@@ -1,0 +1,37 @@
+{
+  "expo": {
+    "name": "Dayframe",
+    "slug": "dayframe",
+    "scheme": "dayframe",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "local.dayframe.app",
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "location",
+          "fetch"
+        ],
+        "NSLocationWhenInUseUsageDescription": "Dayframe uses location to detect known places and create reviewable activity suggestions.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Dayframe can monitor geofences in the background so place visits become activity events before they become time entries."
+      }
+    },
+    "android": {
+      "package": "local.dayframe.app",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-location"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

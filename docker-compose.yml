@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: dayframe-postgis
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dayframe
+      POSTGRES_PASSWORD: dayframe
+      POSTGRES_DB: dayframe
+    ports:
+      - "54322:5432"
+    volumes:
+      - dayframe-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dayframe -d dayframe"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  dayframe-postgres:

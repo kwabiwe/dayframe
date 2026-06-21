@@ -1,0 +1,29 @@
+{
+  "name": "dayframe",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev -w @dayframe/web",
+    "dev:mobile": "npm run start -w @dayframe/mobile",
+    "ios": "npm run ios -w @dayframe/mobile",
+    "ios:prebuild": "npm run prebuild:ios -w @dayframe/mobile",
+    "ios:xcode": "npm run xcode -w @dayframe/mobile",
+    "db:up": "docker compose up -d db",
+    "db:down": "docker compose down",
+    "db:setup": "npm run setup -w @dayframe/db",
+    "test": "npm run test -w @dayframe/shared",
+    "build": "npm run build -w @dayframe/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "tsx": "^4.20.6",
+    "typescript": "5.9.3",
+    "vitest": "^4.0.15"
+  }
+}
