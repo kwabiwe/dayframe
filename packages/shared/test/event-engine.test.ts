@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   applyActivityEvent,
+  mapHealthKitSleepStage,
+  mapTogglTimeEntry,
   normalizeActivityEvent,
   type NormalizationContext,
   type TimelineState
@@ -102,6 +104,48 @@ describe("event normalization", () => {
     expect(candidate.confidence).toBe("low");
   });
 
+  it("routes specific geofence exits to review unless an explicit stop rule exists", () => {
+    const reviewCandidate = normalizeActivityEvent(
+      {
+        source: "geofence_specific",
+        type: "geofence_exit",
+        occurredAt: new Date("2026-06-20T13:00:00Z"),
+        placeId: ids.gymPlace
+      },
+      context
+    );
+    expect(reviewCandidate.action).toBe("create_review_item");
+    expect(reviewCandidate.reviewStatus).toBe("needs_review");
+
+    const stopCandidate = normalizeActivityEvent(
+      {
+        source: "geofence_specific",
+        type: "geofence_exit",
+        occurredAt: new Date("2026-06-20T14:00:00Z"),
+        placeId: ids.gymPlace
+      },
+      {
+        ...context,
+        automationRules: [
+          {
+            id: "40000000-0000-4000-8000-000000000010",
+            name: "Leave Gym -> stop",
+            triggerSource: "geofence_specific",
+            triggerType: "geofence_exit",
+            placeId: ids.gymPlace,
+            action: "stop_timer",
+            projectId: ids.gym,
+            categoryId: ids.health,
+            enabled: true
+          }
+        ]
+      }
+    );
+
+    expect(stopCandidate.action).toBe("stop_timer");
+    expect(stopCandidate.reviewStatus).toBe("confirmed");
+  });
+
   it("suppresses review items when an ignore source rule matches", () => {
     const candidate = normalizeActivityEvent(
       {
@@ -159,5 +203,34 @@ describe("event normalization", () => {
 
     expect(candidate.action).toBe("create_review_item");
     expect(candidate.reviewStatus).toBe("needs_review");
+  });
+
+  it("maps HealthKit sleep stages into Dayframe stages", () => {
+    expect(mapHealthKitSleepStage(0)).toBe("in_bed");
+    expect(mapHealthKitSleepStage(3)).toBe("asleep_core");
+    expect(mapHealthKitSleepStage(4)).toBe("asleep_deep");
+    expect(mapHealthKitSleepStage(5)).toBe("asleep_rem");
+    expect(mapHealthKitSleepStage("awake")).toBe("awake");
+  });
+
+  it("maps Toggl time entries to stable external references", () => {
+    const mapped = mapTogglTimeEntry({
+      id: 123,
+      workspace_id: 999,
+      project_id: 456,
+      description: " Imported entry ",
+      start: new Date("2026-06-20T08:00:00Z"),
+      stop: null,
+      duration: 1800,
+      tags: ["billable"],
+      billable: true
+    });
+
+    expect(mapped.externalId).toBe("123");
+    expect(mapped.projectExternalId).toBe("456");
+    expect(mapped.description).toBe("Imported entry");
+    expect(mapped.stoppedAt).toBe("2026-06-20T08:30:00.000Z");
+    expect(mapped.tags).toEqual(["billable"]);
+    expect(mapped.billable).toBe(true);
   });
 });

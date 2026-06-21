@@ -106,6 +106,19 @@ The selected review mode is stored locally in the browser. Calendar drag and res
 - `DELETE /api/time-entries/:id`: delete an entry.
 - `POST /api/entities`: create clients, projects, categories, tags, places and rules.
 - `POST /api/review/:id`: accept, ignore or create a rule from a review item.
+- `GET /api/export?kind=workspace_json`: workspace backup JSON.
+- `GET /api/export?kind=time_entries_csv`: time-entry CSV export.
+
+## Production Readiness Foundations
+
+This repo now has explicit local-dev auth/session configuration, scoped ingest-token foundations, Toggl import/export scaffolding, geofence exit handling and a HealthKit sleep adapter for native iOS builds. See [docs/production-readiness.md](docs/production-readiness.md) for setup, scope and remaining work.
+
+Useful commands:
+
+```bash
+npm run toggl:import -- --dry-run
+npm run export:workspace -- ./dayframe-backup.json
+```
 
 ## Privacy Model
 
@@ -146,7 +159,7 @@ Mobile-to-web sync path:
 - No billing, team management or production auth.
 - Review split/merge and saved-place correction flows are documented but not fully implemented.
 - Calendar drag/drop and resize are not implemented yet; use the List view to edit start and stop times.
-- HealthKit and Android Health Connect are stubs; imports should create activity events first in a later phase.
+- HealthKit sleep import is implemented behind a native iOS adapter; it requires a development build/device and still routes through activity events/review.
 - NFC is represented as an event/deep-link pathway; full native NFC scanning should be added with a development build.
 - Local demo auth uses fixed demo user/workspace IDs.
 - Docker Desktop must be running before `npm run db:up`.

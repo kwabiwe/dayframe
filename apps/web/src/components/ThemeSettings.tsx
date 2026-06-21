@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Monitor, Moon, Sun } from "lucide-react";
 
 type ThemeChoice = "system" | "light" | "dark";
@@ -27,21 +27,20 @@ const choices: Array<{ value: ThemeChoice; label: string; description: string; i
 ];
 
 export function ThemeSettings() {
-  const [choice, setChoice] = useState<ThemeChoice>("system");
-
-  useEffect(() => {
+  const [choice, setChoice] = useState<ThemeChoice>(() => {
+    if (typeof window === "undefined") return "system";
     const storedTheme = window.localStorage.getItem("dayframe.theme");
-    setChoice(storedTheme === "light" || storedTheme === "dark" ? storedTheme : "system");
-  }, []);
+    return storedTheme === "light" || storedTheme === "dark" ? storedTheme : "system";
+  });
 
   function updateTheme(nextChoice: ThemeChoice) {
     setChoice(nextChoice);
     if (nextChoice === "system") {
       window.localStorage.removeItem("dayframe.theme");
-      delete document.documentElement.dataset.theme;
+      document.documentElement.removeAttribute("data-theme");
     } else {
       window.localStorage.setItem("dayframe.theme", nextChoice);
-      document.documentElement.dataset.theme = nextChoice;
+      document.documentElement.setAttribute("data-theme", nextChoice);
     }
     window.dispatchEvent(new Event("dayframe-theme-change"));
   }

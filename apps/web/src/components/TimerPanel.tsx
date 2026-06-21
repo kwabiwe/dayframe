@@ -46,7 +46,7 @@ export function TimerPanel({
     if (!activeEntry) return undefined;
     const interval = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(interval);
-  }, [activeEntry?.id]);
+  }, [activeEntry]);
 
   async function refreshClientData() {
     const response = await fetch("/api/bootstrap", { cache: "no-store" });

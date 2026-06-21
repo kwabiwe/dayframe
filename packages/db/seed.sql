@@ -1,5 +1,9 @@
 truncate table
   audit_log,
+  import_runs,
+  external_entity_refs,
+  external_accounts,
+  integration_tokens,
   integrations,
   health_workouts,
   health_sleep_segments,
@@ -87,7 +91,10 @@ insert into event_sources (workspace_id, source, display_name) values
   ('00000000-0000-4000-8000-000000000010', 'geofence_specific', 'Specific geofence'),
   ('00000000-0000-4000-8000-000000000010', 'geofence_broad', 'Broad geofence'),
   ('00000000-0000-4000-8000-000000000010', 'calendar', 'Calendar hint'),
-  ('00000000-0000-4000-8000-000000000010', 'health_sleep', 'Health sleep import');
+  ('00000000-0000-4000-8000-000000000010', 'health_sleep', 'Health sleep import'),
+  ('00000000-0000-4000-8000-000000000010', 'home_assistant', 'Home Assistant bridge'),
+  ('00000000-0000-4000-8000-000000000010', 'ha_button', 'Home Assistant button'),
+  ('00000000-0000-4000-8000-000000000010', 'ha_geofence', 'Home Assistant geofence');
 
 insert into places (id, workspace_id, name, latitude, longitude, radius_meters, priority, default_project_id, default_category_id, auto_start) values
   ('30000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000010', 'Home', 51.509, -0.118, 120, 5, null, null, false),
@@ -130,5 +137,6 @@ insert into calendar_events (workspace_id, external_id, title, started_at, stopp
 
 insert into integrations (workspace_id, provider, status, settings) values
   ('00000000-0000-4000-8000-000000000010', 'calendar', 'not_connected', '{"notes":"Calendar sync is planned after v1."}'),
-  ('00000000-0000-4000-8000-000000000010', 'healthkit', 'not_connected', '{"notes":"HealthKit import is stubbed for iOS."}'),
-  ('00000000-0000-4000-8000-000000000010', 'health_connect', 'not_connected', '{"notes":"Android Health Connect import is stubbed."}');
+  ('00000000-0000-4000-8000-000000000010', 'healthkit', 'not_connected', '{"notes":"HealthKit sleep import requires a native iOS build and permission."}'),
+  ('00000000-0000-4000-8000-000000000010', 'health_connect', 'not_connected', '{"notes":"Android Health Connect import follows the same event-first pipeline."}'),
+  ('00000000-0000-4000-8000-000000000010', 'toggl', 'not_connected', '{"notes":"Use the local Toggl importer with TOGGL_API_TOKEN; tokens are not stored in plaintext."}');

@@ -4,9 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "setup": "tsx scripts/setup.ts"
+    "setup": "tsx scripts/setup.ts",
+    "toggl:import": "tsx scripts/toggl-import.ts",
+    "export:workspace": "tsx scripts/export-workspace.ts"
   },
   "dependencies": {
+    "@dayframe/shared": "0.1.0",
     "pg": "^8.22.0"
   },
   "devDependencies": {

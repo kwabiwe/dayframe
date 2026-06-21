@@ -15,7 +15,9 @@
           "fetch"
         ],
         "NSLocationWhenInUseUsageDescription": "Dayframe uses location to detect known places and create reviewable activity suggestions.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Dayframe can monitor geofences in the background so place visits become activity events before they become time entries."
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Dayframe can monitor geofences in the background so place visits become activity events before they become time entries.",
+        "NSHealthShareUsageDescription": "Dayframe reads sleep analysis from HealthKit so sleep becomes reviewable activity events.",
+        "NSHealthUpdateUsageDescription": "Dayframe does not write health data, but iOS requires this description when HealthKit capability is enabled."
       }
     },
     "android": {
@@ -28,7 +30,14 @@
     },
     "plugins": [
       "expo-router",
-      "expo-location"
+      "expo-location",
+      [
+        "@kingstinct/react-native-healthkit",
+        {
+          "NSHealthShareUsageDescription": "Dayframe reads sleep analysis from HealthKit so sleep becomes reviewable activity events.",
+          "NSHealthUpdateUsageDescription": "Dayframe does not write health data, but iOS requires this description when HealthKit capability is enabled."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { paletteColorFor } from "@dayframe/shared";
 import { CalendarDays, ChevronLeft, ChevronRight, List, Pencil, RotateCcw, Table2, Trash2 } from "lucide-react";
@@ -33,16 +33,15 @@ export function TimeReviewViews({
   categories: CategoryRow[];
   places: PlaceRow[];
 }) {
-  const [activeView, setActiveView] = useState<TimeView>("calendar");
+  const [activeView, setActiveView] = useState<TimeView>(() => {
+    if (typeof window === "undefined") return "calendar";
+    const storedView = window.localStorage.getItem("dayframe.timeReviewView");
+    return storedView === "calendar" || storedView === "list" || storedView === "timesheet"
+      ? storedView
+      : "calendar";
+  });
   const [calendarMode, setCalendarMode] = useState<CalendarMode>("week");
   const [weekAnchor, setWeekAnchor] = useState(() => startOfWeek(new Date()));
-
-  useEffect(() => {
-    const storedView = window.localStorage.getItem("dayframe.timeReviewView");
-    if (storedView === "calendar" || storedView === "list" || storedView === "timesheet") {
-      setActiveView(storedView);
-    }
-  }, []);
 
   function updateView(view: TimeView) {
     setActiveView(view);
@@ -163,12 +162,6 @@ function CalendarReview({
       : weekDays;
   const hours = Array.from({ length: endHour - startHour + 1 }, (_, index) => startHour + index);
   const selectedEntry = entries.find((entry) => entry.id === selectedEntryId) ?? null;
-
-  useEffect(() => {
-    if (selectedEntryId && !entries.some((entry) => entry.id === selectedEntryId)) {
-      setSelectedEntryId(null);
-    }
-  }, [entries, selectedEntryId]);
 
   async function remove(id: string) {
     await fetch(`/api/time-entries/${id}`, { method: "DELETE" });

@@ -27,9 +27,27 @@ export default function SettingsPage() {
           title="Integrations"
           rows={[
             ["Calendar", "Hint source only in v1"],
-            ["HealthKit", "Sleep/workout import stub for iOS"],
-            ["Health Connect", "Android import stub"],
-            ["Data export/deletion", "Design notes in README"]
+            ["HealthKit", "iOS native sleep import queues activity events first"],
+            ["Health Connect", "Android import planned behind the same adapter"],
+            ["Toggl", "Local importer supports dry-run and idempotent external refs"]
+          ]}
+        />
+        <SettingsPanel
+          title="Auth and ingest"
+          rows={[
+            ["Session mode", process.env.DAYFRAME_AUTH_MODE ?? "dev fallback in local development"],
+            ["Dev user", process.env.DAYFRAME_DEV_USER_ID ?? "seeded demo user"],
+            ["Dev workspace", process.env.DAYFRAME_DEV_WORKSPACE_ID ?? "seeded Personal workspace"],
+            ["Ingest tokens", "Bearer or x-dayframe-ingest-token with scoped token hashes"]
+          ]}
+        />
+        <SettingsPanel
+          title="Export and backup"
+          rows={[
+            ["Workspace JSON", "/api/export?kind=workspace_json"],
+            ["Time entries CSV", "/api/export?kind=time_entries_csv"],
+            ["Activity events JSON", "/api/export?kind=activity_events_json"],
+            ["Local backup", "npm run export:workspace -w @dayframe/db -- ./backup.json"]
           ]}
         />
       </div>

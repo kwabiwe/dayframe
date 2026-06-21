@@ -6,7 +6,7 @@ import type {
   ProjectSummary
 } from "@dayframe/shared";
 import { query } from "./db";
-import { USER_ID, WORKSPACE_ID } from "./constants";
+import { getDevSession, type RequestSession } from "./session";
 
 export type ClientRow = {
   id: string;
@@ -147,7 +147,7 @@ export type BootstrapData = {
   stats: DashboardStats;
 };
 
-export async function getBootstrapData(): Promise<BootstrapData> {
+export async function getBootstrapData(session: RequestSession = getDevSession()): Promise<BootstrapData> {
   const [
     workspaces,
     clients,
@@ -162,22 +162,22 @@ export async function getBootstrapData(): Promise<BootstrapData> {
     activityEvents,
     stats
   ] = await Promise.all([
-    getWorkspaces(),
-    getClients(),
-    getCategories(),
-    getProjects(),
-    getTags(),
-    getPlaces(),
-    getAutomationRules(),
-    getTimeEntries(),
-    getActiveEntry(),
-    getReviewItems(),
-    getActivityEvents(),
-    getDashboardStats()
+    getWorkspaces(session),
+    getClients(session),
+    getCategories(session),
+    getProjects(session),
+    getTags(session),
+    getPlaces(session),
+    getAutomationRules(session),
+    getTimeEntries(session),
+    getActiveEntry(session),
+    getReviewItems(session),
+    getActivityEvents(session),
+    getDashboardStats(session)
   ]);
 
   return {
-    workspace: workspaces.find((workspace) => workspace.id === WORKSPACE_ID) ?? workspaces[0],
+    workspace: workspaces.find((workspace) => workspace.id === session.workspaceId) ?? workspaces[0],
     workspaces,
     clients,
     categories,
@@ -193,12 +193,14 @@ export async function getBootstrapData(): Promise<BootstrapData> {
   };
 }
 
-export async function getNormalizationContext(): Promise<NormalizationContext> {
+export async function getNormalizationContext(
+  session: RequestSession = getDevSession()
+): Promise<NormalizationContext> {
   const [projects, categories, places, automationRules] = await Promise.all([
-    getProjects(),
-    getCategories(),
-    getPlaces(),
-    getAutomationRules()
+    getProjects(session),
+    getCategories(session),
+    getPlaces(session),
+    getAutomationRules(session)
   ]);
 
   return {
@@ -235,36 +237,41 @@ export async function getNormalizationContext(): Promise<NormalizationContext> {
   };
 }
 
-async function getWorkspaces() {
+async function getWorkspaces(session: RequestSession) {
   const result = await query<{ id: string; name: string }>(
-    "select id, name from workspaces order by name"
+    `select w.id, w.name
+     from workspaces w
+     join workspace_members wm on wm.workspace_id = w.id
+     where wm.user_id = $1
+     order by w.name`,
+    [session.userId]
   );
   return result.rows;
 }
 
-async function getClients() {
+async function getClients(session: RequestSession) {
   const result = await query<ClientRow>(
     `select id, name, color
      from clients
      where workspace_id = $1 and is_archived = false
      order by name`,
-    [WORKSPACE_ID]
+    [session.workspaceId]
   );
   return result.rows;
 }
 
-async function getCategories() {
+async function getCategories(session: RequestSession) {
   const result = await query<CategoryRow>(
     `select id, name, color
      from categories
      where workspace_id = $1 and is_archived = false
      order by name`,
-    [WORKSPACE_ID]
+    [session.workspaceId]
   );
   return result.rows;
 }
 
-async function getProjects() {
+async function getProjects(session: RequestSession) {
   const result = await query<ProjectRow>(
     `select p.id,
             p.name,
@@ -279,23 +286,23 @@ async function getProjects() {
      left join categories cat on cat.id = p.category_id
      where p.workspace_id = $1 and p.is_archived = false
      order by p.name`,
-    [WORKSPACE_ID]
+    [session.workspaceId]
   );
   return result.rows;
 }
 
-async function getTags() {
+async function getTags(session: RequestSession) {
   const result = await query<TagRow>(
     `select id, name, color
      from tags
      where workspace_id = $1
      order by name`,
-    [WORKSPACE_ID]
+    [session.workspaceId]
   );
   return result.rows;
 }
 
-async function getPlaces() {
+async function getPlaces(session: RequestSession) {
   const result = await query<PlaceRow>(
     `select pl.id,
             pl.name,
@@ -313,12 +320,12 @@ async function getPlaces() {
      left join categories c on c.id = pl.default_category_id
      where pl.workspace_id = $1
      order by pl.priority desc, pl.name`,
-    [WORKSPACE_ID]
+    [session.workspaceId]
   );
   return result.rows;
 }
 
-async function getAutomationRules() {
+async function getAutomationRules(session: RequestSession) {
   const result = await query<AutomationRuleRow>(
     `select ar.id,
             ar.name,
@@ -339,12 +346,12 @@ async function getAutomationRules() {
      left join categories c on c.id = ar.category_id
      where ar.workspace_id = $1
      order by ar.created_at desc`,
-    [WORKSPACE_ID]
+    [session.workspaceId]
   );
   return result.rows;
 }
 
-async function getTimeEntries() {
+async function getTimeEntries(session: RequestSession) {
   const result = await query<TimeEntryRow>(
     `select te.id,
             te.project_id as "projectId",
@@ -376,12 +383,12 @@ async function getTimeEntries() {
      where te.workspace_id = $1
      order by te.started_at desc
      limit 100`,
-    [WORKSPACE_ID]
+    [session.workspaceId]
   );
   return result.rows;
 }
 
-async function getActiveEntry() {
+async function getActiveEntry(session: RequestSession) {
   const result = await query<TimeEntryRow>(
     `select te.id,
             te.project_id as "projectId",
@@ -413,12 +420,12 @@ async function getActiveEntry() {
      where te.workspace_id = $1 and te.user_id = $2 and te.stopped_at is null
      order by te.started_at desc
      limit 1`,
-    [WORKSPACE_ID, USER_ID]
+    [session.workspaceId, session.userId]
   );
   return result.rows[0] ?? null;
 }
 
-async function getReviewItems() {
+async function getReviewItems(session: RequestSession) {
   const result = await query<ReviewItemRow>(
     `select ri.id,
             ri.type,
@@ -445,12 +452,12 @@ async function getReviewItems() {
      where ri.workspace_id = $1
      order by case ri.status when 'open' then 0 else 1 end, ri.created_at desc
      limit 100`,
-    [WORKSPACE_ID]
+    [session.workspaceId]
   );
   return result.rows;
 }
 
-async function getActivityEvents() {
+async function getActivityEvents(session: RequestSession) {
   const result = await query<ActivityRow>(
     `select ae.id,
             ae.source,
@@ -466,12 +473,12 @@ async function getActivityEvents() {
      where ae.workspace_id = $1
      order by ae.occurred_at desc
      limit 24`,
-    [WORKSPACE_ID]
+    [session.workspaceId]
   );
   return result.rows;
 }
 
-async function getDashboardStats() {
+async function getDashboardStats(session: RequestSession) {
   const result = await query<DashboardStats>(
     `select
         coalesce(sum(
@@ -483,12 +490,12 @@ async function getDashboardStats() {
         (select count(*)::int from review_items where workspace_id = $1 and status = 'open') as "reviewCount"
      from time_entries
      where workspace_id = $1`,
-    [WORKSPACE_ID]
+    [session.workspaceId]
   );
   return result.rows[0] ?? { todaySeconds: 0, weekSeconds: 0, reviewCount: 0 };
 }
 
-export async function getReports() {
+export async function getReports(session: RequestSession = getDevSession()) {
   const [byProject, byClient, byCategory, bySource, byPlace, byTag] = await Promise.all([
     query<ReportRow>(
       `select coalesce(p.id::text, 'unassigned') as id,
@@ -500,7 +507,7 @@ export async function getReports() {
        where te.workspace_id = $1
        group by coalesce(p.id::text, 'unassigned'), coalesce(p.name, 'Unassigned'), p.color
        order by seconds desc`,
-      [WORKSPACE_ID]
+      [session.workspaceId]
     ),
     query<ReportRow>(
       `select coalesce(c.id::text, 'unassigned') as id,
@@ -513,7 +520,7 @@ export async function getReports() {
        where te.workspace_id = $1
        group by coalesce(c.id::text, 'unassigned'), coalesce(c.name, 'Unassigned'), c.color
        order by seconds desc`,
-      [WORKSPACE_ID]
+      [session.workspaceId]
     ),
     query<ReportRow>(
       `select coalesce(c.id::text, 'unassigned') as id,
@@ -525,7 +532,7 @@ export async function getReports() {
        where te.workspace_id = $1
        group by coalesce(c.id::text, 'unassigned'), coalesce(c.name, 'Unassigned'), c.color
        order by seconds desc`,
-      [WORKSPACE_ID]
+      [session.workspaceId]
     ),
     query<ReportRow>(
       `select source as id,
@@ -536,7 +543,7 @@ export async function getReports() {
        where workspace_id = $1
        group by source
        order by seconds desc`,
-      [WORKSPACE_ID]
+      [session.workspaceId]
     ),
     query<ReportRow>(
       `select coalesce(pl.id::text, 'no-place') as id,
@@ -548,7 +555,7 @@ export async function getReports() {
        where te.workspace_id = $1
        group by coalesce(pl.id::text, 'no-place'), coalesce(pl.name, 'No place')
        order by seconds desc`,
-      [WORKSPACE_ID]
+      [session.workspaceId]
     ),
     query<ReportRow>(
       `select t.id::text as id,
@@ -561,7 +568,7 @@ export async function getReports() {
        where te.workspace_id = $1
        group by t.id, t.name, t.color
        order by seconds desc`,
-      [WORKSPACE_ID]
+      [session.workspaceId]
     )
   ]);
 

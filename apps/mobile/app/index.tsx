@@ -23,6 +23,12 @@ import {
   startGeofences
 } from "@/lib/geofence";
 import {
+  getHealthImportStatus,
+  importHealthKitSleep,
+  requestHealthKitSleepPermission,
+  type HealthImportStatus
+} from "@/lib/health";
+import {
   enqueueEvent,
   fetchBootstrap,
   readQueue,
@@ -65,6 +71,7 @@ export default function HomeScreen() {
   const [queue, setQueue] = useState<QueuedEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [locationStatus, setLocationStatus] = useState("Not requested");
+  const [healthStatus, setHealthStatus] = useState<HealthImportStatus[]>([]);
   const [now, setNow] = useState(() => Date.now());
   const [customDescription, setCustomDescription] = useState("");
   const [customProjectId, setCustomProjectId] = useState("");
@@ -104,6 +111,18 @@ export default function HomeScreen() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    getHealthImportStatus().then(setHealthStatus).catch(() => {
+      setHealthStatus([
+        {
+          provider: "healthkit",
+          status: "error",
+          notes: "Unable to check HealthKit status."
+        }
+      ]);
+    });
+  }, []);
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
@@ -208,6 +227,25 @@ export default function HomeScreen() {
     if (status === "granted" && data) {
       const count = await startGeofences(data.places);
       Alert.alert("Geofences", `Started ${count} place monitors.`);
+    }
+  }
+
+  async function connectHealthKit() {
+    try {
+      const status = await requestHealthKitSleepPermission();
+      setHealthStatus((current) => [status, ...current.filter((item) => item.provider !== "healthkit")]);
+    } catch (error) {
+      Alert.alert("HealthKit", error instanceof Error ? error.message : "Unable to request HealthKit permission");
+    }
+  }
+
+  async function syncHealthKitSleep() {
+    try {
+      const status = await importHealthKitSleep();
+      setHealthStatus((current) => [status, ...current.filter((item) => item.provider !== "healthkit")]);
+      await syncAndReload();
+    } catch (error) {
+      Alert.alert("HealthKit", error instanceof Error ? error.message : "Unable to sync HealthKit sleep");
     }
   }
 
@@ -364,6 +402,25 @@ export default function HomeScreen() {
               <Text style={styles.statusText}>{locationStatus}</Text>
               <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={enableLocation}>
                 <Text style={styles.secondaryButtonText}>Enable</Text>
+              </Pressable>
+            </View>
+          </View>
+
+          <View style={styles.panel}>
+            <Text style={styles.sectionTitle}>HealthKit sleep</Text>
+            <Text style={styles.muted}>
+              Sleep samples are queued as health activity events first, then reviewed before becoming trusted
+              time entries.
+            </Text>
+            <Text style={styles.statusText}>
+              {healthStatus.find((item) => item.provider === "healthkit")?.notes ?? "HealthKit status not checked"}
+            </Text>
+            <View style={styles.buttonRow}>
+              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={connectHealthKit}>
+                <Text style={styles.secondaryButtonText}>Connect</Text>
+              </Pressable>
+              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={syncHealthKitSleep}>
+                <Text style={styles.secondaryButtonText}>Sync sleep</Text>
               </Pressable>
             </View>
           </View>
@@ -970,6 +1027,11 @@ function createStyles(theme: MobileTheme) {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
+      gap: 10
+    },
+    buttonRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
       gap: 10
     },
     statusText: {

@@ -37,7 +37,7 @@ export function TimeAllocationPie({ entries }: { entries: TimeEntryRow[] }) {
   const background =
     total > 0
       ? `conic-gradient(from -90deg, ${segments
-          .map((segment, index) => {
+          .map((segment) => {
             const start = cursor;
             const size = (segment.seconds / total) * 100;
             cursor += size;

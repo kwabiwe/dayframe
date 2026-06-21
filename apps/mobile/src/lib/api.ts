@@ -7,6 +7,7 @@ import {
 } from "@dayframe/shared";
 
 const API_BASE = process.env.EXPO_PUBLIC_DAYFRAME_API_BASE ?? "http://localhost:3000";
+const INGEST_TOKEN = process.env.EXPO_PUBLIC_DAYFRAME_INGEST_TOKEN;
 const QUEUE_KEY = "dayframe.offlineQueue.v1";
 
 export type MobileBootstrap = {
@@ -121,7 +122,10 @@ export async function syncQueue() {
     try {
       const response = await fetch(`${API_BASE}/api/events`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(INGEST_TOKEN ? { Authorization: `Bearer ${INGEST_TOKEN}` } : {})
+        },
         body: JSON.stringify({
           ...item,
           occurredAt: item.occurredAt.toISOString()

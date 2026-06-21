@@ -212,10 +212,16 @@ create table if not exists health_sleep_segments (
   id uuid primary key default gen_random_uuid(),
   workspace_id uuid not null references workspaces(id) on delete cascade,
   user_id uuid not null references users(id) on delete cascade,
+  external_sample_id text,
+  provider text not null default 'healthkit',
+  source_name text,
+  sleep_stage text not null default 'asleep_unspecified',
   started_at timestamptz not null,
   stopped_at timestamptz not null,
   source_device_id uuid references devices(id) on delete set null,
-  imported_at timestamptz not null default now()
+  raw_payload jsonb not null default '{}',
+  imported_at timestamptz not null default now(),
+  unique (workspace_id, provider, external_sample_id)
 );
 
 create table if not exists health_workouts (
@@ -240,6 +246,55 @@ create table if not exists integrations (
   unique (workspace_id, provider)
 );
 
+create table if not exists integration_tokens (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  name text not null,
+  token_hash text not null unique,
+  scopes text[] not null default '{}',
+  last_used_at timestamptz,
+  created_at timestamptz not null default now(),
+  revoked_at timestamptz
+);
+
+create table if not exists external_accounts (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  provider text not null,
+  external_workspace_id text,
+  display_name text,
+  token_secret_ref text,
+  settings jsonb not null default '{}',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (workspace_id, provider, external_workspace_id)
+);
+
+create table if not exists external_entity_refs (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  provider text not null,
+  external_id text not null,
+  entity_type text not null,
+  entity_id uuid not null,
+  metadata jsonb not null default '{}',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (workspace_id, provider, entity_type, external_id)
+);
+
+create table if not exists import_runs (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  provider text not null,
+  mode text not null default 'dry_run',
+  started_at timestamptz not null default now(),
+  completed_at timestamptz,
+  status text not null default 'running',
+  summary jsonb not null default '{}',
+  error text
+);
+
 create table if not exists audit_log (
   id uuid primary key default gen_random_uuid(),
   workspace_id uuid not null references workspaces(id) on delete cascade,
@@ -256,3 +311,6 @@ create index if not exists idx_time_entries_active on time_entries(workspace_id,
 create index if not exists idx_activity_events_workspace_occurred on activity_events(workspace_id, occurred_at desc);
 create index if not exists idx_review_items_workspace_status on review_items(workspace_id, status, created_at desc);
 create index if not exists idx_geofences_center on geofences using gist(center);
+create index if not exists idx_integration_tokens_workspace on integration_tokens(workspace_id) where revoked_at is null;
+create index if not exists idx_external_refs_workspace on external_entity_refs(workspace_id, provider, entity_type);
+create index if not exists idx_import_runs_workspace on import_runs(workspace_id, provider, started_at desc);

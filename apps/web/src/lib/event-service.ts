@@ -5,18 +5,18 @@ import {
   type ActivityEventInput
 } from "@dayframe/shared";
 import { pool, query } from "./db";
-import { USER_ID, WORKSPACE_ID } from "./constants";
 import { getNormalizationContext } from "./queries";
+import { getDevSession, type RequestSession } from "./session";
 
-export async function processActivityEvent(rawInput: unknown) {
+export async function processActivityEvent(rawInput: unknown, session: RequestSession = getDevSession()) {
   const parsed = ActivityEventInputSchema.parse({
     occurredAt: new Date(),
-    workspaceId: WORKSPACE_ID,
-    userId: USER_ID,
+    workspaceId: session.workspaceId,
+    userId: session.userId,
     rawPayload: {},
     ...(rawInput as Record<string, unknown>)
   });
-  const context = await getNormalizationContext();
+  const context = await getNormalizationContext(session);
   const candidate = normalizeActivityEvent(parsed, context);
   const client = await pool.connect();
 
@@ -134,6 +134,35 @@ export async function processActivityEvent(rawInput: unknown) {
       );
     }
 
+    if (parsed.type === "health_sleep_import") {
+      await client.query(
+        `insert into health_sleep_segments (
+            workspace_id,
+            user_id,
+            external_sample_id,
+            provider,
+            source_name,
+            sleep_stage,
+            started_at,
+            stopped_at,
+            raw_payload
+         )
+         values ($1, $2, $3, coalesce($4, 'healthkit'), $5, coalesce($6, 'asleep_unspecified'), $7, $8, $9::jsonb)
+         on conflict (workspace_id, provider, external_sample_id) do nothing`,
+        [
+          parsed.workspaceId,
+          parsed.userId,
+          stringOrNull(parsed.rawPayload.externalSampleId),
+          stringOrNull(parsed.rawPayload.provider),
+          stringOrNull(parsed.rawPayload.sourceName),
+          stringOrNull(parsed.rawPayload.sleepStage),
+          stringOrNull(parsed.rawPayload.startedAt) ?? parsed.occurredAt,
+          stringOrNull(parsed.rawPayload.stoppedAt) ?? parsed.occurredAt,
+          JSON.stringify(parsed.rawPayload)
+        ]
+      );
+    }
+
     await client.query("commit");
     return { eventId, candidate };
   } catch (error) {
@@ -151,7 +180,7 @@ export async function createManualEntry(input: {
   description?: string | null;
   startedAt: string;
   stoppedAt: string;
-}) {
+}, session: RequestSession = getDevSession()) {
   const client = await pool.connect();
   try {
     await client.query("begin");
@@ -172,8 +201,8 @@ export async function createManualEntry(input: {
        values ($1, $2, 'manual_app', 'timer_start', $3, 'high', $4::jsonb, $5, $6, $7, 'confirmed')
        returning id`,
       [
-        WORKSPACE_ID,
-        USER_ID,
+        session.workspaceId,
+        session.userId,
         input.startedAt,
         JSON.stringify({ description: input.description ?? "Manual entry" }),
         input.projectId,
@@ -199,8 +228,8 @@ export async function createManualEntry(input: {
        )
        values ($1, $2, $3, $4, $5, 'manual_app', 'high', 'confirmed', $6, $7, $8, $9)`,
       [
-        WORKSPACE_ID,
-        USER_ID,
+        session.workspaceId,
+        session.userId,
         input.projectId,
         input.categoryId ?? null,
         input.placeId ?? null,
@@ -229,7 +258,8 @@ export async function updateTimeEntry(
     description?: string | null;
     startedAt?: string;
     stoppedAt?: string | null;
-  }
+  },
+  session: RequestSession = getDevSession()
 ) {
   await query(
     `update time_entries
@@ -249,18 +279,22 @@ export async function updateTimeEntry(
       input.description ?? null,
       input.startedAt ?? null,
       input.stoppedAt ?? null,
-      WORKSPACE_ID
+      session.workspaceId
     ]
   );
 }
 
-export async function deleteTimeEntry(id: string) {
-  await query("delete from time_entries where id = $1 and workspace_id = $2", [id, WORKSPACE_ID]);
+export async function deleteTimeEntry(id: string, session: RequestSession = getDevSession()) {
+  await query("delete from time_entries where id = $1 and workspace_id = $2", [
+    id,
+    session.workspaceId
+  ]);
 }
 
 export async function resolveReviewItem(
   id: string,
-  action: "accept" | "ignore_once" | "always_ignore_source" | "create_rule"
+  action: "accept" | "ignore_once" | "always_ignore_source" | "create_rule",
+  session: RequestSession = getDevSession()
 ) {
   const client = await pool.connect();
   try {
@@ -293,7 +327,7 @@ export async function resolveReviewItem(
        left join activity_events ae on ae.id = ri.event_id
        where ri.id = $1 and ri.workspace_id = $2
        for update of ri`,
-      [id, WORKSPACE_ID]
+      [id, session.workspaceId]
     );
     const item = review.rows[0];
     if (!item) throw new Error("Review item not found");
@@ -316,8 +350,8 @@ export async function resolveReviewItem(
          )
          values ($1, $2, $3, $4, $5, coalesce($6, 'manual_app'), $7, 'accepted', $8, $9, coalesce($10, $9::timestamptz + interval '1 hour'), $11)`,
         [
-          WORKSPACE_ID,
-          USER_ID,
+          session.workspaceId,
+          session.userId,
           item.suggestedProjectId,
           item.suggestedCategoryId,
           item.suggestedPlaceId,
@@ -347,7 +381,7 @@ export async function resolveReviewItem(
          )
          values ($1, $2, $3, $4, $5, 'suggest_timer', $6, $7, $8, true)`,
         [
-          WORKSPACE_ID,
+          session.workspaceId,
           `Suggestion from ${item.title}`,
           item.eventSource,
           item.eventType,
@@ -375,7 +409,7 @@ export async function resolveReviewItem(
          )
          values ($1, $2, $3, $4, null, 'ignore_source', null, null, $5, true)`,
         [
-          WORKSPACE_ID,
+          session.workspaceId,
           `Ignore ${item.eventSource} / ${item.eventType}`,
           item.eventSource,
           item.eventType,
@@ -392,7 +426,7 @@ export async function resolveReviewItem(
        where id = $1 and workspace_id = $2`,
       [
         id,
-        WORKSPACE_ID,
+        session.workspaceId,
         action === "accept" || action === "create_rule" ? "accepted" : "ignored",
         action === "always_ignore_source" ? "source" : action === "ignore_once" ? "once" : null
       ]
@@ -406,23 +440,27 @@ export async function resolveReviewItem(
   }
 }
 
-export async function createEntity(entity: string, input: Record<string, unknown>) {
+export async function createEntity(
+  entity: string,
+  input: Record<string, unknown>,
+  session: RequestSession = getDevSession()
+) {
   switch (entity) {
     case "client":
       return query("insert into clients (workspace_id, name, color) values ($1, $2, $3)", [
-        WORKSPACE_ID,
+        session.workspaceId,
         String(input.name ?? "New client"),
         normalizePaletteKey(input.color, String(input.name ?? "New client"))
       ]);
     case "category":
       return query("insert into categories (workspace_id, name, color) values ($1, $2, $3)", [
-        WORKSPACE_ID,
+        session.workspaceId,
         String(input.name ?? "New category"),
         normalizePaletteKey(input.color, String(input.name ?? "New category"))
       ]);
     case "tag":
       return query("insert into tags (workspace_id, name, color) values ($1, $2, $3)", [
-        WORKSPACE_ID,
+        session.workspaceId,
         String(input.name ?? "new-tag"),
         normalizePaletteKey(input.color, String(input.name ?? "new-tag"))
       ]);
@@ -431,7 +469,7 @@ export async function createEntity(entity: string, input: Record<string, unknown
         `insert into projects (workspace_id, name, client_id, category_id, color, billable)
          values ($1, $2, $3, $4, $5, $6)`,
         [
-          WORKSPACE_ID,
+          session.workspaceId,
           String(input.name ?? "New project"),
           nullableString(input.clientId),
           nullableString(input.categoryId),
@@ -454,7 +492,7 @@ export async function createEntity(entity: string, input: Record<string, unknown
          )
          values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
         [
-          WORKSPACE_ID,
+          session.workspaceId,
           String(input.name ?? "New place"),
           nullableNumber(input.latitude),
           nullableNumber(input.longitude),
@@ -481,7 +519,7 @@ export async function createEntity(entity: string, input: Record<string, unknown
          )
          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)`,
         [
-          WORKSPACE_ID,
+          session.workspaceId,
           String(input.name ?? "New automation"),
           String(input.triggerSource ?? "geofence_specific"),
           String(input.triggerType ?? "geofence_enter"),
@@ -498,12 +536,13 @@ export async function createEntity(entity: string, input: Record<string, unknown
 }
 
 export function buildQuickActionEvent(projectId: string, categoryId?: string | null): ActivityEventInput {
+  const session = getDevSession();
   return {
     source: "mobile_app",
     type: "quick_action",
     occurredAt: new Date(),
-    workspaceId: WORKSPACE_ID,
-    userId: USER_ID,
+    workspaceId: session.workspaceId,
+    userId: session.userId,
     projectId,
     categoryId: categoryId ?? undefined,
     rawPayload: { origin: "quick_action" }
@@ -511,6 +550,10 @@ export function buildQuickActionEvent(projectId: string, categoryId?: string | n
 }
 
 function nullableString(value: unknown) {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function stringOrNull(value: unknown) {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 

@@ -13,21 +13,30 @@ type DayframeRegion = {
   notifyOnExit: boolean;
 };
 
+const IOS_GEOFENCE_LIMIT = 20;
+
 TaskManager.defineTask(DAYFRAME_GEOFENCE_TASK, async ({ data, error }) => {
   if (error) return;
   const payload = data as {
     eventType: Location.GeofencingEventType;
     region: DayframeRegion;
   };
-  if (payload.eventType !== Location.GeofencingEventType.Enter) return;
+  const type =
+    payload.eventType === Location.GeofencingEventType.Enter
+      ? "geofence_enter"
+      : payload.eventType === Location.GeofencingEventType.Exit
+        ? "geofence_exit"
+        : null;
+  if (!type) return;
 
   await enqueueEvent({
     source: payload.region.radius > 250 ? "geofence_broad" : "geofence_specific",
-    type: "geofence_enter",
+    type,
     placeId: payload.region.identifier,
     rawPayload: {
       region: payload.region.identifier,
       radius: payload.region.radius,
+      transition: type === "geofence_enter" ? "enter" : "exit",
       isBroad: payload.region.radius > 250
     }
   });
@@ -47,10 +56,17 @@ export async function startGeofences(
     latitude?: number | null;
     longitude?: number | null;
     radiusMeters: number;
+    priority?: number;
   }>
 ) {
   const regions = places
     .filter((place) => typeof place.latitude === "number" && typeof place.longitude === "number")
+    .sort((left, right) => {
+      const priorityDelta = (right.priority ?? 0) - (left.priority ?? 0);
+      if (priorityDelta !== 0) return priorityDelta;
+      return left.radiusMeters - right.radiusMeters;
+    })
+    .slice(0, IOS_GEOFENCE_LIMIT)
     .map((place) => ({
       identifier: place.id,
       latitude: place.latitude as number,

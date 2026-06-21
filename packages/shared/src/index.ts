@@ -1,4 +1,5 @@
 import { z } from "zod";
+export * from "./toggl";
 
 export const DEMO_USER_ID = "00000000-0000-4000-8000-000000000001";
 export const DEMO_WORKSPACE_ID = "00000000-0000-4000-8000-000000000010";
@@ -123,7 +124,10 @@ export const EventSourceSchema = z.enum([
   "geofence_broad",
   "calendar",
   "health_sleep",
-  "health_workout"
+  "health_workout",
+  "home_assistant",
+  "ha_button",
+  "ha_geofence"
 ]);
 
 export const ConfidenceSchema = z.enum([
@@ -139,6 +143,15 @@ export const ReviewStatusSchema = z.enum([
   "needs_review",
   "accepted",
   "ignored"
+]);
+
+export const SleepStageSchema = z.enum([
+  "in_bed",
+  "asleep_unspecified",
+  "asleep_core",
+  "asleep_deep",
+  "asleep_rem",
+  "awake"
 ]);
 
 export const ActivityEventTypeSchema = z.enum([
@@ -181,10 +194,42 @@ export const ActivityEventInputSchema = z.object({
 export type EventSource = z.infer<typeof EventSourceSchema>;
 export type Confidence = z.infer<typeof ConfidenceSchema>;
 export type ReviewStatus = z.infer<typeof ReviewStatusSchema>;
+export type SleepStage = z.infer<typeof SleepStageSchema>;
 export type ActivityEventType = z.infer<typeof ActivityEventTypeSchema>;
 export type AutomationAction = z.infer<typeof AutomationActionSchema>;
 export type ActivityEventInput = z.input<typeof ActivityEventInputSchema>;
 type ParsedActivityEvent = z.output<typeof ActivityEventInputSchema>;
+
+const healthKitSleepStages: Record<number | string, SleepStage> = {
+  0: "in_bed",
+  1: "asleep_unspecified",
+  2: "awake",
+  3: "asleep_core",
+  4: "asleep_deep",
+  5: "asleep_rem",
+  inBed: "in_bed",
+  asleep: "asleep_unspecified",
+  asleepUnspecified: "asleep_unspecified",
+  awake: "awake",
+  asleepCore: "asleep_core",
+  asleepDeep: "asleep_deep",
+  asleepREM: "asleep_rem",
+  HKCategoryValueSleepAnalysisInBed: "in_bed",
+  HKCategoryValueSleepAnalysisAsleep: "asleep_unspecified",
+  HKCategoryValueSleepAnalysisAsleepUnspecified: "asleep_unspecified",
+  HKCategoryValueSleepAnalysisAwake: "awake",
+  HKCategoryValueSleepAnalysisAsleepCore: "asleep_core",
+  HKCategoryValueSleepAnalysisAsleepDeep: "asleep_deep",
+  HKCategoryValueSleepAnalysisAsleepREM: "asleep_rem"
+};
+
+export function mapHealthKitSleepStage(value: unknown): SleepStage {
+  if (typeof value === "number" || typeof value === "string") {
+    return healthKitSleepStages[value] ?? "asleep_unspecified";
+  }
+
+  return "asleep_unspecified";
+}
 
 export type ProjectSummary = {
   id: string;
@@ -286,9 +331,12 @@ export function confidenceForSource(source: EventSource): Confidence {
     case "shortcut":
     case "health_sleep":
     case "health_workout":
+    case "ha_button":
       return "high";
+    case "ha_geofence":
     case "geofence_specific":
       return "medium_high";
+    case "home_assistant":
     case "geofence_broad":
       return "low";
     case "calendar":
@@ -394,6 +442,43 @@ export function normalizeActivityEvent(
         : broadPlace
           ? "Broad geofences create review items unless the user creates a stricter rule."
           : "Specific places without an auto-start rule are reviewed first.",
+      shouldClosePrevious: false
+    };
+  }
+
+  if (event.type === "geofence_exit") {
+    const broadPlace = event.source === "geofence_broad" || event.source === "ha_geofence" || Boolean(event.rawPayload.isBroad);
+    const isHome = place?.name.toLowerCase() === "home";
+    const projectId = matchingRule?.projectId ?? place?.defaultProjectId ?? undefined;
+    const categoryId = matchingRule?.categoryId ?? place?.defaultCategoryId ?? undefined;
+
+    if (matchingRule?.enabled && matchingRule.action === "stop_timer" && !broadPlace && !isHome) {
+      return {
+        action: "stop_timer",
+        confidence: "medium_high",
+        reviewStatus: "confirmed",
+        projectId,
+        categoryId,
+        placeId: place?.id,
+        title: `Left ${place?.name ?? "known place"}`,
+        reason: "An enabled automation rule converted this geofence exit into a timer stop.",
+        shouldClosePrevious: false
+      };
+    }
+
+    return {
+      action: "create_review_item",
+      confidence: broadPlace || isHome ? "low" : "medium_high",
+      reviewStatus: "needs_review",
+      projectId,
+      categoryId,
+      placeId: place?.id,
+      title: `Review ${place?.name ?? "place"} exit`,
+      reason: broadPlace
+        ? "Broad geofence exits are reviewed before Dayframe closes or creates a stay."
+        : isHome
+          ? "Home exits are ambiguous and stay review-first by default."
+          : "Specific geofence exits can stop a timer when the user adds a stop rule.",
       shouldClosePrevious: false
     };
   }

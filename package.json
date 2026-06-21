@@ -15,6 +15,8 @@
     "db:up": "docker compose up -d db",
     "db:down": "docker compose down",
     "db:setup": "npm run setup -w @dayframe/db",
+    "toggl:import": "npm run toggl:import -w @dayframe/db",
+    "export:workspace": "npm run export:workspace -w @dayframe/db",
     "test": "npm run test -w @dayframe/shared",
     "build": "npm run build -w @dayframe/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
