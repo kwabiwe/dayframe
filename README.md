@@ -113,6 +113,8 @@ The selected review mode is stored locally in the browser. Calendar drag and res
 
 This repo now has explicit local-dev auth/session configuration, scoped ingest-token foundations, Toggl import/export scaffolding, geofence exit handling and a HealthKit sleep adapter for native iOS builds. See [docs/production-readiness.md](docs/production-readiness.md) for setup, scope and remaining work.
 
+For DB-backed local login/signup sessions, use `DAYFRAME_AUTH_MODE=local` and see [docs/local-auth-and-hosting-plan.md](docs/local-auth-and-hosting-plan.md).
+
 Useful commands:
 
 ```bash

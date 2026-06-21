@@ -1,9 +1,12 @@
 import { PageHeader } from "@/components/PageHeader";
 import { ThemeSettings } from "@/components/ThemeSettings";
+import { resolvePageSession } from "@/lib/auth/server";
 
 export const dynamic = "force-dynamic";
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  await resolvePageSession();
+
   return (
     <>
       <PageHeader

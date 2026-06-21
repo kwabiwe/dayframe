@@ -4,7 +4,7 @@ Dayframe keeps one invariant: signals become `activity_events` first. Only high-
 
 ## Auth And Workspace Model
 
-Web API routes now resolve a `RequestSession` before reading or writing scoped data. Local development uses:
+Web API routes resolve a `RequestSession` before reading or writing scoped data. Local development can use the unsafe bypass:
 
 ```bash
 DAYFRAME_AUTH_MODE=dev
@@ -12,7 +12,7 @@ DAYFRAME_DEV_USER_ID=00000000-0000-4000-8000-000000000001
 DAYFRAME_DEV_WORKSPACE_ID=00000000-0000-4000-8000-000000000010
 ```
 
-This keeps the seeded demo flow easy while making the auth seam explicit. Production auth is not yet wired. The next production step is to plug `resolveAppSession()` into Supabase Auth, Auth.js, or another provider, then add Postgres RLS policies matching `workspace_members`.
+Dayframe also supports `DAYFRAME_AUTH_MODE=local` for DB-backed email/password auth using `users.password_hash` and `auth_sessions`. Production provider auth is not yet wired. The next production step is to plug `resolveAppSession()` into Supabase Auth, Auth.js, or another provider, then add Postgres RLS policies matching `workspace_members`.
 
 ## Ingest Tokens
 
@@ -20,10 +20,10 @@ This keeps the seeded demo flow easy while making the auth seam explicit. Produc
 
 Accepted token locations:
 
-- `Authorization: Bearer <token>`
-- `x-dayframe-ingest-token: <token>`
+- App session: `Authorization: Bearer <session-token>` for mobile, or the web `dayframe_session` cookie.
+- Ingest token: `x-dayframe-ingest-token: <token>`.
 
-Persisted tokens use `integration_tokens.token_hash`; store only a hash, not the original secret. For local development only, `DAYFRAME_INGEST_TOKEN` can be used without inserting a DB row.
+In local auth mode, Bearer tokens are treated as app session tokens only so an invalid mobile session cannot fall through to a bridge token. Persisted ingest tokens use `integration_tokens.token_hash`; store only a hash, not the original secret. DB-backed ingest sessions resolve to the workspace owner for event writes. For local development only, `DAYFRAME_INGEST_TOKEN` can be used without inserting a DB row.
 
 Minimum scope for event posting:
 

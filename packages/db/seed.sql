@@ -1,5 +1,6 @@
 truncate table
   audit_log,
+  auth_sessions,
   import_runs,
   external_entity_refs,
   external_accounts,

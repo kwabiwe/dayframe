@@ -1,11 +1,13 @@
 import { PageHeader } from "@/components/PageHeader";
 import { TimeReviewViews } from "@/components/TimeReviewViews";
+import { resolvePageSession } from "@/lib/auth/server";
 import { getBootstrapData } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
 export default async function TimelinePage() {
-  const data = await getBootstrapData();
+  const session = await resolvePageSession();
+  const data = await getBootstrapData(session);
 
   return (
     <>

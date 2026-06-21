@@ -1,11 +1,13 @@
 import { PageHeader } from "@/components/PageHeader";
 import { EntityForms } from "@/components/EntityForms";
+import { resolvePageSession } from "@/lib/auth/server";
 import { getBootstrapData } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
 export default async function ProjectsPage() {
-  const data = await getBootstrapData();
+  const session = await resolvePageSession();
+  const data = await getBootstrapData(session);
 
   return (
     <>

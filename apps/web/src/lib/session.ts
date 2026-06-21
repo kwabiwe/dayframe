@@ -3,16 +3,17 @@ import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@dayframe/shared";
 export type RequestSession = {
   userId: string;
   workspaceId: string;
-  authMode: "dev" | "token" | "provider";
+  authMode: "dev" | "local" | "token" | "provider";
   scopes: string[];
 };
 
 export class AuthError extends Error {
-  status = 401;
+  status: number;
 
-  constructor(message = "Unauthorized") {
+  constructor(message = "Unauthorized", status = 401) {
     super(message);
     this.name = "AuthError";
+    this.status = status;
   }
 }
 
@@ -37,7 +38,9 @@ export function resolveAppSession(): RequestSession {
   if (mode === "dev") return getDevSession();
 
   throw new AuthError(
-    "No production auth provider is configured. Set DAYFRAME_AUTH_MODE=dev for local development or use an integration token for ingest-only requests."
+    mode === "local"
+      ? "Login required."
+      : "Provider auth is not configured yet. Use DAYFRAME_AUTH_MODE=local for DB-backed local auth or DAYFRAME_AUTH_MODE=dev for the unsafe local-only bypass."
   );
 }
 

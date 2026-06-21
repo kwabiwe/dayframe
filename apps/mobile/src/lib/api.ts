@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as SecureStore from "expo-secure-store";
 import {
   ActivityEventInputSchema,
   type ActivityEventInput,
@@ -7,8 +8,8 @@ import {
 } from "@dayframe/shared";
 
 const API_BASE = process.env.EXPO_PUBLIC_DAYFRAME_API_BASE ?? "http://localhost:3000";
-const INGEST_TOKEN = process.env.EXPO_PUBLIC_DAYFRAME_INGEST_TOKEN;
 const QUEUE_KEY = "dayframe.offlineQueue.v1";
+const SESSION_TOKEN_KEY = "dayframe.localSessionToken.v1";
 
 export type MobileBootstrap = {
   activeEntry: {
@@ -61,6 +62,13 @@ export type MobileBootstrap = {
   reviewItems: Array<{ id: string; title: string; confidence: string; status: string }>;
 };
 
+export type MobileAuthSession = {
+  token: string;
+  user: { id: string; email: string; name: string };
+  workspace: { id: string; name: string };
+  expiresAt: string;
+};
+
 export type QueuedEvent = Omit<ActivityEventInput, "occurredAt"> & {
   occurredAt: Date;
   localId: string;
@@ -80,11 +88,42 @@ type ActivityEventDraft = {
 };
 
 export async function fetchBootstrap(): Promise<MobileBootstrap> {
-  const response = await fetch(`${API_BASE}/api/bootstrap`);
+  const response = await fetch(`${API_BASE}/api/bootstrap`, {
+    headers: await authHeaders()
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
   if (!response.ok) {
     throw new Error(`Unable to load Dayframe API: ${response.status}`);
   }
   return response.json();
+}
+
+export async function login(email: string, password: string) {
+  return authenticate("/api/auth/login", { email, password });
+}
+
+export async function signup(email: string, password: string, name?: string, workspaceName?: string) {
+  return authenticate("/api/auth/signup", { email, password, name, workspaceName });
+}
+
+export async function logout() {
+  const token = await getSessionToken();
+  await fetch(`${API_BASE}/api/auth/logout`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {}
+  }).catch(() => undefined);
+  await clearSessionToken();
+}
+
+export async function getSessionToken() {
+  return SecureStore.getItemAsync(SESSION_TOKEN_KEY);
+}
+
+export async function clearSessionToken() {
+  await SecureStore.deleteItemAsync(SESSION_TOKEN_KEY);
 }
 
 export async function enqueueEvent(input: ActivityEventDraft) {
@@ -124,16 +163,21 @@ export async function syncQueue() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(INGEST_TOKEN ? { Authorization: `Bearer ${INGEST_TOKEN}` } : {})
+          ...(await authHeaders())
         },
         body: JSON.stringify({
           ...item,
           occurredAt: item.occurredAt.toISOString()
         })
       });
+      if (response.status === 401) {
+        await clearSessionToken();
+        throw new AuthRequiredError();
+      }
       if (!response.ok) throw new Error(`Sync failed: ${response.status}`);
       synced.push(item.localId);
-    } catch {
+    } catch (error) {
+      if (error instanceof AuthRequiredError) throw error;
       remaining.push(item);
     }
   }
@@ -148,4 +192,28 @@ export async function stopTimer() {
     type: "timer_stop",
     rawPayload: { origin: "mobile_home" }
   });
+}
+
+export class AuthRequiredError extends Error {
+  constructor() {
+    super("Login required");
+    this.name = "AuthRequiredError";
+  }
+}
+
+async function authenticate(path: string, body: Record<string, unknown>) {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const payload = (await response.json()) as MobileAuthSession & { error?: string };
+  if (!response.ok) throw new Error(payload.error ?? `Authentication failed: ${response.status}`);
+  await SecureStore.setItemAsync(SESSION_TOKEN_KEY, payload.token);
+  return payload;
+}
+
+async function authHeaders(): Promise<Record<string, string>> {
+  const token = await getSessionToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }

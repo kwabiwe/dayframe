@@ -5,8 +5,11 @@ create table if not exists users (
   id uuid primary key default gen_random_uuid(),
   email text not null unique,
   name text not null,
+  password_hash text,
   created_at timestamptz not null default now()
 );
+
+alter table users add column if not exists password_hash text;
 
 create table if not exists workspaces (
   id uuid primary key default gen_random_uuid(),
@@ -20,6 +23,18 @@ create table if not exists workspace_members (
   role text not null default 'owner',
   created_at timestamptz not null default now(),
   primary key (workspace_id, user_id)
+);
+
+create table if not exists auth_sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  token_hash text not null unique,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  revoked_at timestamptz,
+  user_agent text,
+  last_used_at timestamptz
 );
 
 create table if not exists clients (
@@ -314,3 +329,5 @@ create index if not exists idx_geofences_center on geofences using gist(center);
 create index if not exists idx_integration_tokens_workspace on integration_tokens(workspace_id) where revoked_at is null;
 create index if not exists idx_external_refs_workspace on external_entity_refs(workspace_id, provider, entity_type);
 create index if not exists idx_import_runs_workspace on import_runs(workspace_id, provider, started_at desc);
+create index if not exists idx_auth_sessions_token_hash on auth_sessions(token_hash) where revoked_at is null;
+create index if not exists idx_auth_sessions_user_expiry on auth_sessions(user_id, expires_at desc);

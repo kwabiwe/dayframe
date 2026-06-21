@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useSyncExternalStore } from "react";
 import { Monitor, Moon, Sun } from "lucide-react";
 
 type ThemeChoice = "system" | "light" | "dark";
@@ -27,14 +27,9 @@ const choices: Array<{ value: ThemeChoice; label: string; description: string; i
 ];
 
 export function ThemeSettings() {
-  const [choice, setChoice] = useState<ThemeChoice>(() => {
-    if (typeof window === "undefined") return "system";
-    const storedTheme = window.localStorage.getItem("dayframe.theme");
-    return storedTheme === "light" || storedTheme === "dark" ? storedTheme : "system";
-  });
+  const choice = useSyncExternalStore(subscribeToThemeChoice, getThemeChoice, getServerThemeChoice);
 
   function updateTheme(nextChoice: ThemeChoice) {
-    setChoice(nextChoice);
     if (nextChoice === "system") {
       window.localStorage.removeItem("dayframe.theme");
       document.documentElement.removeAttribute("data-theme");
@@ -76,4 +71,23 @@ export function ThemeSettings() {
       </div>
     </section>
   );
+}
+
+function subscribeToThemeChoice(callback: () => void) {
+  window.addEventListener("storage", callback);
+  window.addEventListener("dayframe-theme-change", callback);
+
+  return () => {
+    window.removeEventListener("storage", callback);
+    window.removeEventListener("dayframe-theme-change", callback);
+  };
+}
+
+function getThemeChoice(): ThemeChoice {
+  const storedTheme = window.localStorage.getItem("dayframe.theme");
+  return storedTheme === "light" || storedTheme === "dark" ? storedTheme : "system";
+}
+
+function getServerThemeChoice(): ThemeChoice {
+  return "system";
 }

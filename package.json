@@ -17,7 +17,7 @@
     "db:setup": "npm run setup -w @dayframe/db",
     "toggl:import": "npm run toggl:import -w @dayframe/db",
     "export:workspace": "npm run export:workspace -w @dayframe/db",
-    "test": "npm run test -w @dayframe/shared",
+    "test": "npm run test --workspaces --if-present",
     "build": "npm run build -w @dayframe/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present"

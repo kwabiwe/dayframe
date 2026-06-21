@@ -29,9 +29,13 @@ import {
   type HealthImportStatus
 } from "@/lib/health";
 import {
+  AuthRequiredError,
   enqueueEvent,
   fetchBootstrap,
+  login,
+  logout,
   readQueue,
+  signup,
   stopTimer,
   syncQueue,
   type MobileBootstrap,
@@ -47,6 +51,8 @@ type MobileTheme = (typeof DAYFRAME_THEME)[ThemeMode] & {
 };
 type TimeEntry = MobileBootstrap["entries"][number];
 type SummaryPeriod = "day" | "week" | "month" | "year";
+type AuthView = "login" | "signup";
+type AuthState = "checking" | "authenticated" | "signedOut";
 type SummarySegment = {
   key: string;
   placeName: string;
@@ -70,6 +76,13 @@ export default function HomeScreen() {
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [queue, setQueue] = useState<QueuedEvent[]>([]);
   const [loading, setLoading] = useState(false);
+  const [authState, setAuthState] = useState<AuthState>("checking");
+  const [authView, setAuthView] = useState<AuthView>("login");
+  const [authEmail, setAuthEmail] = useState("test1@dayframe.local");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authName, setAuthName] = useState("");
+  const [authWorkspace, setAuthWorkspace] = useState("");
+  const [authError, setAuthError] = useState<string | null>(null);
   const [locationStatus, setLocationStatus] = useState("Not requested");
   const [healthStatus, setHealthStatus] = useState<HealthImportStatus[]>([]);
   const [now, setNow] = useState(() => Date.now());
@@ -89,7 +102,13 @@ export default function HomeScreen() {
       const [bootstrap, queued] = await Promise.all([fetchBootstrap(), readQueue()]);
       setData(bootstrap);
       setQueue(queued);
+      setAuthState("authenticated");
     } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        setData(null);
+        setAuthState("signedOut");
+        return;
+      }
       if (!options?.silent) {
         Alert.alert("Dayframe API", error instanceof Error ? error.message : "Unable to load API");
       }
@@ -131,10 +150,10 @@ export default function HomeScreen() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      void load({ silent: true });
+      if (authState !== "signedOut") void load({ silent: true });
     }, 1000);
     return () => clearInterval(interval);
-  }, [load]);
+  }, [authState, load]);
 
   useEffect(() => {
     const subscription = Linking.addEventListener("url", async ({ url }) => {
@@ -216,9 +235,18 @@ export default function HomeScreen() {
   }
 
   async function syncAndReload() {
-    const result = await syncQueue();
-    setQueue(result.remaining);
-    await load();
+    try {
+      const result = await syncQueue();
+      setQueue(result.remaining);
+      await load();
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        setAuthState("signedOut");
+        setData(null);
+        return;
+      }
+      throw error;
+    }
   }
 
   async function enableLocation() {
@@ -249,6 +277,37 @@ export default function HomeScreen() {
     }
   }
 
+  async function submitAuth() {
+    setAuthError(null);
+    setLoading(true);
+    try {
+      if (authView === "signup") {
+        await signup(
+          authEmail,
+          authPassword,
+          authName.trim() || undefined,
+          authWorkspace.trim() || undefined
+        );
+      } else {
+        await login(authEmail, authPassword);
+      }
+      setAuthPassword("");
+      await load();
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Unable to authenticate");
+      setAuthState("signedOut");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function signOut() {
+    await logout();
+    setData(null);
+    setQueue(await readQueue());
+    setAuthState("signedOut");
+  }
+
   const enteringStyle = {
     opacity: entrance,
     transform: [
@@ -261,10 +320,88 @@ export default function HomeScreen() {
     ]
   };
 
+  if (authState === "signedOut") {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+          <View style={styles.header}>
+            <View>
+              <Text style={styles.title}>Dayframe</Text>
+              <Text style={styles.subtitle}>Local auth</Text>
+            </View>
+          </View>
+          <View style={styles.panel}>
+            <Text style={styles.sectionTitle}>{authView === "signup" ? "Create account" : "Log in"}</Text>
+            <Text style={styles.muted}>
+              Use the same local account as the web app. Events sync with your authenticated workspace.
+            </Text>
+            {authView === "signup" ? (
+              <>
+                <TextInput
+                  style={styles.textInput}
+                  value={authName}
+                  onChangeText={setAuthName}
+                  placeholder="Name"
+                  placeholderTextColor={theme.textSecondary}
+                  autoCapitalize="words"
+                />
+                <TextInput
+                  style={styles.textInput}
+                  value={authWorkspace}
+                  onChangeText={setAuthWorkspace}
+                  placeholder="Workspace"
+                  placeholderTextColor={theme.textSecondary}
+                  autoCapitalize="words"
+                />
+              </>
+            ) : null}
+            <TextInput
+              style={styles.textInput}
+              value={authEmail}
+              onChangeText={setAuthEmail}
+              placeholder="Email"
+              placeholderTextColor={theme.textSecondary}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              textContentType="emailAddress"
+            />
+            <TextInput
+              style={styles.textInput}
+              value={authPassword}
+              onChangeText={setAuthPassword}
+              placeholder="Password"
+              placeholderTextColor={theme.textSecondary}
+              secureTextEntry
+              textContentType={authView === "signup" ? "newPassword" : "password"}
+            />
+            {authError ? <Text style={styles.errorText}>{authError}</Text> : null}
+            <Pressable style={pressable(styles.primaryButton, styles.buttonPressed)} onPress={submitAuth}>
+              <Text style={styles.primaryButtonText}>
+                {loading ? "Working..." : authView === "signup" ? "Create account" : "Log in"}
+              </Text>
+            </Pressable>
+            <Pressable
+              style={pressable(styles.secondaryButton, styles.buttonPressed)}
+              onPress={() => {
+                setAuthError(null);
+                setAuthView(authView === "signup" ? "login" : "signup");
+              }}
+            >
+              <Text style={styles.secondaryButtonText}>
+                {authView === "signup" ? "Use existing account" : "Create local account"}
+              </Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView
         contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl
             refreshing={loading}
@@ -283,6 +420,9 @@ export default function HomeScreen() {
             <View style={styles.headerActions}>
               <Pressable style={pressable(styles.syncButton, styles.buttonPressed)} onPress={syncAndReload}>
                 <Text style={styles.secondaryButtonText}>Sync {queue.length}</Text>
+              </Pressable>
+              <Pressable style={pressable(styles.syncButton, styles.buttonPressed)} onPress={signOut}>
+                <Text style={styles.secondaryButtonText}>Logout</Text>
               </Pressable>
             </View>
           </View>
@@ -329,8 +469,10 @@ export default function HomeScreen() {
               style={styles.textInput}
               value={customDescription}
               onChangeText={setCustomDescription}
+              onSubmitEditing={customStart}
               placeholder="What are you working on?"
               placeholderTextColor={theme.textSecondary}
+              returnKeyType="done"
             />
             <Text style={styles.label}>Project</Text>
             <ScrollView
@@ -1038,6 +1180,16 @@ function createStyles(theme: MobileTheme) {
       fontSize: 13,
       color: theme.textPrimary,
       fontWeight: "700",
+      fontFamily: monoFont
+    },
+    errorText: {
+      borderWidth: 1,
+      borderColor: theme.danger,
+      color: theme.danger,
+      backgroundColor: theme.surfaceInset,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      fontSize: 13,
       fontFamily: monoFont
     }
   });
