@@ -99,7 +99,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
         ) : null}
 
         <button
-          className="focus-ring min-h-11 border border-[var(--accent)] bg-[var(--accent)] px-4 py-2 font-semibold text-black disabled:opacity-60"
+          className="focus-ring min-h-11 border border-[var(--accent)] bg-[var(--accent)] px-4 py-2 font-semibold text-[var(--on-accent)] disabled:opacity-60"
           type="submit"
           disabled={isSubmitting}
         >

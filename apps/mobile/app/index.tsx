@@ -3,6 +3,7 @@ import {
   Alert,
   Animated,
   Easing,
+  Image,
   Linking,
   Platform,
   Pressable,
@@ -34,8 +35,10 @@ import {
   fetchBootstrap,
   login,
   logout,
+  queueStopTimer,
   readQueue,
   signup,
+  startTimer,
   stopTimer,
   syncQueue,
   type MobileBootstrap,
@@ -168,7 +171,7 @@ export default function HomeScreen() {
     return () => subscription.remove();
   }, []);
 
-  const quickActions = useMemo(() => data?.projects.slice(0, 8) ?? [], [data?.projects]);
+  const quickActions = useMemo(() => buildMobileQuickActions(data), [data]);
   const selectedCustomProject = useMemo(
     () => data?.projects.find((project) => project.id === customProjectId) ?? data?.projects[0],
     [customProjectId, data?.projects]
@@ -207,31 +210,56 @@ export default function HomeScreen() {
   }, [chartBuild, summaryPeriod, summarySegments.length]);
 
   async function quickStart(projectId: string, categoryId?: string | null) {
-    const nextQueue = await enqueueEvent({
-      source: "mobile_app",
-      type: "quick_action",
-      projectId,
-      categoryId: categoryId ?? undefined,
-      rawPayload: { origin: "mobile_quick_action" }
-    });
-    setQueue(nextQueue);
-    await syncAndReload();
+    try {
+      await startTimer(projectId, categoryId);
+      await load();
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        setAuthState("signedOut");
+        setData(null);
+        return;
+      }
+      const nextQueue = await enqueueEvent({
+        source: "mobile_app",
+        type: "quick_action",
+        projectId,
+        categoryId: categoryId ?? undefined,
+        rawPayload: { origin: "mobile_quick_action_fallback" }
+      });
+      setQueue(nextQueue);
+      await syncAndReload();
+    }
   }
 
   async function customStart() {
     if (!selectedCustomProject) return;
     const trimmedDescription = customDescription.trim();
-    const nextQueue = await enqueueEvent({
-      source: "mobile_app",
-      type: "timer_start",
-      projectId: selectedCustomProject.id,
-      categoryId: selectedCustomProject.categoryId ?? undefined,
-      description: trimmedDescription || undefined,
-      rawPayload: { origin: "mobile_custom_start" }
-    });
-    setQueue(nextQueue);
-    if (trimmedDescription) setCustomDescription("");
-    await syncAndReload();
+    try {
+      await startTimer(
+        selectedCustomProject.id,
+        selectedCustomProject.categoryId,
+        trimmedDescription
+      );
+      if (trimmedDescription) setCustomDescription("");
+      await load();
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        setAuthState("signedOut");
+        setData(null);
+        return;
+      }
+      const nextQueue = await enqueueEvent({
+        source: "mobile_app",
+        type: "timer_start",
+        projectId: selectedCustomProject.id,
+        categoryId: selectedCustomProject.categoryId ?? undefined,
+        description: trimmedDescription || undefined,
+        rawPayload: { origin: "mobile_custom_start_fallback" }
+      });
+      setQueue(nextQueue);
+      if (trimmedDescription) setCustomDescription("");
+      await syncAndReload();
+    }
   }
 
   async function syncAndReload() {
@@ -325,8 +353,12 @@ export default function HomeScreen() {
       <SafeAreaView style={styles.safeArea}>
         <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
           <View style={styles.header}>
-            <View>
-              <Text style={styles.title}>Dayframe</Text>
+            <View style={styles.logoLockup}>
+              <Image
+                source={require("../assets/dayframe_logo_banner.png")}
+                style={styles.logoImage}
+                resizeMode="contain"
+              />
               <Text style={styles.subtitle}>Local auth</Text>
             </View>
           </View>
@@ -413,8 +445,12 @@ export default function HomeScreen() {
       >
         <Animated.View style={[styles.contentStack, enteringStyle]}>
           <View style={styles.header}>
-            <View>
-              <Text style={styles.title}>Dayframe</Text>
+            <View style={styles.logoLockup}>
+              <Image
+                source={require("../assets/dayframe_logo_banner.png")}
+                style={styles.logoImage}
+                resizeMode="contain"
+              />
               <Text style={styles.subtitle}>Mobile capture</Text>
             </View>
             <View style={styles.headerActions}>
@@ -444,8 +480,18 @@ export default function HomeScreen() {
               <Pressable
                 style={pressable(styles.primaryButton, styles.buttonPressed)}
                 onPress={async () => {
-                  setQueue(await stopTimer());
-                  await syncAndReload();
+                  try {
+                    await stopTimer();
+                    await load();
+                  } catch (error) {
+                    if (error instanceof AuthRequiredError) {
+                      setAuthState("signedOut");
+                      setData(null);
+                      return;
+                    }
+                    setQueue(await queueStopTimer());
+                    await syncAndReload();
+                  }
                 }}
               >
                 <Text style={styles.primaryButtonText}>Stop current timer</Text>
@@ -748,6 +794,31 @@ function buildSummarySegments(entries: TimeEntry[], period: SummaryPeriod, now: 
     .slice(0, 8);
 }
 
+function buildMobileQuickActions(data: MobileBootstrap | null) {
+  if (!data) return [];
+  const projectsById = new Map(data.projects.map((project) => [project.id, project]));
+  const scored = new Map<string, { count: number; lastSeen: number }>();
+
+  for (const entry of data.entries) {
+    if (!entry.projectId) continue;
+    const current = scored.get(entry.projectId) ?? { count: 0, lastSeen: 0 };
+    current.count += 1;
+    current.lastSeen = Math.max(current.lastSeen, new Date(entry.startedAt).getTime());
+    scored.set(entry.projectId, current);
+  }
+
+  const learned = [...scored.entries()]
+    .map(([projectId, score]) => ({ score, project: projectsById.get(projectId) }))
+    .filter((item): item is { score: { count: number; lastSeen: number }; project: MobileBootstrap["projects"][number] } =>
+      Boolean(item.project)
+    )
+    .sort((a, b) => b.score.count - a.score.count || b.score.lastSeen - a.score.lastSeen)
+    .map((item) => item.project);
+  const fallback = data.projects.filter((project) => !scored.has(project.id));
+
+  return [...learned, ...fallback].slice(0, 8);
+}
+
 function startOfPeriod(period: SummaryPeriod, now: number) {
   const date = new Date(now);
   if (period === "year") return new Date(date.getFullYear(), 0, 1).getTime();
@@ -840,9 +911,9 @@ function formatDuration(seconds: number) {
 }
 
 const monoFont = Platform.select({
-  ios: "Menlo",
-  android: "monospace",
-  default: "Courier"
+  ios: "System",
+  android: "sans-serif",
+  default: "Arial"
 });
 
 function createStyles(theme: MobileTheme) {
@@ -865,7 +936,16 @@ function createStyles(theme: MobileTheme) {
       borderWidth: 1,
       borderColor: theme.border,
       backgroundColor: theme.surface,
-      padding: 14
+      borderRadius: 16,
+      padding: 16
+    },
+    logoLockup: {
+      flexShrink: 1,
+      gap: 4
+    },
+    logoImage: {
+      width: 158,
+      height: 52
     },
     headerActions: {
       alignItems: "flex-end",
@@ -887,6 +967,7 @@ function createStyles(theme: MobileTheme) {
       borderWidth: 1,
       borderColor: theme.border,
       backgroundColor: theme.surface,
+      borderRadius: 16,
       padding: 16,
       gap: 10
     },
@@ -894,6 +975,7 @@ function createStyles(theme: MobileTheme) {
       borderWidth: 1,
       borderColor: theme.borderStrong,
       backgroundColor: theme.surfaceInset,
+      borderRadius: 16,
       padding: 16,
       gap: 10
     },
@@ -901,6 +983,7 @@ function createStyles(theme: MobileTheme) {
       borderWidth: 1,
       borderColor: theme.borderStrong,
       backgroundColor: theme.surface,
+      borderRadius: 16,
       padding: 16,
       gap: 14
     },
@@ -910,7 +993,7 @@ function createStyles(theme: MobileTheme) {
       fontFamily: monoFont
     },
     timerText: {
-      fontSize: 28,
+      fontSize: 25,
       fontWeight: "800",
       color: theme.accent,
       fontFamily: monoFont
@@ -933,7 +1016,7 @@ function createStyles(theme: MobileTheme) {
       paddingBottom: 10
     },
     sectionTitle: {
-      fontSize: 18,
+      fontSize: 16,
       fontWeight: "800",
       color: theme.textPrimary,
       fontFamily: monoFont
@@ -954,7 +1037,9 @@ function createStyles(theme: MobileTheme) {
       flexDirection: "row",
       borderWidth: 1,
       borderColor: theme.border,
-      backgroundColor: theme.surfaceMuted
+      borderRadius: 12,
+      backgroundColor: theme.surfaceMuted,
+      overflow: "hidden"
     },
     segmentButton: {
       flex: 1,
@@ -1060,25 +1145,29 @@ function createStyles(theme: MobileTheme) {
       borderWidth: 1,
       borderColor: theme.borderStrong,
       backgroundColor: theme.surfaceInset,
+      borderRadius: 14,
       padding: 14,
       justifyContent: "space-between",
       overflow: "hidden"
     },
     colorRule: {
       height: 3,
+      borderRadius: 999,
       marginBottom: 10
     },
     colorDot: {
       width: 12,
       height: 12,
       borderWidth: 1,
-      borderColor: theme.borderStrong
+      borderColor: theme.borderStrong,
+      borderRadius: 999
     },
     textInput: {
       minHeight: 48,
       borderWidth: 1,
       borderColor: theme.borderStrong,
       backgroundColor: theme.surfaceInset,
+      borderRadius: 12,
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 15,
@@ -1094,6 +1183,7 @@ function createStyles(theme: MobileTheme) {
       borderWidth: 1,
       borderColor: theme.borderStrong,
       backgroundColor: theme.surfaceInset,
+      borderRadius: 14,
       padding: 12,
       gap: 6
     },
@@ -1131,6 +1221,7 @@ function createStyles(theme: MobileTheme) {
       borderWidth: 1,
       borderColor: theme.accent,
       backgroundColor: theme.accent,
+      borderRadius: 12,
       paddingVertical: 12,
       alignItems: "center"
     },
@@ -1150,6 +1241,7 @@ function createStyles(theme: MobileTheme) {
       borderWidth: 1,
       borderColor: theme.borderStrong,
       backgroundColor: theme.surfaceInset,
+      borderRadius: 12,
       paddingHorizontal: 14,
       paddingVertical: 10
     },
@@ -1157,6 +1249,7 @@ function createStyles(theme: MobileTheme) {
       borderWidth: 1,
       borderColor: theme.borderStrong,
       backgroundColor: theme.surfaceInset,
+      borderRadius: 12,
       paddingHorizontal: 12,
       paddingVertical: 8
     },
@@ -1187,6 +1280,7 @@ function createStyles(theme: MobileTheme) {
       borderColor: theme.danger,
       color: theme.danger,
       backgroundColor: theme.surfaceInset,
+      borderRadius: 12,
       paddingHorizontal: 10,
       paddingVertical: 8,
       fontSize: 13,

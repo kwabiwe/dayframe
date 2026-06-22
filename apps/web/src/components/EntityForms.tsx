@@ -371,7 +371,7 @@ function ColorInput({
         {DAYFRAME_PALETTE.map((color) => (
           <label
             key={color.key}
-            className="focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--accent)]"
+            className="rounded-lg focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--accent)]"
             title={color.label}
           >
             <input
@@ -382,7 +382,7 @@ function ColorInput({
               defaultChecked={color.key === defaultKey}
             />
             <span
-              className="block h-8 border border-[var(--line-strong)] peer-checked:border-[var(--foreground)] peer-checked:outline peer-checked:outline-2 peer-checked:outline-[var(--accent)]"
+              className="block h-8 rounded-lg border border-[var(--line-strong)] shadow-sm peer-checked:border-[var(--foreground)] peer-checked:outline peer-checked:outline-2 peer-checked:outline-[var(--accent)]"
               style={{ backgroundColor: color.hex }}
             />
           </label>
@@ -399,7 +399,7 @@ function ColorCell({ value }: { value: string }) {
   return (
     <span className="inline-flex items-center gap-2">
       <span
-        className="h-3 w-3 border border-[var(--line-strong)]"
+        className="h-3 w-3 rounded-full border border-[var(--line-strong)]"
         style={{ backgroundColor: paletteColorFor(value) }}
       />
       {color?.label ?? key}

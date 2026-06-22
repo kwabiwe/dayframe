@@ -1,6 +1,6 @@
 import { paletteColorFor } from "@dayframe/shared";
 import type { TimeEntryRow } from "@/lib/queries";
-import { formatDuration, formatTime } from "@/lib/format";
+import { formatDuration, formatSourceLabel, formatTime } from "@/lib/format";
 
 export function TimelineRail({ entries }: { entries: TimeEntryRow[] }) {
   const sorted = [...entries].sort(
@@ -41,7 +41,7 @@ export function TimelineRail({ entries }: { entries: TimeEntryRow[] }) {
                       <span>{entry.clientName ?? "No client"}</span>
                       <span>{entry.categoryName ?? "No category"}</span>
                       <span>{entry.placeName ?? "No place"}</span>
-                      <span>{entry.source}</span>
+                      <span>{formatSourceLabel(entry.source)}</span>
                     </div>
                   </div>
                   <div className="tabular text-left text-sm md:text-right">

@@ -1,12 +1,20 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { paletteColorFor } from "@dayframe/shared";
-import { CalendarDays, ChevronLeft, ChevronRight, List, Pencil, RotateCcw, Table2, Trash2 } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, List, Pencil, Play, Table2, Trash2 } from "lucide-react";
+import { CurrentTimerPanel } from "@/components/DashboardRealtime";
 import { EntriesTable } from "@/components/EntriesTable";
-import type { CategoryRow, PlaceRow, ProjectRow, TimeEntryRow } from "@/lib/queries";
-import { dateTimeLocal, formatDate, formatDuration, formatTime } from "@/lib/format";
+import type { BootstrapData, CategoryRow, PlaceRow, ProjectRow, TimeEntryRow } from "@/lib/queries";
+import {
+  dateTimeLocal,
+  formatDate,
+  formatDuration,
+  formatSourceLabel,
+  formatTime
+} from "@/lib/format";
 
 type TimeView = "calendar" | "list" | "timesheet";
 type CalendarMode = "week" | "day";
@@ -21,27 +29,44 @@ const startHour = 6;
 const endHour = 22;
 const rowHeight = 58;
 const calendarHeight = (endHour - startHour) * rowHeight;
+const calendarSnapMinutes = 15;
+
+type CalendarResizeEdge = "start" | "end";
+
+type CalendarResizeDraft = {
+  entryId: string;
+  startedAt: string;
+  stoppedAt: string;
+};
 
 export function TimeReviewViews({
-  entries,
-  projects,
-  categories,
-  places
+  initialData
 }: {
-  entries: TimeEntryRow[];
-  projects: ProjectRow[];
-  categories: CategoryRow[];
-  places: PlaceRow[];
+  initialData: BootstrapData;
 }) {
-  const [activeView, setActiveView] = useState<TimeView>(() => {
-    if (typeof window === "undefined") return "calendar";
-    const storedView = window.localStorage.getItem("dayframe.timeReviewView");
-    return storedView === "calendar" || storedView === "list" || storedView === "timesheet"
-      ? storedView
-      : "calendar";
-  });
+  const [data, setData] = useState(initialData);
+  const [activeView, setActiveView] = useState<TimeView>("calendar");
   const [calendarMode, setCalendarMode] = useState<CalendarMode>("week");
-  const [weekAnchor, setWeekAnchor] = useState(() => startOfWeek(new Date()));
+  const [weekAnchor, setWeekAnchor] = useState(() => startOfWeek(new Date(initialData.dateRange.selectedDate)));
+
+  const refreshData = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/bootstrap?date=${data.dateRange.selectedDate}`, {
+        cache: "no-store"
+      });
+      if (response.ok) setData((await response.json()) as BootstrapData);
+    } catch {
+      // Navigation can interrupt polling; the next visible tick will retry.
+    }
+  }, [data.dateRange.selectedDate]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void refreshData();
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [refreshData]);
 
   function updateView(view: TimeView) {
     setActiveView(view);
@@ -50,14 +75,16 @@ export function TimeReviewViews({
 
   const weekDays = useMemo(() => getWeekDays(weekAnchor), [weekAnchor]);
   const weekEntries = useMemo(
-    () => entries.filter((entry) => isInWeek(new Date(entry.startedAt), weekAnchor)),
-    [entries, weekAnchor]
+    () => data.entries.filter((entry) => isInWeek(new Date(entry.startedAt), weekAnchor)),
+    [data.entries, weekAnchor]
   );
   const weekTotal = weekEntries.reduce((sum, entry) => sum + entry.durationSeconds, 0);
 
   return (
     <section className="space-y-5">
-      <div className="industrial-panel p-4">
+      <CurrentTimerPanel data={data} onSynced={setData} />
+
+      <div className="industrial-panel rounded-xl p-4">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex flex-wrap items-center gap-3">
             <button
@@ -68,7 +95,7 @@ export function TimeReviewViews({
             >
               <ChevronLeft size={16} />
             </button>
-            <div className="min-w-[220px] border border-[var(--line)] bg-[var(--surface-inset)] px-3 py-2">
+            <div className="min-w-[220px] rounded-lg border border-[var(--line)] bg-[var(--surface-inset)] px-3 py-2">
               <div className="text-sm font-semibold">This week</div>
               <div className="tabular mt-1 text-xs text-[var(--muted)]">
                 {formatDate(weekDays[0])} - {formatDate(weekDays[6])}
@@ -82,13 +109,13 @@ export function TimeReviewViews({
             >
               <ChevronRight size={16} />
             </button>
-            <div className="border border-[var(--line)] bg-[var(--surface-inset)] px-3 py-2 text-sm">
+            <div className="rounded-lg border border-[var(--line)] bg-[var(--surface-inset)] px-3 py-2 text-sm">
               <span className="text-[var(--muted)]">Week total </span>
               <span className="tabular font-semibold">{formatDuration(weekTotal)}</span>
             </div>
           </div>
 
-          <div className="grid grid-cols-3 border border-[var(--line-strong)] bg-[var(--surface-inset)]">
+          <div className="grid grid-cols-3 overflow-hidden rounded-lg border border-[var(--line-strong)] bg-[var(--surface-inset)]">
             {viewItems.map((item) => {
               const selected = item.id === activeView;
               return (
@@ -96,7 +123,9 @@ export function TimeReviewViews({
                   key={item.id}
                   className={[
                     "focus-ring flex min-h-10 min-w-[116px] items-center justify-center gap-2 border-r border-[var(--line)] px-3 text-sm last:border-r-0",
-                    selected ? "bg-[var(--accent)] text-black" : "text-[var(--foreground)] hover:text-[var(--accent)]"
+                    selected
+                      ? "bg-[var(--accent)] text-[var(--on-accent)]"
+                      : "text-[var(--foreground)] hover:text-[var(--accent)]"
                   ].join(" ")}
                   type="button"
                   onClick={() => updateView(item.id)}
@@ -113,21 +142,23 @@ export function TimeReviewViews({
       {activeView === "calendar" ? (
         <CalendarReview
           calendarMode={calendarMode}
-          categories={categories}
+          categories={data.categories}
           entries={weekEntries}
-          places={places}
-          projects={projects}
+          onSynced={refreshData}
+          places={data.places}
+          projects={data.projects}
           setCalendarMode={setCalendarMode}
           weekDays={weekDays}
         />
       ) : null}
       {activeView === "list" ? (
         <EntriesTable
-          entries={entries}
-          projects={projects}
-          categories={categories}
-          places={places}
+          entries={data.entries}
+          projects={data.projects}
+          categories={data.categories}
+          places={data.places}
           groupByDay
+          onChanged={refreshData}
         />
       ) : null}
       {activeView === "timesheet" ? <TimesheetView entries={weekEntries} weekDays={weekDays} /> : null}
@@ -139,6 +170,7 @@ function CalendarReview({
   calendarMode,
   categories,
   entries,
+  onSynced,
   places,
   projects,
   setCalendarMode,
@@ -147,6 +179,7 @@ function CalendarReview({
   calendarMode: CalendarMode;
   categories: CategoryRow[];
   entries: TimeEntryRow[];
+  onSynced: () => Promise<void>;
   places: PlaceRow[];
   projects: ProjectRow[];
   setCalendarMode: (mode: CalendarMode) => void;
@@ -155,6 +188,9 @@ function CalendarReview({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
+  const [resizeDraft, setResizeDraft] = useState<CalendarResizeDraft | null>(null);
+  const [resizingId, setResizingId] = useState<string | null>(null);
+  const [resizeError, setResizeError] = useState<string | null>(null);
   const today = new Date();
   const visibleDays =
     calendarMode === "day"
@@ -166,6 +202,7 @@ function CalendarReview({
   async function remove(id: string) {
     await fetch(`/api/time-entries/${id}`, { method: "DELETE" });
     setSelectedEntryId(null);
+    await onSynced();
     startTransition(() => router.refresh());
   }
 
@@ -177,9 +214,10 @@ function CalendarReview({
         mode: "start",
         projectId: entry.projectId,
         categoryId: entry.categoryId,
-        description: entry.description ? `Continue: ${entry.description}` : undefined
+        description: entry.description ?? undefined
       })
     });
+    await onSynced();
     startTransition(() => router.refresh());
   }
 
@@ -197,7 +235,116 @@ function CalendarReview({
       })
     });
     setSelectedEntryId(null);
+    await onSynced();
     startTransition(() => router.refresh());
+  }
+
+  async function saveCalendarResize(entry: TimeEntryRow, draft: CalendarResizeDraft) {
+    const response = await fetch(`/api/time-entries/${entry.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: entry.projectId,
+        categoryId: entry.categoryId,
+        placeId: entry.placeId,
+        description: entry.description,
+        startedAt: draft.startedAt,
+        stoppedAt: draft.stoppedAt
+      })
+    });
+
+    if (!response.ok) throw new Error(`Unable to resize entry: ${response.status}`);
+    await onSynced();
+    startTransition(() => router.refresh());
+  }
+
+  function startCalendarResize(
+    entry: TimeEntryRow,
+    day: Date,
+    edge: CalendarResizeEdge,
+    event: ReactPointerEvent<HTMLButtonElement>
+  ) {
+    if (!entry.stoppedAt) return;
+    const dayColumn = event.currentTarget.closest("[data-calendar-day-body]") as HTMLElement | null;
+    if (!dayColumn) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const columnRect = dayColumn.getBoundingClientRect();
+    const originalStart = minutesFromDate(new Date(entry.startedAt));
+    const originalEnd = minutesFromDate(new Date(entry.stoppedAt));
+    const ranges = entries
+      .filter((candidate) => candidate.id !== entry.id && candidate.stoppedAt && sameDay(new Date(candidate.startedAt), day))
+      .map((candidate) => ({
+        start: minutesFromDate(new Date(candidate.startedAt)),
+        end: minutesFromDate(new Date(candidate.stoppedAt as string))
+      }))
+      .sort((a, b) => a.start - b.start);
+    const timelineStart = startHour * 60;
+    const timelineEnd = endHour * 60;
+    const previousEnd = Math.max(
+      timelineStart,
+      ...ranges.filter((range) => range.end <= originalStart).map((range) => range.end)
+    );
+    const nextStart = Math.min(
+      timelineEnd,
+      ...ranges.filter((range) => range.start >= originalEnd).map((range) => range.start)
+    );
+    let finalDraft: CalendarResizeDraft | null = null;
+
+    setResizingId(entry.id);
+    setResizeError(null);
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    const updateDraft = (clientY: number) => {
+      const relativeY = clientY - columnRect.top;
+      const rawMinutes = timelineStart + (relativeY / rowHeight) * 60;
+      const snappedMinutes = clampMinutes(snapCalendarMinutes(rawMinutes), timelineStart, timelineEnd);
+      const nextStartMinutes =
+        edge === "start" ? clampMinutes(snappedMinutes, previousEnd, originalEnd - 15) : originalStart;
+      const nextEndMinutes =
+        edge === "end" ? clampMinutes(snappedMinutes, originalStart + 15, nextStart) : originalEnd;
+      finalDraft = {
+        entryId: entry.id,
+        startedAt: isoForDateMinutes(day, nextStartMinutes),
+        stoppedAt: isoForDateMinutes(day, nextEndMinutes)
+      };
+      setResizeDraft(finalDraft);
+    };
+
+    const moveResize = (moveEvent: PointerEvent) => updateDraft(moveEvent.clientY);
+    const cancelResize = () => {
+      window.removeEventListener("pointermove", moveResize);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", cancelResize);
+      setResizingId(null);
+      setResizeDraft(null);
+    };
+    const stopResize = async () => {
+      window.removeEventListener("pointermove", moveResize);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", cancelResize);
+      setResizingId(null);
+
+      if (!finalDraft) {
+        setResizeDraft(null);
+        return;
+      }
+
+      try {
+        await saveCalendarResize(entry, finalDraft);
+      } catch {
+        setResizeError("Unable to save the resized time block.");
+      } finally {
+        setResizeDraft(null);
+      }
+    };
+
+    updateDraft(event.clientY);
+    window.addEventListener("pointermove", moveResize);
+    window.addEventListener("pointerup", stopResize, { once: true });
+    window.addEventListener("pointercancel", cancelResize, { once: true });
   }
 
   return (
@@ -205,7 +352,7 @@ function CalendarReview({
       <div className="flex flex-col gap-3 border-b border-[var(--line)] px-4 py-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="text-lg font-semibold">Calendar</h2>
-          <p className="mt-1 text-sm text-[var(--muted)]">Click a block to inspect it. Drag and resize are planned after v1.</p>
+          <p className="mt-1 text-sm text-[var(--muted)]">Click a block to inspect it. Drag the top or bottom edge to resize.</p>
         </div>
         <div className="grid w-full max-w-[220px] grid-cols-2 border border-[var(--line-strong)] bg-[var(--surface-inset)]">
           {(["week", "day"] as CalendarMode[]).map((mode) => (
@@ -213,7 +360,7 @@ function CalendarReview({
               key={mode}
               className={[
                 "focus-ring px-3 py-2 text-sm capitalize",
-                calendarMode === mode ? "bg-[var(--accent)] text-black" : "hover:text-[var(--accent)]"
+                calendarMode === mode ? "bg-[var(--accent)] text-[var(--on-accent)]" : "hover:text-[var(--accent)]"
               ].join(" ")}
               type="button"
               onClick={() => setCalendarMode(mode)}
@@ -263,6 +410,7 @@ function CalendarReview({
           {visibleDays.map((day) => (
             <div
               key={`${day.toISOString()}-body`}
+              data-calendar-day-body
               className="relative border-r border-[var(--line)] last:border-r-0"
               style={{
                 height: calendarHeight,
@@ -271,32 +419,64 @@ function CalendarReview({
             >
               {entries
                 .filter((entry) => sameDay(new Date(entry.startedAt), day))
-                .map((entry) => (
-                  <button
-                    key={entry.id}
-                    className={[
-                      "focus-ring absolute left-2 right-2 overflow-hidden border p-2 text-left text-xs text-black",
-                      selectedEntryId === entry.id ? "outline outline-2 outline-offset-1 outline-[var(--foreground)]" : ""
-                    ].join(" ")}
-                    style={{
-                      ...calendarBlockStyle(entry),
-                      backgroundColor: paletteColorFor(entry.projectColor, entry.projectName ?? entry.id),
-                      borderColor: "color-mix(in srgb, #000 35%, transparent)"
-                    }}
-                    type="button"
-                    data-entry-id={entry.id}
-                    title={`${entry.description ?? entry.projectName ?? "Unassigned"} ${formatTime(entry.startedAt)} - ${entry.stoppedAt ? formatTime(entry.stoppedAt) : "Running"}`}
-                    onClick={() => setSelectedEntryId(entry.id)}
-                  >
-                    <span className="block truncate font-semibold">{entry.description ?? entry.projectName ?? "Unassigned"}</span>
-                    <span className="block truncate opacity-80">{entry.clientName ?? entry.categoryName ?? entry.source}</span>
-                    <span className="tabular block">{formatDuration(entry.durationSeconds)}</span>
-                  </button>
-                ))}
+                .map((entry) => {
+                  const activeDraft = resizeDraft?.entryId === entry.id ? resizeDraft : null;
+                  return (
+                    <article
+                      key={entry.id}
+                      className={[
+                        "focus-ring absolute left-2 right-2 overflow-hidden border p-2 text-left text-xs",
+                        "calendar-time-block",
+                        selectedEntryId === entry.id ? "outline outline-2 outline-offset-1 outline-[var(--foreground)]" : "",
+                        resizingId === entry.id ? "is-resizing" : ""
+                      ].join(" ")}
+                      style={{
+                        ...calendarBlockStyle(entry, activeDraft),
+                        backgroundColor: paletteColorFor(entry.projectColor, entry.projectName ?? entry.id),
+                        borderColor: "color-mix(in srgb, var(--foreground) 28%, transparent)",
+                        color: "var(--on-pastel)"
+                      }}
+                      role="button"
+                      tabIndex={0}
+                      data-entry-id={entry.id}
+                      title={`${entry.description ?? entry.projectName ?? "Unassigned"} ${formatTime(activeDraft?.startedAt ?? entry.startedAt)} - ${activeDraft?.stoppedAt ? formatTime(activeDraft.stoppedAt) : entry.stoppedAt ? formatTime(entry.stoppedAt) : "Running"}`}
+                      onClick={() => setSelectedEntryId(entry.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setSelectedEntryId(entry.id);
+                        }
+                      }}
+                    >
+                      {entry.stoppedAt ? (
+                        <>
+                          <button
+                            type="button"
+                            className="swiss-resize-handle top"
+                            aria-label={`Resize start of ${entry.projectName ?? "time block"}`}
+                            onPointerDown={(event) => startCalendarResize(entry, day, "start", event)}
+                          />
+                          <button
+                            type="button"
+                            className="swiss-resize-handle bottom"
+                            aria-label={`Resize end of ${entry.projectName ?? "time block"}`}
+                            onPointerDown={(event) => startCalendarResize(entry, day, "end", event)}
+                          />
+                        </>
+                      ) : null}
+                      <span className="block truncate font-semibold">{entry.description ?? entry.projectName ?? "Unassigned"}</span>
+                      <span className="block truncate opacity-80">
+                        {entry.clientName ?? entry.categoryName ?? formatSourceLabel(entry.source)}
+                      </span>
+                      <span className="tabular block">{formatDuration(calendarDurationSeconds(entry, activeDraft))}</span>
+                    </article>
+                  );
+                })}
             </div>
           ))}
         </div>
       </div>
+      {resizeError ? <p className="border-t border-[var(--line)] px-4 py-2 text-sm text-[var(--danger)]">{resizeError}</p> : null}
       {selectedEntry ? (
         <div className="border-t border-[var(--line)] p-4">
           <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
@@ -364,8 +544,8 @@ function CalendarReview({
                 disabled={!selectedEntry.projectId || isPending}
                 onClick={() => continueEntry(selectedEntry)}
               >
-                <RotateCcw size={15} />
-                Continue
+                <Play size={15} fill="currentColor" strokeWidth={0} />
+                Start again
               </button>
               <button
                 className="industrial-button-danger focus-ring text-sm"
@@ -545,14 +725,38 @@ function DateField({
   );
 }
 
-function calendarBlockStyle(entry: TimeEntryRow) {
-  const start = new Date(entry.startedAt);
-  const stoppedAt = entry.stoppedAt ? new Date(entry.stoppedAt) : new Date();
+function calendarBlockStyle(entry: TimeEntryRow, draft: CalendarResizeDraft | null = null) {
+  const start = new Date(draft?.startedAt ?? entry.startedAt);
+  const stoppedAt = draft?.stoppedAt ? new Date(draft.stoppedAt) : entry.stoppedAt ? new Date(entry.stoppedAt) : new Date();
   const startMinutes = start.getHours() * 60 + start.getMinutes();
   const durationMinutes = Math.max(15, (stoppedAt.getTime() - start.getTime()) / 60_000);
   const top = Math.min(calendarHeight - 24, Math.max(0, ((startMinutes - startHour * 60) / 60) * rowHeight));
   const height = Math.min(calendarHeight - top, Math.max(36, (durationMinutes / 60) * rowHeight));
   return { top, height: Math.max(24, height) };
+}
+
+function calendarDurationSeconds(entry: TimeEntryRow, draft: CalendarResizeDraft | null = null) {
+  const start = new Date(draft?.startedAt ?? entry.startedAt);
+  const stoppedAt = draft?.stoppedAt ? new Date(draft.stoppedAt) : entry.stoppedAt ? new Date(entry.stoppedAt) : new Date();
+  return Math.max(0, Math.round((stoppedAt.getTime() - start.getTime()) / 1000));
+}
+
+function minutesFromDate(date: Date) {
+  return date.getHours() * 60 + date.getMinutes();
+}
+
+function snapCalendarMinutes(value: number) {
+  return Math.round(value / calendarSnapMinutes) * calendarSnapMinutes;
+}
+
+function clampMinutes(value: number, minimum: number, maximum: number) {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function isoForDateMinutes(day: Date, minutes: number) {
+  const date = new Date(day);
+  date.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+  return date.toISOString();
 }
 
 function startOfWeek(input: Date) {

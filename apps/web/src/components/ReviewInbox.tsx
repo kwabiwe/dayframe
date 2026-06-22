@@ -4,7 +4,7 @@ import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, CircleSlash, GitMerge, WandSparkles } from "lucide-react";
 import type { ReviewItemRow } from "@/lib/queries";
-import { formatDate, formatTime } from "@/lib/format";
+import { formatDate, formatEventLabel, formatSourceLabel, formatTime } from "@/lib/format";
 
 export function ReviewInbox({ items }: { items: ReviewItemRow[] }) {
   const openItems = items.filter((item) => item.status === "open");
@@ -54,8 +54,8 @@ function ReviewItemCard({ item }: { item: ReviewItemRow }) {
         </div>
 
         <div className="mt-3 flex flex-wrap gap-2 text-xs">
-          <span className="industrial-chip">{item.eventSource ?? "review"}</span>
-          <span className="industrial-chip">{item.eventType ?? item.type}</span>
+          <span className="industrial-chip">{formatSourceLabel(item.eventSource ?? "review")}</span>
+          <span className="industrial-chip">{formatEventLabel(item.eventType ?? item.type)}</span>
           <span className="industrial-chip tabular">
             {formatDate(item.createdAt)} {formatTime(item.createdAt)}
           </span>
