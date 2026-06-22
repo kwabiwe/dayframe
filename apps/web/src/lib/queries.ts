@@ -124,6 +124,22 @@ export type DashboardStats = {
   reviewCount: number;
 };
 
+export type DashboardDateRange = {
+  selectedDate: string;
+  previousDate: string;
+  nextDate: string;
+  dayStart: string;
+  dayEnd: string;
+  weekStart: string;
+  weekEnd: string;
+};
+
+export type DashboardSeriesPoint = {
+  key: string;
+  label: string;
+  seconds: number;
+};
+
 export type ReportRow = {
   id: string;
   name: string;
@@ -132,8 +148,10 @@ export type ReportRow = {
 };
 
 export type BootstrapData = {
+  user: { id: string; email: string; name: string };
   workspace: { id: string; name: string };
   workspaces: Array<{ id: string; name: string }>;
+  dateRange: DashboardDateRange;
   clients: ClientRow[];
   categories: CategoryRow[];
   projects: ProjectRow[];
@@ -141,14 +159,23 @@ export type BootstrapData = {
   places: PlaceRow[];
   automationRules: AutomationRuleRow[];
   entries: TimeEntryRow[];
+  dayEntries: TimeEntryRow[];
+  weekEntries: TimeEntryRow[];
   activeEntry: TimeEntryRow | null;
   reviewItems: ReviewItemRow[];
   activityEvents: ActivityRow[];
   stats: DashboardStats;
+  todaySeries: DashboardSeriesPoint[];
+  weekSeries: DashboardSeriesPoint[];
 };
 
-export async function getBootstrapData(session: RequestSession = getDevSession()): Promise<BootstrapData> {
+export async function getBootstrapData(
+  session: RequestSession = getDevSession(),
+  options: { selectedDate?: string | Date | null } = {}
+): Promise<BootstrapData> {
+  const dateRange = buildDashboardDateRange(options.selectedDate);
   const [
+    user,
     workspaces,
     clients,
     categories,
@@ -157,11 +184,14 @@ export async function getBootstrapData(session: RequestSession = getDevSession()
     places,
     automationRules,
     entries,
+    dayEntries,
+    weekEntries,
     activeEntry,
     reviewItems,
     activityEvents,
     stats
   ] = await Promise.all([
+    getUser(session),
     getWorkspaces(session),
     getClients(session),
     getCategories(session),
@@ -170,15 +200,27 @@ export async function getBootstrapData(session: RequestSession = getDevSession()
     getPlaces(session),
     getAutomationRules(session),
     getTimeEntries(session),
+    getTimeEntries(session, {
+      startedFrom: dateRange.dayStart,
+      startedBefore: dateRange.dayEnd,
+      limit: 100
+    }),
+    getTimeEntries(session, {
+      startedFrom: dateRange.weekStart,
+      startedBefore: dateRange.weekEnd,
+      limit: 300
+    }),
     getActiveEntry(session),
     getReviewItems(session),
     getActivityEvents(session),
-    getDashboardStats(session)
+    getDashboardStats(session, dateRange)
   ]);
 
   return {
+    user,
     workspace: workspaces.find((workspace) => workspace.id === session.workspaceId) ?? workspaces[0],
     workspaces,
+    dateRange,
     clients,
     categories,
     projects,
@@ -186,10 +228,14 @@ export async function getBootstrapData(session: RequestSession = getDevSession()
     places,
     automationRules,
     entries,
+    dayEntries,
+    weekEntries,
     activeEntry,
     reviewItems,
     activityEvents,
-    stats
+    stats,
+    todaySeries: buildHourlySeries(dayEntries),
+    weekSeries: buildWeekSeries(weekEntries, dateRange)
   };
 }
 
@@ -235,6 +281,16 @@ export async function getNormalizationContext(
       enabled: rule.enabled
     }))
   };
+}
+
+async function getUser(session: RequestSession) {
+  const result = await query<{ id: string; email: string; name: string }>(
+    `select id, email, name
+     from users
+     where id = $1`,
+    [session.userId]
+  );
+  return result.rows[0] ?? { id: session.userId, email: "local@dayframe", name: "Dayframe user" };
 }
 
 async function getWorkspaces(session: RequestSession) {
@@ -351,7 +407,22 @@ async function getAutomationRules(session: RequestSession) {
   return result.rows;
 }
 
-async function getTimeEntries(session: RequestSession) {
+async function getTimeEntries(
+  session: RequestSession,
+  options: { startedFrom?: string; startedBefore?: string; limit?: number } = {}
+) {
+  const where = ["te.workspace_id = $1"];
+  const values: Array<string | number> = [session.workspaceId];
+  if (options.startedFrom) {
+    values.push(options.startedFrom);
+    where.push(`te.started_at >= $${values.length}`);
+  }
+  if (options.startedBefore) {
+    values.push(options.startedBefore);
+    where.push(`te.started_at < $${values.length}`);
+  }
+  values.push(options.limit ?? 100);
+
   const result = await query<TimeEntryRow>(
     `select te.id,
             te.project_id as "projectId",
@@ -380,10 +451,10 @@ async function getTimeEntries(session: RequestSession) {
      left join clients cl on cl.id = p.client_id
      left join categories cat on cat.id = te.category_id
      left join places pl on pl.id = te.place_id
-     where te.workspace_id = $1
+     where ${where.join(" and ")}
      order by te.started_at desc
-     limit 100`,
-    [session.workspaceId]
+     limit $${values.length}`,
+    values
   );
   return result.rows;
 }
@@ -478,21 +549,108 @@ async function getActivityEvents(session: RequestSession) {
   return result.rows;
 }
 
-async function getDashboardStats(session: RequestSession) {
+async function getDashboardStats(session: RequestSession, dateRange: DashboardDateRange) {
   const result = await query<DashboardStats>(
     `select
         coalesce(sum(
           extract(epoch from (coalesce(stopped_at, now()) - started_at))
-        ) filter (where started_at::date = current_date), 0)::int as "todaySeconds",
+        ) filter (where started_at >= $2::timestamptz and started_at < $3::timestamptz), 0)::int as "todaySeconds",
         coalesce(sum(
           extract(epoch from (coalesce(stopped_at, now()) - started_at))
-        ) filter (where started_at >= date_trunc('week', now())), 0)::int as "weekSeconds",
+        ) filter (where started_at >= $4::timestamptz and started_at < $5::timestamptz), 0)::int as "weekSeconds",
         (select count(*)::int from review_items where workspace_id = $1 and status = 'open') as "reviewCount"
      from time_entries
      where workspace_id = $1`,
-    [session.workspaceId]
+    [
+      session.workspaceId,
+      dateRange.dayStart,
+      dateRange.dayEnd,
+      dateRange.weekStart,
+      dateRange.weekEnd
+    ]
   );
   return result.rows[0] ?? { todaySeconds: 0, weekSeconds: 0, reviewCount: 0 };
+}
+
+function buildDashboardDateRange(input?: string | Date | null): DashboardDateRange {
+  const selected = coerceDate(input);
+  selected.setHours(0, 0, 0, 0);
+  const dayEnd = addDays(selected, 1);
+  const previous = addDays(selected, -1);
+  const next = addDays(selected, 1);
+  const weekStart = startOfWeek(selected);
+  const weekEnd = addDays(weekStart, 7);
+
+  return {
+    selectedDate: toDateKey(selected),
+    previousDate: toDateKey(previous),
+    nextDate: toDateKey(next),
+    dayStart: selected.toISOString(),
+    dayEnd: dayEnd.toISOString(),
+    weekStart: weekStart.toISOString(),
+    weekEnd: weekEnd.toISOString()
+  };
+}
+
+function coerceDate(input?: string | Date | null) {
+  if (input instanceof Date && !Number.isNaN(input.getTime())) return new Date(input);
+  if (typeof input === "string" && /^\d{4}-\d{2}-\d{2}$/.test(input)) {
+    const [year, month, day] = input.split("-").map(Number);
+    return new Date(year, month - 1, day);
+  }
+  if (typeof input === "string") {
+    const parsed = new Date(input);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+  return new Date();
+}
+
+function startOfWeek(date: Date) {
+  const copy = new Date(date);
+  const day = copy.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  copy.setDate(copy.getDate() + diff);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
+}
+
+function addDays(date: Date, days: number) {
+  const copy = new Date(date);
+  copy.setDate(copy.getDate() + days);
+  return copy;
+}
+
+function toDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function buildHourlySeries(entries: TimeEntryRow[]): DashboardSeriesPoint[] {
+  const hours = Array.from({ length: 8 }, (_, index) => 8 + index * 2);
+  return hours.map((hour) => ({
+    key: `${hour}`,
+    label: `${hour.toString().padStart(2, "0")}:00`,
+    seconds: entries
+      .filter((entry) => new Date(entry.startedAt).getHours() >= hour && new Date(entry.startedAt).getHours() < hour + 2)
+      .reduce((sum, entry) => sum + entry.durationSeconds, 0)
+  }));
+}
+
+function buildWeekSeries(entries: TimeEntryRow[], dateRange: DashboardDateRange): DashboardSeriesPoint[] {
+  const start = new Date(dateRange.weekStart);
+  return Array.from({ length: 7 }, (_, index) => {
+    const day = addDays(start, index);
+    const key = toDateKey(day);
+    return {
+      key,
+      label: new Intl.DateTimeFormat("en-GB", { weekday: "short" }).format(day),
+      seconds: entries
+        .filter((entry) => toDateKey(new Date(entry.startedAt)) === key)
+        .reduce((sum, entry) => sum + entry.durationSeconds, 0)
+    };
+  });
 }
 
 export async function getReports(session: RequestSession = getDevSession()) {

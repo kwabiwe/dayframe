@@ -186,7 +186,24 @@ export async function syncQueue() {
   return { synced, remaining };
 }
 
+export async function startTimer(projectId: string, categoryId?: string | null, description?: string) {
+  return postTimerAction({
+    mode: "start",
+    source: "mobile_app",
+    projectId,
+    categoryId: categoryId ?? undefined,
+    description: description?.trim() || undefined
+  });
+}
+
 export async function stopTimer() {
+  return postTimerAction({
+    mode: "stop",
+    source: "mobile_app"
+  });
+}
+
+export async function queueStopTimer() {
   return enqueueEvent({
     source: "mobile_app",
     type: "timer_stop",
@@ -211,6 +228,23 @@ async function authenticate(path: string, body: Record<string, unknown>) {
   if (!response.ok) throw new Error(payload.error ?? `Authentication failed: ${response.status}`);
   await SecureStore.setItemAsync(SESSION_TOKEN_KEY, payload.token);
   return payload;
+}
+
+async function postTimerAction(body: Record<string, unknown>) {
+  const response = await fetch(`${API_BASE}/api/time-entries`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify(body)
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(`Timer action failed: ${response.status}`);
+  return response.json();
 }
 
 async function authHeaders(): Promise<Record<string, string>> {

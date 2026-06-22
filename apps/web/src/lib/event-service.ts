@@ -291,6 +291,109 @@ export async function deleteTimeEntry(id: string, session: RequestSession = getD
   ]);
 }
 
+export async function splitActiveEntry(session: RequestSession = getDevSession()) {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const active = await client.query<{
+      id: string;
+      projectId: string | null;
+      categoryId: string | null;
+      placeId: string | null;
+      source: string;
+      confidence: string;
+      reviewStatus: string;
+      description: string | null;
+    }>(
+      `select id,
+              project_id as "projectId",
+              category_id as "categoryId",
+              place_id as "placeId",
+              source,
+              confidence,
+              review_status as "reviewStatus",
+              description
+       from time_entries
+       where workspace_id = $1 and user_id = $2 and stopped_at is null
+       order by started_at desc
+       limit 1
+       for update`,
+      [session.workspaceId, session.userId]
+    );
+    const row = active.rows[0];
+    if (!row?.projectId) throw new Error("No active timer is available to split.");
+
+    const eventResult = await client.query<{ id: string }>(
+      `insert into activity_events (
+          workspace_id,
+          user_id,
+          source,
+          event_type,
+          occurred_at,
+          confidence,
+          raw_payload,
+          suggested_project_id,
+          suggested_category_id,
+          suggested_place_id,
+          review_status
+       )
+       values ($1, $2, 'manual_app', 'timer_switch', now(), 'high', $3::jsonb, $4, $5, $6, 'confirmed')
+       returning id`,
+      [
+        session.workspaceId,
+        session.userId,
+        JSON.stringify({ origin: "web_timer_split", previousEntryId: row.id }),
+        row.projectId,
+        row.categoryId,
+        row.placeId
+      ]
+    );
+
+    await client.query(
+      `update time_entries
+       set stopped_at = now(), updated_at = now()
+       where id = $1 and workspace_id = $2`,
+      [row.id, session.workspaceId]
+    );
+
+    await client.query(
+      `insert into time_entries (
+          workspace_id,
+          user_id,
+          project_id,
+          category_id,
+          place_id,
+          source,
+          confidence,
+          review_status,
+          description,
+          started_at,
+          created_from_event_id
+       )
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), $10)`,
+      [
+        session.workspaceId,
+        session.userId,
+        row.projectId,
+        row.categoryId,
+        row.placeId,
+        row.source,
+        row.confidence,
+        row.reviewStatus,
+        row.description,
+        eventResult.rows[0].id
+      ]
+    );
+
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function resolveReviewItem(
   id: string,
   action: "accept" | "ignore_once" | "always_ignore_source" | "create_rule",

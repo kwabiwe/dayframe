@@ -6,52 +6,52 @@ export const DEMO_WORKSPACE_ID = "00000000-0000-4000-8000-000000000010";
 export const DEFAULT_UNKNOWN_STAY_THRESHOLD_MINUTES = 20;
 
 export const DAYFRAME_PALETTE = [
-  { key: "lime", label: "Lime", hex: "#C6FF4A" },
-  { key: "teal", label: "Teal", hex: "#00D1B2" },
-  { key: "sky", label: "Sky", hex: "#38A8FF" },
-  { key: "blue", label: "Blue", hex: "#3D6BFF" },
-  { key: "violet", label: "Violet", hex: "#9B7CFF" },
-  { key: "rose", label: "Rose", hex: "#FF5C8A" },
-  { key: "amber", label: "Amber", hex: "#FFB800" },
-  { key: "orange", label: "Orange", hex: "#FF7A1A" },
-  { key: "red", label: "Red", hex: "#FF3B30" },
-  { key: "steel", label: "Steel", hex: "#7A8591" },
-  { key: "moss", label: "Moss", hex: "#7EA16B" },
-  { key: "graphite", label: "Graphite", hex: "#4E565F" }
+  { key: "lime", label: "Soft mint", hex: "#BFE8D9" },
+  { key: "teal", label: "Seafoam", hex: "#84D8C9" },
+  { key: "sky", label: "Powder blue", hex: "#8EC5F2" },
+  { key: "blue", label: "Periwinkle", hex: "#7FA7E8" },
+  { key: "violet", label: "Lavender", hex: "#B58EE8" },
+  { key: "rose", label: "Blush", hex: "#E8A7BF" },
+  { key: "amber", label: "Butter", hex: "#FFD979" },
+  { key: "orange", label: "Apricot", hex: "#FF987D" },
+  { key: "red", label: "Watermelon", hex: "#F0776B" },
+  { key: "steel", label: "Aqua", hex: "#57CFC2" },
+  { key: "moss", label: "Sage", hex: "#B7D99B" },
+  { key: "graphite", label: "Ink", hex: "#1D2638" }
 ] as const;
 
 export type DayframePaletteKey = (typeof DAYFRAME_PALETTE)[number]["key"];
 
 export const DAYFRAME_THEME = {
   light: {
-    background: "#F6F8F1",
+    background: "#F7F8F5",
     surface: "#FFFFFF",
-    surfaceMuted: "#ECF0E6",
-    surfaceInset: "#F8FAF4",
-    border: "#D6DEC9",
-    borderStrong: "#AAB79A",
-    textPrimary: "#11150F",
-    textSecondary: "#57614E",
-    accent: "#4E7F00",
-    accentStrong: "#C6FF4A",
-    success: "#087A54",
-    warning: "#9A6200",
-    danger: "#C63028"
+    surfaceMuted: "#EEF4F1",
+    surfaceInset: "#FBFCF8",
+    border: "#DDE5DE",
+    borderStrong: "#B8C9C0",
+    textPrimary: "#171A2E",
+    textSecondary: "#63706B",
+    accent: "#2F766D",
+    accentStrong: "#FF9A7D",
+    success: "#347B68",
+    warning: "#946B15",
+    danger: "#B8504C"
   },
   dark: {
-    background: "#000000",
-    surface: "#0B0C0A",
-    surfaceMuted: "#121410",
-    surfaceInset: "#050604",
-    border: "#2A2F26",
-    borderStrong: "#56604B",
-    textPrimary: "#E8EEE0",
-    textSecondary: "#A2AB97",
-    accent: "#C6FF4A",
-    accentStrong: "#C6FF4A",
-    success: "#00E676",
-    warning: "#FFB800",
-    danger: "#FF3B30"
+    background: "#111820",
+    surface: "#172028",
+    surfaceMuted: "#1E2A31",
+    surfaceInset: "#121A21",
+    border: "#34434A",
+    borderStrong: "#52666A",
+    textPrimary: "#F3F7F5",
+    textSecondary: "#AAB8B2",
+    accent: "#8AD7C4",
+    accentStrong: "#FFAF95",
+    success: "#80D2BF",
+    warning: "#FFD46E",
+    danger: "#EA7A73"
   }
 } as const;
 
@@ -64,15 +64,23 @@ const legacyColorMap: Record<string, DayframePaletteKey> = {
   "#0f766e": "teal",
   "#14b8a6": "teal",
   "#0891b2": "sky",
+  "#94bff0": "sky",
   "#2563eb": "blue",
   "#1d4ed8": "blue",
+  "#82a8e8": "blue",
   "#7c3aed": "violet",
   "#9333ea": "violet",
+  "#b691e6": "violet",
   "#db2777": "rose",
+  "#e7a6bc": "rose",
   "#f59e0b": "amber",
+  "#ffd46e": "amber",
   "#ea580c": "orange",
+  "#ff9a7d": "orange",
   "#dc2626": "red",
+  "#ea7a73": "red",
   "#64748b": "steel",
+  "#dce1e6": "steel",
   "#475569": "graphite"
 };
 

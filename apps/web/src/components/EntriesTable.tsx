@@ -3,9 +3,15 @@
 import { Fragment, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { paletteColorFor } from "@dayframe/shared";
-import { Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { Pencil, Play, Trash2 } from "lucide-react";
 import type { CategoryRow, PlaceRow, ProjectRow, TimeEntryRow } from "@/lib/queries";
-import { dateTimeLocal, formatDate, formatDuration, formatTime } from "@/lib/format";
+import {
+  dateTimeLocal,
+  formatDate,
+  formatDuration,
+  formatSourceLabel,
+  formatTime
+} from "@/lib/format";
 
 export function EntriesTable({
   entries,
@@ -13,7 +19,8 @@ export function EntriesTable({
   categories,
   places,
   showManualForm = true,
-  groupByDay = false
+  groupByDay = false,
+  onChanged
 }: {
   entries: TimeEntryRow[];
   projects: ProjectRow[];
@@ -21,6 +28,7 @@ export function EntriesTable({
   places: PlaceRow[];
   showManualForm?: boolean;
   groupByDay?: boolean;
+  onChanged?: () => Promise<void>;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -52,6 +60,7 @@ export function EntriesTable({
 
   async function remove(id: string) {
     await fetch(`/api/time-entries/${id}`, { method: "DELETE" });
+    await onChanged?.();
     startTransition(() => router.refresh());
   }
 
@@ -63,9 +72,10 @@ export function EntriesTable({
         mode: "start",
         projectId: entry.projectId,
         categoryId: entry.categoryId,
-        description: entry.description ? `Continue: ${entry.description}` : undefined
+        description: entry.description ?? undefined
       })
     });
+    await onChanged?.();
     startTransition(() => router.refresh());
   }
 
@@ -83,6 +93,7 @@ export function EntriesTable({
         stoppedAt: formData.get("stoppedAt")
       })
     });
+    await onChanged?.();
     startTransition(() => router.refresh());
   }
 
@@ -100,12 +111,13 @@ export function EntriesTable({
       })
     });
     setEditingId(null);
+    await onChanged?.();
     startTransition(() => router.refresh());
   }
 
   return (
     <section className="space-y-5">
-      <div className="grid gap-3 border border-[var(--line)] bg-[var(--surface)] p-4 md:grid-cols-3 xl:grid-cols-7">
+      <div className="grid gap-3 overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 md:grid-cols-3 xl:grid-cols-7">
         <FilterSelect
           label="Project"
           value={filters.project}
@@ -141,7 +153,7 @@ export function EntriesTable({
           value={filters.source}
           onChange={(source) => setFilters((current) => ({ ...current, source }))}
           options={[...new Set(entries.map((entry) => entry.source))].map((source) => ({
-            label: source,
+            label: formatSourceLabel(source),
             value: source
           }))}
         />
@@ -168,7 +180,7 @@ export function EntriesTable({
       {showManualForm ? (
         <form
           action={submitManual}
-          className="grid gap-3 border border-[var(--line)] bg-[var(--surface-strong)] p-4 md:grid-cols-6"
+          className="grid gap-3 rounded-xl border border-[var(--line)] bg-[var(--surface-strong)] p-4 md:grid-cols-6"
         >
           <SelectField name="projectId" label="Project" options={projects} required />
           <SelectField name="categoryId" label="Category" options={categories} />
@@ -186,7 +198,8 @@ export function EntriesTable({
         </form>
       ) : null}
 
-      <div className="overflow-x-auto border border-[var(--line)] bg-[var(--surface)]">
+      <div className="overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)]">
+        <div className="overflow-x-auto">
         <table className="min-w-[980px] w-full border-collapse text-sm">
           <thead className="bg-[var(--surface-inset)] text-left text-xs text-[var(--muted)]">
             <tr>
@@ -291,7 +304,7 @@ export function EntriesTable({
                   <td className="px-3 py-3 text-[var(--muted)]">{entry.clientName ?? "No client"}</td>
                   <td className="px-3 py-3 text-[var(--muted)]">{entry.categoryName ?? "No category"}</td>
                   <td className="px-3 py-3 text-[var(--muted)]">{entry.placeName ?? "No place"}</td>
-                  <td className="px-3 py-3 text-[var(--muted)]">{entry.source}</td>
+                  <td className="px-3 py-3 text-[var(--muted)]">{formatSourceLabel(entry.source)}</td>
                   <td className="px-3 py-3 text-[var(--muted)]">{entry.reviewStatus}</td>
                   <td className="tabular px-3 py-3 font-semibold text-[var(--accent)]">
                     {formatDuration(entry.durationSeconds)}
@@ -299,16 +312,16 @@ export function EntriesTable({
                   <td className="px-3 py-3">
                     <div className="flex gap-2">
                       <button
-                        className="focus-ring border border-[var(--line)] bg-[var(--surface-inset)] p-2 hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                        className="focus-ring rounded-md border border-[var(--line)] bg-[var(--surface-inset)] p-2 hover:border-[var(--accent)] hover:text-[var(--accent)]"
                         type="button"
                         disabled={!entry.projectId || isPending}
-                        aria-label="Continue entry"
+                        aria-label="Start this task again"
                         onClick={() => continueEntry(entry)}
                       >
-                        <RotateCcw size={15} />
+                        <Play size={15} fill="currentColor" strokeWidth={0} />
                       </button>
                       <button
-                        className="focus-ring border border-[var(--line)] bg-[var(--surface-inset)] p-2 hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                        className="focus-ring rounded-md border border-[var(--line)] bg-[var(--surface-inset)] p-2 hover:border-[var(--accent)] hover:text-[var(--accent)]"
                         type="button"
                         aria-label="Edit entry"
                         onClick={() => setEditingId(entry.id)}
@@ -316,7 +329,7 @@ export function EntriesTable({
                         <Pencil size={15} />
                       </button>
                       <button
-                        className="focus-ring border border-[var(--line)] bg-[var(--surface-inset)] p-2 hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                        className="focus-ring rounded-md border border-[var(--line)] bg-[var(--surface-inset)] p-2 hover:border-[var(--accent)] hover:text-[var(--accent)]"
                         type="button"
                         aria-label="Delete entry"
                         onClick={() => remove(entry.id)}
@@ -332,6 +345,7 @@ export function EntriesTable({
             })}
           </tbody>
         </table>
+        </div>
       </div>
     </section>
   );

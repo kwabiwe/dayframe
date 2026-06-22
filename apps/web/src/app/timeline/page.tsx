@@ -5,9 +5,15 @@ import { getBootstrapData } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
-export default async function TimelinePage() {
+export default async function TimelinePage({
+  searchParams
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const session = await resolvePageSession();
-  const data = await getBootstrapData(session);
+  const params = searchParams ? await searchParams : {};
+  const date = Array.isArray(params.date) ? params.date[0] : params.date;
+  const data = await getBootstrapData(session, { selectedDate: date });
 
   return (
     <>
@@ -16,12 +22,7 @@ export default async function TimelinePage() {
         description="Review time as calendar blocks, grouped entries and a weekly timesheet."
       />
       <div className="space-y-6 px-5 py-6 md:px-8">
-        <TimeReviewViews
-          entries={data.entries}
-          projects={data.projects}
-          categories={data.categories}
-          places={data.places}
-        />
+        <TimeReviewViews key={data.dateRange.selectedDate} initialData={data} />
       </div>
     </>
   );

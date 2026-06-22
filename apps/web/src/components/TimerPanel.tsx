@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { paletteColorFor } from "@dayframe/shared";
-import { Play, Square, RotateCcw } from "lucide-react";
+import { Play, Square } from "lucide-react";
 import type { BootstrapData, CategoryRow, PlaceRow, ProjectRow, TimeEntryRow } from "@/lib/queries";
 import { formatClockDuration, formatTime } from "@/lib/format";
 
@@ -96,7 +96,7 @@ export function TimerPanel({
           mode: "start",
           projectId: entry.projectId,
           categoryId: entry.categoryId,
-          description: entry.description ? `Continue: ${entry.description}` : undefined
+          description: entry.description ?? undefined
         })
       });
       if (!response.ok) throw new Error(`Continue action failed: ${response.status}`);
@@ -230,7 +230,7 @@ export function TimerPanel({
           {recentEntries.slice(0, 4).map((entry) => (
             <button
               key={entry.id}
-              className="focus-ring motion-row flex w-full items-center justify-between border border-[var(--line)] bg-[var(--surface-inset)] px-3 py-2 text-left text-sm hover:border-[var(--accent)] hover:text-[var(--accent)]"
+              className="focus-ring motion-row flex w-full items-center justify-between rounded-lg border border-[var(--line)] bg-[var(--surface-inset)] px-3 py-2 text-left text-sm hover:border-[var(--accent)] hover:text-[var(--accent)]"
               style={{ borderLeftWidth: 4, borderLeftColor: paletteColorFor(entry.projectColor, entry.projectName ?? entry.id) }}
               type="button"
               disabled={!entry.projectId || isBusy}
@@ -242,7 +242,7 @@ export function TimerPanel({
                   {entry.description ?? entry.categoryName ?? "No description"}
                 </span>
               </span>
-              <RotateCcw size={15} />
+              <Play size={15} fill="currentColor" strokeWidth={0} />
             </button>
           ))}
         </div>

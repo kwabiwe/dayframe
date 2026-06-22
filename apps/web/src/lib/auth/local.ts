@@ -192,6 +192,34 @@ export async function revokeLocalSession(token: string | null | undefined) {
   ]);
 }
 
+export async function switchLocalSessionWorkspace(token: string | null | undefined, workspaceId: string) {
+  if (!token) throw new AuthError("Login required.");
+  const tokenHash = hashSessionToken(token);
+  const result = await query<{ workspaceId: string }>(
+    `with current_session as (
+       select user_id
+       from auth_sessions
+       where token_hash = $1 and revoked_at is null and expires_at > now()
+     ),
+     allowed_workspace as (
+       select wm.workspace_id
+       from workspace_members wm
+       join current_session cs on cs.user_id = wm.user_id
+       where wm.workspace_id = $2
+     )
+     update auth_sessions
+     set workspace_id = (select workspace_id from allowed_workspace),
+         last_used_at = now()
+     where token_hash = $1
+       and exists (select 1 from allowed_workspace)
+     returning workspace_id as "workspaceId"`,
+    [tokenHash, workspaceId]
+  );
+
+  if (!result.rows[0]) throw new AuthError("Workspace is not available for this account.", 403);
+  return result.rows[0];
+}
+
 async function createSession(
   client: pg.PoolClient,
   userId: string,
