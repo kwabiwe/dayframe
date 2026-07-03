@@ -88,15 +88,19 @@ Do not use dev mode for hosted testing.
 
 ## Provider Mode
 
-`DAYFRAME_AUTH_MODE=provider` is reserved for future hosted auth. It currently returns a clear not-implemented error.
+`DAYFRAME_AUTH_MODE=provider` uses Supabase Auth for hosted identity and Dayframe app sessions for web/mobile API access.
 
-Likely migration path:
+Hosted defaults:
 
 - Vercel for the Next.js web app/API routes.
-- Supabase Postgres/Auth/PostGIS as the first hosted database/auth option.
-- Replace `resolveAppSession()` with a provider adapter that validates provider sessions and resolves the workspace.
-- Add RLS policies that mirror `workspace_members`.
+- Supabase Postgres/Auth/PostGIS as the database and identity provider.
+- Dayframe provisions a matching `public.users` row and personal workspace from the Supabase user UUID.
+- The web app stores a Dayframe session in an HTTP-only `dayframe_session` cookie.
+- Mobile stores the same Dayframe app session token in Expo SecureStore.
+- Supabase RLS policies mirror `workspace_members`; see `supabase/migrations/202607020001_dayframe_rls.sql`.
 - Keep integration tokens separate from user app sessions.
+
+See `docs/vercel-supabase-hosting.md` for the deployment checklist.
 
 ## Secrets
 

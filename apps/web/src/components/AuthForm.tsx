@@ -7,11 +7,13 @@ type AuthMode = "login" | "signup";
 
 export function AuthForm({ mode }: { mode: AuthMode }) {
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isSignup = mode === "signup";
 
   async function submit(formData: FormData) {
     setError(null);
+    setNotice(null);
     setIsSubmitting(true);
     try {
       const response = await fetch(`/api/auth/${mode}`, {
@@ -24,9 +26,14 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
           workspaceName: formData.get("workspaceName") || undefined
         })
       });
-      const payload = (await response.json()) as { error?: string };
+      const payload = (await response.json()) as { error?: string; message?: string; requiresEmailConfirmation?: boolean };
       if (!response.ok) {
         setError(payload.error ?? "Authentication failed.");
+        return;
+      }
+
+      if (payload.requiresEmailConfirmation) {
+        setNotice(payload.message ?? "Check your email to confirm your account, then log in.");
         return;
       }
 
@@ -42,8 +49,8 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
         <h1 className="text-2xl font-semibold">{isSignup ? "Create account" : "Log in"}</h1>
         <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
           {isSignup
-            ? "Create a local Dayframe user and workspace in this Postgres database."
-            : "Use your local Dayframe account to open your workspace."}
+            ? "Create your Dayframe account and personal workspace."
+            : "Use your Dayframe account to open your workspace."}
         </p>
       </div>
       <form action={submit} className="grid gap-4 p-5">
@@ -95,6 +102,12 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
         {error ? (
           <p className="border border-[var(--danger)] bg-[var(--surface-inset)] px-3 py-2 text-sm text-[var(--danger)]">
             {error}
+          </p>
+        ) : null}
+
+        {notice ? (
+          <p className="border border-[var(--accent)] bg-[var(--surface-inset)] px-3 py-2 text-sm text-[var(--accent)]">
+            {notice}
           </p>
         ) : null}
 

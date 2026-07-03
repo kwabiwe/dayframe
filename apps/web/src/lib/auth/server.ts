@@ -1,12 +1,12 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { APP_SESSION_COOKIE, resolveLocalSession } from "@/lib/auth/local";
-import { AuthError, getAuthMode, getDevSession, resolveAppSession, type RequestSession } from "@/lib/session";
+import { AuthError, getAuthMode, getDevSession, type RequestSession } from "@/lib/session";
 
 export async function resolvePageSession(): Promise<RequestSession> {
   const mode = getAuthMode();
   if (mode === "dev") return getDevSession();
-  if (mode === "local") {
+  if (mode === "local" || mode === "provider") {
     const session = await getOptionalPageSession();
     if (session) return session;
     redirect("/login");
@@ -21,14 +21,14 @@ export async function resolvePageSession(): Promise<RequestSession> {
 export async function getOptionalPageSession(): Promise<RequestSession | null> {
   const mode = getAuthMode();
   if (mode === "dev") return getDevSession();
-  if (mode !== "local") return null;
+  if (mode !== "local" && mode !== "provider") return null;
 
   const cookieStore = await cookies();
   const token = cookieStore.get(APP_SESSION_COOKIE)?.value;
   if (!token) return null;
 
   try {
-    return await resolveLocalSession(token);
+    return await resolveLocalSession(token, mode);
   } catch {
     return null;
   }
@@ -40,5 +40,5 @@ export async function currentUserAgent() {
 }
 
 export function resolveProviderSession(): RequestSession {
-  return resolveAppSession();
+  throw new AuthError("Provider sessions require a request cookie or bearer token.", 401);
 }

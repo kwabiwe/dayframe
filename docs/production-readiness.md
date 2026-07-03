@@ -12,7 +12,7 @@ DAYFRAME_DEV_USER_ID=00000000-0000-4000-8000-000000000001
 DAYFRAME_DEV_WORKSPACE_ID=00000000-0000-4000-8000-000000000010
 ```
 
-Dayframe also supports `DAYFRAME_AUTH_MODE=local` for DB-backed email/password auth using `users.password_hash` and `auth_sessions`. Production provider auth is not yet wired. The next production step is to plug `resolveAppSession()` into Supabase Auth, Auth.js, or another provider, then add Postgres RLS policies matching `workspace_members`.
+Dayframe also supports `DAYFRAME_AUTH_MODE=local` for DB-backed email/password auth using `users.password_hash` and `auth_sessions`. Production provider auth uses Supabase Auth for identity/password verification and Dayframe app sessions for web/mobile API access. Hosted Supabase RLS policies live in `supabase/migrations/202607020001_dayframe_rls.sql`.
 
 ## Ingest Tokens
 
@@ -111,7 +111,6 @@ Deletion/privacy groundwork remains: implement safe user/workspace deletion with
 
 ## Remaining Before Replacing Toggl And LifeCycle
 
-- Wire a real auth provider and RLS.
 - Add token management UI for creating/revoking integration tokens.
 - Add full Toggl import status UI and conflict review.
 - Verify HealthKit import on a physical iPhone/native build.

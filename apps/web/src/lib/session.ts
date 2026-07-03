@@ -21,7 +21,9 @@ export const DEV_USER_ID = process.env.DAYFRAME_DEV_USER_ID ?? DEMO_USER_ID;
 export const DEV_WORKSPACE_ID = process.env.DAYFRAME_DEV_WORKSPACE_ID ?? DEMO_WORKSPACE_ID;
 
 export function getAuthMode() {
-  return process.env.DAYFRAME_AUTH_MODE ?? (process.env.NODE_ENV === "production" ? "provider" : "dev");
+  const mode = process.env.DAYFRAME_AUTH_MODE ?? (process.env.NODE_ENV === "production" ? "provider" : "dev");
+  if (mode === "dev" || mode === "local" || mode === "provider") return mode;
+  return process.env.NODE_ENV === "production" ? "provider" : "dev";
 }
 
 export function getDevSession(): RequestSession {
@@ -40,7 +42,7 @@ export function resolveAppSession(): RequestSession {
   throw new AuthError(
     mode === "local"
       ? "Login required."
-      : "Provider auth is not configured yet. Use DAYFRAME_AUTH_MODE=local for DB-backed local auth or DAYFRAME_AUTH_MODE=dev for the unsafe local-only bypass."
+      : "Provider auth requires a request cookie or bearer token."
   );
 }
 
