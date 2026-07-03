@@ -21,6 +21,13 @@ export async function POST(request: Request) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    throw error;
+    console.error("Dayframe login failed", error);
+    return NextResponse.json(
+      {
+        error:
+          "Dayframe account provisioning failed. Confirm the Supabase database schema is installed, then try logging in again."
+      },
+      { status: 500 }
+    );
   }
 }

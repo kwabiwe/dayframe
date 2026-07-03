@@ -26,7 +26,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
           workspaceName: formData.get("workspaceName") || undefined
         })
       });
-      const payload = (await response.json()) as { error?: string; message?: string; requiresEmailConfirmation?: boolean };
+      const payload = await readAuthResponse(response);
       if (!response.ok) {
         setError(payload.error ?? "Authentication failed.");
         return;
@@ -128,4 +128,21 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
       </form>
     </section>
   );
+}
+
+async function readAuthResponse(response: Response) {
+  const text = await response.text();
+  if (!text) {
+    return {
+      error: response.ok ? undefined : "Authentication failed. Please try again."
+    };
+  }
+
+  try {
+    return JSON.parse(text) as { error?: string; message?: string; requiresEmailConfirmation?: boolean };
+  } catch {
+    return {
+      error: response.ok ? undefined : "Authentication failed. Please try again."
+    };
+  }
 }
