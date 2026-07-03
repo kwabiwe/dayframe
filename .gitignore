@@ -17,3 +17,4 @@ apps/mobile/android/build
 *.tsbuildinfo
 .DS_Store
 dayframe-data
+.codex-dayframe-*.png
