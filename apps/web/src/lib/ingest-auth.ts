@@ -53,6 +53,20 @@ export async function resolveRequestSession(
     throw new AuthError("Login required.");
   }
 
+  if (authMode === "provider") {
+    if (appToken) {
+      const session = await resolveLocalSession(appToken, "provider");
+      return scopedSession(session, requiredScopes);
+    }
+
+    if (options.allowIngestToken && ingestHeader) {
+      const tokenSession = await resolveTokenSession(ingestHeader);
+      return scopedSession(tokenSession, requiredScopes);
+    }
+
+    throw new AuthError("Login required.");
+  }
+
   const session = resolveAppSession();
   return scopedSession(session, requiredScopes);
 }

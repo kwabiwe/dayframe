@@ -28,14 +28,14 @@ export type AuthPayload = {
   expiresAt: string;
 };
 
-type UserRow = {
+export type UserRow = {
   id: string;
   email: string;
   name: string;
   passwordHash: string | null;
 };
 
-type WorkspaceRow = {
+export type WorkspaceRow = {
   id: string;
   name: string;
 };
@@ -164,7 +164,10 @@ export async function loginLocalAccount(input: z.input<typeof LoginInputSchema>,
   }
 }
 
-export async function resolveLocalSession(token: string | null | undefined): Promise<RequestSession> {
+export async function resolveLocalSession(
+  token: string | null | undefined,
+  authMode: "local" | "provider" = "local"
+): Promise<RequestSession> {
   if (!token) throw new AuthError("Login required.");
   const tokenHash = hashSessionToken(token);
   const session = await query<{ userId: string; workspaceId: string }>(
@@ -180,7 +183,7 @@ export async function resolveLocalSession(token: string | null | undefined): Pro
   return {
     userId: row.userId,
     workspaceId: row.workspaceId,
-    authMode: "local",
+    authMode,
     scopes: ["app:read", "app:write", "events:write", "toggl:import", "exports:read"]
   };
 }
@@ -220,7 +223,7 @@ export async function switchLocalSessionWorkspace(token: string | null | undefin
   return result.rows[0];
 }
 
-async function createSession(
+export async function createSession(
   client: pg.PoolClient,
   userId: string,
   workspaceId: string,
@@ -237,7 +240,7 @@ async function createSession(
   return { token, expiresAt };
 }
 
-async function getDefaultWorkspaceForUser(userId: string) {
+export async function getDefaultWorkspaceForUser(userId: string) {
   const workspace = await query<WorkspaceRow>(
     `select w.id, w.name
      from workspaces w
@@ -250,7 +253,7 @@ async function getDefaultWorkspaceForUser(userId: string) {
   return workspace.rows[0] ?? null;
 }
 
-async function seedDefaultWorkspaceData(client: pg.PoolClient, workspaceId: string) {
+export async function seedDefaultWorkspaceData(client: pg.PoolClient, workspaceId: string) {
   const clientRow = await client.query<{ id: string }>(
     `insert into clients (workspace_id, name, color)
      values ($1, 'Personal', $2)
@@ -282,7 +285,7 @@ async function seedDefaultWorkspaceData(client: pg.PoolClient, workspaceId: stri
   );
 }
 
-function toAuthPayload(
+export function toAuthPayload(
   token: string,
   expiresAt: Date,
   user: UserRow,

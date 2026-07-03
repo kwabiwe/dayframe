@@ -115,6 +115,8 @@ This repo now has explicit local-dev auth/session configuration, scoped ingest-t
 
 For DB-backed local login/signup sessions, use `DAYFRAME_AUTH_MODE=local` and see [docs/local-auth-and-hosting-plan.md](docs/local-auth-and-hosting-plan.md).
 
+For hosted Vercel/Supabase setup, use `DAYFRAME_AUTH_MODE=provider` and see [docs/vercel-supabase-hosting.md](docs/vercel-supabase-hosting.md).
+
 Useful commands:
 
 ```bash
@@ -158,7 +160,7 @@ Mobile-to-web sync path:
 
 ## Known Limitations
 
-- No billing, team management or production auth.
+- No billing or team management.
 - Review split/merge and saved-place correction flows are documented but not fully implemented.
 - Calendar drag/drop and resize are not implemented yet; use the List view to edit start and stop times.
 - HealthKit sleep import is implemented behind a native iOS adapter; it requires a development build/device and still routes through activity events/review.
