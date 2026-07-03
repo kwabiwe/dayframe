@@ -7,7 +7,8 @@ Dayframe production hosting uses Vercel for the Next.js web app/API routes and S
 Provide these values from Supabase and Vercel when you want the hosted deployment connected:
 
 - `NEXT_PUBLIC_SUPABASE_URL`: Supabase project URL.
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Supabase anon/public key.
+- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`: Supabase publishable public key, usually starting with `sb_publishable_`.
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`: legacy Supabase anon JWT fallback if your project still uses legacy API keys.
 - `DATABASE_URL`: Supabase Postgres pooled connection string with SSL.
 - `DAYFRAME_ALLOWED_SIGNUP_EMAILS`: comma-separated emails allowed to create accounts.
 - `EXPO_PUBLIC_DAYFRAME_API_BASE`: hosted Vercel URL for mobile builds.
@@ -33,10 +34,12 @@ Set these Vercel environment variables for Production and Preview:
 DAYFRAME_AUTH_MODE=provider
 DATABASE_URL=...
 NEXT_PUBLIC_SUPABASE_URL=...
-NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
 DAYFRAME_ALLOWED_SIGNUP_EMAILS=you@example.com,friend@example.com
 DAYFRAME_SIGNUPS_ENABLED=false
 ```
+
+If your Supabase project still uses legacy API keys, `NEXT_PUBLIC_SUPABASE_ANON_KEY` also works. Prefer the publishable key for new Supabase projects.
 
 Optional integration tokens:
 

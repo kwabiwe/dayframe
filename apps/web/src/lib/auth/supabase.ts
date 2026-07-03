@@ -94,10 +94,12 @@ export async function loginSupabaseAccount(input: unknown, userAgent?: string | 
 
 export function getSupabaseProviderEnvStatus() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const publicKey = getSupabasePublicApiKey();
   return {
     hasUrl: Boolean(url),
-    hasAnonKey: Boolean(anonKey),
+    hasAnonKey: Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
+    hasPublishableKey: Boolean(process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY),
+    hasPublicKey: Boolean(publicKey),
     hasDatabaseUrl: Boolean(process.env.DATABASE_URL),
     signupsEnabled: providerSignupsEnabled(),
     allowedEmailCount: allowedSignupEmails().size
@@ -188,22 +190,26 @@ async function getDefaultWorkspaceForUserInTransaction(client: pg.PoolClient, us
 
 function createSupabaseAuthClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const publicKey = getSupabasePublicApiKey();
 
-  if (!url || !anonKey) {
+  if (!url || !publicKey) {
     throw new AuthError(
-      "Supabase Auth is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.",
+      "Supabase Auth is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY.",
       500
     );
   }
 
-  return createClient(url, anonKey, {
+  return createClient(url, publicKey, {
     auth: {
       autoRefreshToken: false,
       detectSessionInUrl: false,
       persistSession: false
     }
   });
+}
+
+function getSupabasePublicApiKey() {
+  return process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 }
 
 function assertProviderSignupAllowed(email: string) {
