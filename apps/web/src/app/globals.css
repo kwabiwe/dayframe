@@ -466,6 +466,23 @@ textarea:focus-visible {
   gap: 9px;
 }
 
+.swiss-mobile-help-button,
+.swiss-mobile-account-button {
+  display: none;
+}
+
+.swiss-mobile-account-button span {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .swiss-theme-toggle {
   border-radius: 999px;
   color: var(--accent);
@@ -1626,6 +1643,14 @@ textarea:focus-visible {
   font-weight: 600;
 }
 
+.swiss-menu-list button span,
+.swiss-notification-list a span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .swiss-menu-list button.is-selected {
   color: var(--accent);
   font-weight: 700;
@@ -1752,7 +1777,7 @@ textarea:focus-visible {
 
 .swiss-search-input {
   display: grid;
-  grid-template-columns: 28px 1fr auto;
+  grid-template-columns: 28px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 10px;
   border-bottom: 1px solid var(--line);
@@ -1772,6 +1797,17 @@ kbd {
   padding: 4px 7px;
   color: var(--foreground);
   font-size: 12px;
+}
+
+.swiss-command-close {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--foreground);
 }
 
 .swiss-search-results {
@@ -2123,6 +2159,21 @@ kbd {
 
   .swiss-top-actions {
     justify-content: flex-start;
+    gap: 6px;
+  }
+
+  .swiss-top-actions button,
+  .swiss-top-actions a {
+    width: 42px;
+    height: 42px;
+  }
+
+  .swiss-mobile-account-button {
+    display: grid;
+  }
+
+  .swiss-mobile-help-button {
+    display: grid;
   }
 
   .swiss-dashboard {
@@ -2142,6 +2193,89 @@ kbd {
   .swiss-week-strip {
     margin-left: 0;
     overflow-x: auto;
+  }
+
+  .swiss-floating-layer {
+    display: grid;
+    align-items: end;
+    padding: 12px;
+  }
+
+  .swiss-floating-panel,
+  .swiss-floating-panel.top-left,
+  .swiss-floating-panel.top-right,
+  .swiss-floating-panel.bottom-left {
+    position: relative;
+    inset: auto;
+    width: 100%;
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
+    border-radius: 20px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .swiss-floating-header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--surface);
+    padding: 16px;
+  }
+
+  .swiss-floating-header h2 {
+    font-size: 18px;
+  }
+
+  .swiss-floating-header button {
+    width: 40px;
+    height: 40px;
+  }
+
+  .swiss-dialog-title button,
+  .swiss-command-close {
+    flex: 0 0 44px;
+    min-width: 44px;
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+  }
+
+  .swiss-search-input {
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    padding: 12px;
+  }
+
+  .swiss-search-input kbd {
+    display: none;
+  }
+
+  .swiss-menu-list button,
+  .swiss-notification-list a {
+    min-height: 56px;
+    padding: 0 18px;
+    font-size: 15px;
+  }
+
+  .swiss-popover-form {
+    padding: 18px;
+  }
+
+  .swiss-popover-form input,
+  .swiss-form-grid input,
+  .swiss-form-grid select,
+  .swiss-primary-action,
+  .swiss-menu-action {
+    min-height: 44px;
+  }
+
+  .swiss-profile-summary {
+    padding: 18px;
+  }
+
+  .swiss-menu-action {
+    width: calc(100% - 36px);
+    margin: 0 18px 12px;
   }
 
   .swiss-timeline-summary {

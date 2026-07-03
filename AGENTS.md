@@ -84,6 +84,9 @@ npm run export:workspace -- ./dayframe-backup.json
 - Use palette keys from `packages/shared`; avoid arbitrary hex color pickers.
 - For frontend changes, preserve the current Dayframe visual system: restrained, rounded, pastel logo palette, accessible light/dark tokens, compact productivity UI.
 - Use lucide icons where practical.
+- All floating UI surfaces must be mobile-safe. Popovers, dropdowns, menus, modals, profile panels, workspace switchers, help panels, search palettes, and notification panels must fit within phone viewports without horizontal overflow.
+- On narrow screens, desktop popovers should become centered dialogs, full-width sheets, or bottom sheets with `max-width: calc(100vw - 24px)`, `max-height`, internal scrolling, visible close controls, and 44px minimum touch targets.
+- Account management and logout must be reachable on mobile wherever they are reachable on desktop.
 
 ## Mobile Patterns
 
@@ -125,6 +128,7 @@ npm run build
 
 - For mobile/native changes, also run the mobile typecheck and, when feasible, an iOS simulator build.
 - For UI changes, validate in a browser at desktop and mobile widths and check for console/runtime overlays.
+- For app chrome, account, workspace, navigation, settings, or floating-surface changes, explicitly test mobile overlay behavior at phone widths. Do not treat a generic responsive pass as sufficient.
 - For auth/deployment changes, verify `DAYFRAME_AUTH_MODE=dev`, `local`, and `provider` code paths where practical.
 - Do not claim scripts passed if they were not run.
 

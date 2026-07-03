@@ -299,6 +299,22 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Link href="/reports" aria-label="Reports">
               <BarChart3 size={22} />
             </Link>
+            <button
+              type="button"
+              aria-label="Help and shortcuts"
+              className="swiss-mobile-help-button"
+              onClick={() => setOverlay("help")}
+            >
+              <HelpCircle size={21} />
+            </button>
+            <button
+              type="button"
+              aria-label="Profile and account"
+              className="swiss-mobile-account-button"
+              onClick={() => setOverlay("profile")}
+            >
+              <span>{initials(data?.user.name ?? "Dayframe User")}</span>
+            </button>
           </div>
         </header>
         <main>{children}</main>
@@ -568,6 +584,9 @@ function SearchPalette({
             placeholder="Search projects, entries, places, review items"
           />
           <kbd>Esc</kbd>
+          <button type="button" className="swiss-command-close" aria-label="Close search" onClick={onClose}>
+            <X size={18} />
+          </button>
         </div>
         <div className="swiss-search-results">
           {results.map((result) => {

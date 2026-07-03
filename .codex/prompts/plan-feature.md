@@ -79,6 +79,7 @@ So that <benefit/value>
 - Map router/API registration patterns
 - Understand database/model patterns if applicable
 - Identify authentication/authorization patterns if relevant
+- If the feature changes navigation, app shell, menus, popovers, dialogs, account controls, workspace controls, notifications, search, or settings, include a mobile overlay test plan. Explicitly list every floating surface affected and how it behaves on mobile.
 
 **Clarify Ambiguities:**
 
@@ -331,6 +332,8 @@ Execute every command to ensure zero regressions and 100% feature correctness.
 ### Level 4: Manual Validation
 
 <Feature-specific manual testing steps - API calls, UI testing, etc.>
+
+For app chrome, account/workspace controls, and floating surfaces, include phone-width checks for workspace switcher, profile/logout access, Help & Shortcuts, search, notifications, no horizontal overflow, visible close actions, and no zoom/landscape requirement.
 
 ### Level 5: Additional Validation (Optional)
 
