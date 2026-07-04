@@ -31,14 +31,19 @@ vi.mock("./config", () => ({
 
 const {
   AuthRequiredError,
+  archiveCategory,
   createCategory,
   enqueueEvent,
   fetchBootstrap,
   getSessionToken,
   login,
+  reorderCategories,
+  resolveReviewItem,
   startTimer,
   signup,
-  syncQueue
+  syncQueue,
+  updateCategory,
+  updateTimeEntry
 } = await import("./api");
 
 describe("mobile API client", () => {
@@ -175,6 +180,83 @@ describe("mobile API client", () => {
             isPinned: "true"
           }
         })
+      })
+    );
+  });
+
+  it("updates categories through the hosted API", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await updateCategory("category-1", { name: "Deep work", isPinned: true });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/categories/category-1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ name: "Deep work", isPinned: true })
+      })
+    );
+  });
+
+  it("archives categories through the hosted API", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await archiveCategory("category-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/categories/category-1",
+      expect.objectContaining({ method: "DELETE" })
+    );
+  });
+
+  it("reorders categories through the hosted API", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await reorderCategories(["category-2", "category-1"]);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/categories",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ categoryIds: ["category-2", "category-1"] })
+      })
+    );
+  });
+
+  it("updates a running timer category and description", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await updateTimeEntry("entry-1", { categoryId: "category-1", description: "Write proposal" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/time-entries/entry-1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ categoryId: "category-1", description: "Write proposal" })
+      })
+    );
+  });
+
+  it("resolves review items from mobile", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await resolveReviewItem("review-1", "accept");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/review/review-1",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ action: "accept" })
       })
     );
   });

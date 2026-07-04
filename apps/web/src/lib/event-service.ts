@@ -622,7 +622,14 @@ export async function createEntity(
       ]);
     case "category":
       return query(
-        "insert into categories (workspace_id, name, color, is_pinned) values ($1, $2, $3, $4)",
+        `insert into categories (workspace_id, name, color, is_pinned, sort_order)
+         values (
+           $1,
+           $2,
+           $3,
+           $4,
+           coalesce((select max(sort_order) + 1 from categories where workspace_id = $1), 0)
+         )`,
         [
           session.workspaceId,
           String(input.name ?? "New category"),
@@ -704,6 +711,71 @@ export async function createEntity(
       );
     default:
       throw new Error(`Unsupported entity: ${entity}`);
+  }
+}
+
+export async function updateCategory(
+  id: string,
+  input: { name?: unknown; color?: unknown; isPinned?: unknown },
+  session: RequestSession = getDevSession()
+) {
+  const hasName = Object.prototype.hasOwnProperty.call(input, "name");
+  const hasColor = Object.prototype.hasOwnProperty.call(input, "color");
+  const hasPinned = Object.prototype.hasOwnProperty.call(input, "isPinned");
+  const nextName = hasName && typeof input.name === "string" ? input.name.trim() : "";
+
+  if (hasName && !nextName) throw new Error("Category name is required.");
+
+  await query(
+    `update categories
+     set name = case when $2 then $3 else name end,
+         color = case when $4 then $5 else color end,
+         is_pinned = case when $6 then $7 else is_pinned end,
+         updated_at = now()
+     where id = $1 and workspace_id = $8 and is_archived = false`,
+    [
+      id,
+      hasName,
+      nextName || null,
+      hasColor,
+      normalizePaletteKey(input.color, nextName || String(input.name ?? id)),
+      hasPinned,
+      Boolean(input.isPinned),
+      session.workspaceId
+    ]
+  );
+}
+
+export async function archiveCategory(id: string, session: RequestSession = getDevSession()) {
+  await query(
+    `update categories
+     set is_archived = true,
+         is_pinned = false,
+         updated_at = now()
+     where id = $1 and workspace_id = $2`,
+    [id, session.workspaceId]
+  );
+}
+
+export async function reorderCategories(categoryIds: string[], session: RequestSession = getDevSession()) {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    for (let index = 0; index < categoryIds.length; index += 1) {
+      await client.query(
+        `update categories
+         set sort_order = $1,
+             updated_at = now()
+         where id = $2 and workspace_id = $3 and is_archived = false`,
+        [index, categoryIds[index], session.workspaceId]
+      );
+    }
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
   }
 }
 

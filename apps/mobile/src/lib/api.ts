@@ -12,6 +12,8 @@ const QUEUE_KEY = "dayframe.offlineQueue.v1";
 const SESSION_TOKEN_KEY = "dayframe.localSessionToken.v1";
 
 export type MobileBootstrap = {
+  user?: { id: string; email: string; name: string };
+  workspace?: { id: string; name: string };
   activeEntry: {
     id: string;
     projectId: string | null;
@@ -31,7 +33,7 @@ export type MobileBootstrap = {
     categoryName: string | null;
     clientName: string | null;
   }>;
-  categories: Array<{ id: string; name: string; color: string; isPinned: boolean }>;
+  categories: Array<{ id: string; name: string; color: string; isPinned: boolean; sortOrder?: number }>;
   entries: Array<{
     id: string;
     projectId: string | null;
@@ -59,7 +61,16 @@ export type MobileBootstrap = {
     defaultProjectId: string | null;
     defaultCategoryId: string | null;
   }>;
-  reviewItems: Array<{ id: string; title: string; confidence: string; status: string }>;
+  reviewItems: Array<{
+    id: string;
+    title: string;
+    confidence: string;
+    status: string;
+    type?: string;
+    categoryName?: string | null;
+    placeName?: string | null;
+    projectName?: string | null;
+  }>;
 };
 
 export type MobileAuthSession = {
@@ -236,6 +247,93 @@ export async function createCategory(name: string, options: { color?: string; is
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to create category"));
+  return readJsonResponse(response);
+}
+
+export async function updateCategory(
+  id: string,
+  input: { name?: string; color?: string; isPinned?: boolean }
+) {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/categories/${id}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify(input)
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to update category"));
+  return readJsonResponse(response);
+}
+
+export async function archiveCategory(id: string) {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/categories/${id}`, {
+    method: "DELETE",
+    headers: await authHeaders()
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to archive category"));
+  return readJsonResponse(response);
+}
+
+export async function reorderCategories(categoryIds: string[]) {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/categories`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify({ categoryIds })
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to reorder categories"));
+  return readJsonResponse(response);
+}
+
+export async function updateTimeEntry(
+  id: string,
+  input: { categoryId?: string | null; description?: string | null }
+) {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/time-entries/${id}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify(input)
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to update timer"));
+  return readJsonResponse(response);
+}
+
+export async function resolveReviewItem(id: string, action: "accept" | "ignore_once") {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/review/${id}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify({ action })
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to update review item"));
   return readJsonResponse(response);
 }
 

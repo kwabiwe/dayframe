@@ -1,9 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Alert,
-  Animated,
   AppState,
-  Easing,
   Image,
   Linking,
   Pressable,
@@ -17,36 +15,23 @@ import {
   type ViewStyle
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { router } from "expo-router";
+import { AlertCircle, Check, Inbox, Play, RefreshCw, Save, Settings, Square } from "lucide-react-native";
 import Svg, { Circle, G, Path } from "react-native-svg";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { DAYFRAME_THEME, paletteColorFor } from "@dayframe/shared";
 import {
-  requestLocationAccess,
-  refreshGeofencesForPlaces,
-  startGeofences
-} from "@/lib/geofence";
-import {
-  getHealthImportStatus,
-  importHealthKitSleep,
-  importHealthKitWorkouts,
-  friendlyHealthKitError,
-  requestHealthKitSleepPermission,
-  requestHealthKitWorkoutPermission,
-  type HealthImportStatus
-} from "@/lib/health";
-import {
   AuthRequiredError,
-  createCategory,
   enqueueEvent,
   fetchBootstrap,
   login,
-  logout,
-  queueStopTimer,
   readQueue,
+  resolveReviewItem,
   signup,
   startTimer,
   stopTimer,
   syncQueue,
+  updateTimeEntry,
   type MobileBootstrap,
   type QueuedEvent
 } from "@/lib/api";
@@ -60,6 +45,8 @@ type MobileTheme = (typeof DAYFRAME_THEME)[ThemeMode] & {
   pressed: string;
 };
 type TimeEntry = MobileBootstrap["entries"][number];
+type Category = MobileBootstrap["categories"][number];
+type ReviewItem = MobileBootstrap["reviewItems"][number];
 type SummaryPeriod = "day" | "week" | "month" | "year";
 type AuthView = "login" | "signup";
 type AuthState = "checking" | "authenticated" | "signedOut";
@@ -70,6 +57,11 @@ type SummarySegment = {
   share: number;
   color: string;
 };
+type StartStatus =
+  | { kind: "idle" }
+  | { kind: "starting"; label: string }
+  | { kind: "queued"; label: string }
+  | { kind: "error"; label: string };
 
 const periodLabels: Record<SummaryPeriod, string> = {
   day: "Day",
@@ -77,16 +69,11 @@ const periodLabels: Record<SummaryPeriod, string> = {
   month: "Month",
   year: "Year"
 };
-const themeOptions: Array<{ value: ThemePreference; label: string }> = [
-  { value: "system", label: "System" },
-  { value: "light", label: "Light" },
-  { value: "dark", label: "Dark" }
-];
 const THEME_PREFERENCE_KEY = "dayframe.themePreference.v1";
 
 export default function HomeScreen() {
   const colorScheme = useColorScheme();
-  const [themePreference, setThemePreferenceState] = useState<ThemePreference>("system");
+  const [themePreference, setThemePreference] = useState<ThemePreference>("system");
   const resolvedThemeMode = themePreference === "system"
     ? colorScheme === "light" ? "light" : "dark"
     : themePreference;
@@ -103,18 +90,14 @@ export default function HomeScreen() {
   const [authWorkspace, setAuthWorkspace] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
   const [authNotice, setAuthNotice] = useState<string | null>(null);
-  const [locationStatus, setLocationStatus] = useState("Not requested");
-  const [healthStatus, setHealthStatus] = useState<HealthImportStatus[]>([]);
   const [now, setNow] = useState(() => Date.now());
-  const [customDescription, setCustomDescription] = useState("");
-  const [customCategoryId, setCustomCategoryId] = useState("");
-  const [newCategoryName, setNewCategoryName] = useState("");
-  const [pinNewCategory, setPinNewCategory] = useState(true);
+  const [taskDraft, setTaskDraft] = useState("");
+  const [startStatus, setStartStatus] = useState<StartStatus>({ kind: "idle" });
   const [summaryPeriod, setSummaryPeriod] = useState<SummaryPeriod>("day");
-  const [chartProgress, setChartProgress] = useState(1);
+  const [activeDescriptionDraft, setActiveDescriptionDraft] = useState("");
+  const [activeCategoryDraft, setActiveCategoryDraft] = useState("");
+  const [savingActive, setSavingActive] = useState(false);
   const refreshInFlight = useRef(false);
-  const entrance = useRef(new Animated.Value(0)).current;
-  const chartBuild = useRef(new Animated.Value(1)).current;
 
   const load = useCallback(async (options?: { silent?: boolean }) => {
     if (refreshInFlight.current) return;
@@ -141,18 +124,9 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
-    Animated.timing(entrance, {
-      toValue: 1,
-      duration: 320,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true
-    }).start();
-  }, [entrance]);
-
-  useEffect(() => {
     AsyncStorage.getItem(THEME_PREFERENCE_KEY)
       .then((value) => {
-        if (value === "system" || value === "light" || value === "dark") setThemePreferenceState(value);
+        if (value === "system" || value === "light" || value === "dark") setThemePreference(value);
       })
       .catch(() => undefined);
   }, []);
@@ -162,28 +136,16 @@ export default function HomeScreen() {
   }, [load]);
 
   useEffect(() => {
-    getHealthImportStatus().then(setHealthStatus).catch(() => {
-      setHealthStatus([
-        {
-          provider: "healthkit",
-          status: "error",
-          notes: "Unable to check HealthKit status."
-        }
-      ]);
-    });
-  }, []);
-
-  useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
     const interval = setInterval(() => {
-      if (authState !== "signedOut") void load({ silent: true });
-    }, 30000);
+      if (authState === "authenticated") void load({ silent: true });
+    }, data?.activeEntry || queue.length > 0 || startStatus.kind !== "idle" ? 3000 : 15000);
     return () => clearInterval(interval);
-  }, [authState, load]);
+  }, [authState, data?.activeEntry, load, queue.length, startStatus.kind]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
@@ -196,20 +158,23 @@ export default function HomeScreen() {
     const subscription = Linking.addEventListener("url", async ({ url }) => {
       await handleDayframeUrl(url);
       setQueue(await readQueue());
+      await load({ silent: true });
     });
     Linking.getInitialURL().then(async (url) => {
       if (!url) return;
       await handleDayframeUrl(url);
       setQueue(await readQueue());
+      await load({ silent: true });
     });
     return () => subscription.remove();
-  }, []);
+  }, [load]);
 
-  const quickActions = useMemo(() => buildMobileQuickActions(data), [data]);
-  const selectedCustomCategory = useMemo(
-    () => data?.categories.find((category) => category.id === customCategoryId) ?? data?.categories[0],
-    [customCategoryId, data?.categories]
-  );
+  useEffect(() => {
+    const active = data?.activeEntry;
+    setActiveDescriptionDraft(active?.description ?? "");
+    setActiveCategoryDraft(active?.categoryId ?? "");
+  }, [data?.activeEntry?.categoryId, data?.activeEntry?.description, data?.activeEntry?.id]);
+
   const activeDurationSeconds = data?.activeEntry
     ? Math.max(
         data.activeEntry.durationSeconds,
@@ -221,183 +186,8 @@ export default function HomeScreen() {
     [data?.entries, now, summaryPeriod]
   );
   const summaryTotal = summarySegments.reduce((sum, segment) => sum + segment.seconds, 0);
-  const places = data?.places ?? [];
-  const healthAvailability =
-    healthStatus.find((item) => item.provider === "healthkit" && item.kind === "availability") ??
-    healthStatus.find((item) => item.provider === "healthkit");
-  const sleepStatus = healthStatus.find((item) => item.provider === "healthkit" && item.kind === "sleep");
-  const workoutStatus = healthStatus.find((item) => item.provider === "healthkit" && item.kind === "workout");
-
-  useEffect(() => {
-    if (!customCategoryId && data?.categories[0]) setCustomCategoryId(data.categories[0].id);
-  }, [customCategoryId, data?.categories]);
-
-  useEffect(() => {
-    if (authState !== "authenticated" || !data?.places.length) return;
-    refreshGeofencesForPlaces(data.places)
-      .then((count) => {
-        if (count > 0) setLocationStatus(`Monitoring ${count} places`);
-      })
-      .catch(() => undefined);
-  }, [authState, data?.places]);
-
-  useEffect(() => {
-    chartBuild.stopAnimation();
-    chartBuild.setValue(0);
-    const listenerId = chartBuild.addListener(({ value }) => setChartProgress(value));
-    Animated.timing(chartBuild, {
-      toValue: 1,
-      duration: 720,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false
-    }).start();
-
-    return () => {
-      chartBuild.removeListener(listenerId);
-    };
-  }, [chartBuild, summaryPeriod, summarySegments.length]);
-
-  async function quickStart(categoryId?: string | null) {
-    try {
-      await startTimer(undefined, categoryId);
-      await load();
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        setAuthState("signedOut");
-        setData(null);
-        return;
-      }
-      const nextQueue = await enqueueEvent({
-        source: "mobile_app",
-        type: "quick_action",
-        categoryId: categoryId ?? undefined,
-        rawPayload: { origin: "mobile_quick_action_fallback" }
-      });
-      setQueue(nextQueue);
-      await syncAndReload();
-    }
-  }
-
-  async function customStart() {
-    const trimmedDescription = customDescription.trim();
-    try {
-      await startTimer(
-        undefined,
-        selectedCustomCategory?.id,
-        trimmedDescription
-      );
-      if (trimmedDescription) setCustomDescription("");
-      await load();
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        setAuthState("signedOut");
-        setData(null);
-        return;
-      }
-      const nextQueue = await enqueueEvent({
-        source: "mobile_app",
-        type: "timer_start",
-        categoryId: selectedCustomCategory?.id,
-        description: trimmedDescription || undefined,
-        rawPayload: { origin: "mobile_custom_start_fallback" }
-      });
-      setQueue(nextQueue);
-      if (trimmedDescription) setCustomDescription("");
-      await syncAndReload();
-    }
-  }
-
-  async function syncAndReload() {
-    try {
-      const result = await syncQueue();
-      setQueue(result.remaining);
-      await load();
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        setAuthState("signedOut");
-        setData(null);
-        return;
-      }
-      throw error;
-    }
-  }
-
-  async function setThemePreference(nextPreference: ThemePreference) {
-    setThemePreferenceState(nextPreference);
-    await AsyncStorage.setItem(THEME_PREFERENCE_KEY, nextPreference);
-  }
-
-  async function addCategory() {
-    const name = newCategoryName.trim();
-    if (!name) return;
-    try {
-      await createCategory(name, { isPinned: pinNewCategory });
-      setNewCategoryName("");
-      setPinNewCategory(true);
-      await load();
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        setAuthState("signedOut");
-        setData(null);
-        return;
-      }
-      Alert.alert("Categories", error instanceof Error ? error.message : "Unable to create category.");
-    }
-  }
-
-  async function enableLocation() {
-    const status = await requestLocationAccess();
-    setLocationStatus(status);
-    if (status.startsWith("Always allowed") && data) {
-      const count = await startGeofences(data.places);
-      Alert.alert("Geofences", `Started ${count} place monitors.`);
-    }
-  }
-
-  async function connectHealthKit() {
-    try {
-      const status = await requestHealthKitSleepPermission();
-      updateHealthStatus(status);
-    } catch (error) {
-      Alert.alert("HealthKit", friendlyHealthKitError(error, "request HealthKit permission"));
-    }
-  }
-
-  async function connectHealthKitWorkouts() {
-    try {
-      const status = await requestHealthKitWorkoutPermission();
-      updateHealthStatus(status);
-    } catch (error) {
-      Alert.alert("HealthKit", friendlyHealthKitError(error, "request HealthKit workout permission"));
-    }
-  }
-
-  async function syncHealthKitSleep() {
-    try {
-      const status = await importHealthKitSleep();
-      updateHealthStatus(status);
-      await syncAndReload();
-    } catch (error) {
-      Alert.alert("HealthKit", friendlyHealthKitError(error, "sync HealthKit sleep"));
-    }
-  }
-
-  async function syncHealthKitWorkouts() {
-    try {
-      const status = await importHealthKitWorkouts();
-      updateHealthStatus(status);
-      await syncAndReload();
-    } catch (error) {
-      Alert.alert("HealthKit", friendlyHealthKitError(error, "sync HealthKit workouts"));
-    }
-  }
-
-  function updateHealthStatus(status: HealthImportStatus) {
-    setHealthStatus((current) => [
-      status,
-      ...current.filter((item) => !(item.provider === status.provider && item.kind === status.kind))
-    ]);
-  }
+  const openReviewItems = (data?.reviewItems ?? []).filter((item) => item.status === "open");
+  const categories = data?.categories ?? [];
 
   async function submitAuth() {
     setAuthError(null);
@@ -429,42 +219,151 @@ export default function HomeScreen() {
     }
   }
 
-  async function signOut() {
-    await logout();
-    setData(null);
-    setQueue(await readQueue());
-    setAuthState("signedOut");
+  async function beginStart(categoryId?: string | null) {
+    if (startStatus.kind === "starting") return;
+    const description = taskDraft.trim();
+    setStartStatus({ kind: "starting", label: "Starting..." });
+    try {
+      await startTimer(undefined, categoryId ?? undefined, description || undefined);
+      setTaskDraft("");
+      await load();
+      setStartStatus({ kind: "idle" });
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        setAuthState("signedOut");
+        setData(null);
+        setStartStatus({ kind: "idle" });
+        return;
+      }
+
+      const nextQueue = await enqueueEvent({
+        source: "mobile_app",
+        type: "timer_start",
+        categoryId: categoryId ?? undefined,
+        description: description || undefined,
+        rawPayload: { origin: "mobile_dashboard_start_fallback" }
+      });
+      setQueue(nextQueue);
+      setStartStatus({ kind: "queued", label: "Queued. Syncing when the API is ready." });
+      try {
+        const result = await syncQueue();
+        setQueue(result.remaining);
+        await load({ silent: true });
+        if (result.remaining.length === 0) {
+          setTaskDraft("");
+          setStartStatus({ kind: "idle" });
+        }
+      } catch (syncError) {
+        if (syncError instanceof AuthRequiredError) {
+          setAuthState("signedOut");
+          setData(null);
+          setStartStatus({ kind: "idle" });
+          return;
+        }
+      }
+    }
   }
 
-  const enteringStyle = {
-    opacity: entrance,
-    transform: [
-      {
-        translateY: entrance.interpolate({
-          inputRange: [0, 1],
-          outputRange: [10, 0]
-        })
+  async function stopActiveTimer() {
+    try {
+      await stopTimer();
+      await load();
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        setAuthState("signedOut");
+        setData(null);
+        return;
       }
-    ]
-  };
+      const nextQueue = await enqueueEvent({
+        source: "mobile_app",
+        type: "timer_stop",
+        rawPayload: { origin: "mobile_dashboard_stop_fallback" }
+      });
+      setQueue(nextQueue);
+      Alert.alert("Timer queued", "The stop action is queued and will sync when the API is ready.");
+    }
+  }
+
+  async function saveActiveTimer() {
+    const active = data?.activeEntry;
+    if (!active || savingActive) return;
+    setSavingActive(true);
+    try {
+      await updateTimeEntry(active.id, {
+        description: activeDescriptionDraft.trim() || null,
+        categoryId: activeCategoryDraft || null
+      });
+      await load();
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        setAuthState("signedOut");
+        setData(null);
+        return;
+      }
+      Alert.alert("Timer", error instanceof Error ? error.message : "Unable to save timer changes.");
+    } finally {
+      setSavingActive(false);
+    }
+  }
+
+  async function syncAndReload() {
+    try {
+      const result = await syncQueue();
+      setQueue(result.remaining);
+      await load();
+      if (result.remaining.length === 0 && startStatus.kind === "queued") setStartStatus({ kind: "idle" });
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        setAuthState("signedOut");
+        setData(null);
+        return;
+      }
+      Alert.alert("Sync", error instanceof Error ? error.message : "Unable to sync queued events.");
+    }
+  }
+
+  function openReviewItem(item: ReviewItem) {
+    Alert.alert(item.title, "Review this activity suggestion.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Ignore",
+        style: "destructive",
+        onPress: () => {
+          void resolveReview(item.id, "ignore_once");
+        }
+      },
+      {
+        text: "Accept",
+        onPress: () => {
+          void resolveReview(item.id, "accept");
+        }
+      }
+    ]);
+  }
+
+  async function resolveReview(id: string, action: "accept" | "ignore_once") {
+    try {
+      await resolveReviewItem(id, action);
+      await load();
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        setAuthState("signedOut");
+        setData(null);
+        return;
+      }
+      Alert.alert("Review", error instanceof Error ? error.message : "Unable to update review item.");
+    }
+  }
 
   if (authState === "signedOut") {
     return (
       <SafeAreaView style={styles.safeArea}>
         <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-          <View style={styles.header}>
-            <View style={styles.logoLockup}>
-              <Image
-                source={require("../assets/dayframe_logo_banner.png")}
-                style={styles.logoImage}
-                resizeMode="contain"
-              />
-            </View>
-          </View>
+          <Header styles={styles} />
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>{authView === "signup" ? "Create account" : "Log in"}</Text>
             <Text style={styles.muted}>
-              Use your Dayframe account to sync timers, location events and HealthKit imports with your workspace.
+              Use your Dayframe account to sync timers, location events and Apple Health imports with your workspace.
             </Text>
             {authView === "signup" ? (
               <>
@@ -543,119 +442,50 @@ export default function HomeScreen() {
           />
         }
       >
-        <Animated.View style={[styles.contentStack, enteringStyle]}>
-          <View style={styles.header}>
-            <View style={styles.logoLockup}>
-              <Image
-                source={require("../assets/dayframe_logo_banner.png")}
-                style={styles.logoImage}
-                resizeMode="contain"
+        <View style={styles.contentStack}>
+          <Header
+            styles={styles}
+            action={
+              <IconButton
+                accessibilityLabel="Open settings"
+                icon={<Settings size={21} color={theme.accent} />}
+                onPress={() => router.push("/settings")}
+                styles={styles}
               />
-            </View>
-          </View>
+            }
+          />
 
-          <View style={styles.timerPanel}>
-            <Text style={styles.label}>Active timer</Text>
-            <Text style={styles.timerText}>
-              {data?.activeEntry
-                ? data.activeEntry.description ?? data.activeEntry.categoryName ?? "Running"
-                : "No timer"}
-            </Text>
-            {data?.activeEntry?.categoryName ? (
-              <Text style={styles.activeDescription}>{data.activeEntry.categoryName}</Text>
-            ) : null}
-            <Text style={styles.muted}>
-              {data?.activeEntry
-                ? `${formatClockDuration(activeDurationSeconds)} running`
-                : "Start a task now, then add detail when you need it."}
-            </Text>
-            {data?.activeEntry ? (
-              <Pressable
-                style={pressable(styles.primaryButton, styles.buttonPressed)}
-                onPress={async () => {
-                  try {
-                    await stopTimer();
-                    await load();
-                  } catch (error) {
-                    if (error instanceof AuthRequiredError) {
-                      setAuthState("signedOut");
-                      setData(null);
-                      return;
-                    }
-                    setQueue(await queueStopTimer());
-                    await syncAndReload();
-                  }
-                }}
-              >
-                <Text style={styles.primaryButtonText}>Stop current timer</Text>
-              </Pressable>
-            ) : null}
-          </View>
+          <TimerCard
+            activeCategoryDraft={activeCategoryDraft}
+            activeDescriptionDraft={activeDescriptionDraft}
+            activeDurationSeconds={activeDurationSeconds}
+            categories={categories}
+            data={data}
+            onCategoryDraft={setActiveCategoryDraft}
+            onDescriptionDraft={setActiveDescriptionDraft}
+            onSave={saveActiveTimer}
+            onStop={stopActiveTimer}
+            saving={savingActive}
+            startStatus={startStatus}
+            styles={styles}
+            theme={theme}
+          />
 
-          <View style={styles.panel}>
-            <Text style={styles.sectionTitle}>Start task</Text>
-            <TextInput
-              style={styles.textInput}
-              value={customDescription}
-              onChangeText={setCustomDescription}
-              onSubmitEditing={customStart}
-              placeholder="What are you working on?"
-              placeholderTextColor={theme.textSecondary}
-              returnKeyType="done"
-            />
-            <Text style={styles.label}>Category</Text>
-            <ScrollView
-              horizontal
-              keyboardShouldPersistTaps="handled"
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.projectPicker}
-            >
-              {(data?.categories ?? []).map((category) => {
-                const selected = category.id === selectedCustomCategory?.id;
-                const categoryColor = paletteColorFor(category.color, category.name);
-                return (
-                  <Pressable
-                    key={category.id}
-                    style={pressable(
-                      [styles.projectPill, selected ? styles.projectPillSelected : null],
-                      styles.buttonPressed
-                    )}
-                    onPress={() => setCustomCategoryId(category.id)}
-                  >
-                    <View style={[styles.colorDot, { backgroundColor: categoryColor }]} />
-                    <Text style={[styles.projectPillText, selected ? styles.projectPillTextSelected : null]}>
-                      {category.name}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-            <Pressable style={pressable(styles.primaryButton, styles.buttonPressed)} onPress={customStart}>
-              <Text style={styles.primaryButtonText}>Start task</Text>
-            </Pressable>
-          </View>
+          <StartTaskCard
+            categories={categories}
+            disabled={startStatus.kind === "starting"}
+            onStart={beginStart}
+            setTaskDraft={setTaskDraft}
+            startStatus={startStatus}
+            styles={styles}
+            taskDraft={taskDraft}
+            theme={theme}
+          />
 
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Quick categories</Text>
-            <Text style={styles.muted}>{quickActions.length} ready</Text>
-          </View>
-          <View style={styles.quickGrid}>
-            {quickActions.map((category) => (
-              <Pressable
-                key={category.id}
-                style={pressable(styles.quickButton, styles.buttonPressed)}
-                onPress={() => quickStart(category.id)}
-              >
-                <View style={[styles.colorRule, { backgroundColor: paletteColorFor(category.color, category.name) }]} />
-                <Text style={styles.quickTitle}>{category.name}</Text>
-                <Text style={styles.quickMeta}>Start now</Text>
-              </Pressable>
-            ))}
-          </View>
-
-          <LifecycleSummary
-            chartProgress={chartProgress}
+          <TodaySummary
+            onOpenReview={openReviewItem}
             period={summaryPeriod}
+            reviewItems={openReviewItems}
             segments={summarySegments}
             setPeriod={setSummaryPeriod}
             styles={styles}
@@ -663,135 +493,275 @@ export default function HomeScreen() {
             total={summaryTotal}
           />
 
-          <View style={styles.panel}>
-            <Text style={styles.sectionTitle}>Profile & settings</Text>
-            <Text style={styles.muted}>Account, sync and device permissions.</Text>
-            <View style={styles.settingsDivider} />
-            <Text style={styles.label}>Theme</Text>
-            <View style={styles.segmentedControl}>
-              {themeOptions.map((option) => {
-                const selected = option.value === themePreference;
-                return (
-                  <Pressable
-                    key={option.value}
-                    style={pressable(
-                      [styles.segmentButton, selected ? styles.segmentButtonSelected : null],
-                      styles.buttonPressed
-                    )}
-                    onPress={() => setThemePreference(option.value)}
-                  >
-                    <Text style={[styles.segmentButtonText, selected ? styles.segmentButtonTextSelected : null]}>
-                      {option.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            <View style={styles.settingsDivider} />
-            <Text style={styles.label}>Categories</Text>
-            <View style={styles.categoryList}>
-              {(data?.categories ?? []).slice(0, 8).map((category) => (
-                <View key={category.id} style={styles.categoryRow}>
-                  <View style={[styles.colorDot, { backgroundColor: paletteColorFor(category.color, category.name) }]} />
-                  <Text style={styles.categoryName}>{category.name}</Text>
-                  {category.isPinned ? <Text style={styles.categoryMeta}>Pinned</Text> : null}
-                </View>
-              ))}
-            </View>
-            <TextInput
-              style={styles.textInput}
-              value={newCategoryName}
-              onChangeText={setNewCategoryName}
-              onSubmitEditing={addCategory}
-              placeholder="New category"
-              placeholderTextColor={theme.textSecondary}
-              returnKeyType="done"
-            />
-            <View style={styles.buttonRow}>
-              <Pressable
-                style={pressable(
-                  [styles.secondaryButton, pinNewCategory ? styles.toggleSelected : null],
-                  styles.buttonPressed
-                )}
-                onPress={() => setPinNewCategory((current) => !current)}
-              >
-                <Text style={styles.secondaryButtonText}>{pinNewCategory ? "Pinned" : "Pin later"}</Text>
-              </Pressable>
-              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={addCategory}>
-                <Text style={styles.secondaryButtonText}>Create category</Text>
-              </Pressable>
-            </View>
-            <View style={styles.settingsDivider} />
-            <Text style={styles.label}>Profile</Text>
-            <View style={styles.buttonRow}>
-              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={signOut}>
-                <Text style={styles.secondaryButtonText}>Log out</Text>
-              </Pressable>
-            </View>
-            <View style={styles.settingsDivider} />
-            <Text style={styles.label}>Device sync</Text>
-            <View style={styles.row}>
-              <Text style={styles.statusText}>{queue.length} queued events</Text>
-              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={syncAndReload}>
-                <Text style={styles.secondaryButtonText}>Sync now</Text>
-              </Pressable>
-            </View>
-            <View style={styles.settingsDivider} />
-            <Text style={styles.label}>Location</Text>
-            <Text style={styles.muted}>
-              Enable location to let Dayframe suggest activity from places you visit. Ambiguous stays are sent
-              to review before they become time entries.
-            </Text>
-            <View style={styles.row}>
-              <Text style={styles.statusText}>{locationStatus}</Text>
-              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={enableLocation}>
-                <Text style={styles.secondaryButtonText}>Enable</Text>
-              </Pressable>
-            </View>
-
-            <View style={styles.settingsDivider} />
-            <Text style={styles.label}>HealthKit</Text>
-            <Text style={styles.muted}>
-              Sleep and workouts are queued as health activity events first, then reviewed before becoming
-              trusted time entries.
-            </Text>
-            <Text style={styles.statusText}>
-              {healthAvailability?.notes ?? "HealthKit status not checked"}
-            </Text>
-            <Text style={styles.muted}>Sleep: {sleepStatus?.notes ?? "Not synced yet."}</Text>
-            <Text style={styles.muted}>Workouts: {workoutStatus?.notes ?? "Not synced yet."}</Text>
-            <View style={styles.buttonRow}>
-              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={connectHealthKit}>
-                <Text style={styles.secondaryButtonText}>Sleep access</Text>
-              </Pressable>
-              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={syncHealthKitSleep}>
-                <Text style={styles.secondaryButtonText}>Sync sleep</Text>
-              </Pressable>
-              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={connectHealthKitWorkouts}>
-                <Text style={styles.secondaryButtonText}>Workout access</Text>
-              </Pressable>
-              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={syncHealthKitWorkouts}>
-                <Text style={styles.secondaryButtonText}>Sync workouts</Text>
-              </Pressable>
-            </View>
-          </View>
-        </Animated.View>
+          {queue.length > 0 ? (
+            <Pressable style={pressable(styles.syncNotice, styles.buttonPressed)} onPress={syncAndReload}>
+              <RefreshCw size={17} color={theme.accent} />
+              <View style={styles.syncNoticeText}>
+                <Text style={styles.statusText}>{queue.length} queued events</Text>
+                <Text style={styles.muted}>Tap to sync now.</Text>
+              </View>
+            </Pressable>
+          ) : null}
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function LifecycleSummary({
-  chartProgress,
+function Header({
+  action,
+  styles
+}: {
+  action?: ReactNode;
+  styles: ReturnType<typeof createStyles>;
+}) {
+  return (
+    <View style={styles.header}>
+      <Image
+        source={require("../assets/dayframe_logo_banner.png")}
+        style={styles.logoImage}
+        resizeMode="contain"
+      />
+      {action}
+    </View>
+  );
+}
+
+function IconButton({
+  accessibilityLabel,
+  icon,
+  onPress,
+  styles
+}: {
+  accessibilityLabel: string;
+  icon: ReactNode;
+  onPress: () => void;
+  styles: ReturnType<typeof createStyles>;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      style={pressable(styles.iconButton, styles.buttonPressed)}
+      onPress={onPress}
+    >
+      {icon}
+    </Pressable>
+  );
+}
+
+function TimerCard({
+  activeCategoryDraft,
+  activeDescriptionDraft,
+  activeDurationSeconds,
+  categories,
+  data,
+  onCategoryDraft,
+  onDescriptionDraft,
+  onSave,
+  onStop,
+  saving,
+  startStatus,
+  styles,
+  theme
+}: {
+  activeCategoryDraft: string;
+  activeDescriptionDraft: string;
+  activeDurationSeconds: number;
+  categories: Category[];
+  data: MobileBootstrap | null;
+  onCategoryDraft: (categoryId: string) => void;
+  onDescriptionDraft: (description: string) => void;
+  onSave: () => void;
+  onStop: () => void;
+  saving: boolean;
+  startStatus: StartStatus;
+  styles: ReturnType<typeof createStyles>;
+  theme: MobileTheme;
+}) {
+  const active = data?.activeEntry;
+  const categoryLabel = active?.categoryName ?? "No category";
+
+  if (!active && startStatus.kind !== "idle") {
+    return (
+      <View style={styles.timerPanel}>
+        <View style={styles.row}>
+          <Text style={styles.label}>Active timer</Text>
+          {startStatus.kind === "starting" ? (
+            <RefreshCw size={17} color={theme.accent} />
+          ) : (
+            <AlertCircle size={17} color={theme.warning} />
+          )}
+        </View>
+        <Text style={styles.timerText}>{startStatus.kind === "starting" ? "Starting..." : "Queued"}</Text>
+        <Text style={styles.muted}>{startStatus.label}</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.timerPanel}>
+      <Text style={styles.label}>Active timer</Text>
+      <Text style={styles.timerText}>
+        {active ? active.description || active.categoryName || "Running" : "No timer"}
+      </Text>
+      <Text style={styles.muted}>
+        {active
+          ? `${formatClockDuration(activeDurationSeconds)} running in ${categoryLabel}`
+          : "Start with a category chip, or press play for a task without a category."}
+      </Text>
+
+      {active ? (
+        <>
+          <TextInput
+            style={styles.textInput}
+            value={activeDescriptionDraft}
+            onChangeText={onDescriptionDraft}
+            placeholder="Task title"
+            placeholderTextColor={theme.textSecondary}
+            returnKeyType="done"
+          />
+          <CategoryChipRow
+            categories={categories}
+            onPress={(category) => onCategoryDraft(category.id)}
+            selectedId={activeCategoryDraft}
+            styles={styles}
+          />
+          <View style={styles.buttonRow}>
+            <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={onSave}>
+              <Save size={16} color={theme.accent} />
+              <Text style={styles.secondaryButtonText}>{saving ? "Saving..." : "Save"}</Text>
+            </Pressable>
+            <Pressable style={pressable(styles.stopButton, styles.buttonPressed)} onPress={onStop}>
+              <Square size={16} color="#FFFFFF" />
+              <Text style={styles.stopButtonText}>Stop</Text>
+            </Pressable>
+          </View>
+        </>
+      ) : null}
+    </View>
+  );
+}
+
+function StartTaskCard({
+  categories,
+  disabled,
+  onStart,
+  setTaskDraft,
+  startStatus,
+  styles,
+  taskDraft,
+  theme
+}: {
+  categories: Category[];
+  disabled: boolean;
+  onStart: (categoryId?: string | null) => void;
+  setTaskDraft: (task: string) => void;
+  startStatus: StartStatus;
+  styles: ReturnType<typeof createStyles>;
+  taskDraft: string;
+  theme: MobileTheme;
+}) {
+  return (
+    <View style={styles.panel}>
+      <View style={styles.row}>
+        <Text style={styles.sectionTitle}>Start task</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Start task without category"
+          disabled={disabled}
+          style={pressable([styles.playButton, disabled ? styles.buttonDisabled : null], styles.buttonPressed)}
+          onPress={() => onStart(undefined)}
+        >
+          <Play size={18} color="#FFFFFF" fill="#FFFFFF" />
+        </Pressable>
+      </View>
+      <TextInput
+        style={styles.textInput}
+        value={taskDraft}
+        onChangeText={setTaskDraft}
+        onSubmitEditing={() => onStart(undefined)}
+        placeholder="What are you working on?"
+        placeholderTextColor={theme.textSecondary}
+        returnKeyType="done"
+      />
+      <Text style={styles.label}>Categories</Text>
+      <CategoryChipRow
+        categories={categories}
+        disabled={disabled}
+        onPress={(category) => onStart(category.id)}
+        styles={styles}
+      />
+      {startStatus.kind !== "idle" ? (
+        <View style={styles.inlineStatus}>
+          {startStatus.kind === "starting" ? <RefreshCw size={15} color={theme.accent} /> : <Check size={15} color={theme.accent} />}
+          <Text style={styles.muted}>{startStatus.label}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function CategoryChipRow({
+  categories,
+  disabled,
+  onPress,
+  selectedId,
+  styles
+}: {
+  categories: Category[];
+  disabled?: boolean;
+  onPress: (category: Category) => void;
+  selectedId?: string;
+  styles: ReturnType<typeof createStyles>;
+}) {
+  if (categories.length === 0) {
+    return <Text style={styles.muted}>Create categories in Settings.</Text>;
+  }
+
+  return (
+    <ScrollView
+      horizontal
+      keyboardShouldPersistTaps="handled"
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.chipScroller}
+    >
+      {categories.map((category) => {
+        const selected = category.id === selectedId;
+        return (
+          <Pressable
+            key={category.id}
+            disabled={disabled}
+            style={pressable(
+              [styles.categoryChip, selected ? styles.categoryChipSelected : null, disabled ? styles.buttonDisabled : null],
+              styles.buttonPressed
+            )}
+            onPress={() => onPress(category)}
+          >
+            <View style={[styles.colorDot, { backgroundColor: paletteColorFor(category.color, category.name) }]} />
+            <Text style={[styles.categoryChipText, selected ? styles.categoryChipTextSelected : null]}>
+              {category.name}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </ScrollView>
+  );
+}
+
+function TodaySummary({
+  onOpenReview,
   period,
+  reviewItems,
   segments,
   setPeriod,
   styles,
   theme,
   total
 }: {
-  chartProgress: number;
+  onOpenReview: (item: ReviewItem) => void;
   period: SummaryPeriod;
+  reviewItems: ReviewItem[];
   segments: SummarySegment[];
   setPeriod: (period: SummaryPeriod) => void;
   styles: ReturnType<typeof createStyles>;
@@ -829,48 +799,76 @@ function LifecycleSummary({
       </View>
 
       <View style={styles.chartWrap}>
-        <DonutChart progress={chartProgress} segments={segments} styles={styles} theme={theme} total={total} />
+        <DonutChart segments={segments} styles={styles} theme={theme} total={total} />
       </View>
 
-      <View style={styles.legendList}>
-        {segments.length === 0 ? (
-          <Text style={styles.muted}>No tracked time for this period.</Text>
-        ) : null}
-        {segments.map((segment) => (
-          <View key={segment.key} style={styles.legendRow}>
-            <View style={[styles.legendSwatch, { backgroundColor: segment.color }]} />
-            <View style={styles.legendText}>
-              <Text style={styles.legendPlace}>{segment.categoryName}</Text>
-              <Text style={styles.legendProject}>Category</Text>
+      {total === 0 ? (
+        <View style={styles.emptySummary}>
+          <Text style={styles.statusText}>No tracked time yet.</Text>
+          <Text style={styles.muted}>Start a category when your day begins.</Text>
+        </View>
+      ) : (
+        <View style={styles.legendList}>
+          {segments.map((segment) => (
+            <View key={segment.key} style={styles.legendRow}>
+              <View style={[styles.legendSwatch, { backgroundColor: segment.color }]} />
+              <View style={styles.legendText}>
+                <Text style={styles.legendPlace}>{segment.categoryName}</Text>
+                <Text style={styles.legendProject}>Category</Text>
+              </View>
+              <View style={styles.legendNumbers}>
+                <Text style={styles.legendDuration}>{formatDuration(segment.seconds)}</Text>
+                <Text style={styles.legendShare}>{segment.share}%</Text>
+              </View>
             </View>
-            <View style={styles.legendNumbers}>
-              <Text style={styles.legendDuration}>{formatDuration(segment.seconds)}</Text>
-              <Text style={styles.legendShare}>{segment.share}%</Text>
-            </View>
+          ))}
+        </View>
+      )}
+
+      <View style={styles.reviewBlock}>
+        <View style={styles.row}>
+          <View style={styles.inlineStatus}>
+            <Inbox size={16} color={theme.accent} />
+            <Text style={styles.statusText}>{reviewItems.length} reviewable</Text>
           </View>
-        ))}
+        </View>
+        {reviewItems.length === 0 ? (
+          <Text style={styles.muted}>No suggestions waiting.</Text>
+        ) : (
+          reviewItems.slice(0, 3).map((item) => (
+            <Pressable
+              key={item.id}
+              style={pressable(styles.reviewRow, styles.buttonPressed)}
+              onPress={() => onOpenReview(item)}
+            >
+              <View style={styles.reviewDot} />
+              <View style={styles.reviewText}>
+                <Text style={styles.reviewTitle}>{item.title}</Text>
+                <Text style={styles.muted}>{item.categoryName ?? item.placeName ?? item.confidence}</Text>
+              </View>
+            </Pressable>
+          ))
+        )}
       </View>
     </View>
   );
 }
 
 function DonutChart({
-  progress,
   segments,
   styles,
   theme,
   total
 }: {
-  progress: number;
   segments: SummarySegment[];
   styles: ReturnType<typeof createStyles>;
   theme: MobileTheme;
   total: number;
 }) {
-  const size = 264;
+  const size = 220;
   const center = size / 2;
-  const outerRadius = 122;
-  const innerRadius = 58;
+  const outerRadius = 98;
+  const innerRadius = 52;
   let cursor = 0;
 
   return (
@@ -884,7 +882,7 @@ function DonutChart({
                 const fullSweep = (segment.seconds / total) * 360;
                 const start = cursor;
                 const gap = fullSweep > 8 ? 2 : 0;
-                const end = start + Math.max(0, fullSweep * progress - gap);
+                const end = start + Math.max(0, fullSweep - gap);
                 cursor += fullSweep;
                 if (end <= start) return null;
 
@@ -930,6 +928,7 @@ function buildSummarySegments(entries: TimeEntry[], period: SummaryPeriod, now: 
     const seconds = entry.stoppedAt
       ? entry.durationSeconds
       : Math.max(entry.durationSeconds, Math.floor((now - startedAt) / 1000));
+    if (seconds <= 0) continue;
 
     totals.set(key, {
       key,
@@ -947,35 +946,6 @@ function buildSummarySegments(entries: TimeEntry[], period: SummaryPeriod, now: 
     }))
     .sort((a, b) => b.seconds - a.seconds)
     .slice(0, 8);
-}
-
-function buildMobileQuickActions(data: MobileBootstrap | null) {
-  if (!data) return [];
-  const categoriesById = new Map(data.categories.map((category) => [category.id, category]));
-  const scored = new Map<string, { count: number; lastSeen: number }>();
-
-  for (const entry of data.entries) {
-    if (!entry.categoryId) continue;
-    const current = scored.get(entry.categoryId) ?? { count: 0, lastSeen: 0 };
-    current.count += 1;
-    current.lastSeen = Math.max(current.lastSeen, new Date(entry.startedAt).getTime());
-    scored.set(entry.categoryId, current);
-  }
-
-  const learned = [...scored.entries()]
-    .map(([categoryId, score]) => ({ score, category: categoriesById.get(categoryId) }))
-    .filter((item): item is { score: { count: number; lastSeen: number }; category: MobileBootstrap["categories"][number] } =>
-      Boolean(item.category)
-    )
-    .sort((a, b) => b.score.count - a.score.count || b.score.lastSeen - a.score.lastSeen)
-    .map((item) => item.category);
-  const pinned = data.categories.filter((category) => category.isPinned);
-  const usedIds = new Set(pinned.map((category) => category.id));
-  const learnedUnpinned = learned.filter((category) => !usedIds.has(category.id));
-  for (const category of learnedUnpinned) usedIds.add(category.id);
-  const fallback = data.categories.filter((category) => !usedIds.has(category.id));
-
-  return [...pinned, ...learnedUnpinned, ...fallback].slice(0, 8);
 }
 
 function startOfPeriod(period: SummaryPeriod, now: number) {
@@ -1061,6 +1031,7 @@ function formatClockDuration(seconds: number) {
 
 function formatDuration(seconds: number) {
   const safe = Math.max(0, Math.floor(seconds));
+  if (safe > 0 && safe < 60) return "<1m";
   const hours = Math.floor(safe / 3600);
   const minutes = Math.floor((safe % 3600) / 60);
 
@@ -1079,41 +1050,32 @@ function createStyles(theme: MobileTheme) {
     },
     container: {
       padding: 18,
+      paddingBottom: 32,
       backgroundColor: theme.background
     },
     contentStack: {
-      gap: 18
+      gap: 16
     },
     header: {
+      minHeight: 58,
       flexDirection: "row",
       alignItems: "center",
-      justifyContent: "flex-start",
-      paddingHorizontal: 6,
-      paddingTop: 6
-    },
-    logoLockup: {
-      flexShrink: 1,
-      gap: 4
+      justifyContent: "space-between",
+      paddingHorizontal: 4
     },
     logoImage: {
-      width: 158,
+      width: 166,
       height: 52
     },
-    headerActions: {
-      alignItems: "flex-end",
-      gap: 8
-    },
-    title: {
-      fontSize: 30,
-      fontWeight: "800",
-      color: theme.textPrimary,
-      fontFamily: monoFont
-    },
-    subtitle: {
-      marginTop: 2,
-      fontSize: 13,
-      color: theme.textSecondary,
-      fontFamily: monoFont
+    iconButton: {
+      width: 44,
+      height: 44,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      borderRadius: 12,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: theme.surface
     },
     panel: {
       borderWidth: 1,
@@ -1121,7 +1083,7 @@ function createStyles(theme: MobileTheme) {
       backgroundColor: theme.surface,
       borderRadius: 16,
       padding: 16,
-      gap: 10
+      gap: 12
     },
     timerPanel: {
       borderWidth: 1,
@@ -1129,7 +1091,7 @@ function createStyles(theme: MobileTheme) {
       backgroundColor: theme.surfaceInset,
       borderRadius: 16,
       padding: 16,
-      gap: 10
+      gap: 12
     },
     lifecyclePanel: {
       borderWidth: 1,
@@ -1139,20 +1101,15 @@ function createStyles(theme: MobileTheme) {
       padding: 16,
       gap: 14
     },
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 12
+    },
     label: {
       fontSize: 11,
       color: theme.textSecondary,
-      fontFamily: monoFont
-    },
-    timerText: {
-      fontSize: 25,
-      fontWeight: "800",
-      color: theme.accent,
-      fontFamily: monoFont
-    },
-    activeDescription: {
-      fontSize: 14,
-      color: theme.textPrimary,
       fontFamily: monoFont
     },
     muted: {
@@ -1161,17 +1118,174 @@ function createStyles(theme: MobileTheme) {
       color: theme.textSecondary,
       fontFamily: monoFont
     },
-    sectionHeader: {
-      gap: 4,
-      borderBottomWidth: 1,
-      borderBottomColor: theme.border,
-      paddingBottom: 10
-    },
     sectionTitle: {
       fontSize: 16,
       fontWeight: "800",
       color: theme.textPrimary,
       fontFamily: monoFont
+    },
+    timerText: {
+      fontSize: 27,
+      fontWeight: "800",
+      color: theme.accent,
+      fontFamily: monoFont
+    },
+    textInput: {
+      minHeight: 48,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 12,
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 15,
+      paddingHorizontal: 12,
+      paddingVertical: 10
+    },
+    chipScroller: {
+      gap: 8,
+      paddingRight: 6
+    },
+    categoryChip: {
+      minHeight: 44,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 12,
+      paddingHorizontal: 12,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8
+    },
+    categoryChipSelected: {
+      borderColor: theme.accent,
+      backgroundColor: theme.surfaceMuted
+    },
+    categoryChipText: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "800"
+    },
+    categoryChipTextSelected: {
+      color: theme.accent
+    },
+    colorDot: {
+      width: 11,
+      height: 11,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      borderRadius: 999
+    },
+    playButton: {
+      width: 46,
+      height: 46,
+      borderWidth: 1,
+      borderColor: theme.accent,
+      backgroundColor: theme.accent,
+      borderRadius: 14,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    buttonRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 10
+    },
+    primaryButton: {
+      marginTop: 4,
+      borderWidth: 1,
+      borderColor: theme.accent,
+      backgroundColor: theme.accent,
+      borderRadius: 12,
+      paddingVertical: 12,
+      alignItems: "center",
+      justifyContent: "center",
+      minHeight: 46
+    },
+    secondaryButton: {
+      minHeight: 44,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 12,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8
+    },
+    stopButton: {
+      minHeight: 44,
+      borderWidth: 1,
+      borderColor: theme.danger,
+      backgroundColor: theme.danger,
+      borderRadius: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8
+    },
+    buttonPressed: {
+      opacity: 0.84,
+      transform: [{ translateY: 1 }]
+    },
+    buttonDisabled: {
+      opacity: 0.45
+    },
+    primaryButtonText: {
+      color: theme.mode === "dark" ? theme.background : "#FFFFFF",
+      fontWeight: "800",
+      fontFamily: monoFont
+    },
+    secondaryButtonText: {
+      color: theme.accent,
+      fontWeight: "800",
+      fontFamily: monoFont
+    },
+    stopButtonText: {
+      color: "#FFFFFF",
+      fontWeight: "800",
+      fontFamily: monoFont
+    },
+    statusText: {
+      fontSize: 13,
+      color: theme.textPrimary,
+      fontWeight: "800",
+      fontFamily: monoFont
+    },
+    errorText: {
+      borderWidth: 1,
+      borderColor: theme.danger,
+      color: theme.danger,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 12,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      fontSize: 13,
+      fontFamily: monoFont
+    },
+    inlineStatus: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8
+    },
+    syncNotice: {
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 16,
+      padding: 14,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12
+    },
+    syncNoticeText: {
+      flex: 1,
+      gap: 2
     },
     summaryHeader: {
       flexDirection: "row",
@@ -1213,18 +1327,18 @@ function createStyles(theme: MobileTheme) {
     },
     chartWrap: {
       alignItems: "center",
-      paddingVertical: 8
+      paddingVertical: 2
     },
     chartBox: {
-      width: 264,
-      height: 264,
+      width: 220,
+      height: 220,
       alignItems: "center",
       justifyContent: "center"
     },
     chartCenter: {
       position: "absolute",
-      width: 116,
-      height: 116,
+      width: 104,
+      height: 104,
       alignItems: "center",
       justifyContent: "center"
     },
@@ -1238,6 +1352,12 @@ function createStyles(theme: MobileTheme) {
       fontFamily: monoFont,
       fontSize: 18,
       fontWeight: "800"
+    },
+    emptySummary: {
+      borderTopWidth: 1,
+      borderTopColor: theme.border,
+      paddingTop: 12,
+      gap: 2
     },
     legendList: {
       gap: 10
@@ -1286,193 +1406,39 @@ function createStyles(theme: MobileTheme) {
       fontFamily: monoFont,
       fontSize: 12
     },
-    quickGrid: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      gap: 10
-    },
-    quickButton: {
-      width: "48%",
-      minHeight: 98,
-      borderWidth: 1,
-      borderColor: theme.borderStrong,
-      backgroundColor: theme.surfaceInset,
-      borderRadius: 14,
-      padding: 14,
-      justifyContent: "space-between",
-      overflow: "hidden"
-    },
-    colorRule: {
-      height: 3,
-      borderRadius: 999,
-      marginBottom: 10
-    },
-    colorDot: {
-      width: 12,
-      height: 12,
-      borderWidth: 1,
-      borderColor: theme.borderStrong,
-      borderRadius: 999
-    },
-    categoryList: {
+    reviewBlock: {
+      borderTopWidth: 1,
+      borderTopColor: theme.border,
+      paddingTop: 12,
       gap: 8
     },
-    categoryRow: {
-      minHeight: 38,
+    reviewRow: {
+      minHeight: 50,
       borderWidth: 1,
       borderColor: theme.border,
       backgroundColor: theme.surfaceInset,
       borderRadius: 12,
       paddingHorizontal: 10,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8
-    },
-    categoryName: {
-      flex: 1,
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 13,
-      fontWeight: "800"
-    },
-    categoryMeta: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 11,
-      fontWeight: "700"
-    },
-    textInput: {
-      minHeight: 48,
-      borderWidth: 1,
-      borderColor: theme.borderStrong,
-      backgroundColor: theme.surfaceInset,
-      borderRadius: 12,
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 15,
-      paddingHorizontal: 12,
-      paddingVertical: 10
-    },
-    projectPicker: {
-      gap: 10,
-      paddingRight: 4
-    },
-    projectPill: {
-      minWidth: 150,
-      borderWidth: 1,
-      borderColor: theme.borderStrong,
-      backgroundColor: theme.surfaceInset,
-      borderRadius: 14,
-      padding: 12,
-      gap: 6
-    },
-    projectPillSelected: {
-      borderColor: theme.accent,
-      backgroundColor: theme.surfaceMuted
-    },
-    projectPillText: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 14,
-      fontWeight: "800"
-    },
-    projectPillTextSelected: {
-      color: theme.accent
-    },
-    projectPillMeta: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 11
-    },
-    quickTitle: {
-      fontSize: 16,
-      fontWeight: "800",
-      color: theme.textPrimary,
-      fontFamily: monoFont
-    },
-    quickMeta: {
-      fontSize: 12,
-      color: theme.textSecondary,
-      fontFamily: monoFont
-    },
-    primaryButton: {
-      marginTop: 8,
-      borderWidth: 1,
-      borderColor: theme.accent,
-      backgroundColor: theme.accent,
-      borderRadius: 12,
-      paddingVertical: 12,
-      alignItems: "center"
-    },
-    buttonPressed: {
-      opacity: 0.84,
-      transform: [{ translateY: 1 }]
-    },
-    buttonDisabled: {
-      opacity: 0.45
-    },
-    primaryButtonText: {
-      color: theme.mode === "dark" ? theme.background : "#FFFFFF",
-      fontWeight: "800",
-      fontFamily: monoFont
-    },
-    secondaryButton: {
-      borderWidth: 1,
-      borderColor: theme.borderStrong,
-      backgroundColor: theme.surfaceInset,
-      borderRadius: 12,
-      paddingHorizontal: 14,
-      paddingVertical: 10
-    },
-    toggleSelected: {
-      borderColor: theme.accent,
-      backgroundColor: theme.surfaceMuted
-    },
-    syncButton: {
-      borderWidth: 1,
-      borderColor: theme.borderStrong,
-      backgroundColor: theme.surfaceInset,
-      borderRadius: 12,
-      paddingHorizontal: 12,
-      paddingVertical: 8
-    },
-    secondaryButtonText: {
-      color: theme.accent,
-      fontWeight: "800",
-      fontFamily: monoFont
-    },
-    row: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 10
-    },
-    settingsDivider: {
-      height: 1,
-      backgroundColor: theme.border,
-      marginVertical: 8
-    },
-    buttonRow: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      gap: 10
-    },
-    statusText: {
-      fontSize: 13,
-      color: theme.textPrimary,
-      fontWeight: "700",
-      fontFamily: monoFont
-    },
-    errorText: {
-      borderWidth: 1,
-      borderColor: theme.danger,
-      color: theme.danger,
-      backgroundColor: theme.surfaceInset,
-      borderRadius: 12,
-      paddingHorizontal: 10,
       paddingVertical: 8,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10
+    },
+    reviewDot: {
+      width: 8,
+      height: 28,
+      borderRadius: 999,
+      backgroundColor: theme.accentStrong
+    },
+    reviewText: {
+      flex: 1,
+      gap: 2
+    },
+    reviewTitle: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
       fontSize: 13,
-      fontFamily: monoFont
+      fontWeight: "800"
     }
   });
 }

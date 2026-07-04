@@ -71,7 +71,7 @@ export async function getHealthImportStatus(): Promise<HealthImportStatus[]> {
         provider: "healthkit",
         kind: "availability",
         status: "unavailable",
-        notes: "HealthKit is only available on iOS native builds."
+        notes: "Apple Health is available from a native iOS build on iPhone."
       }
     ];
   }
@@ -85,7 +85,7 @@ export async function getHealthImportStatus(): Promise<HealthImportStatus[]> {
         kind: "availability",
         status: available ? "available" : "unavailable",
         notes: available
-          ? "HealthKit sleep permission can be requested from this native build."
+          ? "Apple Health access can be requested from this native build."
           : "Health data is not available on this device."
       },
     ];
@@ -120,8 +120,34 @@ export async function requestHealthKitSleepPermission() {
     kind: "sleep" as const,
     status: granted ? ("available" as const) : ("needs_permission" as const),
     notes: granted
-      ? "HealthKit sleep read permission was requested."
-      : "HealthKit sleep permission was not granted."
+      ? "Apple Health sleep access was requested."
+      : "Apple Health sleep access was not granted."
+  };
+}
+
+export async function requestHealthKitPermission() {
+  ensureIos();
+  const healthkit = await loadHealthKit();
+  const available = await Promise.resolve(healthkit.isHealthDataAvailable());
+  if (!available) {
+    return {
+      provider: "healthkit" as const,
+      kind: "availability" as const,
+      status: "unavailable" as const,
+      notes: "Health data is not available on this device."
+    };
+  }
+
+  const granted = await healthkit.requestAuthorization({
+    toRead: [HEALTHKIT_SLEEP_TYPE, HEALTHKIT_WORKOUT_TYPE]
+  });
+  return {
+    provider: "healthkit" as const,
+    kind: "availability" as const,
+    status: granted ? ("available" as const) : ("needs_permission" as const),
+    notes: granted
+      ? "Apple Health access was requested for sleep and workouts."
+      : "Apple Health access was not granted."
   };
 }
 
@@ -144,8 +170,8 @@ export async function requestHealthKitWorkoutPermission() {
     kind: "workout" as const,
     status: granted ? ("available" as const) : ("needs_permission" as const),
     notes: granted
-      ? "HealthKit workout read permission was requested."
-      : "HealthKit workout permission was not granted."
+      ? "Apple Health workout access was requested."
+      : "Apple Health workout access was not granted."
   };
 }
 
@@ -190,8 +216,8 @@ export async function importHealthKitSleep() {
     kind: "sleep" as const,
     status: "synced" as const,
     notes: imported.length
-      ? `Queued ${imported.length} HealthKit sleep samples as activity events.`
-      : "No new HealthKit sleep samples found.",
+      ? `Queued ${imported.length} sleep samples as activity events.`
+      : "No new sleep samples found.",
     importedCount: imported.length,
     lastSync: new Date().toISOString()
   };
@@ -224,8 +250,8 @@ export async function importHealthKitWorkouts() {
     kind: "workout" as const,
     status: "synced" as const,
     notes: imported.length
-      ? `Queued ${imported.length} HealthKit workouts as activity events.`
-      : "No new HealthKit workouts found.",
+      ? `Queued ${imported.length} workouts as activity events.`
+      : "No new workouts found.",
     importedCount: imported.length,
     lastSync: new Date().toISOString()
   };
@@ -324,15 +350,15 @@ export function friendlyHealthKitError(error: unknown, action = "use HealthKit")
     lower.includes("code=5") ||
     lower.includes("not determined")
   ) {
-    return "HealthKit permission is not ready yet. Request access from Settings, confirm it in the iOS Health prompt, then sync again.";
+    return "Apple Health access is not ready yet. Connect Apple Health, confirm the iOS prompt, then sync again.";
   }
 
   if (lower.includes("not available") || lower.includes("native ios build")) {
-    return "HealthKit needs a native iOS build on a real device.";
+    return "Apple Health needs a native iOS build on iPhone.";
   }
 
   if (lower.includes("denied") || lower.includes("not granted")) {
-    return "HealthKit access was not granted. Open iOS Settings and allow Dayframe to read the selected Health data.";
+    return "Apple Health access was not granted. Open iOS Settings and allow Dayframe to read sleep and workouts.";
   }
 
   return `Unable to ${action}.`;

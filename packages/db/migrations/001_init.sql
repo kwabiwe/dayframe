@@ -52,8 +52,11 @@ create table if not exists categories (
   workspace_id uuid not null references workspaces(id) on delete cascade,
   name text not null,
   color text not null default 'steel',
+  is_pinned boolean not null default false,
+  sort_order integer not null default 0,
   is_archived boolean not null default false,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 create table if not exists projects (
@@ -330,6 +333,9 @@ create table if not exists audit_log (
 );
 
 alter table activity_events add column if not exists client_event_id text;
+alter table categories add column if not exists is_pinned boolean not null default false;
+alter table categories add column if not exists sort_order integer not null default 0;
+alter table categories add column if not exists updated_at timestamptz not null default now();
 alter table health_workouts add column if not exists external_sample_id text;
 alter table health_workouts add column if not exists provider text not null default 'healthkit';
 alter table health_workouts add column if not exists duration_seconds integer;
@@ -341,7 +347,7 @@ create index if not exists idx_time_entries_workspace_started on time_entries(wo
 create index if not exists idx_time_entries_active on time_entries(workspace_id, user_id) where stopped_at is null;
 create index if not exists idx_activity_events_workspace_occurred on activity_events(workspace_id, occurred_at desc);
 create unique index if not exists idx_activity_events_client_event_id on activity_events(workspace_id, user_id, client_event_id) where client_event_id is not null;
-create index if not exists idx_categories_workspace_pinned on categories(workspace_id, is_pinned desc, name) where is_archived = false;
+create index if not exists idx_categories_workspace_pinned on categories(workspace_id, is_pinned desc, sort_order, name) where is_archived = false;
 create index if not exists idx_review_items_workspace_status on review_items(workspace_id, status, created_at desc);
 create unique index if not exists idx_health_workouts_external_sample on health_workouts(workspace_id, provider, external_sample_id) where external_sample_id is not null;
 create index if not exists idx_geofences_center on geofences using gist(center);

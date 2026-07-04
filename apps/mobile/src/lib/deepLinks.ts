@@ -17,7 +17,7 @@ export async function enqueueShortcutAction(
   const projectId = firstString(query.projectId);
   const categoryId = firstString(query.categoryId);
 
-  if (action === "action/start" && projectId) {
+  if (action === "action/start" && (projectId || categoryId)) {
     return enqueueEvent({
       source: "shortcut",
       type: "shortcut_action",
