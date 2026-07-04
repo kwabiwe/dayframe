@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Animated,
+  AppState,
   Easing,
   Image,
   Linking,
@@ -21,12 +22,15 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { DAYFRAME_THEME, paletteColorFor } from "@dayframe/shared";
 import {
   requestLocationAccess,
+  refreshGeofencesForPlaces,
   startGeofences
 } from "@/lib/geofence";
 import {
   getHealthImportStatus,
   importHealthKitSleep,
+  importHealthKitWorkouts,
   requestHealthKitSleepPermission,
+  requestHealthKitWorkoutPermission,
   type HealthImportStatus
 } from "@/lib/health";
 import {
@@ -81,11 +85,12 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(false);
   const [authState, setAuthState] = useState<AuthState>("checking");
   const [authView, setAuthView] = useState<AuthView>("login");
-  const [authEmail, setAuthEmail] = useState("test1@dayframe.local");
+  const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authName, setAuthName] = useState("");
   const [authWorkspace, setAuthWorkspace] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authNotice, setAuthNotice] = useState<string | null>(null);
   const [locationStatus, setLocationStatus] = useState("Not requested");
   const [healthStatus, setHealthStatus] = useState<HealthImportStatus[]>([]);
   const [now, setNow] = useState(() => Date.now());
@@ -154,8 +159,15 @@ export default function HomeScreen() {
   useEffect(() => {
     const interval = setInterval(() => {
       if (authState !== "signedOut") void load({ silent: true });
-    }, 1000);
+    }, 30000);
     return () => clearInterval(interval);
+  }, [authState, load]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active" && authState === "authenticated") void load({ silent: true });
+    });
+    return () => subscription.remove();
   }, [authState, load]);
 
   useEffect(() => {
@@ -188,10 +200,24 @@ export default function HomeScreen() {
   );
   const summaryTotal = summarySegments.reduce((sum, segment) => sum + segment.seconds, 0);
   const places = data?.places ?? [];
+  const healthAvailability =
+    healthStatus.find((item) => item.provider === "healthkit" && item.kind === "availability") ??
+    healthStatus.find((item) => item.provider === "healthkit");
+  const sleepStatus = healthStatus.find((item) => item.provider === "healthkit" && item.kind === "sleep");
+  const workoutStatus = healthStatus.find((item) => item.provider === "healthkit" && item.kind === "workout");
 
   useEffect(() => {
     if (!customProjectId && data?.projects[0]) setCustomProjectId(data.projects[0].id);
   }, [customProjectId, data?.projects]);
+
+  useEffect(() => {
+    if (authState !== "authenticated" || !data?.places.length) return;
+    refreshGeofencesForPlaces(data.places)
+      .then((count) => {
+        if (count > 0) setLocationStatus(`Monitoring ${count} places`);
+      })
+      .catch(() => undefined);
+  }, [authState, data?.places]);
 
   useEffect(() => {
     chartBuild.stopAnimation();
@@ -289,35 +315,67 @@ export default function HomeScreen() {
   async function connectHealthKit() {
     try {
       const status = await requestHealthKitSleepPermission();
-      setHealthStatus((current) => [status, ...current.filter((item) => item.provider !== "healthkit")]);
+      updateHealthStatus(status);
     } catch (error) {
       Alert.alert("HealthKit", error instanceof Error ? error.message : "Unable to request HealthKit permission");
+    }
+  }
+
+  async function connectHealthKitWorkouts() {
+    try {
+      const status = await requestHealthKitWorkoutPermission();
+      updateHealthStatus(status);
+    } catch (error) {
+      Alert.alert("HealthKit", error instanceof Error ? error.message : "Unable to request HealthKit workout permission");
     }
   }
 
   async function syncHealthKitSleep() {
     try {
       const status = await importHealthKitSleep();
-      setHealthStatus((current) => [status, ...current.filter((item) => item.provider !== "healthkit")]);
+      updateHealthStatus(status);
       await syncAndReload();
     } catch (error) {
       Alert.alert("HealthKit", error instanceof Error ? error.message : "Unable to sync HealthKit sleep");
     }
   }
 
+  async function syncHealthKitWorkouts() {
+    try {
+      const status = await importHealthKitWorkouts();
+      updateHealthStatus(status);
+      await syncAndReload();
+    } catch (error) {
+      Alert.alert("HealthKit", error instanceof Error ? error.message : "Unable to sync HealthKit workouts");
+    }
+  }
+
+  function updateHealthStatus(status: HealthImportStatus) {
+    setHealthStatus((current) => [
+      status,
+      ...current.filter((item) => !(item.provider === status.provider && item.kind === status.kind))
+    ]);
+  }
+
   async function submitAuth() {
     setAuthError(null);
+    setAuthNotice(null);
     setLoading(true);
     try {
-      if (authView === "signup") {
-        await signup(
+      const auth = authView === "signup"
+        ? await signup(
           authEmail,
           authPassword,
           authName.trim() || undefined,
           authWorkspace.trim() || undefined
-        );
-      } else {
-        await login(authEmail, authPassword);
+        )
+        : await login(authEmail, authPassword);
+      if ("requiresEmailConfirmation" in auth) {
+        setAuthPassword("");
+        setAuthNotice(auth.message);
+        setAuthView("login");
+        setAuthState("signedOut");
+        return;
       }
       setAuthPassword("");
       await load();
@@ -359,13 +417,13 @@ export default function HomeScreen() {
                 style={styles.logoImage}
                 resizeMode="contain"
               />
-              <Text style={styles.subtitle}>Local auth</Text>
+              <Text style={styles.subtitle}>Hosted sync</Text>
             </View>
           </View>
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>{authView === "signup" ? "Create account" : "Log in"}</Text>
             <Text style={styles.muted}>
-              Use the same local account as the web app. Events sync with your authenticated workspace.
+              Use your Dayframe account to sync timers, location events and HealthKit imports with your workspace.
             </Text>
             {authView === "signup" ? (
               <>
@@ -406,6 +464,7 @@ export default function HomeScreen() {
               secureTextEntry
               textContentType={authView === "signup" ? "newPassword" : "password"}
             />
+            {authNotice ? <Text style={styles.statusText}>{authNotice}</Text> : null}
             {authError ? <Text style={styles.errorText}>{authError}</Text> : null}
             <Pressable style={pressable(styles.primaryButton, styles.buttonPressed)} onPress={submitAuth}>
               <Text style={styles.primaryButtonText}>
@@ -420,7 +479,7 @@ export default function HomeScreen() {
               }}
             >
               <Text style={styles.secondaryButtonText}>
-                {authView === "signup" ? "Use existing account" : "Create local account"}
+                {authView === "signup" ? "Use existing account" : "Create account"}
               </Text>
             </Pressable>
           </View>
@@ -595,20 +654,28 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.panel}>
-            <Text style={styles.sectionTitle}>HealthKit sleep</Text>
+            <Text style={styles.sectionTitle}>HealthKit</Text>
             <Text style={styles.muted}>
-              Sleep samples are queued as health activity events first, then reviewed before becoming trusted
-              time entries.
+              Sleep and workouts are queued as health activity events first, then reviewed before becoming
+              trusted time entries.
             </Text>
             <Text style={styles.statusText}>
-              {healthStatus.find((item) => item.provider === "healthkit")?.notes ?? "HealthKit status not checked"}
+              {healthAvailability?.notes ?? "HealthKit status not checked"}
             </Text>
+            <Text style={styles.muted}>Sleep: {sleepStatus?.notes ?? "Not synced yet."}</Text>
+            <Text style={styles.muted}>Workouts: {workoutStatus?.notes ?? "Not synced yet."}</Text>
             <View style={styles.buttonRow}>
               <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={connectHealthKit}>
-                <Text style={styles.secondaryButtonText}>Connect</Text>
+                <Text style={styles.secondaryButtonText}>Sleep access</Text>
               </Pressable>
               <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={syncHealthKitSleep}>
                 <Text style={styles.secondaryButtonText}>Sync sleep</Text>
+              </Pressable>
+              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={connectHealthKitWorkouts}>
+                <Text style={styles.secondaryButtonText}>Workout access</Text>
+              </Pressable>
+              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={syncHealthKitWorkouts}>
+                <Text style={styles.secondaryButtonText}>Sync workouts</Text>
               </Pressable>
             </View>
           </View>

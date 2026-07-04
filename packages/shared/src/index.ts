@@ -192,6 +192,7 @@ export const ActivityEventInputSchema = z.object({
   workspaceId: z.string().uuid().default(DEMO_WORKSPACE_ID),
   userId: z.string().uuid().default(DEMO_USER_ID),
   deviceId: z.string().uuid().optional(),
+  clientEventId: z.string().trim().min(1).max(160).optional(),
   projectId: z.string().uuid().optional(),
   categoryId: z.string().uuid().optional(),
   placeId: z.string().uuid().optional(),

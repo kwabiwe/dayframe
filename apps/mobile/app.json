@@ -8,7 +8,7 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "local.dayframe.app",
+      "bundleIdentifier": "com.dayframe.app",
       "infoPlist": {
         "UIBackgroundModes": [
           "location",
@@ -21,7 +21,7 @@
       }
     },
     "android": {
-      "package": "local.dayframe.app",
+      "package": "com.dayframe.app",
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",

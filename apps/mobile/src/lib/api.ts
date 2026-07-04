@@ -6,8 +6,8 @@ import {
   type ActivityEventType,
   type EventSource
 } from "@dayframe/shared";
+import { DAYFRAME_API_BASE } from "./config";
 
-const API_BASE = process.env.EXPO_PUBLIC_DAYFRAME_API_BASE ?? "http://localhost:3000";
 const QUEUE_KEY = "dayframe.offlineQueue.v1";
 const SESSION_TOKEN_KEY = "dayframe.localSessionToken.v1";
 
@@ -69,6 +69,15 @@ export type MobileAuthSession = {
   expiresAt: string;
 };
 
+export type MobileAuthConfirmation = {
+  requiresEmailConfirmation: true;
+  message: string;
+  user: { id: string; email: string; name: string };
+  workspace: { id: string; name: string };
+};
+
+export type MobileAuthResult = MobileAuthSession | MobileAuthConfirmation;
+
 export type QueuedEvent = Omit<ActivityEventInput, "occurredAt"> & {
   occurredAt: Date;
   localId: string;
@@ -88,7 +97,7 @@ type ActivityEventDraft = {
 };
 
 export async function fetchBootstrap(): Promise<MobileBootstrap> {
-  const response = await fetch(`${API_BASE}/api/bootstrap`, {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/bootstrap`, {
     headers: await authHeaders()
   });
   if (response.status === 401) {
@@ -96,9 +105,9 @@ export async function fetchBootstrap(): Promise<MobileBootstrap> {
     throw new AuthRequiredError();
   }
   if (!response.ok) {
-    throw new Error(`Unable to load Dayframe API: ${response.status}`);
+    throw new Error(await errorMessage(response, "Unable to load Dayframe API"));
   }
-  return response.json();
+  return readJsonResponse<MobileBootstrap>(response);
 }
 
 export async function login(email: string, password: string) {
@@ -111,7 +120,7 @@ export async function signup(email: string, password: string, name?: string, wor
 
 export async function logout() {
   const token = await getSessionToken();
-  await fetch(`${API_BASE}/api/auth/logout`, {
+  await fetch(`${DAYFRAME_API_BASE}/api/auth/logout`, {
     method: "POST",
     headers: token ? { Authorization: `Bearer ${token}` } : {}
   }).catch(() => undefined);
@@ -154,12 +163,12 @@ export async function readQueue(): Promise<QueuedEvent[]> {
 
 export async function syncQueue() {
   const queue = await readQueue();
-  const remaining: QueuedEvent[] = [];
   const synced: string[] = [];
 
-  for (const item of queue) {
+  for (let index = 0; index < queue.length; index += 1) {
+    const item = queue[index];
     try {
-      const response = await fetch(`${API_BASE}/api/events`, {
+      const response = await fetch(`${DAYFRAME_API_BASE}/api/events`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -167,6 +176,7 @@ export async function syncQueue() {
         },
         body: JSON.stringify({
           ...item,
+          clientEventId: item.localId,
           occurredAt: item.occurredAt.toISOString()
         })
       });
@@ -178,12 +188,14 @@ export async function syncQueue() {
       synced.push(item.localId);
     } catch (error) {
       if (error instanceof AuthRequiredError) throw error;
-      remaining.push(item);
+      const remaining = queue.slice(index);
+      await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(remaining));
+      return { synced, remaining };
     }
   }
 
-  await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(remaining));
-  return { synced, remaining };
+  await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify([]));
+  return { synced, remaining: [] };
 }
 
 export async function startTimer(projectId: string, categoryId?: string | null, description?: string) {
@@ -218,20 +230,21 @@ export class AuthRequiredError extends Error {
   }
 }
 
-async function authenticate(path: string, body: Record<string, unknown>) {
-  const response = await fetch(`${API_BASE}${path}`, {
+async function authenticate(path: string, body: Record<string, unknown>): Promise<MobileAuthResult> {
+  const response = await fetch(`${DAYFRAME_API_BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
-  const payload = (await response.json()) as MobileAuthSession & { error?: string };
+  const payload = await readJsonResponse<MobileAuthResult & { error?: string }>(response);
   if (!response.ok) throw new Error(payload.error ?? `Authentication failed: ${response.status}`);
+  if ("requiresEmailConfirmation" in payload) return payload;
   await SecureStore.setItemAsync(SESSION_TOKEN_KEY, payload.token);
   return payload;
 }
 
 async function postTimerAction(body: Record<string, unknown>) {
-  const response = await fetch(`${API_BASE}/api/time-entries`, {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/time-entries`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -243,11 +256,26 @@ async function postTimerAction(body: Record<string, unknown>) {
     await clearSessionToken();
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(`Timer action failed: ${response.status}`);
-  return response.json();
+  if (!response.ok) throw new Error(await errorMessage(response, "Timer action failed"));
+  return readJsonResponse(response);
 }
 
 async function authHeaders(): Promise<Record<string, string>> {
   const token = await getSessionToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+async function readJsonResponse<T>(response: Response): Promise<T> {
+  const text = await response.text();
+  if (!text) return {} as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return { error: text } as T;
+  }
+}
+
+async function errorMessage(response: Response, fallback: string) {
+  const payload = await readJsonResponse<{ error?: string }>(response);
+  return payload.error ?? `${fallback}: ${response.status}`;
 }

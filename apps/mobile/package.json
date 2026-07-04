@@ -8,6 +8,7 @@
     "ios": "expo run:ios",
     "prebuild:ios": "expo prebuild --platform ios",
     "xcode": "node scripts/open-xcode.mjs",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

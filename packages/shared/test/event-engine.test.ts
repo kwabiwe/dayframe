@@ -213,6 +213,21 @@ describe("event normalization", () => {
     expect(mapHealthKitSleepStage("awake")).toBe("awake");
   });
 
+  it("accepts optional client event ids for idempotent mobile retries", () => {
+    const candidate = normalizeActivityEvent(
+      {
+        source: "mobile_app",
+        type: "timer_stop",
+        occurredAt: new Date("2026-06-20T17:00:00Z"),
+        clientEventId: "mobile-local-1"
+      },
+      context
+    );
+
+    expect(candidate.action).toBe("stop_timer");
+    expect(candidate.reviewStatus).toBe("confirmed");
+  });
+
   it("maps Toggl time entries to stable external references", () => {
     const mapped = mapTogglTimeEntry({
       id: 123,

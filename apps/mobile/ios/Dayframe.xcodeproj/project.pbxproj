@@ -7,29 +7,29 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		04BED18508AD6E4F9E2FCC38 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6D2172E2E3CB5FA372F9746 /* ExpoModulesProvider.swift */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
+		779A5666A26D5B5BAFD1A287 /* libPods-Dayframe.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A6DC16DC66C3BC0A0812E20 /* libPods-Dayframe.a */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
-		D1AC1BED527122A51E7F1210 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = B964A8BCB77C710BB746FEC0 /* PrivacyInfo.xcprivacy */; };
-		EE3173A84A44A52200364EB6 /* libPods-Dayframe.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 602BA5E9897CA0BC31FAD09B /* libPods-Dayframe.a */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
-		F964A4DE0CEE4ADB3861A413 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DF858EAFDD52D18B30EFC04 /* ExpoModulesProvider.swift */; };
+		F8E5DEB5A642AF9128DE2E3F /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 47826C218DF2CD53638292FB /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		0728297A5966D57372FD6B88 /* Pods-Dayframe.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Dayframe.debug.xcconfig"; path = "Target Support Files/Pods-Dayframe/Pods-Dayframe.debug.xcconfig"; sourceTree = "<group>"; };
 		13B07F961A680F5B00A75B9A /* Dayframe.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Dayframe.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = Dayframe/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = Dayframe/Info.plist; sourceTree = "<group>"; };
-		3E8E3DED1AB5D8723DB6D6D1 /* Pods-Dayframe.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Dayframe.release.xcconfig"; path = "Target Support Files/Pods-Dayframe/Pods-Dayframe.release.xcconfig"; sourceTree = "<group>"; };
-		429D5C06DCB466EFCFB10052 /* Pods-Dayframe.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Dayframe.debug.xcconfig"; path = "Target Support Files/Pods-Dayframe/Pods-Dayframe.debug.xcconfig"; sourceTree = "<group>"; };
-		602BA5E9897CA0BC31FAD09B /* libPods-Dayframe.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-Dayframe.a"; sourceTree = BUILT_PRODUCTS_DIR; };
-		9DF858EAFDD52D18B30EFC04 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-Dayframe/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
+		1A6DC16DC66C3BC0A0812E20 /* libPods-Dayframe.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-Dayframe.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		2E3F5FC9A57F78D3CBEF1BC5 /* Pods-Dayframe.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Dayframe.release.xcconfig"; path = "Target Support Files/Pods-Dayframe/Pods-Dayframe.release.xcconfig"; sourceTree = "<group>"; };
+		47826C218DF2CD53638292FB /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = Dayframe/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = Dayframe/SplashScreen.storyboard; sourceTree = "<group>"; };
-		B964A8BCB77C710BB746FEC0 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = Dayframe/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = Dayframe/AppDelegate.swift; sourceTree = "<group>"; };
 		F11748442D0722820044C1D9 /* Dayframe-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "Dayframe-Bridging-Header.h"; path = "Dayframe/Dayframe-Bridging-Header.h"; sourceTree = "<group>"; };
+		F6D2172E2E3CB5FA372F9746 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-Dayframe/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -37,13 +37,21 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				EE3173A84A44A52200364EB6 /* libPods-Dayframe.a in Frameworks */,
+				779A5666A26D5B5BAFD1A287 /* libPods-Dayframe.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		05BE13FCD363E5C3BB58A6EC /* Dayframe */ = {
+			isa = PBXGroup;
+			children = (
+				F6D2172E2E3CB5FA372F9746 /* ExpoModulesProvider.swift */,
+			);
+			name = Dayframe;
+			sourceTree = "<group>";
+		};
 		13B07FAE1A68108700A75B9A /* Dayframe */ = {
 			isa = PBXGroup;
 			children = (
@@ -53,7 +61,7 @@
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
-				B964A8BCB77C710BB746FEC0 /* PrivacyInfo.xcprivacy */,
+				47826C218DF2CD53638292FB /* PrivacyInfo.xcprivacy */,
 			);
 			name = Dayframe;
 			sourceTree = "<group>";
@@ -62,17 +70,9 @@
 			isa = PBXGroup;
 			children = (
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
-				602BA5E9897CA0BC31FAD09B /* libPods-Dayframe.a */,
+				1A6DC16DC66C3BC0A0812E20 /* libPods-Dayframe.a */,
 			);
 			name = Frameworks;
-			sourceTree = "<group>";
-		};
-		67C7C3B68B029A11399300D3 /* Dayframe */ = {
-			isa = PBXGroup;
-			children = (
-				9DF858EAFDD52D18B30EFC04 /* ExpoModulesProvider.swift */,
-			);
-			name = Dayframe;
 			sourceTree = "<group>";
 		};
 		832341AE1AAA6A7D00B99B32 /* Libraries */ = {
@@ -89,8 +89,8 @@
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
-				E946D3A16BE921A0711ED538 /* Pods */,
-				A8935692620C688E658DBC37 /* ExpoModulesProviders */,
+				8B53C3DAD95134FCC8817840 /* Pods */,
+				BAD062834DAA0307FD7E7788 /* ExpoModulesProviders */,
 			);
 			indentWidth = 2;
 			sourceTree = "<group>";
@@ -105,10 +105,20 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		A8935692620C688E658DBC37 /* ExpoModulesProviders */ = {
+		8B53C3DAD95134FCC8817840 /* Pods */ = {
 			isa = PBXGroup;
 			children = (
-				67C7C3B68B029A11399300D3 /* Dayframe */,
+				0728297A5966D57372FD6B88 /* Pods-Dayframe.debug.xcconfig */,
+				2E3F5FC9A57F78D3CBEF1BC5 /* Pods-Dayframe.release.xcconfig */,
+			);
+			name = Pods;
+			path = Pods;
+			sourceTree = "<group>";
+		};
+		BAD062834DAA0307FD7E7788 /* ExpoModulesProviders */ = {
+			isa = PBXGroup;
+			children = (
+				05BE13FCD363E5C3BB58A6EC /* Dayframe */,
 			);
 			name = ExpoModulesProviders;
 			sourceTree = "<group>";
@@ -122,16 +132,6 @@
 			path = Dayframe/Supporting;
 			sourceTree = "<group>";
 		};
-		E946D3A16BE921A0711ED538 /* Pods */ = {
-			isa = PBXGroup;
-			children = (
-				429D5C06DCB466EFCFB10052 /* Pods-Dayframe.debug.xcconfig */,
-				3E8E3DED1AB5D8723DB6D6D1 /* Pods-Dayframe.release.xcconfig */,
-			);
-			name = Pods;
-			path = Pods;
-			sourceTree = "<group>";
-		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -140,13 +140,13 @@
 			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "Dayframe" */;
 			buildPhases = (
 				08A4A3CD28434E44B6B9DE2E /* [CP] Check Pods Manifest.lock */,
-				9DC5D5D11A4E22FD41309A55 /* [Expo] Configure project */,
+				728EF8A02F580D60E329C172 /* [Expo] Configure project */,
 				13B07F871A680F5B00A75B9A /* Sources */,
 				13B07F8C1A680F5B00A75B9A /* Frameworks */,
 				13B07F8E1A680F5B00A75B9A /* Resources */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */,
-				91DD64BB9357D11AB35FA738 /* [CP] Embed Pods Frameworks */,
+				986EA460A2C4C44DDFF08D75 /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
 			);
@@ -196,7 +196,7 @@
 				BB2F792D24A3F905000567C9 /* Expo.plist in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
-				D1AC1BED527122A51E7F1210 /* PrivacyInfo.xcprivacy in Resources */,
+				F8E5DEB5A642AF9128DE2E3F /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -242,6 +242,30 @@
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
+		728EF8A02F580D60E329C172 /* [Expo] Configure project */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/.xcode.env",
+				"$(SRCROOT)/.xcode.env.local",
+				"$(SRCROOT)/Dayframe/Dayframe.entitlements",
+				"$(SRCROOT)/Pods/Target Support Files/Pods-Dayframe/expo-configure-project.sh",
+			);
+			name = "[Expo] Configure project";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(SRCROOT)/Pods/Target Support Files/Pods-Dayframe/ExpoModulesProvider.swift",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# This script configures Expo modules and generates the modules provider file.\nbash -l -c \"./Pods/Target\\ Support\\ Files/Pods-Dayframe/expo-configure-project.sh\"\n";
+		};
 		800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -274,7 +298,7 @@
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-Dayframe/Pods-Dayframe-resources.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
-		91DD64BB9357D11AB35FA738 /* [CP] Embed Pods Frameworks */ = {
+		986EA460A2C4C44DDFF08D75 /* [CP] Embed Pods Frameworks */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -308,30 +332,6 @@
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-Dayframe/Pods-Dayframe-frameworks.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
-		9DC5D5D11A4E22FD41309A55 /* [Expo] Configure project */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-				"$(SRCROOT)/.xcode.env",
-				"$(SRCROOT)/.xcode.env.local",
-				"$(SRCROOT)/Dayframe/Dayframe.entitlements",
-				"$(SRCROOT)/Pods/Target Support Files/Pods-Dayframe/expo-configure-project.sh",
-			);
-			name = "[Expo] Configure project";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-				"$(SRCROOT)/Pods/Target Support Files/Pods-Dayframe/ExpoModulesProvider.swift",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "# This script configures Expo modules and generates the modules provider file.\nbash -l -c \"./Pods/Target\\ Support\\ Files/Pods-Dayframe/expo-configure-project.sh\"\n";
-		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -340,7 +340,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */,
-				F964A4DE0CEE4ADB3861A413 /* ExpoModulesProvider.swift in Sources */,
+				04BED18508AD6E4F9E2FCC38 /* ExpoModulesProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -349,7 +349,7 @@
 /* Begin XCBuildConfiguration section */
 		13B07F941A680F5B00A75B9A /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 429D5C06DCB466EFCFB10052 /* Pods-Dayframe.debug.xcconfig */;
+			baseConfigurationReference = 0728297A5966D57372FD6B88 /* Pods-Dayframe.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
@@ -374,7 +374,7 @@
 					"-lc++",
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
-				PRODUCT_BUNDLE_IDENTIFIER = local.dayframe.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dayframe.app;
 				PRODUCT_NAME = Dayframe;
 				SWIFT_OBJC_BRIDGING_HEADER = "Dayframe/Dayframe-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -386,7 +386,7 @@
 		};
 		13B07F951A680F5B00A75B9A /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 3E8E3DED1AB5D8723DB6D6D1 /* Pods-Dayframe.release.xcconfig */;
+			baseConfigurationReference = 2E3F5FC9A57F78D3CBEF1BC5 /* Pods-Dayframe.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
@@ -406,7 +406,7 @@
 					"-lc++",
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
-				PRODUCT_BUNDLE_IDENTIFIER = local.dayframe.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dayframe.app;
 				PRODUCT_NAME = Dayframe;
 				SWIFT_OBJC_BRIDGING_HEADER = "Dayframe/Dayframe-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
@@ -478,7 +478,6 @@
 					"$(inherited)",
 					"-DRCT_REMOVE_LEGACY_ARCH=1",
 				);
-				PODFILE_DIR = "$(SRCROOT)";
 				REACT_NATIVE_PATH = "${PODS_ROOT}/../../node_modules/react-native";
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
@@ -542,7 +541,6 @@
 					"$(inherited)",
 					"-DRCT_REMOVE_LEGACY_ARCH=1",
 				);
-				PODFILE_DIR = "$(SRCROOT)";
 				REACT_NATIVE_PATH = "${PODS_ROOT}/../../node_modules/react-native";
 				SDKROOT = iphoneos;
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;

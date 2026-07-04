@@ -11,7 +11,7 @@ export async function POST(request: Request) {
     });
     const body = await request.json();
     const result = await processActivityEvent(body, session);
-    return NextResponse.json(result, { status: 201 });
+    return NextResponse.json(result, { status: result.duplicate ? 200 : 201 });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
