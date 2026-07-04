@@ -4,7 +4,7 @@
   "private": true,
   "main": "expo-router/entry",
   "scripts": {
-    "start": "expo start",
+    "start": "expo start --dev-client",
     "ios": "expo run:ios",
     "prebuild:ios": "expo prebuild --platform ios",
     "xcode": "node scripts/open-xcode.mjs",

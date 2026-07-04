@@ -49,6 +49,8 @@ npm run ios:xcode
 npm run ios
 ```
 
+`npm run ios` is the safest local simulator path because it builds, installs and opens the app with the correct Metro development URL. If you want to use Xcode directly, run `npm run ios:xcode` instead of opening the workspace by hand; the helper starts Metro before opening Xcode. A Debug build launched without Metro shows React Native's "No script URL provided" red screen because there is no embedded JavaScript bundle in Debug.
+
 `apps/mobile/ios/Dayframe.xcworkspace` is generated and ready for Xcode. The helper script prints the active Xcode developer directory and version before opening the workspace/project.
 
 For a physical iPhone, set `EXPO_PUBLIC_DAYFRAME_API_BASE` in `apps/mobile/.env` to your Mac's LAN URL instead of `localhost`.
