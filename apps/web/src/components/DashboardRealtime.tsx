@@ -17,13 +17,11 @@ import {
   ChevronDown,
   Clock3,
   Edit3,
-  Folder,
   HelpCircle,
   Laptop,
   MapPin,
   Play,
   Plus,
-  Search,
   Square,
   Tag,
   Trash2,
@@ -161,32 +159,17 @@ export function CurrentTimerPanel({
 }) {
   const [now, setNow] = useState(() => Date.now());
   const [isBusy, setIsBusy] = useState(false);
+  const [timerError, setTimerError] = useState<string | null>(null);
   const [description, setDescription] = useState(data.activeEntry?.description ?? "");
-  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
-  const [projectQuery, setProjectQuery] = useState("");
-  const [projectId, setProjectId] = useState(data.activeEntry?.projectId ?? data.projects[0]?.id ?? "");
   const [categoryId, setCategoryId] = useState(
-    data.activeEntry?.categoryId ?? data.projects[0]?.categoryId ?? data.categories[0]?.id ?? ""
+    data.activeEntry?.categoryId ?? data.categories[0]?.id ?? ""
   );
   const activeDetailsSyncRef = useRef("");
   const active = data.activeEntry;
-  const selectedProject = data.projects.find((project) => project.id === projectId) ?? null;
   const selectedCategory = data.categories.find((category) => category.id === categoryId) ?? null;
   const durationSeconds = active
     ? Math.max(active.durationSeconds, Math.floor((now - new Date(active.startedAt).getTime()) / 1000))
     : 0;
-  const filteredProjects = data.projects.filter((project) => {
-    const query = projectQuery.trim().toLowerCase();
-    if (!query) return true;
-    return `${project.name} ${project.clientName ?? ""} ${project.categoryName ?? ""}`.toLowerCase().includes(query);
-  });
-  const groupedProjects = filteredProjects.reduce((groups, project) => {
-    const group = project.clientName ?? "No client";
-    const existing = groups.get(group) ?? [];
-    existing.push(project);
-    groups.set(group, existing);
-    return groups;
-  }, new Map<string, typeof data.projects>());
   const quickActions = useMemo(() => buildLearnedQuickActions(data), [data]);
 
   useEffect(() => {
@@ -201,18 +184,15 @@ export function CurrentTimerPanel({
       return undefined;
     }
 
-    const nextProjectId = selectedProject?.id ?? active.projectId;
     const nextCategoryId = categoryId || null;
     const nextDescription = description.trim() || null;
     const nextSyncKey = JSON.stringify([
       active.id,
-      nextProjectId,
       nextCategoryId,
       nextDescription
     ]);
 
     if (
-      nextProjectId === active.projectId &&
       nextCategoryId === active.categoryId &&
       nextDescription === (active.description ?? null)
     ) {
@@ -228,7 +208,7 @@ export function CurrentTimerPanel({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          projectId: nextProjectId,
+          projectId: active.projectId,
           categoryId: nextCategoryId,
           placeId: active.placeId,
           description: nextDescription,
@@ -239,7 +219,7 @@ export function CurrentTimerPanel({
     }, 650);
 
     return () => window.clearTimeout(syncHandle);
-  }, [active, categoryId, description, selectedProject?.id]);
+  }, [active, categoryId, description]);
 
   async function refresh() {
     const response = await fetch(`/api/bootstrap?date=${data.dateRange.selectedDate}`, {
@@ -252,18 +232,17 @@ export function CurrentTimerPanel({
     mode: "start" | "stop",
     override?: { projectId?: string | null; categoryId?: string | null; description?: string | null }
   ) {
-    const nextProjectId = override?.projectId ?? selectedProject?.id;
     const nextCategoryId =
       override && "categoryId" in override
         ? (override.categoryId ?? undefined)
-        : categoryId || selectedProject?.categoryId || undefined;
+        : categoryId || undefined;
     const nextDescription =
       override && "description" in override
         ? (override.description ?? undefined)
         : description.trim() || undefined;
 
-    if (mode === "start" && !nextProjectId) return;
     setIsBusy(true);
+    setTimerError(null);
     try {
       const response = await fetch("/api/time-entries", {
         method: "POST",
@@ -272,33 +251,33 @@ export function CurrentTimerPanel({
           mode === "start"
             ? {
                 mode,
-                projectId: nextProjectId,
                 categoryId: nextCategoryId,
                 description: nextDescription
               }
             : { mode }
         )
       });
-      if (!response.ok) throw new Error(`Timer action failed: ${response.status}`);
+      if (!response.ok) {
+        let errorMessage = `Timer action failed: ${response.status}`;
+        try {
+          const payload = (await response.json()) as { error?: string };
+          errorMessage = payload.error ?? errorMessage;
+        } catch {
+          // Deployed runtime failures may not return a JSON body.
+        }
+        throw new Error(errorMessage);
+      }
       await refresh();
+    } catch (error) {
+      setTimerError(error instanceof Error ? error.message : "Unable to update the timer.");
     } finally {
       setIsBusy(false);
     }
   }
 
-  function selectProject(nextProjectId: string) {
-    const nextProject = data.projects.find((project) => project.id === nextProjectId) ?? null;
-    setProjectId(nextProjectId);
-    if (nextProject?.categoryId) setCategoryId(nextProject.categoryId);
-    setProjectPickerOpen(false);
-    setProjectQuery("");
-  }
-
   async function startQuickAction(action: LearnedQuickAction) {
-    setProjectId(action.projectId);
     setCategoryId(action.categoryId ?? "");
     await timerAction("start", {
-      projectId: action.projectId,
       categoryId: action.categoryId,
       description: description.trim() || null
     });
@@ -317,16 +296,6 @@ export function CurrentTimerPanel({
           />
         </label>
         <div className="swiss-entrybar-actions">
-          <button
-            type="button"
-            className="swiss-project-trigger"
-            aria-expanded={projectPickerOpen}
-            onClick={() => setProjectPickerOpen((current) => !current)}
-          >
-            <Folder size={17} />
-            <span>{selectedProject?.name ?? "No project"}</span>
-            <ChevronDown size={14} />
-          </button>
           <label className="swiss-category-trigger">
             <Tag size={16} />
             <span
@@ -348,63 +317,13 @@ export function CurrentTimerPanel({
           <button
             className="swiss-command-play"
             type="button"
-            disabled={isBusy || (!active && !selectedProject?.id)}
+            disabled={isBusy}
             aria-label={active ? "Stop timer" : "Start timer"}
             onClick={() => timerAction(active ? "stop" : "start")}
           >
             {active ? <Square size={16} fill="currentColor" /> : <Play size={24} fill="currentColor" strokeWidth={0} />}
           </button>
         </div>
-        {projectPickerOpen ? (
-          <div className="swiss-project-picker" role="dialog" aria-label="Choose project">
-            <label className="swiss-project-search">
-              <Search size={16} />
-              <input
-                autoFocus
-                value={projectQuery}
-                onChange={(event) => setProjectQuery(event.target.value)}
-                placeholder="Search by project, task or client"
-              />
-            </label>
-            <button
-              type="button"
-              className="swiss-project-option muted"
-              onClick={() => {
-                setProjectId("");
-                setProjectPickerOpen(false);
-              }}
-            >
-              <span className="swiss-color-dot muted" />
-              No project
-            </button>
-            {[...groupedProjects.entries()].map(([clientName, projects]) => (
-              <div key={clientName} className="swiss-project-group">
-                <strong>{clientName}</strong>
-                {projects.map((project) => (
-                  <button
-                    key={project.id}
-                    type="button"
-                    className={project.id === projectId ? "swiss-project-option is-selected" : "swiss-project-option"}
-                    onClick={() => selectProject(project.id)}
-                  >
-                    <span
-                      className="swiss-color-dot"
-                      style={{ backgroundColor: paletteColorFor(project.color, project.name) }}
-                    />
-                    <span>
-                      {project.name}
-                      {project.categoryName ? <small>{project.categoryName}</small> : null}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            ))}
-            <Link href="/projects" className="swiss-create-project">
-              <Plus size={15} />
-              Create a new project
-            </Link>
-          </div>
-        ) : null}
       </div>
 
       {active ? (
@@ -421,13 +340,15 @@ export function CurrentTimerPanel({
         </div>
       ) : null}
 
+      {timerError ? <p className="swiss-inline-error">{timerError}</p> : null}
+
       {quickActions.length > 0 ? (
         <div className="swiss-quick-actions-strip" aria-label="Frequent quick actions">
           <span>Frequent</span>
           <div>
             {quickActions.map((action) => (
               <button
-                key={action.projectId}
+                key={action.categoryId ?? action.label}
                 type="button"
                 disabled={isBusy}
                 onClick={() => startQuickAction(action)}
@@ -446,7 +367,6 @@ export function CurrentTimerPanel({
 }
 
 type LearnedQuickAction = {
-  projectId: string;
   categoryId: string | null;
   label: string;
   detail: string | null;
@@ -454,33 +374,36 @@ type LearnedQuickAction = {
 };
 
 function buildLearnedQuickActions(data: BootstrapData): LearnedQuickAction[] {
-  const projectsById = new Map(data.projects.map((project) => [project.id, project]));
+  const categoriesById = new Map(data.categories.map((category) => [category.id, category]));
   const scored = new Map<string, { count: number; seconds: number; lastSeen: number }>();
 
   for (const entry of data.entries) {
-    if (!entry.projectId) continue;
-    const current = scored.get(entry.projectId) ?? { count: 0, seconds: 0, lastSeen: 0 };
+    if (!entry.categoryId) continue;
+    const current = scored.get(entry.categoryId) ?? { count: 0, seconds: 0, lastSeen: 0 };
     current.count += 1;
     current.seconds += entry.durationSeconds;
     current.lastSeen = Math.max(current.lastSeen, new Date(entry.startedAt).getTime());
-    scored.set(entry.projectId, current);
+    scored.set(entry.categoryId, current);
   }
 
   const learned = [...scored.entries()]
-    .map(([projectId, score]) => ({ projectId, score, project: projectsById.get(projectId) }))
-    .filter((item): item is { projectId: string; score: { count: number; seconds: number; lastSeen: number }; project: NonNullable<ReturnType<typeof projectsById.get>> } =>
-      Boolean(item.project)
+    .map(([categoryId, score]) => ({ categoryId, score, category: categoriesById.get(categoryId) }))
+    .filter((item): item is { categoryId: string; score: { count: number; seconds: number; lastSeen: number }; category: NonNullable<ReturnType<typeof categoriesById.get>> } =>
+      Boolean(item.category)
     )
     .sort((a, b) => b.score.count - a.score.count || b.score.lastSeen - a.score.lastSeen)
-    .map(({ project }) => project);
-  const fallback = data.projects.filter((project) => !scored.has(project.id));
+    .map(({ category }) => category);
+  const pinned = data.categories.filter((category) => category.isPinned);
+  const usedIds = new Set(pinned.map((category) => category.id));
+  const learnedUnpinned = learned.filter((category) => !usedIds.has(category.id));
+  for (const category of learnedUnpinned) usedIds.add(category.id);
+  const fallback = data.categories.filter((category) => !usedIds.has(category.id));
 
-  return [...learned, ...fallback].slice(0, 6).map((project) => ({
-    projectId: project.id,
-    categoryId: project.categoryId,
-    label: project.name,
-    detail: project.clientName ?? project.categoryName,
-    color: paletteColorFor(project.color, project.name)
+  return [...pinned, ...learnedUnpinned, ...fallback].slice(0, 6).map((category) => ({
+    categoryId: category.id,
+    label: category.name,
+    detail: "Category",
+    color: paletteColorFor(category.color, category.name)
   }));
 }
 
@@ -1373,7 +1296,6 @@ function ManualEntryDialog({
   onSynced: (data: BootstrapData) => void;
 }) {
   const [isBusy, setIsBusy] = useState(false);
-  const defaultProject = data.projects[0]?.id ?? "";
   const selectedDate = parseDateKey(data.dateRange.selectedDate);
   selectedDate.setHours(9, 0, 0, 0);
   const defaultStart = dateTimeLocal(selectedDate);
@@ -1419,8 +1341,9 @@ function ManualEntryDialog({
         </div>
         <form className="swiss-form-grid" onSubmit={submit}>
           <label>
-            Project
-            <select name="projectId" defaultValue={defaultProject} required>
+            Legacy project
+            <select name="projectId" defaultValue="">
+              <option value="">None</option>
               {data.projects.map((project) => (
                 <option key={project.id} value={project.id}>
                   {project.name}

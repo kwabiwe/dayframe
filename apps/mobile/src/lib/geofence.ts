@@ -44,9 +44,22 @@ TaskManager.defineTask(DAYFRAME_GEOFENCE_TASK, async ({ data, error }) => {
 
 export async function requestLocationAccess() {
   const foreground = await Location.requestForegroundPermissionsAsync();
-  if (foreground.status !== "granted") return foreground.status;
+  if (!foreground.granted) {
+    return foreground.canAskAgain
+      ? "Location permission was not enabled. You can try again when you are ready."
+      : "Location is denied. Open iOS Settings to allow Dayframe to use location.";
+  }
+
   const background = await Location.requestBackgroundPermissionsAsync();
-  return background.status;
+  if (background.granted) return "Always allowed. Dayframe can monitor known places in the background.";
+
+  const accuracyNote =
+    foreground.ios?.accuracy === "reduced"
+      ? " Precise location is off, so place detection may be less accurate."
+      : "";
+  return background.canAskAgain
+    ? `Allowed while using the app. Enable Always access to monitor places in the background.${accuracyNote}`
+    : `Allowed while using the app. Open iOS Settings to enable Always access for background place monitoring.${accuracyNote}`;
 }
 
 export async function startGeofences(

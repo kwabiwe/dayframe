@@ -824,6 +824,13 @@ textarea:focus-visible {
   margin-top: 0;
 }
 
+.swiss-inline-error {
+  margin: 0;
+  color: #b42318;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
 .swiss-quick-actions-strip {
   grid-column: 1 / -1;
   display: grid;

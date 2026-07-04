@@ -1,5 +1,4 @@
 import { z } from "zod";
-export * from "./toggl";
 
 export const DEMO_USER_ID = "00000000-0000-4000-8000-000000000001";
 export const DEMO_WORKSPACE_ID = "00000000-0000-4000-8000-000000000010";
@@ -296,7 +295,7 @@ export type CandidateActivity = {
 
 export type RunningEntry = {
   id: string;
-  projectId: string;
+  projectId?: string;
   categoryId?: string;
   placeId?: string;
   source: EventSource;
@@ -562,11 +561,6 @@ export function applyActivityEvent(
   }
 
   if (candidate.action === "start_timer") {
-    if (!candidate.projectId) {
-      next.reviewItems.push(toReviewCandidate(event, candidate));
-      return next;
-    }
-
     if (candidate.shouldClosePrevious && next.activeEntry) {
       next.completedEntries.push({ ...next.activeEntry, stoppedAt: event.occurredAt });
     }

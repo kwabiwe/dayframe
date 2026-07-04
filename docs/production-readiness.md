@@ -51,17 +51,6 @@ Future Home Assistant bridge payload example:
 
 Home Assistant is not wired in this repo yet.
 
-## Toggl Import
-
-The importer uses environment variables and does not store the Toggl API token in plaintext:
-
-```bash
-TOGGL_API_TOKEN=... TOGGL_WORKSPACE_ID=... npm run toggl:import -- --dry-run
-TOGGL_API_TOKEN=... TOGGL_WORKSPACE_ID=... npm run toggl:import -- --since 2026-06-01T00:00:00Z --until 2026-06-21T23:59:59Z
-```
-
-The importer creates `external_entity_refs` for Toggl clients, projects, tags and time entries. Re-running the importer skips already imported time entries by external ID. `import_runs` records completed import summaries.
-
 ## Geofencing
 
 Mobile geofencing now queues both `geofence_enter` and `geofence_exit`. iOS monitors are capped to the highest-priority 20 regions, preferring higher priority and smaller radius.
@@ -76,18 +65,18 @@ Behavior defaults:
 
 Expo Go cannot fully exercise background geofencing; use a development build.
 
-## HealthKit Sleep
+## HealthKit Sleep And Workouts
 
-iOS HealthKit sleep import uses `@kingstinct/react-native-healthkit` behind `apps/mobile/src/lib/health.ts`.
+iOS HealthKit sleep and workout imports use `@kingstinct/react-native-healthkit` behind `apps/mobile/src/lib/health.ts`.
 
 Implemented:
 
 - HealthKit config plugin and iOS entitlement.
-- Permission request for `HKCategoryTypeIdentifierSleepAnalysis`.
+- Permission requests for `HKCategoryTypeIdentifierSleepAnalysis` and `HKWorkoutTypeIdentifier`.
 - Anchored sleep queries with local dedupe.
 - Mapping for in-bed, asleep unspecified/core/deep/REM, and awake.
-- Event-first queueing as `health_sleep_import`.
-- Server-side audit/dedupe into `health_sleep_segments`.
+- Event-first queueing as `health_sleep_import` and `health_workout_import`.
+- Server-side audit/dedupe into `health_sleep_segments` and `health_workouts`.
 
 HealthKit requires a native iOS build/device and does not work in plain Expo Go.
 
@@ -109,10 +98,9 @@ npm run export:workspace -- ./dayframe-backup.json
 
 Deletion/privacy groundwork remains: implement safe user/workspace deletion with raw location and health payload hard-deletion before using Dayframe as a sole system of record.
 
-## Remaining Before Replacing Toggl And LifeCycle
+## Remaining Before Daily Beta Use
 
 - Add token management UI for creating/revoking integration tokens.
-- Add full Toggl import status UI and conflict review.
 - Verify HealthKit import on a physical iPhone/native build.
 - Add Home Assistant bridge after ingestion contracts are stable.
 - Add richer report filtering and larger-data performance checks.

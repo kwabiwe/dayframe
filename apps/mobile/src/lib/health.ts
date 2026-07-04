@@ -11,7 +11,7 @@ const HEALTHKIT_WORKOUT_ANCHOR_KEY = "dayframe.healthkit.workoutAnchor.v1";
 const HEALTHKIT_WORKOUT_SEEN_KEY = "dayframe.healthkit.workoutSeen.v1";
 
 export type HealthImportStatus = {
-  provider: "healthkit" | "health_connect";
+  provider: "healthkit";
   kind?: "availability" | "sleep" | "workout";
   status: "available" | "unavailable" | "needs_permission" | "synced" | "error" | "planned";
   notes: string;
@@ -72,8 +72,7 @@ export async function getHealthImportStatus(): Promise<HealthImportStatus[]> {
         kind: "availability",
         status: "unavailable",
         notes: "HealthKit is only available on iOS native builds."
-      },
-      healthConnectPlannedStatus()
+      }
     ];
   }
 
@@ -89,7 +88,6 @@ export async function getHealthImportStatus(): Promise<HealthImportStatus[]> {
           ? "HealthKit sleep permission can be requested from this native build."
           : "Health data is not available on this device."
       },
-      healthConnectPlannedStatus()
     ];
   } catch (error) {
     return [
@@ -97,9 +95,8 @@ export async function getHealthImportStatus(): Promise<HealthImportStatus[]> {
         provider: "healthkit",
         kind: "availability",
         status: "error",
-        notes: error instanceof Error ? error.message : "Unable to load HealthKit."
-      },
-      healthConnectPlannedStatus()
+        notes: friendlyHealthKitError(error, "check HealthKit availability")
+      }
     ];
   }
 }
@@ -314,8 +311,31 @@ async function loadHealthKit(): Promise<HealthKitModule> {
 
 function ensureIos() {
   if (Platform.OS !== "ios") {
-    throw new Error("HealthKit sleep import requires a native iOS build.");
+    throw new Error("HealthKit requires a native iOS build.");
   }
+}
+
+export function friendlyHealthKitError(error: unknown, action = "use HealthKit") {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const lower = message.toLowerCase();
+
+  if (
+    lower.includes("authorization not determined") ||
+    lower.includes("code=5") ||
+    lower.includes("not determined")
+  ) {
+    return "HealthKit permission is not ready yet. Request access from Settings, confirm it in the iOS Health prompt, then sync again.";
+  }
+
+  if (lower.includes("not available") || lower.includes("native ios build")) {
+    return "HealthKit needs a native iOS build on a real device.";
+  }
+
+  if (lower.includes("denied") || lower.includes("not granted")) {
+    return "HealthKit access was not granted. Open iOS Settings and allow Dayframe to read the selected Health data.";
+  }
+
+  return `Unable to ${action}.`;
 }
 
 async function readSeenSampleIds(key = HEALTHKIT_SEEN_KEY): Promise<string[]> {
@@ -379,13 +399,4 @@ function safeHealthMetadata(metadata: Record<string, unknown> | undefined) {
       return ["boolean", "number", "string"].includes(typeof value);
     })
   );
-}
-
-function healthConnectPlannedStatus(): HealthImportStatus {
-  return {
-    provider: "health_connect",
-    kind: "availability",
-    status: "planned",
-    notes: "Android Health Connect will use the same event-first import contract."
-  };
 }

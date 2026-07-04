@@ -69,7 +69,7 @@ export function LandingPage() {
         <div className="landing-hero-copy">
           <h1>Personal time tracking that understands the shape of your day.</h1>
           <p>
-            Dayframe combines a fast Toggl-style timer with iOS location and HealthKit signals, then lets you review
+            Dayframe combines a fast task timer with iOS location and HealthKit signals, then lets you review
             what should become part of your timeline.
           </p>
           <div className="landing-hero-actions">

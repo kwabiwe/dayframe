@@ -66,7 +66,7 @@ export function TimerPanel({
             ? { mode: "stop" }
             : {
                 mode: "start",
-                projectId,
+                projectId: projectId || undefined,
                 categoryId: categoryId || selectedProject?.categoryId,
                 placeId: placeId || undefined,
                 description: description || undefined
@@ -94,7 +94,7 @@ export function TimerPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mode: "start",
-          projectId: entry.projectId,
+          projectId: entry.projectId ?? undefined,
           categoryId: entry.categoryId,
           description: entry.description ?? undefined
         })
@@ -211,7 +211,7 @@ export function TimerPanel({
             <button
               className="industrial-button-primary focus-ring mt-3 w-full text-sm disabled:opacity-50"
               type="button"
-              disabled={!projectId || isBusy}
+              disabled={isBusy}
               onClick={() => submit("start")}
             >
               <Play size={16} />
@@ -233,7 +233,7 @@ export function TimerPanel({
               className="focus-ring motion-row flex w-full items-center justify-between rounded-lg border border-[var(--line)] bg-[var(--surface-inset)] px-3 py-2 text-left text-sm hover:border-[var(--accent)] hover:text-[var(--accent)]"
               style={{ borderLeftWidth: 4, borderLeftColor: paletteColorFor(entry.projectColor, entry.projectName ?? entry.id) }}
               type="button"
-              disabled={!entry.projectId || isBusy}
+              disabled={isBusy}
               onClick={() => continueEntry(entry)}
             >
               <span>

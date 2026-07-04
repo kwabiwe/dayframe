@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ZodError } from "zod";
 import { createManualEntry, processActivityEvent, splitActiveEntry } from "@/lib/event-service";
 import { authErrorResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
@@ -11,7 +12,19 @@ export async function POST(request: Request) {
     const origin = eventSource === "mobile_app" ? "mobile_timer" : "web_timer";
 
     if (body.mode === "manual") {
-      await createManualEntry(body, session);
+      const startedAt = requiredString(body.startedAt, "startedAt");
+      const stoppedAt = requiredString(body.stoppedAt, "stoppedAt");
+      await createManualEntry(
+        {
+          projectId: optionalString(body.projectId),
+          categoryId: optionalString(body.categoryId),
+          placeId: optionalString(body.placeId),
+          description: optionalString(body.description),
+          startedAt,
+          stoppedAt
+        },
+        session
+      );
       return NextResponse.json({ ok: true }, { status: 201 });
     }
 
@@ -38,10 +51,10 @@ export async function POST(request: Request) {
         source: eventSource,
         type: "timer_start",
         occurredAt: new Date(),
-        projectId: body.projectId,
-        categoryId: body.categoryId,
-        placeId: body.placeId,
-        description: body.description,
+        projectId: optionalString(body.projectId),
+        categoryId: optionalString(body.categoryId),
+        placeId: optionalString(body.placeId),
+        description: optionalString(body.description),
         rawPayload: { origin }
       },
       session
@@ -50,6 +63,33 @@ export async function POST(request: Request) {
   } catch (error) {
     const response = authErrorResponse(error);
     if (response) return response;
-    throw error;
+    if (error instanceof ZodError || error instanceof BadRequestError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    console.error("Dayframe timer action failed", error);
+    return NextResponse.json(
+      {
+        error:
+          "Unable to save this time entry. Confirm the hosted database migrations are applied, then try again."
+      },
+      { status: 500 }
+    );
   }
+}
+
+class BadRequestError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BadRequestError";
+  }
+}
+
+function optionalString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function requiredString(value: unknown, field: string) {
+  const next = optionalString(value);
+  if (!next) throw new BadRequestError(`${field} is required.`);
+  return next;
 }

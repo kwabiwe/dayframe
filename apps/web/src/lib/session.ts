@@ -31,7 +31,7 @@ export function getDevSession(): RequestSession {
     userId: DEV_USER_ID,
     workspaceId: DEV_WORKSPACE_ID,
     authMode: "dev",
-    scopes: ["app:read", "app:write", "events:write", "toggl:import", "exports:read"]
+    scopes: ["app:read", "app:write", "events:write", "exports:read"]
   };
 }
 

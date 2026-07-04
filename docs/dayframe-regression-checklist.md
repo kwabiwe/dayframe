@@ -5,12 +5,12 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 ## Core Timer
 
 - Web dashboard and timeline both show the "What are you working on?" timer strip.
-- Users can type a long task description, choose a project, choose a category, and start a timer.
+- Users can type a long task description, optionally choose a category, and start a timer without a project.
 - If a timer is already running, starting a new timer closes the previous active entry first.
 - The active timer ticks every second on web and mobile.
 - Stopping a timer on web or mobile stops the same active timer for the signed-in workspace.
-- Edits typed into the active timer description/project/category are saved before the entry is stopped.
-- Recent/frequent quick actions can start a previously used project.
+- Edits typed into the active timer description/category are saved before the entry is stopped.
+- Pinned and recent/frequent quick actions can start category-based tasks.
 - Continue/start-again actions use a play affordance and start the task.
 
 ## Time Review
@@ -34,8 +34,8 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 ## Productivity Views
 
 - Dashboard shows Today and This Week totals, review count, streak/summary, day timeline, review inbox, and recent activity.
-- Reports show project/client/category/tag/source/place breakdowns with readable bars and friendly source labels.
-- Projects, Clients, Categories, Tags, Places, Automation, Review Inbox, Settings, Search, Notifications, Profile, and Help remain navigable.
+- Reports show category/tag/source/place breakdowns first, with legacy project/client breakdowns still readable.
+- Categories, legacy clients/projects, Tags, Places, Automation, Review Inbox, Settings, Search, Notifications, Profile, and Help remain navigable.
 - Review Inbox actions remain normal sized, readable, and do not overlay item content.
 
 ## Visual System
@@ -52,5 +52,5 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Run `npm run typecheck`.
 - Run `npm run test`.
 - Run `npm run build`.
-- Use Browser/CDP to smoke-test dashboard, timeline, entries, reports, projects, places, automation, review, settings, search, notifications, profile, help, and theme switching.
+- Use Browser/CDP to smoke-test dashboard, timeline, entries, reports, categories, places, automation, review, settings, search, notifications, profile, help, and theme switching.
 - Use Computer/Xcode or Expo tooling to smoke-test mobile login, bootstrap load, start timer, stop timer, quick actions, manual task entry, queue sync, and web/mobile active-timer synchronization.

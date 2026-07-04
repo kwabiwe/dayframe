@@ -42,6 +42,7 @@ create table if not exists clients (
   workspace_id uuid not null references workspaces(id) on delete cascade,
   name text not null,
   color text not null default 'steel',
+  is_pinned boolean not null default false,
   is_archived boolean not null default false,
   created_at timestamptz not null default now()
 );
@@ -340,6 +341,7 @@ create index if not exists idx_time_entries_workspace_started on time_entries(wo
 create index if not exists idx_time_entries_active on time_entries(workspace_id, user_id) where stopped_at is null;
 create index if not exists idx_activity_events_workspace_occurred on activity_events(workspace_id, occurred_at desc);
 create unique index if not exists idx_activity_events_client_event_id on activity_events(workspace_id, user_id, client_event_id) where client_event_id is not null;
+create index if not exists idx_categories_workspace_pinned on categories(workspace_id, is_pinned desc, name) where is_archived = false;
 create index if not exists idx_review_items_workspace_status on review_items(workspace_id, status, created_at desc);
 create unique index if not exists idx_health_workouts_external_sample on health_workouts(workspace_id, provider, external_sample_id) where external_sample_id is not null;
 create index if not exists idx_geofences_center on geofences using gist(center);

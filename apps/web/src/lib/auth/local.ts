@@ -184,7 +184,7 @@ export async function resolveLocalSession(
     userId: row.userId,
     workspaceId: row.workspaceId,
     authMode,
-    scopes: ["app:read", "app:write", "events:write", "toggl:import", "exports:read"]
+    scopes: ["app:read", "app:write", "events:write", "exports:read"]
   };
 }
 
@@ -261,8 +261,8 @@ export async function seedDefaultWorkspaceData(client: pg.PoolClient, workspaceI
     [workspaceId, normalizePaletteKey("steel", "Personal")]
   );
   const categoryRow = await client.query<{ id: string }>(
-    `insert into categories (workspace_id, name, color)
-     values ($1, 'General', $2)
+    `insert into categories (workspace_id, name, color, is_pinned)
+     values ($1, 'General', $2, true)
      returning id`,
     [workspaceId, normalizePaletteKey("lime", "General")]
   );
@@ -279,7 +279,8 @@ export async function seedDefaultWorkspaceData(client: pg.PoolClient, workspaceI
        ($1, 'shortcut', 'Shortcut or deep link'),
        ($1, 'geofence_specific', 'Specific geofence'),
        ($1, 'geofence_broad', 'Broad geofence'),
-       ($1, 'health_sleep', 'Health sleep import')
+       ($1, 'health_sleep', 'Health sleep import'),
+       ($1, 'health_workout', 'Health workout import')
      on conflict (workspace_id, source) do nothing`,
     [workspaceId]
   );

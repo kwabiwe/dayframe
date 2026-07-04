@@ -81,7 +81,7 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
          where workspace_id = $2 and user_id = $3 and stopped_at is null`,
         [parsed.occurredAt, parsed.workspaceId, parsed.userId]
       );
-    } else if (candidate.action === "start_timer" && candidate.projectId) {
+    } else if (candidate.action === "start_timer") {
       if (candidate.shouldClosePrevious) {
         await client.query(
           `update time_entries
@@ -109,7 +109,7 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
         [
           parsed.workspaceId,
           parsed.userId,
-          candidate.projectId,
+          candidate.projectId ?? null,
           candidate.categoryId ?? null,
           candidate.placeId ?? null,
           parsed.source,
@@ -225,7 +225,7 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
 }
 
 export async function createManualEntry(input: {
-  projectId: string;
+  projectId?: string | null;
   categoryId?: string | null;
   placeId?: string | null;
   description?: string | null;
@@ -256,9 +256,9 @@ export async function createManualEntry(input: {
         session.userId,
         input.startedAt,
         JSON.stringify({ description: input.description ?? "Manual entry" }),
-        input.projectId,
-        input.categoryId ?? null,
-        input.placeId ?? null
+        nullableString(input.projectId),
+        nullableString(input.categoryId),
+        nullableString(input.placeId)
       ]
     );
 
@@ -281,9 +281,9 @@ export async function createManualEntry(input: {
       [
         session.workspaceId,
         session.userId,
-        input.projectId,
-        input.categoryId ?? null,
-        input.placeId ?? null,
+        nullableString(input.projectId),
+        nullableString(input.categoryId),
+        nullableString(input.placeId),
         input.description ?? null,
         input.startedAt,
         input.stoppedAt,
@@ -312,25 +312,39 @@ export async function updateTimeEntry(
   },
   session: RequestSession = getDevSession()
 ) {
+  const hasProjectId = Object.prototype.hasOwnProperty.call(input, "projectId");
+  const hasCategoryId = Object.prototype.hasOwnProperty.call(input, "categoryId");
+  const hasPlaceId = Object.prototype.hasOwnProperty.call(input, "placeId");
+  const hasDescription = Object.prototype.hasOwnProperty.call(input, "description");
+  const hasStartedAt = Object.prototype.hasOwnProperty.call(input, "startedAt");
+  const hasStoppedAt = Object.prototype.hasOwnProperty.call(input, "stoppedAt");
+
   await query(
     `update time_entries
-     set project_id = coalesce($2, project_id),
-         category_id = $3,
-         place_id = $4,
-         description = $5,
-         started_at = coalesce($6, started_at),
-         stopped_at = $7,
+     set project_id = case when $2 then $3 else project_id end,
+         category_id = case when $4 then $5 else category_id end,
+         place_id = case when $6 then $7 else place_id end,
+         description = case when $8 then $9 else description end,
+         started_at = case when $10 then $11 else started_at end,
+         stopped_at = case when $12 then $13 else stopped_at end,
          updated_at = now()
-     where id = $1 and workspace_id = $8`,
+     where id = $1 and workspace_id = $14 and user_id = $15`,
     [
       id,
-      input.projectId ?? null,
-      input.categoryId ?? null,
-      input.placeId ?? null,
-      input.description ?? null,
+      hasProjectId,
+      nullableString(input.projectId),
+      hasCategoryId,
+      nullableString(input.categoryId),
+      hasPlaceId,
+      nullableString(input.placeId),
+      hasDescription,
+      nullableString(input.description),
+      hasStartedAt,
       input.startedAt ?? null,
+      hasStoppedAt,
       input.stoppedAt ?? null,
-      session.workspaceId
+      session.workspaceId,
+      session.userId
     ]
   );
 }
@@ -372,7 +386,7 @@ export async function splitActiveEntry(session: RequestSession = getDevSession()
       [session.workspaceId, session.userId]
     );
     const row = active.rows[0];
-    if (!row?.projectId) throw new Error("No active timer is available to split.");
+    if (!row) throw new Error("No active timer is available to split.");
 
     const eventResult = await client.query<{ id: string }>(
       `insert into activity_events (
@@ -486,7 +500,7 @@ export async function resolveReviewItem(
     const item = review.rows[0];
     if (!item) throw new Error("Review item not found");
 
-    if (action === "accept" && item.suggestedProjectId && item.suggestedStartedAt) {
+    if (action === "accept" && item.suggestedStartedAt) {
       await client.query(
         `insert into time_entries (
             workspace_id,
@@ -607,11 +621,15 @@ export async function createEntity(
         normalizePaletteKey(input.color, String(input.name ?? "New client"))
       ]);
     case "category":
-      return query("insert into categories (workspace_id, name, color) values ($1, $2, $3)", [
-        session.workspaceId,
-        String(input.name ?? "New category"),
-        normalizePaletteKey(input.color, String(input.name ?? "New category"))
-      ]);
+      return query(
+        "insert into categories (workspace_id, name, color, is_pinned) values ($1, $2, $3, $4)",
+        [
+          session.workspaceId,
+          String(input.name ?? "New category"),
+          normalizePaletteKey(input.color, String(input.name ?? "New category")),
+          Boolean(input.isPinned)
+        ]
+      );
     case "tag":
       return query("insert into tags (workspace_id, name, color) values ($1, $2, $3)", [
         session.workspaceId,
@@ -689,7 +707,7 @@ export async function createEntity(
   }
 }
 
-export function buildQuickActionEvent(projectId: string, categoryId?: string | null): ActivityEventInput {
+export function buildQuickActionEvent(projectId?: string | null, categoryId?: string | null): ActivityEventInput {
   const session = getDevSession();
   return {
     source: "mobile_app",
@@ -697,7 +715,7 @@ export function buildQuickActionEvent(projectId: string, categoryId?: string | n
     occurredAt: new Date(),
     workspaceId: session.workspaceId,
     userId: session.userId,
-    projectId,
+    projectId: projectId ?? undefined,
     categoryId: categoryId ?? undefined,
     rawPayload: { origin: "quick_action" }
   };

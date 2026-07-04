@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ZodError } from "zod";
 import { AuthError } from "@/lib/session";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import { processActivityEvent } from "@/lib/event-service";
@@ -16,6 +17,16 @@ export async function POST(request: Request) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    throw error;
+    if (error instanceof ZodError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    console.error("Dayframe event sync failed", error);
+    return NextResponse.json(
+      {
+        error:
+          "Unable to sync this event. Confirm the hosted database migrations are applied, then try again."
+      },
+      { status: 500 }
+    );
   }
 }

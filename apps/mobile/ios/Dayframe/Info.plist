@@ -46,7 +46,7 @@
 		<true/>
 	</dict>
 	<key>NSHealthShareUsageDescription</key>
-	<string>Dayframe reads sleep analysis from HealthKit so sleep becomes reviewable activity events.</string>
+	<string>Dayframe reads sleep and workout summaries from HealthKit so they become reviewable activity events.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>Dayframe does not write health data, but iOS requires this description when HealthKit capability is enabled.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

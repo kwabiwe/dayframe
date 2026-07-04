@@ -43,7 +43,7 @@ const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/timeline", label: "Timeline", icon: CalendarRange },
   { href: "/entries", label: "Entries", icon: ListFilter },
-  { href: "/projects", label: "Projects", icon: FolderKanban },
+  { href: "/projects", label: "Categories", icon: FolderKanban },
   { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/places", label: "Places", icon: MapPin },
   { href: "/automation", label: "Automation", icon: Workflow },
@@ -581,7 +581,7 @@ function SearchPalette({
             autoFocus
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search projects, entries, places, review items"
+            placeholder="Search categories, entries, places, review items"
           />
           <kbd>Esc</kbd>
           <button type="button" className="swiss-command-close" aria-label="Close search" onClick={onClose}>
@@ -716,29 +716,29 @@ function buildSearchResults(data: BootstrapData | null, query: string): SearchRe
   if (!data) return [];
   const needle = query.trim().toLowerCase();
   const results: SearchResult[] = [
+    ...data.categories.map((category) => ({
+      id: `category:${category.id}`,
+      label: category.name,
+      detail: category.isPinned ? "Pinned category" : "Category",
+      group: "Category",
+      href: "/projects",
+      icon: FileText
+    })),
     ...data.projects.map((project) => ({
       id: `project:${project.id}`,
       label: project.name,
-      detail: project.clientName ?? project.categoryName ?? "Project",
-      group: "Project",
+      detail: project.clientName ?? project.categoryName ?? "Legacy project",
+      group: "Legacy",
       href: "/projects",
       icon: FolderKanban
     })),
     ...data.clients.map((client) => ({
       id: `client:${client.id}`,
       label: client.name,
-      detail: "Client",
-      group: "Client",
+      detail: "Legacy client",
+      group: "Legacy",
       href: "/projects",
       icon: Folder
-    })),
-    ...data.categories.map((category) => ({
-      id: `category:${category.id}`,
-      label: category.name,
-      detail: "Category",
-      group: "Category",
-      href: "/projects",
-      icon: FileText
     })),
     ...data.tags.map((tag) => ({
       id: `tag:${tag.id}`,
@@ -751,7 +751,7 @@ function buildSearchResults(data: BootstrapData | null, query: string): SearchRe
     ...data.places.map((place) => ({
       id: `place:${place.id}`,
       label: place.name,
-      detail: place.defaultProjectName ?? "Place",
+      detail: place.defaultCategoryName ?? place.defaultProjectName ?? "Place",
       group: "Place",
       href: "/places",
       icon: MapPin
@@ -824,8 +824,7 @@ function buildNotifications(data: BootstrapData | null): NotificationItem[] {
 async function toggleTimer(data: BootstrapData | null, refresh: () => Promise<void>) {
   if (!data) return;
   const active = data.activeEntry;
-  const project = data.projects[0];
-  if (!active && !project) return;
+  const category = data.categories[0];
   await fetch("/api/time-entries", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -834,8 +833,7 @@ async function toggleTimer(data: BootstrapData | null, refresh: () => Promise<vo
         ? { mode: "stop" }
         : {
             mode: "start",
-            projectId: project.id,
-            categoryId: project.categoryId ?? undefined
+            categoryId: category?.id
           }
     )
   });
