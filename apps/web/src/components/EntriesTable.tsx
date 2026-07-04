@@ -147,7 +147,7 @@ export function EntriesTable({
           action={submitManual}
           className="grid gap-3 rounded-xl border border-[var(--line)] bg-[var(--surface-strong)] p-4 md:grid-cols-5"
         >
-          <SelectField name="categoryId" label="Category" options={categories} defaultValue={categories[0]?.id ?? ""} required />
+          <SelectField name="categoryId" label="Category" options={categories} />
           <SelectField name="placeId" label="Place" options={places} />
           <TextField name="description" label="Description" />
           <DateField name="startedAt" label="Start" defaultValue={dateTimeLocal()} />
@@ -201,7 +201,6 @@ export function EntriesTable({
                         label="Category"
                         options={categories}
                         defaultValue={entry.categoryId ?? ""}
-                        required
                       />
                       <SelectField
                         name="placeId"

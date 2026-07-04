@@ -498,7 +498,6 @@ function CalendarReview({
               label="Category"
               options={categories}
               defaultValue={selectedEntry.categoryId ?? ""}
-              required
             />
             <SelectField
               name="placeId"

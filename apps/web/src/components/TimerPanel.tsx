@@ -7,6 +7,22 @@ import { Play, Square } from "lucide-react";
 import type { BootstrapData, CategoryRow, PlaceRow, TimeEntryRow } from "@/lib/queries";
 import { formatClockDuration, formatTime } from "@/lib/format";
 
+type TimerDraft = {
+  activeEntryId: string | null;
+  categoryId: string;
+  placeId: string;
+  description: string;
+};
+
+function draftFromEntry(activeEntry: TimeEntryRow | null): TimerDraft {
+  return {
+    activeEntryId: activeEntry?.id ?? null,
+    categoryId: activeEntry?.categoryId ?? "",
+    placeId: activeEntry?.placeId ?? "",
+    description: activeEntry?.description ?? ""
+  };
+}
+
 export function TimerPanel({
   activeEntry,
   categories,
@@ -24,9 +40,9 @@ export function TimerPanel({
   const [isPending, startTransition] = useTransition();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-  const [categoryId, setCategoryId] = useState(activeEntry?.categoryId ?? categories[0]?.id ?? "");
-  const [placeId, setPlaceId] = useState("");
-  const [description, setDescription] = useState("");
+  const [draft, setDraft] = useState<TimerDraft>(() => draftFromEntry(activeEntry));
+  const syncedDraft = draft.activeEntryId === (activeEntry?.id ?? null) ? draft : draftFromEntry(activeEntry);
+  const { categoryId, placeId, description } = syncedDraft;
   const isBusy = isPending || isSubmitting;
   const activeDurationSeconds = activeEntry
     ? Math.max(
@@ -41,6 +57,10 @@ export function TimerPanel({
     return () => window.clearInterval(interval);
   }, [activeEntry]);
 
+  function updateDraft(patch: Partial<Omit<TimerDraft, "activeEntryId">>) {
+    setDraft({ ...syncedDraft, ...patch });
+  }
+
   async function refreshClientData() {
     const response = await fetch("/api/bootstrap", { cache: "no-store" });
     if (!response.ok) throw new Error(`Unable to refresh timer state: ${response.status}`);
@@ -49,9 +69,23 @@ export function TimerPanel({
   }
 
   async function submit(mode: "start" | "stop") {
-    if (mode === "start" && !categoryId) return;
     setIsSubmitting(true);
     try {
+      if (mode === "stop" && activeEntry) {
+        const updateResponse = await fetch(`/api/time-entries/${activeEntry.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            categoryId: categoryId || null,
+            placeId: placeId || null,
+            description: description.trim() || null,
+            startedAt: activeEntry.startedAt,
+            stoppedAt: activeEntry.stoppedAt
+          })
+        });
+        if (!updateResponse.ok) throw new Error(`Unable to save timer details: ${updateResponse.status}`);
+      }
+
       const response = await fetch("/api/time-entries", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -67,7 +101,7 @@ export function TimerPanel({
         )
       });
       if (!response.ok) throw new Error(`Timer action failed: ${response.status}`);
-      if (mode === "start") setDescription("");
+      if (mode === "start") updateDraft({ description: "" });
 
       if (onSynced) await refreshClientData();
       else startTransition(() => router.refresh());
@@ -77,8 +111,7 @@ export function TimerPanel({
   }
 
   async function continueEntry(entry: TimeEntryRow) {
-    setCategoryId(entry.categoryId ?? "");
-    setDescription(entry.description ?? "");
+    updateDraft({ categoryId: entry.categoryId ?? "", description: entry.description ?? "" });
     setIsSubmitting(true);
     try {
       const response = await fetch("/api/time-entries", {
@@ -125,7 +158,7 @@ export function TimerPanel({
           <input
             className="focus-ring industrial-field"
             value={description}
-            onChange={(event) => setDescription(event.target.value)}
+            onChange={(event) => updateDraft({ description: event.target.value })}
             placeholder="What are you working on?"
           />
         </label>
@@ -135,10 +168,9 @@ export function TimerPanel({
           <select
             className="focus-ring industrial-field"
             value={categoryId}
-            onChange={(event) => setCategoryId(event.target.value)}
-            required
+            onChange={(event) => updateDraft({ categoryId: event.target.value })}
           >
-            {categories.length === 0 ? <option value="">Create a category first</option> : null}
+            <option value="">No category</option>
             {categories.map((category) => (
               <option key={category.id} value={category.id}>
                 {category.name}
@@ -152,7 +184,7 @@ export function TimerPanel({
           <select
             className="focus-ring industrial-field"
             value={placeId}
-            onChange={(event) => setPlaceId(event.target.value)}
+            onChange={(event) => updateDraft({ placeId: event.target.value })}
           >
             <option value="">No place</option>
             {places.map((place) => (
@@ -184,7 +216,7 @@ export function TimerPanel({
             <button
               className="industrial-button-primary focus-ring mt-3 w-full text-sm disabled:opacity-50"
               type="button"
-              disabled={isBusy || !categoryId}
+              disabled={isBusy}
               onClick={() => submit("start")}
             >
               <Play size={16} />

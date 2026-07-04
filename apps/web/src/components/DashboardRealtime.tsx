@@ -159,9 +159,7 @@ export function CurrentTimerPanel({
   const [isBusy, setIsBusy] = useState(false);
   const [timerError, setTimerError] = useState<string | null>(null);
   const [description, setDescription] = useState(data.activeEntry?.description ?? "");
-  const [categoryId, setCategoryId] = useState(
-    data.activeEntry?.categoryId ?? data.categories[0]?.id ?? ""
-  );
+  const [categoryId, setCategoryId] = useState(data.activeEntry?.categoryId ?? "");
   const activeDetailsSyncRef = useRef("");
   const active = data.activeEntry;
   const [now, setNow] = useState(() =>
@@ -244,14 +242,24 @@ export function CurrentTimerPanel({
         ? (override.description ?? undefined)
         : description.trim() || undefined;
 
-    if (mode === "start" && !nextCategoryId) {
-      setTimerError("Choose a category before starting the timer.");
-      return;
-    }
-
     setIsBusy(true);
     setTimerError(null);
     try {
+      if (mode === "stop" && active) {
+        const updateResponse = await fetch(`/api/time-entries/${active.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            categoryId: nextCategoryId ?? null,
+            placeId: active.placeId,
+            description: nextDescription ?? null,
+            startedAt: active.startedAt,
+            stoppedAt: active.stoppedAt
+          })
+        });
+        if (!updateResponse.ok) throw new Error(`Unable to save timer details: ${updateResponse.status}`);
+      }
+
       const response = await fetch("/api/time-entries", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -316,9 +324,7 @@ export function CurrentTimerPanel({
               onChange={(event) => setCategoryId(event.target.value)}
               aria-label="Choose category"
             >
-              {data.categories.length === 0 ? (
-                <option value="">Create a category first</option>
-              ) : null}
+              <option value="">No category</option>
               {data.categories.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.name}
@@ -1140,7 +1146,8 @@ function EditEntryDialog({
         <form className="swiss-form-grid" onSubmit={submit}>
           <label>
             Category
-            <select name="categoryId" defaultValue={entry.categoryId ?? data.categories[0]?.id ?? ""} required>
+            <select name="categoryId" defaultValue={entry.categoryId ?? ""}>
+              <option value="">No category</option>
               {data.categories.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.name}
@@ -1342,7 +1349,8 @@ function ManualEntryDialog({
         <form className="swiss-form-grid" onSubmit={submit}>
           <label>
             Category
-            <select name="categoryId" defaultValue={data.categories[0]?.id ?? ""} required>
+            <select name="categoryId" defaultValue="">
+              <option value="">No category</option>
               {data.categories.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.name}

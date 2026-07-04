@@ -156,6 +156,26 @@ describe("mobile API client", () => {
     );
   });
 
+  it("starts uncategorized timers when no category is selected", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 201)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startTimer(null, "Capture loose task");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/time-entries",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          mode: "start",
+          source: "mobile_app",
+          description: "Capture loose task"
+        })
+      })
+    );
+  });
+
   it("creates pinned categories through the hosted API", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 201)));

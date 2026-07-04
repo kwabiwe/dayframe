@@ -208,7 +208,10 @@ export default function HomeScreen() {
 
   const quickActions = useMemo(() => buildMobileQuickActions(data), [data]);
   const selectedCustomCategory = useMemo(
-    () => data?.categories.find((category) => category.id === customCategoryId) ?? data?.categories[0],
+    () => {
+      if (!customCategoryId) return null;
+      return data?.categories.find((category) => category.id === customCategoryId) ?? null;
+    },
     [customCategoryId, data?.categories]
   );
   const activeDurationSeconds = data?.activeEntry
@@ -228,10 +231,6 @@ export default function HomeScreen() {
     healthStatus.find((item) => item.provider === "healthkit");
   const sleepStatus = healthStatus.find((item) => item.provider === "healthkit" && item.kind === "sleep");
   const workoutStatus = healthStatus.find((item) => item.provider === "healthkit" && item.kind === "workout");
-
-  useEffect(() => {
-    if (!customCategoryId && data?.categories[0]) setCustomCategoryId(data.categories[0].id);
-  }, [customCategoryId, data?.categories]);
 
   useEffect(() => {
     if (authState !== "authenticated" || !data?.places.length) return;
@@ -622,6 +621,18 @@ export default function HomeScreen() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.projectPicker}
             >
+              <Pressable
+                style={pressable(
+                  [styles.projectPill, customCategoryId === "" ? styles.projectPillSelected : null],
+                  styles.buttonPressed
+                )}
+                onPress={() => setCustomCategoryId("")}
+              >
+                <View style={[styles.colorDot, { backgroundColor: theme.borderStrong }]} />
+                <Text style={[styles.projectPillText, customCategoryId === "" ? styles.projectPillTextSelected : null]}>
+                  No category
+                </Text>
+              </Pressable>
               {(data?.categories ?? []).map((category) => {
                 const selected = category.id === selectedCustomCategory?.id;
                 const categoryColor = paletteColorFor(category.color, category.name);

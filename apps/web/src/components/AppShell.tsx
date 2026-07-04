@@ -680,6 +680,12 @@ function FloatingPanel({
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        style={{
+          maxHeight: "calc(100dvh - 36px)",
+          overflowX: "hidden",
+          overflowY: "auto",
+          overscrollBehavior: "contain"
+        }}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="swiss-floating-header">

@@ -49,6 +49,21 @@ describe("POST /api/time-entries", () => {
     );
   });
 
+  it("starts an uncategorized task without requiring a project", async () => {
+    const response = await POST(jsonRequest({ mode: "start", projectId: "", categoryId: "", description: "Inbox zero" }));
+
+    expect(response.status).toBe(201);
+    expect(mocks.processActivityEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "timer_start",
+        projectId: undefined,
+        categoryId: undefined,
+        description: "Inbox zero"
+      }),
+      session
+    );
+  });
+
   it("creates a manual entry with no legacy project", async () => {
     const response = await POST(
       jsonRequest({

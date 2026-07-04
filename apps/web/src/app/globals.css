@@ -1582,11 +1582,15 @@ textarea:focus-visible {
 .swiss-floating-panel {
   position: absolute;
   width: min(380px, calc(100vw - 32px));
+  max-height: calc(100vh - 36px);
+  max-height: calc(100dvh - 36px);
   border: 1px solid var(--line-strong);
   border-radius: 10px;
   background: var(--surface);
   box-shadow: var(--shadow-soft);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .swiss-floating-panel.top-left {
