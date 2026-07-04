@@ -81,6 +81,22 @@ export async function startGeofences(
   return regions.length;
 }
 
+export async function refreshGeofencesForPlaces(
+  places: Array<{
+    id: string;
+    name: string;
+    latitude?: number | null;
+    longitude?: number | null;
+    radiusMeters: number;
+    priority?: number;
+  }>
+) {
+  const foreground = await Location.getForegroundPermissionsAsync();
+  const background = await Location.getBackgroundPermissionsAsync();
+  if (foreground.status !== "granted" || background.status !== "granted") return 0;
+  return startGeofences(places);
+}
+
 export async function createUnknownStayCandidate(durationMinutes: number) {
   return enqueueEvent({
     source: "geofence_broad",

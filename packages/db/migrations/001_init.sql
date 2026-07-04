@@ -142,6 +142,7 @@ create table if not exists activity_events (
   workspace_id uuid not null references workspaces(id) on delete cascade,
   user_id uuid not null references users(id) on delete cascade,
   device_id uuid references devices(id) on delete set null,
+  client_event_id text,
   source text not null,
   event_type text not null,
   occurred_at timestamptz not null,
@@ -243,10 +244,16 @@ create table if not exists health_workouts (
   id uuid primary key default gen_random_uuid(),
   workspace_id uuid not null references workspaces(id) on delete cascade,
   user_id uuid not null references users(id) on delete cascade,
+  external_sample_id text,
+  provider text not null default 'healthkit',
   workout_type text not null,
   started_at timestamptz not null,
   stopped_at timestamptz not null,
+  duration_seconds integer,
+  distance_meters double precision,
+  energy_kcal double precision,
   source_device_id uuid references devices(id) on delete set null,
+  raw_payload jsonb not null default '{}',
   imported_at timestamptz not null default now()
 );
 
@@ -321,10 +328,20 @@ create table if not exists audit_log (
   created_at timestamptz not null default now()
 );
 
+alter table activity_events add column if not exists client_event_id text;
+alter table health_workouts add column if not exists external_sample_id text;
+alter table health_workouts add column if not exists provider text not null default 'healthkit';
+alter table health_workouts add column if not exists duration_seconds integer;
+alter table health_workouts add column if not exists distance_meters double precision;
+alter table health_workouts add column if not exists energy_kcal double precision;
+alter table health_workouts add column if not exists raw_payload jsonb not null default '{}';
+
 create index if not exists idx_time_entries_workspace_started on time_entries(workspace_id, started_at desc);
 create index if not exists idx_time_entries_active on time_entries(workspace_id, user_id) where stopped_at is null;
 create index if not exists idx_activity_events_workspace_occurred on activity_events(workspace_id, occurred_at desc);
+create unique index if not exists idx_activity_events_client_event_id on activity_events(workspace_id, user_id, client_event_id) where client_event_id is not null;
 create index if not exists idx_review_items_workspace_status on review_items(workspace_id, status, created_at desc);
+create unique index if not exists idx_health_workouts_external_sample on health_workouts(workspace_id, provider, external_sample_id) where external_sample_id is not null;
 create index if not exists idx_geofences_center on geofences using gist(center);
 create index if not exists idx_integration_tokens_workspace on integration_tokens(workspace_id) where revoked_at is null;
 create index if not exists idx_external_refs_workspace on external_entity_refs(workspace_id, provider, entity_type);

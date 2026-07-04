@@ -22,11 +22,28 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
 
   try {
     await client.query("begin");
+
+    if (parsed.clientEventId) {
+      const existingEvent = await client.query<{ id: string }>(
+        `select id
+         from activity_events
+         where workspace_id = $1 and user_id = $2 and client_event_id = $3
+         limit 1`,
+        [parsed.workspaceId, parsed.userId, parsed.clientEventId]
+      );
+
+      if (existingEvent.rows[0]) {
+        await client.query("commit");
+        return { eventId: existingEvent.rows[0].id, candidate, duplicate: true };
+      }
+    }
+
     const eventResult = await client.query<{ id: string }>(
       `insert into activity_events (
           workspace_id,
           user_id,
           device_id,
+          client_event_id,
           source,
           event_type,
           occurred_at,
@@ -37,12 +54,13 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
           suggested_place_id,
           review_status
        )
-       values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13)
        returning id`,
       [
         parsed.workspaceId,
         parsed.userId,
         parsed.deviceId ?? null,
+        parsed.clientEventId ?? null,
         parsed.source,
         parsed.type,
         parsed.occurredAt,
@@ -158,6 +176,39 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
           stringOrNull(parsed.rawPayload.sleepStage),
           stringOrNull(parsed.rawPayload.startedAt) ?? parsed.occurredAt,
           stringOrNull(parsed.rawPayload.stoppedAt) ?? parsed.occurredAt,
+          JSON.stringify(parsed.rawPayload)
+        ]
+      );
+    }
+
+    if (parsed.type === "health_workout_import") {
+      await client.query(
+        `insert into health_workouts (
+            workspace_id,
+            user_id,
+            external_sample_id,
+            provider,
+            workout_type,
+            started_at,
+            stopped_at,
+            duration_seconds,
+            distance_meters,
+            energy_kcal,
+            raw_payload
+         )
+         values ($1, $2, $3, coalesce($4, 'healthkit'), coalesce($5, 'other'), $6, $7, $8, $9, $10, $11::jsonb)
+         on conflict (workspace_id, provider, external_sample_id) do nothing`,
+        [
+          parsed.workspaceId,
+          parsed.userId,
+          stringOrNull(parsed.rawPayload.externalSampleId),
+          stringOrNull(parsed.rawPayload.provider),
+          stringOrNull(parsed.rawPayload.workoutType),
+          stringOrNull(parsed.rawPayload.startedAt) ?? parsed.occurredAt,
+          stringOrNull(parsed.rawPayload.stoppedAt) ?? parsed.occurredAt,
+          numberOrNull(parsed.rawPayload.durationSeconds),
+          numberOrNull(parsed.rawPayload.distanceMeters),
+          numberOrNull(parsed.rawPayload.energyKcal),
           JSON.stringify(parsed.rawPayload)
         ]
       );
@@ -658,6 +709,11 @@ function nullableString(value: unknown) {
 
 function stringOrNull(value: unknown) {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function numberOrNull(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function nullableNumber(value: unknown) {

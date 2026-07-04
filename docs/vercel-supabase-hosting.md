@@ -9,7 +9,7 @@ Provide these values from Supabase and Vercel when you want the hosted deploymen
 - `NEXT_PUBLIC_SUPABASE_URL`: Supabase project URL.
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`: Supabase publishable public key, usually starting with `sb_publishable_`.
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`: legacy Supabase anon JWT fallback if your project still uses legacy API keys.
-- `DATABASE_URL`: Supabase Postgres pooled connection string with SSL.
+- `DATABASE_URL`: Supabase Postgres pooled connection string. Use the pooler URL as provided by Supabase; do not add an SSL-mode query parameter if that prevents the Vercel deployment from connecting.
 - `DAYFRAME_ALLOWED_SIGNUP_EMAILS`: comma-separated emails allowed to create accounts.
 - `EXPO_PUBLIC_DAYFRAME_API_BASE`: hosted Vercel URL for mobile builds.
 
@@ -41,6 +41,8 @@ DAYFRAME_SIGNUPS_ENABLED=false
 
 If your Supabase project still uses legacy API keys, `NEXT_PUBLIC_SUPABASE_ANON_KEY` also works. Prefer the publishable key for new Supabase projects.
 
+For `DATABASE_URL`, the Supabase pooler string may work without an `sslmode` query parameter. Keep the value aligned with the connection string that actually succeeds in Vercel.
+
 Optional integration tokens:
 
 ```bash
@@ -53,7 +55,9 @@ Supabase Auth owns identity and password verification. Dayframe provisions a mat
 
 The web app uses an HTTP-only `dayframe_session` cookie. The mobile app receives the same Dayframe token as a bearer token and stores it in SecureStore.
 
-For mobile builds, set `EXPO_PUBLIC_DAYFRAME_API_BASE` to the hosted Vercel URL so the iOS app syncs with production.
+For mobile builds, set `EXPO_PUBLIC_DAYFRAME_API_BASE` to the hosted Vercel URL so the iOS app syncs with production. Do not point mobile builds at the Supabase project URL, do not write directly to Supabase tables from iOS, and do not put service-role keys in EAS or app config.
+
+See `docs/ios-hosted-supabase-runbook.md` for the iOS/EAS setup and physical-device validation checklist.
 
 ## Personal Beta Defaults
 

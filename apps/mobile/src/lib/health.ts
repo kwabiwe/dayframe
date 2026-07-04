@@ -4,11 +4,15 @@ import { mapHealthKitSleepStage, type SleepStage } from "@dayframe/shared";
 import { enqueueEvent } from "./api";
 
 const HEALTHKIT_SLEEP_TYPE = "HKCategoryTypeIdentifierSleepAnalysis";
+const HEALTHKIT_WORKOUT_TYPE = "HKWorkoutTypeIdentifier";
 const HEALTHKIT_ANCHOR_KEY = "dayframe.healthkit.sleepAnchor.v1";
 const HEALTHKIT_SEEN_KEY = "dayframe.healthkit.sleepSeen.v1";
+const HEALTHKIT_WORKOUT_ANCHOR_KEY = "dayframe.healthkit.workoutAnchor.v1";
+const HEALTHKIT_WORKOUT_SEEN_KEY = "dayframe.healthkit.workoutSeen.v1";
 
 export type HealthImportStatus = {
   provider: "healthkit" | "health_connect";
+  kind?: "availability" | "sleep" | "workout";
   status: "available" | "unavailable" | "needs_permission" | "synced" | "error" | "planned";
   notes: string;
   importedCount?: number;
@@ -35,11 +39,37 @@ type HealthKitSleepSample = {
   metadata?: Record<string, unknown>;
 };
 
+export type DayframeWorkoutSample = {
+  externalSampleId: string;
+  workoutType: string;
+  startedAt: string;
+  stoppedAt: string;
+  durationSeconds: number | null;
+  distanceMeters: number | null;
+  energyKcal: number | null;
+  sourceName?: string;
+  rawPayload: Record<string, unknown>;
+};
+
+type HealthKitWorkoutSample = {
+  uuid?: string;
+  workoutActivityType?: number | string;
+  startDate: Date | string;
+  endDate: Date | string;
+  duration?: { quantity?: number; unit?: string } | number;
+  totalDistance?: { quantity?: number; unit?: string };
+  totalEnergyBurned?: { quantity?: number; unit?: string };
+  sourceRevision?: { source?: { name?: string; bundleIdentifier?: string } };
+  metadata?: Record<string, unknown>;
+  toJSON?: () => HealthKitWorkoutSample;
+};
+
 export async function getHealthImportStatus(): Promise<HealthImportStatus[]> {
   if (Platform.OS !== "ios") {
     return [
       {
         provider: "healthkit",
+        kind: "availability",
         status: "unavailable",
         notes: "HealthKit is only available on iOS native builds."
       },
@@ -53,6 +83,7 @@ export async function getHealthImportStatus(): Promise<HealthImportStatus[]> {
     return [
       {
         provider: "healthkit",
+        kind: "availability",
         status: available ? "available" : "unavailable",
         notes: available
           ? "HealthKit sleep permission can be requested from this native build."
@@ -64,6 +95,7 @@ export async function getHealthImportStatus(): Promise<HealthImportStatus[]> {
     return [
       {
         provider: "healthkit",
+        kind: "availability",
         status: "error",
         notes: error instanceof Error ? error.message : "Unable to load HealthKit."
       },
@@ -79,6 +111,7 @@ export async function requestHealthKitSleepPermission() {
   if (!available) {
     return {
       provider: "healthkit" as const,
+      kind: "sleep" as const,
       status: "unavailable" as const,
       notes: "Health data is not available on this device."
     };
@@ -87,10 +120,35 @@ export async function requestHealthKitSleepPermission() {
   const granted = await healthkit.requestAuthorization({ toRead: [HEALTHKIT_SLEEP_TYPE] });
   return {
     provider: "healthkit" as const,
+    kind: "sleep" as const,
     status: granted ? ("available" as const) : ("needs_permission" as const),
     notes: granted
       ? "HealthKit sleep read permission was requested."
       : "HealthKit sleep permission was not granted."
+  };
+}
+
+export async function requestHealthKitWorkoutPermission() {
+  ensureIos();
+  const healthkit = await loadHealthKit();
+  const available = await Promise.resolve(healthkit.isHealthDataAvailable());
+  if (!available) {
+    return {
+      provider: "healthkit" as const,
+      kind: "workout" as const,
+      status: "unavailable" as const,
+      notes: "Health data is not available on this device."
+    };
+  }
+
+  const granted = await healthkit.requestAuthorization({ toRead: [HEALTHKIT_WORKOUT_TYPE] });
+  return {
+    provider: "healthkit" as const,
+    kind: "workout" as const,
+    status: granted ? ("available" as const) : ("needs_permission" as const),
+    notes: granted
+      ? "HealthKit workout read permission was requested."
+      : "HealthKit workout permission was not granted."
   };
 }
 
@@ -132,10 +190,45 @@ export async function importHealthKitSleep() {
 
   return {
     provider: "healthkit" as const,
+    kind: "sleep" as const,
     status: "synced" as const,
     notes: imported.length
       ? `Queued ${imported.length} HealthKit sleep samples as activity events.`
       : "No new HealthKit sleep samples found.",
+    importedCount: imported.length,
+    lastSync: new Date().toISOString()
+  };
+}
+
+export async function importHealthKitWorkouts() {
+  ensureIos();
+  const healthkit = await loadHealthKit();
+  const anchor = await AsyncStorage.getItem(HEALTHKIT_WORKOUT_ANCHOR_KEY);
+  const seen = new Set(await readSeenSampleIds(HEALTHKIT_WORKOUT_SEEN_KEY));
+  const result = await healthkit.queryWorkoutSamplesWithAnchor({
+    anchor: anchor ?? undefined,
+    limit: 0
+  });
+
+  const imported: DayframeWorkoutSample[] = [];
+  for (const sample of result.workouts as readonly HealthKitWorkoutSample[]) {
+    const mapped = mapHealthKitWorkoutSample(sample.toJSON?.() ?? sample);
+    if (seen.has(mapped.externalSampleId)) continue;
+    seen.add(mapped.externalSampleId);
+    imported.push(mapped);
+    await enqueueEvent(healthKitWorkoutEvent(mapped));
+  }
+
+  await AsyncStorage.setItem(HEALTHKIT_WORKOUT_ANCHOR_KEY, result.newAnchor);
+  await AsyncStorage.setItem(HEALTHKIT_WORKOUT_SEEN_KEY, JSON.stringify([...seen].slice(-1000)));
+
+  return {
+    provider: "healthkit" as const,
+    kind: "workout" as const,
+    status: "synced" as const,
+    notes: imported.length
+      ? `Queued ${imported.length} HealthKit workouts as activity events.`
+      : "No new HealthKit workouts found.",
     importedCount: imported.length,
     lastSync: new Date().toISOString()
   };
@@ -164,6 +257,57 @@ export function mapHealthKitSleepSample(sample: HealthKitSleepSample): DayframeS
   };
 }
 
+export function mapHealthKitWorkoutSample(sample: HealthKitWorkoutSample): DayframeWorkoutSample {
+  const startedAt = new Date(sample.startDate).toISOString();
+  const stoppedAt = new Date(sample.endDate).toISOString();
+  const workoutType = mapHealthKitWorkoutType(sample.workoutActivityType);
+  const durationSeconds =
+    quantityValue(sample.duration) ??
+    Math.max(0, Math.round((new Date(stoppedAt).getTime() - new Date(startedAt).getTime()) / 1000));
+  const externalSampleId = sample.uuid ?? `${startedAt}:${stoppedAt}:${workoutType}`;
+
+  return {
+    externalSampleId,
+    workoutType,
+    startedAt,
+    stoppedAt,
+    durationSeconds,
+    distanceMeters: quantityValue(sample.totalDistance),
+    energyKcal: quantityValue(sample.totalEnergyBurned),
+    sourceName:
+      sample.sourceRevision?.source?.name ??
+      sample.sourceRevision?.source?.bundleIdentifier ??
+      undefined,
+    rawPayload: {
+      uuid: sample.uuid,
+      workoutActivityType: sample.workoutActivityType,
+      metadata: safeHealthMetadata(sample.metadata),
+      sourceRevision: sample.sourceRevision
+    }
+  };
+}
+
+export function healthKitWorkoutEvent(sample: DayframeWorkoutSample) {
+  return {
+    source: "health_workout" as const,
+    type: "health_workout_import" as const,
+    occurredAt: new Date(sample.startedAt),
+    description: `Workout ${sample.workoutType.replaceAll("_", " ")}`,
+    rawPayload: {
+      provider: "healthkit",
+      externalSampleId: sample.externalSampleId,
+      workoutType: sample.workoutType,
+      startedAt: sample.startedAt,
+      stoppedAt: sample.stoppedAt,
+      durationSeconds: sample.durationSeconds,
+      distanceMeters: sample.distanceMeters,
+      energyKcal: sample.energyKcal,
+      sourceName: sample.sourceName,
+      sample: sample.rawPayload
+    }
+  };
+}
+
 async function loadHealthKit(): Promise<HealthKitModule> {
   return import("@kingstinct/react-native-healthkit");
 }
@@ -174,8 +318,8 @@ function ensureIos() {
   }
 }
 
-async function readSeenSampleIds(): Promise<string[]> {
-  const raw = await AsyncStorage.getItem(HEALTHKIT_SEEN_KEY);
+async function readSeenSampleIds(key = HEALTHKIT_SEEN_KEY): Promise<string[]> {
+  const raw = await AsyncStorage.getItem(key);
   if (!raw) return [];
   try {
     return JSON.parse(raw) as string[];
@@ -184,9 +328,63 @@ async function readSeenSampleIds(): Promise<string[]> {
   }
 }
 
+function mapHealthKitWorkoutType(value: unknown) {
+  if (typeof value === "string" && value.trim()) return camelToSnake(value);
+  if (typeof value === "number") {
+    return (
+      {
+        13: "cycling",
+        24: "hiking",
+        37: "running",
+        46: "swimming",
+        52: "walking",
+        57: "yoga",
+        63: "high_intensity_interval_training",
+        3000: "other"
+      }[value] ?? `workout_${value}`
+    );
+  }
+  return "other";
+}
+
+function camelToSnake(value: string) {
+  return value
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/[\s-]+/g, "_")
+    .toLowerCase();
+}
+
+function quantityValue(value: HealthKitWorkoutSample["duration"] | HealthKitWorkoutSample["totalDistance"]) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (value && typeof value === "object" && typeof value.quantity === "number" && Number.isFinite(value.quantity)) {
+    return value.quantity;
+  }
+  return null;
+}
+
+function safeHealthMetadata(metadata: Record<string, unknown> | undefined) {
+  if (!metadata) return undefined;
+  return Object.fromEntries(
+    Object.entries(metadata).filter(([key, value]) => {
+      const normalizedKey = key.toLowerCase();
+      if (
+        normalizedKey.includes("route") ||
+        normalizedKey.includes("location") ||
+        normalizedKey.includes("latitude") ||
+        normalizedKey.includes("longitude")
+      ) {
+        return false;
+      }
+      return ["boolean", "number", "string"].includes(typeof value);
+    })
+  );
+}
+
 function healthConnectPlannedStatus(): HealthImportStatus {
   return {
     provider: "health_connect",
+    kind: "availability",
     status: "planned",
     notes: "Android Health Connect will use the same event-first import contract."
   };
