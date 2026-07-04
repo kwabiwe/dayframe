@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Dayframe is a personal time-intelligence app. It combines fast manual task tracking with iOS mobile capture from HealthKit, geofences, shortcuts/NFC-style actions, and offline event sync.
+Dayframe is a category-first personal time tracker. It combines fast task/title/description capture, category-based timers, review/edit workflows, and iOS mobile context from Apple Health, location, shortcuts/NFC-style actions, and offline event sync.
 
 The core invariant is **event-first tracking**: mobile/web/health/location signals become `activity_events` before they become `time_entries`. High-confidence explicit actions may create entries immediately. Ambiguous signals should become `review_items`.
 
@@ -12,7 +12,7 @@ Use `docs/PRD.md` as the product source of truth. Use `docs/vercel-supabase-host
 
 - Monorepo: npm workspaces.
 - Web: Next.js App Router, React, TypeScript, Tailwind CSS, route handlers.
-- Mobile: Expo Router, React Native, iOS-first, HealthKit, Expo Location/Task Manager.
+- Mobile: Expo Router, React Native, iOS-first, Apple Health native bridge, Expo Location/Task Manager.
 - Shared: Zod schemas, palette/theme constants, event normalization.
 - Database: Postgres/PostGIS via `pg`; Supabase Postgres/Auth for hosted production.
 - Tests: Vitest plus TypeScript checks.
@@ -57,7 +57,7 @@ npm run export:workspace -- ./dayframe-backup.json
 - `apps/web/src/lib`: database, auth, session, queries, event processing, formatting, exports.
 - `apps/web/src/components`: dashboard, timer, timeline/review, reports, entity forms, shell UI.
 - `apps/mobile`: Expo iOS app, routes, native config, mobile UI.
-- `apps/mobile/src/lib`: API client, offline queue, geofence, HealthKit, deep links.
+- `apps/mobile/src/lib`: API client, offline queue, geofence, Apple Health import bridge, deep links.
 - `packages/shared`: Zod schemas, shared types, palette, event normalization.
 - `packages/db`: local Postgres/PostGIS migration, seed/setup/import/export scripts.
 - `supabase/migrations`: hosted Supabase-only RLS/security migrations.
@@ -66,7 +66,8 @@ npm run export:workspace -- ./dayframe-backup.json
 ## Architecture Rules
 
 - Preserve the event-first model. Do not bypass `activity_events` for new signal sources.
-- Preserve category/task-first UX. Users track a title/description and optional category; projects/clients are legacy/internal compatibility until explicitly reintroduced.
+- Preserve category-first UX. The normal user-facing model is task/title/description plus category, timer, and review/edit.
+- Clients and projects are not normal user-facing concepts. Treat existing client/project data only as legacy compatibility or migration input unless the PRD explicitly reintroduces it.
 - Keep automatic behavior conservative. Trusted places may auto-start; broad/unknown/Home-like signals should go to review unless the user has configured a rule.
 - Keep web and mobile API contracts compatible. Mobile relies on `/api/bootstrap`, `/api/time-entries`, `/api/events`, and bearer app sessions.
 - Maintain workspace/user scoping on all data access. API routes must resolve a `RequestSession` before reading or writing workspace data.
@@ -94,11 +95,15 @@ npm run export:workspace -- ./dayframe-backup.json
 - Mobile session tokens live in Expo SecureStore.
 - Offline event capture goes through the queue in `apps/mobile/src/lib/api.ts`.
 - Geofence tasks must remain defined at module top level.
-- HealthKit access is iOS native-build only; do not assume Expo Go can exercise it.
+- Apple Health access is iOS native-build only; do not assume Expo Go can exercise it.
 - Keep `EXPO_PUBLIC_DAYFRAME_API_BASE` configurable for hosted Vercel, simulator, and physical iPhone testing.
 - When changing sync behavior, test both direct timer actions and queued event sync.
-- The mobile dashboard should stay focused on the primary flow: logo/header, active timer, start task, quick category actions, and Today summary.
-- Location and HealthKit permission flows belong in onboarding and Settings, not on the dashboard. Surface friendly, actionable permission states instead of raw native errors.
+- The mobile dashboard must stay focused on the daily flow only: header, active timer, start task, compact category chips, and Today chart/summary.
+- Settings must be a separate pushed screen from a top-right settings/menu icon.
+- Location and Apple Health permission flows belong in onboarding and Settings, not on the dashboard. Surface friendly, actionable permission states instead of raw native errors.
+- Mobile category chips must be compact, pill-shaped, color-coded, and safe inside the dashboard width.
+- Today chart/summary is a core dashboard element and must not be pushed below settings/configuration content.
+- Light/dark/system theme changes must apply immediately across the mobile app.
 - Logout/account controls belong under profile/account management, not as primary dashboard chrome.
 
 ## Database Patterns
@@ -116,7 +121,7 @@ npm run export:workspace -- ./dayframe-backup.json
 - Personal productivity tracker first; no team/billing workflows unless explicitly requested.
 - MVP is iOS-only.
 - Non-iOS mobile support is out of scope and should not be added, documented, or configured unless explicitly requested.
-- HealthKit MVP includes sleep and workout/walking summaries.
+- Apple Health MVP includes sleep and workout/walking summaries.
 - Monetization is out of scope.
 - Light/dark/theming is polish, not a reason to destabilize core tracking.
 
@@ -132,8 +137,8 @@ npm run build
 ```
 
 - For mobile/native changes, also run the mobile typecheck and, when feasible, an iOS simulator build.
-- For timer/auth/sync changes, add or run regression coverage for web start, web stop, mobile start, mobile stop, active timer refresh, completed entry persistence, and queued event sync.
-- For UI changes, validate in a browser at desktop and mobile widths and check for console/runtime overlays.
+- For timer/auth/sync changes, add or run regression coverage for web start, web stop, mobile start, mobile stop, web/mobile active timer sync, active timer refresh, completed entry persistence, and queued event sync.
+- For UI changes, manually validate in simulator/browser using computer-use where available; lint/typecheck alone is not sufficient. Check desktop and mobile widths and watch for console/runtime overlays.
 - For app chrome, account, workspace, navigation, settings, or floating-surface changes, explicitly test mobile overlay behavior at phone widths. Do not treat a generic responsive pass as sufficient.
 - For auth/deployment changes, verify `DAYFRAME_AUTH_MODE=dev`, `local`, and `provider` code paths where practical.
 - For hosted deployment changes, verify the Supabase schema has all columns/indexes used by the deployed code before smoke-testing Vercel.
@@ -153,12 +158,12 @@ npm run build
 - `apps/web/src/lib/auth/supabase.ts`: hosted Supabase Auth adapter.
 - `apps/mobile/src/lib/api.ts`: mobile auth, queue, timer sync.
 - `apps/mobile/src/lib/geofence.ts`: iOS geofence capture.
-- `apps/mobile/src/lib/health.ts`: HealthKit sleep and workout imports.
+- `apps/mobile/src/lib/health.ts`: Apple Health sleep and workout imports through the native health bridge.
 - `packages/db/migrations/001_init.sql`: base schema.
 - `supabase/migrations/202607020001_dayframe_rls.sql`: hosted RLS policies.
 
 ## Git And Artifacts
 
 - Do not stage generated QA screenshots such as `.codex-dayframe-*.png` unless explicitly requested.
-- Do not commit secrets, real Supabase keys, session tokens, location exports, or HealthKit payload dumps.
+- Do not commit secrets, real Supabase keys, session tokens, location exports, Apple Health payload dumps, generated QA screenshots, or local env files.
 - Be careful with existing untracked `.codex/` files; they may be local workflow artifacts.

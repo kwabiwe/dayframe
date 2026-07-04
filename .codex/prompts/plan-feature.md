@@ -25,6 +25,7 @@ Transform a feature request into a **comprehensive implementation plan** through
 - Determine feature type: New Capability/Enhancement/Refactor/Bug Fix
 - Assess complexity: Low/Medium/High
 - Map affected systems and components
+- For Dayframe, check the request against category-first product direction: task/title/description plus category, timer, review/edit; clients/projects are not normal user-facing concepts.
 
 **Create User Story Format Or Refine If Story Was Provided By The User:**
 
@@ -57,6 +58,7 @@ So that <benefit/value>
 - Extract common patterns for the feature's domain
 - Document anti-patterns to avoid
 - Check `AGENTS.md` for project-specific rules and conventions
+- Check `docs/PRD.md`, `docs/dayframe-regression-checklist.md`, and relevant `.codex/reference/` files for current Dayframe product direction and validation requirements.
 
 **3. Dependency Analysis**
 
@@ -80,6 +82,8 @@ So that <benefit/value>
 - Understand database/model patterns if applicable
 - Identify authentication/authorization patterns if relevant
 - If the feature changes navigation, app shell, menus, popovers, dialogs, account controls, workspace controls, notifications, search, or settings, include a mobile overlay test plan. Explicitly list every floating surface affected and how it behaves on mobile.
+- If the feature changes Dayframe mobile dashboard, timer, category, settings, permissions, or theme behavior, include simulator/manual validation using computer-use where available.
+- If the feature changes hosted auth, events, timers, schema, or mobile sync, include Supabase migration verification: base schema first, then all `supabase/migrations` files in timestamp order.
 
 **Clarify Ambiguities:**
 
@@ -335,6 +339,10 @@ Execute every command to ensure zero regressions and 100% feature correctness.
 
 For app chrome, account/workspace controls, and floating surfaces, include phone-width checks for workspace switcher, profile/logout access, Help & Shortcuts, search, notifications, no horizontal overflow, visible close actions, and no zoom/landscape requirement.
 
+For Dayframe mobile UI, include simulator/manual checks for dashboard order, compact category chips, Today chart zero-state, Settings as a pushed screen, permission placement, immediate theme updates, category color/pin state, and no clipped controls.
+
+For Dayframe P0 timer flows, include web start, web stop, mobile start, mobile stop, web/mobile sync, queued event sync, and `clientEventId` dedupe.
+
 ### Level 5: Additional Validation (Optional)
 
 <MCP servers or additional CLI tools if available>
@@ -414,6 +422,8 @@ For app chrome, account/workspace controls, and floating surfaces, include phone
 - [ ] URLs include section anchors when applicable
 - [ ] Task descriptions use codebase keywords
 - [ ] Validation commands are non-interactive and executable
+- [ ] Dayframe UI work includes manual simulator/browser validation using computer-use where available
+- [ ] Dayframe hosted work includes Supabase migration checks in timestamp order after the base schema
 
 ## Success Metrics
 

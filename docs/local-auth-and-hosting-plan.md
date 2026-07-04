@@ -43,7 +43,7 @@ Signup creates:
 - a `users` row with `password_hash`
 - a `workspaces` row
 - a `workspace_members` owner row
-- a small default client/category/project set so the app can start timers immediately
+- a small default category set so the app can start timers immediately, with any legacy compatibility records kept out of normal UX
 - an `auth_sessions` row with a hashed session token
 
 ## Sessions And Logout

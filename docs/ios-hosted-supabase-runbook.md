@@ -13,7 +13,7 @@ The iOS app does not write directly to Supabase tables. It authenticates with Da
 - Supabase project with Auth, Postgres, and PostGIS enabled.
 - Vercel project deployed from the repository root.
 - Expo/EAS project for iOS internal or production builds.
-- Apple Developer account with HealthKit and background location capabilities available for the app identifier.
+- Apple Developer account with Apple Health and background location capabilities available for the app identifier.
 
 ## Supabase Setup
 
@@ -66,10 +66,10 @@ The native build must preserve:
 - URL scheme: `dayframe`
 - Background modes: `location` and `fetch`
 - Location usage strings for foreground and background geofencing
-- HealthKit entitlement
-- HealthKit usage strings
+- Apple Health entitlement
+- Apple Health usage strings
 
-HealthKit and background geofence behavior require a native iOS build and physical-device validation. Expo Go is not enough.
+Apple Health and background geofence behavior require a native iOS build and physical-device validation. Expo Go is not enough.
 
 ## Physical iPhone Smoke Test
 
@@ -81,7 +81,7 @@ HealthKit and background geofence behavior require a native iOS build and physic
 6. Disable network, queue a quick action and shortcut action, reconnect, then sync.
 7. Enable location and verify known-place geofences are monitored.
 8. Verify geofence enter/exit events create `activity_events` and review items unless an explicit trusted rule starts or stops a timer.
-9. Request HealthKit permission and import sleep.
+9. Request Apple Health permission and import sleep.
 10. Import workouts/walks.
 11. Confirm health imports create review items and audit rows through the hosted API.
 12. Logout and confirm subsequent authenticated requests require login.

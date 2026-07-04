@@ -10,6 +10,8 @@ Use this when adding or changing API routes, server actions, controllers, servic
 - Keep secrets server-side.
 - Timer, event, and entry routes must resolve a `RequestSession` before reading or writing workspace data.
 - User-facing timer APIs must support category/task-first flows and must not require projects unless the product model explicitly changes.
+- Clients/projects are compatibility data, not normal user-facing timer requirements.
+- Mobile hosted calls must use `EXPO_PUBLIC_DAYFRAME_API_BASE` against the Dayframe API, never direct Supabase table access.
 
 ## Data Access
 
@@ -18,6 +20,8 @@ Use this when adding or changing API routes, server actions, controllers, servic
 - Make ownership checks explicit for user-owned records.
 - Use transactions when writing `activity_events` plus derived `time_entries` or `review_items`.
 - Scope active timer updates by workspace and user.
+- Deduplicate offline/mobile events by `clientEventId` where provided.
+- Strip route/location-like metadata from Apple Health workout payloads before persistence or forwarding.
 
 ## Timer Regression Matrix
 
@@ -33,6 +37,7 @@ When changing `/api/time-entries`, `/api/events`, session handling, or mobile sy
 - category assignment while running
 - queued event sync with `clientEventId` dedupe
 - unauthorized request handling
+- hosted API base configuration with no production/native localhost fallback
 
 ## Review Checklist
 
@@ -40,3 +45,4 @@ When changing `/api/time-entries`, `/api/events`, session handling, or mobile sy
 - [ ] Auth checks happen before data access.
 - [ ] Errors are useful without leaking sensitive details.
 - [ ] Tests cover success, validation failure, unauthorized access, and the timer regression matrix where relevant.
+- [ ] Hosted migrations needed by changed API fields are documented and checked before deployment.

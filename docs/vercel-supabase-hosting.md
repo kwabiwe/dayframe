@@ -19,7 +19,7 @@ Do not paste the Supabase service-role key into chat unless an admin-only backen
 
 1. Create a Supabase project.
 2. Run the base Dayframe migration from `packages/db/migrations/001_init.sql`.
-3. Run the hosted security migration from `supabase/migrations/202607020001_dayframe_rls.sql`.
+3. Run every migration in `supabase/migrations/` in timestamp order after the base schema.
 4. In Auth settings, choose whether email confirmation is required.
    - For personal sideload/beta testing, disabling confirmation is simplest.
    - If confirmation is enabled, signup will return a “check your email” state and the user logs in after confirmation.

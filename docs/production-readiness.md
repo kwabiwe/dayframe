@@ -65,20 +65,20 @@ Behavior defaults:
 
 Expo Go cannot fully exercise background geofencing; use a development build.
 
-## HealthKit Sleep And Workouts
+## Apple Health Sleep And Workouts
 
-iOS HealthKit sleep and workout imports use `@kingstinct/react-native-healthkit` behind `apps/mobile/src/lib/health.ts`.
+iOS Apple Health sleep and workout imports use the native health bridge behind `apps/mobile/src/lib/health.ts`.
 
 Implemented:
 
-- HealthKit config plugin and iOS entitlement.
+- Apple Health config plugin and iOS entitlement.
 - Permission requests for `HKCategoryTypeIdentifierSleepAnalysis` and `HKWorkoutTypeIdentifier`.
 - Anchored sleep queries with local dedupe.
 - Mapping for in-bed, asleep unspecified/core/deep/REM, and awake.
 - Event-first queueing as `health_sleep_import` and `health_workout_import`.
 - Server-side audit/dedupe into `health_sleep_segments` and `health_workouts`.
 
-HealthKit requires a native iOS build/device and does not work in plain Expo Go.
+Apple Health requires a native iOS build/device and does not work in plain Expo Go.
 
 ## Export And Backup
 
@@ -101,6 +101,6 @@ Deletion/privacy groundwork remains: implement safe user/workspace deletion with
 ## Remaining Before Daily Beta Use
 
 - Add token management UI for creating/revoking integration tokens.
-- Verify HealthKit import on a physical iPhone/native build.
+- Verify Apple Health import on a physical iPhone/native build.
 - Add Home Assistant bridge after ingestion contracts are stable.
 - Add richer report filtering and larger-data performance checks.

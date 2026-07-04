@@ -28,6 +28,8 @@ Run `tree -L 3 -I 'node_modules|__pycache__|.git|dist|build|.next|coverage'` if 
 - Read README files at project root and major directories
 - Read any architecture documentation
 - Read relevant files in `.codex/reference/` only when they apply to the current task
+- For Dayframe product work, treat `docs/PRD.md`, `AGENTS.md`, `docs/dayframe-regression-checklist.md`, and relevant `.codex/reference/` files as source-of-truth before implementation.
+- Check whether current code or docs drift from category-first direction, focused mobile dashboard rules, Settings separation, and hosted Supabase migration requirements.
 - Read database/schema configuration if present, such as Drizzle, Prisma, SQL migrations, ORM models, or schema files
 
 ### 3. Identify Key Files
@@ -82,5 +84,6 @@ Provide a concise summary covering:
 - Recent changes or development focus
 - Current PRD phase or likely next feature
 - Any immediate observations or concerns
+- Any detected product-direction drift that should be fixed before implementation
 
 **Make this summary easy to scan - use bullet points and clear headers.**

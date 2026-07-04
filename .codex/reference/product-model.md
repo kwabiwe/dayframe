@@ -10,7 +10,7 @@ Use this when changing timer flows, dashboards, reports, entity management, onbo
 - Category is optional and can be added while a task is running.
 - Quick actions should combine pinned categories with most-used categories.
 - Existing projects may be converted into categories.
-- Projects and clients are legacy/internal compatibility until explicitly approved for user-facing UX again.
+- Projects and clients are not normal user-facing concepts. Treat them only as legacy/internal compatibility until explicitly approved for user-facing UX again.
 
 ## Timer UX Rules
 
@@ -19,6 +19,8 @@ Use this when changing timer flows, dashboards, reports, entity management, onbo
 - Active timer state must refresh correctly on web and mobile.
 - Manual completed entries should support category-only or uncategorized entries.
 - User-facing labels should say task, category, time entry, place, or source. Avoid project/client wording unless working on a compatibility or migration surface.
+- Mobile category chips start immediately when tapped.
+- Mobile unconfirmed starts should show queued/starting state until server confirmation.
 
 ## Data Compatibility
 

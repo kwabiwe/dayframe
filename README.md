@@ -59,7 +59,7 @@ Seed data is fictional and generic:
 
 - Workspaces: Personal, Freelance Studio.
 - Categories: Work, Admin, Personal, Health, Family, Learning, Rest, Travel, Client Work.
-- Legacy clients/projects remain in seed data only for compatibility and migration testing.
+- Legacy compatibility records remain in seed data only for migration testing; normal UX should use categories.
 - Tags: billable, manual, automated, needs-review, nfc, geofence, health, calendar.
 - Places: Home, Office, Gym, School, Town Centre, Coffee Shop.
 - Rules: Gym and School create suggestions, Town Centre creates review, NFC Start Chores starts a timer.
@@ -72,7 +72,7 @@ The approved entity/chart palette is shared from `packages/shared` and uses pale
 
 `lime`, `teal`, `sky`, `blue`, `violet`, `rose`, `amber`, `orange`, `red`, `steel`, `moss`, `graphite`.
 
-Categories and tags are created with a swatch selector on web. Legacy clients/projects can still be created for compatibility and migration testing. The API normalizes submitted colors to approved palette keys, and legacy seeded hex values are still resolved into approved colors for compatibility. New seed data stores palette keys directly.
+Categories and tags are created with a swatch selector on web. Legacy compatibility entities should stay hidden or demoted unless a migration/testing task explicitly needs them. The API normalizes submitted colors to approved palette keys, and legacy seeded hex values are still resolved into approved colors for compatibility. New seed data stores palette keys directly.
 
 Charts use the same palette resolver on web and mobile. If a report/source/place does not have a stored color, Dayframe cycles through the palette deterministically from the row name so chart colors remain stable. The dashboard time-spent chart and mobile activity summary both render circular donut charts. Web reports use animated bar widths and category-aware timeline marks. The mobile activity summary uses `react-native-svg` to render a donut chart split by category.
 
@@ -111,7 +111,7 @@ The selected review mode is stored locally in the browser. Calendar drag and res
 
 ## Production Readiness Foundations
 
-This repo now has explicit local-dev auth/session configuration, scoped ingest-token foundations, geofence exit handling and HealthKit sleep/workout adapters for native iOS builds. See [docs/production-readiness.md](docs/production-readiness.md) for setup, scope and remaining work.
+This repo now has explicit local-dev auth/session configuration, scoped ingest-token foundations, geofence exit handling and Apple Health sleep/workout adapters for native iOS builds. See [docs/production-readiness.md](docs/production-readiness.md) for setup, scope and remaining work.
 
 For DB-backed local login/signup sessions, use `DAYFRAME_AUTH_MODE=local` and see [docs/local-auth-and-hosting-plan.md](docs/local-auth-and-hosting-plan.md).
 
@@ -162,7 +162,7 @@ Mobile-to-web sync path:
 - No billing or team management.
 - Review split/merge and saved-place correction flows are documented but not fully implemented.
 - Calendar drag/drop and resize are not implemented yet; use the List view to edit start and stop times.
-- HealthKit sleep and workout imports are implemented behind a native iOS adapter; they require a development build/device and still route through activity events/review.
+- Apple Health sleep and workout imports are implemented behind a native iOS adapter; they require a development build/device and still route through activity events/review.
 - NFC is represented as an event/deep-link pathway; full native NFC scanning should be added with a development build.
 - Local demo auth uses fixed demo user/workspace IDs.
 - Docker Desktop must be running before `npm run db:up`.

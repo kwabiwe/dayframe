@@ -139,4 +139,4 @@ insert into calendar_events (workspace_id, external_id, title, started_at, stopp
 
 insert into integrations (workspace_id, provider, status, settings) values
   ('00000000-0000-4000-8000-000000000010', 'calendar', 'not_connected', '{"notes":"Calendar sync is planned after v1."}'),
-  ('00000000-0000-4000-8000-000000000010', 'healthkit', 'not_connected', '{"notes":"HealthKit sleep/workout imports require a native iOS build and permission."}');
+  ('00000000-0000-4000-8000-000000000010', 'healthkit', 'not_connected', '{"notes":"Apple Health sleep/workout imports require a native iOS build and permission."}');

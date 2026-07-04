@@ -1,10 +1,10 @@
 # Mobile Permission Guidelines
 
-Use this when changing iOS onboarding, Settings, geofencing, HealthKit, or mobile dashboard behavior.
+Use this when changing iOS onboarding, Settings, geofencing, Apple Health, or mobile dashboard behavior.
 
 ## Placement
 
-- Location and HealthKit permission controls belong in onboarding and Settings.
+- Location and Apple Health permission controls belong in onboarding and Settings.
 - Do not put permission cards on the main dashboard.
 - The dashboard should focus on logo/header, active timer, start task, quick category actions, and Today summary.
 - Logout belongs under profile/account management, not as primary dashboard chrome.
@@ -36,9 +36,9 @@ Recommended product states:
 
 Request foreground location first. Explain background/Always access before requesting it. If `canAskAgain` is false, provide an Open Settings action.
 
-## HealthKit State
+## Apple Health State
 
-HealthKit requires a native iOS build and real-device validation. Expo Go and many simulator paths cannot fully exercise it.
+Apple Health requires a native iOS build and real-device validation. Expo Go and many simulator paths cannot fully exercise it.
 
 Use friendly states for:
 
@@ -52,4 +52,4 @@ Use friendly states for:
 
 Do not surface raw native errors such as `Authorization not determined` in alerts. Convert native errors into user-friendly messages and next actions.
 
-Sleep and workout permissions may be requested from onboarding or Settings. Imports should continue to queue event-first payloads and should not include route/location-like HealthKit metadata.
+Sleep and workout permissions may be requested from onboarding or Settings. Imports should continue to queue event-first payloads and should not include route/location-like metadata.

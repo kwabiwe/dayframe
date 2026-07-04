@@ -17,6 +17,8 @@ Read plan file: `$ARGUMENTS`
 - Understand all tasks and their dependencies
 - Note the validation commands to run
 - Review the testing strategy
+- Re-check `AGENTS.md`, `docs/PRD.md`, `docs/dayframe-regression-checklist.md`, and relevant `.codex/reference/` files if the plan touches Dayframe product, mobile UI, timer, sync, hosted auth, or schema behavior.
+- Confirm the plan still matches category-first direction, focused mobile dashboard rules, Settings separation, P0 timer validation, and hosted Supabase migration requirements before editing.
 
 ### 2. Execute Tasks in Order
 
@@ -31,6 +33,7 @@ For EACH task in "Step by Step Tasks":
 - Maintain consistency with existing code patterns
 - Include proper type hints and documentation
 - Add structured logging where appropriate
+- Keep UI and product behavior aligned with the current PRD; do not reintroduce client/project-first flows or dashboard permission/configuration clutter.
 
 #### c. Verify as you go
 - After each file change, check syntax
@@ -59,6 +62,8 @@ If any command fails:
 - Re-run the command
 - Continue only when it passes
 
+For UI changes, run simulator/browser manual validation using computer-use where available before claiming completion. For hosted schema/API changes, verify the hosted Supabase migration state before deployment or smoke-test signoff.
+
 ### 5. Final Verification
 
 Before completing:
@@ -68,6 +73,8 @@ Before completing:
 - ✅ All validation commands pass
 - ✅ Code follows project conventions
 - ✅ Documentation added/updated as needed
+- ✅ Manual UI validation completed for UI changes
+- ✅ Supabase migration checks completed for hosted/schema changes
 
 ## Output Report
 

@@ -9,13 +9,25 @@ Use this when implementing visual UI.
 - Use clear hierarchy, stable spacing, and predictable interactions.
 - Avoid one-note palettes and decorative clutter.
 - Dayframe should feel like a compact personal time tool, not a project-management or billing app.
-- Mobile first screen should match the simple dashboard sketch: logo, active timer, start task, Today summary.
+- Mobile first screen should match the focused daily workflow: header, active timer, start task, compact category chips, and Today chart/summary.
+
+## Dayframe Mobile UX Invariants
+
+- Keep the dashboard for daily tracking only. Do not place Settings, logout, permission setup, or sync administration on the dashboard.
+- Settings must be a separate pushed screen opened from a top-right settings/menu icon.
+- Category chips must be compact, pill-shaped, color-coded, and safe inside phone-width dashboard layouts.
+- The Today chart/summary is a core dashboard element and must not be pushed below settings or configuration content.
+- Empty Today summaries should use a clean zero-state, not a fake 100% category slice.
+- User-facing health copy should say "Health data" or "Apple Health".
+- Theme changes for system/light/dark must apply immediately across mobile surfaces.
+- Use icons consistently for small chrome/actions, with accessible labels; keep text buttons for clear task commands.
 
 ## Responsive Design
 
 - Define stable dimensions for fixed-format UI such as boards, toolbars, tiles, counters, and icon buttons.
 - Ensure text fits inside controls at mobile and desktop sizes.
 - Check all primary screens at mobile, tablet, and desktop viewports.
+- Check mobile dashboard and Settings at common simulator widths. No button, category chip, segmented control, permission row, or settings action may clip off-screen.
 
 ## Mobile Floating Surfaces
 
@@ -36,3 +48,8 @@ Use this when implementing visual UI.
 - [ ] Floating surfaces fit inside mobile viewports without horizontal scrolling or zooming.
 - [ ] Visual assets render correctly if used.
 - [ ] Mobile dashboard excludes sync/logout/permission clutter from primary chrome.
+- [ ] Mobile dashboard order is header, active timer, start task, compact category chips, Today chart/summary.
+- [ ] Today chart is visible before settings/configuration content.
+- [ ] Category chips are compact, pill-shaped, color-coded, and do not overflow.
+- [ ] Settings is a separate screen and all controls fit within phone width.
+- [ ] Theme changes apply immediately across mobile UI.
