@@ -3,6 +3,7 @@ import Script from "next/script";
 import { Suspense } from "react";
 import "./globals.css";
 import { AppShell } from "@/components/AppShell";
+import { getOptionalPageSession } from "@/lib/auth/server";
 
 export const metadata: Metadata = {
   title: "Dayframe",
@@ -12,7 +13,9 @@ export const metadata: Metadata = {
   }
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const session = await getOptionalPageSession();
+
   return (
     <html lang="en" suppressHydrationWarning>
       <body>
@@ -25,7 +28,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           }}
         />
         <Suspense fallback={<>{children}</>}>
-          <AppShell>{children}</AppShell>
+          {session ? <AppShell>{children}</AppShell> : children}
         </Suspense>
       </body>
     </html>

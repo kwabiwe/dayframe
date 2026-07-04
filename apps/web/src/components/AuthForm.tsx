@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
 
 type AuthMode = "login" | "signup";
@@ -9,6 +10,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const isSignup = mode === "signup";
 
   async function submit(formData: FormData) {
@@ -44,7 +46,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
   }
 
   return (
-    <section className="industrial-panel mx-auto w-full max-w-[440px]">
+    <section className="industrial-panel auth-card mx-auto w-full max-w-[440px]">
       <div className="border-b border-[var(--line)] px-5 py-4">
         <h1 className="text-2xl font-semibold">{isSignup ? "Create account" : "Log in"}</h1>
         <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
@@ -62,7 +64,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
                 className="industrial-field"
                 name="name"
                 autoComplete="name"
-                placeholder="Local test user"
+                placeholder="Your name"
               />
             </label>
             <label className="grid gap-2 text-sm font-medium">
@@ -71,7 +73,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
                 className="industrial-field"
                 name="workspaceName"
                 autoComplete="organization"
-                placeholder="My Dayframe"
+                placeholder="Personal workspace"
               />
             </label>
           </>
@@ -83,20 +85,29 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
             name="email"
             type="email"
             autoComplete="email"
-            placeholder="test1@dayframe.local"
+            placeholder="you@example.com"
             required
           />
         </label>
         <label className="grid gap-2 text-sm font-medium">
           Password
-          <input
-            className="industrial-field"
-            name="password"
-            type="password"
-            autoComplete={isSignup ? "new-password" : "current-password"}
-            minLength={8}
-            required
-          />
+          <span className="auth-password-field">
+            <input
+              className="industrial-field"
+              name="password"
+              type={showPassword ? "text" : "password"}
+              autoComplete={isSignup ? "new-password" : "current-password"}
+              minLength={8}
+              required
+            />
+            <button
+              type="button"
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              onClick={() => setShowPassword((value) => !value)}
+            >
+              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </span>
         </label>
 
         {error ? (
@@ -120,7 +131,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
         </button>
 
         <p className="text-sm text-[var(--muted)]">
-          {isSignup ? "Already have a local account?" : "Need a local account?"}{" "}
+          {isSignup ? "Already have an account?" : "New to Dayframe?"}{" "}
           <Link className="font-semibold text-[var(--accent)]" href={isSignup ? "/login" : "/signup"}>
             {isSignup ? "Log in" : "Create one"}
           </Link>
