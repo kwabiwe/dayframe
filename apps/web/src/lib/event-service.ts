@@ -4,9 +4,16 @@ import {
   normalizeActivityEvent,
   type ActivityEventInput
 } from "@dayframe/shared";
-import { pool, query } from "./db";
+import { isUndefinedColumnError, pool, query } from "./db";
 import { getNormalizationContext } from "./queries";
 import { getDevSession, type RequestSession } from "./session";
+
+type CategoryRowLike = {
+  id: string;
+  name: string;
+  color: string;
+  isPinned: boolean;
+};
 
 export async function processActivityEvent(rawInput: unknown, session: RequestSession = getDevSession()) {
   const parsed = ActivityEventInputSchema.parse({
@@ -309,24 +316,39 @@ export async function createCategory(
   session: RequestSession = getDevSession()
 ) {
   const name = normalizeName(input.name, "New category");
-  const result = await query<{
-    id: string;
-    name: string;
-    color: string;
-    isPinned: boolean;
-  }>(
-    `insert into categories (workspace_id, name, color, is_pinned)
-     values ($1, $2, $3, $4)
-     returning id, name, color, is_pinned as "isPinned"`,
-    [
-      session.workspaceId,
-      name,
-      normalizePaletteKey(input.color, name),
-      Boolean(input.isPinned)
-    ]
-  );
+  const color = normalizePaletteKey(input.color, name);
 
-  return result.rows[0];
+  try {
+    const result = await query<{
+      id: string;
+      name: string;
+      color: string;
+      isPinned: boolean;
+    }>(
+      `insert into categories (workspace_id, name, color, is_pinned)
+       values ($1, $2, $3, $4)
+       returning id, name, color, is_pinned as "isPinned"`,
+      [
+        session.workspaceId,
+        name,
+        color,
+        Boolean(input.isPinned)
+      ]
+    );
+
+    return result.rows[0];
+  } catch (error) {
+    if (!isUndefinedColumnError(error, "is_pinned")) throw error;
+    const result = await query<Omit<CategoryRowLike, "isPinned">>(
+      `insert into categories (workspace_id, name, color)
+       values ($1, $2, $3)
+       returning id, name, color`,
+      [session.workspaceId, name, color]
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error("Category could not be created.");
+    return { ...row, isPinned: false };
+  }
 }
 
 export async function updateCategory(
@@ -346,41 +368,67 @@ export async function updateCategory(
     ? normalizePaletteKey(input.color, normalizedName ?? id)
     : null;
 
-  const result = await query<{
-    id: string;
-    name: string;
-    color: string;
-    isPinned: boolean;
-  }>(
-    `update categories
-     set name = case when $3 then $4 else name end,
-         color = case when $5 then $6 else color end,
-         is_pinned = case when $7 then $8 else is_pinned end
-     where id = $1 and workspace_id = $2 and is_archived = false
-     returning id, name, color, is_pinned as "isPinned"`,
-    [
-      id,
-      session.workspaceId,
-      hasName,
-      normalizedName,
-      hasColor,
-      normalizedColor,
-      hasIsPinned,
-      Boolean(input.isPinned)
-    ]
-  );
+  try {
+    const result = await query<CategoryRowLike>(
+      `update categories
+       set name = case when $3 then $4 else name end,
+           color = case when $5 then $6 else color end,
+           is_pinned = case when $7 then $8 else is_pinned end
+       where id = $1 and workspace_id = $2 and is_archived = false
+       returning id, name, color, is_pinned as "isPinned"`,
+      [
+        id,
+        session.workspaceId,
+        hasName,
+        normalizedName,
+        hasColor,
+        normalizedColor,
+        hasIsPinned,
+        Boolean(input.isPinned)
+      ]
+    );
 
-  return result.rows[0] ?? null;
+    return result.rows[0] ?? null;
+  } catch (error) {
+    if (!isUndefinedColumnError(error, "is_pinned")) throw error;
+    const result = await query<Omit<CategoryRowLike, "isPinned">>(
+      `update categories
+       set name = case when $3 then $4 else name end,
+           color = case when $5 then $6 else color end
+       where id = $1 and workspace_id = $2 and is_archived = false
+       returning id, name, color`,
+      [
+        id,
+        session.workspaceId,
+        hasName,
+        normalizedName,
+        hasColor,
+        normalizedColor
+      ]
+    );
+    const row = result.rows[0];
+    return row ? { ...row, isPinned: false } : null;
+  }
 }
 
 export async function archiveCategory(id: string, session: RequestSession = getDevSession()) {
-  await query(
-    `update categories
-     set is_archived = true,
-         is_pinned = false
-     where id = $1 and workspace_id = $2`,
-    [id, session.workspaceId]
-  );
+  try {
+    await query(
+      `update categories
+       set is_archived = true,
+           is_pinned = false
+       where id = $1 and workspace_id = $2`,
+      [id, session.workspaceId]
+    );
+  } catch (error) {
+    if (!isUndefinedColumnError(error, "is_pinned")) throw error;
+    await query(
+      `update categories
+       set is_archived = true
+       where id = $1 and workspace_id = $2`,
+      [id, session.workspaceId]
+    );
+  }
 }
 
 export async function updateTimeEntry(
@@ -704,15 +752,27 @@ export async function createEntity(
         normalizePaletteKey(input.color, String(input.name ?? "New client"))
       ]);
     case "category":
-      return query(
-        "insert into categories (workspace_id, name, color, is_pinned) values ($1, $2, $3, $4)",
-        [
-          session.workspaceId,
-          String(input.name ?? "New category"),
-          normalizePaletteKey(input.color, String(input.name ?? "New category")),
-          Boolean(input.isPinned)
-        ]
-      );
+      try {
+        return await query(
+          "insert into categories (workspace_id, name, color, is_pinned) values ($1, $2, $3, $4)",
+          [
+            session.workspaceId,
+            String(input.name ?? "New category"),
+            normalizePaletteKey(input.color, String(input.name ?? "New category")),
+            Boolean(input.isPinned)
+          ]
+        );
+      } catch (error) {
+        if (!isUndefinedColumnError(error, "is_pinned")) throw error;
+        return query(
+          "insert into categories (workspace_id, name, color) values ($1, $2, $3)",
+          [
+            session.workspaceId,
+            String(input.name ?? "New category"),
+            normalizePaletteKey(input.color, String(input.name ?? "New category"))
+          ]
+        );
+      }
     case "tag":
       return query("insert into tags (workspace_id, name, color) values ($1, $2, $3)", [
         session.workspaceId,

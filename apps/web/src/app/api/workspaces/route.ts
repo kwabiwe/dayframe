@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { normalizePaletteKey } from "@dayframe/shared";
 import { sessionTokenFromRequest, switchLocalSessionWorkspace } from "@/lib/auth/local";
 import { authErrorResponse } from "@/lib/api-errors";
-import { pool } from "@/lib/db";
+import { hasTableColumn, pool } from "@/lib/db";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 
 export async function POST(request: Request) {
@@ -34,12 +34,20 @@ export async function POST(request: Request) {
        returning id`,
       [workspaceId, normalizePaletteKey("steel", "Personal")]
     );
-    const categoryRow = await client.query<{ id: string }>(
-      `insert into categories (workspace_id, name, color, is_pinned)
-       values ($1, 'General', $2, true)
-       returning id`,
-      [workspaceId, normalizePaletteKey("blue", "General")]
-    );
+    const supportsPinnedCategories = await hasTableColumn(client, "categories", "is_pinned");
+    const categoryRow = supportsPinnedCategories
+      ? await client.query<{ id: string }>(
+          `insert into categories (workspace_id, name, color, is_pinned)
+           values ($1, 'General', $2, true)
+           returning id`,
+          [workspaceId, normalizePaletteKey("blue", "General")]
+        )
+      : await client.query<{ id: string }>(
+          `insert into categories (workspace_id, name, color)
+           values ($1, 'General', $2)
+           returning id`,
+          [workspaceId, normalizePaletteKey("blue", "General")]
+        );
     await client.query(
       `insert into projects (workspace_id, client_id, category_id, name, color, billable)
        values ($1, $2, $3, 'General', $4, false)`,

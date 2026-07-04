@@ -5,7 +5,7 @@ import type {
   PlaceSummary,
   ProjectSummary
 } from "@dayframe/shared";
-import { query } from "./db";
+import { isUndefinedColumnError, query } from "./db";
 import { getDevSession, type RequestSession } from "./session";
 
 export type ClientRow = {
@@ -322,14 +322,26 @@ async function getClients(session: RequestSession) {
 }
 
 async function getCategories(session: RequestSession) {
-  const result = await query<CategoryRow>(
-    `select id, name, color, is_pinned as "isPinned"
-     from categories
-     where workspace_id = $1 and is_archived = false
-     order by is_pinned desc, name`,
-    [session.workspaceId]
-  );
-  return result.rows;
+  try {
+    const result = await query<CategoryRow>(
+      `select id, name, color, is_pinned as "isPinned"
+       from categories
+       where workspace_id = $1 and is_archived = false
+       order by is_pinned desc, name`,
+      [session.workspaceId]
+    );
+    return result.rows;
+  } catch (error) {
+    if (!isUndefinedColumnError(error, "is_pinned")) throw error;
+    const result = await query<Omit<CategoryRow, "isPinned">>(
+      `select id, name, color
+       from categories
+       where workspace_id = $1 and is_archived = false
+       order by name`,
+      [session.workspaceId]
+    );
+    return result.rows.map((category) => ({ ...category, isPinned: false }));
+  }
 }
 
 async function getProjects(session: RequestSession) {

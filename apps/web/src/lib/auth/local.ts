@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type pg from "pg";
 import { z } from "zod";
 import { normalizePaletteKey } from "@dayframe/shared";
-import { pool, query } from "@/lib/db";
+import { hasTableColumn, pool, query } from "@/lib/db";
 import { AuthError, type RequestSession } from "@/lib/session";
 
 export const APP_SESSION_COOKIE = "dayframe_session";
@@ -260,12 +260,20 @@ export async function seedDefaultWorkspaceData(client: pg.PoolClient, workspaceI
      returning id`,
     [workspaceId, normalizePaletteKey("steel", "Personal")]
   );
-  const categoryRow = await client.query<{ id: string }>(
-    `insert into categories (workspace_id, name, color, is_pinned)
-     values ($1, 'General', $2, true)
-     returning id`,
-    [workspaceId, normalizePaletteKey("lime", "General")]
-  );
+  const supportsPinnedCategories = await hasTableColumn(client, "categories", "is_pinned");
+  const categoryRow = supportsPinnedCategories
+    ? await client.query<{ id: string }>(
+        `insert into categories (workspace_id, name, color, is_pinned)
+         values ($1, 'General', $2, true)
+         returning id`,
+        [workspaceId, normalizePaletteKey("lime", "General")]
+      )
+    : await client.query<{ id: string }>(
+        `insert into categories (workspace_id, name, color)
+         values ($1, 'General', $2)
+         returning id`,
+        [workspaceId, normalizePaletteKey("lime", "General")]
+      );
   await client.query(
     `insert into projects (workspace_id, client_id, category_id, name, color, billable)
      values ($1, $2, $3, 'General', $4, false)`,
