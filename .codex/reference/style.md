@@ -8,6 +8,8 @@ Use this when implementing visual UI.
 - Prefer restrained, readable interfaces for tools and dashboards.
 - Use clear hierarchy, stable spacing, and predictable interactions.
 - Avoid one-note palettes and decorative clutter.
+- Dayframe should feel like a compact personal time tool, not a project-management or billing app.
+- Mobile first screen should match the simple dashboard sketch: logo, active timer, start task, Today summary.
 
 ## Responsive Design
 
@@ -33,3 +35,4 @@ Use this when implementing visual UI.
 - [ ] Text does not overlap, clip, or overflow.
 - [ ] Floating surfaces fit inside mobile viewports without horizontal scrolling or zooming.
 - [ ] Visual assets render correctly if used.
+- [ ] Mobile dashboard excludes sync/logout/permission clutter from primary chrome.

@@ -2,7 +2,7 @@
 
 ## 1. Executive Summary
 
-Dayframe is a personal time-intelligence product that combines Toggl-style manual time tracking with LifeCycle-style automatic activity capture. It has two interfaces: an iOS mobile app that can read location and HealthKit signals, and a web app for timer control, review, reporting, project/category management, and longer-form analysis.
+Dayframe is a personal time-intelligence product that combines manual task tracking with privacy-conscious automatic activity capture. It has two interfaces: an iOS mobile app that can read location and HealthKit signals, and a web app for timer control, review, reporting, category management, and longer-form analysis.
 
 The core value proposition is to reduce manual time-tracking friction without losing user trust. Dayframe should capture manual timer actions, trusted-place automation, HealthKit sleep/workout summaries, and mobile offline activity signals, then sync them into a clear web/mobile timeline. Ambiguous or low-confidence signals should be reviewable instead of silently becoming incorrect time entries.
 
@@ -36,7 +36,7 @@ Technical comfort level:
 Key needs and pain points:
 
 - Manual time tracking is easy to forget.
-- Location apps show where time went but not project/category context.
+- Location apps show where time went but not task/category context.
 - Health apps show sleep/workouts but do not connect that data to a productivity timeline.
 - Fully automatic time tracking can be wrong, so corrections and review matter.
 
@@ -47,7 +47,7 @@ Key needs and pain points:
 Core Functionality:
 
 - ✅ Web and mobile manual timer start/stop with live active timer sync.
-- ✅ Description, project, client, category, place, source, confidence, and review status on time entries.
+- ✅ Description, category, place, source, confidence, and review status on time entries.
 - ✅ Calendar, List, and Timesheet review views.
 - ✅ Review inbox for ambiguous geofence/health/location suggestions.
 - ✅ Auto-start for trusted places only.
@@ -69,7 +69,6 @@ Integration:
 
 - ✅ iOS HealthKit sleep and walking/workout summaries.
 - ✅ iOS geofence monitoring for known places.
-- ✅ Long-term Toggl integration path, while Dayframe remains standalone.
 - ✅ Anonymized automation accuracy analytics.
 
 Deployment:
@@ -81,7 +80,7 @@ Deployment:
 ### Out of Scope
 
 - ❌ Team time tracking, approvals, seats, roles, or billable SaaS workflows.
-- ❌ Android and Health Connect.
+- ❌ Non-iOS mobile support.
 - ❌ App Store optimization/review as a launch blocker.
 - ❌ Billing/subscriptions.
 - ❌ Full calendar integration.
@@ -93,8 +92,8 @@ Deployment:
 1. As a personal productivity user, I want to start a timer from web or mobile, so that I can track focused work without switching tools.
    - Example: Start "Deep Work" on mobile, see the same active timer ticking on web.
 
-2. As a user entering work context, I want to type a task description and choose project/category/client, so that the final time entry has useful context.
-   - Example: Type "Draft Supabase auth plan", choose "Deep Work", stop timer later, and keep that description.
+2. As a user entering work context, I want to type an optional task description and choose an optional category, so that the final time entry has useful context.
+   - Example: Type "Draft Supabase auth plan", choose "Work", stop timer later, and keep that description.
 
 3. As a user moving between trusted places, I want Dayframe to auto-start known activities only for trusted locations, so that routine places save effort without creating noisy entries.
    - Example: Arriving at Gym starts a Gym/Health entry if explicitly configured as trusted.
@@ -109,7 +108,7 @@ Deployment:
    - Example: A walk captured offline syncs when the phone reconnects.
 
 7. As a user reviewing time, I want Calendar, List, and Timesheet views, so that I can edit precise entries and understand daily/weekly totals.
-   - Example: Resize/edit a time block, delete an accidental entry, and review weekly totals by project/category.
+   - Example: Resize/edit a time block, delete an accidental entry, and review weekly totals by category.
 
 8. As the product owner, I want anonymized automation accuracy metrics, so that I can improve rules without collecting unnecessary personal detail.
    - Example: Track accepted vs ignored suggestions by source type, not raw coordinates.
@@ -139,7 +138,7 @@ Manual timer:
 - Start/stop from web and mobile.
 - Live ticking duration.
 - Description can be edited while running.
-- Project/category/client selection.
+- Optional task description and category selection.
 - Active timer sync across interfaces.
 
 Timeline/review:
@@ -254,14 +253,14 @@ Authentication:
 Core app:
 
 - `GET /api/bootstrap`
-  - Returns active timer, entries, projects, categories, places, review items, stats, and dashboard data.
+  - Returns active timer, entries, categories, places, review items, stats, dashboard data, and legacy project/client compatibility data.
 
 - `POST /api/time-entries`
   - Modes: start, stop, manual entry creation.
   - Mobile may send `source: "mobile_app"`.
 
 - `PATCH /api/time-entries/:id`
-  - Edits project/category/place/description/start/stop.
+  - Edits category/place/description/start/stop, with legacy project fields preserved for compatibility.
 
 - `DELETE /api/time-entries/:id`
   - Deletes an entry.
@@ -403,8 +402,6 @@ Validation:
 
 ## 13. Future Considerations
 
-- Toggl import/export and optional long-term sync.
-- Full Android Health Connect support.
 - Calendar integration for work meeting hints.
 - Home Assistant/local bridge integrations.
 - Realtime sync through Supabase Realtime/WebSocket/SSE.

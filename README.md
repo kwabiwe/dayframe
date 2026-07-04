@@ -1,6 +1,6 @@
 # Dayframe
 
-Dayframe is a first working version of a customizable time intelligence product. It combines a Toggl-style web app with an Expo mobile app that can capture manual actions, quick actions, NFC/Shortcut-style events, geofence events and unknown stays.
+Dayframe is a first working version of a customizable time intelligence product. It combines fast task tracking with an Expo iOS app that can capture manual actions, quick actions, NFC/Shortcut-style events, geofence events and unknown stays.
 
 The core rule is event-first: every signal becomes an `activity_events` row before it can become a `time_entries` row. High-confidence explicit actions can create entries immediately. Ambiguous signals go to `review_items`.
 
@@ -58,8 +58,8 @@ For a physical iPhone, set `EXPO_PUBLIC_DAYFRAME_API_BASE` in `apps/mobile/.env`
 Seed data is fictional and generic:
 
 - Workspaces: Personal, Freelance Studio.
-- Clients: Internal, Acme Ltd, Family, Health, Learning.
-- Projects: Admin, Deep Work, Client Delivery, Gym, Family Time, Chores, Errands, Travel, Reading, Sleep, Study, Creative Work.
+- Categories: Work, Admin, Personal, Health, Family, Learning, Rest, Travel, Client Work.
+- Legacy clients/projects remain in seed data only for compatibility and migration testing.
 - Tags: billable, manual, automated, needs-review, nfc, geofence, health, calendar.
 - Places: Home, Office, Gym, School, Town Centre, Coffee Shop.
 - Rules: Gym and School create suggestions, Town Centre creates review, NFC Start Chores starts a timer.
@@ -72,9 +72,9 @@ The approved entity/chart palette is shared from `packages/shared` and uses pale
 
 `lime`, `teal`, `sky`, `blue`, `violet`, `rose`, `amber`, `orange`, `red`, `steel`, `moss`, `graphite`.
 
-Clients, projects, categories and tags are created with a swatch selector on web. The API normalizes submitted colors to approved palette keys, and legacy seeded hex values are still resolved into approved colors for compatibility. New seed data stores palette keys directly.
+Categories and tags are created with a swatch selector on web. Legacy clients/projects can still be created for compatibility and migration testing. The API normalizes submitted colors to approved palette keys, and legacy seeded hex values are still resolved into approved colors for compatibility. New seed data stores palette keys directly.
 
-Charts use the same palette resolver on web and mobile. If a report/source/place does not have a stored color, Dayframe cycles through the palette deterministically from the row name so chart colors remain stable. The dashboard time-spent chart and mobile activity summary both render circular donut charts. Web reports use animated bar widths and project-colored timeline marks. The mobile activity summary uses `react-native-svg` to render a LifeCycle-style donut chart split by location and project/activity.
+Charts use the same palette resolver on web and mobile. If a report/source/place does not have a stored color, Dayframe cycles through the palette deterministically from the row name so chart colors remain stable. The dashboard time-spent chart and mobile activity summary both render circular donut charts. Web reports use animated bar widths and category-aware timeline marks. The mobile activity summary uses `react-native-svg` to render a donut chart split by category.
 
 Motion is intentionally restrained: panels ease in, buttons show press feedback, timer state color changes are immediate, report bars animate their widths, and the mobile donut draws once when the summary period first appears.
 
@@ -82,9 +82,9 @@ Motion is intentionally restrained: panels ease in, buttons show press feedback,
 
 The web Timeline page has three Dayframe review modes:
 
-- Calendar: a week/day grid with time blocks placed by start and stop time, daily totals and project color accents.
-- List: a chronological, grouped list of entries with filters for client, project, category, tag, source, confidence and review state. Entries can be edited, continued or deleted inline.
-- Timesheet: a weekly table grouped by project/activity, with days as columns, cell totals and weekly totals.
+- Calendar: a week/day grid with time blocks placed by start and stop time, daily totals and category color accents.
+- List: a chronological, grouped list of entries with filters for category, tag, source, confidence and review state. Entries can be edited, continued or deleted inline.
+- Timesheet: a weekly table grouped by category/activity, with days as columns, cell totals and weekly totals.
 
 The selected review mode is stored locally in the browser. Calendar drag and resize are not implemented in v1; click/inspect and List editing are the current editing path.
 
@@ -104,14 +104,14 @@ The selected review mode is stored locally in the browser. Calendar drag and res
 - `POST /api/time-entries`: start, stop or create manual entries.
 - `PATCH /api/time-entries/:id`: edit an entry.
 - `DELETE /api/time-entries/:id`: delete an entry.
-- `POST /api/entities`: create clients, projects, categories, tags, places and rules.
+- `POST /api/entities`: create categories, tags, places, rules and legacy compatibility entities.
 - `POST /api/review/:id`: accept, ignore or create a rule from a review item.
 - `GET /api/export?kind=workspace_json`: workspace backup JSON.
 - `GET /api/export?kind=time_entries_csv`: time-entry CSV export.
 
 ## Production Readiness Foundations
 
-This repo now has explicit local-dev auth/session configuration, scoped ingest-token foundations, Toggl import/export scaffolding, geofence exit handling and a HealthKit sleep adapter for native iOS builds. See [docs/production-readiness.md](docs/production-readiness.md) for setup, scope and remaining work.
+This repo now has explicit local-dev auth/session configuration, scoped ingest-token foundations, geofence exit handling and HealthKit sleep/workout adapters for native iOS builds. See [docs/production-readiness.md](docs/production-readiness.md) for setup, scope and remaining work.
 
 For DB-backed local login/signup sessions, use `DAYFRAME_AUTH_MODE=local` and see [docs/local-auth-and-hosting-plan.md](docs/local-auth-and-hosting-plan.md).
 
@@ -120,7 +120,6 @@ For hosted Vercel/Supabase setup, use `DAYFRAME_AUTH_MODE=provider` and see [doc
 Useful commands:
 
 ```bash
-npm run toggl:import -- --dry-run
 npm run export:workspace -- ./dayframe-backup.json
 ```
 
@@ -163,7 +162,7 @@ Mobile-to-web sync path:
 - No billing or team management.
 - Review split/merge and saved-place correction flows are documented but not fully implemented.
 - Calendar drag/drop and resize are not implemented yet; use the List view to edit start and stop times.
-- HealthKit sleep import is implemented behind a native iOS adapter; it requires a development build/device and still routes through activity events/review.
+- HealthKit sleep and workout imports are implemented behind a native iOS adapter; they require a development build/device and still route through activity events/review.
 - NFC is represented as an event/deep-link pathway; full native NFC scanning should be added with a development build.
 - Local demo auth uses fixed demo user/workspace IDs.
 - Docker Desktop must be running before `npm run db:up`.

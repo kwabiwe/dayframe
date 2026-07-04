@@ -41,15 +41,18 @@ export function EntityForms({
         {mode === "projects" ? (
           <>
             <EntityList
-              title="Clients"
-              rows={clients.map((client) => ({ id: client.id, cells: [client.name, client.color] }))}
-            />
-            <EntityList
               title="Categories"
-              rows={categories.map((category) => ({ id: category.id, cells: [category.name, category.color] }))}
+              rows={categories.map((category) => ({
+                id: category.id,
+                cells: [category.name, category.color, category.isPinned ? "Pinned" : "Not pinned"]
+              }))}
             />
             <EntityList
-              title="Projects"
+              title="Tags"
+              rows={tags.map((tag) => ({ id: tag.id, cells: [tag.name, tag.color] }))}
+            />
+            <EntityList
+              title="Legacy projects"
               rows={projects.map((project) => ({
                 id: project.id,
                 cells: [
@@ -62,8 +65,8 @@ export function EntityForms({
               }))}
             />
             <EntityList
-              title="Tags"
-              rows={tags.map((tag) => ({ id: tag.id, cells: [tag.name, tag.color] }))}
+              title="Legacy clients"
+              rows={clients.map((client) => ({ id: client.id, cells: [client.name, client.color] }))}
             />
           </>
         ) : null}
@@ -76,7 +79,7 @@ export function EntityForms({
                 place.name,
                 `${place.radiusMeters}m`,
                 `Priority ${place.priority}`,
-                place.defaultProjectName ?? "No default project",
+                place.defaultCategoryName ?? place.defaultProjectName ?? "No default category",
                 place.autoStart ? "Auto-start" : "Review first"
               ]
             }))}
@@ -102,10 +105,10 @@ export function EntityForms({
       <div className="space-y-5">
         {mode === "projects" ? (
           <>
-            <CreateClientForm />
             <CreateCategoryForm />
-            <CreateProjectForm clients={clients} categories={categories} />
             <CreateTagForm />
+            <CreateProjectForm clients={clients} categories={categories} />
+            <CreateClientForm />
           </>
         ) : null}
         {mode === "places" ? (
@@ -143,7 +146,7 @@ function EntityList({ title, rows }: { title: string; rows: EntityListRow[] }) {
 
 function CreateClientForm() {
   return (
-    <EntityForm title="New client" entity="client">
+    <EntityForm title="New legacy client" entity="client">
       <TextInput name="name" label="Name" placeholder="Client name" required />
       <ColorInput name="color" label="Color" defaultValue="steel" />
     </EntityForm>
@@ -155,6 +158,10 @@ function CreateCategoryForm() {
     <EntityForm title="New category" entity="category">
       <TextInput name="name" label="Name" placeholder="Category name" required />
       <ColorInput name="color" label="Color" defaultValue="lime" />
+      <label className="flex items-center gap-2 text-sm">
+        <input name="isPinned" type="checkbox" value="true" />
+        Pin as quick action
+      </label>
     </EntityForm>
   );
 }
@@ -176,7 +183,7 @@ function CreateProjectForm({
   categories: CategoryRow[];
 }) {
   return (
-    <EntityForm title="New project" entity="project">
+    <EntityForm title="New legacy project" entity="project">
       <TextInput name="name" label="Name" placeholder="Project name" required />
       <SelectInput name="clientId" label="Client" options={clients} />
       <SelectInput name="categoryId" label="Category" options={categories} />
@@ -207,8 +214,8 @@ function CreatePlaceForm({
         <NumberInput name="radiusMeters" label="Radius" defaultValue="100" />
         <NumberInput name="priority" label="Priority" defaultValue="5" />
       </div>
-      <SelectInput name="projectId" label="Default project" options={projects} />
       <SelectInput name="categoryId" label="Default category" options={categories} />
+      <SelectInput name="projectId" label="Legacy default project" options={projects} />
       <label className="flex items-center gap-2 text-sm">
         <input name="autoStart" type="checkbox" value="true" />
         Auto-start when rule allows
@@ -260,8 +267,8 @@ function CreateAutomationForm({
           { id: "ignore_source", name: "ignore_source" }
         ]}
       />
-      <SelectInput name="projectId" label="Project" options={projects} />
       <SelectInput name="categoryId" label="Category" options={categories} />
+      <SelectInput name="projectId" label="Legacy project" options={projects} />
     </EntityForm>
   );
 }

@@ -6,7 +6,6 @@ import {
   Easing,
   Image,
   Linking,
-  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -17,6 +16,7 @@ import {
   View,
   type ViewStyle
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import Svg, { Circle, G, Path } from "react-native-svg";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { DAYFRAME_THEME, paletteColorFor } from "@dayframe/shared";
@@ -29,12 +29,14 @@ import {
   getHealthImportStatus,
   importHealthKitSleep,
   importHealthKitWorkouts,
+  friendlyHealthKitError,
   requestHealthKitSleepPermission,
   requestHealthKitWorkoutPermission,
   type HealthImportStatus
 } from "@/lib/health";
 import {
   AuthRequiredError,
+  createCategory,
   enqueueEvent,
   fetchBootstrap,
   login,
@@ -51,6 +53,7 @@ import {
 import { handleDayframeUrl } from "@/lib/deepLinks";
 
 type ThemeMode = "light" | "dark";
+type ThemePreference = ThemeMode | "system";
 type MobileTheme = (typeof DAYFRAME_THEME)[ThemeMode] & {
   mode: ThemeMode;
   chartTrack: string;
@@ -62,8 +65,7 @@ type AuthView = "login" | "signup";
 type AuthState = "checking" | "authenticated" | "signedOut";
 type SummarySegment = {
   key: string;
-  placeName: string;
-  projectName: string;
+  categoryName: string;
   seconds: number;
   share: number;
   color: string;
@@ -75,10 +77,20 @@ const periodLabels: Record<SummaryPeriod, string> = {
   month: "Month",
   year: "Year"
 };
+const themeOptions: Array<{ value: ThemePreference; label: string }> = [
+  { value: "system", label: "System" },
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" }
+];
+const THEME_PREFERENCE_KEY = "dayframe.themePreference.v1";
 
 export default function HomeScreen() {
   const colorScheme = useColorScheme();
-  const theme = useMemo(() => createMobileTheme(colorScheme === "light" ? "light" : "dark"), [colorScheme]);
+  const [themePreference, setThemePreferenceState] = useState<ThemePreference>("system");
+  const resolvedThemeMode = themePreference === "system"
+    ? colorScheme === "light" ? "light" : "dark"
+    : themePreference;
+  const theme = useMemo(() => createMobileTheme(resolvedThemeMode), [resolvedThemeMode]);
   const styles = useMemo(() => createStyles(theme), [theme]);
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [queue, setQueue] = useState<QueuedEvent[]>([]);
@@ -95,7 +107,9 @@ export default function HomeScreen() {
   const [healthStatus, setHealthStatus] = useState<HealthImportStatus[]>([]);
   const [now, setNow] = useState(() => Date.now());
   const [customDescription, setCustomDescription] = useState("");
-  const [customProjectId, setCustomProjectId] = useState("");
+  const [customCategoryId, setCustomCategoryId] = useState("");
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [pinNewCategory, setPinNewCategory] = useState(true);
   const [summaryPeriod, setSummaryPeriod] = useState<SummaryPeriod>("day");
   const [chartProgress, setChartProgress] = useState(1);
   const refreshInFlight = useRef(false);
@@ -134,6 +148,14 @@ export default function HomeScreen() {
       useNativeDriver: true
     }).start();
   }, [entrance]);
+
+  useEffect(() => {
+    AsyncStorage.getItem(THEME_PREFERENCE_KEY)
+      .then((value) => {
+        if (value === "system" || value === "light" || value === "dark") setThemePreferenceState(value);
+      })
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -184,9 +206,9 @@ export default function HomeScreen() {
   }, []);
 
   const quickActions = useMemo(() => buildMobileQuickActions(data), [data]);
-  const selectedCustomProject = useMemo(
-    () => data?.projects.find((project) => project.id === customProjectId) ?? data?.projects[0],
-    [customProjectId, data?.projects]
+  const selectedCustomCategory = useMemo(
+    () => data?.categories.find((category) => category.id === customCategoryId) ?? data?.categories[0],
+    [customCategoryId, data?.categories]
   );
   const activeDurationSeconds = data?.activeEntry
     ? Math.max(
@@ -207,8 +229,8 @@ export default function HomeScreen() {
   const workoutStatus = healthStatus.find((item) => item.provider === "healthkit" && item.kind === "workout");
 
   useEffect(() => {
-    if (!customProjectId && data?.projects[0]) setCustomProjectId(data.projects[0].id);
-  }, [customProjectId, data?.projects]);
+    if (!customCategoryId && data?.categories[0]) setCustomCategoryId(data.categories[0].id);
+  }, [customCategoryId, data?.categories]);
 
   useEffect(() => {
     if (authState !== "authenticated" || !data?.places.length) return;
@@ -235,9 +257,9 @@ export default function HomeScreen() {
     };
   }, [chartBuild, summaryPeriod, summarySegments.length]);
 
-  async function quickStart(projectId: string, categoryId?: string | null) {
+  async function quickStart(categoryId?: string | null) {
     try {
-      await startTimer(projectId, categoryId);
+      await startTimer(undefined, categoryId);
       await load();
     } catch (error) {
       if (error instanceof AuthRequiredError) {
@@ -248,7 +270,6 @@ export default function HomeScreen() {
       const nextQueue = await enqueueEvent({
         source: "mobile_app",
         type: "quick_action",
-        projectId,
         categoryId: categoryId ?? undefined,
         rawPayload: { origin: "mobile_quick_action_fallback" }
       });
@@ -258,12 +279,11 @@ export default function HomeScreen() {
   }
 
   async function customStart() {
-    if (!selectedCustomProject) return;
     const trimmedDescription = customDescription.trim();
     try {
       await startTimer(
-        selectedCustomProject.id,
-        selectedCustomProject.categoryId,
+        undefined,
+        selectedCustomCategory?.id,
         trimmedDescription
       );
       if (trimmedDescription) setCustomDescription("");
@@ -277,8 +297,7 @@ export default function HomeScreen() {
       const nextQueue = await enqueueEvent({
         source: "mobile_app",
         type: "timer_start",
-        projectId: selectedCustomProject.id,
-        categoryId: selectedCustomProject.categoryId ?? undefined,
+        categoryId: selectedCustomCategory?.id,
         description: trimmedDescription || undefined,
         rawPayload: { origin: "mobile_custom_start_fallback" }
       });
@@ -303,10 +322,33 @@ export default function HomeScreen() {
     }
   }
 
+  async function setThemePreference(nextPreference: ThemePreference) {
+    setThemePreferenceState(nextPreference);
+    await AsyncStorage.setItem(THEME_PREFERENCE_KEY, nextPreference);
+  }
+
+  async function addCategory() {
+    const name = newCategoryName.trim();
+    if (!name) return;
+    try {
+      await createCategory(name, { isPinned: pinNewCategory });
+      setNewCategoryName("");
+      setPinNewCategory(true);
+      await load();
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        setAuthState("signedOut");
+        setData(null);
+        return;
+      }
+      Alert.alert("Categories", error instanceof Error ? error.message : "Unable to create category.");
+    }
+  }
+
   async function enableLocation() {
     const status = await requestLocationAccess();
     setLocationStatus(status);
-    if (status === "granted" && data) {
+    if (status.startsWith("Always allowed") && data) {
       const count = await startGeofences(data.places);
       Alert.alert("Geofences", `Started ${count} place monitors.`);
     }
@@ -317,7 +359,7 @@ export default function HomeScreen() {
       const status = await requestHealthKitSleepPermission();
       updateHealthStatus(status);
     } catch (error) {
-      Alert.alert("HealthKit", error instanceof Error ? error.message : "Unable to request HealthKit permission");
+      Alert.alert("HealthKit", friendlyHealthKitError(error, "request HealthKit permission"));
     }
   }
 
@@ -326,7 +368,7 @@ export default function HomeScreen() {
       const status = await requestHealthKitWorkoutPermission();
       updateHealthStatus(status);
     } catch (error) {
-      Alert.alert("HealthKit", error instanceof Error ? error.message : "Unable to request HealthKit workout permission");
+      Alert.alert("HealthKit", friendlyHealthKitError(error, "request HealthKit workout permission"));
     }
   }
 
@@ -336,7 +378,7 @@ export default function HomeScreen() {
       updateHealthStatus(status);
       await syncAndReload();
     } catch (error) {
-      Alert.alert("HealthKit", error instanceof Error ? error.message : "Unable to sync HealthKit sleep");
+      Alert.alert("HealthKit", friendlyHealthKitError(error, "sync HealthKit sleep"));
     }
   }
 
@@ -346,7 +388,7 @@ export default function HomeScreen() {
       updateHealthStatus(status);
       await syncAndReload();
     } catch (error) {
-      Alert.alert("HealthKit", error instanceof Error ? error.message : "Unable to sync HealthKit workouts");
+      Alert.alert("HealthKit", friendlyHealthKitError(error, "sync HealthKit workouts"));
     }
   }
 
@@ -417,7 +459,6 @@ export default function HomeScreen() {
                 style={styles.logoImage}
                 resizeMode="contain"
               />
-              <Text style={styles.subtitle}>Hosted sync</Text>
             </View>
           </View>
           <View style={styles.panel}>
@@ -510,30 +551,23 @@ export default function HomeScreen() {
                 style={styles.logoImage}
                 resizeMode="contain"
               />
-              <Text style={styles.subtitle}>Mobile capture</Text>
-            </View>
-            <View style={styles.headerActions}>
-              <Pressable style={pressable(styles.syncButton, styles.buttonPressed)} onPress={syncAndReload}>
-                <Text style={styles.secondaryButtonText}>Sync {queue.length}</Text>
-              </Pressable>
-              <Pressable style={pressable(styles.syncButton, styles.buttonPressed)} onPress={signOut}>
-                <Text style={styles.secondaryButtonText}>Logout</Text>
-              </Pressable>
             </View>
           </View>
 
           <View style={styles.timerPanel}>
             <Text style={styles.label}>Active timer</Text>
             <Text style={styles.timerText}>
-              {data?.activeEntry ? data.activeEntry.projectName ?? "Running" : "No timer"}
+              {data?.activeEntry
+                ? data.activeEntry.description ?? data.activeEntry.categoryName ?? "Running"
+                : "No timer"}
             </Text>
-            {data?.activeEntry?.description ? (
-              <Text style={styles.activeDescription}>{data.activeEntry.description}</Text>
+            {data?.activeEntry?.categoryName ? (
+              <Text style={styles.activeDescription}>{data.activeEntry.categoryName}</Text>
             ) : null}
             <Text style={styles.muted}>
               {data?.activeEntry
                 ? `${formatClockDuration(activeDurationSeconds)} running`
-                : "Start from a quick action, NFC tag or shortcut."}
+                : "Start a task now, then add detail when you need it."}
             </Text>
             {data?.activeEntry ? (
               <Pressable
@@ -558,16 +592,6 @@ export default function HomeScreen() {
             ) : null}
           </View>
 
-          <LifecycleSummary
-            chartProgress={chartProgress}
-            period={summaryPeriod}
-            segments={summarySegments}
-            setPeriod={setSummaryPeriod}
-            styles={styles}
-            theme={theme}
-            total={summaryTotal}
-          />
-
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Start task</Text>
             <TextInput
@@ -579,68 +603,141 @@ export default function HomeScreen() {
               placeholderTextColor={theme.textSecondary}
               returnKeyType="done"
             />
-            <Text style={styles.label}>Project</Text>
+            <Text style={styles.label}>Category</Text>
             <ScrollView
               horizontal
               keyboardShouldPersistTaps="handled"
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.projectPicker}
             >
-              {(data?.projects ?? []).map((project) => {
-                const selected = project.id === selectedCustomProject?.id;
-                const projectColor = paletteColorFor(project.color, project.name);
+              {(data?.categories ?? []).map((category) => {
+                const selected = category.id === selectedCustomCategory?.id;
+                const categoryColor = paletteColorFor(category.color, category.name);
                 return (
                   <Pressable
-                    key={project.id}
+                    key={category.id}
                     style={pressable(
                       [styles.projectPill, selected ? styles.projectPillSelected : null],
                       styles.buttonPressed
                     )}
-                    onPress={() => setCustomProjectId(project.id)}
+                    onPress={() => setCustomCategoryId(category.id)}
                   >
-                    <View style={[styles.colorDot, { backgroundColor: projectColor }]} />
+                    <View style={[styles.colorDot, { backgroundColor: categoryColor }]} />
                     <Text style={[styles.projectPillText, selected ? styles.projectPillTextSelected : null]}>
-                      {project.name}
-                    </Text>
-                    <Text style={styles.projectPillMeta}>
-                      {project.categoryName ?? project.clientName ?? "No category"}
+                      {category.name}
                     </Text>
                   </Pressable>
                 );
               })}
             </ScrollView>
-            <Pressable
-              style={pressable(
-                [styles.primaryButton, !selectedCustomProject ? styles.buttonDisabled : null],
-                styles.buttonPressed
-              )}
-              disabled={!selectedCustomProject}
-              onPress={customStart}
-            >
+            <Pressable style={pressable(styles.primaryButton, styles.buttonPressed)} onPress={customStart}>
               <Text style={styles.primaryButtonText}>Start task</Text>
             </Pressable>
           </View>
 
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Quick actions</Text>
-            <Text style={styles.muted}>{quickActions.length} configured projects</Text>
+            <Text style={styles.sectionTitle}>Quick categories</Text>
+            <Text style={styles.muted}>{quickActions.length} ready</Text>
           </View>
           <View style={styles.quickGrid}>
-            {quickActions.map((project) => (
+            {quickActions.map((category) => (
               <Pressable
-                key={project.id}
+                key={category.id}
                 style={pressable(styles.quickButton, styles.buttonPressed)}
-                onPress={() => quickStart(project.id, project.categoryId)}
+                onPress={() => quickStart(category.id)}
               >
-                <View style={[styles.colorRule, { backgroundColor: paletteColorFor(project.color, project.name) }]} />
-                <Text style={styles.quickTitle}>{project.name}</Text>
-                <Text style={styles.quickMeta}>{project.categoryName ?? project.clientName ?? "No category"}</Text>
+                <View style={[styles.colorRule, { backgroundColor: paletteColorFor(category.color, category.name) }]} />
+                <Text style={styles.quickTitle}>{category.name}</Text>
+                <Text style={styles.quickMeta}>Start now</Text>
               </Pressable>
             ))}
           </View>
 
+          <LifecycleSummary
+            chartProgress={chartProgress}
+            period={summaryPeriod}
+            segments={summarySegments}
+            setPeriod={setSummaryPeriod}
+            styles={styles}
+            theme={theme}
+            total={summaryTotal}
+          />
+
           <View style={styles.panel}>
-            <Text style={styles.sectionTitle}>Location permission</Text>
+            <Text style={styles.sectionTitle}>Profile & settings</Text>
+            <Text style={styles.muted}>Account, sync and device permissions.</Text>
+            <View style={styles.settingsDivider} />
+            <Text style={styles.label}>Theme</Text>
+            <View style={styles.segmentedControl}>
+              {themeOptions.map((option) => {
+                const selected = option.value === themePreference;
+                return (
+                  <Pressable
+                    key={option.value}
+                    style={pressable(
+                      [styles.segmentButton, selected ? styles.segmentButtonSelected : null],
+                      styles.buttonPressed
+                    )}
+                    onPress={() => setThemePreference(option.value)}
+                  >
+                    <Text style={[styles.segmentButtonText, selected ? styles.segmentButtonTextSelected : null]}>
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <View style={styles.settingsDivider} />
+            <Text style={styles.label}>Categories</Text>
+            <View style={styles.categoryList}>
+              {(data?.categories ?? []).slice(0, 8).map((category) => (
+                <View key={category.id} style={styles.categoryRow}>
+                  <View style={[styles.colorDot, { backgroundColor: paletteColorFor(category.color, category.name) }]} />
+                  <Text style={styles.categoryName}>{category.name}</Text>
+                  {category.isPinned ? <Text style={styles.categoryMeta}>Pinned</Text> : null}
+                </View>
+              ))}
+            </View>
+            <TextInput
+              style={styles.textInput}
+              value={newCategoryName}
+              onChangeText={setNewCategoryName}
+              onSubmitEditing={addCategory}
+              placeholder="New category"
+              placeholderTextColor={theme.textSecondary}
+              returnKeyType="done"
+            />
+            <View style={styles.buttonRow}>
+              <Pressable
+                style={pressable(
+                  [styles.secondaryButton, pinNewCategory ? styles.toggleSelected : null],
+                  styles.buttonPressed
+                )}
+                onPress={() => setPinNewCategory((current) => !current)}
+              >
+                <Text style={styles.secondaryButtonText}>{pinNewCategory ? "Pinned" : "Pin later"}</Text>
+              </Pressable>
+              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={addCategory}>
+                <Text style={styles.secondaryButtonText}>Create category</Text>
+              </Pressable>
+            </View>
+            <View style={styles.settingsDivider} />
+            <Text style={styles.label}>Profile</Text>
+            <View style={styles.buttonRow}>
+              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={signOut}>
+                <Text style={styles.secondaryButtonText}>Log out</Text>
+              </Pressable>
+            </View>
+            <View style={styles.settingsDivider} />
+            <Text style={styles.label}>Device sync</Text>
+            <View style={styles.row}>
+              <Text style={styles.statusText}>{queue.length} queued events</Text>
+              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={syncAndReload}>
+                <Text style={styles.secondaryButtonText}>Sync now</Text>
+              </Pressable>
+            </View>
+            <View style={styles.settingsDivider} />
+            <Text style={styles.label}>Location</Text>
             <Text style={styles.muted}>
               Enable location to let Dayframe suggest activity from places you visit. Ambiguous stays are sent
               to review before they become time entries.
@@ -651,10 +748,9 @@ export default function HomeScreen() {
                 <Text style={styles.secondaryButtonText}>Enable</Text>
               </Pressable>
             </View>
-          </View>
 
-          <View style={styles.panel}>
-            <Text style={styles.sectionTitle}>HealthKit</Text>
+            <View style={styles.settingsDivider} />
+            <Text style={styles.label}>HealthKit</Text>
             <Text style={styles.muted}>
               Sleep and workouts are queued as health activity events first, then reviewed before becoming
               trusted time entries.
@@ -678,12 +774,6 @@ export default function HomeScreen() {
                 <Text style={styles.secondaryButtonText}>Sync workouts</Text>
               </Pressable>
             </View>
-          </View>
-
-          <View style={styles.panel}>
-            <Text style={styles.sectionTitle}>Review</Text>
-            <Text style={styles.timerText}>{data?.reviewItems.filter((item) => item.status === "open").length ?? 0}</Text>
-            <Text style={styles.muted}>Open suggestions awaiting web or mobile review.</Text>
           </View>
         </Animated.View>
       </ScrollView>
@@ -750,8 +840,8 @@ function LifecycleSummary({
           <View key={segment.key} style={styles.legendRow}>
             <View style={[styles.legendSwatch, { backgroundColor: segment.color }]} />
             <View style={styles.legendText}>
-              <Text style={styles.legendPlace}>{segment.placeName}</Text>
-              <Text style={styles.legendProject}>{segment.projectName}</Text>
+              <Text style={styles.legendPlace}>{segment.categoryName}</Text>
+              <Text style={styles.legendProject}>Category</Text>
             </View>
             <View style={styles.legendNumbers}>
               <Text style={styles.legendDuration}>{formatDuration(segment.seconds)}</Text>
@@ -834,9 +924,8 @@ function buildSummarySegments(entries: TimeEntry[], period: SummaryPeriod, now: 
   for (const entry of entries) {
     const startedAt = new Date(entry.startedAt).getTime();
     if (startedAt < periodStart) continue;
-    const placeName = entry.placeName ?? "No place";
-    const projectName = entry.projectName ?? "Unassigned";
-    const key = `${placeName}:${projectName}`;
+    const categoryName = entry.categoryName ?? "Uncategorized";
+    const key = entry.categoryId ?? "uncategorized";
     const current = totals.get(key);
     const seconds = entry.stoppedAt
       ? entry.durationSeconds
@@ -844,10 +933,9 @@ function buildSummarySegments(entries: TimeEntry[], period: SummaryPeriod, now: 
 
     totals.set(key, {
       key,
-      placeName,
-      projectName,
+      categoryName,
       seconds: (current?.seconds ?? 0) + seconds,
-      color: current?.color ?? paletteColorFor(entry.projectColor, projectName)
+      color: current?.color ?? paletteColorFor(entry.categoryId, categoryName)
     });
   }
 
@@ -863,27 +951,31 @@ function buildSummarySegments(entries: TimeEntry[], period: SummaryPeriod, now: 
 
 function buildMobileQuickActions(data: MobileBootstrap | null) {
   if (!data) return [];
-  const projectsById = new Map(data.projects.map((project) => [project.id, project]));
+  const categoriesById = new Map(data.categories.map((category) => [category.id, category]));
   const scored = new Map<string, { count: number; lastSeen: number }>();
 
   for (const entry of data.entries) {
-    if (!entry.projectId) continue;
-    const current = scored.get(entry.projectId) ?? { count: 0, lastSeen: 0 };
+    if (!entry.categoryId) continue;
+    const current = scored.get(entry.categoryId) ?? { count: 0, lastSeen: 0 };
     current.count += 1;
     current.lastSeen = Math.max(current.lastSeen, new Date(entry.startedAt).getTime());
-    scored.set(entry.projectId, current);
+    scored.set(entry.categoryId, current);
   }
 
   const learned = [...scored.entries()]
-    .map(([projectId, score]) => ({ score, project: projectsById.get(projectId) }))
-    .filter((item): item is { score: { count: number; lastSeen: number }; project: MobileBootstrap["projects"][number] } =>
-      Boolean(item.project)
+    .map(([categoryId, score]) => ({ score, category: categoriesById.get(categoryId) }))
+    .filter((item): item is { score: { count: number; lastSeen: number }; category: MobileBootstrap["categories"][number] } =>
+      Boolean(item.category)
     )
     .sort((a, b) => b.score.count - a.score.count || b.score.lastSeen - a.score.lastSeen)
-    .map((item) => item.project);
-  const fallback = data.projects.filter((project) => !scored.has(project.id));
+    .map((item) => item.category);
+  const pinned = data.categories.filter((category) => category.isPinned);
+  const usedIds = new Set(pinned.map((category) => category.id));
+  const learnedUnpinned = learned.filter((category) => !usedIds.has(category.id));
+  for (const category of learnedUnpinned) usedIds.add(category.id);
+  const fallback = data.categories.filter((category) => !usedIds.has(category.id));
 
-  return [...learned, ...fallback].slice(0, 8);
+  return [...pinned, ...learnedUnpinned, ...fallback].slice(0, 8);
 }
 
 function startOfPeriod(period: SummaryPeriod, now: number) {
@@ -977,11 +1069,7 @@ function formatDuration(seconds: number) {
   return `${hours}h ${minutes}m`;
 }
 
-const monoFont = Platform.select({
-  ios: "System",
-  android: "sans-serif",
-  default: "Arial"
-});
+const monoFont = "System";
 
 function createStyles(theme: MobileTheme) {
   return StyleSheet.create({
@@ -999,12 +1087,9 @@ function createStyles(theme: MobileTheme) {
     header: {
       flexDirection: "row",
       alignItems: "center",
-      justifyContent: "space-between",
-      borderWidth: 1,
-      borderColor: theme.border,
-      backgroundColor: theme.surface,
-      borderRadius: 16,
-      padding: 16
+      justifyContent: "flex-start",
+      paddingHorizontal: 6,
+      paddingTop: 6
     },
     logoLockup: {
       flexShrink: 1,
@@ -1229,6 +1314,33 @@ function createStyles(theme: MobileTheme) {
       borderColor: theme.borderStrong,
       borderRadius: 999
     },
+    categoryList: {
+      gap: 8
+    },
+    categoryRow: {
+      minHeight: 38,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 12,
+      paddingHorizontal: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8
+    },
+    categoryName: {
+      flex: 1,
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "800"
+    },
+    categoryMeta: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 11,
+      fontWeight: "700"
+    },
     textInput: {
       minHeight: 48,
       borderWidth: 1,
@@ -1312,6 +1424,10 @@ function createStyles(theme: MobileTheme) {
       paddingHorizontal: 14,
       paddingVertical: 10
     },
+    toggleSelected: {
+      borderColor: theme.accent,
+      backgroundColor: theme.surfaceMuted
+    },
     syncButton: {
       borderWidth: 1,
       borderColor: theme.borderStrong,
@@ -1330,6 +1446,11 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       justifyContent: "space-between",
       gap: 10
+    },
+    settingsDivider: {
+      height: 1,
+      backgroundColor: theme.border,
+      marginVertical: 8
     },
     buttonRow: {
       flexDirection: "row",

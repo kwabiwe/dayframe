@@ -75,7 +75,7 @@ HealthKit and background geofence behavior require a native iOS build and physic
 
 1. Install a native preview/internal build.
 2. Log in with an allowlisted hosted account.
-3. Confirm bootstrap loads projects, places, entries, active timer, and review count.
+3. Confirm bootstrap loads categories, places, entries, active timer, and review count.
 4. Start a timer on iOS and confirm it appears on web.
 5. Stop the timer on web and confirm iOS refreshes to the stopped state.
 6. Disable network, queue a quick action and shortcut action, reconnect, then sync.

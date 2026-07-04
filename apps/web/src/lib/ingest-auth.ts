@@ -81,7 +81,7 @@ async function resolveTokenSession(token: string): Promise<RequestSession> {
     return {
       ...getDevSession(),
       authMode: "token",
-      scopes: ["events:write", "events:read", "toggl:import", "exports:read"]
+      scopes: ["events:write", "events:read", "exports:read"]
     };
   }
 

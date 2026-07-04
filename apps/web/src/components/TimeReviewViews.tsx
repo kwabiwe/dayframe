@@ -212,7 +212,7 @@ function CalendarReview({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         mode: "start",
-        projectId: entry.projectId,
+        projectId: entry.projectId ?? undefined,
         categoryId: entry.categoryId,
         description: entry.description ?? undefined
       })
@@ -502,10 +502,9 @@ function CalendarReview({
           <form action={(formData) => submitEdit(selectedEntry, formData)} className="grid gap-3 md:grid-cols-6">
             <SelectField
               name="projectId"
-              label="Project"
+              label="Legacy project"
               options={projects}
               defaultValue={selectedEntry.projectId ?? ""}
-              required
             />
             <SelectField
               name="categoryId"
@@ -541,7 +540,7 @@ function CalendarReview({
               <button
                 className="industrial-button focus-ring text-sm"
                 type="button"
-                disabled={!selectedEntry.projectId || isPending}
+                disabled={isPending}
                 onClick={() => continueEntry(selectedEntry)}
               >
                 <Play size={15} fill="currentColor" strokeWidth={0} />

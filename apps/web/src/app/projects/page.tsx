@@ -12,8 +12,8 @@ export default async function ProjectsPage() {
   return (
     <>
       <PageHeader
-        title="Projects"
-        description="Configure clients, projects, categories and tags without hard-coded personal routines."
+        title="Categories"
+        description="Manage quick-action categories first; legacy projects and clients remain for data compatibility."
       />
       <div className="px-5 py-6 md:px-8">
         <EntityForms

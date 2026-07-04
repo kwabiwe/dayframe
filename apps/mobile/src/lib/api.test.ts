@@ -31,10 +31,12 @@ vi.mock("./config", () => ({
 
 const {
   AuthRequiredError,
+  createCategory,
   enqueueEvent,
   fetchBootstrap,
   getSessionToken,
   login,
+  startTimer,
   signup,
   syncQueue
 } = await import("./api");
@@ -130,6 +132,51 @@ describe("mobile API client", () => {
     expect(result.synced).toHaveLength(1);
     expect(result.remaining).toHaveLength(1);
     expect(result.remaining[0].rawPayload).toEqual({ order: 2 });
+  });
+
+  it("starts timers with an optional category and no project", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 201)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startTimer(undefined, "20000000-0000-4000-8000-000000000001", "Write notes");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/time-entries",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          mode: "start",
+          source: "mobile_app",
+          projectId: undefined,
+          categoryId: "20000000-0000-4000-8000-000000000001",
+          description: "Write notes"
+        })
+      })
+    );
+  });
+
+  it("creates pinned categories through the hosted API", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 201)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createCategory("DIY", { isPinned: true });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/entities",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          entity: "category",
+          values: {
+            name: "DIY",
+            color: "lime",
+            isPinned: "true"
+          }
+        })
+      })
+    );
   });
 });
 

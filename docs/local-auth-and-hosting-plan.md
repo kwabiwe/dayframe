@@ -109,6 +109,5 @@ Never commit:
 - real user passwords
 - session tokens
 - ingest tokens
-- Toggl API tokens
 - Supabase service keys
 - precise private addresses or raw personal location exports

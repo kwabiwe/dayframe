@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   applyActivityEvent,
   mapHealthKitSleepStage,
-  mapTogglTimeEntry,
   normalizeActivityEvent,
   type NormalizationContext,
   type TimelineState
@@ -85,6 +84,25 @@ describe("event normalization", () => {
     expect(second.completedEntries[0].projectId).toBe(ids.deepWork);
     expect(second.completedEntries[0].stoppedAt?.toISOString()).toBe("2026-06-20T09:15:00.000Z");
     expect(second.activeEntry?.projectId).toBe(ids.gym);
+  });
+
+  it("allows explicit task starts without a project", () => {
+    const next = applyActivityEvent(
+      { completedEntries: [], reviewItems: [] },
+      {
+        source: "manual_app",
+        type: "timer_start",
+        occurredAt: new Date("2026-06-20T08:00:00Z"),
+        categoryId: ids.work,
+        description: "Unplanned admin"
+      },
+      context
+    );
+
+    expect(next.activeEntry?.projectId).toBeUndefined();
+    expect(next.activeEntry?.categoryId).toBe(ids.work);
+    expect(next.activeEntry?.description).toBe("Unplanned admin");
+    expect(next.reviewItems).toHaveLength(0);
   });
 
   it("routes broad geofence signals to review", () => {
@@ -226,26 +244,5 @@ describe("event normalization", () => {
 
     expect(candidate.action).toBe("stop_timer");
     expect(candidate.reviewStatus).toBe("confirmed");
-  });
-
-  it("maps Toggl time entries to stable external references", () => {
-    const mapped = mapTogglTimeEntry({
-      id: 123,
-      workspace_id: 999,
-      project_id: 456,
-      description: " Imported entry ",
-      start: new Date("2026-06-20T08:00:00Z"),
-      stop: null,
-      duration: 1800,
-      tags: ["billable"],
-      billable: true
-    });
-
-    expect(mapped.externalId).toBe("123");
-    expect(mapped.projectExternalId).toBe("456");
-    expect(mapped.description).toBe("Imported entry");
-    expect(mapped.stoppedAt).toBe("2026-06-20T08:30:00.000Z");
-    expect(mapped.tags).toEqual(["billable"]);
-    expect(mapped.billable).toBe(true);
   });
 });

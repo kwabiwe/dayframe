@@ -46,16 +46,16 @@ insert into clients (id, workspace_id, name, color) values
   ('01000000-0000-4000-8000-000000000004', '00000000-0000-4000-8000-000000000010', 'Health', 'lime'),
   ('01000000-0000-4000-8000-000000000005', '00000000-0000-4000-8000-000000000010', 'Learning', 'violet');
 
-insert into categories (id, workspace_id, name, color) values
-  ('20000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000010', 'Work', 'blue'),
-  ('20000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000010', 'Admin', 'steel'),
-  ('20000000-0000-4000-8000-000000000003', '00000000-0000-4000-8000-000000000010', 'Personal', 'teal'),
-  ('20000000-0000-4000-8000-000000000004', '00000000-0000-4000-8000-000000000010', 'Health', 'lime'),
-  ('20000000-0000-4000-8000-000000000005', '00000000-0000-4000-8000-000000000010', 'Family', 'rose'),
-  ('20000000-0000-4000-8000-000000000006', '00000000-0000-4000-8000-000000000010', 'Learning', 'violet'),
-  ('20000000-0000-4000-8000-000000000007', '00000000-0000-4000-8000-000000000010', 'Rest', 'sky'),
-  ('20000000-0000-4000-8000-000000000008', '00000000-0000-4000-8000-000000000010', 'Travel', 'orange'),
-  ('20000000-0000-4000-8000-000000000009', '00000000-0000-4000-8000-000000000010', 'Client Work', 'blue');
+insert into categories (id, workspace_id, name, color, is_pinned) values
+  ('20000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000010', 'Work', 'blue', true),
+  ('20000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000010', 'Admin', 'steel', true),
+  ('20000000-0000-4000-8000-000000000003', '00000000-0000-4000-8000-000000000010', 'Personal', 'teal', true),
+  ('20000000-0000-4000-8000-000000000004', '00000000-0000-4000-8000-000000000010', 'Health', 'lime', true),
+  ('20000000-0000-4000-8000-000000000005', '00000000-0000-4000-8000-000000000010', 'Family', 'rose', true),
+  ('20000000-0000-4000-8000-000000000006', '00000000-0000-4000-8000-000000000010', 'Learning', 'violet', false),
+  ('20000000-0000-4000-8000-000000000007', '00000000-0000-4000-8000-000000000010', 'Rest', 'sky', false),
+  ('20000000-0000-4000-8000-000000000008', '00000000-0000-4000-8000-000000000010', 'Travel', 'orange', false),
+  ('20000000-0000-4000-8000-000000000009', '00000000-0000-4000-8000-000000000010', 'Client Work', 'blue', false);
 
 insert into projects (id, workspace_id, client_id, category_id, name, color, billable) values
   ('10000000-0000-4000-8000-000000000000', '00000000-0000-4000-8000-000000000010', '01000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000002', 'Admin', 'steel', false),
@@ -93,6 +93,7 @@ insert into event_sources (workspace_id, source, display_name) values
   ('00000000-0000-4000-8000-000000000010', 'geofence_broad', 'Broad geofence'),
   ('00000000-0000-4000-8000-000000000010', 'calendar', 'Calendar hint'),
   ('00000000-0000-4000-8000-000000000010', 'health_sleep', 'Health sleep import'),
+  ('00000000-0000-4000-8000-000000000010', 'health_workout', 'Health workout import'),
   ('00000000-0000-4000-8000-000000000010', 'home_assistant', 'Home Assistant bridge'),
   ('00000000-0000-4000-8000-000000000010', 'ha_button', 'Home Assistant button'),
   ('00000000-0000-4000-8000-000000000010', 'ha_geofence', 'Home Assistant geofence');
@@ -138,6 +139,4 @@ insert into calendar_events (workspace_id, external_id, title, started_at, stopp
 
 insert into integrations (workspace_id, provider, status, settings) values
   ('00000000-0000-4000-8000-000000000010', 'calendar', 'not_connected', '{"notes":"Calendar sync is planned after v1."}'),
-  ('00000000-0000-4000-8000-000000000010', 'healthkit', 'not_connected', '{"notes":"HealthKit sleep import requires a native iOS build and permission."}'),
-  ('00000000-0000-4000-8000-000000000010', 'health_connect', 'not_connected', '{"notes":"Android Health Connect import follows the same event-first pipeline."}'),
-  ('00000000-0000-4000-8000-000000000010', 'toggl', 'not_connected', '{"notes":"Use the local Toggl importer with TOGGL_API_TOKEN; tokens are not stored in plaintext."}');
+  ('00000000-0000-4000-8000-000000000010', 'healthkit', 'not_connected', '{"notes":"HealthKit sleep/workout imports require a native iOS build and permission."}');

@@ -11,3 +11,5 @@ Suggested files:
 - `style.md` for visual design and styling rules
 - `testing.md` for validation and regression testing rules
 - `database.md` for schema, migration, and query patterns
+- `product-model.md` for category/task-first product rules
+- `mobile-permissions.md` for iOS permission state and placement rules

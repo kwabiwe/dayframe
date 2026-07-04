@@ -18,6 +18,7 @@ export type CategoryRow = {
   id: string;
   name: string;
   color: string;
+  isPinned: boolean;
 };
 
 export type ProjectRow = {
@@ -318,10 +319,10 @@ async function getClients(session: RequestSession) {
 
 async function getCategories(session: RequestSession) {
   const result = await query<CategoryRow>(
-    `select id, name, color
+    `select id, name, color, is_pinned as "isPinned"
      from categories
      where workspace_id = $1 and is_archived = false
-     order by name`,
+     order by is_pinned desc, name`,
     [session.workspaceId]
   );
   return result.rows;

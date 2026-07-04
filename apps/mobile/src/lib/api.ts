@@ -31,7 +31,7 @@ export type MobileBootstrap = {
     categoryName: string | null;
     clientName: string | null;
   }>;
-  categories: Array<{ id: string; name: string; color: string }>;
+  categories: Array<{ id: string; name: string; color: string; isPinned: boolean }>;
   entries: Array<{
     id: string;
     projectId: string | null;
@@ -198,11 +198,11 @@ export async function syncQueue() {
   return { synced, remaining: [] };
 }
 
-export async function startTimer(projectId: string, categoryId?: string | null, description?: string) {
+export async function startTimer(projectId?: string | null, categoryId?: string | null, description?: string) {
   return postTimerAction({
     mode: "start",
     source: "mobile_app",
-    projectId,
+    projectId: projectId ?? undefined,
     categoryId: categoryId ?? undefined,
     description: description?.trim() || undefined
   });
@@ -213,6 +213,30 @@ export async function stopTimer() {
     mode: "stop",
     source: "mobile_app"
   });
+}
+
+export async function createCategory(name: string, options: { color?: string; isPinned?: boolean } = {}) {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/entities`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify({
+      entity: "category",
+      values: {
+        name,
+        color: options.color ?? "lime",
+        isPinned: options.isPinned ? "true" : ""
+      }
+    })
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to create category"));
+  return readJsonResponse(response);
 }
 
 export async function queueStopTimer() {
