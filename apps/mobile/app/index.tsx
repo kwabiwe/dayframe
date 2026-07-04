@@ -39,6 +39,7 @@ import {
   createCategory,
   enqueueEvent,
   fetchBootstrap,
+  isNetworkTimerError,
   login,
   logout,
   queueStopTimer,
@@ -167,7 +168,7 @@ export default function HomeScreen() {
         {
           provider: "healthkit",
           status: "error",
-          notes: "Unable to check HealthKit status."
+          notes: "Unable to check Apple Health status."
         }
       ]);
     });
@@ -259,12 +260,16 @@ export default function HomeScreen() {
 
   async function quickStart(categoryId?: string | null) {
     try {
-      await startTimer(undefined, categoryId);
+      await startTimer(categoryId);
       await load();
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         setAuthState("signedOut");
         setData(null);
+        return;
+      }
+      if (!isNetworkTimerError(error)) {
+        Alert.alert("Timer not started", error instanceof Error ? error.message : "Unable to start this timer.");
         return;
       }
       const nextQueue = await enqueueEvent({
@@ -282,7 +287,6 @@ export default function HomeScreen() {
     const trimmedDescription = customDescription.trim();
     try {
       await startTimer(
-        undefined,
         selectedCustomCategory?.id,
         trimmedDescription
       );
@@ -292,6 +296,10 @@ export default function HomeScreen() {
       if (error instanceof AuthRequiredError) {
         setAuthState("signedOut");
         setData(null);
+        return;
+      }
+      if (!isNetworkTimerError(error)) {
+        Alert.alert("Timer not started", error instanceof Error ? error.message : "Unable to start this timer.");
         return;
       }
       const nextQueue = await enqueueEvent({
@@ -359,7 +367,7 @@ export default function HomeScreen() {
       const status = await requestHealthKitSleepPermission();
       updateHealthStatus(status);
     } catch (error) {
-      Alert.alert("HealthKit", friendlyHealthKitError(error, "request HealthKit permission"));
+      Alert.alert("Apple Health", friendlyHealthKitError(error, "request Apple Health permission"));
     }
   }
 
@@ -368,7 +376,7 @@ export default function HomeScreen() {
       const status = await requestHealthKitWorkoutPermission();
       updateHealthStatus(status);
     } catch (error) {
-      Alert.alert("HealthKit", friendlyHealthKitError(error, "request HealthKit workout permission"));
+      Alert.alert("Apple Health", friendlyHealthKitError(error, "request Apple Health workout permission"));
     }
   }
 
@@ -378,7 +386,7 @@ export default function HomeScreen() {
       updateHealthStatus(status);
       await syncAndReload();
     } catch (error) {
-      Alert.alert("HealthKit", friendlyHealthKitError(error, "sync HealthKit sleep"));
+      Alert.alert("Apple Health", friendlyHealthKitError(error, "sync Apple Health sleep"));
     }
   }
 
@@ -388,7 +396,7 @@ export default function HomeScreen() {
       updateHealthStatus(status);
       await syncAndReload();
     } catch (error) {
-      Alert.alert("HealthKit", friendlyHealthKitError(error, "sync HealthKit workouts"));
+      Alert.alert("Apple Health", friendlyHealthKitError(error, "sync Apple Health workouts"));
     }
   }
 
@@ -464,7 +472,7 @@ export default function HomeScreen() {
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>{authView === "signup" ? "Create account" : "Log in"}</Text>
             <Text style={styles.muted}>
-              Use your Dayframe account to sync timers, location events and HealthKit imports with your workspace.
+              Use your Dayframe account to sync timers, location events and Apple Health imports with your workspace.
             </Text>
             {authView === "signup" ? (
               <>
@@ -580,6 +588,10 @@ export default function HomeScreen() {
                     if (error instanceof AuthRequiredError) {
                       setAuthState("signedOut");
                       setData(null);
+                      return;
+                    }
+                    if (!isNetworkTimerError(error)) {
+                      Alert.alert("Timer not stopped", error instanceof Error ? error.message : "Unable to stop this timer.");
                       return;
                     }
                     setQueue(await queueStopTimer());
@@ -750,13 +762,13 @@ export default function HomeScreen() {
             </View>
 
             <View style={styles.settingsDivider} />
-            <Text style={styles.label}>HealthKit</Text>
+            <Text style={styles.label}>Apple Health</Text>
             <Text style={styles.muted}>
               Sleep and workouts are queued as health activity events first, then reviewed before becoming
               trusted time entries.
             </Text>
             <Text style={styles.statusText}>
-              {healthAvailability?.notes ?? "HealthKit status not checked"}
+              {healthAvailability?.notes ?? "Apple Health status not checked"}
             </Text>
             <Text style={styles.muted}>Sleep: {sleepStatus?.notes ?? "Not synced yet."}</Text>
             <Text style={styles.muted}>Workouts: {workoutStatus?.notes ?? "Not synced yet."}</Text>

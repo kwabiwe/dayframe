@@ -23,7 +23,6 @@ import {
   Play,
   Plus,
   Square,
-  Tag,
   Trash2,
   Users,
   Utensils
@@ -157,7 +156,6 @@ export function CurrentTimerPanel({
   data: BootstrapData;
   onSynced: (data: BootstrapData) => void;
 }) {
-  const [now, setNow] = useState(() => Date.now());
   const [isBusy, setIsBusy] = useState(false);
   const [timerError, setTimerError] = useState<string | null>(null);
   const [description, setDescription] = useState(data.activeEntry?.description ?? "");
@@ -166,17 +164,23 @@ export function CurrentTimerPanel({
   );
   const activeDetailsSyncRef = useRef("");
   const active = data.activeEntry;
+  const [now, setNow] = useState(() =>
+    active ? new Date(active.startedAt).getTime() + active.durationSeconds * 1000 : 0
+  );
   const selectedCategory = data.categories.find((category) => category.id === categoryId) ?? null;
+  const activeStartedAtMs = active ? new Date(active.startedAt).getTime() : 0;
+  const activeBaselineNow = active ? activeStartedAtMs + active.durationSeconds * 1000 : 0;
+  const effectiveNow = active ? Math.max(now, activeBaselineNow) : now;
   const durationSeconds = active
-    ? Math.max(active.durationSeconds, Math.floor((now - new Date(active.startedAt).getTime()) / 1000))
+    ? Math.max(active.durationSeconds, Math.floor((effectiveNow - activeStartedAtMs) / 1000))
     : 0;
   const quickActions = useMemo(() => buildLearnedQuickActions(data), [data]);
 
   useEffect(() => {
-    if (!active) return undefined;
+    if (!active?.id) return undefined;
     const interval = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(interval);
-  }, [active]);
+  }, [active?.id]);
 
   useEffect(() => {
     if (!active) {
@@ -208,7 +212,6 @@ export function CurrentTimerPanel({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          projectId: active.projectId,
           categoryId: nextCategoryId,
           placeId: active.placeId,
           description: nextDescription,
@@ -230,7 +233,7 @@ export function CurrentTimerPanel({
 
   async function timerAction(
     mode: "start" | "stop",
-    override?: { projectId?: string | null; categoryId?: string | null; description?: string | null }
+    override?: { categoryId?: string | null; description?: string | null }
   ) {
     const nextCategoryId =
       override && "categoryId" in override
@@ -240,6 +243,11 @@ export function CurrentTimerPanel({
       override && "description" in override
         ? (override.description ?? undefined)
         : description.trim() || undefined;
+
+    if (mode === "start" && !nextCategoryId) {
+      setTimerError("Choose a category before starting the timer.");
+      return;
+    }
 
     setIsBusy(true);
     setTimerError(null);
@@ -297,15 +305,20 @@ export function CurrentTimerPanel({
         </label>
         <div className="swiss-entrybar-actions">
           <label className="swiss-category-trigger">
-            <Tag size={16} />
             <span
               className="swiss-focus-dot"
               style={{
                 backgroundColor: paletteColorFor(selectedCategory?.color, selectedCategory?.name ?? "Focus")
               }}
             />
-            <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
-              <option value="">No category</option>
+            <select
+              value={categoryId}
+              onChange={(event) => setCategoryId(event.target.value)}
+              aria-label="Choose category"
+            >
+              {data.categories.length === 0 ? (
+                <option value="">Create a category first</option>
+              ) : null}
               {data.categories.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.name}
@@ -438,7 +451,7 @@ function MetricCard({
 
 function ReviewSummaryCard({ items }: { items: BootstrapData["reviewItems"] }) {
   const openItems = items.filter((item) => item.status === "open");
-  const needsClassification = openItems.filter((item) => !item.projectName).length;
+  const needsClassification = openItems.filter((item) => !item.categoryName).length;
   const needsDuration = openItems.filter((item) => !item.suggestedStoppedAt).length;
   const overlapDetected = openItems.filter((item) => item.type.includes("overlap")).length;
 
@@ -611,7 +624,6 @@ function DayTimeline({
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        projectId: entry.projectId,
         categoryId: entry.categoryId,
         placeId: entry.placeId,
         description: entry.description,
@@ -995,7 +1007,11 @@ function TimelineBlock({
   onSelect: () => void;
 }) {
   const start = new Date(draft?.startedAt ?? entry.startedAt);
-  const end = draft?.stoppedAt ? new Date(draft.stoppedAt) : entry.stoppedAt ? new Date(entry.stoppedAt) : new Date();
+  const end = draft?.stoppedAt
+    ? new Date(draft.stoppedAt)
+    : entry.stoppedAt
+      ? new Date(entry.stoppedAt)
+      : projectedEntryEnd(entry);
   const top =
     ((start.getHours() * 60 + start.getMinutes() - dayStartHour * 60) / 60) * pixelsPerHour;
   const height = Math.max(30, ((end.getTime() - start.getTime()) / 3_600_000) * pixelsPerHour);
@@ -1016,7 +1032,7 @@ function TimelineBlock({
     <article
       tabIndex={0}
       role="button"
-      aria-label={`Time block ${entry.projectName ?? "Unassigned"} ${formatDuration(durationSeconds)}`}
+      aria-label={`Time block ${entry.description ?? entry.categoryName ?? "Untitled task"} ${formatDuration(durationSeconds)}`}
       className={[
         "swiss-time-block",
         isResizing ? "is-resizing" : "",
@@ -1032,9 +1048,9 @@ function TimelineBlock({
         if (event.key === "Enter") onEdit();
       }}
       style={{
-        top: Math.max(0, top),
-        height,
-        background: color.background,
+        top: Math.round(Math.max(0, top)),
+        height: Math.round(height),
+        backgroundColor: color.background,
         borderColor: color.border,
         color: color.text,
         ...positionStyle
@@ -1045,22 +1061,22 @@ function TimelineBlock({
           <button
             type="button"
             className="swiss-resize-handle top"
-            aria-label={`Resize start of ${entry.projectName ?? "time block"}`}
+            aria-label={`Resize start of ${entry.description ?? entry.categoryName ?? "time block"}`}
             onDoubleClick={onEdit}
             onPointerDown={(event) => onResizeStart(entry, "start", event)}
           />
           <button
             type="button"
             className="swiss-resize-handle bottom"
-            aria-label={`Resize end of ${entry.projectName ?? "time block"}`}
+            aria-label={`Resize end of ${entry.description ?? entry.categoryName ?? "time block"}`}
             onDoubleClick={onEdit}
             onPointerDown={(event) => onResizeStart(entry, "end", event)}
           />
         </>
       ) : null}
       <div>
-        <strong>{entry.description || entry.projectName || "Unassigned"}</strong>
-        <span>{entry.projectName ?? entry.clientName ?? entry.categoryName ?? formatSourceLabel(entry.source)}</span>
+        <strong>{entry.description || entry.categoryName || "Untitled task"}</strong>
+        <span>{entry.categoryName ?? formatSourceLabel(entry.source)}</span>
       </div>
       <div>
         <EntryIcon entry={entry} />
@@ -1092,7 +1108,6 @@ function EditEntryDialog({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          projectId: formData.get("projectId"),
           categoryId: formData.get("categoryId") || null,
           placeId: formData.get("placeId") || null,
           description: formData.get("description") || null,
@@ -1124,22 +1139,8 @@ function EditEntryDialog({
         </div>
         <form className="swiss-form-grid" onSubmit={submit}>
           <label>
-            Project
-            <select name="projectId" defaultValue={entry.projectId ?? ""} required>
-              <option value="" disabled>
-                Choose project
-              </option>
-              {data.projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
             Category
-            <select name="categoryId" defaultValue={entry.categoryId ?? ""}>
-              <option value="">No category</option>
+            <select name="categoryId" defaultValue={entry.categoryId ?? data.categories[0]?.id ?? ""} required>
               {data.categories.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.name}
@@ -1226,7 +1227,7 @@ function DashboardReviewInbox({
             <span>
               <strong>{item.title}</strong>
               <small>
-                {item.projectName ?? item.type} ·{" "}
+                {item.categoryName ?? formatEventLabel(item.eventType ?? item.type)} ·{" "}
                 {item.suggestedStartedAt ? formatTime(item.suggestedStartedAt) : "Needs time"}
               </small>
             </span>
@@ -1273,8 +1274,8 @@ function RecentActivityPanel({ data }: { data: BootstrapData }) {
             <div key={event.id} className="swiss-activity-row">
               <Icon size={22} />
               <span>
-                <strong>{event.projectName ?? formatEventLabel(event.eventType)}</strong>
-                <small>{event.placeName ?? formatSourceLabel(event.source)}</small>
+                <strong>{event.categoryName ?? formatEventLabel(event.eventType)}</strong>
+                <small>{event.categoryName ?? event.placeName ?? formatSourceLabel(event.source)}</small>
               </span>
               <time>{formatTime(event.occurredAt)}</time>
             </div>
@@ -1312,7 +1313,6 @@ function ManualEntryDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mode: "manual",
-          projectId: formData.get("projectId"),
           categoryId: formData.get("categoryId") || undefined,
           placeId: formData.get("placeId") || undefined,
           description: formData.get("description") || undefined,
@@ -1341,20 +1341,8 @@ function ManualEntryDialog({
         </div>
         <form className="swiss-form-grid" onSubmit={submit}>
           <label>
-            Legacy project
-            <select name="projectId" defaultValue="">
-              <option value="">None</option>
-              {data.projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
             Category
-            <select name="categoryId" defaultValue="">
-              <option value="">Project default</option>
+            <select name="categoryId" defaultValue={data.categories[0]?.id ?? ""} required>
               {data.categories.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.name}
@@ -1400,7 +1388,7 @@ function ManualEntryDialog({
 }
 
 function pastelFor(entry: TimeEntryRow) {
-  const key = `${entry.projectColor ?? ""}-${entry.projectName ?? ""}`.toLowerCase();
+  const key = `${entry.categoryColor ?? ""}-${entry.categoryName ?? ""}`.toLowerCase();
   if (key.includes("lime") || key.includes("green") || key.includes("gym") || key.includes("family")) {
     return {
       background: "var(--block-mint-bg)",
@@ -1422,7 +1410,7 @@ function pastelFor(entry: TimeEntryRow) {
       text: "var(--block-text)"
     };
   }
-  if (key.includes("coral") || key.includes("red") || key.includes("client")) {
+  if (key.includes("coral") || key.includes("red")) {
     return {
       background: "var(--block-coral-bg)",
       border: "var(--block-coral-border)",
@@ -1437,7 +1425,7 @@ function pastelFor(entry: TimeEntryRow) {
 }
 
 function EntryIcon({ entry }: { entry: TimeEntryRow }) {
-  const label = `${entry.projectName ?? ""} ${entry.categoryName ?? ""} ${entry.placeName ?? ""}`.toLowerCase();
+  const label = `${entry.description ?? ""} ${entry.categoryName ?? ""} ${entry.placeName ?? ""}`.toLowerCase();
   if (label.includes("gym") || label.includes("walk")) return <Users size={16} />;
   if (label.includes("lunch") || label.includes("food")) return <Utensils size={16} />;
   if (label.includes("town") || label.includes("place")) return <MapPin size={16} />;
@@ -1507,6 +1495,10 @@ function isoForDateMinutes(dateValue: string, minutes: number) {
   const date = parseDateKey(dateValue);
   date.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
   return date.toISOString();
+}
+
+function projectedEntryEnd(entry: TimeEntryRow) {
+  return new Date(new Date(entry.startedAt).getTime() + entry.durationSeconds * 1000);
 }
 
 function dateKey(date: Date) {

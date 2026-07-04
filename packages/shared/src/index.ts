@@ -249,6 +249,8 @@ export type ProjectSummary = {
 export type CategorySummary = {
   id: string;
   name: string;
+  color?: string | null;
+  isPinned?: boolean;
 };
 
 export type PlaceSummary = {

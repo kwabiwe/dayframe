@@ -198,11 +198,10 @@ export async function syncQueue() {
   return { synced, remaining: [] };
 }
 
-export async function startTimer(projectId?: string | null, categoryId?: string | null, description?: string) {
+export async function startTimer(categoryId?: string | null, description?: string) {
   return postTimerAction({
     mode: "start",
     source: "mobile_app",
-    projectId: projectId ?? undefined,
     categoryId: categoryId ?? undefined,
     description: description?.trim() || undefined
   });
@@ -216,19 +215,16 @@ export async function stopTimer() {
 }
 
 export async function createCategory(name: string, options: { color?: string; isPinned?: boolean } = {}) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/entities`, {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/categories`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       ...(await authHeaders())
     },
     body: JSON.stringify({
-      entity: "category",
-      values: {
-        name,
-        color: options.color ?? "lime",
-        isPinned: options.isPinned ? "true" : ""
-      }
+      name,
+      color: options.color ?? "lime",
+      isPinned: Boolean(options.isPinned)
     })
   });
   if (response.status === 401) {
@@ -245,6 +241,18 @@ export async function queueStopTimer() {
     type: "timer_stop",
     rawPayload: { origin: "mobile_home" }
   });
+}
+
+export function isNetworkTimerError(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return (
+    error.name === "TypeError" ||
+    message.includes("network request failed") ||
+    message.includes("failed to fetch") ||
+    message.includes("networkerror") ||
+    message.includes("internet connection")
+  );
 }
 
 export class AuthRequiredError extends Error {

@@ -1,22 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { paletteColorFor } from "@dayframe/shared";
 import { Play, Square } from "lucide-react";
-import type { BootstrapData, CategoryRow, PlaceRow, ProjectRow, TimeEntryRow } from "@/lib/queries";
+import type { BootstrapData, CategoryRow, PlaceRow, TimeEntryRow } from "@/lib/queries";
 import { formatClockDuration, formatTime } from "@/lib/format";
 
 export function TimerPanel({
   activeEntry,
-  projects,
   categories,
   places,
   recentEntries,
   onSynced
 }: {
   activeEntry: TimeEntryRow | null;
-  projects: ProjectRow[];
   categories: CategoryRow[];
   places: PlaceRow[];
   recentEntries: TimeEntryRow[];
@@ -26,12 +24,7 @@ export function TimerPanel({
   const [isPending, startTransition] = useTransition();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-  const [projectId, setProjectId] = useState(projects[0]?.id ?? "");
-  const selectedProject = useMemo(
-    () => projects.find((project) => project.id === projectId),
-    [projectId, projects]
-  );
-  const [categoryId, setCategoryId] = useState(selectedProject?.categoryId ?? "");
+  const [categoryId, setCategoryId] = useState(activeEntry?.categoryId ?? categories[0]?.id ?? "");
   const [placeId, setPlaceId] = useState("");
   const [description, setDescription] = useState("");
   const isBusy = isPending || isSubmitting;
@@ -56,6 +49,7 @@ export function TimerPanel({
   }
 
   async function submit(mode: "start" | "stop") {
+    if (mode === "start" && !categoryId) return;
     setIsSubmitting(true);
     try {
       const response = await fetch("/api/time-entries", {
@@ -66,8 +60,7 @@ export function TimerPanel({
             ? { mode: "stop" }
             : {
                 mode: "start",
-                projectId: projectId || undefined,
-                categoryId: categoryId || selectedProject?.categoryId,
+                categoryId: categoryId || undefined,
                 placeId: placeId || undefined,
                 description: description || undefined
               }
@@ -84,7 +77,6 @@ export function TimerPanel({
   }
 
   async function continueEntry(entry: TimeEntryRow) {
-    setProjectId(entry.projectId ?? "");
     setCategoryId(entry.categoryId ?? "");
     setDescription(entry.description ?? "");
     setIsSubmitting(true);
@@ -94,7 +86,6 @@ export function TimerPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mode: "start",
-          projectId: entry.projectId ?? undefined,
           categoryId: entry.categoryId,
           description: entry.description ?? undefined
         })
@@ -113,7 +104,7 @@ export function TimerPanel({
       className="industrial-panel"
       style={{
         borderColor: activeEntry
-          ? paletteColorFor(activeEntry.projectColor, activeEntry.projectName ?? activeEntry.id)
+          ? paletteColorFor(activeEntry.categoryColor, activeEntry.categoryName ?? activeEntry.id)
           : undefined
       }}
     >
@@ -122,13 +113,13 @@ export function TimerPanel({
           <h2 className="text-base font-semibold">Time entry</h2>
           <p className="text-xs text-[var(--muted)]">
             {activeEntry
-              ? `${activeEntry.projectName ?? "Unassigned"} since ${formatTime(activeEntry.startedAt)}`
+              ? `${activeEntry.description ?? activeEntry.categoryName ?? "Timer"} since ${formatTime(activeEntry.startedAt)}`
               : "No timer is running."}
           </p>
         </div>
       </div>
 
-      <div className="grid gap-0 lg:grid-cols-[minmax(220px,1fr)_180px_150px_150px_140px]">
+      <div className="grid gap-0 lg:grid-cols-[minmax(220px,1fr)_180px_150px_140px]">
         <label className="border-b border-[var(--line)] p-4 lg:border-b-0 lg:border-r">
           <span className="industrial-field-label">Description</span>
           <input
@@ -140,32 +131,14 @@ export function TimerPanel({
         </label>
 
         <label className="border-b border-[var(--line)] p-4 lg:border-b-0 lg:border-r">
-          <span className="industrial-field-label">Project</span>
-          <select
-            className="focus-ring industrial-field"
-            value={projectId}
-            onChange={(event) => {
-              setProjectId(event.target.value);
-              const nextProject = projects.find((project) => project.id === event.target.value);
-              setCategoryId(nextProject?.categoryId ?? "");
-            }}
-          >
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="border-b border-[var(--line)] p-4 lg:border-b-0 lg:border-r">
           <span className="industrial-field-label">Category</span>
           <select
             className="focus-ring industrial-field"
             value={categoryId}
             onChange={(event) => setCategoryId(event.target.value)}
+            required
           >
-            <option value="">Project default</option>
+            {categories.length === 0 ? <option value="">Create a category first</option> : null}
             {categories.map((category) => (
               <option key={category.id} value={category.id}>
                 {category.name}
@@ -211,7 +184,7 @@ export function TimerPanel({
             <button
               className="industrial-button-primary focus-ring mt-3 w-full text-sm disabled:opacity-50"
               type="button"
-              disabled={isBusy}
+              disabled={isBusy || !categoryId}
               onClick={() => submit("start")}
             >
               <Play size={16} />
@@ -231,15 +204,15 @@ export function TimerPanel({
             <button
               key={entry.id}
               className="focus-ring motion-row flex w-full items-center justify-between rounded-lg border border-[var(--line)] bg-[var(--surface-inset)] px-3 py-2 text-left text-sm hover:border-[var(--accent)] hover:text-[var(--accent)]"
-              style={{ borderLeftWidth: 4, borderLeftColor: paletteColorFor(entry.projectColor, entry.projectName ?? entry.id) }}
+              style={{ borderLeftWidth: 4, borderLeftColor: paletteColorFor(entry.categoryColor, entry.categoryName ?? entry.id) }}
               type="button"
               disabled={isBusy}
               onClick={() => continueEntry(entry)}
             >
               <span>
-                <span className="block font-medium">{entry.projectName ?? "Unassigned"}</span>
+                <span className="block font-medium">{entry.description ?? entry.categoryName ?? "Untitled task"}</span>
                 <span className="block text-xs text-[var(--muted)]">
-                  {entry.description ?? entry.categoryName ?? "No description"}
+                  {entry.categoryName ?? "No category"}
                 </span>
               </span>
               <Play size={15} fill="currentColor" strokeWidth={0} />

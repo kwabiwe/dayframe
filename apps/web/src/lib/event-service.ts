@@ -300,6 +300,89 @@ export async function createManualEntry(input: {
   }
 }
 
+export async function createCategory(
+  input: {
+    name: string;
+    color?: string | null;
+    isPinned?: boolean;
+  },
+  session: RequestSession = getDevSession()
+) {
+  const name = normalizeName(input.name, "New category");
+  const result = await query<{
+    id: string;
+    name: string;
+    color: string;
+    isPinned: boolean;
+  }>(
+    `insert into categories (workspace_id, name, color, is_pinned)
+     values ($1, $2, $3, $4)
+     returning id, name, color, is_pinned as "isPinned"`,
+    [
+      session.workspaceId,
+      name,
+      normalizePaletteKey(input.color, name),
+      Boolean(input.isPinned)
+    ]
+  );
+
+  return result.rows[0];
+}
+
+export async function updateCategory(
+  id: string,
+  input: {
+    name?: string | null;
+    color?: string | null;
+    isPinned?: boolean;
+  },
+  session: RequestSession = getDevSession()
+) {
+  const hasName = Object.prototype.hasOwnProperty.call(input, "name");
+  const hasColor = Object.prototype.hasOwnProperty.call(input, "color");
+  const hasIsPinned = Object.prototype.hasOwnProperty.call(input, "isPinned");
+  const normalizedName = hasName ? normalizeName(input.name, "Category") : null;
+  const normalizedColor = hasColor
+    ? normalizePaletteKey(input.color, normalizedName ?? id)
+    : null;
+
+  const result = await query<{
+    id: string;
+    name: string;
+    color: string;
+    isPinned: boolean;
+  }>(
+    `update categories
+     set name = case when $3 then $4 else name end,
+         color = case when $5 then $6 else color end,
+         is_pinned = case when $7 then $8 else is_pinned end
+     where id = $1 and workspace_id = $2 and is_archived = false
+     returning id, name, color, is_pinned as "isPinned"`,
+    [
+      id,
+      session.workspaceId,
+      hasName,
+      normalizedName,
+      hasColor,
+      normalizedColor,
+      hasIsPinned,
+      Boolean(input.isPinned)
+    ]
+  );
+
+  return result.rows[0] ?? null;
+}
+
+export async function archiveCategory(id: string, session: RequestSession = getDevSession()) {
+  await query(
+    `update categories
+     set is_archived = true,
+         is_pinned = false
+     where id = $1 and workspace_id = $2`,
+    [id, session.workspaceId]
+  );
+}
+
 export async function updateTimeEntry(
   id: string,
   input: {
@@ -723,6 +806,11 @@ export function buildQuickActionEvent(projectId?: string | null, categoryId?: st
 
 function nullableString(value: unknown) {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function normalizeName(value: unknown, fallback: string) {
+  const name = typeof value === "string" ? value.trim() : "";
+  return name || fallback;
 }
 
 function stringOrNull(value: unknown) {

@@ -52,6 +52,7 @@ create table if not exists categories (
   workspace_id uuid not null references workspaces(id) on delete cascade,
   name text not null,
   color text not null default 'steel',
+  is_pinned boolean not null default false,
   is_archived boolean not null default false,
   created_at timestamptz not null default now()
 );
@@ -330,6 +331,7 @@ create table if not exists audit_log (
 );
 
 alter table activity_events add column if not exists client_event_id text;
+alter table categories add column if not exists is_pinned boolean not null default false;
 alter table health_workouts add column if not exists external_sample_id text;
 alter table health_workouts add column if not exists provider text not null default 'healthkit';
 alter table health_workouts add column if not exists duration_seconds integer;

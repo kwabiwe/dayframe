@@ -12,13 +12,13 @@ type Segment = {
 export function TimeAllocationPie({ entries }: { entries: TimeEntryRow[] }) {
   const segments = Array.from(
     entries.reduce((totals, entry) => {
-      const id = entry.projectId ?? "unassigned";
-      const name = entry.projectName ?? "Unassigned";
-      const current = totals.get(id) ?? { name, seconds: 0, color: entry.projectColor };
+      const id = entry.categoryId ?? "needs-category";
+      const name = entry.categoryName ?? "Needs category";
+      const current = totals.get(id) ?? { name, seconds: 0, color: entry.categoryColor };
       totals.set(id, {
         name: current.name,
         seconds: current.seconds + entry.durationSeconds,
-        color: current.color ?? entry.projectColor
+        color: current.color ?? entry.categoryColor
       });
       return totals;
     }, new Map<string, { name: string; seconds: number; color: string | null }>())

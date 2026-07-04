@@ -16,31 +16,31 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 ## Time Review
 
 - Timeline includes Calendar, List, and Timesheet views with a clear selected state.
-- Calendar blocks are positioned by time, use project colors, and can be clicked or double-clicked to edit.
+- Calendar blocks are positioned by time, use category colors, and can be clicked or double-clicked to edit.
 - Calendar/time blocks can be resized from the top or bottom edge, snap to configured intervals, and save on release.
 - Selected time blocks can be deleted from edit controls, context actions, or keyboard delete/backspace where supported.
 - Calendar zoom controls change time granularity without breaking layout.
 - List view groups entries by date, shows friendly source labels, and includes edit, start-again, and delete actions.
-- Timesheet view groups work by project/activity, shows day totals and row totals, and remains readable.
+- Timesheet view groups work by category/activity, shows day totals and row totals, and remains readable.
 
 ## Data And Sync
 
 - Web and mobile use authenticated workspace-scoped API calls.
-- Mobile foreground start/stop actions attempt immediate API sync and only fall back to the offline queue if direct sync fails.
-- Offline queue sync preserves shortcut, NFC, geofence, HealthKit, and other background event paths.
+- Mobile foreground start/stop actions attempt immediate API sync and only fall back to the offline queue for genuine network/offline failure.
+- Offline queue sync preserves shortcut, NFC, geofence, Apple Health, and other background event paths.
 - Bootstrap data remains backward compatible for web and mobile consumers.
 - No duplicate React keys, hydration errors, or framework runtime overlays appear during normal use.
 
 ## Productivity Views
 
 - Dashboard shows Today and This Week totals, review count, streak/summary, day timeline, review inbox, and recent activity.
-- Reports show category/tag/source/place breakdowns first, with legacy project/client breakdowns still readable.
-- Categories, legacy clients/projects, Tags, Places, Automation, Review Inbox, Settings, Search, Notifications, Profile, and Help remain navigable.
+- Reports show category, source and place breakdowns as the normal user-facing views.
+- Categories, Places, Automation, Review Inbox, Settings, Search, Notifications, Profile, and Help remain navigable.
 - Review Inbox actions remain normal sized, readable, and do not overlay item content.
 
 ## Visual System
 
-- The Dayframe Soft Pop palette is used consistently for project, client, category, tag, calendar, and report colors.
+- The Dayframe Soft Pop palette is used consistently for category, calendar, and report colors.
 - Light and dark themes apply across backgrounds, text, borders, controls, icons, panels, and time blocks.
 - Outer and inner panels, popovers, tables, color swatches, and floating dialogs have consistent rounded corners.
 - Typography uses the current modern system font stack and stays compact in dense productivity surfaces.

@@ -1,26 +1,22 @@
+import { CategoryManager } from "@/components/CategoryManager";
 import { PageHeader } from "@/components/PageHeader";
-import { EntriesTable } from "@/components/EntriesTable";
 import { resolvePageSession } from "@/lib/auth/server";
 import { getBootstrapData } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
-export default async function EntriesPage() {
+export default async function CategoriesPage() {
   const session = await resolvePageSession();
   const data = await getBootstrapData(session);
 
   return (
     <>
       <PageHeader
-        title="Time entries"
-        description="Filter, create, edit and delete time entries while keeping source confidence and review status visible."
+        title="Categories"
+        description="Manage the categories used for timer starts, quick actions, review and reports."
       />
       <div className="px-5 py-6 md:px-8">
-        <EntriesTable
-          entries={data.entries}
-          categories={data.categories}
-          places={data.places}
-        />
+        <CategoryManager categories={data.categories} />
       </div>
     </>
   );

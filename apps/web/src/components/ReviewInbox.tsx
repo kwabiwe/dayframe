@@ -46,8 +46,8 @@ function ReviewItemCard({ item }: { item: ReviewItemRow }) {
           <div className="min-w-0">
             <h3 className="text-base font-semibold">{item.title}</h3>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              {item.projectName ?? "No project"} / {item.categoryName ?? "No category"} /{" "}
-              {item.placeName ?? "No place"}
+              {item.categoryName ?? "Needs category"} / {item.placeName ?? "No place"} /{" "}
+              {formatSourceLabel(item.eventSource ?? "review")}
             </p>
           </div>
           <span className="industrial-chip shrink-0 text-xs">{item.confidence}</span>

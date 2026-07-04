@@ -76,6 +76,7 @@ export type TimeEntryRow = {
   clientName: string | null;
   categoryId: string | null;
   categoryName: string | null;
+  categoryColor: string | null;
   placeId: string | null;
   placeName: string | null;
   source: string;
@@ -116,6 +117,7 @@ export type ActivityRow = {
   confidence: string;
   reviewStatus: string;
   projectName: string | null;
+  categoryName: string | null;
   placeName: string | null;
 };
 
@@ -259,7 +261,9 @@ export async function getNormalizationContext(
     })),
     categories: categories.map<CategorySummary>((category) => ({
       id: category.id,
-      name: category.name
+      name: category.name,
+      color: category.color,
+      isPinned: category.isPinned
     })),
     places: places.map<PlaceSummary>((place) => ({
       id: place.id,
@@ -432,6 +436,7 @@ async function getTimeEntries(
             cl.name as "clientName",
             te.category_id as "categoryId",
             cat.name as "categoryName",
+            cat.color as "categoryColor",
             te.place_id as "placeId",
             pl.name as "placeName",
             te.source,
@@ -469,6 +474,7 @@ async function getActiveEntry(session: RequestSession) {
             cl.name as "clientName",
             te.category_id as "categoryId",
             cat.name as "categoryName",
+            cat.color as "categoryColor",
             te.place_id as "placeId",
             pl.name as "placeName",
             te.source,
@@ -538,9 +544,11 @@ async function getActivityEvents(session: RequestSession) {
             ae.confidence,
             ae.review_status as "reviewStatus",
             p.name as "projectName",
+            c.name as "categoryName",
             pl.name as "placeName"
      from activity_events ae
      left join projects p on p.id = ae.suggested_project_id
+     left join categories c on c.id = ae.suggested_category_id
      left join places pl on pl.id = ae.suggested_place_id
      where ae.workspace_id = $1
      order by ae.occurred_at desc

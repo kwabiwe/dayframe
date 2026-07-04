@@ -18,7 +18,6 @@ import {
   Command,
   FileText,
   Folder,
-  FolderKanban,
   HelpCircle,
   Inbox,
   LayoutDashboard,
@@ -43,7 +42,7 @@ const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/timeline", label: "Timeline", icon: CalendarRange },
   { href: "/entries", label: "Entries", icon: ListFilter },
-  { href: "/projects", label: "Categories", icon: FolderKanban },
+  { href: "/categories", label: "Categories", icon: FileText },
   { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/places", label: "Places", icon: MapPin },
   { href: "/automation", label: "Automation", icon: Workflow },
@@ -721,37 +720,13 @@ function buildSearchResults(data: BootstrapData | null, query: string): SearchRe
       label: category.name,
       detail: category.isPinned ? "Pinned category" : "Category",
       group: "Category",
-      href: "/projects",
-      icon: FileText
-    })),
-    ...data.projects.map((project) => ({
-      id: `project:${project.id}`,
-      label: project.name,
-      detail: project.clientName ?? project.categoryName ?? "Legacy project",
-      group: "Legacy",
-      href: "/projects",
-      icon: FolderKanban
-    })),
-    ...data.clients.map((client) => ({
-      id: `client:${client.id}`,
-      label: client.name,
-      detail: "Legacy client",
-      group: "Legacy",
-      href: "/projects",
-      icon: Folder
-    })),
-    ...data.tags.map((tag) => ({
-      id: `tag:${tag.id}`,
-      label: tag.name,
-      detail: "Tag",
-      group: "Tag",
-      href: "/projects",
+      href: "/categories",
       icon: FileText
     })),
     ...data.places.map((place) => ({
       id: `place:${place.id}`,
       label: place.name,
-      detail: place.defaultCategoryName ?? place.defaultProjectName ?? "Place",
+      detail: place.defaultCategoryName ?? "Place",
       group: "Place",
       href: "/places",
       icon: MapPin
@@ -766,7 +741,7 @@ function buildSearchResults(data: BootstrapData | null, query: string): SearchRe
     })),
     ...data.entries.slice(0, 40).map((entry) => ({
       id: `entry:${entry.id}`,
-      label: entry.projectName ?? entry.description ?? "Time entry",
+      label: entry.description ?? entry.categoryName ?? "Time entry",
       detail: `${formatTime(entry.startedAt)} · ${formatDuration(entry.durationSeconds)}`,
       group: "Entry",
       href: "/entries",
@@ -794,7 +769,7 @@ function buildNotifications(data: BootstrapData | null): NotificationItem[] {
   if (data.activeEntry) {
     items.push({
       id: `active:${data.activeEntry.id}`,
-      title: data.activeEntry.projectName ?? "Timer running",
+      title: data.activeEntry.description ?? data.activeEntry.categoryName ?? "Timer running",
       detail: `Started ${formatTime(data.activeEntry.startedAt)}`,
       href: "/",
       icon: Clock3
@@ -825,6 +800,7 @@ async function toggleTimer(data: BootstrapData | null, refresh: () => Promise<vo
   if (!data) return;
   const active = data.activeEntry;
   const category = data.categories[0];
+  if (!active && !category) return;
   await fetch("/api/time-entries", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -18,10 +18,7 @@ export default async function PlacesPage() {
       <div className="px-5 py-6 md:px-8">
         <EntityForms
           mode="places"
-          clients={data.clients}
           categories={data.categories}
-          projects={data.projects}
-          tags={data.tags}
           places={data.places}
           automationRules={data.automationRules}
         />

@@ -13,15 +13,12 @@ export default async function ReportsPage() {
     <>
       <PageHeader
         title="Reports"
-        description="Compare tracked time by category, source, place, tag, and legacy project/client data."
+        description="Compare tracked time by category, source and place."
       />
       <div className="grid gap-5 px-5 py-6 md:grid-cols-2 md:px-8 xl:grid-cols-3">
         <ReportBars title="By category" rows={reports.byCategory} />
         <ReportBars title="By source" rows={reports.bySource} />
         <ReportBars title="By place" rows={reports.byPlace} />
-        <ReportBars title="By tag" rows={reports.byTag} />
-        <ReportBars title="By legacy project" rows={reports.byProject} />
-        <ReportBars title="By legacy client" rows={reports.byClient} />
       </div>
     </>
   );

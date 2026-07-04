@@ -4,7 +4,7 @@ import { Fragment, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { paletteColorFor } from "@dayframe/shared";
 import { Pencil, Play, Trash2 } from "lucide-react";
-import type { CategoryRow, PlaceRow, ProjectRow, TimeEntryRow } from "@/lib/queries";
+import type { CategoryRow, PlaceRow, TimeEntryRow } from "@/lib/queries";
 import {
   dateTimeLocal,
   formatDate,
@@ -15,7 +15,6 @@ import {
 
 export function EntriesTable({
   entries,
-  projects,
   categories,
   places,
   showManualForm = true,
@@ -23,7 +22,6 @@ export function EntriesTable({
   onChanged
 }: {
   entries: TimeEntryRow[];
-  projects: ProjectRow[];
   categories: CategoryRow[];
   places: PlaceRow[];
   showManualForm?: boolean;
@@ -33,10 +31,7 @@ export function EntriesTable({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [filters, setFilters] = useState({
-    project: "",
-    client: "",
     category: "",
-    tag: "",
     source: "",
     confidence: "",
     reviewStatus: ""
@@ -46,10 +41,7 @@ export function EntriesTable({
   const filtered = useMemo(
     () =>
       entries.filter((entry) => {
-        if (filters.project && entry.projectId !== filters.project) return false;
-        if (filters.client && entry.clientName !== filters.client) return false;
         if (filters.category && entry.categoryId !== filters.category) return false;
-        if (filters.tag && !entry.tagNames.includes(filters.tag)) return false;
         if (filters.source && entry.source !== filters.source) return false;
         if (filters.confidence && entry.confidence !== filters.confidence) return false;
         if (filters.reviewStatus && entry.reviewStatus !== filters.reviewStatus) return false;
@@ -70,7 +62,6 @@ export function EntriesTable({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         mode: "start",
-        projectId: entry.projectId,
         categoryId: entry.categoryId,
         description: entry.description ?? undefined
       })
@@ -85,7 +76,6 @@ export function EntriesTable({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         mode: "manual",
-        projectId: formData.get("projectId"),
         categoryId: formData.get("categoryId") || undefined,
         placeId: formData.get("placeId") || undefined,
         description: formData.get("description") || undefined,
@@ -102,7 +92,6 @@ export function EntriesTable({
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        projectId: formData.get("projectId"),
         categoryId: formData.get("categoryId") || null,
         placeId: formData.get("placeId") || null,
         description: formData.get("description") || null,
@@ -117,36 +106,12 @@ export function EntriesTable({
 
   return (
     <section className="space-y-5">
-      <div className="grid gap-3 overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 md:grid-cols-3 xl:grid-cols-7">
-        <FilterSelect
-          label="Project"
-          value={filters.project}
-          onChange={(project) => setFilters((current) => ({ ...current, project }))}
-          options={projects.map((project) => ({ label: project.name, value: project.id }))}
-        />
-        <FilterSelect
-          label="Client"
-          value={filters.client}
-          onChange={(client) => setFilters((current) => ({ ...current, client }))}
-          options={[...new Set(entries.map((entry) => entry.clientName).filter(isString))].map((client) => ({
-            label: client,
-            value: client
-          }))}
-        />
+      <div className="grid gap-3 overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 md:grid-cols-2 xl:grid-cols-4">
         <FilterSelect
           label="Category"
           value={filters.category}
           onChange={(category) => setFilters((current) => ({ ...current, category }))}
           options={categories.map((category) => ({ label: category.name, value: category.id }))}
-        />
-        <FilterSelect
-          label="Tag"
-          value={filters.tag}
-          onChange={(tag) => setFilters((current) => ({ ...current, tag }))}
-          options={[...new Set(entries.flatMap((entry) => entry.tagNames))].map((tag) => ({
-            label: tag,
-            value: tag
-          }))}
         />
         <FilterSelect
           label="Source"
@@ -180,16 +145,15 @@ export function EntriesTable({
       {showManualForm ? (
         <form
           action={submitManual}
-          className="grid gap-3 rounded-xl border border-[var(--line)] bg-[var(--surface-strong)] p-4 md:grid-cols-6"
+          className="grid gap-3 rounded-xl border border-[var(--line)] bg-[var(--surface-strong)] p-4 md:grid-cols-5"
         >
-          <SelectField name="projectId" label="Project" options={projects} required />
-          <SelectField name="categoryId" label="Category" options={categories} />
+          <SelectField name="categoryId" label="Category" options={categories} defaultValue={categories[0]?.id ?? ""} required />
           <SelectField name="placeId" label="Place" options={places} />
           <TextField name="description" label="Description" />
           <DateField name="startedAt" label="Start" defaultValue={dateTimeLocal()} />
           <DateField name="stoppedAt" label="Stop" defaultValue={dateTimeLocal()} />
           <button
-            className="industrial-button-primary focus-ring text-sm md:col-span-6"
+            className="industrial-button-primary focus-ring text-sm md:col-span-5"
             type="submit"
             disabled={isPending}
           >
@@ -204,8 +168,7 @@ export function EntriesTable({
           <thead className="bg-[var(--surface-inset)] text-left text-xs text-[var(--muted)]">
             <tr>
               <th className="border-b border-[var(--line)] px-3 py-3">Time</th>
-              <th className="border-b border-[var(--line)] px-3 py-3">Project</th>
-              <th className="border-b border-[var(--line)] px-3 py-3">Client</th>
+              <th className="border-b border-[var(--line)] px-3 py-3">Task</th>
               <th className="border-b border-[var(--line)] px-3 py-3">Category</th>
               <th className="border-b border-[var(--line)] px-3 py-3">Place</th>
               <th className="border-b border-[var(--line)] px-3 py-3">Source</th>
@@ -224,27 +187,21 @@ export function EntriesTable({
                 <Fragment key={entry.id}>
                   {shouldShowDate ? (
                     <tr key={`${currentDate}-${entry.id}-group`} className="bg-[var(--surface-inset)]">
-                      <td colSpan={9} className="border-b border-[var(--line)] px-3 py-2 text-xs font-semibold text-[var(--muted)]">
+                      <td colSpan={8} className="border-b border-[var(--line)] px-3 py-2 text-xs font-semibold text-[var(--muted)]">
                         {currentDate}
                       </td>
                     </tr>
                   ) : null}
                   {editingId === entry.id ? (
                 <tr className="border-b border-[var(--line)] bg-[var(--surface-strong)] align-top">
-                  <td colSpan={9} className="p-3">
-                    <form action={(formData) => submitEdit(entry, formData)} className="grid gap-3 md:grid-cols-6">
-                      <SelectField
-                        name="projectId"
-                        label="Project"
-                        options={projects}
-                        defaultValue={entry.projectId ?? ""}
-                        required
-                      />
+                  <td colSpan={8} className="p-3">
+                    <form action={(formData) => submitEdit(entry, formData)} className="grid gap-3 md:grid-cols-5">
                       <SelectField
                         name="categoryId"
                         label="Category"
                         options={categories}
                         defaultValue={entry.categoryId ?? ""}
+                        required
                       />
                       <SelectField
                         name="placeId"
@@ -267,7 +224,7 @@ export function EntriesTable({
                         label="Stop"
                         defaultValue={entry.stoppedAt ? dateTimeLocal(entry.stoppedAt) : ""}
                       />
-                      <div className="flex gap-2 md:col-span-6">
+                      <div className="flex gap-2 md:col-span-5">
                         <button className="industrial-button-primary focus-ring text-sm">
                           Save
                         </button>
@@ -288,21 +245,22 @@ export function EntriesTable({
                     {formatTime(entry.startedAt)} - {entry.stoppedAt ? formatTime(entry.stoppedAt) : "Running"}
                   </td>
                   <td className="px-3 py-3 font-medium">
+                    {entry.description ?? entry.categoryName ?? "Untitled task"}
+                  </td>
+                  <td className="px-3 py-3 text-[var(--muted)]">
                     <span className="flex items-center gap-2">
                       <span
-                        className="h-3 w-3 shrink-0 border border-[var(--line-strong)]"
+                        className="h-3 w-3 shrink-0 rounded-full border border-[var(--line-strong)]"
                         style={{
                           backgroundColor: paletteColorFor(
-                            entry.projectColor,
-                            entry.projectName ?? entry.id
+                            entry.categoryColor,
+                            entry.categoryName ?? entry.id
                           )
                         }}
                       />
-                      {entry.projectName ?? "Unassigned"}
+                      {entry.categoryName ?? "No category"}
                     </span>
                   </td>
-                  <td className="px-3 py-3 text-[var(--muted)]">{entry.clientName ?? "No client"}</td>
-                  <td className="px-3 py-3 text-[var(--muted)]">{entry.categoryName ?? "No category"}</td>
                   <td className="px-3 py-3 text-[var(--muted)]">{entry.placeName ?? "No place"}</td>
                   <td className="px-3 py-3 text-[var(--muted)]">{formatSourceLabel(entry.source)}</td>
                   <td className="px-3 py-3 text-[var(--muted)]">{entry.reviewStatus}</td>
@@ -314,7 +272,7 @@ export function EntriesTable({
                       <button
                         className="focus-ring rounded-md border border-[var(--line)] bg-[var(--surface-inset)] p-2 hover:border-[var(--accent)] hover:text-[var(--accent)]"
                         type="button"
-                        disabled={!entry.projectId || isPending}
+                        disabled={isPending}
                         aria-label="Start this task again"
                         onClick={() => continueEntry(entry)}
                       >
@@ -349,10 +307,6 @@ export function EntriesTable({
       </div>
     </section>
   );
-}
-
-function isString(value: string | null): value is string {
-  return typeof value === "string" && value.length > 0;
 }
 
 function FilterSelect({

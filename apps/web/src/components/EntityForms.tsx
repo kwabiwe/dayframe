@@ -7,10 +7,7 @@ import { Plus } from "lucide-react";
 import type {
   AutomationRuleRow,
   CategoryRow,
-  ClientRow,
-  PlaceRow,
-  ProjectRow,
-  TagRow
+  PlaceRow
 } from "@/lib/queries";
 
 type EntityListRow = {
@@ -19,57 +16,19 @@ type EntityListRow = {
 };
 
 export function EntityForms({
-  clients,
   categories,
-  projects,
-  tags,
   places,
   automationRules,
   mode
 }: {
-  clients: ClientRow[];
   categories: CategoryRow[];
-  projects: ProjectRow[];
-  tags: TagRow[];
   places: PlaceRow[];
   automationRules: AutomationRuleRow[];
-  mode: "projects" | "places" | "automation";
+  mode: "places" | "automation";
 }) {
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
       <div className="space-y-5">
-        {mode === "projects" ? (
-          <>
-            <EntityList
-              title="Categories"
-              rows={categories.map((category) => ({
-                id: category.id,
-                cells: [category.name, category.color, category.isPinned ? "Pinned" : "Not pinned"]
-              }))}
-            />
-            <EntityList
-              title="Tags"
-              rows={tags.map((tag) => ({ id: tag.id, cells: [tag.name, tag.color] }))}
-            />
-            <EntityList
-              title="Legacy projects"
-              rows={projects.map((project) => ({
-                id: project.id,
-                cells: [
-                  project.name,
-                  project.color,
-                  project.clientName ?? "No client",
-                  project.categoryName ?? "No category",
-                  project.billable ? "Billable" : "Non-billable"
-                ]
-              }))}
-            />
-            <EntityList
-              title="Legacy clients"
-              rows={clients.map((client) => ({ id: client.id, cells: [client.name, client.color] }))}
-            />
-          </>
-        ) : null}
         {mode === "places" ? (
           <EntityList
             title="Places and geofences"
@@ -79,7 +38,7 @@ export function EntityForms({
                 place.name,
                 `${place.radiusMeters}m`,
                 `Priority ${place.priority}`,
-                place.defaultCategoryName ?? place.defaultProjectName ?? "No default category",
+                place.defaultCategoryName ?? "No default category",
                 place.autoStart ? "Auto-start" : "Review first"
               ]
             }))}
@@ -95,7 +54,7 @@ export function EntityForms({
                 `${rule.triggerSource} / ${rule.triggerType}`,
                 rule.placeName ?? "Any place",
                 rule.action,
-                rule.projectName ?? "No project",
+                rule.categoryName ?? "No category",
                 rule.enabled ? "Enabled" : "Disabled"
               ]
             }))}
@@ -103,19 +62,11 @@ export function EntityForms({
         ) : null}
       </div>
       <div className="space-y-5">
-        {mode === "projects" ? (
-          <>
-            <CreateCategoryForm />
-            <CreateTagForm />
-            <CreateProjectForm clients={clients} categories={categories} />
-            <CreateClientForm />
-          </>
-        ) : null}
         {mode === "places" ? (
-          <CreatePlaceForm projects={projects} categories={categories} />
+          <CreatePlaceForm categories={categories} />
         ) : null}
         {mode === "automation" ? (
-          <CreateAutomationForm projects={projects} categories={categories} places={places} />
+          <CreateAutomationForm categories={categories} places={places} />
         ) : null}
       </div>
     </div>
@@ -144,63 +95,9 @@ function EntityList({ title, rows }: { title: string; rows: EntityListRow[] }) {
   );
 }
 
-function CreateClientForm() {
-  return (
-    <EntityForm title="New legacy client" entity="client">
-      <TextInput name="name" label="Name" placeholder="Client name" required />
-      <ColorInput name="color" label="Color" defaultValue="steel" />
-    </EntityForm>
-  );
-}
-
-function CreateCategoryForm() {
-  return (
-    <EntityForm title="New category" entity="category">
-      <TextInput name="name" label="Name" placeholder="Category name" required />
-      <ColorInput name="color" label="Color" defaultValue="lime" />
-      <label className="flex items-center gap-2 text-sm">
-        <input name="isPinned" type="checkbox" value="true" />
-        Pin as quick action
-      </label>
-    </EntityForm>
-  );
-}
-
-function CreateTagForm() {
-  return (
-    <EntityForm title="New tag" entity="tag">
-      <TextInput name="name" label="Name" placeholder="tag-name" required />
-      <ColorInput name="color" label="Color" defaultValue="teal" />
-    </EntityForm>
-  );
-}
-
-function CreateProjectForm({
-  clients,
-  categories
-}: {
-  clients: ClientRow[];
-  categories: CategoryRow[];
-}) {
-  return (
-    <EntityForm title="New legacy project" entity="project">
-      <TextInput name="name" label="Name" placeholder="Project name" required />
-      <SelectInput name="clientId" label="Client" options={clients} />
-      <SelectInput name="categoryId" label="Category" options={categories} />
-      <ColorInput name="color" label="Color" defaultValue="lime" />
-      <label className="flex items-center gap-2 text-sm">
-        <input name="billable" type="checkbox" value="true" />
-        Billable
-      </label>
-    </EntityForm>
-  );
-}
-
 function CreatePlaceForm({
-  projects,
   categories
 }: {
-  projects: ProjectRow[];
   categories: CategoryRow[];
 }) {
   return (
@@ -215,7 +112,6 @@ function CreatePlaceForm({
         <NumberInput name="priority" label="Priority" defaultValue="5" />
       </div>
       <SelectInput name="categoryId" label="Default category" options={categories} />
-      <SelectInput name="projectId" label="Legacy default project" options={projects} />
       <label className="flex items-center gap-2 text-sm">
         <input name="autoStart" type="checkbox" value="true" />
         Auto-start when rule allows
@@ -225,11 +121,9 @@ function CreatePlaceForm({
 }
 
 function CreateAutomationForm({
-  projects,
   categories,
   places
 }: {
-  projects: ProjectRow[];
   categories: CategoryRow[];
   places: PlaceRow[];
 }) {
@@ -268,7 +162,6 @@ function CreateAutomationForm({
         ]}
       />
       <SelectInput name="categoryId" label="Category" options={categories} />
-      <SelectInput name="projectId" label="Legacy project" options={projects} />
     </EntityForm>
   );
 }
@@ -357,45 +250,6 @@ function NumberInput({
         step={step}
       />
     </label>
-  );
-}
-
-function ColorInput({
-  name,
-  label,
-  defaultValue
-}: {
-  name: string;
-  label: string;
-  defaultValue: string;
-}) {
-  const defaultKey = paletteKeyFor(defaultValue);
-
-  return (
-    <fieldset className="text-sm">
-      <legend className="industrial-field-label">{label}</legend>
-      <div className="grid grid-cols-6 gap-2">
-        {DAYFRAME_PALETTE.map((color) => (
-          <label
-            key={color.key}
-            className="rounded-lg focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--accent)]"
-            title={color.label}
-          >
-            <input
-              className="peer sr-only"
-              name={name}
-              type="radio"
-              value={color.key}
-              defaultChecked={color.key === defaultKey}
-            />
-            <span
-              className="block h-8 rounded-lg border border-[var(--line-strong)] shadow-sm peer-checked:border-[var(--foreground)] peer-checked:outline peer-checked:outline-2 peer-checked:outline-[var(--accent)]"
-              style={{ backgroundColor: color.hex }}
-            />
-          </label>
-        ))}
-      </div>
-    </fieldset>
   );
 }
 

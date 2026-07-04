@@ -7,7 +7,7 @@ import { paletteColorFor } from "@dayframe/shared";
 import { CalendarDays, ChevronLeft, ChevronRight, List, Pencil, Play, Table2, Trash2 } from "lucide-react";
 import { CurrentTimerPanel } from "@/components/DashboardRealtime";
 import { EntriesTable } from "@/components/EntriesTable";
-import type { BootstrapData, CategoryRow, PlaceRow, ProjectRow, TimeEntryRow } from "@/lib/queries";
+import type { BootstrapData, CategoryRow, PlaceRow, TimeEntryRow } from "@/lib/queries";
 import {
   dateTimeLocal,
   formatDate,
@@ -146,7 +146,6 @@ export function TimeReviewViews({
           entries={weekEntries}
           onSynced={refreshData}
           places={data.places}
-          projects={data.projects}
           setCalendarMode={setCalendarMode}
           weekDays={weekDays}
         />
@@ -154,7 +153,6 @@ export function TimeReviewViews({
       {activeView === "list" ? (
         <EntriesTable
           entries={data.entries}
-          projects={data.projects}
           categories={data.categories}
           places={data.places}
           groupByDay
@@ -172,7 +170,6 @@ function CalendarReview({
   entries,
   onSynced,
   places,
-  projects,
   setCalendarMode,
   weekDays
 }: {
@@ -181,7 +178,6 @@ function CalendarReview({
   entries: TimeEntryRow[];
   onSynced: () => Promise<void>;
   places: PlaceRow[];
-  projects: ProjectRow[];
   setCalendarMode: (mode: CalendarMode) => void;
   weekDays: Date[];
 }) {
@@ -212,7 +208,6 @@ function CalendarReview({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         mode: "start",
-        projectId: entry.projectId ?? undefined,
         categoryId: entry.categoryId,
         description: entry.description ?? undefined
       })
@@ -226,7 +221,6 @@ function CalendarReview({
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        projectId: formData.get("projectId"),
         categoryId: formData.get("categoryId") || null,
         placeId: formData.get("placeId") || null,
         description: formData.get("description") || null,
@@ -244,7 +238,6 @@ function CalendarReview({
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        projectId: entry.projectId,
         categoryId: entry.categoryId,
         placeId: entry.placeId,
         description: entry.description,
@@ -432,14 +425,14 @@ function CalendarReview({
                       ].join(" ")}
                       style={{
                         ...calendarBlockStyle(entry, activeDraft),
-                        backgroundColor: paletteColorFor(entry.projectColor, entry.projectName ?? entry.id),
+                        backgroundColor: paletteColorFor(entry.categoryColor, entry.categoryName ?? entry.id),
                         borderColor: "color-mix(in srgb, var(--foreground) 28%, transparent)",
                         color: "var(--on-pastel)"
                       }}
                       role="button"
                       tabIndex={0}
                       data-entry-id={entry.id}
-                      title={`${entry.description ?? entry.projectName ?? "Unassigned"} ${formatTime(activeDraft?.startedAt ?? entry.startedAt)} - ${activeDraft?.stoppedAt ? formatTime(activeDraft.stoppedAt) : entry.stoppedAt ? formatTime(entry.stoppedAt) : "Running"}`}
+                      title={`${entry.description ?? entry.categoryName ?? "Untitled task"} ${formatTime(activeDraft?.startedAt ?? entry.startedAt)} - ${activeDraft?.stoppedAt ? formatTime(activeDraft.stoppedAt) : entry.stoppedAt ? formatTime(entry.stoppedAt) : "Running"}`}
                       onClick={() => setSelectedEntryId(entry.id)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {
@@ -453,20 +446,20 @@ function CalendarReview({
                           <button
                             type="button"
                             className="swiss-resize-handle top"
-                            aria-label={`Resize start of ${entry.projectName ?? "time block"}`}
+                            aria-label={`Resize start of ${entry.description ?? entry.categoryName ?? "time block"}`}
                             onPointerDown={(event) => startCalendarResize(entry, day, "start", event)}
                           />
                           <button
                             type="button"
                             className="swiss-resize-handle bottom"
-                            aria-label={`Resize end of ${entry.projectName ?? "time block"}`}
+                            aria-label={`Resize end of ${entry.description ?? entry.categoryName ?? "time block"}`}
                             onPointerDown={(event) => startCalendarResize(entry, day, "end", event)}
                           />
                         </>
                       ) : null}
-                      <span className="block truncate font-semibold">{entry.description ?? entry.projectName ?? "Unassigned"}</span>
+                      <span className="block truncate font-semibold">{entry.description ?? entry.categoryName ?? "Untitled task"}</span>
                       <span className="block truncate opacity-80">
-                        {entry.clientName ?? entry.categoryName ?? formatSourceLabel(entry.source)}
+                        {entry.categoryName ?? formatSourceLabel(entry.source)}
                       </span>
                       <span className="tabular block">{formatDuration(calendarDurationSeconds(entry, activeDraft))}</span>
                     </article>
@@ -501,16 +494,11 @@ function CalendarReview({
           </div>
           <form action={(formData) => submitEdit(selectedEntry, formData)} className="grid gap-3 md:grid-cols-6">
             <SelectField
-              name="projectId"
-              label="Legacy project"
-              options={projects}
-              defaultValue={selectedEntry.projectId ?? ""}
-            />
-            <SelectField
               name="categoryId"
               label="Category"
               options={categories}
               defaultValue={selectedEntry.categoryId ?? ""}
+              required
             />
             <SelectField
               name="placeId"
@@ -566,14 +554,13 @@ function CalendarReview({
 function TimesheetView({ entries, weekDays }: { entries: TimeEntryRow[]; weekDays: Date[] }) {
   const rows = Array.from(
     entries.reduce((totals, entry) => {
-      const key = entry.projectId ?? `unassigned:${entry.projectName ?? "Unassigned"}`;
+      const key = entry.categoryId ?? `uncategorized:${entry.categoryName ?? "No category"}`;
       const current = totals.get(key) ?? {
         id: key,
         name: key,
-        label: entry.projectName ?? "Unassigned",
-        clientName: entry.clientName,
+        label: entry.categoryName ?? "No category",
         categoryName: entry.categoryName,
-        color: paletteColorFor(entry.projectColor, entry.projectName ?? key),
+        color: paletteColorFor(entry.categoryColor, entry.categoryName ?? key),
         days: Array(7).fill(0) as number[],
         total: 0
       };
@@ -582,7 +569,7 @@ function TimesheetView({ entries, weekDays }: { entries: TimeEntryRow[]; weekDay
       current.total += entry.durationSeconds;
       totals.set(key, current);
       return totals;
-    }, new Map<string, { id: string; name: string; label: string; clientName: string | null; categoryName: string | null; color: string; days: number[]; total: number }>())
+    }, new Map<string, { id: string; name: string; label: string; categoryName: string | null; color: string; days: number[]; total: number }>())
   )
     .map(([, row]) => row)
     .sort((a, b) => b.total - a.total);
@@ -620,7 +607,7 @@ function TimesheetView({ entries, weekDays }: { entries: TimeEntryRow[]; weekDay
                   <span className="h-3 w-3 border border-[var(--line-strong)]" style={{ backgroundColor: row.color }} />
                   {row.label}
                 </span>
-                <span className="mt-1 block text-xs text-[var(--muted)]">{row.clientName ?? row.categoryName ?? "No client"}</span>
+                <span className="mt-1 block text-xs text-[var(--muted)]">{row.categoryName ?? "Needs category"}</span>
               </td>
               {row.days.map((seconds, index) => (
                 <td key={`${row.id}-${index}`} className="tabular border-r border-[var(--line)] px-3 py-3 text-[var(--muted)] last:border-r-0">
@@ -726,18 +713,30 @@ function DateField({
 
 function calendarBlockStyle(entry: TimeEntryRow, draft: CalendarResizeDraft | null = null) {
   const start = new Date(draft?.startedAt ?? entry.startedAt);
-  const stoppedAt = draft?.stoppedAt ? new Date(draft.stoppedAt) : entry.stoppedAt ? new Date(entry.stoppedAt) : new Date();
+  const stoppedAt = draft?.stoppedAt
+    ? new Date(draft.stoppedAt)
+    : entry.stoppedAt
+      ? new Date(entry.stoppedAt)
+      : projectedEntryEnd(entry);
   const startMinutes = start.getHours() * 60 + start.getMinutes();
   const durationMinutes = Math.max(15, (stoppedAt.getTime() - start.getTime()) / 60_000);
   const top = Math.min(calendarHeight - 24, Math.max(0, ((startMinutes - startHour * 60) / 60) * rowHeight));
   const height = Math.min(calendarHeight - top, Math.max(36, (durationMinutes / 60) * rowHeight));
-  return { top, height: Math.max(24, height) };
+  return { top: Math.round(top), height: Math.round(Math.max(24, height)) };
 }
 
 function calendarDurationSeconds(entry: TimeEntryRow, draft: CalendarResizeDraft | null = null) {
   const start = new Date(draft?.startedAt ?? entry.startedAt);
-  const stoppedAt = draft?.stoppedAt ? new Date(draft.stoppedAt) : entry.stoppedAt ? new Date(entry.stoppedAt) : new Date();
+  const stoppedAt = draft?.stoppedAt
+    ? new Date(draft.stoppedAt)
+    : entry.stoppedAt
+      ? new Date(entry.stoppedAt)
+      : projectedEntryEnd(entry);
   return Math.max(0, Math.round((stoppedAt.getTime() - start.getTime()) / 1000));
+}
+
+function projectedEntryEnd(entry: TimeEntryRow) {
+  return new Date(new Date(entry.startedAt).getTime() + entry.durationSeconds * 1000);
 }
 
 function minutesFromDate(date: Date) {

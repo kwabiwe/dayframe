@@ -29,16 +29,15 @@ export function TimelineRail({ entries }: { entries: TimeEntryRow[] }) {
               <article
                 key={entry.id}
                 className="motion-row border border-l-4 border-[var(--line)] bg-[var(--surface-inset)] px-4 py-3"
-                style={{ borderLeftColor: paletteColorFor(entry.projectColor, entry.projectName ?? entry.id) }}
+                style={{ borderLeftColor: paletteColorFor(entry.categoryColor, entry.categoryName ?? entry.id) }}
               >
                 <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                   <div>
-                    <h3 className="text-base font-semibold">{entry.projectName ?? "Unassigned"}</h3>
+                    <h3 className="text-base font-semibold">{entry.description ?? entry.categoryName ?? "Untitled task"}</h3>
                     <p className="mt-1 text-sm text-[var(--muted)]">
-                      {entry.description ?? entry.categoryName ?? "Tracked activity"}
+                      {entry.categoryName ?? "Tracked activity"}
                     </p>
                     <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--muted)]">
-                      <span>{entry.clientName ?? "No client"}</span>
                       <span>{entry.categoryName ?? "No category"}</span>
                       <span>{entry.placeName ?? "No place"}</span>
                       <span>{formatSourceLabel(entry.source)}</span>

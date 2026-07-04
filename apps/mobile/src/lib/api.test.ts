@@ -35,6 +35,7 @@ const {
   enqueueEvent,
   fetchBootstrap,
   getSessionToken,
+  isNetworkTimerError,
   login,
   startTimer,
   signup,
@@ -139,7 +140,7 @@ describe("mobile API client", () => {
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 201)));
     vi.stubGlobal("fetch", fetchMock);
 
-    await startTimer(undefined, "20000000-0000-4000-8000-000000000001", "Write notes");
+    await startTimer("20000000-0000-4000-8000-000000000001", "Write notes");
 
     expect(fetchMock).toHaveBeenCalledWith(
       "https://dayframe.test/api/time-entries",
@@ -148,7 +149,6 @@ describe("mobile API client", () => {
         body: JSON.stringify({
           mode: "start",
           source: "mobile_app",
-          projectId: undefined,
           categoryId: "20000000-0000-4000-8000-000000000001",
           description: "Write notes"
         })
@@ -164,19 +164,21 @@ describe("mobile API client", () => {
     await createCategory("DIY", { isPinned: true });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://dayframe.test/api/entities",
+      "https://dayframe.test/api/categories",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
-          entity: "category",
-          values: {
-            name: "DIY",
-            color: "lime",
-            isPinned: "true"
-          }
+          name: "DIY",
+          color: "lime",
+          isPinned: true
         })
       })
     );
+  });
+
+  it("recognizes network failures as timer-queue fallback candidates", () => {
+    expect(isNetworkTimerError(new TypeError("Network request failed"))).toBe(true);
+    expect(isNetworkTimerError(new Error("Timer action failed: 500"))).toBe(false);
   });
 });
 
