@@ -3,6 +3,7 @@ import { ZodError } from "zod";
 import { createManualEntry, processActivityEvent, splitActiveEntry } from "@/lib/event-service";
 import { authErrorResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
+import { getBootstrapData } from "@/lib/queries";
 
 export async function POST(request: Request) {
   try {
@@ -59,7 +60,8 @@ export async function POST(request: Request) {
       },
       session
     );
-    return NextResponse.json(result, { status: 201 });
+    const bootstrap = await getBootstrapData(session);
+    return NextResponse.json({ ...result, activeEntry: bootstrap.activeEntry }, { status: 201 });
   } catch (error) {
     const response = authErrorResponse(error);
     if (response) return response;

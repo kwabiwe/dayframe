@@ -10,16 +10,14 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  useColorScheme,
   View,
   type ViewStyle
 } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import { AlertCircle, Check, Inbox, Play, RefreshCw, Save, Settings, Square } from "lucide-react-native";
 import Svg, { Circle, G, Path } from "react-native-svg";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { DAYFRAME_THEME, paletteColorFor } from "@dayframe/shared";
+import { paletteColorFor } from "@dayframe/shared";
 import {
   AuthRequiredError,
   enqueueEvent,
@@ -36,14 +34,8 @@ import {
   type QueuedEvent
 } from "@/lib/api";
 import { handleDayframeUrl } from "@/lib/deepLinks";
+import { useMobileTheme, type MobileTheme } from "@/lib/theme";
 
-type ThemeMode = "light" | "dark";
-type ThemePreference = ThemeMode | "system";
-type MobileTheme = (typeof DAYFRAME_THEME)[ThemeMode] & {
-  mode: ThemeMode;
-  chartTrack: string;
-  pressed: string;
-};
 type TimeEntry = MobileBootstrap["entries"][number];
 type Category = MobileBootstrap["categories"][number];
 type ReviewItem = MobileBootstrap["reviewItems"][number];
@@ -69,15 +61,9 @@ const periodLabels: Record<SummaryPeriod, string> = {
   month: "Month",
   year: "Year"
 };
-const THEME_PREFERENCE_KEY = "dayframe.themePreference.v1";
 
 export default function HomeScreen() {
-  const colorScheme = useColorScheme();
-  const [themePreference, setThemePreference] = useState<ThemePreference>("system");
-  const resolvedThemeMode = themePreference === "system"
-    ? colorScheme === "light" ? "light" : "dark"
-    : themePreference;
-  const theme = useMemo(() => createMobileTheme(resolvedThemeMode), [resolvedThemeMode]);
+  const { theme } = useMobileTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [queue, setQueue] = useState<QueuedEvent[]>([]);
@@ -94,41 +80,44 @@ export default function HomeScreen() {
   const [taskDraft, setTaskDraft] = useState("");
   const [startStatus, setStartStatus] = useState<StartStatus>({ kind: "idle" });
   const [summaryPeriod, setSummaryPeriod] = useState<SummaryPeriod>("day");
+  const [startCategoryDraft, setStartCategoryDraft] = useState("");
   const [activeDescriptionDraft, setActiveDescriptionDraft] = useState("");
   const [activeCategoryDraft, setActiveCategoryDraft] = useState("");
   const [savingActive, setSavingActive] = useState(false);
   const refreshInFlight = useRef(false);
+  const refreshSequence = useRef(0);
 
-  const load = useCallback(async (options?: { silent?: boolean }) => {
-    if (refreshInFlight.current) return;
+  const load = useCallback(async (options?: { silent?: boolean; force?: boolean }) => {
+    if (refreshInFlight.current && !options?.force) return null;
+    const sequence = ++refreshSequence.current;
     refreshInFlight.current = true;
     if (!options?.silent) setLoading(true);
     try {
       const [bootstrap, queued] = await Promise.all([fetchBootstrap(), readQueue()]);
-      setData(bootstrap);
-      setQueue(queued);
-      setAuthState("authenticated");
+      if (sequence === refreshSequence.current) {
+        setData(bootstrap);
+        setQueue(queued);
+        setAuthState("authenticated");
+      }
+      return bootstrap;
     } catch (error) {
       if (error instanceof AuthRequiredError) {
-        setData(null);
-        setAuthState("signedOut");
-        return;
+        if (sequence === refreshSequence.current) {
+          setData(null);
+          setAuthState("signedOut");
+        }
+        return null;
       }
-      if (!options?.silent) {
+      if (!options?.silent && sequence === refreshSequence.current) {
         Alert.alert("Dayframe API", error instanceof Error ? error.message : "Unable to load API");
       }
+      return null;
     } finally {
-      refreshInFlight.current = false;
-      if (!options?.silent) setLoading(false);
+      if (sequence === refreshSequence.current) {
+        refreshInFlight.current = false;
+        if (!options?.silent) setLoading(false);
+      }
     }
-  }, []);
-
-  useEffect(() => {
-    AsyncStorage.getItem(THEME_PREFERENCE_KEY)
-      .then((value) => {
-        if (value === "system" || value === "light" || value === "dark") setThemePreference(value);
-      })
-      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -189,6 +178,16 @@ export default function HomeScreen() {
   const openReviewItems = (data?.reviewItems ?? []).filter((item) => item.status === "open");
   const categories = data?.categories ?? [];
 
+  useEffect(() => {
+    if (categories.length === 0) {
+      if (startCategoryDraft) setStartCategoryDraft("");
+      return;
+    }
+    if (!categories.some((category) => category.id === startCategoryDraft)) {
+      setStartCategoryDraft(categories[0].id);
+    }
+  }, [categories, startCategoryDraft]);
+
   async function submitAuth() {
     setAuthError(null);
     setAuthNotice(null);
@@ -224,9 +223,31 @@ export default function HomeScreen() {
     const description = taskDraft.trim();
     setStartStatus({ kind: "starting", label: "Starting..." });
     try {
-      await startTimer(undefined, categoryId ?? undefined, description || undefined);
+      const startResult = await startTimer(undefined, categoryId ?? undefined, description || undefined);
+      const confirmedActive = startResult.activeEntry ?? null;
       setTaskDraft("");
-      await load();
+      const bootstrap = await load({ force: true });
+      if (!bootstrap?.activeEntry) {
+        if (confirmedActive) {
+          setData((current) => (current ? { ...current, activeEntry: confirmedActive } : current));
+          setStartStatus({ kind: "idle" });
+          return;
+        }
+        setStartStatus({ kind: "starting", label: "Started. Refreshing timer state..." });
+        const retry = await load({ force: true, silent: true });
+        if (!retry?.activeEntry) {
+          if (confirmedActive) {
+            setData((current) => (current ? { ...current, activeEntry: confirmedActive } : current));
+            setStartStatus({ kind: "idle" });
+            return;
+          }
+          setStartStatus({
+            kind: "error",
+            label: "Timer start was accepted, but the active timer did not refresh. Pull to refresh or try again."
+          });
+          return;
+        }
+      }
       setStartStatus({ kind: "idle" });
     } catch (error) {
       if (error instanceof AuthRequiredError) {
@@ -267,7 +288,7 @@ export default function HomeScreen() {
   async function stopActiveTimer() {
     try {
       await stopTimer();
-      await load();
+      await load({ force: true });
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         setAuthState("signedOut");
@@ -293,7 +314,7 @@ export default function HomeScreen() {
         description: activeDescriptionDraft.trim() || null,
         categoryId: activeCategoryDraft || null
       });
-      await load();
+      await load({ force: true });
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         setAuthState("signedOut");
@@ -303,22 +324,6 @@ export default function HomeScreen() {
       Alert.alert("Timer", error instanceof Error ? error.message : "Unable to save timer changes.");
     } finally {
       setSavingActive(false);
-    }
-  }
-
-  async function syncAndReload() {
-    try {
-      const result = await syncQueue();
-      setQueue(result.remaining);
-      await load();
-      if (result.remaining.length === 0 && startStatus.kind === "queued") setStartStatus({ kind: "idle" });
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        setAuthState("signedOut");
-        setData(null);
-        return;
-      }
-      Alert.alert("Sync", error instanceof Error ? error.message : "Unable to sync queued events.");
     }
   }
 
@@ -344,7 +349,7 @@ export default function HomeScreen() {
   async function resolveReview(id: string, action: "accept" | "ignore_once") {
     try {
       await resolveReviewItem(id, action);
-      await load();
+      await load({ force: true });
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         setAuthState("signedOut");
@@ -475,7 +480,9 @@ export default function HomeScreen() {
             categories={categories}
             disabled={startStatus.kind === "starting"}
             onStart={beginStart}
+            onSelectCategory={setStartCategoryDraft}
             setTaskDraft={setTaskDraft}
+            selectedCategoryId={startCategoryDraft}
             startStatus={startStatus}
             styles={styles}
             taskDraft={taskDraft}
@@ -493,15 +500,6 @@ export default function HomeScreen() {
             total={summaryTotal}
           />
 
-          {queue.length > 0 ? (
-            <Pressable style={pressable(styles.syncNotice, styles.buttonPressed)} onPress={syncAndReload}>
-              <RefreshCw size={17} color={theme.accent} />
-              <View style={styles.syncNoticeText}>
-                <Text style={styles.statusText}>{queue.length} queued events</Text>
-                <Text style={styles.muted}>Tap to sync now.</Text>
-              </View>
-            </Pressable>
-          ) : null}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -608,7 +606,7 @@ function TimerCard({
       <Text style={styles.muted}>
         {active
           ? `${formatClockDuration(activeDurationSeconds)} running in ${categoryLabel}`
-          : "Start with a category chip, or press play for a task without a category."}
+          : "Start task below"}
       </Text>
 
       {active ? (
@@ -626,6 +624,7 @@ function TimerCard({
             onPress={(category) => onCategoryDraft(category.id)}
             selectedId={activeCategoryDraft}
             styles={styles}
+            theme={theme}
           />
           <View style={styles.buttonRow}>
             <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={onSave}>
@@ -647,6 +646,8 @@ function StartTaskCard({
   categories,
   disabled,
   onStart,
+  onSelectCategory,
+  selectedCategoryId,
   setTaskDraft,
   startStatus,
   styles,
@@ -656,6 +657,8 @@ function StartTaskCard({
   categories: Category[];
   disabled: boolean;
   onStart: (categoryId?: string | null) => void;
+  onSelectCategory: (categoryId: string) => void;
+  selectedCategoryId?: string;
   setTaskDraft: (task: string) => void;
   startStatus: StartStatus;
   styles: ReturnType<typeof createStyles>;
@@ -668,10 +671,10 @@ function StartTaskCard({
         <Text style={styles.sectionTitle}>Start task</Text>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Start task without category"
+          accessibilityLabel="Start task"
           disabled={disabled}
           style={pressable([styles.playButton, disabled ? styles.buttonDisabled : null], styles.buttonPressed)}
-          onPress={() => onStart(undefined)}
+          onPress={() => onStart(selectedCategoryId || undefined)}
         >
           <Play size={18} color="#FFFFFF" fill="#FFFFFF" />
         </Pressable>
@@ -680,7 +683,7 @@ function StartTaskCard({
         style={styles.textInput}
         value={taskDraft}
         onChangeText={setTaskDraft}
-        onSubmitEditing={() => onStart(undefined)}
+        onSubmitEditing={() => onStart(selectedCategoryId || undefined)}
         placeholder="What are you working on?"
         placeholderTextColor={theme.textSecondary}
         returnKeyType="done"
@@ -689,8 +692,13 @@ function StartTaskCard({
       <CategoryChipRow
         categories={categories}
         disabled={disabled}
-        onPress={(category) => onStart(category.id)}
+        onPress={(category) => {
+          onSelectCategory(category.id);
+          onStart(category.id);
+        }}
+        selectedId={selectedCategoryId}
         styles={styles}
+        theme={theme}
       />
       {startStatus.kind !== "idle" ? (
         <View style={styles.inlineStatus}>
@@ -707,45 +715,50 @@ function CategoryChipRow({
   disabled,
   onPress,
   selectedId,
-  styles
+  styles,
+  theme
 }: {
   categories: Category[];
   disabled?: boolean;
   onPress: (category: Category) => void;
   selectedId?: string;
   styles: ReturnType<typeof createStyles>;
+  theme: MobileTheme;
 }) {
   if (categories.length === 0) {
     return <Text style={styles.muted}>Create categories in Settings.</Text>;
   }
 
   return (
-    <ScrollView
-      horizontal
-      keyboardShouldPersistTaps="handled"
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.chipScroller}
-    >
+    <View style={styles.chipWrap}>
       {categories.map((category) => {
         const selected = category.id === selectedId;
+        const color = paletteColorFor(category.color, category.name);
         return (
           <Pressable
             key={category.id}
             disabled={disabled}
             style={pressable(
-              [styles.categoryChip, selected ? styles.categoryChipSelected : null, disabled ? styles.buttonDisabled : null],
+              [
+                styles.categoryChip,
+                selected ? styles.categoryChipSelected : null,
+                {
+                  borderColor: color,
+                  backgroundColor: selected ? color : transparentColor(color, theme.mode === "dark" ? "2B" : "42")
+                },
+                disabled ? styles.buttonDisabled : null
+              ],
               styles.buttonPressed
             )}
             onPress={() => onPress(category)}
           >
-            <View style={[styles.colorDot, { backgroundColor: paletteColorFor(category.color, category.name) }]} />
             <Text style={[styles.categoryChipText, selected ? styles.categoryChipTextSelected : null]}>
               {category.name}
             </Text>
           </Pressable>
         );
       })}
-    </ScrollView>
+    </View>
   );
 }
 
@@ -905,16 +918,6 @@ function DonutChart({
   );
 }
 
-function createMobileTheme(mode: ThemeMode): MobileTheme {
-  const base = DAYFRAME_THEME[mode];
-  return {
-    ...base,
-    mode,
-    chartTrack: mode === "dark" ? "#161A13" : "#E2E9D8",
-    pressed: mode === "dark" ? "#1B2114" : "#E9F2DE"
-  };
-}
-
 function buildSummarySegments(entries: TimeEntry[], period: SummaryPeriod, now: number): SummarySegment[] {
   const periodStart = startOfPeriod(period, now);
   const totals = new Map<string, Omit<SummarySegment, "share">>();
@@ -1040,6 +1043,10 @@ function formatDuration(seconds: number) {
   return `${hours}h ${minutes}m`;
 }
 
+function transparentColor(hex: string, alpha: string) {
+  return /^#[0-9a-f]{6}$/i.test(hex) ? `${hex}${alpha}` : hex;
+}
+
 const monoFont = "System";
 
 function createStyles(theme: MobileTheme) {
@@ -1142,24 +1149,25 @@ function createStyles(theme: MobileTheme) {
       paddingHorizontal: 12,
       paddingVertical: 10
     },
-    chipScroller: {
-      gap: 8,
-      paddingRight: 6
+    chipWrap: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8
     },
     categoryChip: {
-      minHeight: 44,
+      minHeight: 36,
       borderWidth: 1,
       borderColor: theme.borderStrong,
       backgroundColor: theme.surfaceInset,
-      borderRadius: 12,
-      paddingHorizontal: 12,
+      borderRadius: 999,
+      paddingHorizontal: 11,
+      paddingVertical: 7,
       flexDirection: "row",
       alignItems: "center",
-      gap: 8
+      justifyContent: "center"
     },
     categoryChipSelected: {
-      borderColor: theme.accent,
-      backgroundColor: theme.surfaceMuted
+      borderWidth: 2
     },
     categoryChipText: {
       color: theme.textPrimary,
@@ -1168,7 +1176,7 @@ function createStyles(theme: MobileTheme) {
       fontWeight: "800"
     },
     categoryChipTextSelected: {
-      color: theme.accent
+      color: theme.textPrimary
     },
     colorDot: {
       width: 11,

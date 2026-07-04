@@ -13,7 +13,7 @@ export default async function ProjectsPage() {
     <>
       <PageHeader
         title="Categories"
-        description="Manage quick-action categories first; legacy projects and clients remain for data compatibility."
+        description="Manage the categories used by timers, quick actions and reports."
       />
       <div className="px-5 py-6 md:px-8">
         <EntityForms

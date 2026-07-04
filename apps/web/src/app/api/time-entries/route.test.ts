@@ -11,7 +11,8 @@ const mocks = vi.hoisted(() => ({
   resolveRequestSession: vi.fn(),
   processActivityEvent: vi.fn(),
   createManualEntry: vi.fn(),
-  splitActiveEntry: vi.fn()
+  splitActiveEntry: vi.fn(),
+  getBootstrapData: vi.fn()
 }));
 
 vi.mock("@/lib/ingest-auth", () => ({
@@ -24,6 +25,10 @@ vi.mock("@/lib/event-service", () => ({
   splitActiveEntry: mocks.splitActiveEntry
 }));
 
+vi.mock("@/lib/queries", () => ({
+  getBootstrapData: mocks.getBootstrapData
+}));
+
 const { POST } = await import("./route");
 
 describe("POST /api/time-entries", () => {
@@ -32,6 +37,19 @@ describe("POST /api/time-entries", () => {
     mocks.resolveRequestSession.mockResolvedValue(session);
     mocks.processActivityEvent.mockResolvedValue({ eventId: "event-1", candidate: { action: "start_timer" } });
     mocks.createManualEntry.mockResolvedValue(undefined);
+    mocks.getBootstrapData.mockResolvedValue({
+      activeEntry: {
+        id: "entry-1",
+        projectId: null,
+        projectName: null,
+        projectColor: null,
+        categoryId: categoryId(),
+        categoryName: "Focus",
+        description: "Focus",
+        durationSeconds: 0,
+        startedAt: "2026-07-04T09:00:00.000Z"
+      }
+    });
   });
 
   it("starts a category-only task without requiring a project", async () => {
@@ -47,6 +65,13 @@ describe("POST /api/time-entries", () => {
       }),
       session
     );
+    await expect(response.json()).resolves.toMatchObject({
+      eventId: "event-1",
+      activeEntry: {
+        id: "entry-1",
+        categoryName: "Focus"
+      }
+    });
   });
 
   it("creates a manual entry with no legacy project", async () => {

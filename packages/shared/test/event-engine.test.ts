@@ -105,6 +105,24 @@ describe("event normalization", () => {
     expect(next.reviewItems).toHaveLength(0);
   });
 
+  it("treats category-only mobile starts as confirmed active timers", () => {
+    const candidate = normalizeActivityEvent(
+      {
+        source: "mobile_app",
+        type: "timer_start",
+        occurredAt: new Date("2026-06-20T08:30:00Z"),
+        categoryId: ids.work,
+        description: "Plan launch tasks"
+      },
+      context
+    );
+
+    expect(candidate.action).toBe("start_timer");
+    expect(candidate.reviewStatus).toBe("confirmed");
+    expect(candidate.projectId).toBeUndefined();
+    expect(candidate.categoryId).toBe(ids.work);
+  });
+
   it("routes broad geofence signals to review", () => {
     const candidate = normalizeActivityEvent(
       {

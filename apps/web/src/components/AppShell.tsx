@@ -724,27 +724,11 @@ function buildSearchResults(data: BootstrapData | null, query: string): SearchRe
       href: "/projects",
       icon: FileText
     })),
-    ...data.projects.map((project) => ({
-      id: `project:${project.id}`,
-      label: project.name,
-      detail: project.clientName ?? project.categoryName ?? "Legacy project",
-      group: "Legacy",
-      href: "/projects",
-      icon: FolderKanban
-    })),
-    ...data.clients.map((client) => ({
-      id: `client:${client.id}`,
-      label: client.name,
-      detail: "Legacy client",
-      group: "Legacy",
-      href: "/projects",
-      icon: Folder
-    })),
     ...data.tags.map((tag) => ({
       id: `tag:${tag.id}`,
       label: tag.name,
-      detail: "Tag",
-      group: "Tag",
+      detail: "Compatibility tag",
+      group: "Compatibility",
       href: "/projects",
       icon: FileText
     })),
@@ -766,7 +750,7 @@ function buildSearchResults(data: BootstrapData | null, query: string): SearchRe
     })),
     ...data.entries.slice(0, 40).map((entry) => ({
       id: `entry:${entry.id}`,
-      label: entry.projectName ?? entry.description ?? "Time entry",
+      label: entry.description ?? entry.categoryName ?? entry.projectName ?? "Time entry",
       detail: `${formatTime(entry.startedAt)} · ${formatDuration(entry.durationSeconds)}`,
       group: "Entry",
       href: "/entries",
@@ -794,7 +778,7 @@ function buildNotifications(data: BootstrapData | null): NotificationItem[] {
   if (data.activeEntry) {
     items.push({
       id: `active:${data.activeEntry.id}`,
-      title: data.activeEntry.projectName ?? "Timer running",
+      title: data.activeEntry.description ?? data.activeEntry.categoryName ?? "Timer running",
       detail: `Started ${formatTime(data.activeEntry.startedAt)}`,
       href: "/",
       icon: Clock3

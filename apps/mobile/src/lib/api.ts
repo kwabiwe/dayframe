@@ -95,6 +95,18 @@ export type QueuedEvent = Omit<ActivityEventInput, "occurredAt"> & {
   queuedAt: string;
 };
 
+export type TimerActionResult = {
+  eventId?: string;
+  duplicate?: boolean;
+  activeEntry?: MobileBootstrap["activeEntry"];
+  candidate?: {
+    action?: string;
+    confidence?: string;
+    reviewStatus?: string;
+    title?: string;
+  };
+};
+
 type ActivityEventDraft = {
   source: EventSource;
   type: ActivityEventType;
@@ -209,7 +221,11 @@ export async function syncQueue() {
   return { synced, remaining: [] };
 }
 
-export async function startTimer(projectId?: string | null, categoryId?: string | null, description?: string) {
+export async function startTimer(
+  projectId?: string | null,
+  categoryId?: string | null,
+  description?: string
+): Promise<TimerActionResult> {
   return postTimerAction({
     mode: "start",
     source: "mobile_app",
@@ -219,7 +235,7 @@ export async function startTimer(projectId?: string | null, categoryId?: string 
   });
 }
 
-export async function stopTimer() {
+export async function stopTimer(): Promise<TimerActionResult> {
   return postTimerAction({
     mode: "stop",
     source: "mobile_app"
@@ -365,7 +381,7 @@ async function authenticate(path: string, body: Record<string, unknown>): Promis
   return payload;
 }
 
-async function postTimerAction(body: Record<string, unknown>) {
+async function postTimerAction(body: Record<string, unknown>): Promise<TimerActionResult> {
   const response = await fetch(`${DAYFRAME_API_BASE}/api/time-entries`, {
     method: "POST",
     headers: {
@@ -379,7 +395,7 @@ async function postTimerAction(body: Record<string, unknown>) {
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Timer action failed"));
-  return readJsonResponse(response);
+  return readJsonResponse<TimerActionResult>(response);
 }
 
 async function authHeaders(): Promise<Record<string, string>> {

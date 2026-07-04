@@ -157,7 +157,7 @@ export function CurrentTimerPanel({
   data: BootstrapData;
   onSynced: (data: BootstrapData) => void;
 }) {
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState<number | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [timerError, setTimerError] = useState<string | null>(null);
   const [description, setDescription] = useState(data.activeEntry?.description ?? "");
@@ -166,17 +166,24 @@ export function CurrentTimerPanel({
   );
   const activeDetailsSyncRef = useRef("");
   const active = data.activeEntry;
+  const activeTimerKey = active ? `${active.id}:${active.startedAt}` : "";
   const selectedCategory = data.categories.find((category) => category.id === categoryId) ?? null;
   const durationSeconds = active
-    ? Math.max(active.durationSeconds, Math.floor((now - new Date(active.startedAt).getTime()) / 1000))
+    ? now == null
+      ? active.durationSeconds
+      : Math.max(active.durationSeconds, Math.floor((now - new Date(active.startedAt).getTime()) / 1000))
     : 0;
   const quickActions = useMemo(() => buildLearnedQuickActions(data), [data]);
 
   useEffect(() => {
-    if (!active) return undefined;
+    if (!activeTimerKey) return undefined;
+    const timeout = window.setTimeout(() => setNow(Date.now()), 0);
     const interval = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(interval);
-  }, [active]);
+    return () => {
+      window.clearTimeout(timeout);
+      window.clearInterval(interval);
+    };
+  }, [activeTimerKey]);
 
   useEffect(() => {
     if (!active) {
@@ -520,6 +527,7 @@ function DayTimeline({
   const [editingEntry, setEditingEntry] = useState<TimeEntryRow | null>(null);
   const [dateJumpOpen, setDateJumpOpen] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
+  const [liveNowMs, setLiveNowMs] = useState<number | null>(null);
   const selectedDay = useMemo(() => parseDateKey(selectedDate), [selectedDate]);
   const weekDays = useMemo(() => getWeekDays(startOfWeek(selectedDay)), [selectedDay]);
   const zoom = timelineZooms[zoomLevel];
@@ -538,6 +546,7 @@ function DayTimeline({
   const sorted = [...visibleEntries].sort(
     (a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime()
   );
+  const hasLiveEntry = sorted.some((entry) => !entry.stoppedAt);
   const axisMarks = useMemo(() => {
     const totalMinutes = timelineEndMinutes - timelineStartMinutes;
     const markCount = Math.floor(totalMinutes / zoom.intervalMinutes);
@@ -551,10 +560,25 @@ function DayTimeline({
       };
     });
   }, [timelineEndMinutes, timelineStartMinutes, zoom.intervalMinutes, zoom.pixelsPerHour]);
-  const isToday = viewMode === "day" && selectedDate === dateKey(new Date());
-  const now = new Date();
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setLiveNowMs(Date.now()), 0);
+    const interval = window.setInterval(
+      () => setLiveNowMs(Date.now()),
+      hasLiveEntry ? 1000 : 60_000
+    );
+    return () => {
+      window.clearTimeout(timeout);
+      window.clearInterval(interval);
+    };
+  }, [hasLiveEntry, selectedDate]);
+
+  const liveNow = liveNowMs == null ? null : new Date(liveNowMs);
+  const isToday = viewMode === "day" && liveNow != null && selectedDate === dateKey(liveNow);
   const currentTop =
-    ((now.getHours() * 60 + now.getMinutes() - dayStartHour * 60) / 60) * zoom.pixelsPerHour;
+    liveNow == null
+      ? -1
+      : ((liveNow.getHours() * 60 + liveNow.getMinutes() - dayStartHour * 60) / 60) *
+        zoom.pixelsPerHour;
   const displayedTotal =
     viewMode === "day" ? totalLogged : sorted.reduce((sum, entry) => sum + entry.durationSeconds, 0);
   const averageDuration = sorted.length > 0 ? displayedTotal / sorted.length : 0;
@@ -880,6 +904,7 @@ function DayTimeline({
                   entry={entry}
                   isResizing={resizingId === entry.id}
                   isSelected={selectedEntryId === entry.id}
+                  nowMs={liveNowMs}
                   pixelsPerHour={zoom.pixelsPerHour}
                   viewMode={viewMode}
                   onContextMenu={(event) => {
@@ -970,6 +995,7 @@ function TimelineBlock({
   entry,
   isResizing,
   isSelected,
+  nowMs,
   pixelsPerHour,
   viewMode,
   onContextMenu,
@@ -983,6 +1009,7 @@ function TimelineBlock({
   entry: TimeEntryRow;
   isResizing: boolean;
   isSelected: boolean;
+  nowMs: number | null;
   pixelsPerHour: number;
   viewMode: "day" | "week";
   onContextMenu: (event: ReactMouseEvent<HTMLElement>) => void;
@@ -995,7 +1022,11 @@ function TimelineBlock({
   onSelect: () => void;
 }) {
   const start = new Date(draft?.startedAt ?? entry.startedAt);
-  const end = draft?.stoppedAt ? new Date(draft.stoppedAt) : entry.stoppedAt ? new Date(entry.stoppedAt) : new Date();
+  const end = draft?.stoppedAt
+    ? new Date(draft.stoppedAt)
+    : entry.stoppedAt
+      ? new Date(entry.stoppedAt)
+      : new Date(nowMs ?? start.getTime() + entry.durationSeconds * 1000);
   const top =
     ((start.getHours() * 60 + start.getMinutes() - dayStartHour * 60) / 60) * pixelsPerHour;
   const height = Math.max(30, ((end.getTime() - start.getTime()) / 3_600_000) * pixelsPerHour);
@@ -1034,7 +1065,7 @@ function TimelineBlock({
       style={{
         top: Math.max(0, top),
         height,
-        background: color.background,
+        backgroundColor: color.background,
         borderColor: color.border,
         color: color.text,
         ...positionStyle
@@ -1312,7 +1343,6 @@ function ManualEntryDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mode: "manual",
-          projectId: formData.get("projectId"),
           categoryId: formData.get("categoryId") || undefined,
           placeId: formData.get("placeId") || undefined,
           description: formData.get("description") || undefined,
@@ -1341,20 +1371,9 @@ function ManualEntryDialog({
         </div>
         <form className="swiss-form-grid" onSubmit={submit}>
           <label>
-            Legacy project
-            <select name="projectId" defaultValue="">
-              <option value="">None</option>
-              {data.projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
             Category
             <select name="categoryId" defaultValue="">
-              <option value="">Project default</option>
+              <option value="">No category</option>
               {data.categories.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.name}

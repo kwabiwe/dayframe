@@ -95,7 +95,7 @@ export async function getHealthImportStatus(): Promise<HealthImportStatus[]> {
         provider: "healthkit",
         kind: "availability",
         status: "error",
-        notes: friendlyHealthKitError(error, "check HealthKit availability")
+        notes: friendlyHealthKitError(error, "check Apple Health availability")
       }
     ];
   }
@@ -337,11 +337,11 @@ async function loadHealthKit(): Promise<HealthKitModule> {
 
 function ensureIos() {
   if (Platform.OS !== "ios") {
-    throw new Error("HealthKit requires a native iOS build.");
+    throw new Error("Apple Health requires a native iOS build.");
   }
 }
 
-export function friendlyHealthKitError(error: unknown, action = "use HealthKit") {
+export function friendlyHealthKitError(error: unknown, action = "use Apple Health") {
   const message = error instanceof Error ? error.message : String(error ?? "");
   const lower = message.toLowerCase();
 

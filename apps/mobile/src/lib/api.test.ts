@@ -141,10 +141,30 @@ describe("mobile API client", () => {
 
   it("starts timers with an optional category and no project", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
-    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 201)));
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        jsonResponse(
+          {
+            eventId: "event-1",
+            activeEntry: {
+              id: "entry-1",
+              projectId: null,
+              projectName: null,
+              projectColor: null,
+              categoryId: "20000000-0000-4000-8000-000000000001",
+              categoryName: "Writing",
+              description: "Write notes",
+              durationSeconds: 0,
+              startedAt: "2026-07-04T09:00:00.000Z"
+            }
+          },
+          201
+        )
+      )
+    );
     vi.stubGlobal("fetch", fetchMock);
 
-    await startTimer(undefined, "20000000-0000-4000-8000-000000000001", "Write notes");
+    const result = await startTimer(undefined, "20000000-0000-4000-8000-000000000001", "Write notes");
 
     expect(fetchMock).toHaveBeenCalledWith(
       "https://dayframe.test/api/time-entries",
@@ -159,6 +179,7 @@ describe("mobile API client", () => {
         })
       })
     );
+    expect(result.activeEntry?.categoryName).toBe("Writing");
   });
 
   it("creates pinned categories through the hosted API", async () => {
@@ -189,13 +210,13 @@ describe("mobile API client", () => {
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));
     vi.stubGlobal("fetch", fetchMock);
 
-    await updateCategory("category-1", { name: "Deep work", isPinned: true });
+    await updateCategory("category-1", { name: "Deep work", color: "teal", isPinned: true });
 
     expect(fetchMock).toHaveBeenCalledWith(
       "https://dayframe.test/api/categories/category-1",
       expect.objectContaining({
         method: "PATCH",
-        body: JSON.stringify({ name: "Deep work", isPinned: true })
+        body: JSON.stringify({ name: "Deep work", color: "teal", isPinned: true })
       })
     );
   });

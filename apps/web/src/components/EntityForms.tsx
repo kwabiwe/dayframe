@@ -3,7 +3,7 @@
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { DAYFRAME_PALETTE, paletteColorFor, paletteKeyFor } from "@dayframe/shared";
-import { Plus } from "lucide-react";
+import { Archive, Plus, Save } from "lucide-react";
 import type {
   AutomationRuleRow,
   CategoryRow,
@@ -40,34 +40,8 @@ export function EntityForms({
       <div className="space-y-5">
         {mode === "projects" ? (
           <>
-            <EntityList
-              title="Categories"
-              rows={categories.map((category) => ({
-                id: category.id,
-                cells: [category.name, category.color, category.isPinned ? "Pinned" : "Not pinned"]
-              }))}
-            />
-            <EntityList
-              title="Tags"
-              rows={tags.map((tag) => ({ id: tag.id, cells: [tag.name, tag.color] }))}
-            />
-            <EntityList
-              title="Legacy projects"
-              rows={projects.map((project) => ({
-                id: project.id,
-                cells: [
-                  project.name,
-                  project.color,
-                  project.clientName ?? "No client",
-                  project.categoryName ?? "No category",
-                  project.billable ? "Billable" : "Non-billable"
-                ]
-              }))}
-            />
-            <EntityList
-              title="Legacy clients"
-              rows={clients.map((client) => ({ id: client.id, cells: [client.name, client.color] }))}
-            />
+            <CategorySettings categories={categories} />
+            <CompatibilityDetails clients={clients} projects={projects} tags={tags} />
           </>
         ) : null}
         {mode === "places" ? (
@@ -95,7 +69,7 @@ export function EntityForms({
                 `${rule.triggerSource} / ${rule.triggerType}`,
                 rule.placeName ?? "Any place",
                 rule.action,
-                rule.projectName ?? "No project",
+                rule.categoryName ?? "No category",
                 rule.enabled ? "Enabled" : "Disabled"
               ]
             }))}
@@ -106,19 +80,138 @@ export function EntityForms({
         {mode === "projects" ? (
           <>
             <CreateCategoryForm />
-            <CreateTagForm />
-            <CreateProjectForm clients={clients} categories={categories} />
-            <CreateClientForm />
           </>
         ) : null}
         {mode === "places" ? (
-          <CreatePlaceForm projects={projects} categories={categories} />
+          <CreatePlaceForm categories={categories} />
         ) : null}
         {mode === "automation" ? (
-          <CreateAutomationForm projects={projects} categories={categories} places={places} />
+          <CreateAutomationForm categories={categories} places={places} />
         ) : null}
       </div>
     </div>
+  );
+}
+
+function CategorySettings({ categories }: { categories: CategoryRow[] }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+
+  async function updateCategory(id: string, formData: FormData) {
+    const values = Object.fromEntries(formData.entries());
+    await fetch(`/api/categories/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: values.name,
+        color: values.color,
+        isPinned: values.isPinned === "true"
+      })
+    });
+    startTransition(() => router.refresh());
+  }
+
+  async function archiveCategory(id: string, name: string) {
+    if (!window.confirm(`Archive ${name}? Existing entries keep their category history.`)) return;
+    await fetch(`/api/categories/${id}`, { method: "DELETE" });
+    startTransition(() => router.refresh());
+  }
+
+  return (
+    <section className="industrial-panel">
+      <div className="border-b border-[var(--line)] px-4 py-3">
+        <h2 className="text-lg font-semibold">Categories</h2>
+        <p className="mt-1 text-sm text-[var(--muted)]">
+          Categories are the primary timer, dashboard and report grouping.
+        </p>
+      </div>
+      <div className="divide-y divide-[var(--line)]">
+        {categories.map((category) => (
+          <form
+            key={category.id}
+            action={(formData) => updateCategory(category.id, formData)}
+            className="grid gap-3 px-4 py-4 text-sm lg:grid-cols-[minmax(180px,1fr)_minmax(260px,1.3fr)_auto]"
+          >
+            <label>
+              <span className="industrial-field-label">Name</span>
+              <input
+                className="industrial-field focus-ring"
+                name="name"
+                defaultValue={category.name}
+                required
+              />
+            </label>
+            <ColorInput name="color" label="Color" defaultValue={category.color} />
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="flex min-h-10 items-center gap-2 rounded-lg border border-[var(--line-strong)] bg-[var(--surface)] px-3 text-sm">
+                <input name="isPinned" type="checkbox" value="true" defaultChecked={category.isPinned} />
+                Pinned
+              </label>
+              <button
+                className="industrial-button-secondary focus-ring min-h-10 text-sm disabled:opacity-50"
+                type="submit"
+                disabled={isPending}
+              >
+                <Save size={16} />
+                Save
+              </button>
+              <button
+                className="industrial-button-secondary focus-ring min-h-10 text-sm text-[var(--danger)] disabled:opacity-50"
+                type="button"
+                disabled={isPending}
+                onClick={() => archiveCategory(category.id, category.name)}
+              >
+                <Archive size={16} />
+                Archive
+              </button>
+            </div>
+          </form>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CompatibilityDetails({
+  clients,
+  projects,
+  tags
+}: {
+  clients: ClientRow[];
+  projects: ProjectRow[];
+  tags: TagRow[];
+}) {
+  return (
+    <details className="industrial-panel">
+      <summary className="cursor-pointer border-b border-[var(--line)] px-4 py-3 text-lg font-semibold">
+        Compatibility data
+      </summary>
+      <div className="space-y-4 p-4">
+        <p className="text-sm text-[var(--muted)]">
+          These records are kept for migration and historical data compatibility. Day-to-day timer UX should use categories.
+        </p>
+        <EntityList
+          title="Tags"
+          rows={tags.map((tag) => ({ id: tag.id, cells: [tag.name, tag.color] }))}
+        />
+        <EntityList
+          title="Historical projects"
+          rows={projects.map((project) => ({
+            id: project.id,
+            cells: [
+              project.name,
+              project.color,
+              project.categoryName ?? "No category",
+              project.billable ? "Billable" : "Non-billable"
+            ]
+          }))}
+        />
+        <EntityList
+          title="Historical clients"
+          rows={clients.map((client) => ({ id: client.id, cells: [client.name, client.color] }))}
+        />
+      </div>
+    </details>
   );
 }
 
@@ -144,15 +237,6 @@ function EntityList({ title, rows }: { title: string; rows: EntityListRow[] }) {
   );
 }
 
-function CreateClientForm() {
-  return (
-    <EntityForm title="New legacy client" entity="client">
-      <TextInput name="name" label="Name" placeholder="Client name" required />
-      <ColorInput name="color" label="Color" defaultValue="steel" />
-    </EntityForm>
-  );
-}
-
 function CreateCategoryForm() {
   return (
     <EntityForm title="New category" entity="category">
@@ -166,41 +250,9 @@ function CreateCategoryForm() {
   );
 }
 
-function CreateTagForm() {
-  return (
-    <EntityForm title="New tag" entity="tag">
-      <TextInput name="name" label="Name" placeholder="tag-name" required />
-      <ColorInput name="color" label="Color" defaultValue="teal" />
-    </EntityForm>
-  );
-}
-
-function CreateProjectForm({
-  clients,
-  categories
-}: {
-  clients: ClientRow[];
-  categories: CategoryRow[];
-}) {
-  return (
-    <EntityForm title="New legacy project" entity="project">
-      <TextInput name="name" label="Name" placeholder="Project name" required />
-      <SelectInput name="clientId" label="Client" options={clients} />
-      <SelectInput name="categoryId" label="Category" options={categories} />
-      <ColorInput name="color" label="Color" defaultValue="lime" />
-      <label className="flex items-center gap-2 text-sm">
-        <input name="billable" type="checkbox" value="true" />
-        Billable
-      </label>
-    </EntityForm>
-  );
-}
-
 function CreatePlaceForm({
-  projects,
   categories
 }: {
-  projects: ProjectRow[];
   categories: CategoryRow[];
 }) {
   return (
@@ -215,7 +267,6 @@ function CreatePlaceForm({
         <NumberInput name="priority" label="Priority" defaultValue="5" />
       </div>
       <SelectInput name="categoryId" label="Default category" options={categories} />
-      <SelectInput name="projectId" label="Legacy default project" options={projects} />
       <label className="flex items-center gap-2 text-sm">
         <input name="autoStart" type="checkbox" value="true" />
         Auto-start when rule allows
@@ -225,11 +276,9 @@ function CreatePlaceForm({
 }
 
 function CreateAutomationForm({
-  projects,
   categories,
   places
 }: {
-  projects: ProjectRow[];
   categories: CategoryRow[];
   places: PlaceRow[];
 }) {
@@ -268,7 +317,6 @@ function CreateAutomationForm({
         ]}
       />
       <SelectInput name="categoryId" label="Category" options={categories} />
-      <SelectInput name="projectId" label="Legacy project" options={projects} />
     </EntityForm>
   );
 }

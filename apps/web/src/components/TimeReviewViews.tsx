@@ -7,7 +7,7 @@ import { paletteColorFor } from "@dayframe/shared";
 import { CalendarDays, ChevronLeft, ChevronRight, List, Pencil, Play, Table2, Trash2 } from "lucide-react";
 import { CurrentTimerPanel } from "@/components/DashboardRealtime";
 import { EntriesTable } from "@/components/EntriesTable";
-import type { BootstrapData, CategoryRow, PlaceRow, ProjectRow, TimeEntryRow } from "@/lib/queries";
+import type { BootstrapData, CategoryRow, PlaceRow, TimeEntryRow } from "@/lib/queries";
 import {
   dateTimeLocal,
   formatDate,
@@ -146,7 +146,6 @@ export function TimeReviewViews({
           entries={weekEntries}
           onSynced={refreshData}
           places={data.places}
-          projects={data.projects}
           setCalendarMode={setCalendarMode}
           weekDays={weekDays}
         />
@@ -172,7 +171,6 @@ function CalendarReview({
   entries,
   onSynced,
   places,
-  projects,
   setCalendarMode,
   weekDays
 }: {
@@ -181,7 +179,6 @@ function CalendarReview({
   entries: TimeEntryRow[];
   onSynced: () => Promise<void>;
   places: PlaceRow[];
-  projects: ProjectRow[];
   setCalendarMode: (mode: CalendarMode) => void;
   weekDays: Date[];
 }) {
@@ -226,7 +223,6 @@ function CalendarReview({
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        projectId: formData.get("projectId"),
         categoryId: formData.get("categoryId") || null,
         placeId: formData.get("placeId") || null,
         description: formData.get("description") || null,
@@ -500,12 +496,6 @@ function CalendarReview({
             </button>
           </div>
           <form action={(formData) => submitEdit(selectedEntry, formData)} className="grid gap-3 md:grid-cols-6">
-            <SelectField
-              name="projectId"
-              label="Legacy project"
-              options={projects}
-              defaultValue={selectedEntry.projectId ?? ""}
-            />
             <SelectField
               name="categoryId"
               label="Category"

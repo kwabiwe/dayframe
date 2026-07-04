@@ -6,7 +6,7 @@ const productPoints = [
   {
     icon: Clock3,
     title: "Manual timers stay fast",
-    body: "Type what you are doing, choose the project, and keep the same timeline available on web and iPhone."
+    body: "Type what you are doing, choose a category, and keep the same timeline available on web and iPhone."
   },
   {
     icon: MapPin,
@@ -50,11 +50,11 @@ export function LandingPage() {
           </div>
           <div className="landing-preview-block block-sleep">
             <strong>Sleep</strong>
-            <span>HealthKit summary</span>
+            <span>Apple Health summary</span>
           </div>
           <div className="landing-preview-block block-focus">
             <strong>Deep work</strong>
-            <span>Project Phoenix</span>
+            <span>Work category</span>
           </div>
           <div className="landing-preview-block block-walk">
             <strong>Walk</strong>
@@ -69,7 +69,7 @@ export function LandingPage() {
         <div className="landing-hero-copy">
           <h1>Personal time tracking that understands the shape of your day.</h1>
           <p>
-            Dayframe combines a fast task timer with iOS location and HealthKit signals, then lets you review
+            Dayframe combines a fast task timer with iOS location and Apple Health signals, then lets you review
             what should become part of your timeline.
           </p>
           <div className="landing-hero-actions">

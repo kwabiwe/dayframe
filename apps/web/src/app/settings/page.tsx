@@ -30,7 +30,7 @@ export default async function SettingsPage() {
           title="Integrations"
           rows={[
             ["Calendar", "Hint source only in v1"],
-            ["HealthKit", "iOS native sleep and workout imports queue activity events first"]
+            ["Apple Health", "iOS sleep and workout imports queue activity events first"]
           ]}
         />
         <SettingsPanel

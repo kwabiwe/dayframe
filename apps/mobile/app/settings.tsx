@@ -7,27 +7,30 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  useColorScheme,
   View,
   type ViewStyle
 } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import {
-  ArrowDown,
   ArrowLeft,
-  ArrowUp,
   HeartPulse,
   LogOut,
   MapPin,
+  Pencil,
   Pin,
   Plus,
   RefreshCw,
   Save,
-  Trash2
+  Trash2,
+  X
 } from "lucide-react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { DAYFRAME_THEME, paletteColorFor } from "@dayframe/shared";
+import {
+  DAYFRAME_PALETTE,
+  paletteColorFor,
+  paletteKeyFor,
+  type DayframePaletteKey
+} from "@dayframe/shared";
 import {
   AuthRequiredError,
   archiveCategory,
@@ -35,7 +38,6 @@ import {
   fetchBootstrap,
   logout,
   readQueue,
-  reorderCategories,
   syncQueue,
   updateCategory,
   type MobileBootstrap,
@@ -50,16 +52,10 @@ import {
   type HealthImportStatus
 } from "@/lib/health";
 import { requestLocationAccess, startGeofences } from "@/lib/geofence";
+import { useMobileTheme, type MobileTheme, type ThemePreference } from "@/lib/theme";
 
-type ThemeMode = "light" | "dark";
-type ThemePreference = ThemeMode | "system";
-type MobileTheme = (typeof DAYFRAME_THEME)[ThemeMode] & {
-  mode: ThemeMode;
-  pressed: string;
-};
 type Category = MobileBootstrap["categories"][number];
 
-const THEME_PREFERENCE_KEY = "dayframe.themePreference.v1";
 const themeOptions: Array<{ value: ThemePreference; label: string }> = [
   { value: "system", label: "System" },
   { value: "light", label: "Light" },
@@ -67,20 +63,17 @@ const themeOptions: Array<{ value: ThemePreference; label: string }> = [
 ];
 
 export default function SettingsScreen() {
-  const colorScheme = useColorScheme();
-  const [themePreference, setThemePreferenceState] = useState<ThemePreference>("system");
-  const resolvedThemeMode = themePreference === "system"
-    ? colorScheme === "light" ? "light" : "dark"
-    : themePreference;
-  const theme = useMemo(() => createMobileTheme(resolvedThemeMode), [resolvedThemeMode]);
+  const { theme, themePreference, setThemePreference } = useMobileTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [queue, setQueue] = useState<QueuedEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryColor, setNewCategoryColor] = useState<DayframePaletteKey>("lime");
   const [pinNewCategory, setPinNewCategory] = useState(true);
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
+  const [editingColor, setEditingColor] = useState<DayframePaletteKey>("lime");
   const [locationStatus, setLocationStatus] = useState("Not requested");
   const [healthStatus, setHealthStatus] = useState<HealthImportStatus[]>([]);
   const refreshInFlight = useRef(false);
@@ -108,11 +101,6 @@ export default function SettingsScreen() {
   }, []);
 
   useEffect(() => {
-    AsyncStorage.getItem(THEME_PREFERENCE_KEY)
-      .then((value) => {
-        if (value === "system" || value === "light" || value === "dark") setThemePreferenceState(value);
-      })
-      .catch(() => undefined);
     void load();
     getHealthImportStatus().then(setHealthStatus).catch(() => {
       setHealthStatus([
@@ -126,17 +114,13 @@ export default function SettingsScreen() {
     });
   }, [load]);
 
-  async function setThemePreference(nextPreference: ThemePreference) {
-    setThemePreferenceState(nextPreference);
-    await AsyncStorage.setItem(THEME_PREFERENCE_KEY, nextPreference);
-  }
-
   async function addCategory() {
     const name = newCategoryName.trim();
     if (!name) return;
     try {
-      await createCategory(name, { isPinned: pinNewCategory });
+      await createCategory(name, { color: newCategoryColor, isPinned: pinNewCategory });
       setNewCategoryName("");
+      setNewCategoryColor("lime");
       setPinNewCategory(true);
       await load();
     } catch (error) {
@@ -148,13 +132,24 @@ export default function SettingsScreen() {
     }
   }
 
+  function startEditingCategory(category: Category) {
+    setEditingCategoryId(category.id);
+    setEditingName(category.name);
+    setEditingColor(paletteKeyFor(category.color, category.name));
+  }
+
+  function cancelCategoryEdit() {
+    setEditingCategoryId(null);
+    setEditingName("");
+    setEditingColor("lime");
+  }
+
   async function saveCategory(category: Category) {
     const name = editingName.trim();
     if (!name) return;
     try {
-      await updateCategory(category.id, { name });
-      setEditingCategoryId(null);
-      setEditingName("");
+      await updateCategory(category.id, { name, color: editingColor });
+      cancelCategoryEdit();
       await load();
     } catch (error) {
       if (error instanceof AuthRequiredError) {
@@ -201,25 +196,6 @@ export default function SettingsScreen() {
         return;
       }
       Alert.alert("Categories", error instanceof Error ? error.message : "Unable to archive category.");
-    }
-  }
-
-  async function moveCategory(category: Category, direction: -1 | 1) {
-    if (!data) return;
-    const ids = data.categories.map((item) => item.id);
-    const index = ids.indexOf(category.id);
-    const nextIndex = index + direction;
-    if (index < 0 || nextIndex < 0 || nextIndex >= ids.length) return;
-    [ids[index], ids[nextIndex]] = [ids[nextIndex], ids[index]];
-    try {
-      await reorderCategories(ids);
-      await load();
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        router.replace("/");
-        return;
-      }
-      Alert.alert("Categories", error instanceof Error ? error.message : "Unable to reorder categories.");
     }
   }
 
@@ -293,6 +269,7 @@ export default function SettingsScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView
+        style={styles.scrollView}
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
         refreshControl={
@@ -348,74 +325,90 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.panel}>
+          <Text style={styles.sectionTitle}>Device sync</Text>
+          <View style={styles.syncRow}>
+            <View style={styles.syncText}>
+              <Text style={styles.statusText}>{queue.length} queued events</Text>
+              <Text style={styles.muted}>Direct actions sync first; offline actions wait here.</Text>
+            </View>
+            <Pressable style={pressable(styles.syncButton, styles.buttonPressed)} onPress={syncAndReload}>
+              <RefreshCw size={16} color={theme.accent} />
+              <Text style={styles.secondaryButtonText}>Sync now</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={styles.panel}>
           <Text style={styles.sectionTitle}>Categories</Text>
           <Text style={styles.muted}>Pinned categories appear first on the dashboard.</Text>
           <View style={styles.categoryList}>
-            {(data?.categories ?? []).map((category, index) => {
+            {(data?.categories ?? []).map((category) => {
               const editing = editingCategoryId === category.id;
               return (
                 <View key={category.id} style={styles.categoryRow}>
                   <View style={[styles.colorDot, { backgroundColor: paletteColorFor(category.color, category.name) }]} />
                   <View style={styles.categoryBody}>
                     {editing ? (
-                      <TextInput
-                        style={styles.inlineInput}
-                        value={editingName}
-                        onChangeText={setEditingName}
-                        placeholder="Category name"
-                        placeholderTextColor={theme.textSecondary}
-                      />
+                      <>
+                        <TextInput
+                          style={styles.inlineInput}
+                          value={editingName}
+                          onChangeText={setEditingName}
+                          placeholder="Category name"
+                          placeholderTextColor={theme.textSecondary}
+                        />
+                        <ColorPalette
+                          selectedColor={editingColor}
+                          onSelect={setEditingColor}
+                          styles={styles}
+                        />
+                        <View style={styles.compactButtonRow}>
+                          <Pressable
+                            style={pressable(styles.secondaryButton, styles.buttonPressed)}
+                            onPress={cancelCategoryEdit}
+                          >
+                            <X size={16} color={theme.accent} />
+                            <Text style={styles.secondaryButtonText}>Cancel</Text>
+                          </Pressable>
+                          <Pressable
+                            style={pressable(styles.primaryButton, styles.buttonPressed)}
+                            onPress={() => saveCategory(category)}
+                          >
+                            <Save size={16} color="#FFFFFF" />
+                            <Text style={styles.primaryButtonText}>Save</Text>
+                          </Pressable>
+                        </View>
+                      </>
                     ) : (
                       <>
                         <Text style={styles.categoryName}>{category.name}</Text>
-                        <Text style={styles.muted}>{category.isPinned ? "Pinned" : "Available"}</Text>
+                        <Text style={styles.muted}>{category.isPinned ? "Pinned to dashboard" : "Not pinned"}</Text>
                       </>
                     )}
                   </View>
-                  {editing ? (
-                    <IconButton
-                      accessibilityLabel={`Save ${category.name}`}
-                      icon={<Save size={18} color={theme.accent} />}
-                      onPress={() => saveCategory(category)}
-                      styles={styles}
-                    />
-                  ) : (
-                    <>
+                  {!editing ? (
+                    <View style={styles.categoryActions}>
                       <IconButton
                         accessibilityLabel={`${category.isPinned ? "Unpin" : "Pin"} ${category.name}`}
                         icon={<Pin size={17} color={category.isPinned ? theme.accent : theme.textSecondary} />}
                         onPress={() => togglePin(category)}
                         styles={styles}
+                        selected={category.isPinned}
                       />
                       <IconButton
-                        accessibilityLabel={`Move ${category.name} up`}
-                        icon={<ArrowUp size={17} color={index === 0 ? theme.textSecondary : theme.accent} />}
-                        onPress={() => moveCategory(category, -1)}
+                        accessibilityLabel={`Edit ${category.name}`}
+                        icon={<Pencil size={17} color={theme.accent} />}
+                        onPress={() => startEditingCategory(category)}
                         styles={styles}
                       />
                       <IconButton
-                        accessibilityLabel={`Move ${category.name} down`}
-                        icon={<ArrowDown size={17} color={index === (data?.categories.length ?? 1) - 1 ? theme.textSecondary : theme.accent} />}
-                        onPress={() => moveCategory(category, 1)}
+                        accessibilityLabel={`Archive ${category.name}`}
+                        icon={<Trash2 size={17} color={theme.danger} />}
+                        onPress={() => confirmArchive(category)}
                         styles={styles}
                       />
-                      <Pressable
-                        style={pressable(styles.textAction, styles.buttonPressed)}
-                        onPress={() => {
-                          setEditingCategoryId(category.id);
-                          setEditingName(category.name);
-                        }}
-                      >
-                        <Text style={styles.secondaryButtonText}>Edit</Text>
-                      </Pressable>
-                    </>
-                  )}
-                  <IconButton
-                    accessibilityLabel={`Archive ${category.name}`}
-                    icon={<Trash2 size={17} color={theme.danger} />}
-                    onPress={() => confirmArchive(category)}
-                    styles={styles}
-                  />
+                    </View>
+                  ) : null}
                 </View>
               );
             })}
@@ -429,6 +422,7 @@ export default function SettingsScreen() {
             placeholderTextColor={theme.textSecondary}
             returnKeyType="done"
           />
+          <ColorPalette selectedColor={newCategoryColor} onSelect={setNewCategoryColor} styles={styles} />
           <View style={styles.buttonRow}>
             <Pressable
               style={pressable([styles.secondaryButton, pinNewCategory ? styles.toggleSelected : null], styles.buttonPressed)}
@@ -440,20 +434,6 @@ export default function SettingsScreen() {
             <Pressable style={pressable(styles.primaryButton, styles.buttonPressed)} onPress={addCategory}>
               <Plus size={16} color="#FFFFFF" />
               <Text style={styles.primaryButtonText}>Create</Text>
-            </Pressable>
-          </View>
-        </View>
-
-        <View style={styles.panel}>
-          <Text style={styles.sectionTitle}>Device sync</Text>
-          <View style={styles.row}>
-            <View>
-              <Text style={styles.statusText}>{queue.length} queued events</Text>
-              <Text style={styles.muted}>Direct actions sync first; offline actions wait here.</Text>
-            </View>
-            <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={syncAndReload}>
-              <RefreshCw size={16} color={theme.accent} />
-              <Text style={styles.secondaryButtonText}>Sync now</Text>
             </Pressable>
           </View>
         </View>
@@ -511,18 +491,20 @@ function IconButton({
   accessibilityLabel,
   icon,
   onPress,
+  selected,
   styles
 }: {
   accessibilityLabel: string;
   icon: ReactNode;
   onPress: () => void;
+  selected?: boolean;
   styles: ReturnType<typeof createStyles>;
 }) {
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
-      style={pressable(styles.iconButton, styles.buttonPressed)}
+      style={pressable([styles.iconButton, selected ? styles.iconButtonSelected : null], styles.buttonPressed)}
       onPress={onPress}
     >
       {icon}
@@ -530,13 +512,38 @@ function IconButton({
   );
 }
 
-function createMobileTheme(mode: ThemeMode): MobileTheme {
-  const base = DAYFRAME_THEME[mode];
-  return {
-    ...base,
-    mode,
-    pressed: mode === "dark" ? "#1B2114" : "#E9F2DE"
-  };
+function ColorPalette({
+  onSelect,
+  selectedColor,
+  styles
+}: {
+  onSelect: (color: DayframePaletteKey) => void;
+  selectedColor: DayframePaletteKey;
+  styles: ReturnType<typeof createStyles>;
+}) {
+  return (
+    <View style={styles.paletteGrid}>
+      {DAYFRAME_PALETTE.map((color) => {
+        const selected = color.key === selectedColor;
+        return (
+          <Pressable
+            key={color.key}
+            accessibilityRole="button"
+            accessibilityLabel={`Use ${color.label}`}
+            style={pressable(
+              [
+                styles.paletteSwatch,
+                { backgroundColor: color.hex },
+                selected ? styles.paletteSwatchSelected : null
+              ],
+              styles.buttonPressed
+            )}
+            onPress={() => onSelect(color.key)}
+          />
+        );
+      })}
+    </View>
+  );
 }
 
 function pressable(baseStyle: ViewStyle | Array<ViewStyle | null>, pressedStyle: ViewStyle) {
@@ -554,9 +561,12 @@ function createStyles(theme: MobileTheme) {
       flex: 1,
       backgroundColor: theme.background
     },
+    scrollView: {
+      flex: 1
+    },
     container: {
       padding: 18,
-      paddingBottom: 36,
+      paddingBottom: 88,
       gap: 16,
       backgroundColor: theme.background
     },
@@ -667,21 +677,21 @@ function createStyles(theme: MobileTheme) {
       gap: 8
     },
     categoryRow: {
-      minHeight: 58,
+      minHeight: 52,
       borderWidth: 1,
       borderColor: theme.border,
       backgroundColor: theme.surfaceInset,
       borderRadius: 12,
       padding: 8,
       flexDirection: "row",
-      alignItems: "center",
+      alignItems: "flex-start",
       gap: 8,
       flexWrap: "wrap"
     },
     categoryBody: {
-      minWidth: 130,
+      minWidth: 0,
       flex: 1,
-      gap: 2
+      gap: 8
     },
     categoryName: {
       color: theme.textPrimary,
@@ -700,6 +710,42 @@ function createStyles(theme: MobileTheme) {
       flexDirection: "row",
       flexWrap: "wrap",
       gap: 10
+    },
+    compactButtonRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8
+    },
+    categoryActions: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6
+    },
+    syncRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      alignItems: "center",
+      gap: 12
+    },
+    syncText: {
+      minWidth: 0,
+      flexGrow: 1,
+      flexShrink: 1,
+      gap: 2
+    },
+    syncButton: {
+      minHeight: 44,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 12,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      flexShrink: 0
     },
     primaryButton: {
       minHeight: 44,
@@ -728,8 +774,12 @@ function createStyles(theme: MobileTheme) {
       gap: 8
     },
     textAction: {
-      minHeight: 36,
-      paddingHorizontal: 8,
+      width: 40,
+      height: 40,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      borderRadius: 12,
+      backgroundColor: theme.surface,
       alignItems: "center",
       justifyContent: "center"
     },
@@ -756,6 +806,26 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: theme.surface
+    },
+    iconButtonSelected: {
+      borderColor: theme.accent,
+      backgroundColor: theme.surfaceMuted
+    },
+    paletteGrid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8
+    },
+    paletteSwatch: {
+      width: 34,
+      height: 30,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      borderRadius: 9
+    },
+    paletteSwatchSelected: {
+      borderWidth: 3,
+      borderColor: theme.accent
     },
     buttonPressed: {
       opacity: 0.84,
