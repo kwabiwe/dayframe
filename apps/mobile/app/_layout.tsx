@@ -16,6 +16,7 @@ export default function RootLayout() {
         }}
       >
         <Stack.Screen name="index" options={{ title: "Dayframe" }} />
+        <Stack.Screen name="settings" options={{ title: "Settings" }} />
         <Stack.Screen name="action/[verb]" options={{ headerShown: false }} />
       </Stack>
     </SafeAreaProvider>
