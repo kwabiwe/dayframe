@@ -426,7 +426,8 @@ function CalendarReview({
                         "focus-ring absolute left-2 right-2 overflow-hidden border p-2 text-left text-xs",
                         "calendar-time-block",
                         selectedEntryId === entry.id ? "outline outline-2 outline-offset-1 outline-[var(--foreground)]" : "",
-                        resizingId === entry.id ? "is-resizing" : ""
+                        resizingId === entry.id ? "is-resizing" : "",
+                        entry.stoppedAt ? "" : "is-running"
                       ].join(" ")}
                       style={{
                         ...calendarBlockStyle(entry, activeDraft),

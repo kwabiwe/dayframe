@@ -9,13 +9,13 @@ import {
   Activity,
   BarChart3,
   Bell,
+  Building2,
   CalendarRange,
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock3,
-  Command,
   FileText,
   Folder,
   HelpCircle,
@@ -260,7 +260,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="swiss-main-frame">
         <header className="swiss-topbar">
           <button type="button" className="swiss-workspace-button" onClick={() => setOverlay("workspace")}>
-            <Command size={18} />
+            <Building2 size={18} />
             <span>{data?.workspace.name ?? "Workspace"}</span>
             <ChevronDown size={15} />
           </button>

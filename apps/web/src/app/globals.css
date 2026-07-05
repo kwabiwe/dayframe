@@ -573,14 +573,20 @@ textarea:focus-visible {
 
 .swiss-work-input input {
   min-height: 44px;
-  border-color: transparent;
-  border-bottom-color: var(--line);
-  border-radius: 0;
-  background: transparent;
-  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 0 12px;
   color: var(--foreground);
   font-size: 18px;
   font-weight: 600;
+}
+
+.swiss-work-input input:focus,
+.swiss-work-input input:focus-visible {
+  border-color: color-mix(in srgb, var(--timer-accent, var(--accent)) 62%, var(--line));
+  outline: 2px solid color-mix(in srgb, var(--timer-accent, var(--accent)) 34%, transparent);
+  outline-offset: 2px;
 }
 
 .swiss-work-input input::placeholder {
@@ -655,6 +661,20 @@ textarea:focus-visible {
   box-shadow: 0 10px 24px color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
+.swiss-command-play.is-active {
+  display: inline-flex;
+  width: auto;
+  min-width: 92px;
+  padding: 0 16px;
+  gap: 8px;
+  border-width: 1px;
+  border-color: color-mix(in srgb, var(--danger) 48%, var(--line));
+  background: color-mix(in srgb, var(--danger) 88%, var(--surface));
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--danger) 20%, transparent);
+  font-size: 14px;
+  font-weight: 800;
+}
+
 .swiss-focus-select {
   position: relative;
   display: inline-flex;
@@ -682,46 +702,13 @@ textarea:focus-visible {
   border-radius: 999px;
 }
 
-.swiss-active-timer-summary {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 10px;
+.swiss-active-timer-meta {
+  margin: 0;
   border-top: 1px solid var(--line);
-  padding-top: 10px;
-}
-
-.swiss-active-timer-summary i {
-  width: 12px;
-  height: 12px;
-  flex: 0 0 auto;
-  border: 1px solid color-mix(in srgb, var(--foreground) 18%, transparent);
-  border-radius: 999px;
-}
-
-.swiss-active-timer-summary span {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
-
-.swiss-active-timer-summary strong,
-.swiss-active-timer-summary small {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.swiss-active-timer-summary strong {
-  color: var(--foreground);
-  font-size: 15px;
-  font-weight: 800;
-}
-
-.swiss-active-timer-summary small {
+  padding-top: 8px;
   color: var(--muted);
   font-size: 12px;
+  font-weight: 700;
 }
 
 .swiss-note-row {
@@ -736,7 +723,6 @@ textarea:focus-visible {
 }
 
 .swiss-note-row button,
-.swiss-timer-actions button,
 .swiss-primary-action,
 .swiss-menu-action {
   display: inline-flex;
@@ -751,18 +737,10 @@ textarea:focus-visible {
   font-weight: 600;
 }
 
-.swiss-primary-action,
-.swiss-timer-actions .swiss-primary-action {
+.swiss-primary-action {
   border-color: var(--accent);
   background: var(--accent);
   color: var(--on-accent);
-}
-
-.swiss-timer-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 0;
 }
 
 .swiss-inline-error {
@@ -1243,6 +1221,31 @@ textarea:focus-visible {
   outline-offset: 1px;
 }
 
+.swiss-time-block.is-running,
+.calendar-time-block.is-running {
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, currentColor 18%, transparent),
+    0 10px 24px color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.swiss-time-block.is-running {
+  border-width: 2px;
+}
+
+.calendar-time-block.is-running::after {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  border: 1px solid color-mix(in srgb, currentColor 36%, transparent);
+  border-radius: 999px;
+  padding: 1px 6px;
+  background: color-mix(in srgb, currentColor 9%, transparent);
+  color: inherit;
+  content: "Running";
+  font-size: 10px;
+  font-weight: 800;
+}
+
 .swiss-resize-handle {
   position: absolute;
   left: 0;
@@ -1320,6 +1323,28 @@ textarea:focus-visible {
   gap: 10px;
   font-variant-numeric: tabular-nums;
   font-size: 12px;
+}
+
+.swiss-running-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  border: 1px solid color-mix(in srgb, currentColor 36%, transparent);
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+  opacity: 0.9;
+}
+
+.swiss-running-badge::before {
+  width: 5px;
+  height: 5px;
+  margin-right: 5px;
+  border-radius: 999px;
+  background: currentColor;
+  content: "";
 }
 
 .swiss-time-block.is-compact {
@@ -1852,6 +1877,12 @@ kbd {
   background: var(--surface);
   padding: 0 14px;
   font-weight: 700;
+}
+
+.swiss-dialog-actions .swiss-primary-action {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .industrial-panel,
@@ -2416,10 +2447,6 @@ kbd {
     flex-wrap: wrap;
   }
 
-  .swiss-timer-actions {
-    margin-top: 4px;
-  }
-
   .swiss-top-grid > .swiss-panel {
     border-width: 0 0 1px;
   }
@@ -2739,10 +2766,6 @@ kbd {
   .swiss-entrybar-clock {
     flex: 1 0 82px;
     text-align: left;
-  }
-
-  .swiss-timer-actions {
-    grid-template-columns: 1fr;
   }
 
   .swiss-time-axis {

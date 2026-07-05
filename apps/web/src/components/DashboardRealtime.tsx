@@ -178,16 +178,14 @@ export function CurrentTimerPanel({
     ? Math.max(active.durationSeconds, Math.floor((effectiveNow - activeStartedAtMs) / 1000))
     : 0;
   const quickActions = useMemo(() => buildLearnedQuickActions(data), [data]);
-  const liveActiveEntry = active
-    ? {
+  const activeAccent = active
+    ? timeEntryAccentColor({
         ...active,
-        categoryId: categoryId || null,
-        categoryName: categoryId ? selectedCategory?.name ?? active.categoryName : null,
-        categoryColor: categoryId ? selectedCategory?.color ?? active.categoryColor : null,
-        description: description.trim() || null
-      }
-    : null;
-  const activeAccent = liveActiveEntry ? timeEntryAccentColor(liveActiveEntry) : undefined;
+        categoryName: categoryId ? selectedCategory?.name ?? active.categoryName : active.categoryName,
+        categoryColor: categoryId ? selectedCategory?.color ?? active.categoryColor : active.categoryColor,
+        description: description.trim() || active.description
+      })
+    : undefined;
 
   useEffect(() => {
     if (!active?.id) return undefined;
@@ -355,49 +353,28 @@ export function CurrentTimerPanel({
           </label>
           <span className="swiss-entrybar-clock">{formatClockDuration(durationSeconds)}</span>
           <button
-            className="swiss-command-play"
+            className={["swiss-command-play", active ? "is-active" : ""].filter(Boolean).join(" ")}
             type="button"
             disabled={isBusy}
             aria-label={active ? "Stop timer" : "Start timer"}
             onClick={() => timerAction(active ? "stop" : "start")}
           >
-            {active ? <Square size={16} fill="currentColor" /> : <Play size={24} fill="currentColor" strokeWidth={0} />}
+            {active ? (
+              <>
+                <Square size={15} fill="currentColor" />
+                <span>Stop</span>
+              </>
+            ) : (
+              <Play size={24} fill="currentColor" strokeWidth={0} />
+            )}
           </button>
         </div>
-        {liveActiveEntry ? (
-          <div className="swiss-active-timer-summary">
-            <i style={{ backgroundColor: activeAccent }} />
-            <span>
-              <strong>{timeEntryTitle(liveActiveEntry)}</strong>
-              <small>
-                {timeEntryContextLabel(liveActiveEntry)} · since {formatTime(liveActiveEntry.startedAt)}
-              </small>
-            </span>
-          </div>
+        {active ? (
+          <p className="swiss-active-timer-meta">
+            Running since {formatTime(active.startedAt)}
+          </p>
         ) : null}
       </div>
-
-      {active ? (
-        <div className="swiss-timer-actions">
-          <button
-            className="swiss-primary-action"
-            type="button"
-            disabled={isBusy}
-            onClick={() => timerAction("start")}
-          >
-            <Play size={13} fill="currentColor" strokeWidth={0} />
-            Start new
-          </button>
-          <button
-            type="button"
-            disabled={isBusy}
-            onClick={() => timerAction("stop")}
-          >
-            <Square size={13} fill="currentColor" />
-            Stop
-          </button>
-        </div>
-      ) : null}
 
       {timerError ? <p className="swiss-inline-error">{timerError}</p> : null}
 
@@ -1078,11 +1055,12 @@ function TimelineBlock({
     <article
       tabIndex={0}
       role="button"
-      aria-label={`Time block ${timeEntryTitle(entry)} ${formatDuration(durationSeconds)}`}
+      aria-label={`Time block ${timeEntryTitle(entry)} ${entry.stoppedAt ? "" : "Running "}${formatDuration(durationSeconds)}`}
       className={[
         "swiss-time-block",
         isResizing ? "is-resizing" : "",
         isSelected ? "is-selected" : "",
+        entry.stoppedAt ? "" : "is-running",
         viewMode === "week" ? "is-compact" : ""
       ]
         .filter(Boolean)
@@ -1125,7 +1103,7 @@ function TimelineBlock({
         <span>{timeEntryContextLabel(entry)}</span>
       </div>
       <div>
-        <EntryIcon entry={entry} />
+        {entry.stoppedAt ? <EntryIcon entry={entry} /> : <em className="swiss-running-badge">Running</em>}
         <b>{formatDuration(durationSeconds)}</b>
       </div>
     </article>
@@ -1226,8 +1204,8 @@ function EditEntryDialog({
             <button type="button" onClick={onClose}>
               Cancel
             </button>
-            <button className="swiss-primary-action" disabled={isBusy}>
-              Save changes
+            <button className="swiss-primary-action" type="submit" disabled={isBusy}>
+              Save
             </button>
           </div>
         </form>
