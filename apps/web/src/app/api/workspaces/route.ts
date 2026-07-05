@@ -4,6 +4,7 @@ import { sessionTokenFromRequest, switchLocalSessionWorkspace } from "@/lib/auth
 import { authErrorResponse } from "@/lib/api-errors";
 import { hasTableColumn, pool } from "@/lib/db";
 import { resolveRequestSession } from "@/lib/ingest-auth";
+import { devWorkspaceCookieOptions, DEV_WORKSPACE_COOKIE } from "@/lib/session";
 
 export async function POST(request: Request) {
   const client = await pool.connect();
@@ -69,11 +70,15 @@ export async function POST(request: Request) {
 
     await client.query("commit");
 
-    if (session.authMode === "local") {
+    if (session.authMode === "local" || session.authMode === "provider") {
       await switchLocalSessionWorkspace(sessionTokenFromRequest(request), workspaceId);
     }
 
-    return NextResponse.json({ workspace: workspace.rows[0] }, { status: 201 });
+    const response = NextResponse.json({ workspace: workspace.rows[0] }, { status: 201 });
+    if (session.authMode === "dev") {
+      response.cookies.set(DEV_WORKSPACE_COOKIE, workspaceId, devWorkspaceCookieOptions());
+    }
+    return response;
   } catch (error) {
     await client.query("rollback");
     const response = authErrorResponse(error);

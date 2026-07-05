@@ -41,6 +41,11 @@ import {
   formatSourceLabel,
   formatTime
 } from "@/lib/format";
+import {
+  TIMER_FOCUS_EVENT,
+  TIMER_SHORTCUT_EVENT,
+  type TimerShortcutEventDetail
+} from "@/lib/timer-shortcut";
 
 const dayStartHour = 7;
 const dayEndHour = 21;
@@ -171,6 +176,7 @@ export function CurrentTimerPanel({
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const activeDetailsSyncRef = useRef("");
   const categoryMenuRef = useRef<HTMLDivElement | null>(null);
+  const descriptionInputRef = useRef<HTMLInputElement | null>(null);
   const active = data.activeEntry;
   const [now, setNow] = useState(() =>
     active ? new Date(active.startedAt).getTime() + active.durationSeconds * 1000 : 0
@@ -259,17 +265,17 @@ export function CurrentTimerPanel({
     return () => window.clearTimeout(syncHandle);
   }, [active, categoryId, description]);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     const response = await fetch(`/api/bootstrap?date=${data.dateRange.selectedDate}`, {
       cache: "no-store"
     });
     if (response.ok) onSynced((await response.json()) as BootstrapData);
-  }
+  }, [data.dateRange.selectedDate, onSynced]);
 
-  async function timerAction(
+  const timerAction = useCallback(async (
     mode: "start" | "stop",
     override?: { categoryId?: string | null; description?: string | null }
-  ) {
+  ) => {
     const nextCategoryId =
       override && "categoryId" in override
         ? (override.categoryId ?? undefined)
@@ -326,7 +332,7 @@ export function CurrentTimerPanel({
     } finally {
       setIsBusy(false);
     }
-  }
+  }, [active, categoryId, description, refresh]);
 
   async function startQuickAction(action: LearnedQuickAction) {
     setCategoryId(action.categoryId ?? "");
@@ -341,6 +347,37 @@ export function CurrentTimerPanel({
     setCategoryId(nextCategoryId);
     setCategoryMenuOpen(false);
   }
+
+  useEffect(() => {
+    function focusTimerInput() {
+      descriptionInputRef.current?.focus();
+    }
+
+    function toggleFromShortcut(event: Event) {
+      const shortcutEvent = event as CustomEvent<TimerShortcutEventDetail>;
+      shortcutEvent.detail.handled = true;
+      if (isBusy) return;
+
+      if (active) {
+        shortcutEvent.detail.action = timerAction("stop");
+        return;
+      }
+
+      if (categoryId || description.trim()) {
+        shortcutEvent.detail.action = timerAction("start");
+        return;
+      }
+
+      focusTimerInput();
+    }
+
+    window.addEventListener(TIMER_FOCUS_EVENT, focusTimerInput);
+    window.addEventListener(TIMER_SHORTCUT_EVENT, toggleFromShortcut);
+    return () => {
+      window.removeEventListener(TIMER_FOCUS_EVENT, focusTimerInput);
+      window.removeEventListener(TIMER_SHORTCUT_EVENT, toggleFromShortcut);
+    };
+  }, [active, categoryId, description, isBusy, timerAction]);
 
   async function saveActiveStartTime(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -411,6 +448,7 @@ export function CurrentTimerPanel({
         <label className="swiss-work-input">
           <span>Task description</span>
           <input
+            ref={descriptionInputRef}
             value={description}
             onChange={(event) => setDescription(event.target.value)}
             placeholder="Describe the task"

@@ -22,7 +22,7 @@ export default async function TimelinePage({
         description="Review time as calendar blocks, grouped entries and a weekly timesheet."
       />
       <div className="space-y-6 px-5 py-6 md:px-8">
-        <TimeReviewViews key={data.dateRange.selectedDate} initialData={data} />
+        <TimeReviewViews key={`${data.workspace.id}:${data.dateRange.selectedDate}`} initialData={data} />
       </div>
     </>
   );

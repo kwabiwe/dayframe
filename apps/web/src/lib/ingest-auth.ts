@@ -1,7 +1,15 @@
 import crypto from "node:crypto";
 import { APP_SESSION_COOKIE, resolveLocalSession } from "./auth/local";
 import { query } from "./db";
-import { AuthError, getAuthMode, getDevSession, hasScopes, resolveAppSession, type RequestSession } from "./session";
+import {
+  AuthError,
+  devWorkspaceIdFromCookieHeader,
+  getAuthMode,
+  getDevSession,
+  hasScopes,
+  resolveAppSession,
+  type RequestSession
+} from "./session";
 
 export type ResolveSessionOptions = {
   allowIngestToken?: boolean;
@@ -36,7 +44,7 @@ export async function resolveRequestSession(
         return scopedSession(getDevSession(), requiredScopes);
       }
     }
-    return scopedSession(getDevSession(), requiredScopes);
+    return scopedSession(getDevSession(devWorkspaceIdFromCookieHeader(request.headers.get("cookie"))), requiredScopes);
   }
 
   if (authMode === "local") {

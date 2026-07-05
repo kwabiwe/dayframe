@@ -36,6 +36,11 @@ import type { LucideIcon } from "lucide-react";
 import { timeEntryTitle } from "@/lib/display";
 import type { BootstrapData } from "@/lib/queries";
 import { formatDuration, formatEventLabel, formatSourceLabel, formatTime } from "@/lib/format";
+import {
+  TIMER_SHORTCUT_EVENT,
+  toggleTimerFromFreshBootstrap,
+  type TimerShortcutEventDetail
+} from "@/lib/timer-shortcut";
 
 type Overlay = "search" | "notifications" | "profile" | "help" | "workspace" | null;
 
@@ -166,7 +171,18 @@ export function AppShell({ children }: { children: ReactNode }) {
       }
       if (event.shiftKey && event.code === "Space") {
         event.preventDefault();
-        void toggleTimer(data, refreshShellData);
+        const detail: TimerShortcutEventDetail = { handled: false };
+        window.dispatchEvent(new CustomEvent<TimerShortcutEventDetail>(TIMER_SHORTCUT_EVENT, { detail }));
+        if (detail.handled) {
+          void detail.action?.then(refreshShellData).catch(() => refreshShellData());
+        } else {
+          void toggleTimerFromFreshBootstrap({
+            fallbackData: data,
+            refresh: refreshShellData,
+            selectedDate,
+            setData
+          }).catch(() => refreshShellData());
+        }
         return;
       }
       if (event.key.toLowerCase() === "n") {
@@ -370,17 +386,28 @@ function WorkspacePopover({
 }) {
   const [isBusy, setIsBusy] = useState(false);
   const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   async function switchWorkspace(workspaceId: string) {
+    if (workspaceId === data.workspace.id) {
+      onClose();
+      return;
+    }
+
     setIsBusy(true);
+    setError(null);
     try {
       const response = await fetch("/api/workspace/switch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ workspaceId })
       });
-      if (!response.ok) throw new Error(`Unable to switch workspace: ${response.status}`);
+      if (!response.ok) {
+        throw new Error(await responseError(response, `Unable to switch workspace: ${response.status}`));
+      }
       await onSwitched();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Unable to switch workspace.");
     } finally {
       setIsBusy(false);
     }
@@ -390,14 +417,19 @@ function WorkspacePopover({
     event.preventDefault();
     if (!name.trim()) return;
     setIsBusy(true);
+    setError(null);
     try {
       const response = await fetch("/api/workspaces", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name })
       });
-      if (!response.ok) throw new Error(`Unable to create workspace: ${response.status}`);
+      if (!response.ok) {
+        throw new Error(await responseError(response, `Unable to create workspace: ${response.status}`));
+      }
       await onSwitched();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Unable to create workspace.");
     } finally {
       setIsBusy(false);
     }
@@ -420,6 +452,11 @@ function WorkspacePopover({
           </button>
         ))}
       </div>
+      {error ? (
+        <p className="swiss-inline-error" role="alert">
+          {error}
+        </p>
+      ) : null}
       <form className="swiss-popover-form" onSubmit={createWorkspace}>
         <label>
           New workspace
@@ -432,6 +469,15 @@ function WorkspacePopover({
       </form>
     </FloatingPanel>
   );
+}
+
+async function responseError(response: Response, fallback: string) {
+  try {
+    const payload = (await response.json()) as { error?: string };
+    return payload.error ?? fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 function ProfilePopover({
@@ -801,26 +847,6 @@ function buildNotifications(data: BootstrapData | null): NotificationItem[] {
     });
   }
   return items;
-}
-
-async function toggleTimer(data: BootstrapData | null, refresh: () => Promise<void>) {
-  if (!data) return;
-  const active = data.activeEntry;
-  const category = data.categories[0];
-  if (!active && !category) return;
-  await fetch("/api/time-entries", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(
-      active
-        ? { mode: "stop" }
-        : {
-            mode: "start",
-            categoryId: category?.id
-          }
-    )
-  });
-  await refresh();
 }
 
 function initials(name: string) {
