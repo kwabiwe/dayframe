@@ -158,7 +158,7 @@ function createStyles(theme: MobileTheme) {
       borderColor: theme.borderStrong,
       backgroundColor: theme.surfaceInset,
       borderRadius: 16,
-      padding: 14,
+      padding: 12,
       gap: 8
     },
     lifecyclePanel: {
@@ -179,6 +179,17 @@ function createStyles(theme: MobileTheme) {
       fontWeight: "800",
       color: theme.accent,
       fontFamily: monoFont
+    },
+    activeTimerHeader: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+      gap: 12
+    },
+    activeTimerTextStack: {
+      flex: 1,
+      gap: 5,
+      minWidth: 0
     },
     activeTitleRow: {
       flexDirection: "row",
@@ -345,6 +356,14 @@ function createStyles(theme: MobileTheme) {
       fontSize: 13,
       fontWeight: "800"
     },
+    quickCategoryHint: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "700",
+      paddingHorizontal: 2,
+      paddingTop: 2
+    },
     colorDot: {
       width: 12,
       height: 12,
@@ -367,6 +386,10 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       gap: 8
     },
+    categoryRowPinned: {
+      borderColor: theme.accent,
+      backgroundColor: theme.surfaceMuted
+    },
     categoryTextStack: {
       flex: 1,
       gap: 1,
@@ -383,6 +406,9 @@ function createStyles(theme: MobileTheme) {
       fontFamily: monoFont,
       fontSize: 11,
       fontWeight: "700"
+    },
+    categoryMetaPinned: {
+      color: theme.accent
     },
     categoryActions: {
       flexDirection: "row",
@@ -500,6 +526,16 @@ function createStyles(theme: MobileTheme) {
       borderColor: theme.accent,
       backgroundColor: theme.accent,
       borderRadius: 14,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    stopButton: {
+      width: 44,
+      height: 44,
+      borderWidth: 1,
+      borderColor: theme.danger,
+      backgroundColor: theme.danger,
+      borderRadius: 13,
       alignItems: "center",
       justifyContent: "center"
     },

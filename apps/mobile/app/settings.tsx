@@ -12,7 +12,7 @@ import {
 import Svg, { Path } from "react-native-svg";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { DAYFRAME_PALETTE, paletteColorFor } from "@dayframe/shared";
+import { DAYFRAME_PALETTE, paletteColorFor, type DayframePaletteKey } from "@dayframe/shared";
 import {
   AuthRequiredError,
   archiveCategory,
@@ -132,8 +132,9 @@ export default function SettingsScreen() {
   async function addCategory() {
     const name = newCategoryName.trim();
     if (!name) return;
+    const color = nextCategoryColor(data?.categories ?? []);
     try {
-      await createCategory(name, { isPinned: pinNewCategory });
+      await createCategory(name, { color, isPinned: pinNewCategory });
       setNewCategoryName("");
       setPinNewCategory(true);
       await load();
@@ -181,10 +182,13 @@ export default function SettingsScreen() {
   }
 
   async function toggleCategoryPin(category: Category) {
+    const nextPinned = !category.isPinned;
+    patchCategory(category.id, { isPinned: nextPinned });
     try {
-      await updateCategory(category.id, { isPinned: !category.isPinned });
+      await updateCategory(category.id, { isPinned: nextPinned });
       await load({ silent: true });
     } catch (error) {
+      patchCategory(category.id, { isPinned: category.isPinned });
       if (error instanceof AuthRequiredError) {
         router.replace("/");
         return;
@@ -278,6 +282,18 @@ export default function SettingsScreen() {
     ]);
   }
 
+  function patchCategory(id: string, patch: Partial<Category>) {
+    setData((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        categories: current.categories.map((category) =>
+          category.id === id ? { ...category, ...patch } : category
+        )
+      };
+    });
+  }
+
   async function signOut() {
     await logout();
     setData(null);
@@ -302,11 +318,12 @@ export default function SettingsScreen() {
         <View style={styles.contentStack}>
           <View style={styles.settingsHeader}>
             <Pressable
+              accessibilityLabel="Back"
               accessibilityRole="button"
-              style={pressable(styles.secondaryButton, styles.buttonPressed)}
+              style={pressable(styles.iconButton, styles.buttonPressed)}
               onPress={() => router.back()}
             >
-              <Text style={styles.secondaryButtonText}>Back</Text>
+              <BackGlyph color={theme.accent} />
             </Pressable>
             <Image
               source={require("../assets/dayframe_logo_banner.png")}
@@ -407,11 +424,13 @@ export default function SettingsScreen() {
                 }
 
                 return (
-                  <View key={category.id} style={styles.categoryRow}>
+                  <View key={category.id} style={[styles.categoryRow, category.isPinned ? styles.categoryRowPinned : null]}>
                     <View style={[styles.colorDot, { backgroundColor: categoryColor }]} />
                     <View style={styles.categoryTextStack}>
                       <Text style={styles.categoryName} numberOfLines={1}>{category.name}</Text>
-                      <Text style={styles.categoryMeta}>{category.isPinned ? "Pinned" : "Unpinned"}</Text>
+                      <Text style={[styles.categoryMeta, category.isPinned ? styles.categoryMetaPinned : null]}>
+                        {category.isPinned ? "Pinned" : "Unpinned"}
+                      </Text>
                     </View>
                     <View style={styles.categoryActions}>
                       <Pressable
@@ -442,7 +461,11 @@ export default function SettingsScreen() {
                         )}
                         onPress={() => toggleCategoryPin(category)}
                       >
-                        <PinGlyph color={theme.accent} filled={category.isPinned} />
+                        {category.isPinned ? (
+                          <PinGlyph color={theme.accent} />
+                        ) : (
+                          <PinOffGlyph color={theme.textSecondary} />
+                        )}
                       </Pressable>
                     </View>
                   </View>
@@ -468,7 +491,11 @@ export default function SettingsScreen() {
                 )}
                 onPress={() => setPinNewCategory((current) => !current)}
               >
-                <PinGlyph color={theme.accent} filled={pinNewCategory} />
+                {pinNewCategory ? (
+                  <PinGlyph color={theme.accent} />
+                ) : (
+                  <PinOffGlyph color={theme.textSecondary} />
+                )}
               </Pressable>
               <Pressable
                 accessibilityLabel="Create category"
@@ -541,6 +568,14 @@ export default function SettingsScreen() {
   );
 }
 
+function BackGlyph({ color }: { color: string }) {
+  return (
+    <Svg width={20} height={20} viewBox="0 0 24 24">
+      <Path d="M15 5 8 12l7 7" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.3} />
+    </Svg>
+  );
+}
+
 function PencilGlyph({ color }: { color: string }) {
   return (
     <Svg width={18} height={18} viewBox="0 0 24 24">
@@ -560,16 +595,31 @@ function ArchiveGlyph({ color }: { color: string }) {
   );
 }
 
-function PinGlyph({ color, filled }: { color: string; filled: boolean }) {
+function PinGlyph({ color }: { color: string }) {
   return (
     <Svg width={18} height={18} viewBox="0 0 24 24">
       <Path
         d="M9 4h6l-1 6 4 3v2h-5l-1 6-1-6H6v-2l4-3-1-6Z"
-        fill={filled ? color : "none"}
+        fill={color}
         stroke={color}
         strokeLinejoin="round"
         strokeWidth={2}
       />
+    </Svg>
+  );
+}
+
+function PinOffGlyph({ color }: { color: string }) {
+  return (
+    <Svg width={18} height={18} viewBox="0 0 24 24">
+      <Path
+        d="M9 4h6l-1 6 4 3v2h-5l-1 6-1-6H6v-2l4-3-1-6Z"
+        fill="none"
+        stroke={color}
+        strokeLinejoin="round"
+        strokeWidth={2}
+      />
+      <Path d="M4 4l16 16" stroke={color} strokeLinecap="round" strokeWidth={2.2} />
     </Svg>
   );
 }
@@ -580,4 +630,15 @@ function PlusGlyph({ color }: { color: string }) {
       <Path d="M12 5v14M5 12h14" stroke={color} strokeLinecap="round" strokeWidth={2.2} />
     </Svg>
   );
+}
+
+function nextCategoryColor(categories: Category[]): DayframePaletteKey {
+  const paletteKeys = new Set(DAYFRAME_PALETTE.map((color) => color.key));
+  const usedKeys = new Set(
+    categories
+      .map((category) => category.color)
+      .filter((color): color is DayframePaletteKey => paletteKeys.has(color as DayframePaletteKey))
+  );
+  const unused = DAYFRAME_PALETTE.find((color) => !usedKeys.has(color.key));
+  return unused?.key ?? DAYFRAME_PALETTE[categories.length % DAYFRAME_PALETTE.length].key;
 }
