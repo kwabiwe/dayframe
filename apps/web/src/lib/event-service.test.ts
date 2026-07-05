@@ -4,7 +4,8 @@ const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   pool: {
     connect: vi.fn()
-  }
+  },
+  getNormalizationContext: vi.fn()
 }));
 
 vi.mock("./db", async () => {
@@ -16,7 +17,11 @@ vi.mock("./db", async () => {
   };
 });
 
-const { updateCategory } = await import("./event-service");
+vi.mock("./queries", () => ({
+  getNormalizationContext: mocks.getNormalizationContext
+}));
+
+const { processActivityEvent, updateCategory } = await import("./event-service");
 
 const session = {
   userId: "00000000-0000-4000-8000-000000000001",
@@ -28,6 +33,12 @@ const session = {
 describe("category persistence", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mocks.getNormalizationContext.mockResolvedValue({
+      projects: [],
+      categories: [{ id: categoryId(), name: "Focus", color: "lime", isPinned: true }],
+      places: [],
+      automationRules: []
+    });
   });
 
   it("persists pin state to the categories.is_pinned column", async () => {
@@ -85,6 +96,50 @@ describe("category persistence", () => {
       /categories\.is_pinned/
     );
     expect(mocks.query).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes an existing active timer before inserting a category-only replacement", async () => {
+    const occurredAt = new Date("2026-07-05T09:30:00.000Z");
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        return statement.includes("returning id") ? { rows: [{ id: "event-1" }] } : { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await processActivityEvent(
+      {
+        source: "manual_app",
+        type: "timer_start",
+        occurredAt,
+        categoryId: categoryId()
+      },
+      session
+    );
+
+    const closeActiveCall = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("where workspace_id = $2 and user_id = $3 and stopped_at is null")
+    );
+    expect(closeActiveCall?.[1]).toEqual([occurredAt, session.workspaceId, session.userId]);
+
+    const insertEntryCall = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into time_entries")
+    );
+    expect(insertEntryCall?.[1]).toEqual([
+      session.workspaceId,
+      session.userId,
+      null,
+      categoryId(),
+      null,
+      "manual_app",
+      "high",
+      null,
+      occurredAt,
+      "event-1"
+    ]);
+    expect(client.release).toHaveBeenCalled();
   });
 });
 

@@ -3,16 +3,21 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { paletteColorFor } from "@dayframe/shared";
 import { CalendarDays, ChevronLeft, ChevronRight, List, Pencil, Play, Table2, Trash2 } from "lucide-react";
 import { CurrentTimerPanel } from "@/components/DashboardRealtime";
 import { EntriesTable } from "@/components/EntriesTable";
+import {
+  timeEntryAccentColor,
+  timeEntryCategoryColor,
+  timeEntryCategoryLabel,
+  timeEntryContextLabel,
+  timeEntryTitle
+} from "@/lib/display";
 import type { BootstrapData, CategoryRow, PlaceRow, TimeEntryRow } from "@/lib/queries";
 import {
   dateTimeLocal,
   formatDate,
   formatDuration,
-  formatSourceLabel,
   formatTime
 } from "@/lib/format";
 
@@ -425,14 +430,14 @@ function CalendarReview({
                       ].join(" ")}
                       style={{
                         ...calendarBlockStyle(entry, activeDraft),
-                        backgroundColor: paletteColorFor(entry.categoryColor, entry.categoryName ?? entry.id),
+                        backgroundColor: timeEntryAccentColor(entry),
                         borderColor: "color-mix(in srgb, var(--foreground) 28%, transparent)",
                         color: "var(--on-pastel)"
                       }}
                       role="button"
                       tabIndex={0}
                       data-entry-id={entry.id}
-                      title={`${entry.description ?? entry.categoryName ?? "Untitled task"} ${formatTime(activeDraft?.startedAt ?? entry.startedAt)} - ${activeDraft?.stoppedAt ? formatTime(activeDraft.stoppedAt) : entry.stoppedAt ? formatTime(entry.stoppedAt) : "Running"}`}
+                      title={`${timeEntryTitle(entry)} ${formatTime(activeDraft?.startedAt ?? entry.startedAt)} - ${activeDraft?.stoppedAt ? formatTime(activeDraft.stoppedAt) : entry.stoppedAt ? formatTime(entry.stoppedAt) : "Running"}`}
                       onClick={() => setSelectedEntryId(entry.id)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {
@@ -446,20 +451,20 @@ function CalendarReview({
                           <button
                             type="button"
                             className="swiss-resize-handle top"
-                            aria-label={`Resize start of ${entry.description ?? entry.categoryName ?? "time block"}`}
+                            aria-label={`Resize start of ${timeEntryTitle(entry)}`}
                             onPointerDown={(event) => startCalendarResize(entry, day, "start", event)}
                           />
                           <button
                             type="button"
                             className="swiss-resize-handle bottom"
-                            aria-label={`Resize end of ${entry.description ?? entry.categoryName ?? "time block"}`}
+                            aria-label={`Resize end of ${timeEntryTitle(entry)}`}
                             onPointerDown={(event) => startCalendarResize(entry, day, "end", event)}
                           />
                         </>
                       ) : null}
-                      <span className="block truncate font-semibold">{entry.description ?? entry.categoryName ?? "Untitled task"}</span>
+                      <span className="block truncate font-semibold">{timeEntryTitle(entry)}</span>
                       <span className="block truncate opacity-80">
-                        {entry.categoryName ?? formatSourceLabel(entry.source)}
+                        {timeEntryContextLabel(entry)}
                       </span>
                       <span className="tabular block">{formatDuration(calendarDurationSeconds(entry, activeDraft))}</span>
                     </article>
@@ -553,13 +558,13 @@ function CalendarReview({
 function TimesheetView({ entries, weekDays }: { entries: TimeEntryRow[]; weekDays: Date[] }) {
   const rows = Array.from(
     entries.reduce((totals, entry) => {
-      const key = entry.categoryId ?? `uncategorized:${entry.categoryName ?? "No category"}`;
+      const key = entry.categoryId ?? `uncategorized:${entry.categoryName ?? "time"}`;
       const current = totals.get(key) ?? {
         id: key,
         name: key,
-        label: entry.categoryName ?? "No category",
+        label: timeEntryCategoryLabel(entry),
         categoryName: entry.categoryName,
-        color: paletteColorFor(entry.categoryColor, entry.categoryName ?? key),
+        color: timeEntryCategoryColor(entry),
         days: Array(7).fill(0) as number[],
         total: 0
       };
@@ -606,7 +611,9 @@ function TimesheetView({ entries, weekDays }: { entries: TimeEntryRow[]; weekDay
                   <span className="h-3 w-3 border border-[var(--line-strong)]" style={{ backgroundColor: row.color }} />
                   {row.label}
                 </span>
-                <span className="mt-1 block text-xs text-[var(--muted)]">{row.categoryName ?? "Needs category"}</span>
+                <span className="mt-1 block text-xs text-[var(--muted)]">
+                  {row.categoryName ? "Category total" : "Uncategorized time"}
+                </span>
               </td>
               {row.days.map((seconds, index) => (
                 <td key={`${row.id}-${index}`} className="tabular border-r border-[var(--line)] px-3 py-3 text-[var(--muted)] last:border-r-0">
@@ -655,7 +662,7 @@ function SelectField({
         required={required}
         className="industrial-field focus-ring"
       >
-        <option value="">{required ? "Select" : "None"}</option>
+        <option value="">{required ? "Select" : label === "Category" ? "Uncategorized" : "None"}</option>
         {options.map((option) => (
           <option key={option.id} value={option.id}>
             {option.name}

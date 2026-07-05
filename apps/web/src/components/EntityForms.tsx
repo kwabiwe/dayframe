@@ -54,7 +54,7 @@ export function EntityForms({
                 `${rule.triggerSource} / ${rule.triggerType}`,
                 rule.placeName ?? "Any place",
                 rule.action,
-                rule.categoryName ?? "No category",
+                rule.categoryName ?? "Uncategorized",
                 rule.enabled ? "Enabled" : "Disabled"
               ]
             }))}

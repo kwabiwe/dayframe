@@ -1,4 +1,5 @@
 import { paletteColorFor } from "@dayframe/shared";
+import { timeEntryCategoryLabel } from "@/lib/display";
 import type { TimeEntryRow } from "@/lib/queries";
 import { formatDuration } from "@/lib/format";
 
@@ -12,8 +13,8 @@ type Segment = {
 export function TimeAllocationPie({ entries }: { entries: TimeEntryRow[] }) {
   const segments = Array.from(
     entries.reduce((totals, entry) => {
-      const id = entry.categoryId ?? "needs-category";
-      const name = entry.categoryName ?? "Needs category";
+      const id = entry.categoryId ?? "uncategorized";
+      const name = timeEntryCategoryLabel(entry);
       const current = totals.get(id) ?? { name, seconds: 0, color: entry.categoryColor };
       totals.set(id, {
         name: current.name,

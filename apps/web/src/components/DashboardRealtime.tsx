@@ -29,6 +29,11 @@ import {
 } from "lucide-react";
 import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
 import {
+  timeEntryAccentColor,
+  timeEntryContextLabel,
+  timeEntryTitle
+} from "@/lib/display";
+import {
   dateTimeLocal,
   formatClockDuration,
   formatDuration,
@@ -173,6 +178,16 @@ export function CurrentTimerPanel({
     ? Math.max(active.durationSeconds, Math.floor((effectiveNow - activeStartedAtMs) / 1000))
     : 0;
   const quickActions = useMemo(() => buildLearnedQuickActions(data), [data]);
+  const liveActiveEntry = active
+    ? {
+        ...active,
+        categoryId: categoryId || null,
+        categoryName: categoryId ? selectedCategory?.name ?? active.categoryName : null,
+        categoryColor: categoryId ? selectedCategory?.color ?? active.categoryColor : null,
+        description: description.trim() || null
+      }
+    : null;
+  const activeAccent = liveActiveEntry ? timeEntryAccentColor(liveActiveEntry) : undefined;
 
   useEffect(() => {
     if (!active?.id) return undefined;
@@ -300,37 +315,43 @@ export function CurrentTimerPanel({
   }
 
   return (
-    <section className="swiss-panel swiss-current-timer">
+    <section
+      className="swiss-panel swiss-current-timer"
+      style={activeAccent ? ({ "--timer-accent": activeAccent } as CSSProperties) : undefined}
+    >
       <div className="swiss-timer-entrybar">
         <label className="swiss-work-input">
-          <span>What are you working on?</span>
+          <span>Task description</span>
           <input
             value={description}
             onChange={(event) => setDescription(event.target.value)}
             placeholder="Describe the task"
-            aria-label="What are you working on?"
+            aria-label="Task description"
           />
         </label>
         <div className="swiss-entrybar-actions">
-          <label className="swiss-category-trigger">
-            <span
-              className="swiss-focus-dot"
-              style={{
-                backgroundColor: paletteColorFor(selectedCategory?.color, selectedCategory?.name ?? "Focus")
-              }}
-            />
-            <select
-              value={categoryId}
-              onChange={(event) => setCategoryId(event.target.value)}
-              aria-label="Choose category"
-            >
-              <option value="">No category</option>
-              {data.categories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-            </select>
+          <label className="swiss-category-field">
+            <span>Category</span>
+            <span className="swiss-category-trigger">
+              <span
+                className="swiss-focus-dot"
+                style={{
+                  backgroundColor: paletteColorFor(selectedCategory?.color, selectedCategory?.name ?? "Focus")
+                }}
+              />
+              <select
+                value={categoryId}
+                onChange={(event) => setCategoryId(event.target.value)}
+                aria-label="Choose category"
+              >
+                <option value="">Uncategorized</option>
+                {data.categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+            </span>
           </label>
           <span className="swiss-entrybar-clock">{formatClockDuration(durationSeconds)}</span>
           <button
@@ -343,12 +364,31 @@ export function CurrentTimerPanel({
             {active ? <Square size={16} fill="currentColor" /> : <Play size={24} fill="currentColor" strokeWidth={0} />}
           </button>
         </div>
+        {liveActiveEntry ? (
+          <div className="swiss-active-timer-summary">
+            <i style={{ backgroundColor: activeAccent }} />
+            <span>
+              <strong>{timeEntryTitle(liveActiveEntry)}</strong>
+              <small>
+                {timeEntryContextLabel(liveActiveEntry)} · since {formatTime(liveActiveEntry.startedAt)}
+              </small>
+            </span>
+          </div>
+        ) : null}
       </div>
 
       {active ? (
         <div className="swiss-timer-actions">
           <button
             className="swiss-primary-action"
+            type="button"
+            disabled={isBusy}
+            onClick={() => timerAction("start")}
+          >
+            <Play size={13} fill="currentColor" strokeWidth={0} />
+            Start new
+          </button>
+          <button
             type="button"
             disabled={isBusy}
             onClick={() => timerAction("stop")}
@@ -421,7 +461,7 @@ function buildLearnedQuickActions(data: BootstrapData): LearnedQuickAction[] {
   return [...pinned, ...learnedUnpinned, ...fallback].slice(0, 6).map((category) => ({
     categoryId: category.id,
     label: category.name,
-    detail: "Category",
+    detail: category.isPinned ? "Pinned" : null,
     color: paletteColorFor(category.color, category.name)
   }));
 }
@@ -1038,7 +1078,7 @@ function TimelineBlock({
     <article
       tabIndex={0}
       role="button"
-      aria-label={`Time block ${entry.description ?? entry.categoryName ?? "Untitled task"} ${formatDuration(durationSeconds)}`}
+      aria-label={`Time block ${timeEntryTitle(entry)} ${formatDuration(durationSeconds)}`}
       className={[
         "swiss-time-block",
         isResizing ? "is-resizing" : "",
@@ -1067,22 +1107,22 @@ function TimelineBlock({
           <button
             type="button"
             className="swiss-resize-handle top"
-            aria-label={`Resize start of ${entry.description ?? entry.categoryName ?? "time block"}`}
+            aria-label={`Resize start of ${timeEntryTitle(entry)}`}
             onDoubleClick={onEdit}
             onPointerDown={(event) => onResizeStart(entry, "start", event)}
           />
           <button
             type="button"
             className="swiss-resize-handle bottom"
-            aria-label={`Resize end of ${entry.description ?? entry.categoryName ?? "time block"}`}
+            aria-label={`Resize end of ${timeEntryTitle(entry)}`}
             onDoubleClick={onEdit}
             onPointerDown={(event) => onResizeStart(entry, "end", event)}
           />
         </>
       ) : null}
       <div>
-        <strong>{entry.description || entry.categoryName || "Untitled task"}</strong>
-        <span>{entry.categoryName ?? formatSourceLabel(entry.source)}</span>
+        <strong>{timeEntryTitle(entry)}</strong>
+        <span>{timeEntryContextLabel(entry)}</span>
       </div>
       <div>
         <EntryIcon entry={entry} />
@@ -1147,7 +1187,7 @@ function EditEntryDialog({
           <label>
             Category
             <select name="categoryId" defaultValue={entry.categoryId ?? ""}>
-              <option value="">No category</option>
+              <option value="">Uncategorized</option>
               {data.categories.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.name}
@@ -1281,8 +1321,12 @@ function RecentActivityPanel({ data }: { data: BootstrapData }) {
             <div key={event.id} className="swiss-activity-row">
               <Icon size={22} />
               <span>
-                <strong>{event.categoryName ?? formatEventLabel(event.eventType)}</strong>
-                <small>{event.categoryName ?? event.placeName ?? formatSourceLabel(event.source)}</small>
+                <strong>{event.categoryName ?? event.placeName ?? formatEventLabel(event.eventType)}</strong>
+                <small>
+                  {[formatEventLabel(event.eventType), event.placeName, formatSourceLabel(event.source)]
+                    .filter((part, index, parts) => part && parts.indexOf(part) === index)
+                    .join(" · ")}
+                </small>
               </span>
               <time>{formatTime(event.occurredAt)}</time>
             </div>
@@ -1350,7 +1394,7 @@ function ManualEntryDialog({
           <label>
             Category
             <select name="categoryId" defaultValue="">
-              <option value="">No category</option>
+              <option value="">Uncategorized</option>
               {data.categories.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.name}
@@ -1396,38 +1440,10 @@ function ManualEntryDialog({
 }
 
 function pastelFor(entry: TimeEntryRow) {
-  const key = `${entry.categoryColor ?? ""}-${entry.categoryName ?? ""}`.toLowerCase();
-  if (key.includes("lime") || key.includes("green") || key.includes("gym") || key.includes("family")) {
-    return {
-      background: "var(--block-mint-bg)",
-      border: "var(--block-mint-border)",
-      text: "var(--block-text)"
-    };
-  }
-  if (key.includes("amber") || key.includes("admin") || key.includes("orange")) {
-    return {
-      background: "var(--block-sun-bg)",
-      border: "var(--block-sun-border)",
-      text: "var(--block-text)"
-    };
-  }
-  if (key.includes("violet") || key.includes("purple") || key.includes("town")) {
-    return {
-      background: "var(--block-lavender-bg)",
-      border: "var(--block-lavender-border)",
-      text: "var(--block-text)"
-    };
-  }
-  if (key.includes("coral") || key.includes("red")) {
-    return {
-      background: "var(--block-coral-bg)",
-      border: "var(--block-coral-border)",
-      text: "var(--block-text)"
-    };
-  }
+  const accent = timeEntryAccentColor(entry);
   return {
-    background: "var(--block-sky-bg)",
-    border: "var(--block-sky-border)",
+    background: `color-mix(in srgb, ${accent} 58%, var(--surface))`,
+    border: accent,
     text: "var(--block-text)"
   };
 }

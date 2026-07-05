@@ -33,6 +33,7 @@ import {
   X
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { timeEntryTitle } from "@/lib/display";
 import type { BootstrapData } from "@/lib/queries";
 import { formatDuration, formatEventLabel, formatSourceLabel, formatTime } from "@/lib/format";
 
@@ -747,7 +748,7 @@ function buildSearchResults(data: BootstrapData | null, query: string): SearchRe
     })),
     ...data.entries.slice(0, 40).map((entry) => ({
       id: `entry:${entry.id}`,
-      label: entry.description ?? entry.categoryName ?? "Time entry",
+      label: timeEntryTitle(entry),
       detail: `${formatTime(entry.startedAt)} · ${formatDuration(entry.durationSeconds)}`,
       group: "Entry",
       href: "/entries",
@@ -775,7 +776,7 @@ function buildNotifications(data: BootstrapData | null): NotificationItem[] {
   if (data.activeEntry) {
     items.push({
       id: `active:${data.activeEntry.id}`,
-      title: data.activeEntry.description ?? data.activeEntry.categoryName ?? "Timer running",
+      title: timeEntryTitle(data.activeEntry),
       detail: `Started ${formatTime(data.activeEntry.startedAt)}`,
       href: "/",
       icon: Clock3
