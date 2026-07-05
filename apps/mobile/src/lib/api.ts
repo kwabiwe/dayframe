@@ -12,6 +12,8 @@ const QUEUE_KEY = "dayframe.offlineQueue.v1";
 const SESSION_TOKEN_KEY = "dayframe.localSessionToken.v1";
 
 export type MobileBootstrap = {
+  user: { id: string; email: string; name: string };
+  workspace: { id: string; name: string };
   activeEntry: {
     id: string;
     projectId: string | null;
@@ -60,6 +62,11 @@ export type MobileBootstrap = {
     defaultCategoryId: string | null;
   }>;
   reviewItems: Array<{ id: string; title: string; confidence: string; status: string }>;
+};
+
+export type MobileCategoryResponse = {
+  ok: true;
+  category: MobileBootstrap["categories"][number];
 };
 
 export type MobileAuthSession = {
@@ -214,7 +221,10 @@ export async function stopTimer() {
   });
 }
 
-export async function createCategory(name: string, options: { color?: string; isPinned?: boolean } = {}) {
+export async function createCategory(
+  name: string,
+  options: { color?: string; isPinned?: boolean } = {}
+): Promise<MobileCategoryResponse> {
   const response = await fetch(`${DAYFRAME_API_BASE}/api/categories`, {
     method: "POST",
     headers: {
@@ -232,6 +242,39 @@ export async function createCategory(name: string, options: { color?: string; is
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to create category"));
+  return readJsonResponse(response);
+}
+
+export async function updateCategory(
+  id: string,
+  options: { name?: string; color?: string; isPinned?: boolean }
+): Promise<MobileCategoryResponse> {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/categories`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify({ id, ...options })
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to update category"));
+  return readJsonResponse(response);
+}
+
+export async function archiveCategory(id: string) {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/categories?id=${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: await authHeaders()
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to delete category"));
   return readJsonResponse(response);
 }
 

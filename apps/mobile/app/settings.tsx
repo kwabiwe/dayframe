@@ -9,16 +9,19 @@ import {
   TextInput,
   View
 } from "react-native";
+import Svg, { Path } from "react-native-svg";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { paletteColorFor } from "@dayframe/shared";
+import { DAYFRAME_PALETTE, paletteColorFor, type DayframePaletteKey } from "@dayframe/shared";
 import {
   AuthRequiredError,
+  archiveCategory,
   createCategory,
   fetchBootstrap,
   logout,
   readQueue,
   syncQueue,
+  updateCategory,
   type MobileBootstrap,
   type QueuedEvent
 } from "@/lib/api";
@@ -32,8 +35,7 @@ import {
   getHealthImportStatus,
   importHealthKitSleep,
   importHealthKitWorkouts,
-  requestHealthKitSleepPermission,
-  requestHealthKitWorkoutPermission,
+  requestHealthKitPermissions,
   type HealthImportStatus
 } from "@/lib/health";
 import {
@@ -41,6 +43,8 @@ import {
   themeOptions,
   useMobileTheme
 } from "@/lib/mobileTheme";
+
+type Category = MobileBootstrap["categories"][number];
 
 export default function SettingsScreen() {
   const {
@@ -57,6 +61,9 @@ export default function SettingsScreen() {
   const [healthStatus, setHealthStatus] = useState<HealthImportStatus[]>([]);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [pinNewCategory, setPinNewCategory] = useState(true);
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+  const [editingCategoryName, setEditingCategoryName] = useState("");
+  const [editingCategoryColor, setEditingCategoryColor] = useState("lime");
   const refreshInFlight = useRef(false);
 
   const load = useCallback(async (options?: { silent?: boolean }) => {
@@ -118,12 +125,16 @@ export default function SettingsScreen() {
     healthStatus.find((item) => item.provider === "healthkit");
   const sleepStatus = healthStatus.find((item) => item.provider === "healthkit" && item.kind === "sleep");
   const workoutStatus = healthStatus.find((item) => item.provider === "healthkit" && item.kind === "workout");
+  const healthPermissionStatus = healthStatus.find(
+    (item) => item.provider === "healthkit" && item.kind === "permissions"
+  );
 
   async function addCategory() {
     const name = newCategoryName.trim();
     if (!name) return;
+    const color = nextCategoryColor(data?.categories ?? []);
     try {
-      await createCategory(name, { isPinned: pinNewCategory });
+      await createCategory(name, { color, isPinned: pinNewCategory });
       setNewCategoryName("");
       setPinNewCategory(true);
       await load();
@@ -133,6 +144,90 @@ export default function SettingsScreen() {
         return;
       }
       Alert.alert("Categories", error instanceof Error ? error.message : "Unable to create category.");
+    }
+  }
+
+  function beginEditCategory(category: Category) {
+    setEditingCategoryId(category.id);
+    setEditingCategoryName(category.name);
+    setEditingCategoryColor(category.color);
+  }
+
+  function cancelEditCategory() {
+    setEditingCategoryId(null);
+    setEditingCategoryName("");
+    setEditingCategoryColor("lime");
+  }
+
+  async function saveCategoryEdit(category: Category) {
+    const name = editingCategoryName.trim();
+    if (!name) {
+      Alert.alert("Categories", "Category name is required.");
+      return;
+    }
+    try {
+      await updateCategory(category.id, {
+        name,
+        color: editingCategoryColor
+      });
+      cancelEditCategory();
+      await load();
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        router.replace("/");
+        return;
+      }
+      Alert.alert("Categories", error instanceof Error ? error.message : "Unable to save category.");
+    }
+  }
+
+  async function toggleCategoryPin(category: Category) {
+    const nextPinned = !category.isPinned;
+    patchCategory(category.id, { isPinned: nextPinned });
+    try {
+      const result = await updateCategory(category.id, { isPinned: nextPinned });
+      if (result.category.isPinned !== nextPinned) {
+        throw new Error("Category pin state was not saved. Check that the Dayframe API has the category pin migration.");
+      }
+      await load({ silent: true });
+    } catch (error) {
+      patchCategory(category.id, { isPinned: category.isPinned });
+      if (error instanceof AuthRequiredError) {
+        router.replace("/");
+        return;
+      }
+      Alert.alert("Categories", error instanceof Error ? error.message : "Unable to update category.");
+    }
+  }
+
+  function confirmDeleteCategory(category: Category) {
+    Alert.alert(
+      "Delete category",
+      `Delete ${category.name}? Existing time entries keep their history.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            void deleteSelectedCategory(category);
+          }
+        }
+      ]
+    );
+  }
+
+  async function deleteSelectedCategory(category: Category) {
+    try {
+      await archiveCategory(category.id);
+      if (editingCategoryId === category.id) cancelEditCategory();
+      await load();
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        router.replace("/");
+        return;
+      }
+      Alert.alert("Categories", error instanceof Error ? error.message : "Unable to delete category.");
     }
   }
 
@@ -161,16 +256,15 @@ export default function SettingsScreen() {
 
   async function connectAppleHealth() {
     try {
-      const sleep = await requestHealthKitSleepPermission();
-      updateHealthStatus(sleep);
-      const workout = await requestHealthKitWorkoutPermission();
-      updateHealthStatus(workout);
+      const permissions = await requestHealthKitPermissions();
+      updateHealthStatus(permissions);
+      if (permissions.status === "available") await syncAppleHealth({ silent: true });
     } catch (error) {
       Alert.alert("Apple Health", friendlyHealthKitError(error, "request Apple Health permission"));
     }
   }
 
-  async function syncAppleHealth() {
+  async function syncAppleHealth(options?: { silent?: boolean }) {
     try {
       const sleep = await importHealthKitSleep();
       updateHealthStatus(sleep);
@@ -178,7 +272,9 @@ export default function SettingsScreen() {
       updateHealthStatus(workout);
       await syncAndReload();
     } catch (error) {
-      Alert.alert("Apple Health", friendlyHealthKitError(error, "sync Apple Health"));
+      if (!options?.silent) {
+        Alert.alert("Apple Health", friendlyHealthKitError(error, "sync Apple Health"));
+      }
     }
   }
 
@@ -187,6 +283,18 @@ export default function SettingsScreen() {
       status,
       ...current.filter((item) => !(item.provider === status.provider && item.kind === status.kind))
     ]);
+  }
+
+  function patchCategory(id: string, patch: Partial<Category>) {
+    setData((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        categories: current.categories.map((category) =>
+          category.id === id ? { ...category, ...patch } : category
+        )
+      };
+    });
   }
 
   async function signOut() {
@@ -213,11 +321,12 @@ export default function SettingsScreen() {
         <View style={styles.contentStack}>
           <View style={styles.settingsHeader}>
             <Pressable
+              accessibilityLabel="Back"
               accessibilityRole="button"
-              style={pressable(styles.secondaryButton, styles.buttonPressed)}
+              style={pressable(styles.iconButton, styles.buttonPressed)}
               onPress={() => router.back()}
             >
-              <Text style={styles.secondaryButtonText}>Back</Text>
+              <BackGlyph color={theme.accent} />
             </Pressable>
             <Image
               source={require("../assets/dayframe_logo_banner.png")}
@@ -257,41 +366,172 @@ export default function SettingsScreen() {
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Categories</Text>
             <View style={styles.categoryList}>
-              {(data?.categories ?? []).slice(0, 8).map((category) => (
-                <View key={category.id} style={styles.categoryRow}>
-                  <View style={[styles.colorDot, { backgroundColor: paletteColorFor(category.color, category.name) }]} />
-                  <Text style={styles.categoryName}>{category.name}</Text>
-                  {category.isPinned ? <Text style={styles.categoryMeta}>Pinned</Text> : null}
-                </View>
-              ))}
+              {(data?.categories ?? []).map((category) => {
+                const categoryColor = paletteColorFor(category.color, category.name);
+                const editing = editingCategoryId === category.id;
+
+                if (editing) {
+                  return (
+                    <View key={category.id} style={styles.categoryEditCard}>
+                      <View style={styles.categoryEditHeader}>
+                        <View style={[styles.colorDot, { backgroundColor: paletteColorFor(editingCategoryColor, category.name) }]} />
+                        <TextInput
+                          style={[styles.textInput, styles.categoryEditInput]}
+                          value={editingCategoryName}
+                          onChangeText={setEditingCategoryName}
+                          placeholder="Category name"
+                          placeholderTextColor={theme.textSecondary}
+                          returnKeyType="done"
+                          onSubmitEditing={() => saveCategoryEdit(category)}
+                        />
+                      </View>
+                      <View style={styles.paletteGrid}>
+                        {DAYFRAME_PALETTE.map((color) => {
+                          const selected = editingCategoryColor === color.key;
+                          return (
+                            <Pressable
+                              key={color.key}
+                              accessibilityLabel={`${color.label} category colour`}
+                              accessibilityRole="button"
+                              style={pressable(
+                                [
+                                  styles.paletteSwatch,
+                                  { backgroundColor: color.hex },
+                                  selected ? styles.paletteSwatchSelected : null
+                                ],
+                                styles.buttonPressed
+                              )}
+                              onPress={() => setEditingCategoryColor(color.key)}
+                            />
+                          );
+                        })}
+                      </View>
+                      <View style={styles.buttonRow}>
+                        <Pressable
+                          accessibilityRole="button"
+                          style={pressable(styles.secondaryButton, styles.buttonPressed)}
+                          onPress={cancelEditCategory}
+                        >
+                          <Text style={styles.secondaryButtonText}>Cancel</Text>
+                        </Pressable>
+                        <Pressable
+                          accessibilityRole="button"
+                          style={pressable(styles.primaryInlineButton, styles.buttonPressed)}
+                          onPress={() => saveCategoryEdit(category)}
+                        >
+                          <Text style={styles.primaryButtonText}>Save</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  );
+                }
+
+                return (
+                  <View key={category.id} style={[styles.categoryRow, category.isPinned ? styles.categoryRowPinned : null]}>
+                    <View style={[styles.colorDot, { backgroundColor: categoryColor }]} />
+                    <View style={styles.categoryTextStack}>
+                      <Text style={styles.categoryName} numberOfLines={1}>{category.name}</Text>
+                      <Text style={[styles.categoryMeta, category.isPinned ? styles.categoryMetaPinned : null]}>
+                        {category.isPinned ? "Pinned" : "Unpinned"}
+                      </Text>
+                    </View>
+                    <View style={styles.categoryActions}>
+                      <Pressable
+                        accessibilityLabel={`Edit ${category.name}`}
+                        accessibilityRole="button"
+                        style={pressable(styles.categoryIconButton, styles.buttonPressed)}
+                        onPress={() => beginEditCategory(category)}
+                      >
+                        <PencilGlyph color={theme.accent} />
+                      </Pressable>
+                      <Pressable
+                        accessibilityLabel={`Delete ${category.name}`}
+                        accessibilityRole="button"
+                        style={pressable(styles.categoryIconButton, styles.buttonPressed)}
+                        onPress={() => confirmDeleteCategory(category)}
+                      >
+                        <ArchiveGlyph color={theme.danger} />
+                      </Pressable>
+                      <Pressable
+                        accessibilityLabel={category.isPinned ? `Unpin ${category.name}` : `Pin ${category.name}`}
+                        accessibilityRole="button"
+                        style={pressable(
+                          [
+                            styles.categoryIconButton,
+                            category.isPinned ? styles.categoryIconButtonSelected : null
+                          ],
+                          styles.buttonPressed
+                        )}
+                        onPress={() => toggleCategoryPin(category)}
+                      >
+                        {category.isPinned ? (
+                          <PinGlyph color={theme.accent} />
+                        ) : (
+                          <PinOffGlyph color={theme.textSecondary} />
+                        )}
+                      </Pressable>
+                    </View>
+                  </View>
+                );
+              })}
             </View>
-            <TextInput
-              style={styles.textInput}
-              value={newCategoryName}
-              onChangeText={setNewCategoryName}
-              onSubmitEditing={addCategory}
-              placeholder="New category"
-              placeholderTextColor={theme.textSecondary}
-              returnKeyType="done"
-            />
-            <View style={styles.buttonRow}>
+            <View style={styles.categoryCreateRow}>
+              <TextInput
+                style={[styles.textInput, styles.categoryCreateInput]}
+                value={newCategoryName}
+                onChangeText={setNewCategoryName}
+                onSubmitEditing={addCategory}
+                placeholder="New category"
+                placeholderTextColor={theme.textSecondary}
+                returnKeyType="done"
+              />
               <Pressable
+                accessibilityLabel={pinNewCategory ? "Create as pinned category" : "Create as unpinned category"}
+                accessibilityRole="button"
                 style={pressable(
-                  [styles.secondaryButton, pinNewCategory ? styles.toggleSelected : null],
+                  [styles.categoryIconButton, pinNewCategory ? styles.categoryIconButtonSelected : null],
                   styles.buttonPressed
                 )}
                 onPress={() => setPinNewCategory((current) => !current)}
               >
-                <Text style={styles.secondaryButtonText}>{pinNewCategory ? "Pinned" : "Pin later"}</Text>
+                {pinNewCategory ? (
+                  <PinGlyph color={theme.accent} />
+                ) : (
+                  <PinOffGlyph color={theme.textSecondary} />
+                )}
               </Pressable>
-              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={addCategory}>
-                <Text style={styles.secondaryButtonText}>Create category</Text>
+              <Pressable
+                accessibilityLabel="Create category"
+                accessibilityRole="button"
+                style={pressable(styles.categoryIconButtonPrimary, styles.buttonPressed)}
+                onPress={addCategory}
+              >
+                <PlusGlyph color={theme.mode === "dark" ? theme.background : "#FFFFFF"} />
               </Pressable>
             </View>
           </View>
 
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Account</Text>
+            {data?.user || data?.workspace ? (
+              <View style={styles.accountList}>
+                {data.user ? (
+                  <View style={styles.accountRow}>
+                    <Text style={styles.label}>Signed in as</Text>
+                    <Text style={styles.accountValue} numberOfLines={1}>
+                      {data.user.name || data.user.email}
+                    </Text>
+                    <Text style={styles.accountMeta} numberOfLines={1}>{data.user.email}</Text>
+                  </View>
+                ) : null}
+                {data.workspace ? (
+                  <View style={styles.accountRow}>
+                    <Text style={styles.label}>Workspace</Text>
+                    <Text style={styles.accountValue} numberOfLines={1}>{data.workspace.name}</Text>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
             <View style={styles.buttonRow}>
               <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={signOut}>
                 <Text style={styles.secondaryButtonText}>Log out</Text>
@@ -332,14 +572,15 @@ export default function SettingsScreen() {
             <Text style={styles.statusText}>
               {healthAvailability?.notes ?? "Apple Health status not checked"}
             </Text>
+            {healthPermissionStatus ? <Text style={styles.muted}>{healthPermissionStatus.notes}</Text> : null}
             <Text style={styles.muted}>Sleep: {sleepStatus?.notes ?? "Not synced yet."}</Text>
             <Text style={styles.muted}>Workouts: {workoutStatus?.notes ?? "Not synced yet."}</Text>
             <View style={styles.buttonRow}>
               <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={connectAppleHealth}>
-                <Text style={styles.secondaryButtonText}>Connect Apple Health</Text>
+                <Text style={styles.secondaryButtonText}>Connect</Text>
               </Pressable>
-              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={syncAppleHealth}>
-                <Text style={styles.secondaryButtonText}>Sync Apple Health</Text>
+              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={() => syncAppleHealth()}>
+                <Text style={styles.secondaryButtonText}>Sync now</Text>
               </Pressable>
             </View>
           </View>
@@ -347,4 +588,79 @@ export default function SettingsScreen() {
       </ScrollView>
     </SafeAreaView>
   );
+}
+
+function BackGlyph({ color }: { color: string }) {
+  return (
+    <Svg width={20} height={20} viewBox="0 0 24 24">
+      <Path d="M15 5 8 12l7 7" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.3} />
+    </Svg>
+  );
+}
+
+function PencilGlyph({ color }: { color: string }) {
+  return (
+    <Svg width={18} height={18} viewBox="0 0 24 24">
+      <Path d="M4 20h4l10.5-10.5-4-4L4 16v4Z" fill="none" stroke={color} strokeLinejoin="round" strokeWidth={2} />
+      <Path d="m13.5 6.5 4 4" stroke={color} strokeLinecap="round" strokeWidth={2} />
+    </Svg>
+  );
+}
+
+function ArchiveGlyph({ color }: { color: string }) {
+  return (
+    <Svg width={18} height={18} viewBox="0 0 24 24">
+      <Path d="M5 7h14" stroke={color} strokeLinecap="round" strokeWidth={2} />
+      <Path d="M9 7V5h6v2" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
+      <Path d="M8 10v9h8v-9" fill="none" stroke={color} strokeLinejoin="round" strokeWidth={2} />
+    </Svg>
+  );
+}
+
+function PinGlyph({ color }: { color: string }) {
+  return (
+    <Svg width={18} height={18} viewBox="0 0 24 24">
+      <Path
+        d="M9 4h6l-1 6 4 3v2h-5l-1 6-1-6H6v-2l4-3-1-6Z"
+        fill={color}
+        stroke={color}
+        strokeLinejoin="round"
+        strokeWidth={2}
+      />
+    </Svg>
+  );
+}
+
+function PinOffGlyph({ color }: { color: string }) {
+  return (
+    <Svg width={18} height={18} viewBox="0 0 24 24">
+      <Path
+        d="M9 4h6l-1 6 4 3v2h-5l-1 6-1-6H6v-2l4-3-1-6Z"
+        fill="none"
+        stroke={color}
+        strokeLinejoin="round"
+        strokeWidth={2}
+      />
+      <Path d="M4 4l16 16" stroke={color} strokeLinecap="round" strokeWidth={2.2} />
+    </Svg>
+  );
+}
+
+function PlusGlyph({ color }: { color: string }) {
+  return (
+    <Svg width={20} height={20} viewBox="0 0 24 24">
+      <Path d="M12 5v14M5 12h14" stroke={color} strokeLinecap="round" strokeWidth={2.2} />
+    </Svg>
+  );
+}
+
+function nextCategoryColor(categories: Category[]): DayframePaletteKey {
+  const paletteKeys = new Set(DAYFRAME_PALETTE.map((color) => color.key));
+  const usedKeys = new Set(
+    categories
+      .map((category) => category.color)
+      .filter((color): color is DayframePaletteKey => paletteKeys.has(color as DayframePaletteKey))
+  );
+  const unused = DAYFRAME_PALETTE.find((color) => !usedKeys.has(color.key));
+  return unused?.key ?? DAYFRAME_PALETTE[categories.length % DAYFRAME_PALETTE.length].key;
 }

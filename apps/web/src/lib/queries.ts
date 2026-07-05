@@ -5,7 +5,7 @@ import type {
   PlaceSummary,
   ProjectSummary
 } from "@dayframe/shared";
-import { isUndefinedColumnError, query } from "./db";
+import { isUndefinedColumnError, missingRequiredColumnError, query } from "./db";
 import { getDevSession, type RequestSession } from "./session";
 
 export type ClientRow = {
@@ -332,15 +332,15 @@ async function getCategories(session: RequestSession) {
     );
     return result.rows;
   } catch (error) {
-    if (!isUndefinedColumnError(error, "is_pinned")) throw error;
-    const result = await query<Omit<CategoryRow, "isPinned">>(
-      `select id, name, color
-       from categories
-       where workspace_id = $1 and is_archived = false
-       order by name`,
-      [session.workspaceId]
-    );
-    return result.rows.map((category) => ({ ...category, isPinned: false }));
+    if (isUndefinedColumnError(error, "is_pinned")) {
+      throw missingRequiredColumnError(
+        "categories",
+        "is_pinned",
+        "supabase/migrations/202607040001_category_pins_and_project_backfill.sql",
+        error
+      );
+    }
+    throw error;
   }
 }
 

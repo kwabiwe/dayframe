@@ -49,6 +49,20 @@ describe("POST /api/time-entries", () => {
     );
   });
 
+  it("omits blank descriptions for category-only starts", async () => {
+    const response = await POST(jsonRequest({ mode: "start", categoryId: categoryId(), description: "   " }));
+
+    expect(response.status).toBe(201);
+    expect(mocks.processActivityEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "timer_start",
+        categoryId: categoryId(),
+        description: undefined
+      }),
+      session
+    );
+  });
+
   it("starts an uncategorized task without requiring a project", async () => {
     const response = await POST(jsonRequest({ mode: "start", projectId: "", categoryId: "", description: "Inbox zero" }));
 

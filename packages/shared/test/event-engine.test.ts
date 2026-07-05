@@ -105,6 +105,36 @@ describe("event normalization", () => {
     expect(next.reviewItems).toHaveLength(0);
   });
 
+  it("keeps category-only explicit starts descriptionless when no description is supplied", () => {
+    const next = applyActivityEvent(
+      { completedEntries: [], reviewItems: [] },
+      {
+        source: "mobile_app",
+        type: "timer_start",
+        occurredAt: new Date("2026-06-20T08:00:00Z"),
+        categoryId: ids.work
+      },
+      context
+    );
+
+    expect(next.activeEntry?.categoryId).toBe(ids.work);
+    expect(next.activeEntry?.description).toBeUndefined();
+  });
+
+  it("does not use the legacy start fallback title for blank timer starts", () => {
+    const candidate = normalizeActivityEvent(
+      {
+        source: "manual_app",
+        type: "timer_start",
+        occurredAt: new Date("2026-06-20T08:00:00Z"),
+        categoryId: ids.work
+      },
+      context
+    );
+
+    expect(candidate.title).toBe("Timer started");
+  });
+
   it("routes broad geofence signals to review", () => {
     const candidate = normalizeActivityEvent(
       {

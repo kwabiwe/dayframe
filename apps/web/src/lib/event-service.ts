@@ -4,7 +4,7 @@ import {
   normalizeActivityEvent,
   type ActivityEventInput
 } from "@dayframe/shared";
-import { isUndefinedColumnError, pool, query } from "./db";
+import { isUndefinedColumnError, missingRequiredColumnError, pool, query } from "./db";
 import { getNormalizationContext } from "./queries";
 import { getDevSession, type RequestSession } from "./session";
 
@@ -14,6 +14,12 @@ type CategoryRowLike = {
   color: string;
   isPinned: boolean;
 };
+
+const CATEGORY_PINS_MIGRATION = "supabase/migrations/202607040001_category_pins_and_project_backfill.sql";
+
+function missingCategoryPinColumnError(cause: unknown) {
+  return missingRequiredColumnError("categories", "is_pinned", CATEGORY_PINS_MIGRATION, cause);
+}
 
 export async function processActivityEvent(rawInput: unknown, session: RequestSession = getDevSession()) {
   const parsed = ActivityEventInputSchema.parse({
@@ -121,7 +127,7 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
           candidate.placeId ?? null,
           parsed.source,
           candidate.confidence,
-          parsed.description ?? candidate.title,
+          parsed.description ?? (isExplicitStartEvent(parsed.type) ? null : candidate.title),
           parsed.occurredAt,
           eventId
         ]
@@ -338,16 +344,8 @@ export async function createCategory(
 
     return result.rows[0];
   } catch (error) {
-    if (!isUndefinedColumnError(error, "is_pinned")) throw error;
-    const result = await query<Omit<CategoryRowLike, "isPinned">>(
-      `insert into categories (workspace_id, name, color)
-       values ($1, $2, $3)
-       returning id, name, color`,
-      [session.workspaceId, name, color]
-    );
-    const row = result.rows[0];
-    if (!row) throw new Error("Category could not be created.");
-    return { ...row, isPinned: false };
+    if (isUndefinedColumnError(error, "is_pinned")) throw missingCategoryPinColumnError(error);
+    throw error;
   }
 }
 
@@ -390,24 +388,8 @@ export async function updateCategory(
 
     return result.rows[0] ?? null;
   } catch (error) {
-    if (!isUndefinedColumnError(error, "is_pinned")) throw error;
-    const result = await query<Omit<CategoryRowLike, "isPinned">>(
-      `update categories
-       set name = case when $3 then $4 else name end,
-           color = case when $5 then $6 else color end
-       where id = $1 and workspace_id = $2 and is_archived = false
-       returning id, name, color`,
-      [
-        id,
-        session.workspaceId,
-        hasName,
-        normalizedName,
-        hasColor,
-        normalizedColor
-      ]
-    );
-    const row = result.rows[0];
-    return row ? { ...row, isPinned: false } : null;
+    if (isUndefinedColumnError(error, "is_pinned")) throw missingCategoryPinColumnError(error);
+    throw error;
   }
 }
 
@@ -421,13 +403,8 @@ export async function archiveCategory(id: string, session: RequestSession = getD
       [id, session.workspaceId]
     );
   } catch (error) {
-    if (!isUndefinedColumnError(error, "is_pinned")) throw error;
-    await query(
-      `update categories
-       set is_archived = true
-       where id = $1 and workspace_id = $2`,
-      [id, session.workspaceId]
-    );
+    if (isUndefinedColumnError(error, "is_pinned")) throw missingCategoryPinColumnError(error);
+    throw error;
   }
 }
 
@@ -871,6 +848,16 @@ function nullableString(value: unknown) {
 function normalizeName(value: unknown, fallback: string) {
   const name = typeof value === "string" ? value.trim() : "";
   return name || fallback;
+}
+
+function isExplicitStartEvent(type: string) {
+  return (
+    type === "timer_start" ||
+    type === "timer_switch" ||
+    type === "quick_action" ||
+    type === "nfc_action" ||
+    type === "shortcut_action"
+  );
 }
 
 function stringOrNull(value: unknown) {

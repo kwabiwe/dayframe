@@ -39,7 +39,9 @@ const {
   login,
   startTimer,
   signup,
-  syncQueue
+  syncQueue,
+  updateCategory,
+  archiveCategory
 } = await import("./api");
 
 describe("mobile API client", () => {
@@ -176,6 +178,26 @@ describe("mobile API client", () => {
     );
   });
 
+  it("omits blank timer descriptions from mobile starts", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 201)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startTimer("20000000-0000-4000-8000-000000000001", "   ");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/time-entries",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          mode: "start",
+          source: "mobile_app",
+          categoryId: "20000000-0000-4000-8000-000000000001"
+        })
+      })
+    );
+  });
+
   it("creates pinned categories through the hosted API", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 201)));
@@ -193,6 +215,63 @@ describe("mobile API client", () => {
           isPinned: true
         })
       })
+    );
+  });
+
+  it("updates category name, color and pin state through the hosted API", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true, category: { id: "20000000-0000-4000-8000-000000000001", name: "Deep work", color: "sky", isPinned: true } }, 200)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await updateCategory("20000000-0000-4000-8000-000000000001", {
+      name: "Deep work",
+      color: "sky",
+      isPinned: true
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/categories",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          id: "20000000-0000-4000-8000-000000000001",
+          name: "Deep work",
+          color: "sky",
+          isPinned: true
+        })
+      })
+    );
+  });
+
+  it("unpins categories through the hosted API", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true, category: { id: "20000000-0000-4000-8000-000000000001", name: "Deep work", color: "sky", isPinned: false } }, 200)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await updateCategory("20000000-0000-4000-8000-000000000001", { isPinned: false });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/categories",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          id: "20000000-0000-4000-8000-000000000001",
+          isPinned: false
+        })
+      })
+    );
+  });
+
+  it("deletes categories through the hosted API", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await archiveCategory("20000000-0000-4000-8000-000000000001");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/categories?id=20000000-0000-4000-8000-000000000001",
+      expect.objectContaining({ method: "DELETE" })
     );
   });
 
