@@ -91,7 +91,7 @@ function createStyles(theme: MobileTheme) {
       backgroundColor: theme.background
     },
     contentStack: {
-      gap: 18
+      gap: 14
     },
     header: {
       flexDirection: "row",
@@ -112,8 +112,8 @@ function createStyles(theme: MobileTheme) {
       gap: 4
     },
     logoImage: {
-      width: 158,
-      height: 52
+      width: 148,
+      height: 46
     },
     iconButton: {
       width: 44,
@@ -150,7 +150,7 @@ function createStyles(theme: MobileTheme) {
       borderColor: theme.border,
       backgroundColor: theme.surface,
       borderRadius: 16,
-      padding: 16,
+      padding: 14,
       gap: 10
     },
     timerPanel: {
@@ -158,16 +158,16 @@ function createStyles(theme: MobileTheme) {
       borderColor: theme.borderStrong,
       backgroundColor: theme.surfaceInset,
       borderRadius: 16,
-      padding: 16,
-      gap: 10
+      padding: 14,
+      gap: 8
     },
     lifecyclePanel: {
       borderWidth: 1,
       borderColor: theme.borderStrong,
       backgroundColor: theme.surface,
       borderRadius: 16,
-      padding: 16,
-      gap: 14
+      padding: 14,
+      gap: 12
     },
     label: {
       fontSize: 11,
@@ -175,10 +175,18 @@ function createStyles(theme: MobileTheme) {
       fontFamily: monoFont
     },
     timerText: {
-      fontSize: 25,
+      fontSize: 23,
       fontWeight: "800",
       color: theme.accent,
       fontFamily: monoFont
+    },
+    activeTitleRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8
+    },
+    activeTitleText: {
+      flex: 1
     },
     activeDescription: {
       fontSize: 14,
@@ -243,7 +251,7 @@ function createStyles(theme: MobileTheme) {
     },
     chartWrap: {
       alignItems: "center",
-      paddingVertical: 8
+      paddingVertical: 2
     },
     chartBox: {
       width: 264,
@@ -317,19 +325,19 @@ function createStyles(theme: MobileTheme) {
       fontSize: 12
     },
     compactCategoryScroller: {
-      gap: 8,
+      gap: 7,
       paddingRight: 4
     },
     categoryPill: {
-      minHeight: 44,
+      minHeight: 38,
       borderWidth: 1,
       backgroundColor: theme.surfaceInset,
       borderRadius: 999,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
+      paddingHorizontal: 10,
+      paddingVertical: 7,
       flexDirection: "row",
       alignItems: "center",
-      gap: 8
+      gap: 7
     },
     categoryPillText: {
       color: theme.textPrimary,
@@ -348,18 +356,23 @@ function createStyles(theme: MobileTheme) {
       gap: 8
     },
     categoryRow: {
-      minHeight: 38,
+      minHeight: 48,
       borderWidth: 1,
       borderColor: theme.border,
       backgroundColor: theme.surfaceInset,
       borderRadius: 12,
       paddingHorizontal: 10,
+      paddingVertical: 6,
       flexDirection: "row",
       alignItems: "center",
       gap: 8
     },
-    categoryName: {
+    categoryTextStack: {
       flex: 1,
+      gap: 1,
+      minWidth: 0
+    },
+    categoryName: {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 13,
@@ -370,6 +383,76 @@ function createStyles(theme: MobileTheme) {
       fontFamily: monoFont,
       fontSize: 11,
       fontWeight: "700"
+    },
+    categoryActions: {
+      flexDirection: "row",
+      gap: 4
+    },
+    categoryIconButton: {
+      width: 44,
+      height: 44,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surface,
+      borderRadius: 11,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    categoryIconButtonSelected: {
+      borderColor: theme.accent,
+      backgroundColor: theme.surfaceMuted
+    },
+    categoryIconButtonPrimary: {
+      width: 44,
+      height: 44,
+      borderWidth: 1,
+      borderColor: theme.accent,
+      backgroundColor: theme.accent,
+      borderRadius: 12,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    categoryEditCard: {
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 12,
+      padding: 10,
+      gap: 10
+    },
+    categoryEditHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8
+    },
+    categoryEditInput: {
+      flex: 1,
+      minHeight: 42
+    },
+    paletteGrid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8
+    },
+    paletteSwatch: {
+      width: 34,
+      height: 34,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      borderRadius: 999
+    },
+    paletteSwatchSelected: {
+      borderWidth: 3,
+      borderColor: theme.accent
+    },
+    categoryCreateRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8
+    },
+    categoryCreateInput: {
+      flex: 1,
+      minHeight: 42
     },
     textInput: {
       minHeight: 48,
@@ -391,6 +474,34 @@ function createStyles(theme: MobileTheme) {
       borderRadius: 12,
       paddingVertical: 12,
       alignItems: "center"
+    },
+    primaryInlineButton: {
+      borderWidth: 1,
+      borderColor: theme.accent,
+      backgroundColor: theme.accent,
+      borderRadius: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      alignItems: "center"
+    },
+    startInputRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8
+    },
+    startInput: {
+      flex: 1,
+      minHeight: 44
+    },
+    playButton: {
+      width: 46,
+      height: 46,
+      borderWidth: 1,
+      borderColor: theme.accent,
+      backgroundColor: theme.accent,
+      borderRadius: 14,
+      alignItems: "center",
+      justifyContent: "center"
     },
     buttonPressed: {
       opacity: 0.84,

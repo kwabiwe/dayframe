@@ -235,6 +235,39 @@ export async function createCategory(name: string, options: { color?: string; is
   return readJsonResponse(response);
 }
 
+export async function updateCategory(
+  id: string,
+  options: { name?: string; color?: string; isPinned?: boolean }
+) {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/categories`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify({ id, ...options })
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to update category"));
+  return readJsonResponse(response);
+}
+
+export async function archiveCategory(id: string) {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/categories?id=${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: await authHeaders()
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to archive category"));
+  return readJsonResponse(response);
+}
+
 export async function queueStopTimer() {
   return enqueueEvent({
     source: "mobile_app",

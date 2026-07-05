@@ -399,7 +399,7 @@ export function normalizeActivityEvent(
       projectId,
       categoryId: event.categoryId ?? matchingRule?.categoryId ?? project?.categoryId ?? undefined,
       placeId: event.placeId ?? place?.id,
-      title: event.description ?? "Start activity",
+      title: event.description ?? project?.name ?? "Timer started",
       reason: "Manual, NFC, widget and shortcut signals are treated as high-confidence explicit starts.",
       shouldClosePrevious: true
     };

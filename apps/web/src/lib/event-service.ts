@@ -121,7 +121,7 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
           candidate.placeId ?? null,
           parsed.source,
           candidate.confidence,
-          parsed.description ?? candidate.title,
+          parsed.description ?? (isExplicitStartEvent(parsed.type) ? null : candidate.title),
           parsed.occurredAt,
           eventId
         ]
@@ -871,6 +871,16 @@ function nullableString(value: unknown) {
 function normalizeName(value: unknown, fallback: string) {
   const name = typeof value === "string" ? value.trim() : "";
   return name || fallback;
+}
+
+function isExplicitStartEvent(type: string) {
+  return (
+    type === "timer_start" ||
+    type === "timer_switch" ||
+    type === "quick_action" ||
+    type === "nfc_action" ||
+    type === "shortcut_action"
+  );
 }
 
 function stringOrNull(value: unknown) {

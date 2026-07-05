@@ -153,6 +153,10 @@ export default function HomeScreen() {
     [data?.entries, now]
   );
   const summaryTotal = summarySegments.reduce((sum, segment) => sum + segment.seconds, 0);
+  const activeCategoryColor = data?.activeEntry?.categoryName
+    ? paletteColorFor(data.activeEntry.categoryId, data.activeEntry.categoryName)
+    : null;
+  const activeDescription = displayTimerDescription(data?.activeEntry);
 
   useEffect(() => {
     chartBuild.stopAnimation();
@@ -370,12 +374,17 @@ export default function HomeScreen() {
 
           <View style={styles.timerPanel}>
             <Text style={styles.label}>Active timer</Text>
-            <Text style={styles.timerText}>
-              {data?.activeEntry
-                ? data.activeEntry.description ?? data.activeEntry.categoryName ?? "Running"
-                : "Start task below"}
-            </Text>
-            {data?.activeEntry?.categoryName ? (
+            <View style={styles.activeTitleRow}>
+              {activeCategoryColor ? (
+                <View style={[styles.colorDot, { backgroundColor: activeCategoryColor }]} />
+              ) : null}
+              <Text style={[styles.timerText, styles.activeTitleText]} numberOfLines={2}>
+                {data?.activeEntry
+                  ? activeDescription ?? data.activeEntry.categoryName ?? "Running"
+                  : "Start task below"}
+              </Text>
+            </View>
+            {activeDescription && data?.activeEntry?.categoryName ? (
               <Text style={styles.activeDescription}>{data.activeEntry.categoryName}</Text>
             ) : null}
             {data?.activeEntry ? (
@@ -410,15 +419,25 @@ export default function HomeScreen() {
 
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Start task</Text>
-            <TextInput
-              style={styles.textInput}
-              value={customDescription}
-              onChangeText={setCustomDescription}
-              onSubmitEditing={() => startTask(null)}
-              placeholder="What are you working on?"
-              placeholderTextColor={theme.textSecondary}
-              returnKeyType="done"
-            />
+            <View style={styles.startInputRow}>
+              <TextInput
+                style={[styles.textInput, styles.startInput]}
+                value={customDescription}
+                onChangeText={setCustomDescription}
+                onSubmitEditing={() => startTask(null)}
+                placeholder="What are you working on?"
+                placeholderTextColor={theme.textSecondary}
+                returnKeyType="done"
+              />
+              <Pressable
+                accessibilityLabel="Start task"
+                accessibilityRole="button"
+                style={pressable(styles.playButton, styles.buttonPressed)}
+                onPress={() => startTask(null)}
+              >
+                <PlayGlyph color={theme.mode === "dark" ? theme.background : "#FFFFFF"} />
+              </Pressable>
+            </View>
             {quickActions.length > 0 ? (
               <ScrollView
                 horizontal
@@ -431,6 +450,8 @@ export default function HomeScreen() {
                   return (
                     <Pressable
                       key={category.id}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Start ${category.name}`}
                       style={pressable(
                         [styles.categoryPill, { borderColor: categoryColor }],
                         styles.buttonPressed
@@ -444,9 +465,6 @@ export default function HomeScreen() {
                 })}
               </ScrollView>
             ) : null}
-            <Pressable style={pressable(styles.primaryButton, styles.buttonPressed)} onPress={() => startTask(null)}>
-              <Text style={styles.primaryButtonText}>Start task</Text>
-            </Pressable>
           </View>
 
           <TodaySummary
@@ -479,6 +497,14 @@ function SettingsGlyph({ color }: { color: string }) {
         strokeWidth={2}
       />
       <Circle cx={8} cy={17} r={2.5} fill="none" stroke={color} strokeWidth={2} />
+    </Svg>
+  );
+}
+
+function PlayGlyph({ color }: { color: string }) {
+  return (
+    <Svg width={20} height={20} viewBox="0 0 24 24">
+      <Path d="M8 5v14l11-7L8 5Z" fill={color} />
     </Svg>
   );
 }
@@ -644,6 +670,11 @@ function buildMobileQuickActions(data: MobileBootstrap | null) {
   const fallback = data.categories.filter((category) => !usedIds.has(category.id));
 
   return [...pinned, ...learnedUnpinned, ...fallback].slice(0, 8);
+}
+
+function displayTimerDescription(entry: MobileBootstrap["activeEntry"] | null | undefined) {
+  if (!entry?.description) return null;
+  return entry.description === "Start activity" ? null : entry.description;
 }
 
 function startOfToday(now: number) {
