@@ -543,7 +543,7 @@ textarea:focus-visible {
 
 .swiss-current-timer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(220px, auto);
+  grid-template-columns: minmax(0, 1fr);
   align-items: end;
   gap: 14px;
   margin-bottom: 18px;
@@ -573,20 +573,23 @@ textarea:focus-visible {
 
 .swiss-work-input input {
   min-height: 44px;
-  border: 1px solid transparent;
-  border-radius: 10px;
-  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--line) 86%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 86%, var(--surface-inset));
   padding: 0 12px;
   color: var(--foreground);
   font-size: 18px;
   font-weight: 600;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 36%, transparent);
 }
 
 .swiss-work-input input:focus,
 .swiss-work-input input:focus-visible {
   border-color: color-mix(in srgb, var(--timer-accent, var(--accent)) 62%, var(--line));
-  outline: 2px solid color-mix(in srgb, var(--timer-accent, var(--accent)) 34%, transparent);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--timer-accent, var(--accent)) 24%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 36%, transparent);
 }
 
 .swiss-work-input input::placeholder {
@@ -594,15 +597,17 @@ textarea:focus-visible {
 }
 
 .swiss-entrybar-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(220px, 360px) auto auto;
+  align-items: end;
+  justify-content: start;
+  gap: 10px;
 }
 
 .swiss-category-field {
+  position: relative;
   display: grid;
-  flex: 1 1 210px;
+  min-width: 0;
   gap: 6px;
 }
 
@@ -614,36 +619,106 @@ textarea:focus-visible {
 
 .swiss-category-trigger {
   position: relative;
-  display: inline-flex;
-  min-height: 42px;
+  display: flex;
+  min-height: 44px;
   width: 100%;
-  max-width: none;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   border: 1px solid color-mix(in srgb, var(--timer-accent, var(--accent)) 54%, var(--line));
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--surface);
   color: var(--foreground);
   padding: 0 12px;
   font-size: 15px;
   font-weight: 700;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 5%, transparent);
 }
 
-.swiss-category-trigger select {
-  min-height: 30px;
-  width: 100%;
-  min-width: 124px;
+.swiss-category-trigger:hover,
+.swiss-category-trigger[aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--timer-accent, var(--accent)) 76%, var(--line));
+  background: color-mix(in srgb, var(--timer-accent, var(--accent)) 8%, var(--surface));
+}
+
+.swiss-category-trigger:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--timer-accent, var(--accent)) 24%, transparent),
+    0 1px 2px color-mix(in srgb, var(--foreground) 5%, transparent);
+}
+
+.swiss-category-trigger-value {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.swiss-category-trigger-value span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.swiss-category-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  display: grid;
+  width: min(100%, 360px);
+  min-width: 220px;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 6px;
+  box-shadow: var(--shadow-soft);
+}
+
+.swiss-category-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
   border: 0;
+  border-radius: 8px;
   background: transparent;
-  padding: 0 16px 0 0;
-  color: inherit;
+  color: var(--foreground);
+  padding: 0 9px;
+  text-align: left;
+  font-size: 14px;
   font-weight: 700;
 }
 
+.swiss-category-option span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.swiss-category-option:hover,
+.swiss-category-option:focus-visible,
+.swiss-category-option.is-selected {
+  background: color-mix(in srgb, var(--timer-accent, var(--accent)) 10%, var(--surface-muted));
+}
+
+.swiss-category-option.is-muted {
+  color: var(--muted);
+  font-weight: 650;
+}
+
 .swiss-entrybar-clock {
-  min-width: 74px;
+  display: inline-flex;
+  min-width: 84px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
   color: var(--foreground);
-  text-align: right;
+  text-align: center;
   font-size: 17px;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
@@ -654,11 +729,13 @@ textarea:focus-visible {
   width: 50px;
   height: 50px;
   place-items: center;
-  border: 5px solid color-mix(in srgb, var(--brand-sun) 54%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 48%, var(--line));
   border-radius: 999px;
   background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 72%, var(--brand-sky)));
   color: #ffffff;
-  box-shadow: 0 10px 24px color-mix(in srgb, var(--accent) 28%, transparent);
+  box-shadow:
+    0 10px 24px color-mix(in srgb, var(--accent) 28%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 28%, transparent);
 }
 
 .swiss-command-play.is-active {
@@ -700,6 +777,11 @@ textarea:focus-visible {
   height: 9px;
   flex: 0 0 auto;
   border-radius: 999px;
+}
+
+.swiss-focus-dot.is-muted {
+  border: 1px solid var(--line-strong);
+  background: transparent;
 }
 
 .swiss-active-timer-meta {
@@ -2530,7 +2612,8 @@ kbd {
   }
 
   .swiss-entrybar-actions {
-    flex-wrap: wrap;
+    grid-template-columns: minmax(180px, 1fr) auto auto;
+    justify-content: stretch;
   }
 
   .swiss-top-grid > .swiss-panel {
@@ -2846,11 +2929,15 @@ kbd {
 
   .swiss-category-field {
     max-width: none;
-    flex: 1 1 160px;
+    grid-column: 1 / -1;
+  }
+
+  .swiss-entrybar-actions {
+    grid-template-columns: auto auto;
+    justify-content: start;
   }
 
   .swiss-entrybar-clock {
-    flex: 1 0 82px;
     text-align: left;
   }
 

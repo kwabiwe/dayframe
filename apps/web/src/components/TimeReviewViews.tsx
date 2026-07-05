@@ -32,11 +32,15 @@ const viewItems: Array<{ id: TimeView; label: string; icon: React.ReactNode }> =
 
 const startHour = 6;
 const endHour = 22;
-const rowHeight = 58;
-const calendarHeight = (endHour - startHour) * rowHeight;
 const calendarSnapMinutes = 15;
+const calendarZooms = {
+  compact: { label: "Fit", rowHeight: 48 },
+  regular: { label: "1h", rowHeight: 58 },
+  detail: { label: "Detail", rowHeight: 82 }
+} as const;
 
 type CalendarResizeEdge = "start" | "end";
+type CalendarZoom = keyof typeof calendarZooms;
 
 type CalendarResizeDraft = {
   entryId: string;
@@ -192,7 +196,13 @@ function CalendarReview({
   const [resizeDraft, setResizeDraft] = useState<CalendarResizeDraft | null>(null);
   const [resizingId, setResizingId] = useState<string | null>(null);
   const [resizeError, setResizeError] = useState<string | null>(null);
+  const [zoomLevel, setZoomLevel] = useState<CalendarZoom>("regular");
   const today = new Date();
+  const zoom = calendarZooms[zoomLevel];
+  const zoomKeys = Object.keys(calendarZooms) as CalendarZoom[];
+  const zoomIndex = zoomKeys.indexOf(zoomLevel);
+  const rowHeight = zoom.rowHeight;
+  const calendarHeight = (endHour - startHour) * rowHeight;
   const visibleDays =
     calendarMode === "day"
       ? [weekDays.find((day) => sameDay(day, today)) ?? today]
@@ -352,20 +362,38 @@ function CalendarReview({
           <h2 className="text-lg font-semibold">Calendar</h2>
           <p className="mt-1 text-sm text-[var(--muted)]">Click a block to inspect it. Drag the top or bottom edge to resize.</p>
         </div>
-        <div className="grid w-full max-w-[220px] grid-cols-2 border border-[var(--line-strong)] bg-[var(--surface-inset)]">
-          {(["week", "day"] as CalendarMode[]).map((mode) => (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="swiss-view-switch" aria-label="Calendar view">
+            {(["week", "day"] as CalendarMode[]).map((mode) => (
+              <button
+                key={mode}
+                className={calendarMode === mode ? "is-selected" : ""}
+                type="button"
+                onClick={() => setCalendarMode(mode)}
+              >
+                {mode === "week" ? "Week" : "Day"}
+              </button>
+            ))}
+          </span>
+          <span className="swiss-zoom-control" aria-label="Calendar zoom">
             <button
-              key={mode}
-              className={[
-                "focus-ring px-3 py-2 text-sm capitalize",
-                calendarMode === mode ? "bg-[var(--accent)] text-[var(--on-accent)]" : "hover:text-[var(--accent)]"
-              ].join(" ")}
               type="button"
-              onClick={() => setCalendarMode(mode)}
+              disabled={zoomIndex === 0}
+              aria-label="Zoom calendar out"
+              onClick={() => setZoomLevel(zoomKeys[Math.max(0, zoomIndex - 1)])}
             >
-              {mode}
+              -
             </button>
-          ))}
+            <b>{zoom.label}</b>
+            <button
+              type="button"
+              disabled={zoomIndex === zoomKeys.length - 1}
+              aria-label="Zoom calendar in"
+              onClick={() => setZoomLevel(zoomKeys[Math.min(zoomKeys.length - 1, zoomIndex + 1)])}
+            >
+              +
+            </button>
+          </span>
         </div>
       </div>
       <div className="overflow-x-auto">
@@ -412,7 +440,7 @@ function CalendarReview({
               className="relative border-r border-[var(--line)] last:border-r-0"
               style={{
                 height: calendarHeight,
-                backgroundImage: "repeating-linear-gradient(to bottom, transparent 0, transparent 57px, var(--line) 58px)"
+                backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${Math.max(0, rowHeight - 1)}px, var(--line) ${rowHeight}px)`
               }}
             >
               {entries
@@ -430,7 +458,7 @@ function CalendarReview({
                         entry.stoppedAt ? "" : "is-running"
                       ].join(" ")}
                       style={{
-                        ...calendarBlockStyle(entry, activeDraft),
+                        ...calendarBlockStyle(entry, activeDraft, rowHeight, calendarHeight),
                         backgroundColor: timeEntryAccentColor(entry),
                         borderColor: "color-mix(in srgb, var(--foreground) 28%, transparent)",
                         color: "var(--on-pastel)"
@@ -718,7 +746,12 @@ function DateField({
   );
 }
 
-function calendarBlockStyle(entry: TimeEntryRow, draft: CalendarResizeDraft | null = null) {
+function calendarBlockStyle(
+  entry: TimeEntryRow,
+  draft: CalendarResizeDraft | null,
+  rowHeight: number,
+  calendarHeight: number
+) {
   const start = new Date(draft?.startedAt ?? entry.startedAt);
   const stoppedAt = draft?.stoppedAt
     ? new Date(draft.stoppedAt)

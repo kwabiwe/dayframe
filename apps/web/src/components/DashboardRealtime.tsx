@@ -168,7 +168,9 @@ export function CurrentTimerPanel({
   const [isEditingStartedAt, setIsEditingStartedAt] = useState(false);
   const [startedAtDraft, setStartedAtDraft] = useState(() => timeInputValue(data.activeEntry?.startedAt));
   const [startEditError, setStartEditError] = useState<string | null>(null);
+  const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const activeDetailsSyncRef = useRef("");
+  const categoryMenuRef = useRef<HTMLDivElement | null>(null);
   const active = data.activeEntry;
   const [now, setNow] = useState(() =>
     active ? new Date(active.startedAt).getTime() + active.durationSeconds * 1000 : 0
@@ -195,6 +197,27 @@ export function CurrentTimerPanel({
     const interval = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(interval);
   }, [active?.id]);
+
+  useEffect(() => {
+    if (!categoryMenuOpen) return undefined;
+
+    function closeOnOutsideClick(event: MouseEvent) {
+      if (!categoryMenuRef.current?.contains(event.target as Node)) {
+        setCategoryMenuOpen(false);
+      }
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setCategoryMenuOpen(false);
+    }
+
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [categoryMenuOpen]);
 
   useEffect(() => {
     if (!active) {
@@ -307,10 +330,16 @@ export function CurrentTimerPanel({
 
   async function startQuickAction(action: LearnedQuickAction) {
     setCategoryId(action.categoryId ?? "");
+    setCategoryMenuOpen(false);
     await timerAction("start", {
       categoryId: action.categoryId,
       description: description.trim() || null
     });
+  }
+
+  function chooseCategory(nextCategoryId: string) {
+    setCategoryId(nextCategoryId);
+    setCategoryMenuOpen(false);
   }
 
   async function saveActiveStartTime(event: FormEvent<HTMLFormElement>) {
@@ -389,29 +418,69 @@ export function CurrentTimerPanel({
           />
         </label>
         <div className="swiss-entrybar-actions">
-          <label className="swiss-category-field">
+          <div className="swiss-category-field" ref={categoryMenuRef}>
             <span>Category</span>
-            <span className="swiss-category-trigger">
-              <span
-                className="swiss-focus-dot"
-                style={{
-                  backgroundColor: paletteColorFor(selectedCategory?.color, selectedCategory?.name ?? "Focus")
-                }}
-              />
-              <select
-                value={categoryId}
-                onChange={(event) => setCategoryId(event.target.value)}
-                aria-label="Choose category"
-              >
-                <option value="">Uncategorized</option>
-                {data.categories.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.name}
-                  </option>
-                ))}
-              </select>
-            </span>
-          </label>
+            <button
+              className="swiss-category-trigger"
+              type="button"
+              aria-haspopup="listbox"
+              aria-expanded={categoryMenuOpen}
+              aria-label="Choose category"
+              onClick={() => setCategoryMenuOpen((current) => !current)}
+            >
+              <span className="swiss-category-trigger-value">
+                <span
+                  className={["swiss-focus-dot", selectedCategory ? "" : "is-muted"].filter(Boolean).join(" ")}
+                  style={{
+                    backgroundColor: selectedCategory
+                      ? paletteColorFor(selectedCategory.color, selectedCategory.name)
+                      : "transparent"
+                  }}
+                />
+                <span>{selectedCategory?.name ?? "Uncategorized"}</span>
+              </span>
+              <ChevronDown size={16} aria-hidden="true" />
+            </button>
+            {categoryMenuOpen ? (
+              <div className="swiss-category-menu" role="listbox" aria-label="Categories">
+                <button
+                  className={["swiss-category-option", "is-muted", !categoryId ? "is-selected" : ""]
+                    .filter(Boolean)
+                    .join(" ")}
+                  type="button"
+                  role="option"
+                  aria-selected={!categoryId}
+                  onClick={() => chooseCategory("")}
+                >
+                  <span className="swiss-focus-dot is-muted" />
+                  <span>Uncategorized</span>
+                  {!categoryId ? <CheckCircle2 size={14} aria-hidden="true" /> : null}
+                </button>
+                {data.categories.map((category) => {
+                  const isSelected = category.id === categoryId;
+                  return (
+                    <button
+                      key={category.id}
+                      className={["swiss-category-option", isSelected ? "is-selected" : ""]
+                        .filter(Boolean)
+                        .join(" ")}
+                      type="button"
+                      role="option"
+                      aria-selected={isSelected}
+                      onClick={() => chooseCategory(category.id)}
+                    >
+                      <span
+                        className="swiss-focus-dot"
+                        style={{ backgroundColor: paletteColorFor(category.color, category.name) }}
+                      />
+                      <span>{category.name}</span>
+                      {isSelected ? <CheckCircle2 size={14} aria-hidden="true" /> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
           <span className="swiss-entrybar-clock">{formatClockDuration(durationSeconds)}</span>
           <button
             className={["swiss-command-play", active ? "is-active" : ""].filter(Boolean).join(" ")}
