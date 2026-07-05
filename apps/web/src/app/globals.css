@@ -703,12 +703,98 @@ textarea:focus-visible {
 }
 
 .swiss-active-timer-meta {
+  display: grid;
+  gap: 6px;
   margin: 0;
   border-top: 1px solid var(--line);
   padding-top: 8px;
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
+}
+
+.swiss-active-start-edit {
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
+  width: max-content;
+  max-width: 100%;
+  align-items: center;
+  justify-content: start;
+  gap: 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  padding: 2px 4px;
+  font: inherit;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.swiss-active-start-edit svg {
+  flex: 0 0 auto;
+}
+
+.swiss-active-start-edit:hover,
+.swiss-active-start-edit:focus-visible {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--timer-accent, var(--accent)) 10%, transparent);
+}
+
+.swiss-start-time-editor {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.swiss-start-time-editor label {
+  display: grid;
+  gap: 4px;
+}
+
+.swiss-start-time-editor label span {
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.swiss-start-time-editor input {
+  min-height: 34px;
+  border: 1px solid color-mix(in srgb, var(--timer-accent, var(--accent)) 54%, var(--line));
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--foreground);
+  padding: 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.swiss-start-time-editor button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--foreground);
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.swiss-start-time-editor .swiss-start-time-save {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.swiss-start-time-error {
+  color: #b42318;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .swiss-note-row {

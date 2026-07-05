@@ -165,6 +165,9 @@ export function CurrentTimerPanel({
   const [timerError, setTimerError] = useState<string | null>(null);
   const [description, setDescription] = useState(data.activeEntry?.description ?? "");
   const [categoryId, setCategoryId] = useState(data.activeEntry?.categoryId ?? "");
+  const [isEditingStartedAt, setIsEditingStartedAt] = useState(false);
+  const [startedAtDraft, setStartedAtDraft] = useState(() => timeInputValue(data.activeEntry?.startedAt));
+  const [startEditError, setStartEditError] = useState<string | null>(null);
   const activeDetailsSyncRef = useRef("");
   const active = data.activeEntry;
   const [now, setNow] = useState(() =>
@@ -225,9 +228,7 @@ export function CurrentTimerPanel({
         body: JSON.stringify({
           categoryId: nextCategoryId,
           placeId: active.placeId,
-          description: nextDescription,
-          startedAt: active.startedAt,
-          stoppedAt: active.stoppedAt
+          description: nextDescription
         })
       });
     }, 650);
@@ -312,6 +313,66 @@ export function CurrentTimerPanel({
     });
   }
 
+  async function saveActiveStartTime(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!active) return;
+
+    const nextStart = dateWithTime(active.startedAt, startedAtDraft);
+    if (!nextStart) {
+      setStartEditError("Use a valid time, for example 17:15.");
+      return;
+    }
+
+    const nowDate = new Date();
+    if (nextStart.getTime() > nowDate.getTime()) {
+      setStartEditError("Start time cannot be in the future.");
+      return;
+    }
+
+    const nextCategoryId = categoryId || null;
+    const nextDescription = description.trim() || null;
+
+    setIsBusy(true);
+    setTimerError(null);
+    setStartEditError(null);
+    try {
+      const response = await fetch(`/api/time-entries/${active.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          categoryId: nextCategoryId,
+          placeId: active.placeId,
+          description: nextDescription,
+          startedAt: nextStart.toISOString(),
+          stoppedAt: active.stoppedAt
+        })
+      });
+      if (!response.ok) {
+        let errorMessage = `Unable to update start time: ${response.status}`;
+        try {
+          const payload = (await response.json()) as { error?: string };
+          errorMessage = payload.error ?? errorMessage;
+        } catch {
+          // Some runtime failures do not return a JSON body.
+        }
+        throw new Error(errorMessage);
+      }
+
+      activeDetailsSyncRef.current = JSON.stringify([
+        active.id,
+        nextCategoryId,
+        nextDescription
+      ]);
+      setNow(Date.now());
+      setIsEditingStartedAt(false);
+      await refresh();
+    } catch (error) {
+      setStartEditError(error instanceof Error ? error.message : "Unable to update the start time.");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
   return (
     <section
       className="swiss-panel swiss-current-timer"
@@ -370,9 +431,65 @@ export function CurrentTimerPanel({
           </button>
         </div>
         {active ? (
-          <p className="swiss-active-timer-meta">
-            Running since {formatTime(active.startedAt)}
-          </p>
+          <div className="swiss-active-timer-meta">
+            {isEditingStartedAt ? (
+              <form className="swiss-start-time-editor" onSubmit={saveActiveStartTime}>
+                <label>
+                  <span>Running since</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]{2}:[0-9]{2}"
+                    placeholder="17:15"
+                    value={startedAtDraft}
+                    onChange={(event) => setStartedAtDraft(event.target.value)}
+                    aria-label="Active timer start time"
+                  />
+                </label>
+                <button
+                  className="swiss-start-time-save"
+                  type="submit"
+                  disabled={isBusy}
+                  aria-label="Save active timer start time"
+                >
+                  <CheckCircle2 size={13} />
+                  Save
+                </button>
+                <button
+                  className="swiss-start-time-cancel"
+                  type="button"
+                  disabled={isBusy}
+                  aria-label="Cancel editing active timer start time"
+                  onClick={() => {
+                    setStartedAtDraft(timeInputValue(active.startedAt));
+                    setIsEditingStartedAt(false);
+                    setStartEditError(null);
+                  }}
+                >
+                  Cancel
+                </button>
+              </form>
+            ) : (
+              <button
+                className="swiss-active-start-edit"
+                type="button"
+                aria-label={`Edit active timer start time. Running since ${formatTime(active.startedAt)}`}
+                onClick={() => {
+                  setStartedAtDraft(timeInputValue(active.startedAt));
+                  setIsEditingStartedAt(true);
+                  setStartEditError(null);
+                }}
+              >
+                <span>Running since {formatTime(active.startedAt)}</span>
+                <Edit3 size={13} />
+              </button>
+            )}
+            {startEditError ? (
+              <span className="swiss-start-time-error" role="alert">
+                {startEditError}
+              </span>
+            ) : null}
+          </div>
         ) : null}
       </div>
 
@@ -1497,6 +1614,32 @@ function isoForDateMinutes(dateValue: string, minutes: number) {
   const date = parseDateKey(dateValue);
   date.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
   return date.toISOString();
+}
+
+function timeInputValue(value?: string | Date | null) {
+  const date = value ? new Date(value) : new Date();
+  return `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
+}
+
+function dateWithTime(dateValue: string | Date, timeValue: string) {
+  const [hoursText, minutesText] = timeValue.split(":");
+  const hours = Number(hoursText);
+  const minutes = Number(minutesText);
+  if (
+    !Number.isInteger(hours) ||
+    !Number.isInteger(minutes) ||
+    hours < 0 ||
+    hours > 23 ||
+    minutes < 0 ||
+    minutes > 59
+  ) {
+    return null;
+  }
+
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setHours(hours, minutes, 0, 0);
+  return date;
 }
 
 function projectedEntryEnd(entry: TimeEntryRow) {
