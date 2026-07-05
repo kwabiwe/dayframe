@@ -185,7 +185,10 @@ export default function SettingsScreen() {
     const nextPinned = !category.isPinned;
     patchCategory(category.id, { isPinned: nextPinned });
     try {
-      await updateCategory(category.id, { isPinned: nextPinned });
+      const result = await updateCategory(category.id, { isPinned: nextPinned });
+      if (result.category.isPinned !== nextPinned) {
+        throw new Error("Category pin state was not saved. Check that the Dayframe API has the category pin migration.");
+      }
       await load({ silent: true });
     } catch (error) {
       patchCategory(category.id, { isPinned: category.isPinned });
@@ -197,24 +200,24 @@ export default function SettingsScreen() {
     }
   }
 
-  function confirmArchiveCategory(category: Category) {
+  function confirmDeleteCategory(category: Category) {
     Alert.alert(
-      "Archive category",
-      `Archive ${category.name}? Existing entries keep their category history.`,
+      "Delete category",
+      `Delete ${category.name}? Existing time entries keep their history.`,
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Archive",
+          text: "Delete",
           style: "destructive",
           onPress: () => {
-            void archiveSelectedCategory(category);
+            void deleteSelectedCategory(category);
           }
         }
       ]
     );
   }
 
-  async function archiveSelectedCategory(category: Category) {
+  async function deleteSelectedCategory(category: Category) {
     try {
       await archiveCategory(category.id);
       if (editingCategoryId === category.id) cancelEditCategory();
@@ -224,7 +227,7 @@ export default function SettingsScreen() {
         router.replace("/");
         return;
       }
-      Alert.alert("Categories", error instanceof Error ? error.message : "Unable to archive category.");
+      Alert.alert("Categories", error instanceof Error ? error.message : "Unable to delete category.");
     }
   }
 
@@ -442,10 +445,10 @@ export default function SettingsScreen() {
                         <PencilGlyph color={theme.accent} />
                       </Pressable>
                       <Pressable
-                        accessibilityLabel={`Archive ${category.name}`}
+                        accessibilityLabel={`Delete ${category.name}`}
                         accessibilityRole="button"
                         style={pressable(styles.categoryIconButton, styles.buttonPressed)}
-                        onPress={() => confirmArchiveCategory(category)}
+                        onPress={() => confirmDeleteCategory(category)}
                       >
                         <ArchiveGlyph color={theme.danger} />
                       </Pressable>
@@ -510,6 +513,25 @@ export default function SettingsScreen() {
 
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Account</Text>
+            {data?.user || data?.workspace ? (
+              <View style={styles.accountList}>
+                {data.user ? (
+                  <View style={styles.accountRow}>
+                    <Text style={styles.label}>Signed in as</Text>
+                    <Text style={styles.accountValue} numberOfLines={1}>
+                      {data.user.name || data.user.email}
+                    </Text>
+                    <Text style={styles.accountMeta} numberOfLines={1}>{data.user.email}</Text>
+                  </View>
+                ) : null}
+                {data.workspace ? (
+                  <View style={styles.accountRow}>
+                    <Text style={styles.label}>Workspace</Text>
+                    <Text style={styles.accountValue} numberOfLines={1}>{data.workspace.name}</Text>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
             <View style={styles.buttonRow}>
               <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={signOut}>
                 <Text style={styles.secondaryButtonText}>Log out</Text>

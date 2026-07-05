@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { authErrorResponse } from "@/lib/api-errors";
+import { isMissingRequiredColumnError } from "@/lib/db";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import { getBootstrapData } from "@/lib/queries";
 
@@ -14,6 +15,9 @@ export async function GET(request: Request) {
   } catch (error) {
     const response = authErrorResponse(error);
     if (response) return response;
+    if (isMissingRequiredColumnError(error)) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
     throw error;
   }
 }

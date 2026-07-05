@@ -31,6 +31,36 @@ export function isUndefinedColumnError(error: unknown, columnName?: string) {
   return columnName ? candidate.message?.includes(columnName) === true : true;
 }
 
+export class MissingRequiredColumnError extends Error {
+  tableName: string;
+  columnName: string;
+  migrationHint: string;
+
+  constructor(tableName: string, columnName: string, migrationHint: string, cause?: unknown) {
+    super(`Database schema is missing ${tableName}.${columnName}. Run ${migrationHint} before using this feature.`);
+    this.name = "MissingRequiredColumnError";
+    this.tableName = tableName;
+    this.columnName = columnName;
+    this.migrationHint = migrationHint;
+    if (cause) {
+      (this as Error & { cause?: unknown }).cause = cause;
+    }
+  }
+}
+
+export function missingRequiredColumnError(
+  tableName: string,
+  columnName: string,
+  migrationHint: string,
+  cause?: unknown
+) {
+  return new MissingRequiredColumnError(tableName, columnName, migrationHint, cause);
+}
+
+export function isMissingRequiredColumnError(error: unknown): error is MissingRequiredColumnError {
+  return error instanceof MissingRequiredColumnError;
+}
+
 type Queryable = Pick<pg.Pool | pg.PoolClient, "query">;
 
 export async function hasTableColumn(

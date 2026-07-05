@@ -579,6 +579,29 @@ function createStyles(theme: MobileTheme) {
       backgroundColor: theme.border,
       marginVertical: 8
     },
+    accountList: {
+      gap: 8
+    },
+    accountRow: {
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 12,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      gap: 2
+    },
+    accountValue: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "800"
+    },
+    accountMeta: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12
+    },
     buttonRow: {
       flexDirection: "row",
       flexWrap: "wrap",

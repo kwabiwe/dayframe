@@ -2,20 +2,21 @@ import { NextResponse } from "next/server";
 import { ZodError, z } from "zod";
 import { archiveCategory, createCategory, updateCategory } from "@/lib/event-service";
 import { authErrorResponse } from "@/lib/api-errors";
+import { isMissingRequiredColumnError } from "@/lib/db";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import { getBootstrapData } from "@/lib/queries";
 
 const createCategorySchema = z.object({
   name: z.string().trim().min(1, "Category name is required."),
   color: z.string().trim().optional(),
-  isPinned: z.coerce.boolean().optional()
+  isPinned: z.boolean().optional()
 });
 
 const updateCategorySchema = z.object({
   id: z.string().uuid(),
   name: z.string().trim().min(1).optional(),
   color: z.string().trim().optional(),
-  isPinned: z.coerce.boolean().optional()
+  isPinned: z.boolean().optional()
 });
 
 export async function GET(request: Request) {
@@ -26,6 +27,8 @@ export async function GET(request: Request) {
   } catch (error) {
     const response = authErrorResponse(error);
     if (response) return response;
+    const schemaResponse = schemaErrorResponse(error);
+    if (schemaResponse) return schemaResponse;
     throw error;
   }
 }
@@ -39,6 +42,8 @@ export async function POST(request: Request) {
   } catch (error) {
     const response = authErrorResponse(error);
     if (response) return response;
+    const schemaResponse = schemaErrorResponse(error);
+    if (schemaResponse) return schemaResponse;
     if (error instanceof ZodError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
@@ -56,6 +61,8 @@ export async function PATCH(request: Request) {
   } catch (error) {
     const response = authErrorResponse(error);
     if (response) return response;
+    const schemaResponse = schemaErrorResponse(error);
+    if (schemaResponse) return schemaResponse;
     if (error instanceof ZodError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
@@ -73,9 +80,16 @@ export async function DELETE(request: Request) {
   } catch (error) {
     const response = authErrorResponse(error);
     if (response) return response;
+    const schemaResponse = schemaErrorResponse(error);
+    if (schemaResponse) return schemaResponse;
     if (error instanceof ZodError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
     throw error;
   }
+}
+
+function schemaErrorResponse(error: unknown) {
+  if (!isMissingRequiredColumnError(error)) return null;
+  return NextResponse.json({ error: error.message }, { status: 500 });
 }

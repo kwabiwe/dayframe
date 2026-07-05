@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { DAYFRAME_PALETTE, paletteColorFor, paletteKeyFor } from "@dayframe/shared";
-import { Archive, Check, Pin, PinOff, Plus, Save } from "lucide-react";
+import { Check, Pin, PinOff, Plus, Save, Trash2 } from "lucide-react";
 import type { CategoryRow } from "@/lib/queries";
 
 export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
@@ -60,7 +60,7 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
   }
 
   async function archiveCategory(category: CategoryRow) {
-    if (!window.confirm(`Archive ${category.name}? Existing time entries will keep their history.`)) return;
+    if (!window.confirm(`Delete ${category.name}? Existing time entries keep their history.`)) return;
     await fetch(`/api/categories?id=${category.id}`, { method: "DELETE" });
     refresh();
   }
@@ -210,8 +210,8 @@ function CategorySection({
                   Edit
                 </button>
                 <button type="button" className="industrial-button-danger focus-ring text-sm" onClick={() => onArchive(category)}>
-                  <Archive size={15} />
-                  Archive
+                  <Trash2 size={15} />
+                  Delete
                 </button>
               </div>
             </div>
