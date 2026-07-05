@@ -29,6 +29,11 @@ import {
 } from "lucide-react";
 import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
 import {
+  timeEntryAccentColor,
+  timeEntryContextLabel,
+  timeEntryTitle
+} from "@/lib/display";
+import {
   dateTimeLocal,
   formatClockDuration,
   formatDuration,
@@ -36,6 +41,11 @@ import {
   formatSourceLabel,
   formatTime
 } from "@/lib/format";
+import {
+  TIMER_FOCUS_EVENT,
+  TIMER_SHORTCUT_EVENT,
+  type TimerShortcutEventDetail
+} from "@/lib/timer-shortcut";
 
 const dayStartHour = 7;
 const dayEndHour = 21;
@@ -160,7 +170,13 @@ export function CurrentTimerPanel({
   const [timerError, setTimerError] = useState<string | null>(null);
   const [description, setDescription] = useState(data.activeEntry?.description ?? "");
   const [categoryId, setCategoryId] = useState(data.activeEntry?.categoryId ?? "");
+  const [isEditingStartedAt, setIsEditingStartedAt] = useState(false);
+  const [startedAtDraft, setStartedAtDraft] = useState(() => timeInputValue(data.activeEntry?.startedAt));
+  const [startEditError, setStartEditError] = useState<string | null>(null);
+  const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const activeDetailsSyncRef = useRef("");
+  const categoryMenuRef = useRef<HTMLDivElement | null>(null);
+  const descriptionInputRef = useRef<HTMLInputElement | null>(null);
   const active = data.activeEntry;
   const [now, setNow] = useState(() =>
     active ? new Date(active.startedAt).getTime() + active.durationSeconds * 1000 : 0
@@ -173,12 +189,41 @@ export function CurrentTimerPanel({
     ? Math.max(active.durationSeconds, Math.floor((effectiveNow - activeStartedAtMs) / 1000))
     : 0;
   const quickActions = useMemo(() => buildLearnedQuickActions(data), [data]);
+  const activeAccent = active
+    ? timeEntryAccentColor({
+        ...active,
+        categoryName: categoryId ? selectedCategory?.name ?? active.categoryName : active.categoryName,
+        categoryColor: categoryId ? selectedCategory?.color ?? active.categoryColor : active.categoryColor,
+        description: description.trim() || active.description
+      })
+    : undefined;
 
   useEffect(() => {
     if (!active?.id) return undefined;
     const interval = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(interval);
   }, [active?.id]);
+
+  useEffect(() => {
+    if (!categoryMenuOpen) return undefined;
+
+    function closeOnOutsideClick(event: MouseEvent) {
+      if (!categoryMenuRef.current?.contains(event.target as Node)) {
+        setCategoryMenuOpen(false);
+      }
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setCategoryMenuOpen(false);
+    }
+
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [categoryMenuOpen]);
 
   useEffect(() => {
     if (!active) {
@@ -212,9 +257,7 @@ export function CurrentTimerPanel({
         body: JSON.stringify({
           categoryId: nextCategoryId,
           placeId: active.placeId,
-          description: nextDescription,
-          startedAt: active.startedAt,
-          stoppedAt: active.stoppedAt
+          description: nextDescription
         })
       });
     }, 650);
@@ -222,17 +265,17 @@ export function CurrentTimerPanel({
     return () => window.clearTimeout(syncHandle);
   }, [active, categoryId, description]);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     const response = await fetch(`/api/bootstrap?date=${data.dateRange.selectedDate}`, {
       cache: "no-store"
     });
     if (response.ok) onSynced((await response.json()) as BootstrapData);
-  }
+  }, [data.dateRange.selectedDate, onSynced]);
 
-  async function timerAction(
+  const timerAction = useCallback(async (
     mode: "start" | "stop",
     override?: { categoryId?: string | null; description?: string | null }
-  ) {
+  ) => {
     const nextCategoryId =
       override && "categoryId" in override
         ? (override.categoryId ?? undefined)
@@ -289,75 +332,273 @@ export function CurrentTimerPanel({
     } finally {
       setIsBusy(false);
     }
-  }
+  }, [active, categoryId, description, refresh]);
 
   async function startQuickAction(action: LearnedQuickAction) {
     setCategoryId(action.categoryId ?? "");
+    setCategoryMenuOpen(false);
     await timerAction("start", {
       categoryId: action.categoryId,
       description: description.trim() || null
     });
   }
 
+  function chooseCategory(nextCategoryId: string) {
+    setCategoryId(nextCategoryId);
+    setCategoryMenuOpen(false);
+  }
+
+  useEffect(() => {
+    function focusTimerInput() {
+      descriptionInputRef.current?.focus();
+    }
+
+    function toggleFromShortcut(event: Event) {
+      const shortcutEvent = event as CustomEvent<TimerShortcutEventDetail>;
+      shortcutEvent.detail.handled = true;
+      if (isBusy) return;
+
+      if (active) {
+        shortcutEvent.detail.action = timerAction("stop");
+        return;
+      }
+
+      if (categoryId || description.trim()) {
+        shortcutEvent.detail.action = timerAction("start");
+        return;
+      }
+
+      focusTimerInput();
+    }
+
+    window.addEventListener(TIMER_FOCUS_EVENT, focusTimerInput);
+    window.addEventListener(TIMER_SHORTCUT_EVENT, toggleFromShortcut);
+    return () => {
+      window.removeEventListener(TIMER_FOCUS_EVENT, focusTimerInput);
+      window.removeEventListener(TIMER_SHORTCUT_EVENT, toggleFromShortcut);
+    };
+  }, [active, categoryId, description, isBusy, timerAction]);
+
+  async function saveActiveStartTime(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!active) return;
+
+    const nextStart = dateWithTime(active.startedAt, startedAtDraft);
+    if (!nextStart) {
+      setStartEditError("Use a valid time, for example 17:15.");
+      return;
+    }
+
+    const nowDate = new Date();
+    if (nextStart.getTime() > nowDate.getTime()) {
+      setStartEditError("Start time cannot be in the future.");
+      return;
+    }
+
+    const nextCategoryId = categoryId || null;
+    const nextDescription = description.trim() || null;
+
+    setIsBusy(true);
+    setTimerError(null);
+    setStartEditError(null);
+    try {
+      const response = await fetch(`/api/time-entries/${active.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          categoryId: nextCategoryId,
+          placeId: active.placeId,
+          description: nextDescription,
+          startedAt: nextStart.toISOString(),
+          stoppedAt: active.stoppedAt
+        })
+      });
+      if (!response.ok) {
+        let errorMessage = `Unable to update start time: ${response.status}`;
+        try {
+          const payload = (await response.json()) as { error?: string };
+          errorMessage = payload.error ?? errorMessage;
+        } catch {
+          // Some runtime failures do not return a JSON body.
+        }
+        throw new Error(errorMessage);
+      }
+
+      activeDetailsSyncRef.current = JSON.stringify([
+        active.id,
+        nextCategoryId,
+        nextDescription
+      ]);
+      setNow(Date.now());
+      setIsEditingStartedAt(false);
+      await refresh();
+    } catch (error) {
+      setStartEditError(error instanceof Error ? error.message : "Unable to update the start time.");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
   return (
-    <section className="swiss-panel swiss-current-timer">
+    <section
+      className="swiss-panel swiss-current-timer"
+      style={activeAccent ? ({ "--timer-accent": activeAccent } as CSSProperties) : undefined}
+    >
       <div className="swiss-timer-entrybar">
         <label className="swiss-work-input">
-          <span>What are you working on?</span>
+          <span>Task description</span>
           <input
+            ref={descriptionInputRef}
             value={description}
             onChange={(event) => setDescription(event.target.value)}
             placeholder="Describe the task"
-            aria-label="What are you working on?"
+            aria-label="Task description"
           />
         </label>
         <div className="swiss-entrybar-actions">
-          <label className="swiss-category-trigger">
-            <span
-              className="swiss-focus-dot"
-              style={{
-                backgroundColor: paletteColorFor(selectedCategory?.color, selectedCategory?.name ?? "Focus")
-              }}
-            />
-            <select
-              value={categoryId}
-              onChange={(event) => setCategoryId(event.target.value)}
+          <div className="swiss-category-field" ref={categoryMenuRef}>
+            <span>Category</span>
+            <button
+              className="swiss-category-trigger"
+              type="button"
+              aria-haspopup="listbox"
+              aria-expanded={categoryMenuOpen}
               aria-label="Choose category"
+              onClick={() => setCategoryMenuOpen((current) => !current)}
             >
-              <option value="">No category</option>
-              {data.categories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-            </select>
-          </label>
+              <span className="swiss-category-trigger-value">
+                <span
+                  className={["swiss-focus-dot", selectedCategory ? "" : "is-muted"].filter(Boolean).join(" ")}
+                  style={{
+                    backgroundColor: selectedCategory
+                      ? paletteColorFor(selectedCategory.color, selectedCategory.name)
+                      : "transparent"
+                  }}
+                />
+                <span>{selectedCategory?.name ?? "Uncategorized"}</span>
+              </span>
+              <ChevronDown size={16} aria-hidden="true" />
+            </button>
+            {categoryMenuOpen ? (
+              <div className="swiss-category-menu" role="listbox" aria-label="Categories">
+                <button
+                  className={["swiss-category-option", "is-muted", !categoryId ? "is-selected" : ""]
+                    .filter(Boolean)
+                    .join(" ")}
+                  type="button"
+                  role="option"
+                  aria-selected={!categoryId}
+                  onClick={() => chooseCategory("")}
+                >
+                  <span className="swiss-focus-dot is-muted" />
+                  <span>Uncategorized</span>
+                  {!categoryId ? <CheckCircle2 size={14} aria-hidden="true" /> : null}
+                </button>
+                {data.categories.map((category) => {
+                  const isSelected = category.id === categoryId;
+                  return (
+                    <button
+                      key={category.id}
+                      className={["swiss-category-option", isSelected ? "is-selected" : ""]
+                        .filter(Boolean)
+                        .join(" ")}
+                      type="button"
+                      role="option"
+                      aria-selected={isSelected}
+                      onClick={() => chooseCategory(category.id)}
+                    >
+                      <span
+                        className="swiss-focus-dot"
+                        style={{ backgroundColor: paletteColorFor(category.color, category.name) }}
+                      />
+                      <span>{category.name}</span>
+                      {isSelected ? <CheckCircle2 size={14} aria-hidden="true" /> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
           <span className="swiss-entrybar-clock">{formatClockDuration(durationSeconds)}</span>
           <button
-            className="swiss-command-play"
+            className={["swiss-command-play", active ? "is-active" : ""].filter(Boolean).join(" ")}
             type="button"
             disabled={isBusy}
             aria-label={active ? "Stop timer" : "Start timer"}
             onClick={() => timerAction(active ? "stop" : "start")}
           >
-            {active ? <Square size={16} fill="currentColor" /> : <Play size={24} fill="currentColor" strokeWidth={0} />}
+            {active ? (
+              <>
+                <Square size={15} fill="currentColor" />
+                <span>Stop</span>
+              </>
+            ) : (
+              <Play size={24} fill="currentColor" strokeWidth={0} />
+            )}
           </button>
         </div>
+        {active ? (
+          <div className="swiss-active-timer-meta">
+            {isEditingStartedAt ? (
+              <form className="swiss-start-time-editor" onSubmit={saveActiveStartTime}>
+                <label>
+                  <span>Running since</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]{2}:[0-9]{2}"
+                    placeholder="17:15"
+                    value={startedAtDraft}
+                    onChange={(event) => setStartedAtDraft(event.target.value)}
+                    aria-label="Active timer start time"
+                  />
+                </label>
+                <button
+                  className="swiss-start-time-save"
+                  type="submit"
+                  disabled={isBusy}
+                  aria-label="Save active timer start time"
+                >
+                  <CheckCircle2 size={13} />
+                  Save
+                </button>
+                <button
+                  className="swiss-start-time-cancel"
+                  type="button"
+                  disabled={isBusy}
+                  aria-label="Cancel editing active timer start time"
+                  onClick={() => {
+                    setStartedAtDraft(timeInputValue(active.startedAt));
+                    setIsEditingStartedAt(false);
+                    setStartEditError(null);
+                  }}
+                >
+                  Cancel
+                </button>
+              </form>
+            ) : (
+              <button
+                className="swiss-active-start-edit"
+                type="button"
+                aria-label={`Edit active timer start time. Running since ${formatTime(active.startedAt)}`}
+                onClick={() => {
+                  setStartedAtDraft(timeInputValue(active.startedAt));
+                  setIsEditingStartedAt(true);
+                  setStartEditError(null);
+                }}
+              >
+                <span>Running since {formatTime(active.startedAt)}</span>
+                <Edit3 size={13} />
+              </button>
+            )}
+            {startEditError ? (
+              <span className="swiss-start-time-error" role="alert">
+                {startEditError}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
       </div>
-
-      {active ? (
-        <div className="swiss-timer-actions">
-          <button
-            className="swiss-primary-action"
-            type="button"
-            disabled={isBusy}
-            onClick={() => timerAction("stop")}
-          >
-            <Square size={13} fill="currentColor" />
-            Stop
-          </button>
-        </div>
-      ) : null}
 
       {timerError ? <p className="swiss-inline-error">{timerError}</p> : null}
 
@@ -421,7 +662,7 @@ function buildLearnedQuickActions(data: BootstrapData): LearnedQuickAction[] {
   return [...pinned, ...learnedUnpinned, ...fallback].slice(0, 6).map((category) => ({
     categoryId: category.id,
     label: category.name,
-    detail: "Category",
+    detail: category.isPinned ? "Pinned" : null,
     color: paletteColorFor(category.color, category.name)
   }));
 }
@@ -1038,11 +1279,12 @@ function TimelineBlock({
     <article
       tabIndex={0}
       role="button"
-      aria-label={`Time block ${entry.description ?? entry.categoryName ?? "Untitled task"} ${formatDuration(durationSeconds)}`}
+      aria-label={`Time block ${timeEntryTitle(entry)} ${entry.stoppedAt ? "" : "Running "}${formatDuration(durationSeconds)}`}
       className={[
         "swiss-time-block",
         isResizing ? "is-resizing" : "",
         isSelected ? "is-selected" : "",
+        entry.stoppedAt ? "" : "is-running",
         viewMode === "week" ? "is-compact" : ""
       ]
         .filter(Boolean)
@@ -1067,25 +1309,25 @@ function TimelineBlock({
           <button
             type="button"
             className="swiss-resize-handle top"
-            aria-label={`Resize start of ${entry.description ?? entry.categoryName ?? "time block"}`}
+            aria-label={`Resize start of ${timeEntryTitle(entry)}`}
             onDoubleClick={onEdit}
             onPointerDown={(event) => onResizeStart(entry, "start", event)}
           />
           <button
             type="button"
             className="swiss-resize-handle bottom"
-            aria-label={`Resize end of ${entry.description ?? entry.categoryName ?? "time block"}`}
+            aria-label={`Resize end of ${timeEntryTitle(entry)}`}
             onDoubleClick={onEdit}
             onPointerDown={(event) => onResizeStart(entry, "end", event)}
           />
         </>
       ) : null}
       <div>
-        <strong>{entry.description || entry.categoryName || "Untitled task"}</strong>
-        <span>{entry.categoryName ?? formatSourceLabel(entry.source)}</span>
+        <strong>{timeEntryTitle(entry)}</strong>
+        <span>{timeEntryContextLabel(entry)}</span>
       </div>
       <div>
-        <EntryIcon entry={entry} />
+        {entry.stoppedAt ? <EntryIcon entry={entry} /> : <em className="swiss-running-badge">Running</em>}
         <b>{formatDuration(durationSeconds)}</b>
       </div>
     </article>
@@ -1147,7 +1389,7 @@ function EditEntryDialog({
           <label>
             Category
             <select name="categoryId" defaultValue={entry.categoryId ?? ""}>
-              <option value="">No category</option>
+              <option value="">Uncategorized</option>
               {data.categories.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.name}
@@ -1186,8 +1428,8 @@ function EditEntryDialog({
             <button type="button" onClick={onClose}>
               Cancel
             </button>
-            <button className="swiss-primary-action" disabled={isBusy}>
-              Save changes
+            <button className="swiss-primary-action" type="submit" disabled={isBusy}>
+              Save
             </button>
           </div>
         </form>
@@ -1281,8 +1523,12 @@ function RecentActivityPanel({ data }: { data: BootstrapData }) {
             <div key={event.id} className="swiss-activity-row">
               <Icon size={22} />
               <span>
-                <strong>{event.categoryName ?? formatEventLabel(event.eventType)}</strong>
-                <small>{event.categoryName ?? event.placeName ?? formatSourceLabel(event.source)}</small>
+                <strong>{event.categoryName ?? event.placeName ?? formatEventLabel(event.eventType)}</strong>
+                <small>
+                  {[formatEventLabel(event.eventType), event.placeName, formatSourceLabel(event.source)]
+                    .filter((part, index, parts) => part && parts.indexOf(part) === index)
+                    .join(" · ")}
+                </small>
               </span>
               <time>{formatTime(event.occurredAt)}</time>
             </div>
@@ -1350,7 +1596,7 @@ function ManualEntryDialog({
           <label>
             Category
             <select name="categoryId" defaultValue="">
-              <option value="">No category</option>
+              <option value="">Uncategorized</option>
               {data.categories.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.name}
@@ -1396,38 +1642,10 @@ function ManualEntryDialog({
 }
 
 function pastelFor(entry: TimeEntryRow) {
-  const key = `${entry.categoryColor ?? ""}-${entry.categoryName ?? ""}`.toLowerCase();
-  if (key.includes("lime") || key.includes("green") || key.includes("gym") || key.includes("family")) {
-    return {
-      background: "var(--block-mint-bg)",
-      border: "var(--block-mint-border)",
-      text: "var(--block-text)"
-    };
-  }
-  if (key.includes("amber") || key.includes("admin") || key.includes("orange")) {
-    return {
-      background: "var(--block-sun-bg)",
-      border: "var(--block-sun-border)",
-      text: "var(--block-text)"
-    };
-  }
-  if (key.includes("violet") || key.includes("purple") || key.includes("town")) {
-    return {
-      background: "var(--block-lavender-bg)",
-      border: "var(--block-lavender-border)",
-      text: "var(--block-text)"
-    };
-  }
-  if (key.includes("coral") || key.includes("red")) {
-    return {
-      background: "var(--block-coral-bg)",
-      border: "var(--block-coral-border)",
-      text: "var(--block-text)"
-    };
-  }
+  const accent = timeEntryAccentColor(entry);
   return {
-    background: "var(--block-sky-bg)",
-    border: "var(--block-sky-border)",
+    background: `color-mix(in srgb, ${accent} 58%, var(--surface))`,
+    border: accent,
     text: "var(--block-text)"
   };
 }
@@ -1503,6 +1721,32 @@ function isoForDateMinutes(dateValue: string, minutes: number) {
   const date = parseDateKey(dateValue);
   date.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
   return date.toISOString();
+}
+
+function timeInputValue(value?: string | Date | null) {
+  const date = value ? new Date(value) : new Date();
+  return `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
+}
+
+function dateWithTime(dateValue: string | Date, timeValue: string) {
+  const [hoursText, minutesText] = timeValue.split(":");
+  const hours = Number(hoursText);
+  const minutes = Number(minutesText);
+  if (
+    !Number.isInteger(hours) ||
+    !Number.isInteger(minutes) ||
+    hours < 0 ||
+    hours > 23 ||
+    minutes < 0 ||
+    minutes > 59
+  ) {
+    return null;
+  }
+
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setHours(hours, minutes, 0, 0);
+  return date;
 }
 
 function projectedEntryEnd(entry: TimeEntryRow) {

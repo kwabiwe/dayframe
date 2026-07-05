@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { paletteColorFor } from "@dayframe/shared";
 import { Play, Square } from "lucide-react";
+import { timeEntryCategoryColor, timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
 import type { BootstrapData, CategoryRow, PlaceRow, TimeEntryRow } from "@/lib/queries";
 import { formatClockDuration, formatTime } from "@/lib/format";
 
@@ -146,7 +147,7 @@ export function TimerPanel({
           <h2 className="text-base font-semibold">Time entry</h2>
           <p className="text-xs text-[var(--muted)]">
             {activeEntry
-              ? `${activeEntry.description ?? activeEntry.categoryName ?? "Timer"} since ${formatTime(activeEntry.startedAt)}`
+              ? `${timeEntryTitle(activeEntry)} since ${formatTime(activeEntry.startedAt)}`
               : "No timer is running."}
           </p>
         </div>
@@ -170,7 +171,7 @@ export function TimerPanel({
             value={categoryId}
             onChange={(event) => updateDraft({ categoryId: event.target.value })}
           >
-            <option value="">No category</option>
+            <option value="">Uncategorized</option>
             {categories.map((category) => (
               <option key={category.id} value={category.id}>
                 {category.name}
@@ -236,15 +237,15 @@ export function TimerPanel({
             <button
               key={entry.id}
               className="focus-ring motion-row flex w-full items-center justify-between rounded-lg border border-[var(--line)] bg-[var(--surface-inset)] px-3 py-2 text-left text-sm hover:border-[var(--accent)] hover:text-[var(--accent)]"
-              style={{ borderLeftWidth: 4, borderLeftColor: paletteColorFor(entry.categoryColor, entry.categoryName ?? entry.id) }}
+              style={{ borderLeftWidth: 4, borderLeftColor: timeEntryCategoryColor(entry) }}
               type="button"
               disabled={isBusy}
               onClick={() => continueEntry(entry)}
             >
               <span>
-                <span className="block font-medium">{entry.description ?? entry.categoryName ?? "Untitled task"}</span>
+                <span className="block font-medium">{timeEntryTitle(entry)}</span>
                 <span className="block text-xs text-[var(--muted)]">
-                  {entry.categoryName ?? "No category"}
+                  {timeEntryCategoryLabel(entry)}
                 </span>
               </span>
               <Play size={15} fill="currentColor" strokeWidth={0} />

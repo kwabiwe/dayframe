@@ -675,41 +675,16 @@ function buildWeekSeries(entries: TimeEntryRow[], dateRange: DashboardDateRange)
 }
 
 export async function getReports(session: RequestSession = getDevSession()) {
-  const [byProject, byClient, byCategory, bySource, byPlace, byTag] = await Promise.all([
-    query<ReportRow>(
-      `select coalesce(p.id::text, 'unassigned') as id,
-              coalesce(p.name, 'Unassigned') as name,
-              p.color,
-              sum(extract(epoch from (coalesce(te.stopped_at, now()) - te.started_at)))::int as seconds
-       from time_entries te
-       left join projects p on p.id = te.project_id
-       where te.workspace_id = $1
-       group by coalesce(p.id::text, 'unassigned'), coalesce(p.name, 'Unassigned'), p.color
-       order by seconds desc`,
-      [session.workspaceId]
-    ),
+  const [byCategory, bySource, byPlace] = await Promise.all([
     query<ReportRow>(
       `select coalesce(c.id::text, 'unassigned') as id,
-              coalesce(c.name, 'Unassigned') as name,
-              c.color,
-              sum(extract(epoch from (coalesce(te.stopped_at, now()) - te.started_at)))::int as seconds
-       from time_entries te
-       left join projects p on p.id = te.project_id
-       left join clients c on c.id = p.client_id
-       where te.workspace_id = $1
-       group by coalesce(c.id::text, 'unassigned'), coalesce(c.name, 'Unassigned'), c.color
-       order by seconds desc`,
-      [session.workspaceId]
-    ),
-    query<ReportRow>(
-      `select coalesce(c.id::text, 'unassigned') as id,
-              coalesce(c.name, 'Unassigned') as name,
+              coalesce(c.name, 'Uncategorized') as name,
               c.color,
               sum(extract(epoch from (coalesce(te.stopped_at, now()) - te.started_at)))::int as seconds
        from time_entries te
        left join categories c on c.id = te.category_id
        where te.workspace_id = $1
-       group by coalesce(c.id::text, 'unassigned'), coalesce(c.name, 'Unassigned'), c.color
+       group by coalesce(c.id::text, 'unassigned'), coalesce(c.name, 'Uncategorized'), c.color
        order by seconds desc`,
       [session.workspaceId]
     ),
@@ -735,28 +710,12 @@ export async function getReports(session: RequestSession = getDevSession()) {
        group by coalesce(pl.id::text, 'no-place'), coalesce(pl.name, 'No place')
        order by seconds desc`,
       [session.workspaceId]
-    ),
-    query<ReportRow>(
-      `select t.id::text as id,
-              t.name,
-              t.color,
-              sum(extract(epoch from (coalesce(te.stopped_at, now()) - te.started_at)))::int as seconds
-       from time_entry_tags tet
-       join tags t on t.id = tet.tag_id
-       join time_entries te on te.id = tet.time_entry_id
-       where te.workspace_id = $1
-       group by t.id, t.name, t.color
-       order by seconds desc`,
-      [session.workspaceId]
     )
   ]);
 
   return {
-    byProject: byProject.rows,
-    byClient: byClient.rows,
     byCategory: byCategory.rows,
     bySource: bySource.rows,
-    byPlace: byPlace.rows,
-    byTag: byTag.rows
+    byPlace: byPlace.rows
   };
 }

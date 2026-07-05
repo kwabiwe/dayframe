@@ -2,8 +2,8 @@
 
 import { Fragment, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { paletteColorFor } from "@dayframe/shared";
 import { Pencil, Play, Trash2 } from "lucide-react";
+import { timeEntryCategoryColor, timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
 import type { CategoryRow, PlaceRow, TimeEntryRow } from "@/lib/queries";
 import {
   dateTimeLocal,
@@ -244,20 +244,17 @@ export function EntriesTable({
                     {formatTime(entry.startedAt)} - {entry.stoppedAt ? formatTime(entry.stoppedAt) : "Running"}
                   </td>
                   <td className="px-3 py-3 font-medium">
-                    {entry.description ?? entry.categoryName ?? "Untitled task"}
+                    {timeEntryTitle(entry)}
                   </td>
                   <td className="px-3 py-3 text-[var(--muted)]">
                     <span className="flex items-center gap-2">
                       <span
                         className="h-3 w-3 shrink-0 rounded-full border border-[var(--line-strong)]"
                         style={{
-                          backgroundColor: paletteColorFor(
-                            entry.categoryColor,
-                            entry.categoryName ?? entry.id
-                          )
+                          backgroundColor: timeEntryCategoryColor(entry)
                         }}
                       />
-                      {entry.categoryName ?? "No category"}
+                      {timeEntryCategoryLabel(entry)}
                     </span>
                   </td>
                   <td className="px-3 py-3 text-[var(--muted)]">{entry.placeName ?? "No place"}</td>
@@ -272,7 +269,7 @@ export function EntriesTable({
                         className="focus-ring rounded-md border border-[var(--line)] bg-[var(--surface-inset)] p-2 hover:border-[var(--accent)] hover:text-[var(--accent)]"
                         type="button"
                         disabled={isPending}
-                        aria-label="Start this task again"
+                        aria-label={`Start ${timeEntryTitle(entry)} again`}
                         onClick={() => continueEntry(entry)}
                       >
                         <Play size={15} fill="currentColor" strokeWidth={0} />
@@ -360,7 +357,7 @@ function SelectField({
         required={required}
         className="industrial-field focus-ring"
       >
-        <option value="">{required ? "Select" : "None"}</option>
+        <option value="">{required ? "Select" : label === "Category" ? "Uncategorized" : "None"}</option>
         {options.map((option) => (
           <option key={option.id} value={option.id}>
             {option.name}

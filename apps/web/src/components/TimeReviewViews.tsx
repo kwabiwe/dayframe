@@ -3,16 +3,21 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { paletteColorFor } from "@dayframe/shared";
 import { CalendarDays, ChevronLeft, ChevronRight, List, Pencil, Play, Table2, Trash2 } from "lucide-react";
 import { CurrentTimerPanel } from "@/components/DashboardRealtime";
 import { EntriesTable } from "@/components/EntriesTable";
+import {
+  timeEntryAccentColor,
+  timeEntryCategoryColor,
+  timeEntryCategoryLabel,
+  timeEntryContextLabel,
+  timeEntryTitle
+} from "@/lib/display";
 import type { BootstrapData, CategoryRow, PlaceRow, TimeEntryRow } from "@/lib/queries";
 import {
   dateTimeLocal,
   formatDate,
   formatDuration,
-  formatSourceLabel,
   formatTime
 } from "@/lib/format";
 
@@ -27,11 +32,15 @@ const viewItems: Array<{ id: TimeView; label: string; icon: React.ReactNode }> =
 
 const startHour = 6;
 const endHour = 22;
-const rowHeight = 58;
-const calendarHeight = (endHour - startHour) * rowHeight;
 const calendarSnapMinutes = 15;
+const calendarZooms = {
+  compact: { label: "Fit", rowHeight: 48 },
+  regular: { label: "1h", rowHeight: 58 },
+  detail: { label: "Detail", rowHeight: 82 }
+} as const;
 
 type CalendarResizeEdge = "start" | "end";
+type CalendarZoom = keyof typeof calendarZooms;
 
 type CalendarResizeDraft = {
   entryId: string;
@@ -187,7 +196,13 @@ function CalendarReview({
   const [resizeDraft, setResizeDraft] = useState<CalendarResizeDraft | null>(null);
   const [resizingId, setResizingId] = useState<string | null>(null);
   const [resizeError, setResizeError] = useState<string | null>(null);
+  const [zoomLevel, setZoomLevel] = useState<CalendarZoom>("regular");
   const today = new Date();
+  const zoom = calendarZooms[zoomLevel];
+  const zoomKeys = Object.keys(calendarZooms) as CalendarZoom[];
+  const zoomIndex = zoomKeys.indexOf(zoomLevel);
+  const rowHeight = zoom.rowHeight;
+  const calendarHeight = (endHour - startHour) * rowHeight;
   const visibleDays =
     calendarMode === "day"
       ? [weekDays.find((day) => sameDay(day, today)) ?? today]
@@ -347,20 +362,38 @@ function CalendarReview({
           <h2 className="text-lg font-semibold">Calendar</h2>
           <p className="mt-1 text-sm text-[var(--muted)]">Click a block to inspect it. Drag the top or bottom edge to resize.</p>
         </div>
-        <div className="grid w-full max-w-[220px] grid-cols-2 border border-[var(--line-strong)] bg-[var(--surface-inset)]">
-          {(["week", "day"] as CalendarMode[]).map((mode) => (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="swiss-view-switch" aria-label="Calendar view">
+            {(["week", "day"] as CalendarMode[]).map((mode) => (
+              <button
+                key={mode}
+                className={calendarMode === mode ? "is-selected" : ""}
+                type="button"
+                onClick={() => setCalendarMode(mode)}
+              >
+                {mode === "week" ? "Week" : "Day"}
+              </button>
+            ))}
+          </span>
+          <span className="swiss-zoom-control" aria-label="Calendar zoom">
             <button
-              key={mode}
-              className={[
-                "focus-ring px-3 py-2 text-sm capitalize",
-                calendarMode === mode ? "bg-[var(--accent)] text-[var(--on-accent)]" : "hover:text-[var(--accent)]"
-              ].join(" ")}
               type="button"
-              onClick={() => setCalendarMode(mode)}
+              disabled={zoomIndex === 0}
+              aria-label="Zoom calendar out"
+              onClick={() => setZoomLevel(zoomKeys[Math.max(0, zoomIndex - 1)])}
             >
-              {mode}
+              -
             </button>
-          ))}
+            <b>{zoom.label}</b>
+            <button
+              type="button"
+              disabled={zoomIndex === zoomKeys.length - 1}
+              aria-label="Zoom calendar in"
+              onClick={() => setZoomLevel(zoomKeys[Math.min(zoomKeys.length - 1, zoomIndex + 1)])}
+            >
+              +
+            </button>
+          </span>
         </div>
       </div>
       <div className="overflow-x-auto">
@@ -407,7 +440,7 @@ function CalendarReview({
               className="relative border-r border-[var(--line)] last:border-r-0"
               style={{
                 height: calendarHeight,
-                backgroundImage: "repeating-linear-gradient(to bottom, transparent 0, transparent 57px, var(--line) 58px)"
+                backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${Math.max(0, rowHeight - 1)}px, var(--line) ${rowHeight}px)`
               }}
             >
               {entries
@@ -421,18 +454,19 @@ function CalendarReview({
                         "focus-ring absolute left-2 right-2 overflow-hidden border p-2 text-left text-xs",
                         "calendar-time-block",
                         selectedEntryId === entry.id ? "outline outline-2 outline-offset-1 outline-[var(--foreground)]" : "",
-                        resizingId === entry.id ? "is-resizing" : ""
+                        resizingId === entry.id ? "is-resizing" : "",
+                        entry.stoppedAt ? "" : "is-running"
                       ].join(" ")}
                       style={{
-                        ...calendarBlockStyle(entry, activeDraft),
-                        backgroundColor: paletteColorFor(entry.categoryColor, entry.categoryName ?? entry.id),
+                        ...calendarBlockStyle(entry, activeDraft, rowHeight, calendarHeight),
+                        backgroundColor: timeEntryAccentColor(entry),
                         borderColor: "color-mix(in srgb, var(--foreground) 28%, transparent)",
                         color: "var(--on-pastel)"
                       }}
                       role="button"
                       tabIndex={0}
                       data-entry-id={entry.id}
-                      title={`${entry.description ?? entry.categoryName ?? "Untitled task"} ${formatTime(activeDraft?.startedAt ?? entry.startedAt)} - ${activeDraft?.stoppedAt ? formatTime(activeDraft.stoppedAt) : entry.stoppedAt ? formatTime(entry.stoppedAt) : "Running"}`}
+                      title={`${timeEntryTitle(entry)} ${formatTime(activeDraft?.startedAt ?? entry.startedAt)} - ${activeDraft?.stoppedAt ? formatTime(activeDraft.stoppedAt) : entry.stoppedAt ? formatTime(entry.stoppedAt) : "Running"}`}
                       onClick={() => setSelectedEntryId(entry.id)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {
@@ -446,20 +480,20 @@ function CalendarReview({
                           <button
                             type="button"
                             className="swiss-resize-handle top"
-                            aria-label={`Resize start of ${entry.description ?? entry.categoryName ?? "time block"}`}
+                            aria-label={`Resize start of ${timeEntryTitle(entry)}`}
                             onPointerDown={(event) => startCalendarResize(entry, day, "start", event)}
                           />
                           <button
                             type="button"
                             className="swiss-resize-handle bottom"
-                            aria-label={`Resize end of ${entry.description ?? entry.categoryName ?? "time block"}`}
+                            aria-label={`Resize end of ${timeEntryTitle(entry)}`}
                             onPointerDown={(event) => startCalendarResize(entry, day, "end", event)}
                           />
                         </>
                       ) : null}
-                      <span className="block truncate font-semibold">{entry.description ?? entry.categoryName ?? "Untitled task"}</span>
+                      <span className="block truncate font-semibold">{timeEntryTitle(entry)}</span>
                       <span className="block truncate opacity-80">
-                        {entry.categoryName ?? formatSourceLabel(entry.source)}
+                        {timeEntryContextLabel(entry)}
                       </span>
                       <span className="tabular block">{formatDuration(calendarDurationSeconds(entry, activeDraft))}</span>
                     </article>
@@ -553,13 +587,13 @@ function CalendarReview({
 function TimesheetView({ entries, weekDays }: { entries: TimeEntryRow[]; weekDays: Date[] }) {
   const rows = Array.from(
     entries.reduce((totals, entry) => {
-      const key = entry.categoryId ?? `uncategorized:${entry.categoryName ?? "No category"}`;
+      const key = entry.categoryId ?? `uncategorized:${entry.categoryName ?? "time"}`;
       const current = totals.get(key) ?? {
         id: key,
         name: key,
-        label: entry.categoryName ?? "No category",
+        label: timeEntryCategoryLabel(entry),
         categoryName: entry.categoryName,
-        color: paletteColorFor(entry.categoryColor, entry.categoryName ?? key),
+        color: timeEntryCategoryColor(entry),
         days: Array(7).fill(0) as number[],
         total: 0
       };
@@ -606,7 +640,9 @@ function TimesheetView({ entries, weekDays }: { entries: TimeEntryRow[]; weekDay
                   <span className="h-3 w-3 border border-[var(--line-strong)]" style={{ backgroundColor: row.color }} />
                   {row.label}
                 </span>
-                <span className="mt-1 block text-xs text-[var(--muted)]">{row.categoryName ?? "Needs category"}</span>
+                <span className="mt-1 block text-xs text-[var(--muted)]">
+                  {row.categoryName ? "Category total" : "Uncategorized time"}
+                </span>
               </td>
               {row.days.map((seconds, index) => (
                 <td key={`${row.id}-${index}`} className="tabular border-r border-[var(--line)] px-3 py-3 text-[var(--muted)] last:border-r-0">
@@ -655,7 +691,7 @@ function SelectField({
         required={required}
         className="industrial-field focus-ring"
       >
-        <option value="">{required ? "Select" : "None"}</option>
+        <option value="">{required ? "Select" : label === "Category" ? "Uncategorized" : "None"}</option>
         {options.map((option) => (
           <option key={option.id} value={option.id}>
             {option.name}
@@ -710,7 +746,12 @@ function DateField({
   );
 }
 
-function calendarBlockStyle(entry: TimeEntryRow, draft: CalendarResizeDraft | null = null) {
+function calendarBlockStyle(
+  entry: TimeEntryRow,
+  draft: CalendarResizeDraft | null,
+  rowHeight: number,
+  calendarHeight: number
+) {
   const start = new Date(draft?.startedAt ?? entry.startedAt);
   const stoppedAt = draft?.stoppedAt
     ? new Date(draft.stoppedAt)

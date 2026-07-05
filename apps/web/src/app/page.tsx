@@ -17,5 +17,5 @@ export default async function DashboardPage({
   const date = Array.isArray(params.date) ? params.date[0] : params.date;
   const data = await getBootstrapData(session, { selectedDate: date });
 
-  return <DashboardRealtime key={data.dateRange.selectedDate} initialData={data} />;
+  return <DashboardRealtime key={`${data.workspace.id}:${data.dateRange.selectedDate}`} initialData={data} />;
 }
