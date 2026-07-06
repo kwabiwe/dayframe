@@ -17,6 +17,7 @@ import Svg, { Circle, G, Path } from "react-native-svg";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { paletteColorFor } from "@dayframe/shared";
+import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { useKeyboardAccessory, type KeyboardAccessoryField } from "@/components/KeyboardAccessory";
 import {
   AuthRequiredError,
@@ -30,7 +31,9 @@ import {
   startTimer,
   stopTimer,
   syncQueue,
-  type MobileBootstrap
+  updateTimeEntry,
+  type MobileBootstrap,
+  type TimeEntryUpdatePatch
 } from "@/lib/api";
 import { handleDayframeUrl } from "@/lib/deepLinks";
 import {
@@ -53,6 +56,7 @@ type SummarySegment = {
 
 const AUTH_KEYBOARD_ACCESSORY_ID = "dayframe-auth-keyboard-accessory";
 const START_TASK_KEYBOARD_ACCESSORY_ID = "dayframe-start-task-keyboard-accessory";
+const RECENT_LAST_STOP_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export default function HomeScreen() {
   const { reloadThemePreference, styles, theme } = useMobileTheme();
@@ -68,6 +72,9 @@ export default function HomeScreen() {
   const [authNotice, setAuthNotice] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [customDescription, setCustomDescription] = useState("");
+  const [activeEditVisible, setActiveEditVisible] = useState(false);
+  const [activeEditSaving, setActiveEditSaving] = useState(false);
+  const [activeEditStopping, setActiveEditStopping] = useState(false);
   const [chartProgress, setChartProgress] = useState(1);
   const refreshInFlight = useRef(false);
   const entrance = useRef(new Animated.Value(0)).current;
@@ -193,6 +200,14 @@ export default function HomeScreen() {
     ? paletteColorFor(data.activeEntry.categoryId, data.activeEntry.categoryName)
     : null;
   const activeDescription = displayTimerDescription(data?.activeEntry);
+  const recentStoppedAt = useMemo(
+    () => recentStoppedEntryTime(data?.entries ?? [], data?.activeEntry ?? null),
+    [data?.activeEntry, data?.entries]
+  );
+
+  useEffect(() => {
+    if (!data?.activeEntry && activeEditVisible) setActiveEditVisible(false);
+  }, [activeEditVisible, data?.activeEntry]);
 
   useEffect(() => {
     chartBuild.stopAnimation();
@@ -252,22 +267,53 @@ export default function HomeScreen() {
     }
   }
 
+  async function saveActiveTimerEdit(entryId: string, patch: TimeEntryUpdatePatch) {
+    setActiveEditSaving(true);
+    try {
+      await updateTimeEntry(entryId, patch);
+      await load();
+      return true;
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        setActiveEditVisible(false);
+        setAuthState("signedOut");
+        setData(null);
+        return false;
+      }
+      Alert.alert(
+        "Timer not saved",
+        isNetworkTimerError(error)
+          ? "Your changes were not saved. Check your connection and try again."
+          : error instanceof Error ? error.message : "Unable to save this timer."
+      );
+      return false;
+    } finally {
+      setActiveEditSaving(false);
+    }
+  }
+
   async function stopActiveTimer() {
+    setActiveEditStopping(true);
     try {
       await stopTimer();
       await load();
+      return true;
     } catch (error) {
       if (error instanceof AuthRequiredError) {
+        setActiveEditVisible(false);
         setAuthState("signedOut");
         setData(null);
-        return;
+        return false;
       }
       if (!isNetworkTimerError(error)) {
         Alert.alert("Timer not stopped", error instanceof Error ? error.message : "Unable to stop this timer.");
-        return;
+        return false;
       }
       await queueStopTimer();
       await syncAndReload();
+      return true;
+    } finally {
+      setActiveEditStopping(false);
     }
   }
 
@@ -481,34 +527,53 @@ export default function HomeScreen() {
             </Pressable>
           </View>
 
-          <View style={styles.timerPanel}>
+          <Pressable
+            accessibilityLabel={data?.activeEntry ? "Edit running timer" : undefined}
+            accessibilityRole={data?.activeEntry ? "button" : undefined}
+            disabled={!data?.activeEntry}
+            onPress={() => setActiveEditVisible(true)}
+            style={({ pressed }) => [
+              styles.timerPanel,
+              pressed && data?.activeEntry ? styles.buttonPressed : null
+            ]}
+          >
             <View style={styles.activeTimerHeader}>
-              <View style={styles.activeTimerTextStack}>
-                <Text style={styles.label}>Active timer</Text>
-                <View style={styles.activeTitleRow}>
-                  {activeCategoryColor ? (
-                    <View style={[styles.colorDot, { backgroundColor: activeCategoryColor }]} />
+              {data?.activeEntry ? (
+                <View style={styles.activeTimerTextStack}>
+                  <Text style={styles.label}>Active timer</Text>
+                  <View style={styles.activeTitleRow}>
+                    {activeCategoryColor ? (
+                      <View style={[styles.colorDot, { backgroundColor: activeCategoryColor }]} />
+                    ) : null}
+                    <Text style={[styles.timerText, styles.activeTitleText]} numberOfLines={2}>
+                      {activeDescription ?? data.activeEntry.categoryName ?? "Running"}
+                    </Text>
+                  </View>
+                  {activeDescription && data.activeEntry.categoryName ? (
+                    <Text style={styles.activeDescription}>{data.activeEntry.categoryName}</Text>
                   ) : null}
-                  <Text style={[styles.timerText, styles.activeTitleText]} numberOfLines={2}>
-                    {data?.activeEntry
-                      ? activeDescription ?? data.activeEntry.categoryName ?? "Running"
-                      : "Start task below"}
-                  </Text>
-                </View>
-                {activeDescription && data?.activeEntry?.categoryName ? (
-                  <Text style={styles.activeDescription}>{data.activeEntry.categoryName}</Text>
-                ) : null}
-                {data?.activeEntry ? (
                   <Text style={styles.muted}>{formatClockDuration(activeDurationSeconds)} running</Text>
-                ) : null}
-              </View>
+                </View>
+              ) : (
+                <View style={styles.activeTimerTextStack}>
+                  <Text style={styles.label}>Active timer</Text>
+                  <View style={styles.activeTitleRow}>
+                    <Text style={[styles.timerText, styles.activeTitleText]} numberOfLines={2}>
+                      Start task below
+                    </Text>
+                  </View>
+                </View>
+              )}
               {data?.activeEntry ? (
                 <View style={styles.activeTimerActions}>
                   <Pressable
                     accessibilityLabel="Stop current timer"
                     accessibilityRole="button"
                     style={pressable(styles.stopButton, styles.buttonPressed)}
-                    onPress={stopActiveTimer}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      void stopActiveTimer();
+                    }}
                   >
                     <StopGlyph color={theme.mode === "dark" ? theme.background : "#FFFFFF"} />
                   </Pressable>
@@ -516,14 +581,17 @@ export default function HomeScreen() {
                     accessibilityLabel="Delete running timer"
                     accessibilityRole="button"
                     style={pressable(styles.deleteTimerButton, styles.buttonPressed)}
-                    onPress={confirmDeleteActiveTimer}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      confirmDeleteActiveTimer();
+                    }}
                   >
                     <TrashGlyph color={theme.danger} />
                   </Pressable>
                 </View>
               ) : null}
             </View>
-          </View>
+          </Pressable>
 
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Start task</Text>
@@ -588,6 +656,20 @@ export default function HomeScreen() {
           />
         </Animated.View>
       </ScrollView>
+      <ActiveTimerEditSheet
+        categories={data?.categories ?? []}
+        elapsedSeconds={activeDurationSeconds}
+        entry={data?.activeEntry ?? null}
+        lastStoppedAt={recentStoppedAt}
+        onCancel={() => setActiveEditVisible(false)}
+        onSave={saveActiveTimerEdit}
+        onStop={stopActiveTimer}
+        saving={activeEditSaving}
+        stopping={activeEditStopping}
+        styles={styles}
+        theme={theme}
+        visible={activeEditVisible}
+      />
       {startTaskKeyboard.accessory}
     </SafeAreaView>
   );
@@ -778,6 +860,31 @@ function buildTodaySummarySegments(entries: TimeEntry[], now: number): SummarySe
 function buildMobileQuickActions(data: MobileBootstrap | null) {
   if (!data) return [];
   return data.categories.filter((category) => category.isPinned).slice(0, 8);
+}
+
+function recentStoppedEntryTime(entries: TimeEntry[], activeEntry: MobileBootstrap["activeEntry"]) {
+  if (!activeEntry) return null;
+  const activeStart = new Date(activeEntry.startedAt).getTime();
+  if (Number.isNaN(activeStart)) return null;
+
+  let recentStop: string | null = null;
+  let recentStopTime = 0;
+  for (const entry of entries) {
+    if (!entry.stoppedAt) continue;
+    const stoppedAt = new Date(entry.stoppedAt).getTime();
+    if (
+      Number.isNaN(stoppedAt) ||
+      stoppedAt > activeStart ||
+      activeStart - stoppedAt > RECENT_LAST_STOP_WINDOW_MS ||
+      stoppedAt <= recentStopTime
+    ) {
+      continue;
+    }
+    recentStop = entry.stoppedAt;
+    recentStopTime = stoppedAt;
+  }
+
+  return recentStop;
 }
 
 function displayTimerDescription(entry: MobileBootstrap["activeEntry"] | null | undefined) {

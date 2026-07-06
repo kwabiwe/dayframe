@@ -564,6 +564,200 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       justifyContent: "center"
     },
+    sheetOverlay: {
+      flex: 1,
+      justifyContent: "flex-end",
+      backgroundColor: theme.mode === "dark" ? "rgba(0, 0, 0, 0.56)" : "rgba(10, 18, 8, 0.32)"
+    },
+    sheetBackdrop: {
+      position: "absolute",
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0
+    },
+    sheetKeyboardAvoidingView: {
+      flex: 1,
+      justifyContent: "flex-end"
+    },
+    sheetSafeArea: {
+      width: "100%"
+    },
+    activeEditSheet: {
+      maxHeight: "92%",
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      borderTopWidth: 1,
+      borderLeftWidth: 1,
+      borderRightWidth: 1,
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surface,
+      paddingHorizontal: 18,
+      paddingTop: 10,
+      paddingBottom: 4,
+      gap: 8,
+      shadowColor: "#000000",
+      shadowOpacity: theme.mode === "dark" ? 0.36 : 0.14,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: -8 },
+      elevation: 8
+    },
+    sheetHandle: {
+      alignSelf: "center",
+      width: 42,
+      height: 5,
+      borderRadius: 999,
+      backgroundColor: theme.borderStrong
+    },
+    sheetHeader: {
+      minHeight: 56,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 12
+    },
+    sheetTitle: {
+      flex: 1,
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 16,
+      fontWeight: "800",
+      textAlign: "center"
+    },
+    sheetIconButton: {
+      width: 52,
+      height: 52,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 999,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    sheetSaveButton: {
+      width: 52,
+      height: 52,
+      borderWidth: 1,
+      borderColor: theme.accent,
+      backgroundColor: theme.accent,
+      borderRadius: 999,
+      alignItems: "center",
+      justifyContent: "center",
+      shadowColor: theme.accent,
+      shadowOpacity: theme.mode === "dark" ? 0.16 : 0.24,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 3
+    },
+    activeEditContent: {
+      gap: 14,
+      paddingBottom: 18
+    },
+    activeEditElapsed: {
+      color: theme.accent,
+      fontFamily: monoFont,
+      fontSize: 42,
+      fontWeight: "800"
+    },
+    activeEditSection: {
+      gap: 8
+    },
+    activeEditSectionLabel: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "800"
+    },
+    activeEditDescriptionInput: {
+      minHeight: 52
+    },
+    activeEditCategoryScroller: {
+      gap: 8,
+      paddingRight: 4
+    },
+    activeEditCategoryChip: {
+      minHeight: 42,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 999,
+      paddingHorizontal: 11,
+      paddingVertical: 8,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 7
+    },
+    activeEditCategoryChipSelected: {
+      borderColor: theme.accent,
+      backgroundColor: theme.surfaceMuted
+    },
+    activeEditCategoryChipText: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "800"
+    },
+    activeEditCategoryChipTextSelected: {
+      color: theme.accent
+    },
+    activeEditTimeRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8
+    },
+    activeEditDateInput: {
+      flex: 1.25,
+      minHeight: 48
+    },
+    activeEditTimeInput: {
+      flex: 0.75,
+      minHeight: 48
+    },
+    activeEditLastStopButton: {
+      minHeight: 44,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 9,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 10
+    },
+    activeEditLastStopText: {
+      flex: 1,
+      color: theme.accent,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "800"
+    },
+    activeEditLastStopMeta: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "800"
+    },
+    activeEditStopButton: {
+      minHeight: 54,
+      borderWidth: 1,
+      borderColor: theme.danger,
+      backgroundColor: theme.danger,
+      borderRadius: 14,
+      paddingHorizontal: 16,
+      paddingVertical: 13,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8
+    },
+    activeEditStopButtonText: {
+      color: theme.mode === "dark" ? theme.background : "#FFFFFF",
+      fontFamily: monoFont,
+      fontSize: 15,
+      fontWeight: "800"
+    },
     buttonPressed: {
       opacity: 0.84,
       transform: [{ translateY: 1 }]

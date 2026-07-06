@@ -42,6 +42,7 @@ const {
   signup,
   syncQueue,
   updateCategory,
+  updateTimeEntry,
   archiveCategory
 } = await import("./api");
 
@@ -293,11 +294,48 @@ describe("mobile API client", () => {
     expect(asyncStore.get("dayframe.offlineQueue.v1")).toBeUndefined();
   });
 
+  it("updates running time entries through the hosted API without queueing", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await updateTimeEntry("entry-1", {
+      categoryId: "20000000-0000-4000-8000-000000000001",
+      description: "Write review notes",
+      startedAt: "2026-07-06T08:15:00.000Z"
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/time-entries/entry-1",
+      expect.objectContaining({
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer session-token"
+        },
+        body: JSON.stringify({
+          categoryId: "20000000-0000-4000-8000-000000000001",
+          description: "Write review notes",
+          startedAt: "2026-07-06T08:15:00.000Z"
+        })
+      })
+    );
+    expect(asyncStore.get("dayframe.offlineQueue.v1")).toBeUndefined();
+  });
+
   it("clears the session token when deleting a time entry returns 401", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "expired-token");
     vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({ error: "Login required." }, 401))));
 
     await expect(deleteTimeEntry("entry-1")).rejects.toBeInstanceOf(AuthRequiredError);
+    await expect(getSessionToken()).resolves.toBeNull();
+  });
+
+  it("clears the session token when updating a time entry returns 401", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "expired-token");
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({ error: "Login required." }, 401))));
+
+    await expect(updateTimeEntry("entry-1", { startedAt: "2026-07-06T08:15:00.000Z" })).rejects.toBeInstanceOf(AuthRequiredError);
     await expect(getSessionToken()).resolves.toBeNull();
   });
 
