@@ -34,6 +34,8 @@ const viewItems: Array<{ id: TimeView; label: string; icon: ReactNode }> = [
 const startHour = 6;
 const endHour = 22;
 const calendarSnapMinutes = 15;
+const shortCalendarBlockMinutes = 15;
+const minimumCalendarClickableBlockHeight = 18;
 const calendarZooms = {
   hour: { label: "1h", intervalMinutes: 60, pixelsPerHour: 64 },
   half: { label: "30m", intervalMinutes: 30, pixelsPerHour: 92 },
@@ -468,6 +470,14 @@ function CalendarReview({
                 .filter((entry) => sameDay(new Date(entry.startedAt), day))
                 .map((entry) => {
                   const activeDraft = resizeDraft?.entryId === entry.id ? resizeDraft : null;
+                  const blockStyle = calendarBlockStyle(entry, activeDraft, rowHeight, calendarHeight);
+                  const durationSeconds = calendarDurationSeconds(entry, activeDraft);
+                  const durationMinutes = durationSeconds / 60;
+                  const isTinyBlock = durationMinutes < 10 || blockStyle.height < 24;
+                  const isShortBlock = durationMinutes < 16 || blockStyle.height < 38;
+                  const canShowContext = !isShortBlock && blockStyle.height >= 44;
+                  const canShowDuration = !isShortBlock && blockStyle.height >= 40;
+                  const detailsLabel = calendarBlockDetailsLabel(entry, activeDraft, durationSeconds);
                   return (
                     <article
                       key={entry.id}
@@ -476,10 +486,12 @@ function CalendarReview({
                         "calendar-time-block",
                         selectedEntryId === entry.id ? "outline outline-2 outline-offset-1 outline-[var(--foreground)]" : "",
                         resizingId === entry.id ? "is-resizing" : "",
-                        entry.stoppedAt ? "" : "is-running"
+                        entry.stoppedAt ? "" : "is-running",
+                        isTinyBlock ? "is-tiny" : "",
+                        isShortBlock ? "is-short" : ""
                       ].join(" ")}
                       style={{
-                        ...calendarBlockStyle(entry, activeDraft, rowHeight, calendarHeight),
+                        ...blockStyle,
                         backgroundColor: timeEntryAccentColor(entry),
                         borderColor: "color-mix(in srgb, var(--foreground) 28%, transparent)",
                         color: "var(--on-pastel)"
@@ -487,7 +499,8 @@ function CalendarReview({
                       role="button"
                       tabIndex={0}
                       data-entry-id={entry.id}
-                      title={`${timeEntryTitle(entry)} ${formatTime(activeDraft?.startedAt ?? entry.startedAt)} - ${activeDraft?.stoppedAt ? formatTime(activeDraft.stoppedAt) : entry.stoppedAt ? formatTime(entry.stoppedAt) : "Running"}`}
+                      title={detailsLabel}
+                      aria-label={detailsLabel}
                       onClick={() => setSelectedEntryId(entry.id)}
                       onDoubleClick={() => setEditingEntry(entry)}
                       onKeyDown={(event) => {
@@ -505,7 +518,6 @@ function CalendarReview({
                             aria-label={`Resize start of ${timeEntryTitle(entry)}`}
                             onDoubleClick={(event) => {
                               event.stopPropagation();
-                              setEditingEntry(entry);
                             }}
                             onPointerDown={(event) => startCalendarResize(entry, day, "start", event)}
                           />
@@ -515,17 +527,18 @@ function CalendarReview({
                             aria-label={`Resize end of ${timeEntryTitle(entry)}`}
                             onDoubleClick={(event) => {
                               event.stopPropagation();
-                              setEditingEntry(entry);
                             }}
                             onPointerDown={(event) => startCalendarResize(entry, day, "end", event)}
                           />
                         </>
                       ) : null}
                       <span className="block truncate font-semibold">{timeEntryTitle(entry)}</span>
-                      <span className="block truncate opacity-80">
-                        {timeEntryContextLabel(entry)}
-                      </span>
-                      <span className="tabular block">{formatDuration(calendarDurationSeconds(entry, activeDraft))}</span>
+                      {canShowContext ? (
+                        <span className="block truncate opacity-80">
+                          {timeEntryContextLabel(entry)}
+                        </span>
+                      ) : null}
+                      {canShowDuration ? <span className="tabular block">{formatDuration(durationSeconds)}</span> : null}
                     </article>
                   );
                 })}
@@ -649,10 +662,27 @@ function calendarBlockStyle(
       ? new Date(entry.stoppedAt)
       : projectedEntryEnd(entry);
   const startMinutes = start.getHours() * 60 + start.getMinutes();
-  const durationMinutes = Math.max(15, (stoppedAt.getTime() - start.getTime()) / 60_000);
-  const top = Math.min(calendarHeight - 24, Math.max(0, ((startMinutes - startHour * 60) / 60) * rowHeight));
-  const height = Math.min(calendarHeight - top, Math.max(36, (durationMinutes / 60) * rowHeight));
-  return { top: Math.round(top), height: Math.round(Math.max(24, height)) };
+  const durationMinutes = Math.max(0, (stoppedAt.getTime() - start.getTime()) / 60_000);
+  const minimumHeight = minimumCalendarVisualBlockHeight(rowHeight);
+  const top = Math.min(calendarHeight - minimumHeight, Math.max(0, ((startMinutes - startHour * 60) / 60) * rowHeight));
+  const height = Math.min(calendarHeight - top, Math.max(minimumHeight, (durationMinutes / 60) * rowHeight));
+  return { top: Math.round(top), height: Math.round(height) };
+}
+
+function minimumCalendarVisualBlockHeight(rowHeight: number) {
+  return Math.max(minimumCalendarClickableBlockHeight, (shortCalendarBlockMinutes / 60) * rowHeight);
+}
+
+function calendarBlockDetailsLabel(
+  entry: TimeEntryRow,
+  draft: CalendarResizeDraft | null,
+  durationSeconds: number
+) {
+  const start = draft?.startedAt ?? entry.startedAt;
+  const stoppedAt = draft?.stoppedAt ?? entry.stoppedAt;
+  const timeRange = `${formatTime(start)} - ${stoppedAt ? formatTime(stoppedAt) : "now"}`;
+  const durationLabel = stoppedAt ? formatDuration(durationSeconds) : `Running, ${formatDuration(durationSeconds)}`;
+  return `${timeEntryTitle(entry)}. ${timeEntryContextLabel(entry)}. ${timeRange}. ${durationLabel}`;
 }
 
 function calendarDurationSeconds(entry: TimeEntryRow, draft: CalendarResizeDraft | null = null) {

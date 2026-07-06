@@ -1272,13 +1272,17 @@ textarea:focus-visible {
 }
 
 .swiss-timeline-scroll {
-  overflow-x: auto;
+  max-height: min(72vh, 760px);
+  overflow: auto;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
 }
 
 .swiss-timeline-shell {
   display: grid;
   grid-template-columns: 74px minmax(0, 1fr);
   min-width: 680px;
+  padding-block: 8px 12px;
 }
 
 .swiss-time-axis {
@@ -1360,7 +1364,7 @@ textarea:focus-visible {
 .calendar-time-block {
   position: absolute;
   z-index: 2;
-  touch-action: none;
+  touch-action: pan-x pan-y;
 }
 
 .swiss-time-block {
@@ -1368,6 +1372,7 @@ textarea:focus-visible {
   right: 72px;
   scroll-margin-top: 140px;
   display: flex;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
   overflow: hidden;
@@ -1381,11 +1386,19 @@ textarea:focus-visible {
 }
 
 .calendar-time-block {
+  display: grid;
+  align-content: start;
+  gap: 2px;
   border-radius: 10px;
+  line-height: 1.2;
   transition:
     border-color 140ms ease,
     box-shadow 140ms ease,
     transform 140ms ease;
+}
+
+.calendar-time-block > span {
+  min-width: 0;
 }
 
 .swiss-time-block.is-resizing,
@@ -1402,27 +1415,18 @@ textarea:focus-visible {
 
 .swiss-time-block.is-running,
 .calendar-time-block.is-running {
-  box-shadow:
-    0 0 0 2px color-mix(in srgb, currentColor 18%, transparent),
-    0 10px 24px color-mix(in srgb, currentColor 12%, transparent);
+  border-style: dotted;
+  border-bottom-style: dashed;
+  box-shadow: 0 8px 18px color-mix(in srgb, currentColor 8%, transparent);
+  opacity: 0.72;
 }
 
 .swiss-time-block.is-running {
-  border-width: 2px;
+  border-width: 1px;
 }
 
 .calendar-time-block.is-running::after {
-  position: absolute;
-  right: 8px;
-  bottom: 6px;
-  border: 1px solid color-mix(in srgb, currentColor 36%, transparent);
-  border-radius: 999px;
-  padding: 1px 6px;
-  background: color-mix(in srgb, currentColor 9%, transparent);
-  color: inherit;
-  content: "Running";
-  font-size: 10px;
-  font-weight: 800;
+  content: none;
 }
 
 .swiss-resize-handle {
@@ -1484,6 +1488,10 @@ textarea:focus-visible {
   font-size: 12px;
 }
 
+.swiss-time-block > div:first-of-type {
+  min-width: 0;
+}
+
 .swiss-time-block span {
   display: block;
   margin-top: 2px;
@@ -1504,28 +1512,6 @@ textarea:focus-visible {
   font-size: 12px;
 }
 
-.swiss-running-badge {
-  display: inline-flex;
-  align-items: center;
-  min-height: 18px;
-  border: 1px solid color-mix(in srgb, currentColor 36%, transparent);
-  border-radius: 999px;
-  padding: 0 6px;
-  font-size: 10px;
-  font-style: normal;
-  font-weight: 800;
-  opacity: 0.9;
-}
-
-.swiss-running-badge::before {
-  width: 5px;
-  height: 5px;
-  margin-right: 5px;
-  border-radius: 999px;
-  background: currentColor;
-  content: "";
-}
-
 .swiss-time-block.is-compact {
   flex-direction: column;
   justify-content: flex-start;
@@ -1535,6 +1521,67 @@ textarea:focus-visible {
 
 .swiss-time-block.is-compact > div:last-child {
   justify-content: space-between;
+}
+
+.swiss-time-block.is-short,
+.calendar-time-block.is-short {
+  border-radius: 8px;
+}
+
+.swiss-time-block.is-short {
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+}
+
+.calendar-time-block.is-short {
+  gap: 0;
+  padding: 2px 7px;
+}
+
+.swiss-time-block.is-short strong,
+.calendar-time-block.is-short > span:first-of-type {
+  font-size: 11px;
+  line-height: 1.15;
+}
+
+.swiss-time-block.is-tiny,
+.calendar-time-block.is-tiny {
+  border-radius: 7px;
+}
+
+.swiss-time-block.is-tiny {
+  padding-block: 1px;
+}
+
+.calendar-time-block.is-tiny {
+  padding-block: 1px;
+}
+
+.swiss-time-block.is-tiny strong,
+.calendar-time-block.is-tiny > span:first-of-type {
+  font-size: 10.5px;
+}
+
+.swiss-time-block.is-short .swiss-resize-handle,
+.calendar-time-block.is-short .swiss-resize-handle {
+  height: 5px;
+}
+
+.swiss-time-block.is-short .swiss-resize-handle::after,
+.calendar-time-block.is-short .swiss-resize-handle::after {
+  width: 28px;
+  height: 2px;
+}
+
+.swiss-time-block.is-short .swiss-resize-handle.top::after,
+.calendar-time-block.is-short .swiss-resize-handle.top::after {
+  top: 1px;
+}
+
+.swiss-time-block.is-short .swiss-resize-handle.bottom::after,
+.calendar-time-block.is-short .swiss-resize-handle.bottom::after {
+  bottom: 1px;
 }
 
 .swiss-empty-timeline {

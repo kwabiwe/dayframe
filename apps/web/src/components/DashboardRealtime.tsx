@@ -58,6 +58,8 @@ const dayStartHour = 7;
 const dayEndHour = 21;
 const resizeSnapMinutes = 15;
 const minEntryMinutes = 15;
+const shortBlockMinutes = 15;
+const minimumClickableBlockHeight = 18;
 const timelineZooms = {
   hour: { label: "1h", intervalMinutes: 60, pixelsPerHour: 64 },
   half: { label: "30m", intervalMinutes: 30, pixelsPerHour: 92 },
@@ -1295,9 +1297,16 @@ function TimelineBlock({
       : projectedEntryEnd(entry);
   const top =
     ((start.getHours() * 60 + start.getMinutes() - dayStartHour * 60) / 60) * pixelsPerHour;
-  const height = Math.max(30, ((end.getTime() - start.getTime()) / 3_600_000) * pixelsPerHour);
+  const rawHeight = ((end.getTime() - start.getTime()) / 3_600_000) * pixelsPerHour;
+  const height = Math.max(minimumVisualBlockHeight(pixelsPerHour), rawHeight);
   const color = pastelFor(entry);
   const durationSeconds = Math.max(0, Math.round((end.getTime() - start.getTime()) / 1000));
+  const durationMinutes = durationSeconds / 60;
+  const isTinyBlock = durationMinutes < 10 || height < 24;
+  const isShortBlock = durationMinutes < 16 || height < 38;
+  const canShowContext = !isShortBlock && height >= 44;
+  const canShowDuration = !isShortBlock && height >= 40;
+  const detailsLabel = timelineBlockDetailsLabel(entry, start, end, durationSeconds);
   const weekLeft = (dayIndex / columnCount) * 100;
   const weekWidth = 100 / columnCount;
   const positionStyle: CSSProperties =
@@ -1313,12 +1322,15 @@ function TimelineBlock({
     <article
       tabIndex={0}
       role="button"
-      aria-label={`Time block ${timeEntryTitle(entry)} ${entry.stoppedAt ? "" : "Running "}${formatDuration(durationSeconds)}`}
+      aria-label={detailsLabel}
+      title={detailsLabel}
       className={[
         "swiss-time-block",
         isResizing ? "is-resizing" : "",
         isSelected ? "is-selected" : "",
         entry.stoppedAt ? "" : "is-running",
+        isTinyBlock ? "is-tiny" : "",
+        isShortBlock ? "is-short" : "",
         viewMode === "week" ? "is-compact" : ""
       ]
         .filter(Boolean)
@@ -1344,28 +1356,47 @@ function TimelineBlock({
             type="button"
             className="swiss-resize-handle top"
             aria-label={`Resize start of ${timeEntryTitle(entry)}`}
-            onDoubleClick={onEdit}
+            onDoubleClick={(event) => event.stopPropagation()}
             onPointerDown={(event) => onResizeStart(entry, "start", event)}
           />
           <button
             type="button"
             className="swiss-resize-handle bottom"
             aria-label={`Resize end of ${timeEntryTitle(entry)}`}
-            onDoubleClick={onEdit}
+            onDoubleClick={(event) => event.stopPropagation()}
             onPointerDown={(event) => onResizeStart(entry, "end", event)}
           />
         </>
       ) : null}
       <div>
         <strong>{timeEntryTitle(entry)}</strong>
-        <span>{timeEntryContextLabel(entry)}</span>
+        {canShowContext ? <span>{timeEntryContextLabel(entry)}</span> : null}
       </div>
-      <div>
-        {entry.stoppedAt ? <EntryIcon entry={entry} /> : <em className="swiss-running-badge">Running</em>}
-        <b>{formatDuration(durationSeconds)}</b>
-      </div>
+      {canShowDuration ? (
+        <div>
+          {entry.stoppedAt ? <EntryIcon entry={entry} /> : null}
+          <b>{formatDuration(durationSeconds)}</b>
+        </div>
+      ) : null}
     </article>
   );
+}
+
+function minimumVisualBlockHeight(pixelsPerHour: number) {
+  return Math.max(minimumClickableBlockHeight, (shortBlockMinutes / 60) * pixelsPerHour);
+}
+
+function timelineBlockDetailsLabel(
+  entry: TimeEntryRow,
+  start: Date,
+  end: Date,
+  durationSeconds: number
+) {
+  const timeRange = `${formatTime(start)} - ${entry.stoppedAt ? formatTime(end) : "now"}`;
+  const durationLabel = entry.stoppedAt
+    ? formatDuration(durationSeconds)
+    : `Running, ${formatDuration(durationSeconds)}`;
+  return [timeEntryTitle(entry), timeEntryContextLabel(entry), timeRange, durationLabel].join(". ");
 }
 
 function DashboardReviewInbox({
