@@ -525,24 +525,34 @@ function createStyles(theme: MobileTheme) {
       minHeight: 44
     },
     playButton: {
-      width: 46,
-      height: 46,
+      width: 52,
+      height: 52,
       borderWidth: 1,
       borderColor: theme.accent,
       backgroundColor: theme.accent,
-      borderRadius: 14,
+      borderRadius: 999,
       alignItems: "center",
-      justifyContent: "center"
+      justifyContent: "center",
+      shadowColor: theme.accent,
+      shadowOpacity: theme.mode === "dark" ? 0.18 : 0.24,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 3
     },
     stopButton: {
-      width: 44,
-      height: 44,
+      width: 52,
+      height: 52,
       borderWidth: 1,
       borderColor: theme.danger,
       backgroundColor: theme.danger,
-      borderRadius: 13,
+      borderRadius: 999,
       alignItems: "center",
-      justifyContent: "center"
+      justifyContent: "center",
+      shadowColor: theme.danger,
+      shadowOpacity: theme.mode === "dark" ? 0.18 : 0.22,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 5 },
+      elevation: 3
     },
     deleteTimerButton: {
       width: 44,
@@ -550,7 +560,7 @@ function createStyles(theme: MobileTheme) {
       borderWidth: 1,
       borderColor: theme.danger,
       backgroundColor: theme.surface,
-      borderRadius: 13,
+      borderRadius: 999,
       alignItems: "center",
       justifyContent: "center"
     },
