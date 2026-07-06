@@ -9,7 +9,15 @@ type Segment = {
   color: string;
 };
 
+type DonutSlice = Segment & {
+  fullCircle: boolean;
+  path: string;
+};
+
 const maxDonutSegments = 6;
+const donutCenter = 60;
+const donutOuterRadius = 56;
+const donutInnerRadius = 24;
 
 export function ReportsOverview({
   categories,
@@ -30,7 +38,7 @@ export function ReportsOverview({
   const visibleSegments = buildVisibleSegments(categorySegments);
   const weekTotal = weekSeries.reduce((sum, point) => sum + point.seconds, 0);
   const weekMax = Math.max(...weekSeries.map((point) => point.seconds), 1);
-  const donutBackground = buildDonutBackground(visibleSegments, totalSeconds);
+  const donutSlices = buildDonutSlices(visibleSegments, totalSeconds);
   const topSegment = categorySegments[0];
 
   return (
@@ -52,12 +60,35 @@ export function ReportsOverview({
         <div className="reports-donut-panel">
           <div
             className={`reports-donut${totalSeconds === 0 ? " is-empty" : ""}`}
-            style={{ background: donutBackground }}
             aria-label={`Category total ${formatDuration(totalSeconds)}`}
           >
+            <svg className="reports-donut-svg" viewBox="0 0 120 120" aria-hidden="true" focusable="false">
+              <circle className="reports-donut-empty-ring" cx={donutCenter} cy={donutCenter} r={40} />
+              {donutSlices.map((slice) =>
+                slice.fullCircle ? (
+                  <circle
+                    key={slice.id}
+                    className="reports-donut-full-ring"
+                    cx={donutCenter}
+                    cy={donutCenter}
+                    r={40}
+                    style={{ stroke: slice.color }}
+                  />
+                ) : (
+                  <path
+                    key={slice.id}
+                    className="reports-donut-segment"
+                    d={slice.path}
+                    fill={slice.color}
+                  />
+                )
+              )}
+            </svg>
             <div className="reports-donut-center">
-              <span>Total</span>
-              <strong>{formatDuration(totalSeconds)}</strong>
+              <div className="reports-donut-center-inner">
+                <span>Total</span>
+                <strong>{formatDuration(totalSeconds)}</strong>
+              </div>
             </div>
           </div>
         </div>
@@ -143,18 +174,44 @@ function buildVisibleSegments(segments: Segment[]) {
   ];
 }
 
-function buildDonutBackground(segments: Segment[], totalSeconds: number) {
-  if (totalSeconds <= 0) {
-    return "conic-gradient(from -90deg, color-mix(in srgb, var(--line) 62%, transparent) 0% 100%)";
-  }
+function buildDonutSlices(segments: Segment[], totalSeconds: number): DonutSlice[] {
+  if (totalSeconds <= 0) return [];
 
-  let cursor = 0;
-  const stops = segments.map((segment) => {
-    const start = cursor;
-    const size = (segment.seconds / totalSeconds) * 100;
-    cursor += size;
-    return `${segment.color} ${start.toFixed(2)}% ${cursor.toFixed(2)}%`;
+  let cursor = -90;
+  return segments.map((segment) => {
+    const size = (segment.seconds / totalSeconds) * 360;
+    const startAngle = cursor;
+    const endAngle = cursor + size;
+    cursor = endAngle;
+
+    return {
+      ...segment,
+      fullCircle: size >= 359.99,
+      path: size >= 359.99 ? "" : describeDonutSlice(startAngle, endAngle)
+    };
   });
+}
 
-  return `conic-gradient(from -90deg, ${stops.join(", ")})`;
+function describeDonutSlice(startAngle: number, endAngle: number) {
+  const outerStart = pointOnCircle(donutOuterRadius, startAngle);
+  const outerEnd = pointOnCircle(donutOuterRadius, endAngle);
+  const innerEnd = pointOnCircle(donutInnerRadius, endAngle);
+  const innerStart = pointOnCircle(donutInnerRadius, startAngle);
+  const largeArcFlag = endAngle - startAngle > 180 ? 1 : 0;
+
+  return [
+    `M ${outerStart.x} ${outerStart.y}`,
+    `A ${donutOuterRadius} ${donutOuterRadius} 0 ${largeArcFlag} 1 ${outerEnd.x} ${outerEnd.y}`,
+    `L ${innerEnd.x} ${innerEnd.y}`,
+    `A ${donutInnerRadius} ${donutInnerRadius} 0 ${largeArcFlag} 0 ${innerStart.x} ${innerStart.y}`,
+    "Z"
+  ].join(" ");
+}
+
+function pointOnCircle(radius: number, angleDegrees: number) {
+  const radians = (angleDegrees * Math.PI) / 180;
+  return {
+    x: Number((donutCenter + radius * Math.cos(radians)).toFixed(3)),
+    y: Number((donutCenter + radius * Math.sin(radians)).toFixed(3))
+  };
 }
