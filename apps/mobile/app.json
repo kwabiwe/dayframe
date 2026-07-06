@@ -8,7 +8,7 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.dayframe.app",
+      "bundleIdentifier": "com.layereight.dayframe",
       "infoPlist": {
         "UIBackgroundModes": [
           "location",

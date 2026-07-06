@@ -28,7 +28,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>dayframe</string>
-				<string>com.dayframe.app</string>
+				<string>com.layereight.dayframe</string>
 			</array>
 		</dict>
 	</array>
