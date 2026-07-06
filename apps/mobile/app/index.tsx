@@ -19,6 +19,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { paletteColorFor } from "@dayframe/shared";
 import {
   AuthRequiredError,
+  deleteTimeEntry,
   enqueueEvent,
   fetchBootstrap,
   isNetworkTimerError,
@@ -216,6 +217,59 @@ export default function HomeScreen() {
     }
   }
 
+  async function stopActiveTimer() {
+    try {
+      await stopTimer();
+      await load();
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        setAuthState("signedOut");
+        setData(null);
+        return;
+      }
+      if (!isNetworkTimerError(error)) {
+        Alert.alert("Timer not stopped", error instanceof Error ? error.message : "Unable to stop this timer.");
+        return;
+      }
+      await queueStopTimer();
+      await syncAndReload();
+    }
+  }
+
+  function confirmDeleteActiveTimer() {
+    const activeEntry = data?.activeEntry;
+    if (!activeEntry) return;
+
+    Alert.alert(
+      "Delete running timer",
+      "Delete this running timer? This removes the entry instead of stopping it.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            void deleteActiveTimer(activeEntry.id);
+          }
+        }
+      ]
+    );
+  }
+
+  async function deleteActiveTimer(entryId: string) {
+    try {
+      await deleteTimeEntry(entryId);
+      await load();
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        setAuthState("signedOut");
+        setData(null);
+        return;
+      }
+      Alert.alert("Timer not deleted", error instanceof Error ? error.message : "Unable to delete this timer.");
+    }
+  }
+
   async function submitAuth() {
     setAuthError(null);
     setAuthNotice(null);
@@ -394,31 +448,24 @@ export default function HomeScreen() {
                 ) : null}
               </View>
               {data?.activeEntry ? (
-                <Pressable
-                  accessibilityLabel="Stop current timer"
-                  accessibilityRole="button"
-                  style={pressable(styles.stopButton, styles.buttonPressed)}
-                  onPress={async () => {
-                    try {
-                      await stopTimer();
-                      await load();
-                    } catch (error) {
-                      if (error instanceof AuthRequiredError) {
-                        setAuthState("signedOut");
-                        setData(null);
-                        return;
-                      }
-                      if (!isNetworkTimerError(error)) {
-                        Alert.alert("Timer not stopped", error instanceof Error ? error.message : "Unable to stop this timer.");
-                        return;
-                      }
-                      await queueStopTimer();
-                      await syncAndReload();
-                    }
-                  }}
-                >
-                  <StopGlyph color={theme.mode === "dark" ? theme.background : "#FFFFFF"} />
-                </Pressable>
+                <View style={styles.activeTimerActions}>
+                  <Pressable
+                    accessibilityLabel="Stop current timer"
+                    accessibilityRole="button"
+                    style={pressable(styles.stopButton, styles.buttonPressed)}
+                    onPress={stopActiveTimer}
+                  >
+                    <StopGlyph color={theme.mode === "dark" ? theme.background : "#FFFFFF"} />
+                  </Pressable>
+                  <Pressable
+                    accessibilityLabel="Delete running timer"
+                    accessibilityRole="button"
+                    style={pressable(styles.deleteTimerButton, styles.buttonPressed)}
+                    onPress={confirmDeleteActiveTimer}
+                  >
+                    <TrashGlyph color={theme.danger} />
+                  </Pressable>
+                </View>
               ) : null}
             </View>
           </View>
@@ -521,6 +568,17 @@ function StopGlyph({ color }: { color: string }) {
   return (
     <Svg width={18} height={18} viewBox="0 0 24 24">
       <Path d="M7 7h10v10H7V7Z" fill={color} />
+    </Svg>
+  );
+}
+
+function TrashGlyph({ color }: { color: string }) {
+  return (
+    <Svg width={18} height={18} viewBox="0 0 24 24">
+      <Path
+        d="M9 4h6l1 2h4v2H4V6h4l1-2Zm-2 6h10l-.7 10H7.7L7 10Zm3 2v6h1.5v-6H10Zm2.5 0v6H14v-6h-1.5Z"
+        fill={color}
+      />
     </Svg>
   );
 }

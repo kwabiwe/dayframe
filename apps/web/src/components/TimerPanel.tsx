@@ -3,7 +3,8 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { paletteColorFor } from "@dayframe/shared";
-import { Play, Square } from "lucide-react";
+import { Play, Square, Trash2 } from "lucide-react";
+import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
 import { timeEntryCategoryColor, timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
 import type { BootstrapData, CategoryRow, PlaceRow, TimeEntryRow } from "@/lib/queries";
 import { formatClockDuration, formatTime } from "@/lib/format";
@@ -40,6 +41,8 @@ export function TimerPanel({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [draft, setDraft] = useState<TimerDraft>(() => draftFromEntry(activeEntry));
   const syncedDraft = draft.activeEntryId === (activeEntry?.id ?? null) ? draft : draftFromEntry(activeEntry);
@@ -56,6 +59,10 @@ export function TimerPanel({
     if (!activeEntry) return undefined;
     const interval = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(interval);
+  }, [activeEntry]);
+
+  useEffect(() => {
+    if (!activeEntry) setIsDeleteDialogOpen(false);
   }, [activeEntry]);
 
   function updateDraft(patch: Partial<Omit<TimerDraft, "activeEntryId">>) {
@@ -106,6 +113,37 @@ export function TimerPanel({
 
       if (onSynced) await refreshClientData();
       else startTransition(() => router.refresh());
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function deleteActiveEntry() {
+    if (!activeEntry) return;
+
+    setIsSubmitting(true);
+    setDeleteError(null);
+    try {
+      const response = await fetch(`/api/time-entries/${activeEntry.id}`, {
+        method: "DELETE"
+      });
+      if (!response.ok) {
+        let errorMessage = `Unable to delete timer: ${response.status}`;
+        try {
+          const payload = (await response.json()) as { error?: string };
+          errorMessage = payload.error ?? errorMessage;
+        } catch {
+          // Runtime failures may not return JSON.
+        }
+        throw new Error(errorMessage);
+      }
+
+      setIsDeleteDialogOpen(false);
+      setDraft(draftFromEntry(null));
+      if (onSynced) await refreshClientData();
+      else startTransition(() => router.refresh());
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "Unable to delete the running timer.");
     } finally {
       setIsSubmitting(false);
     }
@@ -204,15 +242,30 @@ export function TimerPanel({
             </div>
           </div>
           {activeEntry ? (
-            <button
-              className="industrial-button-danger focus-ring mt-3 w-full text-sm disabled:opacity-50"
-              type="button"
-              disabled={isBusy}
-              onClick={() => submit("stop")}
-            >
-              <Square size={16} />
-              Stop
-            </button>
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                className="industrial-button-danger focus-ring min-h-10 flex-1 text-sm disabled:opacity-50"
+                type="button"
+                disabled={isBusy}
+                onClick={() => submit("stop")}
+              >
+                <Square size={16} />
+                Stop
+              </button>
+              <button
+                className="industrial-button-danger focus-ring h-10 w-10 shrink-0 px-0 text-sm disabled:opacity-50"
+                type="button"
+                disabled={isBusy}
+                aria-label="Delete running timer"
+                title="Delete running timer"
+                onClick={() => {
+                  setDeleteError(null);
+                  setIsDeleteDialogOpen(true);
+                }}
+              >
+                <Trash2 size={16} />
+              </button>
+            </div>
           ) : (
             <button
               className="industrial-button-primary focus-ring mt-3 w-full text-sm disabled:opacity-50"
@@ -253,6 +306,17 @@ export function TimerPanel({
           ))}
         </div>
       </div>
+      {isDeleteDialogOpen ? (
+        <DestructiveConfirmationDialog
+          body="This removes the entry instead of stopping it."
+          dialogId="delete-running-timer"
+          error={deleteError}
+          isBusy={isBusy}
+          onCancel={() => setIsDeleteDialogOpen(false)}
+          onConfirm={() => void deleteActiveEntry()}
+          title="Delete running timer?"
+        />
+      ) : null}
     </section>
   );
 }

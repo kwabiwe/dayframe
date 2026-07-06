@@ -10,6 +10,7 @@ import type {
 } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { paletteColorFor } from "@dayframe/shared";
+import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import {
   ArrowRight,
@@ -181,6 +182,8 @@ export function CurrentTimerPanel({
 }) {
   const [isBusy, setIsBusy] = useState(false);
   const [timerError, setTimerError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [description, setDescription] = useState(data.activeEntry?.description ?? "");
   const [categoryId, setCategoryId] = useState(data.activeEntry?.categoryId ?? "");
   const [isEditingStartedAt, setIsEditingStartedAt] = useState(false);
@@ -359,6 +362,38 @@ export function CurrentTimerPanel({
       setIsBusy(false);
     }
   }, [active, categoryId, description, refresh]);
+
+  const deleteActiveTimer = useCallback(async () => {
+    if (!active || timerActionInFlightRef.current) return;
+
+    timerActionInFlightRef.current = true;
+    setIsBusy(true);
+    setTimerError(null);
+    setDeleteError(null);
+    try {
+      const response = await fetch(`/api/time-entries/${active.id}`, {
+        method: "DELETE"
+      });
+      if (!response.ok) {
+        let errorMessage = `Unable to delete timer: ${response.status}`;
+        try {
+          const payload = (await response.json()) as { error?: string };
+          errorMessage = payload.error ?? errorMessage;
+        } catch {
+          // Some deployed failures do not return a JSON body.
+        }
+        throw new Error(errorMessage);
+      }
+      setIsDeleteDialogOpen(false);
+      clearDraftAfterStopRef.current = true;
+      await refresh();
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "Unable to delete the running timer.");
+    } finally {
+      timerActionInFlightRef.current = false;
+      setIsBusy(false);
+    }
+  }, [active, refresh]);
 
   async function startQuickAction(action: LearnedQuickAction) {
     setCategoryId(action.categoryId ?? "");
@@ -561,24 +596,42 @@ export function CurrentTimerPanel({
               ) : null}
             </div>
             <span className="swiss-entrybar-clock">{formatClockDuration(durationSeconds)}</span>
-            <button
-              className={["swiss-command-play", active ? "is-active" : ""].filter(Boolean).join(" ")}
-              type={active ? "button" : "submit"}
-              disabled={isBusy}
-              aria-label={active ? "Stop timer" : "Start timer"}
-              onClick={() => {
-                if (active) void timerAction("stop");
-              }}
-            >
+            <div className="swiss-timer-control-group">
+              <button
+                className={["swiss-command-play", active ? "is-active" : ""].filter(Boolean).join(" ")}
+                type={active ? "button" : "submit"}
+                disabled={isBusy}
+                aria-label={active ? "Stop timer" : "Start timer"}
+                onClick={() => {
+                  if (active) void timerAction("stop");
+                }}
+              >
+                {active ? (
+                  <>
+                    <Square size={15} fill="currentColor" />
+                    <span>Stop</span>
+                  </>
+                ) : (
+                  <Play size={24} fill="currentColor" strokeWidth={0} />
+                )}
+              </button>
               {active ? (
-                <>
-                  <Square size={15} fill="currentColor" />
-                  <span>Stop</span>
-                </>
-              ) : (
-                <Play size={24} fill="currentColor" strokeWidth={0} />
-              )}
-            </button>
+                <button
+                  className="swiss-command-delete"
+                  type="button"
+                  disabled={isBusy}
+                  aria-label="Delete running timer"
+                  title="Delete running timer"
+                  onClick={() => {
+                    setTimerError(null);
+                    setDeleteError(null);
+                    setIsDeleteDialogOpen(true);
+                  }}
+                >
+                  <Trash2 size={16} aria-hidden="true" />
+                </button>
+              ) : null}
+            </div>
           </div>
         </form>
         {active ? (
@@ -645,6 +698,18 @@ export function CurrentTimerPanel({
       </div>
 
       {timerError ? <p className="swiss-inline-error">{timerError}</p> : null}
+
+      {isDeleteDialogOpen ? (
+        <DestructiveConfirmationDialog
+          body="This removes the entry instead of stopping it."
+          dialogId="delete-running-timer"
+          error={deleteError}
+          isBusy={isBusy}
+          onCancel={() => setIsDeleteDialogOpen(false)}
+          onConfirm={() => void deleteActiveTimer()}
+          title="Delete running timer?"
+        />
+      ) : null}
 
       {quickActions.length > 0 ? (
         <div className="swiss-quick-actions-strip" aria-label="Frequent quick actions">

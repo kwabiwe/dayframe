@@ -191,6 +191,11 @@ function createStyles(theme: MobileTheme) {
       gap: 5,
       minWidth: 0
     },
+    activeTimerActions: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8
+    },
     activeTitleRow: {
       flexDirection: "row",
       alignItems: "center",
@@ -535,6 +540,16 @@ function createStyles(theme: MobileTheme) {
       borderWidth: 1,
       borderColor: theme.danger,
       backgroundColor: theme.danger,
+      borderRadius: 13,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    deleteTimerButton: {
+      width: 44,
+      height: 44,
+      borderWidth: 1,
+      borderColor: theme.danger,
+      backgroundColor: theme.surface,
       borderRadius: 13,
       alignItems: "center",
       justifyContent: "center"

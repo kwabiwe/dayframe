@@ -221,6 +221,19 @@ export async function stopTimer() {
   });
 }
 
+export async function deleteTimeEntry(id: string) {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/time-entries/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: await authHeaders()
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to delete timer"));
+  return readJsonResponse(response);
+}
+
 export async function createCategory(
   name: string,
   options: { color?: string; isPinned?: boolean } = {}

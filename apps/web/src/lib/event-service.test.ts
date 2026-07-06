@@ -21,7 +21,7 @@ vi.mock("./queries", () => ({
   getNormalizationContext: mocks.getNormalizationContext
 }));
 
-const { processActivityEvent, updateCategory } = await import("./event-service");
+const { deleteTimeEntry, processActivityEvent, TimeEntryNotFoundError, updateCategory } = await import("./event-service");
 
 const session = {
   userId: "00000000-0000-4000-8000-000000000001",
@@ -140,6 +140,38 @@ describe("category persistence", () => {
       "event-1"
     ]);
     expect(client.release).toHaveBeenCalled();
+  });
+});
+
+describe("time entry deletion", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("hard-deletes active or completed entries in the current user workspace scope", async () => {
+    mocks.query.mockResolvedValueOnce({ rowCount: 1, rows: [] });
+
+    await expect(deleteTimeEntry("entry-1", session)).resolves.toEqual({
+      id: "entry-1",
+      deleted: true
+    });
+
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining("delete from time_entries where id = $1 and workspace_id = $2 and user_id = $3"),
+      ["entry-1", session.workspaceId, session.userId]
+    );
+    expect(mocks.query.mock.calls[0][0]).not.toContain("stopped_at");
+  });
+
+  it("does not delete entries outside the current user or workspace scope", async () => {
+    mocks.query.mockResolvedValueOnce({ rowCount: 0, rows: [] });
+
+    await expect(deleteTimeEntry("other-entry", session)).rejects.toBeInstanceOf(TimeEntryNotFoundError);
+
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.any(String),
+      ["other-entry", session.workspaceId, session.userId]
+    );
   });
 });
 
