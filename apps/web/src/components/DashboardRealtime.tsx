@@ -53,6 +53,12 @@ import {
   emptyTimerEntryDraft,
   shouldStartTimerFromEntrySubmit
 } from "@/lib/timer-entry-draft";
+import {
+  getTimeBlockDensity,
+  minimumTimeBlockHeight,
+  resizeDragThresholdPx,
+  timeBlockDensityClassNames
+} from "@/lib/time-block-display";
 
 const dayStartHour = 7;
 const dayEndHour = 21;
@@ -183,6 +189,7 @@ export function CurrentTimerPanel({
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const activeDetailsSyncRef = useRef("");
   const clearDraftAfterStopRef = useRef(false);
+  const timerActionInFlightRef = useRef(false);
   const categoryMenuRef = useRef<HTMLDivElement | null>(null);
   const descriptionInputRef = useRef<HTMLInputElement | null>(null);
   const active = data.activeEntry;
@@ -290,6 +297,8 @@ export function CurrentTimerPanel({
     mode: "start" | "stop",
     override?: { categoryId?: string | null; description?: string | null }
   ) => {
+    if (timerActionInFlightRef.current) return;
+
     const nextCategoryId =
       override && "categoryId" in override
         ? (override.categoryId ?? undefined)
@@ -299,6 +308,7 @@ export function CurrentTimerPanel({
         ? (override.description ?? undefined)
         : description.trim() || undefined;
 
+    timerActionInFlightRef.current = true;
     setIsBusy(true);
     setTimerError(null);
     try {
@@ -345,6 +355,7 @@ export function CurrentTimerPanel({
     } catch (error) {
       setTimerError(error instanceof Error ? error.message : "Unable to update the timer.");
     } finally {
+      timerActionInFlightRef.current = false;
       setIsBusy(false);
     }
   }, [active, categoryId, description, refresh]);
@@ -384,7 +395,7 @@ export function CurrentTimerPanel({
     function toggleFromShortcut(event: Event) {
       const shortcutEvent = event as CustomEvent<TimerShortcutEventDetail>;
       shortcutEvent.detail.handled = true;
-      if (isBusy) return;
+      if (isBusy || timerActionInFlightRef.current) return;
 
       if (active) {
         shortcutEvent.detail.action = timerAction("stop");
@@ -952,10 +963,10 @@ function DayTimeline({
       timelineEndMinutes,
       ...ranges.filter((range) => range.start >= originalEnd).map((range) => range.start)
     );
+    const startClientY = event.clientY;
     let finalDraft: ResizeDraft | null = null;
+    let hasStartedResize = false;
 
-    setResizingId(entry.id);
-    setResizeError(null);
     event.currentTarget.setPointerCapture(event.pointerId);
 
     const updateDraft = (clientY: number) => {
@@ -982,13 +993,20 @@ function DayTimeline({
       setResizeDraft(finalDraft);
     };
 
+    const beginResize = () => {
+      if (hasStartedResize) return;
+      hasStartedResize = true;
+      setResizingId(entry.id);
+      setResizeError(null);
+    };
+
     const stopResize = async () => {
       window.removeEventListener("pointermove", moveResize);
       window.removeEventListener("pointerup", stopResize);
       window.removeEventListener("pointercancel", cancelResize);
       setResizingId(null);
 
-      if (!finalDraft) {
+      if (!hasStartedResize || !finalDraft) {
         setResizeDraft(null);
         return;
       }
@@ -1010,9 +1028,14 @@ function DayTimeline({
       setResizeDraft(null);
     };
 
-    const moveResize = (moveEvent: PointerEvent) => updateDraft(moveEvent.clientY);
+    const moveResize = (moveEvent: PointerEvent) => {
+      if (!hasStartedResize) {
+        if (Math.abs(moveEvent.clientY - startClientY) < resizeDragThresholdPx) return;
+        beginResize();
+      }
+      updateDraft(moveEvent.clientY);
+    };
 
-    updateDraft(event.clientY);
     window.addEventListener("pointermove", moveResize);
     window.addEventListener("pointerup", stopResize, { once: true });
     window.addEventListener("pointercancel", cancelResize, { once: true });
@@ -1295,9 +1318,12 @@ function TimelineBlock({
       : projectedEntryEnd(entry);
   const top =
     ((start.getHours() * 60 + start.getMinutes() - dayStartHour * 60) / 60) * pixelsPerHour;
-  const height = Math.max(30, ((end.getTime() - start.getTime()) / 3_600_000) * pixelsPerHour);
+  const rawHeight = ((end.getTime() - start.getTime()) / 3_600_000) * pixelsPerHour;
+  const height = Math.max(minimumTimeBlockHeight(pixelsPerHour), rawHeight);
   const color = pastelFor(entry);
   const durationSeconds = Math.max(0, Math.round((end.getTime() - start.getTime()) / 1000));
+  const density = getTimeBlockDensity({ durationSeconds, height });
+  const detailsLabel = timelineBlockDetailsLabel(entry, start, end, durationSeconds);
   const weekLeft = (dayIndex / columnCount) * 100;
   const weekWidth = 100 / columnCount;
   const positionStyle: CSSProperties =
@@ -1313,21 +1339,29 @@ function TimelineBlock({
     <article
       tabIndex={0}
       role="button"
-      aria-label={`Time block ${timeEntryTitle(entry)} ${entry.stoppedAt ? "" : "Running "}${formatDuration(durationSeconds)}`}
+      aria-label={detailsLabel}
+      title={detailsLabel}
       className={[
         "swiss-time-block",
         isResizing ? "is-resizing" : "",
         isSelected ? "is-selected" : "",
         entry.stoppedAt ? "" : "is-running",
+        ...timeBlockDensityClassNames(density),
         viewMode === "week" ? "is-compact" : ""
       ]
         .filter(Boolean)
         .join(" ")}
       onClick={onSelect}
       onContextMenu={onContextMenu}
-      onDoubleClick={onEdit}
+      onDoubleClick={(event) => {
+        event.preventDefault();
+        onEdit();
+      }}
       onKeyDown={(event) => {
         if (event.key === "Enter") onEdit();
+      }}
+      onMouseDown={(event) => {
+        if (event.detail > 1) event.preventDefault();
       }}
       style={{
         top: Math.round(Math.max(0, top)),
@@ -1344,28 +1378,45 @@ function TimelineBlock({
             type="button"
             className="swiss-resize-handle top"
             aria-label={`Resize start of ${timeEntryTitle(entry)}`}
-            onDoubleClick={onEdit}
+            onDoubleClick={(event) => event.stopPropagation()}
             onPointerDown={(event) => onResizeStart(entry, "start", event)}
           />
           <button
             type="button"
             className="swiss-resize-handle bottom"
             aria-label={`Resize end of ${timeEntryTitle(entry)}`}
-            onDoubleClick={onEdit}
+            onDoubleClick={(event) => event.stopPropagation()}
             onPointerDown={(event) => onResizeStart(entry, "end", event)}
           />
         </>
       ) : null}
-      <div>
-        <strong>{timeEntryTitle(entry)}</strong>
-        <span>{timeEntryContextLabel(entry)}</span>
-      </div>
-      <div>
-        {entry.stoppedAt ? <EntryIcon entry={entry} /> : <em className="swiss-running-badge">Running</em>}
-        <b>{formatDuration(durationSeconds)}</b>
-      </div>
+      {density.showTitle ? (
+        <div>
+          <strong>{timeEntryTitle(entry)}</strong>
+          {density.showContext ? <span>{timeEntryContextLabel(entry)}</span> : null}
+        </div>
+      ) : null}
+      {density.showDuration ? (
+        <div>
+          {entry.stoppedAt ? <EntryIcon entry={entry} /> : null}
+          <b>{formatDuration(durationSeconds)}</b>
+        </div>
+      ) : null}
     </article>
   );
+}
+
+function timelineBlockDetailsLabel(
+  entry: TimeEntryRow,
+  start: Date,
+  end: Date,
+  durationSeconds: number
+) {
+  const timeRange = `${formatTime(start)} - ${entry.stoppedAt ? formatTime(end) : "now"}`;
+  const durationLabel = entry.stoppedAt
+    ? formatDuration(durationSeconds)
+    : `Running, ${formatDuration(durationSeconds)}`;
+  return [timeEntryTitle(entry), timeEntryContextLabel(entry), timeRange, durationLabel].join(". ");
 }
 
 function DashboardReviewInbox({

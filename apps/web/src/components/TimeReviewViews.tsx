@@ -21,6 +21,12 @@ import {
   formatDuration,
   formatTime
 } from "@/lib/format";
+import {
+  getTimeBlockDensity,
+  minimumTimeBlockHeight,
+  resizeDragThresholdPx,
+  timeBlockDensityClassNames
+} from "@/lib/time-block-display";
 
 type TimeView = "calendar" | "list" | "timesheet";
 type CalendarMode = "week" | "day";
@@ -133,7 +139,7 @@ export function TimeReviewViews({
 
   return (
     <section className="space-y-5">
-      <CurrentTimerPanel data={data} onSynced={setData} />
+      <CurrentTimerPanel key={data.activeEntry?.id ?? "inactive"} data={data} onSynced={setData} />
 
       <div className="industrial-panel rounded-xl p-4">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
@@ -317,10 +323,10 @@ function CalendarReview({
       timelineEnd,
       ...ranges.filter((range) => range.start >= originalEnd).map((range) => range.start)
     );
+    const startClientY = event.clientY;
     let finalDraft: CalendarResizeDraft | null = null;
+    let hasStartedResize = false;
 
-    setResizingId(entry.id);
-    setResizeError(null);
     event.currentTarget.setPointerCapture(event.pointerId);
 
     const updateDraft = (clientY: number) => {
@@ -339,7 +345,20 @@ function CalendarReview({
       setResizeDraft(finalDraft);
     };
 
-    const moveResize = (moveEvent: PointerEvent) => updateDraft(moveEvent.clientY);
+    const beginResize = () => {
+      if (hasStartedResize) return;
+      hasStartedResize = true;
+      setResizingId(entry.id);
+      setResizeError(null);
+    };
+
+    const moveResize = (moveEvent: PointerEvent) => {
+      if (!hasStartedResize) {
+        if (Math.abs(moveEvent.clientY - startClientY) < resizeDragThresholdPx) return;
+        beginResize();
+      }
+      updateDraft(moveEvent.clientY);
+    };
     const cancelResize = () => {
       window.removeEventListener("pointermove", moveResize);
       window.removeEventListener("pointerup", stopResize);
@@ -353,7 +372,7 @@ function CalendarReview({
       window.removeEventListener("pointercancel", cancelResize);
       setResizingId(null);
 
-      if (!finalDraft) {
+      if (!hasStartedResize || !finalDraft) {
         setResizeDraft(null);
         return;
       }
@@ -367,7 +386,6 @@ function CalendarReview({
       }
     };
 
-    updateDraft(event.clientY);
     window.addEventListener("pointermove", moveResize);
     window.addEventListener("pointerup", stopResize, { once: true });
     window.addEventListener("pointercancel", cancelResize, { once: true });
@@ -468,6 +486,13 @@ function CalendarReview({
                 .filter((entry) => sameDay(new Date(entry.startedAt), day))
                 .map((entry) => {
                   const activeDraft = resizeDraft?.entryId === entry.id ? resizeDraft : null;
+                  const blockStyle = calendarBlockStyle(entry, activeDraft, rowHeight, calendarHeight);
+                  const durationSeconds = calendarDurationSeconds(entry, activeDraft);
+                  const density = getTimeBlockDensity({
+                    durationSeconds,
+                    height: blockStyle.height
+                  });
+                  const detailsLabel = calendarBlockDetailsLabel(entry, activeDraft, durationSeconds);
                   return (
                     <article
                       key={entry.id}
@@ -476,10 +501,11 @@ function CalendarReview({
                         "calendar-time-block",
                         selectedEntryId === entry.id ? "outline outline-2 outline-offset-1 outline-[var(--foreground)]" : "",
                         resizingId === entry.id ? "is-resizing" : "",
-                        entry.stoppedAt ? "" : "is-running"
+                        entry.stoppedAt ? "" : "is-running",
+                        ...timeBlockDensityClassNames(density)
                       ].join(" ")}
                       style={{
-                        ...calendarBlockStyle(entry, activeDraft, rowHeight, calendarHeight),
+                        ...blockStyle,
                         backgroundColor: timeEntryAccentColor(entry),
                         borderColor: "color-mix(in srgb, var(--foreground) 28%, transparent)",
                         color: "var(--on-pastel)"
@@ -487,14 +513,21 @@ function CalendarReview({
                       role="button"
                       tabIndex={0}
                       data-entry-id={entry.id}
-                      title={`${timeEntryTitle(entry)} ${formatTime(activeDraft?.startedAt ?? entry.startedAt)} - ${activeDraft?.stoppedAt ? formatTime(activeDraft.stoppedAt) : entry.stoppedAt ? formatTime(entry.stoppedAt) : "Running"}`}
+                      title={detailsLabel}
+                      aria-label={detailsLabel}
                       onClick={() => setSelectedEntryId(entry.id)}
-                      onDoubleClick={() => setEditingEntry(entry)}
+                      onDoubleClick={(event) => {
+                        event.preventDefault();
+                        setEditingEntry(entry);
+                      }}
                       onKeyDown={(event) => {
                         if (event.key === "Enter") {
                           event.preventDefault();
                           setEditingEntry(entry);
                         }
+                      }}
+                      onMouseDown={(event) => {
+                        if (event.detail > 1) event.preventDefault();
                       }}
                     >
                       {entry.stoppedAt ? (
@@ -505,7 +538,6 @@ function CalendarReview({
                             aria-label={`Resize start of ${timeEntryTitle(entry)}`}
                             onDoubleClick={(event) => {
                               event.stopPropagation();
-                              setEditingEntry(entry);
                             }}
                             onPointerDown={(event) => startCalendarResize(entry, day, "start", event)}
                           />
@@ -515,17 +547,22 @@ function CalendarReview({
                             aria-label={`Resize end of ${timeEntryTitle(entry)}`}
                             onDoubleClick={(event) => {
                               event.stopPropagation();
-                              setEditingEntry(entry);
                             }}
                             onPointerDown={(event) => startCalendarResize(entry, day, "end", event)}
                           />
                         </>
                       ) : null}
-                      <span className="block truncate font-semibold">{timeEntryTitle(entry)}</span>
-                      <span className="block truncate opacity-80">
-                        {timeEntryContextLabel(entry)}
-                      </span>
-                      <span className="tabular block">{formatDuration(calendarDurationSeconds(entry, activeDraft))}</span>
+                      {density.showTitle ? (
+                        <>
+                          <span className="block truncate font-semibold">{timeEntryTitle(entry)}</span>
+                          {density.showContext ? (
+                            <span className="block truncate opacity-80">
+                              {timeEntryContextLabel(entry)}
+                            </span>
+                          ) : null}
+                        </>
+                      ) : null}
+                      {density.showDuration ? <span className="tabular block">{formatDuration(durationSeconds)}</span> : null}
                     </article>
                   );
                 })}
@@ -649,10 +686,23 @@ function calendarBlockStyle(
       ? new Date(entry.stoppedAt)
       : projectedEntryEnd(entry);
   const startMinutes = start.getHours() * 60 + start.getMinutes();
-  const durationMinutes = Math.max(15, (stoppedAt.getTime() - start.getTime()) / 60_000);
-  const top = Math.min(calendarHeight - 24, Math.max(0, ((startMinutes - startHour * 60) / 60) * rowHeight));
-  const height = Math.min(calendarHeight - top, Math.max(36, (durationMinutes / 60) * rowHeight));
-  return { top: Math.round(top), height: Math.round(Math.max(24, height)) };
+  const durationMinutes = Math.max(0, (stoppedAt.getTime() - start.getTime()) / 60_000);
+  const minimumHeight = minimumTimeBlockHeight(rowHeight);
+  const top = Math.min(calendarHeight - minimumHeight, Math.max(0, ((startMinutes - startHour * 60) / 60) * rowHeight));
+  const height = Math.min(calendarHeight - top, Math.max(minimumHeight, (durationMinutes / 60) * rowHeight));
+  return { top: Math.round(top), height: Math.round(height) };
+}
+
+function calendarBlockDetailsLabel(
+  entry: TimeEntryRow,
+  draft: CalendarResizeDraft | null,
+  durationSeconds: number
+) {
+  const start = draft?.startedAt ?? entry.startedAt;
+  const stoppedAt = draft?.stoppedAt ?? entry.stoppedAt;
+  const timeRange = `${formatTime(start)} - ${stoppedAt ? formatTime(stoppedAt) : "now"}`;
+  const durationLabel = stoppedAt ? formatDuration(durationSeconds) : `Running, ${formatDuration(durationSeconds)}`;
+  return `${timeEntryTitle(entry)}. ${timeEntryContextLabel(entry)}. ${timeRange}. ${durationLabel}`;
 }
 
 function calendarDurationSeconds(entry: TimeEntryRow, draft: CalendarResizeDraft | null = null) {
