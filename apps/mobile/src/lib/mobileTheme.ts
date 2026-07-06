@@ -584,6 +584,11 @@ function createStyles(theme: MobileTheme) {
       paddingHorizontal: 14,
       paddingVertical: 10
     },
+    authSecondaryButton: {
+      minHeight: 44,
+      alignItems: "center",
+      justifyContent: "center"
+    },
     toggleSelected: {
       borderColor: theme.accent,
       backgroundColor: theme.surfaceMuted
@@ -592,6 +597,10 @@ function createStyles(theme: MobileTheme) {
       color: theme.accent,
       fontWeight: "800",
       fontFamily: monoFont
+    },
+    authSecondaryButtonText: {
+      lineHeight: 18,
+      textAlign: "center"
     },
     row: {
       flexDirection: "row",

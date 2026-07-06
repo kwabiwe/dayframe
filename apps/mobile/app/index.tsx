@@ -431,13 +431,13 @@ export default function HomeScreen() {
               </Text>
             </Pressable>
             <Pressable
-              style={pressable(styles.secondaryButton, styles.buttonPressed)}
+              style={pressable([styles.secondaryButton, styles.authSecondaryButton], styles.buttonPressed)}
               onPress={() => {
                 setAuthError(null);
                 setAuthView(authView === "signup" ? "login" : "signup");
               }}
             >
-              <Text style={styles.secondaryButtonText}>
+              <Text style={[styles.secondaryButtonText, styles.authSecondaryButtonText]}>
                 {authView === "signup" ? "Use existing account" : "Create account"}
               </Text>
             </Pressable>
