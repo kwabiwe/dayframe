@@ -41,6 +41,7 @@ export function EntriesTable({
   });
   const [editingEntry, setEditingEntry] = useState<TimeEntryRow | null>(null);
   const [manualError, setManualError] = useState<string | null>(null);
+  const [continuingEntryId, setContinuingEntryId] = useState<string | null>(null);
 
   const filtered = useMemo(
     () =>
@@ -61,17 +62,45 @@ export function EntriesTable({
   }
 
   async function continueEntry(entry: TimeEntryRow) {
-    await fetch("/api/time-entries", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        mode: "start",
-        categoryId: entry.categoryId,
-        description: entry.description ?? undefined
-      })
-    });
-    await onChanged?.();
-    startTransition(() => router.refresh());
+    if (continuingEntryId) return;
+
+    const categoryId = entry.categoryId ?? undefined;
+    const description = entry.description?.trim() || undefined;
+
+    if (!categoryId && !description) {
+      setManualError("This row does not have a task or category to start.");
+      return;
+    }
+
+    setContinuingEntryId(entry.id);
+    setManualError(null);
+    try {
+      const response = await fetch("/api/time-entries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "start",
+          categoryId,
+          description
+        })
+      });
+      if (!response.ok) {
+        let errorMessage = `Unable to start this task: ${response.status}`;
+        try {
+          const payload = (await response.json()) as { error?: string };
+          errorMessage = payload.error ?? errorMessage;
+        } catch {
+          // Runtime failures may not return JSON.
+        }
+        throw new Error(errorMessage);
+      }
+      await onChanged?.();
+      startTransition(() => router.refresh());
+    } catch (error) {
+      setManualError(error instanceof Error ? error.message : "Unable to start this task.");
+    } finally {
+      setContinuingEntryId(null);
+    }
   }
 
   async function submitManual(event: FormEvent<HTMLFormElement>) {
@@ -186,6 +215,11 @@ export function EntriesTable({
           </button>
         </form>
       ) : null}
+      {!showManualForm && manualError ? (
+        <p className="swiss-inline-error" role="alert">
+          {manualError}
+        </p>
+      ) : null}
 
       <div className="overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)]">
         <div className="overflow-x-auto">
@@ -246,7 +280,7 @@ export function EntriesTable({
                       <button
                         className="focus-ring rounded-md border border-[var(--line)] bg-[var(--surface-inset)] p-2 hover:border-[var(--accent)] hover:text-[var(--accent)]"
                         type="button"
-                        disabled={isPending}
+                        disabled={isPending || Boolean(continuingEntryId)}
                         aria-label={`Start ${timeEntryTitle(entry)} again`}
                         onClick={() => continueEntry(entry)}
                       >

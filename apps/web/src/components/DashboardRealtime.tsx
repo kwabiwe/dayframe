@@ -53,13 +53,17 @@ import {
   emptyTimerEntryDraft,
   shouldStartTimerFromEntrySubmit
 } from "@/lib/timer-entry-draft";
+import {
+  getTimeBlockDensity,
+  minimumTimeBlockHeight,
+  resizeDragThresholdPx,
+  timeBlockDensityClassNames
+} from "@/lib/time-block-display";
 
 const dayStartHour = 7;
 const dayEndHour = 21;
 const resizeSnapMinutes = 15;
 const minEntryMinutes = 15;
-const shortBlockMinutes = 15;
-const minimumClickableBlockHeight = 18;
 const timelineZooms = {
   hour: { label: "1h", intervalMinutes: 60, pixelsPerHour: 64 },
   half: { label: "30m", intervalMinutes: 30, pixelsPerHour: 92 },
@@ -185,6 +189,7 @@ export function CurrentTimerPanel({
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const activeDetailsSyncRef = useRef("");
   const clearDraftAfterStopRef = useRef(false);
+  const timerActionInFlightRef = useRef(false);
   const categoryMenuRef = useRef<HTMLDivElement | null>(null);
   const descriptionInputRef = useRef<HTMLInputElement | null>(null);
   const active = data.activeEntry;
@@ -292,6 +297,8 @@ export function CurrentTimerPanel({
     mode: "start" | "stop",
     override?: { categoryId?: string | null; description?: string | null }
   ) => {
+    if (timerActionInFlightRef.current) return;
+
     const nextCategoryId =
       override && "categoryId" in override
         ? (override.categoryId ?? undefined)
@@ -301,6 +308,7 @@ export function CurrentTimerPanel({
         ? (override.description ?? undefined)
         : description.trim() || undefined;
 
+    timerActionInFlightRef.current = true;
     setIsBusy(true);
     setTimerError(null);
     try {
@@ -347,6 +355,7 @@ export function CurrentTimerPanel({
     } catch (error) {
       setTimerError(error instanceof Error ? error.message : "Unable to update the timer.");
     } finally {
+      timerActionInFlightRef.current = false;
       setIsBusy(false);
     }
   }, [active, categoryId, description, refresh]);
@@ -386,7 +395,7 @@ export function CurrentTimerPanel({
     function toggleFromShortcut(event: Event) {
       const shortcutEvent = event as CustomEvent<TimerShortcutEventDetail>;
       shortcutEvent.detail.handled = true;
-      if (isBusy) return;
+      if (isBusy || timerActionInFlightRef.current) return;
 
       if (active) {
         shortcutEvent.detail.action = timerAction("stop");
@@ -954,10 +963,10 @@ function DayTimeline({
       timelineEndMinutes,
       ...ranges.filter((range) => range.start >= originalEnd).map((range) => range.start)
     );
+    const startClientY = event.clientY;
     let finalDraft: ResizeDraft | null = null;
+    let hasStartedResize = false;
 
-    setResizingId(entry.id);
-    setResizeError(null);
     event.currentTarget.setPointerCapture(event.pointerId);
 
     const updateDraft = (clientY: number) => {
@@ -984,13 +993,20 @@ function DayTimeline({
       setResizeDraft(finalDraft);
     };
 
+    const beginResize = () => {
+      if (hasStartedResize) return;
+      hasStartedResize = true;
+      setResizingId(entry.id);
+      setResizeError(null);
+    };
+
     const stopResize = async () => {
       window.removeEventListener("pointermove", moveResize);
       window.removeEventListener("pointerup", stopResize);
       window.removeEventListener("pointercancel", cancelResize);
       setResizingId(null);
 
-      if (!finalDraft) {
+      if (!hasStartedResize || !finalDraft) {
         setResizeDraft(null);
         return;
       }
@@ -1012,9 +1028,14 @@ function DayTimeline({
       setResizeDraft(null);
     };
 
-    const moveResize = (moveEvent: PointerEvent) => updateDraft(moveEvent.clientY);
+    const moveResize = (moveEvent: PointerEvent) => {
+      if (!hasStartedResize) {
+        if (Math.abs(moveEvent.clientY - startClientY) < resizeDragThresholdPx) return;
+        beginResize();
+      }
+      updateDraft(moveEvent.clientY);
+    };
 
-    updateDraft(event.clientY);
     window.addEventListener("pointermove", moveResize);
     window.addEventListener("pointerup", stopResize, { once: true });
     window.addEventListener("pointercancel", cancelResize, { once: true });
@@ -1298,14 +1319,10 @@ function TimelineBlock({
   const top =
     ((start.getHours() * 60 + start.getMinutes() - dayStartHour * 60) / 60) * pixelsPerHour;
   const rawHeight = ((end.getTime() - start.getTime()) / 3_600_000) * pixelsPerHour;
-  const height = Math.max(minimumVisualBlockHeight(pixelsPerHour), rawHeight);
+  const height = Math.max(minimumTimeBlockHeight(pixelsPerHour), rawHeight);
   const color = pastelFor(entry);
   const durationSeconds = Math.max(0, Math.round((end.getTime() - start.getTime()) / 1000));
-  const durationMinutes = durationSeconds / 60;
-  const isTinyBlock = durationMinutes < 10 || height < 24;
-  const isShortBlock = durationMinutes < 16 || height < 38;
-  const canShowContext = !isShortBlock && height >= 44;
-  const canShowDuration = !isShortBlock && height >= 40;
+  const density = getTimeBlockDensity({ durationSeconds, height });
   const detailsLabel = timelineBlockDetailsLabel(entry, start, end, durationSeconds);
   const weekLeft = (dayIndex / columnCount) * 100;
   const weekWidth = 100 / columnCount;
@@ -1329,17 +1346,22 @@ function TimelineBlock({
         isResizing ? "is-resizing" : "",
         isSelected ? "is-selected" : "",
         entry.stoppedAt ? "" : "is-running",
-        isTinyBlock ? "is-tiny" : "",
-        isShortBlock ? "is-short" : "",
+        ...timeBlockDensityClassNames(density),
         viewMode === "week" ? "is-compact" : ""
       ]
         .filter(Boolean)
         .join(" ")}
       onClick={onSelect}
       onContextMenu={onContextMenu}
-      onDoubleClick={onEdit}
+      onDoubleClick={(event) => {
+        event.preventDefault();
+        onEdit();
+      }}
       onKeyDown={(event) => {
         if (event.key === "Enter") onEdit();
+      }}
+      onMouseDown={(event) => {
+        if (event.detail > 1) event.preventDefault();
       }}
       style={{
         top: Math.round(Math.max(0, top)),
@@ -1368,11 +1390,13 @@ function TimelineBlock({
           />
         </>
       ) : null}
-      <div>
-        <strong>{timeEntryTitle(entry)}</strong>
-        {canShowContext ? <span>{timeEntryContextLabel(entry)}</span> : null}
-      </div>
-      {canShowDuration ? (
+      {density.showTitle ? (
+        <div>
+          <strong>{timeEntryTitle(entry)}</strong>
+          {density.showContext ? <span>{timeEntryContextLabel(entry)}</span> : null}
+        </div>
+      ) : null}
+      {density.showDuration ? (
         <div>
           {entry.stoppedAt ? <EntryIcon entry={entry} /> : null}
           <b>{formatDuration(durationSeconds)}</b>
@@ -1380,10 +1404,6 @@ function TimelineBlock({
       ) : null}
     </article>
   );
-}
-
-function minimumVisualBlockHeight(pixelsPerHour: number) {
-  return Math.max(minimumClickableBlockHeight, (shortBlockMinutes / 60) * pixelsPerHour);
 }
 
 function timelineBlockDetailsLabel(

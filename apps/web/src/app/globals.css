@@ -1365,6 +1365,8 @@ textarea:focus-visible {
   position: absolute;
   z-index: 2;
   touch-action: pan-x pan-y;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .swiss-time-block {
@@ -1391,6 +1393,7 @@ textarea:focus-visible {
   gap: 2px;
   border-radius: 10px;
   line-height: 1.2;
+  cursor: pointer;
   transition:
     border-color 140ms ease,
     box-shadow 140ms ease,
@@ -1416,7 +1419,8 @@ textarea:focus-visible {
 .swiss-time-block.is-running,
 .calendar-time-block.is-running {
   border-style: dotted;
-  border-bottom-style: dashed;
+  border-bottom-style: none;
+  border-bottom-color: transparent;
   box-shadow: 0 8px 18px color-mix(in srgb, currentColor 8%, transparent);
   opacity: 0.72;
 }
@@ -1441,6 +1445,8 @@ textarea:focus-visible {
   background: transparent;
   cursor: ns-resize;
   touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .swiss-resize-handle::after {
