@@ -93,6 +93,9 @@ function createStyles(theme: MobileTheme) {
     contentStack: {
       gap: 14
     },
+    tabScreenStack: {
+      gap: 14
+    },
     header: {
       flexDirection: "row",
       alignItems: "center",
@@ -124,6 +127,50 @@ function createStyles(theme: MobileTheme) {
       borderRadius: 12,
       alignItems: "center",
       justifyContent: "center"
+    },
+    floatingTabBarWrap: {
+      position: "absolute",
+      left: 16,
+      right: 16,
+      alignItems: "center"
+    },
+    floatingTabBar: {
+      width: "100%",
+      maxWidth: 420,
+      minHeight: 72,
+      borderWidth: 1,
+      borderColor: theme.mode === "dark" ? "rgba(138, 215, 196, 0.24)" : "rgba(47, 118, 109, 0.18)",
+      backgroundColor: theme.mode === "dark" ? "rgba(23, 32, 40, 0.88)" : "rgba(255, 255, 255, 0.88)",
+      borderRadius: 28,
+      padding: 6,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      shadowColor: "#000000",
+      shadowOpacity: theme.mode === "dark" ? 0.34 : 0.14,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 10 },
+      elevation: 8
+    },
+    floatingTabButton: {
+      flex: 1,
+      minHeight: 58,
+      borderRadius: 22,
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 3
+    },
+    floatingTabButtonSelected: {
+      backgroundColor: theme.mode === "dark" ? "rgba(138, 215, 196, 0.14)" : "rgba(47, 118, 109, 0.10)"
+    },
+    floatingTabLabel: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 11,
+      fontWeight: "800"
+    },
+    floatingTabLabelSelected: {
+      color: theme.accent
     },
     title: {
       fontSize: 30,
@@ -168,6 +215,155 @@ function createStyles(theme: MobileTheme) {
       borderRadius: 16,
       padding: 14,
       gap: 12
+    },
+    calendarWeekStrip: {
+      gap: 8,
+      paddingRight: 4
+    },
+    calendarDayButton: {
+      width: 54,
+      minHeight: 64,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 16,
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 4
+    },
+    calendarDayButtonSelected: {
+      borderColor: theme.accent,
+      backgroundColor: theme.surfaceMuted
+    },
+    calendarDayButtonToday: {
+      borderColor: theme.accentStrong
+    },
+    calendarWeekday: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 11,
+      fontWeight: "800"
+    },
+    calendarDayNumber: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 18,
+      fontWeight: "800"
+    },
+    calendarDayTextSelected: {
+      color: theme.accent
+    },
+    calendarTimelinePanel: {
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 16,
+      overflow: "hidden"
+    },
+    calendarEdgeStack: {
+      borderBottomWidth: 1,
+      borderBottomColor: theme.border,
+      paddingHorizontal: 10,
+      paddingVertical: 10,
+      gap: 8
+    },
+    calendarEdgeTimeRow: {
+      minHeight: 20,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6
+    },
+    calendarOutsideBlock: {
+      minHeight: 52,
+      borderWidth: 1,
+      borderStyle: "dashed",
+      borderRadius: 13,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      gap: 4,
+      justifyContent: "center"
+    },
+    calendarTimelineCanvas: {
+      position: "relative"
+    },
+    calendarHourRow: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      height: 1,
+      flexDirection: "row",
+      alignItems: "center"
+    },
+    calendarHourLabel: {
+      width: 54,
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 10,
+      fontWeight: "800",
+      textAlign: "center"
+    },
+    calendarHourLine: {
+      flex: 1,
+      height: 1,
+      backgroundColor: theme.border
+    },
+    calendarBlock: {
+      position: "absolute",
+      left: 58,
+      right: 10,
+      minHeight: 44,
+      borderWidth: 1,
+      borderRadius: 13,
+      paddingHorizontal: 10,
+      paddingVertical: 7,
+      gap: 4,
+      justifyContent: "center"
+    },
+    calendarBlockActive: {
+      borderStyle: "dashed"
+    },
+    calendarBlockTitleRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 7,
+      minWidth: 0
+    },
+    calendarBlockTitle: {
+      flex: 1,
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "800"
+    },
+    calendarBlockMeta: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 11,
+      fontWeight: "800"
+    },
+    currentTimeRow: {
+      position: "absolute",
+      left: 6,
+      right: 8,
+      height: 18,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      transform: [{ translateY: -9 }]
+    },
+    currentTimeLabel: {
+      width: 48,
+      color: theme.danger,
+      fontFamily: monoFont,
+      fontSize: 10,
+      fontWeight: "800",
+      textAlign: "center"
+    },
+    currentTimeLine: {
+      flex: 1,
+      height: 2,
+      borderRadius: 999,
+      backgroundColor: theme.danger
     },
     label: {
       fontSize: 11,
@@ -339,6 +535,125 @@ function createStyles(theme: MobileTheme) {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 12
+    },
+    reportRangeRow: {
+      flexDirection: "row",
+      gap: 8
+    },
+    reportRangeChip: {
+      minHeight: 44,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 999,
+      paddingHorizontal: 16,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    reportRangeChipSelected: {
+      borderColor: theme.accent,
+      backgroundColor: theme.surfaceMuted
+    },
+    reportRangeChipText: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "800"
+    },
+    reportRangeChipTextSelected: {
+      color: theme.accent
+    },
+    reportTotalsRow: {
+      flexDirection: "row",
+      gap: 10
+    },
+    reportTotalCard: {
+      flex: 1,
+      minHeight: 78,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 14,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      justifyContent: "space-between"
+    },
+    reportTotalValue: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 22,
+      fontWeight: "800"
+    },
+    reportCategoryList: {
+      gap: 12
+    },
+    reportCategoryRow: {
+      flexDirection: "row",
+      gap: 10,
+      borderTopWidth: 1,
+      borderTopColor: theme.border,
+      paddingTop: 12
+    },
+    reportCategorySwatch: {
+      width: 12,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      borderRadius: 999
+    },
+    reportCategoryBody: {
+      flex: 1,
+      minWidth: 0,
+      gap: 6
+    },
+    reportCategoryHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 10
+    },
+    reportBarTrack: {
+      height: 9,
+      borderRadius: 999,
+      backgroundColor: theme.chartTrack,
+      overflow: "hidden"
+    },
+    reportBarFill: {
+      height: "100%",
+      borderRadius: 999
+    },
+    reportDailyChart: {
+      height: 150,
+      flexDirection: "row",
+      alignItems: "flex-end",
+      gap: 8,
+      paddingTop: 8
+    },
+    reportDailySlot: {
+      flex: 1,
+      height: "100%",
+      alignItems: "center",
+      gap: 8
+    },
+    reportDailyTrack: {
+      flex: 1,
+      width: "100%",
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 999,
+      justifyContent: "flex-end",
+      overflow: "hidden"
+    },
+    reportDailyFill: {
+      width: "100%",
+      borderTopLeftRadius: 999,
+      borderTopRightRadius: 999
+    },
+    reportDailyLabel: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 11,
+      fontWeight: "800"
     },
     compactCategoryScroller: {
       gap: 7,
@@ -603,6 +918,55 @@ function createStyles(theme: MobileTheme) {
       shadowRadius: 18,
       shadowOffset: { width: 0, height: -8 },
       elevation: 8
+    },
+    entryDetailSheet: {
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      borderTopWidth: 1,
+      borderLeftWidth: 1,
+      borderRightWidth: 1,
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surface,
+      paddingHorizontal: 18,
+      paddingTop: 10,
+      paddingBottom: 16,
+      gap: 12,
+      shadowColor: "#000000",
+      shadowOpacity: theme.mode === "dark" ? 0.36 : 0.14,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: -8 },
+      elevation: 8
+    },
+    entryDetailHeader: {
+      minHeight: 56,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10
+    },
+    entryDetailTitle: {
+      flex: 1,
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 17,
+      fontWeight: "800"
+    },
+    entryDetailBody: {
+      gap: 10
+    },
+    entryDetailRow: {
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 14,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      gap: 3
+    },
+    entryDetailValue: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 15,
+      fontWeight: "800"
     },
     sheetHandle: {
       alignSelf: "center",

@@ -11,20 +11,55 @@ import { DAYFRAME_API_BASE } from "./config";
 const QUEUE_KEY = "dayframe.offlineQueue.v1";
 const SESSION_TOKEN_KEY = "dayframe.localSessionToken.v1";
 
+export type MobileDateRange = {
+  selectedDate: string;
+  previousDate: string;
+  nextDate: string;
+  dayStart: string;
+  dayEnd: string;
+  weekStart: string;
+  weekEnd: string;
+};
+
+export type MobileSeriesPoint = {
+  key: string;
+  label: string;
+  seconds: number;
+};
+
+export type MobileStats = {
+  todaySeconds: number;
+  weekSeconds: number;
+  reviewCount: number;
+};
+
+export type MobileTimeEntry = {
+  id: string;
+  projectId: string | null;
+  projectName: string | null;
+  projectColor: string | null;
+  clientName: string | null;
+  categoryId: string | null;
+  categoryName: string | null;
+  categoryColor?: string | null;
+  placeName: string | null;
+  source: string;
+  confidence: string;
+  reviewStatus: string;
+  description: string | null;
+  startedAt: string;
+  stoppedAt: string | null;
+  durationSeconds: number;
+};
+
 export type MobileBootstrap = {
   user: { id: string; email: string; name: string };
   workspace: { id: string; name: string };
-  activeEntry: {
-    id: string;
-    projectId: string | null;
-    projectName: string | null;
-    projectColor: string | null;
-    categoryId: string | null;
-    categoryName: string | null;
-    description: string | null;
-    durationSeconds: number;
-    startedAt: string;
-  } | null;
+  dateRange?: MobileDateRange;
+  activeEntry: MobileTimeEntry | null;
+  stats?: MobileStats;
+  todaySeries?: MobileSeriesPoint[];
+  weekSeries?: MobileSeriesPoint[];
   projects: Array<{
     id: string;
     name: string;
@@ -34,23 +69,9 @@ export type MobileBootstrap = {
     clientName: string | null;
   }>;
   categories: Array<{ id: string; name: string; color: string; isPinned: boolean }>;
-  entries: Array<{
-    id: string;
-    projectId: string | null;
-    projectName: string | null;
-    projectColor: string | null;
-    clientName: string | null;
-    categoryId: string | null;
-    categoryName: string | null;
-    placeName: string | null;
-    source: string;
-    confidence: string;
-    reviewStatus: string;
-    description: string | null;
-    startedAt: string;
-    stoppedAt: string | null;
-    durationSeconds: number;
-  }>;
+  entries: MobileTimeEntry[];
+  dayEntries?: MobileTimeEntry[];
+  weekEntries?: MobileTimeEntry[];
   places: Array<{
     id: string;
     name: string;
@@ -110,8 +131,9 @@ type ActivityEventDraft = {
   rawPayload?: Record<string, unknown>;
 };
 
-export async function fetchBootstrap(): Promise<MobileBootstrap> {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/bootstrap`, {
+export async function fetchBootstrap(options: { date?: string } = {}): Promise<MobileBootstrap> {
+  const params = options.date ? `?date=${encodeURIComponent(options.date)}` : "";
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/bootstrap${params}`, {
     headers: await authHeaders()
   });
   if (response.status === 401) {
