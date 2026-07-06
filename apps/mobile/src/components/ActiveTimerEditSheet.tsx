@@ -119,16 +119,17 @@ export function ActiveTimerEditSheet({
   const editingEntry = entry;
 
   const busy = saving || stopping;
+  const keyboardSafeAreaOverlap = keyboardInset > 0 ? insets.bottom : 0;
   const keyboardAwareSheetHeight = keyboardInset > 0
     ? Math.max(
         360,
-        windowDimensions.height - keyboardInset - insets.top - 12
+        windowDimensions.height - keyboardInset - insets.top - 12 + keyboardSafeAreaOverlap
       )
     : null;
   const keyboardAwareSheetStyle = keyboardAwareSheetHeight
     ? {
         height: keyboardAwareSheetHeight,
-        marginBottom: keyboardInset,
+        marginBottom: Math.max(0, keyboardInset - keyboardSafeAreaOverlap),
         maxHeight: keyboardAwareSheetHeight
       }
     : null;
@@ -173,7 +174,7 @@ export function ActiveTimerEditSheet({
   }
 
   function updateTimeText(value: string) {
-    setTimeText(value.replace(/[^\d:]/g, "").slice(0, 5));
+    setTimeText(formatEditableTime(value));
     setValidationError(null);
   }
 
@@ -658,6 +659,28 @@ function formatDateInput(date: Date) {
 
 function formatTimeInput(date: Date) {
   return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+function formatEditableTime(value: string) {
+  const digits = value.replace(/\D/g, "").slice(0, 4);
+  if (digits.length === 0) return "";
+  if (digits.length === 1) {
+    const hour = Number(digits);
+    return hour > 2 ? `0${hour}:` : digits;
+  }
+  if (digits.length === 2) {
+    const hour = Number(digits);
+    if (hour > 23) return `0${digits[0]}:${digits[1]}`;
+    return value.includes(":") ? `${digits}:` : digits;
+  }
+  if (digits.length === 3) {
+    const hour = Number(digits.slice(0, 2));
+    return hour > 23 ? `0${digits[0]}:${digits.slice(1)}` : `${digits.slice(0, 2)}:${digits[2]}`;
+  }
+
+  const hour = Math.min(Number(digits.slice(0, 2)), 23);
+  const minute = Math.min(Number(digits.slice(2)), 59);
+  return `${pad2(hour)}:${pad2(minute)}`;
 }
 
 function pad2(value: number) {
