@@ -143,6 +143,8 @@ export type DashboardSeriesPoint = {
   seconds: number;
 };
 
+export type ReportSeriesPoint = DashboardSeriesPoint;
+
 export type ReportRow = {
   id: string;
   name: string;
@@ -675,7 +677,8 @@ function buildWeekSeries(entries: TimeEntryRow[], dateRange: DashboardDateRange)
 }
 
 export async function getReports(session: RequestSession = getDevSession()) {
-  const [byCategory, bySource, byPlace] = await Promise.all([
+  const dateRange = buildDashboardDateRange();
+  const [byCategory, bySource, byPlace, weekTotals] = await Promise.all([
     query<ReportRow>(
       `select coalesce(c.id::text, 'unassigned') as id,
               coalesce(c.name, 'Uncategorized') as name,
@@ -710,12 +713,46 @@ export async function getReports(session: RequestSession = getDevSession()) {
        group by coalesce(pl.id::text, 'no-place'), coalesce(pl.name, 'No place')
        order by seconds desc`,
       [session.workspaceId]
+    ),
+    query<{ index: number; seconds: number }>(
+      `with days as (
+         select day_start, index
+         from generate_series(
+           $2::timestamptz,
+           $3::timestamptz - interval '1 day',
+           interval '1 day'
+         ) with ordinality as series(day_start, index)
+       )
+       select (days.index - 1)::int as index,
+              coalesce(sum(
+                extract(epoch from (coalesce(te.stopped_at, now()) - te.started_at))
+              ), 0)::int as seconds
+       from days
+       left join time_entries te
+         on te.workspace_id = $1
+        and te.started_at >= days.day_start
+        and te.started_at < days.day_start + interval '1 day'
+       group by days.index
+       order by days.index`,
+      [session.workspaceId, dateRange.weekStart, dateRange.weekEnd]
     )
   ]);
+
+  const secondsByDay = new Map(weekTotals.rows.map((row) => [row.index, row.seconds]));
+  const weekStart = new Date(dateRange.weekStart);
+  const weekSeries = Array.from({ length: 7 }, (_, index) => {
+    const day = addDays(weekStart, index);
+    return {
+      key: toDateKey(day),
+      label: new Intl.DateTimeFormat("en-GB", { weekday: "short" }).format(day),
+      seconds: secondsByDay.get(index) ?? 0
+    };
+  });
 
   return {
     byCategory: byCategory.rows,
     bySource: bySource.rows,
-    byPlace: byPlace.rows
+    byPlace: byPlace.rows,
+    weekSeries
   };
 }

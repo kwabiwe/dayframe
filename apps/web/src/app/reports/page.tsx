@@ -1,5 +1,6 @@
 import { PageHeader } from "@/components/PageHeader";
 import { ReportBars } from "@/components/ReportBars";
+import { ReportsOverview } from "@/components/ReportsOverview";
 import { resolvePageSession } from "@/lib/auth/server";
 import { getReports } from "@/lib/queries";
 
@@ -15,10 +16,13 @@ export default async function ReportsPage() {
         title="Reports"
         description="Compare tracked time by category, source and place."
       />
-      <div className="grid gap-5 px-5 py-6 md:grid-cols-2 md:px-8 xl:grid-cols-3">
-        <ReportBars title="By category" rows={reports.byCategory} />
-        <ReportBars title="By source" rows={reports.bySource} />
-        <ReportBars title="By place" rows={reports.byPlace} />
+      <div className="reports-page px-5 py-6 md:px-8">
+        <ReportsOverview categories={reports.byCategory} weekSeries={reports.weekSeries} />
+        <div className="reports-list-grid">
+          <ReportBars title="By category" rows={reports.byCategory} />
+          <ReportBars title="By source" rows={reports.bySource} />
+          <ReportBars title="By place" rows={reports.byPlace} />
+        </div>
       </div>
     </>
   );

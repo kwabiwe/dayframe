@@ -34,9 +34,9 @@ const startHour = 6;
 const endHour = 22;
 const calendarSnapMinutes = 15;
 const calendarZooms = {
-  compact: { label: "Fit", rowHeight: 48 },
-  regular: { label: "1h", rowHeight: 58 },
-  detail: { label: "Detail", rowHeight: 82 }
+  hour: { label: "1h", intervalMinutes: 60, pixelsPerHour: 64 },
+  half: { label: "30m", intervalMinutes: 30, pixelsPerHour: 92 },
+  quarter: { label: "15m", intervalMinutes: 15, pixelsPerHour: 128 }
 } as const;
 
 type CalendarResizeEdge = "start" | "end";
@@ -196,18 +196,32 @@ function CalendarReview({
   const [resizeDraft, setResizeDraft] = useState<CalendarResizeDraft | null>(null);
   const [resizingId, setResizingId] = useState<string | null>(null);
   const [resizeError, setResizeError] = useState<string | null>(null);
-  const [zoomLevel, setZoomLevel] = useState<CalendarZoom>("regular");
+  const [zoomLevel, setZoomLevel] = useState<CalendarZoom>("hour");
   const today = new Date();
   const zoom = calendarZooms[zoomLevel];
   const zoomKeys = Object.keys(calendarZooms) as CalendarZoom[];
   const zoomIndex = zoomKeys.indexOf(zoomLevel);
-  const rowHeight = zoom.rowHeight;
+  const rowHeight = zoom.pixelsPerHour;
+  const gridLineSpacing = (zoom.intervalMinutes / 60) * rowHeight;
   const calendarHeight = (endHour - startHour) * rowHeight;
   const visibleDays =
     calendarMode === "day"
       ? [weekDays.find((day) => sameDay(day, today)) ?? today]
       : weekDays;
-  const hours = Array.from({ length: endHour - startHour + 1 }, (_, index) => startHour + index);
+  const axisMarks = useMemo(() => {
+    const startMinutes = startHour * 60;
+    const totalMinutes = (endHour - startHour) * 60;
+    const markCount = Math.floor(totalMinutes / zoom.intervalMinutes);
+    return Array.from({ length: markCount + 1 }, (_, index) => {
+      const minutes = startMinutes + index * zoom.intervalMinutes;
+      return {
+        key: `${minutes}`,
+        label: formatCalendarAxisMinutes(minutes),
+        major: minutes % 60 === 0,
+        top: ((minutes - startMinutes) / 60) * rowHeight
+      };
+    });
+  }, [rowHeight, zoom.intervalMinutes]);
   const selectedEntry = entries.find((entry) => entry.id === selectedEntryId) ?? null;
 
   async function remove(id: string) {
@@ -423,13 +437,16 @@ function CalendarReview({
           })}
 
           <div className="relative border-r border-[var(--line)] bg-[var(--surface-inset)]" style={{ height: calendarHeight }}>
-            {hours.map((hour) => (
+            {axisMarks.map((mark) => (
               <div
-                key={hour}
-                className="tabular absolute left-0 right-0 border-t border-[var(--line)] px-2 pt-1 text-xs text-[var(--muted)]"
-                style={{ top: (hour - startHour) * rowHeight }}
+                key={mark.key}
+                className={[
+                  "tabular absolute left-0 right-0 border-t border-[var(--line)] px-2 pt-1 text-xs text-[var(--muted)]",
+                  mark.major ? "" : "border-dotted opacity-70"
+                ].join(" ")}
+                style={{ top: mark.top }}
               >
-                {hour.toString().padStart(2, "0")}:00
+                {mark.label}
               </div>
             ))}
           </div>
@@ -440,7 +457,7 @@ function CalendarReview({
               className="relative border-r border-[var(--line)] last:border-r-0"
               style={{
                 height: calendarHeight,
-                backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${Math.max(0, rowHeight - 1)}px, var(--line) ${rowHeight}px)`
+                backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${Math.max(0, gridLineSpacing - 1)}px, var(--line) ${gridLineSpacing}px)`
               }}
             >
               {entries
@@ -789,6 +806,12 @@ function snapCalendarMinutes(value: number) {
 
 function clampMinutes(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+function formatCalendarAxisMinutes(minutes: number) {
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  return `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
 }
 
 function isoForDateMinutes(day: Date, minutes: number) {
