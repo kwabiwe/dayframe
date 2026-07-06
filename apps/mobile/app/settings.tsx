@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   Image,
@@ -13,7 +13,6 @@ import Svg, { Path } from "react-native-svg";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { DAYFRAME_PALETTE, paletteColorFor, type DayframePaletteKey } from "@dayframe/shared";
-import { useKeyboardAccessory, type KeyboardAccessoryField } from "@/components/KeyboardAccessory";
 import {
   AuthRequiredError,
   archiveCategory,
@@ -47,8 +46,6 @@ import {
 
 type Category = MobileBootstrap["categories"][number];
 
-const CATEGORY_KEYBOARD_ACCESSORY_ID = "dayframe-category-keyboard-accessory";
-
 export default function SettingsScreen() {
   const {
     reloadThemePreference,
@@ -69,7 +66,6 @@ export default function SettingsScreen() {
   const [editingCategoryColor, setEditingCategoryColor] = useState("lime");
   const refreshInFlight = useRef(false);
   const categoryEditRef = useRef<TextInput>(null);
-  const categoryCreateRef = useRef<TextInput>(null);
 
   const load = useCallback(async (options?: { silent?: boolean }) => {
     if (refreshInFlight.current) return;
@@ -133,22 +129,6 @@ export default function SettingsScreen() {
   const healthPermissionStatus = healthStatus.find(
     (item) => item.provider === "healthkit" && item.kind === "permissions"
   );
-  const categoryKeyboardFields = useMemo<KeyboardAccessoryField[]>(() => (
-    editingCategoryId
-      ? [
-        { id: "category-edit-name", ref: categoryEditRef },
-        { id: "category-create-name", ref: categoryCreateRef }
-      ]
-      : [
-        { id: "category-create-name", ref: categoryCreateRef }
-      ]
-  ), [editingCategoryId]);
-  const categoryKeyboard = useKeyboardAccessory({
-    nativeID: CATEGORY_KEYBOARD_ACCESSORY_ID,
-    fields: categoryKeyboardFields,
-    theme
-  });
-
   useEffect(() => {
     if (!editingCategoryId) return undefined;
 
@@ -414,7 +394,6 @@ export default function SettingsScreen() {
                           placeholderTextColor={theme.textSecondary}
                           returnKeyType="done"
                           onSubmitEditing={() => saveCategoryEdit(category)}
-                          {...categoryKeyboard.getTextInputProps("category-edit-name")}
                         />
                       </View>
                       <View style={styles.paletteGrid}>
@@ -509,7 +488,6 @@ export default function SettingsScreen() {
             </View>
             <View style={styles.categoryCreateRow}>
               <TextInput
-                ref={categoryCreateRef}
                 style={[styles.textInput, styles.categoryCreateInput]}
                 value={newCategoryName}
                 onChangeText={setNewCategoryName}
@@ -517,7 +495,6 @@ export default function SettingsScreen() {
                 placeholder="New category"
                 placeholderTextColor={theme.textSecondary}
                 returnKeyType="done"
-                {...categoryKeyboard.getTextInputProps("category-create-name")}
               />
               <Pressable
                 accessibilityLabel={pinNewCategory ? "Create as pinned category" : "Create as unpinned category"}
@@ -620,7 +597,6 @@ export default function SettingsScreen() {
           </View>
         </View>
       </ScrollView>
-      {categoryKeyboard.accessory}
     </SafeAreaView>
   );
 }

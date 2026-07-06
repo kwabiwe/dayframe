@@ -1,18 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  KeyboardAvoidingView,
+  Dimensions,
+  Keyboard,
+  type KeyboardEvent,
   Modal,
   Platform,
   Pressable,
   ScrollView,
   Text,
   TextInput,
+  useWindowDimensions,
   View
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import { paletteColorFor } from "@dayframe/shared";
-import { useKeyboardAccessory, type KeyboardAccessoryField } from "@/components/KeyboardAccessory";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
 import type { MobileBootstrap, TimeEntryUpdatePatch } from "@/lib/api";
 
@@ -34,8 +36,6 @@ type ActiveTimerEditSheetProps = {
   visible: boolean;
 };
 
-const EDIT_KEYBOARD_ACCESSORY_ID = "dayframe-active-timer-edit-keyboard-accessory";
-
 export function ActiveTimerEditSheet({
   categories,
   elapsedSeconds,
@@ -50,24 +50,15 @@ export function ActiveTimerEditSheet({
   theme,
   visible
 }: ActiveTimerEditSheetProps) {
+  const insets = useSafeAreaInsets();
+  const windowDimensions = useWindowDimensions();
   const [description, setDescription] = useState("");
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [dateText, setDateText] = useState("");
   const [timeText, setTimeText] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
-  const descriptionRef = useRef<TextInput>(null);
-  const dateRef = useRef<TextInput>(null);
+  const [keyboardInset, setKeyboardInset] = useState(0);
   const timeRef = useRef<TextInput>(null);
-  const keyboardFields = useMemo<KeyboardAccessoryField[]>(() => [
-    { id: "edit-description", ref: descriptionRef },
-    { id: "edit-date", ref: dateRef },
-    { id: "edit-time", ref: timeRef }
-  ], []);
-  const keyboard = useKeyboardAccessory({
-    nativeID: EDIT_KEYBOARD_ACCESSORY_ID,
-    fields: keyboardFields,
-    theme
-  });
 
   const entryId = entry?.id ?? null;
 
@@ -81,6 +72,33 @@ export function ActiveTimerEditSheet({
     setValidationError(null);
   }, [entryId, visible]);
 
+  useEffect(() => {
+    if (!visible) {
+      setKeyboardInset(0);
+      return undefined;
+    }
+
+    function updateKeyboardInset(event: KeyboardEvent) {
+      const windowHeight = Dimensions.get("window").height;
+      const nextInset = Math.max(0, windowHeight - event.endCoordinates.screenY - insets.bottom);
+      setKeyboardInset(nextInset);
+    }
+
+    const changeSubscription = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillChangeFrame" : "keyboardDidShow",
+      updateKeyboardInset
+    );
+    const hideSubscription = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => setKeyboardInset(0)
+    );
+
+    return () => {
+      changeSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, [insets.bottom, visible]);
+
   const parsedStart = useMemo(
     () => parseLocalDateTime(dateText, timeText),
     [dateText, timeText]
@@ -93,6 +111,19 @@ export function ActiveTimerEditSheet({
   const editingEntry = entry;
 
   const busy = saving || stopping;
+  const keyboardAwareSheetHeight = keyboardInset > 0
+    ? Math.max(
+        360,
+        windowDimensions.height - keyboardInset - insets.bottom - insets.top - 12
+      )
+    : null;
+  const keyboardAwareSheetStyle = keyboardAwareSheetHeight
+    ? {
+        height: keyboardAwareSheetHeight,
+        marginBottom: keyboardInset,
+        maxHeight: keyboardAwareSheetHeight
+      }
+    : null;
 
   async function saveChanges() {
     if (busy) return;
@@ -144,13 +175,9 @@ export function ActiveTimerEditSheet({
           onPress={onCancel}
           style={styles.sheetBackdrop}
         />
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          pointerEvents="box-none"
-          style={styles.sheetKeyboardAvoidingView}
-        >
-          <SafeAreaView edges={["bottom"]} style={styles.sheetSafeArea}>
-            <View style={styles.activeEditSheet}>
+        <View pointerEvents="box-none" style={styles.sheetKeyboardAvoidingView}>
+          <SafeAreaView edges={["bottom"]} pointerEvents="box-none" style={styles.sheetSafeArea}>
+            <View style={[styles.activeEditSheet, keyboardAwareSheetStyle]}>
               <View style={styles.sheetHandle} />
               <View style={styles.sheetHeader}>
                 <Pressable
@@ -184,8 +211,13 @@ export function ActiveTimerEditSheet({
 
               <ScrollView
                 contentContainerStyle={styles.activeEditContent}
+                keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}
+                style={[
+                  styles.activeEditScroller,
+                  keyboardAwareSheetHeight ? styles.activeEditScrollerKeyboard : null
+                ]}
               >
                 <Text style={styles.activeEditElapsed}>{formatClockDuration(elapsedPreviewSeconds)}</Text>
 
@@ -193,16 +225,13 @@ export function ActiveTimerEditSheet({
                   <Text style={styles.activeEditSectionLabel}>Description</Text>
                   <TextInput
                     accessibilityLabel="Timer description"
-                    ref={descriptionRef}
                     style={[styles.textInput, styles.activeEditDescriptionInput]}
                     value={description}
                     onChangeText={setDescription}
-                    onSubmitEditing={keyboard.focusNext}
+                    onSubmitEditing={Keyboard.dismiss}
                     placeholder="What are you working on?"
                     placeholderTextColor={theme.textSecondary}
-                    returnKeyType="next"
-                    blurOnSubmit={false}
-                    {...keyboard.getTextInputProps("edit-description")}
+                    returnKeyType="done"
                   />
                 </View>
 
@@ -239,14 +268,13 @@ export function ActiveTimerEditSheet({
                   <View style={styles.activeEditTimeRow}>
                     <TextInput
                       accessibilityLabel="Start date"
-                      ref={dateRef}
                       style={[styles.textInput, styles.activeEditDateInput]}
                       value={dateText}
                       onChangeText={(value) => {
                         setDateText(value);
                         setValidationError(null);
                       }}
-                      onSubmitEditing={keyboard.focusNext}
+                      onSubmitEditing={() => timeRef.current?.focus()}
                       keyboardType="numbers-and-punctuation"
                       maxLength={10}
                       placeholder="YYYY-MM-DD"
@@ -254,7 +282,6 @@ export function ActiveTimerEditSheet({
                       returnKeyType="next"
                       blurOnSubmit={false}
                       selectTextOnFocus
-                      {...keyboard.getTextInputProps("edit-date")}
                     />
                     <TextInput
                       accessibilityLabel="Start time"
@@ -272,7 +299,6 @@ export function ActiveTimerEditSheet({
                       placeholderTextColor={theme.textSecondary}
                       returnKeyType="done"
                       selectTextOnFocus
-                      {...keyboard.getTextInputProps("edit-time")}
                     />
                   </View>
                   {lastStoppedAt ? (
@@ -290,26 +316,25 @@ export function ActiveTimerEditSheet({
                   {validationError ? <Text style={styles.errorText}>{validationError}</Text> : null}
                 </View>
 
-                <Pressable
-                  accessibilityLabel="Stop timer from edit sheet"
-                  accessibilityRole="button"
-                  disabled={busy}
-                  onPress={stopFromSheet}
-                  style={({ pressed }) => [
-                    styles.activeEditStopButton,
-                    pressed && !busy ? styles.buttonPressed : null,
-                    busy ? styles.buttonDisabled : null
-                  ]}
-                >
-                  <StopGlyph color={theme.mode === "dark" ? theme.background : "#FFFFFF"} />
-                  <Text style={styles.activeEditStopButtonText}>{stopping ? "Stopping..." : "Stop timer"}</Text>
-                </Pressable>
               </ScrollView>
+              <Pressable
+                accessibilityLabel="Stop timer from edit sheet"
+                accessibilityRole="button"
+                disabled={busy}
+                onPress={stopFromSheet}
+                style={({ pressed }) => [
+                  styles.activeEditStopButton,
+                  pressed && !busy ? styles.buttonPressed : null,
+                  busy ? styles.buttonDisabled : null
+                ]}
+              >
+                <StopGlyph color={theme.mode === "dark" ? theme.background : "#FFFFFF"} />
+                <Text style={styles.activeEditStopButtonText}>{stopping ? "Stopping..." : "Stop timer"}</Text>
+              </Pressable>
             </View>
           </SafeAreaView>
-        </KeyboardAvoidingView>
+        </View>
       </View>
-      {keyboard.accessory}
     </Modal>
   );
 }

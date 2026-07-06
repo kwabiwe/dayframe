@@ -55,7 +55,6 @@ type SummarySegment = {
 };
 
 const AUTH_KEYBOARD_ACCESSORY_ID = "dayframe-auth-keyboard-accessory";
-const START_TASK_KEYBOARD_ACCESSORY_ID = "dayframe-start-task-keyboard-accessory";
 const RECENT_LAST_STOP_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export default function HomeScreen() {
@@ -83,7 +82,6 @@ export default function HomeScreen() {
   const authWorkspaceRef = useRef<TextInput>(null);
   const authEmailRef = useRef<TextInput>(null);
   const authPasswordRef = useRef<TextInput>(null);
-  const startTaskRef = useRef<TextInput>(null);
 
   const load = useCallback(async (options?: { silent?: boolean }) => {
     if (refreshInFlight.current) return;
@@ -175,14 +173,6 @@ export default function HomeScreen() {
   const authKeyboard = useKeyboardAccessory({
     nativeID: AUTH_KEYBOARD_ACCESSORY_ID,
     fields: authKeyboardFields,
-    theme
-  });
-  const startTaskKeyboardFields = useMemo<KeyboardAccessoryField[]>(() => [
-    { id: "start-task-description", ref: startTaskRef }
-  ], []);
-  const startTaskKeyboard = useKeyboardAccessory({
-    nativeID: START_TASK_KEYBOARD_ACCESSORY_ID,
-    fields: startTaskKeyboardFields,
     theme
   });
   const activeDurationSeconds = data?.activeEntry
@@ -597,7 +587,6 @@ export default function HomeScreen() {
             <Text style={styles.sectionTitle}>Start task</Text>
             <View style={styles.startInputRow}>
               <TextInput
-                ref={startTaskRef}
                 style={[styles.textInput, styles.startInput]}
                 value={customDescription}
                 onChangeText={setCustomDescription}
@@ -605,7 +594,6 @@ export default function HomeScreen() {
                 placeholder="What are you working on?"
                 placeholderTextColor={theme.textSecondary}
                 returnKeyType="done"
-                {...startTaskKeyboard.getTextInputProps("start-task-description")}
               />
               <Pressable
                 accessibilityLabel="Start task"
@@ -670,7 +658,6 @@ export default function HomeScreen() {
         theme={theme}
         visible={activeEditVisible}
       />
-      {startTaskKeyboard.accessory}
     </SafeAreaView>
   );
 }

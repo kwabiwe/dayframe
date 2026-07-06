@@ -581,6 +581,8 @@ function createStyles(theme: MobileTheme) {
       justifyContent: "flex-end"
     },
     sheetSafeArea: {
+      flex: 1,
+      justifyContent: "flex-end",
       width: "100%"
     },
     activeEditSheet: {
@@ -594,7 +596,7 @@ function createStyles(theme: MobileTheme) {
       backgroundColor: theme.surface,
       paddingHorizontal: 18,
       paddingTop: 10,
-      paddingBottom: 4,
+      paddingBottom: 10,
       gap: 8,
       shadowColor: "#000000",
       shadowOpacity: theme.mode === "dark" ? 0.36 : 0.14,
@@ -648,6 +650,12 @@ function createStyles(theme: MobileTheme) {
       shadowRadius: 12,
       shadowOffset: { width: 0, height: 6 },
       elevation: 3
+    },
+    activeEditScroller: {
+      flexShrink: 1
+    },
+    activeEditScrollerKeyboard: {
+      flex: 1
     },
     activeEditContent: {
       gap: 14,
