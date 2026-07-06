@@ -17,6 +17,7 @@ import Svg, { Circle, G, Path } from "react-native-svg";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { paletteColorFor } from "@dayframe/shared";
+import { useKeyboardAccessory, type KeyboardAccessoryField } from "@/components/KeyboardAccessory";
 import {
   AuthRequiredError,
   deleteTimeEntry,
@@ -50,6 +51,9 @@ type SummarySegment = {
   color: string;
 };
 
+const AUTH_KEYBOARD_ACCESSORY_ID = "dayframe-auth-keyboard-accessory";
+const START_TASK_KEYBOARD_ACCESSORY_ID = "dayframe-start-task-keyboard-accessory";
+
 export default function HomeScreen() {
   const { reloadThemePreference, styles, theme } = useMobileTheme();
   const [data, setData] = useState<MobileBootstrap | null>(null);
@@ -68,6 +72,11 @@ export default function HomeScreen() {
   const refreshInFlight = useRef(false);
   const entrance = useRef(new Animated.Value(0)).current;
   const chartBuild = useRef(new Animated.Value(1)).current;
+  const authNameRef = useRef<TextInput>(null);
+  const authWorkspaceRef = useRef<TextInput>(null);
+  const authEmailRef = useRef<TextInput>(null);
+  const authPasswordRef = useRef<TextInput>(null);
+  const startTaskRef = useRef<TextInput>(null);
 
   const load = useCallback(async (options?: { silent?: boolean }) => {
     if (refreshInFlight.current) return;
@@ -143,6 +152,32 @@ export default function HomeScreen() {
   }, []);
 
   const quickActions = useMemo(() => buildMobileQuickActions(data), [data]);
+  const authKeyboardFields = useMemo<KeyboardAccessoryField[]>(() => (
+    authView === "signup"
+      ? [
+        { id: "auth-name", ref: authNameRef },
+        { id: "auth-workspace", ref: authWorkspaceRef },
+        { id: "auth-email", ref: authEmailRef },
+        { id: "auth-password", ref: authPasswordRef }
+      ]
+      : [
+        { id: "auth-email", ref: authEmailRef },
+        { id: "auth-password", ref: authPasswordRef }
+      ]
+  ), [authView]);
+  const authKeyboard = useKeyboardAccessory({
+    nativeID: AUTH_KEYBOARD_ACCESSORY_ID,
+    fields: authKeyboardFields,
+    theme
+  });
+  const startTaskKeyboardFields = useMemo<KeyboardAccessoryField[]>(() => [
+    { id: "start-task-description", ref: startTaskRef }
+  ], []);
+  const startTaskKeyboard = useKeyboardAccessory({
+    nativeID: START_TASK_KEYBOARD_ACCESSORY_ID,
+    fields: startTaskKeyboardFields,
+    theme
+  });
   const activeDurationSeconds = data?.activeEntry
     ? Math.max(
         data.activeEntry.durationSeconds,
@@ -333,41 +368,60 @@ export default function HomeScreen() {
             {authView === "signup" ? (
               <>
                 <TextInput
+                  ref={authNameRef}
                   style={styles.textInput}
                   value={authName}
                   onChangeText={setAuthName}
+                  onSubmitEditing={authKeyboard.focusNext}
                   placeholder="Name"
                   placeholderTextColor={theme.textSecondary}
                   autoCapitalize="words"
+                  returnKeyType="next"
+                  blurOnSubmit={false}
+                  {...authKeyboard.getTextInputProps("auth-name")}
                 />
                 <TextInput
+                  ref={authWorkspaceRef}
                   style={styles.textInput}
                   value={authWorkspace}
                   onChangeText={setAuthWorkspace}
+                  onSubmitEditing={authKeyboard.focusNext}
                   placeholder="Workspace"
                   placeholderTextColor={theme.textSecondary}
                   autoCapitalize="words"
+                  returnKeyType="next"
+                  blurOnSubmit={false}
+                  {...authKeyboard.getTextInputProps("auth-workspace")}
                 />
               </>
             ) : null}
             <TextInput
+              ref={authEmailRef}
               style={styles.textInput}
               value={authEmail}
               onChangeText={setAuthEmail}
+              onSubmitEditing={authKeyboard.focusNext}
               placeholder="Email"
               placeholderTextColor={theme.textSecondary}
               autoCapitalize="none"
               keyboardType="email-address"
               textContentType="emailAddress"
+              returnKeyType="next"
+              blurOnSubmit={false}
+              {...authKeyboard.getTextInputProps("auth-email")}
             />
             <TextInput
+              ref={authPasswordRef}
               style={styles.textInput}
               value={authPassword}
               onChangeText={setAuthPassword}
+              onSubmitEditing={submitAuth}
               placeholder="Password"
               placeholderTextColor={theme.textSecondary}
+              returnKeyType="done"
               secureTextEntry
               textContentType={authView === "signup" ? "newPassword" : "password"}
+              {...authKeyboard.getTextInputProps("auth-password")}
             />
             {authNotice ? <Text style={styles.statusText}>{authNotice}</Text> : null}
             {authError ? <Text style={styles.errorText}>{authError}</Text> : null}
@@ -377,18 +431,19 @@ export default function HomeScreen() {
               </Text>
             </Pressable>
             <Pressable
-              style={pressable(styles.secondaryButton, styles.buttonPressed)}
+              style={pressable([styles.secondaryButton, styles.authSecondaryButton], styles.buttonPressed)}
               onPress={() => {
                 setAuthError(null);
                 setAuthView(authView === "signup" ? "login" : "signup");
               }}
             >
-              <Text style={styles.secondaryButtonText}>
+              <Text style={[styles.secondaryButtonText, styles.authSecondaryButtonText]}>
                 {authView === "signup" ? "Use existing account" : "Create account"}
               </Text>
             </Pressable>
           </View>
         </ScrollView>
+        {authKeyboard.accessory}
       </SafeAreaView>
     );
   }
@@ -474,6 +529,7 @@ export default function HomeScreen() {
             <Text style={styles.sectionTitle}>Start task</Text>
             <View style={styles.startInputRow}>
               <TextInput
+                ref={startTaskRef}
                 style={[styles.textInput, styles.startInput]}
                 value={customDescription}
                 onChangeText={setCustomDescription}
@@ -481,6 +537,7 @@ export default function HomeScreen() {
                 placeholder="What are you working on?"
                 placeholderTextColor={theme.textSecondary}
                 returnKeyType="done"
+                {...startTaskKeyboard.getTextInputProps("start-task-description")}
               />
               <Pressable
                 accessibilityLabel="Start task"
@@ -531,6 +588,7 @@ export default function HomeScreen() {
           />
         </Animated.View>
       </ScrollView>
+      {startTaskKeyboard.accessory}
     </SafeAreaView>
   );
 }
