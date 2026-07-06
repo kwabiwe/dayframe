@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Dimensions,
   Keyboard,
@@ -58,7 +58,8 @@ export function ActiveTimerEditSheet({
   const [timeText, setTimeText] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [keyboardInset, setKeyboardInset] = useState(0);
-  const timeRef = useRef<TextInput>(null);
+  const [timePickerOpen, setTimePickerOpen] = useState(false);
+  const [pickerStartAt, setPickerStartAt] = useState<Date | null>(null);
 
   const entryId = entry?.id ?? null;
 
@@ -69,6 +70,8 @@ export function ActiveTimerEditSheet({
     setSelectedCategoryId(entry.categoryId);
     setDateText(formatDateInput(startedAt));
     setTimeText(formatTimeInput(startedAt));
+    setPickerStartAt(startedAt);
+    setTimePickerOpen(false);
     setValidationError(null);
   }, [entryId, visible]);
 
@@ -80,7 +83,7 @@ export function ActiveTimerEditSheet({
 
     function updateKeyboardInset(event: KeyboardEvent) {
       const windowHeight = Dimensions.get("window").height;
-      const nextInset = Math.max(0, windowHeight - event.endCoordinates.screenY - insets.bottom);
+      const nextInset = Math.max(0, windowHeight - event.endCoordinates.screenY);
       setKeyboardInset(nextInset);
     }
 
@@ -97,14 +100,15 @@ export function ActiveTimerEditSheet({
       changeSubscription.remove();
       hideSubscription.remove();
     };
-  }, [insets.bottom, visible]);
+  }, [visible]);
 
   const parsedStart = useMemo(
     () => parseLocalDateTime(dateText, timeText),
     [dateText, timeText]
   );
-  const elapsedPreviewSeconds = parsedStart.date && parsedStart.date.getTime() <= Date.now()
-    ? Math.max(0, Math.floor((Date.now() - parsedStart.date.getTime()) / 1000))
+  const previewStartAt = timePickerOpen && pickerStartAt ? pickerStartAt : parsedStart.date;
+  const elapsedPreviewSeconds = previewStartAt && previewStartAt.getTime() <= Date.now()
+    ? Math.max(0, Math.floor((Date.now() - previewStartAt.getTime()) / 1000))
     : elapsedSeconds;
 
   if (!entry) return null;
@@ -114,7 +118,7 @@ export function ActiveTimerEditSheet({
   const keyboardAwareSheetHeight = keyboardInset > 0
     ? Math.max(
         360,
-        windowDimensions.height - keyboardInset - insets.bottom - insets.top - 12
+        windowDimensions.height - keyboardInset - insets.top - 12
       )
     : null;
   const keyboardAwareSheetStyle = keyboardAwareSheetHeight
@@ -127,9 +131,11 @@ export function ActiveTimerEditSheet({
 
   async function saveChanges() {
     if (busy) return;
-    const parsed = parseLocalDateTime(dateText, timeText);
+    const parsed = timePickerOpen && pickerStartAt
+      ? { date: pickerStartAt, error: null }
+      : parseLocalDateTime(dateText, timeText);
     if (parsed.error || !parsed.date) {
-      setValidationError(parsed.error ?? "Enter a valid start date and time.");
+      setValidationError(parsed.error ?? "Choose a valid start date and time.");
       return;
     }
     if (parsed.date.getTime() > Date.now()) {
@@ -157,8 +163,73 @@ export function ActiveTimerEditSheet({
     const stoppedAt = new Date(lastStoppedAt);
     setDateText(formatDateInput(stoppedAt));
     setTimeText(formatTimeInput(stoppedAt));
+    setPickerStartAt(stoppedAt);
     setValidationError(null);
   }
+
+  function openStartPicker() {
+    Keyboard.dismiss();
+    const currentStart = parsedStart.date ?? new Date(editingEntry.startedAt);
+    setPickerStartAt(currentStart);
+    setTimePickerOpen(true);
+    setValidationError(null);
+  }
+
+  function applyStartPicker() {
+    if (!pickerStartAt) return;
+    if (pickerStartAt.getTime() > Date.now()) {
+      setValidationError("Start time cannot be in the future.");
+      return;
+    }
+    setDateText(formatDateInput(pickerStartAt));
+    setTimeText(formatTimeInput(pickerStartAt));
+    setTimePickerOpen(false);
+    setValidationError(null);
+  }
+
+  function cancelStartPicker() {
+    setPickerStartAt(parsedStart.date ?? new Date(editingEntry.startedAt));
+    setTimePickerOpen(false);
+    setValidationError(null);
+  }
+
+  function adjustPickerStart(delta: { days?: number; hours?: number; minutes?: number }) {
+    setPickerStartAt((current) => {
+      const next = new Date((current ?? parsedStart.date ?? new Date(editingEntry.startedAt)).getTime());
+      if (delta.days) next.setDate(next.getDate() + delta.days);
+      if (delta.hours) next.setHours(next.getHours() + delta.hours);
+      if (delta.minutes) next.setMinutes(next.getMinutes() + delta.minutes);
+      next.setSeconds(0, 0);
+      return clampStartToNow(next);
+    });
+    setValidationError(null);
+  }
+
+  function setPickerToToday() {
+    setPickerStartAt((current) => {
+      const source = current ?? parsedStart.date ?? new Date(editingEntry.startedAt);
+      const today = new Date();
+      const next = new Date(
+        today.getFullYear(),
+        today.getMonth(),
+        today.getDate(),
+        source.getHours(),
+        source.getMinutes(),
+        0,
+        0
+      );
+      return clampStartToNow(next);
+    });
+    setValidationError(null);
+  }
+
+  function setPickerToNow() {
+    setPickerStartAt(clampStartToNow(new Date()));
+    setValidationError(null);
+  }
+
+  const displayedStartAt = previewStartAt ?? new Date(editingEntry.startedAt);
+  const pickerDate = pickerStartAt ?? displayedStartAt;
 
   return (
     <Modal
@@ -219,7 +290,25 @@ export function ActiveTimerEditSheet({
                   keyboardAwareSheetHeight ? styles.activeEditScrollerKeyboard : null
                 ]}
               >
-                <Text style={styles.activeEditElapsed}>{formatClockDuration(elapsedPreviewSeconds)}</Text>
+                <View style={styles.activeEditHeroRow}>
+                  <View style={styles.activeEditElapsedStack}>
+                    <Text style={styles.activeEditElapsed}>{formatClockDuration(elapsedPreviewSeconds)}</Text>
+                    <Text style={styles.activeEditElapsedLabel}>Running</Text>
+                  </View>
+                  <Pressable
+                    accessibilityLabel="Stop timer from edit sheet"
+                    accessibilityRole="button"
+                    disabled={busy}
+                    onPress={stopFromSheet}
+                    style={({ pressed }) => [
+                      styles.activeEditStopButton,
+                      pressed && !busy ? styles.buttonPressed : null,
+                      busy ? styles.buttonDisabled : null
+                    ]}
+                  >
+                    <StopGlyph color={theme.mode === "dark" ? theme.background : "#FFFFFF"} />
+                  </Pressable>
+                </View>
 
                 <View style={styles.activeEditSection}>
                   <Text style={styles.activeEditSectionLabel}>Description</Text>
@@ -265,42 +354,18 @@ export function ActiveTimerEditSheet({
 
                 <View style={styles.activeEditSection}>
                   <Text style={styles.activeEditSectionLabel}>Start time</Text>
-                  <View style={styles.activeEditTimeRow}>
-                    <TextInput
-                      accessibilityLabel="Start date"
-                      style={[styles.textInput, styles.activeEditDateInput]}
-                      value={dateText}
-                      onChangeText={(value) => {
-                        setDateText(value);
-                        setValidationError(null);
-                      }}
-                      onSubmitEditing={() => timeRef.current?.focus()}
-                      keyboardType="numbers-and-punctuation"
-                      maxLength={10}
-                      placeholder="YYYY-MM-DD"
-                      placeholderTextColor={theme.textSecondary}
-                      returnKeyType="next"
-                      blurOnSubmit={false}
-                      selectTextOnFocus
-                    />
-                    <TextInput
-                      accessibilityLabel="Start time"
-                      ref={timeRef}
-                      style={[styles.textInput, styles.activeEditTimeInput]}
-                      value={timeText}
-                      onChangeText={(value) => {
-                        setTimeText(value);
-                        setValidationError(null);
-                      }}
-                      onSubmitEditing={saveChanges}
-                      keyboardType="numbers-and-punctuation"
-                      maxLength={5}
-                      placeholder="HH:mm"
-                      placeholderTextColor={theme.textSecondary}
-                      returnKeyType="done"
-                      selectTextOnFocus
-                    />
-                  </View>
+                  <Pressable
+                    accessibilityLabel="Edit start date and time"
+                    accessibilityRole="button"
+                    onPress={openStartPicker}
+                    style={pressable(styles.activeEditStartSummary, styles.buttonPressed)}
+                  >
+                    <View style={styles.activeEditStartSummaryText}>
+                      <Text style={styles.activeEditStartDate}>{formatPickerDate(displayedStartAt)}</Text>
+                      <Text style={styles.activeEditStartMeta}>{formatDateInput(displayedStartAt)}</Text>
+                    </View>
+                    <Text style={styles.activeEditStartTime}>{formatTimeInput(displayedStartAt)}</Text>
+                  </Pressable>
                   {lastStoppedAt ? (
                     <Pressable
                       accessibilityLabel="Set start time to last stop time"
@@ -314,28 +379,156 @@ export function ActiveTimerEditSheet({
                     </Pressable>
                   ) : null}
                   {validationError ? <Text style={styles.errorText}>{validationError}</Text> : null}
+                  {timePickerOpen ? (
+                    <View style={styles.activeEditPickerPanel}>
+                      <View style={styles.activeEditPickerHeader}>
+                        <View style={styles.activeEditPickerHeaderText}>
+                          <Text style={styles.activeEditPickerTitle}>Choose start</Text>
+                          <Text style={styles.activeEditPickerMeta}>
+                            {formatPickerDate(pickerDate)} at {formatTimeInput(pickerDate)}
+                          </Text>
+                        </View>
+                        <View style={styles.activeEditPickerActions}>
+                          <Pressable
+                            accessibilityLabel="Cancel start time picker"
+                            accessibilityRole="button"
+                            onPress={cancelStartPicker}
+                            style={pressable(styles.activeEditPickerSecondaryButton, styles.buttonPressed)}
+                          >
+                            <Text style={styles.activeEditPickerSecondaryText}>Cancel</Text>
+                          </Pressable>
+                          <Pressable
+                            accessibilityLabel="Apply start time"
+                            accessibilityRole="button"
+                            onPress={applyStartPicker}
+                            style={pressable(styles.activeEditPickerPrimaryButton, styles.buttonPressed)}
+                          >
+                            <Text style={styles.activeEditPickerPrimaryText}>Apply</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+
+                      <View style={styles.activeEditPickerShortcutRow}>
+                        <Pressable
+                          accessibilityLabel="Set start date to today"
+                          accessibilityRole="button"
+                          onPress={setPickerToToday}
+                          style={pressable(styles.activeEditPickerChip, styles.buttonPressed)}
+                        >
+                          <Text style={styles.activeEditPickerChipText}>Today</Text>
+                        </Pressable>
+                        <Pressable
+                          accessibilityLabel="Set start time to now"
+                          accessibilityRole="button"
+                          onPress={setPickerToNow}
+                          style={pressable(styles.activeEditPickerChip, styles.buttonPressed)}
+                        >
+                          <Text style={styles.activeEditPickerChipText}>Now</Text>
+                        </Pressable>
+                      </View>
+
+                      <View style={styles.activeEditPickerGrid}>
+                        <PickerStepper
+                          decrementLabel="Previous day"
+                          disableIncrement={isPickerIncrementFuture(pickerDate, { days: 1 })}
+                          incrementLabel="Next day"
+                          label="Date"
+                          onDecrement={() => adjustPickerStart({ days: -1 })}
+                          onIncrement={() => adjustPickerStart({ days: 1 })}
+                          value={formatShortPickerDate(pickerDate)}
+                          styles={styles}
+                          theme={theme}
+                        />
+                        <PickerStepper
+                          decrementLabel="Previous hour"
+                          disableIncrement={isPickerIncrementFuture(pickerDate, { hours: 1 })}
+                          incrementLabel="Next hour"
+                          label="Hour"
+                          onDecrement={() => adjustPickerStart({ hours: -1 })}
+                          onIncrement={() => adjustPickerStart({ hours: 1 })}
+                          value={pad2(pickerDate.getHours())}
+                          styles={styles}
+                          theme={theme}
+                        />
+                        <PickerStepper
+                          decrementLabel="Previous minute"
+                          disableIncrement={isPickerIncrementFuture(pickerDate, { minutes: 1 })}
+                          incrementLabel="Next minute"
+                          label="Minute"
+                          onDecrement={() => adjustPickerStart({ minutes: -1 })}
+                          onIncrement={() => adjustPickerStart({ minutes: 1 })}
+                          value={pad2(pickerDate.getMinutes())}
+                          styles={styles}
+                          theme={theme}
+                        />
+                      </View>
+                    </View>
+                  ) : null}
                 </View>
 
               </ScrollView>
-              <Pressable
-                accessibilityLabel="Stop timer from edit sheet"
-                accessibilityRole="button"
-                disabled={busy}
-                onPress={stopFromSheet}
-                style={({ pressed }) => [
-                  styles.activeEditStopButton,
-                  pressed && !busy ? styles.buttonPressed : null,
-                  busy ? styles.buttonDisabled : null
-                ]}
-              >
-                <StopGlyph color={theme.mode === "dark" ? theme.background : "#FFFFFF"} />
-                <Text style={styles.activeEditStopButtonText}>{stopping ? "Stopping..." : "Stop timer"}</Text>
-              </Pressable>
             </View>
           </SafeAreaView>
         </View>
       </View>
     </Modal>
+  );
+}
+
+function PickerStepper({
+  decrementLabel,
+  disableIncrement,
+  incrementLabel,
+  label,
+  onDecrement,
+  onIncrement,
+  styles,
+  theme,
+  value
+}: {
+  decrementLabel: string;
+  disableIncrement?: boolean;
+  incrementLabel: string;
+  label: string;
+  onDecrement: () => void;
+  onIncrement: () => void;
+  styles: MobileStyles;
+  theme: MobileTheme;
+  value: string;
+}) {
+  return (
+    <View style={styles.activeEditPickerStepper}>
+      <Text style={styles.activeEditPickerStepperLabel}>{label}</Text>
+      <View style={styles.activeEditPickerStepperControls}>
+        <Pressable
+          accessibilityLabel={decrementLabel}
+          accessibilityRole="button"
+          onPress={onDecrement}
+          style={pressable(styles.activeEditPickerStepperButton, styles.buttonPressed)}
+        >
+          <Text style={styles.activeEditPickerStepperButtonText}>-</Text>
+        </Pressable>
+        <Text style={styles.activeEditPickerStepperValue} numberOfLines={1}>{value}</Text>
+        <Pressable
+          accessibilityLabel={incrementLabel}
+          accessibilityRole="button"
+          disabled={disableIncrement}
+          onPress={onIncrement}
+          style={({ pressed }) => [
+            styles.activeEditPickerStepperButton,
+            pressed && !disableIncrement ? styles.buttonPressed : null,
+            disableIncrement ? styles.buttonDisabled : null
+          ]}
+        >
+          <Text style={[
+            styles.activeEditPickerStepperButtonText,
+            disableIncrement ? { color: theme.textSecondary } : null
+          ]}>
+            +
+          </Text>
+        </Pressable>
+      </View>
+    </View>
   );
 }
 
@@ -408,6 +601,49 @@ function parseLocalDateTime(dateText: string, timeText: string): { date: Date | 
   }
 
   return { date, error: null };
+}
+
+function clampStartToNow(date: Date) {
+  const now = new Date();
+  const safeNow = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), now.getMinutes(), 0, 0);
+  const candidate = new Date(date.getTime());
+  candidate.setSeconds(0, 0);
+  return candidate.getTime() > Date.now() ? safeNow : candidate;
+}
+
+function isPickerIncrementFuture(date: Date, delta: { days?: number; hours?: number; minutes?: number }) {
+  const next = new Date(date.getTime());
+  if (delta.days) next.setDate(next.getDate() + delta.days);
+  if (delta.hours) next.setHours(next.getHours() + delta.hours);
+  if (delta.minutes) next.setMinutes(next.getMinutes() + delta.minutes);
+  next.setSeconds(0, 0);
+  return next.getTime() > Date.now();
+}
+
+function formatPickerDate(date: Date) {
+  if (isToday(date)) return "Today";
+  return date.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric"
+  });
+}
+
+function formatShortPickerDate(date: Date) {
+  if (isToday(date)) return "Today";
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric"
+  });
+}
+
+function isToday(date: Date) {
+  const today = new Date();
+  return (
+    date.getFullYear() === today.getFullYear() &&
+    date.getMonth() === today.getMonth() &&
+    date.getDate() === today.getDate()
+  );
 }
 
 function formatDateInput(date: Date) {
