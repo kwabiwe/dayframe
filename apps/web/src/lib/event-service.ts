@@ -457,11 +457,20 @@ export async function updateTimeEntry(
   );
 }
 
+export class TimeEntryNotFoundError extends Error {
+  constructor() {
+    super("Time entry not found.");
+    this.name = "TimeEntryNotFoundError";
+  }
+}
+
 export async function deleteTimeEntry(id: string, session: RequestSession = getDevSession()) {
-  await query("delete from time_entries where id = $1 and workspace_id = $2", [
-    id,
-    session.workspaceId
-  ]);
+  const result = await query(
+    "delete from time_entries where id = $1 and workspace_id = $2 and user_id = $3",
+    [id, session.workspaceId, session.userId]
+  );
+  if ((result.rowCount ?? 0) === 0) throw new TimeEntryNotFoundError();
+  return { id, deleted: true };
 }
 
 export async function splitActiveEntry(session: RequestSession = getDevSession()) {

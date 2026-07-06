@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { paletteColorFor } from "@dayframe/shared";
-import { Play, Square } from "lucide-react";
+import { Play, Square, Trash2 } from "lucide-react";
 import { timeEntryCategoryColor, timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
 import type { BootstrapData, CategoryRow, PlaceRow, TimeEntryRow } from "@/lib/queries";
 import { formatClockDuration, formatTime } from "@/lib/format";
@@ -14,6 +14,8 @@ type TimerDraft = {
   placeId: string;
   description: string;
 };
+
+const deleteRunningTimerCopy = "Delete this running timer? This removes the entry instead of stopping it.";
 
 function draftFromEntry(activeEntry: TimeEntryRow | null): TimerDraft {
   return {
@@ -104,6 +106,25 @@ export function TimerPanel({
       if (!response.ok) throw new Error(`Timer action failed: ${response.status}`);
       if (mode === "start") updateDraft({ description: "" });
 
+      if (onSynced) await refreshClientData();
+      else startTransition(() => router.refresh());
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function deleteActiveEntry() {
+    if (!activeEntry) return;
+    if (!window.confirm(deleteRunningTimerCopy)) return;
+
+    setIsSubmitting(true);
+    try {
+      const response = await fetch(`/api/time-entries/${activeEntry.id}`, {
+        method: "DELETE"
+      });
+      if (!response.ok) throw new Error(`Unable to delete timer: ${response.status}`);
+
+      setDraft(draftFromEntry(null));
       if (onSynced) await refreshClientData();
       else startTransition(() => router.refresh());
     } finally {
@@ -204,15 +225,27 @@ export function TimerPanel({
             </div>
           </div>
           {activeEntry ? (
-            <button
-              className="industrial-button-danger focus-ring mt-3 w-full text-sm disabled:opacity-50"
-              type="button"
-              disabled={isBusy}
-              onClick={() => submit("stop")}
-            >
-              <Square size={16} />
-              Stop
-            </button>
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                className="industrial-button-danger focus-ring min-h-10 flex-1 text-sm disabled:opacity-50"
+                type="button"
+                disabled={isBusy}
+                onClick={() => submit("stop")}
+              >
+                <Square size={16} />
+                Stop
+              </button>
+              <button
+                className="industrial-button-danger focus-ring h-10 w-10 shrink-0 px-0 text-sm disabled:opacity-50"
+                type="button"
+                disabled={isBusy}
+                aria-label="Delete running timer"
+                title="Delete running timer"
+                onClick={() => deleteActiveEntry()}
+              >
+                <Trash2 size={16} />
+              </button>
+            </div>
           ) : (
             <button
               className="industrial-button-primary focus-ring mt-3 w-full text-sm disabled:opacity-50"

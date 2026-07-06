@@ -731,6 +731,12 @@ textarea:focus-visible {
   font-weight: 700;
 }
 
+.swiss-timer-control-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .swiss-command-play {
   display: grid;
   width: 50px;
@@ -757,6 +763,32 @@ textarea:focus-visible {
   box-shadow: 0 8px 20px color-mix(in srgb, var(--danger) 20%, transparent);
   font-size: 14px;
   font-weight: 800;
+}
+
+.swiss-command-delete {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--danger) 54%, var(--line));
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--danger);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.swiss-command-delete:hover,
+.swiss-command-delete:focus-visible {
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  outline: none;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--danger) 20%, transparent),
+    0 4px 12px color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.swiss-command-delete:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .swiss-focus-select {

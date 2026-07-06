@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AuthError } from "@/lib/session";
 
 const session = {
   userId: "00000000-0000-4000-8000-000000000001",
@@ -10,7 +11,13 @@ const session = {
 const mocks = vi.hoisted(() => ({
   resolveRequestSession: vi.fn(),
   updateTimeEntry: vi.fn(),
-  deleteTimeEntry: vi.fn()
+  deleteTimeEntry: vi.fn(),
+  TimeEntryNotFoundError: class TimeEntryNotFoundError extends Error {
+    constructor() {
+      super("Time entry not found.");
+      this.name = "TimeEntryNotFoundError";
+    }
+  }
 }));
 
 vi.mock("@/lib/ingest-auth", () => ({
@@ -19,10 +26,11 @@ vi.mock("@/lib/ingest-auth", () => ({
 
 vi.mock("@/lib/event-service", () => ({
   updateTimeEntry: mocks.updateTimeEntry,
-  deleteTimeEntry: mocks.deleteTimeEntry
+  deleteTimeEntry: mocks.deleteTimeEntry,
+  TimeEntryNotFoundError: mocks.TimeEntryNotFoundError
 }));
 
-const { PATCH } = await import("./route");
+const { DELETE, PATCH } = await import("./route");
 
 describe("PATCH /api/time-entries/[id]", () => {
   beforeEach(() => {
@@ -87,6 +95,51 @@ describe("PATCH /api/time-entries/[id]", () => {
   });
 });
 
+describe("DELETE /api/time-entries/[id]", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mocks.resolveRequestSession.mockResolvedValue(session);
+    mocks.deleteTimeEntry.mockResolvedValue({ id: "entry-1", deleted: true });
+  });
+
+  it("deletes an active running time entry without stopping it", async () => {
+    const response = await DELETE(deleteRequest(), routeContext());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, id: "entry-1", deleted: true });
+    expect(mocks.deleteTimeEntry).toHaveBeenCalledWith("entry-1", session);
+  });
+
+  it("keeps completed-entry delete behavior on the same scoped route", async () => {
+    mocks.deleteTimeEntry.mockResolvedValueOnce({ id: "completed-entry", deleted: true });
+
+    const response = await DELETE(deleteRequest("completed-entry"), routeContext("completed-entry"));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, id: "completed-entry", deleted: true });
+    expect(mocks.deleteTimeEntry).toHaveBeenCalledWith("completed-entry", session);
+  });
+
+  it("returns a clear error when the entry does not exist in the session scope", async () => {
+    mocks.deleteTimeEntry.mockRejectedValueOnce(new mocks.TimeEntryNotFoundError());
+
+    const response = await DELETE(deleteRequest("missing-entry"), routeContext("missing-entry"));
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: "Time entry not found." });
+  });
+
+  it("returns the auth error when the user is unauthenticated", async () => {
+    mocks.resolveRequestSession.mockRejectedValueOnce(new AuthError("Login required."));
+
+    const response = await DELETE(deleteRequest(), routeContext());
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ error: "Login required." });
+    expect(mocks.deleteTimeEntry).not.toHaveBeenCalled();
+  });
+});
+
 function jsonRequest(body: unknown) {
   return new Request("https://dayframe.test/api/time-entries/entry-1", {
     method: "PATCH",
@@ -95,8 +148,14 @@ function jsonRequest(body: unknown) {
   });
 }
 
-function routeContext() {
-  return { params: Promise.resolve({ id: "entry-1" }) };
+function deleteRequest(id = "entry-1") {
+  return new Request(`https://dayframe.test/api/time-entries/${id}`, {
+    method: "DELETE"
+  });
+}
+
+function routeContext(id = "entry-1") {
+  return { params: Promise.resolve({ id }) };
 }
 
 function categoryId() {

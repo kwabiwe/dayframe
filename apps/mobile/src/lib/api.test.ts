@@ -32,6 +32,7 @@ vi.mock("./config", () => ({
 const {
   AuthRequiredError,
   createCategory,
+  deleteTimeEntry,
   enqueueEvent,
   fetchBootstrap,
   getSessionToken,
@@ -273,6 +274,31 @@ describe("mobile API client", () => {
       "https://dayframe.test/api/categories?id=20000000-0000-4000-8000-000000000001",
       expect.objectContaining({ method: "DELETE" })
     );
+  });
+
+  it("deletes running time entries through the hosted API without queueing", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true, id: "entry-1", deleted: true }, 200)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await deleteTimeEntry("entry-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/time-entries/entry-1",
+      expect.objectContaining({
+        method: "DELETE",
+        headers: { Authorization: "Bearer session-token" }
+      })
+    );
+    expect(asyncStore.get("dayframe.offlineQueue.v1")).toBeUndefined();
+  });
+
+  it("clears the session token when deleting a time entry returns 401", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "expired-token");
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({ error: "Login required." }, 401))));
+
+    await expect(deleteTimeEntry("entry-1")).rejects.toBeInstanceOf(AuthRequiredError);
+    await expect(getSessionToken()).resolves.toBeNull();
   });
 
   it("recognizes network failures as timer-queue fallback candidates", () => {

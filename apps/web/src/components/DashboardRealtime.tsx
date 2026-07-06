@@ -64,6 +64,7 @@ const dayStartHour = 7;
 const dayEndHour = 21;
 const resizeSnapMinutes = 15;
 const minEntryMinutes = 15;
+const deleteRunningTimerCopy = "Delete this running timer? This removes the entry instead of stopping it.";
 const timelineZooms = {
   hour: { label: "1h", intervalMinutes: 60, pixelsPerHour: 64 },
   half: { label: "30m", intervalMinutes: 30, pixelsPerHour: 92 },
@@ -360,6 +361,37 @@ export function CurrentTimerPanel({
     }
   }, [active, categoryId, description, refresh]);
 
+  const deleteActiveTimer = useCallback(async () => {
+    if (!active || timerActionInFlightRef.current) return;
+    if (!window.confirm(deleteRunningTimerCopy)) return;
+
+    timerActionInFlightRef.current = true;
+    setIsBusy(true);
+    setTimerError(null);
+    try {
+      const response = await fetch(`/api/time-entries/${active.id}`, {
+        method: "DELETE"
+      });
+      if (!response.ok) {
+        let errorMessage = `Unable to delete timer: ${response.status}`;
+        try {
+          const payload = (await response.json()) as { error?: string };
+          errorMessage = payload.error ?? errorMessage;
+        } catch {
+          // Some deployed failures do not return a JSON body.
+        }
+        throw new Error(errorMessage);
+      }
+      clearDraftAfterStopRef.current = true;
+      await refresh();
+    } catch (error) {
+      setTimerError(error instanceof Error ? error.message : "Unable to delete the running timer.");
+    } finally {
+      timerActionInFlightRef.current = false;
+      setIsBusy(false);
+    }
+  }, [active, refresh]);
+
   async function startQuickAction(action: LearnedQuickAction) {
     setCategoryId(action.categoryId ?? "");
     setCategoryMenuOpen(false);
@@ -561,24 +593,38 @@ export function CurrentTimerPanel({
               ) : null}
             </div>
             <span className="swiss-entrybar-clock">{formatClockDuration(durationSeconds)}</span>
-            <button
-              className={["swiss-command-play", active ? "is-active" : ""].filter(Boolean).join(" ")}
-              type={active ? "button" : "submit"}
-              disabled={isBusy}
-              aria-label={active ? "Stop timer" : "Start timer"}
-              onClick={() => {
-                if (active) void timerAction("stop");
-              }}
-            >
+            <div className="swiss-timer-control-group">
+              <button
+                className={["swiss-command-play", active ? "is-active" : ""].filter(Boolean).join(" ")}
+                type={active ? "button" : "submit"}
+                disabled={isBusy}
+                aria-label={active ? "Stop timer" : "Start timer"}
+                onClick={() => {
+                  if (active) void timerAction("stop");
+                }}
+              >
+                {active ? (
+                  <>
+                    <Square size={15} fill="currentColor" />
+                    <span>Stop</span>
+                  </>
+                ) : (
+                  <Play size={24} fill="currentColor" strokeWidth={0} />
+                )}
+              </button>
               {active ? (
-                <>
-                  <Square size={15} fill="currentColor" />
-                  <span>Stop</span>
-                </>
-              ) : (
-                <Play size={24} fill="currentColor" strokeWidth={0} />
-              )}
-            </button>
+                <button
+                  className="swiss-command-delete"
+                  type="button"
+                  disabled={isBusy}
+                  aria-label="Delete running timer"
+                  title="Delete running timer"
+                  onClick={() => void deleteActiveTimer()}
+                >
+                  <Trash2 size={16} aria-hidden="true" />
+                </button>
+              ) : null}
+            </div>
           </div>
         </form>
         {active ? (
