@@ -2016,6 +2016,23 @@ textarea:focus-visible {
   overflow: hidden;
 }
 
+.swiss-confirm-dialog {
+  width: min(420px, calc(100vw - 40px));
+}
+
+.swiss-confirm-body {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+}
+
+.swiss-confirm-body p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
 .swiss-search-input {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr) auto auto;
@@ -2147,6 +2164,12 @@ kbd {
   border-color: var(--accent);
   background: var(--accent);
   color: var(--on-accent);
+}
+
+.swiss-dialog-actions .swiss-destructive-action {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #ffffff;
 }
 
 .industrial-panel,

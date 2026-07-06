@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { paletteColorFor } from "@dayframe/shared";
 import { Play, Square, Trash2 } from "lucide-react";
+import { DeleteRunningTimerDialog } from "@/components/DeleteRunningTimerDialog";
 import { timeEntryCategoryColor, timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
 import type { BootstrapData, CategoryRow, PlaceRow, TimeEntryRow } from "@/lib/queries";
 import { formatClockDuration, formatTime } from "@/lib/format";
@@ -14,8 +15,6 @@ type TimerDraft = {
   placeId: string;
   description: string;
 };
-
-const deleteRunningTimerCopy = "Delete this running timer? This removes the entry instead of stopping it.";
 
 function draftFromEntry(activeEntry: TimeEntryRow | null): TimerDraft {
   return {
@@ -42,6 +41,8 @@ export function TimerPanel({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [draft, setDraft] = useState<TimerDraft>(() => draftFromEntry(activeEntry));
   const syncedDraft = draft.activeEntryId === (activeEntry?.id ?? null) ? draft : draftFromEntry(activeEntry);
@@ -58,6 +59,10 @@ export function TimerPanel({
     if (!activeEntry) return undefined;
     const interval = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(interval);
+  }, [activeEntry]);
+
+  useEffect(() => {
+    if (!activeEntry) setIsDeleteDialogOpen(false);
   }, [activeEntry]);
 
   function updateDraft(patch: Partial<Omit<TimerDraft, "activeEntryId">>) {
@@ -115,18 +120,30 @@ export function TimerPanel({
 
   async function deleteActiveEntry() {
     if (!activeEntry) return;
-    if (!window.confirm(deleteRunningTimerCopy)) return;
 
     setIsSubmitting(true);
+    setDeleteError(null);
     try {
       const response = await fetch(`/api/time-entries/${activeEntry.id}`, {
         method: "DELETE"
       });
-      if (!response.ok) throw new Error(`Unable to delete timer: ${response.status}`);
+      if (!response.ok) {
+        let errorMessage = `Unable to delete timer: ${response.status}`;
+        try {
+          const payload = (await response.json()) as { error?: string };
+          errorMessage = payload.error ?? errorMessage;
+        } catch {
+          // Runtime failures may not return JSON.
+        }
+        throw new Error(errorMessage);
+      }
 
+      setIsDeleteDialogOpen(false);
       setDraft(draftFromEntry(null));
       if (onSynced) await refreshClientData();
       else startTransition(() => router.refresh());
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "Unable to delete the running timer.");
     } finally {
       setIsSubmitting(false);
     }
@@ -241,7 +258,10 @@ export function TimerPanel({
                 disabled={isBusy}
                 aria-label="Delete running timer"
                 title="Delete running timer"
-                onClick={() => deleteActiveEntry()}
+                onClick={() => {
+                  setDeleteError(null);
+                  setIsDeleteDialogOpen(true);
+                }}
               >
                 <Trash2 size={16} />
               </button>
@@ -286,6 +306,14 @@ export function TimerPanel({
           ))}
         </div>
       </div>
+      {isDeleteDialogOpen ? (
+        <DeleteRunningTimerDialog
+          error={deleteError}
+          isBusy={isBusy}
+          onCancel={() => setIsDeleteDialogOpen(false)}
+          onDelete={() => void deleteActiveEntry()}
+        />
+      ) : null}
     </section>
   );
 }

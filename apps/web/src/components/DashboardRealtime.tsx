@@ -10,6 +10,7 @@ import type {
 } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { paletteColorFor } from "@dayframe/shared";
+import { DeleteRunningTimerDialog } from "@/components/DeleteRunningTimerDialog";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import {
   ArrowRight,
@@ -64,7 +65,6 @@ const dayStartHour = 7;
 const dayEndHour = 21;
 const resizeSnapMinutes = 15;
 const minEntryMinutes = 15;
-const deleteRunningTimerCopy = "Delete this running timer? This removes the entry instead of stopping it.";
 const timelineZooms = {
   hour: { label: "1h", intervalMinutes: 60, pixelsPerHour: 64 },
   half: { label: "30m", intervalMinutes: 30, pixelsPerHour: 92 },
@@ -182,6 +182,8 @@ export function CurrentTimerPanel({
 }) {
   const [isBusy, setIsBusy] = useState(false);
   const [timerError, setTimerError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [description, setDescription] = useState(data.activeEntry?.description ?? "");
   const [categoryId, setCategoryId] = useState(data.activeEntry?.categoryId ?? "");
   const [isEditingStartedAt, setIsEditingStartedAt] = useState(false);
@@ -363,11 +365,11 @@ export function CurrentTimerPanel({
 
   const deleteActiveTimer = useCallback(async () => {
     if (!active || timerActionInFlightRef.current) return;
-    if (!window.confirm(deleteRunningTimerCopy)) return;
 
     timerActionInFlightRef.current = true;
     setIsBusy(true);
     setTimerError(null);
+    setDeleteError(null);
     try {
       const response = await fetch(`/api/time-entries/${active.id}`, {
         method: "DELETE"
@@ -382,10 +384,11 @@ export function CurrentTimerPanel({
         }
         throw new Error(errorMessage);
       }
+      setIsDeleteDialogOpen(false);
       clearDraftAfterStopRef.current = true;
       await refresh();
     } catch (error) {
-      setTimerError(error instanceof Error ? error.message : "Unable to delete the running timer.");
+      setDeleteError(error instanceof Error ? error.message : "Unable to delete the running timer.");
     } finally {
       timerActionInFlightRef.current = false;
       setIsBusy(false);
@@ -619,7 +622,11 @@ export function CurrentTimerPanel({
                   disabled={isBusy}
                   aria-label="Delete running timer"
                   title="Delete running timer"
-                  onClick={() => void deleteActiveTimer()}
+                  onClick={() => {
+                    setTimerError(null);
+                    setDeleteError(null);
+                    setIsDeleteDialogOpen(true);
+                  }}
                 >
                   <Trash2 size={16} aria-hidden="true" />
                 </button>
@@ -691,6 +698,15 @@ export function CurrentTimerPanel({
       </div>
 
       {timerError ? <p className="swiss-inline-error">{timerError}</p> : null}
+
+      {isDeleteDialogOpen ? (
+        <DeleteRunningTimerDialog
+          error={deleteError}
+          isBusy={isBusy}
+          onCancel={() => setIsDeleteDialogOpen(false)}
+          onDelete={() => void deleteActiveTimer()}
+        />
+      ) : null}
 
       {quickActions.length > 0 ? (
         <div className="swiss-quick-actions-strip" aria-label="Frequent quick actions">
