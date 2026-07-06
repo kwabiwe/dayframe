@@ -540,8 +540,8 @@ function createStyles(theme: MobileTheme) {
       elevation: 3
     },
     stopButton: {
-      width: 52,
-      height: 52,
+      width: 44,
+      height: 44,
       borderWidth: 1,
       borderColor: theme.danger,
       backgroundColor: theme.danger,
@@ -550,8 +550,8 @@ function createStyles(theme: MobileTheme) {
       justifyContent: "center",
       shadowColor: theme.danger,
       shadowOpacity: theme.mode === "dark" ? 0.18 : 0.22,
-      shadowRadius: 10,
-      shadowOffset: { width: 0, height: 5 },
+      shadowRadius: 9,
+      shadowOffset: { width: 0, height: 4 },
       elevation: 3
     },
     deleteTimerButton: {
@@ -563,6 +563,412 @@ function createStyles(theme: MobileTheme) {
       borderRadius: 999,
       alignItems: "center",
       justifyContent: "center"
+    },
+    sheetOverlay: {
+      flex: 1,
+      justifyContent: "flex-end",
+      backgroundColor: theme.mode === "dark" ? "rgba(0, 0, 0, 0.56)" : "rgba(10, 18, 8, 0.32)"
+    },
+    sheetBackdrop: {
+      position: "absolute",
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0
+    },
+    sheetKeyboardAvoidingView: {
+      flex: 1,
+      justifyContent: "flex-end"
+    },
+    sheetSafeArea: {
+      flex: 1,
+      justifyContent: "flex-end",
+      width: "100%"
+    },
+    activeEditSheet: {
+      maxHeight: "96%",
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      borderTopWidth: 1,
+      borderLeftWidth: 1,
+      borderRightWidth: 1,
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surface,
+      paddingHorizontal: 18,
+      paddingTop: 10,
+      paddingBottom: 10,
+      gap: 8,
+      shadowColor: "#000000",
+      shadowOpacity: theme.mode === "dark" ? 0.36 : 0.14,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: -8 },
+      elevation: 8
+    },
+    sheetHandle: {
+      alignSelf: "center",
+      width: 42,
+      height: 5,
+      borderRadius: 999,
+      backgroundColor: theme.borderStrong
+    },
+    sheetHeader: {
+      minHeight: 56,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 12
+    },
+    sheetTitle: {
+      flex: 1,
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 16,
+      fontWeight: "800",
+      textAlign: "center"
+    },
+    sheetIconButton: {
+      width: 52,
+      height: 52,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 999,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    sheetSaveButton: {
+      width: 52,
+      height: 52,
+      borderWidth: 1,
+      borderColor: theme.accent,
+      backgroundColor: theme.accent,
+      borderRadius: 999,
+      alignItems: "center",
+      justifyContent: "center",
+      shadowColor: theme.accent,
+      shadowOpacity: theme.mode === "dark" ? 0.16 : 0.24,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 3
+    },
+    activeEditScroller: {
+      flexShrink: 1
+    },
+    activeEditScrollerKeyboard: {
+      flex: 1
+    },
+    activeEditContent: {
+      gap: 12,
+      paddingBottom: 18
+    },
+    activeEditHeroRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 14
+    },
+    activeEditElapsedStack: {
+      flex: 1,
+      minWidth: 0
+    },
+    activeEditElapsed: {
+      color: theme.accent,
+      fontFamily: monoFont,
+      fontSize: 40,
+      fontWeight: "800"
+    },
+    activeEditElapsedLabel: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "800"
+    },
+    activeEditSection: {
+      gap: 8
+    },
+    activeEditSectionLabel: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "800"
+    },
+    activeEditDescriptionInput: {
+      minHeight: 52
+    },
+    activeEditCategoryScroller: {
+      gap: 8,
+      paddingRight: 4
+    },
+    activeEditCategoryChip: {
+      minHeight: 42,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 999,
+      paddingHorizontal: 11,
+      paddingVertical: 8,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 7
+    },
+    activeEditCategoryChipSelected: {
+      borderColor: theme.accent,
+      backgroundColor: theme.surfaceMuted
+    },
+    activeEditCategoryChipText: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "800"
+    },
+    activeEditCategoryChipTextSelected: {
+      color: theme.accent
+    },
+    activeEditTimeRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8
+    },
+    activeEditDateInput: {
+      flex: 1.25,
+      minHeight: 48
+    },
+    activeEditTimeInput: {
+      width: 108,
+      minHeight: 56,
+      color: theme.accent,
+      fontFamily: monoFont,
+      fontSize: 20,
+      fontWeight: "800",
+      textAlign: "center"
+    },
+    activeEditStartSummary: {
+      flex: 1,
+      minWidth: 0,
+      minHeight: 56,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 14,
+      paddingHorizontal: 12,
+      paddingVertical: 9,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 12
+    },
+    activeEditStartSummaryText: {
+      flex: 1,
+      minWidth: 0
+    },
+    activeEditStartDate: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 15,
+      fontWeight: "800"
+    },
+    activeEditStartMeta: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "700"
+    },
+    activeEditStartTime: {
+      color: theme.accent,
+      fontFamily: monoFont,
+      fontSize: 20,
+      fontWeight: "800"
+    },
+    activeEditLastStopButton: {
+      minHeight: 44,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 9,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 10
+    },
+    activeEditLastStopText: {
+      flex: 1,
+      color: theme.accent,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "800"
+    },
+    activeEditLastStopMeta: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "800"
+    },
+    activeEditPickerPanel: {
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surfaceMuted,
+      borderRadius: 16,
+      padding: 12,
+      gap: 12
+    },
+    activeEditPickerHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 10
+    },
+    activeEditPickerHeaderText: {
+      flex: 1,
+      minWidth: 0
+    },
+    activeEditPickerTitle: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 14,
+      fontWeight: "800"
+    },
+    activeEditPickerMeta: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "700"
+    },
+    activeEditPickerActions: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8
+    },
+    activeEditPickerPrimaryButton: {
+      minHeight: 36,
+      borderWidth: 1,
+      borderColor: theme.accent,
+      backgroundColor: theme.accent,
+      borderRadius: 999,
+      paddingHorizontal: 12,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    activeEditPickerPrimaryText: {
+      color: theme.mode === "dark" ? theme.background : "#FFFFFF",
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "800"
+    },
+    activeEditPickerSecondaryButton: {
+      minHeight: 36,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 999,
+      paddingHorizontal: 12,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    activeEditPickerSecondaryText: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "800"
+    },
+    activeEditPickerShortcutRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8
+    },
+    activeEditPickerChip: {
+      minHeight: 34,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 999,
+      paddingHorizontal: 12,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    activeEditPickerChipText: {
+      color: theme.accent,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "800"
+    },
+    activeEditPickerGrid: {
+      gap: 8
+    },
+    activeEditPickerStepper: {
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surface,
+      borderRadius: 14,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 10
+    },
+    activeEditPickerStepperLabel: {
+      width: 58,
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 11,
+      fontWeight: "800",
+      textAlign: "left"
+    },
+    activeEditPickerStepperControls: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "flex-end",
+      gap: 6
+    },
+    activeEditPickerStepperButton: {
+      width: 30,
+      height: 30,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 999,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    activeEditPickerStepperButtonText: {
+      color: theme.accent,
+      fontFamily: monoFont,
+      fontSize: 18,
+      fontWeight: "800",
+      lineHeight: 20
+    },
+    activeEditPickerStepperValue: {
+      flex: 1,
+      minWidth: 0,
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 15,
+      fontWeight: "800",
+      textAlign: "center"
+    },
+    activeEditStopButton: {
+      width: 52,
+      height: 52,
+      borderWidth: 1,
+      borderColor: theme.danger,
+      backgroundColor: theme.danger,
+      borderRadius: 999,
+      alignItems: "center",
+      justifyContent: "center",
+      shadowColor: theme.danger,
+      shadowOpacity: theme.mode === "dark" ? 0.16 : 0.22,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 5 },
+      elevation: 3
+    },
+    activeEditStopButtonText: {
+      color: theme.mode === "dark" ? theme.background : "#FFFFFF",
+      fontFamily: monoFont,
+      fontSize: 15,
+      fontWeight: "800"
     },
     buttonPressed: {
       opacity: 0.84,

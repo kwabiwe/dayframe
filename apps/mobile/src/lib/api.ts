@@ -69,6 +69,13 @@ export type MobileCategoryResponse = {
   category: MobileBootstrap["categories"][number];
 };
 
+export type TimeEntryUpdatePatch = {
+  categoryId?: string | null;
+  description?: string | null;
+  startedAt?: string;
+  stoppedAt?: string | null;
+};
+
 export type MobileAuthSession = {
   token: string;
   user: { id: string; email: string; name: string };
@@ -231,6 +238,23 @@ export async function deleteTimeEntry(id: string) {
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to delete timer"));
+  return readJsonResponse(response);
+}
+
+export async function updateTimeEntry(id: string, patch: TimeEntryUpdatePatch) {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/time-entries/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify(patch)
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to update timer"));
   return readJsonResponse(response);
 }
 
