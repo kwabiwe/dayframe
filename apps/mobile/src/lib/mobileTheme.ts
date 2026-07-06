@@ -734,10 +734,17 @@ function createStyles(theme: MobileTheme) {
       minHeight: 48
     },
     activeEditTimeInput: {
-      flex: 0.75,
-      minHeight: 48
+      width: 108,
+      minHeight: 56,
+      color: theme.accent,
+      fontFamily: monoFont,
+      fontSize: 20,
+      fontWeight: "800",
+      textAlign: "center"
     },
     activeEditStartSummary: {
+      flex: 1,
+      minWidth: 0,
       minHeight: 56,
       borderWidth: 1,
       borderColor: theme.borderStrong,
