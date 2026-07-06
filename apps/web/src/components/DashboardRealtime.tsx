@@ -10,7 +10,7 @@ import type {
 } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { paletteColorFor } from "@dayframe/shared";
-import { DeleteRunningTimerDialog } from "@/components/DeleteRunningTimerDialog";
+import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import {
   ArrowRight,
@@ -700,11 +700,14 @@ export function CurrentTimerPanel({
       {timerError ? <p className="swiss-inline-error">{timerError}</p> : null}
 
       {isDeleteDialogOpen ? (
-        <DeleteRunningTimerDialog
+        <DestructiveConfirmationDialog
+          body="This removes the entry instead of stopping it."
+          dialogId="delete-running-timer"
           error={deleteError}
           isBusy={isBusy}
           onCancel={() => setIsDeleteDialogOpen(false)}
-          onDelete={() => void deleteActiveTimer()}
+          onConfirm={() => void deleteActiveTimer()}
+          title="Delete running timer?"
         />
       ) : null}
 

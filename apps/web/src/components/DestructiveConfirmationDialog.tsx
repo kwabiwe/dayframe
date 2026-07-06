@@ -3,21 +3,31 @@
 import type { FormEvent } from "react";
 import { useEffect, useRef } from "react";
 
-const deleteRunningTimerDescription = "This removes the entry instead of stopping it.";
-
-export function DeleteRunningTimerDialog({
+export function DestructiveConfirmationDialog({
+  body,
+  busyLabel = "Deleting...",
+  confirmLabel = "Delete",
+  dialogId,
   error,
   isBusy,
   onCancel,
-  onDelete
+  onConfirm,
+  title
 }: {
+  body: string;
+  busyLabel?: string;
+  confirmLabel?: string;
+  dialogId: string;
   error?: string | null;
   isBusy: boolean;
   onCancel: () => void;
-  onDelete: () => void;
+  onConfirm: () => void;
+  title: string;
 }) {
   const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
   const onCancelRef = useRef(onCancel);
+  const titleId = `${dialogId}-title`;
+  const descriptionId = `${dialogId}-description`;
 
   useEffect(() => {
     onCancelRef.current = onCancel;
@@ -40,7 +50,7 @@ export function DeleteRunningTimerDialog({
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!isBusy) onDelete();
+    if (!isBusy) onConfirm();
   }
 
   function cancel() {
@@ -53,15 +63,15 @@ export function DeleteRunningTimerDialog({
         className="swiss-dialog swiss-confirm-dialog"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="delete-running-timer-title"
-        aria-describedby="delete-running-timer-description"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="swiss-dialog-header">
-          <h2 id="delete-running-timer-title">Delete running timer?</h2>
+          <h2 id={titleId}>{title}</h2>
         </div>
         <form className="swiss-confirm-body" onSubmit={submit}>
-          <p id="delete-running-timer-description">{deleteRunningTimerDescription}</p>
+          <p id={descriptionId}>{body}</p>
           {error ? (
             <p className="swiss-inline-error" role="alert">
               {error}
@@ -72,7 +82,7 @@ export function DeleteRunningTimerDialog({
               Cancel
             </button>
             <button className="swiss-destructive-action" type="submit" disabled={isBusy}>
-              {isBusy ? "Deleting..." : "Delete"}
+              {isBusy ? busyLabel : confirmLabel}
             </button>
           </div>
         </form>

@@ -4,12 +4,16 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { DAYFRAME_PALETTE, paletteColorFor, paletteKeyFor } from "@dayframe/shared";
 import { Check, Pin, PinOff, Plus, Save, Trash2 } from "lucide-react";
+import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
 import type { CategoryRow } from "@/lib/queries";
 
 export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [categoryPendingDelete, setCategoryPendingDelete] = useState<CategoryRow | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const pinned = categories.filter((category) => category.isPinned);
   const unpinned = categories.filter((category) => !category.isPinned);
 
@@ -60,9 +64,27 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
   }
 
   async function archiveCategory(category: CategoryRow) {
-    if (!window.confirm(`Delete ${category.name}? Existing time entries keep their history.`)) return;
-    await fetch(`/api/categories?id=${category.id}`, { method: "DELETE" });
-    refresh();
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      const response = await fetch(`/api/categories?id=${category.id}`, { method: "DELETE" });
+      if (!response.ok) {
+        let errorMessage = `Unable to delete category: ${response.status}`;
+        try {
+          const payload = (await response.json()) as { error?: string };
+          errorMessage = payload.error ?? errorMessage;
+        } catch {
+          // Runtime failures may not return JSON.
+        }
+        throw new Error(errorMessage);
+      }
+      setCategoryPendingDelete(null);
+      refresh();
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "Unable to delete this category.");
+    } finally {
+      setIsDeleting(false);
+    }
   }
 
   return (
@@ -80,7 +102,10 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
           categories={pinned}
           editingId={editingId}
           isPending={isPending}
-          onArchive={archiveCategory}
+          onArchive={(category) => {
+            setDeleteError(null);
+            setCategoryPendingDelete(category);
+          }}
           onEdit={setEditingId}
           onTogglePin={togglePin}
           onUpdate={updateCategory}
@@ -91,7 +116,10 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
           categories={unpinned}
           editingId={editingId}
           isPending={isPending}
-          onArchive={archiveCategory}
+          onArchive={(category) => {
+            setDeleteError(null);
+            setCategoryPendingDelete(category);
+          }}
           onEdit={setEditingId}
           onTogglePin={togglePin}
           onUpdate={updateCategory}
@@ -117,6 +145,17 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
           Create category
         </button>
       </form>
+      {categoryPendingDelete ? (
+        <DestructiveConfirmationDialog
+          body="Existing time entries keep their category history."
+          dialogId="delete-category"
+          error={deleteError}
+          isBusy={isDeleting || isPending}
+          onCancel={() => setCategoryPendingDelete(null)}
+          onConfirm={() => void archiveCategory(categoryPendingDelete)}
+          title="Delete category?"
+        />
+      ) : null}
     </div>
   );
 }
@@ -137,7 +176,7 @@ function CategorySection({
   categories: CategoryRow[];
   editingId: string | null;
   isPending: boolean;
-  onArchive: (category: CategoryRow) => Promise<void>;
+  onArchive: (category: CategoryRow) => void;
   onEdit: (id: string | null) => void;
   onTogglePin: (category: CategoryRow) => Promise<void>;
   onUpdate: (category: CategoryRow, formData: FormData) => Promise<void>;

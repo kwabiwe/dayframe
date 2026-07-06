@@ -4,7 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { paletteColorFor } from "@dayframe/shared";
 import { Play, Square, Trash2 } from "lucide-react";
-import { DeleteRunningTimerDialog } from "@/components/DeleteRunningTimerDialog";
+import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
 import { timeEntryCategoryColor, timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
 import type { BootstrapData, CategoryRow, PlaceRow, TimeEntryRow } from "@/lib/queries";
 import { formatClockDuration, formatTime } from "@/lib/format";
@@ -307,11 +307,14 @@ export function TimerPanel({
         </div>
       </div>
       {isDeleteDialogOpen ? (
-        <DeleteRunningTimerDialog
+        <DestructiveConfirmationDialog
+          body="This removes the entry instead of stopping it."
+          dialogId="delete-running-timer"
           error={deleteError}
           isBusy={isBusy}
           onCancel={() => setIsDeleteDialogOpen(false)}
-          onDelete={() => void deleteActiveEntry()}
+          onConfirm={() => void deleteActiveEntry()}
+          title="Delete running timer?"
         />
       ) : null}
     </section>
