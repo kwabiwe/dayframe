@@ -1,10 +1,11 @@
 "use client";
 
-import type { PointerEvent as ReactPointerEvent } from "react";
+import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarDays, ChevronLeft, ChevronRight, List, Pencil, Play, Table2, Trash2 } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, List, Table2 } from "lucide-react";
 import { CurrentTimerPanel } from "@/components/DashboardRealtime";
+import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import { EntriesTable } from "@/components/EntriesTable";
 import {
   timeEntryAccentColor,
@@ -15,7 +16,7 @@ import {
 } from "@/lib/display";
 import type { BootstrapData, CategoryRow, PlaceRow, TimeEntryRow } from "@/lib/queries";
 import {
-  dateTimeLocal,
+  dateTimeLocalInputToIso,
   formatDate,
   formatDuration,
   formatTime
@@ -24,7 +25,7 @@ import {
 type TimeView = "calendar" | "list" | "timesheet";
 type CalendarMode = "week" | "day";
 
-const viewItems: Array<{ id: TimeView; label: string; icon: React.ReactNode }> = [
+const viewItems: Array<{ id: TimeView; label: string; icon: ReactNode }> = [
   { id: "calendar", label: "Calendar", icon: <CalendarDays size={16} /> },
   { id: "list", label: "List", icon: <List size={16} /> },
   { id: "timesheet", label: "Timesheet", icon: <Table2 size={16} /> }
@@ -48,6 +49,30 @@ type CalendarResizeDraft = {
   stoppedAt: string;
 };
 
+function isTimeView(value: string | null): value is TimeView {
+  return value === "calendar" || value === "list" || value === "timesheet";
+}
+
+function isCalendarMode(value: string | null): value is CalendarMode {
+  return value === "week" || value === "day";
+}
+
+function readTimelinePreference(key: string) {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeTimelinePreference(key: string, value: string) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Preference persistence is best-effort; tab switching should still work.
+  }
+}
+
 export function TimeReviewViews({
   initialData
 }: {
@@ -57,6 +82,8 @@ export function TimeReviewViews({
   const [activeView, setActiveView] = useState<TimeView>("calendar");
   const [calendarMode, setCalendarMode] = useState<CalendarMode>("week");
   const [weekAnchor, setWeekAnchor] = useState(() => startOfWeek(new Date(initialData.dateRange.selectedDate)));
+  const timelineViewStorageKey = `dayframe.timeline.${data.workspace.id}.view`;
+  const calendarModeStorageKey = `dayframe.timeline.${data.workspace.id}.calendarMode`;
 
   const refreshData = useCallback(async () => {
     try {
@@ -77,9 +104,24 @@ export function TimeReviewViews({
     return () => window.clearInterval(interval);
   }, [refreshData]);
 
+  useEffect(() => {
+    const storedView = readTimelinePreference(timelineViewStorageKey);
+    if (isTimeView(storedView)) setActiveView(storedView);
+  }, [timelineViewStorageKey]);
+
+  useEffect(() => {
+    const storedMode = readTimelinePreference(calendarModeStorageKey);
+    if (isCalendarMode(storedMode)) setCalendarMode(storedMode);
+  }, [calendarModeStorageKey]);
+
   function updateView(view: TimeView) {
     setActiveView(view);
-    window.localStorage.setItem("dayframe.timeReviewView", view);
+    writeTimelinePreference(timelineViewStorageKey, view);
+  }
+
+  function updateCalendarMode(mode: CalendarMode) {
+    setCalendarMode(mode);
+    writeTimelinePreference(calendarModeStorageKey, mode);
   }
 
   const weekDays = useMemo(() => getWeekDays(weekAnchor), [weekAnchor]);
@@ -155,7 +197,7 @@ export function TimeReviewViews({
           entries={weekEntries}
           onSynced={refreshData}
           places={data.places}
-          setCalendarMode={setCalendarMode}
+          setCalendarMode={updateCalendarMode}
           weekDays={weekDays}
         />
       ) : null}
@@ -191,7 +233,8 @@ function CalendarReview({
   weekDays: Date[];
 }) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
+  const [editingEntry, setEditingEntry] = useState<TimeEntryRow | null>(null);
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
   const [resizeDraft, setResizeDraft] = useState<CalendarResizeDraft | null>(null);
   const [resizingId, setResizingId] = useState<string | null>(null);
@@ -222,45 +265,6 @@ function CalendarReview({
       };
     });
   }, [rowHeight, zoom.intervalMinutes]);
-  const selectedEntry = entries.find((entry) => entry.id === selectedEntryId) ?? null;
-
-  async function remove(id: string) {
-    await fetch(`/api/time-entries/${id}`, { method: "DELETE" });
-    setSelectedEntryId(null);
-    await onSynced();
-    startTransition(() => router.refresh());
-  }
-
-  async function continueEntry(entry: TimeEntryRow) {
-    await fetch("/api/time-entries", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        mode: "start",
-        categoryId: entry.categoryId,
-        description: entry.description ?? undefined
-      })
-    });
-    await onSynced();
-    startTransition(() => router.refresh());
-  }
-
-  async function submitEdit(entry: TimeEntryRow, formData: FormData) {
-    await fetch(`/api/time-entries/${entry.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        categoryId: formData.get("categoryId") || null,
-        placeId: formData.get("placeId") || null,
-        description: formData.get("description") || null,
-        startedAt: formData.get("startedAt"),
-        stoppedAt: formData.get("stoppedAt") || null
-      })
-    });
-    setSelectedEntryId(null);
-    await onSynced();
-    startTransition(() => router.refresh());
-  }
 
   async function saveCalendarResize(entry: TimeEntryRow, draft: CalendarResizeDraft) {
     const response = await fetch(`/api/time-entries/${entry.id}`, {
@@ -374,7 +378,7 @@ function CalendarReview({
       <div className="flex flex-col gap-3 border-b border-[var(--line)] px-4 py-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="text-lg font-semibold">Calendar</h2>
-          <p className="mt-1 text-sm text-[var(--muted)]">Click a block to inspect it. Drag the top or bottom edge to resize.</p>
+          <p className="mt-1 text-sm text-[var(--muted)]">Double click a block to edit it. Drag the top or bottom edge to resize.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="swiss-view-switch" aria-label="Calendar view">
@@ -485,10 +489,11 @@ function CalendarReview({
                       data-entry-id={entry.id}
                       title={`${timeEntryTitle(entry)} ${formatTime(activeDraft?.startedAt ?? entry.startedAt)} - ${activeDraft?.stoppedAt ? formatTime(activeDraft.stoppedAt) : entry.stoppedAt ? formatTime(entry.stoppedAt) : "Running"}`}
                       onClick={() => setSelectedEntryId(entry.id)}
+                      onDoubleClick={() => setEditingEntry(entry)}
                       onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
+                        if (event.key === "Enter") {
                           event.preventDefault();
-                          setSelectedEntryId(entry.id);
+                          setEditingEntry(entry);
                         }
                       }}
                     >
@@ -498,12 +503,20 @@ function CalendarReview({
                             type="button"
                             className="swiss-resize-handle top"
                             aria-label={`Resize start of ${timeEntryTitle(entry)}`}
+                            onDoubleClick={(event) => {
+                              event.stopPropagation();
+                              setEditingEntry(entry);
+                            }}
                             onPointerDown={(event) => startCalendarResize(entry, day, "start", event)}
                           />
                           <button
                             type="button"
                             className="swiss-resize-handle bottom"
                             aria-label={`Resize end of ${timeEntryTitle(entry)}`}
+                            onDoubleClick={(event) => {
+                              event.stopPropagation();
+                              setEditingEntry(entry);
+                            }}
                             onPointerDown={(event) => startCalendarResize(entry, day, "end", event)}
                           />
                         </>
@@ -521,81 +534,18 @@ function CalendarReview({
         </div>
       </div>
       {resizeError ? <p className="border-t border-[var(--line)] px-4 py-2 text-sm text-[var(--danger)]">{resizeError}</p> : null}
-      {selectedEntry ? (
-        <div className="border-t border-[var(--line)] p-4">
-          <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-            <div>
-              <h3 className="flex items-center gap-2 text-base font-semibold">
-                <Pencil size={16} />
-                Edit calendar entry
-              </h3>
-              <p className="mt-1 text-sm text-[var(--muted)]">
-                {formatTime(selectedEntry.startedAt)} -{" "}
-                {selectedEntry.stoppedAt ? formatTime(selectedEntry.stoppedAt) : "Running"} /{" "}
-                {formatDuration(selectedEntry.durationSeconds)}
-              </p>
-            </div>
-            <button
-              className="industrial-button focus-ring self-start text-sm"
-              type="button"
-              onClick={() => setSelectedEntryId(null)}
-            >
-              Close
-            </button>
-          </div>
-          <form action={(formData) => submitEdit(selectedEntry, formData)} className="grid gap-3 md:grid-cols-6">
-            <SelectField
-              name="categoryId"
-              label="Category"
-              options={categories}
-              defaultValue={selectedEntry.categoryId ?? ""}
-            />
-            <SelectField
-              name="placeId"
-              label="Place"
-              options={places}
-              defaultValue={selectedEntry.placeId ?? ""}
-            />
-            <TextField
-              name="description"
-              label="Description"
-              defaultValue={selectedEntry.description ?? ""}
-            />
-            <DateField
-              name="startedAt"
-              label="Start"
-              defaultValue={dateTimeLocal(selectedEntry.startedAt)}
-            />
-            <DateField
-              name="stoppedAt"
-              label="Stop"
-              defaultValue={selectedEntry.stoppedAt ? dateTimeLocal(selectedEntry.stoppedAt) : ""}
-            />
-            <div className="flex flex-wrap gap-2 md:col-span-6">
-              <button className="industrial-button-primary focus-ring text-sm" disabled={isPending}>
-                Save
-              </button>
-              <button
-                className="industrial-button focus-ring text-sm"
-                type="button"
-                disabled={isPending}
-                onClick={() => continueEntry(selectedEntry)}
-              >
-                <Play size={15} fill="currentColor" strokeWidth={0} />
-                Start again
-              </button>
-              <button
-                className="industrial-button-danger focus-ring text-sm"
-                type="button"
-                disabled={isPending}
-                onClick={() => remove(selectedEntry.id)}
-              >
-                <Trash2 size={15} />
-                Delete
-              </button>
-            </div>
-          </form>
-        </div>
+      {editingEntry ? (
+        <EditTimeEntryDialog
+          categories={categories}
+          entry={editingEntry}
+          onClose={() => setEditingEntry(null)}
+          onSaved={async () => {
+            setEditingEntry(null);
+            await onSynced();
+            startTransition(() => router.refresh());
+          }}
+          places={places}
+        />
       ) : null}
     </section>
   );
@@ -686,83 +636,6 @@ function TimesheetView({ entries, weekDays }: { entries: TimeEntryRow[]; weekDay
   );
 }
 
-function SelectField({
-  name,
-  label,
-  options,
-  defaultValue = "",
-  required = false
-}: {
-  name: string;
-  label: string;
-  options: Array<{ id: string; name: string }>;
-  defaultValue?: string;
-  required?: boolean;
-}) {
-  return (
-    <label className="text-sm">
-      <span className="industrial-field-label">{label}</span>
-      <select
-        name={name}
-        defaultValue={defaultValue}
-        required={required}
-        className="industrial-field focus-ring"
-      >
-        <option value="">{required ? "Select" : label === "Category" ? "Uncategorized" : "None"}</option>
-        {options.map((option) => (
-          <option key={option.id} value={option.id}>
-            {option.name}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function TextField({
-  name,
-  label,
-  defaultValue = ""
-}: {
-  name: string;
-  label: string;
-  defaultValue?: string;
-}) {
-  return (
-    <label className="text-sm">
-      <span className="industrial-field-label">{label}</span>
-      <input
-        name={name}
-        defaultValue={defaultValue}
-        className="industrial-field focus-ring"
-      />
-    </label>
-  );
-}
-
-function DateField({
-  name,
-  label,
-  defaultValue
-}: {
-  name: string;
-  label: string;
-  defaultValue?: string;
-}) {
-  return (
-    <label className="text-sm">
-      <span className="industrial-field-label">{label}</span>
-      <input
-        type="datetime-local"
-        name={name}
-        defaultValue={defaultValue}
-        required={name === "startedAt"}
-        className="industrial-field focus-ring"
-      />
-    </label>
-  );
-}
-
 function calendarBlockStyle(
   entry: TimeEntryRow,
   draft: CalendarResizeDraft | null,
@@ -814,10 +687,18 @@ function formatCalendarAxisMinutes(minutes: number) {
   return `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
 }
 
+function formatCalendarDateKey(day: Date) {
+  return [
+    day.getFullYear(),
+    (day.getMonth() + 1).toString().padStart(2, "0"),
+    day.getDate().toString().padStart(2, "0")
+  ].join("-");
+}
+
 function isoForDateMinutes(day: Date, minutes: number) {
-  const date = new Date(day);
-  date.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
-  return date.toISOString();
+  const iso = dateTimeLocalInputToIso(`${formatCalendarDateKey(day)}T${formatCalendarAxisMinutes(minutes)}`);
+  if (!iso) throw new Error("Invalid calendar time.");
+  return iso;
 }
 
 function startOfWeek(input: Date) {

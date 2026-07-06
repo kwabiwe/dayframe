@@ -4,11 +4,13 @@ import Link from "next/link";
 import type {
   CSSProperties,
   FormEvent,
+  KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent
 } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { paletteColorFor } from "@dayframe/shared";
+import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import {
   ArrowRight,
   BarChart3,
@@ -35,6 +37,7 @@ import {
 } from "@/lib/display";
 import {
   dateTimeLocal,
+  dateTimeLocalInputToIso,
   formatClockDuration,
   formatDuration,
   formatEventLabel,
@@ -46,6 +49,10 @@ import {
   TIMER_SHORTCUT_EVENT,
   type TimerShortcutEventDetail
 } from "@/lib/timer-shortcut";
+import {
+  emptyTimerEntryDraft,
+  shouldStartTimerFromEntrySubmit
+} from "@/lib/timer-entry-draft";
 
 const dayStartHour = 7;
 const dayEndHour = 21;
@@ -175,6 +182,7 @@ export function CurrentTimerPanel({
   const [startEditError, setStartEditError] = useState<string | null>(null);
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const activeDetailsSyncRef = useRef("");
+  const clearDraftAfterStopRef = useRef(false);
   const categoryMenuRef = useRef<HTMLDivElement | null>(null);
   const descriptionInputRef = useRef<HTMLInputElement | null>(null);
   const active = data.activeEntry;
@@ -228,6 +236,12 @@ export function CurrentTimerPanel({
   useEffect(() => {
     if (!active) {
       activeDetailsSyncRef.current = "";
+      if (clearDraftAfterStopRef.current) {
+        clearDraftAfterStopRef.current = false;
+        const emptyDraft = emptyTimerEntryDraft();
+        setDescription(emptyDraft.description);
+        setCategoryId(emptyDraft.categoryId);
+      }
       return undefined;
     }
 
@@ -326,6 +340,7 @@ export function CurrentTimerPanel({
         }
         throw new Error(errorMessage);
       }
+      if (mode === "stop") clearDraftAfterStopRef.current = true;
       await refresh();
     } catch (error) {
       setTimerError(error instanceof Error ? error.message : "Unable to update the timer.");
@@ -346,6 +361,19 @@ export function CurrentTimerPanel({
   function chooseCategory(nextCategoryId: string) {
     setCategoryId(nextCategoryId);
     setCategoryMenuOpen(false);
+  }
+
+  async function submitTimerEntry(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!shouldStartTimerFromEntrySubmit({ hasActiveTimer: Boolean(active), isBusy })) return;
+    await timerAction("start");
+  }
+
+  function startTimerFromDescriptionKey(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    if (!shouldStartTimerFromEntrySubmit({ hasActiveTimer: Boolean(active), isBusy })) return;
+    void timerAction("start");
   }
 
   useEffect(() => {
@@ -445,98 +473,103 @@ export function CurrentTimerPanel({
       style={activeAccent ? ({ "--timer-accent": activeAccent } as CSSProperties) : undefined}
     >
       <div className="swiss-timer-entrybar">
-        <label className="swiss-work-input">
-          <span>Task description</span>
-          <input
-            ref={descriptionInputRef}
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            placeholder="Describe the task"
-            aria-label="Task description"
-          />
-        </label>
-        <div className="swiss-entrybar-actions">
-          <div className="swiss-category-field" ref={categoryMenuRef}>
-            <span>Category</span>
+        <form className="swiss-timer-entry-form" onSubmit={submitTimerEntry}>
+          <label className="swiss-work-input">
+            <span>Task description</span>
+            <input
+              ref={descriptionInputRef}
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              onKeyDown={startTimerFromDescriptionKey}
+              placeholder="Describe the task"
+              aria-label="Task description"
+            />
+          </label>
+          <div className="swiss-entrybar-actions">
+            <div className="swiss-category-field" ref={categoryMenuRef}>
+              <span>Category</span>
+              <button
+                className="swiss-category-trigger"
+                type="button"
+                aria-haspopup="listbox"
+                aria-expanded={categoryMenuOpen}
+                aria-label="Choose category"
+                onClick={() => setCategoryMenuOpen((current) => !current)}
+              >
+                <span className="swiss-category-trigger-value">
+                  <span
+                    className={["swiss-focus-dot", selectedCategory ? "" : "is-muted"].filter(Boolean).join(" ")}
+                    style={{
+                      backgroundColor: selectedCategory
+                        ? paletteColorFor(selectedCategory.color, selectedCategory.name)
+                        : "transparent"
+                    }}
+                  />
+                  <span>{selectedCategory?.name ?? "Uncategorized"}</span>
+                </span>
+                <ChevronDown size={16} aria-hidden="true" />
+              </button>
+              {categoryMenuOpen ? (
+                <div className="swiss-category-menu" role="listbox" aria-label="Categories">
+                  <button
+                    className={["swiss-category-option", "is-muted", !categoryId ? "is-selected" : ""]
+                      .filter(Boolean)
+                      .join(" ")}
+                    type="button"
+                    role="option"
+                    aria-selected={!categoryId}
+                    onClick={() => chooseCategory("")}
+                  >
+                    <span className="swiss-focus-dot is-muted" />
+                    <span>Uncategorized</span>
+                    {!categoryId ? <CheckCircle2 size={14} aria-hidden="true" /> : null}
+                  </button>
+                  {data.categories.map((category) => {
+                    const isSelected = category.id === categoryId;
+                    return (
+                      <button
+                        key={category.id}
+                        className={["swiss-category-option", isSelected ? "is-selected" : ""]
+                          .filter(Boolean)
+                          .join(" ")}
+                        type="button"
+                        role="option"
+                        aria-selected={isSelected}
+                        onClick={() => chooseCategory(category.id)}
+                      >
+                        <span
+                          className="swiss-focus-dot"
+                          style={{ backgroundColor: paletteColorFor(category.color, category.name) }}
+                        />
+                        <span>{category.name}</span>
+                        {isSelected ? <CheckCircle2 size={14} aria-hidden="true" /> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+            <span className="swiss-entrybar-clock">{formatClockDuration(durationSeconds)}</span>
             <button
-              className="swiss-category-trigger"
-              type="button"
-              aria-haspopup="listbox"
-              aria-expanded={categoryMenuOpen}
-              aria-label="Choose category"
-              onClick={() => setCategoryMenuOpen((current) => !current)}
+              className={["swiss-command-play", active ? "is-active" : ""].filter(Boolean).join(" ")}
+              type={active ? "button" : "submit"}
+              disabled={isBusy}
+              aria-label={active ? "Stop timer" : "Start timer"}
+              onClick={() => {
+                if (active) void timerAction("stop");
+              }}
             >
-              <span className="swiss-category-trigger-value">
-                <span
-                  className={["swiss-focus-dot", selectedCategory ? "" : "is-muted"].filter(Boolean).join(" ")}
-                  style={{
-                    backgroundColor: selectedCategory
-                      ? paletteColorFor(selectedCategory.color, selectedCategory.name)
-                      : "transparent"
-                  }}
-                />
-                <span>{selectedCategory?.name ?? "Uncategorized"}</span>
-              </span>
-              <ChevronDown size={16} aria-hidden="true" />
+              {active ? (
+                <>
+                  <Square size={15} fill="currentColor" />
+                  <span>Stop</span>
+                </>
+              ) : (
+                <Play size={24} fill="currentColor" strokeWidth={0} />
+              )}
             </button>
-            {categoryMenuOpen ? (
-              <div className="swiss-category-menu" role="listbox" aria-label="Categories">
-                <button
-                  className={["swiss-category-option", "is-muted", !categoryId ? "is-selected" : ""]
-                    .filter(Boolean)
-                    .join(" ")}
-                  type="button"
-                  role="option"
-                  aria-selected={!categoryId}
-                  onClick={() => chooseCategory("")}
-                >
-                  <span className="swiss-focus-dot is-muted" />
-                  <span>Uncategorized</span>
-                  {!categoryId ? <CheckCircle2 size={14} aria-hidden="true" /> : null}
-                </button>
-                {data.categories.map((category) => {
-                  const isSelected = category.id === categoryId;
-                  return (
-                    <button
-                      key={category.id}
-                      className={["swiss-category-option", isSelected ? "is-selected" : ""]
-                        .filter(Boolean)
-                        .join(" ")}
-                      type="button"
-                      role="option"
-                      aria-selected={isSelected}
-                      onClick={() => chooseCategory(category.id)}
-                    >
-                      <span
-                        className="swiss-focus-dot"
-                        style={{ backgroundColor: paletteColorFor(category.color, category.name) }}
-                      />
-                      <span>{category.name}</span>
-                      {isSelected ? <CheckCircle2 size={14} aria-hidden="true" /> : null}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
           </div>
-          <span className="swiss-entrybar-clock">{formatClockDuration(durationSeconds)}</span>
-          <button
-            className={["swiss-command-play", active ? "is-active" : ""].filter(Boolean).join(" ")}
-            type="button"
-            disabled={isBusy}
-            aria-label={active ? "Stop timer" : "Start timer"}
-            onClick={() => timerAction(active ? "stop" : "start")}
-          >
-            {active ? (
-              <>
-                <Square size={15} fill="currentColor" />
-                <span>Stop</span>
-              </>
-            ) : (
-              <Play size={24} fill="currentColor" strokeWidth={0} />
-            )}
-          </button>
-        </div>
+        </form>
         {active ? (
           <div className="swiss-active-timer-meta">
             {isEditingStartedAt ? (
@@ -1193,14 +1226,15 @@ function DayTimeline({
         </div>
       ) : null}
       {editingEntry ? (
-        <EditEntryDialog
-          data={data}
+        <EditTimeEntryDialog
+          categories={data.categories}
           entry={editingEntry}
           onClose={() => setEditingEntry(null)}
-          onSynced={async () => {
+          onSaved={async () => {
             setEditingEntry(null);
             await onEntryUpdated();
           }}
+          places={data.places}
         />
       ) : null}
       {resizeError ? <p className="swiss-resize-error">{resizeError}</p> : null}
@@ -1334,110 +1368,6 @@ function TimelineBlock({
   );
 }
 
-function EditEntryDialog({
-  data,
-  entry,
-  onClose,
-  onSynced
-}: {
-  data: BootstrapData;
-  entry: TimeEntryRow;
-  onClose: () => void;
-  onSynced: () => Promise<void>;
-}) {
-  const [isBusy, setIsBusy] = useState(false);
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setIsBusy(true);
-    try {
-      const formData = new FormData(event.currentTarget);
-      const response = await fetch(`/api/time-entries/${entry.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          categoryId: formData.get("categoryId") || null,
-          placeId: formData.get("placeId") || null,
-          description: formData.get("description") || null,
-          startedAt: formData.get("startedAt"),
-          stoppedAt: formData.get("stoppedAt") || null
-        })
-      });
-      if (!response.ok) throw new Error(`Unable to update entry: ${response.status}`);
-      await onSynced();
-    } finally {
-      setIsBusy(false);
-    }
-  }
-
-  return (
-    <div className="swiss-dialog-backdrop" role="presentation" onMouseDown={onClose}>
-      <section
-        className="swiss-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="edit-entry-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="swiss-dialog-header">
-          <h2 id="edit-entry-title">Edit time block</h2>
-          <button type="button" onClick={onClose} aria-label="Close edit time block">
-            x
-          </button>
-        </div>
-        <form className="swiss-form-grid" onSubmit={submit}>
-          <label>
-            Category
-            <select name="categoryId" defaultValue={entry.categoryId ?? ""}>
-              <option value="">Uncategorized</option>
-              {data.categories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Place
-            <select name="placeId" defaultValue={entry.placeId ?? ""}>
-              <option value="">No place</option>
-              {data.places.map((place) => (
-                <option key={place.id} value={place.id}>
-                  {place.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="swiss-form-wide">
-            Description
-            <input name="description" defaultValue={entry.description ?? ""} placeholder="What are you working on?" />
-          </label>
-          <label>
-            Start
-            <input type="datetime-local" name="startedAt" defaultValue={dateTimeLocal(new Date(entry.startedAt))} required />
-          </label>
-          <label>
-            Finish
-            <input
-              type="datetime-local"
-              name="stoppedAt"
-              defaultValue={entry.stoppedAt ? dateTimeLocal(new Date(entry.stoppedAt)) : ""}
-            />
-          </label>
-          <div className="swiss-dialog-actions">
-            <button type="button" onClick={onClose}>
-              Cancel
-            </button>
-            <button className="swiss-primary-action" type="submit" disabled={isBusy}>
-              Save
-            </button>
-          </div>
-        </form>
-      </section>
-    </div>
-  );
-}
-
 function DashboardReviewInbox({
   items,
   onSynced
@@ -1550,6 +1480,7 @@ function ManualEntryDialog({
   onSynced: (data: BootstrapData) => void;
 }) {
   const [isBusy, setIsBusy] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const selectedDate = parseDateKey(data.dateRange.selectedDate);
   selectedDate.setHours(9, 0, 0, 0);
   const defaultStart = dateTimeLocal(selectedDate);
@@ -1558,9 +1489,23 @@ function ManualEntryDialog({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setFormError(null);
+    const formData = new FormData(event.currentTarget);
+    const startedAt = dateTimeLocalInputToIso(formData.get("startedAt"));
+    const stoppedAt = dateTimeLocalInputToIso(formData.get("stoppedAt"));
+
+    if (!startedAt || !stoppedAt) {
+      setFormError("Use valid start and finish times.");
+      return;
+    }
+
+    if (new Date(startedAt).getTime() >= new Date(stoppedAt).getTime()) {
+      setFormError("Finish time must be after start time.");
+      return;
+    }
+
     setIsBusy(true);
     try {
-      const formData = new FormData(event.currentTarget);
       const response = await fetch("/api/time-entries", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1569,15 +1514,26 @@ function ManualEntryDialog({
           categoryId: formData.get("categoryId") || undefined,
           placeId: formData.get("placeId") || undefined,
           description: formData.get("description") || undefined,
-          startedAt: formData.get("startedAt"),
-          stoppedAt: formData.get("stoppedAt")
+          startedAt,
+          stoppedAt
         })
       });
-      if (!response.ok) throw new Error(`Unable to add entry: ${response.status}`);
+      if (!response.ok) {
+        let errorMessage = `Unable to add entry: ${response.status}`;
+        try {
+          const payload = (await response.json()) as { error?: string };
+          errorMessage = payload.error ?? errorMessage;
+        } catch {
+          // Runtime failures may not return JSON.
+        }
+        throw new Error(errorMessage);
+      }
       const refresh = await fetch(`/api/bootstrap?date=${data.dateRange.selectedDate}`, {
         cache: "no-store"
       });
       if (refresh.ok) onSynced((await refresh.json()) as BootstrapData);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Unable to add this time block.");
     } finally {
       setIsBusy(false);
     }
@@ -1624,9 +1580,14 @@ function ManualEntryDialog({
             <input type="datetime-local" name="startedAt" defaultValue={defaultStart} required />
           </label>
           <label>
-            Stop
+            Finish
             <input type="datetime-local" name="stoppedAt" defaultValue={defaultStop} required />
           </label>
+          {formError ? (
+            <p className="swiss-inline-error swiss-form-wide" role="alert">
+              {formError}
+            </p>
+          ) : null}
           <div className="swiss-dialog-actions">
             <button type="button" onClick={onClose}>
               Cancel
@@ -1718,9 +1679,9 @@ function clamp(value: number, minimum: number, maximum: number) {
 }
 
 function isoForDateMinutes(dateValue: string, minutes: number) {
-  const date = parseDateKey(dateValue);
-  date.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
-  return date.toISOString();
+  const iso = dateTimeLocalInputToIso(`${dateValue}T${formatAxisMinutes(minutes)}`);
+  if (!iso) throw new Error("Invalid timeline time.");
+  return iso;
 }
 
 function timeInputValue(value?: string | Date | null) {

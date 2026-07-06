@@ -560,6 +560,13 @@ textarea:focus-visible {
   gap: 10px;
 }
 
+.swiss-timer-entry-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 10px;
+}
+
 .swiss-work-input {
   display: grid;
   gap: 7px;

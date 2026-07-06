@@ -1,12 +1,15 @@
 "use client";
 
+import type { FormEvent } from "react";
 import { Fragment, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Play, Trash2 } from "lucide-react";
+import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import { timeEntryCategoryColor, timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
 import type { CategoryRow, PlaceRow, TimeEntryRow } from "@/lib/queries";
 import {
   dateTimeLocal,
+  dateTimeLocalInputToIso,
   formatDate,
   formatDuration,
   formatSourceLabel,
@@ -36,7 +39,8 @@ export function EntriesTable({
     confidence: "",
     reviewStatus: ""
   });
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingEntry, setEditingEntry] = useState<TimeEntryRow | null>(null);
+  const [manualError, setManualError] = useState<string | null>(null);
 
   const filtered = useMemo(
     () =>
@@ -70,38 +74,54 @@ export function EntriesTable({
     startTransition(() => router.refresh());
   }
 
-  async function submitManual(formData: FormData) {
-    await fetch("/api/time-entries", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        mode: "manual",
-        categoryId: formData.get("categoryId") || undefined,
-        placeId: formData.get("placeId") || undefined,
-        description: formData.get("description") || undefined,
-        startedAt: formData.get("startedAt"),
-        stoppedAt: formData.get("stoppedAt")
-      })
-    });
-    await onChanged?.();
-    startTransition(() => router.refresh());
-  }
+  async function submitManual(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setManualError(null);
 
-  async function submitEdit(entry: TimeEntryRow, formData: FormData) {
-    await fetch(`/api/time-entries/${entry.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        categoryId: formData.get("categoryId") || null,
-        placeId: formData.get("placeId") || null,
-        description: formData.get("description") || null,
-        startedAt: formData.get("startedAt"),
-        stoppedAt: formData.get("stoppedAt") || null
-      })
-    });
-    setEditingId(null);
-    await onChanged?.();
-    startTransition(() => router.refresh());
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const startedAt = dateTimeLocalInputToIso(formData.get("startedAt"));
+    const stoppedAt = dateTimeLocalInputToIso(formData.get("stoppedAt"));
+
+    if (!startedAt || !stoppedAt) {
+      setManualError("Use valid start and finish times.");
+      return;
+    }
+
+    if (new Date(startedAt).getTime() >= new Date(stoppedAt).getTime()) {
+      setManualError("Finish time must be after start time.");
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/time-entries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "manual",
+          categoryId: formData.get("categoryId") || undefined,
+          placeId: formData.get("placeId") || undefined,
+          description: formData.get("description") || undefined,
+          startedAt,
+          stoppedAt
+        })
+      });
+      if (!response.ok) {
+        let errorMessage = `Unable to add entry: ${response.status}`;
+        try {
+          const payload = (await response.json()) as { error?: string };
+          errorMessage = payload.error ?? errorMessage;
+        } catch {
+          // Runtime failures may not return JSON.
+        }
+        throw new Error(errorMessage);
+      }
+      form.reset();
+      await onChanged?.();
+      startTransition(() => router.refresh());
+    } catch (error) {
+      setManualError(error instanceof Error ? error.message : "Unable to add this time entry.");
+    }
   }
 
   return (
@@ -144,14 +164,19 @@ export function EntriesTable({
 
       {showManualForm ? (
         <form
-          action={submitManual}
+          onSubmit={submitManual}
           className="grid gap-3 rounded-xl border border-[var(--line)] bg-[var(--surface-strong)] p-4 md:grid-cols-5"
         >
           <SelectField name="categoryId" label="Category" options={categories} />
           <SelectField name="placeId" label="Place" options={places} />
           <TextField name="description" label="Description" />
           <DateField name="startedAt" label="Start" defaultValue={dateTimeLocal()} />
-          <DateField name="stoppedAt" label="Stop" defaultValue={dateTimeLocal()} />
+          <DateField name="stoppedAt" label="Finish" defaultValue={dateTimeLocal()} />
+          {manualError ? (
+            <p className="swiss-inline-error md:col-span-5" role="alert">
+              {manualError}
+            </p>
+          ) : null}
           <button
             className="industrial-button-primary focus-ring text-sm md:col-span-5"
             type="submit"
@@ -192,53 +217,6 @@ export function EntriesTable({
                       </td>
                     </tr>
                   ) : null}
-                  {editingId === entry.id ? (
-                <tr className="border-b border-[var(--line)] bg-[var(--surface-strong)] align-top">
-                  <td colSpan={8} className="p-3">
-                    <form action={(formData) => submitEdit(entry, formData)} className="grid gap-3 md:grid-cols-5">
-                      <SelectField
-                        name="categoryId"
-                        label="Category"
-                        options={categories}
-                        defaultValue={entry.categoryId ?? ""}
-                      />
-                      <SelectField
-                        name="placeId"
-                        label="Place"
-                        options={places}
-                        defaultValue={entry.placeId ?? ""}
-                      />
-                      <TextField
-                        name="description"
-                        label="Description"
-                        defaultValue={entry.description ?? ""}
-                      />
-                      <DateField
-                        name="startedAt"
-                        label="Start"
-                        defaultValue={dateTimeLocal(entry.startedAt)}
-                      />
-                      <DateField
-                        name="stoppedAt"
-                        label="Stop"
-                        defaultValue={entry.stoppedAt ? dateTimeLocal(entry.stoppedAt) : ""}
-                      />
-                      <div className="flex gap-2 md:col-span-5">
-                        <button className="industrial-button-primary focus-ring text-sm">
-                          Save
-                        </button>
-                        <button
-                          type="button"
-                          className="industrial-button focus-ring text-sm"
-                          onClick={() => setEditingId(null)}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </form>
-                  </td>
-                </tr>
-                  ) : (
                 <tr className="motion-row border-b border-[var(--line)] align-top last:border-b-0 hover:bg-[var(--surface-strong)]">
                   <td className="tabular px-3 py-3">
                     {formatTime(entry.startedAt)} - {entry.stoppedAt ? formatTime(entry.stoppedAt) : "Running"}
@@ -278,7 +256,7 @@ export function EntriesTable({
                         className="focus-ring rounded-md border border-[var(--line)] bg-[var(--surface-inset)] p-2 hover:border-[var(--accent)] hover:text-[var(--accent)]"
                         type="button"
                         aria-label="Edit entry"
-                        onClick={() => setEditingId(entry.id)}
+                        onClick={() => setEditingEntry(entry)}
                       >
                         <Pencil size={15} />
                       </button>
@@ -293,7 +271,6 @@ export function EntriesTable({
                     </div>
                   </td>
                 </tr>
-                  )}
                 </Fragment>
               );
             })}
@@ -301,6 +278,19 @@ export function EntriesTable({
         </table>
         </div>
       </div>
+      {editingEntry ? (
+        <EditTimeEntryDialog
+          categories={categories}
+          entry={editingEntry}
+          onClose={() => setEditingEntry(null)}
+          onSaved={async () => {
+            setEditingEntry(null);
+            await onChanged?.();
+            startTransition(() => router.refresh());
+          }}
+          places={places}
+        />
+      ) : null}
     </section>
   );
 }
