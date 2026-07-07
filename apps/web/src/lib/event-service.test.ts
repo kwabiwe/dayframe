@@ -21,7 +21,8 @@ vi.mock("./queries", () => ({
   getNormalizationContext: mocks.getNormalizationContext
 }));
 
-const { deleteTimeEntry, processActivityEvent, TimeEntryNotFoundError, updateCategory } = await import("./event-service");
+const { deleteTimeEntry, processActivityEvent, resolveReviewItem, TimeEntryNotFoundError, updateCategory } =
+  await import("./event-service");
 
 const session = {
   userId: "00000000-0000-4000-8000-000000000001",
@@ -181,8 +182,160 @@ describe("health event persistence", () => {
       "2026-06-07T05:55:00.000Z",
       JSON.stringify(healthSleepEvent().rawPayload)
     ]);
+    const reviewInsert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into review_items")
+    );
+    expect(String(reviewInsert?.[0])).toContain("suggested_stopped_at");
+    expect(reviewInsert?.[1]).toEqual([
+      session.workspaceId,
+      "event-1",
+      "health_sleep_import_suggestion",
+      "Sleep asleep core",
+      null,
+      null,
+      null,
+      "2026-06-06T22:24:00.000Z",
+      "2026-06-07T05:55:00.000Z",
+      "high",
+      "Health imports are reviewed before becoming completed entries."
+    ]);
     expect(client.query).toHaveBeenCalledWith("commit");
     expect(client.release).toHaveBeenCalled();
+  });
+
+  it("rounds fractional Health workout durations before inserting integer duration seconds", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        return statement.includes("returning id") ? { rows: [{ id: "event-1" }] } : { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await processActivityEvent(healthWorkoutEvent(), session);
+
+    const healthInsert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into health_workouts")
+    );
+    expect(String(healthInsert?.[0])).toContain("duration_seconds");
+    expect(healthInsert?.[1]).toEqual([
+      session.workspaceId,
+      session.userId,
+      "workout-sample-1",
+      "healthkit",
+      "walking",
+      "2026-06-07T06:39:00.000Z",
+      "2026-06-07T07:43:18.000Z",
+      3858,
+      5123.75,
+      284.5,
+      JSON.stringify(healthWorkoutEvent().rawPayload)
+    ]);
+  });
+
+  it("stores queued Health sleep imports under the resolved session workspace when the payload has stale ids", async () => {
+    const hostedSession = {
+      ...session,
+      userId: "00000000-0000-4000-8000-000000000002",
+      workspaceId: "00000000-0000-4000-8000-000000000011"
+    };
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        return statement.includes("returning id") ? { rows: [{ id: "event-1" }] } : { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await processActivityEvent(staleWorkspaceHealthSleepEvent(), hostedSession);
+
+    const duplicateLookup = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("client_event_id = $3")
+    );
+    expect(duplicateLookup?.[1]).toEqual([
+      hostedSession.workspaceId,
+      hostedSession.userId,
+      "local-health-sleep-1"
+    ]);
+
+    const activityInsert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into activity_events")
+    );
+    expect((activityInsert?.[1] as unknown[]).slice(0, 2)).toEqual([
+      hostedSession.workspaceId,
+      hostedSession.userId
+    ]);
+
+    const healthInsert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into health_sleep_segments")
+    );
+    expect((healthInsert?.[1] as unknown[]).slice(0, 2)).toEqual([
+      hostedSession.workspaceId,
+      hostedSession.userId
+    ]);
+  });
+
+  it("checks clientEventId idempotency in the resolved session workspace when the payload has stale ids", async () => {
+    const hostedSession = {
+      ...session,
+      userId: "00000000-0000-4000-8000-000000000002",
+      workspaceId: "00000000-0000-4000-8000-000000000011"
+    };
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        if (statement.includes("client_event_id = $3")) return { rows: [{ id: "event-existing" }] };
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await processActivityEvent(staleWorkspaceHealthSleepEvent(), hostedSession);
+
+    const duplicateLookup = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("client_event_id = $3")
+    );
+    expect(duplicateLookup?.[1]).toEqual([
+      hostedSession.workspaceId,
+      hostedSession.userId,
+      "local-health-sleep-1"
+    ]);
+    expect(result).toEqual({
+      eventId: "event-existing",
+      candidate: expect.objectContaining({ action: "create_review_item" }),
+      duplicate: true
+    });
+    expect(
+      client.query.mock.calls.find(([statement]) => String(statement).includes("insert into activity_events"))
+    ).toBeUndefined();
+    expect(client.query).toHaveBeenCalledWith("commit");
+  });
+
+  it("identifies a stale authenticated workspace foreign key failure", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        if (statement.includes("insert into activity_events")) {
+          throw Object.assign(
+            new Error(
+              'insert or update on table "activity_events" violates foreign key constraint "activity_events_workspace_id_fkey"'
+            ),
+            { code: "23503", constraint: "activity_events_workspace_id_fkey" }
+          );
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(processActivityEvent(healthSleepEvent(), session)).rejects.toThrow(
+      /Authenticated session workspace is missing from public\.workspaces/
+    );
+    expect(client.query).toHaveBeenCalledWith("rollback");
   });
 
   it("identifies a missing health sleep table instead of throwing a generic sync failure", async () => {
@@ -209,6 +362,62 @@ describe("health event persistence", () => {
       /idx_health_sleep_segments_external_sample/
     );
     expect(client.query).toHaveBeenCalledWith("rollback");
+  });
+});
+
+describe("review item resolution", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("accepts Health review candidates as completed entries with their suggested stop time", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        if (statement.includes("from review_items ri")) {
+          return {
+            rows: [
+              {
+                id: "review-1",
+                eventId: "event-1",
+                title: "Sleep asleep core",
+                suggestedProjectId: null,
+                suggestedCategoryId: null,
+                suggestedPlaceId: null,
+                suggestedStartedAt: "2026-06-06T22:24:00.000Z",
+                suggestedStoppedAt: "2026-06-07T05:55:00.000Z",
+                confidence: "high",
+                eventSource: "health_sleep",
+                eventType: "health_sleep_import"
+              }
+            ]
+          };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await resolveReviewItem("review-1", "accept", session);
+
+    const entryInsert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into time_entries")
+    );
+    expect(entryInsert?.[1]).toEqual([
+      session.workspaceId,
+      session.userId,
+      null,
+      null,
+      null,
+      "health_sleep",
+      "high",
+      "Sleep asleep core",
+      "2026-06-06T22:24:00.000Z",
+      "2026-06-07T05:55:00.000Z",
+      "event-1"
+    ]);
+    expect(client.query).toHaveBeenCalledWith("commit");
   });
 });
 
@@ -275,6 +484,42 @@ function healthSleepEvent() {
       sample: {
         uuid: "sleep-sample-1"
       }
+    }
+  };
+}
+
+function healthWorkoutEvent() {
+  return {
+    source: "health_workout",
+    type: "health_workout_import",
+    occurredAt: new Date("2026-06-07T06:39:00.000Z"),
+    description: "Workout walking",
+    rawPayload: {
+      provider: "healthkit",
+      externalSampleId: "workout-sample-1",
+      workoutType: "walking",
+      startedAt: "2026-06-07T06:39:00.000Z",
+      stoppedAt: "2026-06-07T07:43:18.000Z",
+      durationSeconds: 3858.122684240341,
+      distanceMeters: 5123.75,
+      energyKcal: 284.5,
+      sourceName: "Apple Watch",
+      sample: {
+        uuid: "workout-sample-1"
+      }
+    }
+  };
+}
+
+function staleWorkspaceHealthSleepEvent() {
+  return {
+    ...healthSleepEvent(),
+    workspaceId: "00000000-0000-4000-8000-000000000010",
+    userId: "00000000-0000-4000-8000-000000000001",
+    clientEventId: "local-health-sleep-1",
+    rawPayload: {
+      ...healthSleepEvent().rawPayload,
+      workspaceId: "00000000-0000-4000-8000-000000000010"
     }
   };
 }

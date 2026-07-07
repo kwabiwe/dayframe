@@ -3,7 +3,7 @@ import { ZodError } from "zod";
 import { AuthError } from "@/lib/session";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import { processActivityEvent } from "@/lib/event-service";
-import { isDatabaseReadinessError, isMissingRequiredColumnError } from "@/lib/db";
+import { isDatabasePayloadError, isDatabaseReadinessError, isMissingRequiredColumnError } from "@/lib/db";
 
 export async function POST(request: Request) {
   try {
@@ -23,6 +23,9 @@ export async function POST(request: Request) {
     }
     if (isMissingRequiredColumnError(error) || isDatabaseReadinessError(error)) {
       return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    if (isDatabasePayloadError(error)) {
+      return NextResponse.json({ error: error.message }, { status: 422 });
     }
     console.error("Dayframe event sync failed", error);
     return NextResponse.json(

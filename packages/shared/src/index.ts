@@ -411,47 +411,33 @@ export function normalizeActivityEvent(
     const projectId = matchingRule?.projectId ?? place?.defaultProjectId ?? undefined;
     const categoryId = matchingRule?.categoryId ?? place?.defaultCategoryId ?? undefined;
 
-    if (matchingRule?.enabled && matchingRule.action === "start_timer" && !isHome) {
+    if (matchingRule?.enabled && matchingRule.action === "suggest_timer") {
       return {
-        action: "start_timer",
-        confidence: "medium_high",
+        action: "record_only",
+        confidence: broadPlace ? "low" : "medium_high",
         reviewStatus: "confirmed",
         projectId,
         categoryId,
         placeId: place?.id,
-        title: `Entered ${place?.name ?? "known place"}`,
-        reason: "An enabled automation rule converted this geofence signal into a timer start.",
-        shouldClosePrevious: true
-      };
-    }
-
-    if (matchingRule?.enabled && matchingRule.action === "suggest_timer") {
-      return {
-        action: "suggest_timer",
-        confidence: broadPlace ? "low" : "medium_high",
-        reviewStatus: "needs_review",
-        projectId,
-        categoryId,
-        placeId: place?.id,
-        title: `Review ${place?.name ?? "place"} activity`,
-        reason: "The matching automation rule asks Dayframe to suggest instead of auto-start.",
+        title: `Entered ${place?.name ?? "place"}`,
+        reason: "Geofence arrivals are recorded as evidence only; completed visits are reviewed after a stay or exit is known.",
         shouldClosePrevious: false
       };
     }
 
     return {
-      action: "create_review_item",
+      action: "record_only",
       confidence: broadPlace || isHome ? "low" : "medium_high",
-      reviewStatus: "needs_review",
+      reviewStatus: "confirmed",
       projectId,
       categoryId,
       placeId: place?.id,
-      title: `Review ${place?.name ?? "unknown place"} visit`,
+      title: `Entered ${place?.name ?? "unknown place"}`,
       reason: isHome
-        ? "Home is intentionally ambiguous and never auto-starts by default."
+        ? "Home arrivals are intentionally ambiguous and remain raw evidence."
         : broadPlace
-          ? "Broad geofences create review items unless the user creates a stricter rule."
-          : "Specific places without an auto-start rule are reviewed first.",
+          ? "Broad geofence arrivals are raw evidence until a stay or exit is known."
+          : "Specific geofence arrivals are raw evidence; Dayframe reviews completed visits after the fact.",
       shouldClosePrevious: false
     };
   }
@@ -461,20 +447,6 @@ export function normalizeActivityEvent(
     const isHome = place?.name.toLowerCase() === "home";
     const projectId = matchingRule?.projectId ?? place?.defaultProjectId ?? undefined;
     const categoryId = matchingRule?.categoryId ?? place?.defaultCategoryId ?? undefined;
-
-    if (matchingRule?.enabled && matchingRule.action === "stop_timer" && !broadPlace && !isHome) {
-      return {
-        action: "stop_timer",
-        confidence: "medium_high",
-        reviewStatus: "confirmed",
-        projectId,
-        categoryId,
-        placeId: place?.id,
-        title: `Left ${place?.name ?? "known place"}`,
-        reason: "An enabled automation rule converted this geofence exit into a timer stop.",
-        shouldClosePrevious: false
-      };
-    }
 
     return {
       action: "create_review_item",
@@ -488,7 +460,9 @@ export function normalizeActivityEvent(
         ? "Broad geofence exits are reviewed before Dayframe closes or creates a stay."
         : isHome
           ? "Home exits are ambiguous and stay review-first by default."
-          : "Specific geofence exits can stop a timer when the user adds a stop rule.",
+          : matchingRule?.enabled && matchingRule.action === "stop_timer"
+            ? "Location rules create after-the-fact review candidates instead of stopping live timers."
+            : "Specific geofence exits are reviewed as completed visit evidence.",
       shouldClosePrevious: false
     };
   }
@@ -528,7 +502,7 @@ export function normalizeActivityEvent(
       projectId: event.projectId,
       categoryId: event.categoryId,
       title: event.description ?? "Review health import",
-      reason: "Health integrations are stubbed in v1 and route through review before entry creation.",
+      reason: "Health imports are reviewed before becoming completed entries.",
       shouldClosePrevious: false
     };
   }

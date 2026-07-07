@@ -113,7 +113,7 @@ export type MobileAuthConfirmation = {
 
 export type MobileAuthResult = MobileAuthSession | MobileAuthConfirmation;
 
-export type QueuedEvent = Omit<ActivityEventInput, "occurredAt"> & {
+export type QueuedEvent = Omit<ActivityEventInput, "occurredAt" | "workspaceId" | "userId" | "clientEventId"> & {
   occurredAt: Date;
   localId: string;
   queuedAt: string;
@@ -162,7 +162,22 @@ type SyncQueueOptions = {
 
 type StoredQueuedEvent = Partial<Omit<QueuedEvent, "occurredAt">> & {
   occurredAt?: string | Date;
+  workspaceId?: unknown;
+  userId?: unknown;
+  clientEventId?: unknown;
 };
+
+type QueueableEvent = Omit<
+  QueuedEvent,
+  | "localId"
+  | "queuedAt"
+  | "failedAt"
+  | "failureCount"
+  | "lastError"
+  | "lastStatusCode"
+  | "lastAttemptedAt"
+  | "failureKind"
+>;
 
 type ActivityEventDraft = {
   source: EventSource;
@@ -224,7 +239,7 @@ export async function enqueueEvent(input: ActivityEventDraft) {
   });
   const queue = await readQueue();
   queue.push({
-    ...parsed,
+    ...queuedEventFromParsedEvent(parsed),
     localId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     queuedAt: new Date().toISOString()
   });
@@ -298,11 +313,7 @@ export async function syncQueue(options: SyncQueueOptions = {}): Promise<SyncQue
           "Content-Type": "application/json",
           ...(await authHeaders())
         },
-        body: JSON.stringify({
-          ...item,
-          clientEventId: item.localId,
-          occurredAt: item.occurredAt.toISOString()
-        })
+        body: JSON.stringify(queuedEventRequestBody(item))
       });
       if (response.status === 401 || response.status === 403) {
         await clearSessionToken();
@@ -463,6 +474,11 @@ export function isNetworkTimerError(error: unknown) {
 const permanentStatusCodes = new Set([400, 413, 422]);
 
 function migrateQueuedEvent(item: StoredQueuedEvent, index: number): QueuedEvent {
+  const queueItem = { ...item };
+  delete queueItem.workspaceId;
+  delete queueItem.userId;
+  delete queueItem.clientEventId;
+
   const queuedAt = validIsoString(item.queuedAt) ?? new Date().toISOString();
   const localId = typeof item.localId === "string" && item.localId.trim()
     ? item.localId
@@ -482,7 +498,7 @@ function migrateQueuedEvent(item: StoredQueuedEvent, index: number): QueuedEvent
       : undefined;
 
   return {
-    ...item,
+    ...queueItem,
     source: item.source as EventSource,
     type: item.type as ActivityEventType,
     occurredAt: coerceQueuedDate(item.occurredAt),
@@ -495,6 +511,37 @@ function migrateQueuedEvent(item: StoredQueuedEvent, index: number): QueuedEvent
     lastStatusCode,
     lastAttemptedAt: validIsoString(item.lastAttemptedAt),
     failureKind
+  };
+}
+
+function queuedEventFromParsedEvent(
+  event: ReturnType<typeof ActivityEventInputSchema.parse>
+): QueueableEvent {
+  return {
+    source: event.source,
+    type: event.type,
+    occurredAt: event.occurredAt,
+    deviceId: event.deviceId,
+    projectId: event.projectId,
+    categoryId: event.categoryId,
+    placeId: event.placeId,
+    description: event.description,
+    rawPayload: event.rawPayload
+  };
+}
+
+function queuedEventRequestBody(item: QueuedEvent) {
+  return {
+    source: item.source,
+    type: item.type,
+    occurredAt: item.occurredAt.toISOString(),
+    deviceId: item.deviceId,
+    clientEventId: item.localId,
+    projectId: item.projectId,
+    categoryId: item.categoryId,
+    placeId: item.placeId,
+    description: item.description,
+    rawPayload: item.rawPayload
   };
 }
 

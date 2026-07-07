@@ -135,7 +135,7 @@ describe("event normalization", () => {
     expect(candidate.title).toBe("Timer started");
   });
 
-  it("routes broad geofence signals to review", () => {
+  it("records geofence arrivals as evidence instead of live timers", () => {
     const candidate = normalizeActivityEvent(
       {
         source: "geofence_broad",
@@ -147,12 +147,43 @@ describe("event normalization", () => {
       context
     );
 
-    expect(candidate.action).toBe("create_review_item");
-    expect(candidate.reviewStatus).toBe("needs_review");
+    expect(candidate.action).toBe("record_only");
+    expect(candidate.reviewStatus).toBe("confirmed");
     expect(candidate.confidence).toBe("low");
   });
 
-  it("routes specific geofence exits to review unless an explicit stop rule exists", () => {
+  it("does not live-start timers from old geofence start rules", () => {
+    const candidate = normalizeActivityEvent(
+      {
+        source: "geofence_specific",
+        type: "geofence_enter",
+        occurredAt: new Date("2026-06-20T12:00:00Z"),
+        placeId: ids.gymPlace
+      },
+      {
+        ...context,
+        automationRules: [
+          {
+            id: "40000000-0000-4000-8000-000000000011",
+            name: "Enter Gym -> start",
+            triggerSource: "geofence_specific",
+            triggerType: "geofence_enter",
+            placeId: ids.gymPlace,
+            action: "start_timer",
+            projectId: ids.gym,
+            categoryId: ids.health,
+            enabled: true
+          }
+        ]
+      }
+    );
+
+    expect(candidate.action).toBe("record_only");
+    expect(candidate.reviewStatus).toBe("confirmed");
+    expect(candidate.reason).toContain("after the fact");
+  });
+
+  it("routes specific geofence exits to review even when an old stop rule exists", () => {
     const reviewCandidate = normalizeActivityEvent(
       {
         source: "geofence_specific",
@@ -190,8 +221,9 @@ describe("event normalization", () => {
       }
     );
 
-    expect(stopCandidate.action).toBe("stop_timer");
-    expect(stopCandidate.reviewStatus).toBe("confirmed");
+    expect(stopCandidate.action).toBe("create_review_item");
+    expect(stopCandidate.reviewStatus).toBe("needs_review");
+    expect(stopCandidate.reason).toContain("after-the-fact");
   });
 
   it("suppresses review items when an ignore source rule matches", () => {
@@ -223,7 +255,7 @@ describe("event normalization", () => {
     expect(candidate.reviewStatus).toBe("confirmed");
   });
 
-  it("never auto-starts Home by default", () => {
+  it("records Home arrivals as evidence only", () => {
     const candidate = normalizeActivityEvent(
       {
         source: "geofence_specific",
@@ -234,7 +266,7 @@ describe("event normalization", () => {
       context
     );
 
-    expect(candidate.action).toBe("create_review_item");
+    expect(candidate.action).toBe("record_only");
     expect(candidate.reason).toContain("Home");
   });
 

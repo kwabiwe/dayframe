@@ -7,7 +7,10 @@ import {
 } from "@dayframe/shared";
 import {
   databaseReadinessError,
+  databasePayloadError,
+  isForeignKeyViolationError,
   isInsufficientPrivilegeError,
+  isInvalidTextRepresentationError,
   isInvalidConflictTargetError,
   isUndefinedColumnError,
   isUndefinedTableError,
@@ -42,6 +45,25 @@ function eventSyncReadinessError(error: unknown, eventType: ActivityEventType) {
       "activity_events",
       "client_event_id",
       MOBILE_EVENT_IDEMPOTENCY_MIGRATION,
+      error
+    );
+  }
+
+  if (isForeignKeyViolationError(error, "activity_events_workspace_id_fkey")) {
+    return databaseReadinessError(
+      "Authenticated session workspace is missing from public.workspaces. Log out and back in, then retry queued sync.",
+      "public.workspaces",
+      "docs/vercel-supabase-hosting.md",
+      error
+    );
+  }
+
+  if (isInvalidTextRepresentationError(error)) {
+    return databasePayloadError(
+      eventType === "health_workout_import"
+        ? "Unable to sync this Health workout because a numeric value could not be stored. Update Dayframe and tap Retry failed."
+        : "Unable to sync this event because a payload value has the wrong format.",
+      eventType,
       error
     );
   }
@@ -137,12 +159,13 @@ function healthSchemaReadinessError(
 }
 
 export async function processActivityEvent(rawInput: unknown, session: RequestSession = getDevSession()) {
+  const input = isRecord(rawInput) ? rawInput : {};
   const parsed = ActivityEventInputSchema.parse({
     occurredAt: new Date(),
-    workspaceId: session.workspaceId,
-    userId: session.userId,
     rawPayload: {},
-    ...(rawInput as Record<string, unknown>)
+    ...input,
+    workspaceId: session.workspaceId,
+    userId: session.userId
   });
   const context = await getNormalizationContext(session);
   const candidate = normalizeActivityEvent(parsed, context);
@@ -250,6 +273,8 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
     }
 
     if (candidate.reviewStatus === "needs_review") {
+      const suggestedStartedAt = suggestedStartedAtForEvent(parsed);
+      const suggestedStoppedAt = suggestedStoppedAtForEvent(parsed);
       await client.query(
         `insert into review_items (
             workspace_id,
@@ -260,11 +285,12 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
             suggested_category_id,
             suggested_place_id,
             suggested_started_at,
+            suggested_stopped_at,
             confidence,
             status,
             notes
          )
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'open', $10)`,
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'open', $11)`,
         [
           parsed.workspaceId,
           eventId,
@@ -273,7 +299,8 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
           candidate.projectId ?? null,
           candidate.categoryId ?? null,
           candidate.placeId ?? null,
-          parsed.occurredAt,
+          suggestedStartedAt,
+          suggestedStoppedAt,
           candidate.confidence,
           candidate.reason
         ]
@@ -338,7 +365,7 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
           stringOrNull(parsed.rawPayload.workoutType),
           stringOrNull(parsed.rawPayload.startedAt) ?? parsed.occurredAt,
           stringOrNull(parsed.rawPayload.stoppedAt) ?? parsed.occurredAt,
-          numberOrNull(parsed.rawPayload.durationSeconds),
+          wholeSecondsOrNull(parsed.rawPayload.durationSeconds),
           numberOrNull(parsed.rawPayload.distanceMeters),
           numberOrNull(parsed.rawPayload.energyKcal),
           JSON.stringify(parsed.rawPayload)
@@ -992,9 +1019,59 @@ function stringOrNull(value: unknown) {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+function timestampStringOrNull(value: unknown) {
+  const timestamp = stringOrNull(value);
+  if (!timestamp) return null;
+  return Number.isNaN(new Date(timestamp).getTime()) ? null : timestamp;
+}
+
+function suggestedStartedAtForEvent(event: ReturnType<typeof ActivityEventInputSchema.parse>) {
+  if (event.type === "health_sleep_import" || event.type === "health_workout_import") {
+    return timestampStringOrNull(event.rawPayload.startedAt) ?? event.occurredAt;
+  }
+
+  if (event.type === "unknown_stay") {
+    return timestampStringOrNull(event.rawPayload.startedAt) ?? event.occurredAt;
+  }
+
+  if (event.type === "geofence_exit") {
+    return timestampStringOrNull(event.rawPayload.startedAt) ?? timestampStringOrNull(event.rawPayload.enteredAt) ?? event.occurredAt;
+  }
+
+  return event.occurredAt;
+}
+
+function suggestedStoppedAtForEvent(event: ReturnType<typeof ActivityEventInputSchema.parse>) {
+  if (event.type === "health_sleep_import" || event.type === "health_workout_import") {
+    return timestampStringOrNull(event.rawPayload.stoppedAt) ?? timestampStringOrNull(event.rawPayload.endedAt);
+  }
+
+  if (event.type === "unknown_stay") {
+    const stoppedAt = timestampStringOrNull(event.rawPayload.stoppedAt) ?? timestampStringOrNull(event.rawPayload.endedAt);
+    if (stoppedAt) return stoppedAt;
+    const durationMinutes = numberOrNull(event.rawPayload.durationMinutes);
+    return durationMinutes ? new Date(event.occurredAt.getTime() + durationMinutes * 60_000).toISOString() : null;
+  }
+
+  if (event.type === "geofence_exit") {
+    return timestampStringOrNull(event.rawPayload.stoppedAt) ?? timestampStringOrNull(event.rawPayload.exitedAt) ?? event.occurredAt.toISOString();
+  }
+
+  return null;
+}
+
 function numberOrNull(value: unknown) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function wholeSecondsOrNull(value: unknown) {
+  const number = numberOrNull(value);
+  return number === null ? null : Math.max(0, Math.round(number));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function nullableNumber(value: unknown) {

@@ -20,7 +20,7 @@ vi.mock("@/lib/event-service", () => ({
   processActivityEvent: mocks.processActivityEvent
 }));
 
-const { databaseReadinessError, missingRequiredColumnError } = await import("@/lib/db");
+const { databasePayloadError, databaseReadinessError, missingRequiredColumnError } = await import("@/lib/db");
 const { POST } = await import("./route");
 
 describe("POST /api/events", () => {
@@ -72,6 +72,22 @@ describe("POST /api/events", () => {
     expect(payload.error).toContain("activity_events.client_event_id");
     expect(payload.error).toContain("202607030001_mobile_event_idempotency_and_workouts.sql");
   });
+
+  it("returns a precise payload error instead of the generic migration message", async () => {
+    mocks.processActivityEvent.mockRejectedValueOnce(
+      databasePayloadError(
+        "Unable to sync this Health workout because a numeric value could not be stored. Update Dayframe and tap Retry failed.",
+        "health_workout_import"
+      )
+    );
+
+    const response = await POST(jsonRequest(healthWorkoutEvent()));
+    const payload = await response.json();
+
+    expect(response.status).toBe(422);
+    expect(payload.error).toContain("numeric value");
+    expect(payload.error).not.toContain("migrations");
+  });
 });
 
 function jsonRequest(body: unknown) {
@@ -95,6 +111,23 @@ function healthSleepEvent() {
       startedAt: "2026-06-06T22:24:00.000Z",
       stoppedAt: "2026-06-07T05:55:00.000Z",
       sourceName: "Apple Watch"
+    }
+  };
+}
+
+function healthWorkoutEvent() {
+  return {
+    source: "health_workout",
+    type: "health_workout_import",
+    occurredAt: "2026-06-07T06:39:00.000Z",
+    clientEventId: "local-health-workout-1",
+    rawPayload: {
+      provider: "healthkit",
+      externalSampleId: "workout-sample-1",
+      workoutType: "walking",
+      startedAt: "2026-06-07T06:39:00.000Z",
+      stoppedAt: "2026-06-07T07:43:18.000Z",
+      durationSeconds: 3858.122684240341
     }
   };
 }
