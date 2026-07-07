@@ -1,12 +1,17 @@
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
+  DEFAULT_HEALTH_IMPORT_PREFERENCES,
   DEFAULT_HEALTH_WORKOUT_IMPORT_PREFERENCES,
+  HEALTH_IMPORT_PREFERENCE_OPTIONS as SHARED_HEALTH_IMPORT_PREFERENCE_OPTIONS,
   HEALTH_WORKOUT_TYPE_OPTIONS,
   healthWorkoutLabel,
   mapHealthKitSleepStage,
   normalizeHealthWorkoutType,
+  shouldAutoConfirmHealthSleep,
   shouldAutoConfirmHealthWorkout,
+  type HealthImportPreferenceKey,
+  type HealthImportPreferences,
   type HealthWorkoutImportPreferences,
   type HealthWorkoutType,
   type SleepStage
@@ -20,9 +25,11 @@ const HEALTHKIT_ANCHOR_KEY = "dayframe.healthkit.sleepAnchor.v1";
 const HEALTHKIT_SEEN_KEY = "dayframe.healthkit.sleepSeen.v1";
 const HEALTHKIT_WORKOUT_ANCHOR_KEY = "dayframe.healthkit.workoutAnchor.v1";
 const HEALTHKIT_WORKOUT_SEEN_KEY = "dayframe.healthkit.workoutSeen.v1";
+const HEALTHKIT_IMPORT_PREFERENCES_KEY = "dayframe.healthkit.importPreferences.v1";
 const HEALTHKIT_WORKOUT_PREFERENCES_KEY = "dayframe.healthkit.workoutPreferences.v1";
 const SLEEP_SESSION_GAP_MS = 90 * 60 * 1000;
 
+export const HEALTH_IMPORT_PREFERENCE_OPTIONS = SHARED_HEALTH_IMPORT_PREFERENCE_OPTIONS;
 export const HEALTH_WORKOUT_PREFERENCE_OPTIONS = HEALTH_WORKOUT_TYPE_OPTIONS;
 
 export type HealthImportStatus = {
@@ -154,6 +161,7 @@ export async function importHealthKitSleep() {
   const healthkit = await loadHealthKit();
   const anchor = await AsyncStorage.getItem(HEALTHKIT_ANCHOR_KEY);
   const seen = new Set(await readSeenSampleIds());
+  const preferences = await getHealthImportPreferences();
   const result = await healthkit.queryCategorySamplesWithAnchor(HEALTHKIT_SLEEP_TYPE, {
     anchor: anchor ?? undefined,
     limit: 0
@@ -168,7 +176,12 @@ export async function importHealthKitSleep() {
   }
 
   const sessions = groupSleepSamplesIntoSessions(importedSamples);
+  let ignoredCount = 0;
   for (const session of sessions) {
+    if (!preferences.sleep) {
+      ignoredCount += 1;
+      continue;
+    }
     await enqueueEvent(healthKitSleepSessionEvent(session));
   }
 
@@ -179,10 +192,8 @@ export async function importHealthKitSleep() {
     provider: "healthkit" as const,
     kind: "sleep" as const,
     status: "synced" as const,
-    notes: sessions.length
-      ? `Queued ${sessions.length} Apple Health sleep ${sessions.length === 1 ? "session" : "sessions"} as activity events.`
-      : "No new Apple Health sleep samples found.",
-    importedCount: sessions.length,
+    notes: sleepImportNotes(sessions.length - ignoredCount, ignoredCount),
+    importedCount: sessions.length - ignoredCount,
     lastSync: new Date().toISOString()
   };
 }
@@ -192,7 +203,7 @@ export async function importHealthKitWorkouts() {
   const healthkit = await loadHealthKit();
   const anchor = await AsyncStorage.getItem(HEALTHKIT_WORKOUT_ANCHOR_KEY);
   const seen = new Set(await readSeenSampleIds(HEALTHKIT_WORKOUT_SEEN_KEY));
-  const preferences = await getHealthWorkoutImportPreferences();
+  const preferences = await getHealthImportPreferences();
   const result = await healthkit.queryWorkoutSamplesWithAnchor({
     anchor: anchor ?? undefined,
     limit: 0
@@ -225,22 +236,40 @@ export async function importHealthKitWorkouts() {
   };
 }
 
-export async function getHealthWorkoutImportPreferences(): Promise<HealthWorkoutImportPreferences> {
-  const raw = await AsyncStorage.getItem(HEALTHKIT_WORKOUT_PREFERENCES_KEY);
-  if (!raw) return { ...DEFAULT_HEALTH_WORKOUT_IMPORT_PREFERENCES };
+export async function getHealthImportPreferences(): Promise<HealthImportPreferences> {
+  const raw = await AsyncStorage.getItem(HEALTHKIT_IMPORT_PREFERENCES_KEY);
+  if (raw) {
+    try {
+      return healthImportPreferencesFromPartial(JSON.parse(raw) as Partial<Record<HealthImportPreferenceKey, unknown>>);
+    } catch {
+      return { ...DEFAULT_HEALTH_IMPORT_PREFERENCES };
+    }
+  }
+
+  const legacyWorkoutRaw = await AsyncStorage.getItem(HEALTHKIT_WORKOUT_PREFERENCES_KEY);
+  if (!legacyWorkoutRaw) return { ...DEFAULT_HEALTH_IMPORT_PREFERENCES };
   try {
-    const parsed = JSON.parse(raw) as Partial<Record<HealthWorkoutType, unknown>>;
-    return healthWorkoutPreferencesFromPartial(parsed);
+    const legacyWorkouts = JSON.parse(legacyWorkoutRaw) as Partial<Record<HealthWorkoutType, unknown>>;
+    return healthImportPreferencesFromPartial(legacyWorkouts);
   } catch {
-    return { ...DEFAULT_HEALTH_WORKOUT_IMPORT_PREFERENCES };
+    return { ...DEFAULT_HEALTH_IMPORT_PREFERENCES };
   }
 }
 
-export async function setHealthWorkoutImportPreference(type: HealthWorkoutType, enabled: boolean) {
-  const current = await getHealthWorkoutImportPreferences();
+export async function setHealthImportPreference(type: HealthImportPreferenceKey, enabled: boolean) {
+  const current = await getHealthImportPreferences();
   const next = { ...current, [type]: enabled };
-  await AsyncStorage.setItem(HEALTHKIT_WORKOUT_PREFERENCES_KEY, JSON.stringify(next));
+  await AsyncStorage.setItem(HEALTHKIT_IMPORT_PREFERENCES_KEY, JSON.stringify(next));
   return next;
+}
+
+export async function getHealthWorkoutImportPreferences(): Promise<HealthWorkoutImportPreferences> {
+  return healthWorkoutPreferencesFromPartial(await getHealthImportPreferences());
+}
+
+export async function setHealthWorkoutImportPreference(type: HealthWorkoutType, enabled: boolean) {
+  await setHealthImportPreference(type, enabled);
+  return getHealthWorkoutImportPreferences();
 }
 
 export function mapHealthKitSleepSample(sample: HealthKitSleepSample): DayframeSleepSample {
@@ -364,6 +393,7 @@ export function groupSleepSamplesIntoSessions(samples: DayframeSleepSample[]): D
 }
 
 export function healthKitSleepSessionEvent(session: DayframeSleepSession) {
+  const durationSeconds = sessionDurationSeconds(session);
   return {
     localId: `healthkit-sleep:${session.externalSessionId}`,
     source: "health_sleep" as const,
@@ -376,6 +406,12 @@ export function healthKitSleepSessionEvent(session: DayframeSleepSession) {
       sleepStage: "asleep_unspecified",
       startedAt: session.startedAt,
       stoppedAt: session.stoppedAt,
+      durationSeconds,
+      autoConfirm: shouldAutoConfirmHealthSleep({
+        durationSeconds,
+        startedAt: session.startedAt,
+        stoppedAt: session.stoppedAt
+      }),
       sourceName: session.sourceName,
       samples: session.samples.map((sample) => ({
         externalSampleId: sample.externalSampleId,
@@ -458,6 +494,32 @@ function healthWorkoutPreferencesFromPartial(
   ) as HealthWorkoutImportPreferences;
 }
 
+function healthImportPreferencesFromPartial(
+  value: Partial<Record<HealthImportPreferenceKey, unknown>>
+): HealthImportPreferences {
+  return Object.fromEntries(
+    HEALTH_IMPORT_PREFERENCE_OPTIONS.map((option) => [
+      option.key,
+      typeof value[option.key] === "boolean"
+        ? Boolean(value[option.key])
+        : DEFAULT_HEALTH_IMPORT_PREFERENCES[option.key]
+    ])
+  ) as HealthImportPreferences;
+}
+
+function sleepImportNotes(importedCount: number, ignoredCount: number) {
+  if (importedCount > 0 && ignoredCount > 0) {
+    return `Queued ${importedCount} Apple Health sleep ${importedCount === 1 ? "session" : "sessions"} as activity events. Ignored ${ignoredCount} disabled sleep ${ignoredCount === 1 ? "session" : "sessions"}.`;
+  }
+  if (importedCount > 0) {
+    return `Queued ${importedCount} Apple Health sleep ${importedCount === 1 ? "session" : "sessions"} as activity events.`;
+  }
+  if (ignoredCount > 0) {
+    return `Ignored ${ignoredCount} disabled Apple Health sleep ${ignoredCount === 1 ? "session" : "sessions"}.`;
+  }
+  return "No new Apple Health sleep samples found.";
+}
+
 function workoutImportNotes(importedCount: number, ignoredCount: number) {
   if (importedCount > 0 && ignoredCount > 0) {
     return `Queued ${importedCount} Apple Health ${importedCount === 1 ? "workout" : "workouts"} as activity events. Ignored ${ignoredCount} disabled ${ignoredCount === 1 ? "workout" : "workouts"}.`;
@@ -477,6 +539,13 @@ function isAsleepStage(stage: SleepStage) {
 
 function validDate(value: string) {
   return !Number.isNaN(new Date(value).getTime());
+}
+
+function sessionDurationSeconds(session: Pick<DayframeSleepSession, "startedAt" | "stoppedAt">) {
+  const started = new Date(session.startedAt).getTime();
+  const stopped = new Date(session.stoppedAt).getTime();
+  if (!Number.isFinite(started) || !Number.isFinite(stopped) || stopped <= started) return null;
+  return Math.round((stopped - started) / 1000);
 }
 
 function stableHash(value: string) {

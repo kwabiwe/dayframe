@@ -37,6 +37,7 @@ vi.mock("@kingstinct/react-native-healthkit", () => ({
 }));
 
 const {
+  getHealthImportPreferences,
   getHealthWorkoutImportPreferences,
   groupSleepSamplesIntoSessions,
   healthKitSleepSessionEvent,
@@ -45,7 +46,7 @@ const {
   importHealthKitWorkouts,
   mapHealthKitSleepSample,
   mapHealthKitWorkoutSample,
-  setHealthWorkoutImportPreference
+  setHealthImportPreference
 } = await import("./health");
 
 describe("HealthKit mapping", () => {
@@ -101,6 +102,8 @@ describe("HealthKit mapping", () => {
       rawPayload: {
         startedAt: "2026-07-06T23:55:00.000Z",
         stoppedAt: "2026-07-07T06:27:00.000Z",
+        durationSeconds: 23520,
+        autoConfirm: true,
         samples: expect.arrayContaining([
           expect.objectContaining({ sleepStage: "asleep_core" }),
           expect.objectContaining({ sleepStage: "asleep_deep" }),
@@ -130,6 +133,7 @@ describe("HealthKit mapping", () => {
         rawPayload: expect.objectContaining({
           startedAt: "2026-07-06T23:55:00.000Z",
           stoppedAt: "2026-07-07T06:27:00.000Z",
+          autoConfirm: true,
           samples: expect.arrayContaining([
             expect.objectContaining({ externalSampleId: "core" }),
             expect.objectContaining({ externalSampleId: "deep" }),
@@ -138,6 +142,36 @@ describe("HealthKit mapping", () => {
         })
       })
     );
+  });
+
+  it("filters disabled sleep sessions before queueing Health events", async () => {
+    await setHealthImportPreference("sleep", false);
+    healthkitMocks.queryCategorySamplesWithAnchor.mockResolvedValueOnce({
+      newAnchor: "sleep-anchor-disabled",
+      samples: [
+        { uuid: "core", value: 3, startDate: "2026-07-06T23:55:00.000Z", endDate: "2026-07-07T06:27:00.000Z" }
+      ]
+    });
+
+    const result = await importHealthKitSleep();
+
+    expect(result.importedCount).toBe(0);
+    expect(result.notes).toContain("Ignored 1 disabled Apple Health sleep session");
+    expect(apiMocks.enqueueEvent).not.toHaveBeenCalled();
+  });
+
+  it("marks short sleep sessions for review instead of auto-confirm", () => {
+    const event = healthKitSleepSessionEvent({
+      externalSessionId: "short-sleep",
+      startedAt: "2026-07-07T04:00:00.000Z",
+      stoppedAt: "2026-07-07T04:30:00.000Z",
+      samples: [
+        sleepSample("short-core", "asleep_core", "2026-07-07T04:00:00.000Z", "2026-07-07T04:30:00.000Z")
+      ]
+    });
+
+    expect(event.rawPayload.durationSeconds).toBe(1800);
+    expect(event.rawPayload.autoConfirm).toBe(false);
   });
 
   it("maps workout samples into summarized Dayframe workouts", () => {
@@ -218,20 +252,24 @@ describe("HealthKit mapping", () => {
     expect(JSON.stringify(event.rawPayload)).not.toContain("longitude");
   });
 
-  it("stores workout import preferences with strength disabled by default", async () => {
-    await expect(getHealthWorkoutImportPreferences()).resolves.toMatchObject({
+  it("stores Health import preferences with sleep enabled and strength disabled by default", async () => {
+    await expect(getHealthImportPreferences()).resolves.toMatchObject({
       cycling: true,
       running: true,
+      sleep: true,
       strength_training: false,
-      swimming: true,
+      swimming: false,
       walking: true,
       other: false
     });
 
-    const saved = await setHealthWorkoutImportPreference("strength_training", true);
+    const saved = await setHealthImportPreference("strength_training", true);
 
     expect(saved.strength_training).toBe(true);
-    await expect(getHealthWorkoutImportPreferences()).resolves.toMatchObject({ strength_training: true });
+    await expect(getHealthWorkoutImportPreferences()).resolves.toMatchObject({
+      strength_training: true,
+      swimming: false
+    });
   });
 
   it("filters disabled workout types before queueing Health events", async () => {

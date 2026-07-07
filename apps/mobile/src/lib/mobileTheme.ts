@@ -894,40 +894,22 @@ function createStyles(theme: MobileTheme) {
       gap: 8
     },
     healthPreferenceRow: {
-      minHeight: 62,
+      minHeight: 58,
       borderWidth: 1,
       borderColor: theme.border,
       backgroundColor: theme.surfaceInset,
       borderRadius: 12,
-      paddingHorizontal: 10,
-      paddingVertical: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
       flexDirection: "row",
       alignItems: "center",
-      gap: 10
+      justifyContent: "space-between",
+      gap: 12
     },
-    healthPreferenceToggle: {
-      minWidth: 92,
-      minHeight: 44,
-      borderWidth: 1,
-      borderColor: theme.borderStrong,
-      backgroundColor: theme.surface,
-      borderRadius: 12,
-      paddingHorizontal: 12,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    healthPreferenceToggleEnabled: {
-      borderColor: theme.accent,
-      backgroundColor: theme.surfaceMuted
-    },
-    healthPreferenceToggleText: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "800"
-    },
-    healthPreferenceToggleTextEnabled: {
-      color: theme.accent
+    healthPreferenceText: {
+      flex: 1,
+      minWidth: 0,
+      gap: 3
     },
     categoryChoiceScroller: {
       gap: 8,

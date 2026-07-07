@@ -313,10 +313,80 @@ describe("health event persistence", () => {
       "2026-06-06T23:55:00.000Z",
       "2026-06-07T06:27:00.000Z",
       "high",
-      "Sleep imports are reviewed as one continuous session before becoming completed entries."
+      "Sleep imports are reviewed when the duration or confidence is uncertain."
     ]);
     expect(client.query).toHaveBeenCalledWith("commit");
     expect(client.release).toHaveBeenCalled();
+  });
+
+  it("auto-confirms high-confidence Health sleep as completed Health time", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        if (statement.includes("from time_entries")) return { rows: [] };
+        return statement.includes("returning id") ? { rows: [{ id: "event-1" }] } : { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await processActivityEvent(
+      healthSleepEvent({ autoConfirm: true, durationSeconds: 23520 }),
+      session
+    );
+
+    const entryInsert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into time_entries")
+    );
+    expect(entryInsert?.[1]).toEqual([
+      session.workspaceId,
+      session.userId,
+      null,
+      healthCategoryId(),
+      null,
+      "health_sleep",
+      "high",
+      "Sleep",
+      "2026-06-06T23:55:00.000Z",
+      "2026-06-07T06:27:00.000Z",
+      "event-1"
+    ]);
+    expect(
+      client.query.mock.calls.find(([statement]) => String(statement).includes("insert into review_items"))
+    ).toBeUndefined();
+    expect(
+      client.query.mock.calls.filter(([statement]) => String(statement).includes("insert into health_sleep_segments"))
+    ).toHaveLength(3);
+  });
+
+  it("does not duplicate auto-confirmed Health sleep entries on clientEventId retry", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        if (statement.includes("client_event_id = $3")) return { rows: [{ id: "event-existing" }] };
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await processActivityEvent(
+      {
+        ...healthSleepEvent({ autoConfirm: true, durationSeconds: 23520 }),
+        clientEventId: "healthkit-sleep:sleep-session-1"
+      },
+      session
+    );
+
+    expect(result).toEqual({
+      eventId: "event-existing",
+      candidate: expect.objectContaining({ action: "create_time_entry" }),
+      duplicate: true
+    });
+    expect(
+      client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"))
+    ).toBeUndefined();
+    expect(client.query).toHaveBeenCalledWith("commit");
   });
 
   it("rounds fractional Health workout durations before inserting integer duration seconds", async () => {
@@ -492,7 +562,7 @@ describe("health event persistence", () => {
     const reviewInsert = client.query.mock.calls.find(([statement]) =>
       String(statement).includes("insert into review_items")
     );
-    expect(reviewInsert?.[1]).toContain("This Health workout overlaps existing time and needs review before becoming confirmed time.");
+    expect(reviewInsert?.[1]).toContain("This Health activity overlaps existing time and needs review before becoming confirmed time.");
     expect(
       client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"))
     ).toBeUndefined();
@@ -770,46 +840,53 @@ function healthClientWithFailure(error: Error & { code?: string }) {
   };
 }
 
-function healthSleepEvent() {
+function healthSleepEvent(overrides: {
+  autoConfirm?: boolean;
+  durationSeconds?: number;
+} = {}) {
+  const rawPayload: Record<string, unknown> = {
+    provider: "healthkit",
+    externalSampleId: "sleep-session-1",
+    sleepStage: "asleep_unspecified",
+    startedAt: "2026-06-06T23:55:00.000Z",
+    stoppedAt: "2026-06-07T06:27:00.000Z",
+    sourceName: "Apple Watch",
+    samples: [
+      {
+        externalSampleId: "sleep-core-1",
+        sleepStage: "asleep_core",
+        startedAt: "2026-06-06T23:55:00.000Z",
+        stoppedAt: "2026-06-07T02:15:00.000Z",
+        sourceName: "Apple Watch",
+        sample: { uuid: "sleep-core-1" }
+      },
+      {
+        externalSampleId: "sleep-deep-1",
+        sleepStage: "asleep_deep",
+        startedAt: "2026-06-07T02:15:00.000Z",
+        stoppedAt: "2026-06-07T03:10:00.000Z",
+        sourceName: "Apple Watch",
+        sample: { uuid: "sleep-deep-1" }
+      },
+      {
+        externalSampleId: "sleep-rem-1",
+        sleepStage: "asleep_rem",
+        startedAt: "2026-06-07T03:10:00.000Z",
+        stoppedAt: "2026-06-07T06:27:00.000Z",
+        sourceName: "Apple Watch",
+        sample: { uuid: "sleep-rem-1" }
+      }
+    ]
+  };
+  if (typeof overrides.autoConfirm === "boolean") rawPayload.autoConfirm = overrides.autoConfirm;
+  if (typeof overrides.durationSeconds === "number") rawPayload.durationSeconds = overrides.durationSeconds;
+
   return {
     source: "health_sleep",
     type: "health_sleep_import",
     occurredAt: new Date("2026-06-06T23:55:00.000Z"),
     description: "Sleep",
-    rawPayload: {
-      provider: "healthkit",
-      externalSampleId: "sleep-session-1",
-      sleepStage: "asleep_unspecified",
-      startedAt: "2026-06-06T23:55:00.000Z",
-      stoppedAt: "2026-06-07T06:27:00.000Z",
-      sourceName: "Apple Watch",
-      samples: [
-        {
-          externalSampleId: "sleep-core-1",
-          sleepStage: "asleep_core",
-          startedAt: "2026-06-06T23:55:00.000Z",
-          stoppedAt: "2026-06-07T02:15:00.000Z",
-          sourceName: "Apple Watch",
-          sample: { uuid: "sleep-core-1" }
-        },
-        {
-          externalSampleId: "sleep-deep-1",
-          sleepStage: "asleep_deep",
-          startedAt: "2026-06-07T02:15:00.000Z",
-          stoppedAt: "2026-06-07T03:10:00.000Z",
-          sourceName: "Apple Watch",
-          sample: { uuid: "sleep-deep-1" }
-        },
-        {
-          externalSampleId: "sleep-rem-1",
-          sleepStage: "asleep_rem",
-          startedAt: "2026-06-07T03:10:00.000Z",
-          stoppedAt: "2026-06-07T06:27:00.000Z",
-          sourceName: "Apple Watch",
-          sample: { uuid: "sleep-rem-1" }
-        }
-      ]
-    }
+    rawPayload
   };
 }
 

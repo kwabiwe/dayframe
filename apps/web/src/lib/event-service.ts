@@ -230,7 +230,7 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
           ...candidate,
           action: "create_review_item",
           reviewStatus: "needs_review",
-          reason: "This Health workout overlaps existing time and needs review before becoming confirmed time."
+          reason: "This Health activity overlaps existing time and needs review before becoming confirmed time."
         };
       }
     }

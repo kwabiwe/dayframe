@@ -3,6 +3,7 @@ import {
   applyActivityEvent,
   healthWorkoutLabel,
   normalizeHealthWorkoutType,
+  shouldAutoConfirmHealthSleep,
   shouldAutoConfirmHealthWorkout,
   type NormalizationContext,
   type TimelineState
@@ -78,6 +79,74 @@ describe("HealthKit workout helpers", () => {
     expect(shouldAutoConfirmHealthWorkout({ workoutType: "walking", durationSeconds: 2 * 60 })).toBe(false);
     expect(shouldAutoConfirmHealthWorkout({ workoutType: "strength_training", durationSeconds: 5 * 60 })).toBe(false);
     expect(shouldAutoConfirmHealthWorkout({ workoutType: "other", durationSeconds: 60 * 60 })).toBe(false);
+  });
+
+  it("only auto-confirms plausible Health sleep sessions", () => {
+    expect(shouldAutoConfirmHealthSleep({ durationSeconds: 7 * 60 * 60 })).toBe(true);
+    expect(shouldAutoConfirmHealthSleep({ durationSeconds: 45 * 60 })).toBe(false);
+    expect(shouldAutoConfirmHealthSleep({ durationSeconds: 16 * 60 * 60 })).toBe(false);
+  });
+
+  it("applies high-confidence Health sleep as completed entries", () => {
+    const next = applyActivityEvent(
+      { completedEntries: [], reviewItems: [] },
+      {
+        source: "health_sleep",
+        type: "health_sleep_import",
+        occurredAt: new Date("2026-07-06T23:55:00.000Z"),
+        description: "Sleep",
+        rawPayload: {
+          autoConfirm: true,
+          startedAt: "2026-07-06T23:55:00.000Z",
+          stoppedAt: "2026-07-07T06:27:00.000Z",
+          durationSeconds: 23520
+        }
+      },
+      {
+        ...context,
+        categories: [{ id: categoryId("health"), name: "Health" }]
+      }
+    );
+
+    expect(next.reviewItems).toHaveLength(0);
+    expect(next.completedEntries).toEqual([
+      expect.objectContaining({
+        categoryId: categoryId("health"),
+        description: "Sleep",
+        startedAt: new Date("2026-07-06T23:55:00.000Z"),
+        stoppedAt: new Date("2026-07-07T06:27:00.000Z")
+      })
+    ]);
+  });
+
+  it("keeps suspicious Health sleep in review", () => {
+    const next = applyActivityEvent(
+      { completedEntries: [], reviewItems: [] },
+      {
+        source: "health_sleep",
+        type: "health_sleep_import",
+        occurredAt: new Date("2026-07-07T04:00:00.000Z"),
+        description: "Sleep",
+        rawPayload: {
+          autoConfirm: true,
+          startedAt: "2026-07-07T04:00:00.000Z",
+          stoppedAt: "2026-07-07T04:30:00.000Z",
+          durationSeconds: 1800
+        }
+      },
+      {
+        ...context,
+        categories: [{ id: categoryId("health"), name: "Health" }]
+      }
+    );
+
+    expect(next.completedEntries).toHaveLength(0);
+    expect(next.reviewItems).toEqual([
+      expect.objectContaining({
+        categoryId: categoryId("health"),
+        title: "Sleep"
+      })
+    ]);
   });
 
   it("applies high-confidence Health workouts as completed entries", () => {

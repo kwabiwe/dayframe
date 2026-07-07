@@ -244,7 +244,7 @@ export const HEALTH_WORKOUT_TYPE_OPTIONS = [
   { key: "running", label: "Running", activityLabel: "Run", defaultEnabled: true },
   { key: "cycling", label: "Cycling", activityLabel: "Cycling", defaultEnabled: true },
   { key: "strength_training", label: "Strength training", activityLabel: "Strength training", defaultEnabled: false },
-  { key: "swimming", label: "Swimming", activityLabel: "Swimming", defaultEnabled: true },
+  { key: "swimming", label: "Swimming", activityLabel: "Swimming", defaultEnabled: false },
   { key: "other", label: "Other/unknown", activityLabel: "Workout", defaultEnabled: false }
 ] as const;
 
@@ -254,6 +254,23 @@ export type HealthWorkoutImportPreferences = Record<HealthWorkoutType, boolean>;
 export const DEFAULT_HEALTH_WORKOUT_IMPORT_PREFERENCES = Object.fromEntries(
   HEALTH_WORKOUT_TYPE_OPTIONS.map((option) => [option.key, option.defaultEnabled])
 ) as HealthWorkoutImportPreferences;
+
+export const HEALTH_IMPORT_PREFERENCE_OPTIONS = [
+  { key: "sleep", label: "Sleep", defaultEnabled: true },
+  { key: "walking", label: "Walking", defaultEnabled: true },
+  { key: "running", label: "Running", defaultEnabled: true },
+  { key: "cycling", label: "Cycling", defaultEnabled: true },
+  { key: "strength_training", label: "Strength training", defaultEnabled: false },
+  { key: "swimming", label: "Swimming", defaultEnabled: false },
+  { key: "other", label: "Other/unknown", defaultEnabled: false }
+] as const;
+
+export type HealthImportPreferenceKey = (typeof HEALTH_IMPORT_PREFERENCE_OPTIONS)[number]["key"];
+export type HealthImportPreferences = Record<HealthImportPreferenceKey, boolean>;
+
+export const DEFAULT_HEALTH_IMPORT_PREFERENCES = Object.fromEntries(
+  HEALTH_IMPORT_PREFERENCE_OPTIONS.map((option) => [option.key, option.defaultEnabled])
+) as HealthImportPreferences;
 
 const healthWorkoutTypeByNumber: Record<number, HealthWorkoutType> = {
   13: "cycling",
@@ -325,6 +342,19 @@ export function shouldAutoConfirmHealthWorkout(input: {
   return Boolean(minimum && durationSeconds >= minimum);
 }
 
+export function shouldAutoConfirmHealthSleep(input: {
+  durationSeconds?: number | null;
+  startedAt?: unknown;
+  stoppedAt?: unknown;
+}) {
+  const durationSeconds =
+    typeof input.durationSeconds === "number" && Number.isFinite(input.durationSeconds)
+      ? input.durationSeconds
+      : durationSecondsBetween(input.startedAt, input.stoppedAt);
+  if (typeof durationSeconds !== "number" || !Number.isFinite(durationSeconds)) return false;
+  return durationSeconds >= 3 * 60 * 60 && durationSeconds <= 14 * 60 * 60;
+}
+
 function healthWorkoutTypeString(value: string) {
   return value
     .trim()
@@ -333,6 +363,14 @@ function healthWorkoutTypeString(value: string) {
     .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
     .replace(/[\s-]+/g, "_")
     .toLowerCase();
+}
+
+function durationSecondsBetween(startedAt: unknown, stoppedAt: unknown) {
+  if (typeof startedAt !== "string" || typeof stoppedAt !== "string") return null;
+  const started = new Date(startedAt).getTime();
+  const stopped = new Date(stoppedAt).getTime();
+  if (!Number.isFinite(started) || !Number.isFinite(stopped) || stopped <= started) return null;
+  return Math.round((stopped - started) / 1000);
 }
 
 export type ProjectSummary = {
@@ -593,14 +631,26 @@ export function normalizeActivityEvent(
   }
 
   if (event.type === "health_sleep_import") {
+    const autoConfirm =
+      event.rawPayload.autoConfirm === true &&
+      shouldAutoConfirmHealthSleep({
+        durationSeconds: typeof event.rawPayload.durationSeconds === "number"
+          ? event.rawPayload.durationSeconds
+          : undefined,
+        startedAt: event.rawPayload.startedAt,
+        stoppedAt: event.rawPayload.stoppedAt
+      });
+
     return {
-      action: "create_review_item",
+      action: autoConfirm ? "create_time_entry" : "create_review_item",
       confidence: "high",
-      reviewStatus: "needs_review",
+      reviewStatus: autoConfirm ? "confirmed" : "needs_review",
       projectId: event.projectId,
       categoryId: event.categoryId ?? findCategoryByName(context.categories, "Health")?.id,
       title: event.description ?? "Sleep",
-      reason: "Sleep imports are reviewed as one continuous session before becoming completed entries.",
+      reason: autoConfirm
+        ? "High-confidence Health sleep can become completed time automatically."
+        : "Sleep imports are reviewed when the duration or confidence is uncertain.",
       shouldClosePrevious: false
     };
   }
