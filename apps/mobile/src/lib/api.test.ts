@@ -32,10 +32,13 @@ vi.mock("./config", () => ({
 const {
   AuthRequiredError,
   clearFailedQueuedEvents,
+  confirmReviewItem,
   createCategory,
+  createManualTimeEntry,
   createPlace,
   deleteTimeEntry,
   deletePlace,
+  dismissReviewItem,
   enqueueEvent,
   fetchBootstrap,
   getQueueDiagnostics,
@@ -44,6 +47,7 @@ const {
   login,
   readQueue,
   retryFailedQueuedEvents,
+  saveEditedReviewItem,
   startTimer,
   signup,
   syncQueue,
@@ -759,6 +763,103 @@ describe("mobile API client", () => {
       })
     );
     expect(asyncStore.get("dayframe.offlineQueue.v1")).toBeUndefined();
+  });
+
+  it("creates manual time entries for edited suggestions", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 201)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createManualTimeEntry({
+      categoryId: "20000000-0000-4000-8000-000000000001",
+      description: "Edited workout",
+      startedAt: "2026-07-07T09:00:00.000Z",
+      stoppedAt: "2026-07-07T10:00:00.000Z"
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/time-entries",
+      expect.objectContaining({
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer session-token"
+        },
+        body: JSON.stringify({
+          mode: "manual",
+          categoryId: "20000000-0000-4000-8000-000000000001",
+          description: "Edited workout",
+          startedAt: "2026-07-07T09:00:00.000Z",
+          stoppedAt: "2026-07-07T10:00:00.000Z"
+        })
+      })
+    );
+  });
+
+  it("confirms and dismisses review items through the hosted API", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await confirmReviewItem("review-1");
+    await dismissReviewItem("review-2");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://dayframe.test/api/review/review-1",
+      expect.objectContaining({
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer session-token"
+        },
+        body: JSON.stringify({ action: "accept" })
+      })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://dayframe.test/api/review/review-2",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ action: "ignore_once" })
+      })
+    );
+  });
+
+  it("saves edited review items by creating confirmed time then dismissing the suggestion", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await saveEditedReviewItem("review-1", {
+      categoryId: null,
+      description: "Adjusted suggestion",
+      startedAt: "2026-07-07T09:15:00.000Z",
+      stoppedAt: "2026-07-07T10:10:00.000Z"
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://dayframe.test/api/time-entries",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          mode: "manual",
+          categoryId: undefined,
+          description: "Adjusted suggestion",
+          startedAt: "2026-07-07T09:15:00.000Z",
+          stoppedAt: "2026-07-07T10:10:00.000Z"
+        })
+      })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://dayframe.test/api/review/review-1",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ action: "ignore_once" })
+      })
+    );
   });
 
   it("clears the session token when deleting a time entry returns 401", async () => {

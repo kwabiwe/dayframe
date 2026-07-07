@@ -50,6 +50,7 @@ import {
   themeOptions,
   useMobileTheme
 } from "@/lib/mobileTheme";
+import { REVIEW_COPY, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
 
 type Category = MobileBootstrap["categories"][number];
 
@@ -151,6 +152,12 @@ export default function SettingsScreen() {
     (item) => item.provider === "healthkit" && item.kind === "permissions"
   );
   const queueDiagnostics = getQueueDiagnostics(queue);
+  const reviewNeededEntryIds = new Set([
+    ...(data?.dayEntries ?? []),
+    ...(data?.weekEntries ?? []),
+    ...(data?.entries ?? [])
+  ].filter(isReviewNeededEntry).map((entry) => entry.id));
+  const openReviewCount = (data?.reviewItems ?? []).filter(isOpenReviewItem).length + reviewNeededEntryIds.size;
   const firstFailedEvent = queueDiagnostics.firstFailed;
   const canRetryFailed = queueDiagnostics.failedCount > 0;
   const canClearFailed = queueDiagnostics.clearableFailedCount > 0;
@@ -451,6 +458,26 @@ export default function SettingsScreen() {
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Settings</Text>
             <Text style={styles.muted}>Account, categories, device sync and permissions.</Text>
+          </View>
+
+          <View style={styles.panel}>
+            <View style={styles.summaryHeader}>
+              <View>
+                <Text style={styles.label}>{REVIEW_COPY.needsReview}</Text>
+                <Text style={styles.sectionTitle}>Review</Text>
+              </View>
+              <Text style={styles.summaryTotal}>{openReviewCount}</Text>
+            </View>
+            <Text style={styles.muted}>Suggested activity from Health and places stays here until it is confirmed.</Text>
+            <View style={styles.buttonRow}>
+              <Pressable
+                accessibilityRole="button"
+                style={pressable(styles.secondaryButton, styles.buttonPressed)}
+                onPress={() => router.push("./review")}
+              >
+                <Text style={styles.secondaryButtonText}>Open Review</Text>
+              </Pressable>
+            </View>
           </View>
 
           <View style={styles.panel}>
