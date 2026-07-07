@@ -26,6 +26,7 @@ import {
   syncQueue,
   updateCategory,
   type MobileBootstrap,
+  type QueueDiagnostics,
   type QueuedEvent,
   type SyncQueueResult
 } from "@/lib/api";
@@ -60,6 +61,10 @@ export default function SettingsScreen() {
   } = useMobileTheme();
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [queue, setQueue] = useState<QueuedEvent[]>([]);
+  const [lastSyncResult, setLastSyncResult] = useState<SyncQueueResult | null>(null);
+  const [syncingQueue, setSyncingQueue] = useState(false);
+  const [syncStatusMessage, setSyncStatusMessage] = useState<string | null>(null);
+  const [showQueueDetails, setShowQueueDetails] = useState(false);
   const [loading, setLoading] = useState(false);
   const [locationStatus, setLocationStatus] = useState("Not requested");
   const [healthStatus, setHealthStatus] = useState<HealthImportStatus[]>([]);
@@ -137,6 +142,12 @@ export default function SettingsScreen() {
   const firstFailedEvent = queueDiagnostics.firstFailed;
   const canRetryFailed = queueDiagnostics.failedCount > 0;
   const canClearFailed = queueDiagnostics.clearableFailedCount > 0;
+  const deviceSyncStatus = deviceSyncStatusText({
+    syncingQueue,
+    syncStatusMessage,
+    lastSyncResult,
+    queueDiagnostics
+  });
   useEffect(() => {
     if (!editingCategoryId) return undefined;
 
@@ -249,33 +260,45 @@ export default function SettingsScreen() {
     }
   }
 
-  async function syncAndReload() {
+  async function syncAndReload(options?: { syncingMessage?: string }) {
+    setSyncingQueue(true);
+    setSyncStatusMessage(options?.syncingMessage ?? "Syncing device data...");
     try {
       const result = await syncQueue();
       setQueue(result.remaining);
+      setLastSyncResult(result);
+      setSyncStatusMessage(null);
       await load();
-      showSyncResult("Device sync", result);
+      return result;
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         router.replace("/");
-        return;
+        return null;
       }
-      Alert.alert("Device sync", error instanceof Error ? error.message : "Unable to sync queued events.");
+      setSyncStatusMessage(error instanceof Error ? error.message : "Unable to sync queued events.");
+      return null;
+    } finally {
+      setSyncingQueue(false);
     }
   }
 
   async function retryFailedAndReload() {
+    setSyncingQueue(true);
+    setSyncStatusMessage("Retrying failed items...");
     try {
       const result = await retryFailedQueuedEvents();
       setQueue(result.remaining);
+      setLastSyncResult(result);
+      setSyncStatusMessage(null);
       await load();
-      showSyncResult("Retry failed", result);
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         router.replace("/");
         return;
       }
-      Alert.alert("Retry failed", error instanceof Error ? error.message : "Unable to retry failed events.");
+      setSyncStatusMessage(error instanceof Error ? error.message : "Unable to retry failed events.");
+    } finally {
+      setSyncingQueue(false);
     }
   }
 
@@ -300,22 +323,14 @@ export default function SettingsScreen() {
     try {
       const result = await clearFailedQueuedEvents();
       setQueue(result.remaining);
-      await load({ silent: true });
-      Alert.alert(
-        "Device sync",
+      setLastSyncResult(null);
+      setSyncStatusMessage(
         `${result.removedCount} failed queued ${result.removedCount === 1 ? "event was" : "events were"} removed. ${result.remainingCount} queued ${result.remainingCount === 1 ? "event remains" : "events remain"}.`
       );
+      await load({ silent: true });
     } catch (error) {
-      Alert.alert("Device sync", error instanceof Error ? error.message : "Unable to clear failed events.");
+      setSyncStatusMessage(error instanceof Error ? error.message : "Unable to clear failed events.");
     }
-  }
-
-  function showSyncResult(title: string, result: SyncQueueResult) {
-    if (!result.firstError) return;
-    Alert.alert(
-      title,
-      `${result.syncedCount} synced, ${result.remainingCount} queued, ${result.failedCount} failed.\n\n${result.firstError.message}`
-    );
   }
 
   async function enableLocation() {
@@ -339,14 +354,18 @@ export default function SettingsScreen() {
 
   async function syncAppleHealth(options?: { silent?: boolean }) {
     try {
+      setSyncStatusMessage("Syncing Health data...");
       const sleep = await importHealthKitSleep();
       updateHealthStatus(sleep);
       const workout = await importHealthKitWorkouts();
       updateHealthStatus(workout);
-      await syncAndReload();
+      await syncAndReload({ syncingMessage: "Syncing Health data..." });
     } catch (error) {
+      if (error instanceof AuthRequiredError) return;
+      const message = friendlyHealthKitError(error, "sync Apple Health");
+      setSyncStatusMessage(message);
       if (!options?.silent) {
-        Alert.alert("Apple Health", friendlyHealthKitError(error, "sync Apple Health"));
+        Alert.alert("Apple Health", message);
       }
     }
   }
@@ -615,35 +634,49 @@ export default function SettingsScreen() {
 
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Device sync</Text>
-            <Text style={styles.statusText}>
-              {queueDiagnostics.queuedCount} queued {queueDiagnostics.queuedCount === 1 ? "event" : "events"}
-            </Text>
-            {queueDiagnostics.failedCount > 0 ? (
-              <Text style={styles.errorText}>
-                {queueDiagnostics.failedCount} failed {queueDiagnostics.failedCount === 1 ? "event" : "events"}
+            <Text style={styles.statusText}>{deviceSyncStatus}</Text>
+            {lastSyncResult?.firstError ? (
+              <Text style={styles.muted}>Some queued data still needs attention. Details are available below.</Text>
+            ) : null}
+            <Pressable
+              accessibilityRole="button"
+              style={pressable(styles.secondaryButton, styles.buttonPressed)}
+              onPress={() => setShowQueueDetails((current) => !current)}
+            >
+              <Text style={styles.secondaryButtonText}>
+                {showQueueDetails ? "Hide troubleshooting details" : "Troubleshooting details"}
               </Text>
-            ) : (
-              <Text style={styles.muted}>No failed queued events.</Text>
-            )}
-            {firstFailedEvent ? (
+            </Pressable>
+            {showQueueDetails ? (
               <View style={styles.queueDiagnosticCard}>
-                <Text style={styles.label}>First failed event</Text>
-                <Text style={styles.accountValue} numberOfLines={2}>
-                  {formatSourceLabel(firstFailedEvent.source)} · {formatEventLabel(firstFailedEvent.type)} ·{" "}
-                  {formatQueueTime(firstFailedEvent.occurredAt)}
+                <Text style={styles.label}>Queue</Text>
+                <Text style={styles.accountMeta}>
+                  Queued {queueDiagnostics.queuedCount} · Last synced {lastSyncResult?.syncedCount ?? 0} · Failed{" "}
+                  {queueDiagnostics.failedCount}
                 </Text>
-                <Text style={styles.accountMeta} numberOfLines={3}>
-                  {firstFailedEvent.lastError ?? "No error message was recorded."}
-                </Text>
-                {firstFailedEvent.lastAttemptedAt || firstFailedEvent.failedAt ? (
-                  <Text style={styles.accountMeta}>
-                    Last attempt {formatQueueTime(firstFailedEvent.lastAttemptedAt ?? firstFailedEvent.failedAt)}
-                  </Text>
-                ) : null}
+                {firstFailedEvent ? (
+                  <>
+                    <Text style={styles.label}>First failed event</Text>
+                    <Text style={styles.accountValue} numberOfLines={2}>
+                      {formatSourceLabel(firstFailedEvent.source)} · {formatEventLabel(firstFailedEvent.type)} ·{" "}
+                      {formatQueueTime(firstFailedEvent.occurredAt)}
+                    </Text>
+                    <Text style={styles.accountMeta} numberOfLines={3}>
+                      {firstFailedEvent.lastError ?? "No error message was recorded."}
+                    </Text>
+                    {firstFailedEvent.lastAttemptedAt || firstFailedEvent.failedAt ? (
+                      <Text style={styles.accountMeta}>
+                        Last attempt {formatQueueTime(firstFailedEvent.lastAttemptedAt ?? firstFailedEvent.failedAt)}
+                      </Text>
+                    ) : null}
+                  </>
+                ) : (
+                  <Text style={styles.accountMeta}>No failed queued events.</Text>
+                )}
               </View>
             ) : null}
             <View style={styles.buttonRow}>
-              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={syncAndReload}>
+              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={() => void syncAndReload()}>
                 <Text style={styles.secondaryButtonText}>Sync now</Text>
               </Pressable>
               <Pressable
@@ -817,6 +850,41 @@ const eventLabels: Record<string, string> = {
   health_sleep_import: "Health sleep import",
   health_workout_import: "Health workout import"
 };
+
+function deviceSyncStatusText({
+  syncingQueue,
+  syncStatusMessage,
+  lastSyncResult,
+  queueDiagnostics
+}: {
+  syncingQueue: boolean;
+  syncStatusMessage: string | null;
+  lastSyncResult: SyncQueueResult | null;
+  queueDiagnostics: QueueDiagnostics;
+}) {
+  if (syncingQueue) return syncStatusMessage ?? "Syncing device data...";
+  if (syncStatusMessage) return syncStatusMessage;
+
+  if (lastSyncResult) {
+    if (lastSyncResult.syncedCount > 0 && lastSyncResult.failedCount > 0) {
+      return `Synced ${formatItemCount(lastSyncResult.syncedCount)}. ${formatItemCount(lastSyncResult.failedCount)} ${lastSyncResult.failedCount === 1 ? "needs" : "need"} attention.`;
+    }
+    if (lastSyncResult.syncedCount > 0) {
+      return `Synced ${formatItemCount(lastSyncResult.syncedCount)}.`;
+    }
+    if (lastSyncResult.failedCount > 0) return "Some items need attention.";
+    if (lastSyncResult.remainingCount > 0) return "Device data is waiting to sync.";
+    return "Device data is synced.";
+  }
+
+  if (queueDiagnostics.failedCount > 0) return "Some items need attention.";
+  if (queueDiagnostics.queuedCount > 0) return "Device data is waiting to sync.";
+  return "Device data is synced.";
+}
+
+function formatItemCount(count: number) {
+  return `${count} ${count === 1 ? "item" : "items"}`;
+}
 
 function formatSourceLabel(value?: string | null) {
   if (!value) return "Unknown source";

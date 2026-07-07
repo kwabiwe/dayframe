@@ -261,6 +261,8 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
     }
 
     if (candidate.reviewStatus === "needs_review") {
+      const suggestedStartedAt = suggestedStartedAtForEvent(parsed);
+      const suggestedStoppedAt = suggestedStoppedAtForEvent(parsed);
       await client.query(
         `insert into review_items (
             workspace_id,
@@ -271,11 +273,12 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
             suggested_category_id,
             suggested_place_id,
             suggested_started_at,
+            suggested_stopped_at,
             confidence,
             status,
             notes
          )
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'open', $10)`,
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'open', $11)`,
         [
           parsed.workspaceId,
           eventId,
@@ -284,7 +287,8 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
           candidate.projectId ?? null,
           candidate.categoryId ?? null,
           candidate.placeId ?? null,
-          parsed.occurredAt,
+          suggestedStartedAt,
+          suggestedStoppedAt,
           candidate.confidence,
           candidate.reason
         ]
@@ -1001,6 +1005,47 @@ function isExplicitStartEvent(type: string) {
 
 function stringOrNull(value: unknown) {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function timestampStringOrNull(value: unknown) {
+  const timestamp = stringOrNull(value);
+  if (!timestamp) return null;
+  return Number.isNaN(new Date(timestamp).getTime()) ? null : timestamp;
+}
+
+function suggestedStartedAtForEvent(event: ReturnType<typeof ActivityEventInputSchema.parse>) {
+  if (event.type === "health_sleep_import" || event.type === "health_workout_import") {
+    return timestampStringOrNull(event.rawPayload.startedAt) ?? event.occurredAt;
+  }
+
+  if (event.type === "unknown_stay") {
+    return timestampStringOrNull(event.rawPayload.startedAt) ?? event.occurredAt;
+  }
+
+  if (event.type === "geofence_exit") {
+    return timestampStringOrNull(event.rawPayload.startedAt) ?? timestampStringOrNull(event.rawPayload.enteredAt) ?? event.occurredAt;
+  }
+
+  return event.occurredAt;
+}
+
+function suggestedStoppedAtForEvent(event: ReturnType<typeof ActivityEventInputSchema.parse>) {
+  if (event.type === "health_sleep_import" || event.type === "health_workout_import") {
+    return timestampStringOrNull(event.rawPayload.stoppedAt) ?? timestampStringOrNull(event.rawPayload.endedAt);
+  }
+
+  if (event.type === "unknown_stay") {
+    const stoppedAt = timestampStringOrNull(event.rawPayload.stoppedAt) ?? timestampStringOrNull(event.rawPayload.endedAt);
+    if (stoppedAt) return stoppedAt;
+    const durationMinutes = numberOrNull(event.rawPayload.durationMinutes);
+    return durationMinutes ? new Date(event.occurredAt.getTime() + durationMinutes * 60_000).toISOString() : null;
+  }
+
+  if (event.type === "geofence_exit") {
+    return timestampStringOrNull(event.rawPayload.stoppedAt) ?? timestampStringOrNull(event.rawPayload.exitedAt) ?? event.occurredAt.toISOString();
+  }
+
+  return null;
 }
 
 function numberOrNull(value: unknown) {

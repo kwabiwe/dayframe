@@ -21,7 +21,8 @@ vi.mock("./queries", () => ({
   getNormalizationContext: mocks.getNormalizationContext
 }));
 
-const { deleteTimeEntry, processActivityEvent, TimeEntryNotFoundError, updateCategory } = await import("./event-service");
+const { deleteTimeEntry, processActivityEvent, resolveReviewItem, TimeEntryNotFoundError, updateCategory } =
+  await import("./event-service");
 
 const session = {
   userId: "00000000-0000-4000-8000-000000000001",
@@ -181,6 +182,23 @@ describe("health event persistence", () => {
       "2026-06-07T05:55:00.000Z",
       JSON.stringify(healthSleepEvent().rawPayload)
     ]);
+    const reviewInsert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into review_items")
+    );
+    expect(String(reviewInsert?.[0])).toContain("suggested_stopped_at");
+    expect(reviewInsert?.[1]).toEqual([
+      session.workspaceId,
+      "event-1",
+      "health_sleep_import_suggestion",
+      "Sleep asleep core",
+      null,
+      null,
+      null,
+      "2026-06-06T22:24:00.000Z",
+      "2026-06-07T05:55:00.000Z",
+      "high",
+      "Health imports are reviewed before becoming completed entries."
+    ]);
     expect(client.query).toHaveBeenCalledWith("commit");
     expect(client.release).toHaveBeenCalled();
   });
@@ -313,6 +331,62 @@ describe("health event persistence", () => {
       /idx_health_sleep_segments_external_sample/
     );
     expect(client.query).toHaveBeenCalledWith("rollback");
+  });
+});
+
+describe("review item resolution", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("accepts Health review candidates as completed entries with their suggested stop time", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        if (statement.includes("from review_items ri")) {
+          return {
+            rows: [
+              {
+                id: "review-1",
+                eventId: "event-1",
+                title: "Sleep asleep core",
+                suggestedProjectId: null,
+                suggestedCategoryId: null,
+                suggestedPlaceId: null,
+                suggestedStartedAt: "2026-06-06T22:24:00.000Z",
+                suggestedStoppedAt: "2026-06-07T05:55:00.000Z",
+                confidence: "high",
+                eventSource: "health_sleep",
+                eventType: "health_sleep_import"
+              }
+            ]
+          };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await resolveReviewItem("review-1", "accept", session);
+
+    const entryInsert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into time_entries")
+    );
+    expect(entryInsert?.[1]).toEqual([
+      session.workspaceId,
+      session.userId,
+      null,
+      null,
+      null,
+      "health_sleep",
+      "high",
+      "Sleep asleep core",
+      "2026-06-06T22:24:00.000Z",
+      "2026-06-07T05:55:00.000Z",
+      "event-1"
+    ]);
+    expect(client.query).toHaveBeenCalledWith("commit");
   });
 });
 
