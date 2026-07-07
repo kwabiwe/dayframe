@@ -185,6 +185,110 @@ describe("health event persistence", () => {
     expect(client.release).toHaveBeenCalled();
   });
 
+  it("stores queued Health sleep imports under the resolved session workspace when the payload has stale ids", async () => {
+    const hostedSession = {
+      ...session,
+      userId: "00000000-0000-4000-8000-000000000002",
+      workspaceId: "00000000-0000-4000-8000-000000000011"
+    };
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        return statement.includes("returning id") ? { rows: [{ id: "event-1" }] } : { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await processActivityEvent(staleWorkspaceHealthSleepEvent(), hostedSession);
+
+    const duplicateLookup = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("client_event_id = $3")
+    );
+    expect(duplicateLookup?.[1]).toEqual([
+      hostedSession.workspaceId,
+      hostedSession.userId,
+      "local-health-sleep-1"
+    ]);
+
+    const activityInsert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into activity_events")
+    );
+    expect((activityInsert?.[1] as unknown[]).slice(0, 2)).toEqual([
+      hostedSession.workspaceId,
+      hostedSession.userId
+    ]);
+
+    const healthInsert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into health_sleep_segments")
+    );
+    expect((healthInsert?.[1] as unknown[]).slice(0, 2)).toEqual([
+      hostedSession.workspaceId,
+      hostedSession.userId
+    ]);
+  });
+
+  it("checks clientEventId idempotency in the resolved session workspace when the payload has stale ids", async () => {
+    const hostedSession = {
+      ...session,
+      userId: "00000000-0000-4000-8000-000000000002",
+      workspaceId: "00000000-0000-4000-8000-000000000011"
+    };
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        if (statement.includes("client_event_id = $3")) return { rows: [{ id: "event-existing" }] };
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await processActivityEvent(staleWorkspaceHealthSleepEvent(), hostedSession);
+
+    const duplicateLookup = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("client_event_id = $3")
+    );
+    expect(duplicateLookup?.[1]).toEqual([
+      hostedSession.workspaceId,
+      hostedSession.userId,
+      "local-health-sleep-1"
+    ]);
+    expect(result).toEqual({
+      eventId: "event-existing",
+      candidate: expect.objectContaining({ action: "create_review_item" }),
+      duplicate: true
+    });
+    expect(
+      client.query.mock.calls.find(([statement]) => String(statement).includes("insert into activity_events"))
+    ).toBeUndefined();
+    expect(client.query).toHaveBeenCalledWith("commit");
+  });
+
+  it("identifies a stale authenticated workspace foreign key failure", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        if (statement.includes("insert into activity_events")) {
+          throw Object.assign(
+            new Error(
+              'insert or update on table "activity_events" violates foreign key constraint "activity_events_workspace_id_fkey"'
+            ),
+            { code: "23503", constraint: "activity_events_workspace_id_fkey" }
+          );
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(processActivityEvent(healthSleepEvent(), session)).rejects.toThrow(
+      /Authenticated session workspace is missing from public\.workspaces/
+    );
+    expect(client.query).toHaveBeenCalledWith("rollback");
+  });
+
   it("identifies a missing health sleep table instead of throwing a generic sync failure", async () => {
     const client = healthClientWithFailure(
       Object.assign(new Error('relation "health_sleep_segments" does not exist'), { code: "42P01" })
@@ -275,6 +379,19 @@ function healthSleepEvent() {
       sample: {
         uuid: "sleep-sample-1"
       }
+    }
+  };
+}
+
+function staleWorkspaceHealthSleepEvent() {
+  return {
+    ...healthSleepEvent(),
+    workspaceId: "00000000-0000-4000-8000-000000000010",
+    userId: "00000000-0000-4000-8000-000000000001",
+    clientEventId: "local-health-sleep-1",
+    rawPayload: {
+      ...healthSleepEvent().rawPayload,
+      workspaceId: "00000000-0000-4000-8000-000000000010"
     }
   };
 }

@@ -47,6 +47,13 @@ export function isInsufficientPrivilegeError(error: unknown) {
   return candidate?.code === "42501";
 }
 
+export function isForeignKeyViolationError(error: unknown, constraintName?: string) {
+  const candidate = error as { code?: string; constraint?: string; message?: string } | null;
+  if (candidate?.code !== "23503") return false;
+  if (!constraintName) return true;
+  return candidate.constraint === constraintName || candidate.message?.includes(constraintName) === true;
+}
+
 export class MissingRequiredColumnError extends Error {
   tableName: string;
   columnName: string;

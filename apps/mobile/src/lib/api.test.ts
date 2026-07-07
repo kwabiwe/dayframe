@@ -157,6 +157,82 @@ describe("mobile API client", () => {
     expect(queue[0].lastError).toBeUndefined();
   });
 
+  it("migrates stale queue workspace fields without losing Health payload details", async () => {
+    asyncStore.set(
+      "dayframe.offlineQueue.v1",
+      JSON.stringify([
+        storedQueuedEvent({
+          source: "health_sleep",
+          type: "health_sleep_import",
+          workspaceId: "00000000-0000-4000-8000-000000000010",
+          userId: "00000000-0000-4000-8000-000000000001",
+          clientEventId: "stale-client-event-id",
+          rawPayload: {
+            provider: "healthkit",
+            externalSampleId: "sleep-sample-1",
+            workspaceId: "00000000-0000-4000-8000-000000000010"
+          }
+        })
+      ])
+    );
+
+    const queue = await readQueue();
+
+    expect(queue).toHaveLength(1);
+    expect((queue[0] as Record<string, unknown>).workspaceId).toBeUndefined();
+    expect((queue[0] as Record<string, unknown>).userId).toBeUndefined();
+    expect((queue[0] as Record<string, unknown>).clientEventId).toBeUndefined();
+    expect(queue[0].rawPayload).toEqual({
+      provider: "healthkit",
+      externalSampleId: "sleep-sample-1",
+      workspaceId: "00000000-0000-4000-8000-000000000010"
+    });
+  });
+
+  it("syncs a queued Health event without posting stale client workspace fields", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    asyncStore.set(
+      "dayframe.offlineQueue.v1",
+      JSON.stringify([
+        storedQueuedEvent({
+          localId: "local-health-sleep-1",
+          source: "health_sleep",
+          type: "health_sleep_import",
+          workspaceId: "00000000-0000-4000-8000-000000000010",
+          userId: "00000000-0000-4000-8000-000000000001",
+          clientEventId: "stale-client-event-id",
+          rawPayload: {
+            provider: "healthkit",
+            externalSampleId: "sleep-sample-1",
+            sleepStage: "asleep_core",
+            workspaceId: "00000000-0000-4000-8000-000000000010"
+          }
+        })
+      ])
+    );
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ eventId: "event-1" }, 201)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await syncQueue();
+    const [, requestInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const body = JSON.parse(String(requestInit.body)) as Record<string, unknown>;
+
+    expect(result.synced).toEqual(["local-health-sleep-1"]);
+    expect(result.remaining).toHaveLength(0);
+    expect(body.clientEventId).toBe("local-health-sleep-1");
+    expect(body.workspaceId).toBeUndefined();
+    expect(body.userId).toBeUndefined();
+    expect(body.localId).toBeUndefined();
+    expect(body.queuedAt).toBeUndefined();
+    expect(body.rawPayload).toEqual({
+      provider: "healthkit",
+      externalSampleId: "sleep-sample-1",
+      sleepStage: "asleep_core",
+      workspaceId: "00000000-0000-4000-8000-000000000010"
+    });
+    await expect(readQueue()).resolves.toHaveLength(0);
+  });
+
   it("preserves queue order when the first event fails to sync", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
     await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: { order: 1 } });

@@ -7,6 +7,7 @@ import {
 } from "@dayframe/shared";
 import {
   databaseReadinessError,
+  isForeignKeyViolationError,
   isInsufficientPrivilegeError,
   isInvalidConflictTargetError,
   isUndefinedColumnError,
@@ -42,6 +43,15 @@ function eventSyncReadinessError(error: unknown, eventType: ActivityEventType) {
       "activity_events",
       "client_event_id",
       MOBILE_EVENT_IDEMPOTENCY_MIGRATION,
+      error
+    );
+  }
+
+  if (isForeignKeyViolationError(error, "activity_events_workspace_id_fkey")) {
+    return databaseReadinessError(
+      "Authenticated session workspace is missing from public.workspaces. Log out and back in, then retry queued sync.",
+      "public.workspaces",
+      "docs/vercel-supabase-hosting.md",
       error
     );
   }
@@ -137,12 +147,13 @@ function healthSchemaReadinessError(
 }
 
 export async function processActivityEvent(rawInput: unknown, session: RequestSession = getDevSession()) {
+  const input = isRecord(rawInput) ? rawInput : {};
   const parsed = ActivityEventInputSchema.parse({
     occurredAt: new Date(),
-    workspaceId: session.workspaceId,
-    userId: session.userId,
     rawPayload: {},
-    ...(rawInput as Record<string, unknown>)
+    ...input,
+    workspaceId: session.workspaceId,
+    userId: session.userId
   });
   const context = await getNormalizationContext(session);
   const candidate = normalizeActivityEvent(parsed, context);
@@ -995,6 +1006,10 @@ function stringOrNull(value: unknown) {
 function numberOrNull(value: unknown) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function nullableNumber(value: unknown) {
