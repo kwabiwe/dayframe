@@ -31,9 +31,11 @@ import {
   type SyncQueueResult
 } from "@/lib/api";
 import {
+  getLocationVisitDiagnostics,
   requestLocationAccess,
   refreshGeofencesForPlaces,
-  startGeofences
+  startGeofences,
+  type LocationVisitDiagnostics
 } from "@/lib/geofence";
 import {
   friendlyHealthKitError,
@@ -67,6 +69,7 @@ export default function SettingsScreen() {
   const [showQueueDetails, setShowQueueDetails] = useState(false);
   const [loading, setLoading] = useState(false);
   const [locationStatus, setLocationStatus] = useState("Not requested");
+  const [locationDiagnostics, setLocationDiagnostics] = useState<LocationVisitDiagnostics | null>(null);
   const [healthStatus, setHealthStatus] = useState<HealthImportStatus[]>([]);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [pinNewCategory, setPinNewCategory] = useState(true);
@@ -81,9 +84,15 @@ export default function SettingsScreen() {
     refreshInFlight.current = true;
     if (!options?.silent) setLoading(true);
     try {
-      const [bootstrap, queued] = await Promise.all([fetchBootstrap(), readQueue()]);
+      const [bootstrap, queued, location] = await Promise.all([
+        fetchBootstrap(),
+        readQueue(),
+        getLocationVisitDiagnostics()
+      ]);
       setData(bootstrap);
       setQueue(queued);
+      setLocationDiagnostics(location);
+      setLocationStatus(locationStatusText(location));
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         router.replace("/");
@@ -122,10 +131,13 @@ export default function SettingsScreen() {
   }, []);
 
   useEffect(() => {
-    if (!data?.places.length) return;
+    if (!data?.places.length) {
+      void refreshLocationDiagnostics();
+      return;
+    }
     refreshGeofencesForPlaces(data.places)
       .then((count) => {
-        if (count > 0) setLocationStatus(`Monitoring ${count} places`);
+        void refreshLocationDiagnostics(count > 0 ? `Monitoring ${count} saved ${count === 1 ? "place" : "places"}.` : undefined);
       })
       .catch(() => undefined);
   }, [data?.places]);
@@ -338,8 +350,17 @@ export default function SettingsScreen() {
     setLocationStatus(status);
     if (status.startsWith("Always allowed") && data) {
       const count = await startGeofences(data.places);
+      await refreshLocationDiagnostics(`Monitoring ${count} saved ${count === 1 ? "place" : "places"}.`);
       Alert.alert("Geofences", `Started ${count} place monitors.`);
+    } else {
+      await refreshLocationDiagnostics(status);
     }
+  }
+
+  async function refreshLocationDiagnostics(fallbackStatus?: string) {
+    const diagnostics = await getLocationVisitDiagnostics();
+    setLocationDiagnostics(diagnostics);
+    setLocationStatus(fallbackStatus ?? locationStatusText(diagnostics));
   }
 
   async function connectAppleHealth() {
@@ -723,10 +744,43 @@ export default function SettingsScreen() {
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Location</Text>
             <Text style={styles.muted}>
-              Enable location to let Dayframe suggest activity from places you visit. Ambiguous stays are sent
-              to review before they become time entries.
+              Dayframe can recognise visits to saved places. Visits are reviewed before becoming time entries.
+              Place visits do not start live timers.
             </Text>
             <Text style={styles.statusText}>{locationStatus}</Text>
+            {locationDiagnostics ? (
+              <>
+                <Text style={styles.muted}>
+                  Permission: {formatPermissionStatus(locationDiagnostics.foregroundPermission)} · Background:{" "}
+                  {formatPermissionStatus(locationDiagnostics.backgroundPermission)}
+                </Text>
+                <Text style={styles.muted}>
+                  Monitors active: {locationDiagnostics.activeMonitorCount}
+                </Text>
+                {locationDiagnostics.lastGeofenceEvent ? (
+                  <Text style={styles.muted}>
+                    Last geofence: {formatGeofenceTransition(locationDiagnostics.lastGeofenceEvent.transition)}{" "}
+                    {locationDiagnostics.lastGeofenceEvent.placeName} ·{" "}
+                    {formatQueueTime(locationDiagnostics.lastGeofenceEvent.occurredAt)}
+                  </Text>
+                ) : null}
+                {locationDiagnostics.lastQueuedVisitCandidate ? (
+                  <Text style={styles.muted}>
+                    Last candidate: {locationDiagnostics.lastQueuedVisitCandidate.placeName} ·{" "}
+                    {formatDurationMinutes(locationDiagnostics.lastQueuedVisitCandidate.durationSeconds)} ·{" "}
+                    {formatQueueTime(locationDiagnostics.lastQueuedVisitCandidate.queuedAt)}
+                  </Text>
+                ) : null}
+                {locationDiagnostics.lastStatus ? (
+                  <Text style={styles.muted}>{locationDiagnostics.lastStatus}</Text>
+                ) : null}
+                {locationDiagnostics.lastEventAt || locationDiagnostics.lastMonitorRefreshAt ? (
+                  <Text style={styles.muted}>
+                    Last update {formatQueueTime(locationDiagnostics.lastEventAt ?? locationDiagnostics.lastMonitorRefreshAt)}
+                  </Text>
+                ) : null}
+              </>
+            ) : null}
             <View style={styles.buttonRow}>
               <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={enableLocation}>
                 <Text style={styles.secondaryButtonText}>Enable</Text>
@@ -834,6 +888,37 @@ function nextCategoryColor(categories: Category[]): DayframePaletteKey {
   );
   const unused = DAYFRAME_PALETTE.find((color) => !usedKeys.has(color.key));
   return unused?.key ?? DAYFRAME_PALETTE[categories.length % DAYFRAME_PALETTE.length].key;
+}
+
+function locationStatusText(diagnostics: LocationVisitDiagnostics) {
+  if (diagnostics.backgroundPermission === "granted" && diagnostics.activeMonitorCount > 0) {
+    return `Monitoring ${diagnostics.activeMonitorCount} saved ${diagnostics.activeMonitorCount === 1 ? "place" : "places"}.`;
+  }
+  if (diagnostics.foregroundPermission !== "granted") return "Location permission is not enabled.";
+  if (diagnostics.backgroundPermission !== "granted") return "Enable Always access to monitor saved places.";
+  return "No saved places with coordinates are being monitored.";
+}
+
+function formatPermissionStatus(value: LocationVisitDiagnostics["foregroundPermission"]) {
+  switch (value) {
+    case "granted":
+      return "Allowed";
+    case "denied":
+      return "Denied";
+    case "undetermined":
+      return "Not requested";
+    case "unknown":
+      return "Unknown";
+  }
+}
+
+function formatGeofenceTransition(value: NonNullable<LocationVisitDiagnostics["lastGeofenceEvent"]>["transition"]) {
+  return value === "enter" ? "Entered" : "Exited";
+}
+
+function formatDurationMinutes(seconds: number) {
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  return `${minutes} min`;
 }
 
 const sourceLabels: Record<string, string> = {
