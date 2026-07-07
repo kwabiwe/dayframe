@@ -550,10 +550,23 @@ describe("mobile API client", () => {
 
   it("creates places through the hosted API without auto-start", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
-    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true, place: { id: "place-1" } }, 201)));
+    const savedPlace = {
+      id: "30000000-0000-4000-8000-000000000001",
+      name: "Gym",
+      latitude: 51.5,
+      longitude: -0.12,
+      radiusMeters: 100,
+      priority: 5,
+      defaultProjectId: null,
+      defaultCategoryId: "20000000-0000-4000-8000-000000000001",
+      defaultCategoryName: "Fitness"
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true }, 201))
+      .mockResolvedValueOnce(jsonResponse({ places: [savedPlace] }, 200));
     vi.stubGlobal("fetch", fetchMock);
 
-    await createPlace({
+    const result = await createPlace({
       name: "Gym",
       latitude: 51.5,
       longitude: -0.12,
@@ -562,19 +575,35 @@ describe("mobile API client", () => {
       defaultCategoryId: "20000000-0000-4000-8000-000000000001"
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://dayframe.test/api/places",
+    expect(result.place).toEqual(savedPlace);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://dayframe.test/api/entities",
       expect.objectContaining({
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer session-token"
+        },
         body: JSON.stringify({
-          name: "Gym",
-          latitude: 51.5,
-          longitude: -0.12,
-          radiusMeters: 100,
-          priority: 5,
-          defaultCategoryId: "20000000-0000-4000-8000-000000000001",
-          autoStart: false
+          entity: "place",
+          values: {
+            name: "Gym",
+            latitude: 51.5,
+            longitude: -0.12,
+            radiusMeters: 100,
+            priority: 5,
+            categoryId: "20000000-0000-4000-8000-000000000001",
+            autoStart: false
+          }
         })
+      })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://dayframe.test/api/bootstrap",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer session-token" }
       })
     );
   });
@@ -607,10 +636,38 @@ describe("mobile API client", () => {
 
   it("rejects place saves when the API does not return the saved place", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
-    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 201))));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(jsonResponse({ ok: true }, 201))
+        .mockResolvedValueOnce(jsonResponse({ places: [] }, 200))
+    );
 
     await expect(createPlace({ name: "Gym", latitude: 51.5, longitude: -0.12, radiusMeters: 100 })).rejects.toThrow(
-      /saved place/
+      /refreshed place list/
+    );
+  });
+
+  it("does not surface raw HTML when a place route returns a hosted 404 page", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(htmlResponse("<!DOCTYPE html><title>404: This page could not be found</title>"))
+      )
+    );
+
+    await expect(createPlace({ name: "Gym", latitude: 51.5, longitude: -0.12, radiusMeters: 100 })).rejects.toThrow(
+      "Unable to save place. The server route was not found."
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Dayframe API returned a non-JSON response.",
+      expect.objectContaining({
+        status: 200,
+        contentType: "text/html; charset=utf-8",
+        bodyPreview: expect.stringContaining("404: This page could not be found")
+      })
     );
   });
 
@@ -699,6 +756,13 @@ function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json" }
+  });
+}
+
+function htmlResponse(body: string, status = 200) {
+  return new Response(body, {
+    status,
+    headers: { "Content-Type": "text/html; charset=utf-8" }
   });
 }
 

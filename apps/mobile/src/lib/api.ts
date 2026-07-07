@@ -10,6 +10,8 @@ import { DAYFRAME_API_BASE } from "./config";
 
 const QUEUE_KEY = "dayframe.offlineQueue.v1";
 const SESSION_TOKEN_KEY = "dayframe.localSessionToken.v1";
+const DEFAULT_PLACE_RADIUS_METERS = 100;
+const DEFAULT_PLACE_PRIORITY = 5;
 
 export type MobileDateRange = {
   selectedDate: string;
@@ -209,6 +211,16 @@ type ActivityEventDraft = {
   description?: string;
   rawPayload?: Record<string, unknown>;
 };
+
+type ApiErrorPayload = {
+  error?: string;
+  message?: string;
+  issues?: Array<{ path?: Array<string | number>; message?: string }>;
+};
+
+type ApiJsonRead<T> =
+  | { ok: true; payload: T }
+  | { ok: false; message: string };
 
 export async function fetchBootstrap(options: { date?: string } = {}): Promise<MobileBootstrap> {
   const params = options.date ? `?date=${encodeURIComponent(options.date)}` : "";
@@ -471,23 +483,34 @@ export async function archiveCategory(id: string) {
 }
 
 export async function createPlace(input: { name: string } & PlaceMutationInput) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/places`, {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/entities`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       ...(await authHeaders())
     },
     body: JSON.stringify({
-      ...input,
-      autoStart: false
+      entity: "place",
+      values: placeEntityValues(input)
     })
   });
   if (response.status === 401) {
     await clearSessionToken();
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to create place"));
-  return readPlaceResponse(response, "Place API did not return the saved place.");
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to save place"));
+
+  const payload = await readApiJson<{ ok?: boolean } & ApiErrorPayload>(response, "Unable to save place");
+  if (!payload.ok) throw new Error(payload.message);
+  const apiError = formatApiError(payload.payload);
+  if (apiError) throw new Error(apiError);
+
+  const bootstrap = await fetchBootstrap();
+  const place = findCreatedPlace(bootstrap.places, input);
+  if (!place) {
+    throw new Error("Place was saved, but the refreshed place list did not include it.");
+  }
+  return { ok: true, place };
 }
 
 export async function updatePlace(id: string, input: PlaceMutationInput) {
@@ -508,7 +531,7 @@ export async function updatePlace(id: string, input: PlaceMutationInput) {
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to update place"));
-  return readPlaceResponse(response, "Place API did not return the updated place.");
+  return readPlaceResponse(response, "Unable to update place");
 }
 
 export async function deletePlace(id: string) {
@@ -521,7 +544,11 @@ export async function deletePlace(id: string) {
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to delete place"));
-  return readJsonResponse(response);
+  const payload = await readApiJson<{ ok?: boolean } & ApiErrorPayload>(response, "Unable to delete place");
+  if (!payload.ok) throw new Error(payload.message);
+  const apiError = formatApiError(payload.payload);
+  if (apiError) throw new Error(apiError);
+  return payload.payload;
 }
 
 export async function queueStopTimer() {
@@ -752,37 +779,40 @@ async function authHeaders(): Promise<Record<string, string>> {
 }
 
 async function readJsonResponse<T>(response: Response): Promise<T> {
+  const result = await readApiJson<T>(response, "Unexpected server response");
+  if (result.ok) return result.payload;
+  return { error: result.message } as T;
+}
+
+async function readApiJson<T>(response: Response, fallback: string): Promise<ApiJsonRead<T>> {
   const text = await response.text();
-  if (!text) return {} as T;
+  if (!text) return { ok: true, payload: {} as T };
   try {
-    return JSON.parse(text) as T;
+    return { ok: true, payload: JSON.parse(text) as T };
   } catch {
-    return { error: text } as T;
+    logNonJsonApiResponse(response, text);
+    return { ok: false, message: nonJsonApiMessage(response, text, fallback) };
   }
 }
 
 async function readPlaceResponse(response: Response, fallback: string): Promise<MobilePlaceResponse> {
-  const payload = await readJsonResponse<Partial<MobilePlaceResponse> & { error?: string }>(response);
+  const result = await readApiJson<Partial<MobilePlaceResponse> & ApiErrorPayload>(response, fallback);
+  if (!result.ok) throw new Error(result.message);
+  const payload = result.payload;
   if (!payload.place || typeof payload.place.id !== "string" || !payload.place.id.trim()) {
-    throw new Error(payload.error ?? fallback);
+    throw new Error(formatApiError(payload) ?? fallback);
   }
   return payload as MobilePlaceResponse;
 }
 
 async function errorMessage(response: Response, fallback: string) {
-  const payload = await readJsonResponse<{
-    error?: string;
-    message?: string;
-    issues?: Array<{ path?: Array<string | number>; message?: string }>;
-  }>(response);
+  const result = await readApiJson<ApiErrorPayload>(response, fallback);
+  if (!result.ok) return result.message;
+  const payload = result.payload;
   return formatApiError(payload) ?? `${fallback}: ${response.status}`;
 }
 
-function formatApiError(payload: {
-  error?: string;
-  message?: string;
-  issues?: Array<{ path?: Array<string | number>; message?: string }>;
-}) {
+function formatApiError(payload: ApiErrorPayload) {
   if (payload.issues?.length) {
     return formatIssue(payload.issues[0]);
   }
@@ -801,6 +831,55 @@ function formatApiError(payload: {
   }
 
   return message;
+}
+
+function placeEntityValues(input: { name: string } & PlaceMutationInput) {
+  return {
+    name: input.name.trim(),
+    latitude: input.latitude ?? null,
+    longitude: input.longitude ?? null,
+    radiusMeters: input.radiusMeters ?? DEFAULT_PLACE_RADIUS_METERS,
+    priority: input.priority ?? DEFAULT_PLACE_PRIORITY,
+    categoryId: input.defaultCategoryId ?? null,
+    autoStart: false
+  };
+}
+
+function findCreatedPlace(places: MobilePlace[], input: { name: string } & PlaceMutationInput) {
+  const values = placeEntityValues(input);
+  return places.find((place) =>
+    place.name.trim() === values.name &&
+    sameNullableNumber(place.latitude, values.latitude) &&
+    sameNullableNumber(place.longitude, values.longitude) &&
+    Number(place.radiusMeters) === Number(values.radiusMeters) &&
+    (place.defaultCategoryId ?? null) === values.categoryId
+  ) ?? null;
+}
+
+function sameNullableNumber(left?: number | null, right?: number | null) {
+  if (left == null || right == null) return left == null && right == null;
+  return Math.abs(left - right) < 0.000001;
+}
+
+function nonJsonApiMessage(response: Response, text: string, fallback: string) {
+  if (isRouteNotFoundHtml(response, text)) {
+    return `${fallback}. The server route was not found.`;
+  }
+  return `${fallback}. The server returned an unexpected response.`;
+}
+
+function isRouteNotFoundHtml(response: Response, text: string) {
+  return response.status === 404 || /404:\s*this page could not be found/i.test(text);
+}
+
+function logNonJsonApiResponse(response: Response, text: string) {
+  const bodyPreview = text.replace(/\s+/g, " ").slice(0, 500);
+  console.warn("Dayframe API returned a non-JSON response.", {
+    status: response.status,
+    url: response.url || undefined,
+    contentType: response.headers.get("content-type") ?? undefined,
+    bodyPreview
+  });
 }
 
 function formatIssue(issue: { path?: Array<string | number>; message?: string }) {
