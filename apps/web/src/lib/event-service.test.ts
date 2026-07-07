@@ -21,8 +21,16 @@ vi.mock("./queries", () => ({
   getNormalizationContext: mocks.getNormalizationContext
 }));
 
-const { deleteTimeEntry, processActivityEvent, resolveReviewItem, TimeEntryNotFoundError, updateCategory } =
-  await import("./event-service");
+const {
+  createPlace,
+  deletePlace,
+  deleteTimeEntry,
+  processActivityEvent,
+  resolveReviewItem,
+  TimeEntryNotFoundError,
+  updateCategory,
+  updatePlace
+} = await import("./event-service");
 
 const session = {
   userId: "00000000-0000-4000-8000-000000000001",
@@ -141,6 +149,97 @@ describe("category persistence", () => {
       "event-1"
     ]);
     expect(client.release).toHaveBeenCalled();
+  });
+});
+
+describe("place persistence", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("creates category-first places without default project or auto-start", async () => {
+    mocks.query.mockResolvedValueOnce({
+      rows: [{
+        id: placeId(),
+        name: "Gym",
+        latitude: 51.5,
+        longitude: -0.12,
+        radiusMeters: 100,
+        priority: 5,
+        defaultProjectId: null,
+        defaultCategoryId: categoryId(),
+        autoStart: false
+      }]
+    });
+
+    const result = await createPlace(
+      {
+        name: " Gym ",
+        latitude: 51.5,
+        longitude: -0.12,
+        radiusMeters: 100,
+        priority: 5,
+        defaultCategoryId: categoryId(),
+        autoStart: false
+      },
+      session
+    );
+
+    expect(result?.name).toBe("Gym");
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining("default_project_id"),
+      [
+        session.workspaceId,
+        "Gym",
+        51.5,
+        -0.12,
+        100,
+        5,
+        categoryId(),
+        false
+      ]
+    );
+  });
+
+  it("updates only the supplied mobile place fields", async () => {
+    mocks.query.mockResolvedValueOnce({
+      rows: [{ id: placeId(), name: "Office", radiusMeters: 150 }]
+    });
+
+    await updatePlace(placeId(), { name: "Office", radiusMeters: 150, defaultCategoryId: null }, session);
+
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining("where id = $1 and workspace_id = $2"),
+      [
+        placeId(),
+        session.workspaceId,
+        true,
+        "Office",
+        false,
+        null,
+        false,
+        null,
+        true,
+        150,
+        false,
+        5,
+        true,
+        null,
+        false,
+        false
+      ]
+    );
+  });
+
+  it("deletes places within the active workspace", async () => {
+    mocks.query.mockResolvedValueOnce({ rows: [{ id: placeId() }] });
+
+    await deletePlace(placeId(), session);
+
+    expect(mocks.query).toHaveBeenCalledWith(
+      "delete from places where id = $1 and workspace_id = $2 returning id",
+      [placeId(), session.workspaceId]
+    );
   });
 });
 
@@ -455,6 +554,10 @@ describe("time entry deletion", () => {
 
 function categoryId() {
   return "20000000-0000-4000-8000-000000000001";
+}
+
+function placeId() {
+  return "30000000-0000-4000-8000-000000000001";
 }
 
 function healthClientWithFailure(error: Error & { code?: string }) {

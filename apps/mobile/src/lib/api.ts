@@ -90,6 +90,22 @@ export type MobileCategoryResponse = {
   category: MobileBootstrap["categories"][number];
 };
 
+export type MobilePlace = MobileBootstrap["places"][number];
+
+export type MobilePlaceResponse = {
+  ok: true;
+  place: MobilePlace;
+};
+
+export type PlaceMutationInput = {
+  name?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  radiusMeters?: number;
+  priority?: number;
+  defaultCategoryId?: string | null;
+};
+
 export type TimeEntryUpdatePatch = {
   categoryId?: string | null;
   description?: string | null;
@@ -448,6 +464,60 @@ export async function archiveCategory(id: string) {
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to delete category"));
+  return readJsonResponse(response);
+}
+
+export async function createPlace(input: { name: string } & PlaceMutationInput) {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/places`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify({
+      ...input,
+      autoStart: false
+    })
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to create place"));
+  return readJsonResponse<MobilePlaceResponse>(response);
+}
+
+export async function updatePlace(id: string, input: PlaceMutationInput) {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/places`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify({
+      id,
+      ...input,
+      autoStart: false
+    })
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to update place"));
+  return readJsonResponse<MobilePlaceResponse>(response);
+}
+
+export async function deletePlace(id: string) {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/places?id=${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: await authHeaders()
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to delete place"));
   return readJsonResponse(response);
 }
 

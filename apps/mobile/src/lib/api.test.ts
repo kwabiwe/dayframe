@@ -33,7 +33,9 @@ const {
   AuthRequiredError,
   clearFailedQueuedEvents,
   createCategory,
+  createPlace,
   deleteTimeEntry,
+  deletePlace,
   enqueueEvent,
   fetchBootstrap,
   getQueueDiagnostics,
@@ -46,6 +48,7 @@ const {
   signup,
   syncQueue,
   updateCategory,
+  updatePlace,
   updateTimeEntry,
   archiveCategory
 } = await import("./api");
@@ -541,6 +544,76 @@ describe("mobile API client", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "https://dayframe.test/api/categories?id=20000000-0000-4000-8000-000000000001",
+      expect.objectContaining({ method: "DELETE" })
+    );
+  });
+
+  it("creates places through the hosted API without auto-start", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true, place: { id: "place-1" } }, 201)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createPlace({
+      name: "Gym",
+      latitude: 51.5,
+      longitude: -0.12,
+      radiusMeters: 100,
+      priority: 5,
+      defaultCategoryId: "20000000-0000-4000-8000-000000000001"
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/places",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          name: "Gym",
+          latitude: 51.5,
+          longitude: -0.12,
+          radiusMeters: 100,
+          priority: 5,
+          defaultCategoryId: "20000000-0000-4000-8000-000000000001",
+          autoStart: false
+        })
+      })
+    );
+  });
+
+  it("updates places through the hosted API without project fields", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true, place: { id: "place-1" } }, 200)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await updatePlace("30000000-0000-4000-8000-000000000001", {
+      name: "Office",
+      radiusMeters: 150,
+      defaultCategoryId: null
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/places",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          id: "30000000-0000-4000-8000-000000000001",
+          name: "Office",
+          radiusMeters: 150,
+          defaultCategoryId: null,
+          autoStart: false
+        })
+      })
+    );
+  });
+
+  it("deletes places through the hosted API", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await deletePlace("30000000-0000-4000-8000-000000000001");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/places?id=30000000-0000-4000-8000-000000000001",
       expect.objectContaining({ method: "DELETE" })
     );
   });
