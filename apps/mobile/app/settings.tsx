@@ -745,7 +745,7 @@ export default function SettingsScreen() {
             <Text style={styles.sectionTitle}>Location</Text>
             <Text style={styles.muted}>
               Dayframe can recognise visits to saved places. Visits are reviewed before becoming time entries.
-              This does not start timers automatically.
+              Place visits do not start live timers.
             </Text>
             <Text style={styles.statusText}>{locationStatus}</Text>
             {locationDiagnostics ? (
@@ -757,6 +757,20 @@ export default function SettingsScreen() {
                 <Text style={styles.muted}>
                   Monitors active: {locationDiagnostics.activeMonitorCount}
                 </Text>
+                {locationDiagnostics.lastGeofenceEvent ? (
+                  <Text style={styles.muted}>
+                    Last geofence: {formatGeofenceTransition(locationDiagnostics.lastGeofenceEvent.transition)}{" "}
+                    {locationDiagnostics.lastGeofenceEvent.placeName} ·{" "}
+                    {formatQueueTime(locationDiagnostics.lastGeofenceEvent.occurredAt)}
+                  </Text>
+                ) : null}
+                {locationDiagnostics.lastQueuedVisitCandidate ? (
+                  <Text style={styles.muted}>
+                    Last candidate: {locationDiagnostics.lastQueuedVisitCandidate.placeName} ·{" "}
+                    {formatDurationMinutes(locationDiagnostics.lastQueuedVisitCandidate.durationSeconds)} ·{" "}
+                    {formatQueueTime(locationDiagnostics.lastQueuedVisitCandidate.queuedAt)}
+                  </Text>
+                ) : null}
                 {locationDiagnostics.lastStatus ? (
                   <Text style={styles.muted}>{locationDiagnostics.lastStatus}</Text>
                 ) : null}
@@ -896,6 +910,15 @@ function formatPermissionStatus(value: LocationVisitDiagnostics["foregroundPermi
     case "unknown":
       return "Unknown";
   }
+}
+
+function formatGeofenceTransition(value: NonNullable<LocationVisitDiagnostics["lastGeofenceEvent"]>["transition"]) {
+  return value === "enter" ? "Entered" : "Exited";
+}
+
+function formatDurationMinutes(seconds: number) {
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  return `${minutes} min`;
 }
 
 const sourceLabels: Record<string, string> = {

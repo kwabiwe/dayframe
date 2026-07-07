@@ -121,9 +121,16 @@ describe("mobile geofence visit candidates", () => {
     const result = await recordGeofenceTransition("exit", region, new Date("2026-07-06T08:02:00.000Z"));
 
     const queue = await readQueue();
+    const diagnostics = await getLocationVisitDiagnostics();
 
     expect(result).toEqual(expect.objectContaining({ status: "below_dwell_threshold", queued: false }));
     expect(queue.some((item) => item.type === "geofence_exit")).toBe(false);
+    expect(diagnostics.lastGeofenceEvent).toEqual({
+      transition: "exit",
+      placeName: "Gym",
+      occurredAt: "2026-07-06T08:02:00.000Z"
+    });
+    expect(diagnostics.lastQueuedVisitCandidate).toBeUndefined();
     expect(LOCATION_VISIT_DWELL_THRESHOLD_MINUTES).toBe(5);
   });
 
@@ -184,6 +191,18 @@ describe("mobile geofence visit candidates", () => {
         activeMonitorCount: 1,
         lastStatus: "Queued Gym visit for review.",
         lastPlaceName: "Gym",
+        lastGeofenceEvent: {
+          transition: "exit",
+          placeName: "Gym",
+          occurredAt: "2026-07-06T12:08:00.000Z"
+        },
+        lastQueuedVisitCandidate: {
+          placeName: "Gym",
+          startedAt: "2026-07-06T12:00:00.000Z",
+          stoppedAt: "2026-07-06T12:08:00.000Z",
+          queuedAt: "2026-07-06T12:08:00.000Z",
+          durationSeconds: 480
+        },
         lastVisitQueuedAt: "2026-07-06T12:08:00.000Z"
       })
     );

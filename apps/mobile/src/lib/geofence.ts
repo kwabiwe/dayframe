@@ -25,6 +25,18 @@ export type LocationVisitDiagnostics = {
   lastStatus?: string;
   lastPlaceName?: string;
   lastEventAt?: string;
+  lastGeofenceEvent?: {
+    transition: GeofenceTransition;
+    placeName: string;
+    occurredAt: string;
+  };
+  lastQueuedVisitCandidate?: {
+    placeName: string;
+    startedAt: string;
+    stoppedAt: string;
+    queuedAt: string;
+    durationSeconds: number;
+  };
   lastMonitorRefreshAt?: string;
   lastVisitQueuedAt?: string;
 };
@@ -241,6 +253,8 @@ export async function getLocationVisitDiagnostics(): Promise<LocationVisitDiagno
     lastStatus: stored.lastStatus,
     lastPlaceName: stored.lastPlaceName,
     lastEventAt: stored.lastEventAt,
+    lastGeofenceEvent: stored.lastGeofenceEvent,
+    lastQueuedVisitCandidate: stored.lastQueuedVisitCandidate,
     lastMonitorRefreshAt: stored.lastMonitorRefreshAt,
     lastVisitQueuedAt: stored.lastVisitQueuedAt
   };
@@ -252,7 +266,12 @@ async function recordPlaceEnter(place: MonitoredPlace, region: DayframeRegion, o
     await updateLocationDiagnostics({
       lastStatus: `Already tracking a visit to ${place.name}.`,
       lastPlaceName: place.name,
-      lastEventAt: occurredAt.toISOString()
+      lastEventAt: occurredAt.toISOString(),
+      lastGeofenceEvent: {
+        transition: "enter",
+        placeName: place.name,
+        occurredAt: occurredAt.toISOString()
+      }
     });
     return { status: "duplicate_enter" as const, queued: false };
   }
@@ -290,7 +309,12 @@ async function recordPlaceEnter(place: MonitoredPlace, region: DayframeRegion, o
   await updateLocationDiagnostics({
     lastStatus: `Entered ${place.name}. Waiting for exit before suggesting a visit.`,
     lastPlaceName: place.name,
-    lastEventAt: occurredAt.toISOString()
+    lastEventAt: occurredAt.toISOString(),
+    lastGeofenceEvent: {
+      transition: "enter",
+      placeName: place.name,
+      occurredAt: occurredAt.toISOString()
+    }
   });
 
   return { status: "entered" as const, queued: true };
@@ -303,7 +327,12 @@ async function recordPlaceExit(place: MonitoredPlace, region: DayframeRegion, oc
     await updateLocationDiagnostics({
       lastStatus: `Left ${place.name}, but no matching entry was recorded.`,
       lastPlaceName: place.name,
-      lastEventAt: occurredAt.toISOString()
+      lastEventAt: occurredAt.toISOString(),
+      lastGeofenceEvent: {
+        transition: "exit",
+        placeName: place.name,
+        occurredAt: occurredAt.toISOString()
+      }
     });
     return { status: "missing_enter" as const, queued: false };
   }
@@ -318,7 +347,12 @@ async function recordPlaceExit(place: MonitoredPlace, region: DayframeRegion, oc
     await updateLocationDiagnostics({
       lastStatus: `Ignored ${place.name} visit because the timestamps were invalid.`,
       lastPlaceName: place.name,
-      lastEventAt: stoppedAt.toISOString()
+      lastEventAt: stoppedAt.toISOString(),
+      lastGeofenceEvent: {
+        transition: "exit",
+        placeName: place.name,
+        occurredAt: stoppedAt.toISOString()
+      }
     });
     return { status: "invalid_duration" as const, queued: false };
   }
@@ -328,7 +362,12 @@ async function recordPlaceExit(place: MonitoredPlace, region: DayframeRegion, oc
     await updateLocationDiagnostics({
       lastStatus: `Ignored short ${place.name} visit under ${LOCATION_VISIT_DWELL_THRESHOLD_MINUTES} minutes.`,
       lastPlaceName: place.name,
-      lastEventAt: stoppedAt.toISOString()
+      lastEventAt: stoppedAt.toISOString(),
+      lastGeofenceEvent: {
+        transition: "exit",
+        placeName: place.name,
+        occurredAt: stoppedAt.toISOString()
+      }
     });
     return { status: "below_dwell_threshold" as const, queued: false, durationSeconds };
   }
@@ -339,7 +378,12 @@ async function recordPlaceExit(place: MonitoredPlace, region: DayframeRegion, oc
     await updateLocationDiagnostics({
       lastStatus: `Already queued the ${place.name} visit.`,
       lastPlaceName: place.name,
-      lastEventAt: stoppedAt.toISOString()
+      lastEventAt: stoppedAt.toISOString(),
+      lastGeofenceEvent: {
+        transition: "exit",
+        placeName: place.name,
+        occurredAt: stoppedAt.toISOString()
+      }
     });
     return { status: "duplicate_visit" as const, queued: false, durationSeconds };
   }
@@ -380,6 +424,18 @@ async function recordPlaceExit(place: MonitoredPlace, region: DayframeRegion, oc
     lastStatus: `Queued ${place.name} visit for review.`,
     lastPlaceName: place.name,
     lastEventAt: stoppedAt.toISOString(),
+    lastGeofenceEvent: {
+      transition: "exit",
+      placeName: place.name,
+      occurredAt: stoppedAt.toISOString()
+    },
+    lastQueuedVisitCandidate: {
+      placeName: place.name,
+      startedAt: startedAt.toISOString(),
+      stoppedAt: stoppedAt.toISOString(),
+      queuedAt: stoppedAt.toISOString(),
+      durationSeconds
+    },
     lastVisitQueuedAt: stoppedAt.toISOString()
   });
 
