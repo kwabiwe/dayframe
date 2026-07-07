@@ -48,6 +48,7 @@ type MonitoredPlace = {
   priority: number;
   defaultCategoryId?: string | null;
   defaultCategoryName?: string | null;
+  defaultActivityDescription?: string | null;
 };
 
 type OpenVisit = {
@@ -58,6 +59,7 @@ type OpenVisit = {
   source: "geofence_specific" | "geofence_broad";
   defaultCategoryId?: string | null;
   defaultCategoryName?: string | null;
+  defaultActivityDescription?: string | null;
 };
 
 type GeofenceTransition = "enter" | "exit";
@@ -137,6 +139,7 @@ export async function startGeofences(
     priority?: number;
     defaultCategoryId?: string | null;
     defaultCategoryName?: string | null;
+    defaultActivityDescription?: string | null;
   }>
 ) {
   const monitorablePlaces = places
@@ -284,7 +287,8 @@ async function recordPlaceEnter(place: MonitoredPlace, region: DayframeRegion, o
     radiusMeters: region.radius || place.radiusMeters,
     source,
     defaultCategoryId: place.defaultCategoryId,
-    defaultCategoryName: place.defaultCategoryName
+    defaultCategoryName: place.defaultCategoryName,
+    defaultActivityDescription: place.defaultActivityDescription
   };
   await writeOpenVisits(openVisits);
   await enqueueEvent({
@@ -389,6 +393,9 @@ async function recordPlaceExit(place: MonitoredPlace, region: DayframeRegion, oc
   }
 
   const source = openVisit.source ?? geofenceSource(region.radius || place.radiusMeters);
+  const defaultActivityDescription = normalizedActivityDescription(
+    place.defaultActivityDescription ?? openVisit.defaultActivityDescription
+  );
   await enqueueEvent({
     localId,
     source,
@@ -396,7 +403,7 @@ async function recordPlaceExit(place: MonitoredPlace, region: DayframeRegion, oc
     occurredAt: stoppedAt,
     placeId: place.id,
     categoryId: place.defaultCategoryId ?? openVisit.defaultCategoryId ?? undefined,
-    description: `Visit to ${place.name}`,
+    description: defaultActivityDescription ?? place.name,
     rawPayload: {
       provider: "expo_location",
       evidenceKind: "known_place_visit",
@@ -416,7 +423,8 @@ async function recordPlaceExit(place: MonitoredPlace, region: DayframeRegion, oc
       transition: "visit",
       isBroad: source === "geofence_broad",
       defaultCategoryId: place.defaultCategoryId ?? openVisit.defaultCategoryId ?? null,
-      defaultCategoryName: place.defaultCategoryName ?? openVisit.defaultCategoryName ?? null
+      defaultCategoryName: place.defaultCategoryName ?? openVisit.defaultCategoryName ?? null,
+      defaultActivityDescription
     }
   });
   await writeSeenVisitIds([localId, ...seenVisitIds.filter((id) => id !== localId)].slice(0, MAX_SEEN_VISIT_IDS));
@@ -449,6 +457,7 @@ function monitoredPlaceFromInput(place: {
   priority?: number;
   defaultCategoryId?: string | null;
   defaultCategoryName?: string | null;
+  defaultActivityDescription?: string | null;
 }): MonitoredPlace {
   return {
     id: place.id,
@@ -456,7 +465,8 @@ function monitoredPlaceFromInput(place: {
     radiusMeters: place.radiusMeters,
     priority: place.priority ?? 0,
     defaultCategoryId: place.defaultCategoryId,
-    defaultCategoryName: place.defaultCategoryName
+    defaultCategoryName: place.defaultCategoryName,
+    defaultActivityDescription: normalizedActivityDescription(place.defaultActivityDescription)
   };
 }
 
@@ -467,6 +477,11 @@ async function stopGeofencesIfStarted() {
 
 function geofenceSource(radiusMeters: number): "geofence_specific" | "geofence_broad" {
   return radiusMeters > 250 ? "geofence_broad" : "geofence_specific";
+}
+
+function normalizedActivityDescription(value?: string | null) {
+  const description = value?.trim();
+  return description || null;
 }
 
 function geofenceEvidenceLocalId(transition: GeofenceTransition, placeId: string, occurredAt: Date) {

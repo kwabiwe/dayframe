@@ -13,7 +13,7 @@ export default async function PlacesPage() {
     <>
       <PageHeader
         title="Places"
-        description="Create known places, tune radius and priority, and set default category mappings for suggestions."
+        description="Create known places, tune radius and priority, and set default category and activity suggestions."
       />
       <div className="px-5 py-6 md:px-8">
         <EntityForms

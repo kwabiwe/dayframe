@@ -115,10 +115,25 @@ describe("mobile API client", () => {
 
   it("requests bootstrap data for a selected date", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
-    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ entries: [] })));
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({
+      entries: [],
+      places: [
+        {
+          id: "30000000-0000-4000-8000-000000000001",
+          name: "Kids' school",
+          latitude: 51.5,
+          longitude: -0.12,
+          radiusMeters: 100,
+          priority: 5,
+          defaultProjectId: null,
+          defaultCategoryId: "20000000-0000-4000-8000-000000000001",
+          defaultActivityDescription: "School drop-off/pickup"
+        }
+      ]
+    })));
     vi.stubGlobal("fetch", fetchMock);
 
-    await fetchBootstrap({ date: "2026-07-06" });
+    const bootstrap = await fetchBootstrap({ date: "2026-07-06" });
 
     expect(fetchMock).toHaveBeenCalledWith(
       "https://dayframe.test/api/bootstrap?date=2026-07-06",
@@ -126,6 +141,7 @@ describe("mobile API client", () => {
         headers: { Authorization: "Bearer session-token" }
       })
     );
+    expect(bootstrap.places[0].defaultActivityDescription).toBe("School drop-off/pickup");
   });
 
   it("migrates old queued items without losing their event fields", async () => {
@@ -569,7 +585,8 @@ describe("mobile API client", () => {
       priority: 5,
       defaultProjectId: null,
       defaultCategoryId: "20000000-0000-4000-8000-000000000001",
-      defaultCategoryName: "Fitness"
+      defaultCategoryName: "Fitness",
+      defaultActivityDescription: "School drop-off/pickup"
     };
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ ok: true }, 201))
@@ -582,7 +599,8 @@ describe("mobile API client", () => {
       longitude: -0.12,
       radiusMeters: 100,
       priority: 5,
-      defaultCategoryId: "20000000-0000-4000-8000-000000000001"
+      defaultCategoryId: "20000000-0000-4000-8000-000000000001",
+      defaultActivityDescription: " School drop-off/pickup "
     });
 
     expect(result.place).toEqual(savedPlace);
@@ -604,6 +622,7 @@ describe("mobile API client", () => {
             radiusMeters: 100,
             priority: 5,
             categoryId: "20000000-0000-4000-8000-000000000001",
+            defaultActivityDescription: "School drop-off/pickup",
             autoStart: false
           }
         })
@@ -626,7 +645,8 @@ describe("mobile API client", () => {
     await updatePlace("30000000-0000-4000-8000-000000000001", {
       name: "Office",
       radiusMeters: 150,
-      defaultCategoryId: null
+      defaultCategoryId: null,
+      defaultActivityDescription: "Office work"
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -638,6 +658,7 @@ describe("mobile API client", () => {
           name: "Office",
           radiusMeters: 150,
           defaultCategoryId: null,
+          defaultActivityDescription: "Office work",
           autoStart: false
         })
       })

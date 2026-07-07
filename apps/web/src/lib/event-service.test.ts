@@ -168,6 +168,7 @@ describe("place persistence", () => {
         priority: 5,
         defaultProjectId: null,
         defaultCategoryId: categoryId(),
+        defaultActivityDescription: "Workout",
         autoStart: false
       }]
     });
@@ -180,6 +181,7 @@ describe("place persistence", () => {
         radiusMeters: 100,
         priority: 5,
         defaultCategoryId: categoryId(),
+        defaultActivityDescription: " Workout ",
         autoStart: false
       },
       session
@@ -196,6 +198,7 @@ describe("place persistence", () => {
         100,
         5,
         categoryId(),
+        "Workout",
         false
       ]
     );
@@ -203,10 +206,19 @@ describe("place persistence", () => {
 
   it("updates only the supplied mobile place fields", async () => {
     mocks.query.mockResolvedValueOnce({
-      rows: [{ id: placeId(), name: "Office", radiusMeters: 150 }]
+      rows: [{ id: placeId(), name: "Office", radiusMeters: 150, defaultActivityDescription: null }]
     });
 
-    await updatePlace(placeId(), { name: "Office", radiusMeters: 150, defaultCategoryId: null }, session);
+    await updatePlace(
+      placeId(),
+      {
+        name: "Office",
+        radiusMeters: 150,
+        defaultCategoryId: null,
+        defaultActivityDescription: null
+      },
+      session
+    );
 
     expect(mocks.query).toHaveBeenCalledWith(
       expect.stringContaining("where id = $1 and workspace_id = $2"),
@@ -223,6 +235,8 @@ describe("place persistence", () => {
         150,
         false,
         5,
+        true,
+        null,
         true,
         null,
         false,

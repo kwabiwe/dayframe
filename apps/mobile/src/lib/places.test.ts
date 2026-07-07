@@ -14,7 +14,8 @@ describe("mobile place helpers", () => {
         latitude: "51.5074",
         longitude: "-0.1278",
         radiusMeters: "100.4",
-        defaultCategoryId: "20000000-0000-4000-8000-000000000001"
+        defaultCategoryId: "20000000-0000-4000-8000-000000000001",
+        defaultActivityDescription: "  School drop-off/pickup  "
       })
     ).toEqual({
       ok: true,
@@ -23,7 +24,8 @@ describe("mobile place helpers", () => {
         latitude: 51.5074,
         longitude: -0.1278,
         radiusMeters: 100,
-        defaultCategoryId: "20000000-0000-4000-8000-000000000001"
+        defaultCategoryId: "20000000-0000-4000-8000-000000000001",
+        defaultActivityDescription: "School drop-off/pickup"
       }
     });
   });

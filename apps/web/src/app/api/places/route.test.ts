@@ -49,6 +49,7 @@ describe("/api/places", () => {
 
     expect(response.status).toBe(200);
     expect(payload.places).toHaveLength(1);
+    expect(payload.places[0].defaultActivityDescription).toBe("School drop-off/pickup");
     expect(mocks.getBootstrapData).toHaveBeenCalledWith(session);
   });
 
@@ -59,7 +60,8 @@ describe("/api/places", () => {
         latitude: 51.5,
         longitude: -0.12,
         radiusMeters: 100,
-        defaultCategoryId: categoryId()
+        defaultCategoryId: categoryId(),
+        defaultActivityDescription: "School drop-off/pickup"
       })
     );
 
@@ -72,6 +74,7 @@ describe("/api/places", () => {
         radiusMeters: 100,
         priority: 5,
         defaultCategoryId: categoryId(),
+        defaultActivityDescription: "School drop-off/pickup",
         autoStart: false
       },
       session
@@ -84,7 +87,8 @@ describe("/api/places", () => {
         id: placeId(),
         name: "Gym",
         radiusMeters: 150,
-        defaultCategoryId: null
+        defaultCategoryId: null,
+        defaultActivityDescription: null
       })
     );
 
@@ -96,6 +100,7 @@ describe("/api/places", () => {
         name: "Gym",
         radiusMeters: 150,
         defaultCategoryId: null,
+        defaultActivityDescription: null,
         autoStart: false
       },
       session
@@ -130,6 +135,7 @@ function placeRow() {
     defaultProjectName: null,
     defaultCategoryId: categoryId(),
     defaultCategoryName: "Health",
+    defaultActivityDescription: "School drop-off/pickup",
     autoStart: false
   };
 }

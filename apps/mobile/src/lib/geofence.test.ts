@@ -65,6 +65,7 @@ const place = {
   defaultProjectId: null,
   defaultCategoryId: "20000000-0000-4000-8000-000000000004",
   defaultCategoryName: "Fitness",
+  defaultActivityDescription: "Workout",
   autoStart: false
 };
 
@@ -100,7 +101,7 @@ describe("mobile geofence visit candidates", () => {
         type: "geofence_exit",
         placeId: place.id,
         categoryId: place.defaultCategoryId,
-        description: "Visit to Gym"
+        description: "Workout"
       })
     );
     expect(visit?.rawPayload).toMatchObject({
@@ -145,7 +146,23 @@ describe("mobile geofence visit candidates", () => {
     expect(visit?.categoryId).toBe(place.defaultCategoryId);
     expect(visit?.rawPayload).toMatchObject({
       defaultCategoryId: place.defaultCategoryId,
-      defaultCategoryName: place.defaultCategoryName
+      defaultCategoryName: place.defaultCategoryName,
+      defaultActivityDescription: "Workout"
+    });
+  });
+
+  it("falls back to the place name when no default activity description is set", async () => {
+    const fallbackPlace = { ...place, defaultActivityDescription: null };
+    await startGeofences([fallbackPlace]);
+    await recordGeofenceTransition("enter", region, new Date("2026-07-06T09:30:00.000Z"));
+    await recordGeofenceTransition("exit", region, new Date("2026-07-06T09:40:00.000Z"));
+
+    const queue = await readQueue();
+    const visit = queue.find((item) => item.type === "geofence_exit");
+
+    expect(visit?.description).toBe("Gym");
+    expect(visit?.rawPayload).toMatchObject({
+      defaultActivityDescription: null
     });
   });
 

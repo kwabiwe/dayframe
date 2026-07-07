@@ -49,6 +49,7 @@ export type PlaceRow = {
   defaultProjectName: string | null;
   defaultCategoryId: string | null;
   defaultCategoryName: string | null;
+  defaultActivityDescription: string | null;
   autoStart: boolean;
 };
 
@@ -272,9 +273,10 @@ export async function getNormalizationContext(
       name: place.name,
       radiusMeters: place.radiusMeters,
       priority: place.priority,
-      defaultProjectId: place.defaultProjectId,
-      defaultCategoryId: place.defaultCategoryId,
-      autoStart: place.autoStart
+            defaultProjectId: place.defaultProjectId,
+            defaultCategoryId: place.defaultCategoryId,
+            defaultActivityDescription: place.defaultActivityDescription,
+            autoStart: place.autoStart
     })),
     automationRules: automationRules.map<AutomationRuleSummary>((rule) => ({
       id: rule.id,
@@ -378,26 +380,39 @@ async function getTags(session: RequestSession) {
 }
 
 async function getPlaces(session: RequestSession) {
-  const result = await query<PlaceRow>(
-    `select pl.id,
-            pl.name,
-            pl.latitude,
-            pl.longitude,
-            pl.radius_meters as "radiusMeters",
-            pl.priority,
-            pl.default_project_id as "defaultProjectId",
-            p.name as "defaultProjectName",
-            pl.default_category_id as "defaultCategoryId",
-            c.name as "defaultCategoryName",
-            pl.auto_start as "autoStart"
-     from places pl
-     left join projects p on p.id = pl.default_project_id
-     left join categories c on c.id = pl.default_category_id
-     where pl.workspace_id = $1
-     order by pl.priority desc, pl.name`,
-    [session.workspaceId]
-  );
-  return result.rows;
+  try {
+    const result = await query<PlaceRow>(
+      `select pl.id,
+              pl.name,
+              pl.latitude,
+              pl.longitude,
+              pl.radius_meters as "radiusMeters",
+              pl.priority,
+              pl.default_project_id as "defaultProjectId",
+              p.name as "defaultProjectName",
+              pl.default_category_id as "defaultCategoryId",
+              c.name as "defaultCategoryName",
+              pl.default_activity_description as "defaultActivityDescription",
+              pl.auto_start as "autoStart"
+       from places pl
+       left join projects p on p.id = pl.default_project_id
+       left join categories c on c.id = pl.default_category_id
+       where pl.workspace_id = $1
+       order by pl.priority desc, pl.name`,
+      [session.workspaceId]
+    );
+    return result.rows;
+  } catch (error) {
+    if (isUndefinedColumnError(error, "default_activity_description")) {
+      throw missingRequiredColumnError(
+        "places",
+        "default_activity_description",
+        "supabase/migrations/202607070002_place_default_activity_description.sql",
+        error
+      );
+    }
+    throw error;
+  }
 }
 
 async function getAutomationRules(session: RequestSession) {

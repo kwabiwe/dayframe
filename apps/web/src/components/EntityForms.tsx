@@ -1,9 +1,9 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { DAYFRAME_PALETTE, paletteColorFor, paletteKeyFor } from "@dayframe/shared";
-import { Plus } from "lucide-react";
+import { Pencil, Plus, Save } from "lucide-react";
 import type {
   AutomationRuleRow,
   CategoryRow,
@@ -26,49 +26,157 @@ export function EntityForms({
   automationRules: AutomationRuleRow[];
   mode: "places" | "automation";
 }) {
+  if (mode === "places") {
+    return <PlacesManager categories={categories} places={places} />;
+  }
+
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
       <div className="space-y-5">
-        {mode === "places" ? (
-          <EntityList
-            title="Places and geofences"
-            rows={places.map((place) => ({
-              id: place.id,
-              cells: [
-                place.name,
-                `${place.radiusMeters}m`,
-                `Priority ${place.priority}`,
-                place.defaultCategoryName ?? "No default category",
-                place.autoStart ? "Auto-start" : "Review first"
-              ]
-            }))}
-          />
-        ) : null}
-        {mode === "automation" ? (
-          <EntityList
-            title="Automation rules"
-            rows={automationRules.map((rule) => ({
-              id: rule.id,
-              cells: [
-                rule.name,
-                `${rule.triggerSource} / ${rule.triggerType}`,
-                rule.placeName ?? "Any place",
-                rule.action,
-                rule.categoryName ?? "Uncategorized",
-                rule.enabled ? "Enabled" : "Disabled"
-              ]
-            }))}
-          />
-        ) : null}
+        <EntityList
+          title="Automation rules"
+          rows={automationRules.map((rule) => ({
+            id: rule.id,
+            cells: [
+              rule.name,
+              `${rule.triggerSource} / ${rule.triggerType}`,
+              rule.placeName ?? "Any place",
+              rule.action,
+              rule.categoryName ?? "Uncategorized",
+              rule.enabled ? "Enabled" : "Disabled"
+            ]
+          }))}
+        />
       </div>
       <div className="space-y-5">
-        {mode === "places" ? (
-          <CreatePlaceForm categories={categories} />
-        ) : null}
-        {mode === "automation" ? (
-          <CreateAutomationForm categories={categories} places={places} />
-        ) : null}
+        <CreateAutomationForm categories={categories} places={places} />
       </div>
+    </div>
+  );
+}
+
+function PlacesManager({
+  categories,
+  places
+}: {
+  categories: CategoryRow[];
+  places: PlaceRow[];
+}) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  function refresh() {
+    startTransition(() => router.refresh());
+  }
+
+  async function updatePlace(place: PlaceRow, formData: FormData) {
+    await fetch("/api/places", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: place.id,
+        name: formString(formData.get("name")),
+        latitude: formNullableNumber(formData.get("latitude")),
+        longitude: formNullableNumber(formData.get("longitude")),
+        radiusMeters: formNumber(formData.get("radiusMeters")),
+        priority: formNumber(formData.get("priority")),
+        defaultCategoryId: formOptionalString(formData.get("defaultCategoryId")),
+        defaultActivityDescription: formOptionalString(formData.get("defaultActivityDescription")),
+        autoStart: false
+      })
+    });
+    setEditingId(null);
+    refresh();
+  }
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <section className="industrial-panel overflow-hidden">
+        <div className="border-b border-[var(--line)] px-4 py-3">
+          <h2 className="text-lg font-semibold">Places and geofences</h2>
+        </div>
+        <div className="divide-y divide-[var(--line)]">
+          {places.map((place) =>
+            editingId === place.id ? (
+              <form
+                key={place.id}
+                action={(formData) => updatePlace(place, formData)}
+                className="grid gap-3 px-4 py-4 lg:grid-cols-2"
+              >
+                <TextInput name="name" label="Name" defaultValue={place.name} required />
+                <TextInput
+                  name="defaultActivityDescription"
+                  label="Default activity description"
+                  defaultValue={place.defaultActivityDescription ?? ""}
+                  placeholder="School drop-off/pickup"
+                />
+                <NumberInput
+                  name="latitude"
+                  label="Latitude"
+                  defaultValue={formatOptionalNumber(place.latitude)}
+                  step="0.000001"
+                />
+                <NumberInput
+                  name="longitude"
+                  label="Longitude"
+                  defaultValue={formatOptionalNumber(place.longitude)}
+                  step="0.000001"
+                />
+                <NumberInput name="radiusMeters" label="Radius" defaultValue={String(place.radiusMeters)} />
+                <NumberInput name="priority" label="Priority" defaultValue={String(place.priority)} />
+                <SelectInput
+                  name="defaultCategoryId"
+                  label="Default category"
+                  options={categories}
+                  defaultValue={place.defaultCategoryId ?? ""}
+                />
+                <div className="flex items-end gap-2">
+                  <button className="industrial-button-primary focus-ring text-sm" disabled={isPending}>
+                    <Save size={15} />
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    className="industrial-button focus-ring text-sm"
+                    onClick={() => setEditingId(null)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div
+                key={place.id}
+                className="motion-row flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between"
+              >
+                <div className="min-w-0">
+                  <h3 className="truncate text-sm font-semibold">{place.name}</h3>
+                  <p className="mt-1 text-xs text-[var(--muted)]">
+                    {place.defaultActivityDescription ?? "No default activity description"}
+                  </p>
+                  <p className="mt-1 text-xs text-[var(--muted)]">
+                    {place.defaultCategoryName ?? "No default category"} · {place.radiusMeters}m radius ·
+                    Priority {place.priority}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="industrial-button focus-ring w-fit text-sm"
+                  onClick={() => setEditingId(place.id)}
+                >
+                  <Pencil size={15} />
+                  Edit
+                </button>
+              </div>
+            )
+          )}
+          {places.length === 0 ? (
+            <p className="px-4 py-5 text-sm text-[var(--muted)]">No places yet.</p>
+          ) : null}
+        </div>
+      </section>
+      <CreatePlaceForm categories={categories} />
     </div>
   );
 }
@@ -112,10 +220,11 @@ function CreatePlaceForm({
         <NumberInput name="priority" label="Priority" defaultValue="5" />
       </div>
       <SelectInput name="categoryId" label="Default category" options={categories} />
-      <label className="flex items-center gap-2 text-sm">
-        <input name="autoStart" type="checkbox" value="true" />
-        Auto-start when rule allows
-      </label>
+      <TextInput
+        name="defaultActivityDescription"
+        label="Default activity description"
+        placeholder="School drop-off/pickup"
+      />
     </EntityForm>
   );
 }
@@ -207,11 +316,13 @@ function EntityForm({
 function TextInput({
   name,
   label,
+  defaultValue,
   placeholder,
   required = false
 }: {
   name: string;
   label: string;
+  defaultValue?: string;
   placeholder?: string;
   required?: boolean;
 }) {
@@ -221,6 +332,7 @@ function TextInput({
       <input
         className="industrial-field focus-ring"
         name={name}
+        defaultValue={defaultValue}
         placeholder={placeholder}
         required={required}
       />
@@ -275,16 +387,18 @@ function looksLikeColorValue(value: string) {
 function SelectInput({
   name,
   label,
-  options
+  options,
+  defaultValue = ""
 }: {
   name: string;
   label: string;
   options: Array<{ id: string; name: string }>;
+  defaultValue?: string;
 }) {
   return (
     <label className="block text-sm">
       <span className="industrial-field-label">{label}</span>
-      <select className="industrial-field focus-ring" name={name}>
+      <select className="industrial-field focus-ring" name={name} defaultValue={defaultValue}>
         <option value="">None</option>
         {options.map((option) => (
           <option key={option.id} value={option.id}>
@@ -294,4 +408,29 @@ function SelectInput({
       </select>
     </label>
   );
+}
+
+function formString(value: FormDataEntryValue | null) {
+  return String(value ?? "").trim();
+}
+
+function formOptionalString(value: FormDataEntryValue | null) {
+  const text = formString(value);
+  return text || null;
+}
+
+function formNullableNumber(value: FormDataEntryValue | null) {
+  const text = formString(value);
+  if (!text) return null;
+  const number = Number(text);
+  return Number.isFinite(number) ? number : null;
+}
+
+function formNumber(value: FormDataEntryValue | null) {
+  const number = formNullableNumber(value);
+  return number ?? undefined;
+}
+
+function formatOptionalNumber(value: number | null) {
+  return value == null ? "" : String(value);
 }

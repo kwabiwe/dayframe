@@ -108,6 +108,7 @@ create table if not exists places (
   priority integer not null default 5,
   default_project_id uuid references projects(id) on delete set null,
   default_category_id uuid references categories(id) on delete set null,
+  default_activity_description text,
   auto_start boolean not null default false,
   raw_location_retention_days integer not null default 7,
   created_at timestamptz not null default now()
