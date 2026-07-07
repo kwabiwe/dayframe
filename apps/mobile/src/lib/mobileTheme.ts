@@ -713,6 +713,108 @@ function createStyles(theme: MobileTheme) {
     categoryList: {
       gap: 8
     },
+    placeList: {
+      gap: 8
+    },
+    placeRow: {
+      minHeight: 62,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 12,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 9
+    },
+    placeTextStack: {
+      flex: 1,
+      gap: 3,
+      minWidth: 0
+    },
+    placeName: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 14,
+      fontWeight: "800"
+    },
+    placeMeta: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "700"
+    },
+    placeActions: {
+      flexDirection: "row",
+      gap: 4
+    },
+    placeForm: {
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 14,
+      padding: 12,
+      gap: 10
+    },
+    placeFormRow: {
+      flexDirection: "row",
+      gap: 8
+    },
+    placeFormField: {
+      flex: 1,
+      minWidth: 0,
+      gap: 5
+    },
+    coordinateInput: {
+      minHeight: 46
+    },
+    radiusInput: {
+      width: 112,
+      textAlign: "center"
+    },
+    diagnosticText: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 11,
+      lineHeight: 16
+    },
+    warningText: {
+      color: theme.danger,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "700",
+      lineHeight: 17
+    },
+    categoryChoiceScroller: {
+      gap: 8,
+      paddingRight: 4
+    },
+    categoryChoice: {
+      minHeight: 42,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surface,
+      borderRadius: 999,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 7
+    },
+    categoryChoiceSelected: {
+      borderColor: theme.accent,
+      backgroundColor: theme.surfaceMuted
+    },
+    categoryChoiceText: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "800"
+    },
+    categoryChoiceTextSelected: {
+      color: theme.accent
+    },
     categoryRow: {
       minHeight: 48,
       borderWidth: 1,

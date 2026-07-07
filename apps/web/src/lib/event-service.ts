@@ -28,6 +28,20 @@ type CategoryRowLike = {
   isPinned: boolean;
 };
 
+type PlaceRowLike = {
+  id: string;
+  name: string;
+  latitude: number | null;
+  longitude: number | null;
+  radiusMeters: number;
+  priority: number;
+  defaultProjectId: string | null;
+  defaultProjectName: string | null;
+  defaultCategoryId: string | null;
+  defaultCategoryName: string | null;
+  autoStart: boolean;
+};
+
 const CATEGORY_PINS_MIGRATION = "supabase/migrations/202607040001_category_pins_and_project_backfill.sql";
 const MOBILE_EVENT_IDEMPOTENCY_MIGRATION =
   "supabase/migrations/202607030001_mobile_event_idempotency_and_workouts.sql";
@@ -554,6 +568,159 @@ export async function archiveCategory(id: string, session: RequestSession = getD
   }
 }
 
+export async function createPlace(
+  input: {
+    name: string;
+    latitude?: number | null;
+    longitude?: number | null;
+    radiusMeters?: number | null;
+    priority?: number | null;
+    defaultCategoryId?: string | null;
+    autoStart?: boolean;
+  },
+  session: RequestSession = getDevSession()
+) {
+  const name = normalizeName(input.name, "New place");
+  const result = await query<PlaceRowLike>(
+    `with inserted as (
+       insert into places (
+          workspace_id,
+          name,
+          latitude,
+          longitude,
+          radius_meters,
+          priority,
+          default_project_id,
+          default_category_id,
+          auto_start
+       )
+       values ($1, $2, $3, $4, $5, $6, null, $7, $8)
+       returning id,
+                 name,
+                 latitude,
+                 longitude,
+                 radius_meters,
+                 priority,
+                 default_project_id,
+                 default_category_id,
+                 auto_start
+     )
+     select inserted.id,
+            inserted.name,
+            inserted.latitude,
+            inserted.longitude,
+            inserted.radius_meters as "radiusMeters",
+            inserted.priority,
+            inserted.default_project_id as "defaultProjectId",
+            p.name as "defaultProjectName",
+            inserted.default_category_id as "defaultCategoryId",
+            c.name as "defaultCategoryName",
+            inserted.auto_start as "autoStart"
+     from inserted
+     left join projects p on p.id = inserted.default_project_id
+     left join categories c on c.id = inserted.default_category_id`,
+    [
+      session.workspaceId,
+      name,
+      nullableNumber(input.latitude),
+      nullableNumber(input.longitude),
+      normalizePlaceRadius(input.radiusMeters),
+      normalizePlacePriority(input.priority),
+      nullableString(input.defaultCategoryId),
+      Boolean(input.autoStart)
+    ]
+  );
+
+  return result.rows[0];
+}
+
+export async function updatePlace(
+  id: string,
+  input: {
+    name?: string | null;
+    latitude?: number | null;
+    longitude?: number | null;
+    radiusMeters?: number | null;
+    priority?: number | null;
+    defaultCategoryId?: string | null;
+    autoStart?: boolean;
+  },
+  session: RequestSession = getDevSession()
+) {
+  const hasName = Object.prototype.hasOwnProperty.call(input, "name");
+  const hasLatitude = Object.prototype.hasOwnProperty.call(input, "latitude");
+  const hasLongitude = Object.prototype.hasOwnProperty.call(input, "longitude");
+  const hasRadius = Object.prototype.hasOwnProperty.call(input, "radiusMeters");
+  const hasPriority = Object.prototype.hasOwnProperty.call(input, "priority");
+  const hasDefaultCategory = Object.prototype.hasOwnProperty.call(input, "defaultCategoryId");
+  const hasAutoStart = Object.prototype.hasOwnProperty.call(input, "autoStart");
+
+  const result = await query<PlaceRowLike>(
+    `with updated as (
+       update places
+       set name = case when $3 then $4 else name end,
+           latitude = case when $5 then $6 else latitude end,
+           longitude = case when $7 then $8 else longitude end,
+           radius_meters = case when $9 then $10 else radius_meters end,
+           priority = case when $11 then $12 else priority end,
+           default_category_id = case when $13 then $14 else default_category_id end,
+           auto_start = case when $15 then $16 else auto_start end
+       where id = $1 and workspace_id = $2
+       returning id,
+                 name,
+                 latitude,
+                 longitude,
+                 radius_meters,
+                 priority,
+                 default_project_id,
+                 default_category_id,
+                 auto_start
+     )
+     select updated.id,
+            updated.name,
+            updated.latitude,
+            updated.longitude,
+            updated.radius_meters as "radiusMeters",
+            updated.priority,
+            updated.default_project_id as "defaultProjectId",
+            p.name as "defaultProjectName",
+            updated.default_category_id as "defaultCategoryId",
+            c.name as "defaultCategoryName",
+            updated.auto_start as "autoStart"
+     from updated
+     left join projects p on p.id = updated.default_project_id
+     left join categories c on c.id = updated.default_category_id`,
+    [
+      id,
+      session.workspaceId,
+      hasName,
+      hasName ? normalizeName(input.name, "Place") : null,
+      hasLatitude,
+      nullableNumber(input.latitude),
+      hasLongitude,
+      nullableNumber(input.longitude),
+      hasRadius,
+      normalizePlaceRadius(input.radiusMeters),
+      hasPriority,
+      normalizePlacePriority(input.priority),
+      hasDefaultCategory,
+      nullableString(input.defaultCategoryId),
+      hasAutoStart,
+      Boolean(input.autoStart)
+    ]
+  );
+
+  return result.rows[0] ?? null;
+}
+
+export async function deletePlace(id: string, session: RequestSession = getDevSession()) {
+  const result = await query<{ id: string }>(
+    "delete from places where id = $1 and workspace_id = $2 returning id",
+    [id, session.workspaceId]
+  );
+  return result.rows[0] ?? null;
+}
+
 export async function updateTimeEntry(
   id: string,
   input: {
@@ -1003,6 +1170,18 @@ function nullableString(value: unknown) {
 function normalizeName(value: unknown, fallback: string) {
   const name = typeof value === "string" ? value.trim() : "";
   return name || fallback;
+}
+
+function normalizePlaceRadius(value: unknown) {
+  const number = Number(value ?? 100);
+  if (!Number.isFinite(number)) return 100;
+  return Math.max(25, Math.min(2000, Math.round(number)));
+}
+
+function normalizePlacePriority(value: unknown) {
+  const number = Number(value ?? 5);
+  if (!Number.isFinite(number)) return 5;
+  return Math.max(0, Math.min(100, Math.round(number)));
 }
 
 function isExplicitStartEvent(type: string) {

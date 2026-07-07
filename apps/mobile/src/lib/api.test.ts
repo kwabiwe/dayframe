@@ -33,7 +33,9 @@ const {
   AuthRequiredError,
   clearFailedQueuedEvents,
   createCategory,
+  createPlace,
   deleteTimeEntry,
+  deletePlace,
   enqueueEvent,
   fetchBootstrap,
   getQueueDiagnostics,
@@ -46,6 +48,7 @@ const {
   signup,
   syncQueue,
   updateCategory,
+  updatePlace,
   updateTimeEntry,
   archiveCategory
 } = await import("./api");
@@ -545,6 +548,142 @@ describe("mobile API client", () => {
     );
   });
 
+  it("creates places through the hosted API without auto-start", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const savedPlace = {
+      id: "30000000-0000-4000-8000-000000000001",
+      name: "Gym",
+      latitude: 51.5,
+      longitude: -0.12,
+      radiusMeters: 100,
+      priority: 5,
+      defaultProjectId: null,
+      defaultCategoryId: "20000000-0000-4000-8000-000000000001",
+      defaultCategoryName: "Fitness"
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true }, 201))
+      .mockResolvedValueOnce(jsonResponse({ places: [savedPlace] }, 200));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await createPlace({
+      name: "Gym",
+      latitude: 51.5,
+      longitude: -0.12,
+      radiusMeters: 100,
+      priority: 5,
+      defaultCategoryId: "20000000-0000-4000-8000-000000000001"
+    });
+
+    expect(result.place).toEqual(savedPlace);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://dayframe.test/api/entities",
+      expect.objectContaining({
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer session-token"
+        },
+        body: JSON.stringify({
+          entity: "place",
+          values: {
+            name: "Gym",
+            latitude: 51.5,
+            longitude: -0.12,
+            radiusMeters: 100,
+            priority: 5,
+            categoryId: "20000000-0000-4000-8000-000000000001",
+            autoStart: false
+          }
+        })
+      })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://dayframe.test/api/bootstrap",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer session-token" }
+      })
+    );
+  });
+
+  it("updates places through the hosted API without project fields", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true, place: { id: "place-1" } }, 200)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await updatePlace("30000000-0000-4000-8000-000000000001", {
+      name: "Office",
+      radiusMeters: 150,
+      defaultCategoryId: null
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/places",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          id: "30000000-0000-4000-8000-000000000001",
+          name: "Office",
+          radiusMeters: 150,
+          defaultCategoryId: null,
+          autoStart: false
+        })
+      })
+    );
+  });
+
+  it("rejects place saves when the API does not return the saved place", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(jsonResponse({ ok: true }, 201))
+        .mockResolvedValueOnce(jsonResponse({ places: [] }, 200))
+    );
+
+    await expect(createPlace({ name: "Gym", latitude: 51.5, longitude: -0.12, radiusMeters: 100 })).rejects.toThrow(
+      /refreshed place list/
+    );
+  });
+
+  it("does not surface raw HTML when a place route returns a hosted 404 page", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(htmlResponse("<!DOCTYPE html><title>404: This page could not be found</title>"))
+      )
+    );
+
+    await expect(createPlace({ name: "Gym", latitude: 51.5, longitude: -0.12, radiusMeters: 100 })).rejects.toThrow(
+      "Unable to save place. The server route was not found."
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Dayframe API returned a non-JSON response.",
+      expect.objectContaining({
+        status: 200,
+        contentType: "text/html; charset=utf-8",
+        bodyPreview: expect.stringContaining("404: This page could not be found")
+      })
+    );
+  });
+
+  it("deletes places through the hosted API", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await deletePlace("30000000-0000-4000-8000-000000000001");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/places?id=30000000-0000-4000-8000-000000000001",
+      expect.objectContaining({ method: "DELETE" })
+    );
+  });
+
   it("deletes running time entries through the hosted API without queueing", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true, id: "entry-1", deleted: true }, 200)));
@@ -617,6 +756,13 @@ function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json" }
+  });
+}
+
+function htmlResponse(body: string, status = 200) {
+  return new Response(body, {
+    status,
+    headers: { "Content-Type": "text/html; charset=utf-8" }
   });
 }
 

@@ -633,6 +633,22 @@ export default function SettingsScreen() {
           </View>
 
           <View style={styles.panel}>
+            <Text style={styles.sectionTitle}>Places</Text>
+            <Text style={styles.muted}>
+              Places help Dayframe recognise where time was spent. Visits are reviewed before becoming time entries.
+            </Text>
+            <View style={styles.buttonRow}>
+              <Pressable
+                accessibilityRole="button"
+                style={pressable(styles.secondaryButton, styles.buttonPressed)}
+                onPress={() => router.push("./places")}
+              >
+                <Text style={styles.secondaryButtonText}>Manage places</Text>
+              </Pressable>
+            </View>
+          </View>
+
+          <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Device sync</Text>
             <Text style={styles.statusText}>{deviceSyncStatus}</Text>
             {lastSyncResult?.firstError ? (
