@@ -97,7 +97,6 @@ export default function SettingsScreen() {
     refreshInFlight.current = true;
     if (!options?.silent) setLoading(true);
     try {
-      await reprocessExistingHealthReviewItems();
       const [bootstrap, queued, location] = await Promise.all([
         fetchBootstrap(),
         readQueue(),
@@ -409,6 +408,8 @@ export default function SettingsScreen() {
       const workout = await importHealthKitWorkouts();
       updateHealthStatus(workout);
       await syncAndReload({ syncingMessage: "Syncing Health data..." });
+      await reprocessExistingHealthReviewItems(undefined, { force: true });
+      await load({ silent: true });
     } catch (error) {
       if (error instanceof AuthRequiredError) return;
       const message = friendlyHealthKitError(error, "sync Apple Health");
@@ -426,7 +427,7 @@ export default function SettingsScreen() {
     try {
       const saved = await setHealthImportPreference(type, enabled);
       setHealthImportPreferences(saved);
-      await reprocessExistingHealthReviewItems(saved);
+      await reprocessExistingHealthReviewItems(saved, { force: true });
       await load({ silent: true });
     } catch (error) {
       setHealthImportPreferences(current);

@@ -835,8 +835,12 @@ describe("mobile API client", () => {
         checkedCount: 3,
         confirmedCount: 2,
         ignoredCount: 0,
+        leftInReviewCount: 1,
+        skippedCount: 0,
+        failedCount: 0,
         updatedCategoryCount: 3,
-        remainingReviewCount: 1
+        remainingReviewCount: 1,
+        errorSummary: []
       }, 200))
     );
     vi.stubGlobal("fetch", fetchMock);

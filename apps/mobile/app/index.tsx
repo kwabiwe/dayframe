@@ -51,7 +51,6 @@ import {
   isOpenReviewItem,
   isReviewNeededEntry
 } from "@/lib/review";
-import { reprocessExistingHealthReviewItems } from "@/lib/health";
 
 type TimeEntry = MobileBootstrap["entries"][number];
 type AuthView = "login" | "signup";
@@ -112,7 +111,6 @@ export default function HomeScreen() {
     refreshInFlight.current = true;
     if (!options?.silent) setLoading(true);
     try {
-      await reprocessExistingHealthReviewItems();
       const bootstrap = await fetchBootstrap({ date: formatDateKey(new Date()) });
       setData(bootstrap);
       setAuthState("authenticated");

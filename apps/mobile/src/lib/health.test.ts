@@ -282,8 +282,12 @@ describe("HealthKit mapping", () => {
       checkedCount: 1,
       confirmedCount: 1,
       ignoredCount: 0,
+      leftInReviewCount: 0,
+      skippedCount: 0,
+      failedCount: 0,
       updatedCategoryCount: 1,
-      remainingReviewCount: 0
+      remainingReviewCount: 0,
+      errorSummary: []
     });
 
     await setHealthImportPreference("walking", true);
@@ -297,6 +301,24 @@ describe("HealthKit mapping", () => {
         swimming: false
       })
     );
+  });
+
+  it("keeps background Health review reprocess failures non-fatal", async () => {
+    apiMocks.reprocessHealthReviewItems.mockRejectedValueOnce(new Error("Unable to reprocess Health review items: 500"));
+
+    const result = await reprocessExistingHealthReviewItems(undefined, { force: true });
+
+    expect(result).toMatchObject({
+      ok: false,
+      failedCount: 1,
+      errorSummary: ["Unable to reprocess Health review items: 500"]
+    });
+    await expect(reprocessExistingHealthReviewItems()).resolves.toMatchObject({
+      ok: true,
+      checkedCount: 0,
+      errorSummary: ["Backoff active."]
+    });
+    expect(apiMocks.reprocessHealthReviewItems).toHaveBeenCalledTimes(1);
   });
 
   it("filters disabled workout types before queueing Health events", async () => {

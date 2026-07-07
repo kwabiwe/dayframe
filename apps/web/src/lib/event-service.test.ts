@@ -716,6 +716,118 @@ describe("health event persistence", () => {
     ]);
   });
 
+  it("keeps a failed Health review candidate open while processing valid candidates", async () => {
+    const client = reprocessClient([
+      healthWorkoutReviewRow({
+        id: "review-bad",
+        eventId: "event-bad",
+        durationSeconds: 37 * 60
+      }),
+      healthWorkoutReviewRow({
+        id: "review-good",
+        eventId: "event-good",
+        durationSeconds: 37 * 60
+      })
+    ]);
+    client.query.mockImplementation(async (statement: string, values?: unknown[]) => {
+      if (statement.includes("insert into time_entries") && (values as unknown[])?.[10] === "event-bad") {
+        throw new Error("bad candidate");
+      }
+      if (statement.includes("from review_items ri") && statement.includes("for update of ri")) {
+        return {
+          rows: [
+            healthWorkoutReviewRow({
+              id: "review-bad",
+              eventId: "event-bad",
+              durationSeconds: 37 * 60
+            }),
+            healthWorkoutReviewRow({
+              id: "review-good",
+              eventId: "event-good",
+              durationSeconds: 37 * 60
+            })
+          ]
+        };
+      }
+      if (statement.includes("from categories")) return { rows: [{ id: healthCategoryId() }] };
+      if (statement.includes("created_from_event_id = $3")) return { rows: [] };
+      if (statement.includes("started_at < $4::timestamptz")) return { rows: [] };
+      return { rows: [] };
+    });
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await reprocessHealthReviewItems({
+      preferences: {
+        sleep: true,
+        walking: true,
+        running: true,
+        cycling: true,
+        strength_training: false,
+        swimming: false,
+        other: false
+      }
+    }, session);
+
+    expect(result).toMatchObject({
+      checkedCount: 2,
+      confirmedCount: 1,
+      failedCount: 1,
+      skippedCount: 1,
+      remainingReviewCount: 1
+    });
+    expect(result.errorSummary[0]).toContain("review-bad");
+    const entryInserts = client.query.mock.calls.filter(([statement]) =>
+      String(statement).includes("insert into time_entries")
+    );
+    expect(entryInserts.map(([, values]) => (values as unknown[])[10])).toEqual([
+      "event-bad",
+      "event-good"
+    ]);
+    expect(client.query).toHaveBeenCalledWith("rollback to savepoint reprocess_health_item");
+    expect(client.query).toHaveBeenCalledWith("commit");
+  });
+
+  it("returns a structured failure when the Health category cannot be ensured", async () => {
+    const client = reprocessClient([
+      healthWorkoutReviewRow({
+        id: "review-walk",
+        eventId: "event-walk",
+        durationSeconds: 37 * 60
+      })
+    ]);
+    client.query.mockImplementation(async (statement: string) => {
+      if (statement.includes("from review_items ri") && statement.includes("for update of ri")) {
+        return { rows: [healthWorkoutReviewRow({ id: "review-walk", eventId: "event-walk" })] };
+      }
+      if (statement.includes("from categories")) throw new Error("categories unavailable");
+      return { rows: [] };
+    });
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await reprocessHealthReviewItems({
+      preferences: {
+        sleep: true,
+        walking: true,
+        running: true,
+        cycling: true,
+        strength_training: false,
+        swimming: false,
+        other: false
+      }
+    }, session);
+
+    expect(result).toMatchObject({
+      checkedCount: 0,
+      confirmedCount: 0,
+      failedCount: 1
+    });
+    expect(result.errorSummary[0]).toContain("Unable to ensure Health category");
+    expect(client.query).toHaveBeenCalledWith("rollback");
+    expect(
+      client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"))
+    ).toBeUndefined();
+  });
+
   it("stores queued Health sleep imports under the resolved session workspace when the payload has stale ids", async () => {
     const hostedSession = {
       ...session,

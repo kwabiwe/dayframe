@@ -11,7 +11,10 @@ export async function POST(request: Request) {
       typeof body === "object" && body !== null ? body : {},
       session
     );
-    return NextResponse.json({ ok: true, ...result });
+    return NextResponse.json(
+      { ok: true, ...result },
+      { status: result.failedCount > 0 ? 207 : 200 }
+    );
   } catch (error) {
     const response = authErrorResponse(error);
     if (response) return response;

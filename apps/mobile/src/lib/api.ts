@@ -149,12 +149,16 @@ export type ManualTimeEntryInput = {
 export type ReviewItemAction = "accept" | "ignore_once";
 
 export type HealthReviewReprocessResult = {
-  ok: true;
+  ok: boolean;
   checkedCount: number;
   confirmedCount: number;
   ignoredCount: number;
+  leftInReviewCount: number;
+  skippedCount: number;
+  failedCount: number;
   updatedCategoryCount: number;
   remainingReviewCount: number;
+  errorSummary: string[];
 };
 
 export type MobileAuthSession = {

@@ -55,8 +55,11 @@ export default function ReviewScreen() {
     refreshInFlight.current = true;
     if (!options?.silent) setLoading(true);
     try {
-      await reprocessExistingHealthReviewItems();
       setData(await fetchBootstrap());
+      const reprocess = await reprocessExistingHealthReviewItems(undefined, { force: true });
+      if (reprocess.confirmedCount > 0 || reprocess.ignoredCount > 0 || reprocess.updatedCategoryCount > 0) {
+        setData(await fetchBootstrap());
+      }
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         router.replace("/");

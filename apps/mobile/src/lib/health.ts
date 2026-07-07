@@ -16,7 +16,7 @@ import {
   type HealthWorkoutType,
   type SleepStage
 } from "@dayframe/shared";
-import { enqueueEvent, reprocessHealthReviewItems } from "./api";
+import { enqueueEvent, reprocessHealthReviewItems, type HealthReviewReprocessResult } from "./api";
 
 const HEALTHKIT_SLEEP_TYPE = "HKCategoryTypeIdentifierSleepAnalysis";
 const HEALTHKIT_WORKOUT_TYPE = "HKWorkoutTypeIdentifier";
@@ -28,6 +28,12 @@ const HEALTHKIT_WORKOUT_SEEN_KEY = "dayframe.healthkit.workoutSeen.v1";
 const HEALTHKIT_IMPORT_PREFERENCES_KEY = "dayframe.healthkit.importPreferences.v1";
 const HEALTHKIT_WORKOUT_PREFERENCES_KEY = "dayframe.healthkit.workoutPreferences.v1";
 const SLEEP_SESSION_GAP_MS = 90 * 60 * 1000;
+const HEALTH_REPROCESS_THROTTLE_MS = 5 * 60 * 1000;
+const HEALTH_REPROCESS_BACKOFF_MS = 10 * 60 * 1000;
+
+let healthReprocessInFlight: Promise<HealthReviewReprocessResult> | null = null;
+let lastHealthReprocessAt = 0;
+let healthReprocessBackoffUntil = 0;
 
 export const HEALTH_IMPORT_PREFERENCE_OPTIONS = SHARED_HEALTH_IMPORT_PREFERENCE_OPTIONS;
 export const HEALTH_WORKOUT_PREFERENCE_OPTIONS = HEALTH_WORKOUT_TYPE_OPTIONS;
@@ -272,8 +278,32 @@ export async function setHealthWorkoutImportPreference(type: HealthWorkoutType, 
   return getHealthWorkoutImportPreferences();
 }
 
-export async function reprocessExistingHealthReviewItems(preferences?: HealthImportPreferences) {
-  return reprocessHealthReviewItems(preferences ?? await getHealthImportPreferences());
+export async function reprocessExistingHealthReviewItems(
+  preferences?: HealthImportPreferences,
+  options: { force?: boolean } = {}
+) {
+  const now = Date.now();
+  if (healthReprocessInFlight) return healthReprocessInFlight;
+  if (!options.force && now < healthReprocessBackoffUntil) return skippedHealthReprocessResult("Backoff active.");
+  if (!options.force && now - lastHealthReprocessAt < HEALTH_REPROCESS_THROTTLE_MS) {
+    return skippedHealthReprocessResult("Recently checked.");
+  }
+
+  healthReprocessInFlight = (async () => {
+    try {
+      const result = await reprocessHealthReviewItems(preferences ?? await getHealthImportPreferences());
+      lastHealthReprocessAt = Date.now();
+      healthReprocessBackoffUntil = 0;
+      return result;
+    } catch (error) {
+      lastHealthReprocessAt = Date.now();
+      healthReprocessBackoffUntil = Date.now() + HEALTH_REPROCESS_BACKOFF_MS;
+      return failedHealthReprocessResult(error);
+    } finally {
+      healthReprocessInFlight = null;
+    }
+  })();
+  return healthReprocessInFlight;
 }
 
 export function mapHealthKitSleepSample(sample: HealthKitSleepSample): DayframeSleepSample {
@@ -535,6 +565,37 @@ function workoutImportNotes(importedCount: number, ignoredCount: number) {
     return `Ignored ${ignoredCount} disabled Apple Health ${ignoredCount === 1 ? "workout" : "workouts"}.`;
   }
   return "No new Apple Health workouts found.";
+}
+
+function skippedHealthReprocessResult(reason: string): HealthReviewReprocessResult {
+  return {
+    ok: true,
+    checkedCount: 0,
+    confirmedCount: 0,
+    ignoredCount: 0,
+    leftInReviewCount: 0,
+    skippedCount: 0,
+    failedCount: 0,
+    updatedCategoryCount: 0,
+    remainingReviewCount: 0,
+    errorSummary: reason ? [reason] : []
+  };
+}
+
+function failedHealthReprocessResult(error: unknown): HealthReviewReprocessResult {
+  const message = error instanceof Error ? error.message : "Unable to reprocess Health review items.";
+  return {
+    ok: false,
+    checkedCount: 0,
+    confirmedCount: 0,
+    ignoredCount: 0,
+    leftInReviewCount: 0,
+    skippedCount: 0,
+    failedCount: 1,
+    updatedCategoryCount: 0,
+    remainingReviewCount: 0,
+    errorSummary: [message]
+  };
 }
 
 function isAsleepStage(stage: SleepStage) {

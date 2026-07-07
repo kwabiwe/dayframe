@@ -1168,8 +1168,12 @@ export async function reprocessHealthReviewItems(
     checkedCount: 0,
     confirmedCount: 0,
     ignoredCount: 0,
+    leftInReviewCount: 0,
+    skippedCount: 0,
+    failedCount: 0,
     updatedCategoryCount: 0,
-    remainingReviewCount: 0
+    remainingReviewCount: 0,
+    errorSummary: [] as string[]
   };
 
   try {
@@ -1205,54 +1209,81 @@ export async function reprocessHealthReviewItems(
       return result;
     }
 
-    const healthCategoryId = await ensureHealthCategoryId(client, session);
+    let healthCategoryId: string | null = null;
+    try {
+      healthCategoryId = await ensureHealthCategoryId(client, session);
+    } catch (error) {
+      result.failedCount = reviewItems.rows.length;
+      result.errorSummary.push(compactErrorSummary(error, "Unable to ensure Health category"));
+      await client.query("rollback");
+      return result;
+    }
+
     for (const item of reviewItems.rows) {
       result.checkedCount += 1;
-      const rawPayload = isRecord(item.rawPayload) ? item.rawPayload : {};
-      const startedAt = timestampStringOrNull(rawPayload.startedAt) ?? item.suggestedStartedAt;
-      const stoppedAt = timestampStringOrNull(rawPayload.stoppedAt) ?? item.suggestedStoppedAt;
-      const durationSeconds = reviewDurationSeconds(rawPayload, startedAt, stoppedAt);
-      const preferenceKey = healthPreferenceKeyForReviewItem(item, rawPayload);
+      await client.query("savepoint reprocess_health_item");
+      try {
+        const rawPayload = isRecord(item.rawPayload) ? item.rawPayload : {};
+        const startedAt = timestampStringOrNull(rawPayload.startedAt) ?? item.suggestedStartedAt;
+        const stoppedAt = timestampStringOrNull(rawPayload.stoppedAt) ?? item.suggestedStoppedAt;
+        const durationSeconds = reviewDurationSeconds(rawPayload, startedAt, stoppedAt);
+        const preferenceKey = healthPreferenceKeyForReviewItem(item, rawPayload);
 
-      if (item.suggestedCategoryId !== healthCategoryId || item.eventCategoryId !== healthCategoryId) {
-        await updateHealthReviewCategory(client, item, healthCategoryId);
-        result.updatedCategoryCount += 1;
-      }
+        if (item.suggestedCategoryId !== healthCategoryId || item.eventCategoryId !== healthCategoryId) {
+          await updateHealthReviewCategory(client, item, healthCategoryId);
+          result.updatedCategoryCount += 1;
+        }
 
-      if (!preferences[preferenceKey]) {
-        await resolveReprocessedHealthReviewItem(client, item, "ignored");
-        result.ignoredCount += 1;
-        continue;
-      }
+        if (!preferences[preferenceKey]) {
+          await resolveReprocessedHealthReviewItem(client, item, "ignored");
+          result.ignoredCount += 1;
+          await client.query("release savepoint reprocess_health_item");
+          continue;
+        }
 
-      if (!isEligibleHealthReviewItemForAutoConfirm(item, rawPayload, durationSeconds, preferenceKey, startedAt, stoppedAt)) {
-        result.remainingReviewCount += 1;
-        continue;
-      }
+        if (!isEligibleHealthReviewItemForAutoConfirm(item, rawPayload, durationSeconds, preferenceKey, startedAt, stoppedAt)) {
+          result.leftInReviewCount += 1;
+          result.remainingReviewCount += 1;
+          await client.query("release savepoint reprocess_health_item");
+          continue;
+        }
 
-      if (item.eventId && await hasTimeEntryCreatedFromEvent(client, item.eventId, session)) {
+        if (item.eventId && await hasTimeEntryCreatedFromEvent(client, item.eventId, session)) {
+          await resolveReprocessedHealthReviewItem(client, item, "accepted");
+          result.confirmedCount += 1;
+          await client.query("release savepoint reprocess_health_item");
+          continue;
+        }
+
+        if (!startedAt || !stoppedAt || await hasOverlappingTimeWindow(client, session, startedAt, stoppedAt)) {
+          await updateHealthReviewNotes(
+            client,
+            item.id,
+            "This Health activity overlaps existing time and needs review before becoming confirmed time."
+          );
+          result.leftInReviewCount += 1;
+          result.remainingReviewCount += 1;
+          await client.query("release savepoint reprocess_health_item");
+          continue;
+        }
+
+        await insertConfirmedHealthTimeEntry(client, item, session, {
+          categoryId: healthCategoryId,
+          startedAt,
+          stoppedAt
+        });
         await resolveReprocessedHealthReviewItem(client, item, "accepted");
         result.confirmedCount += 1;
-        continue;
-      }
-
-      if (!startedAt || !stoppedAt || await hasOverlappingTimeWindow(client, session, startedAt, stoppedAt)) {
-        await updateHealthReviewNotes(
-          client,
-          item.id,
-          "This Health activity overlaps existing time and needs review before becoming confirmed time."
-        );
+        await client.query("release savepoint reprocess_health_item");
+      } catch (error) {
+        await client.query("rollback to savepoint reprocess_health_item");
+        await client.query("release savepoint reprocess_health_item");
+        result.failedCount += 1;
+        result.skippedCount += 1;
+        result.leftInReviewCount += 1;
         result.remainingReviewCount += 1;
-        continue;
+        addCompactError(result.errorSummary, compactErrorSummary(error, `Skipped ${item.id}`));
       }
-
-      await insertConfirmedHealthTimeEntry(client, item, session, {
-        categoryId: healthCategoryId,
-        startedAt,
-        stoppedAt
-      });
-      await resolveReprocessedHealthReviewItem(client, item, "accepted");
-      result.confirmedCount += 1;
     }
 
     await client.query("commit");
@@ -1535,6 +1566,15 @@ function reviewDurationSeconds(
   const stopped = new Date(stoppedAt).getTime();
   if (!Number.isFinite(started) || !Number.isFinite(stopped) || stopped <= started) return null;
   return Math.round((stopped - started) / 1000);
+}
+
+function compactErrorSummary(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return `${fallback}: ${message || "Unknown error"}`.replace(/\s+/g, " ").slice(0, 240);
+}
+
+function addCompactError(errors: string[], message: string) {
+  if (errors.length < 5) errors.push(message);
 }
 
 async function updateHealthReviewCategory(
