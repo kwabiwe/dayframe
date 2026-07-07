@@ -26,6 +26,7 @@ const {
   deletePlace,
   deleteTimeEntry,
   processActivityEvent,
+  reprocessHealthReviewItems,
   resolveReviewItem,
   TimeEntryNotFoundError,
   updateCategory,
@@ -568,6 +569,153 @@ describe("health event persistence", () => {
     ).toBeUndefined();
   });
 
+  it("reprocesses existing high-confidence Walk review candidates using current preferences", async () => {
+    const client = reprocessClient([
+      healthWorkoutReviewRow({
+        id: "review-walk-9",
+        eventId: "event-walk-9",
+        startedAt: "2026-07-06T06:33:00.000Z",
+        stoppedAt: "2026-07-06T06:42:00.000Z",
+        durationSeconds: 9 * 60
+      }),
+      healthWorkoutReviewRow({
+        id: "review-walk-16",
+        eventId: "event-walk-16",
+        startedAt: "2026-07-04T18:19:00.000Z",
+        stoppedAt: "2026-07-04T18:35:00.000Z",
+        durationSeconds: 16 * 60
+      }),
+      healthWorkoutReviewRow({
+        id: "review-walk-37",
+        eventId: "event-walk-37",
+        startedAt: "2026-07-04T19:09:00.000Z",
+        stoppedAt: "2026-07-04T19:46:00.000Z",
+        durationSeconds: 37 * 60
+      })
+    ]);
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await reprocessHealthReviewItems({
+      preferences: {
+        sleep: true,
+        walking: true,
+        running: true,
+        cycling: true,
+        strength_training: false,
+        swimming: false,
+        other: false
+      }
+    }, session);
+
+    expect(result).toMatchObject({
+      checkedCount: 3,
+      confirmedCount: 2,
+      remainingReviewCount: 1,
+      updatedCategoryCount: 3
+    });
+    const entryInserts = client.query.mock.calls.filter(([statement]) =>
+      String(statement).includes("insert into time_entries")
+    );
+    expect(entryInserts).toHaveLength(2);
+    expect(entryInserts.map(([, values]) => (values as unknown[])[10])).toEqual([
+      "event-walk-16",
+      "event-walk-37"
+    ]);
+    expect(entryInserts.every(([, values]) => (values as unknown[])[3] === healthCategoryId())).toBe(true);
+    expect(client.query).toHaveBeenCalledWith(
+      expect.stringContaining("set suggested_category_id = $2"),
+      ["review-walk-9", healthCategoryId()]
+    );
+    expect(
+      client.query.mock.calls.filter(([statement]) =>
+        String(statement).includes("set status = $2") &&
+        ((statement as string).includes("update review_items"))
+      ).map(([, values]) => (values as unknown[]).slice(0, 2))
+    ).toEqual([
+      ["review-walk-16", "accepted"],
+      ["review-walk-37", "accepted"]
+    ]);
+  });
+
+  it("ignores existing Walk review candidates when Walking import is disabled", async () => {
+    const client = reprocessClient([
+      healthWorkoutReviewRow({
+        id: "review-walk-disabled",
+        eventId: "event-walk-disabled",
+        durationSeconds: 37 * 60
+      })
+    ]);
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await reprocessHealthReviewItems({
+      preferences: {
+        sleep: true,
+        walking: false,
+        running: true,
+        cycling: true,
+        strength_training: false,
+        swimming: false,
+        other: false
+      }
+    }, session);
+
+    expect(result).toMatchObject({
+      checkedCount: 1,
+      confirmedCount: 0,
+      ignoredCount: 1
+    });
+    expect(
+      client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"))
+    ).toBeUndefined();
+    expect(client.query).toHaveBeenCalledWith(
+      expect.stringContaining("set status = $2"),
+      ["review-walk-disabled", "ignored"]
+    );
+  });
+
+  it("reprocesses existing eligible Sleep review candidates into confirmed Health entries", async () => {
+    const client = reprocessClient([
+      healthSleepReviewRow({
+        id: "review-sleep",
+        eventId: "event-sleep",
+        startedAt: "2026-07-06T23:55:00.000Z",
+        stoppedAt: "2026-07-07T06:27:00.000Z",
+        durationSeconds: 23520
+      })
+    ]);
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await reprocessHealthReviewItems({
+      preferences: {
+        sleep: true,
+        walking: true,
+        running: true,
+        cycling: true,
+        strength_training: false,
+        swimming: false,
+        other: false
+      }
+    }, session);
+
+    expect(result.confirmedCount).toBe(1);
+    const entryInsert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into time_entries")
+    );
+    expect(entryInsert?.[1]).toEqual([
+      session.workspaceId,
+      session.userId,
+      null,
+      healthCategoryId(),
+      null,
+      "health_sleep",
+      "high",
+      "Sleep",
+      "2026-07-06T23:55:00.000Z",
+      "2026-07-07T06:27:00.000Z",
+      "event-sleep"
+    ]);
+  });
+
   it("stores queued Health sleep imports under the resolved session workspace when the payload has stale ids", async () => {
     const hostedSession = {
       ...session,
@@ -827,6 +975,92 @@ function healthCategoryId() {
 
 function placeId() {
   return "30000000-0000-4000-8000-000000000001";
+}
+
+function reprocessClient(reviewRows: Array<Record<string, unknown>>) {
+  return {
+    query: vi.fn(async (statement: string, values?: unknown[]) => {
+      void values;
+      if (statement.includes("from review_items ri") && statement.includes("for update of ri")) {
+        return { rows: reviewRows };
+      }
+      if (statement.includes("from categories")) return { rows: [{ id: healthCategoryId() }] };
+      if (statement.includes("created_from_event_id = $3")) return { rows: [] };
+      if (statement.includes("started_at < $4::timestamptz")) return { rows: [] };
+      return { rows: [] };
+    }),
+    release: vi.fn()
+  };
+}
+
+function healthWorkoutReviewRow(overrides: {
+  id?: string;
+  eventId?: string;
+  startedAt?: string;
+  stoppedAt?: string;
+  durationSeconds?: number;
+  suggestedCategoryId?: string | null;
+  eventCategoryId?: string | null;
+  workoutType?: string;
+} = {}) {
+  const startedAt = overrides.startedAt ?? "2026-07-04T19:09:00.000Z";
+  const stoppedAt = overrides.stoppedAt ?? "2026-07-04T19:46:00.000Z";
+  return {
+    id: overrides.id ?? "review-walk",
+    eventId: overrides.eventId ?? "event-walk",
+    title: "Walk",
+    suggestedProjectId: null,
+    suggestedCategoryId: overrides.suggestedCategoryId ?? null,
+    suggestedPlaceId: null,
+    suggestedStartedAt: startedAt,
+    suggestedStoppedAt: stoppedAt,
+    confidence: "high",
+    eventSource: "health_workout",
+    eventType: "health_workout_import",
+    eventCategoryId: overrides.eventCategoryId ?? null,
+    rawPayload: {
+      provider: "healthkit",
+      externalSampleId: overrides.eventId ?? "event-walk",
+      workoutType: overrides.workoutType ?? "walking",
+      startedAt,
+      stoppedAt,
+      durationSeconds: overrides.durationSeconds ?? 37 * 60
+    }
+  };
+}
+
+function healthSleepReviewRow(overrides: {
+  id?: string;
+  eventId?: string;
+  startedAt?: string;
+  stoppedAt?: string;
+  durationSeconds?: number;
+  suggestedCategoryId?: string | null;
+  eventCategoryId?: string | null;
+} = {}) {
+  const startedAt = overrides.startedAt ?? "2026-07-06T23:55:00.000Z";
+  const stoppedAt = overrides.stoppedAt ?? "2026-07-07T06:27:00.000Z";
+  return {
+    id: overrides.id ?? "review-sleep",
+    eventId: overrides.eventId ?? "event-sleep",
+    title: "Sleep",
+    suggestedProjectId: null,
+    suggestedCategoryId: overrides.suggestedCategoryId ?? null,
+    suggestedPlaceId: null,
+    suggestedStartedAt: startedAt,
+    suggestedStoppedAt: stoppedAt,
+    confidence: "high",
+    eventSource: "health_sleep",
+    eventType: "health_sleep_import",
+    eventCategoryId: overrides.eventCategoryId ?? null,
+    rawPayload: {
+      provider: "healthkit",
+      externalSampleId: overrides.eventId ?? "event-sleep",
+      startedAt,
+      stoppedAt,
+      durationSeconds: overrides.durationSeconds ?? 23520
+    }
+  };
 }
 
 function healthClientWithFailure(error: Error & { code?: string }) {

@@ -46,6 +46,7 @@ const {
   isNetworkTimerError,
   login,
   readQueue,
+  reprocessHealthReviewItems,
   retryFailedQueuedEvents,
   saveEditedReviewItem,
   startTimer,
@@ -822,6 +823,54 @@ describe("mobile API client", () => {
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ action: "ignore_once" })
+      })
+    );
+  });
+
+  it("reprocesses existing Health review items with current preferences", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(jsonResponse({
+        ok: true,
+        checkedCount: 3,
+        confirmedCount: 2,
+        ignoredCount: 0,
+        updatedCategoryCount: 3,
+        remainingReviewCount: 1
+      }, 200))
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await reprocessHealthReviewItems({
+      sleep: true,
+      walking: true,
+      running: true,
+      cycling: true,
+      strength_training: false,
+      swimming: false,
+      other: false
+    });
+
+    expect(result.confirmedCount).toBe(2);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/review/reprocess-health",
+      expect.objectContaining({
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer session-token"
+        },
+        body: JSON.stringify({
+          preferences: {
+            sleep: true,
+            walking: true,
+            running: true,
+            cycling: true,
+            strength_training: false,
+            swimming: false,
+            other: false
+          }
+        })
       })
     );
   });

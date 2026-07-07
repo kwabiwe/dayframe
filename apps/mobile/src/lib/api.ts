@@ -4,7 +4,8 @@ import {
   ActivityEventInputSchema,
   type ActivityEventInput,
   type ActivityEventType,
-  type EventSource
+  type EventSource,
+  type HealthImportPreferences
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
 
@@ -146,6 +147,15 @@ export type ManualTimeEntryInput = {
 };
 
 export type ReviewItemAction = "accept" | "ignore_once";
+
+export type HealthReviewReprocessResult = {
+  ok: true;
+  checkedCount: number;
+  confirmedCount: number;
+  ignoredCount: number;
+  updatedCategoryCount: number;
+  remainingReviewCount: number;
+};
 
 export type MobileAuthSession = {
   token: string;
@@ -504,6 +514,25 @@ export function confirmReviewItem(id: string) {
 
 export function dismissReviewItem(id: string) {
   return resolveReviewItem(id, "ignore_once");
+}
+
+export async function reprocessHealthReviewItems(
+  preferences: HealthImportPreferences
+): Promise<HealthReviewReprocessResult> {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/review/reprocess-health`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify({ preferences })
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to reprocess Health review items"));
+  return readJsonResponse<HealthReviewReprocessResult>(response);
 }
 
 export async function saveEditedReviewItem(id: string, input: ManualTimeEntryInput) {

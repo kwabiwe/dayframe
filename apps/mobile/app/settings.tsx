@@ -51,6 +51,7 @@ import {
   HEALTH_IMPORT_PREFERENCE_OPTIONS,
   importHealthKitSleep,
   importHealthKitWorkouts,
+  reprocessExistingHealthReviewItems,
   requestHealthKitPermissions,
   setHealthImportPreference,
   type HealthImportStatus
@@ -96,6 +97,7 @@ export default function SettingsScreen() {
     refreshInFlight.current = true;
     if (!options?.silent) setLoading(true);
     try {
+      await reprocessExistingHealthReviewItems();
       const [bootstrap, queued, location] = await Promise.all([
         fetchBootstrap(),
         readQueue(),
@@ -424,6 +426,8 @@ export default function SettingsScreen() {
     try {
       const saved = await setHealthImportPreference(type, enabled);
       setHealthImportPreferences(saved);
+      await reprocessExistingHealthReviewItems(saved);
+      await load({ silent: true });
     } catch (error) {
       setHealthImportPreferences(current);
       Alert.alert("Apple Health", error instanceof Error ? error.message : "Unable to save Health preference.");

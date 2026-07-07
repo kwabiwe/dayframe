@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const asyncStore = vi.hoisted(() => new Map<string, string>());
 const apiMocks = vi.hoisted(() => ({
-  enqueueEvent: vi.fn()
+  enqueueEvent: vi.fn(),
+  reprocessHealthReviewItems: vi.fn()
 }));
 const healthkitMocks = vi.hoisted(() => ({
   isHealthDataAvailable: vi.fn(() => true),
@@ -26,7 +27,8 @@ vi.mock("@react-native-async-storage/async-storage", () => ({
 }));
 
 vi.mock("./api", () => ({
-  enqueueEvent: apiMocks.enqueueEvent
+  enqueueEvent: apiMocks.enqueueEvent,
+  reprocessHealthReviewItems: apiMocks.reprocessHealthReviewItems
 }));
 
 vi.mock("@kingstinct/react-native-healthkit", () => ({
@@ -46,6 +48,7 @@ const {
   importHealthKitWorkouts,
   mapHealthKitSleepSample,
   mapHealthKitWorkoutSample,
+  reprocessExistingHealthReviewItems,
   setHealthImportPreference
 } = await import("./health");
 
@@ -53,6 +56,7 @@ describe("HealthKit mapping", () => {
   beforeEach(() => {
     asyncStore.clear();
     apiMocks.enqueueEvent.mockReset();
+    apiMocks.reprocessHealthReviewItems.mockReset();
     healthkitMocks.queryCategorySamplesWithAnchor.mockReset();
     healthkitMocks.queryWorkoutSamplesWithAnchor.mockReset();
   });
@@ -270,6 +274,29 @@ describe("HealthKit mapping", () => {
       strength_training: true,
       swimming: false
     });
+  });
+
+  it("reprocesses existing Health review items with saved preferences", async () => {
+    apiMocks.reprocessHealthReviewItems.mockResolvedValueOnce({
+      ok: true,
+      checkedCount: 1,
+      confirmedCount: 1,
+      ignoredCount: 0,
+      updatedCategoryCount: 1,
+      remainingReviewCount: 0
+    });
+
+    await setHealthImportPreference("walking", true);
+    await reprocessExistingHealthReviewItems();
+
+    expect(apiMocks.reprocessHealthReviewItems).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sleep: true,
+        walking: true,
+        strength_training: false,
+        swimming: false
+      })
+    );
   });
 
   it("filters disabled workout types before queueing Health events", async () => {

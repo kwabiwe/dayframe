@@ -16,7 +16,7 @@ import {
   type HealthWorkoutType,
   type SleepStage
 } from "@dayframe/shared";
-import { enqueueEvent } from "./api";
+import { enqueueEvent, reprocessHealthReviewItems } from "./api";
 
 const HEALTHKIT_SLEEP_TYPE = "HKCategoryTypeIdentifierSleepAnalysis";
 const HEALTHKIT_WORKOUT_TYPE = "HKWorkoutTypeIdentifier";
@@ -270,6 +270,10 @@ export async function getHealthWorkoutImportPreferences(): Promise<HealthWorkout
 export async function setHealthWorkoutImportPreference(type: HealthWorkoutType, enabled: boolean) {
   await setHealthImportPreference(type, enabled);
   return getHealthWorkoutImportPreferences();
+}
+
+export async function reprocessExistingHealthReviewItems(preferences?: HealthImportPreferences) {
+  return reprocessHealthReviewItems(preferences ?? await getHealthImportPreferences());
 }
 
 export function mapHealthKitSleepSample(sample: HealthKitSleepSample): DayframeSleepSample {

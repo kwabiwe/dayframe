@@ -1,9 +1,16 @@
 import {
   ActivityEventInputSchema,
+  DEFAULT_HEALTH_IMPORT_PREFERENCES,
+  HEALTH_IMPORT_PREFERENCE_OPTIONS,
+  normalizeHealthWorkoutType,
   normalizePaletteKey,
   normalizeActivityEvent,
+  shouldAutoConfirmHealthSleep,
+  shouldAutoConfirmHealthWorkout,
   type ActivityEventType,
-  type ActivityEventInput
+  type ActivityEventInput,
+  type HealthImportPreferenceKey,
+  type HealthImportPreferences
 } from "@dayframe/shared";
 import {
   databaseReadinessError,
@@ -1131,6 +1138,133 @@ export async function resolveReviewItem(
   }
 }
 
+type HealthReviewReprocessInput = {
+  preferences?: Partial<HealthImportPreferences> | null;
+};
+
+type HealthReviewItemRow = {
+  id: string;
+  eventId: string | null;
+  title: string;
+  suggestedProjectId: string | null;
+  suggestedCategoryId: string | null;
+  suggestedPlaceId: string | null;
+  suggestedStartedAt: string | null;
+  suggestedStoppedAt: string | null;
+  confidence: string;
+  eventSource: string | null;
+  eventType: string | null;
+  eventCategoryId: string | null;
+  rawPayload: unknown;
+};
+
+export async function reprocessHealthReviewItems(
+  input: HealthReviewReprocessInput = {},
+  session: RequestSession = getDevSession()
+) {
+  const preferences = normalizeHealthImportPreferences(input.preferences);
+  const client = await pool.connect();
+  const result = {
+    checkedCount: 0,
+    confirmedCount: 0,
+    ignoredCount: 0,
+    updatedCategoryCount: 0,
+    remainingReviewCount: 0
+  };
+
+  try {
+    await client.query("begin");
+    const reviewItems = await client.query<HealthReviewItemRow>(
+      `select ri.id,
+              ri.event_id as "eventId",
+              ri.title,
+              ri.suggested_project_id as "suggestedProjectId",
+              ri.suggested_category_id as "suggestedCategoryId",
+              ri.suggested_place_id as "suggestedPlaceId",
+              ri.suggested_started_at as "suggestedStartedAt",
+              ri.suggested_stopped_at as "suggestedStoppedAt",
+              ri.confidence,
+              ae.source as "eventSource",
+              ae.event_type as "eventType",
+              ae.suggested_category_id as "eventCategoryId",
+              ae.raw_payload as "rawPayload"
+       from review_items ri
+       join activity_events ae on ae.id = ri.event_id
+       where ri.workspace_id = $1
+         and ri.status = 'open'
+         and ae.workspace_id = $1
+         and ae.user_id = $2
+         and ae.event_type in ('health_sleep_import', 'health_workout_import')
+       order by ri.created_at asc
+       for update of ri`,
+      [session.workspaceId, session.userId]
+    );
+
+    if (reviewItems.rows.length === 0) {
+      await client.query("commit");
+      return result;
+    }
+
+    const healthCategoryId = await ensureHealthCategoryId(client, session);
+    for (const item of reviewItems.rows) {
+      result.checkedCount += 1;
+      const rawPayload = isRecord(item.rawPayload) ? item.rawPayload : {};
+      const startedAt = timestampStringOrNull(rawPayload.startedAt) ?? item.suggestedStartedAt;
+      const stoppedAt = timestampStringOrNull(rawPayload.stoppedAt) ?? item.suggestedStoppedAt;
+      const durationSeconds = reviewDurationSeconds(rawPayload, startedAt, stoppedAt);
+      const preferenceKey = healthPreferenceKeyForReviewItem(item, rawPayload);
+
+      if (item.suggestedCategoryId !== healthCategoryId || item.eventCategoryId !== healthCategoryId) {
+        await updateHealthReviewCategory(client, item, healthCategoryId);
+        result.updatedCategoryCount += 1;
+      }
+
+      if (!preferences[preferenceKey]) {
+        await resolveReprocessedHealthReviewItem(client, item, "ignored");
+        result.ignoredCount += 1;
+        continue;
+      }
+
+      if (!isEligibleHealthReviewItemForAutoConfirm(item, rawPayload, durationSeconds, preferenceKey, startedAt, stoppedAt)) {
+        result.remainingReviewCount += 1;
+        continue;
+      }
+
+      if (item.eventId && await hasTimeEntryCreatedFromEvent(client, item.eventId, session)) {
+        await resolveReprocessedHealthReviewItem(client, item, "accepted");
+        result.confirmedCount += 1;
+        continue;
+      }
+
+      if (!startedAt || !stoppedAt || await hasOverlappingTimeWindow(client, session, startedAt, stoppedAt)) {
+        await updateHealthReviewNotes(
+          client,
+          item.id,
+          "This Health activity overlaps existing time and needs review before becoming confirmed time."
+        );
+        result.remainingReviewCount += 1;
+        continue;
+      }
+
+      await insertConfirmedHealthTimeEntry(client, item, session, {
+        categoryId: healthCategoryId,
+        startedAt,
+        stoppedAt
+      });
+      await resolveReprocessedHealthReviewItem(client, item, "accepted");
+      result.confirmedCount += 1;
+    }
+
+    await client.query("commit");
+    return result;
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function createEntity(
   entity: string,
   input: Record<string, unknown>,
@@ -1327,6 +1461,15 @@ async function hasOverlappingTimeEntry(
 ) {
   const startedAt = suggestedStartedAtForEvent(event);
   const stoppedAt = suggestedStoppedAtForEvent(event);
+  return hasOverlappingTimeWindow(client, session, startedAt, stoppedAt);
+}
+
+async function hasOverlappingTimeWindow(
+  client: pg.PoolClient,
+  session: RequestSession,
+  startedAt: string | Date | null | undefined,
+  stoppedAt: string | Date | null | undefined
+) {
   if (!startedAt || !stoppedAt) return true;
 
   const result = await client.query<{ id: string }>(
@@ -1340,6 +1483,177 @@ async function hasOverlappingTimeEntry(
     [session.workspaceId, session.userId, startedAt, stoppedAt]
   );
   return Boolean(result.rows[0]);
+}
+
+function normalizeHealthImportPreferences(input: HealthReviewReprocessInput["preferences"]) {
+  const values = isRecord(input) ? input : {};
+  return Object.fromEntries(
+    HEALTH_IMPORT_PREFERENCE_OPTIONS.map((option) => [
+      option.key,
+      typeof values[option.key] === "boolean"
+        ? Boolean(values[option.key])
+        : DEFAULT_HEALTH_IMPORT_PREFERENCES[option.key]
+    ])
+  ) as HealthImportPreferences;
+}
+
+function healthPreferenceKeyForReviewItem(
+  item: Pick<HealthReviewItemRow, "eventType">,
+  rawPayload: Record<string, unknown>
+): HealthImportPreferenceKey {
+  if (item.eventType === "health_sleep_import") return "sleep";
+  return normalizeHealthWorkoutType(rawPayload.workoutType);
+}
+
+function isEligibleHealthReviewItemForAutoConfirm(
+  item: Pick<HealthReviewItemRow, "confidence" | "eventType">,
+  rawPayload: Record<string, unknown>,
+  durationSeconds: number | null,
+  preferenceKey: HealthImportPreferenceKey,
+  startedAt: string | null,
+  stoppedAt: string | null
+) {
+  if (item.confidence !== "high") return false;
+  if (item.eventType === "health_sleep_import") {
+    return shouldAutoConfirmHealthSleep({ durationSeconds, startedAt, stoppedAt });
+  }
+  if (item.eventType === "health_workout_import") {
+    return shouldAutoConfirmHealthWorkout({ workoutType: preferenceKey, durationSeconds });
+  }
+  return false;
+}
+
+function reviewDurationSeconds(
+  rawPayload: Record<string, unknown>,
+  startedAt: string | null,
+  stoppedAt: string | null
+) {
+  const payloadDuration = wholeSecondsOrNull(rawPayload.durationSeconds);
+  if (typeof payloadDuration === "number") return payloadDuration;
+  if (!startedAt || !stoppedAt) return null;
+  const started = new Date(startedAt).getTime();
+  const stopped = new Date(stoppedAt).getTime();
+  if (!Number.isFinite(started) || !Number.isFinite(stopped) || stopped <= started) return null;
+  return Math.round((stopped - started) / 1000);
+}
+
+async function updateHealthReviewCategory(
+  client: pg.PoolClient,
+  item: Pick<HealthReviewItemRow, "id" | "eventId">,
+  healthCategoryId: string
+) {
+  await client.query(
+    `update review_items
+     set suggested_category_id = $2
+     where id = $1`,
+    [item.id, healthCategoryId]
+  );
+  if (item.eventId) {
+    await client.query(
+      `update activity_events
+       set suggested_category_id = $2
+       where id = $1`,
+      [item.eventId, healthCategoryId]
+    );
+  }
+}
+
+async function updateHealthReviewNotes(
+  client: pg.PoolClient,
+  id: string,
+  notes: string
+) {
+  await client.query(
+    `update review_items
+     set notes = $2
+     where id = $1`,
+    [id, notes]
+  );
+}
+
+async function resolveReprocessedHealthReviewItem(
+  client: pg.PoolClient,
+  item: Pick<HealthReviewItemRow, "id" | "eventId">,
+  status: "accepted" | "ignored"
+) {
+  await client.query(
+    `update review_items
+     set status = $2,
+         ignored_scope = case when $2 = 'ignored' then 'once' else null end,
+         resolved_at = now()
+     where id = $1`,
+    [item.id, status]
+  );
+  if (item.eventId) {
+    await client.query(
+      `update activity_events
+       set review_status = $2
+       where id = $1`,
+      [item.eventId, status === "accepted" ? "confirmed" : "ignored"]
+    );
+  }
+}
+
+async function hasTimeEntryCreatedFromEvent(
+  client: pg.PoolClient,
+  eventId: string,
+  session: RequestSession
+) {
+  const result = await client.query<{ id: string }>(
+    `select id
+     from time_entries
+     where workspace_id = $1
+       and user_id = $2
+       and created_from_event_id = $3
+     limit 1`,
+    [session.workspaceId, session.userId, eventId]
+  );
+  return Boolean(result.rows[0]);
+}
+
+async function insertConfirmedHealthTimeEntry(
+  client: pg.PoolClient,
+  item: Pick<
+    HealthReviewItemRow,
+    "eventId" | "eventSource" | "confidence" | "title" | "suggestedProjectId" | "suggestedPlaceId"
+  >,
+  session: RequestSession,
+  input: {
+    categoryId: string;
+    startedAt: string;
+    stoppedAt: string;
+  }
+) {
+  await client.query(
+    `insert into time_entries (
+        workspace_id,
+        user_id,
+        project_id,
+        category_id,
+        place_id,
+        source,
+        confidence,
+        review_status,
+        description,
+        started_at,
+        stopped_at,
+        created_from_event_id
+     )
+     values ($1, $2, $3, $4, $5, coalesce($6, 'manual_app'), $7, 'confirmed', $8, $9, $10, $11)`,
+    [
+      session.workspaceId,
+      session.userId,
+      item.suggestedProjectId,
+      input.categoryId,
+      item.suggestedPlaceId,
+      item.eventSource,
+      item.confidence,
+      item.title,
+      input.startedAt,
+      input.stoppedAt,
+      item.eventId
+    ]
+  );
 }
 
 function isExplicitStartEvent(type: string) {

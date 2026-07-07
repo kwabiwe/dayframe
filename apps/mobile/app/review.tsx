@@ -25,6 +25,7 @@ import {
   type MobileTimeEntry,
   type TimeEntryUpdatePatch
 } from "@/lib/api";
+import { reprocessExistingHealthReviewItems } from "@/lib/health";
 import { pressable, useMobileTheme } from "@/lib/mobileTheme";
 import {
   REVIEW_COPY,
@@ -54,6 +55,7 @@ export default function ReviewScreen() {
     refreshInFlight.current = true;
     if (!options?.silent) setLoading(true);
     try {
+      await reprocessExistingHealthReviewItems();
       setData(await fetchBootstrap());
     } catch (error) {
       if (error instanceof AuthRequiredError) {
