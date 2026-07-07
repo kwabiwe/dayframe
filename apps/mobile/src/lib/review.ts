@@ -48,7 +48,7 @@ export function buildReviewItemDraftEntry(
   const category = categories.find((candidate) => (
     candidate.id === item.suggestedCategoryId ||
     (item.categoryName ? candidate.name === item.categoryName : false)
-  ));
+  )) ?? fallbackHealthCategory(item, categories);
 
   return {
     id: item.id,
@@ -56,7 +56,7 @@ export function buildReviewItemDraftEntry(
     projectName: null,
     projectColor: null,
     clientName: null,
-    categoryId: item.suggestedCategoryId,
+    categoryId: item.suggestedCategoryId ?? category?.id ?? null,
     categoryName: item.categoryName ?? category?.name ?? null,
     categoryColor: category?.color ?? null,
     placeName: item.placeName,
@@ -110,4 +110,13 @@ function parseTime(value: string | null | undefined) {
   if (!value) return null;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function fallbackHealthCategory(item: MobileReviewItem, categories: MobileCategory[]) {
+  if (!isHealthReviewItem(item)) return undefined;
+  return categories.find((candidate) => candidate.name.trim().toLowerCase() === "health");
+}
+
+function isHealthReviewItem(item: Pick<MobileReviewItem, "eventSource" | "eventType">) {
+  return item.eventSource?.startsWith("health_") || item.eventType?.startsWith("health_") || false;
 }

@@ -336,7 +336,7 @@ export function shouldAutoConfirmHealthWorkout(input: {
     running: 10 * 60,
     strength_training: 20 * 60,
     swimming: 10 * 60,
-    walking: 10 * 60
+    walking: 5 * 60
   };
   const minimum = minimumSeconds[type];
   return Boolean(minimum && durationSeconds >= minimum);
@@ -656,7 +656,9 @@ export function normalizeActivityEvent(
   }
 
   if (event.type === "health_workout_import") {
-    const workoutType = normalizeHealthWorkoutType(event.rawPayload.workoutType);
+    const workoutType = normalizeHealthWorkoutType(
+      event.rawPayload.workoutType ?? event.rawPayload.workoutLabel ?? event.description
+    );
     const durationSeconds = typeof event.rawPayload.durationSeconds === "number"
       ? event.rawPayload.durationSeconds
       : undefined;

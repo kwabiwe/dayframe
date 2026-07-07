@@ -48,6 +48,25 @@ describe("mobile review helpers", () => {
     expect(buildReviewItemDraftEntry(reviewItem({ suggestedStoppedAt: null }), [category()], Date.now())).toBeNull();
   });
 
+  it("defaults stale Health review drafts to the Health category", () => {
+    expect(
+      buildReviewItemDraftEntry(
+        reviewItem({
+          categoryName: null,
+          suggestedCategoryId: null
+        }),
+        [{ id: "cat-health", name: "Health", color: "moss", isPinned: true }],
+        Date.now()
+      )
+    ).toEqual(
+      expect.objectContaining({
+        categoryId: "cat-health",
+        categoryName: "Health",
+        categoryColor: "moss"
+      })
+    );
+  });
+
   it("detects review-needed activity inside a report range", () => {
     const rangeStart = new Date("2026-07-07T00:00:00.000Z");
     const rangeEnd = new Date("2026-07-08T00:00:00.000Z");

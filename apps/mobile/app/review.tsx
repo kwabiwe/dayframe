@@ -43,20 +43,23 @@ type ReviewEditTarget =
 export default function ReviewScreen() {
   const { reloadThemePreference, styles, theme } = useMobileTheme();
   const [data, setData] = useState<MobileBootstrap | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<ReviewEditTarget | null>(null);
   const [editSaving, setEditSaving] = useState(false);
   const refreshInFlight = useRef(false);
+  const forcedReprocessComplete = useRef(false);
   const now = Date.now();
 
-  const load = useCallback(async (options?: { silent?: boolean }) => {
+  const load = useCallback(async (options?: { forceReprocess?: boolean; refresh?: boolean; silent?: boolean }) => {
     if (refreshInFlight.current) return;
     refreshInFlight.current = true;
-    if (!options?.silent) setLoading(true);
+    if (options?.refresh) setRefreshing(true);
     try {
       setData(await fetchBootstrap());
-      const reprocess = await reprocessExistingHealthReviewItems(undefined, { force: true });
+      const forceReprocess = options?.forceReprocess ?? !forcedReprocessComplete.current;
+      const reprocess = await reprocessExistingHealthReviewItems(undefined, { force: forceReprocess });
+      forcedReprocessComplete.current = true;
       if (reprocess.confirmedCount > 0 || reprocess.ignoredCount > 0 || reprocess.updatedCategoryCount > 0) {
         setData(await fetchBootstrap());
       }
@@ -70,12 +73,12 @@ export default function ReviewScreen() {
       }
     } finally {
       refreshInFlight.current = false;
-      if (!options?.silent) setLoading(false);
+      if (options?.refresh) setRefreshing(false);
     }
   }, []);
 
   useEffect(() => {
-    void load();
+    void load({ forceReprocess: true });
   }, [load]);
 
   useFocusEffect(
@@ -175,8 +178,8 @@ export default function ReviewScreen() {
         contentContainerStyle={styles.container}
         refreshControl={
           <RefreshControl
-            refreshing={loading}
-            onRefresh={() => load()}
+            refreshing={refreshing}
+            onRefresh={() => load({ forceReprocess: true, refresh: true })}
             tintColor={theme.accent}
             colors={[theme.accent]}
           />
@@ -288,7 +291,8 @@ function ReviewItemCard({
   theme: ReturnType<typeof useMobileTheme>["theme"];
 }) {
   const durationSeconds = reviewItemDurationSeconds(item, now);
-  const categoryColor = item.categoryName ? paletteColorFor(item.suggestedCategoryId, item.categoryName) : theme.textSecondary;
+  const categoryName = reviewItemCategoryName(item);
+  const categoryColor = reviewItemCategoryColor(item, categoryName, theme.textSecondary);
 
   return (
     <View style={styles.reviewCard}>
@@ -306,7 +310,7 @@ function ReviewItemCard({
       <View style={styles.calendarBlockTitleRow}>
         <View style={[styles.colorDot, { backgroundColor: categoryColor }]} />
         <Text style={styles.reviewMetaLine} numberOfLines={1}>
-          {item.categoryName ?? "No category"}
+          {categoryName}
           {item.placeName ? ` · ${item.placeName}` : ""}
         </Text>
       </View>
@@ -366,7 +370,11 @@ function ReviewNeededEntryCard({
   styles: ReturnType<typeof useMobileTheme>["styles"];
   theme: ReturnType<typeof useMobileTheme>["theme"];
 }) {
-  const categoryColor = paletteColorFor(entry.categoryColor ?? entry.categoryId, entry.categoryName ?? "Uncategorized");
+  const categoryName = entry.categoryName ?? (isHealthSource(entry.source) ? "Health" : "No category");
+  const categoryColor = paletteColorFor(
+    entry.categoryColor ?? (isHealthSource(entry.source) ? "moss" : entry.categoryId),
+    categoryName
+  );
 
   return (
     <View style={styles.reviewCard}>
@@ -384,7 +392,7 @@ function ReviewNeededEntryCard({
       <View style={styles.calendarBlockTitleRow}>
         <View style={[styles.colorDot, { backgroundColor: categoryColor }]} />
         <Text style={styles.reviewMetaLine} numberOfLines={1}>
-          {entry.categoryName ?? "No category"}
+          {categoryName}
           {entry.placeName ? ` · ${entry.placeName}` : ""}
         </Text>
       </View>
@@ -426,6 +434,28 @@ function formatReviewItemMeta(item: MobileReviewItem, durationSeconds: number) {
 
 function formatReviewItemSource(item: MobileReviewItem) {
   return `${formatSourceLabel(item.eventSource)} · ${formatConfidence(item.confidence)}`;
+}
+
+function reviewItemCategoryName(item: MobileReviewItem) {
+  return item.categoryName ?? (isHealthReviewItem(item) ? "Health" : "No category");
+}
+
+function reviewItemCategoryColor(item: MobileReviewItem, categoryName: string, fallbackColor: string) {
+  if (item.categoryColor || item.suggestedCategoryId || isHealthReviewItem(item)) {
+    return paletteColorFor(
+      item.categoryColor ?? (isHealthReviewItem(item) ? "moss" : item.suggestedCategoryId),
+      categoryName
+    );
+  }
+  return fallbackColor;
+}
+
+function isHealthReviewItem(item: Pick<MobileReviewItem, "eventSource" | "eventType">) {
+  return item.eventSource?.startsWith("health_") || item.eventType?.startsWith("health_") || false;
+}
+
+function isHealthSource(source: string | null | undefined) {
+  return source?.startsWith("health_") ?? false;
 }
 
 function formatReviewItemTimeWindow(item: MobileReviewItem) {

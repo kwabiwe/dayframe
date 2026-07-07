@@ -372,6 +372,23 @@ describe("HealthKit mapping", () => {
 
     expect(event.rawPayload.autoConfirm).toBe(false);
   });
+
+  it("auto-confirms five-minute walks", () => {
+    const event = healthKitWorkoutEvent(
+      mapHealthKitWorkoutSample({
+        uuid: "five-minute-walk",
+        workoutActivityType: 52,
+        startDate: "2026-07-03T08:30:00.000Z",
+        endDate: "2026-07-03T08:35:00.000Z",
+        duration: 300
+      })
+    );
+
+    expect(event.rawPayload).toMatchObject({
+      autoConfirm: true,
+      workoutType: "walking"
+    });
+  });
 });
 
 function sleepSample(

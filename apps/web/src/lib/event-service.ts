@@ -1529,11 +1529,22 @@ function normalizeHealthImportPreferences(input: HealthReviewReprocessInput["pre
 }
 
 function healthPreferenceKeyForReviewItem(
-  item: Pick<HealthReviewItemRow, "eventType">,
+  item: Pick<HealthReviewItemRow, "eventType" | "title">,
   rawPayload: Record<string, unknown>
 ): HealthImportPreferenceKey {
   if (item.eventType === "health_sleep_import") return "sleep";
-  return normalizeHealthWorkoutType(rawPayload.workoutType);
+  const hints = [
+    rawPayload.workoutType,
+    rawPayload.workoutLabel,
+    rawPayload.activityType,
+    rawPayload.type,
+    item.title
+  ];
+  for (const hint of hints) {
+    const workoutType = normalizeHealthWorkoutType(hint);
+    if (workoutType !== "other") return workoutType;
+  }
+  return "other";
 }
 
 function isEligibleHealthReviewItemForAutoConfirm(

@@ -62,6 +62,7 @@ export type MobileReviewItem = {
   eventSource: string | null;
   eventType: string | null;
   categoryName: string | null;
+  categoryColor?: string | null;
   placeName: string | null;
   suggestedCategoryId: string | null;
   suggestedPlaceId: string | null;
