@@ -39,6 +39,7 @@ type PlaceRowLike = {
   defaultProjectName: string | null;
   defaultCategoryId: string | null;
   defaultCategoryName: string | null;
+  defaultActivityDescription: string | null;
   autoStart: boolean;
 };
 
@@ -48,9 +49,20 @@ const MOBILE_EVENT_IDEMPOTENCY_MIGRATION =
 const HEALTH_SLEEP_SCHEMA_MIGRATION =
   "supabase/migrations/202607070001_health_sleep_segments.sql";
 const HEALTH_RLS_MIGRATION = "supabase/migrations/202607020001_dayframe_rls.sql";
+const PLACE_DEFAULT_ACTIVITY_DESCRIPTION_MIGRATION =
+  "supabase/migrations/202607070002_place_default_activity_description.sql";
 
 function missingCategoryPinColumnError(cause: unknown) {
   return missingRequiredColumnError("categories", "is_pinned", CATEGORY_PINS_MIGRATION, cause);
+}
+
+function missingPlaceDefaultActivityDescriptionColumnError(cause: unknown) {
+  return missingRequiredColumnError(
+    "places",
+    "default_activity_description",
+    PLACE_DEFAULT_ACTIVITY_DESCRIPTION_MIGRATION,
+    cause
+  );
 }
 
 function eventSyncReadinessError(error: unknown, eventType: ActivityEventType) {
@@ -576,62 +588,74 @@ export async function createPlace(
     radiusMeters?: number | null;
     priority?: number | null;
     defaultCategoryId?: string | null;
+    defaultActivityDescription?: string | null;
     autoStart?: boolean;
   },
   session: RequestSession = getDevSession()
 ) {
   const name = normalizeName(input.name, "New place");
-  const result = await query<PlaceRowLike>(
-    `with inserted as (
-       insert into places (
-          workspace_id,
-          name,
-          latitude,
-          longitude,
-          radius_meters,
-          priority,
-          default_project_id,
-          default_category_id,
-          auto_start
+  try {
+    const result = await query<PlaceRowLike>(
+      `with inserted as (
+         insert into places (
+            workspace_id,
+            name,
+            latitude,
+            longitude,
+            radius_meters,
+            priority,
+            default_project_id,
+            default_category_id,
+            default_activity_description,
+            auto_start
+         )
+         values ($1, $2, $3, $4, $5, $6, null, $7, $8, $9)
+         returning id,
+                   name,
+                   latitude,
+                   longitude,
+                   radius_meters,
+                   priority,
+                   default_project_id,
+                   default_category_id,
+                   default_activity_description,
+                   auto_start
        )
-       values ($1, $2, $3, $4, $5, $6, null, $7, $8)
-       returning id,
-                 name,
-                 latitude,
-                 longitude,
-                 radius_meters,
-                 priority,
-                 default_project_id,
-                 default_category_id,
-                 auto_start
-     )
-     select inserted.id,
-            inserted.name,
-            inserted.latitude,
-            inserted.longitude,
-            inserted.radius_meters as "radiusMeters",
-            inserted.priority,
-            inserted.default_project_id as "defaultProjectId",
-            p.name as "defaultProjectName",
-            inserted.default_category_id as "defaultCategoryId",
-            c.name as "defaultCategoryName",
-            inserted.auto_start as "autoStart"
-     from inserted
-     left join projects p on p.id = inserted.default_project_id
-     left join categories c on c.id = inserted.default_category_id`,
-    [
-      session.workspaceId,
-      name,
-      nullableNumber(input.latitude),
-      nullableNumber(input.longitude),
-      normalizePlaceRadius(input.radiusMeters),
-      normalizePlacePriority(input.priority),
-      nullableString(input.defaultCategoryId),
-      Boolean(input.autoStart)
-    ]
-  );
+       select inserted.id,
+              inserted.name,
+              inserted.latitude,
+              inserted.longitude,
+              inserted.radius_meters as "radiusMeters",
+              inserted.priority,
+              inserted.default_project_id as "defaultProjectId",
+              p.name as "defaultProjectName",
+              inserted.default_category_id as "defaultCategoryId",
+              c.name as "defaultCategoryName",
+              inserted.default_activity_description as "defaultActivityDescription",
+              inserted.auto_start as "autoStart"
+       from inserted
+       left join projects p on p.id = inserted.default_project_id
+       left join categories c on c.id = inserted.default_category_id`,
+      [
+        session.workspaceId,
+        name,
+        nullableNumber(input.latitude),
+        nullableNumber(input.longitude),
+        normalizePlaceRadius(input.radiusMeters),
+        normalizePlacePriority(input.priority),
+        nullableString(input.defaultCategoryId),
+        normalizeOptionalText(input.defaultActivityDescription),
+        Boolean(input.autoStart)
+      ]
+    );
 
-  return result.rows[0];
+    return result.rows[0];
+  } catch (error) {
+    if (isUndefinedColumnError(error, "default_activity_description")) {
+      throw missingPlaceDefaultActivityDescriptionColumnError(error);
+    }
+    throw error;
+  }
 }
 
 export async function updatePlace(
@@ -643,6 +667,7 @@ export async function updatePlace(
     radiusMeters?: number | null;
     priority?: number | null;
     defaultCategoryId?: string | null;
+    defaultActivityDescription?: string | null;
     autoStart?: boolean;
   },
   session: RequestSession = getDevSession()
@@ -653,64 +678,77 @@ export async function updatePlace(
   const hasRadius = Object.prototype.hasOwnProperty.call(input, "radiusMeters");
   const hasPriority = Object.prototype.hasOwnProperty.call(input, "priority");
   const hasDefaultCategory = Object.prototype.hasOwnProperty.call(input, "defaultCategoryId");
+  const hasDefaultActivityDescription = Object.prototype.hasOwnProperty.call(input, "defaultActivityDescription");
   const hasAutoStart = Object.prototype.hasOwnProperty.call(input, "autoStart");
 
-  const result = await query<PlaceRowLike>(
-    `with updated as (
-       update places
-       set name = case when $3 then $4 else name end,
-           latitude = case when $5 then $6 else latitude end,
-           longitude = case when $7 then $8 else longitude end,
-           radius_meters = case when $9 then $10 else radius_meters end,
-           priority = case when $11 then $12 else priority end,
-           default_category_id = case when $13 then $14 else default_category_id end,
-           auto_start = case when $15 then $16 else auto_start end
-       where id = $1 and workspace_id = $2
-       returning id,
-                 name,
-                 latitude,
-                 longitude,
-                 radius_meters,
-                 priority,
-                 default_project_id,
-                 default_category_id,
-                 auto_start
-     )
-     select updated.id,
-            updated.name,
-            updated.latitude,
-            updated.longitude,
-            updated.radius_meters as "radiusMeters",
-            updated.priority,
-            updated.default_project_id as "defaultProjectId",
-            p.name as "defaultProjectName",
-            updated.default_category_id as "defaultCategoryId",
-            c.name as "defaultCategoryName",
-            updated.auto_start as "autoStart"
-     from updated
-     left join projects p on p.id = updated.default_project_id
-     left join categories c on c.id = updated.default_category_id`,
-    [
-      id,
-      session.workspaceId,
-      hasName,
-      hasName ? normalizeName(input.name, "Place") : null,
-      hasLatitude,
-      nullableNumber(input.latitude),
-      hasLongitude,
-      nullableNumber(input.longitude),
-      hasRadius,
-      normalizePlaceRadius(input.radiusMeters),
-      hasPriority,
-      normalizePlacePriority(input.priority),
-      hasDefaultCategory,
-      nullableString(input.defaultCategoryId),
-      hasAutoStart,
-      Boolean(input.autoStart)
-    ]
-  );
+  try {
+    const result = await query<PlaceRowLike>(
+      `with updated as (
+         update places
+         set name = case when $3 then $4 else name end,
+             latitude = case when $5 then $6 else latitude end,
+             longitude = case when $7 then $8 else longitude end,
+             radius_meters = case when $9 then $10 else radius_meters end,
+             priority = case when $11 then $12 else priority end,
+             default_category_id = case when $13 then $14 else default_category_id end,
+             default_activity_description = case when $15 then $16 else default_activity_description end,
+             auto_start = case when $17 then $18 else auto_start end
+         where id = $1 and workspace_id = $2
+         returning id,
+                   name,
+                   latitude,
+                   longitude,
+                   radius_meters,
+                   priority,
+                   default_project_id,
+                   default_category_id,
+                   default_activity_description,
+                   auto_start
+       )
+       select updated.id,
+              updated.name,
+              updated.latitude,
+              updated.longitude,
+              updated.radius_meters as "radiusMeters",
+              updated.priority,
+              updated.default_project_id as "defaultProjectId",
+              p.name as "defaultProjectName",
+              updated.default_category_id as "defaultCategoryId",
+              c.name as "defaultCategoryName",
+              updated.default_activity_description as "defaultActivityDescription",
+              updated.auto_start as "autoStart"
+       from updated
+       left join projects p on p.id = updated.default_project_id
+       left join categories c on c.id = updated.default_category_id`,
+      [
+        id,
+        session.workspaceId,
+        hasName,
+        hasName ? normalizeName(input.name, "Place") : null,
+        hasLatitude,
+        nullableNumber(input.latitude),
+        hasLongitude,
+        nullableNumber(input.longitude),
+        hasRadius,
+        normalizePlaceRadius(input.radiusMeters),
+        hasPriority,
+        normalizePlacePriority(input.priority),
+        hasDefaultCategory,
+        nullableString(input.defaultCategoryId),
+        hasDefaultActivityDescription,
+        normalizeOptionalText(input.defaultActivityDescription),
+        hasAutoStart,
+        Boolean(input.autoStart)
+      ]
+    );
 
-  return result.rows[0] ?? null;
+    return result.rows[0] ?? null;
+  } catch (error) {
+    if (isUndefinedColumnError(error, "default_activity_description")) {
+      throw missingPlaceDefaultActivityDescriptionColumnError(error);
+    }
+    throw error;
+  }
 }
 
 export async function deletePlace(id: string, session: RequestSession = getDevSession()) {
@@ -1092,31 +1130,40 @@ export async function createEntity(
         ]
       );
     case "place":
-      return query(
-        `insert into places (
-            workspace_id,
-            name,
-            latitude,
-            longitude,
-            radius_meters,
-            priority,
-            default_project_id,
-            default_category_id,
-            auto_start
-         )
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [
-          session.workspaceId,
-          String(input.name ?? "New place"),
-          nullableNumber(input.latitude),
-          nullableNumber(input.longitude),
-          Number(input.radiusMeters ?? 100),
-          Number(input.priority ?? 5),
-          nullableString(input.projectId),
-          nullableString(input.categoryId),
-          Boolean(input.autoStart)
-        ]
-      );
+      try {
+        return await query(
+          `insert into places (
+              workspace_id,
+              name,
+              latitude,
+              longitude,
+              radius_meters,
+              priority,
+              default_project_id,
+              default_category_id,
+              default_activity_description,
+              auto_start
+           )
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [
+            session.workspaceId,
+            String(input.name ?? "New place"),
+            nullableNumber(input.latitude),
+            nullableNumber(input.longitude),
+            Number(input.radiusMeters ?? 100),
+            Number(input.priority ?? 5),
+            nullableString(input.projectId),
+            nullableString(input.categoryId),
+            normalizeOptionalText(input.defaultActivityDescription),
+            Boolean(input.autoStart)
+          ]
+        );
+      } catch (error) {
+        if (isUndefinedColumnError(error, "default_activity_description")) {
+          throw missingPlaceDefaultActivityDescriptionColumnError(error);
+        }
+        throw error;
+      }
     case "automation_rule":
       return query(
         `insert into automation_rules (
@@ -1165,6 +1212,11 @@ export function buildQuickActionEvent(projectId?: string | null, categoryId?: st
 
 function nullableString(value: unknown) {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function normalizeOptionalText(value: unknown) {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text || null;
 }
 
 function normalizeName(value: unknown, fallback: string) {

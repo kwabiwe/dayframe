@@ -36,6 +36,7 @@ const context: NormalizationContext = {
       priority: 8,
       defaultProjectId: ids.gym,
       defaultCategoryId: ids.health,
+      defaultActivityDescription: "Workout",
       autoStart: false
     },
     { id: ids.town, name: "Town Centre", radiusMeters: 700, priority: 1, autoStart: false }
@@ -224,6 +225,34 @@ describe("event normalization", () => {
     expect(stopCandidate.action).toBe("create_review_item");
     expect(stopCandidate.reviewStatus).toBe("needs_review");
     expect(stopCandidate.reason).toContain("after-the-fact");
+  });
+
+  it("uses the place default activity description for geofence visit candidates", () => {
+    const candidate = normalizeActivityEvent(
+      {
+        source: "geofence_specific",
+        type: "geofence_exit",
+        occurredAt: new Date("2026-06-20T13:00:00Z"),
+        placeId: ids.gymPlace
+      },
+      context
+    );
+
+    expect(candidate.title).toBe("Workout");
+  });
+
+  it("falls back to the place name when a geofence place has no default activity description", () => {
+    const candidate = normalizeActivityEvent(
+      {
+        source: "geofence_specific",
+        type: "geofence_exit",
+        occurredAt: new Date("2026-06-20T13:00:00Z"),
+        placeId: ids.home
+      },
+      context
+    );
+
+    expect(candidate.title).toBe("Home");
   });
 
   it("suppresses review items when an ignore source rule matches", () => {

@@ -85,6 +85,7 @@ export type MobileBootstrap = {
     defaultProjectName?: string | null;
     defaultCategoryId: string | null;
     defaultCategoryName?: string | null;
+    defaultActivityDescription?: string | null;
     autoStart?: boolean;
   }>;
   reviewItems: Array<{ id: string; title: string; confidence: string; status: string }>;
@@ -109,6 +110,7 @@ export type PlaceMutationInput = {
   radiusMeters?: number;
   priority?: number;
   defaultCategoryId?: string | null;
+  defaultActivityDescription?: string | null;
 };
 
 export type TimeEntryUpdatePatch = {
@@ -854,6 +856,7 @@ function placeEntityValues(input: { name: string } & PlaceMutationInput) {
     radiusMeters: input.radiusMeters ?? DEFAULT_PLACE_RADIUS_METERS,
     priority: input.priority ?? DEFAULT_PLACE_PRIORITY,
     categoryId: input.defaultCategoryId ?? null,
+    defaultActivityDescription: input.defaultActivityDescription?.trim() || null,
     autoStart: false
   };
 }
@@ -865,7 +868,8 @@ function findCreatedPlace(places: MobilePlace[], input: { name: string } & Place
     sameNullableNumber(place.latitude, values.latitude) &&
     sameNullableNumber(place.longitude, values.longitude) &&
     Number(place.radiusMeters) === Number(values.radiusMeters) &&
-    (place.defaultCategoryId ?? null) === values.categoryId
+    (place.defaultCategoryId ?? null) === values.categoryId &&
+    (place.defaultActivityDescription ?? null) === values.defaultActivityDescription
   ) ?? null;
 }
 

@@ -260,6 +260,7 @@ export type PlaceSummary = {
   priority: number;
   defaultProjectId?: string | null;
   defaultCategoryId?: string | null;
+  defaultActivityDescription?: string | null;
   autoStart: boolean;
 };
 
@@ -447,6 +448,7 @@ export function normalizeActivityEvent(
     const isHome = place?.name.toLowerCase() === "home";
     const projectId = matchingRule?.projectId ?? place?.defaultProjectId ?? undefined;
     const categoryId = matchingRule?.categoryId ?? place?.defaultCategoryId ?? undefined;
+    const title = visitActivityDescription(event, place);
 
     return {
       action: "create_review_item",
@@ -455,7 +457,7 @@ export function normalizeActivityEvent(
       projectId,
       categoryId,
       placeId: place?.id,
-      title: `Review ${place?.name ?? "place"} exit`,
+      title,
       reason: broadPlace
         ? "Broad geofence exits are reviewed before Dayframe closes or creates a stay."
         : isHome
@@ -578,6 +580,27 @@ function findMatchingRule(
 function findPlaceByName(places: PlaceSummary[], value: unknown) {
   if (typeof value !== "string") return undefined;
   return places.find((place) => place.name.toLowerCase() === value.toLowerCase());
+}
+
+function visitActivityDescription(event: ParsedActivityEvent, place: PlaceSummary | undefined) {
+  const eventDescription = event.description?.trim();
+  if (eventDescription) return eventDescription;
+
+  const placeDefault = place?.defaultActivityDescription?.trim();
+  if (placeDefault) return placeDefault;
+
+  const payloadDefault =
+    typeof event.rawPayload.defaultActivityDescription === "string"
+      ? event.rawPayload.defaultActivityDescription.trim()
+      : "";
+  if (payloadDefault) return payloadDefault;
+
+  const payloadPlaceName =
+    typeof event.rawPayload.placeName === "string"
+      ? event.rawPayload.placeName.trim()
+      : "";
+
+  return place?.name ?? (payloadPlaceName || "Place visit");
 }
 
 function toReviewCandidate(

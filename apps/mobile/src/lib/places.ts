@@ -9,6 +9,7 @@ export type PlaceFormInput = {
   longitude: string;
   radiusMeters: string;
   defaultCategoryId?: string | null;
+  defaultActivityDescription?: string | null;
 };
 
 export type PlaceFormValue = {
@@ -17,6 +18,7 @@ export type PlaceFormValue = {
   longitude: number;
   radiusMeters: number;
   defaultCategoryId: string | null;
+  defaultActivityDescription: string | null;
 };
 
 export type PlaceFormValidation =
@@ -68,7 +70,8 @@ export function validatePlaceForm(input: PlaceFormInput): PlaceFormValidation {
       latitude,
       longitude,
       radiusMeters,
-      defaultCategoryId: input.defaultCategoryId?.trim() || null
+      defaultCategoryId: input.defaultCategoryId?.trim() || null,
+      defaultActivityDescription: input.defaultActivityDescription?.trim() || null
     }
   };
 }

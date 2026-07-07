@@ -59,6 +59,7 @@ export default function PlacesScreen() {
   const [longitudeText, setLongitudeText] = useState("");
   const [radiusMeters, setRadiusMeters] = useState(String(DEFAULT_PLACE_RADIUS_METERS));
   const [defaultCategoryId, setDefaultCategoryId] = useState("");
+  const [defaultActivityDescription, setDefaultActivityDescription] = useState("");
   const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
   const [locationPrecise, setLocationPrecise] = useState(true);
   const saveInFlight = useRef(false);
@@ -98,6 +99,7 @@ export default function PlacesScreen() {
     setLongitudeText("");
     setRadiusMeters(String(DEFAULT_PLACE_RADIUS_METERS));
     setDefaultCategoryId("");
+    setDefaultActivityDescription("");
     setLocationAccuracy(null);
     setLocationPrecise(true);
     setStatusMessage(null);
@@ -146,6 +148,7 @@ export default function PlacesScreen() {
     setLongitudeText(formatOptionalCoordinate(place.longitude));
     setRadiusMeters(String(place.radiusMeters));
     setDefaultCategoryId(place.defaultCategoryId ?? "");
+    setDefaultActivityDescription(place.defaultActivityDescription ?? "");
     setLocationAccuracy(null);
     setLocationPrecise(true);
     setStatusMessage(null);
@@ -158,6 +161,7 @@ export default function PlacesScreen() {
     setLongitudeText("");
     setRadiusMeters(String(DEFAULT_PLACE_RADIUS_METERS));
     setDefaultCategoryId("");
+    setDefaultActivityDescription("");
     setLocationAccuracy(null);
     setLocationPrecise(true);
   }
@@ -169,7 +173,8 @@ export default function PlacesScreen() {
       latitude: latitudeText,
       longitude: longitudeText,
       radiusMeters,
-      defaultCategoryId
+      defaultCategoryId,
+      defaultActivityDescription
     });
     if (!validation.ok) {
       Alert.alert("Places", validation.message);
@@ -186,7 +191,8 @@ export default function PlacesScreen() {
           longitude: validation.value.longitude,
           radiusMeters: validation.value.radiusMeters,
           priority: 5,
-          defaultCategoryId: validation.value.defaultCategoryId
+          defaultCategoryId: validation.value.defaultCategoryId,
+          defaultActivityDescription: validation.value.defaultActivityDescription
         });
         upsertLocalPlace(response.place);
         cancelForm();
@@ -200,7 +206,8 @@ export default function PlacesScreen() {
           latitude: validation.value.latitude,
           longitude: validation.value.longitude,
           radiusMeters: validation.value.radiusMeters,
-          defaultCategoryId: validation.value.defaultCategoryId
+          defaultCategoryId: validation.value.defaultCategoryId,
+          defaultActivityDescription: validation.value.defaultActivityDescription
         });
         upsertLocalPlace(response.place);
         cancelForm();
@@ -443,6 +450,17 @@ export default function PlacesScreen() {
                   ))}
                 </ScrollView>
               </View>
+              <View style={styles.activeEditSection}>
+                <Text style={styles.label}>Default activity description</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={defaultActivityDescription}
+                  onChangeText={setDefaultActivityDescription}
+                  placeholder="School drop-off/pickup"
+                  placeholderTextColor={theme.textSecondary}
+                  returnKeyType="done"
+                />
+              </View>
               {locationAccuracy !== null ? (
                 <Text style={styles.diagnosticText}>{formatLocationAccuracy(locationAccuracy)}</Text>
               ) : null}
@@ -524,6 +542,11 @@ function PlaceRow({
       <MapPinGlyph color={theme.accent} />
       <View style={styles.placeTextStack}>
         <Text style={styles.placeName} numberOfLines={1}>{place.name}</Text>
+        {place.defaultActivityDescription ? (
+          <Text style={styles.placeMeta} numberOfLines={2}>
+            {place.defaultActivityDescription}
+          </Text>
+        ) : null}
         <Text style={styles.placeMeta} numberOfLines={2}>
           {defaultCategoryName ?? "No default category"} · {place.radiusMeters}m radius
         </Text>

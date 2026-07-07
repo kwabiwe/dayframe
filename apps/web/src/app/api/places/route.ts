@@ -12,6 +12,7 @@ const placeFieldsSchema = z.object({
   radiusMeters: z.number().int().min(25).max(2000).optional(),
   priority: z.number().int().min(0).max(100).optional(),
   defaultCategoryId: z.string().uuid().nullable().optional(),
+  defaultActivityDescription: z.string().trim().max(240).nullable().optional(),
   autoStart: z.boolean().optional()
 });
 
