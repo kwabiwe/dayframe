@@ -12,7 +12,13 @@ import {
 import Svg, { Path } from "react-native-svg";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { DAYFRAME_PALETTE, paletteColorFor, type DayframePaletteKey } from "@dayframe/shared";
+import {
+  DAYFRAME_PALETTE,
+  paletteColorFor,
+  type DayframePaletteKey,
+  type HealthWorkoutImportPreferences,
+  type HealthWorkoutType
+} from "@dayframe/shared";
 import {
   AuthRequiredError,
   archiveCategory,
@@ -39,10 +45,13 @@ import {
 } from "@/lib/geofence";
 import {
   friendlyHealthKitError,
+  getHealthWorkoutImportPreferences,
   getHealthImportStatus,
+  HEALTH_WORKOUT_PREFERENCE_OPTIONS,
   importHealthKitSleep,
   importHealthKitWorkouts,
   requestHealthKitPermissions,
+  setHealthWorkoutImportPreference,
   type HealthImportStatus
 } from "@/lib/health";
 import {
@@ -72,6 +81,7 @@ export default function SettingsScreen() {
   const [locationStatus, setLocationStatus] = useState("Not requested");
   const [locationDiagnostics, setLocationDiagnostics] = useState<LocationVisitDiagnostics | null>(null);
   const [healthStatus, setHealthStatus] = useState<HealthImportStatus[]>([]);
+  const [healthWorkoutPreferences, setHealthWorkoutPreferences] = useState<HealthWorkoutImportPreferences | null>(null);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [pinNewCategory, setPinNewCategory] = useState(true);
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
@@ -129,6 +139,7 @@ export default function SettingsScreen() {
         }
       ]);
     });
+    getHealthWorkoutImportPreferences().then(setHealthWorkoutPreferences).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -395,6 +406,20 @@ export default function SettingsScreen() {
       if (!options?.silent) {
         Alert.alert("Apple Health", message);
       }
+    }
+  }
+
+  async function toggleHealthWorkoutPreference(type: HealthWorkoutType) {
+    const current = healthWorkoutPreferences ?? await getHealthWorkoutImportPreferences();
+    const nextEnabled = !current[type];
+    const optimistic = { ...current, [type]: nextEnabled };
+    setHealthWorkoutPreferences(optimistic);
+    try {
+      const saved = await setHealthWorkoutImportPreference(type, nextEnabled);
+      setHealthWorkoutPreferences(saved);
+    } catch (error) {
+      setHealthWorkoutPreferences(current);
+      Alert.alert("Apple Health", error instanceof Error ? error.message : "Unable to save workout preference.");
     }
   }
 
@@ -827,6 +852,41 @@ export default function SettingsScreen() {
             {healthPermissionStatus ? <Text style={styles.muted}>{healthPermissionStatus.notes}</Text> : null}
             <Text style={styles.muted}>Sleep: {sleepStatus?.notes ?? "Not synced yet."}</Text>
             <Text style={styles.muted}>Workouts: {workoutStatus?.notes ?? "Not synced yet."}</Text>
+            <View style={styles.healthPreferenceList}>
+              {HEALTH_WORKOUT_PREFERENCE_OPTIONS.map((option) => {
+                const enabled = healthWorkoutPreferences?.[option.key] ?? option.defaultEnabled;
+                return (
+                  <View key={option.key} style={styles.healthPreferenceRow}>
+                    <View style={styles.categoryTextStack}>
+                      <Text style={styles.categoryName}>{option.label}</Text>
+                      <Text style={styles.categoryMeta}>
+                        {enabled ? "Auto-log / import this workout type" : "Ignore this workout type"}
+                      </Text>
+                    </View>
+                    <Pressable
+                      accessibilityLabel={`${enabled ? "Ignore" : "Auto-log"} ${option.label}`}
+                      accessibilityRole="switch"
+                      accessibilityState={{ checked: enabled }}
+                      style={pressable(
+                        [
+                          styles.healthPreferenceToggle,
+                          enabled ? styles.healthPreferenceToggleEnabled : null
+                        ],
+                        styles.buttonPressed
+                      )}
+                      onPress={() => toggleHealthWorkoutPreference(option.key)}
+                    >
+                      <Text style={[
+                        styles.healthPreferenceToggleText,
+                        enabled ? styles.healthPreferenceToggleTextEnabled : null
+                      ]}>
+                        {enabled ? "Auto-log" : "Ignore"}
+                      </Text>
+                    </Pressable>
+                  </View>
+                );
+              })}
+            </View>
             <View style={styles.buttonRow}>
               <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={connectAppleHealth}>
                 <Text style={styles.secondaryButtonText}>Connect</Text>

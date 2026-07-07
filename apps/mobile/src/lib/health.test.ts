@@ -1,4 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const asyncStore = vi.hoisted(() => new Map<string, string>());
+const apiMocks = vi.hoisted(() => ({
+  enqueueEvent: vi.fn()
+}));
+const healthkitMocks = vi.hoisted(() => ({
+  isHealthDataAvailable: vi.fn(() => true),
+  queryCategorySamplesWithAnchor: vi.fn(),
+  queryWorkoutSamplesWithAnchor: vi.fn(),
+  requestAuthorization: vi.fn(() => true)
+}));
 
 vi.mock("react-native", () => ({
   Platform: { OS: "ios" }
@@ -6,22 +17,45 @@ vi.mock("react-native", () => ({
 
 vi.mock("@react-native-async-storage/async-storage", () => ({
   default: {
-    getItem: vi.fn(),
-    setItem: vi.fn()
+    getItem: vi.fn((key: string) => Promise.resolve(asyncStore.get(key) ?? null)),
+    setItem: vi.fn((key: string, value: string) => {
+      asyncStore.set(key, value);
+      return Promise.resolve();
+    })
   }
 }));
 
 vi.mock("./api", () => ({
-  enqueueEvent: vi.fn()
+  enqueueEvent: apiMocks.enqueueEvent
+}));
+
+vi.mock("@kingstinct/react-native-healthkit", () => ({
+  isHealthDataAvailable: healthkitMocks.isHealthDataAvailable,
+  queryCategorySamplesWithAnchor: healthkitMocks.queryCategorySamplesWithAnchor,
+  queryWorkoutSamplesWithAnchor: healthkitMocks.queryWorkoutSamplesWithAnchor,
+  requestAuthorization: healthkitMocks.requestAuthorization
 }));
 
 const {
+  getHealthWorkoutImportPreferences,
+  groupSleepSamplesIntoSessions,
+  healthKitSleepSessionEvent,
   healthKitWorkoutEvent,
+  importHealthKitSleep,
+  importHealthKitWorkouts,
   mapHealthKitSleepSample,
-  mapHealthKitWorkoutSample
+  mapHealthKitWorkoutSample,
+  setHealthWorkoutImportPreference
 } = await import("./health");
 
 describe("HealthKit mapping", () => {
+  beforeEach(() => {
+    asyncStore.clear();
+    apiMocks.enqueueEvent.mockReset();
+    healthkitMocks.queryCategorySamplesWithAnchor.mockReset();
+    healthkitMocks.queryWorkoutSamplesWithAnchor.mockReset();
+  });
+
   it("maps sleep samples into Dayframe sleep segments", () => {
     const mapped = mapHealthKitSleepSample({
       uuid: "sleep-1",
@@ -40,6 +74,72 @@ describe("HealthKit mapping", () => {
     });
   });
 
+  it("groups sleep phases into one user-facing sleep session", () => {
+    const samples = [
+      sleepSample("in-bed", "in_bed", "2026-07-06T22:30:00.000Z", "2026-07-06T23:55:00.000Z"),
+      sleepSample("core", "asleep_core", "2026-07-06T23:55:00.000Z", "2026-07-07T02:15:00.000Z"),
+      sleepSample("deep", "asleep_deep", "2026-07-07T02:15:00.000Z", "2026-07-07T03:10:00.000Z"),
+      sleepSample("rem", "asleep_rem", "2026-07-07T03:10:00.000Z", "2026-07-07T06:27:00.000Z"),
+      sleepSample("awake", "awake", "2026-07-07T06:27:00.000Z", "2026-07-07T06:40:00.000Z")
+    ];
+
+    const sessions = groupSleepSamplesIntoSessions(samples);
+
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({
+      startedAt: "2026-07-06T23:55:00.000Z",
+      stoppedAt: "2026-07-07T06:27:00.000Z",
+      samples: [
+        expect.objectContaining({ externalSampleId: "core" }),
+        expect.objectContaining({ externalSampleId: "deep" }),
+        expect.objectContaining({ externalSampleId: "rem" })
+      ]
+    });
+    expect(healthKitSleepSessionEvent(sessions[0])).toMatchObject({
+      localId: expect.stringMatching(/^healthkit-sleep:sleep-session-/),
+      description: "Sleep",
+      rawPayload: {
+        startedAt: "2026-07-06T23:55:00.000Z",
+        stoppedAt: "2026-07-07T06:27:00.000Z",
+        samples: expect.arrayContaining([
+          expect.objectContaining({ sleepStage: "asleep_core" }),
+          expect.objectContaining({ sleepStage: "asleep_deep" }),
+          expect.objectContaining({ sleepStage: "asleep_rem" })
+        ])
+      }
+    });
+  });
+
+  it("imports sleep phases as one queued sleep session", async () => {
+    healthkitMocks.queryCategorySamplesWithAnchor.mockResolvedValueOnce({
+      newAnchor: "sleep-anchor-1",
+      samples: [
+        { uuid: "core", value: 3, startDate: "2026-07-06T23:55:00.000Z", endDate: "2026-07-07T02:15:00.000Z" },
+        { uuid: "deep", value: 4, startDate: "2026-07-07T02:15:00.000Z", endDate: "2026-07-07T03:10:00.000Z" },
+        { uuid: "rem", value: 5, startDate: "2026-07-07T03:10:00.000Z", endDate: "2026-07-07T06:27:00.000Z" }
+      ]
+    });
+
+    const result = await importHealthKitSleep();
+
+    expect(result.importedCount).toBe(1);
+    expect(apiMocks.enqueueEvent).toHaveBeenCalledTimes(1);
+    expect(apiMocks.enqueueEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: "Sleep",
+        rawPayload: expect.objectContaining({
+          startedAt: "2026-07-06T23:55:00.000Z",
+          stoppedAt: "2026-07-07T06:27:00.000Z",
+          samples: expect.arrayContaining([
+            expect.objectContaining({ externalSampleId: "core" }),
+            expect.objectContaining({ externalSampleId: "deep" }),
+            expect.objectContaining({ externalSampleId: "rem" })
+          ])
+        })
+      })
+    );
+  });
+
   it("maps workout samples into summarized Dayframe workouts", () => {
     const mapped = mapHealthKitWorkoutSample({
       uuid: "workout-1",
@@ -56,6 +156,7 @@ describe("HealthKit mapping", () => {
     expect(mapped).toMatchObject({
       externalSampleId: "workout-1",
       workoutType: "walking",
+      workoutLabel: "Walk",
       startedAt: "2026-07-03T08:30:00.000Z",
       stoppedAt: "2026-07-03T09:10:00.000Z",
       durationSeconds: 2400,
@@ -63,6 +164,19 @@ describe("HealthKit mapping", () => {
       energyKcal: 180,
       sourceName: "Apple Watch"
     });
+  });
+
+  it("maps strength workouts to friendly labels", () => {
+    const mapped = mapHealthKitWorkoutSample({
+      uuid: "strength-1",
+      workoutActivityType: 50,
+      startDate: "2026-07-03T08:30:00.000Z",
+      endDate: "2026-07-03T09:10:00.000Z"
+    });
+
+    expect(mapped.workoutType).toBe("strength_training");
+    expect(mapped.workoutLabel).toBe("Strength training");
+    expect(healthKitWorkoutEvent(mapped).description).toBe("Strength training");
   });
 
   it("normalizes fractional workout durations to whole seconds", () => {
@@ -92,14 +206,99 @@ describe("HealthKit mapping", () => {
 
     expect(event.source).toBe("health_workout");
     expect(event.type).toBe("health_workout_import");
-    expect(event.description).toBe("Workout high intensity interval training");
+    expect(event.description).toBe("Workout");
     expect(event.rawPayload).toMatchObject({
       provider: "healthkit",
       externalSampleId: "workout-2",
-      workoutType: "high_intensity_interval_training",
-      durationSeconds: 1800
+      workoutType: "other",
+      durationSeconds: 1800,
+      autoConfirm: false
     });
     expect(JSON.stringify(event.rawPayload)).not.toContain("latitude");
     expect(JSON.stringify(event.rawPayload)).not.toContain("longitude");
   });
+
+  it("stores workout import preferences with strength disabled by default", async () => {
+    await expect(getHealthWorkoutImportPreferences()).resolves.toMatchObject({
+      cycling: true,
+      running: true,
+      strength_training: false,
+      swimming: true,
+      walking: true,
+      other: false
+    });
+
+    const saved = await setHealthWorkoutImportPreference("strength_training", true);
+
+    expect(saved.strength_training).toBe(true);
+    await expect(getHealthWorkoutImportPreferences()).resolves.toMatchObject({ strength_training: true });
+  });
+
+  it("filters disabled workout types before queueing Health events", async () => {
+    healthkitMocks.queryWorkoutSamplesWithAnchor.mockResolvedValueOnce({
+      newAnchor: "workout-anchor-1",
+      workouts: [
+        {
+          uuid: "walk-1",
+          workoutActivityType: 52,
+          startDate: "2026-07-03T08:30:00.000Z",
+          endDate: "2026-07-03T09:00:00.000Z",
+          duration: 1800
+        },
+        {
+          uuid: "strength-1",
+          workoutActivityType: 50,
+          startDate: "2026-07-03T10:00:00.000Z",
+          endDate: "2026-07-03T10:45:00.000Z",
+          duration: 2700
+        }
+      ]
+    });
+
+    const result = await importHealthKitWorkouts();
+
+    expect(result.importedCount).toBe(1);
+    expect(result.notes).toContain("Ignored 1 disabled workout");
+    expect(apiMocks.enqueueEvent).toHaveBeenCalledTimes(1);
+    expect(apiMocks.enqueueEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        localId: "healthkit-workout:walk-1",
+        description: "Walk",
+        rawPayload: expect.objectContaining({
+          autoConfirm: true,
+          workoutType: "walking"
+        })
+      })
+    );
+  });
+
+  it("marks short workouts for review instead of auto-confirm", () => {
+    const event = healthKitWorkoutEvent(
+      mapHealthKitWorkoutSample({
+        uuid: "short-walk",
+        workoutActivityType: 52,
+        startDate: "2026-07-03T08:30:00.000Z",
+        endDate: "2026-07-03T08:32:00.000Z",
+        duration: 120
+      })
+    );
+
+    expect(event.rawPayload.autoConfirm).toBe(false);
+  });
 });
+
+function sleepSample(
+  externalSampleId: string,
+  stage: "in_bed" | "asleep_core" | "asleep_deep" | "asleep_rem" | "awake",
+  startedAt: string,
+  stoppedAt: string
+) {
+  return {
+    externalSampleId,
+    stage,
+    startedAt,
+    stoppedAt,
+    sourceName: "Apple Watch",
+    rawPayload: { uuid: externalSampleId }
+  };
+}

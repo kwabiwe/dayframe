@@ -20,6 +20,7 @@ import {
 } from "./db";
 import { getNormalizationContext } from "./queries";
 import { getDevSession, type RequestSession } from "./session";
+import type pg from "pg";
 
 type CategoryRowLike = {
   id: string;
@@ -194,7 +195,7 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
     userId: session.userId
   });
   const context = await getNormalizationContext(session);
-  const candidate = normalizeActivityEvent(parsed, context);
+  let candidate = normalizeActivityEvent(parsed, context);
   const client = await pool.connect();
 
   try {
@@ -212,6 +213,25 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
       if (existingEvent.rows[0]) {
         await client.query("commit");
         return { eventId: existingEvent.rows[0].id, candidate, duplicate: true };
+      }
+    }
+
+    if (isHealthEvent(parsed.type) && !candidate.categoryId) {
+      candidate = {
+        ...candidate,
+        categoryId: await ensureHealthCategoryId(client, session)
+      };
+    }
+
+    if (candidate.action === "create_time_entry" && isHealthEvent(parsed.type)) {
+      const conflict = await hasOverlappingTimeEntry(client, parsed, session);
+      if (conflict) {
+        candidate = {
+          ...candidate,
+          action: "create_review_item",
+          reviewStatus: "needs_review",
+          reason: "This Health workout overlaps existing time and needs review before becoming confirmed time."
+        };
       }
     }
 
@@ -296,6 +316,39 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
           eventId
         ]
       );
+    } else if (candidate.action === "create_time_entry") {
+      const startedAt = suggestedStartedAtForEvent(parsed);
+      const stoppedAt = suggestedStoppedAtForEvent(parsed);
+      await client.query(
+        `insert into time_entries (
+            workspace_id,
+            user_id,
+            project_id,
+            category_id,
+            place_id,
+            source,
+            confidence,
+            review_status,
+            description,
+            started_at,
+            stopped_at,
+            created_from_event_id
+         )
+         values ($1, $2, $3, $4, $5, $6, $7, 'confirmed', $8, $9, coalesce($10, $9::timestamptz + interval '1 hour'), $11)`,
+        [
+          parsed.workspaceId,
+          parsed.userId,
+          candidate.projectId ?? null,
+          candidate.categoryId ?? null,
+          candidate.placeId ?? null,
+          parsed.source,
+          candidate.confidence,
+          parsed.description ?? candidate.title,
+          startedAt,
+          stoppedAt,
+          eventId
+        ]
+      );
     }
 
     if (candidate.reviewStatus === "needs_review") {
@@ -334,34 +387,36 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
     }
 
     if (parsed.type === "health_sleep_import") {
-      await client.query(
-        `insert into health_sleep_segments (
-            workspace_id,
-            user_id,
-            external_sample_id,
-            provider,
-            source_name,
-            sleep_stage,
-            started_at,
-            stopped_at,
-            raw_payload
-         )
-         values ($1, $2, $3, coalesce($4, 'healthkit'), $5, coalesce($6, 'asleep_unspecified'), $7, $8, $9::jsonb)
-         on conflict (workspace_id, provider, external_sample_id)
-         where external_sample_id is not null
-         do nothing`,
-        [
-          parsed.workspaceId,
-          parsed.userId,
-          stringOrNull(parsed.rawPayload.externalSampleId),
-          stringOrNull(parsed.rawPayload.provider),
-          stringOrNull(parsed.rawPayload.sourceName),
-          stringOrNull(parsed.rawPayload.sleepStage),
-          stringOrNull(parsed.rawPayload.startedAt) ?? parsed.occurredAt,
-          stringOrNull(parsed.rawPayload.stoppedAt) ?? parsed.occurredAt,
-          JSON.stringify(parsed.rawPayload)
-        ]
-      );
+      for (const segment of healthSleepSegmentsForEvent(parsed)) {
+        await client.query(
+          `insert into health_sleep_segments (
+              workspace_id,
+              user_id,
+              external_sample_id,
+              provider,
+              source_name,
+              sleep_stage,
+              started_at,
+              stopped_at,
+              raw_payload
+           )
+           values ($1, $2, $3, coalesce($4, 'healthkit'), $5, coalesce($6, 'asleep_unspecified'), $7, $8, $9::jsonb)
+           on conflict (workspace_id, provider, external_sample_id)
+           where external_sample_id is not null
+           do nothing`,
+          [
+            parsed.workspaceId,
+            parsed.userId,
+            segment.externalSampleId,
+            segment.provider,
+            segment.sourceName,
+            segment.sleepStage,
+            segment.startedAt,
+            segment.stoppedAt,
+            JSON.stringify(segment.rawPayload)
+          ]
+        );
+      }
     }
 
     if (parsed.type === "health_workout_import") {
@@ -1236,6 +1291,57 @@ function normalizePlacePriority(value: unknown) {
   return Math.max(0, Math.min(100, Math.round(number)));
 }
 
+function isHealthEvent(type: string) {
+  return type === "health_sleep_import" || type === "health_workout_import";
+}
+
+async function ensureHealthCategoryId(
+  client: pg.PoolClient,
+  session: RequestSession
+) {
+  const existing = await client.query<{ id: string }>(
+    `select id
+     from categories
+     where workspace_id = $1
+       and lower(name) = lower($2)
+       and coalesce(is_archived, false) = false
+     order by created_at asc
+     limit 1`,
+    [session.workspaceId, "Health"]
+  );
+  if (existing.rows[0]) return existing.rows[0].id;
+
+  const created = await client.query<{ id: string }>(
+    `insert into categories (workspace_id, name, color, is_pinned)
+     values ($1, 'Health', 'moss', false)
+     returning id`,
+    [session.workspaceId]
+  );
+  return created.rows[0].id;
+}
+
+async function hasOverlappingTimeEntry(
+  client: pg.PoolClient,
+  event: ReturnType<typeof ActivityEventInputSchema.parse>,
+  session: RequestSession
+) {
+  const startedAt = suggestedStartedAtForEvent(event);
+  const stoppedAt = suggestedStoppedAtForEvent(event);
+  if (!startedAt || !stoppedAt) return true;
+
+  const result = await client.query<{ id: string }>(
+    `select id
+     from time_entries
+     where workspace_id = $1
+       and user_id = $2
+       and started_at < $4::timestamptz
+       and coalesce(stopped_at, 'infinity'::timestamptz) > $3::timestamptz
+     limit 1`,
+    [session.workspaceId, session.userId, startedAt, stoppedAt]
+  );
+  return Boolean(result.rows[0]);
+}
+
 function isExplicitStartEvent(type: string) {
   return (
     type === "timer_start" ||
@@ -1254,6 +1360,36 @@ function timestampStringOrNull(value: unknown) {
   const timestamp = stringOrNull(value);
   if (!timestamp) return null;
   return Number.isNaN(new Date(timestamp).getTime()) ? null : timestamp;
+}
+
+function healthSleepSegmentsForEvent(event: ReturnType<typeof ActivityEventInputSchema.parse>) {
+  const provider = stringOrNull(event.rawPayload.provider);
+  const samples = Array.isArray(event.rawPayload.samples) ? event.rawPayload.samples : [];
+  if (samples.length > 0) {
+    return samples
+      .filter(isRecord)
+      .map((sample) => ({
+        externalSampleId: stringOrNull(sample.externalSampleId),
+        provider,
+        sourceName: stringOrNull(sample.sourceName) ?? stringOrNull(event.rawPayload.sourceName),
+        sleepStage: stringOrNull(sample.sleepStage),
+        startedAt: timestampStringOrNull(sample.startedAt) ?? suggestedStartedAtForEvent(event),
+        stoppedAt: timestampStringOrNull(sample.stoppedAt) ?? suggestedStoppedAtForEvent(event) ?? suggestedStartedAtForEvent(event),
+        rawPayload: sample
+      }));
+  }
+
+  return [
+    {
+      externalSampleId: stringOrNull(event.rawPayload.externalSampleId),
+      provider,
+      sourceName: stringOrNull(event.rawPayload.sourceName),
+      sleepStage: stringOrNull(event.rawPayload.sleepStage),
+      startedAt: stringOrNull(event.rawPayload.startedAt) ?? event.occurredAt,
+      stoppedAt: stringOrNull(event.rawPayload.stoppedAt) ?? event.occurredAt,
+      rawPayload: event.rawPayload
+    }
+  ];
 }
 
 function suggestedStartedAtForEvent(event: ReturnType<typeof ActivityEventInputSchema.parse>) {

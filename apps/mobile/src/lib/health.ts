@@ -1,6 +1,16 @@
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { mapHealthKitSleepStage, type SleepStage } from "@dayframe/shared";
+import {
+  DEFAULT_HEALTH_WORKOUT_IMPORT_PREFERENCES,
+  HEALTH_WORKOUT_TYPE_OPTIONS,
+  healthWorkoutLabel,
+  mapHealthKitSleepStage,
+  normalizeHealthWorkoutType,
+  shouldAutoConfirmHealthWorkout,
+  type HealthWorkoutImportPreferences,
+  type HealthWorkoutType,
+  type SleepStage
+} from "@dayframe/shared";
 import { enqueueEvent } from "./api";
 
 const HEALTHKIT_SLEEP_TYPE = "HKCategoryTypeIdentifierSleepAnalysis";
@@ -10,6 +20,10 @@ const HEALTHKIT_ANCHOR_KEY = "dayframe.healthkit.sleepAnchor.v1";
 const HEALTHKIT_SEEN_KEY = "dayframe.healthkit.sleepSeen.v1";
 const HEALTHKIT_WORKOUT_ANCHOR_KEY = "dayframe.healthkit.workoutAnchor.v1";
 const HEALTHKIT_WORKOUT_SEEN_KEY = "dayframe.healthkit.workoutSeen.v1";
+const HEALTHKIT_WORKOUT_PREFERENCES_KEY = "dayframe.healthkit.workoutPreferences.v1";
+const SLEEP_SESSION_GAP_MS = 90 * 60 * 1000;
+
+export const HEALTH_WORKOUT_PREFERENCE_OPTIONS = HEALTH_WORKOUT_TYPE_OPTIONS;
 
 export type HealthImportStatus = {
   provider: "healthkit";
@@ -29,6 +43,14 @@ export type DayframeSleepSample = {
   rawPayload: Record<string, unknown>;
 };
 
+export type DayframeSleepSession = {
+  externalSessionId: string;
+  startedAt: string;
+  stoppedAt: string;
+  sourceName?: string;
+  samples: DayframeSleepSample[];
+};
+
 type HealthKitModule = typeof import("@kingstinct/react-native-healthkit");
 
 type HealthKitSleepSample = {
@@ -42,7 +64,8 @@ type HealthKitSleepSample = {
 
 export type DayframeWorkoutSample = {
   externalSampleId: string;
-  workoutType: string;
+  workoutType: HealthWorkoutType;
+  workoutLabel: string;
   startedAt: string;
   stoppedAt: string;
   durationSeconds: number | null;
@@ -136,27 +159,17 @@ export async function importHealthKitSleep() {
     limit: 0
   });
 
-  const imported: DayframeSleepSample[] = [];
+  const importedSamples: DayframeSleepSample[] = [];
   for (const sample of result.samples as readonly HealthKitSleepSample[]) {
     const mapped = mapHealthKitSleepSample(sample);
     if (seen.has(mapped.externalSampleId)) continue;
     seen.add(mapped.externalSampleId);
-    imported.push(mapped);
-    await enqueueEvent({
-      source: "health_sleep",
-      type: "health_sleep_import",
-      occurredAt: new Date(mapped.startedAt),
-      description: `Sleep ${mapped.stage.replaceAll("_", " ")}`,
-      rawPayload: {
-        provider: "healthkit",
-        externalSampleId: mapped.externalSampleId,
-        sleepStage: mapped.stage,
-        startedAt: mapped.startedAt,
-        stoppedAt: mapped.stoppedAt,
-        sourceName: mapped.sourceName,
-        sample: mapped.rawPayload
-      }
-    });
+    importedSamples.push(mapped);
+  }
+
+  const sessions = groupSleepSamplesIntoSessions(importedSamples);
+  for (const session of sessions) {
+    await enqueueEvent(healthKitSleepSessionEvent(session));
   }
 
   await AsyncStorage.setItem(HEALTHKIT_ANCHOR_KEY, result.newAnchor);
@@ -166,10 +179,10 @@ export async function importHealthKitSleep() {
     provider: "healthkit" as const,
     kind: "sleep" as const,
     status: "synced" as const,
-    notes: imported.length
-      ? `Queued ${imported.length} Apple Health sleep samples as activity events.`
+    notes: sessions.length
+      ? `Queued ${sessions.length} Apple Health sleep ${sessions.length === 1 ? "session" : "sessions"} as activity events.`
       : "No new Apple Health sleep samples found.",
-    importedCount: imported.length,
+    importedCount: sessions.length,
     lastSync: new Date().toISOString()
   };
 }
@@ -179,16 +192,22 @@ export async function importHealthKitWorkouts() {
   const healthkit = await loadHealthKit();
   const anchor = await AsyncStorage.getItem(HEALTHKIT_WORKOUT_ANCHOR_KEY);
   const seen = new Set(await readSeenSampleIds(HEALTHKIT_WORKOUT_SEEN_KEY));
+  const preferences = await getHealthWorkoutImportPreferences();
   const result = await healthkit.queryWorkoutSamplesWithAnchor({
     anchor: anchor ?? undefined,
     limit: 0
   });
 
   const imported: DayframeWorkoutSample[] = [];
+  let ignoredCount = 0;
   for (const sample of result.workouts as readonly HealthKitWorkoutSample[]) {
     const mapped = mapHealthKitWorkoutSample(sample.toJSON?.() ?? sample);
     if (seen.has(mapped.externalSampleId)) continue;
     seen.add(mapped.externalSampleId);
+    if (!preferences[mapped.workoutType]) {
+      ignoredCount += 1;
+      continue;
+    }
     imported.push(mapped);
     await enqueueEvent(healthKitWorkoutEvent(mapped));
   }
@@ -200,12 +219,28 @@ export async function importHealthKitWorkouts() {
     provider: "healthkit" as const,
     kind: "workout" as const,
     status: "synced" as const,
-    notes: imported.length
-      ? `Queued ${imported.length} Apple Health workouts as activity events.`
-      : "No new Apple Health workouts found.",
+    notes: workoutImportNotes(imported.length, ignoredCount),
     importedCount: imported.length,
     lastSync: new Date().toISOString()
   };
+}
+
+export async function getHealthWorkoutImportPreferences(): Promise<HealthWorkoutImportPreferences> {
+  const raw = await AsyncStorage.getItem(HEALTHKIT_WORKOUT_PREFERENCES_KEY);
+  if (!raw) return { ...DEFAULT_HEALTH_WORKOUT_IMPORT_PREFERENCES };
+  try {
+    const parsed = JSON.parse(raw) as Partial<Record<HealthWorkoutType, unknown>>;
+    return healthWorkoutPreferencesFromPartial(parsed);
+  } catch {
+    return { ...DEFAULT_HEALTH_WORKOUT_IMPORT_PREFERENCES };
+  }
+}
+
+export async function setHealthWorkoutImportPreference(type: HealthWorkoutType, enabled: boolean) {
+  const current = await getHealthWorkoutImportPreferences();
+  const next = { ...current, [type]: enabled };
+  await AsyncStorage.setItem(HEALTHKIT_WORKOUT_PREFERENCES_KEY, JSON.stringify(next));
+  return next;
 }
 
 export function mapHealthKitSleepSample(sample: HealthKitSleepSample): DayframeSleepSample {
@@ -234,7 +269,7 @@ export function mapHealthKitSleepSample(sample: HealthKitSleepSample): DayframeS
 export function mapHealthKitWorkoutSample(sample: HealthKitWorkoutSample): DayframeWorkoutSample {
   const startedAt = new Date(sample.startDate).toISOString();
   const stoppedAt = new Date(sample.endDate).toISOString();
-  const workoutType = mapHealthKitWorkoutType(sample.workoutActivityType);
+  const workoutType = normalizeHealthWorkoutType(sample.workoutActivityType);
   const durationSeconds = wholeSecondsOrNull(
     quantityValue(sample.duration) ??
       Math.max(0, Math.round((new Date(stoppedAt).getTime() - new Date(startedAt).getTime()) / 1000))
@@ -244,6 +279,7 @@ export function mapHealthKitWorkoutSample(sample: HealthKitWorkoutSample): Dayfr
   return {
     externalSampleId,
     workoutType,
+    workoutLabel: healthWorkoutLabel(workoutType),
     startedAt,
     stoppedAt,
     durationSeconds,
@@ -264,21 +300,91 @@ export function mapHealthKitWorkoutSample(sample: HealthKitWorkoutSample): Dayfr
 
 export function healthKitWorkoutEvent(sample: DayframeWorkoutSample) {
   return {
+    localId: `healthkit-workout:${sample.externalSampleId}`,
     source: "health_workout" as const,
     type: "health_workout_import" as const,
     occurredAt: new Date(sample.startedAt),
-    description: `Workout ${sample.workoutType.replaceAll("_", " ")}`,
+    description: sample.workoutLabel,
     rawPayload: {
       provider: "healthkit",
       externalSampleId: sample.externalSampleId,
       workoutType: sample.workoutType,
+      workoutLabel: sample.workoutLabel,
       startedAt: sample.startedAt,
       stoppedAt: sample.stoppedAt,
       durationSeconds: sample.durationSeconds,
       distanceMeters: sample.distanceMeters,
       energyKcal: sample.energyKcal,
+      autoConfirm: shouldAutoConfirmHealthWorkout({
+        durationSeconds: sample.durationSeconds,
+        workoutType: sample.workoutType
+      }),
       sourceName: sample.sourceName,
       sample: sample.rawPayload
+    }
+  };
+}
+
+export function groupSleepSamplesIntoSessions(samples: DayframeSleepSample[]): DayframeSleepSession[] {
+  const asleepSamples = samples
+    .filter((sample) => isAsleepStage(sample.stage))
+    .filter((sample) => validDate(sample.startedAt) && validDate(sample.stoppedAt))
+    .sort((left, right) => new Date(left.startedAt).getTime() - new Date(right.startedAt).getTime());
+
+  const sessions: DayframeSleepSample[][] = [];
+  for (const sample of asleepSamples) {
+    const current = sessions.at(-1);
+    if (!current) {
+      sessions.push([sample]);
+      continue;
+    }
+
+    const currentStop = Math.max(...current.map((item) => new Date(item.stoppedAt).getTime()));
+    const nextStart = new Date(sample.startedAt).getTime();
+    if (nextStart - currentStop <= SLEEP_SESSION_GAP_MS) {
+      current.push(sample);
+    } else {
+      sessions.push([sample]);
+    }
+  }
+
+  return sessions.map((sessionSamples) => {
+    const startedAt = new Date(Math.min(...sessionSamples.map((sample) => new Date(sample.startedAt).getTime()))).toISOString();
+    const stoppedAt = new Date(Math.max(...sessionSamples.map((sample) => new Date(sample.stoppedAt).getTime()))).toISOString();
+    const sourceName = sessionSamples.find((sample) => sample.sourceName)?.sourceName;
+    const stableSource = sessionSamples.map((sample) => sample.externalSampleId).sort().join("|");
+    return {
+      externalSessionId: `sleep-session-${stableHash(`${startedAt}|${stoppedAt}|${stableSource}`)}`,
+      startedAt,
+      stoppedAt,
+      sourceName,
+      samples: sessionSamples
+    };
+  });
+}
+
+export function healthKitSleepSessionEvent(session: DayframeSleepSession) {
+  return {
+    localId: `healthkit-sleep:${session.externalSessionId}`,
+    source: "health_sleep" as const,
+    type: "health_sleep_import" as const,
+    occurredAt: new Date(session.startedAt),
+    description: "Sleep",
+    rawPayload: {
+      provider: "healthkit",
+      externalSampleId: session.externalSessionId,
+      sleepStage: "asleep_unspecified",
+      startedAt: session.startedAt,
+      stoppedAt: session.stoppedAt,
+      sourceName: session.sourceName,
+      samples: session.samples.map((sample) => ({
+        externalSampleId: sample.externalSampleId,
+        sleepStage: sample.stage,
+        startedAt: sample.startedAt,
+        stoppedAt: sample.stoppedAt,
+        sourceName: sample.sourceName,
+        sample: sample.rawPayload
+      }))
     }
   };
 }
@@ -326,33 +432,6 @@ async function readSeenSampleIds(key = HEALTHKIT_SEEN_KEY): Promise<string[]> {
   }
 }
 
-function mapHealthKitWorkoutType(value: unknown) {
-  if (typeof value === "string" && value.trim()) return camelToSnake(value);
-  if (typeof value === "number") {
-    return (
-      {
-        13: "cycling",
-        24: "hiking",
-        37: "running",
-        46: "swimming",
-        52: "walking",
-        57: "yoga",
-        63: "high_intensity_interval_training",
-        3000: "other"
-      }[value] ?? `workout_${value}`
-    );
-  }
-  return "other";
-}
-
-function camelToSnake(value: string) {
-  return value
-    .trim()
-    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
-    .replace(/[\s-]+/g, "_")
-    .toLowerCase();
-}
-
 function quantityValue(value: HealthKitWorkoutSample["duration"] | HealthKitWorkoutSample["totalDistance"]) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (value && typeof value === "object" && typeof value.quantity === "number" && Number.isFinite(value.quantity)) {
@@ -364,6 +443,48 @@ function quantityValue(value: HealthKitWorkoutSample["duration"] | HealthKitWork
 function wholeSecondsOrNull(value: number | null) {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   return Math.max(0, Math.round(value));
+}
+
+function healthWorkoutPreferencesFromPartial(
+  value: Partial<Record<HealthWorkoutType, unknown>>
+): HealthWorkoutImportPreferences {
+  return Object.fromEntries(
+    HEALTH_WORKOUT_TYPE_OPTIONS.map((option) => [
+      option.key,
+      typeof value[option.key] === "boolean"
+        ? Boolean(value[option.key])
+        : DEFAULT_HEALTH_WORKOUT_IMPORT_PREFERENCES[option.key]
+    ])
+  ) as HealthWorkoutImportPreferences;
+}
+
+function workoutImportNotes(importedCount: number, ignoredCount: number) {
+  if (importedCount > 0 && ignoredCount > 0) {
+    return `Queued ${importedCount} Apple Health ${importedCount === 1 ? "workout" : "workouts"} as activity events. Ignored ${ignoredCount} disabled ${ignoredCount === 1 ? "workout" : "workouts"}.`;
+  }
+  if (importedCount > 0) {
+    return `Queued ${importedCount} Apple Health ${importedCount === 1 ? "workout" : "workouts"} as activity events.`;
+  }
+  if (ignoredCount > 0) {
+    return `Ignored ${ignoredCount} disabled Apple Health ${ignoredCount === 1 ? "workout" : "workouts"}.`;
+  }
+  return "No new Apple Health workouts found.";
+}
+
+function isAsleepStage(stage: SleepStage) {
+  return stage === "asleep_unspecified" || stage === "asleep_core" || stage === "asleep_deep" || stage === "asleep_rem";
+}
+
+function validDate(value: string) {
+  return !Number.isNaN(new Date(value).getTime());
+}
+
+function stableHash(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return hash.toString(36);
 }
 
 function safeHealthMetadata(metadata: Record<string, unknown> | undefined) {

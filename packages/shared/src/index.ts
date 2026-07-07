@@ -239,6 +239,102 @@ export function mapHealthKitSleepStage(value: unknown): SleepStage {
   return "asleep_unspecified";
 }
 
+export const HEALTH_WORKOUT_TYPE_OPTIONS = [
+  { key: "walking", label: "Walking", activityLabel: "Walk", defaultEnabled: true },
+  { key: "running", label: "Running", activityLabel: "Run", defaultEnabled: true },
+  { key: "cycling", label: "Cycling", activityLabel: "Cycling", defaultEnabled: true },
+  { key: "strength_training", label: "Strength training", activityLabel: "Strength training", defaultEnabled: false },
+  { key: "swimming", label: "Swimming", activityLabel: "Swimming", defaultEnabled: true },
+  { key: "other", label: "Other/unknown", activityLabel: "Workout", defaultEnabled: false }
+] as const;
+
+export type HealthWorkoutType = (typeof HEALTH_WORKOUT_TYPE_OPTIONS)[number]["key"];
+export type HealthWorkoutImportPreferences = Record<HealthWorkoutType, boolean>;
+
+export const DEFAULT_HEALTH_WORKOUT_IMPORT_PREFERENCES = Object.fromEntries(
+  HEALTH_WORKOUT_TYPE_OPTIONS.map((option) => [option.key, option.defaultEnabled])
+) as HealthWorkoutImportPreferences;
+
+const healthWorkoutTypeByNumber: Record<number, HealthWorkoutType> = {
+  13: "cycling",
+  20: "strength_training",
+  37: "running",
+  46: "swimming",
+  50: "strength_training",
+  52: "walking",
+  3000: "other"
+};
+
+const healthWorkoutTypeAliases: Record<string, HealthWorkoutType> = {
+  cycle: "cycling",
+  cycling: "cycling",
+  biking: "cycling",
+  functional_strength_training: "strength_training",
+  run: "running",
+  running: "running",
+  strength: "strength_training",
+  strength_training: "strength_training",
+  swim: "swimming",
+  swimming: "swimming",
+  traditional_strength_training: "strength_training",
+  walk: "walking",
+  walking: "walking",
+  workout_13: "cycling",
+  workout_20: "strength_training",
+  workout_37: "running",
+  workout_46: "swimming",
+  workout_50: "strength_training",
+  workout_52: "walking",
+  workout_3000: "other"
+};
+
+export function normalizeHealthWorkoutType(value: unknown): HealthWorkoutType {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return healthWorkoutTypeByNumber[Math.trunc(value)] ?? "other";
+  }
+
+  if (typeof value === "string") {
+    const normalized = healthWorkoutTypeString(value);
+    return healthWorkoutTypeAliases[normalized] ?? "other";
+  }
+
+  return "other";
+}
+
+export function healthWorkoutLabel(value: unknown) {
+  const type = normalizeHealthWorkoutType(value);
+  return HEALTH_WORKOUT_TYPE_OPTIONS.find((option) => option.key === type)?.activityLabel ?? "Workout";
+}
+
+export function shouldAutoConfirmHealthWorkout(input: {
+  durationSeconds?: number | null;
+  workoutType: unknown;
+}) {
+  const type = normalizeHealthWorkoutType(input.workoutType);
+  const durationSeconds = typeof input.durationSeconds === "number" && Number.isFinite(input.durationSeconds)
+    ? input.durationSeconds
+    : 0;
+  const minimumSeconds: Partial<Record<HealthWorkoutType, number>> = {
+    cycling: 10 * 60,
+    running: 10 * 60,
+    strength_training: 20 * 60,
+    swimming: 10 * 60,
+    walking: 10 * 60
+  };
+  const minimum = minimumSeconds[type];
+  return Boolean(minimum && durationSeconds >= minimum);
+}
+
+function healthWorkoutTypeString(value: string) {
+  return value
+    .trim()
+    .replace(/^HKWorkoutActivityType/, "")
+    .replace(/^WorkoutActivityType/, "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/[\s-]+/g, "_")
+    .toLowerCase();
+}
+
 export type ProjectSummary = {
   id: string;
   name: string;
@@ -285,7 +381,7 @@ export type NormalizationContext = {
 };
 
 export type CandidateActivity = {
-  action: AutomationAction | "record_only";
+  action: AutomationAction | "create_time_entry" | "record_only";
   confidence: Confidence;
   reviewStatus: ReviewStatus;
   projectId?: string;
@@ -496,15 +592,38 @@ export function normalizeActivityEvent(
     };
   }
 
-  if (event.type === "health_sleep_import" || event.type === "health_workout_import") {
+  if (event.type === "health_sleep_import") {
     return {
       action: "create_review_item",
       confidence: "high",
       reviewStatus: "needs_review",
       projectId: event.projectId,
-      categoryId: event.categoryId,
-      title: event.description ?? "Review health import",
-      reason: "Health imports are reviewed before becoming completed entries.",
+      categoryId: event.categoryId ?? findCategoryByName(context.categories, "Health")?.id,
+      title: event.description ?? "Sleep",
+      reason: "Sleep imports are reviewed as one continuous session before becoming completed entries.",
+      shouldClosePrevious: false
+    };
+  }
+
+  if (event.type === "health_workout_import") {
+    const workoutType = normalizeHealthWorkoutType(event.rawPayload.workoutType);
+    const durationSeconds = typeof event.rawPayload.durationSeconds === "number"
+      ? event.rawPayload.durationSeconds
+      : undefined;
+    const autoConfirm =
+      event.rawPayload.autoConfirm === true &&
+      shouldAutoConfirmHealthWorkout({ workoutType, durationSeconds });
+
+    return {
+      action: autoConfirm ? "create_time_entry" : "create_review_item",
+      confidence: "high",
+      reviewStatus: autoConfirm ? "confirmed" : "needs_review",
+      projectId: event.projectId,
+      categoryId: event.categoryId ?? findCategoryByName(context.categories, "Health")?.id,
+      title: event.description ?? healthWorkoutLabel(workoutType),
+      reason: autoConfirm
+        ? "High-confidence Health workouts can become completed time entries automatically."
+        : "Health workouts are reviewed when the type, duration, or confidence is uncertain.",
       shouldClosePrevious: false
     };
   }
@@ -556,11 +675,32 @@ export function applyActivityEvent(
     return next;
   }
 
+  if (candidate.action === "create_time_entry") {
+    next.completedEntries.push({
+      id: `entry-${event.occurredAt.getTime()}`,
+      projectId: candidate.projectId,
+      categoryId: candidate.categoryId,
+      placeId: candidate.placeId,
+      source: event.source,
+      confidence: candidate.confidence,
+      startedAt: timestampFromPayload(event.rawPayload.startedAt) ?? event.occurredAt,
+      stoppedAt: timestampFromPayload(event.rawPayload.stoppedAt),
+      description: event.description ?? candidate.title
+    });
+    return next;
+  }
+
   if (candidate.reviewStatus === "needs_review") {
     next.reviewItems.push(toReviewCandidate(event, candidate));
   }
 
   return next;
+}
+
+function timestampFromPayload(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
 function findMatchingRule(
@@ -580,6 +720,10 @@ function findMatchingRule(
 function findPlaceByName(places: PlaceSummary[], value: unknown) {
   if (typeof value !== "string") return undefined;
   return places.find((place) => place.name.toLowerCase() === value.toLowerCase());
+}
+
+function findCategoryByName(categories: CategorySummary[], value: string) {
+  return categories.find((category) => category.name.toLowerCase() === value.toLowerCase());
 }
 
 function visitActivityDescription(event: ParsedActivityEvent, place: PlaceSummary | undefined) {

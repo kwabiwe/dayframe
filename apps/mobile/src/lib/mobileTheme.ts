@@ -890,6 +890,45 @@ function createStyles(theme: MobileTheme) {
       fontWeight: "700",
       lineHeight: 17
     },
+    healthPreferenceList: {
+      gap: 8
+    },
+    healthPreferenceRow: {
+      minHeight: 62,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 12,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10
+    },
+    healthPreferenceToggle: {
+      minWidth: 92,
+      minHeight: 44,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surface,
+      borderRadius: 12,
+      paddingHorizontal: 12,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    healthPreferenceToggleEnabled: {
+      borderColor: theme.accent,
+      backgroundColor: theme.surfaceMuted
+    },
+    healthPreferenceToggleText: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "800"
+    },
+    healthPreferenceToggleTextEnabled: {
+      color: theme.accent
+    },
     categoryChoiceScroller: {
       gap: 8,
       paddingRight: 4
