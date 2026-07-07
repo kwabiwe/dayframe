@@ -31,6 +31,22 @@ export function isUndefinedColumnError(error: unknown, columnName?: string) {
   return columnName ? candidate.message?.includes(columnName) === true : true;
 }
 
+export function isUndefinedTableError(error: unknown, tableName?: string) {
+  const candidate = error as { code?: string; message?: string } | null;
+  if (candidate?.code !== "42P01") return false;
+  return tableName ? candidate.message?.includes(tableName) === true : true;
+}
+
+export function isInvalidConflictTargetError(error: unknown) {
+  const candidate = error as { code?: string } | null;
+  return candidate?.code === "42P10";
+}
+
+export function isInsufficientPrivilegeError(error: unknown) {
+  const candidate = error as { code?: string } | null;
+  return candidate?.code === "42501";
+}
+
 export class MissingRequiredColumnError extends Error {
   tableName: string;
   columnName: string;
@@ -59,6 +75,34 @@ export function missingRequiredColumnError(
 
 export function isMissingRequiredColumnError(error: unknown): error is MissingRequiredColumnError {
   return error instanceof MissingRequiredColumnError;
+}
+
+export class DatabaseReadinessError extends Error {
+  objectName: string;
+  migrationHint: string;
+
+  constructor(message: string, objectName: string, migrationHint: string, cause?: unknown) {
+    super(message);
+    this.name = "DatabaseReadinessError";
+    this.objectName = objectName;
+    this.migrationHint = migrationHint;
+    if (cause) {
+      (this as Error & { cause?: unknown }).cause = cause;
+    }
+  }
+}
+
+export function databaseReadinessError(
+  message: string,
+  objectName: string,
+  migrationHint: string,
+  cause?: unknown
+) {
+  return new DatabaseReadinessError(message, objectName, migrationHint, cause);
+}
+
+export function isDatabaseReadinessError(error: unknown): error is DatabaseReadinessError {
+  return error instanceof DatabaseReadinessError;
 }
 
 type Queryable = Pick<pg.Pool | pg.PoolClient, "query">;
