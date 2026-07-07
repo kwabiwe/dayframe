@@ -36,7 +36,9 @@ type PlaceRowLike = {
   radiusMeters: number;
   priority: number;
   defaultProjectId: string | null;
+  defaultProjectName: string | null;
   defaultCategoryId: string | null;
+  defaultCategoryName: string | null;
   autoStart: boolean;
 };
 
@@ -580,27 +582,43 @@ export async function createPlace(
 ) {
   const name = normalizeName(input.name, "New place");
   const result = await query<PlaceRowLike>(
-    `insert into places (
-        workspace_id,
-        name,
-        latitude,
-        longitude,
-        radius_meters,
-        priority,
-        default_project_id,
-        default_category_id,
-        auto_start
+    `with inserted as (
+       insert into places (
+          workspace_id,
+          name,
+          latitude,
+          longitude,
+          radius_meters,
+          priority,
+          default_project_id,
+          default_category_id,
+          auto_start
+       )
+       values ($1, $2, $3, $4, $5, $6, null, $7, $8)
+       returning id,
+                 name,
+                 latitude,
+                 longitude,
+                 radius_meters,
+                 priority,
+                 default_project_id,
+                 default_category_id,
+                 auto_start
      )
-     values ($1, $2, $3, $4, $5, $6, null, $7, $8)
-     returning id,
-               name,
-               latitude,
-               longitude,
-               radius_meters as "radiusMeters",
-               priority,
-               default_project_id as "defaultProjectId",
-               default_category_id as "defaultCategoryId",
-               auto_start as "autoStart"`,
+     select inserted.id,
+            inserted.name,
+            inserted.latitude,
+            inserted.longitude,
+            inserted.radius_meters as "radiusMeters",
+            inserted.priority,
+            inserted.default_project_id as "defaultProjectId",
+            p.name as "defaultProjectName",
+            inserted.default_category_id as "defaultCategoryId",
+            c.name as "defaultCategoryName",
+            inserted.auto_start as "autoStart"
+     from inserted
+     left join projects p on p.id = inserted.default_project_id
+     left join categories c on c.id = inserted.default_category_id`,
     [
       session.workspaceId,
       name,
@@ -638,24 +656,40 @@ export async function updatePlace(
   const hasAutoStart = Object.prototype.hasOwnProperty.call(input, "autoStart");
 
   const result = await query<PlaceRowLike>(
-    `update places
-     set name = case when $3 then $4 else name end,
-         latitude = case when $5 then $6 else latitude end,
-         longitude = case when $7 then $8 else longitude end,
-         radius_meters = case when $9 then $10 else radius_meters end,
-         priority = case when $11 then $12 else priority end,
-         default_category_id = case when $13 then $14 else default_category_id end,
-         auto_start = case when $15 then $16 else auto_start end
-     where id = $1 and workspace_id = $2
-     returning id,
-               name,
-               latitude,
-               longitude,
-               radius_meters as "radiusMeters",
-               priority,
-               default_project_id as "defaultProjectId",
-               default_category_id as "defaultCategoryId",
-               auto_start as "autoStart"`,
+    `with updated as (
+       update places
+       set name = case when $3 then $4 else name end,
+           latitude = case when $5 then $6 else latitude end,
+           longitude = case when $7 then $8 else longitude end,
+           radius_meters = case when $9 then $10 else radius_meters end,
+           priority = case when $11 then $12 else priority end,
+           default_category_id = case when $13 then $14 else default_category_id end,
+           auto_start = case when $15 then $16 else auto_start end
+       where id = $1 and workspace_id = $2
+       returning id,
+                 name,
+                 latitude,
+                 longitude,
+                 radius_meters,
+                 priority,
+                 default_project_id,
+                 default_category_id,
+                 auto_start
+     )
+     select updated.id,
+            updated.name,
+            updated.latitude,
+            updated.longitude,
+            updated.radius_meters as "radiusMeters",
+            updated.priority,
+            updated.default_project_id as "defaultProjectId",
+            p.name as "defaultProjectName",
+            updated.default_category_id as "defaultCategoryId",
+            c.name as "defaultCategoryName",
+            updated.auto_start as "autoStart"
+     from updated
+     left join projects p on p.id = updated.default_project_id
+     left join categories c on c.id = updated.default_category_id`,
     [
       id,
       session.workspaceId,

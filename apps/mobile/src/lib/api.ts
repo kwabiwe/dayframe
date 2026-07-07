@@ -80,7 +80,10 @@ export type MobileBootstrap = {
     radiusMeters: number;
     priority: number;
     defaultProjectId: string | null;
+    defaultProjectName?: string | null;
     defaultCategoryId: string | null;
+    defaultCategoryName?: string | null;
+    autoStart?: boolean;
   }>;
   reviewItems: Array<{ id: string; title: string; confidence: string; status: string }>;
 };
@@ -484,7 +487,7 @@ export async function createPlace(input: { name: string } & PlaceMutationInput) 
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to create place"));
-  return readJsonResponse<MobilePlaceResponse>(response);
+  return readPlaceResponse(response, "Place API did not return the saved place.");
 }
 
 export async function updatePlace(id: string, input: PlaceMutationInput) {
@@ -505,7 +508,7 @@ export async function updatePlace(id: string, input: PlaceMutationInput) {
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to update place"));
-  return readJsonResponse<MobilePlaceResponse>(response);
+  return readPlaceResponse(response, "Place API did not return the updated place.");
 }
 
 export async function deletePlace(id: string) {
@@ -756,6 +759,14 @@ async function readJsonResponse<T>(response: Response): Promise<T> {
   } catch {
     return { error: text } as T;
   }
+}
+
+async function readPlaceResponse(response: Response, fallback: string): Promise<MobilePlaceResponse> {
+  const payload = await readJsonResponse<Partial<MobilePlaceResponse> & { error?: string }>(response);
+  if (!payload.place || typeof payload.place.id !== "string" || !payload.place.id.trim()) {
+    throw new Error(payload.error ?? fallback);
+  }
+  return payload as MobilePlaceResponse;
 }
 
 async function errorMessage(response: Response, fallback: string) {

@@ -761,6 +761,14 @@ function createStyles(theme: MobileTheme) {
       flexDirection: "row",
       gap: 8
     },
+    placeFormField: {
+      flex: 1,
+      minWidth: 0,
+      gap: 5
+    },
+    coordinateInput: {
+      minHeight: 46
+    },
     radiusInput: {
       width: 112,
       textAlign: "center"

@@ -39,10 +39,6 @@ type Category = MobileBootstrap["categories"][number];
 type PlaceFormMode =
   | {
       type: "create";
-      latitude: number;
-      longitude: number;
-      accuracy: number | null;
-      precise: boolean;
     }
   | {
       type: "edit";
@@ -59,8 +55,12 @@ export default function PlacesScreen() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [formMode, setFormMode] = useState<PlaceFormMode | null>(null);
   const [placeName, setPlaceName] = useState("");
+  const [latitudeText, setLatitudeText] = useState("");
+  const [longitudeText, setLongitudeText] = useState("");
   const [radiusMeters, setRadiusMeters] = useState(String(DEFAULT_PLACE_RADIUS_METERS));
   const [defaultCategoryId, setDefaultCategoryId] = useState("");
+  const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
+  const [locationPrecise, setLocationPrecise] = useState(true);
   const saveInFlight = useRef(false);
 
   const load = useCallback(async (options?: { silent?: boolean }) => {
@@ -91,7 +91,19 @@ export default function PlacesScreen() {
     }, [load])
   );
 
-  async function addCurrentPlace() {
+  function beginAddPlace() {
+    setFormMode({ type: "create" });
+    setPlaceName("");
+    setLatitudeText("");
+    setLongitudeText("");
+    setRadiusMeters(String(DEFAULT_PLACE_RADIUS_METERS));
+    setDefaultCategoryId("");
+    setLocationAccuracy(null);
+    setLocationPrecise(true);
+    setStatusMessage(null);
+  }
+
+  async function useCurrentLocation() {
     if (locating) return;
     setLocating(true);
     setStatusMessage("Checking current location...");
@@ -100,7 +112,7 @@ export default function PlacesScreen() {
       const guidance = foregroundLocationPermissionGuidance(permission);
       if (guidance) {
         setStatusMessage(guidance);
-        Alert.alert("Add current place", guidance);
+        Alert.alert("Use current location", guidance);
         return;
       }
 
@@ -111,21 +123,17 @@ export default function PlacesScreen() {
       const precise = permission.ios?.accuracy !== "reduced";
       const suggestedName = await suggestCurrentPlaceName(latitude, longitude);
 
-      setFormMode({
-        type: "create",
-        latitude,
-        longitude,
-        accuracy: accuracy ?? null,
-        precise
-      });
-      setPlaceName(suggestedName);
-      setRadiusMeters(String(DEFAULT_PLACE_RADIUS_METERS));
-      setDefaultCategoryId("");
+      if (!formMode) setFormMode({ type: "create" });
+      setLatitudeText(formatCoordinate(latitude));
+      setLongitudeText(formatCoordinate(longitude));
+      setLocationAccuracy(accuracy ?? null);
+      setLocationPrecise(precise);
+      if (!placeName.trim() && suggestedName) setPlaceName(suggestedName);
       setStatusMessage(formatLocationAccuracy(accuracy));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to read current location.";
       setStatusMessage(message);
-      Alert.alert("Add current place", message);
+      Alert.alert("Use current location", message);
     } finally {
       setLocating(false);
     }
@@ -134,22 +142,32 @@ export default function PlacesScreen() {
   function beginEditPlace(place: MobilePlace) {
     setFormMode({ type: "edit", place });
     setPlaceName(place.name);
+    setLatitudeText(formatOptionalCoordinate(place.latitude));
+    setLongitudeText(formatOptionalCoordinate(place.longitude));
     setRadiusMeters(String(place.radiusMeters));
     setDefaultCategoryId(place.defaultCategoryId ?? "");
+    setLocationAccuracy(null);
+    setLocationPrecise(true);
     setStatusMessage(null);
   }
 
   function cancelForm() {
     setFormMode(null);
     setPlaceName("");
+    setLatitudeText("");
+    setLongitudeText("");
     setRadiusMeters(String(DEFAULT_PLACE_RADIUS_METERS));
     setDefaultCategoryId("");
+    setLocationAccuracy(null);
+    setLocationPrecise(true);
   }
 
   async function savePlace() {
     if (!formMode || saveInFlight.current) return;
     const validation = validatePlaceForm({
       name: placeName,
+      latitude: latitudeText,
+      longitude: longitudeText,
       radiusMeters,
       defaultCategoryId
     });
@@ -162,24 +180,35 @@ export default function PlacesScreen() {
     setSaving(true);
     try {
       if (formMode.type === "create") {
-        await createPlace({
+        const response = await createPlace({
           name: validation.value.name,
-          latitude: formMode.latitude,
-          longitude: formMode.longitude,
+          latitude: validation.value.latitude,
+          longitude: validation.value.longitude,
           radiusMeters: validation.value.radiusMeters,
           priority: 5,
           defaultCategoryId: validation.value.defaultCategoryId
         });
+        upsertLocalPlace(response.place);
+        cancelForm();
+        await refreshAfterPlaceChange({
+          prefix: "Place saved.",
+          upsertPlace: response.place
+        });
       } else {
-        await updatePlace(formMode.place.id, {
+        const response = await updatePlace(formMode.place.id, {
           name: validation.value.name,
+          latitude: validation.value.latitude,
+          longitude: validation.value.longitude,
           radiusMeters: validation.value.radiusMeters,
           defaultCategoryId: validation.value.defaultCategoryId
         });
+        upsertLocalPlace(response.place);
+        cancelForm();
+        await refreshAfterPlaceChange({
+          prefix: "Place saved.",
+          upsertPlace: response.place
+        });
       }
-
-      cancelForm();
-      await refreshAfterPlaceChange("Place saved.");
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         router.replace("/");
@@ -214,7 +243,11 @@ export default function PlacesScreen() {
     try {
       await deletePlace(place.id);
       if (formMode?.type === "edit" && formMode.place.id === place.id) cancelForm();
-      await refreshAfterPlaceChange("Place deleted.");
+      removeLocalPlace(place.id);
+      await refreshAfterPlaceChange({
+        prefix: "Place deleted.",
+        removePlaceId: place.id
+      });
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         router.replace("/");
@@ -226,21 +259,46 @@ export default function PlacesScreen() {
     }
   }
 
-  async function refreshAfterPlaceChange(prefix: string) {
-    const bootstrap = await fetchBootstrap();
-    setData(bootstrap);
-    const monitoredCount = await refreshGeofencesForPlaces(bootstrap.places).catch(() => 0);
-    setStatusMessage(
-      monitoredCount > 0
-        ? `${prefix} Monitoring ${monitoredCount} places.`
-        : `${prefix} Background place monitoring is unchanged.`
-    );
+  function upsertLocalPlace(place: MobilePlace) {
+    setData((current) => current ? reconcileBootstrapPlaces(current, { upsertPlace: place }) : current);
+  }
+
+  function removeLocalPlace(id: string) {
+    setData((current) => current ? reconcileBootstrapPlaces(current, { removePlaceId: id }) : current);
+  }
+
+  async function refreshAfterPlaceChange(options: {
+    prefix: string;
+    upsertPlace?: MobilePlace;
+    removePlaceId?: string;
+  }) {
+    try {
+      const bootstrap = await fetchBootstrap();
+      const reconciled = reconcileBootstrapPlaces(bootstrap, options);
+      setData(reconciled);
+      const monitoredCount = await refreshGeofencesForPlaces(reconciled.places).catch(() => 0);
+      const bootstrapHasPlace =
+        !options.upsertPlace || bootstrap.places.some((place) => place.id === options.upsertPlace?.id);
+      const refreshNote = bootstrapHasPlace ? "" : " Saved locally while the server list catches up.";
+      setStatusMessage(
+        monitoredCount > 0
+          ? `${options.prefix} Monitoring ${monitoredCount} places.${refreshNote}`
+          : `${options.prefix} Background place monitoring is unchanged.${refreshNote}`
+      );
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        router.replace("/");
+        return;
+      }
+      setStatusMessage(`${options.prefix} Pull to refresh if it does not appear on another device.`);
+    }
   }
 
   const places = data?.places ?? [];
   const categories = data?.categories ?? [];
-  const createWarning =
-    formMode?.type === "create" ? locationAccuracyWarning(formMode.accuracy, formMode.precise) : null;
+  const createWarning = formMode?.type === "create"
+    ? locationAccuracyWarning(locationAccuracy, locationPrecise)
+    : null;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -286,11 +344,9 @@ export default function PlacesScreen() {
                   locating ? styles.buttonDisabled : null,
                   pressed ? styles.buttonPressed : null
                 ]}
-                onPress={addCurrentPlace}
+                onPress={beginAddPlace}
               >
-                <Text style={styles.primaryButtonText}>
-                  {locating ? "Finding location..." : "Add current place"}
-                </Text>
+                <Text style={styles.primaryButtonText}>Add place</Text>
               </Pressable>
             </View>
             {statusMessage ? <Text style={styles.statusText}>{statusMessage}</Text> : null}
@@ -307,6 +363,48 @@ export default function PlacesScreen() {
                 placeholderTextColor={theme.textSecondary}
                 returnKeyType="done"
               />
+              <View style={styles.placeFormRow}>
+                <View style={styles.placeFormField}>
+                  <Text style={styles.label}>Latitude</Text>
+                  <TextInput
+                    style={[styles.textInput, styles.coordinateInput]}
+                    value={latitudeText}
+                    onChangeText={setLatitudeText}
+                    keyboardType="numbers-and-punctuation"
+                    placeholder="51.5074"
+                    placeholderTextColor={theme.textSecondary}
+                    returnKeyType="done"
+                  />
+                </View>
+                <View style={styles.placeFormField}>
+                  <Text style={styles.label}>Longitude</Text>
+                  <TextInput
+                    style={[styles.textInput, styles.coordinateInput]}
+                    value={longitudeText}
+                    onChangeText={setLongitudeText}
+                    keyboardType="numbers-and-punctuation"
+                    placeholder="-0.1278"
+                    placeholderTextColor={theme.textSecondary}
+                    returnKeyType="done"
+                  />
+                </View>
+              </View>
+              <View style={styles.buttonRow}>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={locating}
+                  style={({ pressed }) => [
+                    styles.secondaryButton,
+                    locating ? styles.buttonDisabled : null,
+                    pressed ? styles.buttonPressed : null
+                  ]}
+                  onPress={useCurrentLocation}
+                >
+                  <Text style={styles.secondaryButtonText}>
+                    {locating ? "Finding location..." : "Use current location"}
+                  </Text>
+                </Pressable>
+              </View>
               <View style={styles.placeFormRow}>
                 <TextInput
                   style={[styles.textInput, styles.radiusInput]}
@@ -345,8 +443,8 @@ export default function PlacesScreen() {
                   ))}
                 </ScrollView>
               </View>
-              {formMode.type === "create" ? (
-                <Text style={styles.diagnosticText}>{formatLocationAccuracy(formMode.accuracy)}</Text>
+              {locationAccuracy !== null ? (
+                <Text style={styles.diagnosticText}>{formatLocationAccuracy(locationAccuracy)}</Text>
               ) : null}
               {createWarning ? <Text style={styles.warningText}>{createWarning}</Text> : null}
               <View style={styles.buttonRow}>
@@ -391,7 +489,7 @@ export default function PlacesScreen() {
                 ))}
               </View>
             ) : (
-              <Text style={styles.muted}>No places yet. Add your current place when you are somewhere useful.</Text>
+              <Text style={styles.muted}>No places yet. Add a place with coordinates or use your current location.</Text>
             )}
           </View>
         </View>
@@ -417,14 +515,17 @@ function PlaceRow({
   theme: MobileTheme;
   styles: MobileStyles;
 }) {
-  const defaultCategory = categories.find((category) => category.id === place.defaultCategoryId);
+  const defaultCategoryName =
+    place.defaultCategoryName ??
+    categories.find((category) => category.id === place.defaultCategoryId)?.name ??
+    null;
   return (
     <View style={styles.placeRow}>
       <MapPinGlyph color={theme.accent} />
       <View style={styles.placeTextStack}>
         <Text style={styles.placeName} numberOfLines={1}>{place.name}</Text>
         <Text style={styles.placeMeta} numberOfLines={2}>
-          {defaultCategory ? defaultCategory.name : "No default category"} · {place.radiusMeters}m radius
+          {defaultCategoryName ?? "No default category"} · {place.radiusMeters}m radius
         </Text>
       </View>
       <View style={styles.placeActions}>
@@ -496,6 +597,38 @@ async function suggestCurrentPlaceName(latitude: number, longitude: number) {
   } catch {
     return "";
   }
+}
+
+function reconcileBootstrapPlaces(
+  data: MobileBootstrap,
+  options: { upsertPlace?: MobilePlace; removePlaceId?: string }
+): MobileBootstrap {
+  const withoutChangedPlace = data.places.filter((place) => {
+    if (options.removePlaceId && place.id === options.removePlaceId) return false;
+    if (options.upsertPlace && place.id === options.upsertPlace.id) return false;
+    return true;
+  });
+  const places = options.upsertPlace
+    ? sortPlaces([options.upsertPlace, ...withoutChangedPlace])
+    : sortPlaces(withoutChangedPlace);
+  return { ...data, places };
+}
+
+function sortPlaces(places: MobilePlace[]) {
+  return [...places].sort((left, right) => {
+    const priorityDelta = (right.priority ?? 0) - (left.priority ?? 0);
+    if (priorityDelta !== 0) return priorityDelta;
+    return left.name.localeCompare(right.name);
+  });
+}
+
+function formatCoordinate(value: number) {
+  if (!Number.isFinite(value)) return "";
+  return value.toFixed(6).replace(/\.?0+$/, "");
+}
+
+function formatOptionalCoordinate(value?: number | null) {
+  return typeof value === "number" ? formatCoordinate(value) : "";
 }
 
 function BackGlyph({ color }: { color: string }) {

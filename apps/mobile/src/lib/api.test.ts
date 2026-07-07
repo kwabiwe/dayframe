@@ -605,6 +605,15 @@ describe("mobile API client", () => {
     );
   });
 
+  it("rejects place saves when the API does not return the saved place", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 201))));
+
+    await expect(createPlace({ name: "Gym", latitude: 51.5, longitude: -0.12, radiusMeters: 100 })).rejects.toThrow(
+      /saved place/
+    );
+  });
+
   it("deletes places through the hosted API", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));
