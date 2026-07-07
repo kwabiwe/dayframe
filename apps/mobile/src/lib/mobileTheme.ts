@@ -134,9 +134,29 @@ function createStyles(theme: MobileTheme) {
       right: 16,
       alignItems: "center"
     },
-    floatingTabBar: {
+    floatingTabBarShell: {
       width: "100%",
       maxWidth: 420,
+      minHeight: 72,
+      borderRadius: 28,
+      shadowColor: "#000000",
+      shadowOpacity: theme.mode === "dark" ? 0.34 : 0.14,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 10 },
+      elevation: 8
+    },
+    floatingTabBarGlass: {
+      minHeight: 72,
+      borderWidth: 1,
+      borderColor: theme.mode === "dark" ? "rgba(138, 215, 196, 0.24)" : "rgba(47, 118, 109, 0.18)",
+      borderRadius: 28,
+      padding: 6,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      overflow: "hidden"
+    },
+    floatingTabBarFallback: {
       minHeight: 72,
       borderWidth: 1,
       borderColor: theme.mode === "dark" ? "rgba(138, 215, 196, 0.24)" : "rgba(47, 118, 109, 0.18)",
@@ -146,11 +166,7 @@ function createStyles(theme: MobileTheme) {
       flexDirection: "row",
       alignItems: "center",
       gap: 4,
-      shadowColor: "#000000",
-      shadowOpacity: theme.mode === "dark" ? 0.34 : 0.14,
-      shadowRadius: 18,
-      shadowOffset: { width: 0, height: 10 },
-      elevation: 8
+      overflow: "hidden"
     },
     floatingTabButton: {
       flex: 1,

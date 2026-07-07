@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AccessibilityInfo,
   Alert,
   Animated,
   AppState,
@@ -15,6 +16,7 @@ import {
   View
 } from "react-native";
 import Svg, { Circle, G, Path } from "react-native-svg";
+import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from "expo-glass-effect";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { paletteColorFor } from "@dayframe/shared";
@@ -768,50 +770,97 @@ function FloatingTabBar({
   styles: MobileStyles;
   theme: MobileTheme;
 }) {
+  const liquidGlassAvailable = useLiquidGlassAvailability();
   const tabs: Array<{ id: MobileTab; label: string }> = [
     { id: "timer", label: "Timer" },
     { id: "calendar", label: "Calendar" },
     { id: "reports", label: "Reports" }
   ];
 
+  const tabItems = (
+    <>
+      {tabs.map((tab) => {
+        const selected = tab.id === activeTab;
+        const color = selected ? theme.accent : theme.textSecondary;
+
+        return (
+          <Pressable
+            key={tab.id}
+            accessibilityLabel={`${tab.label} tab`}
+            accessibilityRole="tab"
+            accessibilityState={{ selected }}
+            onPress={() => onChange(tab.id)}
+            style={({ pressed }) => [
+              styles.floatingTabButton,
+              selected ? styles.floatingTabButtonSelected : null,
+              pressed ? styles.buttonPressed : null
+            ]}
+          >
+            {tab.id === "timer" ? <TimerTabGlyph color={color} /> : null}
+            {tab.id === "calendar" ? <CalendarTabGlyph color={color} /> : null}
+            {tab.id === "reports" ? <ReportsTabGlyph color={color} /> : null}
+            <Text style={[
+              styles.floatingTabLabel,
+              selected ? styles.floatingTabLabelSelected : null
+            ]}>
+              {tab.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </>
+  );
+
   return (
     <View
       pointerEvents="box-none"
       style={[styles.floatingTabBarWrap, { bottom: Math.max(bottomInset, 12) }]}
     >
-      <View style={styles.floatingTabBar}>
-        {tabs.map((tab) => {
-          const selected = tab.id === activeTab;
-          const color = selected ? theme.accent : theme.textSecondary;
-
-          return (
-            <Pressable
-              key={tab.id}
-              accessibilityLabel={`${tab.label} tab`}
-              accessibilityRole="tab"
-              accessibilityState={{ selected }}
-              onPress={() => onChange(tab.id)}
-              style={({ pressed }) => [
-                styles.floatingTabButton,
-                selected ? styles.floatingTabButtonSelected : null,
-                pressed ? styles.buttonPressed : null
-              ]}
-            >
-              {tab.id === "timer" ? <TimerTabGlyph color={color} /> : null}
-              {tab.id === "calendar" ? <CalendarTabGlyph color={color} /> : null}
-              {tab.id === "reports" ? <ReportsTabGlyph color={color} /> : null}
-              <Text style={[
-                styles.floatingTabLabel,
-                selected ? styles.floatingTabLabelSelected : null
-              ]}>
-                {tab.label}
-              </Text>
-            </Pressable>
-          );
-        })}
+      <View style={styles.floatingTabBarShell}>
+        {liquidGlassAvailable ? (
+          <GlassView
+            colorScheme={theme.mode}
+            glassEffectStyle="regular"
+            isInteractive
+            style={styles.floatingTabBarGlass}
+            tintColor={theme.mode === "dark" ? "rgba(23, 32, 40, 0.44)" : "rgba(255, 255, 255, 0.50)"}
+          >
+            {tabItems}
+          </GlassView>
+        ) : (
+          <View style={styles.floatingTabBarFallback}>
+            {tabItems}
+          </View>
+        )}
       </View>
     </View>
   );
+}
+
+function useLiquidGlassAvailability() {
+  const [reduceTransparency, setReduceTransparency] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    AccessibilityInfo.isReduceTransparencyEnabled()
+      .then((enabled) => {
+        if (mounted) setReduceTransparency(enabled);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  return useMemo(() => {
+    if (reduceTransparency) return false;
+    try {
+      return isGlassEffectAPIAvailable() && isLiquidGlassAvailable();
+    } catch {
+      return false;
+    }
+  }, [reduceTransparency]);
 }
 
 function CalendarTab({
