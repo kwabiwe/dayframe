@@ -204,6 +204,7 @@ type ActivityEventDraft = {
   source: EventSource;
   type: ActivityEventType;
   occurredAt?: Date;
+  localId?: string;
   deviceId?: string;
   projectId?: string;
   categoryId?: string;
@@ -263,15 +264,18 @@ export async function clearSessionToken() {
 }
 
 export async function enqueueEvent(input: ActivityEventDraft) {
+  const { localId, ...eventInput } = input;
   const parsed = ActivityEventInputSchema.parse({
-    ...input,
+    ...eventInput,
     occurredAt: input.occurredAt ?? new Date(),
     rawPayload: input.rawPayload ?? {}
   });
   const queue = await readQueue();
+  const queuedLocalId = normalizeLocalId(localId) ?? generatedLocalId();
+  if (queue.some((item) => item.localId === queuedLocalId)) return queue;
   queue.push({
     ...queuedEventFromParsedEvent(parsed),
-    localId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    localId: queuedLocalId,
     queuedAt: new Date().toISOString()
   });
   await writeQueue(queue);
@@ -712,6 +716,15 @@ function queueSyncResult(
     firstError,
     stopped
   };
+}
+
+function normalizeLocalId(value?: string) {
+  const localId = value?.trim();
+  return localId ? localId.slice(0, 160) : undefined;
+}
+
+function generatedLocalId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 async function writeQueue(queue: QueuedEvent[]) {

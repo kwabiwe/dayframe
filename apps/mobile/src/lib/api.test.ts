@@ -254,6 +254,16 @@ describe("mobile API client", () => {
     expect(result.firstError?.message).toBe("Server error");
   });
 
+  it("dedupes queued events that reuse a deterministic local id", async () => {
+    await enqueueEvent({ localId: "location-visit-1", source: "mobile_app", type: "timer_stop" });
+    await enqueueEvent({ localId: "location-visit-1", source: "mobile_app", type: "timer_stop" });
+
+    const queue = await readQueue();
+
+    expect(queue).toHaveLength(1);
+    expect(queue[0].localId).toBe("location-visit-1");
+  });
+
   it("removes synced events and preserves later unsynced events", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
     await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: { order: 1 } });
