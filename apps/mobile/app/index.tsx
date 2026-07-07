@@ -7,7 +7,6 @@ import {
   Easing,
   Image,
   Linking,
-  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -77,7 +76,7 @@ export default function HomeScreen() {
   const [activeTab, setActiveTab] = useState<MobileTab>("timer");
   const [selectedDayKey, setSelectedDayKey] = useState(() => formatDateKey(new Date()));
   const [reportRange, setReportRange] = useState<ReportRange>("today");
-  const [detailEntry, setDetailEntry] = useState<CalendarEntry | null>(null);
+  const [calendarEditEntry, setCalendarEditEntry] = useState<CalendarEntry | null>(null);
   const [authView, setAuthView] = useState<AuthView>("login");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -90,6 +89,7 @@ export default function HomeScreen() {
   const [activeEditVisible, setActiveEditVisible] = useState(false);
   const [activeEditSaving, setActiveEditSaving] = useState(false);
   const [activeEditStopping, setActiveEditStopping] = useState(false);
+  const [calendarEditSaving, setCalendarEditSaving] = useState(false);
   const [chartProgress, setChartProgress] = useState(1);
   const refreshInFlight = useRef(false);
   const entrance = useRef(new Animated.Value(0)).current;
@@ -321,6 +321,31 @@ export default function HomeScreen() {
       return false;
     } finally {
       setActiveEditSaving(false);
+    }
+  }
+
+  async function saveCalendarEntryEdit(entryId: string, patch: TimeEntryUpdatePatch) {
+    setCalendarEditSaving(true);
+    try {
+      await updateTimeEntry(entryId, patch);
+      await load();
+      return true;
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        setCalendarEditEntry(null);
+        setAuthState("signedOut");
+        setData(null);
+        return false;
+      }
+      Alert.alert(
+        "Entry not saved",
+        isNetworkTimerError(error)
+          ? "Your changes were not saved. Check your connection and try again."
+          : error instanceof Error ? error.message : "Unable to save this entry."
+      );
+      return false;
+    } finally {
+      setCalendarEditSaving(false);
     }
   }
 
@@ -698,8 +723,11 @@ export default function HomeScreen() {
             <CalendarTab
               entries={calendarEntries}
               now={now}
-              onOpenActive={() => setActiveEditVisible(true)}
-              onOpenDetail={setDetailEntry}
+              onOpenActive={() => {
+                setCalendarEditEntry(null);
+                setActiveEditVisible(true);
+              }}
+              onOpenDetail={setCalendarEditEntry}
               onSelectDay={setSelectedDayKey}
               selectedDayKey={selectedDayKey}
               styles={styles}
@@ -745,13 +773,19 @@ export default function HomeScreen() {
         theme={theme}
         visible={activeEditVisible}
       />
-      <EntryDetailSheet
-        entry={detailEntry}
-        now={now}
-        onClose={() => setDetailEntry(null)}
+      <ActiveTimerEditSheet
+        categories={data?.categories ?? []}
+        elapsedSeconds={calendarEditEntry ? entryDurationSeconds(calendarEditEntry, now) : 0}
+        entry={calendarEditEntry}
+        lastStoppedAt={null}
+        mode="entry"
+        onCancel={() => setCalendarEditEntry(null)}
+        onSave={saveCalendarEntryEdit}
+        saving={calendarEditSaving}
+        stopping={false}
         styles={styles}
         theme={theme}
-        visible={Boolean(detailEntry)}
+        visible={Boolean(calendarEditEntry)}
       />
     </SafeAreaView>
   );
@@ -1208,77 +1242,6 @@ function ReportsTab({
         </View>
       </View>
     </View>
-  );
-}
-
-function EntryDetailSheet({
-  entry,
-  now,
-  onClose,
-  styles,
-  theme,
-  visible
-}: {
-  entry: CalendarEntry | null;
-  now: number;
-  onClose: () => void;
-  styles: MobileStyles;
-  theme: MobileTheme;
-  visible: boolean;
-}) {
-  if (!entry) return null;
-  const color = entryCategoryColor(entry);
-
-  return (
-    <Modal
-      animationType="slide"
-      onRequestClose={onClose}
-      presentationStyle="overFullScreen"
-      transparent
-      visible={visible}
-    >
-      <View style={styles.sheetOverlay}>
-        <Pressable
-          accessibilityLabel="Close time block details"
-          accessibilityRole="button"
-          onPress={onClose}
-          style={styles.sheetBackdrop}
-        />
-        <View pointerEvents="box-none" style={styles.sheetKeyboardAvoidingView}>
-          <SafeAreaView edges={["bottom"]} pointerEvents="box-none" style={styles.sheetSafeArea}>
-            <View style={styles.entryDetailSheet}>
-              <View style={styles.sheetHandle} />
-              <View style={styles.entryDetailHeader}>
-                <View style={[styles.colorDot, { backgroundColor: color }]} />
-                <Text style={styles.entryDetailTitle} numberOfLines={2}>{displayEntryTitle(entry)}</Text>
-                <Pressable
-                  accessibilityLabel="Close details"
-                  accessibilityRole="button"
-                  onPress={onClose}
-                  style={pressable(styles.sheetIconButton, styles.buttonPressed)}
-                >
-                  <CloseGlyph color={theme.textPrimary} />
-                </Pressable>
-              </View>
-              <View style={styles.entryDetailBody}>
-                <View style={styles.entryDetailRow}>
-                  <Text style={styles.label}>Category</Text>
-                  <Text style={styles.entryDetailValue}>{entry.categoryName ?? "Uncategorized"}</Text>
-                </View>
-                <View style={styles.entryDetailRow}>
-                  <Text style={styles.label}>Time</Text>
-                  <Text style={styles.entryDetailValue}>{formatEntryTimeRange(entry, now)}</Text>
-                </View>
-                <View style={styles.entryDetailRow}>
-                  <Text style={styles.label}>Duration</Text>
-                  <Text style={styles.entryDetailValue}>{formatDuration(entryDurationSeconds(entry, now))}</Text>
-                </View>
-              </View>
-            </View>
-          </SafeAreaView>
-        </View>
-      </View>
-    </Modal>
   );
 }
 

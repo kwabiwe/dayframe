@@ -306,17 +306,19 @@ function createStyles(theme: MobileTheme) {
       position: "absolute",
       left: 0,
       right: 0,
-      height: 1,
+      height: 22,
       flexDirection: "row",
-      alignItems: "center"
+      alignItems: "center",
+      transform: [{ translateY: -11 }]
     },
     calendarHourLabel: {
-      width: 54,
+      width: 68,
       color: theme.textSecondary,
       fontFamily: monoFont,
-      fontSize: 10,
+      fontSize: 11,
       fontWeight: "800",
-      textAlign: "center"
+      textAlign: "right",
+      paddingRight: 8
     },
     calendarHourLine: {
       flex: 1,
@@ -325,7 +327,7 @@ function createStyles(theme: MobileTheme) {
     },
     calendarBlock: {
       position: "absolute",
-      left: 58,
+      left: 76,
       right: 10,
       minHeight: 44,
       borderWidth: 1,
@@ -359,7 +361,7 @@ function createStyles(theme: MobileTheme) {
     },
     currentTimeRow: {
       position: "absolute",
-      left: 6,
+      left: 0,
       right: 8,
       height: 18,
       flexDirection: "row",
@@ -368,12 +370,13 @@ function createStyles(theme: MobileTheme) {
       transform: [{ translateY: -9 }]
     },
     currentTimeLabel: {
-      width: 48,
+      width: 68,
       color: theme.danger,
       fontFamily: monoFont,
-      fontSize: 10,
+      fontSize: 11,
       fontWeight: "800",
-      textAlign: "center"
+      textAlign: "right",
+      paddingRight: 8
     },
     currentTimeLine: {
       flex: 1,
@@ -934,55 +937,6 @@ function createStyles(theme: MobileTheme) {
       shadowRadius: 18,
       shadowOffset: { width: 0, height: -8 },
       elevation: 8
-    },
-    entryDetailSheet: {
-      borderTopLeftRadius: 24,
-      borderTopRightRadius: 24,
-      borderTopWidth: 1,
-      borderLeftWidth: 1,
-      borderRightWidth: 1,
-      borderColor: theme.borderStrong,
-      backgroundColor: theme.surface,
-      paddingHorizontal: 18,
-      paddingTop: 10,
-      paddingBottom: 16,
-      gap: 12,
-      shadowColor: "#000000",
-      shadowOpacity: theme.mode === "dark" ? 0.36 : 0.14,
-      shadowRadius: 18,
-      shadowOffset: { width: 0, height: -8 },
-      elevation: 8
-    },
-    entryDetailHeader: {
-      minHeight: 56,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10
-    },
-    entryDetailTitle: {
-      flex: 1,
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 17,
-      fontWeight: "800"
-    },
-    entryDetailBody: {
-      gap: 10
-    },
-    entryDetailRow: {
-      borderWidth: 1,
-      borderColor: theme.border,
-      backgroundColor: theme.surfaceInset,
-      borderRadius: 14,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      gap: 3
-    },
-    entryDetailValue: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 15,
-      fontWeight: "800"
     },
     sheetHandle: {
       alignSelf: "center",
