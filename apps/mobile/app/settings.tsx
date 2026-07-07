@@ -5,6 +5,7 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
+  Switch,
   Text,
   TextInput,
   View
@@ -12,7 +13,13 @@ import {
 import Svg, { Path } from "react-native-svg";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { DAYFRAME_PALETTE, paletteColorFor, type DayframePaletteKey } from "@dayframe/shared";
+import {
+  DAYFRAME_PALETTE,
+  paletteColorFor,
+  type DayframePaletteKey,
+  type HealthImportPreferenceKey,
+  type HealthImportPreferences
+} from "@dayframe/shared";
 import {
   AuthRequiredError,
   archiveCategory,
@@ -39,10 +46,14 @@ import {
 } from "@/lib/geofence";
 import {
   friendlyHealthKitError,
+  getHealthImportPreferences,
   getHealthImportStatus,
+  HEALTH_IMPORT_PREFERENCE_OPTIONS,
   importHealthKitSleep,
   importHealthKitWorkouts,
+  reprocessExistingHealthReviewItems,
   requestHealthKitPermissions,
+  setHealthImportPreference,
   type HealthImportStatus
 } from "@/lib/health";
 import {
@@ -50,6 +61,7 @@ import {
   themeOptions,
   useMobileTheme
 } from "@/lib/mobileTheme";
+import { REVIEW_COPY, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
 
 type Category = MobileBootstrap["categories"][number];
 
@@ -71,6 +83,7 @@ export default function SettingsScreen() {
   const [locationStatus, setLocationStatus] = useState("Not requested");
   const [locationDiagnostics, setLocationDiagnostics] = useState<LocationVisitDiagnostics | null>(null);
   const [healthStatus, setHealthStatus] = useState<HealthImportStatus[]>([]);
+  const [healthImportPreferences, setHealthImportPreferences] = useState<HealthImportPreferences | null>(null);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [pinNewCategory, setPinNewCategory] = useState(true);
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
@@ -128,6 +141,7 @@ export default function SettingsScreen() {
         }
       ]);
     });
+    getHealthImportPreferences().then(setHealthImportPreferences).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -151,6 +165,12 @@ export default function SettingsScreen() {
     (item) => item.provider === "healthkit" && item.kind === "permissions"
   );
   const queueDiagnostics = getQueueDiagnostics(queue);
+  const reviewNeededEntryIds = new Set([
+    ...(data?.dayEntries ?? []),
+    ...(data?.weekEntries ?? []),
+    ...(data?.entries ?? [])
+  ].filter(isReviewNeededEntry).map((entry) => entry.id));
+  const openReviewCount = (data?.reviewItems ?? []).filter(isOpenReviewItem).length + reviewNeededEntryIds.size;
   const firstFailedEvent = queueDiagnostics.firstFailed;
   const canRetryFailed = queueDiagnostics.failedCount > 0;
   const canClearFailed = queueDiagnostics.clearableFailedCount > 0;
@@ -160,6 +180,8 @@ export default function SettingsScreen() {
     lastSyncResult,
     queueDiagnostics
   });
+  const locationMonitoringAllowed = locationDiagnostics?.backgroundPermission === "granted";
+  const locationActionLabel = locationMonitoringAllowed ? "Refresh monitoring" : "Enable";
   useEffect(() => {
     if (!editingCategoryId) return undefined;
 
@@ -346,12 +368,17 @@ export default function SettingsScreen() {
   }
 
   async function enableLocation() {
+    if (locationMonitoringAllowed && data) {
+      await startGeofences(data.places);
+      await refreshLocationDiagnostics("Place monitoring is enabled.");
+      return;
+    }
+
     const status = await requestLocationAccess();
     setLocationStatus(status);
     if (status.startsWith("Always allowed") && data) {
-      const count = await startGeofences(data.places);
-      await refreshLocationDiagnostics(`Monitoring ${count} saved ${count === 1 ? "place" : "places"}.`);
-      Alert.alert("Geofences", `Started ${count} place monitors.`);
+      await startGeofences(data.places);
+      await refreshLocationDiagnostics("Place monitoring is enabled.");
     } else {
       await refreshLocationDiagnostics(status);
     }
@@ -381,6 +408,8 @@ export default function SettingsScreen() {
       const workout = await importHealthKitWorkouts();
       updateHealthStatus(workout);
       await syncAndReload({ syncingMessage: "Syncing Health data..." });
+      await reprocessExistingHealthReviewItems(undefined, { force: true });
+      await load({ silent: true });
     } catch (error) {
       if (error instanceof AuthRequiredError) return;
       const message = friendlyHealthKitError(error, "sync Apple Health");
@@ -388,6 +417,21 @@ export default function SettingsScreen() {
       if (!options?.silent) {
         Alert.alert("Apple Health", message);
       }
+    }
+  }
+
+  async function updateHealthImportPreference(type: HealthImportPreferenceKey, enabled: boolean) {
+    const current = healthImportPreferences ?? await getHealthImportPreferences();
+    const optimistic = { ...current, [type]: enabled };
+    setHealthImportPreferences(optimistic);
+    try {
+      const saved = await setHealthImportPreference(type, enabled);
+      setHealthImportPreferences(saved);
+      await reprocessExistingHealthReviewItems(saved, { force: true });
+      await load({ silent: true });
+    } catch (error) {
+      setHealthImportPreferences(current);
+      Alert.alert("Apple Health", error instanceof Error ? error.message : "Unable to save Health preference.");
     }
   }
 
@@ -451,6 +495,26 @@ export default function SettingsScreen() {
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Settings</Text>
             <Text style={styles.muted}>Account, categories, device sync and permissions.</Text>
+          </View>
+
+          <View style={styles.panel}>
+            <View style={styles.summaryHeader}>
+              <View>
+                <Text style={styles.label}>{REVIEW_COPY.needsReview}</Text>
+                <Text style={styles.sectionTitle}>Review</Text>
+              </View>
+              <Text style={styles.summaryTotal}>{openReviewCount}</Text>
+            </View>
+            <Text style={styles.muted}>Suggested activity from Health and places stays here until it is confirmed.</Text>
+            <View style={styles.buttonRow}>
+              <Pressable
+                accessibilityRole="button"
+                style={pressable(styles.secondaryButton, styles.buttonPressed)}
+                onPress={() => router.push("./review")}
+              >
+                <Text style={styles.secondaryButtonText}>Open Review</Text>
+              </Pressable>
+            </View>
           </View>
 
           <View style={styles.panel}>
@@ -754,9 +818,7 @@ export default function SettingsScreen() {
                   Permission: {formatPermissionStatus(locationDiagnostics.foregroundPermission)} · Background:{" "}
                   {formatPermissionStatus(locationDiagnostics.backgroundPermission)}
                 </Text>
-                <Text style={styles.muted}>
-                  Monitors active: {locationDiagnostics.activeMonitorCount}
-                </Text>
+                <Text style={styles.muted}>{locationMonitorCountText(locationDiagnostics)}</Text>
                 {locationDiagnostics.lastGeofenceEvent ? (
                   <Text style={styles.muted}>
                     Last geofence: {formatGeofenceTransition(locationDiagnostics.lastGeofenceEvent.transition)}{" "}
@@ -771,7 +833,8 @@ export default function SettingsScreen() {
                     {formatQueueTime(locationDiagnostics.lastQueuedVisitCandidate.queuedAt)}
                   </Text>
                 ) : null}
-                {locationDiagnostics.lastStatus ? (
+                {locationDiagnostics.lastStatus &&
+                locationDiagnostics.lastStatus !== locationMonitorCountText(locationDiagnostics) ? (
                   <Text style={styles.muted}>{locationDiagnostics.lastStatus}</Text>
                 ) : null}
                 {locationDiagnostics.lastEventAt || locationDiagnostics.lastMonitorRefreshAt ? (
@@ -783,7 +846,7 @@ export default function SettingsScreen() {
             ) : null}
             <View style={styles.buttonRow}>
               <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={enableLocation}>
-                <Text style={styles.secondaryButtonText}>Enable</Text>
+                <Text style={styles.secondaryButtonText}>{locationActionLabel}</Text>
               </Pressable>
             </View>
           </View>
@@ -791,8 +854,7 @@ export default function SettingsScreen() {
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Apple Health</Text>
             <Text style={styles.muted}>
-              Sleep and workouts are queued as health activity events first, then reviewed before becoming
-              trusted time entries.
+              Sleep and workouts are queued as health activity events first, then logged when confidence is high.
             </Text>
             <Text style={styles.statusText}>
               {healthAvailability?.notes ?? "Apple Health status not checked"}
@@ -800,6 +862,29 @@ export default function SettingsScreen() {
             {healthPermissionStatus ? <Text style={styles.muted}>{healthPermissionStatus.notes}</Text> : null}
             <Text style={styles.muted}>Sleep: {sleepStatus?.notes ?? "Not synced yet."}</Text>
             <Text style={styles.muted}>Workouts: {workoutStatus?.notes ?? "Not synced yet."}</Text>
+            <View style={styles.healthPreferenceList}>
+              {HEALTH_IMPORT_PREFERENCE_OPTIONS.map((option) => {
+                const enabled = healthImportPreferences?.[option.key] ?? option.defaultEnabled;
+                return (
+                  <View key={option.key} style={styles.healthPreferenceRow}>
+                    <View style={styles.healthPreferenceText}>
+                      <Text style={styles.categoryName}>{option.label}</Text>
+                      <Text style={styles.categoryMeta}>
+                        {enabled ? "Auto-log from Apple Health" : "Ignored during Health sync"}
+                      </Text>
+                    </View>
+                    <Switch
+                      accessibilityLabel={`${option.label} Apple Health auto-log`}
+                      value={enabled}
+                      onValueChange={(value) => updateHealthImportPreference(option.key, value)}
+                      trackColor={{ false: theme.borderStrong, true: theme.accent }}
+                      thumbColor={theme.mode === "dark" ? theme.textPrimary : "#FFFFFF"}
+                      ios_backgroundColor={theme.borderStrong}
+                    />
+                  </View>
+                );
+              })}
+            </View>
             <View style={styles.buttonRow}>
               <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={connectAppleHealth}>
                 <Text style={styles.secondaryButtonText}>Connect</Text>
@@ -891,11 +976,16 @@ function nextCategoryColor(categories: Category[]): DayframePaletteKey {
 }
 
 function locationStatusText(diagnostics: LocationVisitDiagnostics) {
-  if (diagnostics.backgroundPermission === "granted" && diagnostics.activeMonitorCount > 0) {
-    return `Monitoring ${diagnostics.activeMonitorCount} saved ${diagnostics.activeMonitorCount === 1 ? "place" : "places"}.`;
-  }
   if (diagnostics.foregroundPermission !== "granted") return "Location permission is not enabled.";
   if (diagnostics.backgroundPermission !== "granted") return "Enable Always access to monitor saved places.";
+  return "Place monitoring is enabled.";
+}
+
+function locationMonitorCountText(diagnostics: LocationVisitDiagnostics) {
+  if (diagnostics.backgroundPermission !== "granted") return "No place monitors are active.";
+  if (diagnostics.activeMonitorCount > 0) {
+    return `Monitoring ${diagnostics.activeMonitorCount} saved ${diagnostics.activeMonitorCount === 1 ? "place" : "places"}.`;
+  }
   return "No saved places with coordinates are being monitored.";
 }
 

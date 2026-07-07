@@ -4,7 +4,8 @@ import {
   ActivityEventInputSchema,
   type ActivityEventInput,
   type ActivityEventType,
-  type EventSource
+  type EventSource,
+  type HealthImportPreferences
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
 
@@ -54,6 +55,24 @@ export type MobileTimeEntry = {
   durationSeconds: number;
 };
 
+export type MobileReviewItem = {
+  id: string;
+  type?: string;
+  title: string;
+  eventSource: string | null;
+  eventType: string | null;
+  categoryName: string | null;
+  placeName: string | null;
+  suggestedCategoryId: string | null;
+  suggestedPlaceId: string | null;
+  suggestedStartedAt: string | null;
+  suggestedStoppedAt: string | null;
+  confidence: string;
+  status: string;
+  notes: string | null;
+  createdAt: string;
+};
+
 export type MobileBootstrap = {
   user: { id: string; email: string; name: string };
   workspace: { id: string; name: string };
@@ -88,7 +107,7 @@ export type MobileBootstrap = {
     defaultActivityDescription?: string | null;
     autoStart?: boolean;
   }>;
-  reviewItems: Array<{ id: string; title: string; confidence: string; status: string }>;
+  reviewItems: MobileReviewItem[];
 };
 
 export type MobileCategoryResponse = {
@@ -118,6 +137,28 @@ export type TimeEntryUpdatePatch = {
   description?: string | null;
   startedAt?: string;
   stoppedAt?: string | null;
+};
+
+export type ManualTimeEntryInput = {
+  categoryId?: string | null;
+  description?: string | null;
+  startedAt: string;
+  stoppedAt: string;
+};
+
+export type ReviewItemAction = "accept" | "ignore_once";
+
+export type HealthReviewReprocessResult = {
+  ok: boolean;
+  checkedCount: number;
+  confirmedCount: number;
+  ignoredCount: number;
+  leftInReviewCount: number;
+  skippedCount: number;
+  failedCount: number;
+  updatedCategoryCount: number;
+  remainingReviewCount: number;
+  errorSummary: string[];
 };
 
 export type MobileAuthSession = {
@@ -429,6 +470,79 @@ export async function updateTimeEntry(id: string, patch: TimeEntryUpdatePatch) {
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to update timer"));
   return readJsonResponse(response);
+}
+
+export async function createManualTimeEntry(input: ManualTimeEntryInput) {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/time-entries`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify({
+      mode: "manual",
+      categoryId: input.categoryId ?? undefined,
+      description: input.description?.trim() || undefined,
+      startedAt: input.startedAt,
+      stoppedAt: input.stoppedAt
+    })
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to create time entry"));
+  return readJsonResponse(response);
+}
+
+export async function resolveReviewItem(id: string, action: ReviewItemAction) {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(id)}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify({ action })
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to update review item"));
+  return readJsonResponse(response);
+}
+
+export function confirmReviewItem(id: string) {
+  return resolveReviewItem(id, "accept");
+}
+
+export function dismissReviewItem(id: string) {
+  return resolveReviewItem(id, "ignore_once");
+}
+
+export async function reprocessHealthReviewItems(
+  preferences: HealthImportPreferences
+): Promise<HealthReviewReprocessResult> {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/review/reprocess-health`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify({ preferences })
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to reprocess Health review items"));
+  return readJsonResponse<HealthReviewReprocessResult>(response);
+}
+
+export async function saveEditedReviewItem(id: string, input: ManualTimeEntryInput) {
+  await createManualTimeEntry(input);
+  await dismissReviewItem(id);
+  return { ok: true };
 }
 
 export async function createCategory(

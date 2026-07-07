@@ -44,13 +44,20 @@ import {
   type MobileStyles,
   type MobileTheme
 } from "@/lib/mobileTheme";
+import {
+  REVIEW_COPY,
+  buildReviewItemDraftEntry,
+  hasReviewNeededActivityForRange,
+  isOpenReviewItem,
+  isReviewNeededEntry
+} from "@/lib/review";
 
 type TimeEntry = MobileBootstrap["entries"][number];
 type AuthView = "login" | "signup";
 type AuthState = "checking" | "authenticated" | "signedOut";
 type MobileTab = "timer" | "calendar" | "reports";
 type ReportRange = "today" | "week";
-type CalendarEntry = TimeEntry & { isActive: boolean };
+type CalendarEntry = TimeEntry & { isActive: boolean; reviewItemId?: string; isReviewSuggestion?: boolean };
 type SummarySegment = {
   key: string;
   categoryName: string;
@@ -211,6 +218,16 @@ export default function HomeScreen() {
     [summaryEntries, now]
   );
   const summaryTotal = summarySegments.reduce((sum, segment) => sum + segment.seconds, 0);
+  const summaryHasSuggestedActivity = useMemo(() => {
+    const rangeStart = dateFromKey(todayKey);
+    return hasReviewNeededActivityForRange({
+      entries: summaryEntries,
+      now,
+      rangeEnd: addDaysToDate(rangeStart, 1),
+      rangeStart,
+      reviewItems: data?.reviewItems ?? []
+    });
+  }, [data?.reviewItems, now, summaryEntries, todayKey]);
   const activeCategoryColor = data?.activeEntry?.categoryName
     ? paletteColorFor(data.activeEntry.categoryColor ?? data.activeEntry.categoryId, data.activeEntry.categoryName)
     : null;
@@ -224,7 +241,7 @@ export default function HomeScreen() {
     [data, now, selectedDayKey]
   );
   const calendarTotal = useMemo(
-    () => sumStartedInDaySeconds(calendarEntries, selectedDayKey, now),
+    () => sumStartedInDaySeconds(calendarEntries.filter((entry) => !isCalendarReviewNeeded(entry)), selectedDayKey, now),
     [calendarEntries, now, selectedDayKey]
   );
   const reports = useMemo(
@@ -711,6 +728,7 @@ export default function HomeScreen() {
 
               <TodaySummary
                 chartProgress={chartProgress}
+                hasSuggestedActivity={summaryHasSuggestedActivity}
                 segments={summarySegments}
                 styles={styles}
                 theme={theme}
@@ -728,6 +746,7 @@ export default function HomeScreen() {
                 setActiveEditVisible(true);
               }}
               onOpenDetail={setCalendarEditEntry}
+              onOpenReviewItem={() => router.push("./review")}
               onSelectDay={setSelectedDayKey}
               selectedDayKey={selectedDayKey}
               styles={styles}
@@ -743,6 +762,7 @@ export default function HomeScreen() {
               dailyBars={reports.dailyBars}
               range={reportRange}
               segments={reports.segments}
+              hasSuggestedActivity={reports.hasSuggestedActivity}
               styles={styles}
               theme={theme}
               todayTotal={reports.todayTotal}
@@ -902,6 +922,7 @@ function CalendarTab({
   now,
   onOpenActive,
   onOpenDetail,
+  onOpenReviewItem,
   onSelectDay,
   selectedDayKey,
   styles,
@@ -914,6 +935,7 @@ function CalendarTab({
   now: number;
   onOpenActive: () => void;
   onOpenDetail: (entry: CalendarEntry) => void;
+  onOpenReviewItem: (reviewItemId: string) => void;
   onSelectDay: (dayKey: string) => void;
   selectedDayKey: string;
   styles: MobileStyles;
@@ -1001,43 +1023,42 @@ function CalendarTab({
                   <View style={styles.currentTimeLine} />
                 </View>
               ) : null}
-              {outsideAxisEntries.map((entry) => (
-                <Pressable
-                  key={entry.id}
-                  accessibilityLabel={`${entry.isActive ? "Edit running timer" : "Open time block"} outside visible calendar hours`}
-                  accessibilityRole="button"
-                  onPress={() => {
-                    if (entry.isActive) {
-                      onOpenActive();
-                      return;
-                    }
-                    onOpenDetail(entry);
-                  }}
-                  style={({ pressed }) => [
-                    styles.calendarOutsideBlock,
-                    entry.isActive ? styles.calendarBlockActive : null,
-                    {
-                      borderColor: entryCategoryColor(entry),
-                      backgroundColor: colorWithAlpha(entryCategoryColor(entry), entry.isActive ? 0.16 : 0.24)
-                    },
-                    pressed ? styles.buttonPressed : null
-                  ]}
-                >
-                  <View style={styles.calendarBlockTitleRow}>
-                    <View
-                      style={[styles.colorDot, { backgroundColor: entryCategoryColor(entry) }]}
-                    />
-                    <Text style={styles.calendarBlockTitle} numberOfLines={1}>
-                      {displayEntryTitle(entry)}
+              {outsideAxisEntries.map((entry) => {
+                const reviewNeeded = isCalendarReviewNeeded(entry);
+                const color = entryCategoryColor(entry);
+                const blockColor = reviewNeeded ? theme.textSecondary : color;
+
+                return (
+                  <Pressable
+                    key={entry.id}
+                    accessibilityLabel={`${reviewNeeded ? REVIEW_COPY.needsReview : entry.isActive ? "Edit running timer" : "Open time block"} outside visible calendar hours`}
+                    accessibilityRole="button"
+                    onPress={() => openCalendarEntry(entry, onOpenActive, onOpenDetail, onOpenReviewItem)}
+                    style={({ pressed }) => [
+                      styles.calendarOutsideBlock,
+                      entry.isActive ? styles.calendarBlockActive : null,
+                      reviewNeeded ? styles.calendarBlockReview : null,
+                      {
+                        borderColor: reviewNeeded ? theme.borderStrong : color,
+                        backgroundColor: colorWithAlpha(blockColor, reviewNeeded ? 0.12 : entry.isActive ? 0.16 : 0.24)
+                      },
+                      pressed ? styles.buttonPressed : null
+                    ]}
+                  >
+                    <View style={styles.calendarBlockTitleRow}>
+                      <View
+                        style={[styles.colorDot, { backgroundColor: blockColor }]}
+                      />
+                      <Text style={styles.calendarBlockTitle} numberOfLines={1}>
+                        {displayEntryTitle(entry)}
+                      </Text>
+                    </View>
+                    <Text style={styles.calendarBlockMeta} numberOfLines={1}>
+                      {calendarBlockMeta(entry, now, reviewNeeded)}
                     </Text>
-                  </View>
-                  <Text style={styles.calendarBlockMeta} numberOfLines={1}>
-                    {entry.isActive
-                      ? `${formatEntryTimeRange(entry, now)} · running`
-                      : `${formatEntryTimeRange(entry, now)} · ${formatDuration(entryDurationSeconds(entry, now))}`}
-                  </Text>
-                </Pressable>
-              ))}
+                  </Pressable>
+                );
+              })}
             </View>
           ) : null}
 
@@ -1055,41 +1076,37 @@ function CalendarTab({
             })}
 
             {visibleBlocks.map(({ entry, metrics }) => {
+              const reviewNeeded = isCalendarReviewNeeded(entry);
               const color = entryCategoryColor(entry);
+              const blockColor = reviewNeeded ? theme.textSecondary : color;
               const title = displayEntryTitle(entry);
               const compact = metrics.height <= 54;
-              const timeLabel = formatEntryTimeRange(entry, now);
 
               return (
                 <Pressable
                   key={entry.id}
-                  accessibilityLabel={`${entry.isActive ? "Edit running timer" : "Open time block"}: ${title}`}
+                  accessibilityLabel={`${reviewNeeded ? REVIEW_COPY.needsReview : entry.isActive ? "Edit running timer" : "Open time block"}: ${title}`}
                   accessibilityRole="button"
-                  onPress={() => {
-                    if (entry.isActive) {
-                      onOpenActive();
-                      return;
-                    }
-                    onOpenDetail(entry);
-                  }}
+                  onPress={() => openCalendarEntry(entry, onOpenActive, onOpenDetail, onOpenReviewItem)}
                   style={({ pressed }) => [
                     styles.calendarBlock,
                     entry.isActive ? styles.calendarBlockActive : null,
+                    reviewNeeded ? styles.calendarBlockReview : null,
                     {
                       top: metrics.top,
                       height: Math.max(TIMELINE_MIN_BLOCK_HEIGHT, metrics.height),
-                      borderColor: color,
-                      backgroundColor: colorWithAlpha(color, entry.isActive ? 0.16 : 0.28)
+                      borderColor: reviewNeeded ? theme.borderStrong : color,
+                      backgroundColor: colorWithAlpha(blockColor, reviewNeeded ? 0.12 : entry.isActive ? 0.16 : 0.28)
                     },
                     pressed ? styles.buttonPressed : null
                   ]}
                 >
                   <View style={styles.calendarBlockTitleRow}>
-                    <View style={[styles.colorDot, { backgroundColor: color }]} />
+                    <View style={[styles.colorDot, { backgroundColor: blockColor }]} />
                     <Text style={styles.calendarBlockTitle} numberOfLines={1}>{title}</Text>
                   </View>
                   <Text style={styles.calendarBlockMeta} numberOfLines={compact ? 1 : 2}>
-                    {entry.isActive ? `${timeLabel} · running` : `${timeLabel} · ${formatDuration(entryDurationSeconds(entry, now))}`}
+                    {calendarBlockMeta(entry, now, reviewNeeded)}
                   </Text>
                 </Pressable>
               );
@@ -1114,6 +1131,7 @@ function CalendarTab({
 
 function ReportsTab({
   dailyBars,
+  hasSuggestedActivity,
   onRangeChange,
   range,
   segments,
@@ -1123,6 +1141,7 @@ function ReportsTab({
   weekTotal
 }: {
   dailyBars: Array<{ key: string; label: string; seconds: number }>;
+  hasSuggestedActivity: boolean;
   onRangeChange: (range: ReportRange) => void;
   range: ReportRange;
   segments: SummarySegment[];
@@ -1183,6 +1202,9 @@ function ReportsTab({
             <Text style={styles.sectionTitle}>{range === "today" ? "Today" : "This week"}</Text>
           </View>
         </View>
+        {hasSuggestedActivity ? (
+          <Text style={styles.reviewNote}>{REVIEW_COPY.suggestedNote}</Text>
+        ) : null}
 
         {segments.length === 0 ? (
           <Text style={styles.muted}>No tracked time yet.</Text>
@@ -1341,12 +1363,14 @@ function CloseGlyph({ color }: { color: string }) {
 
 function TodaySummary({
   chartProgress,
+  hasSuggestedActivity,
   segments,
   styles,
   theme,
   total
 }: {
   chartProgress: number;
+  hasSuggestedActivity: boolean;
   segments: SummarySegment[];
   styles: MobileStyles;
   theme: MobileTheme;
@@ -1365,6 +1389,9 @@ function TodaySummary({
       <View style={styles.chartWrap}>
         <DonutChart progress={chartProgress} segments={segments} styles={styles} theme={theme} total={total} />
       </View>
+      {hasSuggestedActivity ? (
+        <Text style={styles.reviewNote}>{REVIEW_COPY.suggestedNote}</Text>
+      ) : null}
 
       <View style={styles.legendList}>
         {segments.length === 0 ? (
@@ -1458,12 +1485,28 @@ function buildWeekStripDays(weekStartIso: string | undefined, now: number) {
 
 function buildCalendarEntries(data: MobileBootstrap | null, selectedDayKey: string, now: number): CalendarEntry[] {
   if (!data) return [];
-  return mergeActiveEntry(data.weekEntries ?? data.entries, data.activeEntry)
+  const timeEntries = mergeActiveEntry(data.weekEntries ?? data.entries, data.activeEntry)
     .filter((entry) => entryOverlapsDay(entry, selectedDayKey, now))
     .map((entry) => ({
       ...entry,
       isActive: data.activeEntry?.id === entry.id || !entry.stoppedAt
-    }))
+    }));
+  const reviewEntries: CalendarEntry[] = [];
+  for (const item of data.reviewItems ?? []) {
+    if (!isOpenReviewItem(item)) continue;
+    const draft = buildReviewItemDraftEntry(item, data.categories, now);
+    if (!draft) continue;
+    const entry: CalendarEntry = {
+      ...draft,
+      id: `review:${item.id}`,
+      isActive: false,
+      isReviewSuggestion: true,
+      reviewItemId: item.id
+    };
+    if (entryOverlapsDay(entry, selectedDayKey, now)) reviewEntries.push(entry);
+  }
+
+  return [...timeEntries, ...reviewEntries]
     .sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
 }
 
@@ -1478,17 +1521,27 @@ function buildReports(data: MobileBootstrap | null, range: ReportRange, todayKey
   const weekEntries = data
     ? mergeActiveEntry(data.weekEntries ?? data.entries, data.activeEntry)
     : [];
-  const todayTotal = sumRangeSeconds(dayEntries, todayStart, todayEnd, now);
-  const weekTotal = sumRangeSeconds(weekEntries, weekStart, weekEnd, now);
   const selectedEntries = range === "today" ? dayEntries : weekEntries;
   const rangeStart = range === "today" ? todayStart : weekStart;
   const rangeEnd = range === "today" ? todayEnd : weekEnd;
+  const confirmedDayEntries = dayEntries.filter((entry) => !isReviewNeededEntry(entry));
+  const confirmedWeekEntries = weekEntries.filter((entry) => !isReviewNeededEntry(entry));
+  const confirmedSelectedEntries = selectedEntries.filter((entry) => !isReviewNeededEntry(entry));
+  const todayTotal = sumRangeSeconds(confirmedDayEntries, todayStart, todayEnd, now);
+  const weekTotal = sumRangeSeconds(confirmedWeekEntries, weekStart, weekEnd, now);
 
   return {
-    todayTotal: todayTotal || data?.stats?.todaySeconds || 0,
-    weekTotal: weekTotal || data?.stats?.weekSeconds || 0,
-    segments: buildCategorySegments(selectedEntries, rangeStart, rangeEnd, now),
-    dailyBars: buildDailyBars(weekEntries, weekStart, now)
+    todayTotal,
+    weekTotal,
+    segments: buildCategorySegments(confirmedSelectedEntries, rangeStart, rangeEnd, now),
+    dailyBars: buildDailyBars(confirmedWeekEntries, weekStart, now),
+    hasSuggestedActivity: hasReviewNeededActivityForRange({
+      entries: selectedEntries,
+      now,
+      rangeEnd,
+      rangeStart,
+      reviewItems: data?.reviewItems ?? []
+    })
   };
 }
 
@@ -1622,6 +1675,33 @@ function displayEntryTitle(entry: TimeEntry) {
   return displayTimerDescription(entry) ?? entry.categoryName ?? "Uncategorized";
 }
 
+function isCalendarReviewNeeded(entry: CalendarEntry) {
+  return Boolean(entry.reviewItemId || entry.isReviewSuggestion || isReviewNeededEntry(entry));
+}
+
+function openCalendarEntry(
+  entry: CalendarEntry,
+  onOpenActive: () => void,
+  onOpenDetail: (entry: CalendarEntry) => void,
+  onOpenReviewItem: (reviewItemId: string) => void
+) {
+  if (entry.reviewItemId) {
+    onOpenReviewItem(entry.reviewItemId);
+    return;
+  }
+  if (entry.isActive) {
+    onOpenActive();
+    return;
+  }
+  onOpenDetail(entry);
+}
+
+function calendarBlockMeta(entry: CalendarEntry, now: number, reviewNeeded: boolean) {
+  const timeLabel = formatEntryTimeRange(entry, now);
+  const suffix = entry.isActive ? "running" : formatDuration(entryDurationSeconds(entry, now));
+  return reviewNeeded ? `${REVIEW_COPY.needsReview} · ${timeLabel} · ${suffix}` : `${timeLabel} · ${suffix}`;
+}
+
 function formatEntryTimeRange(entry: TimeEntry, now: number) {
   const startedAt = new Date(entry.startedAt);
   const stoppedAt = entry.stoppedAt ? new Date(entry.stoppedAt) : new Date(now);
@@ -1704,6 +1784,7 @@ function buildTodaySummarySegments(entries: TimeEntry[], now: number): SummarySe
   const totals = new Map<string, Omit<SummarySegment, "share">>();
 
   for (const entry of entries) {
+    if (isReviewNeededEntry(entry)) continue;
     const startedAt = new Date(entry.startedAt).getTime();
     if (startedAt < periodStart) continue;
     const categoryName = entry.categoryName ?? "Uncategorized";

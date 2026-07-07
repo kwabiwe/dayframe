@@ -340,6 +340,10 @@ function createStyles(theme: MobileTheme) {
     calendarBlockActive: {
       borderStyle: "dashed"
     },
+    calendarBlockReview: {
+      borderStyle: "dashed",
+      opacity: 0.72
+    },
     calendarBlockTitleRow: {
       flexDirection: "row",
       alignItems: "center",
@@ -357,6 +361,12 @@ function createStyles(theme: MobileTheme) {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 11,
+      fontWeight: "800"
+    },
+    calendarReviewLabel: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 10,
       fontWeight: "800"
     },
     currentTimeRow: {
@@ -554,6 +564,100 @@ function createStyles(theme: MobileTheme) {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 12
+    },
+    reviewList: {
+      gap: 10
+    },
+    reviewCard: {
+      borderWidth: 1,
+      borderStyle: "dashed",
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 14,
+      padding: 12,
+      gap: 10
+    },
+    reviewCardHeader: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+      gap: 10
+    },
+    reviewBadge: {
+      alignSelf: "flex-start",
+      minHeight: 28,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surfaceMuted,
+      borderRadius: 999,
+      paddingHorizontal: 10,
+      justifyContent: "center"
+    },
+    reviewBadgeText: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 11,
+      fontWeight: "800"
+    },
+    reviewTitleStack: {
+      flex: 1,
+      minWidth: 0,
+      gap: 4
+    },
+    reviewTitle: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 15,
+      fontWeight: "800"
+    },
+    reviewMetaLine: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      lineHeight: 17
+    },
+    reviewActions: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8
+    },
+    reviewPrimaryButton: {
+      minHeight: 44,
+      borderWidth: 1,
+      borderColor: theme.accent,
+      backgroundColor: theme.accent,
+      borderRadius: 12,
+      paddingHorizontal: 14,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    reviewSecondaryButton: {
+      minHeight: 44,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surface,
+      borderRadius: 12,
+      paddingHorizontal: 14,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    reviewSecondaryButtonText: {
+      color: theme.accent,
+      fontFamily: monoFont,
+      fontWeight: "800"
+    },
+    reviewNote: {
+      borderWidth: 1,
+      borderStyle: "dashed",
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surfaceMuted,
+      borderRadius: 12,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      lineHeight: 17
     },
     reportRangeRow: {
       flexDirection: "row",
@@ -785,6 +889,27 @@ function createStyles(theme: MobileTheme) {
       fontSize: 12,
       fontWeight: "700",
       lineHeight: 17
+    },
+    healthPreferenceList: {
+      gap: 8
+    },
+    healthPreferenceRow: {
+      minHeight: 58,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 12
+    },
+    healthPreferenceText: {
+      flex: 1,
+      minWidth: 0,
+      gap: 3
     },
     categoryChoiceScroller: {
       gap: 8,

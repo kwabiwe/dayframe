@@ -26,6 +26,7 @@ const {
   deletePlace,
   deleteTimeEntry,
   processActivityEvent,
+  reprocessHealthReviewItems,
   resolveReviewItem,
   TimeEntryNotFoundError,
   updateCategory,
@@ -262,7 +263,7 @@ describe("health event persistence", () => {
     vi.resetAllMocks();
     mocks.getNormalizationContext.mockResolvedValue({
       projects: [],
-      categories: [],
+      categories: [{ id: healthCategoryId(), name: "Health", color: "moss", isPinned: false }],
       places: [],
       automationRules: []
     });
@@ -287,14 +288,17 @@ describe("health event persistence", () => {
     expect(healthInsert?.[1]).toEqual([
       session.workspaceId,
       session.userId,
-      "sleep-sample-1",
+      "sleep-core-1",
       "healthkit",
       "Apple Watch",
       "asleep_core",
-      "2026-06-06T22:24:00.000Z",
-      "2026-06-07T05:55:00.000Z",
-      JSON.stringify(healthSleepEvent().rawPayload)
+      "2026-06-06T23:55:00.000Z",
+      "2026-06-07T02:15:00.000Z",
+      JSON.stringify((healthSleepEvent().rawPayload.samples as Array<Record<string, unknown>>)[0])
     ]);
+    expect(
+      client.query.mock.calls.filter(([statement]) => String(statement).includes("insert into health_sleep_segments"))
+    ).toHaveLength(3);
     const reviewInsert = client.query.mock.calls.find(([statement]) =>
       String(statement).includes("insert into review_items")
     );
@@ -303,17 +307,87 @@ describe("health event persistence", () => {
       session.workspaceId,
       "event-1",
       "health_sleep_import_suggestion",
-      "Sleep asleep core",
+      "Sleep",
       null,
+      healthCategoryId(),
       null,
-      null,
-      "2026-06-06T22:24:00.000Z",
-      "2026-06-07T05:55:00.000Z",
+      "2026-06-06T23:55:00.000Z",
+      "2026-06-07T06:27:00.000Z",
       "high",
-      "Health imports are reviewed before becoming completed entries."
+      "Sleep imports are reviewed when the duration or confidence is uncertain."
     ]);
     expect(client.query).toHaveBeenCalledWith("commit");
     expect(client.release).toHaveBeenCalled();
+  });
+
+  it("auto-confirms high-confidence Health sleep as completed Health time", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        if (statement.includes("from time_entries")) return { rows: [] };
+        return statement.includes("returning id") ? { rows: [{ id: "event-1" }] } : { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await processActivityEvent(
+      healthSleepEvent({ autoConfirm: true, durationSeconds: 23520 }),
+      session
+    );
+
+    const entryInsert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into time_entries")
+    );
+    expect(entryInsert?.[1]).toEqual([
+      session.workspaceId,
+      session.userId,
+      null,
+      healthCategoryId(),
+      null,
+      "health_sleep",
+      "high",
+      "Sleep",
+      "2026-06-06T23:55:00.000Z",
+      "2026-06-07T06:27:00.000Z",
+      "event-1"
+    ]);
+    expect(
+      client.query.mock.calls.find(([statement]) => String(statement).includes("insert into review_items"))
+    ).toBeUndefined();
+    expect(
+      client.query.mock.calls.filter(([statement]) => String(statement).includes("insert into health_sleep_segments"))
+    ).toHaveLength(3);
+  });
+
+  it("does not duplicate auto-confirmed Health sleep entries on clientEventId retry", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        if (statement.includes("client_event_id = $3")) return { rows: [{ id: "event-existing" }] };
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await processActivityEvent(
+      {
+        ...healthSleepEvent({ autoConfirm: true, durationSeconds: 23520 }),
+        clientEventId: "healthkit-sleep:sleep-session-1"
+      },
+      session
+    );
+
+    expect(result).toEqual({
+      eventId: "event-existing",
+      candidate: expect.objectContaining({ action: "create_time_entry" }),
+      duplicate: true
+    });
+    expect(
+      client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"))
+    ).toBeUndefined();
+    expect(client.query).toHaveBeenCalledWith("commit");
   });
 
   it("rounds fractional Health workout durations before inserting integer duration seconds", async () => {
@@ -345,6 +419,413 @@ describe("health event persistence", () => {
       284.5,
       JSON.stringify(healthWorkoutEvent().rawPayload)
     ]);
+  });
+
+  it("reuses the Health category for Health workout review suggestions", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        return statement.includes("returning id") ? { rows: [{ id: "event-1" }] } : { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await processActivityEvent(healthWorkoutEvent({ description: "Walk" }), session);
+
+    const reviewInsert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into review_items")
+    );
+    expect(reviewInsert?.[1]).toEqual([
+      session.workspaceId,
+      "event-1",
+      "health_workout_import_suggestion",
+      "Walk",
+      null,
+      healthCategoryId(),
+      null,
+      "2026-06-07T06:39:00.000Z",
+      "2026-06-07T07:43:18.000Z",
+      "high",
+      "Health workouts are reviewed when the type, duration, or confidence is uncertain."
+    ]);
+    expect(
+      client.query.mock.calls.find(([statement]) => String(statement).includes("insert into categories"))
+    ).toBeUndefined();
+  });
+
+  it("creates the Health category when a Health import has no matching category", async () => {
+    mocks.getNormalizationContext.mockResolvedValueOnce({
+      projects: [],
+      categories: [],
+      places: [],
+      automationRules: []
+    });
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        if (statement.includes("from categories")) return { rows: [] };
+        if (statement.includes("insert into categories")) return { rows: [{ id: healthCategoryId() }] };
+        return statement.includes("returning id") ? { rows: [{ id: "event-1" }] } : { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await processActivityEvent(healthWorkoutEvent({ description: "Walk" }), session);
+
+    expect(client.query).toHaveBeenCalledWith(
+      expect.stringContaining("from categories"),
+      [session.workspaceId, "Health"]
+    );
+    expect(client.query).toHaveBeenCalledWith(
+      expect.stringContaining("insert into categories"),
+      [session.workspaceId]
+    );
+    const activityInsert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into activity_events")
+    );
+    expect((activityInsert?.[1] as unknown[])[10]).toBe(healthCategoryId());
+  });
+
+  it("auto-confirms high-confidence normal Health workouts as completed entries", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        if (statement.includes("from time_entries")) return { rows: [] };
+        return statement.includes("returning id") ? { rows: [{ id: "event-1" }] } : { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await processActivityEvent(healthWorkoutEvent({ autoConfirm: true, description: "Walk" }), session);
+
+    const entryInsert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into time_entries")
+    );
+    expect(entryInsert?.[1]).toEqual([
+      session.workspaceId,
+      session.userId,
+      null,
+      healthCategoryId(),
+      null,
+      "health_workout",
+      "high",
+      "Walk",
+      "2026-06-07T06:39:00.000Z",
+      "2026-06-07T07:43:18.000Z",
+      "event-1"
+    ]);
+    expect(
+      client.query.mock.calls.find(([statement]) => String(statement).includes("insert into review_items"))
+    ).toBeUndefined();
+  });
+
+  it("sends short or unknown Health workouts to review", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        return statement.includes("returning id") ? { rows: [{ id: "event-1" }] } : { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await processActivityEvent(healthWorkoutEvent({
+      autoConfirm: true,
+      description: "Walk",
+      durationSeconds: 120,
+      stoppedAt: "2026-06-07T06:41:00.000Z"
+    }), session);
+
+    expect(
+      client.query.mock.calls.find(([statement]) => String(statement).includes("insert into review_items"))
+    ).toBeTruthy();
+    expect(
+      client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"))
+    ).toBeUndefined();
+  });
+
+  it("keeps overlapping auto-confirm Health workouts in review", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        if (statement.includes("from time_entries")) return { rows: [{ id: "entry-existing" }] };
+        return statement.includes("returning id") ? { rows: [{ id: "event-1" }] } : { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await processActivityEvent(healthWorkoutEvent({ autoConfirm: true, description: "Walk" }), session);
+
+    const reviewInsert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into review_items")
+    );
+    expect(reviewInsert?.[1]).toContain("This Health activity overlaps existing time and needs review before becoming confirmed time.");
+    expect(
+      client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"))
+    ).toBeUndefined();
+  });
+
+  it("reprocesses existing high-confidence Walk review candidates using current preferences", async () => {
+    const client = reprocessClient([
+      healthWorkoutReviewRow({
+        id: "review-walk-9",
+        eventId: "event-walk-9",
+        startedAt: "2026-07-06T06:33:00.000Z",
+        stoppedAt: "2026-07-06T06:42:00.000Z",
+        durationSeconds: 9 * 60
+      }),
+      healthWorkoutReviewRow({
+        id: "review-walk-16",
+        eventId: "event-walk-16",
+        startedAt: "2026-07-04T18:19:00.000Z",
+        stoppedAt: "2026-07-04T18:35:00.000Z",
+        durationSeconds: 16 * 60
+      }),
+      healthWorkoutReviewRow({
+        id: "review-walk-37",
+        eventId: "event-walk-37",
+        startedAt: "2026-07-04T19:09:00.000Z",
+        stoppedAt: "2026-07-04T19:46:00.000Z",
+        durationSeconds: 37 * 60
+      })
+    ]);
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await reprocessHealthReviewItems({
+      preferences: {
+        sleep: true,
+        walking: true,
+        running: true,
+        cycling: true,
+        strength_training: false,
+        swimming: false,
+        other: false
+      }
+    }, session);
+
+    expect(result).toMatchObject({
+      checkedCount: 3,
+      confirmedCount: 2,
+      remainingReviewCount: 1,
+      updatedCategoryCount: 3
+    });
+    const entryInserts = client.query.mock.calls.filter(([statement]) =>
+      String(statement).includes("insert into time_entries")
+    );
+    expect(entryInserts).toHaveLength(2);
+    expect(entryInserts.map(([, values]) => (values as unknown[])[10])).toEqual([
+      "event-walk-16",
+      "event-walk-37"
+    ]);
+    expect(entryInserts.every(([, values]) => (values as unknown[])[3] === healthCategoryId())).toBe(true);
+    expect(client.query).toHaveBeenCalledWith(
+      expect.stringContaining("set suggested_category_id = $2"),
+      ["review-walk-9", healthCategoryId()]
+    );
+    expect(
+      client.query.mock.calls.filter(([statement]) =>
+        String(statement).includes("set status = $2") &&
+        ((statement as string).includes("update review_items"))
+      ).map(([, values]) => (values as unknown[]).slice(0, 2))
+    ).toEqual([
+      ["review-walk-16", "accepted"],
+      ["review-walk-37", "accepted"]
+    ]);
+  });
+
+  it("ignores existing Walk review candidates when Walking import is disabled", async () => {
+    const client = reprocessClient([
+      healthWorkoutReviewRow({
+        id: "review-walk-disabled",
+        eventId: "event-walk-disabled",
+        durationSeconds: 37 * 60
+      })
+    ]);
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await reprocessHealthReviewItems({
+      preferences: {
+        sleep: true,
+        walking: false,
+        running: true,
+        cycling: true,
+        strength_training: false,
+        swimming: false,
+        other: false
+      }
+    }, session);
+
+    expect(result).toMatchObject({
+      checkedCount: 1,
+      confirmedCount: 0,
+      ignoredCount: 1
+    });
+    expect(
+      client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"))
+    ).toBeUndefined();
+    expect(client.query).toHaveBeenCalledWith(
+      expect.stringContaining("set status = $2"),
+      ["review-walk-disabled", "ignored"]
+    );
+  });
+
+  it("reprocesses existing eligible Sleep review candidates into confirmed Health entries", async () => {
+    const client = reprocessClient([
+      healthSleepReviewRow({
+        id: "review-sleep",
+        eventId: "event-sleep",
+        startedAt: "2026-07-06T23:55:00.000Z",
+        stoppedAt: "2026-07-07T06:27:00.000Z",
+        durationSeconds: 23520
+      })
+    ]);
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await reprocessHealthReviewItems({
+      preferences: {
+        sleep: true,
+        walking: true,
+        running: true,
+        cycling: true,
+        strength_training: false,
+        swimming: false,
+        other: false
+      }
+    }, session);
+
+    expect(result.confirmedCount).toBe(1);
+    const entryInsert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into time_entries")
+    );
+    expect(entryInsert?.[1]).toEqual([
+      session.workspaceId,
+      session.userId,
+      null,
+      healthCategoryId(),
+      null,
+      "health_sleep",
+      "high",
+      "Sleep",
+      "2026-07-06T23:55:00.000Z",
+      "2026-07-07T06:27:00.000Z",
+      "event-sleep"
+    ]);
+  });
+
+  it("keeps a failed Health review candidate open while processing valid candidates", async () => {
+    const client = reprocessClient([
+      healthWorkoutReviewRow({
+        id: "review-bad",
+        eventId: "event-bad",
+        durationSeconds: 37 * 60
+      }),
+      healthWorkoutReviewRow({
+        id: "review-good",
+        eventId: "event-good",
+        durationSeconds: 37 * 60
+      })
+    ]);
+    client.query.mockImplementation(async (statement: string, values?: unknown[]) => {
+      if (statement.includes("insert into time_entries") && (values as unknown[])?.[10] === "event-bad") {
+        throw new Error("bad candidate");
+      }
+      if (statement.includes("from review_items ri") && statement.includes("for update of ri")) {
+        return {
+          rows: [
+            healthWorkoutReviewRow({
+              id: "review-bad",
+              eventId: "event-bad",
+              durationSeconds: 37 * 60
+            }),
+            healthWorkoutReviewRow({
+              id: "review-good",
+              eventId: "event-good",
+              durationSeconds: 37 * 60
+            })
+          ]
+        };
+      }
+      if (statement.includes("from categories")) return { rows: [{ id: healthCategoryId() }] };
+      if (statement.includes("created_from_event_id = $3")) return { rows: [] };
+      if (statement.includes("started_at < $4::timestamptz")) return { rows: [] };
+      return { rows: [] };
+    });
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await reprocessHealthReviewItems({
+      preferences: {
+        sleep: true,
+        walking: true,
+        running: true,
+        cycling: true,
+        strength_training: false,
+        swimming: false,
+        other: false
+      }
+    }, session);
+
+    expect(result).toMatchObject({
+      checkedCount: 2,
+      confirmedCount: 1,
+      failedCount: 1,
+      skippedCount: 1,
+      remainingReviewCount: 1
+    });
+    expect(result.errorSummary[0]).toContain("review-bad");
+    const entryInserts = client.query.mock.calls.filter(([statement]) =>
+      String(statement).includes("insert into time_entries")
+    );
+    expect(entryInserts.map(([, values]) => (values as unknown[])[10])).toEqual([
+      "event-bad",
+      "event-good"
+    ]);
+    expect(client.query).toHaveBeenCalledWith("rollback to savepoint reprocess_health_item");
+    expect(client.query).toHaveBeenCalledWith("commit");
+  });
+
+  it("returns a structured failure when the Health category cannot be ensured", async () => {
+    const client = reprocessClient([
+      healthWorkoutReviewRow({
+        id: "review-walk",
+        eventId: "event-walk",
+        durationSeconds: 37 * 60
+      })
+    ]);
+    client.query.mockImplementation(async (statement: string) => {
+      if (statement.includes("from review_items ri") && statement.includes("for update of ri")) {
+        return { rows: [healthWorkoutReviewRow({ id: "review-walk", eventId: "event-walk" })] };
+      }
+      if (statement.includes("from categories")) throw new Error("categories unavailable");
+      return { rows: [] };
+    });
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await reprocessHealthReviewItems({
+      preferences: {
+        sleep: true,
+        walking: true,
+        running: true,
+        cycling: true,
+        strength_training: false,
+        swimming: false,
+        other: false
+      }
+    }, session);
+
+    expect(result).toMatchObject({
+      checkedCount: 0,
+      confirmedCount: 0,
+      failedCount: 1
+    });
+    expect(result.errorSummary[0]).toContain("Unable to ensure Health category");
+    expect(client.query).toHaveBeenCalledWith("rollback");
+    expect(
+      client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"))
+    ).toBeUndefined();
   });
 
   it("stores queued Health sleep imports under the resolved session workspace when the payload has stale ids", async () => {
@@ -427,6 +908,36 @@ describe("health event persistence", () => {
     expect(client.query).toHaveBeenCalledWith("commit");
   });
 
+  it("does not duplicate auto-confirmed Health workout entries on clientEventId retry", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        if (statement.includes("client_event_id = $3")) return { rows: [{ id: "event-existing" }] };
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await processActivityEvent(
+      {
+        ...healthWorkoutEvent({ autoConfirm: true, description: "Walk" }),
+        clientEventId: "healthkit-workout:workout-sample-1"
+      },
+      session
+    );
+
+    expect(result).toEqual({
+      eventId: "event-existing",
+      candidate: expect.objectContaining({ action: "create_time_entry" }),
+      duplicate: true
+    });
+    expect(
+      client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"))
+    ).toBeUndefined();
+    expect(client.query).toHaveBeenCalledWith("commit");
+  });
+
   it("identifies a stale authenticated workspace foreign key failure", async () => {
     const client = {
       query: vi.fn(async (statement: string, values?: unknown[]) => {
@@ -493,12 +1004,12 @@ describe("review item resolution", () => {
               {
                 id: "review-1",
                 eventId: "event-1",
-                title: "Sleep asleep core",
+                title: "Sleep",
                 suggestedProjectId: null,
-                suggestedCategoryId: null,
+                suggestedCategoryId: healthCategoryId(),
                 suggestedPlaceId: null,
-                suggestedStartedAt: "2026-06-06T22:24:00.000Z",
-                suggestedStoppedAt: "2026-06-07T05:55:00.000Z",
+                suggestedStartedAt: "2026-06-06T23:55:00.000Z",
+                suggestedStoppedAt: "2026-06-07T06:27:00.000Z",
                 confidence: "high",
                 eventSource: "health_sleep",
                 eventType: "health_sleep_import"
@@ -521,13 +1032,13 @@ describe("review item resolution", () => {
       session.workspaceId,
       session.userId,
       null,
-      null,
+      healthCategoryId(),
       null,
       "health_sleep",
       "high",
-      "Sleep asleep core",
-      "2026-06-06T22:24:00.000Z",
-      "2026-06-07T05:55:00.000Z",
+      "Sleep",
+      "2026-06-06T23:55:00.000Z",
+      "2026-06-07T06:27:00.000Z",
       "event-1"
     ]);
     expect(client.query).toHaveBeenCalledWith("commit");
@@ -570,8 +1081,98 @@ function categoryId() {
   return "20000000-0000-4000-8000-000000000001";
 }
 
+function healthCategoryId() {
+  return "20000000-0000-4000-8000-000000000004";
+}
+
 function placeId() {
   return "30000000-0000-4000-8000-000000000001";
+}
+
+function reprocessClient(reviewRows: Array<Record<string, unknown>>) {
+  return {
+    query: vi.fn(async (statement: string, values?: unknown[]) => {
+      void values;
+      if (statement.includes("from review_items ri") && statement.includes("for update of ri")) {
+        return { rows: reviewRows };
+      }
+      if (statement.includes("from categories")) return { rows: [{ id: healthCategoryId() }] };
+      if (statement.includes("created_from_event_id = $3")) return { rows: [] };
+      if (statement.includes("started_at < $4::timestamptz")) return { rows: [] };
+      return { rows: [] };
+    }),
+    release: vi.fn()
+  };
+}
+
+function healthWorkoutReviewRow(overrides: {
+  id?: string;
+  eventId?: string;
+  startedAt?: string;
+  stoppedAt?: string;
+  durationSeconds?: number;
+  suggestedCategoryId?: string | null;
+  eventCategoryId?: string | null;
+  workoutType?: string;
+} = {}) {
+  const startedAt = overrides.startedAt ?? "2026-07-04T19:09:00.000Z";
+  const stoppedAt = overrides.stoppedAt ?? "2026-07-04T19:46:00.000Z";
+  return {
+    id: overrides.id ?? "review-walk",
+    eventId: overrides.eventId ?? "event-walk",
+    title: "Walk",
+    suggestedProjectId: null,
+    suggestedCategoryId: overrides.suggestedCategoryId ?? null,
+    suggestedPlaceId: null,
+    suggestedStartedAt: startedAt,
+    suggestedStoppedAt: stoppedAt,
+    confidence: "high",
+    eventSource: "health_workout",
+    eventType: "health_workout_import",
+    eventCategoryId: overrides.eventCategoryId ?? null,
+    rawPayload: {
+      provider: "healthkit",
+      externalSampleId: overrides.eventId ?? "event-walk",
+      workoutType: overrides.workoutType ?? "walking",
+      startedAt,
+      stoppedAt,
+      durationSeconds: overrides.durationSeconds ?? 37 * 60
+    }
+  };
+}
+
+function healthSleepReviewRow(overrides: {
+  id?: string;
+  eventId?: string;
+  startedAt?: string;
+  stoppedAt?: string;
+  durationSeconds?: number;
+  suggestedCategoryId?: string | null;
+  eventCategoryId?: string | null;
+} = {}) {
+  const startedAt = overrides.startedAt ?? "2026-07-06T23:55:00.000Z";
+  const stoppedAt = overrides.stoppedAt ?? "2026-07-07T06:27:00.000Z";
+  return {
+    id: overrides.id ?? "review-sleep",
+    eventId: overrides.eventId ?? "event-sleep",
+    title: "Sleep",
+    suggestedProjectId: null,
+    suggestedCategoryId: overrides.suggestedCategoryId ?? null,
+    suggestedPlaceId: null,
+    suggestedStartedAt: startedAt,
+    suggestedStoppedAt: stoppedAt,
+    confidence: "high",
+    eventSource: "health_sleep",
+    eventType: "health_sleep_import",
+    eventCategoryId: overrides.eventCategoryId ?? null,
+    rawPayload: {
+      provider: "healthkit",
+      externalSampleId: overrides.eventId ?? "event-sleep",
+      startedAt,
+      stoppedAt,
+      durationSeconds: overrides.durationSeconds ?? 23520
+    }
+  };
 }
 
 function healthClientWithFailure(error: Error & { code?: string }) {
@@ -585,41 +1186,81 @@ function healthClientWithFailure(error: Error & { code?: string }) {
   };
 }
 
-function healthSleepEvent() {
+function healthSleepEvent(overrides: {
+  autoConfirm?: boolean;
+  durationSeconds?: number;
+} = {}) {
+  const rawPayload: Record<string, unknown> = {
+    provider: "healthkit",
+    externalSampleId: "sleep-session-1",
+    sleepStage: "asleep_unspecified",
+    startedAt: "2026-06-06T23:55:00.000Z",
+    stoppedAt: "2026-06-07T06:27:00.000Z",
+    sourceName: "Apple Watch",
+    samples: [
+      {
+        externalSampleId: "sleep-core-1",
+        sleepStage: "asleep_core",
+        startedAt: "2026-06-06T23:55:00.000Z",
+        stoppedAt: "2026-06-07T02:15:00.000Z",
+        sourceName: "Apple Watch",
+        sample: { uuid: "sleep-core-1" }
+      },
+      {
+        externalSampleId: "sleep-deep-1",
+        sleepStage: "asleep_deep",
+        startedAt: "2026-06-07T02:15:00.000Z",
+        stoppedAt: "2026-06-07T03:10:00.000Z",
+        sourceName: "Apple Watch",
+        sample: { uuid: "sleep-deep-1" }
+      },
+      {
+        externalSampleId: "sleep-rem-1",
+        sleepStage: "asleep_rem",
+        startedAt: "2026-06-07T03:10:00.000Z",
+        stoppedAt: "2026-06-07T06:27:00.000Z",
+        sourceName: "Apple Watch",
+        sample: { uuid: "sleep-rem-1" }
+      }
+    ]
+  };
+  if (typeof overrides.autoConfirm === "boolean") rawPayload.autoConfirm = overrides.autoConfirm;
+  if (typeof overrides.durationSeconds === "number") rawPayload.durationSeconds = overrides.durationSeconds;
+
   return {
     source: "health_sleep",
     type: "health_sleep_import",
-    occurredAt: new Date("2026-06-06T22:24:00.000Z"),
-    description: "Sleep asleep core",
-    rawPayload: {
-      provider: "healthkit",
-      externalSampleId: "sleep-sample-1",
-      sleepStage: "asleep_core",
-      startedAt: "2026-06-06T22:24:00.000Z",
-      stoppedAt: "2026-06-07T05:55:00.000Z",
-      sourceName: "Apple Watch",
-      sample: {
-        uuid: "sleep-sample-1"
-      }
-    }
+    occurredAt: new Date("2026-06-06T23:55:00.000Z"),
+    description: "Sleep",
+    rawPayload
   };
 }
 
-function healthWorkoutEvent() {
+function healthWorkoutEvent(overrides: {
+  autoConfirm?: boolean;
+  description?: string;
+  durationSeconds?: number;
+  stoppedAt?: string;
+  workoutType?: string;
+} = {}) {
+  const durationSeconds = overrides.durationSeconds ?? 3858.122684240341;
+  const stoppedAt = overrides.stoppedAt ?? "2026-06-07T07:43:18.000Z";
+  const workoutType = overrides.workoutType ?? "walking";
   return {
     source: "health_workout",
     type: "health_workout_import",
     occurredAt: new Date("2026-06-07T06:39:00.000Z"),
-    description: "Workout walking",
+    description: overrides.description ?? "Workout walking",
     rawPayload: {
       provider: "healthkit",
       externalSampleId: "workout-sample-1",
-      workoutType: "walking",
+      workoutType,
       startedAt: "2026-06-07T06:39:00.000Z",
-      stoppedAt: "2026-06-07T07:43:18.000Z",
-      durationSeconds: 3858.122684240341,
+      stoppedAt,
+      durationSeconds,
       distanceMeters: 5123.75,
       energyKcal: 284.5,
+      autoConfirm: overrides.autoConfirm ?? false,
       sourceName: "Apple Watch",
       sample: {
         uuid: "workout-sample-1"
