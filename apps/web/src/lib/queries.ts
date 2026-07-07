@@ -98,6 +98,7 @@ export type ReviewItemRow = {
   eventType: string | null;
   projectName: string | null;
   categoryName: string | null;
+  categoryColor: string | null;
   placeName: string | null;
   suggestedProjectId: string | null;
   suggestedCategoryId: string | null;
@@ -541,6 +542,7 @@ async function getReviewItems(session: RequestSession) {
             ae.event_type as "eventType",
             p.name as "projectName",
             c.name as "categoryName",
+            c.color as "categoryColor",
             pl.name as "placeName",
             ri.suggested_project_id as "suggestedProjectId",
             ri.suggested_category_id as "suggestedCategoryId",

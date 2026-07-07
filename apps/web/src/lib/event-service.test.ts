@@ -572,25 +572,26 @@ describe("health event persistence", () => {
   it("reprocesses existing high-confidence Walk review candidates using current preferences", async () => {
     const client = reprocessClient([
       healthWorkoutReviewRow({
-        id: "review-walk-9",
-        eventId: "event-walk-9",
+        id: "review-walk-4",
+        eventId: "event-walk-4",
         startedAt: "2026-07-06T06:33:00.000Z",
-        stoppedAt: "2026-07-06T06:42:00.000Z",
-        durationSeconds: 9 * 60
+        stoppedAt: "2026-07-06T06:37:00.000Z",
+        durationSeconds: 4 * 60
       }),
       healthWorkoutReviewRow({
-        id: "review-walk-16",
-        eventId: "event-walk-16",
+        id: "review-walk-5",
+        eventId: "event-walk-5",
         startedAt: "2026-07-04T18:19:00.000Z",
-        stoppedAt: "2026-07-04T18:35:00.000Z",
-        durationSeconds: 16 * 60
+        stoppedAt: "2026-07-04T18:24:00.000Z",
+        durationSeconds: 5 * 60
       }),
       healthWorkoutReviewRow({
         id: "review-walk-37",
         eventId: "event-walk-37",
         startedAt: "2026-07-04T19:09:00.000Z",
         stoppedAt: "2026-07-04T19:46:00.000Z",
-        durationSeconds: 37 * 60
+        durationSeconds: 37 * 60,
+        workoutType: null
       })
     ]);
     mocks.pool.connect.mockResolvedValueOnce(client);
@@ -618,13 +619,13 @@ describe("health event persistence", () => {
     );
     expect(entryInserts).toHaveLength(2);
     expect(entryInserts.map(([, values]) => (values as unknown[])[10])).toEqual([
-      "event-walk-16",
+      "event-walk-5",
       "event-walk-37"
     ]);
     expect(entryInserts.every(([, values]) => (values as unknown[])[3] === healthCategoryId())).toBe(true);
     expect(client.query).toHaveBeenCalledWith(
       expect.stringContaining("set suggested_category_id = $2"),
-      ["review-walk-9", healthCategoryId()]
+      ["review-walk-4", healthCategoryId()]
     );
     expect(
       client.query.mock.calls.filter(([statement]) =>
@@ -632,7 +633,7 @@ describe("health event persistence", () => {
         ((statement as string).includes("update review_items"))
       ).map(([, values]) => (values as unknown[]).slice(0, 2))
     ).toEqual([
-      ["review-walk-16", "accepted"],
+      ["review-walk-5", "accepted"],
       ["review-walk-37", "accepted"]
     ]);
   });
@@ -1113,10 +1114,20 @@ function healthWorkoutReviewRow(overrides: {
   durationSeconds?: number;
   suggestedCategoryId?: string | null;
   eventCategoryId?: string | null;
-  workoutType?: string;
+  workoutType?: string | null;
 } = {}) {
   const startedAt = overrides.startedAt ?? "2026-07-04T19:09:00.000Z";
   const stoppedAt = overrides.stoppedAt ?? "2026-07-04T19:46:00.000Z";
+  const rawPayload: Record<string, unknown> = {
+    provider: "healthkit",
+    externalSampleId: overrides.eventId ?? "event-walk",
+    startedAt,
+    stoppedAt,
+    durationSeconds: overrides.durationSeconds ?? 37 * 60
+  };
+  if (overrides.workoutType !== null) {
+    rawPayload.workoutType = overrides.workoutType ?? "walking";
+  }
   return {
     id: overrides.id ?? "review-walk",
     eventId: overrides.eventId ?? "event-walk",
@@ -1130,14 +1141,7 @@ function healthWorkoutReviewRow(overrides: {
     eventSource: "health_workout",
     eventType: "health_workout_import",
     eventCategoryId: overrides.eventCategoryId ?? null,
-    rawPayload: {
-      provider: "healthkit",
-      externalSampleId: overrides.eventId ?? "event-walk",
-      workoutType: overrides.workoutType ?? "walking",
-      startedAt,
-      stoppedAt,
-      durationSeconds: overrides.durationSeconds ?? 37 * 60
-    }
+    rawPayload
   };
 }
 
