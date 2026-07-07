@@ -106,6 +106,21 @@ describe("mobile API client", () => {
     await expect(getSessionToken()).resolves.toBeNull();
   });
 
+  it("requests bootstrap data for a selected date", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ entries: [] })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchBootstrap({ date: "2026-07-06" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/bootstrap?date=2026-07-06",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer session-token" }
+      })
+    );
+  });
+
   it("preserves queue order when the first event fails to sync", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
     await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: { order: 1 } });

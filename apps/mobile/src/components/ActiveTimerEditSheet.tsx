@@ -16,19 +16,20 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import Svg, { Path } from "react-native-svg";
 import { paletteColorFor } from "@dayframe/shared";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
-import type { MobileBootstrap, TimeEntryUpdatePatch } from "@/lib/api";
+import type { MobileBootstrap, MobileTimeEntry, TimeEntryUpdatePatch } from "@/lib/api";
 
-type ActiveEntry = NonNullable<MobileBootstrap["activeEntry"]>;
 type Category = MobileBootstrap["categories"][number];
+type EditSheetMode = "running" | "entry";
 
 type ActiveTimerEditSheetProps = {
   categories: Category[];
   elapsedSeconds: number;
-  entry: ActiveEntry | null;
+  entry: MobileTimeEntry | null;
   lastStoppedAt: string | null;
   onCancel: () => void;
   onSave: (entryId: string, patch: TimeEntryUpdatePatch) => Promise<boolean>;
-  onStop: () => Promise<boolean>;
+  onStop?: () => Promise<boolean>;
+  mode?: EditSheetMode;
   saving: boolean;
   stopping: boolean;
   styles: MobileStyles;
@@ -41,6 +42,7 @@ export function ActiveTimerEditSheet({
   elapsedSeconds,
   entry,
   lastStoppedAt,
+  mode = "running",
   onCancel,
   onSave,
   onStop,
@@ -56,6 +58,8 @@ export function ActiveTimerEditSheet({
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [dateText, setDateText] = useState("");
   const [timeText, setTimeText] = useState("");
+  const [stoppedDateText, setStoppedDateText] = useState("");
+  const [stoppedTimeText, setStoppedTimeText] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
@@ -72,6 +76,14 @@ export function ActiveTimerEditSheet({
     setSelectedCategoryId(entry.categoryId);
     setDateText(formatDateInput(startedAt));
     setTimeText(formatTimeInput(startedAt));
+    if (entry.stoppedAt) {
+      const stoppedAt = new Date(entry.stoppedAt);
+      setStoppedDateText(formatDateInput(stoppedAt));
+      setStoppedTimeText(formatTimeInput(stoppedAt));
+    } else {
+      setStoppedDateText("");
+      setStoppedTimeText("");
+    }
     setPickerStartAt(startedAt);
     setDatePickerOpen(false);
     setValidationError(null);
@@ -108,17 +120,29 @@ export function ActiveTimerEditSheet({
     () => parseLocalDateTime(dateText, timeText),
     [dateText, timeText]
   );
+  const parsedStop = useMemo(
+    () => parseLocalDateTime(stoppedDateText, stoppedTimeText),
+    [stoppedDateText, stoppedTimeText]
+  );
   const previewStartAt = datePickerOpen && pickerStartAt
     ? parseLocalDateTime(formatDateInput(pickerStartAt), timeText).date
     : parsedStart.date;
-  const elapsedPreviewSeconds = previewStartAt && previewStartAt.getTime() <= Date.now()
-    ? Math.max(0, Math.floor((Date.now() - previewStartAt.getTime()) / 1000))
-    : elapsedSeconds;
+  const isRunningMode = mode === "running";
+  const elapsedPreviewSeconds = !isRunningMode && parsedStart.date && parsedStop.date
+    ? Math.max(0, Math.floor((parsedStop.date.getTime() - parsedStart.date.getTime()) / 1000))
+    : previewStartAt && previewStartAt.getTime() <= Date.now()
+      ? Math.max(0, Math.floor((Date.now() - previewStartAt.getTime()) / 1000))
+      : elapsedSeconds;
 
   if (!entry) return null;
   const editingEntry = entry;
 
   const busy = saving || stopping;
+  const canStop = isRunningMode && Boolean(onStop);
+  const cancelLabel = isRunningMode ? "Cancel editing timer" : "Cancel editing entry";
+  const saveLabel = isRunningMode ? "Save timer edits" : "Save entry edits";
+  const sheetTitle = isRunningMode ? "Edit timer" : "Edit entry";
+  const elapsedLabel = isRunningMode ? "Running" : "Duration";
   const keyboardSafeAreaOverlap = keyboardInset > 0 ? insets.bottom : 0;
   const keyboardAwareSheetHeight = keyboardInset > 0
     ? Math.max(
@@ -148,17 +172,36 @@ export function ActiveTimerEditSheet({
       return;
     }
 
-    setValidationError(null);
-    const ok = await onSave(editingEntry.id, {
+    const patch: TimeEntryUpdatePatch = {
       categoryId: selectedCategoryId,
       description: description.trim() || null,
       startedAt: parsed.date.toISOString()
-    });
+    };
+
+    if (!isRunningMode) {
+      const stopped = parseLocalDateTime(stoppedDateText, stoppedTimeText);
+      if (stopped.error || !stopped.date) {
+        setValidationError(stopped.error ?? "Choose a valid end date and time.");
+        return;
+      }
+      if (stopped.date.getTime() > Date.now()) {
+        setValidationError("End time cannot be in the future.");
+        return;
+      }
+      if (parsed.date.getTime() >= stopped.date.getTime()) {
+        setValidationError("Start time must be before the end time.");
+        return;
+      }
+      patch.stoppedAt = stopped.date.toISOString();
+    }
+
+    setValidationError(null);
+    const ok = await onSave(editingEntry.id, patch);
     if (ok) onCancel();
   }
 
   async function stopFromSheet() {
-    if (busy) return;
+    if (busy || !onStop) return;
     const ok = await onStop();
     if (ok) onCancel();
   }
@@ -175,6 +218,16 @@ export function ActiveTimerEditSheet({
 
   function updateTimeText(value: string) {
     setTimeText(formatEditableTime(value));
+    setValidationError(null);
+  }
+
+  function updateStoppedDateText(value: string) {
+    setStoppedDateText(formatEditableDate(value));
+    setValidationError(null);
+  }
+
+  function updateStoppedTimeText(value: string) {
+    setStoppedTimeText(formatEditableTime(value));
     setValidationError(null);
   }
 
@@ -249,7 +302,7 @@ export function ActiveTimerEditSheet({
     >
       <View style={styles.sheetOverlay}>
         <Pressable
-          accessibilityLabel="Cancel editing timer"
+          accessibilityLabel={cancelLabel}
           accessibilityRole="button"
           onPress={onCancel}
           style={styles.sheetBackdrop}
@@ -260,7 +313,7 @@ export function ActiveTimerEditSheet({
               <View style={styles.sheetHandle} />
               <View style={styles.sheetHeader}>
                 <Pressable
-                  accessibilityLabel="Cancel editing timer"
+                  accessibilityLabel={cancelLabel}
                   accessibilityRole="button"
                   disabled={busy}
                   onPress={onCancel}
@@ -272,9 +325,9 @@ export function ActiveTimerEditSheet({
                 >
                   <CloseGlyph color={theme.textPrimary} />
                 </Pressable>
-                <Text style={styles.sheetTitle}>Edit timer</Text>
+                <Text style={styles.sheetTitle}>{sheetTitle}</Text>
                 <Pressable
-                  accessibilityLabel="Save timer edits"
+                  accessibilityLabel={saveLabel}
                   accessibilityRole="button"
                   disabled={busy}
                   onPress={saveChanges}
@@ -304,28 +357,30 @@ export function ActiveTimerEditSheet({
                 <View style={styles.activeEditHeroRow}>
                   <View style={styles.activeEditElapsedStack}>
                     <Text style={styles.activeEditElapsed}>{formatClockDuration(elapsedPreviewSeconds)}</Text>
-                    <Text style={styles.activeEditElapsedLabel}>Running</Text>
+                    <Text style={styles.activeEditElapsedLabel}>{elapsedLabel}</Text>
                   </View>
-                  <Pressable
-                    accessibilityLabel="Stop timer from edit sheet"
-                    accessibilityRole="button"
-                    disabled={busy}
-                    onPress={stopFromSheet}
-                    style={({ pressed }) => [
-                      styles.activeEditStopButton,
-                      pressed && !busy ? styles.buttonPressed : null,
-                      busy ? styles.buttonDisabled : null
-                    ]}
-                  >
-                    <StopGlyph color={theme.mode === "dark" ? theme.background : "#FFFFFF"} />
-                  </Pressable>
+                  {canStop ? (
+                    <Pressable
+                      accessibilityLabel="Stop timer from edit sheet"
+                      accessibilityRole="button"
+                      disabled={busy}
+                      onPress={stopFromSheet}
+                      style={({ pressed }) => [
+                        styles.activeEditStopButton,
+                        pressed && !busy ? styles.buttonPressed : null,
+                        busy ? styles.buttonDisabled : null
+                      ]}
+                    >
+                      <StopGlyph color={theme.mode === "dark" ? theme.background : "#FFFFFF"} />
+                    </Pressable>
+                  ) : null}
                 </View>
 
                 <View style={styles.activeEditSection}>
                   <Text style={styles.activeEditSectionLabel}>Description</Text>
                   <TextInput
                     ref={descriptionInputRef}
-                    accessibilityLabel="Timer description"
+                    accessibilityLabel={isRunningMode ? "Timer description" : "Entry description"}
                     blurOnSubmit
                     editable={!busy}
                     onFocus={() => setDatePickerOpen(false)}
@@ -476,6 +531,45 @@ export function ActiveTimerEditSheet({
                   ) : null}
                 </View>
 
+                {!isRunningMode ? (
+                  <View style={styles.activeEditSection}>
+                    <Text style={styles.activeEditSectionLabel}>End time</Text>
+                    <View style={styles.activeEditTimeRow}>
+                      <TextInput
+                        accessibilityLabel="End date"
+                        blurOnSubmit
+                        editable={!busy}
+                        keyboardType={Platform.OS === "ios" ? "numbers-and-punctuation" : "numeric"}
+                        maxLength={10}
+                        onChangeText={updateStoppedDateText}
+                        onFocus={() => setDatePickerOpen(false)}
+                        onSubmitEditing={Keyboard.dismiss}
+                        placeholder="YYYY-MM-DD"
+                        placeholderTextColor={theme.textSecondary}
+                        returnKeyType="done"
+                        showSoftInputOnFocus
+                        style={[styles.textInput, styles.activeEditDateInput]}
+                        value={stoppedDateText}
+                      />
+                      <TextInput
+                        accessibilityLabel="End time"
+                        blurOnSubmit
+                        editable={!busy}
+                        keyboardType={Platform.OS === "ios" ? "numbers-and-punctuation" : "numeric"}
+                        maxLength={5}
+                        onChangeText={updateStoppedTimeText}
+                        onFocus={() => setDatePickerOpen(false)}
+                        onSubmitEditing={Keyboard.dismiss}
+                        placeholder="17:30"
+                        placeholderTextColor={theme.textSecondary}
+                        returnKeyType="done"
+                        showSoftInputOnFocus
+                        style={[styles.textInput, styles.activeEditTimeInput]}
+                        value={stoppedTimeText}
+                      />
+                    </View>
+                  </View>
+                ) : null}
               </ScrollView>
             </View>
           </SafeAreaView>
@@ -681,6 +775,13 @@ function formatEditableTime(value: string) {
   const hour = Math.min(Number(digits.slice(0, 2)), 23);
   const minute = Math.min(Number(digits.slice(2)), 59);
   return `${pad2(hour)}:${pad2(minute)}`;
+}
+
+function formatEditableDate(value: string) {
+  const digits = value.replace(/\D/g, "").slice(0, 8);
+  if (digits.length <= 4) return digits;
+  if (digits.length <= 6) return `${digits.slice(0, 4)}-${digits.slice(4)}`;
+  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6)}`;
 }
 
 function pad2(value: number) {
