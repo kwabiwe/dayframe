@@ -235,9 +235,10 @@ export function mapHealthKitWorkoutSample(sample: HealthKitWorkoutSample): Dayfr
   const startedAt = new Date(sample.startDate).toISOString();
   const stoppedAt = new Date(sample.endDate).toISOString();
   const workoutType = mapHealthKitWorkoutType(sample.workoutActivityType);
-  const durationSeconds =
+  const durationSeconds = wholeSecondsOrNull(
     quantityValue(sample.duration) ??
-    Math.max(0, Math.round((new Date(stoppedAt).getTime() - new Date(startedAt).getTime()) / 1000));
+      Math.max(0, Math.round((new Date(stoppedAt).getTime() - new Date(startedAt).getTime()) / 1000))
+  );
   const externalSampleId = sample.uuid ?? `${startedAt}:${stoppedAt}:${workoutType}`;
 
   return {
@@ -358,6 +359,11 @@ function quantityValue(value: HealthKitWorkoutSample["duration"] | HealthKitWork
     return value.quantity;
   }
   return null;
+}
+
+function wholeSecondsOrNull(value: number | null) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.round(value));
 }
 
 function safeHealthMetadata(metadata: Record<string, unknown> | undefined) {

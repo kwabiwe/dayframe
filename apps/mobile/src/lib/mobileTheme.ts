@@ -1385,6 +1385,18 @@ function createStyles(theme: MobileTheme) {
       paddingVertical: 8,
       gap: 4
     },
+    detailsToggle: {
+      alignSelf: "flex-start",
+      minHeight: 44,
+      justifyContent: "center",
+      paddingVertical: 4
+    },
+    detailsToggleText: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "800"
+    },
     buttonRow: {
       flexDirection: "row",
       flexWrap: "wrap",

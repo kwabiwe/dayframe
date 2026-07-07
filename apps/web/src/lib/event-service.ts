@@ -7,8 +7,10 @@ import {
 } from "@dayframe/shared";
 import {
   databaseReadinessError,
+  databasePayloadError,
   isForeignKeyViolationError,
   isInsufficientPrivilegeError,
+  isInvalidTextRepresentationError,
   isInvalidConflictTargetError,
   isUndefinedColumnError,
   isUndefinedTableError,
@@ -52,6 +54,16 @@ function eventSyncReadinessError(error: unknown, eventType: ActivityEventType) {
       "Authenticated session workspace is missing from public.workspaces. Log out and back in, then retry queued sync.",
       "public.workspaces",
       "docs/vercel-supabase-hosting.md",
+      error
+    );
+  }
+
+  if (isInvalidTextRepresentationError(error)) {
+    return databasePayloadError(
+      eventType === "health_workout_import"
+        ? "Unable to sync this Health workout because a numeric value could not be stored. Update Dayframe and tap Retry failed."
+        : "Unable to sync this event because a payload value has the wrong format.",
+      eventType,
       error
     );
   }
@@ -353,7 +365,7 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
           stringOrNull(parsed.rawPayload.workoutType),
           stringOrNull(parsed.rawPayload.startedAt) ?? parsed.occurredAt,
           stringOrNull(parsed.rawPayload.stoppedAt) ?? parsed.occurredAt,
-          numberOrNull(parsed.rawPayload.durationSeconds),
+          wholeSecondsOrNull(parsed.rawPayload.durationSeconds),
           numberOrNull(parsed.rawPayload.distanceMeters),
           numberOrNull(parsed.rawPayload.energyKcal),
           JSON.stringify(parsed.rawPayload)
@@ -1051,6 +1063,11 @@ function suggestedStoppedAtForEvent(event: ReturnType<typeof ActivityEventInputS
 function numberOrNull(value: unknown) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function wholeSecondsOrNull(value: unknown) {
+  const number = numberOrNull(value);
+  return number === null ? null : Math.max(0, Math.round(number));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

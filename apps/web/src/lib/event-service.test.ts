@@ -203,6 +203,37 @@ describe("health event persistence", () => {
     expect(client.release).toHaveBeenCalled();
   });
 
+  it("rounds fractional Health workout durations before inserting integer duration seconds", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        return statement.includes("returning id") ? { rows: [{ id: "event-1" }] } : { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await processActivityEvent(healthWorkoutEvent(), session);
+
+    const healthInsert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into health_workouts")
+    );
+    expect(String(healthInsert?.[0])).toContain("duration_seconds");
+    expect(healthInsert?.[1]).toEqual([
+      session.workspaceId,
+      session.userId,
+      "workout-sample-1",
+      "healthkit",
+      "walking",
+      "2026-06-07T06:39:00.000Z",
+      "2026-06-07T07:43:18.000Z",
+      3858,
+      5123.75,
+      284.5,
+      JSON.stringify(healthWorkoutEvent().rawPayload)
+    ]);
+  });
+
   it("stores queued Health sleep imports under the resolved session workspace when the payload has stale ids", async () => {
     const hostedSession = {
       ...session,
@@ -452,6 +483,29 @@ function healthSleepEvent() {
       sourceName: "Apple Watch",
       sample: {
         uuid: "sleep-sample-1"
+      }
+    }
+  };
+}
+
+function healthWorkoutEvent() {
+  return {
+    source: "health_workout",
+    type: "health_workout_import",
+    occurredAt: new Date("2026-06-07T06:39:00.000Z"),
+    description: "Workout walking",
+    rawPayload: {
+      provider: "healthkit",
+      externalSampleId: "workout-sample-1",
+      workoutType: "walking",
+      startedAt: "2026-06-07T06:39:00.000Z",
+      stoppedAt: "2026-06-07T07:43:18.000Z",
+      durationSeconds: 3858.122684240341,
+      distanceMeters: 5123.75,
+      energyKcal: 284.5,
+      sourceName: "Apple Watch",
+      sample: {
+        uuid: "workout-sample-1"
       }
     }
   };

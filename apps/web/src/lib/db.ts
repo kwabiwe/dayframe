@@ -42,6 +42,12 @@ export function isInvalidConflictTargetError(error: unknown) {
   return candidate?.code === "42P10";
 }
 
+export function isInvalidTextRepresentationError(error: unknown, typeName?: string) {
+  const candidate = error as { code?: string; message?: string } | null;
+  if (candidate?.code !== "22P02") return false;
+  return typeName ? candidate.message?.includes(`type ${typeName}`) === true : true;
+}
+
 export function isInsufficientPrivilegeError(error: unknown) {
   const candidate = error as { code?: string } | null;
   return candidate?.code === "42501";
@@ -110,6 +116,27 @@ export function databaseReadinessError(
 
 export function isDatabaseReadinessError(error: unknown): error is DatabaseReadinessError {
   return error instanceof DatabaseReadinessError;
+}
+
+export class DatabasePayloadError extends Error {
+  eventType: string;
+
+  constructor(message: string, eventType: string, cause?: unknown) {
+    super(message);
+    this.name = "DatabasePayloadError";
+    this.eventType = eventType;
+    if (cause) {
+      (this as Error & { cause?: unknown }).cause = cause;
+    }
+  }
+}
+
+export function databasePayloadError(message: string, eventType: string, cause?: unknown) {
+  return new DatabasePayloadError(message, eventType, cause);
+}
+
+export function isDatabasePayloadError(error: unknown): error is DatabasePayloadError {
+  return error instanceof DatabasePayloadError;
 }
 
 type Queryable = Pick<pg.Pool | pg.PoolClient, "query">;

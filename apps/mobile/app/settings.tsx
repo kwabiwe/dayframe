@@ -640,11 +640,11 @@ export default function SettingsScreen() {
             ) : null}
             <Pressable
               accessibilityRole="button"
-              style={pressable(styles.secondaryButton, styles.buttonPressed)}
+              style={pressable(styles.detailsToggle, styles.buttonPressed)}
               onPress={() => setShowQueueDetails((current) => !current)}
             >
-              <Text style={styles.secondaryButtonText}>
-                {showQueueDetails ? "Hide troubleshooting details" : "Troubleshooting details"}
+              <Text style={styles.detailsToggleText}>
+                {showQueueDetails ? "Hide troubleshooting details" : "Troubleshooting details..."}
               </Text>
             </Pressable>
             {showQueueDetails ? (

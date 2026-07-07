@@ -65,6 +65,19 @@ describe("HealthKit mapping", () => {
     });
   });
 
+  it("normalizes fractional workout durations to whole seconds", () => {
+    const mapped = mapHealthKitWorkoutSample({
+      uuid: "workout-decimal-duration",
+      workoutActivityType: 52,
+      startDate: "2026-07-03T08:30:00.000Z",
+      endDate: "2026-07-03T09:34:18.123Z",
+      duration: { quantity: 3858.122684240341, unit: "s" }
+    });
+
+    expect(mapped.durationSeconds).toBe(3858);
+    expect(healthKitWorkoutEvent(mapped).rawPayload.durationSeconds).toBe(3858);
+  });
+
   it("builds event-first workout payloads without route locations", () => {
     const event = healthKitWorkoutEvent(
       mapHealthKitWorkoutSample({
