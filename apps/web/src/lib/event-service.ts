@@ -2,9 +2,19 @@ import {
   ActivityEventInputSchema,
   normalizePaletteKey,
   normalizeActivityEvent,
+  type ActivityEventType,
   type ActivityEventInput
 } from "@dayframe/shared";
-import { isUndefinedColumnError, missingRequiredColumnError, pool, query } from "./db";
+import {
+  databaseReadinessError,
+  isInsufficientPrivilegeError,
+  isInvalidConflictTargetError,
+  isUndefinedColumnError,
+  isUndefinedTableError,
+  missingRequiredColumnError,
+  pool,
+  query
+} from "./db";
 import { getNormalizationContext } from "./queries";
 import { getDevSession, type RequestSession } from "./session";
 
@@ -16,9 +26,114 @@ type CategoryRowLike = {
 };
 
 const CATEGORY_PINS_MIGRATION = "supabase/migrations/202607040001_category_pins_and_project_backfill.sql";
+const MOBILE_EVENT_IDEMPOTENCY_MIGRATION =
+  "supabase/migrations/202607030001_mobile_event_idempotency_and_workouts.sql";
+const HEALTH_SLEEP_SCHEMA_MIGRATION =
+  "supabase/migrations/202607070001_health_sleep_segments.sql";
+const HEALTH_RLS_MIGRATION = "supabase/migrations/202607020001_dayframe_rls.sql";
 
 function missingCategoryPinColumnError(cause: unknown) {
   return missingRequiredColumnError("categories", "is_pinned", CATEGORY_PINS_MIGRATION, cause);
+}
+
+function eventSyncReadinessError(error: unknown, eventType: ActivityEventType) {
+  if (isUndefinedColumnError(error, "client_event_id")) {
+    return missingRequiredColumnError(
+      "activity_events",
+      "client_event_id",
+      MOBILE_EVENT_IDEMPOTENCY_MIGRATION,
+      error
+    );
+  }
+
+  if (eventType === "health_sleep_import") {
+    return healthSchemaReadinessError(error, {
+      tableName: "health_sleep_segments",
+      objectName: "public.health_sleep_segments",
+      indexName: "idx_health_sleep_segments_external_sample",
+      migrationHint: HEALTH_SLEEP_SCHEMA_MIGRATION,
+      columns: [
+        "workspace_id",
+        "user_id",
+        "external_sample_id",
+        "provider",
+        "source_name",
+        "sleep_stage",
+        "started_at",
+        "stopped_at",
+        "raw_payload"
+      ]
+    });
+  }
+
+  if (eventType === "health_workout_import") {
+    return healthSchemaReadinessError(error, {
+      tableName: "health_workouts",
+      objectName: "public.health_workouts",
+      indexName: "idx_health_workouts_external_sample",
+      migrationHint: MOBILE_EVENT_IDEMPOTENCY_MIGRATION,
+      columns: [
+        "workspace_id",
+        "user_id",
+        "external_sample_id",
+        "provider",
+        "workout_type",
+        "started_at",
+        "stopped_at",
+        "duration_seconds",
+        "distance_meters",
+        "energy_kcal",
+        "raw_payload"
+      ]
+    });
+  }
+
+  return undefined;
+}
+
+function healthSchemaReadinessError(
+  error: unknown,
+  options: {
+    tableName: string;
+    objectName: string;
+    indexName: string;
+    migrationHint: string;
+    columns: string[];
+  }
+) {
+  if (isUndefinedTableError(error, options.tableName)) {
+    return databaseReadinessError(
+      `Database schema is missing ${options.objectName}. Run ${options.migrationHint} before syncing Health events.`,
+      options.objectName,
+      options.migrationHint,
+      error
+    );
+  }
+
+  const missingColumn = options.columns.find((column) => isUndefinedColumnError(error, column));
+  if (missingColumn) {
+    return missingRequiredColumnError(options.tableName, missingColumn, options.migrationHint, error);
+  }
+
+  if (isInvalidConflictTargetError(error)) {
+    return databaseReadinessError(
+      `Database schema is missing ${options.indexName} for ${options.objectName}. Run ${options.migrationHint} before syncing Health events.`,
+      options.indexName,
+      options.migrationHint,
+      error
+    );
+  }
+
+  if (isInsufficientPrivilegeError(error)) {
+    return databaseReadinessError(
+      `Database permissions rejected writes to ${options.objectName}. Verify the Health table RLS policies from ${HEALTH_RLS_MIGRATION}.`,
+      options.objectName,
+      HEALTH_RLS_MIGRATION,
+      error
+    );
+  }
+
+  return undefined;
 }
 
 export async function processActivityEvent(rawInput: unknown, session: RequestSession = getDevSession()) {
@@ -179,7 +294,9 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
             raw_payload
          )
          values ($1, $2, $3, coalesce($4, 'healthkit'), $5, coalesce($6, 'asleep_unspecified'), $7, $8, $9::jsonb)
-         on conflict (workspace_id, provider, external_sample_id) do nothing`,
+         on conflict (workspace_id, provider, external_sample_id)
+         where external_sample_id is not null
+         do nothing`,
         [
           parsed.workspaceId,
           parsed.userId,
@@ -210,7 +327,9 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
             raw_payload
          )
          values ($1, $2, $3, coalesce($4, 'healthkit'), coalesce($5, 'other'), $6, $7, $8, $9, $10, $11::jsonb)
-         on conflict (workspace_id, provider, external_sample_id) do nothing`,
+         on conflict (workspace_id, provider, external_sample_id)
+         where external_sample_id is not null
+         do nothing`,
         [
           parsed.workspaceId,
           parsed.userId,
@@ -231,7 +350,7 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
     return { eventId, candidate };
   } catch (error) {
     await client.query("rollback");
-    throw error;
+    throw eventSyncReadinessError(error, parsed.type) ?? error;
   } finally {
     client.release();
   }

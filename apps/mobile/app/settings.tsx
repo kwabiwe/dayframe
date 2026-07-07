@@ -16,14 +16,18 @@ import { DAYFRAME_PALETTE, paletteColorFor, type DayframePaletteKey } from "@day
 import {
   AuthRequiredError,
   archiveCategory,
+  clearFailedQueuedEvents,
   createCategory,
   fetchBootstrap,
+  getQueueDiagnostics,
   logout,
   readQueue,
+  retryFailedQueuedEvents,
   syncQueue,
   updateCategory,
   type MobileBootstrap,
-  type QueuedEvent
+  type QueuedEvent,
+  type SyncQueueResult
 } from "@/lib/api";
 import {
   requestLocationAccess,
@@ -129,6 +133,10 @@ export default function SettingsScreen() {
   const healthPermissionStatus = healthStatus.find(
     (item) => item.provider === "healthkit" && item.kind === "permissions"
   );
+  const queueDiagnostics = getQueueDiagnostics(queue);
+  const firstFailedEvent = queueDiagnostics.firstFailed;
+  const canRetryFailed = queueDiagnostics.failedCount > 0;
+  const canClearFailed = queueDiagnostics.clearableFailedCount > 0;
   useEffect(() => {
     if (!editingCategoryId) return undefined;
 
@@ -246,6 +254,7 @@ export default function SettingsScreen() {
       const result = await syncQueue();
       setQueue(result.remaining);
       await load();
+      showSyncResult("Device sync", result);
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         router.replace("/");
@@ -253,6 +262,60 @@ export default function SettingsScreen() {
       }
       Alert.alert("Device sync", error instanceof Error ? error.message : "Unable to sync queued events.");
     }
+  }
+
+  async function retryFailedAndReload() {
+    try {
+      const result = await retryFailedQueuedEvents();
+      setQueue(result.remaining);
+      await load();
+      showSyncResult("Retry failed", result);
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        router.replace("/");
+        return;
+      }
+      Alert.alert("Retry failed", error instanceof Error ? error.message : "Unable to retry failed events.");
+    }
+  }
+
+  function confirmClearFailedQueue() {
+    Alert.alert(
+      "Clear failed queued events",
+      "Failed queued events that Dayframe has marked invalid will be removed from this device. Queued events that are still retryable will stay queued.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear failed",
+          style: "destructive",
+          onPress: () => {
+            void clearFailedQueue();
+          }
+        }
+      ]
+    );
+  }
+
+  async function clearFailedQueue() {
+    try {
+      const result = await clearFailedQueuedEvents();
+      setQueue(result.remaining);
+      await load({ silent: true });
+      Alert.alert(
+        "Device sync",
+        `${result.removedCount} failed queued ${result.removedCount === 1 ? "event was" : "events were"} removed. ${result.remainingCount} queued ${result.remainingCount === 1 ? "event remains" : "events remain"}.`
+      );
+    } catch (error) {
+      Alert.alert("Device sync", error instanceof Error ? error.message : "Unable to clear failed events.");
+    }
+  }
+
+  function showSyncResult(title: string, result: SyncQueueResult) {
+    if (!result.firstError) return;
+    Alert.alert(
+      title,
+      `${result.syncedCount} synced, ${result.remainingCount} queued, ${result.failedCount} failed.\n\n${result.firstError.message}`
+    );
   }
 
   async function enableLocation() {
@@ -552,10 +615,58 @@ export default function SettingsScreen() {
 
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Device sync</Text>
-            <Text style={styles.statusText}>{queue.length} queued events</Text>
+            <Text style={styles.statusText}>
+              {queueDiagnostics.queuedCount} queued {queueDiagnostics.queuedCount === 1 ? "event" : "events"}
+            </Text>
+            {queueDiagnostics.failedCount > 0 ? (
+              <Text style={styles.errorText}>
+                {queueDiagnostics.failedCount} failed {queueDiagnostics.failedCount === 1 ? "event" : "events"}
+              </Text>
+            ) : (
+              <Text style={styles.muted}>No failed queued events.</Text>
+            )}
+            {firstFailedEvent ? (
+              <View style={styles.queueDiagnosticCard}>
+                <Text style={styles.label}>First failed event</Text>
+                <Text style={styles.accountValue} numberOfLines={2}>
+                  {formatSourceLabel(firstFailedEvent.source)} · {formatEventLabel(firstFailedEvent.type)} ·{" "}
+                  {formatQueueTime(firstFailedEvent.occurredAt)}
+                </Text>
+                <Text style={styles.accountMeta} numberOfLines={3}>
+                  {firstFailedEvent.lastError ?? "No error message was recorded."}
+                </Text>
+                {firstFailedEvent.lastAttemptedAt || firstFailedEvent.failedAt ? (
+                  <Text style={styles.accountMeta}>
+                    Last attempt {formatQueueTime(firstFailedEvent.lastAttemptedAt ?? firstFailedEvent.failedAt)}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
             <View style={styles.buttonRow}>
               <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={syncAndReload}>
                 <Text style={styles.secondaryButtonText}>Sync now</Text>
+              </Pressable>
+              <Pressable
+                disabled={!canRetryFailed}
+                style={({ pressed }) => [
+                  styles.secondaryButton,
+                  !canRetryFailed ? styles.buttonDisabled : null,
+                  pressed ? styles.buttonPressed : null
+                ]}
+                onPress={retryFailedAndReload}
+              >
+                <Text style={styles.secondaryButtonText}>Retry failed</Text>
+              </Pressable>
+              <Pressable
+                disabled={!canClearFailed}
+                style={({ pressed }) => [
+                  styles.secondaryButton,
+                  !canClearFailed ? styles.buttonDisabled : null,
+                  pressed ? styles.buttonPressed : null
+                ]}
+                onPress={confirmClearFailedQueue}
+              >
+                <Text style={styles.secondaryButtonText}>Clear failed/invalid</Text>
               </Pressable>
             </View>
           </View>
@@ -674,4 +785,69 @@ function nextCategoryColor(categories: Category[]): DayframePaletteKey {
   );
   const unused = DAYFRAME_PALETTE.find((color) => !usedKeys.has(color.key));
   return unused?.key ?? DAYFRAME_PALETTE[categories.length % DAYFRAME_PALETTE.length].key;
+}
+
+const sourceLabels: Record<string, string> = {
+  manual_app: "Web app",
+  mobile_app: "Mobile app",
+  nfc: "NFC",
+  widget: "Widget",
+  shortcut: "Shortcut",
+  geofence_specific: "Specific place",
+  geofence_broad: "Broad place",
+  calendar: "Calendar",
+  health_sleep: "Health sleep",
+  health_workout: "Health workout",
+  home_assistant: "Home Assistant",
+  ha_button: "Home Assistant button",
+  ha_geofence: "Home Assistant geofence"
+};
+
+const eventLabels: Record<string, string> = {
+  timer_start: "Started timer",
+  timer_stop: "Stopped timer",
+  timer_switch: "Switched timer",
+  quick_action: "Quick action",
+  geofence_enter: "Entered place",
+  geofence_exit: "Left place",
+  unknown_stay: "Unknown stay",
+  nfc_action: "NFC action",
+  shortcut_action: "Shortcut action",
+  calendar_hint: "Calendar hint",
+  health_sleep_import: "Health sleep import",
+  health_workout_import: "Health workout import"
+};
+
+function formatSourceLabel(value?: string | null) {
+  if (!value) return "Unknown source";
+  return sourceLabels[value] ?? formatMachineLabel(value);
+}
+
+function formatEventLabel(value?: string | null) {
+  if (!value) return "Activity";
+  return eventLabels[value] ?? formatMachineLabel(value);
+}
+
+function formatMachineLabel(value: string) {
+  return value
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map((part) => {
+      if (part.toLowerCase() === "nfc") return "NFC";
+      if (part.toLowerCase() === "ha") return "Home Assistant";
+      return `${part.charAt(0).toUpperCase()}${part.slice(1)}`;
+    })
+    .join(" ");
+}
+
+function formatQueueTime(value?: Date | string) {
+  if (!value) return "unknown time";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "unknown time";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(date);
 }

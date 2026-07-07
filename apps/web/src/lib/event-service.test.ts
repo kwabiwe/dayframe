@@ -143,6 +143,75 @@ describe("category persistence", () => {
   });
 });
 
+describe("health event persistence", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mocks.getNormalizationContext.mockResolvedValue({
+      projects: [],
+      categories: [],
+      places: [],
+      automationRules: []
+    });
+  });
+
+  it("stores health sleep imports with HealthKit payload fields and idempotent conflict handling", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        return statement.includes("returning id") ? { rows: [{ id: "event-1" }] } : { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await processActivityEvent(healthSleepEvent(), session);
+
+    const healthInsert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into health_sleep_segments")
+    );
+    expect(String(healthInsert?.[0])).toContain("where external_sample_id is not null");
+    expect(healthInsert?.[1]).toEqual([
+      session.workspaceId,
+      session.userId,
+      "sleep-sample-1",
+      "healthkit",
+      "Apple Watch",
+      "asleep_core",
+      "2026-06-06T22:24:00.000Z",
+      "2026-06-07T05:55:00.000Z",
+      JSON.stringify(healthSleepEvent().rawPayload)
+    ]);
+    expect(client.query).toHaveBeenCalledWith("commit");
+    expect(client.release).toHaveBeenCalled();
+  });
+
+  it("identifies a missing health sleep table instead of throwing a generic sync failure", async () => {
+    const client = healthClientWithFailure(
+      Object.assign(new Error('relation "health_sleep_segments" does not exist'), { code: "42P01" })
+    );
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(processActivityEvent(healthSleepEvent(), session)).rejects.toThrow(
+      /public\.health_sleep_segments.*202607070001_health_sleep_segments\.sql/
+    );
+  });
+
+  it("identifies a missing health sleep idempotency index", async () => {
+    const client = healthClientWithFailure(
+      Object.assign(
+        new Error("there is no unique or exclusion constraint matching the ON CONFLICT specification"),
+        { code: "42P10" }
+      )
+    );
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(processActivityEvent(healthSleepEvent(), session)).rejects.toThrow(
+      /idx_health_sleep_segments_external_sample/
+    );
+    expect(client.query).toHaveBeenCalledWith("rollback");
+  });
+});
+
 describe("time entry deletion", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -177,4 +246,35 @@ describe("time entry deletion", () => {
 
 function categoryId() {
   return "20000000-0000-4000-8000-000000000001";
+}
+
+function healthClientWithFailure(error: Error & { code?: string }) {
+  return {
+    query: vi.fn(async (statement: string, values?: unknown[]) => {
+      void values;
+      if (statement.includes("health_sleep_segments")) throw error;
+      return statement.includes("returning id") ? { rows: [{ id: "event-1" }] } : { rows: [] };
+    }),
+    release: vi.fn()
+  };
+}
+
+function healthSleepEvent() {
+  return {
+    source: "health_sleep",
+    type: "health_sleep_import",
+    occurredAt: new Date("2026-06-06T22:24:00.000Z"),
+    description: "Sleep asleep core",
+    rawPayload: {
+      provider: "healthkit",
+      externalSampleId: "sleep-sample-1",
+      sleepStage: "asleep_core",
+      startedAt: "2026-06-06T22:24:00.000Z",
+      stoppedAt: "2026-06-07T05:55:00.000Z",
+      sourceName: "Apple Watch",
+      sample: {
+        uuid: "sleep-sample-1"
+      }
+    }
+  };
 }

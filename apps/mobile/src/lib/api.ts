@@ -117,6 +117,51 @@ export type QueuedEvent = Omit<ActivityEventInput, "occurredAt"> & {
   occurredAt: Date;
   localId: string;
   queuedAt: string;
+  failedAt?: string;
+  failureCount?: number;
+  lastError?: string;
+  lastStatusCode?: number;
+  lastAttemptedAt?: string;
+  failureKind?: QueueFailureKind;
+};
+
+export type QueueFailureKind = "network" | "server" | "permanent";
+
+export type QueueFailureReport = {
+  localId: string;
+  source: string;
+  type: string;
+  occurredAt: string;
+  message: string;
+  statusCode?: number;
+  failureKind: QueueFailureKind;
+};
+
+export type SyncQueueResult = {
+  synced: string[];
+  remaining: QueuedEvent[];
+  failed: QueuedEvent[];
+  syncedCount: number;
+  remainingCount: number;
+  failedCount: number;
+  firstError?: QueueFailureReport;
+  stopped: boolean;
+};
+
+export type QueueDiagnostics = {
+  queuedCount: number;
+  failedCount: number;
+  clearableFailedCount: number;
+  firstFailed?: QueuedEvent;
+};
+
+type SyncQueueOptions = {
+  retryFailed?: boolean;
+  onlyFailed?: boolean;
+};
+
+type StoredQueuedEvent = Partial<Omit<QueuedEvent, "occurredAt">> & {
+  occurredAt?: string | Date;
 };
 
 type ActivityEventDraft = {
@@ -183,26 +228,69 @@ export async function enqueueEvent(input: ActivityEventDraft) {
     localId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     queuedAt: new Date().toISOString()
   });
-  await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
+  await writeQueue(queue);
   return queue;
 }
 
 export async function readQueue(): Promise<QueuedEvent[]> {
   const raw = await AsyncStorage.getItem(QUEUE_KEY);
   if (!raw) return [];
-  const parsed = JSON.parse(raw) as Array<QueuedEvent & { occurredAt: string }>;
-  return parsed.map((item) => ({
-    ...item,
-    occurredAt: new Date(item.occurredAt)
-  }));
+  const parsed = JSON.parse(raw) as StoredQueuedEvent[];
+  return parsed.map(migrateQueuedEvent);
 }
 
-export async function syncQueue() {
+export function getQueueDiagnostics(queue: QueuedEvent[]): QueueDiagnostics {
+  const failed = queue.filter(hasQueueFailure);
+  return {
+    queuedCount: queue.length,
+    failedCount: failed.length,
+    clearableFailedCount: queue.filter(isClearableFailedEvent).length,
+    firstFailed: failed[0]
+  };
+}
+
+export async function retryFailedQueuedEvents() {
+  return syncQueue({ retryFailed: true, onlyFailed: true });
+}
+
+export async function clearFailedQueuedEvents() {
   const queue = await readQueue();
+  const remaining = queue.filter((item) => !isClearableFailedEvent(item));
+  const removed = queue.filter(isClearableFailedEvent);
+  await writeQueue(remaining);
+  return {
+    removed,
+    remaining,
+    removedCount: removed.length,
+    remainingCount: remaining.length
+  };
+}
+
+export async function syncQueue(options: SyncQueueOptions = {}): Promise<SyncQueueResult> {
+  const queue = await readQueue();
+  const remaining: QueuedEvent[] = [];
   const synced: string[] = [];
+  let firstError: QueueFailureReport | undefined;
+  let stopped = false;
 
   for (let index = 0; index < queue.length; index += 1) {
     const item = queue[index];
+    if (options.onlyFailed && !hasQueueFailure(item)) {
+      remaining.push(item);
+      continue;
+    }
+    if (!options.retryFailed && isPermanentlyFailedEvent(item)) {
+      remaining.push(item);
+      firstError ??= queueFailureReport(
+        item,
+        item.lastError ?? "Queued event is marked invalid.",
+        item.failureKind ?? "permanent",
+        item.lastStatusCode
+      );
+      continue;
+    }
+
+    const attemptedAt = new Date().toISOString();
     try {
       const response = await fetch(`${DAYFRAME_API_BASE}/api/events`, {
         method: "POST",
@@ -216,22 +304,37 @@ export async function syncQueue() {
           occurredAt: item.occurredAt.toISOString()
         })
       });
-      if (response.status === 401) {
+      if (response.status === 401 || response.status === 403) {
         await clearSessionToken();
         throw new AuthRequiredError();
       }
-      if (!response.ok) throw new Error(`Sync failed: ${response.status}`);
+      if (!response.ok) {
+        const failureKind = permanentStatusCodes.has(response.status) ? "permanent" : "server";
+        const message = await errorMessage(response, "Unable to sync queued event");
+        const failedItem = markQueueFailure(item, message, attemptedAt, failureKind, response.status);
+        remaining.push(failedItem);
+        firstError ??= queueFailureReport(failedItem, message, failureKind, response.status);
+        if (failureKind !== "permanent") {
+          remaining.push(...queue.slice(index + 1));
+          stopped = true;
+          break;
+        }
+        continue;
+      }
       synced.push(item.localId);
     } catch (error) {
       if (error instanceof AuthRequiredError) throw error;
-      const remaining = queue.slice(index);
-      await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(remaining));
-      return { synced, remaining };
+      const message = error instanceof Error ? error.message : "Network request failed";
+      const failedItem = markQueueFailure(item, message, attemptedAt, "network");
+      remaining.push(failedItem, ...queue.slice(index + 1));
+      firstError ??= queueFailureReport(failedItem, message, "network");
+      stopped = true;
+      break;
     }
   }
 
-  await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify([]));
-  return { synced, remaining: [] };
+  await writeQueue(remaining);
+  return queueSyncResult(synced, remaining, firstError, stopped);
 }
 
 export async function startTimer(categoryId?: string | null, description?: string) {
@@ -357,6 +460,135 @@ export function isNetworkTimerError(error: unknown) {
   );
 }
 
+const permanentStatusCodes = new Set([400, 413, 422]);
+
+function migrateQueuedEvent(item: StoredQueuedEvent, index: number): QueuedEvent {
+  const queuedAt = validIsoString(item.queuedAt) ?? new Date().toISOString();
+  const localId = typeof item.localId === "string" && item.localId.trim()
+    ? item.localId
+    : `migrated-${queuedAt}-${index}`;
+  const failureCount = typeof item.failureCount === "number" && Number.isFinite(item.failureCount)
+    ? Math.max(0, Math.trunc(item.failureCount))
+    : item.lastError || item.failedAt
+      ? 1
+      : undefined;
+  const lastStatusCode = typeof item.lastStatusCode === "number" && Number.isFinite(item.lastStatusCode)
+    ? Math.trunc(item.lastStatusCode)
+    : undefined;
+  const failureKind = isQueueFailureKind(item.failureKind)
+    ? item.failureKind
+    : lastStatusCode && permanentStatusCodes.has(lastStatusCode)
+      ? "permanent"
+      : undefined;
+
+  return {
+    ...item,
+    source: item.source as EventSource,
+    type: item.type as ActivityEventType,
+    occurredAt: coerceQueuedDate(item.occurredAt),
+    rawPayload: isRecord(item.rawPayload) ? item.rawPayload : {},
+    localId,
+    queuedAt,
+    failedAt: validIsoString(item.failedAt),
+    failureCount,
+    lastError: typeof item.lastError === "string" && item.lastError.trim() ? item.lastError : undefined,
+    lastStatusCode,
+    lastAttemptedAt: validIsoString(item.lastAttemptedAt),
+    failureKind
+  };
+}
+
+function markQueueFailure(
+  item: QueuedEvent,
+  message: string,
+  attemptedAt: string,
+  failureKind: QueueFailureKind,
+  statusCode?: number
+): QueuedEvent {
+  return {
+    ...item,
+    failedAt: new Date().toISOString(),
+    failureCount: (item.failureCount ?? 0) + 1,
+    lastError: message,
+    lastStatusCode: statusCode,
+    lastAttemptedAt: attemptedAt,
+    failureKind
+  };
+}
+
+function hasQueueFailure(item: QueuedEvent) {
+  return Boolean(item.failedAt || item.lastError || (item.failureCount ?? 0) > 0);
+}
+
+function isPermanentlyFailedEvent(item: QueuedEvent) {
+  return (
+    item.failureKind === "permanent" ||
+    Boolean(item.failedAt && item.lastStatusCode && permanentStatusCodes.has(item.lastStatusCode))
+  );
+}
+
+function isClearableFailedEvent(item: QueuedEvent) {
+  return isPermanentlyFailedEvent(item);
+}
+
+function queueFailureReport(
+  item: QueuedEvent,
+  message: string,
+  failureKind: QueueFailureKind,
+  statusCode?: number
+): QueueFailureReport {
+  return {
+    localId: item.localId,
+    source: String(item.source ?? "unknown"),
+    type: String(item.type ?? "unknown"),
+    occurredAt: item.occurredAt.toISOString(),
+    message,
+    statusCode,
+    failureKind
+  };
+}
+
+function queueSyncResult(
+  synced: string[],
+  remaining: QueuedEvent[],
+  firstError: QueueFailureReport | undefined,
+  stopped: boolean
+): SyncQueueResult {
+  const failed = remaining.filter(hasQueueFailure);
+  return {
+    synced,
+    remaining,
+    failed,
+    syncedCount: synced.length,
+    remainingCount: remaining.length,
+    failedCount: failed.length,
+    firstError,
+    stopped
+  };
+}
+
+async function writeQueue(queue: QueuedEvent[]) {
+  await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
+}
+
+function coerceQueuedDate(value: StoredQueuedEvent["occurredAt"]) {
+  const date = value instanceof Date ? value : typeof value === "string" ? new Date(value) : new Date();
+  return Number.isNaN(date.getTime()) ? new Date() : date;
+}
+
+function validIsoString(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  return Number.isNaN(new Date(value).getTime()) ? undefined : value;
+}
+
+function isQueueFailureKind(value: unknown): value is QueueFailureKind {
+  return value === "network" || value === "server" || value === "permanent";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
 export class AuthRequiredError extends Error {
   constructor() {
     super("Login required");
@@ -410,6 +642,40 @@ async function readJsonResponse<T>(response: Response): Promise<T> {
 }
 
 async function errorMessage(response: Response, fallback: string) {
-  const payload = await readJsonResponse<{ error?: string }>(response);
-  return payload.error ?? `${fallback}: ${response.status}`;
+  const payload = await readJsonResponse<{
+    error?: string;
+    message?: string;
+    issues?: Array<{ path?: Array<string | number>; message?: string }>;
+  }>(response);
+  return formatApiError(payload) ?? `${fallback}: ${response.status}`;
+}
+
+function formatApiError(payload: {
+  error?: string;
+  message?: string;
+  issues?: Array<{ path?: Array<string | number>; message?: string }>;
+}) {
+  if (payload.issues?.length) {
+    return formatIssue(payload.issues[0]);
+  }
+
+  const message = payload.error ?? payload.message;
+  if (!message) return undefined;
+
+  try {
+    const parsed = JSON.parse(message) as unknown;
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      const issue = parsed[0] as { path?: Array<string | number>; message?: string };
+      return formatIssue(issue);
+    }
+  } catch {
+    return message;
+  }
+
+  return message;
+}
+
+function formatIssue(issue: { path?: Array<string | number>; message?: string }) {
+  const path = issue.path?.length ? issue.path.join(".") : "event";
+  return issue.message ? `${path}: ${issue.message}` : "Invalid event payload";
 }

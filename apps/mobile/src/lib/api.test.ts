@@ -31,13 +31,17 @@ vi.mock("./config", () => ({
 
 const {
   AuthRequiredError,
+  clearFailedQueuedEvents,
   createCategory,
   deleteTimeEntry,
   enqueueEvent,
   fetchBootstrap,
+  getQueueDiagnostics,
   getSessionToken,
   isNetworkTimerError,
   login,
+  readQueue,
+  retryFailedQueuedEvents,
   startTimer,
   signup,
   syncQueue,
@@ -121,6 +125,38 @@ describe("mobile API client", () => {
     );
   });
 
+  it("migrates old queued items without losing their event fields", async () => {
+    asyncStore.set(
+      "dayframe.offlineQueue.v1",
+      JSON.stringify([
+        {
+          source: "mobile_app",
+          type: "timer_stop",
+          occurredAt: "2026-07-06T08:15:00.000Z",
+          localId: "local-1",
+          queuedAt: "2026-07-06T08:16:00.000Z",
+          rawPayload: { order: 1 }
+        }
+      ])
+    );
+
+    const queue = await readQueue();
+
+    expect(queue).toHaveLength(1);
+    expect(queue[0]).toEqual(
+      expect.objectContaining({
+        source: "mobile_app",
+        type: "timer_stop",
+        localId: "local-1",
+        queuedAt: "2026-07-06T08:16:00.000Z",
+        rawPayload: { order: 1 }
+      })
+    );
+    expect(queue[0].occurredAt.toISOString()).toBe("2026-07-06T08:15:00.000Z");
+    expect(queue[0].failureCount).toBeUndefined();
+    expect(queue[0].lastError).toBeUndefined();
+  });
+
   it("preserves queue order when the first event fails to sync", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
     await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: { order: 1 } });
@@ -135,6 +171,8 @@ describe("mobile API client", () => {
     expect(result.remaining).toHaveLength(2);
     expect(result.remaining[0].rawPayload).toEqual({ order: 1 });
     expect(result.remaining[1].rawPayload).toEqual({ order: 2 });
+    expect(result.failedCount).toBe(1);
+    expect(result.firstError?.message).toBe("Server error");
   });
 
   it("removes synced events and preserves later unsynced events", async () => {
@@ -152,6 +190,145 @@ describe("mobile API client", () => {
     expect(result.synced).toHaveLength(1);
     expect(result.remaining).toHaveLength(1);
     expect(result.remaining[0].rawPayload).toEqual({ order: 2 });
+  });
+
+  it("records validation failures and continues syncing later valid events", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: { order: 1 } });
+    await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: { order: 2 } });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            error: JSON.stringify([
+              { path: ["type"], message: "Invalid enum value. Expected timer_stop." }
+            ])
+          },
+          400
+        )
+      )
+      .mockResolvedValueOnce(jsonResponse({ eventId: "event-2" }, 201));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await syncQueue();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.syncedCount).toBe(1);
+    expect(result.remaining).toHaveLength(1);
+    expect(result.remaining[0]).toEqual(
+      expect.objectContaining({
+        failureCount: 1,
+        failureKind: "permanent",
+        lastError: "type: Invalid enum value. Expected timer_stop.",
+        lastStatusCode: 400,
+        rawPayload: { order: 1 }
+      })
+    );
+    expect(result.failedCount).toBe(1);
+    expect(getQueueDiagnostics(result.remaining).clearableFailedCount).toBe(1);
+  });
+
+  it("keeps network failures queued for retry with failure metadata", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: { offline: true } });
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("Network request failed"))));
+
+    const result = await syncQueue();
+    const persisted = await readQueue();
+
+    expect(result.syncedCount).toBe(0);
+    expect(result.remainingCount).toBe(1);
+    expect(result.failedCount).toBe(1);
+    expect(result.remaining[0]).toEqual(
+      expect.objectContaining({
+        failureCount: 1,
+        failureKind: "network",
+        lastError: "Network request failed"
+      })
+    );
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0].rawPayload).toEqual({ offline: true });
+  });
+
+  it("clears the session token when queued event sync returns 401", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "expired-token");
+    await enqueueEvent({ source: "mobile_app", type: "timer_stop" });
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({ error: "Login required" }, 401))));
+
+    await expect(syncQueue()).rejects.toBeInstanceOf(AuthRequiredError);
+    await expect(getSessionToken()).resolves.toBeNull();
+    await expect(readQueue()).resolves.toHaveLength(1);
+  });
+
+  it("retries failed queued events without retrying healthy queued events", async () => {
+    asyncStore.set(
+      "dayframe.offlineQueue.v1",
+      JSON.stringify([
+        storedQueuedEvent({
+          localId: "failed-local",
+          rawPayload: { failed: true },
+          failedAt: "2026-07-06T08:20:00.000Z",
+          failureKind: "permanent",
+          failureCount: 1,
+          lastError: "type: Invalid event type",
+          lastStatusCode: 400,
+          lastAttemptedAt: "2026-07-06T08:20:00.000Z"
+        }),
+        storedQueuedEvent({
+          localId: "healthy-local",
+          rawPayload: { healthy: true }
+        })
+      ])
+    );
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ eventId: "event-1" }, 201)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await retryFailedQueuedEvents();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.synced).toEqual(["failed-local"]);
+    expect(result.remaining).toHaveLength(1);
+    expect(result.remaining[0].localId).toBe("healthy-local");
+  });
+
+  it("clears failed invalid queued events without removing valid queued items", async () => {
+    asyncStore.set(
+      "dayframe.offlineQueue.v1",
+      JSON.stringify([
+        storedQueuedEvent({
+          localId: "invalid-local",
+          rawPayload: { invalid: true },
+          failedAt: "2026-07-06T08:20:00.000Z",
+          failureKind: "permanent",
+          failureCount: 1,
+          lastError: "type: Invalid event type",
+          lastStatusCode: 400,
+          lastAttemptedAt: "2026-07-06T08:20:00.000Z"
+        }),
+        storedQueuedEvent({
+          localId: "network-local",
+          rawPayload: { offline: true },
+          failedAt: "2026-07-06T08:21:00.000Z",
+          failureKind: "network",
+          failureCount: 1,
+          lastError: "Network request failed",
+          lastAttemptedAt: "2026-07-06T08:21:00.000Z"
+        }),
+        storedQueuedEvent({
+          localId: "healthy-local",
+          rawPayload: { healthy: true }
+        })
+      ])
+    );
+
+    const result = await clearFailedQueuedEvents();
+    const remainingIds = result.remaining.map((item) => item.localId);
+
+    expect(result.removed.map((item) => item.localId)).toEqual(["invalid-local"]);
+    expect(remainingIds).toEqual(["network-local", "healthy-local"]);
+    await expect(readQueue()).resolves.toHaveLength(2);
   });
 
   it("starts timers with an optional category and no project", async () => {
@@ -365,4 +542,16 @@ function jsonResponse(body: unknown, status = 200) {
     status,
     headers: { "Content-Type": "application/json" }
   });
+}
+
+function storedQueuedEvent(overrides: Record<string, unknown> = {}) {
+  return {
+    source: "mobile_app",
+    type: "timer_stop",
+    occurredAt: "2026-07-06T08:15:00.000Z",
+    localId: "local-1",
+    queuedAt: "2026-07-06T08:16:00.000Z",
+    rawPayload: {},
+    ...overrides
+  };
 }

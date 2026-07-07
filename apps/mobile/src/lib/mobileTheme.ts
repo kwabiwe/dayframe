@@ -1376,6 +1376,15 @@ function createStyles(theme: MobileTheme) {
       fontFamily: monoFont,
       fontSize: 12
     },
+    queueDiagnosticCard: {
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 12,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      gap: 4
+    },
     buttonRow: {
       flexDirection: "row",
       flexWrap: "wrap",
