@@ -1075,6 +1075,10 @@ describe("health event persistence", () => {
       (values as unknown[])?.[1] === "accepted"
     );
     expect(acceptedUpdates).toHaveLength(3);
+    const coveringLookup = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("health_covering_entry")
+    );
+    expect(String(coveringLookup?.[0])).toContain("te.review_status in ('confirmed', 'accepted')");
   });
 
   it("accepts legacy sleep stage rows already covered by a confirmed Sleep entry", async () => {
@@ -1293,6 +1297,7 @@ describe("health event persistence", () => {
       String(statement).includes("health_covering_entry") && (values as unknown[])?.[4] === "Sleep"
     );
     expect(coveringLookup).toBeTruthy();
+    expect(String(coveringLookup?.[0])).toContain("te.review_status in ('confirmed', 'accepted')");
   });
 
   it("returns a structured failure when the Health category cannot be ensured", async () => {

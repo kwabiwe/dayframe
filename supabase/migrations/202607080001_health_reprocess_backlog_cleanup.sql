@@ -10,6 +10,10 @@ create index if not exists idx_time_entries_confirmed_overlap_lookup
 on public.time_entries(workspace_id, user_id, started_at, stopped_at)
 where review_status = 'confirmed';
 
+create index if not exists idx_time_entries_completed_health_overlap_lookup
+on public.time_entries(workspace_id, user_id, started_at, stopped_at)
+where review_status in ('confirmed', 'accepted');
+
 create index if not exists idx_time_entries_created_from_event_lookup
 on public.time_entries(workspace_id, user_id, created_from_event_id)
 where created_from_event_id is not null;
@@ -61,7 +65,7 @@ with covered_sleep_stages as (
     and coalesce(ae.raw_payload->>'sleepStage', 'asleep_unspecified') not in ('awake', 'in_bed')
     and ri.suggested_started_at is not null
     and ri.suggested_stopped_at is not null
-    and te.review_status = 'confirmed'
+    and te.review_status in ('confirmed', 'accepted')
     and te.stopped_at is not null
     and te.started_at <= ri.suggested_started_at + interval '5 minutes'
     and te.stopped_at >= ri.suggested_stopped_at - interval '5 minutes'

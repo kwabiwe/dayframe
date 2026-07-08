@@ -349,6 +349,7 @@ create index if not exists idx_review_items_workspace_status on review_items(wor
 create index if not exists idx_review_items_open_health_event on review_items(workspace_id, event_id, suggested_started_at desc, created_at desc) where status = 'open';
 create index if not exists idx_activity_events_health_review_lookup on activity_events(workspace_id, user_id, event_type, occurred_at desc, id) where event_type in ('health_sleep_import', 'health_workout_import');
 create index if not exists idx_time_entries_confirmed_overlap_lookup on time_entries(workspace_id, user_id, started_at, stopped_at) where review_status = 'confirmed';
+create index if not exists idx_time_entries_completed_health_overlap_lookup on time_entries(workspace_id, user_id, started_at, stopped_at) where review_status in ('confirmed', 'accepted');
 create index if not exists idx_time_entries_created_from_event_lookup on time_entries(workspace_id, user_id, created_from_event_id) where created_from_event_id is not null;
 create unique index if not exists idx_health_sleep_segments_external_sample on health_sleep_segments(workspace_id, provider, external_sample_id) where external_sample_id is not null;
 create unique index if not exists idx_health_workouts_external_sample on health_workouts(workspace_id, provider, external_sample_id) where external_sample_id is not null;

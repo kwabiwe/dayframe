@@ -2129,7 +2129,7 @@ async function findCoveringHealthTimeEntry(
      left join categories c on c.id = te.category_id
      where te.workspace_id = $1
        and te.user_id = $2
-       and te.review_status = 'confirmed'
+       and te.review_status in ('confirmed', 'accepted')
        and te.stopped_at is not null
        and te.started_at <= $3::timestamptz + interval '5 minutes'
        and te.stopped_at >= $4::timestamptz - interval '5 minutes'
