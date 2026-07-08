@@ -1075,6 +1075,10 @@ describe("health event persistence", () => {
       (values as unknown[])?.[1] === "accepted"
     );
     expect(acceptedUpdates).toHaveLength(3);
+    const coveringLookup = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("health_covering_entry")
+    );
+    expect(String(coveringLookup?.[0])).toContain("te.review_status in ('confirmed', 'accepted')");
   });
 
   it("accepts legacy sleep stage rows already covered by a confirmed Sleep entry", async () => {
@@ -1163,6 +1167,137 @@ describe("health event persistence", () => {
       (values as unknown[])?.[1] === "accepted"
     );
     expect(acceptedUpdates).toHaveLength(3);
+  });
+
+  it("ignores legacy awake sleep stage review rows during consolidation", async () => {
+    const awakeRow = {
+      ...healthSleepReviewRow({
+        id: "review-awake",
+        eventId: "event-awake",
+        startedAt: "2026-07-07T04:39:00.000Z",
+        stoppedAt: "2026-07-07T04:41:00.000Z",
+        durationSeconds: 2 * 60,
+        suggestedCategoryId: healthCategoryId(),
+        eventCategoryId: healthCategoryId()
+      }),
+      title: "Sleep awake",
+      rawPayload: {
+        provider: "healthkit",
+        externalSampleId: "event-awake",
+        sleepStage: "awake",
+        startedAt: "2026-07-07T04:39:00.000Z",
+        stoppedAt: "2026-07-07T04:41:00.000Z",
+        durationSeconds: 2 * 60
+      }
+    };
+    const client = reprocessClient([awakeRow]);
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await reprocessHealthReviewItems({
+      preferences: {
+        sleep: true,
+        walking: true,
+        running: true,
+        cycling: true,
+        strength_training: false,
+        swimming: false,
+        other: false
+      }
+    }, session);
+
+    expect(result).toMatchObject({
+      checkedCount: 1,
+      confirmedCount: 0,
+      ignoredCount: 1,
+      remainingReviewCount: 0
+    });
+    const ignoredUpdates = client.query.mock.calls.filter(([statement, values]) =>
+      String(statement).includes("update review_items") &&
+      String(statement).includes("set status = $2") &&
+      (values as unknown[])?.[1] === "ignored"
+    );
+    expect(ignoredUpdates).toHaveLength(1);
+    expect(
+      client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"))
+    ).toBeUndefined();
+  });
+
+  it("accepts legacy sleep stage rows covered by a Health category Sleep entry", async () => {
+    const row = {
+      ...healthSleepReviewRow({
+        id: "review-core-covered-by-manual-sleep",
+        eventId: "event-core-covered-by-manual-sleep",
+        startedAt: "2026-07-07T04:41:00.000Z",
+        stoppedAt: "2026-07-07T04:46:00.000Z",
+        durationSeconds: 5 * 60,
+        suggestedCategoryId: healthCategoryId(),
+        eventCategoryId: healthCategoryId()
+      }),
+      title: "Sleep asleep core",
+      rawPayload: {
+        provider: "healthkit",
+        externalSampleId: "event-core-covered-by-manual-sleep",
+        sleepStage: "asleep_core",
+        startedAt: "2026-07-07T04:41:00.000Z",
+        stoppedAt: "2026-07-07T04:46:00.000Z",
+        durationSeconds: 5 * 60
+      }
+    };
+    const client = reprocessClient([row]);
+    client.query.mockImplementation(async (statement: string) => {
+      if (statement.includes("from review_items ri") && statement.includes("for update of ri")) {
+        return { rows: [row] };
+      }
+      if (statement.includes("from categories")) return { rows: [{ id: healthCategoryId() }] };
+      if (statement.includes("created_from_event_id = $3")) return { rows: [] };
+      if (statement.includes("health_covering_entry")) {
+        return {
+          rows: [
+            {
+              id: "entry-sleep-covered",
+              description: "Sleep",
+              source: "manual_app",
+              reviewStatus: "confirmed",
+              startedAt: "2026-07-07T00:00:00.000Z",
+              stoppedAt: "2026-07-07T07:00:00.000Z",
+              categoryName: "Health",
+              stoppedAtIsNull: false
+            }
+          ]
+        };
+      }
+      if (statement.includes("started_at < $4::timestamptz")) {
+        throw new Error("Covered sleep stage should not run generic overlap checks.");
+      }
+      return { rows: [] };
+    });
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await reprocessHealthReviewItems({
+      preferences: {
+        sleep: true,
+        walking: true,
+        running: true,
+        cycling: true,
+        strength_training: false,
+        swimming: false,
+        other: false
+      }
+    }, session);
+
+    expect(result).toMatchObject({
+      checkedCount: 1,
+      confirmedCount: 1,
+      remainingReviewCount: 0
+    });
+    expect(
+      client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"))
+    ).toBeUndefined();
+    const coveringLookup = client.query.mock.calls.find(([statement, values]) =>
+      String(statement).includes("health_covering_entry") && (values as unknown[])?.[4] === "Sleep"
+    );
+    expect(coveringLookup).toBeTruthy();
+    expect(String(coveringLookup?.[0])).toContain("te.review_status in ('confirmed', 'accepted')");
   });
 
   it("returns a structured failure when the Health category cannot be ensured", async () => {

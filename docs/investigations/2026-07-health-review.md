@@ -63,6 +63,8 @@ Track focused PRs only:
 | #23 | Review locks, sleep stage repair, Health debug export | merged/pending deploy verification | tests, TestFlight build 0.1.0 (1) |
 | #25 | Health reprocess batching | merged/deployed at `80e1bdb` | tests, TestFlight build 0.1.0 (2) |
 | #26 | Review stale list, Health drain, geofence description | merged/deployed | tests, TestFlight build 0.1.0 (3) |
+| #27 | Health review backlog drain | merged/deployed | targeted tests, TestFlight build 0.1.0 (4) |
+| #28 | Mobile API fallback startup crash | merged/deployed | targeted tests, TestFlight build 0.1.0 (5) |
 
 ## 2026-07-08 Follow-Up From TestFlight Build 0.1.0 (2)
 
@@ -113,6 +115,30 @@ Decision:
 - Treat open Health review rows covered by an existing confirmed Health/Sleep entry as accepted instead of left in Review as overlaps.
 - Increase mobile Health reprocess batch size from 12 to 25.
 - Skip background reprocess on normal Review focus/Confirm/Edit reloads; keep forced reprocess for initial load and pull-to-refresh.
+
+## 2026-07-08 Follow-Up From Debug Export 0003 And Build 0.1.0 (5)
+
+Evidence:
+
+- KB screenshots from build `0.1.0 (5)` show production API `https://dayframe-web.vercel.app`, Review count `100`, `partial` reprocess with `confirmed 18`, `ignored 11`, `remaining 1120`, `batch 25`, and later `timed_out`.
+- Vercel production logs around 21:01-21:11 BST show four `POST /api/review/reprocess-health` requests returning `207`; no `500` or `504` was observed for the same window.
+- Debug export `0003` shows Sleep and Walking preferences enabled, stable grouped sleep session events, 6 generated sleep sessions, and 13 generated walking workout events. Most generated walks have `autoConfirm: true`.
+- The same export shows 100 recent sleep samples grouped into sessions, including `awake` samples that should not become user-facing Sleep entries.
+
+Findings:
+
+- The timeout is likely mobile/client-side while draining partial 207 batches, not a Vercel hard timeout. The Review screen had a 15s wrapper timeout while `health.ts` can legitimately run multiple production API batches.
+- Current mobile export groups sleep sessions correctly, so visible `Sleep asleep core` / `Sleep awake` cards are likely old per-stage database review rows rather than newly generated grouped sleep events.
+- Legacy sleep consolidation fetched up to 300 extra rows per API call and did not retire `awake` / `in_bed` rows unless those rows also happened to be in the main reprocess batch.
+- Covered legacy sleep fragments can still be reported as overlapping an existing `Sleep` timer when the existing entry is a Health-category Sleep entry but not sourced as `health_sleep`, because the covered-entry lookup used the fragment title such as `Sleep asleep core`.
+
+Decision:
+
+- Create `codex/fix-health-reprocess-timeout-and-legacy-sleep`.
+- Retire legacy `awake` / `in_bed` sleep stage review rows as ignored during consolidation.
+- Normalize sleep-fragment coverage checks to title `Sleep` so covered legacy fragments are accepted instead of left as overlap.
+- Reduce the legacy consolidation fetch size and extend mobile reprocess timeout bounds so Review does not false-timeout while bounded work is still progressing.
+- Add a Supabase migration with reprocess lookup indexes and a safe one-time cleanup for historical sleep-stage rows already covered by confirmed Sleep entries.
 
 ## Closure Criteria
 

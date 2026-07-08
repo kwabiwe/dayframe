@@ -51,7 +51,7 @@ type ReviewReprocessDiagnostics = {
   error: string | null;
 };
 
-const HEALTH_REPROCESS_TIMEOUT_MS = 15_000;
+const HEALTH_REPROCESS_TIMEOUT_MS = 45_000;
 
 export default function ReviewScreen() {
   const { reloadThemePreference, styles, theme } = useMobileTheme();
