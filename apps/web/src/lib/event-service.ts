@@ -15,10 +15,13 @@ import {
 import {
   databaseReadinessError,
   databasePayloadError,
+  isCheckViolationError,
   isForeignKeyViolationError,
   isInsufficientPrivilegeError,
   isInvalidTextRepresentationError,
   isInvalidConflictTargetError,
+  isNotNullViolationError,
+  isUniqueViolationError,
   isUndefinedColumnError,
   isUndefinedTableError,
   missingRequiredColumnError,
@@ -49,6 +52,63 @@ type PlaceRowLike = {
   defaultCategoryName: string | null;
   defaultActivityDescription: string | null;
   autoStart: boolean;
+};
+
+export type ReviewResolutionCode =
+  | "review_item_not_found"
+  | "already_resolved"
+  | "invalid_action"
+  | "invalid_time_window"
+  | "duplicate_entry"
+  | "database_constraint";
+
+export type ReviewResolutionResult = {
+  ok: true;
+  action: "accept" | "ignore_once" | "always_ignore_source" | "create_rule";
+  status: "accepted" | "ignored";
+  entryId?: string;
+  duplicate?: boolean;
+};
+
+type ReviewResolutionDetails = Record<string, unknown>;
+
+export class ReviewResolutionError extends Error {
+  code: ReviewResolutionCode;
+  status: number;
+  details?: ReviewResolutionDetails;
+
+  constructor(
+    code: ReviewResolutionCode,
+    message: string,
+    options: { status?: number; details?: ReviewResolutionDetails; cause?: unknown } = {}
+  ) {
+    super(message);
+    this.name = "ReviewResolutionError";
+    this.code = code;
+    this.status = options.status ?? 400;
+    this.details = options.details;
+    if (options.cause) {
+      (this as Error & { cause?: unknown }).cause = options.cause;
+    }
+  }
+}
+
+type OverlapBlockingEntry = {
+  id: string;
+  description: string | null;
+  source: string;
+  reviewStatus: string;
+  startedAt: string;
+  stoppedAt: string | null;
+  categoryName: string | null;
+  stoppedAtIsNull: boolean;
+};
+
+type HealthReviewReason = {
+  reviewItemId: string;
+  code: string;
+  message: string;
+  blockingEntry?: OverlapBlockingEntry;
 };
 
 const CATEGORY_PINS_MIGRATION = "supabase/migrations/202607040001_category_pins_and_project_backfill.sql";
@@ -991,16 +1051,24 @@ export async function splitActiveEntry(session: RequestSession = getDevSession()
 
 export async function resolveReviewItem(
   id: string,
-  action: "accept" | "ignore_once" | "always_ignore_source" | "create_rule",
+  action: unknown,
   session: RequestSession = getDevSession()
-) {
+): Promise<ReviewResolutionResult> {
   const client = await pool.connect();
   try {
     await client.query("begin");
+    if (!isReviewResolutionAction(action)) {
+      throw new ReviewResolutionError("invalid_action", "Unsupported review action.", {
+        status: 400,
+        details: { action }
+      });
+    }
+
     const review = await client.query<{
       id: string;
       eventId: string | null;
       title: string;
+      status: string;
       suggestedProjectId: string | null;
       suggestedCategoryId: string | null;
       suggestedPlaceId: string | null;
@@ -1013,6 +1081,7 @@ export async function resolveReviewItem(
       `select ri.id,
               ri.event_id as "eventId",
               ri.title,
+              ri.status,
               ri.suggested_project_id as "suggestedProjectId",
               ri.suggested_category_id as "suggestedCategoryId",
               ri.suggested_place_id as "suggestedPlaceId",
@@ -1028,10 +1097,46 @@ export async function resolveReviewItem(
       [id, session.workspaceId]
     );
     const item = review.rows[0];
-    if (!item) throw new Error("Review item not found");
+    if (!item) {
+      throw new ReviewResolutionError("review_item_not_found", "Review item not found.", { status: 404 });
+    }
+    if (item.status !== "open") {
+      throw new ReviewResolutionError("already_resolved", "This review item has already been resolved.", {
+        status: 409,
+        details: { reviewItemId: item.id, status: item.status }
+      });
+    }
 
-    if (action === "accept" && item.suggestedStartedAt) {
-      await client.query(
+    let entryId: string | undefined;
+    let duplicate = false;
+
+    if (action === "accept") {
+      const window = reviewItemTimeWindow(item);
+      if (!window) {
+        throw new ReviewResolutionError(
+          "invalid_time_window",
+          "This review item is missing a valid start and end time.",
+          {
+            status: 422,
+            details: {
+              reviewItemId: item.id,
+              suggestedStartedAt: item.suggestedStartedAt,
+              suggestedStoppedAt: item.suggestedStoppedAt
+            }
+          }
+        );
+      }
+
+      if (item.eventId) {
+        const existingEntry = await getTimeEntryCreatedFromEvent(client, item.eventId, session);
+        if (existingEntry) {
+          entryId = existingEntry.id;
+          duplicate = true;
+        }
+      }
+
+      if (!entryId) {
+        const inserted = await client.query<{ id: string }>(
         `insert into time_entries (
             workspace_id,
             user_id,
@@ -1046,21 +1151,24 @@ export async function resolveReviewItem(
             stopped_at,
             created_from_event_id
          )
-         values ($1, $2, $3, $4, $5, coalesce($6, 'manual_app'), $7, 'accepted', $8, $9, coalesce($10, $9::timestamptz + interval '1 hour'), $11)`,
-        [
-          session.workspaceId,
-          session.userId,
-          item.suggestedProjectId,
-          item.suggestedCategoryId,
-          item.suggestedPlaceId,
-          item.eventSource,
-          item.confidence,
-          item.title,
-          item.suggestedStartedAt,
-          item.suggestedStoppedAt,
-          item.eventId
-        ]
-      );
+         values ($1, $2, $3, $4, $5, coalesce($6, 'manual_app'), $7, 'confirmed', $8, $9, $10, $11)
+         returning id`,
+          [
+            session.workspaceId,
+            session.userId,
+            item.suggestedProjectId,
+            item.suggestedCategoryId,
+            item.suggestedPlaceId,
+            item.eventSource,
+            item.confidence,
+            item.title,
+            window.startedAt,
+            window.stoppedAt,
+            item.eventId
+          ]
+        );
+        entryId = inserted.rows[0]?.id;
+      }
     }
 
     if (action === "create_rule" && item.eventSource && item.eventType) {
@@ -1116,6 +1224,7 @@ export async function resolveReviewItem(
       );
     }
 
+    const resolvedStatus = action === "accept" || action === "create_rule" ? "accepted" : "ignored";
     await client.query(
       `update review_items
        set status = $3,
@@ -1125,17 +1234,113 @@ export async function resolveReviewItem(
       [
         id,
         session.workspaceId,
-        action === "accept" || action === "create_rule" ? "accepted" : "ignored",
+        resolvedStatus,
         action === "always_ignore_source" ? "source" : action === "ignore_once" ? "once" : null
       ]
     );
+    if (item.eventId) {
+      await client.query(
+        `update activity_events
+         set review_status = $2
+         where id = $1 and workspace_id = $3 and user_id = $4`,
+        [
+          item.eventId,
+          resolvedStatus === "accepted" ? "confirmed" : "ignored",
+          session.workspaceId,
+          session.userId
+        ]
+      );
+    }
     await client.query("commit");
+    return { ok: true, action, status: resolvedStatus, entryId, duplicate };
   } catch (error) {
     await client.query("rollback");
-    throw error;
+    throw reviewResolutionErrorForDatabaseError(error);
   } finally {
     client.release();
   }
+}
+
+function isReviewResolutionAction(
+  value: unknown
+): value is "accept" | "ignore_once" | "always_ignore_source" | "create_rule" {
+  return (
+    value === "accept" ||
+    value === "ignore_once" ||
+    value === "always_ignore_source" ||
+    value === "create_rule"
+  );
+}
+
+function reviewItemTimeWindow(item: {
+  suggestedStartedAt: string | null;
+  suggestedStoppedAt: string | null;
+}) {
+  if (!item.suggestedStartedAt || !item.suggestedStoppedAt) return null;
+  const started = new Date(item.suggestedStartedAt);
+  const stopped = new Date(item.suggestedStoppedAt);
+  if (
+    Number.isNaN(started.getTime()) ||
+    Number.isNaN(stopped.getTime()) ||
+    stopped.getTime() <= started.getTime()
+  ) {
+    return null;
+  }
+  return {
+    startedAt: started.toISOString(),
+    stoppedAt: stopped.toISOString()
+  };
+}
+
+function reviewResolutionErrorForDatabaseError(error: unknown) {
+  if (error instanceof ReviewResolutionError) return error;
+
+  if (isUniqueViolationError(error)) {
+    return new ReviewResolutionError(
+      "duplicate_entry",
+      "A time entry already exists for this activity.",
+      {
+        status: 409,
+        cause: error
+      }
+    );
+  }
+
+  if (
+    isForeignKeyViolationError(error) ||
+    isCheckViolationError(error) ||
+    isNotNullViolationError(error) ||
+    isInvalidTextRepresentationError(error)
+  ) {
+    return new ReviewResolutionError(
+      "database_constraint",
+      "This review item could not be confirmed because its stored data violates a database constraint.",
+      {
+        status: 422,
+        cause: error,
+        details: databaseErrorDetails(error)
+      }
+    );
+  }
+
+  return error;
+}
+
+function databaseErrorDetails(error: unknown) {
+  const candidate = error as {
+    code?: string;
+    constraint?: string;
+    column?: string;
+    detail?: string;
+    table?: string;
+  } | null;
+  return {
+    code: candidate?.code,
+    constraint: candidate?.constraint,
+    column: candidate?.column,
+    table: candidate?.table,
+    detail: candidate?.detail
+  };
 }
 
 type HealthReviewReprocessInput = {
@@ -1173,7 +1378,8 @@ export async function reprocessHealthReviewItems(
     failedCount: 0,
     updatedCategoryCount: 0,
     remainingReviewCount: 0,
-    errorSummary: [] as string[]
+    errorSummary: [] as string[],
+    reasons: [] as HealthReviewReason[]
   };
 
   try {
@@ -1242,6 +1448,13 @@ export async function reprocessHealthReviewItems(
         }
 
         if (!isEligibleHealthReviewItemForAutoConfirm(item, rawPayload, durationSeconds, preferenceKey, startedAt, stoppedAt)) {
+          const reason = healthAutoConfirmSkipReason(item, rawPayload, durationSeconds, preferenceKey, startedAt, stoppedAt);
+          await updateHealthReviewNotes(client, item.id, reason.message);
+          addHealthReviewReason(result.reasons, {
+            reviewItemId: item.id,
+            code: reason.code,
+            message: reason.message
+          });
           result.leftInReviewCount += 1;
           result.remainingReviewCount += 1;
           await client.query("release savepoint reprocess_health_item");
@@ -1255,12 +1468,30 @@ export async function reprocessHealthReviewItems(
           continue;
         }
 
-        if (!startedAt || !stoppedAt || await hasOverlappingTimeWindow(client, session, startedAt, stoppedAt)) {
-          await updateHealthReviewNotes(
-            client,
-            item.id,
-            "This Health activity overlaps existing time and needs review before becoming confirmed time."
-          );
+        if (!startedAt || !stoppedAt) {
+          const reason = {
+            reviewItemId: item.id,
+            code: "missing_time_window",
+            message: "Left in Review: missing start or end time."
+          };
+          await updateHealthReviewNotes(client, item.id, reason.message);
+          addHealthReviewReason(result.reasons, reason);
+          result.leftInReviewCount += 1;
+          result.remainingReviewCount += 1;
+          await client.query("release savepoint reprocess_health_item");
+          continue;
+        }
+
+        const blockingEntry = await findOverlappingTimeEntry(client, session, startedAt, stoppedAt);
+        if (blockingEntry) {
+          const message = overlapReviewNote(blockingEntry);
+          await updateHealthReviewNotes(client, item.id, message);
+          addHealthReviewReason(result.reasons, {
+            reviewItemId: item.id,
+            code: "overlap",
+            message,
+            blockingEntry
+          });
           result.leftInReviewCount += 1;
           result.remainingReviewCount += 1;
           await client.query("release savepoint reprocess_health_item");
@@ -1501,19 +1732,46 @@ async function hasOverlappingTimeWindow(
   startedAt: string | Date | null | undefined,
   stoppedAt: string | Date | null | undefined
 ) {
-  if (!startedAt || !stoppedAt) return true;
+  return Boolean(await findOverlappingTimeEntry(client, session, startedAt, stoppedAt));
+}
 
-  const result = await client.query<{ id: string }>(
-    `select id
-     from time_entries
-     where workspace_id = $1
-       and user_id = $2
-       and started_at < $4::timestamptz
-       and coalesce(stopped_at, 'infinity'::timestamptz) > $3::timestamptz
+async function findOverlappingTimeEntry(
+  client: pg.PoolClient,
+  session: RequestSession,
+  startedAt: string | Date | null | undefined,
+  stoppedAt: string | Date | null | undefined
+): Promise<OverlapBlockingEntry | null> {
+  if (!startedAt || !stoppedAt) return {
+    id: "missing-time-window",
+    description: "Missing start or end time",
+    source: "dayframe",
+    reviewStatus: "invalid",
+    startedAt: String(startedAt ?? ""),
+    stoppedAt: stoppedAt ? String(stoppedAt) : null,
+    categoryName: null,
+    stoppedAtIsNull: stoppedAt == null
+  };
+
+  const result = await client.query<OverlapBlockingEntry>(
+    `select te.id,
+            te.description,
+            te.source,
+            te.review_status as "reviewStatus",
+            te.started_at as "startedAt",
+            te.stopped_at as "stoppedAt",
+            c.name as "categoryName",
+            (te.stopped_at is null) as "stoppedAtIsNull"
+     from time_entries te
+     left join categories c on c.id = te.category_id
+     where te.workspace_id = $1
+       and te.user_id = $2
+       and te.started_at < $4::timestamptz
+       and coalesce(te.stopped_at, 'infinity'::timestamptz) > $3::timestamptz
+     order by te.stopped_at is null desc, te.started_at desc
      limit 1`,
     [session.workspaceId, session.userId, startedAt, stoppedAt]
   );
-  return Boolean(result.rows[0]);
+  return result.rows[0] ?? null;
 }
 
 function normalizeHealthImportPreferences(input: HealthReviewReprocessInput["preferences"]) {
@@ -1565,6 +1823,71 @@ function isEligibleHealthReviewItemForAutoConfirm(
   return false;
 }
 
+function healthAutoConfirmSkipReason(
+  item: Pick<HealthReviewItemRow, "confidence" | "eventType">,
+  rawPayload: Record<string, unknown>,
+  durationSeconds: number | null,
+  preferenceKey: HealthImportPreferenceKey,
+  startedAt: string | null,
+  stoppedAt: string | null
+) {
+  if (item.confidence !== "high") {
+    return {
+      code: "low_confidence",
+      message: "Left in Review: confidence is not high enough for auto-log."
+    };
+  }
+
+  if (!startedAt || !stoppedAt) {
+    return {
+      code: "missing_time_window",
+      message: "Left in Review: missing start or end time."
+    };
+  }
+
+  if (item.eventType === "health_sleep_import") {
+    return {
+      code: "sleep_threshold",
+      message: "Left in Review: sleep duration is outside the auto-log range."
+    };
+  }
+
+  if (item.eventType === "health_workout_import") {
+    const minimumMinutes = healthWorkoutMinimumMinutes(preferenceKey);
+    const actualMinutes = durationSeconds == null ? null : Math.floor(durationSeconds / 60);
+    return {
+      code: "workout_threshold",
+      message: minimumMinutes
+        ? `Left in Review: ${healthPreferenceLabel(preferenceKey)} is below the ${minimumMinutes}-minute auto-log threshold${actualMinutes == null ? "." : ` (${actualMinutes}m).`}`
+        : `Left in Review: ${healthPreferenceLabel(preferenceKey)} is not auto-logged.`
+    };
+  }
+
+  return {
+    code: "unsupported_health_type",
+    message: "Left in Review: unsupported Health activity type."
+  };
+}
+
+function healthWorkoutMinimumMinutes(preferenceKey: HealthImportPreferenceKey) {
+  switch (preferenceKey) {
+    case "walking":
+      return 5;
+    case "running":
+    case "cycling":
+    case "swimming":
+      return 10;
+    case "strength_training":
+      return 20;
+    default:
+      return null;
+  }
+}
+
+function healthPreferenceLabel(preferenceKey: HealthImportPreferenceKey) {
+  return HEALTH_IMPORT_PREFERENCE_OPTIONS.find((option) => option.key === preferenceKey)?.label ?? "Health activity";
+}
+
 function reviewDurationSeconds(
   rawPayload: Record<string, unknown>,
   startedAt: string | null,
@@ -1586,6 +1909,18 @@ function compactErrorSummary(error: unknown, fallback: string) {
 
 function addCompactError(errors: string[], message: string) {
   if (errors.length < 5) errors.push(message);
+}
+
+function addHealthReviewReason(reasons: HealthReviewReason[], reason: HealthReviewReason) {
+  if (reasons.length < 20) reasons.push(reason);
+}
+
+function overlapReviewNote(blockingEntry: OverlapBlockingEntry) {
+  const title = blockingEntry.description?.trim() || blockingEntry.categoryName || blockingEntry.source;
+  if (blockingEntry.stoppedAtIsNull) {
+    return `Left in Review: overlaps stale open timer "${title}" with no stop time.`;
+  }
+  return `Left in Review: overlaps existing timer "${title}".`;
 }
 
 async function updateHealthReviewCategory(
@@ -1650,6 +1985,14 @@ async function hasTimeEntryCreatedFromEvent(
   eventId: string,
   session: RequestSession
 ) {
+  return Boolean(await getTimeEntryCreatedFromEvent(client, eventId, session));
+}
+
+async function getTimeEntryCreatedFromEvent(
+  client: pg.PoolClient,
+  eventId: string,
+  session: RequestSession
+) {
   const result = await client.query<{ id: string }>(
     `select id
      from time_entries
@@ -1659,7 +2002,7 @@ async function hasTimeEntryCreatedFromEvent(
      limit 1`,
     [session.workspaceId, session.userId, eventId]
   );
-  return Boolean(result.rows[0]);
+  return result.rows[0] ?? null;
 }
 
 async function insertConfirmedHealthTimeEntry(

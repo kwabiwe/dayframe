@@ -60,6 +60,27 @@ export function isForeignKeyViolationError(error: unknown, constraintName?: stri
   return candidate.constraint === constraintName || candidate.message?.includes(constraintName) === true;
 }
 
+export function isUniqueViolationError(error: unknown, constraintName?: string) {
+  const candidate = error as { code?: string; constraint?: string; message?: string } | null;
+  if (candidate?.code !== "23505") return false;
+  if (!constraintName) return true;
+  return candidate.constraint === constraintName || candidate.message?.includes(constraintName) === true;
+}
+
+export function isCheckViolationError(error: unknown, constraintName?: string) {
+  const candidate = error as { code?: string; constraint?: string; message?: string } | null;
+  if (candidate?.code !== "23514") return false;
+  if (!constraintName) return true;
+  return candidate.constraint === constraintName || candidate.message?.includes(constraintName) === true;
+}
+
+export function isNotNullViolationError(error: unknown, columnName?: string) {
+  const candidate = error as { code?: string; column?: string; message?: string } | null;
+  if (candidate?.code !== "23502") return false;
+  if (!columnName) return true;
+  return candidate.column === columnName || candidate.message?.includes(columnName) === true;
+}
+
 export class MissingRequiredColumnError extends Error {
   tableName: string;
   columnName: string;

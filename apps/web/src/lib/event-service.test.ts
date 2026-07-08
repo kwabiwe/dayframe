@@ -674,6 +674,85 @@ describe("health event persistence", () => {
     );
   });
 
+  it("leaves overlapping Health review candidates open with stale open timer blocker details", async () => {
+    const client = reprocessClient([
+      healthWorkoutReviewRow({
+        id: "review-overlap",
+        eventId: "event-overlap",
+        durationSeconds: 16 * 60
+      })
+    ]);
+    client.query.mockImplementation(async (statement: string) => {
+      if (statement.includes("from review_items ri") && statement.includes("for update of ri")) {
+        return {
+          rows: [
+            healthWorkoutReviewRow({
+              id: "review-overlap",
+              eventId: "event-overlap",
+              durationSeconds: 16 * 60
+            })
+          ]
+        };
+      }
+      if (statement.includes("from categories")) return { rows: [{ id: healthCategoryId() }] };
+      if (statement.includes("created_from_event_id = $3")) return { rows: [] };
+      if (statement.includes("from time_entries te")) {
+        return {
+          rows: [
+            {
+              id: "entry-open",
+              description: "BAU",
+              source: "manual_app",
+              reviewStatus: "confirmed",
+              startedAt: "2026-07-04T08:00:00.000Z",
+              stoppedAt: null,
+              categoryName: "Work",
+              stoppedAtIsNull: true
+            }
+          ]
+        };
+      }
+      return { rows: [] };
+    });
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await reprocessHealthReviewItems({
+      preferences: {
+        sleep: true,
+        walking: true,
+        running: true,
+        cycling: true,
+        strength_training: false,
+        swimming: false,
+        other: false
+      }
+    }, session);
+
+    expect(result).toMatchObject({
+      checkedCount: 1,
+      confirmedCount: 0,
+      leftInReviewCount: 1,
+      remainingReviewCount: 1,
+      reasons: [
+        {
+          reviewItemId: "review-overlap",
+          code: "overlap",
+          blockingEntry: {
+            id: "entry-open",
+            stoppedAtIsNull: true
+          }
+        }
+      ]
+    });
+    expect(
+      client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"))
+    ).toBeUndefined();
+    expect(client.query).toHaveBeenCalledWith(
+      expect.stringContaining("set notes = $2"),
+      ["review-overlap", "Left in Review: overlaps stale open timer \"BAU\" with no stop time."]
+    );
+  });
+
   it("reprocesses existing eligible Sleep review candidates into confirmed Health entries", async () => {
     const client = reprocessClient([
       healthSleepReviewRow({
@@ -1012,6 +1091,7 @@ describe("review item resolution", () => {
                 suggestedStartedAt: "2026-06-06T23:55:00.000Z",
                 suggestedStoppedAt: "2026-06-07T06:27:00.000Z",
                 confidence: "high",
+                status: "open",
                 eventSource: "health_sleep",
                 eventType: "health_sleep_import"
               }
@@ -1029,6 +1109,8 @@ describe("review item resolution", () => {
     const entryInsert = client.query.mock.calls.find(([statement]) =>
       String(statement).includes("insert into time_entries")
     );
+    expect(entryInsert?.[0]).toContain("'confirmed'");
+    expect(entryInsert?.[0]).not.toContain("'accepted'");
     expect(entryInsert?.[1]).toEqual([
       session.workspaceId,
       session.userId,
@@ -1043,6 +1125,87 @@ describe("review item resolution", () => {
       "event-1"
     ]);
     expect(client.query).toHaveBeenCalledWith("commit");
+  });
+
+  it("marks duplicate event-created review candidates accepted without creating a second entry", async () => {
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes("from review_items ri")) {
+          return {
+            rows: [
+              {
+                id: "review-duplicate",
+                eventId: "event-duplicate",
+                title: "Walk",
+                status: "open",
+                suggestedProjectId: null,
+                suggestedCategoryId: healthCategoryId(),
+                suggestedPlaceId: null,
+                suggestedStartedAt: "2026-07-04T19:09:00.000Z",
+                suggestedStoppedAt: "2026-07-04T19:46:00.000Z",
+                confidence: "high",
+                eventSource: "health_workout",
+                eventType: "health_workout_import"
+              }
+            ]
+          };
+        }
+        if (statement.includes("created_from_event_id = $3")) {
+          return { rows: [{ id: "entry-existing" }] };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await resolveReviewItem("review-duplicate", "accept", session);
+
+    expect(result).toMatchObject({ ok: true, duplicate: true, entryId: "entry-existing" });
+    expect(
+      client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"))
+    ).toBeUndefined();
+    expect(client.query).toHaveBeenCalledWith(
+      expect.stringContaining("set status = $3"),
+      ["review-duplicate", session.workspaceId, "accepted", null]
+    );
+    expect(client.query).toHaveBeenCalledWith("commit");
+  });
+
+  it("returns a structured already-resolved error instead of treating it as unexpected", async () => {
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes("from review_items ri")) {
+          return {
+            rows: [
+              {
+                id: "review-accepted",
+                eventId: "event-accepted",
+                title: "Walk",
+                status: "accepted",
+                suggestedProjectId: null,
+                suggestedCategoryId: healthCategoryId(),
+                suggestedPlaceId: null,
+                suggestedStartedAt: "2026-07-04T19:09:00.000Z",
+                suggestedStoppedAt: "2026-07-04T19:46:00.000Z",
+                confidence: "high",
+                eventSource: "health_workout",
+                eventType: "health_workout_import"
+              }
+            ]
+          };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(resolveReviewItem("review-accepted", "accept", session)).rejects.toMatchObject({
+      code: "already_resolved",
+      status: 409
+    });
+    expect(client.query).toHaveBeenCalledWith("rollback");
   });
 });
 

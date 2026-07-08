@@ -559,7 +559,8 @@ async function getReviewItems(session: RequestSession) {
      left join categories c on c.id = ri.suggested_category_id
      left join places pl on pl.id = ri.suggested_place_id
      where ri.workspace_id = $1
-     order by case ri.status when 'open' then 0 else 1 end, ri.created_at desc
+       and ri.status = 'open'
+     order by ri.created_at desc
      limit 100`,
     [session.workspaceId]
   );

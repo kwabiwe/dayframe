@@ -827,6 +827,31 @@ describe("mobile API client", () => {
     );
   });
 
+  it("surfaces structured review confirm errors from the hosted API", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(jsonResponse({
+          ok: false,
+          code: "overlap",
+          message: "This activity overlaps an existing entry.",
+          blockingEntry: {
+            description: "BAU",
+            source: "manual_app",
+            reviewStatus: "confirmed",
+            startedAt: "2026-07-04T08:00:00.000Z",
+            stoppedAt: null
+          }
+        }, 409))
+      )
+    );
+
+    await expect(confirmReviewItem("review-overlap")).rejects.toThrow(
+      "This activity overlaps an existing entry. Blocked by BAU (confirmed)."
+    );
+  });
+
   it("reprocesses existing Health review items with current preferences", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
     const fetchMock = vi.fn(() =>
@@ -840,7 +865,14 @@ describe("mobile API client", () => {
         failedCount: 0,
         updatedCategoryCount: 3,
         remainingReviewCount: 1,
-        errorSummary: []
+        errorSummary: [],
+        reasons: [
+          {
+            reviewItemId: "review-overlap",
+            code: "overlap",
+            message: "Left in Review: overlaps stale open timer \"BAU\" with no stop time."
+          }
+        ]
       }, 200))
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -856,6 +888,7 @@ describe("mobile API client", () => {
     });
 
     expect(result.confirmedCount).toBe(2);
+    expect(result.reasons?.[0]?.code).toBe("overlap");
     expect(fetchMock).toHaveBeenCalledWith(
       "https://dayframe.test/api/review/reprocess-health",
       expect.objectContaining({
