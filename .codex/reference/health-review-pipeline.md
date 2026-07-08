@@ -115,6 +115,7 @@ If a reason is not visible in UI, it should at least be present in diagnostics o
 - Health sample preferences are off or defaults are not applied.
 - A stale open `time_entries` row with `stopped_at is null` overlaps everything.
 - Sleep stages are imported independently and never consolidated.
+- Already-created Sleep/Health entries can cover sibling Health review rows; those covered rows should be accepted, not left open as overlaps.
 - High-confidence walks stay open because overlap detection is correct but invisible.
 - Accepted/ignored review items leak back into Review due to query or mobile filtering.
 - Reprocess keeps reselecting the same open-but-explained Review items and never reaches later eligible Health rows.

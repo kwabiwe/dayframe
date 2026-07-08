@@ -62,6 +62,7 @@ Track focused PRs only:
 | #22 | Review Confirm/autolog structured errors | merged | tests and simulator |
 | #23 | Review locks, sleep stage repair, Health debug export | merged/pending deploy verification | tests, TestFlight build 0.1.0 (1) |
 | #25 | Health reprocess batching | merged/deployed at `80e1bdb` | tests, TestFlight build 0.1.0 (2) |
+| #26 | Review stale list, Health drain, geofence description | merged/deployed | tests, TestFlight build 0.1.0 (3) |
 
 ## 2026-07-08 Follow-Up From TestFlight Build 0.1.0 (2)
 
@@ -89,6 +90,29 @@ Decision:
 - Treat already-resolved Review actions as idempotent success.
 - Optimistically remove resolved review cards on mobile before the refresh completes.
 - Use the current place default activity description for geofence Review display and Confirm description.
+
+## 2026-07-08 Follow-Up From Debug Export 0002
+
+Evidence:
+
+- KB screenshots show Review diagnostics on production API `https://dayframe-web.vercel.app` with `remaining 1309`, `batch 12`, repeated `Left in Review: overlaps existing timer "Sleep".`, and intermittent `timed_out`.
+- Vercel production logs for the active deployment show repeated `POST /api/review/reprocess-health` responses with status `207`, manual Review actions mostly `200`, and a `409` Review action while reprocess was running.
+- Health debug export `0002` shows preferences enabled for Sleep and Walking, generated sleep sessions, and 12 walking workouts that meet the 5-minute high-confidence auto-confirm criteria.
+
+Findings:
+
+- The production issue is not caused by disabled Health preferences or missing eligible HealthKit data.
+- The forced reprocess ordering made rows with existing `Left in Review` notes sort to the front, so a forced drain could revisit the same Sleep-overlap rows repeatedly and starve later eligible walks/sleep rows.
+- Existing confirmed Sleep/Health time entries were treated as overlap blockers for sibling review rows instead of proof that those review rows were already covered and should be accepted.
+- Mobile Review focus/Confirm reloads could start another reprocess while a user action was in progress, matching the production `409` lock responses and stale list/popup behaviour.
+
+Decision:
+
+- Create `codex/fix-health-review-backlog-drain`.
+- Keep unexplained Health review rows first even during forced reprocess.
+- Treat open Health review rows covered by an existing confirmed Health/Sleep entry as accepted instead of left in Review as overlaps.
+- Increase mobile Health reprocess batch size from 12 to 25.
+- Skip background reprocess on normal Review focus/Confirm/Edit reloads; keep forced reprocess for initial load and pull-to-refresh.
 
 ## Closure Criteria
 

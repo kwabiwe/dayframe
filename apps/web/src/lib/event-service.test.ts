@@ -760,6 +760,7 @@ describe("health event persistence", () => {
       }
       if (statement.includes("from categories")) return { rows: [{ id: healthCategoryId() }] };
       if (statement.includes("created_from_event_id = $3")) return { rows: [] };
+      if (statement.includes("health_covering_entry")) return { rows: [] };
       if (statement.includes("from time_entries te")) {
         return {
           rows: [
@@ -814,6 +815,77 @@ describe("health event persistence", () => {
     expect(client.query).toHaveBeenCalledWith(
       expect.stringContaining("set notes = $2"),
       ["review-overlap", "Left in Review: overlaps stale open timer \"BAU\" with no stop time."]
+    );
+  });
+
+  it("accepts Health review candidates already covered by confirmed Health time", async () => {
+    const client = reprocessClient([
+      healthWorkoutReviewRow({
+        id: "review-walk-covered",
+        eventId: "event-walk-covered",
+        durationSeconds: 37 * 60
+      })
+    ]);
+    client.query.mockImplementation(async (statement: string) => {
+      if (statement.includes("from review_items ri") && statement.includes("for update of ri")) {
+        return {
+          rows: [
+            healthWorkoutReviewRow({
+              id: "review-walk-covered",
+              eventId: "event-walk-covered",
+              durationSeconds: 37 * 60
+            })
+          ]
+        };
+      }
+      if (statement.includes("from categories")) return { rows: [{ id: healthCategoryId() }] };
+      if (statement.includes("created_from_event_id = $3")) return { rows: [] };
+      if (statement.includes("health_covering_entry")) {
+        return {
+          rows: [
+            {
+              id: "entry-covered",
+              description: "Walk",
+              source: "health_workout",
+              reviewStatus: "confirmed",
+              startedAt: "2026-07-04T19:09:00.000Z",
+              stoppedAt: "2026-07-04T19:46:00.000Z",
+              categoryName: "Health",
+              stoppedAtIsNull: false
+            }
+          ]
+        };
+      }
+      if (statement.includes("started_at < $4::timestamptz")) {
+        throw new Error("Covered Health review items should not run generic overlap checks.");
+      }
+      return { rows: [] };
+    });
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await reprocessHealthReviewItems({
+      preferences: {
+        sleep: true,
+        walking: true,
+        running: true,
+        cycling: true,
+        strength_training: false,
+        swimming: false,
+        other: false
+      }
+    }, session);
+
+    expect(result).toMatchObject({
+      checkedCount: 1,
+      confirmedCount: 1,
+      remainingReviewCount: 0
+    });
+    expect(
+      client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"))
+    ).toBeUndefined();
+    expect(client.query).toHaveBeenCalledWith(
+      expect.stringContaining("set status = $2"),
+      ["review-walk-covered", "accepted"]
     );
   });
 
@@ -997,6 +1069,94 @@ describe("health event persistence", () => {
       "2026-07-07T06:27:00.000Z",
       "event-core"
     ]);
+    const acceptedUpdates = client.query.mock.calls.filter(([statement, values]) =>
+      String(statement).includes("update review_items") &&
+      String(statement).includes("set status = $2") &&
+      (values as unknown[])?.[1] === "accepted"
+    );
+    expect(acceptedUpdates).toHaveLength(3);
+  });
+
+  it("accepts legacy sleep stage rows already covered by a confirmed Sleep entry", async () => {
+    const rows = [
+      healthSleepReviewRow({
+        id: "review-core-covered",
+        eventId: "event-core-covered",
+        startedAt: "2026-07-06T23:55:00.000Z",
+        stoppedAt: "2026-07-07T02:15:00.000Z",
+        durationSeconds: 140 * 60,
+        suggestedCategoryId: healthCategoryId(),
+        eventCategoryId: healthCategoryId()
+      }),
+      healthSleepReviewRow({
+        id: "review-deep-covered",
+        eventId: "event-deep-covered",
+        startedAt: "2026-07-07T02:15:00.000Z",
+        stoppedAt: "2026-07-07T03:10:00.000Z",
+        durationSeconds: 55 * 60,
+        suggestedCategoryId: healthCategoryId(),
+        eventCategoryId: healthCategoryId()
+      }),
+      healthSleepReviewRow({
+        id: "review-rem-covered",
+        eventId: "event-rem-covered",
+        startedAt: "2026-07-07T03:10:00.000Z",
+        stoppedAt: "2026-07-07T06:27:00.000Z",
+        durationSeconds: 197 * 60,
+        suggestedCategoryId: healthCategoryId(),
+        eventCategoryId: healthCategoryId()
+      })
+    ];
+    const client = reprocessClient(rows);
+    client.query.mockImplementation(async (statement: string) => {
+      if (statement.includes("from review_items ri") && statement.includes("for update of ri")) {
+        return { rows };
+      }
+      if (statement.includes("from categories")) return { rows: [{ id: healthCategoryId() }] };
+      if (statement.includes("created_from_event_id = $3")) return { rows: [] };
+      if (statement.includes("health_covering_entry")) {
+        return {
+          rows: [
+            {
+              id: "entry-sleep-covered",
+              description: "Sleep",
+              source: "health_sleep",
+              reviewStatus: "confirmed",
+              startedAt: "2026-07-06T23:55:00.000Z",
+              stoppedAt: "2026-07-07T06:27:00.000Z",
+              categoryName: "Health",
+              stoppedAtIsNull: false
+            }
+          ]
+        };
+      }
+      if (statement.includes("started_at < $4::timestamptz")) {
+        throw new Error("Covered sleep stages should not run generic overlap checks.");
+      }
+      return { rows: [] };
+    });
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await reprocessHealthReviewItems({
+      preferences: {
+        sleep: true,
+        walking: true,
+        running: true,
+        cycling: true,
+        strength_training: false,
+        swimming: false,
+        other: false
+      }
+    }, session);
+
+    expect(result).toMatchObject({
+      checkedCount: 3,
+      confirmedCount: 1,
+      remainingReviewCount: 0
+    });
+    expect(
+      client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"))
+    ).toBeUndefined();
     const acceptedUpdates = client.query.mock.calls.filter(([statement, values]) =>
       String(statement).includes("update review_items") &&
       String(statement).includes("set status = $2") &&
@@ -1431,6 +1591,7 @@ function reprocessClient(reviewRows: Array<Record<string, unknown>>) {
       }
       if (statement.includes("from categories")) return { rows: [{ id: healthCategoryId() }] };
       if (statement.includes("created_from_event_id = $3")) return { rows: [] };
+      if (statement.includes("health_covering_entry")) return { rows: [] };
       if (statement.includes("started_at < $4::timestamptz")) return { rows: [] };
       return { rows: [] };
     }),

@@ -72,13 +72,15 @@ export default function ReviewScreen() {
   const forcedReprocessComplete = useRef(false);
   const now = Date.now();
 
-  const load = useCallback(async (options?: { forceReprocess?: boolean; refresh?: boolean; silent?: boolean }) => {
+  const load = useCallback(async (options?: { forceReprocess?: boolean; refresh?: boolean; silent?: boolean; skipReprocess?: boolean }) => {
     if (refreshInFlight.current) return;
     refreshInFlight.current = true;
     if (options?.refresh) setRefreshing(true);
     try {
       setData(await fetchBootstrap());
+      if (options?.skipReprocess) return;
       const forceReprocess = options?.forceReprocess ?? !forcedReprocessComplete.current;
+      if (forceReprocess) forcedReprocessComplete.current = true;
       const startedAt = new Date().toISOString();
       setReprocessDiagnostics((current) => ({
         ...current,
@@ -91,7 +93,6 @@ export default function ReviewScreen() {
         reprocessExistingHealthReviewItems(undefined, { force: forceReprocess }),
         HEALTH_REPROCESS_TIMEOUT_MS
       );
-      forcedReprocessComplete.current = true;
       setReprocessDiagnostics((current) => ({
         ...current,
         finishedAt: new Date().toISOString(),
@@ -130,7 +131,7 @@ export default function ReviewScreen() {
   useFocusEffect(
     useCallback(() => {
       void reloadThemePreference();
-      void load({ silent: true });
+      void load({ silent: true, skipReprocess: true });
     }, [load, reloadThemePreference])
   );
 
@@ -144,6 +145,7 @@ export default function ReviewScreen() {
   );
   const totalNeedsReview = openReviewItems.length + reviewNeededEntries.length;
   const editingEntry = editTarget?.entry ?? null;
+  const reprocessRunning = reprocessDiagnostics.status === "running";
 
   async function confirmItem(item: MobileReviewItem) {
     await resolveItem(item, async () => {
@@ -169,7 +171,7 @@ export default function ReviewScreen() {
           }
           : current
       );
-      await load({ silent: true });
+      await load({ silent: true, skipReprocess: true });
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         router.replace("/");
@@ -212,7 +214,7 @@ export default function ReviewScreen() {
       } else {
         await updateTimeEntry(entryId, patch);
       }
-      await load({ silent: true });
+      await load({ silent: true, skipReprocess: true });
       return true;
     } catch (error) {
       if (error instanceof AuthRequiredError) {
@@ -283,6 +285,7 @@ export default function ReviewScreen() {
                   <ReviewItemCard
                     key={item.id}
                     item={item}
+                    disabled={reprocessRunning}
                     loading={resolvingId === item.id}
                     now={now}
                     onConfirm={() => confirmItem(item)}
@@ -331,6 +334,7 @@ export default function ReviewScreen() {
 }
 
 function ReviewItemCard({
+  disabled,
   item,
   loading,
   now,
@@ -340,6 +344,7 @@ function ReviewItemCard({
   styles,
   theme
 }: {
+  disabled: boolean;
   item: MobileReviewItem;
   loading: boolean;
   now: number;
@@ -352,6 +357,7 @@ function ReviewItemCard({
   const durationSeconds = reviewItemDurationSeconds(item, now);
   const categoryName = reviewItemCategoryName(item);
   const categoryColor = reviewItemCategoryColor(item, categoryName, theme.textSecondary);
+  const controlsDisabled = loading || disabled;
 
   return (
     <View style={styles.reviewCard}>
@@ -380,11 +386,11 @@ function ReviewItemCard({
       <View style={styles.reviewActions}>
         <Pressable
           accessibilityRole="button"
-          disabled={loading}
+          disabled={controlsDisabled}
           style={({ pressed }) => [
             styles.reviewPrimaryButton,
-            pressed && !loading ? styles.buttonPressed : null,
-            loading ? styles.buttonDisabled : null
+            pressed && !controlsDisabled ? styles.buttonPressed : null,
+            controlsDisabled ? styles.buttonDisabled : null
           ]}
           onPress={onConfirm}
         >
@@ -392,11 +398,11 @@ function ReviewItemCard({
         </Pressable>
         <Pressable
           accessibilityRole="button"
-          disabled={loading}
+          disabled={controlsDisabled}
           style={({ pressed }) => [
             styles.reviewSecondaryButton,
-            pressed && !loading ? styles.buttonPressed : null,
-            loading ? styles.buttonDisabled : null
+            pressed && !controlsDisabled ? styles.buttonPressed : null,
+            controlsDisabled ? styles.buttonDisabled : null
           ]}
           onPress={onEdit}
         >
@@ -404,11 +410,11 @@ function ReviewItemCard({
         </Pressable>
         <Pressable
           accessibilityRole="button"
-          disabled={loading}
+          disabled={controlsDisabled}
           style={({ pressed }) => [
             styles.reviewSecondaryButton,
-            pressed && !loading ? styles.buttonPressed : null,
-            loading ? styles.buttonDisabled : null
+            pressed && !controlsDisabled ? styles.buttonPressed : null,
+            controlsDisabled ? styles.buttonDisabled : null
           ]}
           onPress={onDismiss}
         >

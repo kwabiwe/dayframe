@@ -1445,9 +1445,9 @@ export async function reprocessHealthReviewItems(
          and ae.event_type in ('health_sleep_import', 'health_workout_import')
        order by
          case
-           when $4::boolean then 0
            when ri.notes is null or ri.notes not like 'Left in Review:%' then 0
-           else 1
+           when $4::boolean then 1
+           else 2
          end asc,
          case
            when ae.event_type = 'health_workout_import' then 0
@@ -1546,6 +1546,14 @@ export async function reprocessHealthReviewItems(
           addHealthReviewReason(result.reasons, reason);
           result.leftInReviewCount += 1;
           result.remainingReviewCount += 1;
+          await client.query("release savepoint reprocess_health_item");
+          continue;
+        }
+
+        const coveredEntry = await findCoveringHealthTimeEntry(client, session, item, startedAt, stoppedAt);
+        if (coveredEntry) {
+          await resolveReprocessedHealthReviewItem(client, item, "accepted");
+          result.confirmedCount += 1;
           await client.query("release savepoint reprocess_health_item");
           continue;
         }
@@ -1677,9 +1685,9 @@ async function loadLegacySleepReviewItemsForConsolidation(
        and not (ae.raw_payload ? 'samples')
      order by
        case
-         when $3::boolean then 0
          when ri.notes is null or ri.notes not like 'Left in Review:%' then 0
-         else 1
+         when $3::boolean then 1
+         else 2
        end asc,
        coalesce(ri.suggested_started_at, ae.occurred_at) desc,
        ri.created_at desc
@@ -1756,28 +1764,31 @@ async function consolidateLegacyHealthSleepReviewItems(
         }
       }
 
-      const blockingEntry = await findOverlappingTimeEntry(client, session, startedAt, stoppedAt);
-      if (blockingEntry) {
-        const message = overlapReviewNote(blockingEntry);
-        for (const segment of group) {
-          handledIds.add(segment.item.id);
-          result.checkedCount += 1;
-          await updateHealthReviewNotes(client, segment.item.id, message);
-          addHealthReviewReason(result.reasons, {
-            reviewItemId: segment.item.id,
-            code: "overlap",
-            message,
-            blockingEntry
-          });
-          result.leftInReviewCount += 1;
-          result.remainingReviewCount += 1;
-        }
-        await client.query("release savepoint consolidate_health_sleep");
-        continue;
-      }
-
       const existingEntry = await firstExistingEntryForHealthReviewItems(client, group.map((segment) => segment.item), session);
-      if (!existingEntry) {
+      const coveredEntry = existingEntry
+        ? existingEntry
+        : await findCoveringHealthTimeEntry(client, session, { ...group[0].item, title: "Sleep" }, startedAt, stoppedAt);
+      if (!coveredEntry) {
+        const blockingEntry = await findOverlappingTimeEntry(client, session, startedAt, stoppedAt);
+        if (blockingEntry) {
+          const message = overlapReviewNote(blockingEntry);
+          for (const segment of group) {
+            handledIds.add(segment.item.id);
+            result.checkedCount += 1;
+            await updateHealthReviewNotes(client, segment.item.id, message);
+            addHealthReviewReason(result.reasons, {
+              reviewItemId: segment.item.id,
+              code: "overlap",
+              message,
+              blockingEntry
+            });
+            result.leftInReviewCount += 1;
+            result.remainingReviewCount += 1;
+          }
+          await client.query("release savepoint consolidate_health_sleep");
+          continue;
+        }
+
         await insertConfirmedHealthTimeEntry(client, {
           ...group[0].item,
           title: "Sleep"
@@ -2046,6 +2057,49 @@ async function hasOverlappingTimeWindow(
   stoppedAt: string | Date | null | undefined
 ) {
   return Boolean(await findOverlappingTimeEntry(client, session, startedAt, stoppedAt));
+}
+
+async function findCoveringHealthTimeEntry(
+  client: pg.PoolClient,
+  session: RequestSession,
+  item: Pick<HealthReviewItemRow, "eventType" | "title">,
+  startedAt: string | Date | null | undefined,
+  stoppedAt: string | Date | null | undefined
+): Promise<OverlapBlockingEntry | null> {
+  if (!startedAt || !stoppedAt) return null;
+  const title = (item.title || (item.eventType === "health_sleep_import" ? "Sleep" : "")).trim();
+  const result = await client.query<OverlapBlockingEntry>(
+    `/* health_covering_entry */
+     select te.id,
+            te.description,
+            te.source,
+            te.review_status as "reviewStatus",
+            te.started_at as "startedAt",
+            te.stopped_at as "stoppedAt",
+            c.name as "categoryName",
+            false as "stoppedAtIsNull"
+     from time_entries te
+     left join categories c on c.id = te.category_id
+     where te.workspace_id = $1
+       and te.user_id = $2
+       and te.review_status = 'confirmed'
+       and te.stopped_at is not null
+       and te.started_at <= $3::timestamptz + interval '5 minutes'
+       and te.stopped_at >= $4::timestamptz - interval '5 minutes'
+       and (
+         te.source in ('health_sleep', 'health_workout')
+         or (
+           lower(coalesce(c.name, '')) = 'health'
+           and lower(coalesce(te.description, '')) = lower($5)
+         )
+       )
+     order by
+       case when te.source in ('health_sleep', 'health_workout') then 0 else 1 end,
+       abs(extract(epoch from (te.started_at - $3::timestamptz))) asc
+     limit 1`,
+    [session.workspaceId, session.userId, startedAt, stoppedAt, title]
+  );
+  return result.rows[0] ?? null;
 }
 
 async function findOverlappingTimeEntry(

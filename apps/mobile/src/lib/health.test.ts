@@ -424,7 +424,7 @@ describe("HealthKit mapping", () => {
         strength_training: false,
         swimming: false
       }),
-      { limit: 12, force: true }
+      { limit: 25, force: true }
     );
   });
 
@@ -432,15 +432,15 @@ describe("HealthKit mapping", () => {
     apiMocks.reprocessHealthReviewItems
       .mockResolvedValueOnce({
         ok: true,
-        checkedCount: 12,
-        confirmedCount: 12,
+        checkedCount: 25,
+        confirmedCount: 25,
         ignoredCount: 0,
         leftInReviewCount: 0,
         skippedCount: 0,
         failedCount: 0,
-        updatedCategoryCount: 12,
+        updatedCategoryCount: 25,
         remainingReviewCount: 88,
-        batchSize: 12,
+        batchSize: 25,
         partial: true,
         hasMore: true,
         errorSummary: []
@@ -455,7 +455,7 @@ describe("HealthKit mapping", () => {
         failedCount: 0,
         updatedCategoryCount: 8,
         remainingReviewCount: 0,
-        batchSize: 12,
+        batchSize: 25,
         partial: false,
         hasMore: false,
         errorSummary: []
@@ -467,17 +467,17 @@ describe("HealthKit mapping", () => {
     expect(apiMocks.reprocessHealthReviewItems).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ walking: true }),
-      { limit: 12, force: true }
+      { limit: 25, force: true }
     );
     expect(apiMocks.reprocessHealthReviewItems).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({ walking: true }),
-      { limit: 12, force: true }
+      { limit: 25, force: true }
     );
     expect(result).toMatchObject({
-      checkedCount: 20,
-      confirmedCount: 20,
-      updatedCategoryCount: 20,
+      checkedCount: 33,
+      confirmedCount: 33,
+      updatedCategoryCount: 33,
       remainingReviewCount: 0,
       partial: false,
       hasMore: false
