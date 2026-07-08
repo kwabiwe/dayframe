@@ -11,8 +11,13 @@ describe("mobile config", () => {
     expect(assertUsableApiBase("http://localhost:3000/", { allowLocal: true })).toBe("http://localhost:3000");
   });
 
-  it("rejects missing hosted API base values", () => {
+  it("rejects missing hosted API base values when validating directly", () => {
     expect(() => assertUsableApiBase("", { allowLocal: false })).toThrow(/EXPO_PUBLIC_DAYFRAME_API_BASE/);
+  });
+
+  it("falls back to production API when hosted builds have no env value", () => {
+    expect(resolveApiBase("", { allowLocal: false })).toBe("https://dayframe-web.vercel.app");
+    expect(resolveApiBase(undefined, { allowLocal: false })).toBe("https://dayframe-web.vercel.app");
   });
 
   it("rejects localhost and http URLs for hosted builds", () => {
