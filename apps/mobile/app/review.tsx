@@ -95,7 +95,7 @@ export default function ReviewScreen() {
       setReprocessDiagnostics((current) => ({
         ...current,
         finishedAt: new Date().toISOString(),
-        status: reprocess.failedCount > 0 ? "partial" : "success",
+        status: reprocess.failedCount > 0 || reprocess.partial ? "partial" : "success",
         result: reprocess,
         error: reprocess.errorSummary[0] ?? null
       }));
@@ -432,7 +432,8 @@ function ReviewDiagnosticsPanel({
       </Text>
       {result ? (
         <Text style={styles.reviewMetaLine}>
-          Confirmed {result.confirmedCount} · ignored {result.ignoredCount} · left {result.leftInReviewCount} · skipped {result.skippedCount} · failed {result.failedCount} · categories {result.updatedCategoryCount}
+          Confirmed {result.confirmedCount} · ignored {result.ignoredCount} · remaining {result.remainingReviewCount} · skipped {result.skippedCount} · failed {result.failedCount} · categories {result.updatedCategoryCount}
+          {result.partial ? ` · batch ${result.batchSize ?? "partial"}` : ""}
         </Text>
       ) : null}
       {diagnostics.error ? (

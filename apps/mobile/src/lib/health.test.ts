@@ -234,6 +234,44 @@ describe("HealthKit mapping", () => {
     expect(asyncStore.get("dayframe.healthkit.workoutAnchor.v1")).toBe("workout-anchor-before");
   });
 
+  it("excludes disabled workout types from generated debug events", async () => {
+    healthkitMocks.queryCategorySamplesWithAnchor.mockResolvedValueOnce({
+      newAnchor: "sleep-anchor-debug",
+      deletedSamples: [],
+      samples: []
+    });
+    healthkitMocks.queryWorkoutSamplesWithAnchor.mockResolvedValueOnce({
+      newAnchor: "workout-anchor-debug",
+      deletedSamples: [],
+      workouts: [
+        {
+          uuid: "debug-strength",
+          workoutActivityType: 50,
+          startDate: "2026-07-07T11:00:00.000Z",
+          endDate: "2026-07-07T12:00:00.000Z",
+          duration: 3600
+        },
+        {
+          uuid: "debug-walk",
+          workoutActivityType: 52,
+          startDate: "2026-07-07T07:00:00.000Z",
+          endDate: "2026-07-07T07:16:00.000Z",
+          duration: 960
+        }
+      ]
+    });
+
+    const snapshot = await exportHealthDebugSnapshot();
+
+    expect(snapshot.healthKit.workouts).toMatchObject({
+      sampleCount: 2,
+      typeCounts: { strength_training: 1, walking: 1 }
+    });
+    expect(snapshot.generatedEvents.workouts.map((event) => event.rawPayload.workoutType)).toEqual([
+      "walking"
+    ]);
+  });
+
   it("filters disabled sleep sessions before queueing Health events", async () => {
     await setHealthImportPreference("sleep", false);
     healthkitMocks.queryCategorySamplesWithAnchor.mockResolvedValueOnce({
@@ -377,7 +415,7 @@ describe("HealthKit mapping", () => {
     });
 
     await setHealthImportPreference("walking", true);
-    await reprocessExistingHealthReviewItems();
+    await reprocessExistingHealthReviewItems(undefined, { force: true });
 
     expect(apiMocks.reprocessHealthReviewItems).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -385,8 +423,65 @@ describe("HealthKit mapping", () => {
         walking: true,
         strength_training: false,
         swimming: false
-      })
+      }),
+      { limit: 12 }
     );
+  });
+
+  it("drains partial Health review reprocess batches during one refresh", async () => {
+    apiMocks.reprocessHealthReviewItems
+      .mockResolvedValueOnce({
+        ok: true,
+        checkedCount: 12,
+        confirmedCount: 12,
+        ignoredCount: 0,
+        leftInReviewCount: 0,
+        skippedCount: 0,
+        failedCount: 0,
+        updatedCategoryCount: 12,
+        remainingReviewCount: 88,
+        batchSize: 12,
+        partial: true,
+        hasMore: true,
+        errorSummary: []
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        checkedCount: 8,
+        confirmedCount: 8,
+        ignoredCount: 0,
+        leftInReviewCount: 0,
+        skippedCount: 0,
+        failedCount: 0,
+        updatedCategoryCount: 8,
+        remainingReviewCount: 0,
+        batchSize: 12,
+        partial: false,
+        hasMore: false,
+        errorSummary: []
+      });
+
+    const result = await reprocessExistingHealthReviewItems(undefined, { force: true });
+
+    expect(apiMocks.reprocessHealthReviewItems).toHaveBeenCalledTimes(2);
+    expect(apiMocks.reprocessHealthReviewItems).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ walking: true }),
+      { limit: 12 }
+    );
+    expect(apiMocks.reprocessHealthReviewItems).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ walking: true }),
+      { limit: 12 }
+    );
+    expect(result).toMatchObject({
+      checkedCount: 20,
+      confirmedCount: 20,
+      updatedCategoryCount: 20,
+      remainingReviewCount: 0,
+      partial: false,
+      hasMore: false
+    });
   });
 
   it("keeps background Health review reprocess failures non-fatal", async () => {

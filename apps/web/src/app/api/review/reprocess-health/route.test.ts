@@ -80,6 +80,38 @@ describe("POST /api/review/reprocess-health", () => {
     });
   });
 
+  it("returns a non-500 structured result when reprocess only handled one batch", async () => {
+    mocks.reprocessHealthReviewItems.mockResolvedValueOnce({
+      checkedCount: 12,
+      confirmedCount: 12,
+      ignoredCount: 0,
+      leftInReviewCount: 0,
+      skippedCount: 0,
+      failedCount: 0,
+      updatedCategoryCount: 12,
+      remainingReviewCount: 88,
+      batchSize: 12,
+      partial: true,
+      hasMore: true,
+      errorSummary: []
+    });
+
+    const response = await POST(jsonRequest({ preferences: { walking: true }, limit: 12 }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(207);
+    expect(payload).toMatchObject({
+      ok: true,
+      confirmedCount: 12,
+      remainingReviewCount: 88,
+      partial: true
+    });
+    expect(mocks.reprocessHealthReviewItems).toHaveBeenCalledWith(
+      { preferences: { walking: true }, limit: 12 },
+      session
+    );
+  });
+
   it("returns structured JSON when review rows are temporarily locked", async () => {
     mocks.reprocessHealthReviewItems.mockRejectedValueOnce(
       Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" })

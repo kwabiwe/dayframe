@@ -130,6 +130,8 @@ const HEALTH_SLEEP_SCHEMA_MIGRATION =
 const HEALTH_RLS_MIGRATION = "supabase/migrations/202607020001_dayframe_rls.sql";
 const PLACE_DEFAULT_ACTIVITY_DESCRIPTION_MIGRATION =
   "supabase/migrations/202607070002_place_default_activity_description.sql";
+const DEFAULT_HEALTH_REPROCESS_BATCH_SIZE = 12;
+const MAX_HEALTH_REPROCESS_BATCH_SIZE = 25;
 
 function missingCategoryPinColumnError(cause: unknown) {
   return missingRequiredColumnError("categories", "is_pinned", CATEGORY_PINS_MIGRATION, cause);
@@ -1367,6 +1369,8 @@ function databaseErrorDetails(error: unknown) {
 
 type HealthReviewReprocessInput = {
   preferences?: Partial<HealthImportPreferences> | null;
+  limit?: number | null;
+  batchSize?: number | null;
 };
 
 type HealthReviewItemRow = {
@@ -1390,6 +1394,7 @@ export async function reprocessHealthReviewItems(
   session: RequestSession = getDevSession()
 ) {
   const preferences = normalizeHealthImportPreferences(input.preferences);
+  const batchSize = normalizeHealthReprocessBatchSize(input.limit ?? input.batchSize);
   const client = await pool.connect();
   const result = {
     checkedCount: 0,
@@ -1400,6 +1405,9 @@ export async function reprocessHealthReviewItems(
     failedCount: 0,
     updatedCategoryCount: 0,
     remainingReviewCount: 0,
+    batchSize,
+    partial: false,
+    hasMore: false,
     errorSummary: [] as string[],
     reasons: [] as HealthReviewReason[]
   };
@@ -1428,11 +1436,13 @@ export async function reprocessHealthReviewItems(
          and ae.user_id = $2
          and ae.event_type in ('health_sleep_import', 'health_workout_import')
        order by ri.created_at asc
+       limit $3
        for update of ri skip locked`,
-      [session.workspaceId, session.userId]
+      [session.workspaceId, session.userId, batchSize]
     );
 
     if (reviewItems.rows.length === 0) {
+      await refreshHealthReviewRemainingCount(client, session, result, 0);
       await client.query("commit");
       return result;
     }
@@ -1548,6 +1558,7 @@ export async function reprocessHealthReviewItems(
       }
     }
 
+    await refreshHealthReviewRemainingCount(client, session, result, reviewItems.rows.length);
     await client.query("commit");
     return result;
   } catch (error) {
@@ -1556,6 +1567,53 @@ export async function reprocessHealthReviewItems(
   } finally {
     client.release();
   }
+}
+
+function normalizeHealthReprocessBatchSize(value: unknown) {
+  const numeric = Number(value ?? DEFAULT_HEALTH_REPROCESS_BATCH_SIZE);
+  if (!Number.isFinite(numeric)) return DEFAULT_HEALTH_REPROCESS_BATCH_SIZE;
+  return Math.max(1, Math.min(MAX_HEALTH_REPROCESS_BATCH_SIZE, Math.round(numeric)));
+}
+
+async function refreshHealthReviewRemainingCount(
+  client: pg.PoolClient,
+  session: RequestSession,
+  result: {
+    leftInReviewCount: number;
+    failedCount: number;
+    remainingReviewCount: number;
+    batchSize: number;
+    partial: boolean;
+    hasMore: boolean;
+  },
+  fetchedCount: number
+) {
+  try {
+    const countResult = await client.query<{ count: number }>(
+      `select count(*)::int as count
+       from review_items ri
+       join activity_events ae on ae.id = ri.event_id
+       where ri.workspace_id = $1
+         and ri.status = 'open'
+         and ae.workspace_id = $1
+         and ae.user_id = $2
+         and ae.event_type in ('health_sleep_import', 'health_workout_import')`,
+      [session.workspaceId, session.userId]
+    );
+    const remaining = Number(countResult.rows[0]?.count);
+    if (Number.isFinite(remaining)) {
+      result.remainingReviewCount = remaining;
+      const processedButStillOpen = result.leftInReviewCount + result.failedCount;
+      result.partial = remaining > processedButStillOpen;
+      result.hasMore = result.partial;
+      return;
+    }
+  } catch {
+    // Diagnostics should not make reprocess fail after item handling succeeded.
+  }
+
+  result.partial = fetchedCount >= result.batchSize;
+  result.hasMore = result.partial;
 }
 
 async function consolidateLegacyHealthSleepReviewItems(

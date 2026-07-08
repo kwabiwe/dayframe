@@ -17,3 +17,4 @@ apps/mobile/ios/.xcode.env.local
 .DS_Store
 dayframe-data
 .codex-dayframe-*.png
+.codex-dayframe-qa/

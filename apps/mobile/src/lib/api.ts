@@ -159,6 +159,9 @@ export type HealthReviewReprocessResult = {
   failedCount: number;
   updatedCategoryCount: number;
   remainingReviewCount: number;
+  batchSize?: number;
+  partial?: boolean;
+  hasMore?: boolean;
   errorSummary: string[];
   reasons?: Array<{
     reviewItemId: string;
@@ -545,7 +548,8 @@ export function dismissReviewItem(id: string) {
 }
 
 export async function reprocessHealthReviewItems(
-  preferences: HealthImportPreferences
+  preferences: HealthImportPreferences,
+  options: { limit?: number } = {}
 ): Promise<HealthReviewReprocessResult> {
   const response = await fetch(`${DAYFRAME_API_BASE}/api/review/reprocess-health`, {
     method: "POST",
@@ -553,7 +557,7 @@ export async function reprocessHealthReviewItems(
       "Content-Type": "application/json",
       ...(await authHeaders())
     },
-    body: JSON.stringify({ preferences })
+    body: JSON.stringify({ preferences, limit: options.limit })
   });
   if (response.status === 401) {
     await clearSessionToken();
