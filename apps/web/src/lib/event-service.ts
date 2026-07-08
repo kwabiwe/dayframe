@@ -133,6 +133,7 @@ const PLACE_DEFAULT_ACTIVITY_DESCRIPTION_MIGRATION =
   "supabase/migrations/202607070002_place_default_activity_description.sql";
 const DEFAULT_HEALTH_REPROCESS_BATCH_SIZE = 12;
 const MAX_HEALTH_REPROCESS_BATCH_SIZE = 25;
+const LEGACY_SLEEP_CONSOLIDATION_BATCH_SIZE = 120;
 
 function missingCategoryPinColumnError(cause: unknown) {
   return missingRequiredColumnError("categories", "is_pinned", CATEGORY_PINS_MIGRATION, cause);
@@ -1508,23 +1509,16 @@ export async function reprocessHealthReviewItems(
           result.updatedCategoryCount += 1;
         }
 
-        if (!preferences[preferenceKey]) {
+        if (shouldIgnoreHealthSleepStage(item, rawPayload)) {
           await resolveReprocessedHealthReviewItem(client, item, "ignored");
           result.ignoredCount += 1;
           await client.query("release savepoint reprocess_health_item");
           continue;
         }
 
-        if (!isEligibleHealthReviewItemForAutoConfirm(item, rawPayload, durationSeconds, preferenceKey, startedAt, stoppedAt)) {
-          const reason = healthAutoConfirmSkipReason(item, rawPayload, durationSeconds, preferenceKey, startedAt, stoppedAt);
-          await updateHealthReviewNotes(client, item.id, reason.message);
-          addHealthReviewReason(result.reasons, {
-            reviewItemId: item.id,
-            code: reason.code,
-            message: reason.message
-          });
-          result.leftInReviewCount += 1;
-          result.remainingReviewCount += 1;
+        if (!preferences[preferenceKey]) {
+          await resolveReprocessedHealthReviewItem(client, item, "ignored");
+          result.ignoredCount += 1;
           await client.query("release savepoint reprocess_health_item");
           continue;
         }
@@ -1554,6 +1548,20 @@ export async function reprocessHealthReviewItems(
         if (coveredEntry) {
           await resolveReprocessedHealthReviewItem(client, item, "accepted");
           result.confirmedCount += 1;
+          await client.query("release savepoint reprocess_health_item");
+          continue;
+        }
+
+        if (!isEligibleHealthReviewItemForAutoConfirm(item, rawPayload, durationSeconds, preferenceKey, startedAt, stoppedAt)) {
+          const reason = healthAutoConfirmSkipReason(item, rawPayload, durationSeconds, preferenceKey, startedAt, stoppedAt);
+          await updateHealthReviewNotes(client, item.id, reason.message);
+          addHealthReviewReason(result.reasons, {
+            reviewItemId: item.id,
+            code: reason.code,
+            message: reason.message
+          });
+          result.leftInReviewCount += 1;
+          result.remainingReviewCount += 1;
           await client.query("release savepoint reprocess_health_item");
           continue;
         }
@@ -1691,9 +1699,9 @@ async function loadLegacySleepReviewItemsForConsolidation(
        end asc,
        coalesce(ri.suggested_started_at, ae.occurred_at) desc,
        ri.created_at desc
-     limit 300
+     limit $4
      for update of ri skip locked`,
-    [session.workspaceId, session.userId, force]
+    [session.workspaceId, session.userId, force, LEGACY_SLEEP_CONSOLIDATION_BATCH_SIZE]
   );
   return result.rows;
 }
@@ -1719,6 +1727,7 @@ async function consolidateLegacyHealthSleepReviewItems(
   result: {
     checkedCount: number;
     confirmedCount: number;
+    ignoredCount: number;
     leftInReviewCount: number;
     remainingReviewCount: number;
     updatedCategoryCount: number;
@@ -1726,7 +1735,21 @@ async function consolidateLegacyHealthSleepReviewItems(
   }
 ) {
   const handledIds = new Set<string>();
+  for (const item of items) {
+    const rawPayload = isRecord(item.rawPayload) ? item.rawPayload : {};
+    if (!shouldIgnoreHealthSleepStage(item, rawPayload)) continue;
+    if (item.suggestedCategoryId !== healthCategoryId || item.eventCategoryId !== healthCategoryId) {
+      await updateHealthReviewCategory(client, item, healthCategoryId);
+      result.updatedCategoryCount += 1;
+    }
+    await resolveReprocessedHealthReviewItem(client, item, "ignored");
+    handledIds.add(item.id);
+    result.checkedCount += 1;
+    result.ignoredCount += 1;
+  }
+
   const segments = items
+    .filter((item) => !handledIds.has(item.id))
     .map(legacySleepReviewSegment)
     .filter((segment): segment is SleepReviewSegment => Boolean(segment))
     .sort((left, right) => left.startedMs - right.startedMs);
@@ -1824,7 +1847,7 @@ function legacySleepReviewSegment(item: HealthReviewItemRow): SleepReviewSegment
   const rawPayload = isRecord(item.rawPayload) ? item.rawPayload : {};
   if (Array.isArray(rawPayload.samples) && rawPayload.samples.length > 0) return null;
 
-  const sleepStage = stringOrNull(rawPayload.sleepStage);
+  const sleepStage = healthSleepStageForReviewItem(item, rawPayload);
   if (sleepStage === "awake" || sleepStage === "in_bed") return null;
 
   const startedAt = timestampStringOrNull(rawPayload.startedAt) ?? item.suggestedStartedAt;
@@ -2015,6 +2038,30 @@ function isHealthEvent(type: string) {
   return type === "health_sleep_import" || type === "health_workout_import";
 }
 
+function healthSleepStageForReviewItem(
+  item: Pick<HealthReviewItemRow, "eventType" | "title">,
+  rawPayload: Record<string, unknown>
+) {
+  if (item.eventType !== "health_sleep_import") return null;
+  const explicit = stringOrNull(rawPayload.sleepStage);
+  if (explicit) return explicit;
+  const title = item.title.toLowerCase();
+  if (title.includes("awake")) return "awake";
+  if (title.includes("in bed") || title.includes("in_bed")) return "in_bed";
+  if (title.includes("core")) return "asleep_core";
+  if (title.includes("deep")) return "asleep_deep";
+  if (title.includes("rem")) return "asleep_rem";
+  return null;
+}
+
+function shouldIgnoreHealthSleepStage(
+  item: Pick<HealthReviewItemRow, "eventType" | "title">,
+  rawPayload: Record<string, unknown>
+) {
+  const sleepStage = healthSleepStageForReviewItem(item, rawPayload);
+  return sleepStage === "awake" || sleepStage === "in_bed";
+}
+
 async function ensureHealthCategoryId(
   client: pg.PoolClient,
   session: RequestSession
@@ -2067,7 +2114,7 @@ async function findCoveringHealthTimeEntry(
   stoppedAt: string | Date | null | undefined
 ): Promise<OverlapBlockingEntry | null> {
   if (!startedAt || !stoppedAt) return null;
-  const title = (item.title || (item.eventType === "health_sleep_import" ? "Sleep" : "")).trim();
+  const title = healthReviewCoverageTitle(item);
   const result = await client.query<OverlapBlockingEntry>(
     `/* health_covering_entry */
      select te.id,
@@ -2100,6 +2147,11 @@ async function findCoveringHealthTimeEntry(
     [session.workspaceId, session.userId, startedAt, stoppedAt, title]
   );
   return result.rows[0] ?? null;
+}
+
+function healthReviewCoverageTitle(item: Pick<HealthReviewItemRow, "eventType" | "title">) {
+  if (item.eventType === "health_sleep_import") return "Sleep";
+  return (item.title || "").trim();
 }
 
 async function findOverlappingTimeEntry(
