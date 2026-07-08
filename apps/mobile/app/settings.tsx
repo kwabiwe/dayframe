@@ -5,6 +5,7 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
+  Share,
   Switch,
   Text,
   TextInput,
@@ -46,6 +47,7 @@ import {
 } from "@/lib/geofence";
 import {
   friendlyHealthKitError,
+  exportHealthDebugSnapshot,
   getHealthImportPreferences,
   getHealthImportStatus,
   HEALTH_IMPORT_PREFERENCE_OPTIONS,
@@ -84,6 +86,8 @@ export default function SettingsScreen() {
   const [locationDiagnostics, setLocationDiagnostics] = useState<LocationVisitDiagnostics | null>(null);
   const [healthStatus, setHealthStatus] = useState<HealthImportStatus[]>([]);
   const [healthImportPreferences, setHealthImportPreferences] = useState<HealthImportPreferences | null>(null);
+  const [healthDebugStatus, setHealthDebugStatus] = useState<string | null>(null);
+  const [exportingHealthDebug, setExportingHealthDebug] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [pinNewCategory, setPinNewCategory] = useState(true);
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
@@ -432,6 +436,29 @@ export default function SettingsScreen() {
     } catch (error) {
       setHealthImportPreferences(current);
       Alert.alert("Apple Health", error instanceof Error ? error.message : "Unable to save Health preference.");
+    }
+  }
+
+  async function exportAppleHealthDebug() {
+    setExportingHealthDebug(true);
+    setHealthDebugStatus("Preparing Health debug export...");
+    try {
+      const snapshot = await exportHealthDebugSnapshot();
+      const summary =
+        `${snapshot.healthKit.sleep.sampleCount} sleep samples, ` +
+        `${snapshot.healthKit.sleep.sessions.length} sleep sessions and ` +
+        `${snapshot.healthKit.workouts.sampleCount} workouts exported.`;
+      await Share.share({
+        title: `Dayframe Health debug ${snapshot.exportedAt}`,
+        message: JSON.stringify(snapshot, null, 2)
+      });
+      setHealthDebugStatus(summary);
+    } catch (error) {
+      const message = friendlyHealthKitError(error, "export Health debug data");
+      setHealthDebugStatus(message);
+      Alert.alert("Apple Health", message);
+    } finally {
+      setExportingHealthDebug(false);
     }
   }
 
@@ -862,6 +889,7 @@ export default function SettingsScreen() {
             {healthPermissionStatus ? <Text style={styles.muted}>{healthPermissionStatus.notes}</Text> : null}
             <Text style={styles.muted}>Sleep: {sleepStatus?.notes ?? "Not synced yet."}</Text>
             <Text style={styles.muted}>Workouts: {workoutStatus?.notes ?? "Not synced yet."}</Text>
+            {healthDebugStatus ? <Text style={styles.muted}>{healthDebugStatus}</Text> : null}
             <View style={styles.healthPreferenceList}>
               {HEALTH_IMPORT_PREFERENCE_OPTIONS.map((option) => {
                 const enabled = healthImportPreferences?.[option.key] ?? option.defaultEnabled;
@@ -891,6 +919,17 @@ export default function SettingsScreen() {
               </Pressable>
               <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={() => syncAppleHealth()}>
                 <Text style={styles.secondaryButtonText}>Sync now</Text>
+              </Pressable>
+              <Pressable
+                disabled={exportingHealthDebug}
+                style={({ pressed }) => [
+                  styles.secondaryButton,
+                  exportingHealthDebug ? styles.buttonDisabled : null,
+                  pressed ? styles.buttonPressed : null
+                ]}
+                onPress={exportAppleHealthDebug}
+              >
+                <Text style={styles.secondaryButtonText}>{exportingHealthDebug ? "Exporting..." : "Export debug"}</Text>
               </Pressable>
             </View>
           </View>

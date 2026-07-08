@@ -79,6 +79,21 @@ describe("POST /api/review/reprocess-health", () => {
       errorSummary: ["Skipped review-bad: bad candidate"]
     });
   });
+
+  it("returns structured JSON when review rows are temporarily locked", async () => {
+    mocks.reprocessHealthReviewItems.mockRejectedValueOnce(
+      Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" })
+    );
+
+    const response = await POST(jsonRequest({ preferences: { walking: true } }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(payload).toMatchObject({
+      ok: false,
+      code: "review_reprocess_busy"
+    });
+  });
 });
 
 function jsonRequest(body: unknown) {

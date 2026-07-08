@@ -17,6 +17,7 @@ import {
   type SleepStage
 } from "@dayframe/shared";
 import { enqueueEvent, reprocessHealthReviewItems, type HealthReviewReprocessResult } from "./api";
+import { DAYFRAME_API_BASE } from "./config";
 
 const HEALTHKIT_SLEEP_TYPE = "HKCategoryTypeIdentifierSleepAnalysis";
 const HEALTHKIT_WORKOUT_TYPE = "HKWorkoutTypeIdentifier";
@@ -30,6 +31,8 @@ const HEALTHKIT_WORKOUT_PREFERENCES_KEY = "dayframe.healthkit.workoutPreferences
 const SLEEP_SESSION_GAP_MS = 90 * 60 * 1000;
 const HEALTH_REPROCESS_THROTTLE_MS = 5 * 60 * 1000;
 const HEALTH_REPROCESS_BACKOFF_MS = 10 * 60 * 1000;
+const HEALTH_DEBUG_LOOKBACK_DAYS = 14;
+const HEALTH_DEBUG_SAMPLE_LIMIT = 100;
 
 let healthReprocessInFlight: Promise<HealthReviewReprocessResult> | null = null;
 let lastHealthReprocessAt = 0;
@@ -99,6 +102,56 @@ type HealthKitWorkoutSample = {
   sourceRevision?: { source?: { name?: string; bundleIdentifier?: string } };
   metadata?: Record<string, unknown>;
   toJSON?: () => HealthKitWorkoutSample;
+};
+
+export type HealthDebugExportOptions = {
+  lookbackDays?: number;
+  limit?: number;
+};
+
+export type HealthDebugExport = {
+  exportedAt: string;
+  apiBase: string;
+  lookback: {
+    startedAt: string;
+    stoppedAt: string;
+    days: number;
+    limit: number;
+  };
+  storedState: {
+    sleepAnchorPresent: boolean;
+    workoutAnchorPresent: boolean;
+    sleepSeenCount: number;
+    workoutSeenCount: number;
+    preferences: HealthImportPreferences;
+  };
+  healthKit: {
+    sleep: {
+      sampleCount: number;
+      deletedSampleCount: number;
+      stageCounts: Record<string, number>;
+      sessions: Array<{
+        externalSessionId: string;
+        startedAt: string;
+        stoppedAt: string;
+        durationSeconds: number | null;
+        sampleCount: number;
+        stages: string[];
+        autoConfirm: boolean;
+      }>;
+      samples: DayframeSleepSample[];
+    };
+    workouts: {
+      sampleCount: number;
+      deletedSampleCount: number;
+      typeCounts: Record<string, number>;
+      samples: DayframeWorkoutSample[];
+    };
+  };
+  generatedEvents: {
+    sleep: Array<ReturnType<typeof healthKitSleepSessionEvent>>;
+    workouts: Array<ReturnType<typeof healthKitWorkoutEvent>>;
+  };
 };
 
 export async function getHealthImportStatus(): Promise<HealthImportStatus[]> {
@@ -306,6 +359,96 @@ export async function reprocessExistingHealthReviewItems(
   return healthReprocessInFlight;
 }
 
+export async function exportHealthDebugSnapshot(
+  options: HealthDebugExportOptions = {}
+): Promise<HealthDebugExport> {
+  ensureIos();
+  const healthkit = await loadHealthKit();
+  const exportedAt = new Date();
+  const days = sanitizeDebugLookbackDays(options.lookbackDays);
+  const limit = sanitizeDebugLimit(options.limit);
+  const startedAt = new Date(exportedAt.getTime() - days * 24 * 60 * 60 * 1000);
+
+  const [
+    preferences,
+    sleepAnchor,
+    workoutAnchor,
+    sleepSeen,
+    workoutSeen,
+    sleepResult,
+    workoutResult
+  ] = await Promise.all([
+    getHealthImportPreferences(),
+    AsyncStorage.getItem(HEALTHKIT_ANCHOR_KEY),
+    AsyncStorage.getItem(HEALTHKIT_WORKOUT_ANCHOR_KEY),
+    readSeenSampleIds(),
+    readSeenSampleIds(HEALTHKIT_WORKOUT_SEEN_KEY),
+    healthkit.queryCategorySamplesWithAnchor(HEALTHKIT_SLEEP_TYPE, {
+      filter: { date: { startDate: startedAt, endDate: exportedAt } },
+      limit
+    }),
+    healthkit.queryWorkoutSamplesWithAnchor({
+      filter: { date: { startDate: startedAt, endDate: exportedAt } },
+      limit
+    })
+  ]);
+
+  const sleepSamples = (sleepResult.samples as readonly HealthKitSleepSample[])
+    .map(mapHealthKitSleepSample)
+    .filter((sample) => validDate(sample.startedAt) && validDate(sample.stoppedAt));
+  const sessions = groupSleepSamplesIntoSessions(sleepSamples);
+  const workoutSamples = (workoutResult.workouts as readonly HealthKitWorkoutSample[])
+    .map((sample) => mapHealthKitWorkoutSample(sample.toJSON?.() ?? sample))
+    .filter((sample) => validDate(sample.startedAt) && validDate(sample.stoppedAt));
+  const sleepEvents = sessions.map(healthKitSleepSessionEvent);
+  const workoutEvents = workoutSamples.map(healthKitWorkoutEvent);
+
+  return {
+    exportedAt: exportedAt.toISOString(),
+    apiBase: DAYFRAME_API_BASE,
+    lookback: {
+      startedAt: startedAt.toISOString(),
+      stoppedAt: exportedAt.toISOString(),
+      days,
+      limit
+    },
+    storedState: {
+      sleepAnchorPresent: Boolean(sleepAnchor),
+      workoutAnchorPresent: Boolean(workoutAnchor),
+      sleepSeenCount: sleepSeen.length,
+      workoutSeenCount: workoutSeen.length,
+      preferences
+    },
+    healthKit: {
+      sleep: {
+        sampleCount: sleepSamples.length,
+        deletedSampleCount: sleepResult.deletedSamples.length,
+        stageCounts: countBy(sleepSamples, (sample) => sample.stage),
+        sessions: sessions.map((session, index) => ({
+          externalSessionId: session.externalSessionId,
+          startedAt: session.startedAt,
+          stoppedAt: session.stoppedAt,
+          durationSeconds: sleepEvents[index]?.rawPayload.durationSeconds ?? null,
+          sampleCount: session.samples.length,
+          stages: [...new Set(session.samples.map((sample) => sample.stage))],
+          autoConfirm: Boolean(sleepEvents[index]?.rawPayload.autoConfirm)
+        })),
+        samples: sleepSamples
+      },
+      workouts: {
+        sampleCount: workoutSamples.length,
+        deletedSampleCount: workoutResult.deletedSamples.length,
+        typeCounts: countBy(workoutSamples, (sample) => sample.workoutType),
+        samples: workoutSamples
+      }
+    },
+    generatedEvents: {
+      sleep: sleepEvents,
+      workouts: workoutEvents
+    }
+  };
+}
+
 export function mapHealthKitSleepSample(sample: HealthKitSleepSample): DayframeSleepSample {
   const startedAt = new Date(sample.startDate).toISOString();
   const stoppedAt = new Date(sample.endDate).toISOString();
@@ -323,7 +466,7 @@ export function mapHealthKitSleepSample(sample: HealthKitSleepSample): DayframeS
     rawPayload: {
       uuid: sample.uuid,
       value: sample.value,
-      metadata: sample.metadata,
+      metadata: safeHealthMetadata(sample.metadata),
       sourceRevision: sample.sourceRevision
     }
   };
@@ -637,4 +780,22 @@ function safeHealthMetadata(metadata: Record<string, unknown> | undefined) {
       return ["boolean", "number", "string"].includes(typeof value);
     })
   );
+}
+
+function sanitizeDebugLookbackDays(value: number | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return HEALTH_DEBUG_LOOKBACK_DAYS;
+  return Math.min(60, Math.max(1, Math.round(value)));
+}
+
+function sanitizeDebugLimit(value: number | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return HEALTH_DEBUG_SAMPLE_LIMIT;
+  return Math.min(500, Math.max(1, Math.round(value)));
+}
+
+function countBy<T>(items: readonly T[], keyForItem: (item: T) => string) {
+  return items.reduce<Record<string, number>>((counts, item) => {
+    const key = keyForItem(item);
+    counts[key] = (counts[key] ?? 0) + 1;
+    return counts;
+  }, {});
 }
