@@ -20,11 +20,13 @@ import {
   fetchBootstrap,
   saveEditedReviewItem,
   updateTimeEntry,
+  type HealthReviewReprocessResult,
   type MobileBootstrap,
   type MobileReviewItem,
   type MobileTimeEntry,
   type TimeEntryUpdatePatch
 } from "@/lib/api";
+import { DAYFRAME_API_BASE } from "@/lib/config";
 import { reprocessExistingHealthReviewItems } from "@/lib/health";
 import { pressable, useMobileTheme } from "@/lib/mobileTheme";
 import {
@@ -40,6 +42,17 @@ type ReviewEditTarget =
   | { kind: "reviewItem"; item: MobileReviewItem; entry: MobileTimeEntry }
   | { kind: "entry"; entry: MobileTimeEntry };
 
+type ReviewReprocessDiagnostics = {
+  apiBaseUrl: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  status: "idle" | "running" | "success" | "partial" | "failed" | "timed_out";
+  result: HealthReviewReprocessResult | null;
+  error: string | null;
+};
+
+const HEALTH_REPROCESS_TIMEOUT_MS = 15_000;
+
 export default function ReviewScreen() {
   const { reloadThemePreference, styles, theme } = useMobileTheme();
   const [data, setData] = useState<MobileBootstrap | null>(null);
@@ -47,6 +60,14 @@ export default function ReviewScreen() {
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<ReviewEditTarget | null>(null);
   const [editSaving, setEditSaving] = useState(false);
+  const [reprocessDiagnostics, setReprocessDiagnostics] = useState<ReviewReprocessDiagnostics>({
+    apiBaseUrl: DAYFRAME_API_BASE,
+    startedAt: null,
+    finishedAt: null,
+    status: "idle",
+    result: null,
+    error: null
+  });
   const refreshInFlight = useRef(false);
   const forcedReprocessComplete = useRef(false);
   const now = Date.now();
@@ -58,17 +79,42 @@ export default function ReviewScreen() {
     try {
       setData(await fetchBootstrap());
       const forceReprocess = options?.forceReprocess ?? !forcedReprocessComplete.current;
-      const reprocess = await reprocessExistingHealthReviewItems(undefined, { force: forceReprocess });
+      const startedAt = new Date().toISOString();
+      setReprocessDiagnostics((current) => ({
+        ...current,
+        startedAt,
+        finishedAt: null,
+        status: "running",
+        error: null
+      }));
+      const reprocess = await withTimeout(
+        reprocessExistingHealthReviewItems(undefined, { force: forceReprocess }),
+        HEALTH_REPROCESS_TIMEOUT_MS
+      );
       forcedReprocessComplete.current = true;
+      setReprocessDiagnostics((current) => ({
+        ...current,
+        finishedAt: new Date().toISOString(),
+        status: reprocess.failedCount > 0 ? "partial" : "success",
+        result: reprocess,
+        error: reprocess.errorSummary[0] ?? null
+      }));
       if (reprocess.confirmedCount > 0 || reprocess.ignoredCount > 0 || reprocess.updatedCategoryCount > 0) {
         setData(await fetchBootstrap());
       }
     } catch (error) {
+      const timedOut = error instanceof Error && error.message === "Health reprocess timed out.";
+      setReprocessDiagnostics((current) => ({
+        ...current,
+        finishedAt: new Date().toISOString(),
+        status: timedOut ? "timed_out" : "failed",
+        error: error instanceof Error ? error.message : "Unable to reprocess Health review items."
+      }));
       if (error instanceof AuthRequiredError) {
         router.replace("/");
         return;
       }
-      if (!options?.silent) {
+      if (!options?.silent && !timedOut) {
         Alert.alert("Review", error instanceof Error ? error.message : "Unable to load review items.");
       }
     } finally {
@@ -213,6 +259,11 @@ export default function ReviewScreen() {
             <Text style={styles.muted}>Suggested activity from Health and places stays here until it is confirmed.</Text>
           </View>
 
+          <ReviewDiagnosticsPanel
+            diagnostics={reprocessDiagnostics}
+            styles={styles}
+          />
+
           <View style={styles.lifecyclePanel}>
             <Text style={styles.sectionTitle}>{REVIEW_COPY.suggestedActivity}</Text>
             {totalNeedsReview === 0 ? (
@@ -314,6 +365,9 @@ function ReviewItemCard({
           {item.placeName ? ` · ${item.placeName}` : ""}
         </Text>
       </View>
+      {item.notes ? (
+        <Text style={styles.reviewMetaLine}>{item.notes}</Text>
+      ) : null}
 
       <View style={styles.reviewActions}>
         <Pressable
@@ -353,6 +407,40 @@ function ReviewItemCard({
           <Text style={styles.reviewSecondaryButtonText}>{REVIEW_COPY.dismiss}</Text>
         </Pressable>
       </View>
+    </View>
+  );
+}
+
+function ReviewDiagnosticsPanel({
+  diagnostics,
+  styles
+}: {
+  diagnostics: ReviewReprocessDiagnostics;
+  styles: ReturnType<typeof useMobileTheme>["styles"];
+}) {
+  const result = diagnostics.result;
+  const reasonPreview = result?.reasons?.slice(0, 3).map((reason) => reason.message) ?? [];
+
+  return (
+    <View style={styles.panel}>
+      <Text style={styles.label}>Health reprocess</Text>
+      <Text style={styles.muted}>API: {diagnostics.apiBaseUrl}</Text>
+      <Text style={styles.reviewMetaLine}>
+        Status: {diagnostics.status}
+        {diagnostics.startedAt ? ` · started ${formatDiagnosticsTime(diagnostics.startedAt)}` : ""}
+        {diagnostics.finishedAt ? ` · finished ${formatDiagnosticsTime(diagnostics.finishedAt)}` : ""}
+      </Text>
+      {result ? (
+        <Text style={styles.reviewMetaLine}>
+          Confirmed {result.confirmedCount} · ignored {result.ignoredCount} · left {result.leftInReviewCount} · skipped {result.skippedCount} · failed {result.failedCount} · categories {result.updatedCategoryCount}
+        </Text>
+      ) : null}
+      {diagnostics.error ? (
+        <Text style={styles.reviewMetaLine}>Last error: {diagnostics.error}</Text>
+      ) : null}
+      {reasonPreview.map((reason) => (
+        <Text key={reason} style={styles.reviewMetaLine}>{reason}</Text>
+      ))}
     </View>
   );
 }
@@ -503,6 +591,12 @@ function formatDateTime(date: Date) {
   return `${date.toLocaleDateString(undefined, { month: "short", day: "numeric" })} ${formatTimeOfDay(date)}`;
 }
 
+function formatDiagnosticsTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "--:--";
+  return formatTimeOfDay(date);
+}
+
 function formatTimeOfDay(date: Date) {
   if (Number.isNaN(date.getTime())) return "--:--";
   return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
@@ -526,6 +620,18 @@ function formatDuration(seconds: number) {
 
 function pad2(value: number) {
   return value.toString().padStart(2, "0");
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error("Health reprocess timed out.")), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 function BackGlyph({ color }: { color: string }) {

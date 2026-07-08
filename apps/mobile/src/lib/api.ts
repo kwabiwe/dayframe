@@ -160,6 +160,21 @@ export type HealthReviewReprocessResult = {
   updatedCategoryCount: number;
   remainingReviewCount: number;
   errorSummary: string[];
+  reasons?: Array<{
+    reviewItemId: string;
+    code: string;
+    message: string;
+    blockingEntry?: {
+      id: string;
+      description: string | null;
+      source: string;
+      reviewStatus: string;
+      startedAt: string;
+      stoppedAt: string | null;
+      categoryName: string | null;
+      stoppedAtIsNull: boolean;
+    };
+  }>;
 };
 
 export type MobileAuthSession = {
@@ -258,8 +273,16 @@ type ActivityEventDraft = {
 };
 
 type ApiErrorPayload = {
+  code?: string;
   error?: string;
   message?: string;
+  blockingEntry?: {
+    description?: string | null;
+    source?: string;
+    reviewStatus?: string;
+    startedAt?: string;
+    stoppedAt?: string | null;
+  };
   issues?: Array<{ path?: Array<string | number>; message?: string }>;
 };
 
@@ -948,7 +971,7 @@ function formatApiError(payload: ApiErrorPayload) {
   }
 
   const message = payload.error ?? payload.message;
-  if (!message) return undefined;
+  if (!message) return formatBlockingEntry(payload);
 
   try {
     const parsed = JSON.parse(message) as unknown;
@@ -957,10 +980,18 @@ function formatApiError(payload: ApiErrorPayload) {
       return formatIssue(issue);
     }
   } catch {
-    return message;
+    return [message, formatBlockingEntry(payload)].filter(Boolean).join(" ");
   }
 
-  return message;
+  return [message, formatBlockingEntry(payload)].filter(Boolean).join(" ");
+}
+
+function formatBlockingEntry(payload: ApiErrorPayload) {
+  const blockingEntry = payload.blockingEntry;
+  if (!blockingEntry) return undefined;
+  const label = blockingEntry.description?.trim() || blockingEntry.source || "existing entry";
+  const status = blockingEntry.reviewStatus ? ` (${blockingEntry.reviewStatus})` : "";
+  return `Blocked by ${label}${status}.`;
 }
 
 function placeEntityValues(input: { name: string } & PlaceMutationInput) {
