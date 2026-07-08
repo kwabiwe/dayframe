@@ -1,4 +1,5 @@
 const DEFAULT_LOCAL_API_BASE = "http://localhost:3000";
+const DEFAULT_HOSTED_API_BASE = "https://dayframe-web.vercel.app";
 
 export type ApiBaseOptions = {
   allowLocal?: boolean;
@@ -44,7 +45,8 @@ export function resolveApiBase(
   options: ApiBaseOptions = {}
 ) {
   const allowLocal = options.allowLocal ?? process.env.NODE_ENV !== "production";
-  return assertUsableApiBase(value ?? (allowLocal ? DEFAULT_LOCAL_API_BASE : ""), { allowLocal });
+  const fallback = allowLocal ? DEFAULT_LOCAL_API_BASE : DEFAULT_HOSTED_API_BASE;
+  return assertUsableApiBase(normalizeApiBase(value) || fallback, { allowLocal });
 }
 
 export const DAYFRAME_API_BASE = resolveApiBase();
