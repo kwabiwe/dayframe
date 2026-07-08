@@ -48,6 +48,7 @@ const {
   importHealthKitWorkouts,
   mapHealthKitSleepSample,
   mapHealthKitWorkoutSample,
+  exportHealthDebugSnapshot,
   reprocessExistingHealthReviewItems,
   setHealthImportPreference
 } = await import("./health");
@@ -146,6 +147,91 @@ describe("HealthKit mapping", () => {
         })
       })
     );
+  });
+
+  it("exports a bounded Health debug snapshot without advancing anchors or leaking routes", async () => {
+    asyncStore.set("dayframe.healthkit.sleepAnchor.v1", "sleep-anchor-before");
+    asyncStore.set("dayframe.healthkit.workoutAnchor.v1", "workout-anchor-before");
+    asyncStore.set("dayframe.healthkit.sleepSeen.v1", JSON.stringify(["old-sleep"]));
+    asyncStore.set("dayframe.healthkit.workoutSeen.v1", JSON.stringify(["old-workout"]));
+    healthkitMocks.queryCategorySamplesWithAnchor.mockResolvedValueOnce({
+      newAnchor: "sleep-anchor-after",
+      deletedSamples: [],
+      samples: [
+        {
+          uuid: "debug-core",
+          value: 3,
+          startDate: "2026-07-06T23:55:00.000Z",
+          endDate: "2026-07-07T02:15:00.000Z",
+          metadata: { latitude: 51.5, source: "debug" }
+        },
+        {
+          uuid: "debug-rem",
+          value: 5,
+          startDate: "2026-07-07T02:15:00.000Z",
+          endDate: "2026-07-07T06:27:00.000Z"
+        }
+      ]
+    });
+    healthkitMocks.queryWorkoutSamplesWithAnchor.mockResolvedValueOnce({
+      newAnchor: "workout-anchor-after",
+      deletedSamples: [{ uuid: "deleted-workout" }],
+      workouts: [
+        {
+          uuid: "debug-walk",
+          workoutActivityType: 52,
+          startDate: "2026-07-07T07:00:00.000Z",
+          endDate: "2026-07-07T07:16:00.000Z",
+          duration: 960,
+          metadata: { route: [{ latitude: 51.5, longitude: -0.1 }], HKIndoorWorkout: false }
+        }
+      ]
+    });
+
+    const snapshot = await exportHealthDebugSnapshot({ lookbackDays: 7, limit: 50 });
+
+    expect(healthkitMocks.queryCategorySamplesWithAnchor).toHaveBeenCalledWith(
+      "HKCategoryTypeIdentifierSleepAnalysis",
+      expect.objectContaining({
+        filter: { date: expect.objectContaining({ startDate: expect.any(Date), endDate: expect.any(Date) }) },
+        limit: 50
+      })
+    );
+    expect(healthkitMocks.queryWorkoutSamplesWithAnchor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filter: { date: expect.objectContaining({ startDate: expect.any(Date), endDate: expect.any(Date) }) },
+        limit: 50
+      })
+    );
+    expect(snapshot.storedState).toMatchObject({
+      sleepAnchorPresent: true,
+      workoutAnchorPresent: true,
+      sleepSeenCount: 1,
+      workoutSeenCount: 1
+    });
+    expect(snapshot.healthKit.sleep).toMatchObject({
+      sampleCount: 2,
+      stageCounts: { asleep_core: 1, asleep_rem: 1 },
+      sessions: [
+        expect.objectContaining({
+          sampleCount: 2,
+          autoConfirm: true
+        })
+      ]
+    });
+    expect(snapshot.healthKit.workouts).toMatchObject({
+      sampleCount: 1,
+      deletedSampleCount: 1,
+      typeCounts: { walking: 1 }
+    });
+    expect(snapshot.generatedEvents.workouts[0].rawPayload).toMatchObject({
+      workoutType: "walking",
+      autoConfirm: true
+    });
+    expect(JSON.stringify(snapshot)).not.toContain("latitude");
+    expect(JSON.stringify(snapshot)).not.toContain("longitude");
+    expect(asyncStore.get("dayframe.healthkit.sleepAnchor.v1")).toBe("sleep-anchor-before");
+    expect(asyncStore.get("dayframe.healthkit.workoutAnchor.v1")).toBe("workout-anchor-before");
   });
 
   it("filters disabled sleep sessions before queueing Health events", async () => {
