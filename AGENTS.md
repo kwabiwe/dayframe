@@ -138,6 +138,8 @@ npm run build
 - For auth/deployment changes, verify `DAYFRAME_AUTH_MODE=dev`, `local`, and `provider` code paths where practical.
 - For hosted deployment changes, verify the Supabase schema has all columns/indexes used by the deployed code before smoke-testing Vercel.
 - Do not claim scripts passed if they were not run.
+- Before diagnosing screenshots or production regressions, use `.codex/reference/debugging-playbook.md` to verify build, deployment, schema, and runtime state before changing code.
+- When a bug exposes a missing recurring guardrail, update the relevant `.codex/reference/` doc or investigation note as part of the fix.
 
 ## Important Files
 
@@ -147,6 +149,12 @@ npm run build
 - `.codex/reference/product-model.md`: category/task-first product rules.
 - `.codex/reference/mobile-permissions.md`: iOS permission state rules.
 - `.codex/reference/database.md`: schema, RLS, and hosted migration checks.
+- `.codex/reference/debugging-playbook.md`: screenshot/regression investigation workflow.
+- `.codex/reference/health-review-pipeline.md`: HealthKit import, Review, auto-log, and diagnostics flow.
+- `.codex/reference/release-and-testflight.md`: TestFlight, Vercel, Supabase, and runtime version checks.
+- `.codex/reference/validation-matrix.md`: feature-specific validation commands and manual checks.
+- `.codex/reference/process-improvement.md`: lightweight self-review and guardrail update loop.
+- `docs/investigations/`: active issue notes, evidence trails, and closure criteria.
 - `packages/shared/src/index.ts`: schemas, event types, palette, normalization.
 - `apps/web/src/lib/event-service.ts`: event processing into entries/review.
 - `apps/web/src/lib/ingest-auth.ts`: request/session/token resolution.
