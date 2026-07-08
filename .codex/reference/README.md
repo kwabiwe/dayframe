@@ -13,3 +13,8 @@ Suggested files:
 - `database.md` for schema, migration, and query patterns
 - `product-model.md` for category/task-first product rules
 - `mobile-permissions.md` for iOS permission state and placement rules
+- `debugging-playbook.md` for screenshot, production, and regression triage before coding
+- `health-review-pipeline.md` for HealthKit, Review, auto-log, Confirm, Dismiss, and diagnostics work
+- `release-and-testflight.md` for TestFlight, Vercel, Supabase, and runtime version checks
+- `validation-matrix.md` for selecting test commands and manual evidence by feature area
+- `process-improvement.md` for lightweight self-review and guardrail updates after regressions
