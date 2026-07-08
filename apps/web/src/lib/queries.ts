@@ -537,7 +537,12 @@ async function getReviewItems(session: RequestSession) {
   const result = await query<ReviewItemRow>(
     `select ri.id,
             ri.type,
-            ri.title,
+            case
+              when ae.event_type = 'geofence_exit'
+                and nullif(pl.default_activity_description, '') is not null
+              then pl.default_activity_description
+              else ri.title
+            end as title,
             ae.source as "eventSource",
             ae.event_type as "eventType",
             p.name as "projectName",

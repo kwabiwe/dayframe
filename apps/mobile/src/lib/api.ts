@@ -535,6 +535,17 @@ export async function resolveReviewItem(id: string, action: ReviewItemAction) {
     await clearSessionToken();
     throw new AuthRequiredError();
   }
+  if (response.status === 409) {
+    const result = await readApiJson<ApiErrorPayload>(response, "Unable to update review item");
+    if (result.ok && result.payload.code === "already_resolved") {
+      return {
+        ok: true,
+        alreadyResolved: true,
+        status: "accepted"
+      };
+    }
+    throw new Error(result.ok ? formatApiError(result.payload) ?? "Unable to update review item" : result.message);
+  }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to update review item"));
   return readJsonResponse(response);
 }
@@ -549,7 +560,7 @@ export function dismissReviewItem(id: string) {
 
 export async function reprocessHealthReviewItems(
   preferences: HealthImportPreferences,
-  options: { limit?: number } = {}
+  options: { limit?: number; force?: boolean } = {}
 ): Promise<HealthReviewReprocessResult> {
   const response = await fetch(`${DAYFRAME_API_BASE}/api/review/reprocess-health`, {
     method: "POST",
@@ -557,7 +568,7 @@ export async function reprocessHealthReviewItems(
       "Content-Type": "application/json",
       ...(await authHeaders())
     },
-    body: JSON.stringify({ preferences, limit: options.limit })
+    body: JSON.stringify({ preferences, limit: options.limit, force: options.force })
   });
   if (response.status === 401) {
     await clearSessionToken();

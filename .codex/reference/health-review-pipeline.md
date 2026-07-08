@@ -117,6 +117,7 @@ If a reason is not visible in UI, it should at least be present in diagnostics o
 - Sleep stages are imported independently and never consolidated.
 - High-confidence walks stay open because overlap detection is correct but invisible.
 - Accepted/ignored review items leak back into Review due to query or mobile filtering.
+- Reprocess keeps reselecting the same open-but-explained Review items and never reaches later eligible Health rows.
 
 ## Minimal Investigation Checklist
 

@@ -348,7 +348,8 @@ export async function reprocessExistingHealthReviewItems(
   healthReprocessInFlight = (async () => {
     try {
       const result = await reprocessHealthReviewItemBatches(
-        preferences ?? await getHealthImportPreferences()
+        preferences ?? await getHealthImportPreferences(),
+        options.force === true
       );
       lastHealthReprocessAt = result.hasMore ? 0 : Date.now();
       healthReprocessBackoffUntil = 0;
@@ -364,12 +365,12 @@ export async function reprocessExistingHealthReviewItems(
   return healthReprocessInFlight;
 }
 
-async function reprocessHealthReviewItemBatches(preferences: HealthImportPreferences) {
+async function reprocessHealthReviewItemBatches(preferences: HealthImportPreferences, force: boolean) {
   const startedAt = Date.now();
   let combined: HealthReviewReprocessResult | null = null;
 
   for (let batch = 0; batch < HEALTH_REPROCESS_MAX_BATCHES; batch += 1) {
-    const result = await reprocessHealthReviewItems(preferences, { limit: HEALTH_REPROCESS_BATCH_SIZE });
+    const result = await reprocessHealthReviewItems(preferences, { limit: HEALTH_REPROCESS_BATCH_SIZE, force });
     combined = mergeHealthReprocessResults(combined, result);
     if (!result.hasMore && !result.partial) break;
     if (Date.now() - startedAt >= HEALTH_REPROCESS_MAX_DURATION_MS) {

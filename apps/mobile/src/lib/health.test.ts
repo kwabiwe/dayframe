@@ -424,7 +424,7 @@ describe("HealthKit mapping", () => {
         strength_training: false,
         swimming: false
       }),
-      { limit: 12 }
+      { limit: 12, force: true }
     );
   });
 
@@ -467,12 +467,12 @@ describe("HealthKit mapping", () => {
     expect(apiMocks.reprocessHealthReviewItems).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ walking: true }),
-      { limit: 12 }
+      { limit: 12, force: true }
     );
     expect(apiMocks.reprocessHealthReviewItems).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({ walking: true }),
-      { limit: 12 }
+      { limit: 12, force: true }
     );
     expect(result).toMatchObject({
       checkedCount: 20,

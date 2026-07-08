@@ -61,6 +61,34 @@ Track focused PRs only:
 | --- | --- | --- | --- |
 | #22 | Review Confirm/autolog structured errors | merged | tests and simulator |
 | #23 | Review locks, sleep stage repair, Health debug export | merged/pending deploy verification | tests, TestFlight build 0.1.0 (1) |
+| #25 | Health reprocess batching | merged/deployed at `80e1bdb` | tests, TestFlight build 0.1.0 (2) |
+
+## 2026-07-08 Follow-Up From TestFlight Build 0.1.0 (2)
+
+Evidence:
+
+- KB screenshots show production API `https://dayframe-web.vercel.app`.
+- Vercel production deployment for `dayframe-web.vercel.app` is from `main` commit `80e1bdb`, created 2026-07-08 14:48 BST.
+- Vercel logs around 16:35-16:40 BST show repeated `POST /api/review/reprocess-health` responses with status `207`.
+- Review diagnostics on the phone show `remaining 1443`, `partial`, and repeated `Left in Review: sleep duration is outside the auto-log range.`
+- Manual Review actions are reaching `200`, but the mobile list can still show a stale card long enough for a second tap to trigger the "already resolved" pop-up.
+- Places screenshot shows place name `Kids' school` and default activity description `School run`, while an existing review card still displays `Kids' school` as the activity title.
+
+Findings:
+
+- Health reprocess was repeatedly selecting the same open rows that were already left in Review with a reason. Because those rows stay open by design, they could block later eligible walks and sleep groups from being reached in the mobile drain loop.
+- Legacy sleep stage consolidation only saw the rows in the current small batch, so fragmented sleep could stay fragmented when a complete sleep group was not present in that batch.
+- The Review screen removes rows only after a refresh, but `load()` can no-op while another refresh/reprocess is in flight. That makes already accepted/ignored items remain tappable in local state.
+- Place visit review titles and Confirm descriptions came from the stored review item title. Existing rows created before or around a place default description edit did not pick up the latest default activity description.
+
+Decision:
+
+- Create `codex/fix-review-stale-and-health-drain`.
+- Prioritize unprocessed/eligible Health rows and stop reporting `hasMore` once the remaining open rows already have visible "Left in Review" reasons.
+- Load a wider set of legacy sleep rows for consolidation so sleep stages can become one Sleep entry.
+- Treat already-resolved Review actions as idempotent success.
+- Optimistically remove resolved review cards on mobile before the refresh completes.
+- Use the current place default activity description for geofence Review display and Confirm description.
 
 ## Closure Criteria
 

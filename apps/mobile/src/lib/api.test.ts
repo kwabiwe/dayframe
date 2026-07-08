@@ -852,6 +852,25 @@ describe("mobile API client", () => {
     );
   });
 
+  it("treats already-resolved review items as idempotent success", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(jsonResponse({
+          ok: false,
+          code: "already_resolved",
+          message: "This review item has already been resolved."
+        }, 409))
+      )
+    );
+
+    await expect(confirmReviewItem("review-accepted")).resolves.toMatchObject({
+      ok: true,
+      alreadyResolved: true
+    });
+  });
+
   it("reprocesses existing Health review items with current preferences", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
     const fetchMock = vi.fn(() =>
@@ -908,6 +927,42 @@ describe("mobile API client", () => {
             other: false
           }
         })
+      })
+    );
+  });
+
+  it("can force a Health review reprocess batch from mobile", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(jsonResponse({
+        ok: true,
+        checkedCount: 0,
+        confirmedCount: 0,
+        ignoredCount: 0,
+        leftInReviewCount: 0,
+        skippedCount: 0,
+        failedCount: 0,
+        updatedCategoryCount: 0,
+        remainingReviewCount: 0,
+        errorSummary: []
+      }, 200))
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await reprocessHealthReviewItems({
+      sleep: true,
+      walking: true,
+      running: true,
+      cycling: true,
+      strength_training: false,
+      swimming: false,
+      other: false
+    }, { limit: 12, force: true });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/review/reprocess-health",
+      expect.objectContaining({
+        body: expect.stringContaining('"force":true')
       })
     );
   });
