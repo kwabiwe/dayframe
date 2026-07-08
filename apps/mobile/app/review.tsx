@@ -161,6 +161,14 @@ export default function ReviewScreen() {
     setResolvingId(item.id);
     try {
       await action();
+      setData((current) =>
+        current
+          ? {
+            ...current,
+            reviewItems: current.reviewItems.filter((candidate) => candidate.id !== item.id)
+          }
+          : current
+      );
       await load({ silent: true });
     } catch (error) {
       if (error instanceof AuthRequiredError) {

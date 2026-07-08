@@ -686,7 +686,9 @@ describe("health event persistence", () => {
     const reviewSelect = client.query.mock.calls.find(([statement]) =>
       String(statement).includes("from review_items ri") && String(statement).includes("for update of ri")
     );
-    expect(reviewSelect?.[1]).toEqual([session.workspaceId, session.userId, 2]);
+    expect(reviewSelect?.[1]).toEqual([session.workspaceId, session.userId, 2, false]);
+    expect(reviewSelect?.[0]).toContain("ri.notes is null or ri.notes not like 'Left in Review:%'");
+    expect(reviewSelect?.[0]).toContain("ae.event_type = 'health_workout_import'");
     expect(result).toMatchObject({
       batchSize: 2,
       checkedCount: 2,
@@ -1245,6 +1247,11 @@ describe("review item resolution", () => {
     const entryInsert = client.query.mock.calls.find(([statement]) =>
       String(statement).includes("insert into time_entries")
     );
+    const reviewSelect = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("from review_items ri")
+    );
+    expect(reviewSelect?.[0]).toContain("pl.default_activity_description");
+    expect(reviewSelect?.[0]).toContain("geofence_exit");
     expect(entryInsert?.[0]).toContain("'confirmed'");
     expect(entryInsert?.[0]).not.toContain("'accepted'");
     expect(entryInsert?.[1]).toEqual([
@@ -1308,7 +1315,7 @@ describe("review item resolution", () => {
     expect(client.query).toHaveBeenCalledWith("commit");
   });
 
-  it("returns a structured already-resolved error instead of treating it as unexpected", async () => {
+  it("treats already-resolved review candidates as idempotent success", async () => {
     const client = {
       query: vi.fn(async (statement: string) => {
         if (statement.includes("from review_items ri")) {
@@ -1337,11 +1344,12 @@ describe("review item resolution", () => {
     };
     mocks.pool.connect.mockResolvedValueOnce(client);
 
-    await expect(resolveReviewItem("review-accepted", "accept", session)).rejects.toMatchObject({
-      code: "already_resolved",
-      status: 409
+    await expect(resolveReviewItem("review-accepted", "accept", session)).resolves.toMatchObject({
+      ok: true,
+      alreadyResolved: true,
+      status: "accepted"
     });
-    expect(client.query).toHaveBeenCalledWith("rollback");
+    expect(client.query).toHaveBeenCalledWith("commit");
   });
 
   it("returns a structured locked error when Health reprocess is holding the review row", async () => {

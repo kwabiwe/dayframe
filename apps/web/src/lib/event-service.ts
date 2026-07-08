@@ -71,6 +71,7 @@ export type ReviewResolutionResult = {
   status: "accepted" | "ignored";
   entryId?: string;
   duplicate?: boolean;
+  alreadyResolved?: boolean;
 };
 
 type ReviewResolutionDetails = Record<string, unknown>;
@@ -1093,7 +1094,12 @@ export async function resolveReviewItem(
     }>(
       `select ri.id,
               ri.event_id as "eventId",
-              ri.title,
+              case
+                when ae.event_type = 'geofence_exit'
+                  and nullif(pl.default_activity_description, '') is not null
+                then pl.default_activity_description
+                else ri.title
+              end as title,
               ri.status,
               ri.suggested_project_id as "suggestedProjectId",
               ri.suggested_category_id as "suggestedCategoryId",
@@ -1105,6 +1111,7 @@ export async function resolveReviewItem(
               ae.event_type as "eventType"
        from review_items ri
        left join activity_events ae on ae.id = ri.event_id
+       left join places pl on pl.id = ri.suggested_place_id
        where ri.id = $1 and ri.workspace_id = $2
        for update of ri nowait`,
       [id, session.workspaceId]
@@ -1114,10 +1121,9 @@ export async function resolveReviewItem(
       throw new ReviewResolutionError("review_item_not_found", "Review item not found.", { status: 404 });
     }
     if (item.status !== "open") {
-      throw new ReviewResolutionError("already_resolved", "This review item has already been resolved.", {
-        status: 409,
-        details: { reviewItemId: item.id, status: item.status }
-      });
+      const resolvedStatus = item.status === "ignored" ? "ignored" : "accepted";
+      await client.query("commit");
+      return { ok: true, action, status: resolvedStatus, alreadyResolved: true };
     }
 
     let entryId: string | undefined;
@@ -1371,6 +1377,7 @@ type HealthReviewReprocessInput = {
   preferences?: Partial<HealthImportPreferences> | null;
   limit?: number | null;
   batchSize?: number | null;
+  force?: boolean | null;
 };
 
 type HealthReviewItemRow = {
@@ -1395,6 +1402,7 @@ export async function reprocessHealthReviewItems(
 ) {
   const preferences = normalizeHealthImportPreferences(input.preferences);
   const batchSize = normalizeHealthReprocessBatchSize(input.limit ?? input.batchSize);
+  const force = Boolean(input.force);
   const client = await pool.connect();
   const result = {
     checkedCount: 0,
@@ -1435,10 +1443,22 @@ export async function reprocessHealthReviewItems(
          and ae.workspace_id = $1
          and ae.user_id = $2
          and ae.event_type in ('health_sleep_import', 'health_workout_import')
-       order by ri.created_at asc
+       order by
+         case
+           when $4::boolean then 0
+           when ri.notes is null or ri.notes not like 'Left in Review:%' then 0
+           else 1
+         end asc,
+         case
+           when ae.event_type = 'health_workout_import' then 0
+           when ae.event_type = 'health_sleep_import' and ae.raw_payload ? 'samples' then 1
+           else 2
+         end asc,
+         coalesce(ri.suggested_started_at, ae.occurred_at) desc,
+         ri.created_at desc
        limit $3
        for update of ri skip locked`,
-      [session.workspaceId, session.userId, batchSize]
+      [session.workspaceId, session.userId, batchSize, force]
     );
 
     if (reviewItems.rows.length === 0) {
@@ -1457,9 +1477,16 @@ export async function reprocessHealthReviewItems(
       return result;
     }
 
+    const sleepItems = preferences.sleep
+      ? mergeHealthReviewItemRows(
+        reviewItems.rows,
+        await loadLegacySleepReviewItemsForConsolidation(client, session, force)
+      )
+      : reviewItems.rows;
+
     const consolidatedSleepIds = await consolidateLegacyHealthSleepReviewItems(
       client,
-      reviewItems.rows,
+      sleepItems,
       session,
       healthCategoryId,
       result
@@ -1589,8 +1616,11 @@ async function refreshHealthReviewRemainingCount(
   fetchedCount: number
 ) {
   try {
-    const countResult = await client.query<{ count: number }>(
-      `select count(*)::int as count
+    const countResult = await client.query<{ count: number; unexplainedCount: number }>(
+      `select count(*)::int as count,
+              count(*) filter (
+                where ri.notes is null or ri.notes not like 'Left in Review:%'
+              )::int as "unexplainedCount"
        from review_items ri
        join activity_events ae on ae.id = ri.event_id
        where ri.workspace_id = $1
@@ -1601,10 +1631,12 @@ async function refreshHealthReviewRemainingCount(
       [session.workspaceId, session.userId]
     );
     const remaining = Number(countResult.rows[0]?.count);
+    const unexplained = Number(countResult.rows[0]?.unexplainedCount);
     if (Number.isFinite(remaining)) {
       result.remainingReviewCount = remaining;
-      const processedButStillOpen = result.leftInReviewCount + result.failedCount;
-      result.partial = remaining > processedButStillOpen;
+      result.partial = Number.isFinite(unexplained)
+        ? unexplained > 0
+        : remaining > result.leftInReviewCount + result.failedCount;
       result.hasMore = result.partial;
       return;
     }
@@ -1614,6 +1646,61 @@ async function refreshHealthReviewRemainingCount(
 
   result.partial = fetchedCount >= result.batchSize;
   result.hasMore = result.partial;
+}
+
+async function loadLegacySleepReviewItemsForConsolidation(
+  client: pg.PoolClient,
+  session: RequestSession,
+  force: boolean
+) {
+  const result = await client.query<HealthReviewItemRow>(
+    `select ri.id,
+            ri.event_id as "eventId",
+            ri.title,
+            ri.suggested_project_id as "suggestedProjectId",
+            ri.suggested_category_id as "suggestedCategoryId",
+            ri.suggested_place_id as "suggestedPlaceId",
+            ri.suggested_started_at as "suggestedStartedAt",
+            ri.suggested_stopped_at as "suggestedStoppedAt",
+            ri.confidence,
+            ae.source as "eventSource",
+            ae.event_type as "eventType",
+            ae.suggested_category_id as "eventCategoryId",
+            ae.raw_payload as "rawPayload"
+     from review_items ri
+     join activity_events ae on ae.id = ri.event_id
+     where ri.workspace_id = $1
+       and ri.status = 'open'
+       and ae.workspace_id = $1
+       and ae.user_id = $2
+       and ae.event_type = 'health_sleep_import'
+       and not (ae.raw_payload ? 'samples')
+     order by
+       case
+         when $3::boolean then 0
+         when ri.notes is null or ri.notes not like 'Left in Review:%' then 0
+         else 1
+       end asc,
+       coalesce(ri.suggested_started_at, ae.occurred_at) desc,
+       ri.created_at desc
+     limit 300
+     for update of ri skip locked`,
+    [session.workspaceId, session.userId, force]
+  );
+  return result.rows;
+}
+
+function mergeHealthReviewItemRows(...groups: HealthReviewItemRow[][]) {
+  const seen = new Set<string>();
+  const merged: HealthReviewItemRow[] = [];
+  for (const group of groups) {
+    for (const item of group) {
+      if (seen.has(item.id)) continue;
+      seen.add(item.id);
+      merged.push(item);
+    }
+  }
+  return merged;
 }
 
 async function consolidateLegacyHealthSleepReviewItems(
