@@ -31,6 +31,9 @@ const HEALTHKIT_WORKOUT_PREFERENCES_KEY = "dayframe.healthkit.workoutPreferences
 const SLEEP_SESSION_GAP_MS = 90 * 60 * 1000;
 const HEALTH_REPROCESS_THROTTLE_MS = 5 * 60 * 1000;
 const HEALTH_REPROCESS_BACKOFF_MS = 10 * 60 * 1000;
+const HEALTH_REPROCESS_BATCH_SIZE = 12;
+const HEALTH_REPROCESS_MAX_BATCHES = 10;
+const HEALTH_REPROCESS_MAX_DURATION_MS = 12_000;
 const HEALTH_DEBUG_LOOKBACK_DAYS = 14;
 const HEALTH_DEBUG_SAMPLE_LIMIT = 100;
 
@@ -344,8 +347,10 @@ export async function reprocessExistingHealthReviewItems(
 
   healthReprocessInFlight = (async () => {
     try {
-      const result = await reprocessHealthReviewItems(preferences ?? await getHealthImportPreferences());
-      lastHealthReprocessAt = Date.now();
+      const result = await reprocessHealthReviewItemBatches(
+        preferences ?? await getHealthImportPreferences()
+      );
+      lastHealthReprocessAt = result.hasMore ? 0 : Date.now();
       healthReprocessBackoffUntil = 0;
       return result;
     } catch (error) {
@@ -357,6 +362,25 @@ export async function reprocessExistingHealthReviewItems(
     }
   })();
   return healthReprocessInFlight;
+}
+
+async function reprocessHealthReviewItemBatches(preferences: HealthImportPreferences) {
+  const startedAt = Date.now();
+  let combined: HealthReviewReprocessResult | null = null;
+
+  for (let batch = 0; batch < HEALTH_REPROCESS_MAX_BATCHES; batch += 1) {
+    const result = await reprocessHealthReviewItems(preferences, { limit: HEALTH_REPROCESS_BATCH_SIZE });
+    combined = mergeHealthReprocessResults(combined, result);
+    if (!result.hasMore && !result.partial) break;
+    if (Date.now() - startedAt >= HEALTH_REPROCESS_MAX_DURATION_MS) {
+      combined.partial = true;
+      combined.hasMore = true;
+      break;
+    }
+    if (result.checkedCount === 0 && result.confirmedCount === 0 && result.ignoredCount === 0) break;
+  }
+
+  return combined ?? skippedHealthReprocessResult("No Health review work returned.");
 }
 
 export async function exportHealthDebugSnapshot(
@@ -400,8 +424,10 @@ export async function exportHealthDebugSnapshot(
   const workoutSamples = (workoutResult.workouts as readonly HealthKitWorkoutSample[])
     .map((sample) => mapHealthKitWorkoutSample(sample.toJSON?.() ?? sample))
     .filter((sample) => validDate(sample.startedAt) && validDate(sample.stoppedAt));
-  const sleepEvents = sessions.map(healthKitSleepSessionEvent);
-  const workoutEvents = workoutSamples.map(healthKitWorkoutEvent);
+  const sleepEvents = preferences.sleep ? sessions.map(healthKitSleepSessionEvent) : [];
+  const workoutEvents = workoutSamples
+    .filter((sample) => preferences[sample.workoutType])
+    .map(healthKitWorkoutEvent);
 
   return {
     exportedAt: exportedAt.toISOString(),
@@ -424,15 +450,22 @@ export async function exportHealthDebugSnapshot(
         sampleCount: sleepSamples.length,
         deletedSampleCount: sleepResult.deletedSamples.length,
         stageCounts: countBy(sleepSamples, (sample) => sample.stage),
-        sessions: sessions.map((session, index) => ({
-          externalSessionId: session.externalSessionId,
-          startedAt: session.startedAt,
-          stoppedAt: session.stoppedAt,
-          durationSeconds: sleepEvents[index]?.rawPayload.durationSeconds ?? null,
-          sampleCount: session.samples.length,
-          stages: [...new Set(session.samples.map((sample) => sample.stage))],
-          autoConfirm: Boolean(sleepEvents[index]?.rawPayload.autoConfirm)
-        })),
+        sessions: sessions.map((session) => {
+          const durationSeconds = sessionDurationSeconds(session);
+          return {
+            externalSessionId: session.externalSessionId,
+            startedAt: session.startedAt,
+            stoppedAt: session.stoppedAt,
+            durationSeconds,
+            sampleCount: session.samples.length,
+            stages: [...new Set(session.samples.map((sample) => sample.stage))],
+            autoConfirm: preferences.sleep && shouldAutoConfirmHealthSleep({
+              durationSeconds,
+              startedAt: session.startedAt,
+              stoppedAt: session.stoppedAt
+            })
+          };
+        }),
         samples: sleepSamples
       },
       workouts: {
@@ -738,6 +771,36 @@ function failedHealthReprocessResult(error: unknown): HealthReviewReprocessResul
     updatedCategoryCount: 0,
     remainingReviewCount: 0,
     errorSummary: [message]
+  };
+}
+
+function mergeHealthReprocessResults(
+  current: HealthReviewReprocessResult | null,
+  next: HealthReviewReprocessResult
+): HealthReviewReprocessResult {
+  if (!current) {
+    return {
+      ...next,
+      errorSummary: [...next.errorSummary],
+      reasons: next.reasons ? [...next.reasons] : undefined
+    };
+  }
+
+  return {
+    ok: current.ok && next.ok,
+    checkedCount: current.checkedCount + next.checkedCount,
+    confirmedCount: current.confirmedCount + next.confirmedCount,
+    ignoredCount: current.ignoredCount + next.ignoredCount,
+    leftInReviewCount: next.leftInReviewCount,
+    skippedCount: current.skippedCount + next.skippedCount,
+    failedCount: current.failedCount + next.failedCount,
+    updatedCategoryCount: current.updatedCategoryCount + next.updatedCategoryCount,
+    remainingReviewCount: next.remainingReviewCount,
+    batchSize: next.batchSize ?? current.batchSize,
+    partial: Boolean(next.partial),
+    hasMore: Boolean(next.hasMore),
+    errorSummary: [...current.errorSummary, ...next.errorSummary],
+    reasons: [...(current.reasons ?? []), ...(next.reasons ?? [])]
   };
 }
 

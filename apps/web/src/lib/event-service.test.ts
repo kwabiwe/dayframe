@@ -642,6 +642,64 @@ describe("health event persistence", () => {
     ]);
   });
 
+  it("limits Health review reprocess batches and reports remaining production work", async () => {
+    const client = reprocessClient([]);
+    client.query.mockImplementation(async (statement: string) => {
+      if (statement.includes("select count(*)::int")) return { rows: [{ count: 5 }] };
+      if (statement.includes("from review_items ri") && statement.includes("for update of ri")) {
+        return {
+          rows: [
+            healthWorkoutReviewRow({
+              id: "review-walk-1",
+              eventId: "event-walk-1",
+              durationSeconds: 16 * 60
+            }),
+            healthWorkoutReviewRow({
+              id: "review-walk-2",
+              eventId: "event-walk-2",
+              durationSeconds: 37 * 60
+            })
+          ]
+        };
+      }
+      if (statement.includes("from categories")) return { rows: [{ id: healthCategoryId() }] };
+      if (statement.includes("created_from_event_id = $3")) return { rows: [] };
+      if (statement.includes("started_at < $4::timestamptz")) return { rows: [] };
+      if (statement.includes("insert into time_entries")) return { rows: [{ id: "entry" }] };
+      return { rows: [] };
+    });
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await reprocessHealthReviewItems({
+      limit: 2,
+      preferences: {
+        sleep: true,
+        walking: true,
+        running: true,
+        cycling: true,
+        strength_training: false,
+        swimming: false,
+        other: false
+      }
+    }, session);
+
+    const reviewSelect = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("from review_items ri") && String(statement).includes("for update of ri")
+    );
+    expect(reviewSelect?.[1]).toEqual([session.workspaceId, session.userId, 2]);
+    expect(result).toMatchObject({
+      batchSize: 2,
+      checkedCount: 2,
+      confirmedCount: 2,
+      remainingReviewCount: 5,
+      partial: true,
+      hasMore: true
+    });
+    expect(
+      client.query.mock.calls.filter(([statement]) => String(statement).includes("insert into time_entries"))
+    ).toHaveLength(2);
+  });
+
   it("ignores existing Walk review candidates when Walking import is disabled", async () => {
     const client = reprocessClient([
       healthWorkoutReviewRow({

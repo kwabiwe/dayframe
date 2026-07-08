@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     );
     return NextResponse.json(
       { ok: true, ...result },
-      { status: result.failedCount > 0 ? 207 : 200 }
+      { status: result.failedCount > 0 || result.partial ? 207 : 200 }
     );
   } catch (error) {
     const response = authErrorResponse(error);
