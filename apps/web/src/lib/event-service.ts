@@ -20,7 +20,9 @@ import {
   isInsufficientPrivilegeError,
   isInvalidTextRepresentationError,
   isInvalidConflictTargetError,
+  isLockNotAvailableError,
   isNotNullViolationError,
+  isStatementTimeoutError,
   isUniqueViolationError,
   isUndefinedColumnError,
   isUndefinedTableError,
@@ -60,7 +62,8 @@ export type ReviewResolutionCode =
   | "invalid_action"
   | "invalid_time_window"
   | "duplicate_entry"
-  | "database_constraint";
+  | "database_constraint"
+  | "review_item_locked";
 
 export type ReviewResolutionResult = {
   ok: true;
@@ -109,6 +112,14 @@ type HealthReviewReason = {
   code: string;
   message: string;
   blockingEntry?: OverlapBlockingEntry;
+};
+
+type SleepReviewSegment = {
+  item: HealthReviewItemRow;
+  startedAt: string;
+  stoppedAt: string;
+  startedMs: number;
+  stoppedMs: number;
 };
 
 const CATEGORY_PINS_MIGRATION = "supabase/migrations/202607040001_category_pins_and_project_backfill.sql";
@@ -1093,7 +1104,7 @@ export async function resolveReviewItem(
        from review_items ri
        left join activity_events ae on ae.id = ri.event_id
        where ri.id = $1 and ri.workspace_id = $2
-       for update of ri`,
+       for update of ri nowait`,
       [id, session.workspaceId]
     );
     const item = review.rows[0];
@@ -1306,6 +1317,17 @@ function reviewResolutionErrorForDatabaseError(error: unknown) {
     );
   }
 
+  if (isLockNotAvailableError(error) || isStatementTimeoutError(error)) {
+    return new ReviewResolutionError(
+      "review_item_locked",
+      "This review item is being updated by Health reprocess. Try again in a moment.",
+      {
+        status: 409,
+        cause: error
+      }
+    );
+  }
+
   if (
     isForeignKeyViolationError(error) ||
     isCheckViolationError(error) ||
@@ -1406,7 +1428,7 @@ export async function reprocessHealthReviewItems(
          and ae.user_id = $2
          and ae.event_type in ('health_sleep_import', 'health_workout_import')
        order by ri.created_at asc
-       for update of ri`,
+       for update of ri skip locked`,
       [session.workspaceId, session.userId]
     );
 
@@ -1425,7 +1447,16 @@ export async function reprocessHealthReviewItems(
       return result;
     }
 
+    const consolidatedSleepIds = await consolidateLegacyHealthSleepReviewItems(
+      client,
+      reviewItems.rows,
+      session,
+      healthCategoryId,
+      result
+    );
+
     for (const item of reviewItems.rows) {
+      if (consolidatedSleepIds.has(item.id)) continue;
       result.checkedCount += 1;
       await client.query("savepoint reprocess_health_item");
       try {
@@ -1525,6 +1556,143 @@ export async function reprocessHealthReviewItems(
   } finally {
     client.release();
   }
+}
+
+async function consolidateLegacyHealthSleepReviewItems(
+  client: pg.PoolClient,
+  items: HealthReviewItemRow[],
+  session: RequestSession,
+  healthCategoryId: string,
+  result: {
+    checkedCount: number;
+    confirmedCount: number;
+    leftInReviewCount: number;
+    remainingReviewCount: number;
+    updatedCategoryCount: number;
+    reasons: HealthReviewReason[];
+  }
+) {
+  const handledIds = new Set<string>();
+  const segments = items
+    .map(legacySleepReviewSegment)
+    .filter((segment): segment is SleepReviewSegment => Boolean(segment))
+    .sort((left, right) => left.startedMs - right.startedMs);
+
+  const groups: SleepReviewSegment[][] = [];
+  for (const segment of segments) {
+    const current = groups.at(-1);
+    if (!current) {
+      groups.push([segment]);
+      continue;
+    }
+
+    const currentStop = Math.max(...current.map((item) => item.stoppedMs));
+    if (segment.startedMs - currentStop <= 90 * 60 * 1000) {
+      current.push(segment);
+    } else {
+      groups.push([segment]);
+    }
+  }
+
+  for (const group of groups) {
+    if (group.length < 2) continue;
+
+    const startedAt = new Date(Math.min(...group.map((segment) => segment.startedMs))).toISOString();
+    const stoppedAt = new Date(Math.max(...group.map((segment) => segment.stoppedMs))).toISOString();
+    const durationSeconds = Math.round((new Date(stoppedAt).getTime() - new Date(startedAt).getTime()) / 1000);
+    if (!shouldAutoConfirmHealthSleep({ durationSeconds, startedAt, stoppedAt })) continue;
+
+    await client.query("savepoint consolidate_health_sleep");
+    try {
+      for (const segment of group) {
+        if (segment.item.suggestedCategoryId !== healthCategoryId || segment.item.eventCategoryId !== healthCategoryId) {
+          await updateHealthReviewCategory(client, segment.item, healthCategoryId);
+          result.updatedCategoryCount += 1;
+        }
+      }
+
+      const blockingEntry = await findOverlappingTimeEntry(client, session, startedAt, stoppedAt);
+      if (blockingEntry) {
+        const message = overlapReviewNote(blockingEntry);
+        for (const segment of group) {
+          handledIds.add(segment.item.id);
+          result.checkedCount += 1;
+          await updateHealthReviewNotes(client, segment.item.id, message);
+          addHealthReviewReason(result.reasons, {
+            reviewItemId: segment.item.id,
+            code: "overlap",
+            message,
+            blockingEntry
+          });
+          result.leftInReviewCount += 1;
+          result.remainingReviewCount += 1;
+        }
+        await client.query("release savepoint consolidate_health_sleep");
+        continue;
+      }
+
+      const existingEntry = await firstExistingEntryForHealthReviewItems(client, group.map((segment) => segment.item), session);
+      if (!existingEntry) {
+        await insertConfirmedHealthTimeEntry(client, {
+          ...group[0].item,
+          title: "Sleep"
+        }, session, {
+          categoryId: healthCategoryId,
+          startedAt,
+          stoppedAt
+        });
+      }
+
+      for (const segment of group) {
+        handledIds.add(segment.item.id);
+        result.checkedCount += 1;
+        await resolveReprocessedHealthReviewItem(client, segment.item, "accepted");
+      }
+      result.confirmedCount += 1;
+      await client.query("release savepoint consolidate_health_sleep");
+    } catch (error) {
+      void error;
+      await client.query("rollback to savepoint consolidate_health_sleep");
+      await client.query("release savepoint consolidate_health_sleep");
+      handledIds.forEach((id) => {
+        if (group.some((segment) => segment.item.id === id)) handledIds.delete(id);
+      });
+    }
+  }
+
+  return handledIds;
+}
+
+function legacySleepReviewSegment(item: HealthReviewItemRow): SleepReviewSegment | null {
+  if (item.eventType !== "health_sleep_import") return null;
+  const rawPayload = isRecord(item.rawPayload) ? item.rawPayload : {};
+  if (Array.isArray(rawPayload.samples) && rawPayload.samples.length > 0) return null;
+
+  const sleepStage = stringOrNull(rawPayload.sleepStage);
+  if (sleepStage === "awake" || sleepStage === "in_bed") return null;
+
+  const startedAt = timestampStringOrNull(rawPayload.startedAt) ?? item.suggestedStartedAt;
+  const stoppedAt = timestampStringOrNull(rawPayload.stoppedAt) ?? item.suggestedStoppedAt;
+  if (!startedAt || !stoppedAt) return null;
+
+  const startedMs = new Date(startedAt).getTime();
+  const stoppedMs = new Date(stoppedAt).getTime();
+  if (!Number.isFinite(startedMs) || !Number.isFinite(stoppedMs) || stoppedMs <= startedMs) return null;
+
+  return { item, startedAt, stoppedAt, startedMs, stoppedMs };
+}
+
+async function firstExistingEntryForHealthReviewItems(
+  client: pg.PoolClient,
+  items: HealthReviewItemRow[],
+  session: RequestSession
+) {
+  for (const item of items) {
+    if (!item.eventId) continue;
+    const entry = await getTimeEntryCreatedFromEvent(client, item.eventId, session);
+    if (entry) return entry;
+  }
+  return null;
 }
 
 export async function createEntity(

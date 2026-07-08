@@ -608,6 +608,10 @@ describe("health event persistence", () => {
       }
     }, session);
 
+    const reviewSelect = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("from review_items ri") && String(statement).includes("for update of ri")
+    );
+    expect(reviewSelect?.[0]).toContain("skip locked");
     expect(result).toMatchObject({
       checkedCount: 3,
       confirmedCount: 2,
@@ -865,6 +869,80 @@ describe("health event persistence", () => {
     ]);
     expect(client.query).toHaveBeenCalledWith("rollback to savepoint reprocess_health_item");
     expect(client.query).toHaveBeenCalledWith("commit");
+  });
+
+  it("consolidates legacy sleep stage review rows into one confirmed sleep entry", async () => {
+    const client = reprocessClient([
+      healthSleepReviewRow({
+        id: "review-core",
+        eventId: "event-core",
+        startedAt: "2026-07-06T23:55:00.000Z",
+        stoppedAt: "2026-07-07T02:15:00.000Z",
+        durationSeconds: 140 * 60,
+        suggestedCategoryId: healthCategoryId(),
+        eventCategoryId: healthCategoryId()
+      }),
+      healthSleepReviewRow({
+        id: "review-deep",
+        eventId: "event-deep",
+        startedAt: "2026-07-07T02:15:00.000Z",
+        stoppedAt: "2026-07-07T03:10:00.000Z",
+        durationSeconds: 55 * 60,
+        suggestedCategoryId: healthCategoryId(),
+        eventCategoryId: healthCategoryId()
+      }),
+      healthSleepReviewRow({
+        id: "review-rem",
+        eventId: "event-rem",
+        startedAt: "2026-07-07T03:10:00.000Z",
+        stoppedAt: "2026-07-07T06:27:00.000Z",
+        durationSeconds: 197 * 60,
+        suggestedCategoryId: healthCategoryId(),
+        eventCategoryId: healthCategoryId()
+      })
+    ]);
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await reprocessHealthReviewItems({
+      preferences: {
+        sleep: true,
+        walking: true,
+        running: true,
+        cycling: true,
+        strength_training: false,
+        swimming: false,
+        other: false
+      }
+    }, session);
+
+    expect(result).toMatchObject({
+      checkedCount: 3,
+      confirmedCount: 1,
+      remainingReviewCount: 0
+    });
+    const entryInserts = client.query.mock.calls.filter(([statement]) =>
+      String(statement).includes("insert into time_entries")
+    );
+    expect(entryInserts).toHaveLength(1);
+    expect(entryInserts[0]?.[1]).toEqual([
+      session.workspaceId,
+      session.userId,
+      null,
+      healthCategoryId(),
+      null,
+      "health_sleep",
+      "high",
+      "Sleep",
+      "2026-07-06T23:55:00.000Z",
+      "2026-07-07T06:27:00.000Z",
+      "event-core"
+    ]);
+    const acceptedUpdates = client.query.mock.calls.filter(([statement, values]) =>
+      String(statement).includes("update review_items") &&
+      String(statement).includes("set status = $2") &&
+      (values as unknown[])?.[1] === "accepted"
+    );
+    expect(acceptedUpdates).toHaveLength(3);
   });
 
   it("returns a structured failure when the Health category cannot be ensured", async () => {
@@ -1205,6 +1283,31 @@ describe("review item resolution", () => {
       code: "already_resolved",
       status: 409
     });
+    expect(client.query).toHaveBeenCalledWith("rollback");
+  });
+
+  it("returns a structured locked error when Health reprocess is holding the review row", async () => {
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes("from review_items ri")) {
+          throw Object.assign(new Error("could not obtain lock on row in relation review_items"), {
+            code: "55P03"
+          });
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(resolveReviewItem("review-locked", "accept", session)).rejects.toMatchObject({
+      code: "review_item_locked",
+      status: 409
+    });
+    const reviewSelect = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("from review_items ri")
+    );
+    expect(reviewSelect?.[0]).toContain("nowait");
     expect(client.query).toHaveBeenCalledWith("rollback");
   });
 });

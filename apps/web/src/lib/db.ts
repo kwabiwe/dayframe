@@ -81,6 +81,16 @@ export function isNotNullViolationError(error: unknown, columnName?: string) {
   return candidate.column === columnName || candidate.message?.includes(columnName) === true;
 }
 
+export function isLockNotAvailableError(error: unknown) {
+  const candidate = error as { code?: string } | null;
+  return candidate?.code === "55P03";
+}
+
+export function isStatementTimeoutError(error: unknown) {
+  const candidate = error as { code?: string } | null;
+  return candidate?.code === "57014";
+}
+
 export class MissingRequiredColumnError extends Error {
   tableName: string;
   columnName: string;
