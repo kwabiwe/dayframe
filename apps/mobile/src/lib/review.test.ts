@@ -77,6 +77,31 @@ describe("mobile review helpers", () => {
     );
   });
 
+  it("defaults stale sleep review drafts to the Sleep category", () => {
+    expect(
+      buildReviewItemDraftEntry(
+        reviewItem({
+          categoryName: null,
+          eventSource: "health_sleep",
+          eventType: "health_sleep_import",
+          suggestedCategoryId: null,
+          title: "Sleep"
+        }),
+        [
+          { id: "cat-health", name: "Health", color: "moss", isPinned: true },
+          { id: "cat-sleep", name: "Sleep", color: "lime", isPinned: true }
+        ],
+        Date.now()
+      )
+    ).toEqual(
+      expect.objectContaining({
+        categoryId: "cat-sleep",
+        categoryName: "Sleep",
+        categoryColor: "lime"
+      })
+    );
+  });
+
   it("detects review-needed activity inside a report range", () => {
     const rangeStart = new Date("2026-07-07T00:00:00.000Z");
     const rangeEnd = new Date("2026-07-08T00:00:00.000Z");

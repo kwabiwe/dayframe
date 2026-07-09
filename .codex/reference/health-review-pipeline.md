@@ -65,6 +65,7 @@ Sleep:
 
 - Enabled by default.
 - Plausible sleep should become a single Sleep entry/session, not REM/Core/Deep fragments.
+- Confirmed sleep should use a user-facing `Sleep` category, creating it when needed. Workouts can keep using the broader `Health` category unless a user changes defaults later.
 - Implausible, too short, too long, overlapping, or malformed sleep should stay in Review with a reason.
 
 Strength training, swimming, and unknown/other workouts should remain review-first unless a product decision changes that.

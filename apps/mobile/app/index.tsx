@@ -7,6 +7,7 @@ import {
   Easing,
   Image,
   Linking,
+  PanResponder,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -71,7 +72,9 @@ const RECENT_LAST_STOP_WINDOW_MS = 24 * 60 * 60 * 1000;
 const TAB_BAR_HEIGHT = 72;
 const TIMELINE_START_HOUR = 6;
 const TIMELINE_END_HOUR = 22;
-const TIMELINE_HOUR_HEIGHT = 72;
+const TIMELINE_DEFAULT_HOUR_HEIGHT = 72;
+const TIMELINE_MIN_HOUR_HEIGHT = 48;
+const TIMELINE_MAX_HOUR_HEIGHT = 128;
 const TIMELINE_MIN_BLOCK_HEIGHT = 44;
 
 export default function HomeScreen() {
@@ -84,6 +87,7 @@ export default function HomeScreen() {
   const [selectedDayKey, setSelectedDayKey] = useState(() => formatDateKey(new Date()));
   const [reportRange, setReportRange] = useState<ReportRange>("today");
   const [calendarEditEntry, setCalendarEditEntry] = useState<CalendarEntry | null>(null);
+  const [calendarHourHeight, setCalendarHourHeight] = useState(TIMELINE_DEFAULT_HOUR_HEIGHT);
   const [authView, setAuthView] = useState<AuthView>("login");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -97,6 +101,7 @@ export default function HomeScreen() {
   const [activeEditSaving, setActiveEditSaving] = useState(false);
   const [activeEditStopping, setActiveEditStopping] = useState(false);
   const [calendarEditSaving, setCalendarEditSaving] = useState(false);
+  const [calendarEditDeleting, setCalendarEditDeleting] = useState(false);
   const [chartProgress, setChartProgress] = useState(1);
   const refreshInFlight = useRef(false);
   const entrance = useRef(new Animated.Value(0)).current;
@@ -206,8 +211,8 @@ export default function HomeScreen() {
     : 0;
   const todayKey = useMemo(() => formatDateKey(new Date(now)), [now]);
   const weekDays = useMemo(
-    () => buildWeekStripDays(data?.dateRange?.weekStart, now),
-    [data?.dateRange?.weekStart, now]
+    () => buildWeekStripDays(selectedDayKey, now),
+    [now, selectedDayKey]
   );
   const summaryEntries = useMemo(
     () => mergeActiveEntry(data?.dayEntries ?? data?.entries ?? [], data?.activeEntry ?? null),
@@ -248,11 +253,6 @@ export default function HomeScreen() {
     () => buildReports(data, reportRange, todayKey, now),
     [data, now, reportRange, todayKey]
   );
-
-  useEffect(() => {
-    if (weekDays.some((day) => day.key === selectedDayKey)) return;
-    setSelectedDayKey(weekDays.some((day) => day.key === todayKey) ? todayKey : weekDays[0]?.key ?? todayKey);
-  }, [selectedDayKey, todayKey, weekDays]);
 
   useEffect(() => {
     if (!data?.activeEntry && activeEditVisible) setActiveEditVisible(false);
@@ -365,6 +365,34 @@ export default function HomeScreen() {
       setCalendarEditSaving(false);
     }
   }
+
+  async function deleteCalendarEntry(entryId: string) {
+    setCalendarEditDeleting(true);
+    try {
+      await deleteTimeEntry(entryId);
+      await load();
+      return true;
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        setCalendarEditEntry(null);
+        setAuthState("signedOut");
+        setData(null);
+        return false;
+      }
+      Alert.alert("Entry not deleted", error instanceof Error ? error.message : "Unable to delete this entry.");
+      return false;
+    } finally {
+      setCalendarEditDeleting(false);
+    }
+  }
+
+  const shiftSelectedCalendarDay = useCallback((days: number) => {
+    setSelectedDayKey((current) => formatDateKey(addDaysToDate(dateFromKey(current), days)));
+  }, []);
+
+  const setCalendarZoom = useCallback((hourHeight: number) => {
+    setCalendarHourHeight(clamp(hourHeight, TIMELINE_MIN_HOUR_HEIGHT, TIMELINE_MAX_HOUR_HEIGHT));
+  }, []);
 
   async function stopActiveTimer() {
     setActiveEditStopping(true);
@@ -740,7 +768,10 @@ export default function HomeScreen() {
           {activeTab === "calendar" ? (
             <CalendarTab
               entries={calendarEntries}
+              hourHeight={calendarHourHeight}
               now={now}
+              onChangeDay={shiftSelectedCalendarDay}
+              onChangeZoom={setCalendarZoom}
               onOpenActive={() => {
                 setCalendarEditEntry(null);
                 setActiveEditVisible(true);
@@ -800,7 +831,9 @@ export default function HomeScreen() {
         lastStoppedAt={null}
         mode="entry"
         onCancel={() => setCalendarEditEntry(null)}
+        onDelete={deleteCalendarEntry}
         onSave={saveCalendarEntryEdit}
+        deleting={calendarEditDeleting}
         saving={calendarEditSaving}
         stopping={false}
         styles={styles}
@@ -919,7 +952,10 @@ function useLiquidGlassAvailability() {
 
 function CalendarTab({
   entries,
+  hourHeight,
   now,
+  onChangeDay,
+  onChangeZoom,
   onOpenActive,
   onOpenDetail,
   onOpenReviewItem,
@@ -932,7 +968,10 @@ function CalendarTab({
   weekDays
 }: {
   entries: CalendarEntry[];
+  hourHeight: number;
   now: number;
+  onChangeDay: (days: number) => void;
+  onChangeZoom: (hourHeight: number) => void;
   onOpenActive: () => void;
   onOpenDetail: (entry: CalendarEntry) => void;
   onOpenReviewItem: (reviewItemId: string) => void;
@@ -944,22 +983,55 @@ function CalendarTab({
   total: number;
   weekDays: Array<{ key: string; date: Date }>;
 }) {
-  const timelineHeight = (TIMELINE_END_HOUR - TIMELINE_START_HOUR) * TIMELINE_HOUR_HEIGHT;
+  const pinchStartDistance = useRef<number | null>(null);
+  const pinchStartHourHeight = useRef(hourHeight);
+  const timelineHeight = (TIMELINE_END_HOUR - TIMELINE_START_HOUR) * hourHeight;
   const selectedDate = dateFromKey(selectedDayKey);
   const currentMinute = minutesSinceStartOfDay(new Date(now));
   const showCurrentTime = selectedDayKey === todayKey;
   const currentLineTop = Math.min(
     timelineHeight,
-    Math.max(0, ((currentMinute - TIMELINE_START_HOUR * 60) / 60) * TIMELINE_HOUR_HEIGHT)
+    Math.max(0, ((currentMinute - TIMELINE_START_HOUR * 60) / 60) * hourHeight)
   );
   const currentTimeOutsideAxis =
     showCurrentTime &&
     (currentMinute < TIMELINE_START_HOUR * 60 || currentMinute > TIMELINE_END_HOUR * 60);
   const visibleBlocks = entries
-    .map((entry) => ({ entry, metrics: getTimelineMetrics(entry, selectedDayKey, now) }))
+    .map((entry) => ({ entry, metrics: getTimelineMetrics(entry, selectedDayKey, now, hourHeight) }))
     .filter((item): item is { entry: CalendarEntry; metrics: { top: number; height: number } } => Boolean(item.metrics));
   const visibleBlockIds = new Set(visibleBlocks.map(({ entry }) => entry.id));
   const outsideAxisEntries = entries.filter((entry) => !visibleBlockIds.has(entry.id)).slice(0, 3);
+  const dayGestureResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: (event) => event.nativeEvent.touches.length >= 2,
+    onMoveShouldSetPanResponder: (event, gesture) => {
+      if (event.nativeEvent.touches.length >= 2) return true;
+      return Math.abs(gesture.dx) > 28 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.45;
+    },
+    onPanResponderGrant: (event) => {
+      if (event.nativeEvent.touches.length >= 2) {
+        pinchStartDistance.current = touchDistance(event.nativeEvent.touches);
+        pinchStartHourHeight.current = hourHeight;
+      } else {
+        pinchStartDistance.current = null;
+      }
+    },
+    onPanResponderMove: (event) => {
+      if (event.nativeEvent.touches.length < 2 || !pinchStartDistance.current) return;
+      const distance = touchDistance(event.nativeEvent.touches);
+      if (!distance) return;
+      onChangeZoom(pinchStartHourHeight.current * (distance / pinchStartDistance.current));
+    },
+    onPanResponderRelease: (_event, gesture) => {
+      const wasPinching = Boolean(pinchStartDistance.current);
+      pinchStartDistance.current = null;
+      if (wasPinching) return;
+      if (Math.abs(gesture.dx) < 62 || Math.abs(gesture.dx) < Math.abs(gesture.dy) * 1.2) return;
+      onChangeDay(gesture.dx < 0 ? 1 : -1);
+    },
+    onPanResponderTerminate: () => {
+      pinchStartDistance.current = null;
+    }
+  }), [hourHeight, onChangeDay, onChangeZoom]);
 
   return (
     <View style={styles.tabScreenStack}>
@@ -1005,7 +1077,7 @@ function CalendarTab({
         </ScrollView>
       </View>
 
-      <View style={styles.lifecyclePanel}>
+      <View style={styles.lifecyclePanel} {...dayGestureResponder.panHandlers}>
         <View style={styles.summaryHeader}>
           <View>
             <Text style={styles.label}>Calendar</Text>
@@ -1065,7 +1137,7 @@ function CalendarTab({
           <View style={[styles.calendarTimelineCanvas, { height: timelineHeight }]}>
             {Array.from({ length: TIMELINE_END_HOUR - TIMELINE_START_HOUR + 1 }, (_, index) => {
               const hour = TIMELINE_START_HOUR + index;
-              const top = index * TIMELINE_HOUR_HEIGHT;
+              const top = index * hourHeight;
 
               return (
                 <View key={hour} pointerEvents="none" style={[styles.calendarHourRow, { top }]}>
@@ -1468,8 +1540,9 @@ function DonutChart({
   );
 }
 
-function buildWeekStripDays(weekStartIso: string | undefined, now: number) {
-  const start = weekStartIso ? new Date(weekStartIso) : startOfWeekDate(new Date(now));
+function buildWeekStripDays(selectedDayKey: string | undefined, now: number) {
+  const selectedDate = selectedDayKey ? dateFromKey(selectedDayKey) : new Date(now);
+  const start = startOfWeekDate(selectedDate);
   if (Number.isNaN(start.getTime())) {
     return buildWeekStripDays(undefined, now);
   }
@@ -1485,7 +1558,11 @@ function buildWeekStripDays(weekStartIso: string | undefined, now: number) {
 
 function buildCalendarEntries(data: MobileBootstrap | null, selectedDayKey: string, now: number): CalendarEntry[] {
   if (!data) return [];
-  const timeEntries = mergeActiveEntry(data.weekEntries ?? data.entries, data.activeEntry)
+  const mergedEntries = mergeActiveEntry(
+    dedupeEntriesById([...(data.entries ?? []), ...(data.weekEntries ?? [])]),
+    data.activeEntry
+  );
+  const timeEntries = mergedEntries
     .filter((entry) => entryOverlapsDay(entry, selectedDayKey, now))
     .map((entry) => ({
       ...entry,
@@ -1508,6 +1585,12 @@ function buildCalendarEntries(data: MobileBootstrap | null, selectedDayKey: stri
 
   return [...timeEntries, ...reviewEntries]
     .sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
+}
+
+function dedupeEntriesById(entries: TimeEntry[]) {
+  const byId = new Map<string, TimeEntry>();
+  for (const entry of entries) byId.set(entry.id, entry);
+  return Array.from(byId.values());
 }
 
 function buildReports(data: MobileBootstrap | null, range: ReportRange, todayKey: string, now: number) {
@@ -1621,7 +1704,7 @@ function sumRangeSeconds(entries: TimeEntry[], rangeStart: Date, rangeEnd: Date,
   }, 0);
 }
 
-function getTimelineMetrics(entry: CalendarEntry, selectedDayKey: string, now: number) {
+function getTimelineMetrics(entry: CalendarEntry, selectedDayKey: string, now: number, hourHeight: number) {
   const dayStart = dateFromKey(selectedDayKey);
   const axisStart = new Date(dayStart);
   axisStart.setHours(TIMELINE_START_HOUR, 0, 0, 0);
@@ -1646,8 +1729,8 @@ function getTimelineMetrics(entry: CalendarEntry, selectedDayKey: string, now: n
   const durationMinutes = Math.max(1, (visibleEnd.getTime() - visibleStart.getTime()) / 60000);
 
   return {
-    top: (topMinutes / 60) * TIMELINE_HOUR_HEIGHT,
-    height: Math.max(TIMELINE_MIN_BLOCK_HEIGHT, (durationMinutes / 60) * TIMELINE_HOUR_HEIGHT)
+    top: (topMinutes / 60) * hourHeight,
+    height: Math.max(TIMELINE_MIN_BLOCK_HEIGHT, (durationMinutes / 60) * hourHeight)
   };
 }
 
@@ -1744,6 +1827,18 @@ function formatDateKey(date: Date) {
     pad2(date.getMonth() + 1),
     pad2(date.getDate())
   ].join("-");
+}
+
+function touchDistance(touches: ArrayLike<{ pageX: number; pageY: number }>) {
+  if (touches.length < 2) return 0;
+  const first = touches[0];
+  const second = touches[1];
+  return Math.hypot(second.pageX - first.pageX, second.pageY - first.pageY);
+}
+
+function clamp(value: number, min: number, max: number) {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
 }
 
 function startOfWeekDate(date: Date) {

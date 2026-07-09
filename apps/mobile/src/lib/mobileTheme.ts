@@ -1222,6 +1222,20 @@ function createStyles(theme: MobileTheme) {
       gap: 12,
       paddingBottom: 18
     },
+    activeEditDeleteButton: {
+      alignSelf: "center",
+      minHeight: 44,
+      justifyContent: "center",
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      marginTop: 2
+    },
+    activeEditDeleteText: {
+      color: theme.danger,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "800"
+    },
     activeEditHeroRow: {
       flexDirection: "row",
       alignItems: "center",

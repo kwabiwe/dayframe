@@ -843,7 +843,7 @@ export function normalizeActivityEvent(
       confidence: "high",
       reviewStatus: autoConfirm ? "confirmed" : "needs_review",
       projectId: event.projectId,
-      categoryId: event.categoryId ?? findCategoryByName(context.categories, "Health")?.id,
+      categoryId: event.categoryId ?? findCategoryByName(context.categories, "Sleep")?.id,
       title: event.description ?? "Sleep",
       reason: autoConfirm
         ? "High-confidence Health sleep can become completed time automatically."

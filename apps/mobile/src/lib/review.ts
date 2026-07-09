@@ -118,7 +118,9 @@ function parseTime(value: string | null | undefined) {
 
 function fallbackHealthCategory(item: MobileReviewItem, categories: MobileCategory[]) {
   if (!isHealthReviewItem(item)) return undefined;
-  return categories.find((candidate) => candidate.name.trim().toLowerCase() === "health");
+  const preferredName = item.eventType === "health_sleep_import" ? "sleep" : "health";
+  return categories.find((candidate) => candidate.name.trim().toLowerCase() === preferredName)
+    ?? categories.find((candidate) => candidate.name.trim().toLowerCase() === "health");
 }
 
 function isHealthReviewItem(item: Pick<MobileReviewItem, "eventSource" | "eventType">) {

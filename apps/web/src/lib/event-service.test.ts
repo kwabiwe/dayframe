@@ -263,7 +263,10 @@ describe("health event persistence", () => {
     vi.resetAllMocks();
     mocks.getNormalizationContext.mockResolvedValue({
       projects: [],
-      categories: [{ id: healthCategoryId(), name: "Health", color: "moss", isPinned: false }],
+      categories: [
+        { id: healthCategoryId(), name: "Health", color: "moss", isPinned: false },
+        { id: sleepCategoryId(), name: "Sleep", color: "lime", isPinned: false }
+      ],
       places: [],
       automationRules: []
     });
@@ -309,7 +312,7 @@ describe("health event persistence", () => {
       "health_sleep_import_suggestion",
       "Sleep",
       null,
-      healthCategoryId(),
+      sleepCategoryId(),
       null,
       "2026-06-06T23:55:00.000Z",
       "2026-06-07T06:27:00.000Z",
@@ -320,7 +323,7 @@ describe("health event persistence", () => {
     expect(client.release).toHaveBeenCalled();
   });
 
-  it("auto-confirms high-confidence Health sleep as completed Health time", async () => {
+  it("auto-confirms high-confidence Health sleep as completed Sleep time", async () => {
     const client = {
       query: vi.fn(async (statement: string, values?: unknown[]) => {
         void values;
@@ -343,7 +346,7 @@ describe("health event persistence", () => {
       session.workspaceId,
       session.userId,
       null,
-      healthCategoryId(),
+      sleepCategoryId(),
       null,
       "health_sleep",
       "high",
@@ -480,7 +483,7 @@ describe("health event persistence", () => {
     );
     expect(client.query).toHaveBeenCalledWith(
       expect.stringContaining("insert into categories"),
-      [session.workspaceId]
+      [session.workspaceId, "Health", "moss"]
     );
     const activityInsert = client.query.mock.calls.find(([statement]) =>
       String(statement).includes("insert into activity_events")
@@ -1330,12 +1333,13 @@ describe("health event persistence", () => {
     }, session);
 
     expect(result).toMatchObject({
-      checkedCount: 0,
+      checkedCount: 1,
       confirmedCount: 0,
       failedCount: 1
     });
-    expect(result.errorSummary[0]).toContain("Unable to ensure Health category");
-    expect(client.query).toHaveBeenCalledWith("rollback");
+    expect(result.errorSummary[0]).toContain("Skipped review-walk");
+    expect(client.query).toHaveBeenCalledWith("rollback to savepoint reprocess_health_item");
+    expect(client.query).toHaveBeenCalledWith("commit");
     expect(
       client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"))
     ).toBeUndefined();
@@ -1711,6 +1715,10 @@ function categoryId() {
 
 function healthCategoryId() {
   return "20000000-0000-4000-8000-000000000004";
+}
+
+function sleepCategoryId() {
+  return "20000000-0000-4000-8000-000000000008";
 }
 
 function placeId() {
