@@ -48,6 +48,7 @@ const calendarZooms = {
   half: { label: "30m", intervalMinutes: 30, pixelsPerHour: 92 },
   quarter: { label: "15m", intervalMinutes: 15, pixelsPerHour: 128 }
 } as const;
+const calendarAxisLabelHeight = 22;
 
 type CalendarResizeEdge = "start" | "end";
 type CalendarZoom = keyof typeof calendarZooms;
@@ -303,14 +304,16 @@ function CalendarReview({
     const markCount = Math.floor(totalMinutes / zoom.intervalMinutes);
     return Array.from({ length: markCount + 1 }, (_, index) => {
       const minutes = startMinutes + index * zoom.intervalMinutes;
+      const top = ((minutes - startMinutes) / 60) * rowHeight;
       return {
         key: `${minutes}`,
         label: formatCalendarAxisMinutes(minutes),
+        labelTop: clampAxisLabelTop(top, calendarHeight),
         major: minutes % 60 === 0,
-        top: ((minutes - startMinutes) / 60) * rowHeight
+        top
       };
     });
-  }, [calendarHours.endHour, calendarHours.startHour, rowHeight, zoom.intervalMinutes]);
+  }, [calendarHeight, calendarHours.endHour, calendarHours.startHour, rowHeight, zoom.intervalMinutes]);
 
   async function saveCalendarResize(entry: TimeEntryRow, draft: CalendarResizeDraft) {
     const response = await fetch(`/api/time-entries/${entry.id}`, {
@@ -512,15 +515,21 @@ function CalendarReview({
 
           <div className="relative border-r border-[var(--line)] bg-[var(--surface-inset)]" style={{ height: calendarHeight }}>
             {axisMarks.map((mark) => (
-              <div
-                key={mark.key}
-                className={[
-                  "tabular absolute left-0 right-0 border-t border-[var(--line)] px-2 pt-1 text-xs text-[var(--muted)]",
-                  mark.major ? "" : "border-dotted opacity-70"
-                ].join(" ")}
-                style={{ top: mark.top }}
-              >
-                {mark.label}
+              <div key={mark.key}>
+                <span
+                  aria-hidden="true"
+                  className={[
+                    "absolute left-0 right-0 border-t border-[var(--line)]",
+                    mark.major ? "" : "border-dotted opacity-70"
+                  ].join(" ")}
+                  style={{ top: mark.top }}
+                />
+                <span
+                  className="tabular absolute left-0 right-0 px-2 pt-1 text-xs text-[var(--muted)]"
+                  style={{ top: mark.labelTop }}
+                >
+                  {mark.label}
+                </span>
               </div>
             ))}
           </div>
@@ -540,7 +549,7 @@ function CalendarReview({
                   const activeDraft = resizeDraft?.entryId === entry.id ? resizeDraft : null;
                   const blockStyle = calendarBlockStyle(entry, activeDraft, day, rowHeight, calendarHeight, calendarHours);
                   if (!blockStyle) return null;
-                  const { continuesFromPreviousDay, continuesIntoNextDay, ...blockPositionStyle } = blockStyle;
+                  const { continuesIntoNextDay, ...blockPositionStyle } = blockStyle;
                   const durationSeconds = calendarDurationSeconds(entry, activeDraft);
                   const density = getTimeBlockDensity({
                     durationSeconds,
@@ -556,7 +565,6 @@ function CalendarReview({
                         selectedEntryId === entry.id ? "outline outline-2 outline-offset-1 outline-[var(--foreground)]" : "",
                         resizingId === entry.id ? "is-resizing" : "",
                         entry.stoppedAt ? "" : "is-running",
-                        continuesFromPreviousDay ? "is-continuation-from-previous" : "",
                         continuesIntoNextDay ? "is-continuation-to-next" : "",
                         ...timeBlockDensityClassNames(density)
                       ].join(" ")}
@@ -762,7 +770,6 @@ function calendarBlockStyle(
   return {
     top: Math.round(top),
     height: Math.round(height),
-    continuesFromPreviousDay: start < dayStart,
     continuesIntoNextDay: stoppedAt > dayEnd
   };
 }
@@ -806,9 +813,13 @@ function clampMinutes(value: number, minimum: number, maximum: number) {
 }
 
 function formatCalendarAxisMinutes(minutes: number) {
-  const hour = Math.floor(minutes / 60);
+  const hour = Math.floor(minutes / 60) % 24;
   const minute = minutes % 60;
   return `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
+}
+
+function clampAxisLabelTop(top: number, height: number) {
+  return Math.min(Math.max(0, height - calendarAxisLabelHeight), Math.max(0, top - calendarAxisLabelHeight / 2));
 }
 
 function formatCalendarDateKey(day: Date) {

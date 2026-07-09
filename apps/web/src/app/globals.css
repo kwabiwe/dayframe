@@ -1323,18 +1323,30 @@ textarea:focus-visible {
   background: var(--surface-inset);
 }
 
-.swiss-time-axis div {
+.swiss-time-axis-line,
+.swiss-time-axis-label {
   position: absolute;
   left: 0;
   right: 0;
+}
+
+.swiss-time-axis-line {
+  border-top: 1px solid var(--line);
+}
+
+.swiss-time-axis-label {
   padding: 0 12px;
   color: var(--muted);
   font-size: 13px;
   font-variant-numeric: tabular-nums;
-  transform: translateY(-50%);
 }
 
-.swiss-time-axis div.is-minor {
+.swiss-time-axis-line.is-minor {
+  border-top-style: dotted;
+  opacity: 0.72;
+}
+
+.swiss-time-axis-label.is-minor {
   font-size: 11px;
   opacity: 0.72;
 }
@@ -1430,12 +1442,6 @@ textarea:focus-visible {
     border-color 140ms ease,
     box-shadow 140ms ease,
     transform 140ms ease;
-}
-
-.calendar-time-block.is-continuation-from-previous {
-  border-top-style: none;
-  border-top-left-radius: 0;
-  border-top-right-radius: 0;
 }
 
 .calendar-time-block.is-continuation-to-next {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   AccessibilityInfo,
@@ -39,6 +39,11 @@ import {
   type MobileBootstrap,
   type TimeEntryUpdatePatch
 } from "@/lib/api";
+import {
+  calendarSwipeDelta,
+  formatCalendarHourLabel,
+  shouldCaptureCalendarSwipe
+} from "@/lib/calendarGestures";
 import { handleDayframeUrl } from "@/lib/deepLinks";
 import {
   pressable,
@@ -66,7 +71,6 @@ type CalendarHours = { startHour: number; endHour: number };
 type CalendarBlockMetrics = {
   top: number;
   height: number;
-  continuesFromPreviousDay: boolean;
   continuesIntoNextDay: boolean;
 };
 type SummarySegment = {
@@ -89,6 +93,8 @@ const TIMELINE_DEFAULT_HOUR_HEIGHT = 72;
 const TIMELINE_MIN_HOUR_HEIGHT = 48;
 const TIMELINE_MAX_HOUR_HEIGHT = 128;
 const TIMELINE_MIN_BLOCK_HEIGHT = 44;
+const CALENDAR_HOUR_LABEL_HEIGHT = 22;
+const CALENDAR_CURRENT_TIME_LABEL_HEIGHT = 18;
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
@@ -118,6 +124,7 @@ export default function HomeScreen() {
   const [activeEditStopping, setActiveEditStopping] = useState(false);
   const [calendarEditSaving, setCalendarEditSaving] = useState(false);
   const [calendarEditDeleting, setCalendarEditDeleting] = useState(false);
+  const [calendarGestureLocked, setCalendarGestureLocked] = useState(false);
   const [chartProgress, setChartProgress] = useState(1);
   const refreshInFlight = useRef(false);
   const entrance = useRef(new Animated.Value(0)).current;
@@ -646,7 +653,9 @@ export default function HomeScreen() {
           styles.container,
           { paddingBottom: 18 }
         ]}
+        directionalLockEnabled
         keyboardShouldPersistTaps="handled"
+        scrollEnabled={!calendarGestureLocked}
         scrollIndicatorInsets={{ bottom: TAB_BAR_HEIGHT + Math.max(insets.bottom, 12) + 16 }}
         style={{ marginBottom: TAB_BAR_HEIGHT + Math.max(insets.bottom, 12) + 16 }}
         refreshControl={
@@ -819,6 +828,7 @@ export default function HomeScreen() {
               onChangeHoursMode={setCalendarHoursMode}
               onChangeWeek={(weeks) => shiftSelectedCalendarDay(weeks * 7)}
               onChangeZoom={setCalendarZoom}
+              onGestureLockedChange={setCalendarGestureLocked}
               onOpenActive={() => {
                 setCalendarEditEntry(null);
                 setActiveEditVisible(true);
@@ -1009,6 +1019,7 @@ function CalendarTab({
   onChangeHoursMode,
   onChangeWeek,
   onChangeZoom,
+  onGestureLockedChange,
   onOpenActive,
   onOpenDetail,
   onOpenReviewItem,
@@ -1029,6 +1040,7 @@ function CalendarTab({
   onChangeHoursMode: (mode: CalendarHoursMode) => void;
   onChangeWeek: (weeks: number) => void;
   onChangeZoom: (hourHeight: number) => void;
+  onGestureLockedChange: (locked: boolean) => void;
   onOpenActive: () => void;
   onOpenDetail: (entry: CalendarEntry) => void;
   onOpenReviewItem: (reviewItemId: string) => void;
@@ -1052,6 +1064,7 @@ function CalendarTab({
     timelineHeight,
     Math.max(0, ((currentMinute - calendarHours.startHour * 60) / 60) * hourHeight)
   );
+  const currentTimeRowTop = clamp(currentLineTop - CALENDAR_CURRENT_TIME_LABEL_HEIGHT / 2, 0, timelineHeight - CALENDAR_CURRENT_TIME_LABEL_HEIGHT);
   const currentTimeOutsideAxis =
     showCurrentTime &&
     (currentMinute < calendarHours.startHour * 60 || currentMinute > calendarHours.endHour * 60);
@@ -1089,11 +1102,17 @@ function CalendarTab({
 
   const dayGestureResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: (event) => event.nativeEvent.touches.length >= 2,
+    onStartShouldSetPanResponderCapture: (event) => event.nativeEvent.touches.length >= 2,
     onMoveShouldSetPanResponder: (event, gesture) => {
       if (event.nativeEvent.touches.length >= 2) return true;
-      return Math.abs(gesture.dx) > 22 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 0.65;
+      return shouldCaptureCalendarSwipe(gesture);
+    },
+    onMoveShouldSetPanResponderCapture: (event, gesture) => {
+      if (event.nativeEvent.touches.length >= 2) return true;
+      return shouldCaptureCalendarSwipe(gesture);
     },
     onPanResponderGrant: (event) => {
+      onGestureLockedChange(true);
       if (event.nativeEvent.touches.length >= 2) {
         pinchStartDistance.current = touchDistance(event.nativeEvent.touches);
         pinchStartHourHeight.current = hourHeight;
@@ -1110,32 +1129,43 @@ function CalendarTab({
     onPanResponderRelease: (_event, gesture) => {
       const wasPinching = Boolean(pinchStartDistance.current);
       pinchStartDistance.current = null;
+      onGestureLockedChange(false);
       if (wasPinching) return;
-      if (Math.abs(gesture.dx) < 50 || Math.abs(gesture.dx) < Math.abs(gesture.dy) * 0.55) return;
-      onChangeDay(gesture.dx < 0 ? 1 : -1);
+      const delta = calendarSwipeDelta("day", gesture);
+      if (delta === 0) return;
+      onChangeDay(delta);
     },
+    onPanResponderTerminationRequest: () => false,
     onPanResponderTerminate: () => {
       pinchStartDistance.current = null;
+      onGestureLockedChange(false);
     }
-  }), [hourHeight, onChangeDay, onChangeZoom]);
+  }), [hourHeight, onChangeDay, onChangeZoom, onGestureLockedChange]);
 
   const weekGestureResponder = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponderCapture: (_event, gesture) =>
+      shouldCaptureCalendarSwipe(gesture),
     onMoveShouldSetPanResponder: (_event, gesture) =>
-      Math.abs(gesture.dx) > 22 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 0.65,
+      shouldCaptureCalendarSwipe(gesture),
+    onPanResponderGrant: () => {
+      onGestureLockedChange(true);
+    },
     onPanResponderRelease: (_event, gesture) => {
-      if (Math.abs(gesture.dx) < 50 || Math.abs(gesture.dx) < Math.abs(gesture.dy) * 0.55) return;
-      onChangeWeek(gesture.dx < 0 ? 1 : -1);
+      onGestureLockedChange(false);
+      const delta = calendarSwipeDelta("week", gesture);
+      if (delta === 0) return;
+      onChangeWeek(delta);
+    },
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderTerminate: () => {
+      onGestureLockedChange(false);
     }
-  }), [onChangeWeek]);
+  }), [onChangeWeek, onGestureLockedChange]);
 
   return (
     <View style={styles.tabScreenStack}>
       <View style={styles.panel} {...weekGestureResponder.panHandlers}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.calendarWeekStrip}
-        >
+        <View style={styles.calendarWeekStrip}>
           {weekDays.map((day) => {
             const selected = day.key === selectedDayKey;
             const isTodayDay = day.key === todayKey;
@@ -1169,7 +1199,7 @@ function CalendarTab({
               </Pressable>
             );
           })}
-        </ScrollView>
+        </View>
       </View>
 
       <View style={styles.lifecyclePanel} {...dayGestureResponder.panHandlers}>
@@ -1260,13 +1290,16 @@ function CalendarTab({
           <View style={[styles.calendarTimelineCanvas, { height: timelineHeight }]}>
             {Array.from({ length: calendarHours.endHour - calendarHours.startHour + 1 }, (_, index) => {
               const hour = calendarHours.startHour + index;
-              const top = index * hourHeight;
+              const lineTop = index * hourHeight;
+              const labelTop = clamp(lineTop - CALENDAR_HOUR_LABEL_HEIGHT / 2, 0, timelineHeight - CALENDAR_HOUR_LABEL_HEIGHT);
 
               return (
-                <View key={hour} pointerEvents="none" style={[styles.calendarHourRow, { top }]}>
-                  <Text style={styles.calendarHourLabel}>{`${pad2(hour)}:00`}</Text>
-                  <View style={styles.calendarHourLine} />
-                </View>
+                <Fragment key={hour}>
+                  <Text style={[styles.calendarHourLabel, { top: labelTop }]}>
+                    {formatCalendarHourLabel(hour)}
+                  </Text>
+                  <View pointerEvents="none" style={[styles.calendarHourLine, { top: lineTop }]} />
+                </Fragment>
               );
             })}
 
@@ -1293,7 +1326,6 @@ function CalendarTab({
                       borderColor: reviewNeeded ? theme.borderStrong : color,
                       backgroundColor: colorWithAlpha(blockColor, reviewNeeded ? 0.12 : entry.isActive ? 0.16 : 0.28)
                     },
-                    metrics.continuesFromPreviousDay ? styles.calendarBlockFromPrevious : null,
                     metrics.continuesIntoNextDay ? styles.calendarBlockIntoNext : null,
                     pressed ? styles.buttonPressed : null
                   ]}
@@ -1310,7 +1342,7 @@ function CalendarTab({
             })}
 
             {showCurrentTime ? (
-              <View pointerEvents="none" style={[styles.currentTimeRow, { top: currentLineTop }]}>
+              <View pointerEvents="none" style={[styles.currentTimeRow, { top: currentTimeRowTop }]}>
                 <Text style={styles.currentTimeLabel}>{formatTimeOfDay(new Date(now))}</Text>
                 <View style={styles.currentTimeLine} />
               </View>
@@ -1931,7 +1963,6 @@ function getTimelineMetrics(
   return {
     top: (topMinutes / 60) * hourHeight,
     height: Math.max(TIMELINE_MIN_BLOCK_HEIGHT, (durationMinutes / 60) * hourHeight),
-    continuesFromPreviousDay: startedAt < dayStart,
     continuesIntoNextDay: stoppedAt > dayEnd
   };
 }
@@ -1985,13 +2016,12 @@ function calendarBlockMeta(
   entry: CalendarEntry,
   now: number,
   reviewNeeded: boolean,
-  metrics?: Pick<CalendarBlockMetrics, "continuesFromPreviousDay" | "continuesIntoNextDay">
+  metrics?: Pick<CalendarBlockMetrics, "continuesIntoNextDay">
 ) {
   const timeLabel = formatEntryTimeRange(entry, now);
   const suffix = entry.isActive ? "running" : formatDuration(entryDurationSeconds(entry, now));
   const labels = [
     reviewNeeded ? REVIEW_COPY.needsReview : null,
-    metrics?.continuesFromPreviousDay ? "Started previous day" : null,
     metrics?.continuesIntoNextDay ? "Continues next day" : null,
     timeLabel,
     suffix
