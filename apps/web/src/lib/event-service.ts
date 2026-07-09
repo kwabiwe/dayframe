@@ -1413,6 +1413,7 @@ export async function reprocessHealthReviewItems(
     skippedCount: 0,
     failedCount: 0,
     updatedCategoryCount: 0,
+    repairedSleepEntryCount: 0,
     remainingReviewCount: 0,
     batchSize,
     partial: false,
@@ -1462,12 +1463,6 @@ export async function reprocessHealthReviewItems(
       [session.workspaceId, session.userId, batchSize, force]
     );
 
-    if (reviewItems.rows.length === 0) {
-      await refreshHealthReviewRemainingCount(client, session, result, 0);
-      await client.query("commit");
-      return result;
-    }
-
     const healthCategoryIds = new Map<string, string>();
     async function ensureReviewCategoryId(item: Pick<HealthReviewItemRow, "eventType">) {
       const spec = healthCategorySpecForEventType(item.eventType);
@@ -1479,25 +1474,36 @@ export async function reprocessHealthReviewItems(
       return categoryId;
     }
 
+    let sleepCategoryId: string | null = null;
+    try {
+      sleepCategoryId = preferences.sleep
+        ? await ensureReviewCategoryId({ eventType: "health_sleep_import" })
+        : null;
+      if (sleepCategoryId) {
+        result.repairedSleepEntryCount = await repairHealthCategorySleepTimeEntries(client, session, sleepCategoryId);
+      }
+    } catch (error) {
+      result.failedCount = Math.max(
+        1,
+        reviewItems.rows.filter((item) => item.eventType === "health_sleep_import").length
+      );
+      result.errorSummary.push(compactErrorSummary(error, "Unable to repair legacy Sleep categories"));
+      await client.query("rollback");
+      return result;
+    }
+
+    if (reviewItems.rows.length === 0) {
+      await refreshHealthReviewRemainingCount(client, session, result, 0);
+      await client.query("commit");
+      return result;
+    }
+
     const sleepItems = preferences.sleep
       ? mergeHealthReviewItemRows(
         reviewItems.rows,
         await loadLegacySleepReviewItemsForConsolidation(client, session, force)
       )
       : reviewItems.rows;
-
-    const hasSleepReviewItems = sleepItems.some((item) => item.eventType === "health_sleep_import");
-    let sleepCategoryId: string | null = null;
-    try {
-      sleepCategoryId = preferences.sleep && hasSleepReviewItems
-        ? await ensureReviewCategoryId({ eventType: "health_sleep_import" })
-        : null;
-    } catch (error) {
-      result.failedCount = sleepItems.filter((item) => item.eventType === "health_sleep_import").length;
-      result.errorSummary.push(compactErrorSummary(error, "Unable to ensure Sleep category"));
-      await client.query("rollback");
-      return result;
-    }
 
     const consolidatedSleepIds = await consolidateLegacyHealthSleepReviewItems(
       client,
@@ -1625,6 +1631,42 @@ export async function reprocessHealthReviewItems(
   } finally {
     client.release();
   }
+}
+
+async function repairHealthCategorySleepTimeEntries(
+  client: pg.PoolClient,
+  session: RequestSession,
+  sleepCategoryId: string
+) {
+  const repaired = await client.query<{ id: string }>(
+    `update time_entries te
+     set category_id = $3,
+         updated_at = now()
+     from categories current_category
+     where te.category_id = current_category.id
+       and te.workspace_id = $1
+       and te.user_id = $2
+       and current_category.workspace_id = te.workspace_id
+       and lower(current_category.name) = 'health'
+       and coalesce(current_category.is_archived, false) = false
+       and te.review_status in ('confirmed', 'accepted')
+       and te.stopped_at is not null
+       and lower(coalesce(te.description, '')) = 'sleep'
+       and (
+         te.source = 'health_sleep'
+         or exists (
+           select 1
+           from activity_events ae
+           where ae.id = te.created_from_event_id
+             and ae.workspace_id = te.workspace_id
+             and ae.user_id = te.user_id
+             and ae.event_type = 'health_sleep_import'
+         )
+       )
+     returning te.id`,
+    [session.workspaceId, session.userId, sleepCategoryId]
+  );
+  return repaired.rowCount ?? repaired.rows.length;
 }
 
 function normalizeHealthReprocessBatchSize(value: unknown) {

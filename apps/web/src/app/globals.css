@@ -1432,6 +1432,18 @@ textarea:focus-visible {
     transform 140ms ease;
 }
 
+.calendar-time-block.is-continuation-from-previous {
+  border-top-style: none;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.calendar-time-block.is-continuation-to-next {
+  border-bottom-style: none;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
 .calendar-time-block > span {
   min-width: 0;
 }

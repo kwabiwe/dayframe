@@ -30,6 +30,7 @@ import {
 
 type TimeView = "calendar" | "list" | "timesheet";
 type CalendarMode = "week" | "day";
+type CalendarHoursMode = "awake" | "fullDay";
 
 const viewItems: Array<{ id: TimeView; label: string; icon: ReactNode }> = [
   { id: "calendar", label: "Calendar", icon: <CalendarDays size={16} /> },
@@ -37,8 +38,10 @@ const viewItems: Array<{ id: TimeView; label: string; icon: ReactNode }> = [
   { id: "timesheet", label: "Timesheet", icon: <Table2 size={16} /> }
 ];
 
-const startHour = 6;
-const endHour = 22;
+const calendarHourModes: Record<CalendarHoursMode, { label: string; startHour: number; endHour: number }> = {
+  awake: { label: "Awake", startHour: 6, endHour: 22 },
+  fullDay: { label: "24h", startHour: 0, endHour: 24 }
+};
 const calendarSnapMinutes = 15;
 const calendarZooms = {
   hour: { label: "1h", intervalMinutes: 60, pixelsPerHour: 64 },
@@ -63,6 +66,10 @@ function isTimeView(value: string | null): value is TimeView {
 
 function isCalendarMode(value: string | null): value is CalendarMode {
   return value === "week" || value === "day";
+}
+
+function isCalendarHoursMode(value: string | null): value is CalendarHoursMode {
+  return value === "awake" || value === "fullDay";
 }
 
 function readTimelinePreference(key: string) {
@@ -108,14 +115,19 @@ export function TimeReviewViews({
   const [data, setData] = useState(initialData);
   const [activeViewOverride, setActiveViewOverride] = useState<TimeView | null>(null);
   const [calendarModeOverride, setCalendarModeOverride] = useState<CalendarMode | null>(null);
+  const [calendarHoursModeOverride, setCalendarHoursModeOverride] = useState<CalendarHoursMode | null>(null);
   const [weekAnchor, setWeekAnchor] = useState(() => startOfWeek(new Date(initialData.dateRange.selectedDate)));
   const timelineViewStorageKey = `dayframe.timeline.${data.workspace.id}.view`;
   const calendarModeStorageKey = `dayframe.timeline.${data.workspace.id}.calendarMode`;
+  const calendarHoursStorageKey = `dayframe.timeline.${data.workspace.id}.hours`;
   const storedView = useTimelinePreference(timelineViewStorageKey);
   const storedCalendarMode = useTimelinePreference(calendarModeStorageKey);
+  const storedCalendarHours = useTimelinePreference(calendarHoursStorageKey);
   const activeView = activeViewOverride ?? (isTimeView(storedView) ? storedView : "calendar");
   const calendarMode =
     calendarModeOverride ?? (isCalendarMode(storedCalendarMode) ? storedCalendarMode : "week");
+  const calendarHoursMode =
+    calendarHoursModeOverride ?? (isCalendarHoursMode(storedCalendarHours) ? storedCalendarHours : "awake");
 
   const refreshData = useCallback(async () => {
     try {
@@ -146,12 +158,17 @@ export function TimeReviewViews({
     writeTimelinePreference(calendarModeStorageKey, mode);
   }
 
+  function updateCalendarHoursMode(mode: CalendarHoursMode) {
+    setCalendarHoursModeOverride(mode);
+    writeTimelinePreference(calendarHoursStorageKey, mode);
+  }
+
   const weekDays = useMemo(() => getWeekDays(weekAnchor), [weekAnchor]);
   const weekEntries = useMemo(
-    () => data.entries.filter((entry) => isInWeek(new Date(entry.startedAt), weekAnchor)),
+    () => data.entries.filter((entry) => entryOverlapsRange(entry, weekAnchor, addDays(weekAnchor, 7))),
     [data.entries, weekAnchor]
   );
-  const weekTotal = weekEntries.reduce((sum, entry) => sum + entry.durationSeconds, 0);
+  const weekTotal = weekEntries.reduce((sum, entry) => sum + entryOverlapSeconds(entry, weekAnchor, addDays(weekAnchor, 7)), 0);
 
   return (
     <section className="space-y-5">
@@ -214,11 +231,13 @@ export function TimeReviewViews({
 
       {activeView === "calendar" ? (
         <CalendarReview
+          calendarHoursMode={calendarHoursMode}
           calendarMode={calendarMode}
           categories={data.categories}
           entries={weekEntries}
           onSynced={refreshData}
           places={data.places}
+          setCalendarHoursMode={updateCalendarHoursMode}
           setCalendarMode={updateCalendarMode}
           weekDays={weekDays}
         />
@@ -238,19 +257,23 @@ export function TimeReviewViews({
 }
 
 function CalendarReview({
+  calendarHoursMode,
   calendarMode,
   categories,
   entries,
   onSynced,
   places,
+  setCalendarHoursMode,
   setCalendarMode,
   weekDays
 }: {
+  calendarHoursMode: CalendarHoursMode;
   calendarMode: CalendarMode;
   categories: CategoryRow[];
   entries: TimeEntryRow[];
   onSynced: () => Promise<void>;
   places: PlaceRow[];
+  setCalendarHoursMode: (mode: CalendarHoursMode) => void;
   setCalendarMode: (mode: CalendarMode) => void;
   weekDays: Date[];
 }) {
@@ -264,18 +287,19 @@ function CalendarReview({
   const [zoomLevel, setZoomLevel] = useState<CalendarZoom>("hour");
   const today = new Date();
   const zoom = calendarZooms[zoomLevel];
+  const calendarHours = calendarHourModes[calendarHoursMode];
   const zoomKeys = Object.keys(calendarZooms) as CalendarZoom[];
   const zoomIndex = zoomKeys.indexOf(zoomLevel);
   const rowHeight = zoom.pixelsPerHour;
   const gridLineSpacing = (zoom.intervalMinutes / 60) * rowHeight;
-  const calendarHeight = (endHour - startHour) * rowHeight;
+  const calendarHeight = (calendarHours.endHour - calendarHours.startHour) * rowHeight;
   const visibleDays =
     calendarMode === "day"
       ? [weekDays.find((day) => sameDay(day, today)) ?? today]
       : weekDays;
   const axisMarks = useMemo(() => {
-    const startMinutes = startHour * 60;
-    const totalMinutes = (endHour - startHour) * 60;
+    const startMinutes = calendarHours.startHour * 60;
+    const totalMinutes = (calendarHours.endHour - calendarHours.startHour) * 60;
     const markCount = Math.floor(totalMinutes / zoom.intervalMinutes);
     return Array.from({ length: markCount + 1 }, (_, index) => {
       const minutes = startMinutes + index * zoom.intervalMinutes;
@@ -286,7 +310,7 @@ function CalendarReview({
         top: ((minutes - startMinutes) / 60) * rowHeight
       };
     });
-  }, [rowHeight, zoom.intervalMinutes]);
+  }, [calendarHours.endHour, calendarHours.startHour, rowHeight, zoom.intervalMinutes]);
 
   async function saveCalendarResize(entry: TimeEntryRow, draft: CalendarResizeDraft) {
     const response = await fetch(`/api/time-entries/${entry.id}`, {
@@ -329,8 +353,8 @@ function CalendarReview({
         end: minutesFromDate(new Date(candidate.stoppedAt as string))
       }))
       .sort((a, b) => a.start - b.start);
-    const timelineStart = startHour * 60;
-    const timelineEnd = endHour * 60;
+    const timelineStart = calendarHours.startHour * 60;
+    const timelineEnd = calendarHours.endHour * 60;
     const previousEnd = Math.max(
       timelineStart,
       ...ranges.filter((range) => range.end <= originalStart).map((range) => range.end)
@@ -446,6 +470,18 @@ function CalendarReview({
               +
             </button>
           </span>
+          <span className="swiss-view-switch" aria-label="Calendar hours">
+            {(["awake", "fullDay"] as CalendarHoursMode[]).map((mode) => (
+              <button
+                key={mode}
+                className={calendarHoursMode === mode ? "is-selected" : ""}
+                type="button"
+                onClick={() => setCalendarHoursMode(mode)}
+              >
+                {calendarHourModes[mode].label}
+              </button>
+            ))}
+          </span>
         </div>
       </div>
       <div className="overflow-x-auto">
@@ -458,8 +494,8 @@ function CalendarReview({
           </div>
           {visibleDays.map((day) => {
             const total = entries
-              .filter((entry) => sameDay(new Date(entry.startedAt), day))
-              .reduce((sum, entry) => sum + entry.durationSeconds, 0);
+              .filter((entry) => entryOverlapsDay(entry, day))
+              .reduce((sum, entry) => sum + entryOverlapSeconds(entry, day, addDays(day, 1)), 0);
             return (
               <div
                 key={day.toISOString()}
@@ -499,14 +535,16 @@ function CalendarReview({
               }}
             >
               {entries
-                .filter((entry) => sameDay(new Date(entry.startedAt), day))
+                .filter((entry) => entryOverlapsDay(entry, day))
                 .map((entry) => {
                   const activeDraft = resizeDraft?.entryId === entry.id ? resizeDraft : null;
-                  const blockStyle = calendarBlockStyle(entry, activeDraft, rowHeight, calendarHeight);
+                  const blockStyle = calendarBlockStyle(entry, activeDraft, day, rowHeight, calendarHeight, calendarHours);
+                  if (!blockStyle) return null;
+                  const { continuesFromPreviousDay, continuesIntoNextDay, ...blockPositionStyle } = blockStyle;
                   const durationSeconds = calendarDurationSeconds(entry, activeDraft);
                   const density = getTimeBlockDensity({
                     durationSeconds,
-                    height: blockStyle.height
+                    height: blockPositionStyle.height
                   });
                   const detailsLabel = calendarBlockDetailsLabel(entry, activeDraft, durationSeconds);
                   return (
@@ -518,10 +556,12 @@ function CalendarReview({
                         selectedEntryId === entry.id ? "outline outline-2 outline-offset-1 outline-[var(--foreground)]" : "",
                         resizingId === entry.id ? "is-resizing" : "",
                         entry.stoppedAt ? "" : "is-running",
+                        continuesFromPreviousDay ? "is-continuation-from-previous" : "",
+                        continuesIntoNextDay ? "is-continuation-to-next" : "",
                         ...timeBlockDensityClassNames(density)
                       ].join(" ")}
                       style={{
-                        ...blockStyle,
+                        ...blockPositionStyle,
                         backgroundColor: timeEntryAccentColor(entry),
                         borderColor: "color-mix(in srgb, var(--foreground) 28%, transparent)",
                         color: "var(--on-pastel)"
@@ -692,8 +732,10 @@ function TimesheetView({ entries, weekDays }: { entries: TimeEntryRow[]; weekDay
 function calendarBlockStyle(
   entry: TimeEntryRow,
   draft: CalendarResizeDraft | null,
+  day: Date,
   rowHeight: number,
-  calendarHeight: number
+  calendarHeight: number,
+  calendarHours: { startHour: number; endHour: number }
 ) {
   const start = new Date(draft?.startedAt ?? entry.startedAt);
   const stoppedAt = draft?.stoppedAt
@@ -701,12 +743,28 @@ function calendarBlockStyle(
     : entry.stoppedAt
       ? new Date(entry.stoppedAt)
       : projectedEntryEnd(entry);
-  const startMinutes = start.getHours() * 60 + start.getMinutes();
-  const durationMinutes = Math.max(0, (stoppedAt.getTime() - start.getTime()) / 60_000);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(stoppedAt.getTime())) return null;
+  const dayStart = new Date(day);
+  dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = addDays(dayStart, 1);
+  const axisStart = new Date(dayStart);
+  axisStart.setHours(calendarHours.startHour, 0, 0, 0);
+  const axisEnd = new Date(dayStart);
+  axisEnd.setHours(calendarHours.endHour, 0, 0, 0);
+  const visibleStart = new Date(Math.max(start.getTime(), axisStart.getTime()));
+  const visibleEnd = new Date(Math.min(stoppedAt.getTime(), axisEnd.getTime()));
+  if (visibleEnd <= axisStart || visibleStart >= axisEnd || visibleEnd <= visibleStart) return null;
+  const startMinutes = (visibleStart.getTime() - axisStart.getTime()) / 60_000;
+  const durationMinutes = Math.max(1, (visibleEnd.getTime() - visibleStart.getTime()) / 60_000);
   const minimumHeight = minimumTimeBlockHeight(rowHeight);
-  const top = Math.min(calendarHeight - minimumHeight, Math.max(0, ((startMinutes - startHour * 60) / 60) * rowHeight));
+  const top = Math.min(calendarHeight - minimumHeight, Math.max(0, (startMinutes / 60) * rowHeight));
   const height = Math.min(calendarHeight - top, Math.max(minimumHeight, (durationMinutes / 60) * rowHeight));
-  return { top: Math.round(top), height: Math.round(height) };
+  return {
+    top: Math.round(top),
+    height: Math.round(height),
+    continuesFromPreviousDay: start < dayStart,
+    continuesIntoNextDay: stoppedAt > dayEnd
+  };
 }
 
 function calendarBlockDetailsLabel(
@@ -762,7 +820,11 @@ function formatCalendarDateKey(day: Date) {
 }
 
 function isoForDateMinutes(day: Date, minutes: number) {
-  const iso = dateTimeLocalInputToIso(`${formatCalendarDateKey(day)}T${formatCalendarAxisMinutes(minutes)}`);
+  const target = new Date(day);
+  const clampedMinutes = Math.max(0, Math.round(minutes));
+  target.setHours(0, clampedMinutes, 0, 0);
+  const localTime = `${target.getHours().toString().padStart(2, "0")}:${target.getMinutes().toString().padStart(2, "0")}`;
+  const iso = dateTimeLocalInputToIso(`${formatCalendarDateKey(target)}T${localTime}`);
   if (!iso) throw new Error("Invalid calendar time.");
   return iso;
 }
@@ -794,7 +856,25 @@ function sameDay(left: Date, right: Date) {
   );
 }
 
-function isInWeek(date: Date, weekStart: Date) {
-  const weekEnd = addDays(weekStart, 7);
-  return date >= weekStart && date < weekEnd;
+function entryOverlapsDay(entry: TimeEntryRow, day: Date) {
+  const start = new Date(day);
+  start.setHours(0, 0, 0, 0);
+  return entryOverlapsRange(entry, start, addDays(start, 1));
+}
+
+function entryOverlapsRange(entry: TimeEntryRow, rangeStart: Date, rangeEnd: Date) {
+  const startedAt = new Date(entry.startedAt);
+  const stoppedAt = entry.stoppedAt ? new Date(entry.stoppedAt) : projectedEntryEnd(entry);
+  if (Number.isNaN(startedAt.getTime()) || Number.isNaN(stoppedAt.getTime())) return false;
+  return startedAt < rangeEnd && stoppedAt > rangeStart;
+}
+
+function entryOverlapSeconds(entry: TimeEntryRow, rangeStart: Date, rangeEnd: Date) {
+  const startedAt = new Date(entry.startedAt);
+  const stoppedAt = entry.stoppedAt ? new Date(entry.stoppedAt) : projectedEntryEnd(entry);
+  if (Number.isNaN(startedAt.getTime()) || Number.isNaN(stoppedAt.getTime())) return 0;
+  const overlapStart = Math.max(startedAt.getTime(), rangeStart.getTime());
+  const overlapEnd = Math.min(stoppedAt.getTime(), rangeEnd.getTime());
+  if (overlapEnd <= overlapStart) return 0;
+  return Math.round((overlapEnd - overlapStart) / 1000);
 }

@@ -269,6 +269,34 @@ function createStyles(theme: MobileTheme) {
     calendarDayTextSelected: {
       color: theme.accent
     },
+    calendarOptionsRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8
+    },
+    calendarOptionChip: {
+      minHeight: 38,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 999,
+      paddingHorizontal: 13,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    calendarOptionChipSelected: {
+      borderColor: theme.accent,
+      backgroundColor: theme.surfaceMuted
+    },
+    calendarOptionChipText: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "800"
+    },
+    calendarOptionChipTextSelected: {
+      color: theme.accent
+    },
     calendarTimelinePanel: {
       borderWidth: 1,
       borderColor: theme.border,
@@ -343,6 +371,16 @@ function createStyles(theme: MobileTheme) {
     calendarBlockReview: {
       borderStyle: "dashed",
       opacity: 0.72
+    },
+    calendarBlockFromPrevious: {
+      borderTopWidth: 0,
+      borderTopLeftRadius: 0,
+      borderTopRightRadius: 0
+    },
+    calendarBlockIntoNext: {
+      borderBottomWidth: 0,
+      borderBottomLeftRadius: 0,
+      borderBottomRightRadius: 0
     },
     calendarBlockTitleRow: {
       flexDirection: "row",
@@ -684,6 +722,34 @@ function createStyles(theme: MobileTheme) {
       fontWeight: "800"
     },
     reportRangeChipTextSelected: {
+      color: theme.accent
+    },
+    reportChartSwitchRow: {
+      flexDirection: "row",
+      alignSelf: "flex-start",
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 999,
+      overflow: "hidden"
+    },
+    reportChartSwitchButton: {
+      minHeight: 36,
+      minWidth: 72,
+      paddingHorizontal: 13,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    reportChartSwitchButtonSelected: {
+      backgroundColor: theme.surfaceMuted
+    },
+    reportChartSwitchText: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "800"
+    },
+    reportChartSwitchTextSelected: {
       color: theme.accent
     },
     reportTotalsRow: {

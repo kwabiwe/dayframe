@@ -892,7 +892,7 @@ describe("health event persistence", () => {
     );
   });
 
-  it("reprocesses existing eligible Sleep review candidates into confirmed Health entries", async () => {
+  it("reprocesses existing eligible Sleep review candidates into confirmed Sleep entries", async () => {
     const client = reprocessClient([
       healthSleepReviewRow({
         id: "review-sleep",
@@ -924,7 +924,7 @@ describe("health event persistence", () => {
       session.workspaceId,
       session.userId,
       null,
-      healthCategoryId(),
+      sleepCategoryId(),
       null,
       "health_sleep",
       "high",
@@ -933,6 +933,68 @@ describe("health event persistence", () => {
       "2026-07-07T06:27:00.000Z",
       "event-sleep"
     ]);
+  });
+
+  it("repairs old confirmed Health-category Sleep entries when Sleep import is enabled", async () => {
+    const client = reprocessClient([]);
+    client.query.mockImplementation(async (statement: string) => {
+      if (statement.includes("from review_items ri") && statement.includes("for update of ri")) return { rows: [] };
+      if (statement.includes("from categories")) return { rows: [{ id: sleepCategoryId() }] };
+      if (statement.includes("update time_entries te")) return { rowCount: 1, rows: [{ id: "entry-sleep-old" }] };
+      if (statement.includes("select count(*)::int")) return { rows: [{ count: 0, unexplainedCount: 0 }] };
+      return { rows: [] };
+    });
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await reprocessHealthReviewItems({
+      preferences: {
+        sleep: true,
+        walking: true,
+        running: true,
+        cycling: true,
+        strength_training: false,
+        swimming: false,
+        other: false
+      }
+    }, session);
+
+    expect(result).toMatchObject({
+      checkedCount: 0,
+      repairedSleepEntryCount: 1,
+      remainingReviewCount: 0
+    });
+    const repairCall = client.query.mock.calls.find(([statement]) => String(statement).includes("update time_entries te"));
+    expect(repairCall?.[0]).toContain("lower(current_category.name) = 'health'");
+    expect(repairCall?.[0]).toContain("te.review_status in ('confirmed', 'accepted')");
+    expect(repairCall?.[0]).toContain("lower(coalesce(te.description, '')) = 'sleep'");
+    expect(repairCall?.[0]).toContain("te.source = 'health_sleep'");
+    expect(repairCall?.[0]).toContain("ae.event_type = 'health_sleep_import'");
+    expect(repairCall?.[1]).toEqual([session.workspaceId, session.userId, sleepCategoryId()]);
+  });
+
+  it("does not run the legacy Sleep category repair when Sleep import is disabled", async () => {
+    const client = reprocessClient([]);
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await reprocessHealthReviewItems({
+      preferences: {
+        sleep: false,
+        walking: true,
+        running: true,
+        cycling: true,
+        strength_training: false,
+        swimming: false,
+        other: false
+      }
+    }, session);
+
+    expect(result).toMatchObject({
+      checkedCount: 0,
+      repairedSleepEntryCount: 0
+    });
+    expect(
+      client.query.mock.calls.find(([statement]) => String(statement).includes("update time_entries te"))
+    ).toBeUndefined();
   });
 
   it("keeps a failed Health review candidate open while processing valid candidates", async () => {
@@ -1063,7 +1125,7 @@ describe("health event persistence", () => {
       session.workspaceId,
       session.userId,
       null,
-      healthCategoryId(),
+      sleepCategoryId(),
       null,
       "health_sleep",
       "high",
@@ -1311,10 +1373,12 @@ describe("health event persistence", () => {
         durationSeconds: 37 * 60
       })
     ]);
-    client.query.mockImplementation(async (statement: string) => {
+    client.query.mockImplementation(async (statement: string, values?: unknown[]) => {
       if (statement.includes("from review_items ri") && statement.includes("for update of ri")) {
         return { rows: [healthWorkoutReviewRow({ id: "review-walk", eventId: "event-walk" })] };
       }
+      if (statement.includes("from categories") && values?.[1] === "Sleep") return { rows: [{ id: sleepCategoryId() }] };
+      if (statement.includes("update time_entries te")) return { rowCount: 0, rows: [] };
       if (statement.includes("from categories")) throw new Error("categories unavailable");
       return { rows: [] };
     });
@@ -1728,11 +1792,12 @@ function placeId() {
 function reprocessClient(reviewRows: Array<Record<string, unknown>>) {
   return {
     query: vi.fn(async (statement: string, values?: unknown[]) => {
-      void values;
       if (statement.includes("from review_items ri") && statement.includes("for update of ri")) {
         return { rows: reviewRows };
       }
-      if (statement.includes("from categories")) return { rows: [{ id: healthCategoryId() }] };
+      if (statement.includes("from categories")) {
+        return { rows: [{ id: values?.[1] === "Sleep" ? sleepCategoryId() : healthCategoryId() }] };
+      }
       if (statement.includes("created_from_event_id = $3")) return { rows: [] };
       if (statement.includes("health_covering_entry")) return { rows: [] };
       if (statement.includes("started_at < $4::timestamptz")) return { rows: [] };

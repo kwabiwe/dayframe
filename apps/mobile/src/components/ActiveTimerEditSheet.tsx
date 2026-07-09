@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  Animated,
   Dimensions,
   Keyboard,
   type KeyboardEvent,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -69,6 +71,7 @@ export function ActiveTimerEditSheet({
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [pickerStartAt, setPickerStartAt] = useState<Date | null>(null);
+  const dismissDragY = useRef(new Animated.Value(0)).current;
   const descriptionInputRef = useRef<TextInput>(null);
   const timeInputRef = useRef<TextInput>(null);
 
@@ -97,10 +100,12 @@ export function ActiveTimerEditSheet({
   useEffect(() => {
     if (!visible) {
       setKeyboardInset(0);
+      dismissDragY.setValue(0);
       return undefined;
     }
 
     function updateKeyboardInset(event: KeyboardEvent) {
+      Keyboard.scheduleLayoutAnimation(event);
       const windowHeight = Dimensions.get("window").height;
       const nextInset = Math.max(0, windowHeight - event.endCoordinates.screenY);
       setKeyboardInset(nextInset);
@@ -112,14 +117,17 @@ export function ActiveTimerEditSheet({
     );
     const hideSubscription = Keyboard.addListener(
       Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
-      () => setKeyboardInset(0)
+      (event) => {
+        Keyboard.scheduleLayoutAnimation(event);
+        setKeyboardInset(0);
+      }
     );
 
     return () => {
       changeSubscription.remove();
       hideSubscription.remove();
     };
-  }, [visible]);
+  }, [dismissDragY, visible]);
 
   const parsedStart = useMemo(
     () => parseLocalDateTime(dateText, timeText),
@@ -150,19 +158,47 @@ export function ActiveTimerEditSheet({
   const sheetTitle = isRunningMode ? "Edit timer" : "Edit entry";
   const elapsedLabel = isRunningMode ? "Running" : "Duration";
   const keyboardSafeAreaOverlap = keyboardInset > 0 ? insets.bottom : 0;
-  const keyboardAwareSheetHeight = keyboardInset > 0
-    ? Math.max(
-        360,
-        windowDimensions.height - keyboardInset - insets.top - 12 + keyboardSafeAreaOverlap
-      )
-    : null;
-  const keyboardAwareSheetStyle = keyboardAwareSheetHeight
-    ? {
-        height: keyboardAwareSheetHeight,
-        marginBottom: Math.max(0, keyboardInset - keyboardSafeAreaOverlap),
-        maxHeight: keyboardAwareSheetHeight
+  const keyboardBottomLift = Math.max(0, keyboardInset - keyboardSafeAreaOverlap);
+  const topSafeGap = Math.max(insets.top + 18, 32);
+  const keyboardAwareSheetStyle = {
+    marginBottom: keyboardBottomLift,
+    maxHeight: Math.max(360, windowDimensions.height - topSafeGap - keyboardBottomLift)
+  };
+  const dismissResponder = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponder: (_event, gesture) =>
+      !busy && gesture.dy > 8 && Math.abs(gesture.dy) > Math.abs(gesture.dx) * 1.2,
+    onPanResponderMove: (_event, gesture) => {
+      dismissDragY.setValue(Math.max(0, gesture.dy));
+    },
+    onPanResponderRelease: (_event, gesture) => {
+      const shouldDismiss = gesture.dy > 96 || gesture.vy > 0.85;
+      if (shouldDismiss) {
+        Animated.timing(dismissDragY, {
+          toValue: windowDimensions.height,
+          duration: 220,
+          useNativeDriver: true
+        }).start(({ finished }) => {
+          dismissDragY.setValue(0);
+          if (finished) onCancel();
+        });
+        return;
       }
-    : null;
+      Animated.spring(dismissDragY, {
+        toValue: 0,
+        damping: 20,
+        stiffness: 220,
+        useNativeDriver: true
+      }).start();
+    },
+    onPanResponderTerminate: () => {
+      Animated.spring(dismissDragY, {
+        toValue: 0,
+        damping: 20,
+        stiffness: 220,
+        useNativeDriver: true
+      }).start();
+    }
+  }), [busy, dismissDragY, onCancel, windowDimensions.height]);
 
   async function saveChanges() {
     if (busy) return;
@@ -339,49 +375,57 @@ export function ActiveTimerEditSheet({
         />
         <View pointerEvents="box-none" style={styles.sheetKeyboardAvoidingView}>
           <SafeAreaView edges={["bottom"]} pointerEvents="box-none" style={styles.sheetSafeArea}>
-            <View style={[styles.activeEditSheet, keyboardAwareSheetStyle]}>
-              <View style={styles.sheetHandle} />
-              <View style={styles.sheetHeader}>
-                <Pressable
-                  accessibilityLabel={cancelLabel}
-                  accessibilityRole="button"
-                  disabled={busy}
-                  onPress={onCancel}
-                  style={({ pressed }) => [
-                    styles.sheetIconButton,
-                    pressed && !busy ? styles.buttonPressed : null,
-                    busy ? styles.buttonDisabled : null
-                  ]}
-                >
-                  <CloseGlyph color={theme.textPrimary} />
-                </Pressable>
-                <Text style={styles.sheetTitle}>{sheetTitle}</Text>
-                <Pressable
-                  accessibilityLabel={saveLabel}
-                  accessibilityRole="button"
-                  disabled={busy}
-                  onPress={saveChanges}
-                  style={({ pressed }) => [
-                    styles.sheetSaveButton,
-                    pressed && !busy ? styles.buttonPressed : null,
-                    busy ? styles.buttonDisabled : null
-                  ]}
-                >
-                  <CheckGlyph color={theme.mode === "dark" ? theme.background : "#FFFFFF"} />
-                </Pressable>
+            <Animated.View
+              style={[
+                styles.activeEditSheet,
+                keyboardAwareSheetStyle,
+                { transform: [{ translateY: dismissDragY }] }
+              ]}
+            >
+              <View {...dismissResponder.panHandlers}>
+                <View style={styles.sheetHandle} />
+                <View style={styles.sheetHeader}>
+                  <Pressable
+                    accessibilityLabel={cancelLabel}
+                    accessibilityRole="button"
+                    disabled={busy}
+                    onPress={onCancel}
+                    style={({ pressed }) => [
+                      styles.sheetIconButton,
+                      pressed && !busy ? styles.buttonPressed : null,
+                      busy ? styles.buttonDisabled : null
+                    ]}
+                  >
+                    <CloseGlyph color={theme.textPrimary} />
+                  </Pressable>
+                  <Text style={styles.sheetTitle}>{sheetTitle}</Text>
+                  <Pressable
+                    accessibilityLabel={saveLabel}
+                    accessibilityRole="button"
+                    disabled={busy}
+                    onPress={saveChanges}
+                    style={({ pressed }) => [
+                      styles.sheetSaveButton,
+                      pressed && !busy ? styles.buttonPressed : null,
+                      busy ? styles.buttonDisabled : null
+                    ]}
+                  >
+                    <CheckGlyph color={theme.mode === "dark" ? theme.background : "#FFFFFF"} />
+                  </Pressable>
+                </View>
               </View>
 
               <ScrollView
                 contentContainerStyle={[
                   styles.activeEditContent,
-                  keyboardInset > 0 ? { paddingBottom: 28 } : null
+                  keyboardInset > 0 ? { paddingBottom: 36 } : null
                 ]}
                 keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
                 keyboardShouldPersistTaps="always"
                 showsVerticalScrollIndicator={false}
                 style={[
                   styles.activeEditScroller,
-                  keyboardAwareSheetHeight ? styles.activeEditScrollerKeyboard : null
+                  keyboardInset > 0 ? styles.activeEditScrollerKeyboard : null
                 ]}
               >
                 <View style={styles.activeEditHeroRow}>
@@ -619,7 +663,7 @@ export function ActiveTimerEditSheet({
                   </Pressable>
                 ) : null}
               </ScrollView>
-            </View>
+            </Animated.View>
           </SafeAreaView>
         </View>
       </View>
