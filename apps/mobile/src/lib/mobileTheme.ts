@@ -233,11 +233,13 @@ function createStyles(theme: MobileTheme) {
       gap: 12
     },
     calendarWeekStrip: {
-      gap: 8,
-      paddingRight: 4
+      flexDirection: "row",
+      alignItems: "stretch",
+      gap: 6
     },
     calendarDayButton: {
-      width: 54,
+      flex: 1,
+      minWidth: 0,
       minHeight: 64,
       borderWidth: 1,
       borderColor: theme.border,
@@ -330,17 +332,11 @@ function createStyles(theme: MobileTheme) {
     calendarTimelineCanvas: {
       position: "relative"
     },
-    calendarHourRow: {
+    calendarHourLabel: {
       position: "absolute",
       left: 0,
-      right: 0,
-      height: 22,
-      flexDirection: "row",
-      alignItems: "center",
-      transform: [{ translateY: -11 }]
-    },
-    calendarHourLabel: {
       width: 68,
+      height: 22,
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 11,
@@ -349,7 +345,9 @@ function createStyles(theme: MobileTheme) {
       paddingRight: 8
     },
     calendarHourLine: {
-      flex: 1,
+      position: "absolute",
+      left: 68,
+      right: 0,
       height: 1,
       backgroundColor: theme.border
     },
@@ -371,11 +369,6 @@ function createStyles(theme: MobileTheme) {
     calendarBlockReview: {
       borderStyle: "dashed",
       opacity: 0.72
-    },
-    calendarBlockFromPrevious: {
-      borderTopWidth: 0,
-      borderTopLeftRadius: 0,
-      borderTopRightRadius: 0
     },
     calendarBlockIntoNext: {
       borderBottomWidth: 0,
@@ -414,8 +407,7 @@ function createStyles(theme: MobileTheme) {
       height: 18,
       flexDirection: "row",
       alignItems: "center",
-      gap: 6,
-      transform: [{ translateY: -9 }]
+      gap: 6
     },
     currentTimeLabel: {
       width: 68,

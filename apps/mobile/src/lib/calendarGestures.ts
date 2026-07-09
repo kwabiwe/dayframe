@@ -1,0 +1,48 @@
+export type CalendarSwipeGesture = { dx: number; dy: number; vx: number };
+
+export type CalendarSwipeAxis = "day" | "week";
+
+const CALENDAR_SWIPE_CAPTURE_DISTANCE = 6;
+const CALENDAR_SWIPE_CAPTURE_INTENT_DISTANCE = 14;
+const CALENDAR_SWIPE_COMMIT_DISTANCE = 16;
+const CALENDAR_SWIPE_VELOCITY = 0.1;
+const CALENDAR_SWIPE_CAPTURE_VERTICAL_RATIO = 0.18;
+const CALENDAR_SWIPE_COMMIT_VERTICAL_RATIO = 0.18;
+
+export function formatCalendarHourLabel(hour: number) {
+  return `${pad2(((hour % 24) + 24) % 24)}:00`;
+}
+
+export function shouldCaptureCalendarSwipe(gesture: Pick<CalendarSwipeGesture, "dx" | "dy">) {
+  const absDx = Math.abs(gesture.dx);
+  const absDy = Math.abs(gesture.dy);
+  return (
+    absDx >= CALENDAR_SWIPE_CAPTURE_DISTANCE &&
+    (
+      absDx >= CALENDAR_SWIPE_CAPTURE_INTENT_DISTANCE ||
+      absDx >= absDy * CALENDAR_SWIPE_CAPTURE_VERTICAL_RATIO
+    )
+  );
+}
+
+export function shouldCommitCalendarSwipe(gesture: CalendarSwipeGesture) {
+  const absDx = Math.abs(gesture.dx);
+  const absDy = Math.abs(gesture.dy);
+  const farEnough = absDx >= CALENDAR_SWIPE_COMMIT_DISTANCE;
+  const fastEnough = Math.abs(gesture.vx) >= CALENDAR_SWIPE_VELOCITY && absDx >= CALENDAR_SWIPE_CAPTURE_DISTANCE;
+
+  return (
+    (farEnough || fastEnough) &&
+    absDx >= absDy * CALENDAR_SWIPE_COMMIT_VERTICAL_RATIO
+  );
+}
+
+export function calendarSwipeDelta(axis: CalendarSwipeAxis, gesture: CalendarSwipeGesture) {
+  if (!shouldCommitCalendarSwipe(gesture)) return 0;
+  if (axis === "week") return gesture.dx < 0 ? -1 : 1;
+  return gesture.dx < 0 ? 1 : -1;
+}
+
+function pad2(value: number) {
+  return String(value).padStart(2, "0");
+}

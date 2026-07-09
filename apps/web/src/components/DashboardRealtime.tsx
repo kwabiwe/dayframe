@@ -65,6 +65,7 @@ const dayStartHour = 7;
 const dayEndHour = 21;
 const resizeSnapMinutes = 15;
 const minEntryMinutes = 15;
+const timelineAxisLabelHeight = 22;
 const timelineZooms = {
   hour: { label: "1h", intervalMinutes: 60, pixelsPerHour: 64 },
   half: { label: "30m", intervalMinutes: 30, pixelsPerHour: 92 },
@@ -912,14 +913,16 @@ function DayTimeline({
     const markCount = Math.floor(totalMinutes / zoom.intervalMinutes);
     return Array.from({ length: markCount + 1 }, (_, index) => {
       const minutes = timelineStartMinutes + index * zoom.intervalMinutes;
+      const top = ((minutes - timelineStartMinutes) / 60) * zoom.pixelsPerHour;
       return {
         key: `${minutes}`,
         label: formatAxisMinutes(minutes),
+        labelTop: clampAxisLabelTop(top, timelineHeight),
         major: minutes % 60 === 0,
-        top: ((minutes - timelineStartMinutes) / 60) * zoom.pixelsPerHour
+        top
       };
     });
-  }, [timelineEndMinutes, timelineStartMinutes, zoom.intervalMinutes, zoom.pixelsPerHour]);
+  }, [timelineEndMinutes, timelineHeight, timelineStartMinutes, zoom.intervalMinutes, zoom.pixelsPerHour]);
   const isToday = viewMode === "day" && selectedDate === dateKey(new Date());
   const now = new Date();
   const currentTop =
@@ -1210,12 +1213,18 @@ function DayTimeline({
         <div className="swiss-timeline-shell">
           <div className="swiss-time-axis" style={{ minHeight: timelineHeight }}>
             {axisMarks.map((mark) => (
-              <div
-                key={mark.key}
-                className={mark.major ? "is-major" : "is-minor"}
-                style={{ top: mark.top }}
-              >
-                {mark.label}
+              <div key={mark.key}>
+                <span
+                  aria-hidden="true"
+                  className={mark.major ? "is-major swiss-time-axis-line" : "is-minor swiss-time-axis-line"}
+                  style={{ top: mark.top }}
+                />
+                <span
+                  className={mark.major ? "is-major swiss-time-axis-label" : "is-minor swiss-time-axis-label"}
+                  style={{ top: mark.labelTop }}
+                >
+                  {mark.label}
+                </span>
               </div>
             ))}
           </div>
@@ -1766,9 +1775,13 @@ function formatShortDate(date: Date) {
 }
 
 function formatAxisMinutes(minutes: number) {
-  const hour = Math.floor(minutes / 60);
+  const hour = Math.floor(minutes / 60) % 24;
   const minute = minutes % 60;
   return `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
+}
+
+function clampAxisLabelTop(top: number, height: number) {
+  return Math.min(Math.max(0, height - timelineAxisLabelHeight), Math.max(0, top - timelineAxisLabelHeight / 2));
 }
 
 function isTypingTarget(target: EventTarget | null) {
