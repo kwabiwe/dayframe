@@ -32,9 +32,10 @@ export function reviewItemDurationSeconds(
   item: Pick<MobileReviewItem, "suggestedStartedAt" | "suggestedStoppedAt">,
   now: number
 ) {
+  void now;
   const startedAt = parseTime(item.suggestedStartedAt);
-  const stoppedAt = parseTime(item.suggestedStoppedAt) ?? new Date(now);
-  if (!startedAt || Number.isNaN(stoppedAt.getTime()) || startedAt.getTime() >= stoppedAt.getTime()) return 0;
+  const stoppedAt = parseTime(item.suggestedStoppedAt);
+  if (!startedAt || !stoppedAt || startedAt.getTime() >= stoppedAt.getTime()) return 0;
   return Math.floor((stoppedAt.getTime() - startedAt.getTime()) / 1000);
 }
 
@@ -100,9 +101,12 @@ function entryOverlapsRange(entry: MobileTimeEntry, rangeStart: Date, rangeEnd: 
 }
 
 function reviewItemOverlapsRange(item: MobileReviewItem, rangeStart: Date, rangeEnd: Date, now: number) {
+  void now;
   const startedAt = parseTime(item.suggestedStartedAt ?? item.createdAt);
-  const stoppedAt = parseTime(item.suggestedStoppedAt) ?? new Date(now);
-  if (!startedAt || Number.isNaN(stoppedAt.getTime())) return false;
+  const stoppedAt = parseTime(item.suggestedStoppedAt);
+  if (!startedAt) return false;
+  if (!stoppedAt) return startedAt >= rangeStart && startedAt < rangeEnd;
+  if (Number.isNaN(stoppedAt.getTime())) return false;
   return startedAt < rangeEnd && stoppedAt > rangeStart;
 }
 

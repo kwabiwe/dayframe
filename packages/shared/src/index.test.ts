@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyActivityEvent,
+  draftAutomationRuleFromText,
   healthWorkoutLabel,
   normalizeHealthWorkoutType,
   shouldAutoConfirmHealthSleep,
@@ -216,7 +217,43 @@ describe("HealthKit workout helpers", () => {
   });
 });
 
+describe("automation rule drafting", () => {
+  it("drafts a station pickup rule as a guarded round trip", () => {
+    const draft = draftAutomationRuleFromText({
+      text: "If I drive to Chelmsford rail station and come back home shortly after, log it as picking up or dropping my wife.",
+      categories: [{ id: categoryId("family"), name: "Family" }],
+      places: [{ id: "place-station", name: "Chelmsford Station" }]
+    });
+
+    expect(draft).toMatchObject({
+      kind: "round_trip_place_visit",
+      title: "Chelmsford Station pickup/drop-off",
+      placeName: "Chelmsford Station",
+      outcome: {
+        categoryName: "Family",
+        description: "Train station pickup/drop-off",
+        mode: "auto_log_when_matched"
+      }
+    });
+    expect(draft.conditions).toEqual(expect.arrayContaining([
+      "Trip starts at Home and returns to Home.",
+      "No onward commute place appears before returning home."
+    ]));
+    expect(draft.simulationChecks.join(" ")).toMatch(/rejection reason/i);
+  });
+
+  it("keeps unknown rule drafts review-first", () => {
+    const draft = draftAutomationRuleFromText({
+      text: "When something unusual happens, ask me later."
+    });
+
+    expect(draft.kind).toBe("review_first_custom_rule");
+    expect(draft.outcome.mode).toBe("review_first");
+    expect(draft.unsupported[0]).toMatch(/more detail/i);
+  });
+});
+
 function categoryId(seed: string) {
-  const suffix = seed === "focus" ? "0001" : seed === "health" ? "0003" : "0002";
+  const suffix = seed === "focus" ? "0001" : seed === "health" ? "0003" : seed === "family" ? "0004" : "0002";
   return `20000000-0000-4000-8000-00000000${suffix}`;
 }

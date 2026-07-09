@@ -88,6 +88,10 @@ Expected Dismiss behaviour:
 - create no time entry
 - return structured JSON on expected errors
 
+Review display guardrail:
+
+- A review item without a valid start and end time is incomplete evidence, not a running timer. Do not render it with a duration that grows to "now", do not let it mark every later report window as active, and do not build an editable draft until both times are valid.
+
 ## Required Reason Codes
 
 Health items left in Review should have a compact reason whenever possible:
@@ -119,6 +123,7 @@ If a reason is not visible in UI, it should at least be present in diagnostics o
 - High-confidence walks stay open because overlap detection is correct but invisible.
 - Accepted/ignored review items leak back into Review due to query or mobile filtering.
 - Reprocess keeps reselecting the same open-but-explained Review items and never reaches later eligible Health rows.
+- Incomplete old Health review items show misleading multi-day durations because the mobile UI treats missing stop times as "now".
 - Large historical Health backlogs should not be drained entirely from the mobile Review screen. Use bounded batches for interactive reprocess, and use a reviewed server/database cleanup for old rows that can be proven ignored or already covered.
 
 ## Minimal Investigation Checklist
