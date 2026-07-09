@@ -418,6 +418,157 @@ export type NormalizationContext = {
   unknownStayThresholdMinutes?: number;
 };
 
+export type AutomationRuleDraftKind =
+  | "round_trip_place_visit"
+  | "place_visit_with_travel"
+  | "place_visit_with_calendar_context"
+  | "review_first_custom_rule";
+
+export type AutomationRuleDraftOutcome = {
+  categoryName?: string | null;
+  description: string;
+  mode: "auto_log_when_matched" | "review_first";
+};
+
+export type AutomationRuleDraft = {
+  kind: AutomationRuleDraftKind;
+  title: string;
+  summary: string;
+  placeName?: string | null;
+  outcome: AutomationRuleDraftOutcome;
+  conditions: string[];
+  simulationChecks: string[];
+  unsupported: string[];
+};
+
+export function draftAutomationRuleFromText(input: {
+  text: string;
+  places?: Array<Pick<PlaceSummary, "id" | "name">>;
+  categories?: Array<Pick<CategorySummary, "id" | "name">>;
+}): AutomationRuleDraft {
+  const text = input.text.trim();
+  const normalized = normalizeDraftText(text);
+  const placeName = inferDraftPlaceName(normalized, input.places ?? []);
+  const categoryName = inferDraftCategoryName(normalized, input.categories ?? []);
+
+  if (isStationRoundTripDraft(normalized)) {
+    const resolvedPlace = placeName ?? "Chelmsford Station";
+    return {
+      kind: "round_trip_place_visit",
+      title: `${resolvedPlace} pickup/drop-off`,
+      summary: "Create a family duty only when the location evidence shows a short home-to-station-to-home driving loop.",
+      placeName: resolvedPlace,
+      outcome: {
+        categoryName: categoryName ?? "Family",
+        description: "Train station pickup/drop-off",
+        mode: "auto_log_when_matched"
+      },
+      conditions: [
+        `Visited ${resolvedPlace}.`,
+        "Trip starts at Home and returns to Home.",
+        "Total home-to-home loop is 8-75 minutes.",
+        "Station dwell is at most 30 minutes.",
+        "No onward commute place appears before returning home.",
+        "No existing completed entry already covers the inferred window."
+      ],
+      simulationChecks: [
+        "Replay recent location transitions in time order.",
+        "Group transit states between Home and the station visit.",
+        "Reject loops that continue to Stratford, Liverpool Street, Canary Wharf, or a work place.",
+        "Show the inferred start, stop, dwell, and rejection reason before enabling writes."
+      ],
+      unsupported: [
+        "Dayframe does not yet execute multi-place sequence rules from automation_rules."
+      ]
+    };
+  }
+
+  if (normalized.includes("gym")) {
+    return {
+      kind: "place_visit_with_travel",
+      title: "Gym visit with travel",
+      summary: "Infer one gym activity from the home departure before Gym through the next named place or return home.",
+      placeName: placeName ?? "Gym",
+      outcome: {
+        categoryName: categoryName ?? "Gym",
+        description: "Gym",
+        mode: "auto_log_when_matched"
+      },
+      conditions: [
+        "A Gym visit is present in location history.",
+        "The activity window includes travel to and from Gym.",
+        "An existing Gym entry inside the inferred window is updated instead of duplicated.",
+        "A later school pickup starts at school arrival and does not absorb the Gym block."
+      ],
+      simulationChecks: [
+        "Find the home departure before the Gym visit.",
+        "Find the next named place or Home after the Gym visit.",
+        "Check for existing overlapping Gym entries.",
+        "Show any non-Gym overlap before writing time."
+      ],
+      unsupported: [
+        "Dayframe does not yet merge visit evidence and existing entries into sequence-based writes."
+      ]
+    };
+  }
+
+  if (normalized.includes("school")) {
+    return {
+      kind: "place_visit_with_calendar_context",
+      title: "School logistics",
+      summary: "Use a school visit plus calendar context as evidence for school-run activity, without treating the calendar alone as proof.",
+      placeName: placeName ?? "School",
+      outcome: {
+        categoryName: categoryName ?? "Chores",
+        description: "School run",
+        mode: "review_first"
+      },
+      conditions: [
+        "A school place visit is present in location history.",
+        "Calendar context supports a drop-off, pickup, assembly, or similar school event.",
+        "Child-attendance events support timing only; they do not mean the user attended the whole event.",
+        "No existing completed entry already covers the inferred window."
+      ],
+      simulationChecks: [
+        "Compare the school visit against the same-day calendar.",
+        "Classify breakfast club and after-school club as child-attendance context.",
+        "Show the inferred time window and category before confirmation."
+      ],
+      unsupported: [
+        "Dayframe does not yet combine calendar evidence with place-visit rules in the automation UI."
+      ]
+    };
+  }
+
+  return {
+    kind: "review_first_custom_rule",
+    title: text ? "Custom rule draft" : "Empty rule draft",
+    summary: text
+      ? "Start as review-first until the required evidence checks are made explicit."
+      : "Enter a rule request to draft evidence checks.",
+    placeName,
+    outcome: {
+      categoryName,
+      description: text || "Suggested activity",
+      mode: "review_first"
+    },
+    conditions: [
+      "Specify the source evidence.",
+      "Specify the required time window.",
+      "Specify overlap and duplicate handling.",
+      "Keep the first version review-first."
+    ],
+    simulationChecks: [
+      "Run the rule against recent events without writing time.",
+      "Show matched entries and rejection reasons.",
+      "Enable automatic writes only after the simulation matches expectations."
+    ],
+    unsupported: [
+      "The request needs more detail before it can safely auto-log time."
+    ]
+  };
+}
+
 export type CandidateActivity = {
   action: AutomationAction | "create_time_entry" | "record_only";
   confidence: Confidence;
@@ -429,6 +580,52 @@ export type CandidateActivity = {
   reason: string;
   shouldClosePrevious: boolean;
 };
+
+function normalizeDraftText(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function inferDraftPlaceName(normalizedText: string, places: Array<Pick<PlaceSummary, "name">>) {
+  const exact = places.find((place) => normalizedText.includes(place.name.toLowerCase()));
+  if (exact) return exact.name;
+  if (normalizedText.includes("chelmsford") && normalizedText.includes("station")) return "Chelmsford Station";
+  if (normalizedText.includes("rail station") || normalizedText.includes("train station")) return "Train station";
+  if (normalizedText.includes("gym")) return "Gym";
+  if (normalizedText.includes("school")) return "School";
+  return null;
+}
+
+function inferDraftCategoryName(normalizedText: string, categories: Array<Pick<CategorySummary, "name">>) {
+  const categoryHints = [
+    { keywords: ["family duty", "family duties", "wife", "pickup", "drop off", "drop-off"], category: "Family" },
+    { keywords: ["school", "school run", "drop-off", "drop off"], category: "Chores" },
+    { keywords: ["gym", "workout"], category: "Gym" },
+    { keywords: ["errand", "town", "shop"], category: "Errands" },
+    { keywords: ["travel", "commute"], category: "Travel" }
+  ];
+  for (const hint of categoryHints) {
+    if (!hint.keywords.some((keyword) => normalizedText.includes(keyword))) continue;
+    const category = categories.find((candidate) => candidate.name.toLowerCase() === hint.category.toLowerCase());
+    return category?.name ?? hint.category;
+  }
+  return null;
+}
+
+function isStationRoundTripDraft(normalizedText: string) {
+  const mentionsStation = normalizedText.includes("station") || normalizedText.includes("train");
+  const mentionsPickup = ["pick", "pickup", "drop", "drop-off", "wife"].some((keyword) =>
+    normalizedText.includes(keyword)
+  );
+  const mentionsReturnLoop = [
+    "back home",
+    "go back home",
+    "return home",
+    "there and back",
+    "driving there and back",
+    "shortly after"
+  ].some((keyword) => normalizedText.includes(keyword));
+  return mentionsStation && mentionsPickup && mentionsReturnLoop;
+}
 
 export type RunningEntry = {
   id: string;

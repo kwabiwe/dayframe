@@ -45,7 +45,17 @@ describe("mobile review helpers", () => {
   });
 
   it("does not build an editable draft for incomplete suggested time", () => {
-    expect(buildReviewItemDraftEntry(reviewItem({ suggestedStoppedAt: null }), [category()], Date.now())).toBeNull();
+    const now = Date.parse("2026-07-09T08:14:00.000Z");
+    const incompleteSleep = reviewItem({
+      title: "Sleep asleep rem",
+      eventSource: "health_sleep",
+      eventType: "health_sleep_import",
+      suggestedStartedAt: "2026-06-07T00:41:00.000Z",
+      suggestedStoppedAt: null
+    });
+
+    expect(reviewItemDurationSeconds(incompleteSleep, now)).toBe(0);
+    expect(buildReviewItemDraftEntry(incompleteSleep, [category()], now)).toBeNull();
   });
 
   it("defaults stale Health review drafts to the Health category", () => {
@@ -96,6 +106,39 @@ describe("mobile review helpers", () => {
         reviewItems: [reviewItem()]
       })
     ).toBe(true);
+  });
+
+  it("does not treat incomplete review suggestions as running across later ranges", () => {
+    const june7 = {
+      rangeStart: new Date("2026-06-07T00:00:00.000Z"),
+      rangeEnd: new Date("2026-06-08T00:00:00.000Z")
+    };
+    const july9 = {
+      rangeStart: new Date("2026-07-09T00:00:00.000Z"),
+      rangeEnd: new Date("2026-07-10T00:00:00.000Z")
+    };
+    const item = reviewItem({
+      suggestedStartedAt: "2026-06-07T00:41:00.000Z",
+      suggestedStoppedAt: null
+    });
+    const now = Date.parse("2026-07-09T08:14:00.000Z");
+
+    expect(
+      hasReviewNeededActivityForRange({
+        entries: [],
+        now,
+        reviewItems: [item],
+        ...june7
+      })
+    ).toBe(true);
+    expect(
+      hasReviewNeededActivityForRange({
+        entries: [],
+        now,
+        reviewItems: [item],
+        ...july9
+      })
+    ).toBe(false);
   });
 
   it("keeps changed review UI wording category-first", () => {

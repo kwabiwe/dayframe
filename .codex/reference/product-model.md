@@ -20,6 +20,12 @@ Use this when changing timer flows, dashboards, reports, entity management, onbo
 - Manual completed entries should support category-only or uncategorized entries.
 - User-facing labels should say task, category, time entry, place, or source. Avoid project/client wording unless working on a compatibility or migration surface.
 
+## Rule Assistant Rules
+
+- Plain-language automation requests should become structured evidence checks before they become executable rules.
+- Multi-step rules such as home -> station -> home must simulate against event history and show rejection reasons before any automatic write is enabled.
+- Model-generated drafts can help with wording and intent, but the time-entry writer must stay deterministic and auditable.
+
 ## Data Compatibility
 
 - Keep nullable legacy columns such as `time_entries.project_id` until a deliberate migration removes them.

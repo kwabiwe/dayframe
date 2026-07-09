@@ -65,6 +65,7 @@ Track focused PRs only:
 | #26 | Review stale list, Health drain, geofence description | merged/deployed | tests, TestFlight build 0.1.0 (3) |
 | #27 | Health review backlog drain | merged/deployed | targeted tests, TestFlight build 0.1.0 (4) |
 | #28 | Mobile API fallback startup crash | merged/deployed | targeted tests, TestFlight build 0.1.0 (5) |
+| #29 | Health reprocess timeout and legacy sleep backlog | merged/deployed | production DB cleanup, tests, TestFlight build 0.1.0 (6) |
 
 ## 2026-07-08 Follow-Up From TestFlight Build 0.1.0 (2)
 
@@ -150,3 +151,21 @@ This investigation can close when:
 - Production Vercel logs show no unstructured 500s for the tested path.
 - Tests cover the confirmed root cause.
 - The relevant reference docs have been updated with any newly learned guardrail.
+
+## 2026-07-09 Build 6 Follow-Up
+
+Evidence:
+
+- KB reported Dayframe is working better and the queued Review items cleared after using build `0.1.0 (6)`.
+- Production database check after the screenshots showed `0` open `review_items`; historical Health review rows were accepted or ignored.
+- Screenshots still showed stale legacy Sleep stage cards such as `Sleep asleep rem` with a `775h` duration and `Left in Review: sleep duration is outside the auto-log range.`
+
+Findings:
+
+- The remaining visible problem was not a current production backlog. It was a mobile presentation issue for incomplete suggestions: if a review item lacked `suggestedStoppedAt`, mobile calculated duration from `suggestedStartedAt` to `now`, making old malformed sleep fragments look like enormous activities.
+- Incomplete review suggestions could also mark later report windows as needing review because they were treated like running entries.
+
+Decision:
+
+- Patch mobile review helpers so review-item duration requires a valid start and stop, and incomplete suggestions only count inside the day they start.
+- Add a rule-draft assistant as the first AI/rules feature slice: natural-language rule requests become structured evidence checks and simulation checks before any auto-write path exists.

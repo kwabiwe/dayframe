@@ -2,8 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { DAYFRAME_PALETTE, paletteColorFor, paletteKeyFor } from "@dayframe/shared";
-import { Pencil, Plus, Save } from "lucide-react";
+import {
+  DAYFRAME_PALETTE,
+  draftAutomationRuleFromText,
+  paletteColorFor,
+  paletteKeyFor,
+  type AutomationRuleDraft
+} from "@dayframe/shared";
+import { Pencil, Plus, Save, WandSparkles } from "lucide-react";
 import type {
   AutomationRuleRow,
   CategoryRow,
@@ -49,6 +55,7 @@ export function EntityForms({
         />
       </div>
       <div className="space-y-5">
+        <RuleDraftAssistant categories={categories} places={places} />
         <CreateAutomationForm categories={categories} places={places} />
       </div>
     </div>
@@ -273,6 +280,94 @@ function CreateAutomationForm({
       <SelectInput name="categoryId" label="Category" options={categories} />
     </EntityForm>
   );
+}
+
+function RuleDraftAssistant({
+  categories,
+  places
+}: {
+  categories: CategoryRow[];
+  places: PlaceRow[];
+}) {
+  const [text, setText] = useState("");
+  const [draft, setDraft] = useState<AutomationRuleDraft | null>(null);
+
+  function draftRule() {
+    setDraft(draftAutomationRuleFromText({ text, categories, places }));
+  }
+
+  return (
+    <section className="industrial-panel p-4">
+      <div className="mb-3">
+        <h2 className="text-base font-semibold">Rule assistant</h2>
+        <p className="mt-1 text-xs text-[var(--muted)]">
+          Draft evidence checks from a plain-language rule before it is enabled.
+        </p>
+      </div>
+      <label className="block text-sm">
+        <span className="industrial-field-label">Rule request</span>
+        <textarea
+          className="industrial-field focus-ring min-h-28 resize-y"
+          value={text}
+          placeholder="If I drive to Chelmsford rail station and come back home shortly after, log train station pickup/drop-off."
+          onChange={(event) => setText(event.target.value)}
+        />
+      </label>
+      <button
+        className="industrial-button-primary focus-ring mt-3 w-full text-sm"
+        type="button"
+        onClick={draftRule}
+      >
+        <WandSparkles size={16} />
+        Draft rule
+      </button>
+      {draft ? <RuleDraftPreview draft={draft} /> : null}
+    </section>
+  );
+}
+
+function RuleDraftPreview({ draft }: { draft: AutomationRuleDraft }) {
+  return (
+    <div className="mt-4 space-y-3 border-t border-[var(--line)] pt-4 text-sm">
+      <div>
+        <p className="font-semibold">{draft.title}</p>
+        <p className="mt-1 text-xs text-[var(--muted)]">{draft.summary}</p>
+      </div>
+      <div className="grid gap-2 text-xs">
+        <p>
+          <span className="text-[var(--muted)]">Mode:</span> {formatDraftMode(draft.outcome.mode)}
+        </p>
+        <p>
+          <span className="text-[var(--muted)]">Activity:</span> {draft.outcome.description}
+        </p>
+        <p>
+          <span className="text-[var(--muted)]">Category:</span> {draft.outcome.categoryName ?? "Not set"}
+        </p>
+      </div>
+      <RuleDraftList title="Evidence checks" items={draft.conditions} />
+      <RuleDraftList title="Simulation checks" items={draft.simulationChecks} />
+      {draft.unsupported.length > 0 ? <RuleDraftList title="Not enabled yet" items={draft.unsupported} /> : null}
+    </div>
+  );
+}
+
+function RuleDraftList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div>
+      <p className="mb-1 text-xs font-semibold text-[var(--muted)]">{title}</p>
+      <ul className="space-y-1 text-xs text-[var(--muted)]">
+        {items.map((item) => (
+          <li key={item} className="border-l border-[var(--line)] pl-2">
+            {item}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function formatDraftMode(mode: AutomationRuleDraft["outcome"]["mode"]) {
+  return mode === "auto_log_when_matched" ? "Auto-log when matched" : "Review first";
 }
 
 function EntityForm({
