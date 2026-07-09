@@ -158,6 +158,7 @@ export type HealthReviewReprocessResult = {
   skippedCount: number;
   failedCount: number;
   updatedCategoryCount: number;
+  repairedSleepEntryCount: number;
   remainingReviewCount: number;
   batchSize?: number;
   partial?: boolean;

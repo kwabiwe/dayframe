@@ -100,7 +100,12 @@ export default function ReviewScreen() {
         result: reprocess,
         error: reprocess.errorSummary[0] ?? null
       }));
-      if (reprocess.confirmedCount > 0 || reprocess.ignoredCount > 0 || reprocess.updatedCategoryCount > 0) {
+      if (
+        reprocess.confirmedCount > 0 ||
+        reprocess.ignoredCount > 0 ||
+        reprocess.updatedCategoryCount > 0 ||
+        reprocess.repairedSleepEntryCount > 0
+      ) {
         setData(await fetchBootstrap());
       }
     } catch (error) {
@@ -446,7 +451,7 @@ function ReviewDiagnosticsPanel({
       </Text>
       {result ? (
         <Text style={styles.reviewMetaLine}>
-          Confirmed {result.confirmedCount} · ignored {result.ignoredCount} · remaining {result.remainingReviewCount} · skipped {result.skippedCount} · failed {result.failedCount} · categories {result.updatedCategoryCount}
+          Confirmed {result.confirmedCount} · ignored {result.ignoredCount} · remaining {result.remainingReviewCount} · skipped {result.skippedCount} · failed {result.failedCount} · categories {result.updatedCategoryCount} · sleep fixes {result.repairedSleepEntryCount}
           {result.partial ? ` · batch ${result.batchSize ?? "partial"}` : ""}
         </Text>
       ) : null}

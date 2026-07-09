@@ -754,6 +754,7 @@ function skippedHealthReprocessResult(reason: string): HealthReviewReprocessResu
     skippedCount: 0,
     failedCount: 0,
     updatedCategoryCount: 0,
+    repairedSleepEntryCount: 0,
     remainingReviewCount: 0,
     errorSummary: reason ? [reason] : []
   };
@@ -770,6 +771,7 @@ function failedHealthReprocessResult(error: unknown): HealthReviewReprocessResul
     skippedCount: 0,
     failedCount: 1,
     updatedCategoryCount: 0,
+    repairedSleepEntryCount: 0,
     remainingReviewCount: 0,
     errorSummary: [message]
   };
@@ -796,6 +798,7 @@ function mergeHealthReprocessResults(
     skippedCount: current.skippedCount + next.skippedCount,
     failedCount: current.failedCount + next.failedCount,
     updatedCategoryCount: current.updatedCategoryCount + next.updatedCategoryCount,
+    repairedSleepEntryCount: current.repairedSleepEntryCount + next.repairedSleepEntryCount,
     remainingReviewCount: next.remainingReviewCount,
     batchSize: next.batchSize ?? current.batchSize,
     partial: Boolean(next.partial),

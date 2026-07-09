@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   AccessibilityInfo,
   Alert,
@@ -58,7 +59,16 @@ type AuthView = "login" | "signup";
 type AuthState = "checking" | "authenticated" | "signedOut";
 type MobileTab = "timer" | "calendar" | "reports";
 type ReportRange = "today" | "week";
+type ReportChartView = "pie" | "bars";
+type CalendarHoursMode = "awake" | "fullDay";
 type CalendarEntry = TimeEntry & { isActive: boolean; reviewItemId?: string; isReviewSuggestion?: boolean };
+type CalendarHours = { startHour: number; endHour: number };
+type CalendarBlockMetrics = {
+  top: number;
+  height: number;
+  continuesFromPreviousDay: boolean;
+  continuesIntoNextDay: boolean;
+};
 type SummarySegment = {
   key: string;
   categoryName: string;
@@ -68,10 +78,13 @@ type SummarySegment = {
 };
 
 const AUTH_KEYBOARD_ACCESSORY_ID = "dayframe-auth-keyboard-accessory";
+const CALENDAR_HOURS_PREFERENCE_KEY = "dayframe.calendarHoursMode.v1";
 const RECENT_LAST_STOP_WINDOW_MS = 24 * 60 * 60 * 1000;
 const TAB_BAR_HEIGHT = 72;
-const TIMELINE_START_HOUR = 6;
-const TIMELINE_END_HOUR = 22;
+const CALENDAR_HOURS_MODES: Record<CalendarHoursMode, CalendarHours & { label: string; accessibilityLabel: string }> = {
+  awake: { label: "Awake", accessibilityLabel: "Show awake hours", startHour: 6, endHour: 22 },
+  fullDay: { label: "24h", accessibilityLabel: "Show full 24 hours", startHour: 0, endHour: 24 }
+};
 const TIMELINE_DEFAULT_HOUR_HEIGHT = 72;
 const TIMELINE_MIN_HOUR_HEIGHT = 48;
 const TIMELINE_MAX_HOUR_HEIGHT = 128;
@@ -88,6 +101,9 @@ export default function HomeScreen() {
   const [reportRange, setReportRange] = useState<ReportRange>("today");
   const [calendarEditEntry, setCalendarEditEntry] = useState<CalendarEntry | null>(null);
   const [calendarHourHeight, setCalendarHourHeight] = useState(TIMELINE_DEFAULT_HOUR_HEIGHT);
+  const [calendarHoursMode, setCalendarHoursModeState] = useState<CalendarHoursMode>("awake");
+  const [calendarTransitionDirection, setCalendarTransitionDirection] = useState(1);
+  const [reportChartView, setReportChartView] = useState<ReportChartView>("pie");
   const [authView, setAuthView] = useState<AuthView>("login");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -146,6 +162,18 @@ export default function HomeScreen() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    let mounted = true;
+    AsyncStorage.getItem(CALENDAR_HOURS_PREFERENCE_KEY)
+      .then((value) => {
+        if (mounted && isCalendarHoursMode(value)) setCalendarHoursModeState(value);
+      })
+      .catch(() => undefined);
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -246,7 +274,7 @@ export default function HomeScreen() {
     [data, now, selectedDayKey]
   );
   const calendarTotal = useMemo(
-    () => sumStartedInDaySeconds(calendarEntries.filter((entry) => !isCalendarReviewNeeded(entry)), selectedDayKey, now),
+    () => sumOverlappingDaySeconds(calendarEntries.filter((entry) => !isCalendarReviewNeeded(entry)), selectedDayKey, now),
     [calendarEntries, now, selectedDayKey]
   );
   const reports = useMemo(
@@ -387,7 +415,22 @@ export default function HomeScreen() {
   }
 
   const shiftSelectedCalendarDay = useCallback((days: number) => {
+    if (days !== 0) setCalendarTransitionDirection(days > 0 ? 1 : -1);
     setSelectedDayKey((current) => formatDateKey(addDaysToDate(dateFromKey(current), days)));
+  }, []);
+
+  const selectCalendarDay = useCallback((dayKey: string) => {
+    setSelectedDayKey((current) => {
+      const currentTime = dateFromKey(current).getTime();
+      const nextTime = dateFromKey(dayKey).getTime();
+      if (nextTime !== currentTime) setCalendarTransitionDirection(nextTime > currentTime ? 1 : -1);
+      return dayKey;
+    });
+  }, []);
+
+  const setCalendarHoursMode = useCallback((mode: CalendarHoursMode) => {
+    setCalendarHoursModeState(mode);
+    void AsyncStorage.setItem(CALENDAR_HOURS_PREFERENCE_KEY, mode).catch(() => undefined);
   }, []);
 
   const setCalendarZoom = useCallback((hourHeight: number) => {
@@ -767,10 +810,14 @@ export default function HomeScreen() {
 
           {activeTab === "calendar" ? (
             <CalendarTab
+              calendarHoursMode={calendarHoursMode}
+              calendarTransitionDirection={calendarTransitionDirection}
               entries={calendarEntries}
               hourHeight={calendarHourHeight}
               now={now}
               onChangeDay={shiftSelectedCalendarDay}
+              onChangeHoursMode={setCalendarHoursMode}
+              onChangeWeek={(weeks) => shiftSelectedCalendarDay(weeks * 7)}
               onChangeZoom={setCalendarZoom}
               onOpenActive={() => {
                 setCalendarEditEntry(null);
@@ -778,7 +825,7 @@ export default function HomeScreen() {
               }}
               onOpenDetail={setCalendarEditEntry}
               onOpenReviewItem={() => router.push("./review")}
-              onSelectDay={setSelectedDayKey}
+              onSelectDay={selectCalendarDay}
               selectedDayKey={selectedDayKey}
               styles={styles}
               theme={theme}
@@ -790,10 +837,12 @@ export default function HomeScreen() {
 
           {activeTab === "reports" ? (
             <ReportsTab
+              chartView={reportChartView}
               dailyBars={reports.dailyBars}
               range={reportRange}
               segments={reports.segments}
               hasSuggestedActivity={reports.hasSuggestedActivity}
+              onChartViewChange={setReportChartView}
               styles={styles}
               theme={theme}
               todayTotal={reports.todayTotal}
@@ -951,10 +1000,14 @@ function useLiquidGlassAvailability() {
 }
 
 function CalendarTab({
+  calendarHoursMode,
+  calendarTransitionDirection,
   entries,
   hourHeight,
   now,
   onChangeDay,
+  onChangeHoursMode,
+  onChangeWeek,
   onChangeZoom,
   onOpenActive,
   onOpenDetail,
@@ -967,10 +1020,14 @@ function CalendarTab({
   total,
   weekDays
 }: {
+  calendarHoursMode: CalendarHoursMode;
+  calendarTransitionDirection: number;
   entries: CalendarEntry[];
   hourHeight: number;
   now: number;
   onChangeDay: (days: number) => void;
+  onChangeHoursMode: (mode: CalendarHoursMode) => void;
+  onChangeWeek: (weeks: number) => void;
   onChangeZoom: (hourHeight: number) => void;
   onOpenActive: () => void;
   onOpenDetail: (entry: CalendarEntry) => void;
@@ -985,27 +1042,56 @@ function CalendarTab({
 }) {
   const pinchStartDistance = useRef<number | null>(null);
   const pinchStartHourHeight = useRef(hourHeight);
-  const timelineHeight = (TIMELINE_END_HOUR - TIMELINE_START_HOUR) * hourHeight;
+  const calendarTransition = useRef(new Animated.Value(1)).current;
+  const calendarHours = CALENDAR_HOURS_MODES[calendarHoursMode];
+  const timelineHeight = (calendarHours.endHour - calendarHours.startHour) * hourHeight;
   const selectedDate = dateFromKey(selectedDayKey);
   const currentMinute = minutesSinceStartOfDay(new Date(now));
   const showCurrentTime = selectedDayKey === todayKey;
   const currentLineTop = Math.min(
     timelineHeight,
-    Math.max(0, ((currentMinute - TIMELINE_START_HOUR * 60) / 60) * hourHeight)
+    Math.max(0, ((currentMinute - calendarHours.startHour * 60) / 60) * hourHeight)
   );
   const currentTimeOutsideAxis =
     showCurrentTime &&
-    (currentMinute < TIMELINE_START_HOUR * 60 || currentMinute > TIMELINE_END_HOUR * 60);
+    (currentMinute < calendarHours.startHour * 60 || currentMinute > calendarHours.endHour * 60);
   const visibleBlocks = entries
-    .map((entry) => ({ entry, metrics: getTimelineMetrics(entry, selectedDayKey, now, hourHeight) }))
-    .filter((item): item is { entry: CalendarEntry; metrics: { top: number; height: number } } => Boolean(item.metrics));
+    .map((entry) => ({ entry, metrics: getTimelineMetrics(entry, selectedDayKey, now, hourHeight, calendarHours) }))
+    .filter((item): item is { entry: CalendarEntry; metrics: CalendarBlockMetrics } => Boolean(item.metrics));
   const visibleBlockIds = new Set(visibleBlocks.map(({ entry }) => entry.id));
   const outsideAxisEntries = entries.filter((entry) => !visibleBlockIds.has(entry.id)).slice(0, 3);
+
+  useEffect(() => {
+    calendarTransition.stopAnimation();
+    calendarTransition.setValue(0);
+    Animated.timing(calendarTransition, {
+      toValue: 1,
+      duration: 210,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true
+    }).start();
+  }, [calendarTransition, selectedDayKey]);
+
+  const calendarTransitionStyle = {
+    opacity: calendarTransition.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0.78, 1]
+    }),
+    transform: [
+      {
+        translateX: calendarTransition.interpolate({
+          inputRange: [0, 1],
+          outputRange: [calendarTransitionDirection * 24, 0]
+        })
+      }
+    ]
+  };
+
   const dayGestureResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: (event) => event.nativeEvent.touches.length >= 2,
     onMoveShouldSetPanResponder: (event, gesture) => {
       if (event.nativeEvent.touches.length >= 2) return true;
-      return Math.abs(gesture.dx) > 28 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.45;
+      return Math.abs(gesture.dx) > 22 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 0.65;
     },
     onPanResponderGrant: (event) => {
       if (event.nativeEvent.touches.length >= 2) {
@@ -1025,7 +1111,7 @@ function CalendarTab({
       const wasPinching = Boolean(pinchStartDistance.current);
       pinchStartDistance.current = null;
       if (wasPinching) return;
-      if (Math.abs(gesture.dx) < 62 || Math.abs(gesture.dx) < Math.abs(gesture.dy) * 1.2) return;
+      if (Math.abs(gesture.dx) < 50 || Math.abs(gesture.dx) < Math.abs(gesture.dy) * 0.55) return;
       onChangeDay(gesture.dx < 0 ? 1 : -1);
     },
     onPanResponderTerminate: () => {
@@ -1033,9 +1119,18 @@ function CalendarTab({
     }
   }), [hourHeight, onChangeDay, onChangeZoom]);
 
+  const weekGestureResponder = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponder: (_event, gesture) =>
+      Math.abs(gesture.dx) > 22 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 0.65,
+    onPanResponderRelease: (_event, gesture) => {
+      if (Math.abs(gesture.dx) < 50 || Math.abs(gesture.dx) < Math.abs(gesture.dy) * 0.55) return;
+      onChangeWeek(gesture.dx < 0 ? 1 : -1);
+    }
+  }), [onChangeWeek]);
+
   return (
     <View style={styles.tabScreenStack}>
-      <View style={styles.panel}>
+      <View style={styles.panel} {...weekGestureResponder.panHandlers}>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -1086,7 +1181,35 @@ function CalendarTab({
           <Text style={styles.summaryTotal}>{formatDuration(total)}</Text>
         </View>
 
-        <View style={styles.calendarTimelinePanel}>
+        <View style={styles.calendarOptionsRow}>
+          {(["awake", "fullDay"] as const).map((mode) => {
+            const selected = mode === calendarHoursMode;
+            const option = CALENDAR_HOURS_MODES[mode];
+            return (
+              <Pressable
+                key={mode}
+                accessibilityLabel={option.accessibilityLabel}
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                onPress={() => onChangeHoursMode(mode)}
+                style={({ pressed }) => [
+                  styles.calendarOptionChip,
+                  selected ? styles.calendarOptionChipSelected : null,
+                  pressed ? styles.buttonPressed : null
+                ]}
+              >
+                <Text style={[
+                  styles.calendarOptionChipText,
+                  selected ? styles.calendarOptionChipTextSelected : null
+                ]}>
+                  {option.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <Animated.View style={[styles.calendarTimelinePanel, calendarTransitionStyle]}>
           {currentTimeOutsideAxis || outsideAxisEntries.length > 0 ? (
             <View style={styles.calendarEdgeStack}>
               {currentTimeOutsideAxis ? (
@@ -1135,8 +1258,8 @@ function CalendarTab({
           ) : null}
 
           <View style={[styles.calendarTimelineCanvas, { height: timelineHeight }]}>
-            {Array.from({ length: TIMELINE_END_HOUR - TIMELINE_START_HOUR + 1 }, (_, index) => {
-              const hour = TIMELINE_START_HOUR + index;
+            {Array.from({ length: calendarHours.endHour - calendarHours.startHour + 1 }, (_, index) => {
+              const hour = calendarHours.startHour + index;
               const top = index * hourHeight;
 
               return (
@@ -1170,6 +1293,8 @@ function CalendarTab({
                       borderColor: reviewNeeded ? theme.borderStrong : color,
                       backgroundColor: colorWithAlpha(blockColor, reviewNeeded ? 0.12 : entry.isActive ? 0.16 : 0.28)
                     },
+                    metrics.continuesFromPreviousDay ? styles.calendarBlockFromPrevious : null,
+                    metrics.continuesIntoNextDay ? styles.calendarBlockIntoNext : null,
                     pressed ? styles.buttonPressed : null
                   ]}
                 >
@@ -1178,7 +1303,7 @@ function CalendarTab({
                     <Text style={styles.calendarBlockTitle} numberOfLines={1}>{title}</Text>
                   </View>
                   <Text style={styles.calendarBlockMeta} numberOfLines={compact ? 1 : 2}>
-                    {calendarBlockMeta(entry, now, reviewNeeded)}
+                    {calendarBlockMeta(entry, now, reviewNeeded, metrics)}
                   </Text>
                 </Pressable>
               );
@@ -1191,7 +1316,7 @@ function CalendarTab({
               </View>
             ) : null}
           </View>
-        </View>
+        </Animated.View>
 
         {visibleBlocks.length === 0 ? (
           <Text style={styles.muted}>No tracked time for this day.</Text>
@@ -1202,8 +1327,10 @@ function CalendarTab({
 }
 
 function ReportsTab({
+  chartView,
   dailyBars,
   hasSuggestedActivity,
+  onChartViewChange,
   onRangeChange,
   range,
   segments,
@@ -1212,8 +1339,10 @@ function ReportsTab({
   todayTotal,
   weekTotal
 }: {
+  chartView: ReportChartView;
   dailyBars: Array<{ key: string; label: string; seconds: number }>;
   hasSuggestedActivity: boolean;
+  onChartViewChange: (view: ReportChartView) => void;
   onRangeChange: (range: ReportRange) => void;
   range: ReportRange;
   segments: SummarySegment[];
@@ -1281,31 +1410,82 @@ function ReportsTab({
         {segments.length === 0 ? (
           <Text style={styles.muted}>No tracked time yet.</Text>
         ) : (
-          <View style={styles.reportCategoryList}>
-            {segments.map((segment) => (
-              <View key={segment.key} style={styles.reportCategoryRow}>
-                <View style={[styles.reportCategorySwatch, { backgroundColor: segment.color }]} />
-                <View style={styles.reportCategoryBody}>
-                  <View style={styles.reportCategoryHeader}>
-                    <Text style={styles.legendPlace} numberOfLines={1}>{segment.categoryName}</Text>
-                    <Text style={styles.legendDuration}>{formatDuration(segment.seconds)}</Text>
-                  </View>
-                  <View style={styles.reportBarTrack}>
-                    <View
-                      style={[
-                        styles.reportBarFill,
-                        {
-                          backgroundColor: segment.color,
-                          width: `${Math.max(4, Math.round((segment.seconds / maxSegmentSeconds) * 100))}%`
-                        }
-                      ]}
-                    />
-                  </View>
-                  <Text style={styles.legendShare}>{segment.share}%</Text>
+          <>
+            <View style={styles.reportChartSwitchRow}>
+              {(["pie", "bars"] as const).map((option) => {
+                const selected = option === chartView;
+                return (
+                  <Pressable
+                    key={option}
+                    accessibilityLabel={`Show category ${option === "pie" ? "pie chart" : "bar chart"}`}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    onPress={() => onChartViewChange(option)}
+                    style={({ pressed }) => [
+                      styles.reportChartSwitchButton,
+                      selected ? styles.reportChartSwitchButtonSelected : null,
+                      pressed ? styles.buttonPressed : null
+                    ]}
+                  >
+                    <Text style={[
+                      styles.reportChartSwitchText,
+                      selected ? styles.reportChartSwitchTextSelected : null
+                    ]}>
+                      {option === "pie" ? "Pie" : "Bars"}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {chartView === "pie" ? (
+              <>
+                <View style={styles.chartWrap}>
+                  <DonutChart progress={1} segments={segments} styles={styles} theme={theme} total={segments.reduce((sum, segment) => sum + segment.seconds, 0)} />
                 </View>
+                <View style={styles.legendList}>
+                  {segments.map((segment) => (
+                    <View key={segment.key} style={styles.legendRow}>
+                      <View style={[styles.legendSwatch, { backgroundColor: segment.color }]} />
+                      <View style={styles.legendText}>
+                        <Text style={styles.legendPlace} numberOfLines={1}>{segment.categoryName}</Text>
+                        <Text style={styles.legendProject}>Category</Text>
+                      </View>
+                      <View style={styles.legendNumbers}>
+                        <Text style={styles.legendDuration}>{formatDuration(segment.seconds)}</Text>
+                        <Text style={styles.legendShare}>{segment.share}%</Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </>
+            ) : (
+              <View style={styles.reportCategoryList}>
+                {segments.map((segment) => (
+                  <View key={segment.key} style={styles.reportCategoryRow}>
+                    <View style={[styles.reportCategorySwatch, { backgroundColor: segment.color }]} />
+                    <View style={styles.reportCategoryBody}>
+                      <View style={styles.reportCategoryHeader}>
+                        <Text style={styles.legendPlace} numberOfLines={1}>{segment.categoryName}</Text>
+                        <Text style={styles.legendDuration}>{formatDuration(segment.seconds)}</Text>
+                      </View>
+                      <View style={styles.reportBarTrack}>
+                        <View
+                          style={[
+                            styles.reportBarFill,
+                            {
+                              backgroundColor: segment.color,
+                              width: `${Math.max(4, Math.round((segment.seconds / maxSegmentSeconds) * 100))}%`
+                            }
+                          ]}
+                        />
+                      </View>
+                      <Text style={styles.legendShare}>{segment.share}%</Text>
+                    </View>
+                  </View>
+                ))}
               </View>
-            ))}
-          </View>
+            )}
+          </>
         )}
       </View>
 
@@ -1689,6 +1869,11 @@ function buildDailyBars(entries: TimeEntry[], weekStart: Date, now: number) {
   });
 }
 
+function sumOverlappingDaySeconds(entries: TimeEntry[], dayKey: string, now: number) {
+  const dayStart = dateFromKey(dayKey);
+  return sumRangeSeconds(entries, dayStart, addDaysToDate(dayStart, 1), now);
+}
+
 function sumStartedInDaySeconds(entries: TimeEntry[], dayKey: string, now: number) {
   return entries.reduce((sum, entry) => {
     if (formatDateKey(new Date(entry.startedAt)) !== dayKey) return sum;
@@ -1698,18 +1883,33 @@ function sumStartedInDaySeconds(entries: TimeEntry[], dayKey: string, now: numbe
 
 function sumRangeSeconds(entries: TimeEntry[], rangeStart: Date, rangeEnd: Date, now: number) {
   return entries.reduce((sum, entry) => {
-    const startedAt = new Date(entry.startedAt);
-    if (startedAt < rangeStart || startedAt >= rangeEnd) return sum;
-    return sum + entryDurationSeconds(entry, now);
+    return sum + entryOverlapSeconds(entry, rangeStart, rangeEnd, now);
   }, 0);
 }
 
-function getTimelineMetrics(entry: CalendarEntry, selectedDayKey: string, now: number, hourHeight: number) {
+function entryOverlapSeconds(entry: TimeEntry, rangeStart: Date, rangeEnd: Date, now: number) {
+  const startedAt = new Date(entry.startedAt);
+  const stoppedAt = entry.stoppedAt ? new Date(entry.stoppedAt) : new Date(now);
+  if (Number.isNaN(startedAt.getTime()) || Number.isNaN(stoppedAt.getTime())) return 0;
+  const overlapStart = Math.max(startedAt.getTime(), rangeStart.getTime());
+  const overlapEnd = Math.min(stoppedAt.getTime(), rangeEnd.getTime());
+  if (overlapEnd <= overlapStart) return 0;
+  return Math.floor((overlapEnd - overlapStart) / 1000);
+}
+
+function getTimelineMetrics(
+  entry: CalendarEntry,
+  selectedDayKey: string,
+  now: number,
+  hourHeight: number,
+  calendarHours: CalendarHours
+): CalendarBlockMetrics | null {
   const dayStart = dateFromKey(selectedDayKey);
+  const dayEnd = addDaysToDate(dayStart, 1);
   const axisStart = new Date(dayStart);
-  axisStart.setHours(TIMELINE_START_HOUR, 0, 0, 0);
+  axisStart.setHours(calendarHours.startHour, 0, 0, 0);
   const axisEnd = new Date(dayStart);
-  axisEnd.setHours(TIMELINE_END_HOUR, 0, 0, 0);
+  axisEnd.setHours(calendarHours.endHour, 0, 0, 0);
   const startedAt = new Date(entry.startedAt);
   const stoppedAt = entry.stoppedAt ? new Date(entry.stoppedAt) : new Date(now);
   const visibleStart = new Date(Math.max(startedAt.getTime(), axisStart.getTime()));
@@ -1730,7 +1930,9 @@ function getTimelineMetrics(entry: CalendarEntry, selectedDayKey: string, now: n
 
   return {
     top: (topMinutes / 60) * hourHeight,
-    height: Math.max(TIMELINE_MIN_BLOCK_HEIGHT, (durationMinutes / 60) * hourHeight)
+    height: Math.max(TIMELINE_MIN_BLOCK_HEIGHT, (durationMinutes / 60) * hourHeight),
+    continuesFromPreviousDay: startedAt < dayStart,
+    continuesIntoNextDay: stoppedAt > dayEnd
   };
 }
 
@@ -1779,10 +1981,22 @@ function openCalendarEntry(
   onOpenDetail(entry);
 }
 
-function calendarBlockMeta(entry: CalendarEntry, now: number, reviewNeeded: boolean) {
+function calendarBlockMeta(
+  entry: CalendarEntry,
+  now: number,
+  reviewNeeded: boolean,
+  metrics?: Pick<CalendarBlockMetrics, "continuesFromPreviousDay" | "continuesIntoNextDay">
+) {
   const timeLabel = formatEntryTimeRange(entry, now);
   const suffix = entry.isActive ? "running" : formatDuration(entryDurationSeconds(entry, now));
-  return reviewNeeded ? `${REVIEW_COPY.needsReview} · ${timeLabel} · ${suffix}` : `${timeLabel} · ${suffix}`;
+  const labels = [
+    reviewNeeded ? REVIEW_COPY.needsReview : null,
+    metrics?.continuesFromPreviousDay ? "Started previous day" : null,
+    metrics?.continuesIntoNextDay ? "Continues next day" : null,
+    timeLabel,
+    suffix
+  ].filter(Boolean);
+  return labels.join(" · ");
 }
 
 function formatEntryTimeRange(entry: TimeEntry, now: number) {
@@ -1834,6 +2048,10 @@ function touchDistance(touches: ArrayLike<{ pageX: number; pageY: number }>) {
   const first = touches[0];
   const second = touches[1];
   return Math.hypot(second.pageX - first.pageX, second.pageY - first.pageY);
+}
+
+function isCalendarHoursMode(value: string | null): value is CalendarHoursMode {
+  return value === "awake" || value === "fullDay";
 }
 
 function clamp(value: number, min: number, max: number) {
