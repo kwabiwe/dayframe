@@ -1,7 +1,7 @@
 "use client";
 
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarDays, ChevronLeft, ChevronRight, List, Table2 } from "lucide-react";
 import { CurrentTimerPanel } from "@/components/DashboardRealtime";
@@ -55,6 +55,8 @@ type CalendarResizeDraft = {
   stoppedAt: string;
 };
 
+const timelinePreferenceEvent = "dayframe:timeline-preference";
+
 function isTimeView(value: string | null): value is TimeView {
   return value === "calendar" || value === "list" || value === "timesheet";
 }
@@ -74,9 +76,28 @@ function readTimelinePreference(key: string) {
 function writeTimelinePreference(key: string, value: string) {
   try {
     window.localStorage.setItem(key, value);
+    window.dispatchEvent(new Event(timelinePreferenceEvent));
   } catch {
     // Preference persistence is best-effort; tab switching should still work.
   }
+}
+
+function subscribeTimelinePreference(callback: () => void) {
+  if (typeof window === "undefined") return () => undefined;
+  window.addEventListener("storage", callback);
+  window.addEventListener(timelinePreferenceEvent, callback);
+  return () => {
+    window.removeEventListener("storage", callback);
+    window.removeEventListener(timelinePreferenceEvent, callback);
+  };
+}
+
+function useTimelinePreference(key: string) {
+  return useSyncExternalStore(
+    subscribeTimelinePreference,
+    () => readTimelinePreference(key),
+    () => null
+  );
 }
 
 export function TimeReviewViews({
@@ -85,11 +106,16 @@ export function TimeReviewViews({
   initialData: BootstrapData;
 }) {
   const [data, setData] = useState(initialData);
-  const [activeView, setActiveView] = useState<TimeView>("calendar");
-  const [calendarMode, setCalendarMode] = useState<CalendarMode>("week");
+  const [activeViewOverride, setActiveViewOverride] = useState<TimeView | null>(null);
+  const [calendarModeOverride, setCalendarModeOverride] = useState<CalendarMode | null>(null);
   const [weekAnchor, setWeekAnchor] = useState(() => startOfWeek(new Date(initialData.dateRange.selectedDate)));
   const timelineViewStorageKey = `dayframe.timeline.${data.workspace.id}.view`;
   const calendarModeStorageKey = `dayframe.timeline.${data.workspace.id}.calendarMode`;
+  const storedView = useTimelinePreference(timelineViewStorageKey);
+  const storedCalendarMode = useTimelinePreference(calendarModeStorageKey);
+  const activeView = activeViewOverride ?? (isTimeView(storedView) ? storedView : "calendar");
+  const calendarMode =
+    calendarModeOverride ?? (isCalendarMode(storedCalendarMode) ? storedCalendarMode : "week");
 
   const refreshData = useCallback(async () => {
     try {
@@ -110,23 +136,13 @@ export function TimeReviewViews({
     return () => window.clearInterval(interval);
   }, [refreshData]);
 
-  useEffect(() => {
-    const storedView = readTimelinePreference(timelineViewStorageKey);
-    if (isTimeView(storedView)) setActiveView(storedView);
-  }, [timelineViewStorageKey]);
-
-  useEffect(() => {
-    const storedMode = readTimelinePreference(calendarModeStorageKey);
-    if (isCalendarMode(storedMode)) setCalendarMode(storedMode);
-  }, [calendarModeStorageKey]);
-
   function updateView(view: TimeView) {
-    setActiveView(view);
+    setActiveViewOverride(view);
     writeTimelinePreference(timelineViewStorageKey, view);
   }
 
   function updateCalendarMode(mode: CalendarMode) {
-    setCalendarMode(mode);
+    setCalendarModeOverride(mode);
     writeTimelinePreference(calendarModeStorageKey, mode);
   }
 

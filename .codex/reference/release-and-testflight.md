@@ -52,6 +52,27 @@ If the app version stays the same, increment build:
 
 Record the new build number in the investigation note and PR.
 
+## Preflight Before Archive
+
+Run the preflight before spending time on a TestFlight archive/export:
+
+```bash
+npm run testflight:preflight
+```
+
+The preflight checks the failure points that have disrupted recent Dayframe releases:
+
+- full Xcode is installed
+- release commands should pin `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` if `xcode-select` points at Command Line Tools
+- `apps/mobile/ios/Podfile.lock` matches `apps/mobile/ios/Pods/Manifest.lock`
+- Dayframe has an App Store provisioning profile for team `65M773ZG6M`
+- Keychain has an **Apple Distribution** or **iPhone Distribution** signing identity with its private key
+- local App Store Connect API-key config exists under `.codex-dayframe-qa/testflight/appstoreconnect/`
+
+Do not start archive/export if the preflight fails. A valid App Store provisioning profile is not enough; TestFlight export also needs the matching distribution signing identity in Keychain. Xcode/browser App Store Connect login may still be present while the CLI export fails if that certificate/private key is missing.
+
+If the distribution identity is missing, the durable fix is to install an Apple Distribution certificate/private key for the Dayframe Apple team in the login keychain, or explicitly authorize creating a new Apple Distribution certificate and profile. Once this passes, use the API-key upload path and verify export compliance/internal testing state before telling KB to test.
+
 ## Production Deployment Check
 
 For Vercel-hosted fixes:
