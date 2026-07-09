@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Alert,
   Dimensions,
   Keyboard,
   type KeyboardEvent,
@@ -27,9 +28,11 @@ type ActiveTimerEditSheetProps = {
   entry: MobileTimeEntry | null;
   lastStoppedAt: string | null;
   onCancel: () => void;
+  onDelete?: (entryId: string) => Promise<boolean>;
   onSave: (entryId: string, patch: TimeEntryUpdatePatch) => Promise<boolean>;
   onStop?: () => Promise<boolean>;
   mode?: EditSheetMode;
+  deleting?: boolean;
   saving: boolean;
   stopping: boolean;
   styles: MobileStyles;
@@ -44,8 +47,10 @@ export function ActiveTimerEditSheet({
   lastStoppedAt,
   mode = "running",
   onCancel,
+  onDelete,
   onSave,
   onStop,
+  deleting = false,
   saving,
   stopping,
   styles,
@@ -137,8 +142,9 @@ export function ActiveTimerEditSheet({
   if (!entry) return null;
   const editingEntry = entry;
 
-  const busy = saving || stopping;
+  const busy = saving || stopping || deleting;
   const canStop = isRunningMode && Boolean(onStop);
+  const canDelete = !isRunningMode && Boolean(onDelete);
   const cancelLabel = isRunningMode ? "Cancel editing timer" : "Cancel editing entry";
   const saveLabel = isRunningMode ? "Save timer edits" : "Save entry edits";
   const sheetTitle = isRunningMode ? "Edit timer" : "Edit entry";
@@ -203,6 +209,30 @@ export function ActiveTimerEditSheet({
   async function stopFromSheet() {
     if (busy || !onStop) return;
     const ok = await onStop();
+    if (ok) onCancel();
+  }
+
+  function confirmDeleteEntry() {
+    if (busy || !onDelete) return;
+    Alert.alert(
+      "Delete entry",
+      "Delete this time entry? This cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            void deleteEntryFromSheet();
+          }
+        }
+      ]
+    );
+  }
+
+  async function deleteEntryFromSheet() {
+    if (busy || !onDelete) return;
+    const ok = await onDelete(editingEntry.id);
     if (ok) onCancel();
   }
 
@@ -569,6 +599,24 @@ export function ActiveTimerEditSheet({
                       />
                     </View>
                   </View>
+                ) : null}
+
+                {canDelete ? (
+                  <Pressable
+                    accessibilityLabel="Delete entry"
+                    accessibilityRole="button"
+                    disabled={busy}
+                    onPress={confirmDeleteEntry}
+                    style={({ pressed }) => [
+                      styles.activeEditDeleteButton,
+                      pressed && !busy ? styles.buttonPressed : null,
+                      busy ? styles.buttonDisabled : null
+                    ]}
+                  >
+                    <Text style={styles.activeEditDeleteText}>
+                      {deleting ? "Deleting..." : "Delete entry"}
+                    </Text>
+                  </Pressable>
                 ) : null}
               </ScrollView>
             </View>

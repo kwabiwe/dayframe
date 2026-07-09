@@ -107,14 +107,14 @@ describe("HealthKit workout helpers", () => {
       },
       {
         ...context,
-        categories: [{ id: categoryId("health"), name: "Health" }]
+        categories: [{ id: categoryId("sleep"), name: "Sleep" }]
       }
     );
 
     expect(next.reviewItems).toHaveLength(0);
     expect(next.completedEntries).toEqual([
       expect.objectContaining({
-        categoryId: categoryId("health"),
+        categoryId: categoryId("sleep"),
         description: "Sleep",
         startedAt: new Date("2026-07-06T23:55:00.000Z"),
         stoppedAt: new Date("2026-07-07T06:27:00.000Z")
@@ -139,14 +139,14 @@ describe("HealthKit workout helpers", () => {
       },
       {
         ...context,
-        categories: [{ id: categoryId("health"), name: "Health" }]
+        categories: [{ id: categoryId("sleep"), name: "Sleep" }]
       }
     );
 
     expect(next.completedEntries).toHaveLength(0);
     expect(next.reviewItems).toEqual([
       expect.objectContaining({
-        categoryId: categoryId("health"),
+        categoryId: categoryId("sleep"),
         title: "Sleep"
       })
     ]);

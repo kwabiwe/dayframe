@@ -301,7 +301,7 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
     if (isHealthEvent(parsed.type) && !candidate.categoryId) {
       candidate = {
         ...candidate,
-        categoryId: await ensureHealthCategoryId(client, session)
+        categoryId: await ensureHealthEventCategoryId(client, session, parsed.type)
       };
     }
 
@@ -1468,14 +1468,15 @@ export async function reprocessHealthReviewItems(
       return result;
     }
 
-    let healthCategoryId: string | null = null;
-    try {
-      healthCategoryId = await ensureHealthCategoryId(client, session);
-    } catch (error) {
-      result.failedCount = reviewItems.rows.length;
-      result.errorSummary.push(compactErrorSummary(error, "Unable to ensure Health category"));
-      await client.query("rollback");
-      return result;
+    const healthCategoryIds = new Map<string, string>();
+    async function ensureReviewCategoryId(item: Pick<HealthReviewItemRow, "eventType">) {
+      const spec = healthCategorySpecForEventType(item.eventType);
+      const key = spec.name.toLowerCase();
+      const cached = healthCategoryIds.get(key);
+      if (cached) return cached;
+      const categoryId = await ensureHealthEventCategoryId(client, session, item.eventType);
+      healthCategoryIds.set(key, categoryId);
+      return categoryId;
     }
 
     const sleepItems = preferences.sleep
@@ -1485,11 +1486,24 @@ export async function reprocessHealthReviewItems(
       )
       : reviewItems.rows;
 
+    const hasSleepReviewItems = sleepItems.some((item) => item.eventType === "health_sleep_import");
+    let sleepCategoryId: string | null = null;
+    try {
+      sleepCategoryId = preferences.sleep && hasSleepReviewItems
+        ? await ensureReviewCategoryId({ eventType: "health_sleep_import" })
+        : null;
+    } catch (error) {
+      result.failedCount = sleepItems.filter((item) => item.eventType === "health_sleep_import").length;
+      result.errorSummary.push(compactErrorSummary(error, "Unable to ensure Sleep category"));
+      await client.query("rollback");
+      return result;
+    }
+
     const consolidatedSleepIds = await consolidateLegacyHealthSleepReviewItems(
       client,
       sleepItems,
       session,
-      healthCategoryId,
+      sleepCategoryId,
       result
     );
 
@@ -1503,9 +1517,10 @@ export async function reprocessHealthReviewItems(
         const stoppedAt = timestampStringOrNull(rawPayload.stoppedAt) ?? item.suggestedStoppedAt;
         const durationSeconds = reviewDurationSeconds(rawPayload, startedAt, stoppedAt);
         const preferenceKey = healthPreferenceKeyForReviewItem(item, rawPayload);
+        const categoryId = await ensureReviewCategoryId(item);
 
-        if (item.suggestedCategoryId !== healthCategoryId || item.eventCategoryId !== healthCategoryId) {
-          await updateHealthReviewCategory(client, item, healthCategoryId);
+        if (item.suggestedCategoryId !== categoryId || item.eventCategoryId !== categoryId) {
+          await updateHealthReviewCategory(client, item, categoryId);
           result.updatedCategoryCount += 1;
         }
 
@@ -1583,7 +1598,7 @@ export async function reprocessHealthReviewItems(
         }
 
         await insertConfirmedHealthTimeEntry(client, item, session, {
-          categoryId: healthCategoryId,
+          categoryId,
           startedAt,
           stoppedAt
         });
@@ -1723,7 +1738,7 @@ async function consolidateLegacyHealthSleepReviewItems(
   client: pg.PoolClient,
   items: HealthReviewItemRow[],
   session: RequestSession,
-  healthCategoryId: string,
+  sleepCategoryId: string | null,
   result: {
     checkedCount: number;
     confirmedCount: number;
@@ -1735,11 +1750,13 @@ async function consolidateLegacyHealthSleepReviewItems(
   }
 ) {
   const handledIds = new Set<string>();
+  if (!sleepCategoryId) return handledIds;
+
   for (const item of items) {
     const rawPayload = isRecord(item.rawPayload) ? item.rawPayload : {};
     if (!shouldIgnoreHealthSleepStage(item, rawPayload)) continue;
-    if (item.suggestedCategoryId !== healthCategoryId || item.eventCategoryId !== healthCategoryId) {
-      await updateHealthReviewCategory(client, item, healthCategoryId);
+    if (item.suggestedCategoryId !== sleepCategoryId || item.eventCategoryId !== sleepCategoryId) {
+      await updateHealthReviewCategory(client, item, sleepCategoryId);
       result.updatedCategoryCount += 1;
     }
     await resolveReprocessedHealthReviewItem(client, item, "ignored");
@@ -1781,8 +1798,8 @@ async function consolidateLegacyHealthSleepReviewItems(
     await client.query("savepoint consolidate_health_sleep");
     try {
       for (const segment of group) {
-        if (segment.item.suggestedCategoryId !== healthCategoryId || segment.item.eventCategoryId !== healthCategoryId) {
-          await updateHealthReviewCategory(client, segment.item, healthCategoryId);
+        if (segment.item.suggestedCategoryId !== sleepCategoryId || segment.item.eventCategoryId !== sleepCategoryId) {
+          await updateHealthReviewCategory(client, segment.item, sleepCategoryId);
           result.updatedCategoryCount += 1;
         }
       }
@@ -1816,7 +1833,7 @@ async function consolidateLegacyHealthSleepReviewItems(
           ...group[0].item,
           title: "Sleep"
         }, session, {
-          categoryId: healthCategoryId,
+          categoryId: sleepCategoryId,
           startedAt,
           stoppedAt
         });
@@ -2062,10 +2079,19 @@ function shouldIgnoreHealthSleepStage(
   return sleepStage === "awake" || sleepStage === "in_bed";
 }
 
-async function ensureHealthCategoryId(
+function healthCategorySpecForEventType(eventType: string | null | undefined) {
+  if (eventType === "health_sleep_import") {
+    return { name: "Sleep", color: "lime" };
+  }
+  return { name: "Health", color: "moss" };
+}
+
+async function ensureHealthEventCategoryId(
   client: pg.PoolClient,
-  session: RequestSession
+  session: RequestSession,
+  eventType: string | null | undefined
 ) {
+  const spec = healthCategorySpecForEventType(eventType);
   const existing = await client.query<{ id: string }>(
     `select id
      from categories
@@ -2074,15 +2100,15 @@ async function ensureHealthCategoryId(
        and coalesce(is_archived, false) = false
      order by created_at asc
      limit 1`,
-    [session.workspaceId, "Health"]
+    [session.workspaceId, spec.name]
   );
   if (existing.rows[0]) return existing.rows[0].id;
 
   const created = await client.query<{ id: string }>(
     `insert into categories (workspace_id, name, color, is_pinned)
-     values ($1, 'Health', 'moss', false)
+     values ($1, $2, $3, false)
      returning id`,
-    [session.workspaceId]
+    [session.workspaceId, spec.name, spec.color]
   );
   return created.rows[0].id;
 }
@@ -2136,7 +2162,7 @@ async function findCoveringHealthTimeEntry(
        and (
          te.source in ('health_sleep', 'health_workout')
          or (
-           lower(coalesce(c.name, '')) = 'health'
+           lower(coalesce(c.name, '')) in ('health', 'sleep')
            and lower(coalesce(te.description, '')) = lower($5)
          )
        )
