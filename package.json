@@ -19,7 +19,8 @@
     "test": "npm run test --workspaces --if-present",
     "build": "npm run build -w @dayframe/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "lint": "npm run lint --workspaces --if-present"
+    "lint": "npm run lint --workspaces --if-present",
+    "testflight:preflight": "node scripts/dayframe-testflight-preflight.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.0.0",

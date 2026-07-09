@@ -42,12 +42,13 @@ export function TimerPanel({
   const [isPending, startTransition] = useTransition();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [deleteDialogEntryId, setDeleteDialogEntryId] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [draft, setDraft] = useState<TimerDraft>(() => draftFromEntry(activeEntry));
   const syncedDraft = draft.activeEntryId === (activeEntry?.id ?? null) ? draft : draftFromEntry(activeEntry);
   const { categoryId, placeId, description } = syncedDraft;
   const isBusy = isPending || isSubmitting;
+  const isDeleteDialogOpen = activeEntry ? deleteDialogEntryId === activeEntry.id : false;
   const activeDurationSeconds = activeEntry
     ? Math.max(
         activeEntry.durationSeconds,
@@ -59,10 +60,6 @@ export function TimerPanel({
     if (!activeEntry) return undefined;
     const interval = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(interval);
-  }, [activeEntry]);
-
-  useEffect(() => {
-    if (!activeEntry) setIsDeleteDialogOpen(false);
   }, [activeEntry]);
 
   function updateDraft(patch: Partial<Omit<TimerDraft, "activeEntryId">>) {
@@ -138,7 +135,7 @@ export function TimerPanel({
         throw new Error(errorMessage);
       }
 
-      setIsDeleteDialogOpen(false);
+      setDeleteDialogEntryId(null);
       setDraft(draftFromEntry(null));
       if (onSynced) await refreshClientData();
       else startTransition(() => router.refresh());
@@ -260,7 +257,7 @@ export function TimerPanel({
                 title="Delete running timer"
                 onClick={() => {
                   setDeleteError(null);
-                  setIsDeleteDialogOpen(true);
+                  setDeleteDialogEntryId(activeEntry.id);
                 }}
               >
                 <Trash2 size={16} />
@@ -312,7 +309,7 @@ export function TimerPanel({
           dialogId="delete-running-timer"
           error={deleteError}
           isBusy={isBusy}
-          onCancel={() => setIsDeleteDialogOpen(false)}
+          onCancel={() => setDeleteDialogEntryId(null)}
           onConfirm={() => void deleteActiveEntry()}
           title="Delete running timer?"
         />
