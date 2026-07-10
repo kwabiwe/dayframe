@@ -267,10 +267,65 @@ export const HEALTH_IMPORT_PREFERENCE_OPTIONS = [
 
 export type HealthImportPreferenceKey = (typeof HEALTH_IMPORT_PREFERENCE_OPTIONS)[number]["key"];
 export type HealthImportPreferences = Record<HealthImportPreferenceKey, boolean>;
+export type HealthAutoLogMapping = {
+  categoryId?: string | null;
+  description?: string | null;
+};
+export type HealthAutoLogMappings = Partial<Record<HealthImportPreferenceKey, HealthAutoLogMapping>>;
 
 export const DEFAULT_HEALTH_IMPORT_PREFERENCES = Object.fromEntries(
   HEALTH_IMPORT_PREFERENCE_OPTIONS.map((option) => [option.key, option.defaultEnabled])
 ) as HealthImportPreferences;
+
+export function normalizeHealthAutoLogMappings(input: unknown): HealthAutoLogMappings {
+  const values = isObjectRecord(input) ? input : {};
+  const mappings: HealthAutoLogMappings = {};
+
+  for (const option of HEALTH_IMPORT_PREFERENCE_OPTIONS) {
+    const raw = values[option.key];
+    if (!isObjectRecord(raw)) continue;
+
+    const categoryId = normalizeMappingText(raw.categoryId);
+    const description = normalizeMappingText(raw.description);
+    if (!categoryId && !description) continue;
+
+    mappings[option.key] = {
+      categoryId,
+      description
+    };
+  }
+
+  return mappings;
+}
+
+export function healthAutoLogMappingFor(
+  key: HealthImportPreferenceKey,
+  mappings?: HealthAutoLogMappings | null
+): HealthAutoLogMapping {
+  return mappings?.[key] ?? {};
+}
+
+export function calendarBlockContinuationEdges(input: {
+  startedAt: unknown;
+  stoppedAt: unknown;
+  dayStart: unknown;
+  dayEnd: unknown;
+}) {
+  const startedAt = timestampMs(input.startedAt);
+  const stoppedAt = timestampMs(input.stoppedAt);
+  const dayStart = timestampMs(input.dayStart);
+  const dayEnd = timestampMs(input.dayEnd);
+  if (startedAt == null || stoppedAt == null || dayStart == null || dayEnd == null) {
+    return {
+      startsBeforeDay: false,
+      continuesIntoNextDay: false
+    };
+  }
+  return {
+    startsBeforeDay: startedAt < dayStart,
+    continuesIntoNextDay: stoppedAt > dayEnd
+  };
+}
 
 const healthWorkoutTypeByNumber: Record<number, HealthWorkoutType> = {
   13: "cycling",
@@ -950,6 +1005,28 @@ function timestampFromPayload(value: unknown) {
   if (typeof value !== "string") return undefined;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeMappingText(value: unknown) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, 160) : null;
+}
+
+function timestampMs(value: unknown) {
+  const date =
+    value instanceof Date
+      ? value
+      : typeof value === "string" || typeof value === "number"
+        ? new Date(value)
+        : null;
+  if (!date) return null;
+  const time = date.getTime();
+  return Number.isFinite(time) ? time : null;
 }
 
 function findMatchingRule(

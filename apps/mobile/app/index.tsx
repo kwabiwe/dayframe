@@ -19,7 +19,7 @@ import Svg, { Circle, G, Path } from "react-native-svg";
 import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from "expo-glass-effect";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { paletteColorFor } from "@dayframe/shared";
+import { calendarBlockContinuationEdges, paletteColorFor } from "@dayframe/shared";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { useKeyboardAccessory, type KeyboardAccessoryField } from "@/components/KeyboardAccessory";
 import {
@@ -80,6 +80,7 @@ type CalendarHours = { startHour: number; endHour: number };
 type CalendarBlockMetrics = {
   top: number;
   height: number;
+  startsBeforeDay: boolean;
   continuesIntoNextDay: boolean;
 };
 type CalendarZoomFocus = {
@@ -1394,6 +1395,7 @@ function CalendarTab({
                       borderColor: reviewNeeded ? theme.borderStrong : color,
                       backgroundColor: colorWithAlpha(blockColor, reviewNeeded ? 0.12 : entry.isActive ? 0.16 : 0.28)
                     },
+                    metrics.startsBeforeDay ? styles.calendarBlockFromPrevious : null,
                     metrics.continuesIntoNextDay ? styles.calendarBlockIntoNext : null,
                     pressed ? styles.buttonPressed : null
                   ]}
@@ -2026,11 +2028,18 @@ function getTimelineMetrics(
 
   const topMinutes = (visibleStart.getTime() - axisStart.getTime()) / 60000;
   const durationMinutes = Math.max(1, (visibleEnd.getTime() - visibleStart.getTime()) / 60000);
+  const continuation = calendarBlockContinuationEdges({
+    startedAt,
+    stoppedAt,
+    dayStart,
+    dayEnd
+  });
 
   return {
     top: (topMinutes / 60) * hourHeight,
     height: Math.max(TIMELINE_MIN_BLOCK_HEIGHT, (durationMinutes / 60) * hourHeight),
-    continuesIntoNextDay: stoppedAt > dayEnd
+    startsBeforeDay: continuation.startsBeforeDay,
+    continuesIntoNextDay: continuation.continuesIntoNextDay
   };
 }
 

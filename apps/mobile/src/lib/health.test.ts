@@ -49,6 +49,7 @@ vi.mock("@kingstinct/react-native-healthkit", () => ({
 }));
 
 const {
+  getHealthAutoLogMappings,
   getHealthImportPreferences,
   getHealthWorkoutImportPreferences,
   groupSleepSamplesIntoSessions,
@@ -63,6 +64,7 @@ const {
   isHealthKitAutomaticSyncEnabled,
   reprocessExistingHealthReviewItems,
   requestHealthKitPermissions,
+  setHealthAutoLogMapping,
   setHealthImportPreference,
   startHealthKitChangeObservers
 } = await import("./health");
@@ -424,6 +426,59 @@ describe("HealthKit mapping", () => {
     });
   });
 
+  it("stores Health auto-log mappings for category and description defaults", async () => {
+    await expect(getHealthAutoLogMappings()).resolves.toEqual({});
+
+    const saved = await setHealthAutoLogMapping("walking", {
+      categoryId: "category-fitness",
+      description: "Morning walk"
+    });
+
+    expect(saved.walking).toEqual({
+      categoryId: "category-fitness",
+      description: "Morning walk"
+    });
+    await expect(getHealthAutoLogMappings()).resolves.toEqual(saved);
+  });
+
+  it("applies custom Health mappings to generated sleep and workout events", () => {
+    const sleepEvent = healthKitSleepSessionEvent(
+      {
+        externalSessionId: "mapped-sleep",
+        startedAt: "2026-07-07T00:00:00.000Z",
+        stoppedAt: "2026-07-07T07:00:00.000Z",
+        samples: [
+          sleepSample("mapped-core", "asleep_core", "2026-07-07T00:00:00.000Z", "2026-07-07T07:00:00.000Z")
+        ]
+      },
+      {
+        categoryId: "category-rest",
+        description: "Overnight sleep"
+      }
+    );
+    const workoutEvent = healthKitWorkoutEvent(
+      mapHealthKitWorkoutSample({
+        uuid: "mapped-walk",
+        workoutActivityType: 52,
+        startDate: "2026-07-07T08:00:00.000Z",
+        endDate: "2026-07-07T08:30:00.000Z"
+      }),
+      {
+        categoryId: "category-fitness",
+        description: "Morning walk"
+      }
+    );
+
+    expect(sleepEvent).toMatchObject({
+      categoryId: "category-rest",
+      description: "Overnight sleep"
+    });
+    expect(workoutEvent).toMatchObject({
+      categoryId: "category-fitness",
+      description: "Morning walk"
+    });
+  });
+
   it("enables automatic sleep and workout sync after Health permission is granted", async () => {
     const permission = await requestHealthKitPermissions();
 
@@ -484,7 +539,42 @@ describe("HealthKit mapping", () => {
         strength_training: false,
         swimming: false
       }),
-      { limit: 25, force: true }
+      { limit: 25, force: true, mappings: {} }
+    );
+  });
+
+  it("reprocesses existing Health review items with saved mappings", async () => {
+    apiMocks.reprocessHealthReviewItems.mockResolvedValueOnce({
+      ok: true,
+      checkedCount: 1,
+      confirmedCount: 1,
+      ignoredCount: 0,
+      leftInReviewCount: 0,
+      skippedCount: 0,
+      failedCount: 0,
+      updatedCategoryCount: 1,
+      remainingReviewCount: 0,
+      errorSummary: []
+    });
+
+    await setHealthAutoLogMapping("walking", {
+      categoryId: "category-fitness",
+      description: "Morning walk"
+    });
+    await reprocessExistingHealthReviewItems(undefined, { force: true });
+
+    expect(apiMocks.reprocessHealthReviewItems).toHaveBeenCalledWith(
+      expect.objectContaining({ walking: true }),
+      {
+        limit: 25,
+        force: true,
+        mappings: {
+          walking: {
+            categoryId: "category-fitness",
+            description: "Morning walk"
+          }
+        }
+      }
     );
   });
 
@@ -527,12 +617,12 @@ describe("HealthKit mapping", () => {
     expect(apiMocks.reprocessHealthReviewItems).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ walking: true }),
-      { limit: 25, force: true }
+      { limit: 25, force: true, mappings: {} }
     );
     expect(apiMocks.reprocessHealthReviewItems).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({ walking: true }),
-      { limit: 25, force: true }
+      { limit: 25, force: true, mappings: {} }
     );
     expect(result).toMatchObject({
       checkedCount: 33,

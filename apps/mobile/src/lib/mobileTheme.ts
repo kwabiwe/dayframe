@@ -370,6 +370,11 @@ function createStyles(theme: MobileTheme) {
       borderStyle: "dashed",
       opacity: 0.72
     },
+    calendarBlockFromPrevious: {
+      borderTopWidth: 0,
+      borderTopLeftRadius: 0,
+      borderTopRightRadius: 0
+    },
     calendarBlockIntoNext: {
       borderBottomWidth: 0,
       borderBottomLeftRadius: 0,
@@ -959,6 +964,9 @@ function createStyles(theme: MobileTheme) {
       borderRadius: 12,
       paddingHorizontal: 12,
       paddingVertical: 10,
+      gap: 12
+    },
+    healthPreferenceHeader: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
@@ -968,6 +976,19 @@ function createStyles(theme: MobileTheme) {
       flex: 1,
       minWidth: 0,
       gap: 3
+    },
+    healthMappingPanel: {
+      gap: 8
+    },
+    healthMappingLabel: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 11,
+      fontWeight: "800",
+      textTransform: "uppercase"
+    },
+    healthMappingInput: {
+      minHeight: 42
     },
     categoryChoiceScroller: {
       gap: 8,
