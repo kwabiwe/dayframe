@@ -1292,10 +1292,12 @@ function createStyles(theme: MobileTheme) {
       elevation: 3
     },
     activeEditScroller: {
-      flexShrink: 1
+      flexShrink: 1,
+      minHeight: 0
     },
     activeEditScrollerKeyboard: {
-      flex: 1
+      flex: 1,
+      minHeight: 0
     },
     activeEditContent: {
       gap: 12,
