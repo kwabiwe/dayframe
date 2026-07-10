@@ -77,6 +77,8 @@ Implemented:
 - Mapping for in-bed, asleep unspecified/core/deep/REM, and awake.
 - Event-first queueing as `health_sleep_import` and `health_workout_import`.
 - Server-side audit/dedupe into `health_sleep_segments` and `health_workouts`.
+- Foreground sync, HealthKit observer callbacks, and native background-delivery wiring for sleep/workout changes.
+- Apple Health mapping defaults for category and description, applied to new imports and Health Review reprocess.
 
 HealthKit requires a native iOS build/device and does not work in plain Expo Go.
 
@@ -98,9 +100,16 @@ npm run export:workspace -- ./dayframe-backup.json
 
 Deletion/privacy groundwork remains: implement safe user/workspace deletion with raw location and health payload hard-deletion before using Dayframe as a sole system of record.
 
-## Remaining Before Daily Beta Use
+## Current Internal Beta State
 
-- Add token management UI for creating/revoking integration tokens.
-- Verify HealthKit import on a physical iPhone/native build.
-- Add Home Assistant bridge after ingestion contracts are stable.
-- Add richer report filtering and larger-data performance checks.
+As of 2026-07-10, the active internal TestFlight lane has verified build `0.1.0 (13)` in `Internal Health Debug`. The product is usable for owner testing, but several areas remain `Watch`, `Planned`, or `Future` in `docs/feature-fix-tracker.md`.
+
+## Remaining Before Wider Daily Beta Use
+
+- Investigate duplicate/overlapping Sleep entries from real production row metadata before adding any merge/delete logic.
+- Harden offline/mobile failed queue recovery with visible failed states, manual retry, idempotency checks, and diagnostics/export.
+- Add safe account deletion, workspace deletion, and stronger privacy controls for raw Health/location payloads and integration tokens.
+- Add token management UI before Home Assistant or other local bridge inputs are promoted beyond manual/local setup.
+- Add the Home Assistant/Cockpit bridge only after ingestion contracts and token controls are stable.
+- Add richer report filtering, larger-data performance checks, backup verification, and restore/import confidence.
+- Keep HealthKit background sync and Health mapping defaults at `Watch` until KB validates real-device behavior over normal daily use.

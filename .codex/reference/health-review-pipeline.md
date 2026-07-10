@@ -30,9 +30,17 @@ Do not patch one step without checking the adjacent step on either side.
 
 Automatic Health sync needs both JS wiring and native launch wiring: after Health permission is granted, Dayframe should configure/enable background delivery for sleep and workouts, subscribe to observer changes while JS is running, and keep `BackgroundDeliveryManager.shared.setupBackgroundObservers()` in AppDelegate so cold-launch delivery works.
 
+Current state as of internal TestFlight `0.1.0 (13)`:
+
+- PR #35 added foreground sync, HealthKit observer callbacks, and AppDelegate background-delivery setup for sleep/workout changes. Keep this at `Watch` until more real-device background behavior is observed.
+- PR #36 added a compact Apple Health settings surface for sleep/workout category and description defaults.
+- New HealthKit imports and Health Review reprocess both apply the Health mapping defaults.
+- Sleep should route to a user-facing `Sleep` category by default; workouts can remain under `Health` unless the user changes the mapping.
+- Duplicate or overlapping Sleep rows are still a `Next` investigation item. Do not merge/delete them without inspecting production row metadata and preserving auditability.
+
 ## Health Debug Export
 
-TestFlight build `0.1.0 (1)` added a bounded Health debug export in Settings.
+TestFlight build `0.1.0 (1)` added a bounded Health debug export in Settings. Later builds kept using this export while Health sync, backlog cleanup, and mapping defaults were hardened.
 
 Expected path:
 
@@ -68,6 +76,7 @@ Sleep:
 - Enabled by default.
 - Plausible sleep should become a single Sleep entry/session, not REM/Core/Deep fragments.
 - Confirmed sleep should use a user-facing `Sleep` category, creating it when needed. Workouts can keep using the broader `Health` category unless a user changes defaults later.
+- User mapping defaults can override category and description for supported sleep/workout imports and for Health Review reprocess.
 - Implausible, too short, too long, overlapping, or malformed sleep should stay in Review with a reason.
 
 Strength training, swimming, and unknown/other workouts should remain review-first unless a product decision changes that.
@@ -124,6 +133,8 @@ If a reason is not visible in UI, it should at least be present in diagnostics o
 - Sleep stages are imported independently and never consolidated.
 - Already-created Sleep/Health entries can cover sibling Health review rows; those covered rows should be accepted, not left open as overlaps.
 - High-confidence walks stay open because overlap detection is correct but invisible.
+- Health mapping defaults are absent, stale, or not applied consistently between new imports and reprocess.
+- Duplicate or overlapping Sleep entries may come from HealthKit overlap, legacy rows, or reprocess behavior; inspect row metadata before adding dedupe.
 - Accepted/ignored review items leak back into Review due to query or mobile filtering.
 - Reprocess keeps reselecting the same open-but-explained Review items and never reaches later eligible Health rows.
 - Incomplete old Health review items show misleading multi-day durations because the mobile UI treats missing stop times as "now".

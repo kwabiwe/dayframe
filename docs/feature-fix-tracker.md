@@ -1,10 +1,10 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-10 19:09 BST
+Last verified: 2026-07-10 20:04 BST
 
 ## Verification Snapshot
 
-- Local repo: `main`, synced with `origin/main` at PR #37 release base commit `729e3c6`.
+- Local repo: docs refresh branch created from `origin/main` at tracker commit `f5cc85e`.
 - GitHub: PR #37 is merged; no open PRs and no GitHub issues at merge verification time.
 - Latest verified TestFlight build: `0.1.0 (13)`.
 - Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, and App Store Connect build state.
@@ -51,7 +51,7 @@ Last verified: 2026-07-10 19:09 BST
 | Sleep stages fragmented into REM/Core/Deep cards | Watch | PRs #23, #26, and #29. | Current imports group sessions; legacy sleep-stage backlog cleanup is merged. |
 | Health items left in Review without useful explanation | Watch | PRs #22, #25, #26, #27, and #29. | Diagnostics and left-in-review reasons exist; continue checking that reasons are clear on device. |
 | Geo/place default description mismatch | Done | PR #19 and PR #26. | Place names should remain reference/context; configured activity descriptions are used for geofence display and Confirm. |
-| TestFlight release preflight and compliance checks | Done | PR #31 plus build release runs through `0.1.0 (12)`. | Keep verifying processing state, encryption compliance, notes, and internal testing assignment before asking KB to test. |
+| TestFlight release preflight and compliance checks | Done | PR #31 plus build release runs through `0.1.0 (13)`. | Keep verifying processing state, encryption compliance, notes, and internal testing assignment before asking KB to test. Docs-only PRs do not need a TestFlight build unless they change release/build configuration. |
 
 ## Future Tracks
 
