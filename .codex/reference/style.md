@@ -10,6 +10,30 @@ Use this when implementing visual UI.
 - Avoid one-note palettes and decorative clutter.
 - Dayframe should feel like a compact personal time tool, not a project-management or billing app.
 - Mobile first screen should match the simple dashboard sketch: logo, active timer, start task, Today summary.
+- Use Midnight Core consistently: near-black midnight navy, layered neutral surfaces, compact rounded controls, restrained elevation and coral primary/active states.
+- Treat light mode as a designed neutral companion. Preserve the same hierarchy and semantic roles rather than mechanically inverting dark mode.
+- Keep system-first typography. Use tabular numerals for timers and report figures; do not reintroduce all-monospace UI typography.
+
+## Brand Artwork
+
+- `logos/dayframe-colour-logo-transparent.svg` and `logos/dayframe-wordmark-outlined.svg` are canonical.
+- `logos/dayframe-wordmark-light.svg` is light artwork for dark surfaces; `logos/dayframe-wordmark-dark.svg` is dark artwork for light surfaces.
+- Keep symbol and wordmark separate in reusable platform components. Preserve their geometry and aspect ratios.
+- Never recolour the symbol, recreate the wordmark as text, apply filters, or flatten the lock-up into a reusable banner.
+- A meaningful lock-up exposes one accessible Dayframe label. Decorative artwork exposes none.
+- Use the symbol alone for favicons, app icons and spaces where the wordmark would render too small.
+- Runtime copies under `apps/web/public/logos/` mirror root canonical/derived artwork and must not drift.
+- Follow `docs/brand-style-guide.md` for minimum size, clear space, exact tokens and incorrect usage.
+
+## Colour And Components
+
+- Consume semantic theme tokens from `packages/shared`; do not scatter raw Midnight Core HEX values through route components.
+- Preserve palette keys and deterministic category/chart mapping. `lime` remains the stored key even though its Midnight Core display name is Mint.
+- Use coral for primary action and active state, `danger` for destructive action and category colours for data identity.
+- Pair category colours with labels, dots, rails or borders. Never rely on colour alone or assume a palette colour is accessible body text.
+- Use a 44 px/pt minimum interactive target, 1 px default borders, 14–20 px/pt panel/control radii and visible focus/selected states.
+- Use `surfaceInset` for inputs, `surfaceRaised` for floating surfaces and `chartTrack` behind chart data.
+- Disabled controls retain readable labels and an obvious unavailable state; do not fade the whole control to near invisibility.
 
 ## Responsive Design
 
@@ -35,4 +59,8 @@ Use this when implementing visual UI.
 - [ ] Text does not overlap, clip, or overflow.
 - [ ] Floating surfaces fit inside mobile viewports without horizontal scrolling or zooming.
 - [ ] Visual assets render correctly if used.
+- [ ] Canonical symbol geometry is unchanged and the correct wordmark tone is used for the resolved theme.
+- [ ] Brand artwork has one accessible name or is fully decorative.
+- [ ] No legacy PNG banner or unintended white logo rectangle remains in primary branding.
+- [ ] Focus, text, icon, border and chart contrast remain legible in System, Light and Dark modes.
 - [ ] Mobile dashboard excludes sync/logout/permission clutter from primary chrome.

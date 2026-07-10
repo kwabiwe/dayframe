@@ -11,6 +11,7 @@ npm run lint
 npm run typecheck
 npm run test
 npm run build
+npm run check:brand-assets
 git diff --check
 ```
 
@@ -83,6 +84,27 @@ Required checks:
 - Review action buttons remain tappable and readable on phone width.
 - No duplicate React keys or runtime overlays.
 - Light and dark theme remain legible.
+
+## Brand, Theme, And Visual Reskins
+
+Required checks when changing brand artwork, shared theme tokens, app chrome or visual-system documentation:
+
+- Run `npm run check:brand-assets` to verify canonical geometry, fill-only wordmark variants, public mirrors and the symbol favicon.
+- Run shared token tests plus web/mobile typechecks.
+- Build web and verify every public SVG returns successfully without unsafe remote-SVG configuration.
+- If mobile brand components or app-icon configuration changes, run Expo iOS prebuild and an iOS bundle/simulator build where feasible.
+- Search application source for legacy PNG banner references and CSS filters used to manufacture logo variants.
+- Confirm semantic token values remain aligned across shared TypeScript, web CSS and mobile theme resolution.
+
+Manual evidence in System, Light and Dark:
+
+- Header, authentication and public-page lock-ups use the correct wordmark tone without a wrong-colour flash.
+- Symbol geometry and colours are unchanged; no white rectangle appears around transparent artwork.
+- Favicon and iOS app icon use the symbol only; the iOS icon is opaque and legible at home-screen size.
+- Meaningful lock-ups expose one accessible name and decorative artwork exposes none.
+- Primary, secondary, destructive, selected, disabled, loading, empty and error states remain distinguishable.
+- Charts retain exact totals, labels and non-colour cues.
+- Web is checked at desktop, tablet and phone widths; iOS is checked with Dynamic Type, VoiceOver, Reduce Motion and Reduce Transparency.
 
 ## Auth, Workspace, And Deployment
 

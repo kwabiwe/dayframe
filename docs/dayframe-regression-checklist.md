@@ -41,11 +41,18 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 
 ## Visual System
 
-- The Dayframe Soft Pop palette is used consistently for category, calendar, and report colors.
+- Midnight Core is used consistently: midnight-navy dark canvas, designed neutral light canvas, layered surfaces and coral primary/active states.
+- Stable palette keys and legacy HEX compatibility are preserved while Midnight Core display colours are used consistently for category, calendar and report data.
 - Light and dark themes apply across backgrounds, text, borders, controls, icons, panels, and time blocks.
 - Outer and inner panels, popovers, tables, color swatches, and floating dialogs have consistent rounded corners.
 - Typography uses the current modern system font stack and stays compact in dense productivity surfaces.
 - Controls look restrained and functional; decorative visual changes must not reduce timer or review usability.
+- The supplied colour symbol is unchanged; dark surfaces use the light wordmark artwork and light surfaces use the dark wordmark artwork.
+- Symbol and wordmark remain separate reusable elements with one accessible brand name or fully decorative semantics.
+- Primary application branding no longer uses the legacy PNG banner, CSS filters or a visible white image rectangle.
+- The first mobile tab visibly reads “Today”, uses a day-overview icon and retains the internal timer behaviour.
+- Favicon and app icon use the symbol alone; the iOS icon is opaque and legible at home-screen size.
+- Charts use shared palette/track tokens, exact textual values and non-colour cues without changing calculations.
 
 ## Validation Commands
 
@@ -53,9 +60,11 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Run `npm run typecheck`.
 - Run `npm run test`.
 - Run `npm run build`.
+- Run `npm run check:brand-assets`.
 - Run `git diff --check`.
 - Use Browser/CDP to smoke-test dashboard, timeline, entries, reports, categories, places, automation, review, settings, search, notifications, profile, help, and theme switching.
 - Use Computer/Xcode or Expo tooling to smoke-test mobile login, bootstrap load, start timer, stop timer, quick actions, manual task entry, queue sync, and web/mobile active-timer synchronization.
+- In System, Light and Dark, inspect header/auth branding, theme transitions, focus/selected/disabled/destructive states, chart labels, responsive overlays, Dynamic Type, VoiceOver, Reduce Motion and Reduce Transparency.
 
 ## Release Checks
 

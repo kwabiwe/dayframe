@@ -14,6 +14,7 @@ Last verified: 2026-07-10 20:04 BST
 - `Done`: merged to `main`; TestFlight/build evidence is listed separately when applicable.
 - `Watch`: merged, but keep watching real production/TestFlight behaviour because the bug depended on real data or device state.
 - `Release pending`: merged to `main`, but not yet verified in a new TestFlight build.
+- `In progress`: implemented on an active branch, with review or merge still pending.
 - `Next`: intended for the next implementation PR.
 - `Planned`: accepted backlog item, no active branch yet.
 - `Future`: larger track, useful but not immediate.
@@ -22,6 +23,7 @@ Last verified: 2026-07-10 20:04 BST
 
 | Item | Status | Evidence | Next action |
 | --- | --- | --- | --- |
+| Midnight Core reskin and supplied vector branding | In progress | Branch `codex/midnight-core-reskin` implements shared web/iOS tokens, derived wordmarks, reusable brand components and automated visual guardrails without changing product logic. | Complete final review and merge the focused reskin PR. Keep the system UI font: the outlined SVG needs no Sofia Pro font file or licensing dependency. |
 | Auto-log defaults during onboarding and non-Health imports | Next | PR #36 adds the compact Apple Health settings surface; onboarding and non-Health import defaults are not yet designed. | Design the next small surface for onboarding defaults and place/other import mappings if still needed after Apple Health validation. |
 | Duplicate/overlapping Sleep investigation | Next | PR #33 deliberately avoided automatic duplicate sleep merge/delete. | Inspect production row metadata before any merge/delete logic, identify whether duplicates come from HealthKit overlap, legacy rows, or reprocess behavior, then implement only a safe dedupe/merge path with auditability. |
 
@@ -57,7 +59,6 @@ Last verified: 2026-07-10 20:04 BST
 
 | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| UI redesign with new logo and Sofia Pro SemiBold | Future | Commit `0d4f857` added new colour logo assets; KB asked for a redesign using the new logo and Sofia Pro SemiBold. | Define the refreshed brand system across web and mobile: logo usage, app icon/splash/header treatment, Sofia Pro SemiBold licensing/loading, typography tokens, palette updates, dense productivity layouts, and visual regression screenshots before shipping. |
 | NFC support through iOS Shortcuts | Future | README already describes NFC/Shortcut-style event ingestion and notes full native NFC scanning as a known limitation. | Build the practical first path around iOS Shortcuts/NFC tags: tag scan triggers a Shortcut/deep link, Dayframe queues an event-first start/stop/review action, offline queue and idempotency still work, and users get template Shortcuts for common actions. Native NFC scanning can be considered later if Shortcuts is not enough. |
 | Live Activities with a timer | Future | Mobile already has an active timer and shared web/mobile timer sync; no ActivityKit extension exists yet. | Add an iOS Live Activity/Dynamic Island timer for the active Dayframe entry, showing task/category and elapsed time, keeping state accurate across start/stop/edit/sync, and handling stale/offline states without misleading the user. |
 | Dayframe integration with Cockpit | Future | Prior Dayframe/Cockpit planning expects Cockpit to read Dayframe when it is ready instead of Toggl. | Start with a small token-protected read-only Cockpit API/stream for current timer, today timeline, source/confidence, and next suggested action; avoid write/mutation controls until explicitly approved. |
