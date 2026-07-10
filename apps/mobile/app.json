@@ -7,6 +7,7 @@
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "ios": {
+      "icon": "./assets/dayframe_app_icon.png",
       "supportsTablet": true,
       "bundleIdentifier": "com.layereight.dayframe",
       "infoPlist": {

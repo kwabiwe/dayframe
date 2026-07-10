@@ -1,125 +1,25 @@
 import { z } from "zod";
 
+export {
+  DAYFRAME_PALETTE,
+  DEFAULT_PALETTE_KEY,
+  deterministicPaletteIndex,
+  isPaletteKey,
+  normalizePaletteKey,
+  paletteColorFor,
+  paletteCssColorFor,
+  paletteKeyFor,
+  type DayframePaletteKey
+} from "./palette";
+export {
+  DAYFRAME_THEME,
+  type DayframeTheme,
+  type DayframeThemeMode
+} from "./theme";
+
 export const DEMO_USER_ID = "00000000-0000-4000-8000-000000000001";
 export const DEMO_WORKSPACE_ID = "00000000-0000-4000-8000-000000000010";
 export const DEFAULT_UNKNOWN_STAY_THRESHOLD_MINUTES = 20;
-
-export const DAYFRAME_PALETTE = [
-  { key: "lime", label: "Soft mint", hex: "#BFE8D9" },
-  { key: "teal", label: "Seafoam", hex: "#84D8C9" },
-  { key: "sky", label: "Powder blue", hex: "#8EC5F2" },
-  { key: "blue", label: "Periwinkle", hex: "#7FA7E8" },
-  { key: "violet", label: "Lavender", hex: "#B58EE8" },
-  { key: "rose", label: "Blush", hex: "#E8A7BF" },
-  { key: "amber", label: "Butter", hex: "#FFD979" },
-  { key: "orange", label: "Apricot", hex: "#FF987D" },
-  { key: "red", label: "Watermelon", hex: "#F0776B" },
-  { key: "steel", label: "Aqua", hex: "#57CFC2" },
-  { key: "moss", label: "Sage", hex: "#B7D99B" },
-  { key: "graphite", label: "Ink", hex: "#1D2638" }
-] as const;
-
-export type DayframePaletteKey = (typeof DAYFRAME_PALETTE)[number]["key"];
-
-export const DAYFRAME_THEME = {
-  light: {
-    background: "#F7F8F5",
-    surface: "#FFFFFF",
-    surfaceMuted: "#EEF4F1",
-    surfaceInset: "#FBFCF8",
-    border: "#DDE5DE",
-    borderStrong: "#B8C9C0",
-    textPrimary: "#171A2E",
-    textSecondary: "#63706B",
-    accent: "#2F766D",
-    accentStrong: "#FF9A7D",
-    success: "#347B68",
-    warning: "#946B15",
-    danger: "#B8504C"
-  },
-  dark: {
-    background: "#111820",
-    surface: "#172028",
-    surfaceMuted: "#1E2A31",
-    surfaceInset: "#121A21",
-    border: "#34434A",
-    borderStrong: "#52666A",
-    textPrimary: "#F3F7F5",
-    textSecondary: "#AAB8B2",
-    accent: "#8AD7C4",
-    accentStrong: "#FFAF95",
-    success: "#80D2BF",
-    warning: "#FFD46E",
-    danger: "#EA7A73"
-  }
-} as const;
-
-export const DEFAULT_PALETTE_KEY: DayframePaletteKey = "lime";
-
-const legacyColorMap: Record<string, DayframePaletteKey> = {
-  "#c6ff4a": "lime",
-  "#16a34a": "lime",
-  "#22c55e": "lime",
-  "#0f766e": "teal",
-  "#14b8a6": "teal",
-  "#0891b2": "sky",
-  "#94bff0": "sky",
-  "#2563eb": "blue",
-  "#1d4ed8": "blue",
-  "#82a8e8": "blue",
-  "#7c3aed": "violet",
-  "#9333ea": "violet",
-  "#b691e6": "violet",
-  "#db2777": "rose",
-  "#e7a6bc": "rose",
-  "#f59e0b": "amber",
-  "#ffd46e": "amber",
-  "#ea580c": "orange",
-  "#ff9a7d": "orange",
-  "#dc2626": "red",
-  "#ea7a73": "red",
-  "#64748b": "steel",
-  "#dce1e6": "steel",
-  "#475569": "graphite"
-};
-
-export function isPaletteKey(value: unknown): value is DayframePaletteKey {
-  return typeof value === "string" && DAYFRAME_PALETTE.some((color) => color.key === value);
-}
-
-export function paletteKeyFor(value: unknown, fallbackSeed = ""): DayframePaletteKey {
-  if (isPaletteKey(value)) return value;
-
-  if (typeof value === "string") {
-    const normalizedValue = value.trim().toLowerCase();
-    const legacyKey = legacyColorMap[normalizedValue];
-    if (legacyKey) return legacyKey;
-
-    const paletteColor = DAYFRAME_PALETTE.find(
-      (color) => color.hex.toLowerCase() === normalizedValue
-    );
-    if (paletteColor) return paletteColor.key;
-  }
-
-  return DAYFRAME_PALETTE[deterministicPaletteIndex(String(value ?? fallbackSeed))].key;
-}
-
-export function normalizePaletteKey(value: unknown, fallbackSeed = ""): DayframePaletteKey {
-  return paletteKeyFor(value, fallbackSeed);
-}
-
-export function paletteColorFor(value: unknown, fallbackSeed = "") {
-  const key = paletteKeyFor(value, fallbackSeed);
-  return DAYFRAME_PALETTE.find((color) => color.key === key)?.hex ?? DAYFRAME_PALETTE[0].hex;
-}
-
-export function deterministicPaletteIndex(seed: string) {
-  let hash = 0;
-  for (let index = 0; index < seed.length; index += 1) {
-    hash = (hash * 31 + seed.charCodeAt(index)) >>> 0;
-  }
-  return hash % DAYFRAME_PALETTE.length;
-}
 
 export const EventSourceSchema = z.enum([
   "manual_app",
