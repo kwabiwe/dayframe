@@ -8,6 +8,8 @@ The core value proposition is to reduce manual time-tracking friction without lo
 
 The MVP goal is to make Dayframe reliable for personal use and a small friends beta: hosted on Vercel, backed by Supabase Postgres/Auth, iOS-only for mobile, offline-capable for hours or days, and privacy-conscious around health and precise location data.
 
+Current reality as of 2026-07-10: Dayframe is in an active internal TestFlight lane, with build `0.1.0 (13)` verified for KB testing. The tracker in `docs/feature-fix-tracker.md` is the source of truth for what is `Done`, still under `Watch`, or planned next.
+
 ## 2. Mission
 
 Dayframe helps people understand where their time goes by combining intentional timers with privacy-conscious automatic context from location and health signals.
@@ -52,9 +54,9 @@ Core Functionality:
 - ✅ Review inbox for ambiguous geofence/health/location suggestions.
 - ✅ Auto-start for trusted places only.
 - ✅ Conservative suggestions for broad/ambiguous places.
-- ✅ HealthKit summaries for sleep and workouts/walks as automatic entries or reviewable high-confidence events.
-- ✅ Mobile offline queue that can reconcile hours or days later.
-- ✅ Full edit/delete/export path for time entries and sensitive data.
+- ✅ HealthKit summaries for sleep and workouts/walks as automatic entries or reviewable high-confidence events, with real-device background behavior and mapping defaults still watched after TestFlight validation.
+- ⚠️ Mobile offline queue exists, but failed-queue recovery, diagnostics, retry visibility, and conflict recovery still need hardening.
+- ⚠️ Time-entry edit/delete/export paths exist, but full account/workspace deletion and stronger privacy controls for raw Health/location payloads remain future work.
 
 Technical:
 
@@ -74,7 +76,7 @@ Integration:
 Deployment:
 
 - ✅ Hosted SaaS direction.
-- ✅ No App Store requirement for MVP; sideload/TestFlight-style use is acceptable.
+- ✅ No App Store requirement for MVP; the current lane is internal TestFlight.
 - ✅ No monetization or billing.
 
 ### Out of Scope
@@ -304,12 +306,13 @@ Functional requirements:
 - ✅ User can sign up/log in through hosted Supabase Auth.
 - ✅ Only allowlisted beta users can create accounts.
 - ✅ Web and mobile share active timer state.
-- ✅ Mobile can queue events offline and sync later.
+- ⚠️ Mobile can queue events offline and sync later, but failed queue recovery and diagnostics need hardening before wider beta confidence.
 - ✅ Trusted places can auto-start entries.
 - ✅ Ambiguous location events appear in review.
-- ✅ HealthKit sleep and workouts/walks appear as time entries or high-confidence review items.
+- ✅ HealthKit sleep and workouts/walks appear as time entries or high-confidence review items; duplicate/overlapping Sleep remains a tracked investigation.
 - ✅ User can edit/delete entries from web.
 - ✅ User can export data.
+- ⚠️ Full account/workspace deletion and raw payload hard-deletion controls are not complete yet.
 - ✅ Hosted deployment works on Vercel with Supabase database.
 
 Quality indicators:
@@ -319,6 +322,7 @@ Quality indicators:
 - Production build passes.
 - Mobile typecheck/build path remains healthy.
 - Sensitive raw data is not sent to analytics.
+- TestFlight release evidence is captured before KB is asked to test mobile changes.
 
 User experience goals:
 
@@ -374,7 +378,7 @@ Deliverables:
 - ✅ HealthKit walking/workout summary import.
 - ✅ Trusted-place auto-start.
 - ✅ Broad/unknown geofence review suggestions.
-- ✅ Deletion/export path for sensitive data.
+- ⚠️ Export path exists; account/workspace deletion and raw sensitive payload hard-deletion are still future work.
 
 Validation:
 
@@ -391,13 +395,13 @@ Deliverables:
 
 - ✅ Review inbox improvements.
 - ✅ Reports and automation accuracy metrics.
-- ✅ Settings for permissions, retention, and export/delete.
-- ✅ TestFlight/sideload build workflow.
+- ⚠️ Settings for permissions and export exist; deletion/privacy controls still need the next-phase work tracked in `docs/feature-fix-tracker.md`.
+- ✅ Internal TestFlight build workflow is active and verified through `0.1.0 (13)`.
 
 Validation:
 
 - Owner can use Dayframe for two weeks without data loss.
-- Friends can sign in and test without developer help.
+- Friends can sign in and test without developer help once the preview/pre-prod lane and wider-beta invite path are ready.
 - Accuracy metrics show accepted/ignored suggestion rates.
 
 ## 13. Future Considerations
@@ -407,6 +411,7 @@ Validation:
 - Realtime sync through Supabase Realtime/WebSocket/SSE.
 - More advanced rule learning from accepted/ignored suggestions.
 - Account deletion UI with full raw health/location deletion.
+- Dayframe preview/pre-production lane with separate staging app/environment/TestFlight path.
 - App Store release if sideloading is no longer sufficient.
 
 ## 14. Risks & Mitigations

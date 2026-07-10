@@ -1,5 +1,7 @@
 # Feature: Migrate iOS To Hosted Supabase-Backed Dayframe
 
+Historical status as of 2026-07-10: the hosted iOS migration direction is implemented enough for the internal TestFlight lane, and this plan should be treated as background context rather than the active task list. Use `docs/feature-fix-tracker.md` plus the current repo/GitHub/TestFlight state for planning new work.
+
 The following plan should be complete, but its important that you validate documentation and codebase patterns and task sanity before you start implementing.
 
 Pay special attention to naming of existing utils, types, schemas, and route handlers. Import from the right files and keep Dayframe's event-first invariant intact.

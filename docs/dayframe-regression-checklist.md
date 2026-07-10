@@ -20,6 +20,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Calendar/time blocks can be resized from the top or bottom edge, snap to configured intervals, and save on release.
 - Selected time blocks can be deleted from edit controls, context actions, or keyboard delete/backspace where supported.
 - Calendar zoom controls change time granularity without breaking layout.
+- Calendar edit sheets stay visible when the iOS keyboard opens, with the focused field scrolled above the keyboard/suggestion bar.
 - List view groups entries by date, shows friendly source labels, and includes edit, start-again, and delete actions.
 - Timesheet view groups work by category/activity, shows day totals and row totals, and remains readable.
 
@@ -52,5 +53,24 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Run `npm run typecheck`.
 - Run `npm run test`.
 - Run `npm run build`.
+- Run `git diff --check`.
 - Use Browser/CDP to smoke-test dashboard, timeline, entries, reports, categories, places, automation, review, settings, search, notifications, profile, help, and theme switching.
 - Use Computer/Xcode or Expo tooling to smoke-test mobile login, bootstrap load, start timer, stop timer, quick actions, manual task entry, queue sync, and web/mobile active-timer synchronization.
+
+## Release Checks
+
+For docs-only PRs, `git diff --check` plus GitHub/Vercel check observation is enough unless the docs change build or release configuration.
+
+For implementation PRs that affect shipped mobile/API behavior, do not ask KB to test until:
+
+- PR is merged into `main` and local `main` is synced.
+- Tracker reflects merged PR number/status.
+- `npm run testflight:preflight` passes.
+- iOS build number is temporarily incremented for archive/upload.
+- Full Xcode archive, export, and App Store Connect upload complete.
+- App Store Connect processing is `VALID`.
+- Export compliance is set.
+- TestFlight notes are set.
+- Internal group `Internal Health Debug` is assigned or verified.
+- Build beta state is `IN_BETA_TESTING`.
+- Final handoff includes exact version/build and delivery UUID.

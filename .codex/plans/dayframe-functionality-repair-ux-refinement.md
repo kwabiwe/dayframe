@@ -1,5 +1,7 @@
 # Feature: Dayframe Functionality Repair And UX Refinement
 
+Historical status as of 2026-07-10: this plan is useful background for the repair/UX direction, but it is no longer the active work queue. Use `docs/feature-fix-tracker.md` for current `Next`, `Planned`, `Future`, `Watch`, and shipped status, and verify GitHub/TestFlight state before treating any item as complete.
+
 Planning completed. Product answers were received before implementation.
 
 Implementation branch: `codex/dayframe-repair-ux` from latest `origin/main`.

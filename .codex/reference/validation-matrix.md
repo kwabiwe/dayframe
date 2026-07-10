@@ -97,14 +97,27 @@ Required checks:
 
 ## Release Validation
 
-Before telling KB to test:
+For docs-only PRs:
+
+- Confirm the diff only changes docs/planning/reference files.
+- Run `git diff --check`.
+- Open the PR, observe GitHub/Vercel checks, merge, and sync local `main`.
+
+Before telling KB to test an implementation PR:
 
 - Confirm branch and commit.
 - Confirm PR state.
 - Confirm Vercel production deployment if server code changed.
-- Confirm TestFlight version/build if mobile code changed.
+- Confirm TestFlight version/build if mobile code changed or if the user defined TestFlight as the success criterion.
 - Confirm API base URL.
 - Confirm migrations.
+- Run `npm run testflight:preflight` before mobile archive/export.
+- Verify App Store Connect `processingState=VALID`.
+- Verify export compliance/encryption answer is set.
+- Verify TestFlight notes are set.
+- Verify internal testing group assignment and `IN_BETA_TESTING`.
+- Restore temporary iOS build-number changes before final repo status.
+- Report exact version/build and delivery UUID.
 - Note local-only artifacts that were not committed.
 
 ## Self-Review Questions
