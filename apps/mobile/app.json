@@ -26,6 +26,7 @@
       [
         "@kingstinct/react-native-healthkit",
         {
+          "background": true,
           "NSHealthShareUsageDescription": "Dayframe reads sleep and workout summaries from Apple Health so they become reviewable activity events.",
           "NSHealthUpdateUsageDescription": "Dayframe does not write health data, but iOS requires this description when health data access is enabled."
         }

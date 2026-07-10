@@ -402,7 +402,7 @@ function createStyles(theme: MobileTheme) {
     },
     currentTimeRow: {
       position: "absolute",
-      left: 0,
+      left: 68,
       right: 8,
       height: 18,
       flexDirection: "row",

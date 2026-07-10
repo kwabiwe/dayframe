@@ -28,6 +28,9 @@ const HEALTHKIT_WORKOUT_ANCHOR_KEY = "dayframe.healthkit.workoutAnchor.v1";
 const HEALTHKIT_WORKOUT_SEEN_KEY = "dayframe.healthkit.workoutSeen.v1";
 const HEALTHKIT_IMPORT_PREFERENCES_KEY = "dayframe.healthkit.importPreferences.v1";
 const HEALTHKIT_WORKOUT_PREFERENCES_KEY = "dayframe.healthkit.workoutPreferences.v1";
+const HEALTHKIT_AUTOMATIC_SYNC_KEY = "dayframe.healthkit.automaticSync.v1";
+const HEALTHKIT_BACKGROUND_SYNC_TYPES = [HEALTHKIT_SLEEP_TYPE, HEALTHKIT_WORKOUT_TYPE] as const;
+const HEALTHKIT_UPDATE_FREQUENCY_IMMEDIATE = 1;
 const SLEEP_SESSION_GAP_MS = 90 * 60 * 1000;
 const HEALTH_REPROCESS_THROTTLE_MS = 5 * 60 * 1000;
 const HEALTH_REPROCESS_BACKOFF_MS = 10 * 60 * 1000;
@@ -105,6 +108,12 @@ type HealthKitWorkoutSample = {
   sourceRevision?: { source?: { name?: string; bundleIdentifier?: string } };
   metadata?: Record<string, unknown>;
   toJSON?: () => HealthKitWorkoutSample;
+};
+
+export type HealthKitChangeType = typeof HEALTHKIT_BACKGROUND_SYNC_TYPES[number];
+
+export type HealthKitChangeSubscription = {
+  remove: () => void;
 };
 
 export type HealthDebugExportOptions = {
@@ -208,6 +217,9 @@ export async function requestHealthKitPermissions() {
   }
 
   const granted = await healthkit.requestAuthorization({ toRead: HEALTHKIT_READ_TYPES });
+  if (granted) {
+    await configureHealthKitAutomaticSync().catch(() => undefined);
+  }
   return {
     provider: "healthkit" as const,
     kind: "permissions" as const,
@@ -215,6 +227,54 @@ export async function requestHealthKitPermissions() {
     notes: granted
       ? "Apple Health read access was requested for sleep and workouts."
       : "Apple Health access was not granted."
+  };
+}
+
+export async function isHealthKitAutomaticSyncEnabled() {
+  return AsyncStorage.getItem(HEALTHKIT_AUTOMATIC_SYNC_KEY).then((value) => value === "true");
+}
+
+export async function configureHealthKitAutomaticSync() {
+  ensureIos();
+  const healthkit = await loadHealthKit();
+  const available = await Promise.resolve(healthkit.isHealthDataAvailable());
+  if (!available) return false;
+
+  const configured = await healthkit.configureBackgroundTypes(
+    [...HEALTHKIT_BACKGROUND_SYNC_TYPES],
+    HEALTHKIT_UPDATE_FREQUENCY_IMMEDIATE
+  );
+  const deliveryResults = await Promise.all(
+    HEALTHKIT_BACKGROUND_SYNC_TYPES.map((type) =>
+      healthkit.enableBackgroundDelivery(type, HEALTHKIT_UPDATE_FREQUENCY_IMMEDIATE).catch(() => false)
+    )
+  );
+  const enabled = configured !== false && deliveryResults.some(Boolean);
+  if (enabled) {
+    await AsyncStorage.setItem(HEALTHKIT_AUTOMATIC_SYNC_KEY, "true");
+  } else {
+    await AsyncStorage.removeItem(HEALTHKIT_AUTOMATIC_SYNC_KEY);
+  }
+  return enabled;
+}
+
+export async function startHealthKitChangeObservers(
+  onChange: (type: HealthKitChangeType, errorMessage?: string) => void
+): Promise<HealthKitChangeSubscription | null> {
+  ensureIos();
+  if (!(await isHealthKitAutomaticSyncEnabled())) return null;
+
+  const healthkit = await loadHealthKit();
+  const subscriptions = HEALTHKIT_BACKGROUND_SYNC_TYPES.map((type) =>
+    healthkit.subscribeToChanges(type, ({ errorMessage }) => {
+      onChange(type, errorMessage);
+    })
+  );
+
+  return {
+    remove: () => {
+      for (const subscription of subscriptions) subscription.remove();
+    }
   };
 }
 

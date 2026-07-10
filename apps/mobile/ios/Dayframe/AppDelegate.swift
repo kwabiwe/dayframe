@@ -1,4 +1,5 @@
 internal import Expo
+import ObjectiveC
 import React
 import ReactAppDependencyProvider
 
@@ -13,6 +14,8 @@ class AppDelegate: ExpoAppDelegate {
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
+    setupHealthKitBackgroundObservers()
+
     let delegate = ReactNativeDelegate()
     let factory = ExpoReactNativeFactory(delegate: delegate)
     delegate.dependencyProvider = RCTAppDependencyProvider()
@@ -49,6 +52,40 @@ class AppDelegate: ExpoAppDelegate {
     let result = RCTLinkingManager.application(application, continue: userActivity, restorationHandler: restorationHandler)
     return super.application(application, continue: userActivity, restorationHandler: restorationHandler) || result
   }
+}
+
+private func setupHealthKitBackgroundObservers() {
+  let classNames = [
+    "ReactNativeHealthkit.BackgroundDeliveryManager",
+    "_TtC20ReactNativeHealthkit25BackgroundDeliveryManager",
+    "BackgroundDeliveryManager"
+  ]
+
+  guard let managerClass = classNames.compactMap({ NSClassFromString($0) }).first else {
+    return
+  }
+
+  let sharedSelector = NSSelectorFromString("shared")
+  let setupSelector = NSSelectorFromString("setupBackgroundObservers")
+
+  guard
+    let sharedMethod = class_getClassMethod(managerClass, sharedSelector),
+    let setupMethod = class_getInstanceMethod(managerClass, setupSelector)
+  else {
+    return
+  }
+
+  typealias SharedFunction = @convention(c) (AnyClass, Selector) -> AnyObject
+  typealias SetupFunction = @convention(c) (AnyObject, Selector) -> Void
+
+  let shared = unsafeBitCast(method_getImplementation(sharedMethod), to: SharedFunction.self)(
+    managerClass,
+    sharedSelector
+  )
+  unsafeBitCast(method_getImplementation(setupMethod), to: SetupFunction.self)(
+    shared,
+    setupSelector
+  )
 }
 
 class ReactNativeDelegate: ExpoReactNativeFactoryDelegate {

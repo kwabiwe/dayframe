@@ -1,5 +1,4 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   AccessibilityInfo,
   Alert,
@@ -46,6 +45,16 @@ import {
 } from "@/lib/calendarGestures";
 import { handleDayframeUrl } from "@/lib/deepLinks";
 import {
+  configureHealthKitAutomaticSync,
+  friendlyHealthKitError,
+  importHealthKitSleep,
+  importHealthKitWorkouts,
+  isHealthKitAutomaticSyncEnabled,
+  reprocessExistingHealthReviewItems,
+  startHealthKitChangeObservers,
+  type HealthKitChangeSubscription
+} from "@/lib/health";
+import {
   pressable,
   useMobileTheme,
   type MobileStyles,
@@ -65,13 +74,18 @@ type AuthState = "checking" | "authenticated" | "signedOut";
 type MobileTab = "timer" | "calendar" | "reports";
 type ReportRange = "today" | "week";
 type ReportChartView = "pie" | "bars";
-type CalendarHoursMode = "awake" | "fullDay";
+type CalendarHoursMode = "fullDay";
 type CalendarEntry = TimeEntry & { isActive: boolean; reviewItemId?: string; isReviewSuggestion?: boolean };
 type CalendarHours = { startHour: number; endHour: number };
 type CalendarBlockMetrics = {
   top: number;
   height: number;
   continuesIntoNextDay: boolean;
+};
+type CalendarZoomFocus = {
+  anchorY: number;
+  startHourHeight: number;
+  startScrollY: number;
 };
 type SummarySegment = {
   key: string;
@@ -82,12 +96,10 @@ type SummarySegment = {
 };
 
 const AUTH_KEYBOARD_ACCESSORY_ID = "dayframe-auth-keyboard-accessory";
-const CALENDAR_HOURS_PREFERENCE_KEY = "dayframe.calendarHoursMode.v1";
 const RECENT_LAST_STOP_WINDOW_MS = 24 * 60 * 60 * 1000;
 const TAB_BAR_HEIGHT = 72;
 const CALENDAR_HOURS_MODES: Record<CalendarHoursMode, CalendarHours & { label: string; accessibilityLabel: string }> = {
-  awake: { label: "Awake", accessibilityLabel: "Show awake hours", startHour: 6, endHour: 22 },
-  fullDay: { label: "24h", accessibilityLabel: "Show full 24 hours", startHour: 0, endHour: 24 }
+  fullDay: { label: "24-hour", accessibilityLabel: "Show 24-hour calendar", startHour: 0, endHour: 24 }
 };
 const TIMELINE_DEFAULT_HOUR_HEIGHT = 72;
 const TIMELINE_MIN_HOUR_HEIGHT = 48;
@@ -107,7 +119,7 @@ export default function HomeScreen() {
   const [reportRange, setReportRange] = useState<ReportRange>("today");
   const [calendarEditEntry, setCalendarEditEntry] = useState<CalendarEntry | null>(null);
   const [calendarHourHeight, setCalendarHourHeight] = useState(TIMELINE_DEFAULT_HOUR_HEIGHT);
-  const [calendarHoursMode, setCalendarHoursModeState] = useState<CalendarHoursMode>("awake");
+  const [calendarHoursMode] = useState<CalendarHoursMode>("fullDay");
   const [calendarTransitionDirection, setCalendarTransitionDirection] = useState(1);
   const [reportChartView, setReportChartView] = useState<ReportChartView>("pie");
   const [authView, setAuthView] = useState<AuthView>("login");
@@ -127,6 +139,9 @@ export default function HomeScreen() {
   const [calendarGestureLocked, setCalendarGestureLocked] = useState(false);
   const [chartProgress, setChartProgress] = useState(1);
   const refreshInFlight = useRef(false);
+  const healthAutoSyncInFlight = useRef(false);
+  const mainScrollRef = useRef<ScrollView>(null);
+  const mainScrollY = useRef(0);
   const entrance = useRef(new Animated.Value(0)).current;
   const chartBuild = useRef(new Animated.Value(1)).current;
   const authNameRef = useRef<TextInput>(null);
@@ -157,6 +172,34 @@ export default function HomeScreen() {
     }
   }, []);
 
+  const syncHealthKitAndReload = useCallback(async (reason: "foreground" | "observer" = "foreground") => {
+    if (authState !== "authenticated" || healthAutoSyncInFlight.current) return;
+
+    let enabled = await isHealthKitAutomaticSyncEnabled().catch(() => false);
+    if (!enabled) {
+      enabled = await configureHealthKitAutomaticSync().catch(() => false);
+    }
+    if (!enabled) return;
+
+    healthAutoSyncInFlight.current = true;
+    try {
+      await importHealthKitSleep();
+      await importHealthKitWorkouts();
+      await syncQueue();
+      await reprocessExistingHealthReviewItems(undefined, { force: reason === "observer" });
+      await load({ silent: true });
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        setData(null);
+        setAuthState("signedOut");
+        return;
+      }
+      console.warn(friendlyHealthKitError(error, "sync Apple Health"));
+    } finally {
+      healthAutoSyncInFlight.current = false;
+    }
+  }, [authState, load]);
+
   useEffect(() => {
     Animated.timing(entrance, {
       toValue: 1,
@@ -171,16 +214,31 @@ export default function HomeScreen() {
   }, [load]);
 
   useEffect(() => {
+    if (authState !== "authenticated") return undefined;
     let mounted = true;
-    AsyncStorage.getItem(CALENDAR_HOURS_PREFERENCE_KEY)
-      .then((value) => {
-        if (mounted && isCalendarHoursMode(value)) setCalendarHoursModeState(value);
-      })
+    let subscription: HealthKitChangeSubscription | null = null;
+
+    void (async () => {
+      await syncHealthKitAndReload("foreground");
+      if (!mounted) return;
+
+      const nextSubscription = await startHealthKitChangeObservers((_type, errorMessage) => {
+        if (errorMessage) console.warn(`HealthKit observer update failed: ${errorMessage}`);
+        void syncHealthKitAndReload("observer");
+      });
+      if (!mounted) {
+        nextSubscription?.remove();
+        return;
+      }
+      subscription = nextSubscription;
+    })()
       .catch(() => undefined);
+
     return () => {
       mounted = false;
+      subscription?.remove();
     };
-  }, []);
+  }, [authState, syncHealthKitAndReload]);
 
   useFocusEffect(
     useCallback(() => {
@@ -203,10 +261,13 @@ export default function HomeScreen() {
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active" && authState === "authenticated") void load({ silent: true });
+      if (state === "active" && authState === "authenticated") {
+        void syncHealthKitAndReload("foreground");
+        void load({ silent: true });
+      }
     });
     return () => subscription.remove();
-  }, [authState, load]);
+  }, [authState, load, syncHealthKitAndReload]);
 
   useEffect(() => {
     const subscription = Linking.addEventListener("url", async ({ url }) => {
@@ -435,13 +496,17 @@ export default function HomeScreen() {
     });
   }, []);
 
-  const setCalendarHoursMode = useCallback((mode: CalendarHoursMode) => {
-    setCalendarHoursModeState(mode);
-    void AsyncStorage.setItem(CALENDAR_HOURS_PREFERENCE_KEY, mode).catch(() => undefined);
-  }, []);
+  const setCalendarZoom = useCallback((hourHeight: number, focus?: CalendarZoomFocus) => {
+    const nextHourHeight = clamp(hourHeight, TIMELINE_MIN_HOUR_HEIGHT, TIMELINE_MAX_HOUR_HEIGHT);
+    setCalendarHourHeight(nextHourHeight);
 
-  const setCalendarZoom = useCallback((hourHeight: number) => {
-    setCalendarHourHeight(clamp(hourHeight, TIMELINE_MIN_HOUR_HEIGHT, TIMELINE_MAX_HOUR_HEIGHT));
+    if (focus && focus.startHourHeight > 0) {
+      const scale = nextHourHeight / focus.startHourHeight;
+      const nextScrollY = Math.max(0, focus.startScrollY + focus.anchorY * (scale - 1));
+      requestAnimationFrame(() => {
+        mainScrollRef.current?.scrollTo({ y: nextScrollY, animated: false });
+      });
+    }
   }, []);
 
   async function stopActiveTimer() {
@@ -649,6 +714,7 @@ export default function HomeScreen() {
   return (
     <SafeAreaView edges={["top", "left", "right"]} style={styles.safeArea}>
       <ScrollView
+        ref={mainScrollRef}
         contentContainerStyle={[
           styles.container,
           { paddingBottom: 18 }
@@ -656,6 +722,10 @@ export default function HomeScreen() {
         directionalLockEnabled
         keyboardShouldPersistTaps="handled"
         scrollEnabled={!calendarGestureLocked}
+        onScroll={(event) => {
+          mainScrollY.current = event.nativeEvent.contentOffset.y;
+        }}
+        scrollEventThrottle={16}
         scrollIndicatorInsets={{ bottom: TAB_BAR_HEIGHT + Math.max(insets.bottom, 12) + 16 }}
         style={{ marginBottom: TAB_BAR_HEIGHT + Math.max(insets.bottom, 12) + 16 }}
         refreshControl={
@@ -825,9 +895,9 @@ export default function HomeScreen() {
               hourHeight={calendarHourHeight}
               now={now}
               onChangeDay={shiftSelectedCalendarDay}
-              onChangeHoursMode={setCalendarHoursMode}
               onChangeWeek={(weeks) => shiftSelectedCalendarDay(weeks * 7)}
               onChangeZoom={setCalendarZoom}
+              getScrollY={() => mainScrollY.current}
               onGestureLockedChange={setCalendarGestureLocked}
               onOpenActive={() => {
                 setCalendarEditEntry(null);
@@ -1013,10 +1083,10 @@ function CalendarTab({
   calendarHoursMode,
   calendarTransitionDirection,
   entries,
+  getScrollY,
   hourHeight,
   now,
   onChangeDay,
-  onChangeHoursMode,
   onChangeWeek,
   onChangeZoom,
   onGestureLockedChange,
@@ -1034,12 +1104,12 @@ function CalendarTab({
   calendarHoursMode: CalendarHoursMode;
   calendarTransitionDirection: number;
   entries: CalendarEntry[];
+  getScrollY: () => number;
   hourHeight: number;
   now: number;
   onChangeDay: (days: number) => void;
-  onChangeHoursMode: (mode: CalendarHoursMode) => void;
   onChangeWeek: (weeks: number) => void;
-  onChangeZoom: (hourHeight: number) => void;
+  onChangeZoom: (hourHeight: number, focus?: CalendarZoomFocus) => void;
   onGestureLockedChange: (locked: boolean) => void;
   onOpenActive: () => void;
   onOpenDetail: (entry: CalendarEntry) => void;
@@ -1054,6 +1124,10 @@ function CalendarTab({
 }) {
   const pinchStartDistance = useRef<number | null>(null);
   const pinchStartHourHeight = useRef(hourHeight);
+  const pinchAnchorY = useRef(0);
+  const pinchStartScrollY = useRef(0);
+  const timelinePanelY = useRef(0);
+  const timelineCanvasY = useRef(0);
   const calendarTransition = useRef(new Animated.Value(1)).current;
   const calendarHours = CALENDAR_HOURS_MODES[calendarHoursMode];
   const timelineHeight = (calendarHours.endHour - calendarHours.startHour) * hourHeight;
@@ -1116,6 +1190,12 @@ function CalendarTab({
       if (event.nativeEvent.touches.length >= 2) {
         pinchStartDistance.current = touchDistance(event.nativeEvent.touches);
         pinchStartHourHeight.current = hourHeight;
+        pinchStartScrollY.current = getScrollY();
+        pinchAnchorY.current = clamp(
+          touchMidpointLocationY(event.nativeEvent.touches) - timelinePanelY.current - timelineCanvasY.current,
+          0,
+          timelineHeight
+        );
       } else {
         pinchStartDistance.current = null;
       }
@@ -1124,7 +1204,14 @@ function CalendarTab({
       if (event.nativeEvent.touches.length < 2 || !pinchStartDistance.current) return;
       const distance = touchDistance(event.nativeEvent.touches);
       if (!distance) return;
-      onChangeZoom(pinchStartHourHeight.current * (distance / pinchStartDistance.current));
+      onChangeZoom(
+        pinchStartHourHeight.current * (distance / pinchStartDistance.current),
+        {
+          anchorY: pinchAnchorY.current,
+          startHourHeight: pinchStartHourHeight.current,
+          startScrollY: pinchStartScrollY.current
+        }
+      );
     },
     onPanResponderRelease: (_event, gesture) => {
       const wasPinching = Boolean(pinchStartDistance.current);
@@ -1140,7 +1227,7 @@ function CalendarTab({
       pinchStartDistance.current = null;
       onGestureLockedChange(false);
     }
-  }), [hourHeight, onChangeDay, onChangeZoom, onGestureLockedChange]);
+  }), [getScrollY, hourHeight, onChangeDay, onChangeZoom, onGestureLockedChange, timelineHeight]);
 
   const weekGestureResponder = useMemo(() => PanResponder.create({
     onMoveShouldSetPanResponderCapture: (_event, gesture) =>
@@ -1211,40 +1298,16 @@ function CalendarTab({
           <Text style={styles.summaryTotal}>{formatDuration(total)}</Text>
         </View>
 
-        <View style={styles.calendarOptionsRow}>
-          {(["awake", "fullDay"] as const).map((mode) => {
-            const selected = mode === calendarHoursMode;
-            const option = CALENDAR_HOURS_MODES[mode];
-            return (
-              <Pressable
-                key={mode}
-                accessibilityLabel={option.accessibilityLabel}
-                accessibilityRole="button"
-                accessibilityState={{ selected }}
-                onPress={() => onChangeHoursMode(mode)}
-                style={({ pressed }) => [
-                  styles.calendarOptionChip,
-                  selected ? styles.calendarOptionChipSelected : null,
-                  pressed ? styles.buttonPressed : null
-                ]}
-              >
-                <Text style={[
-                  styles.calendarOptionChipText,
-                  selected ? styles.calendarOptionChipTextSelected : null
-                ]}>
-                  {option.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        <Animated.View style={[styles.calendarTimelinePanel, calendarTransitionStyle]}>
+        <Animated.View
+          onLayout={(event) => {
+            timelinePanelY.current = event.nativeEvent.layout.y;
+          }}
+          style={[styles.calendarTimelinePanel, calendarTransitionStyle]}
+        >
           {currentTimeOutsideAxis || outsideAxisEntries.length > 0 ? (
             <View style={styles.calendarEdgeStack}>
               {currentTimeOutsideAxis ? (
                 <View pointerEvents="none" style={styles.calendarEdgeTimeRow}>
-                  <Text style={styles.currentTimeLabel}>{formatTimeOfDay(new Date(now))}</Text>
                   <View style={styles.currentTimeLine} />
                 </View>
               ) : null}
@@ -1287,7 +1350,12 @@ function CalendarTab({
             </View>
           ) : null}
 
-          <View style={[styles.calendarTimelineCanvas, { height: timelineHeight }]}>
+          <View
+            onLayout={(event) => {
+              timelineCanvasY.current = event.nativeEvent.layout.y;
+            }}
+            style={[styles.calendarTimelineCanvas, { height: timelineHeight }]}
+          >
             {Array.from({ length: calendarHours.endHour - calendarHours.startHour + 1 }, (_, index) => {
               const hour = calendarHours.startHour + index;
               const lineTop = index * hourHeight;
@@ -1343,7 +1411,6 @@ function CalendarTab({
 
             {showCurrentTime ? (
               <View pointerEvents="none" style={[styles.currentTimeRow, { top: currentTimeRowTop }]}>
-                <Text style={styles.currentTimeLabel}>{formatTimeOfDay(new Date(now))}</Text>
                 <View style={styles.currentTimeLine} />
               </View>
             ) : null}
@@ -2080,8 +2147,9 @@ function touchDistance(touches: ArrayLike<{ pageX: number; pageY: number }>) {
   return Math.hypot(second.pageX - first.pageX, second.pageY - first.pageY);
 }
 
-function isCalendarHoursMode(value: string | null): value is CalendarHoursMode {
-  return value === "awake" || value === "fullDay";
+function touchMidpointLocationY(touches: ArrayLike<{ locationY: number }>) {
+  if (touches.length < 2) return 0;
+  return (touches[0].locationY + touches[1].locationY) / 2;
 }
 
 function clamp(value: number, min: number, max: number) {
