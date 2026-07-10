@@ -1,12 +1,12 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-10 18:57 BST
+Last verified: 2026-07-10 19:09 BST
 
 ## Verification Snapshot
 
-- Local repo: `main`, synced with `origin/main` at PR #37 merge commit `eb72b36`.
+- Local repo: `main`, synced with `origin/main` at PR #37 release base commit `729e3c6`.
 - GitHub: PR #37 is merged; no open PRs and no GitHub issues at merge verification time.
-- Latest verified TestFlight build: `0.1.0 (12)`.
+- Latest verified TestFlight build: `0.1.0 (13)`.
 - Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, and App Store Connect build state.
 
 ## Status Key
@@ -29,7 +29,7 @@ Last verified: 2026-07-10 18:57 BST
 
 | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Calendar edit card keyboard avoidance regression | Release pending | PR #37 merged to `main` at `eb72b36`; latest verified TestFlight remains `0.1.0 (12)` until build 13 is uploaded and verified. | Edit sheet now uses screen-coordinate keyboard measurements, explicit keyboard-open sheet height, scrollable form body, and regression tests for small-iPhone keyboard-open layout. Release build 13 before marking `Done` or `Watch`. |
+| Calendar edit card keyboard avoidance regression | Watch | PR #37, build `0.1.0 (13)`, delivery UUID `8b5d4ac4-d0ca-4239-9719-4442aee56ec6`. | Edit sheet now uses screen-coordinate keyboard measurements, explicit keyboard-open sheet height, scrollable form body, and regression tests for small-iPhone keyboard-open layout. Watch KB's real-device keyboard/suggestion-bar check before marking fully settled. |
 | Cross-midnight continuation border polish | Done | PR #36, build `0.1.0 (12)`. | Continuation segments that started before midnight now drop the top border/top radii; segments continuing into the next day still drop the bottom border/bottom radii. |
 | Apple Health auto-log category and description customization | Watch | PR #36, build `0.1.0 (12)`. | Settings can map HealthKit sleep/workout types to category and description defaults; new imports and Health Review reprocess both use the mappings. Watch real device import/reprocess behaviour before marking fully settled. |
 | Calendar event tap crash | Done | PR #35, build `0.1.0 (11)`. | Root cause was unstable React hook order in `ActiveTimerEditSheet`. |
