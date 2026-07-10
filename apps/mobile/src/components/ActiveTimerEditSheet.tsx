@@ -19,6 +19,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import Svg, { Path } from "react-native-svg";
 import { paletteColorFor } from "@dayframe/shared";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
+import { editSheetKeyboardLayout, keyboardInsetFromScreenY } from "@/lib/editSheetKeyboard";
 import type { MobileBootstrap, MobileTimeEntry, TimeEntryUpdatePatch } from "@/lib/api";
 
 type Category = MobileBootstrap["categories"][number];
@@ -73,6 +74,7 @@ export function ActiveTimerEditSheet({
   const [pickerStartAt, setPickerStartAt] = useState<Date | null>(null);
   const dismissDragY = useRef(new Animated.Value(0)).current;
   const descriptionInputRef = useRef<TextInput>(null);
+  const editScrollerRef = useRef<ScrollView>(null);
   const timeInputRef = useRef<TextInput>(null);
 
   const entryId = entry?.id ?? null;
@@ -107,7 +109,12 @@ export function ActiveTimerEditSheet({
     function updateKeyboardInset(event: KeyboardEvent) {
       Keyboard.scheduleLayoutAnimation(event);
       const windowHeight = Dimensions.get("window").height;
-      const nextInset = Math.max(0, windowHeight - event.endCoordinates.screenY);
+      const screenHeight = Dimensions.get("screen").height;
+      const nextInset = keyboardInsetFromScreenY({
+        keyboardScreenY: event.endCoordinates.screenY,
+        screenHeight,
+        windowHeight
+      });
       setKeyboardInset(nextInset);
     }
 
@@ -154,13 +161,19 @@ export function ActiveTimerEditSheet({
   const saveLabel = isRunningMode ? "Save timer edits" : "Save entry edits";
   const sheetTitle = isRunningMode ? "Edit timer" : "Edit entry";
   const elapsedLabel = isRunningMode ? "Running" : "Duration";
-  const keyboardSafeAreaOverlap = keyboardInset > 0 ? insets.bottom : 0;
-  const keyboardBottomLift = Math.max(0, keyboardInset - keyboardSafeAreaOverlap);
-  const topSafeGap = Math.max(insets.top + 18, 32);
-  const keyboardAwareSheetStyle = {
-    marginBottom: keyboardBottomLift,
-    maxHeight: Math.max(360, windowDimensions.height - topSafeGap - keyboardBottomLift)
-  };
+  const keyboardLayout = editSheetKeyboardLayout({
+    bottomInset: insets.bottom,
+    keyboardInset,
+    topInset: insets.top,
+    windowHeight: windowDimensions.height
+  });
+  const keyboardAwareSheetStyle = keyboardLayout.keyboardOpen
+    ? {
+        height: keyboardLayout.sheetHeight ?? undefined,
+        marginBottom: keyboardLayout.bottomLift,
+        maxHeight: keyboardLayout.sheetHeight ?? undefined
+      }
+    : null;
   const dismissResponder = useMemo(() => PanResponder.create({
     onMoveShouldSetPanResponder: (_event, gesture) =>
       !busy && gesture.dy > 8 && Math.abs(gesture.dy) > Math.abs(gesture.dx) * 1.2,
@@ -285,6 +298,13 @@ export function ActiveTimerEditSheet({
   function updateTimeText(value: string) {
     setTimeText(formatEditableTime(value));
     setValidationError(null);
+  }
+
+  function focusDescriptionField() {
+    setDatePickerOpen(false);
+    setTimeout(() => {
+      editScrollerRef.current?.scrollTo({ y: 56, animated: true });
+    }, 80);
   }
 
   function updateStoppedDateText(value: string) {
@@ -416,16 +436,17 @@ export function ActiveTimerEditSheet({
               </View>
 
               <ScrollView
+                ref={editScrollerRef}
                 contentContainerStyle={[
                   styles.activeEditContent,
-                  keyboardInset > 0 ? { paddingBottom: 36 } : null
+                  keyboardLayout.keyboardOpen ? { paddingBottom: keyboardLayout.contentPaddingBottom } : null
                 ]}
                 keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
                 keyboardShouldPersistTaps="always"
                 showsVerticalScrollIndicator={false}
                 style={[
                   styles.activeEditScroller,
-                  keyboardInset > 0 ? styles.activeEditScrollerKeyboard : null
+                  keyboardLayout.keyboardOpen ? styles.activeEditScrollerKeyboard : null
                 ]}
               >
                 <View style={styles.activeEditHeroRow}>
@@ -457,7 +478,7 @@ export function ActiveTimerEditSheet({
                     accessibilityLabel={isRunningMode ? "Timer description" : "Entry description"}
                     blurOnSubmit
                     editable={!busy}
-                    onFocus={() => setDatePickerOpen(false)}
+                    onFocus={focusDescriptionField}
                     onPressIn={() => {
                       if (!busy) descriptionInputRef.current?.focus();
                     }}
