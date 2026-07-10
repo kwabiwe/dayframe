@@ -645,6 +645,51 @@ describe("health event persistence", () => {
     ]);
   });
 
+  it("reprocesses Health review candidates with custom auto-log mappings", async () => {
+    const mappedCategoryId = "20000000-0000-4000-8000-000000000099";
+    const client = reprocessClient([
+      healthWorkoutReviewRow({
+        id: "review-walk-mapped",
+        eventId: "event-walk-mapped",
+        durationSeconds: 37 * 60
+      })
+    ]);
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await reprocessHealthReviewItems({
+      preferences: {
+        sleep: true,
+        walking: true,
+        running: true,
+        cycling: true,
+        strength_training: false,
+        swimming: false,
+        other: false
+      },
+      mappings: {
+        walking: {
+          categoryId: mappedCategoryId,
+          description: "Morning walk"
+        }
+      }
+    }, session);
+
+    expect(result).toMatchObject({
+      checkedCount: 1,
+      confirmedCount: 1,
+      updatedCategoryCount: 1
+    });
+    const entryInsert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into time_entries")
+    );
+    expect((entryInsert?.[1] as unknown[])[3]).toBe(mappedCategoryId);
+    expect((entryInsert?.[1] as unknown[])[7]).toBe("Morning walk");
+    expect(client.query).toHaveBeenCalledWith(
+      expect.stringContaining("set suggested_category_id = $2"),
+      ["review-walk-mapped", mappedCategoryId]
+    );
+  });
+
   it("limits Health review reprocess batches and reports remaining production work", async () => {
     const client = reprocessClient([]);
     client.query.mockImplementation(async (statement: string) => {

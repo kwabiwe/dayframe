@@ -1450,6 +1450,12 @@ textarea:focus-visible {
   border-bottom-right-radius: 0;
 }
 
+.calendar-time-block.is-continuation-from-previous {
+  border-top-style: none;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
 .calendar-time-block > span {
   min-width: 0;
 }

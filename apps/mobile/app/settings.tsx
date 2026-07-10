@@ -18,6 +18,8 @@ import {
   DAYFRAME_PALETTE,
   paletteColorFor,
   type DayframePaletteKey,
+  type HealthAutoLogMapping,
+  type HealthAutoLogMappings,
   type HealthImportPreferenceKey,
   type HealthImportPreferences
 } from "@dayframe/shared";
@@ -48,6 +50,7 @@ import {
 import {
   friendlyHealthKitError,
   exportHealthDebugSnapshot,
+  getHealthAutoLogMappings,
   getHealthImportPreferences,
   getHealthImportStatus,
   HEALTH_IMPORT_PREFERENCE_OPTIONS,
@@ -55,6 +58,7 @@ import {
   importHealthKitWorkouts,
   reprocessExistingHealthReviewItems,
   requestHealthKitPermissions,
+  setHealthAutoLogMapping,
   setHealthImportPreference,
   type HealthImportStatus
 } from "@/lib/health";
@@ -86,6 +90,7 @@ export default function SettingsScreen() {
   const [locationDiagnostics, setLocationDiagnostics] = useState<LocationVisitDiagnostics | null>(null);
   const [healthStatus, setHealthStatus] = useState<HealthImportStatus[]>([]);
   const [healthImportPreferences, setHealthImportPreferences] = useState<HealthImportPreferences | null>(null);
+  const [healthAutoLogMappings, setHealthAutoLogMappings] = useState<HealthAutoLogMappings>({});
   const [healthDebugStatus, setHealthDebugStatus] = useState<string | null>(null);
   const [exportingHealthDebug, setExportingHealthDebug] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
@@ -146,6 +151,7 @@ export default function SettingsScreen() {
       ]);
     });
     getHealthImportPreferences().then(setHealthImportPreferences).catch(() => undefined);
+    getHealthAutoLogMappings().then(setHealthAutoLogMappings).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -431,11 +437,36 @@ export default function SettingsScreen() {
     try {
       const saved = await setHealthImportPreference(type, enabled);
       setHealthImportPreferences(saved);
-      await reprocessExistingHealthReviewItems(saved, { force: true });
+      await reprocessExistingHealthReviewItems(saved, { force: true, mappings: healthAutoLogMappings });
       await load({ silent: true });
     } catch (error) {
       setHealthImportPreferences(current);
       Alert.alert("Apple Health", error instanceof Error ? error.message : "Unable to save Health preference.");
+    }
+  }
+
+  async function updateHealthAutoLogMapping(type: HealthImportPreferenceKey, patch: HealthAutoLogMapping) {
+    const current = healthAutoLogMappings;
+    const nextMapping = {
+      ...(current[type] ?? {}),
+      ...patch
+    };
+    const optimistic = { ...current };
+    if (nextMapping.categoryId || nextMapping.description) {
+      optimistic[type] = nextMapping;
+    } else {
+      delete optimistic[type];
+    }
+    setHealthAutoLogMappings(optimistic);
+    try {
+      const saved = await setHealthAutoLogMapping(type, nextMapping);
+      setHealthAutoLogMappings(saved);
+      const preferences = healthImportPreferences ?? await getHealthImportPreferences();
+      await reprocessExistingHealthReviewItems(preferences, { force: true, mappings: saved });
+      await load({ silent: true });
+    } catch (error) {
+      setHealthAutoLogMappings(current);
+      Alert.alert("Apple Health", error instanceof Error ? error.message : "Unable to save Health mapping.");
     }
   }
 
@@ -893,22 +924,104 @@ export default function SettingsScreen() {
             <View style={styles.healthPreferenceList}>
               {HEALTH_IMPORT_PREFERENCE_OPTIONS.map((option) => {
                 const enabled = healthImportPreferences?.[option.key] ?? option.defaultEnabled;
+                const mapping = healthAutoLogMappings[option.key] ?? {};
+                const selectedCategoryName =
+                  data?.categories.find((category) => category.id === mapping.categoryId)?.name ??
+                  defaultHealthCategoryLabel(option.key);
                 return (
                   <View key={option.key} style={styles.healthPreferenceRow}>
-                    <View style={styles.healthPreferenceText}>
-                      <Text style={styles.categoryName}>{option.label}</Text>
-                      <Text style={styles.categoryMeta}>
-                        {enabled ? "Auto-log from Apple Health" : "Ignored during Health sync"}
-                      </Text>
+                    <View style={styles.healthPreferenceHeader}>
+                      <View style={styles.healthPreferenceText}>
+                        <Text style={styles.categoryName}>{option.label}</Text>
+                        <Text style={styles.categoryMeta}>
+                          {enabled
+                            ? `Logs to ${selectedCategoryName}`
+                            : "Ignored during Health sync"}
+                        </Text>
+                      </View>
+                      <Switch
+                        accessibilityLabel={`${option.label} Apple Health auto-log`}
+                        value={enabled}
+                        onValueChange={(value) => updateHealthImportPreference(option.key, value)}
+                        trackColor={{ false: theme.borderStrong, true: theme.accent }}
+                        thumbColor={theme.mode === "dark" ? theme.textPrimary : "#FFFFFF"}
+                        ios_backgroundColor={theme.borderStrong}
+                      />
                     </View>
-                    <Switch
-                      accessibilityLabel={`${option.label} Apple Health auto-log`}
-                      value={enabled}
-                      onValueChange={(value) => updateHealthImportPreference(option.key, value)}
-                      trackColor={{ false: theme.borderStrong, true: theme.accent }}
-                      thumbColor={theme.mode === "dark" ? theme.textPrimary : "#FFFFFF"}
-                      ios_backgroundColor={theme.borderStrong}
-                    />
+                    {enabled ? (
+                      <View style={styles.healthMappingPanel}>
+                        <Text style={styles.healthMappingLabel}>Category</Text>
+                        <ScrollView
+                          horizontal
+                          showsHorizontalScrollIndicator={false}
+                          contentContainerStyle={styles.categoryChoiceScroller}
+                        >
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`${option.label} default Health category`}
+                            onPress={() => updateHealthAutoLogMapping(option.key, { categoryId: null })}
+                            style={pressable(
+                              [
+                                styles.categoryChoice,
+                                !mapping.categoryId ? styles.categoryChoiceSelected : null
+                              ],
+                              styles.buttonPressed
+                            )}
+                          >
+                            <Text
+                              style={[
+                                styles.categoryChoiceText,
+                                !mapping.categoryId ? styles.categoryChoiceTextSelected : null
+                              ]}
+                            >
+                              Default {defaultHealthCategoryLabel(option.key)}
+                            </Text>
+                          </Pressable>
+                          {(data?.categories ?? []).map((category) => {
+                            const selected = mapping.categoryId === category.id;
+                            return (
+                              <Pressable
+                                key={`${option.key}:${category.id}`}
+                                accessibilityRole="button"
+                                accessibilityLabel={`${option.label} category ${category.name}`}
+                                onPress={() => updateHealthAutoLogMapping(option.key, { categoryId: category.id })}
+                                style={pressable(
+                                  [
+                                    styles.categoryChoice,
+                                    selected ? styles.categoryChoiceSelected : null
+                                  ],
+                                  styles.buttonPressed
+                                )}
+                              >
+                                <View style={[styles.colorDot, { backgroundColor: paletteColorFor(category.color, category.name) }]} />
+                                <Text
+                                  style={[
+                                    styles.categoryChoiceText,
+                                    selected ? styles.categoryChoiceTextSelected : null
+                                  ]}
+                                >
+                                  {category.name}
+                                </Text>
+                              </Pressable>
+                            );
+                          })}
+                        </ScrollView>
+                        <Text style={styles.healthMappingLabel}>Description</Text>
+                        <TextInput
+                          key={`${option.key}:${mapping.description ?? ""}`}
+                          style={[styles.textInput, styles.healthMappingInput]}
+                          defaultValue={mapping.description ?? ""}
+                          placeholder={defaultHealthDescription(option.key)}
+                          placeholderTextColor={theme.textSecondary}
+                          returnKeyType="done"
+                          onEndEditing={(event) =>
+                            updateHealthAutoLogMapping(option.key, {
+                              description: event.nativeEvent.text.trim() || null
+                            })
+                          }
+                        />
+                      </View>
+                    ) : null}
                   </View>
                 );
               })}
@@ -1048,6 +1161,14 @@ function formatGeofenceTransition(value: NonNullable<LocationVisitDiagnostics["l
 function formatDurationMinutes(seconds: number) {
   const minutes = Math.max(1, Math.round(seconds / 60));
   return `${minutes} min`;
+}
+
+function defaultHealthCategoryLabel(type: HealthImportPreferenceKey) {
+  return type === "sleep" ? "Sleep" : "Health";
+}
+
+function defaultHealthDescription(type: HealthImportPreferenceKey) {
+  return HEALTH_IMPORT_PREFERENCE_OPTIONS.find((option) => option.key === type)?.label ?? "Health activity";
 }
 
 const sourceLabels: Record<string, string> = {

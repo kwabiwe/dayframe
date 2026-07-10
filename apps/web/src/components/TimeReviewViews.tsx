@@ -4,6 +4,7 @@ import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarDays, ChevronLeft, ChevronRight, List, Table2 } from "lucide-react";
+import { calendarBlockContinuationEdges } from "@dayframe/shared";
 import { CurrentTimerPanel } from "@/components/DashboardRealtime";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import { EntriesTable } from "@/components/EntriesTable";
@@ -549,7 +550,7 @@ function CalendarReview({
                   const activeDraft = resizeDraft?.entryId === entry.id ? resizeDraft : null;
                   const blockStyle = calendarBlockStyle(entry, activeDraft, day, rowHeight, calendarHeight, calendarHours);
                   if (!blockStyle) return null;
-                  const { continuesIntoNextDay, ...blockPositionStyle } = blockStyle;
+                  const { startsBeforeDay, continuesIntoNextDay, ...blockPositionStyle } = blockStyle;
                   const durationSeconds = calendarDurationSeconds(entry, activeDraft);
                   const density = getTimeBlockDensity({
                     durationSeconds,
@@ -565,6 +566,7 @@ function CalendarReview({
                         selectedEntryId === entry.id ? "outline outline-2 outline-offset-1 outline-[var(--foreground)]" : "",
                         resizingId === entry.id ? "is-resizing" : "",
                         entry.stoppedAt ? "" : "is-running",
+                        startsBeforeDay ? "is-continuation-from-previous" : "",
                         continuesIntoNextDay ? "is-continuation-to-next" : "",
                         ...timeBlockDensityClassNames(density)
                       ].join(" ")}
@@ -767,10 +769,17 @@ function calendarBlockStyle(
   const minimumHeight = minimumTimeBlockHeight(rowHeight);
   const top = Math.min(calendarHeight - minimumHeight, Math.max(0, (startMinutes / 60) * rowHeight));
   const height = Math.min(calendarHeight - top, Math.max(minimumHeight, (durationMinutes / 60) * rowHeight));
+  const continuation = calendarBlockContinuationEdges({
+    startedAt: start,
+    stoppedAt,
+    dayStart,
+    dayEnd
+  });
   return {
     top: Math.round(top),
     height: Math.round(height),
-    continuesIntoNextDay: stoppedAt > dayEnd
+    startsBeforeDay: continuation.startsBeforeDay,
+    continuesIntoNextDay: continuation.continuesIntoNextDay
   };
 }
 

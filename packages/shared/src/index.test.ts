@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   applyActivityEvent,
+  calendarBlockContinuationEdges,
   draftAutomationRuleFromText,
+  healthAutoLogMappingFor,
   healthWorkoutLabel,
+  normalizeHealthAutoLogMappings,
   normalizeHealthWorkoutType,
   shouldAutoConfirmHealthSleep,
   shouldAutoConfirmHealthWorkout,
@@ -214,6 +217,71 @@ describe("HealthKit workout helpers", () => {
         description: "Walk"
       })
     ]);
+  });
+});
+
+describe("calendar continuation helpers", () => {
+  it("marks a visible segment that started before the selected day", () => {
+    expect(
+      calendarBlockContinuationEdges({
+        startedAt: "2026-07-09T22:30:00.000Z",
+        stoppedAt: "2026-07-10T06:45:00.000Z",
+        dayStart: "2026-07-10T00:00:00.000Z",
+        dayEnd: "2026-07-11T00:00:00.000Z"
+      })
+    ).toEqual({
+      startsBeforeDay: true,
+      continuesIntoNextDay: false
+    });
+  });
+
+  it("marks a visible segment that continues into the following day", () => {
+    expect(
+      calendarBlockContinuationEdges({
+        startedAt: "2026-07-10T21:30:00.000Z",
+        stoppedAt: "2026-07-11T05:45:00.000Z",
+        dayStart: "2026-07-10T00:00:00.000Z",
+        dayEnd: "2026-07-11T00:00:00.000Z"
+      })
+    ).toEqual({
+      startsBeforeDay: false,
+      continuesIntoNextDay: true
+    });
+  });
+});
+
+describe("Health auto-log mappings", () => {
+  it("keeps known Health mapping values and drops unknown keys", () => {
+    const mappings = normalizeHealthAutoLogMappings({
+      sleep: {
+        categoryId: "category-sleep",
+        description: "  Rest  "
+      },
+      walking: {
+        categoryId: "",
+        description: "Morning walk"
+      },
+      commute: {
+        categoryId: "ignored",
+        description: "ignored"
+      }
+    });
+
+    expect(mappings).toEqual({
+      sleep: {
+        categoryId: "category-sleep",
+        description: "Rest"
+      },
+      walking: {
+        categoryId: null,
+        description: "Morning walk"
+      }
+    });
+    expect(healthAutoLogMappingFor("sleep", mappings)).toEqual({
+      categoryId: "category-sleep",
+      description: "Rest"
+    });
+    expect(healthAutoLogMappingFor("running", mappings)).toEqual({});
   });
 });
 

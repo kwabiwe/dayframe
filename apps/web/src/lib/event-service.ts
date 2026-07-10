@@ -2,13 +2,16 @@ import {
   ActivityEventInputSchema,
   DEFAULT_HEALTH_IMPORT_PREFERENCES,
   HEALTH_IMPORT_PREFERENCE_OPTIONS,
+  healthAutoLogMappingFor,
   normalizeHealthWorkoutType,
+  normalizeHealthAutoLogMappings,
   normalizePaletteKey,
   normalizeActivityEvent,
   shouldAutoConfirmHealthSleep,
   shouldAutoConfirmHealthWorkout,
   type ActivityEventType,
   type ActivityEventInput,
+  type HealthAutoLogMappings,
   type HealthImportPreferenceKey,
   type HealthImportPreferences
 } from "@dayframe/shared";
@@ -1376,6 +1379,7 @@ function databaseErrorDetails(error: unknown) {
 
 type HealthReviewReprocessInput = {
   preferences?: Partial<HealthImportPreferences> | null;
+  mappings?: HealthAutoLogMappings | null;
   limit?: number | null;
   batchSize?: number | null;
   force?: boolean | null;
@@ -1402,6 +1406,7 @@ export async function reprocessHealthReviewItems(
   session: RequestSession = getDevSession()
 ) {
   const preferences = normalizeHealthImportPreferences(input.preferences);
+  const mappings = normalizeHealthAutoLogMappings(input.mappings);
   const batchSize = normalizeHealthReprocessBatchSize(input.limit ?? input.batchSize);
   const force = Boolean(input.force);
   const client = await pool.connect();
@@ -1474,10 +1479,11 @@ export async function reprocessHealthReviewItems(
       return categoryId;
     }
 
+    const sleepMapping = healthAutoLogMappingFor("sleep", mappings);
     let sleepCategoryId: string | null = null;
     try {
       sleepCategoryId = preferences.sleep
-        ? await ensureReviewCategoryId({ eventType: "health_sleep_import" })
+        ? sleepMapping.categoryId ?? await ensureReviewCategoryId({ eventType: "health_sleep_import" })
         : null;
       if (sleepCategoryId) {
         result.repairedSleepEntryCount = await repairHealthCategorySleepTimeEntries(client, session, sleepCategoryId);
@@ -1510,6 +1516,7 @@ export async function reprocessHealthReviewItems(
       sleepItems,
       session,
       sleepCategoryId,
+      sleepMapping.description ?? "Sleep",
       result
     );
 
@@ -1523,7 +1530,9 @@ export async function reprocessHealthReviewItems(
         const stoppedAt = timestampStringOrNull(rawPayload.stoppedAt) ?? item.suggestedStoppedAt;
         const durationSeconds = reviewDurationSeconds(rawPayload, startedAt, stoppedAt);
         const preferenceKey = healthPreferenceKeyForReviewItem(item, rawPayload);
-        const categoryId = await ensureReviewCategoryId(item);
+        const mapping = healthAutoLogMappingFor(preferenceKey, mappings);
+        const categoryId = mapping.categoryId ?? await ensureReviewCategoryId(item);
+        const description = mapping.description ?? item.title;
 
         if (item.suggestedCategoryId !== categoryId || item.eventCategoryId !== categoryId) {
           await updateHealthReviewCategory(client, item, categoryId);
@@ -1605,6 +1614,7 @@ export async function reprocessHealthReviewItems(
 
         await insertConfirmedHealthTimeEntry(client, item, session, {
           categoryId,
+          description,
           startedAt,
           stoppedAt
         });
@@ -1781,6 +1791,7 @@ async function consolidateLegacyHealthSleepReviewItems(
   items: HealthReviewItemRow[],
   session: RequestSession,
   sleepCategoryId: string | null,
+  sleepDescription: string,
   result: {
     checkedCount: number;
     confirmedCount: number;
@@ -1849,7 +1860,7 @@ async function consolidateLegacyHealthSleepReviewItems(
       const existingEntry = await firstExistingEntryForHealthReviewItems(client, group.map((segment) => segment.item), session);
       const coveredEntry = existingEntry
         ? existingEntry
-        : await findCoveringHealthTimeEntry(client, session, { ...group[0].item, title: "Sleep" }, startedAt, stoppedAt);
+        : await findCoveringHealthTimeEntry(client, session, { ...group[0].item, title: sleepDescription }, startedAt, stoppedAt);
       if (!coveredEntry) {
         const blockingEntry = await findOverlappingTimeEntry(client, session, startedAt, stoppedAt);
         if (blockingEntry) {
@@ -1873,9 +1884,10 @@ async function consolidateLegacyHealthSleepReviewItems(
 
         await insertConfirmedHealthTimeEntry(client, {
           ...group[0].item,
-          title: "Sleep"
+          title: sleepDescription
         }, session, {
           categoryId: sleepCategoryId,
+          description: sleepDescription,
           startedAt,
           stoppedAt
         });
@@ -2501,6 +2513,7 @@ async function insertConfirmedHealthTimeEntry(
   session: RequestSession,
   input: {
     categoryId: string;
+    description?: string;
     startedAt: string;
     stoppedAt: string;
   }
@@ -2529,7 +2542,7 @@ async function insertConfirmedHealthTimeEntry(
       item.suggestedPlaceId,
       item.eventSource,
       item.confidence,
-      item.title,
+      input.description ?? item.title,
       input.startedAt,
       input.stoppedAt,
       item.eventId

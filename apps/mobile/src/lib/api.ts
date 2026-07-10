@@ -5,6 +5,7 @@ import {
   type ActivityEventInput,
   type ActivityEventType,
   type EventSource,
+  type HealthAutoLogMappings,
   type HealthImportPreferences
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
@@ -561,7 +562,7 @@ export function dismissReviewItem(id: string) {
 
 export async function reprocessHealthReviewItems(
   preferences: HealthImportPreferences,
-  options: { limit?: number; force?: boolean } = {}
+  options: { limit?: number; force?: boolean; mappings?: HealthAutoLogMappings } = {}
 ): Promise<HealthReviewReprocessResult> {
   const response = await fetch(`${DAYFRAME_API_BASE}/api/review/reprocess-health`, {
     method: "POST",
@@ -569,7 +570,7 @@ export async function reprocessHealthReviewItems(
       "Content-Type": "application/json",
       ...(await authHeaders())
     },
-    body: JSON.stringify({ preferences, limit: options.limit, force: options.force })
+    body: JSON.stringify({ preferences, limit: options.limit, force: options.force, mappings: options.mappings })
   });
   if (response.status === 401) {
     await clearSessionToken();

@@ -5,11 +5,15 @@ import {
   DEFAULT_HEALTH_WORKOUT_IMPORT_PREFERENCES,
   HEALTH_IMPORT_PREFERENCE_OPTIONS as SHARED_HEALTH_IMPORT_PREFERENCE_OPTIONS,
   HEALTH_WORKOUT_TYPE_OPTIONS,
+  healthAutoLogMappingFor,
   healthWorkoutLabel,
   mapHealthKitSleepStage,
+  normalizeHealthAutoLogMappings,
   normalizeHealthWorkoutType,
   shouldAutoConfirmHealthSleep,
   shouldAutoConfirmHealthWorkout,
+  type HealthAutoLogMapping,
+  type HealthAutoLogMappings,
   type HealthImportPreferenceKey,
   type HealthImportPreferences,
   type HealthWorkoutImportPreferences,
@@ -27,6 +31,7 @@ const HEALTHKIT_SEEN_KEY = "dayframe.healthkit.sleepSeen.v1";
 const HEALTHKIT_WORKOUT_ANCHOR_KEY = "dayframe.healthkit.workoutAnchor.v1";
 const HEALTHKIT_WORKOUT_SEEN_KEY = "dayframe.healthkit.workoutSeen.v1";
 const HEALTHKIT_IMPORT_PREFERENCES_KEY = "dayframe.healthkit.importPreferences.v1";
+const HEALTHKIT_AUTO_LOG_MAPPINGS_KEY = "dayframe.healthkit.autoLogMappings.v1";
 const HEALTHKIT_WORKOUT_PREFERENCES_KEY = "dayframe.healthkit.workoutPreferences.v1";
 const HEALTHKIT_AUTOMATIC_SYNC_KEY = "dayframe.healthkit.automaticSync.v1";
 const HEALTHKIT_BACKGROUND_SYNC_TYPES = [HEALTHKIT_SLEEP_TYPE, HEALTHKIT_WORKOUT_TYPE] as const;
@@ -136,6 +141,7 @@ export type HealthDebugExport = {
     sleepSeenCount: number;
     workoutSeenCount: number;
     preferences: HealthImportPreferences;
+    mappings: HealthAutoLogMappings;
   };
   healthKit: {
     sleep: {
@@ -284,6 +290,7 @@ export async function importHealthKitSleep() {
   const anchor = await AsyncStorage.getItem(HEALTHKIT_ANCHOR_KEY);
   const seen = new Set(await readSeenSampleIds());
   const preferences = await getHealthImportPreferences();
+  const mappings = await getHealthAutoLogMappings();
   const result = await healthkit.queryCategorySamplesWithAnchor(HEALTHKIT_SLEEP_TYPE, {
     anchor: anchor ?? undefined,
     limit: 0
@@ -304,7 +311,7 @@ export async function importHealthKitSleep() {
       ignoredCount += 1;
       continue;
     }
-    await enqueueEvent(healthKitSleepSessionEvent(session));
+    await enqueueEvent(healthKitSleepSessionEvent(session, healthAutoLogMappingFor("sleep", mappings)));
   }
 
   await AsyncStorage.setItem(HEALTHKIT_ANCHOR_KEY, result.newAnchor);
@@ -326,6 +333,7 @@ export async function importHealthKitWorkouts() {
   const anchor = await AsyncStorage.getItem(HEALTHKIT_WORKOUT_ANCHOR_KEY);
   const seen = new Set(await readSeenSampleIds(HEALTHKIT_WORKOUT_SEEN_KEY));
   const preferences = await getHealthImportPreferences();
+  const mappings = await getHealthAutoLogMappings();
   const result = await healthkit.queryWorkoutSamplesWithAnchor({
     anchor: anchor ?? undefined,
     limit: 0
@@ -342,7 +350,7 @@ export async function importHealthKitWorkouts() {
       continue;
     }
     imported.push(mapped);
-    await enqueueEvent(healthKitWorkoutEvent(mapped));
+    await enqueueEvent(healthKitWorkoutEvent(mapped, healthAutoLogMappingFor(mapped.workoutType, mappings)));
   }
 
   await AsyncStorage.setItem(HEALTHKIT_WORKOUT_ANCHOR_KEY, result.newAnchor);
@@ -385,6 +393,32 @@ export async function setHealthImportPreference(type: HealthImportPreferenceKey,
   return next;
 }
 
+export async function getHealthAutoLogMappings(): Promise<HealthAutoLogMappings> {
+  const raw = await AsyncStorage.getItem(HEALTHKIT_AUTO_LOG_MAPPINGS_KEY);
+  if (!raw) return {};
+  try {
+    return normalizeHealthAutoLogMappings(JSON.parse(raw));
+  } catch {
+    return {};
+  }
+}
+
+export async function setHealthAutoLogMapping(
+  type: HealthImportPreferenceKey,
+  mapping: HealthAutoLogMapping
+) {
+  const current = await getHealthAutoLogMappings();
+  const normalized = normalizeHealthAutoLogMappings({ [type]: mapping })[type] ?? {};
+  const next = { ...current };
+  if (normalized.categoryId || normalized.description) {
+    next[type] = normalized;
+  } else {
+    delete next[type];
+  }
+  await AsyncStorage.setItem(HEALTHKIT_AUTO_LOG_MAPPINGS_KEY, JSON.stringify(next));
+  return next;
+}
+
 export async function getHealthWorkoutImportPreferences(): Promise<HealthWorkoutImportPreferences> {
   return healthWorkoutPreferencesFromPartial(await getHealthImportPreferences());
 }
@@ -396,7 +430,7 @@ export async function setHealthWorkoutImportPreference(type: HealthWorkoutType, 
 
 export async function reprocessExistingHealthReviewItems(
   preferences?: HealthImportPreferences,
-  options: { force?: boolean } = {}
+  options: { force?: boolean; mappings?: HealthAutoLogMappings } = {}
 ) {
   const now = Date.now();
   if (healthReprocessInFlight) return healthReprocessInFlight;
@@ -409,6 +443,7 @@ export async function reprocessExistingHealthReviewItems(
     try {
       const result = await reprocessHealthReviewItemBatches(
         preferences ?? await getHealthImportPreferences(),
+        options.mappings ?? await getHealthAutoLogMappings(),
         options.force === true
       );
       lastHealthReprocessAt = result.hasMore ? 0 : Date.now();
@@ -425,12 +460,20 @@ export async function reprocessExistingHealthReviewItems(
   return healthReprocessInFlight;
 }
 
-async function reprocessHealthReviewItemBatches(preferences: HealthImportPreferences, force: boolean) {
+async function reprocessHealthReviewItemBatches(
+  preferences: HealthImportPreferences,
+  mappings: HealthAutoLogMappings,
+  force: boolean
+) {
   const startedAt = Date.now();
   let combined: HealthReviewReprocessResult | null = null;
 
   for (let batch = 0; batch < HEALTH_REPROCESS_MAX_BATCHES; batch += 1) {
-    const result = await reprocessHealthReviewItems(preferences, { limit: HEALTH_REPROCESS_BATCH_SIZE, force });
+    const result = await reprocessHealthReviewItems(preferences, {
+      limit: HEALTH_REPROCESS_BATCH_SIZE,
+      force,
+      mappings
+    });
     combined = mergeHealthReprocessResults(combined, result);
     if (!result.hasMore && !result.partial) break;
     if (Date.now() - startedAt >= HEALTH_REPROCESS_MAX_DURATION_MS) {
@@ -456,6 +499,7 @@ export async function exportHealthDebugSnapshot(
 
   const [
     preferences,
+    mappings,
     sleepAnchor,
     workoutAnchor,
     sleepSeen,
@@ -464,6 +508,7 @@ export async function exportHealthDebugSnapshot(
     workoutResult
   ] = await Promise.all([
     getHealthImportPreferences(),
+    getHealthAutoLogMappings(),
     AsyncStorage.getItem(HEALTHKIT_ANCHOR_KEY),
     AsyncStorage.getItem(HEALTHKIT_WORKOUT_ANCHOR_KEY),
     readSeenSampleIds(),
@@ -485,10 +530,12 @@ export async function exportHealthDebugSnapshot(
   const workoutSamples = (workoutResult.workouts as readonly HealthKitWorkoutSample[])
     .map((sample) => mapHealthKitWorkoutSample(sample.toJSON?.() ?? sample))
     .filter((sample) => validDate(sample.startedAt) && validDate(sample.stoppedAt));
-  const sleepEvents = preferences.sleep ? sessions.map(healthKitSleepSessionEvent) : [];
+  const sleepEvents = preferences.sleep
+    ? sessions.map((session) => healthKitSleepSessionEvent(session, healthAutoLogMappingFor("sleep", mappings)))
+    : [];
   const workoutEvents = workoutSamples
     .filter((sample) => preferences[sample.workoutType])
-    .map(healthKitWorkoutEvent);
+    .map((sample) => healthKitWorkoutEvent(sample, healthAutoLogMappingFor(sample.workoutType, mappings)));
 
   return {
     exportedAt: exportedAt.toISOString(),
@@ -504,7 +551,8 @@ export async function exportHealthDebugSnapshot(
       workoutAnchorPresent: Boolean(workoutAnchor),
       sleepSeenCount: sleepSeen.length,
       workoutSeenCount: workoutSeen.length,
-      preferences
+      preferences,
+      mappings
     },
     healthKit: {
       sleep: {
@@ -598,13 +646,14 @@ export function mapHealthKitWorkoutSample(sample: HealthKitWorkoutSample): Dayfr
   };
 }
 
-export function healthKitWorkoutEvent(sample: DayframeWorkoutSample) {
+export function healthKitWorkoutEvent(sample: DayframeWorkoutSample, mapping: HealthAutoLogMapping = {}) {
   return {
     localId: `healthkit-workout:${sample.externalSampleId}`,
     source: "health_workout" as const,
     type: "health_workout_import" as const,
     occurredAt: new Date(sample.startedAt),
-    description: sample.workoutLabel,
+    categoryId: mapping.categoryId ?? undefined,
+    description: mapping.description ?? sample.workoutLabel,
     rawPayload: {
       provider: "healthkit",
       externalSampleId: sample.externalSampleId,
@@ -663,14 +712,15 @@ export function groupSleepSamplesIntoSessions(samples: DayframeSleepSample[]): D
   });
 }
 
-export function healthKitSleepSessionEvent(session: DayframeSleepSession) {
+export function healthKitSleepSessionEvent(session: DayframeSleepSession, mapping: HealthAutoLogMapping = {}) {
   const durationSeconds = sessionDurationSeconds(session);
   return {
     localId: `healthkit-sleep:${session.externalSessionId}`,
     source: "health_sleep" as const,
     type: "health_sleep_import" as const,
     occurredAt: new Date(session.startedAt),
-    description: "Sleep",
+    categoryId: mapping.categoryId ?? undefined,
+    description: mapping.description ?? "Sleep",
     rawPayload: {
       provider: "healthkit",
       externalSampleId: session.externalSessionId,

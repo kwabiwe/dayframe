@@ -967,6 +967,49 @@ describe("mobile API client", () => {
     );
   });
 
+  it("passes Health auto-log mappings when reprocessing review items", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(jsonResponse({
+        ok: true,
+        checkedCount: 0,
+        confirmedCount: 0,
+        ignoredCount: 0,
+        leftInReviewCount: 0,
+        skippedCount: 0,
+        failedCount: 0,
+        updatedCategoryCount: 0,
+        remainingReviewCount: 0,
+        errorSummary: []
+      }, 200))
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await reprocessHealthReviewItems({
+      sleep: true,
+      walking: true,
+      running: true,
+      cycling: true,
+      strength_training: false,
+      swimming: false,
+      other: false
+    }, {
+      mappings: {
+        walking: {
+          categoryId: "category-fitness",
+          description: "Morning walk"
+        }
+      }
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/review/reprocess-health",
+      expect.objectContaining({
+        body: expect.stringContaining('"mappings":{"walking":{"categoryId":"category-fitness","description":"Morning walk"}}')
+      })
+    );
+  });
+
   it("saves edited review items by creating confirmed time then dismissing the suggestion", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));
