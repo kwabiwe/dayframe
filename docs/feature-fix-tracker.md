@@ -1,11 +1,11 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-10 18:54 BST
+Last verified: 2026-07-10 18:57 BST
 
 ## Verification Snapshot
 
-- Local repo: branch `agent/dayframe-calendar-edit-keyboard` from clean `main` at `8ae4c32`.
-- GitHub: PR #36 is merged; no open PRs and no GitHub issues at pre-branch verification time.
+- Local repo: `main`, synced with `origin/main` at PR #37 merge commit `eb72b36`.
+- GitHub: PR #37 is merged; no open PRs and no GitHub issues at merge verification time.
 - Latest verified TestFlight build: `0.1.0 (12)`.
 - Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, and App Store Connect build state.
 
@@ -13,6 +13,7 @@ Last verified: 2026-07-10 18:54 BST
 
 - `Done`: merged to `main`; TestFlight/build evidence is listed separately when applicable.
 - `Watch`: merged, but keep watching real production/TestFlight behaviour because the bug depended on real data or device state.
+- `Release pending`: merged to `main`, but not yet verified in a new TestFlight build.
 - `Next`: intended for the next implementation PR.
 - `Planned`: accepted backlog item, no active branch yet.
 - `Future`: larger track, useful but not immediate.
@@ -21,7 +22,6 @@ Last verified: 2026-07-10 18:54 BST
 
 | Item | Status | Evidence | Next action |
 | --- | --- | --- | --- |
-| Calendar edit card keyboard avoidance regression | Next | KB reported after build `0.1.0 (12)` that tapping a Calendar entry, focusing the description field, and opening the keyboard covers the edit card instead of shifting it into view. The screenshot shows the edit sheet handle/title/actions still visible, but the editable form body is hidden behind the iOS keyboard/suggestion bar, leaving the user without the focused field in view. Branch `agent/dayframe-calendar-edit-keyboard` is addressing this first. | Keep the focused description field and surrounding edit controls visible with keyboard and safe-area aware positioning/internal scroll, preserve the card animation and swipe-down dismissal, avoid the sheet fighting the keyboard by pinning only its chrome, add regression coverage for the keyboard-open layout, then verify through PR, merge, and TestFlight before marking done. |
 | Auto-log defaults during onboarding and non-Health imports | Next | PR #36 adds the compact Apple Health settings surface; onboarding and non-Health import defaults are not yet designed. | Design the next small surface for onboarding defaults and place/other import mappings if still needed after Apple Health validation. |
 | Duplicate/overlapping Sleep investigation | Next | PR #33 deliberately avoided automatic duplicate sleep merge/delete. | Inspect production row metadata before any merge/delete logic, identify whether duplicates come from HealthKit overlap, legacy rows, or reprocess behavior, then implement only a safe dedupe/merge path with auditability. |
 
@@ -29,6 +29,7 @@ Last verified: 2026-07-10 18:54 BST
 
 | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- |
+| Calendar edit card keyboard avoidance regression | Release pending | PR #37 merged to `main` at `eb72b36`; latest verified TestFlight remains `0.1.0 (12)` until build 13 is uploaded and verified. | Edit sheet now uses screen-coordinate keyboard measurements, explicit keyboard-open sheet height, scrollable form body, and regression tests for small-iPhone keyboard-open layout. Release build 13 before marking `Done` or `Watch`. |
 | Cross-midnight continuation border polish | Done | PR #36, build `0.1.0 (12)`. | Continuation segments that started before midnight now drop the top border/top radii; segments continuing into the next day still drop the bottom border/bottom radii. |
 | Apple Health auto-log category and description customization | Watch | PR #36, build `0.1.0 (12)`. | Settings can map HealthKit sleep/workout types to category and description defaults; new imports and Health Review reprocess both use the mappings. Watch real device import/reprocess behaviour before marking fully settled. |
 | Calendar event tap crash | Done | PR #35, build `0.1.0 (11)`. | Root cause was unstable React hook order in `ActiveTimerEditSheet`. |
