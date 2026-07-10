@@ -272,13 +272,13 @@ export function EntriesTable({
                   <td className="px-3 py-3 text-[var(--muted)]">{entry.placeName ?? "No place"}</td>
                   <td className="px-3 py-3 text-[var(--muted)]">{formatSourceLabel(entry.source)}</td>
                   <td className="px-3 py-3 text-[var(--muted)]">{entry.reviewStatus}</td>
-                  <td className="tabular px-3 py-3 font-semibold text-[var(--accent)]">
+                  <td className="tabular px-3 py-3 font-semibold text-[var(--accent-text)]">
                     {formatDuration(entry.durationSeconds)}
                   </td>
                   <td className="px-3 py-3">
                     <div className="flex gap-2">
                       <button
-                        className="focus-ring rounded-md border border-[var(--line)] bg-[var(--surface-inset)] p-2 hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                        className="focus-ring min-h-11 min-w-11 rounded-xl border border-[var(--control-border)] bg-[var(--surface-inset)] p-2 hover:border-[var(--accent)] hover:text-[var(--accent-text)]"
                         type="button"
                         disabled={isPending || Boolean(continuingEntryId)}
                         aria-label={`Start ${timeEntryTitle(entry)} again`}
@@ -287,7 +287,7 @@ export function EntriesTable({
                         <Play size={15} fill="currentColor" strokeWidth={0} />
                       </button>
                       <button
-                        className="focus-ring rounded-md border border-[var(--line)] bg-[var(--surface-inset)] p-2 hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                        className="focus-ring min-h-11 min-w-11 rounded-xl border border-[var(--control-border)] bg-[var(--surface-inset)] p-2 hover:border-[var(--accent)] hover:text-[var(--accent-text)]"
                         type="button"
                         aria-label="Edit entry"
                         onClick={() => setEditingEntry(entry)}
@@ -295,7 +295,7 @@ export function EntriesTable({
                         <Pencil size={15} />
                       </button>
                       <button
-                        className="focus-ring rounded-md border border-[var(--line)] bg-[var(--surface-inset)] p-2 hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                        className="focus-ring min-h-11 min-w-11 rounded-xl border border-[var(--danger)] bg-[var(--surface-inset)] p-2 text-[var(--danger-text)] hover:bg-[color-mix(in_srgb,var(--danger)_10%,var(--surface-inset))]"
                         type="button"
                         aria-label="Delete entry"
                         onClick={() => remove(entry.id)}

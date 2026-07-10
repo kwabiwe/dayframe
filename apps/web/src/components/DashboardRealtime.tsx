@@ -9,7 +9,7 @@ import type {
   PointerEvent as ReactPointerEvent
 } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { paletteColorFor } from "@dayframe/shared";
+import { paletteCssColorFor } from "@dayframe/shared";
 import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import {
@@ -548,7 +548,7 @@ export function CurrentTimerPanel({
                     className={["swiss-focus-dot", selectedCategory ? "" : "is-muted"].filter(Boolean).join(" ")}
                     style={{
                       backgroundColor: selectedCategory
-                        ? paletteColorFor(selectedCategory.color, selectedCategory.name)
+                        ? paletteCssColorFor(selectedCategory.color, selectedCategory.name)
                         : "transparent"
                     }}
                   />
@@ -586,7 +586,7 @@ export function CurrentTimerPanel({
                       >
                         <span
                           className="swiss-focus-dot"
-                          style={{ backgroundColor: paletteColorFor(category.color, category.name) }}
+                          style={{ backgroundColor: paletteCssColorFor(category.color, category.name) }}
                         />
                         <span>{category.name}</span>
                         {isSelected ? <CheckCircle2 size={14} aria-hidden="true" /> : null}
@@ -773,7 +773,7 @@ function buildLearnedQuickActions(data: BootstrapData): LearnedQuickAction[] {
     categoryId: category.id,
     label: category.name,
     detail: category.isPinned ? "Pinned" : null,
-    color: paletteColorFor(category.color, category.name)
+    color: paletteCssColorFor(category.color, category.name)
   }));
 }
 
@@ -1116,10 +1116,11 @@ function DayTimeline({
           {titlePrefix} · {headerLabel}
         </h2>
         <div>
-          <span className="swiss-view-switch" aria-label="Timeline view">
+          <span className="swiss-view-switch" role="group" aria-label="Timeline view">
             <button
               type="button"
               className={viewMode === "day" ? "is-selected" : ""}
+              aria-pressed={viewMode === "day"}
               onClick={() => setViewMode("day")}
             >
               Day
@@ -1127,12 +1128,13 @@ function DayTimeline({
             <button
               type="button"
               className={viewMode === "week" ? "is-selected" : ""}
+              aria-pressed={viewMode === "week"}
               onClick={() => setViewMode("week")}
             >
               Week
             </button>
           </span>
-          <span className="swiss-zoom-control" aria-label="Timeline zoom">
+          <span className="swiss-zoom-control" role="group" aria-label="Timeline zoom">
             <button
               type="button"
               disabled={zoomIndex === 0}
@@ -1156,6 +1158,7 @@ function DayTimeline({
               type="button"
               aria-label="Jump to date"
               className={dateJumpOpen ? "is-selected" : ""}
+              aria-expanded={dateJumpOpen}
               onClick={() => setDateJumpOpen((current) => !current)}
             >
               <CalendarDays size={16} />
@@ -1177,6 +1180,7 @@ function DayTimeline({
             type="button"
             aria-label="Toggle timeline summary"
             className={showSummary ? "is-selected" : ""}
+            aria-pressed={showSummary}
             onClick={() => setShowSummary((current) => !current)}
           >
             <BarChart3 size={16} />
@@ -1413,6 +1417,7 @@ function TimelineBlock({
     <article
       tabIndex={0}
       role="button"
+      aria-pressed={isSelected}
       aria-label={detailsLabel}
       title={detailsLabel}
       className={[
@@ -1730,7 +1735,7 @@ function ManualEntryDialog({
 function pastelFor(entry: TimeEntryRow) {
   const accent = timeEntryAccentColor(entry);
   return {
-    background: `color-mix(in srgb, ${accent} 58%, var(--surface))`,
+    background: `color-mix(in srgb, ${accent} 18%, var(--surface))`,
     border: accent,
     text: "var(--block-text)"
   };

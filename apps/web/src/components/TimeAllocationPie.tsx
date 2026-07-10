@@ -1,4 +1,4 @@
-import { paletteColorFor } from "@dayframe/shared";
+import { paletteCssColorFor } from "@dayframe/shared";
 import { timeEntryCategoryLabel } from "@/lib/display";
 import type { TimeEntryRow } from "@/lib/queries";
 import { formatDuration } from "@/lib/format";
@@ -28,7 +28,7 @@ export function TimeAllocationPie({ entries }: { entries: TimeEntryRow[] }) {
       id,
       name: value.name,
       seconds: value.seconds,
-      color: paletteColorFor(value.color, value.name)
+      color: paletteCssColorFor(value.color, value.name)
     }))
     .sort((a, b) => b.seconds - a.seconds)
     .slice(0, 5);
@@ -56,10 +56,11 @@ export function TimeAllocationPie({ entries }: { entries: TimeEntryRow[] }) {
         <div
           className="time-donut relative mx-auto aspect-square w-full max-w-[240px] rounded-full border border-[var(--line-strong)] bg-[var(--surface-inset)]"
           style={{ background }}
+          role="img"
           aria-label={`Time spent total ${formatDuration(total)}`}
         >
           <div className="absolute inset-[30%] grid place-items-center rounded-full border border-[var(--line-strong)] bg-[var(--surface)]">
-            <span className="tabular text-xl font-semibold text-[var(--accent)]">
+            <span className="tabular text-xl font-semibold text-[var(--accent-text)]">
               {formatDuration(total)}
             </span>
           </div>

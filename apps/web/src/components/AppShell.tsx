@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -33,6 +32,7 @@ import {
   X
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { DayframeBrand } from "@/components/brand/DayframeBrand";
 import { timeEntryTitle } from "@/lib/display";
 import type { BootstrapData } from "@/lib/queries";
 import { formatDuration, formatEventLabel, formatSourceLabel, formatTime } from "@/lib/format";
@@ -70,7 +70,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
-  const [themeMode, setThemeMode] = useState<"light" | "dark">("light");
   const [data, setData] = useState<BootstrapData | null>(null);
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [query, setQuery] = useState("");
@@ -111,16 +110,14 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const frame = window.requestAnimationFrame(applyTheme);
+    applyTheme();
 
     function applyTheme() {
       const storedTheme = window.localStorage.getItem("dayframe.theme");
       if (storedTheme === "light" || storedTheme === "dark") {
         document.documentElement.setAttribute("data-theme", storedTheme);
-        setThemeMode(storedTheme);
       } else {
         document.documentElement.removeAttribute("data-theme");
-        setThemeMode(media.matches ? "dark" : "light");
       }
     }
 
@@ -129,7 +126,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     media.addEventListener("change", applyTheme);
 
     return () => {
-      window.cancelAnimationFrame(frame);
       window.removeEventListener("storage", applyTheme);
       window.removeEventListener("dayframe-theme-change", applyTheme);
       media.removeEventListener("change", applyTheme);
@@ -208,10 +204,13 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [data, navigateDate, nextDate, pathname, previousDate, refreshShellData, router, selectedDate]);
 
   function toggleTheme() {
-    const nextTheme = themeMode === "dark" ? "light" : "dark";
+    const appliedTheme = document.documentElement.getAttribute("data-theme");
+    const currentTheme = appliedTheme === "light" || appliedTheme === "dark"
+      ? appliedTheme
+      : window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    const nextTheme = currentTheme === "dark" ? "light" : "dark";
     window.localStorage.setItem("dayframe.theme", nextTheme);
     document.documentElement.setAttribute("data-theme", nextTheme);
-    setThemeMode(nextTheme);
     window.dispatchEvent(new Event("dayframe-theme-change"));
   }
 
@@ -227,23 +226,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="swiss-app-shell">
       <aside className="swiss-sidebar">
         <Link href="/" className="swiss-brand" aria-label="Dayframe dashboard">
-          <Image
-            className="swiss-brand-banner"
-            src="/logos/dayframe_logo_banner.png"
-            alt="Dayframe"
-            width={2172}
-            height={724}
-            priority
-          />
-          <Image
-            className="swiss-brand-mark"
-            src="/logos/dayframe_logo.png"
-            alt=""
-            aria-hidden="true"
-            width={1254}
-            height={1254}
-            priority
-          />
+          <DayframeBrand decorative size="md" />
         </Link>
         <nav className="swiss-nav" aria-label="Main navigation">
           {navItems.map((item) => {
@@ -295,11 +278,12 @@ export function AppShell({ children }: { children: ReactNode }) {
             </button>
             <button
               type="button"
-              aria-label={`Switch to ${themeMode === "dark" ? "light" : "dark"} theme`}
+              aria-label="Toggle colour theme"
               className="swiss-theme-toggle"
               onClick={toggleTheme}
             >
-              {themeMode === "dark" ? <Sun size={21} /> : <Moon size={21} />}
+              <span className="swiss-theme-icon swiss-theme-icon-on-light"><Moon size={21} /></span>
+              <span className="swiss-theme-icon swiss-theme-icon-on-dark"><Sun size={21} /></span>
             </button>
             <button
               type="button"
@@ -350,7 +334,6 @@ export function AppShell({ children }: { children: ReactNode }) {
       {overlay === "profile" && data ? (
         <ProfilePopover
           data={data}
-          themeMode={themeMode}
           onClose={() => setOverlay(null)}
           onThemeToggle={toggleTheme}
           onUpdated={async () => {
@@ -482,13 +465,11 @@ async function responseError(response: Response, fallback: string) {
 
 function ProfilePopover({
   data,
-  themeMode,
   onClose,
   onThemeToggle,
   onUpdated
 }: {
   data: BootstrapData;
-  themeMode: "light" | "dark";
   onClose: () => void;
   onThemeToggle: () => void;
   onUpdated: () => Promise<void>;
@@ -597,7 +578,7 @@ function ProfilePopover({
       </form>
       <button type="button" className="swiss-menu-action" onClick={onThemeToggle}>
         <Settings size={17} />
-        Switch to {themeMode === "dark" ? "light" : "dark"} theme
+        Toggle colour theme
       </button>
       <Link href="/logout" className="swiss-menu-action">
         <LogOut size={17} />

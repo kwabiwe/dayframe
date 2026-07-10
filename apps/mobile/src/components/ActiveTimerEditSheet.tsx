@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  AccessibilityInfo,
   Alert,
   Animated,
   Dimensions,
@@ -72,12 +73,31 @@ export function ActiveTimerEditSheet({
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [pickerStartAt, setPickerStartAt] = useState<Date | null>(null);
+  // Suppress the sheet transition until iOS resolves the accessibility setting.
+  const [reduceMotion, setReduceMotion] = useState(true);
   const dismissDragY = useRef(new Animated.Value(0)).current;
   const descriptionInputRef = useRef<TextInput>(null);
   const editScrollerRef = useRef<ScrollView>(null);
   const timeInputRef = useRef<TextInput>(null);
 
   const entryId = entry?.id ?? null;
+
+  useEffect(() => {
+    let mounted = true;
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then((enabled) => {
+        if (mounted) setReduceMotion(enabled);
+      })
+      .catch(() => undefined);
+    const subscription = AccessibilityInfo.addEventListener(
+      "reduceMotionChanged",
+      setReduceMotion
+    );
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
+  }, []);
 
   useEffect(() => {
     if (!entry || !visible) return;
@@ -183,6 +203,11 @@ export function ActiveTimerEditSheet({
     onPanResponderRelease: (_event, gesture) => {
       const shouldDismiss = gesture.dy > 96 || gesture.vy > 0.85;
       if (shouldDismiss) {
+        if (reduceMotion) {
+          dismissDragY.setValue(0);
+          onCancel();
+          return;
+        }
         Animated.timing(dismissDragY, {
           toValue: windowDimensions.height,
           duration: 220,
@@ -193,6 +218,10 @@ export function ActiveTimerEditSheet({
         });
         return;
       }
+      if (reduceMotion) {
+        dismissDragY.setValue(0);
+        return;
+      }
       Animated.spring(dismissDragY, {
         toValue: 0,
         damping: 20,
@@ -201,6 +230,10 @@ export function ActiveTimerEditSheet({
       }).start();
     },
     onPanResponderTerminate: () => {
+      if (reduceMotion) {
+        dismissDragY.setValue(0);
+        return;
+      }
       Animated.spring(dismissDragY, {
         toValue: 0,
         damping: 20,
@@ -208,7 +241,7 @@ export function ActiveTimerEditSheet({
         useNativeDriver: true
       }).start();
     }
-  }), [busy, dismissDragY, onCancel, windowDimensions.height]);
+  }), [busy, dismissDragY, onCancel, reduceMotion, windowDimensions.height]);
 
   if (!entry) return null;
   const editingEntry = entry;
@@ -380,7 +413,7 @@ export function ActiveTimerEditSheet({
 
   return (
     <Modal
-      animationType="slide"
+      animationType={reduceMotion ? "none" : "slide"}
       onRequestClose={onCancel}
       presentationStyle="overFullScreen"
       transparent
@@ -430,7 +463,7 @@ export function ActiveTimerEditSheet({
                       busy ? styles.buttonDisabled : null
                     ]}
                   >
-                    <CheckGlyph color={theme.mode === "dark" ? theme.background : "#FFFFFF"} />
+                    <CheckGlyph color={theme.onAccent} />
                   </Pressable>
                 </View>
               </View>
@@ -466,7 +499,7 @@ export function ActiveTimerEditSheet({
                         busy ? styles.buttonDisabled : null
                       ]}
                     >
-                      <StopGlyph color={theme.mode === "dark" ? theme.background : "#FFFFFF"} />
+                      <StopGlyph color={theme.onAccent} />
                     </Pressable>
                   ) : null}
                 </View>
@@ -763,7 +796,9 @@ function CategoryChip({
   theme: MobileTheme;
 }) {
   const label = category?.name ?? "No category";
-  const color = category ? paletteColorFor(category.color, category.name) : theme.textSecondary;
+  const color = category
+    ? paletteColorFor(category.color, category.name, theme.mode)
+    : theme.textSecondary;
 
   return (
     <Pressable

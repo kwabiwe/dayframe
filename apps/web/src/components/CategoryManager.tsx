@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { DAYFRAME_PALETTE, paletteColorFor, paletteKeyFor } from "@dayframe/shared";
+import { DAYFRAME_PALETTE, paletteCssColorFor, paletteKeyFor } from "@dayframe/shared";
 import { Check, Pin, PinOff, Plus, Save, Trash2 } from "lucide-react";
 import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
 import type { CategoryRow } from "@/lib/queries";
@@ -224,7 +224,7 @@ function CategorySection({
               <div className="flex min-w-0 items-center gap-3">
                 <span
                   className="h-8 w-8 shrink-0 rounded-lg border border-[var(--line-strong)]"
-                  style={{ backgroundColor: paletteColorFor(category.color, category.name) }}
+                  style={{ backgroundColor: paletteCssColorFor(category.color, category.name) }}
                 />
                 <div className="min-w-0">
                   <h3 className="truncate text-sm font-semibold">{category.name}</h3>
@@ -236,7 +236,7 @@ function CategorySection({
                   type="button"
                   className={[
                     "industrial-button focus-ring text-sm",
-                    category.isPinned ? "border-[var(--accent)] bg-[var(--surface-muted)] text-[var(--accent)]" : ""
+                    category.isPinned ? "border-[var(--accent)] bg-[var(--surface-muted)] text-[var(--accent-text)]" : ""
                   ].join(" ")}
                   onClick={() => onTogglePin(category)}
                   aria-label={category.isPinned ? `Unpin ${category.name}` : `Pin ${category.name}`}
@@ -267,12 +267,12 @@ function PalettePicker({ name, defaultValue }: { name: string; defaultValue: str
   return (
     <fieldset className="text-sm">
       <legend className="industrial-field-label">Colour</legend>
-      <div className="grid grid-cols-6 gap-2">
+      <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
         {DAYFRAME_PALETTE.map((color) => (
           <label
             key={color.key}
             aria-label={`Use ${color.label} colour`}
-            className="rounded-lg focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--accent)]"
+            className="min-h-11 rounded-xl focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--focus)]"
             title={color.label}
           >
             <input
@@ -284,8 +284,8 @@ function PalettePicker({ name, defaultValue }: { name: string; defaultValue: str
             />
             <span
               data-color={color.key}
-              className="block h-8 rounded-lg border border-[var(--line-strong)] shadow-sm peer-checked:border-[var(--foreground)] peer-checked:outline peer-checked:outline-2 peer-checked:outline-[var(--accent)]"
-              style={{ backgroundColor: color.hex }}
+              className="block h-11 rounded-xl border border-[var(--line-strong)] shadow-sm peer-checked:border-[var(--foreground)] peer-checked:outline peer-checked:outline-2 peer-checked:outline-[var(--focus)]"
+              style={{ backgroundColor: paletteCssColorFor(color.key) }}
             />
           </label>
         ))}

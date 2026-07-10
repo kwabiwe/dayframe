@@ -1,4 +1,4 @@
-import { paletteColorFor } from "@dayframe/shared";
+import { paletteCssColorFor } from "@dayframe/shared";
 import { formatDuration, formatSourceLabel } from "@/lib/format";
 import type { ReportRow } from "@/lib/queries";
 
@@ -20,7 +20,7 @@ export function ReportBars({
           <h2 className="text-base font-semibold">{title}</h2>
           <p className="mt-1 text-xs text-[var(--muted)]">{rows.length} item{rows.length === 1 ? "" : "s"}</p>
         </div>
-        <strong className="tabular text-sm text-[var(--accent)]">{formatDuration(total)}</strong>
+        <strong className="tabular text-sm text-[var(--accent-text)]">{formatDuration(total)}</strong>
       </div>
       <div className="report-list-body">
         {rows.length === 0 ? (
@@ -30,7 +30,7 @@ export function ReportBars({
           </div>
         ) : null}
         {rows.map((row) => {
-          const color = paletteColorFor(row.color, row.name);
+          const color = paletteCssColorFor(row.color, row.name);
           const share = total > 0 ? Math.round((row.seconds / total) * 100) : 0;
           return (
             <div key={row.id} className="report-bar-row motion-row">

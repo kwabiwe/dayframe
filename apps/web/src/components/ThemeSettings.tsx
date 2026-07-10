@@ -55,9 +55,10 @@ export function ThemeSettings() {
               className={[
                 "focus-ring flex min-h-[104px] flex-col items-start gap-3 border p-4 text-left",
                 selected
-                  ? "border-[var(--accent)] bg-[var(--surface-inset)] text-[var(--accent)]"
-                  : "border-[var(--line)] bg-[var(--surface)] text-[var(--foreground)] hover:border-[var(--line-strong)]"
+                  ? "border-[var(--accent)] bg-[var(--surface-inset)] text-[var(--accent-text)]"
+                  : "border-[var(--control-border)] bg-[var(--surface)] text-[var(--foreground)] hover:border-[var(--accent)]"
               ].join(" ")}
+              aria-pressed={selected}
               onClick={() => updateTheme(item.value)}
             >
               <span className="flex items-center gap-2 font-semibold">

@@ -1,4 +1,4 @@
-import { paletteColorFor } from "@dayframe/shared";
+import { paletteCssColorFor } from "@dayframe/shared";
 import { formatSourceLabel } from "@/lib/format";
 
 type TimeEntryDisplayFields = {
@@ -32,14 +32,14 @@ export function timeEntryCategoryLabel(entry: TimeEntryDisplayFields) {
 }
 
 export function timeEntryAccentColor(entry: TimeEntryDisplayFields) {
-  return paletteColorFor(
+  return paletteCssColorFor(
     entry.projectColor ?? entry.categoryColor,
     entry.projectName ?? entry.categoryName ?? entry.description ?? entry.id ?? "Time entry"
   );
 }
 
 export function timeEntryCategoryColor(entry: TimeEntryDisplayFields) {
-  return paletteColorFor(entry.categoryColor, entry.categoryName ?? entry.id ?? "Category");
+  return paletteCssColorFor(entry.categoryColor, entry.categoryName ?? entry.id ?? "Category");
 }
 
 function cleanLabel(value?: string | null) {

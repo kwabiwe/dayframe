@@ -180,7 +180,7 @@ export function TimeReviewViews({
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex flex-wrap items-center gap-3">
             <button
-              className="focus-ring grid h-9 w-9 place-items-center border border-[var(--line-strong)] bg-[var(--surface-inset)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+              className="focus-ring grid h-11 w-11 place-items-center rounded-xl border border-[var(--control-border)] bg-[var(--surface-inset)] hover:border-[var(--accent)] hover:text-[var(--accent-text)]"
               type="button"
               aria-label="Previous week"
               onClick={() => setWeekAnchor(addDays(weekAnchor, -7))}
@@ -194,7 +194,7 @@ export function TimeReviewViews({
               </div>
             </div>
             <button
-              className="focus-ring grid h-9 w-9 place-items-center border border-[var(--line-strong)] bg-[var(--surface-inset)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+              className="focus-ring grid h-11 w-11 place-items-center rounded-xl border border-[var(--control-border)] bg-[var(--surface-inset)] hover:border-[var(--accent)] hover:text-[var(--accent-text)]"
               type="button"
               aria-label="Next week"
               onClick={() => setWeekAnchor(addDays(weekAnchor, 7))}
@@ -207,19 +207,20 @@ export function TimeReviewViews({
             </div>
           </div>
 
-          <div className="grid grid-cols-3 overflow-hidden rounded-lg border border-[var(--line-strong)] bg-[var(--surface-inset)]">
+          <div className="grid grid-cols-1 overflow-hidden rounded-lg border border-[var(--control-border)] bg-[var(--surface-inset)] sm:grid-cols-3">
             {viewItems.map((item) => {
               const selected = item.id === activeView;
               return (
                 <button
                   key={item.id}
                   className={[
-                    "focus-ring flex min-h-10 min-w-[116px] items-center justify-center gap-2 border-r border-[var(--line)] px-3 text-sm last:border-r-0",
+                    "focus-ring flex min-h-11 min-w-0 items-center justify-center gap-2 border-b border-[var(--control-border)] px-3 text-sm last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0",
                     selected
                       ? "bg-[var(--accent)] text-[var(--on-accent)]"
-                      : "text-[var(--foreground)] hover:text-[var(--accent)]"
+                      : "text-[var(--foreground)] hover:text-[var(--accent-text)]"
                   ].join(" ")}
                   type="button"
+                  aria-pressed={selected}
                   onClick={() => updateView(item.id)}
                 >
                   {item.icon}
@@ -443,19 +444,20 @@ function CalendarReview({
           <p className="mt-1 text-sm text-[var(--muted)]">Double click a block to edit it. Drag the top or bottom edge to resize.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="swiss-view-switch" aria-label="Calendar view">
+          <span className="swiss-view-switch" role="group" aria-label="Calendar view">
             {(["week", "day"] as CalendarMode[]).map((mode) => (
               <button
                 key={mode}
                 className={calendarMode === mode ? "is-selected" : ""}
                 type="button"
+                aria-pressed={calendarMode === mode}
                 onClick={() => setCalendarMode(mode)}
               >
                 {mode === "week" ? "Week" : "Day"}
               </button>
             ))}
           </span>
-          <span className="swiss-zoom-control" aria-label="Calendar zoom">
+          <span className="swiss-zoom-control" role="group" aria-label="Calendar zoom">
             <button
               type="button"
               disabled={zoomIndex === 0}
@@ -474,12 +476,13 @@ function CalendarReview({
               +
             </button>
           </span>
-          <span className="swiss-view-switch" aria-label="Calendar hours">
+          <span className="swiss-view-switch" role="group" aria-label="Calendar hours">
             {(["awake", "fullDay"] as CalendarHoursMode[]).map((mode) => (
               <button
                 key={mode}
                 className={calendarHoursMode === mode ? "is-selected" : ""}
                 type="button"
+                aria-pressed={calendarHoursMode === mode}
                 onClick={() => setCalendarHoursMode(mode)}
               >
                 {calendarHourModes[mode].label}
@@ -552,6 +555,7 @@ function CalendarReview({
                   if (!blockStyle) return null;
                   const { startsBeforeDay, continuesIntoNextDay, ...blockPositionStyle } = blockStyle;
                   const durationSeconds = calendarDurationSeconds(entry, activeDraft);
+                  const accent = timeEntryAccentColor(entry);
                   const density = getTimeBlockDensity({
                     durationSeconds,
                     height: blockPositionStyle.height
@@ -572,11 +576,13 @@ function CalendarReview({
                       ].join(" ")}
                       style={{
                         ...blockPositionStyle,
-                        backgroundColor: timeEntryAccentColor(entry),
-                        borderColor: "color-mix(in srgb, var(--foreground) 28%, transparent)",
-                        color: "var(--on-pastel)"
+                        backgroundColor: `color-mix(in srgb, ${accent} 18%, var(--surface))`,
+                        borderColor: `color-mix(in srgb, ${accent} 72%, var(--line))`,
+                        boxShadow: `inset 3px 0 0 ${accent}`,
+                        color: "var(--foreground)"
                       }}
                       role="button"
+                      aria-pressed={selectedEntryId === entry.id}
                       tabIndex={0}
                       data-entry-id={entry.id}
                       title={detailsLabel}
@@ -636,7 +642,7 @@ function CalendarReview({
           ))}
         </div>
       </div>
-      {resizeError ? <p className="border-t border-[var(--line)] px-4 py-2 text-sm text-[var(--danger)]">{resizeError}</p> : null}
+      {resizeError ? <p className="border-t border-[var(--line)] px-4 py-2 text-sm text-[var(--danger-text)]">{resizeError}</p> : null}
       {editingEntry ? (
         <EditTimeEntryDialog
           categories={categories}
@@ -719,7 +725,7 @@ function TimesheetView({ entries, weekDays }: { entries: TimeEntryRow[]; weekDay
                   {seconds > 0 ? formatDuration(seconds) : "-"}
                 </td>
               ))}
-              <td className="tabular px-3 py-3 font-semibold text-[var(--accent)]">{formatDuration(row.total)}</td>
+              <td className="tabular px-3 py-3 font-semibold text-[var(--accent-text)]">{formatDuration(row.total)}</td>
             </tr>
           ))}
           <tr className="bg-[var(--surface-inset)] font-semibold">
@@ -729,7 +735,7 @@ function TimesheetView({ entries, weekDays }: { entries: TimeEntryRow[]; weekDay
                 {formatDuration(seconds)}
               </td>
             ))}
-            <td className="tabular px-3 py-3 text-[var(--accent)]">
+            <td className="tabular px-3 py-3 text-[var(--accent-text)]">
               {formatDuration(dailyTotals.reduce((sum, seconds) => sum + seconds, 0))}
             </td>
           </tr>

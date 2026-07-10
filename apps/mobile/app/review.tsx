@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
-  Image,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -13,6 +12,7 @@ import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { paletteColorFor } from "@dayframe/shared";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
+import { DayframeBrand } from "@/components/brand";
 import {
   AuthRequiredError,
   confirmReviewItem,
@@ -256,10 +256,10 @@ export default function ReviewScreen() {
             >
               <BackGlyph color={theme.accent} />
             </Pressable>
-            <Image
-              source={require("../assets/dayframe_logo_banner.png")}
-              style={styles.logoImage}
-              resizeMode="contain"
+            <DayframeBrand
+              layout="compact"
+              size="sm"
+              tone={theme.mode === "dark" ? "light" : "dark"}
             />
           </View>
 
@@ -361,7 +361,12 @@ function ReviewItemCard({
 }) {
   const durationSeconds = reviewItemDurationSeconds(item, now);
   const categoryName = reviewItemCategoryName(item);
-  const categoryColor = reviewItemCategoryColor(item, categoryName, theme.textSecondary);
+  const categoryColor = reviewItemCategoryColor(
+    item,
+    categoryName,
+    theme.textSecondary,
+    theme.mode
+  );
   const controlsDisabled = loading || disabled;
 
   return (
@@ -481,7 +486,8 @@ function ReviewNeededEntryCard({
   const categoryName = entry.categoryName ?? (isHealthSource(entry.source) ? "Health" : "No category");
   const categoryColor = paletteColorFor(
     entry.categoryColor ?? (isHealthSource(entry.source) ? "moss" : entry.categoryId),
-    categoryName
+    categoryName,
+    theme.mode
   );
 
   return (
@@ -548,11 +554,17 @@ function reviewItemCategoryName(item: MobileReviewItem) {
   return item.categoryName ?? (isHealthReviewItem(item) ? "Health" : "No category");
 }
 
-function reviewItemCategoryColor(item: MobileReviewItem, categoryName: string, fallbackColor: string) {
+function reviewItemCategoryColor(
+  item: MobileReviewItem,
+  categoryName: string,
+  fallbackColor: string,
+  mode: ReturnType<typeof useMobileTheme>["theme"]["mode"]
+) {
   if (item.categoryColor || item.suggestedCategoryId || isHealthReviewItem(item)) {
     return paletteColorFor(
       item.categoryColor ?? (isHealthReviewItem(item) ? "moss" : item.suggestedCategoryId),
-      categoryName
+      categoryName,
+      mode
     );
   }
   return fallbackColor;
