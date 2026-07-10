@@ -1,13 +1,13 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-10 10:30 BST
+Last verified: 2026-07-10 13:04 BST
 
 ## Verification Snapshot
 
-- Local repo: `main`, synced with `origin/main` after PR #36 merge and tracker follow-up.
+- Local repo: `main`, synced with `origin/main` after PR #36 merge, build 12 release, and tracker follow-up.
 - GitHub: PR #36 is merged; no open PRs and no GitHub issues at verification time.
-- Latest verified TestFlight build: `0.1.0 (11)`.
-- Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR history, and project docs.
+- Latest verified TestFlight build: `0.1.0 (12)`.
+- Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR history, project docs, and App Store Connect build state.
 
 ## Status Key
 
@@ -28,8 +28,8 @@ Last verified: 2026-07-10 10:30 BST
 
 | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Cross-midnight continuation border polish | Done | PR #36. | Continuation segments that started before midnight now drop the top border/top radii; segments continuing into the next day still drop the bottom border/bottom radii. |
-| Apple Health auto-log category and description customization | Watch | PR #36. | Settings can map HealthKit sleep/workout types to category and description defaults; new imports and Health Review reprocess both use the mappings. Watch real device import/reprocess behaviour before marking fully settled. |
+| Cross-midnight continuation border polish | Done | PR #36, build `0.1.0 (12)`. | Continuation segments that started before midnight now drop the top border/top radii; segments continuing into the next day still drop the bottom border/bottom radii. |
+| Apple Health auto-log category and description customization | Watch | PR #36, build `0.1.0 (12)`. | Settings can map HealthKit sleep/workout types to category and description defaults; new imports and Health Review reprocess both use the mappings. Watch real device import/reprocess behaviour before marking fully settled. |
 | Calendar event tap crash | Done | PR #35, build `0.1.0 (11)`. | Root cause was unstable React hook order in `ActiveTimerEditSheet`. |
 | HealthKit automatic sleep/workout sync | Watch | PR #35, build `0.1.0 (11)`. | Foreground sync and HealthKit observer callbacks are wired; keep watching real device/background behaviour. |
 | Anchored pinch zoom | Done | PR #35, build `0.1.0 (11)`. | Zoom now shifts scroll position around the finger midpoint. |
@@ -50,7 +50,7 @@ Last verified: 2026-07-10 10:30 BST
 | Sleep stages fragmented into REM/Core/Deep cards | Watch | PRs #23, #26, and #29. | Current imports group sessions; legacy sleep-stage backlog cleanup is merged. |
 | Health items left in Review without useful explanation | Watch | PRs #22, #25, #26, #27, and #29. | Diagnostics and left-in-review reasons exist; continue checking that reasons are clear on device. |
 | Geo/place default description mismatch | Done | PR #19 and PR #26. | Place names should remain reference/context; configured activity descriptions are used for geofence display and Confirm. |
-| TestFlight release preflight and compliance checks | Done | PR #31 plus build release runs. | Keep verifying processing state, encryption compliance, notes, and internal testing assignment before asking KB to test. |
+| TestFlight release preflight and compliance checks | Done | PR #31 plus build release runs through `0.1.0 (12)`. | Keep verifying processing state, encryption compliance, notes, and internal testing assignment before asking KB to test. |
 
 ## Future Tracks
 
