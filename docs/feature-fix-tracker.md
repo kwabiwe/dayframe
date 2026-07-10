@@ -1,11 +1,11 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-10 10:20 BST
+Last verified: 2026-07-10 10:25 BST
 
 ## Verification Snapshot
 
-- Local repo: feature branch `agent/dayframe-health-autolog-customization`, based on `main` at `eb20cb3`.
-- GitHub: no open PRs and no GitHub issues at the start of this slice.
+- Local repo: `main` at `8288517`, matching `origin/main` after PR #36 merge.
+- GitHub: PR #36 is merged; no open PRs and no GitHub issues at verification time.
 - Latest verified TestFlight build: `0.1.0 (11)`.
 - Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR history, and project docs.
 
