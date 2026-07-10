@@ -6,10 +6,13 @@ const apiMocks = vi.hoisted(() => ({
   reprocessHealthReviewItems: vi.fn()
 }));
 const healthkitMocks = vi.hoisted(() => ({
+  configureBackgroundTypes: vi.fn(() => Promise.resolve(true)),
+  enableBackgroundDelivery: vi.fn(() => Promise.resolve(true)),
   isHealthDataAvailable: vi.fn(() => true),
   queryCategorySamplesWithAnchor: vi.fn(),
   queryWorkoutSamplesWithAnchor: vi.fn(),
-  requestAuthorization: vi.fn(() => true)
+  requestAuthorization: vi.fn(() => true),
+  subscribeToChanges: vi.fn()
 }));
 
 vi.mock("react-native", () => ({
@@ -22,6 +25,10 @@ vi.mock("@react-native-async-storage/async-storage", () => ({
     setItem: vi.fn((key: string, value: string) => {
       asyncStore.set(key, value);
       return Promise.resolve();
+    }),
+    removeItem: vi.fn((key: string) => {
+      asyncStore.delete(key);
+      return Promise.resolve();
     })
   }
 }));
@@ -32,10 +39,13 @@ vi.mock("./api", () => ({
 }));
 
 vi.mock("@kingstinct/react-native-healthkit", () => ({
+  configureBackgroundTypes: healthkitMocks.configureBackgroundTypes,
+  enableBackgroundDelivery: healthkitMocks.enableBackgroundDelivery,
   isHealthDataAvailable: healthkitMocks.isHealthDataAvailable,
   queryCategorySamplesWithAnchor: healthkitMocks.queryCategorySamplesWithAnchor,
   queryWorkoutSamplesWithAnchor: healthkitMocks.queryWorkoutSamplesWithAnchor,
-  requestAuthorization: healthkitMocks.requestAuthorization
+  requestAuthorization: healthkitMocks.requestAuthorization,
+  subscribeToChanges: healthkitMocks.subscribeToChanges
 }));
 
 const {
@@ -46,11 +56,15 @@ const {
   healthKitWorkoutEvent,
   importHealthKitSleep,
   importHealthKitWorkouts,
+  configureHealthKitAutomaticSync,
   mapHealthKitSleepSample,
   mapHealthKitWorkoutSample,
   exportHealthDebugSnapshot,
+  isHealthKitAutomaticSyncEnabled,
   reprocessExistingHealthReviewItems,
-  setHealthImportPreference
+  requestHealthKitPermissions,
+  setHealthImportPreference,
+  startHealthKitChangeObservers
 } = await import("./health");
 
 describe("HealthKit mapping", () => {
@@ -58,8 +72,18 @@ describe("HealthKit mapping", () => {
     asyncStore.clear();
     apiMocks.enqueueEvent.mockReset();
     apiMocks.reprocessHealthReviewItems.mockReset();
+    healthkitMocks.configureBackgroundTypes.mockReset();
+    healthkitMocks.configureBackgroundTypes.mockResolvedValue(true);
+    healthkitMocks.enableBackgroundDelivery.mockReset();
+    healthkitMocks.enableBackgroundDelivery.mockResolvedValue(true);
+    healthkitMocks.isHealthDataAvailable.mockReset();
+    healthkitMocks.isHealthDataAvailable.mockReturnValue(true);
     healthkitMocks.queryCategorySamplesWithAnchor.mockReset();
     healthkitMocks.queryWorkoutSamplesWithAnchor.mockReset();
+    healthkitMocks.requestAuthorization.mockReset();
+    healthkitMocks.requestAuthorization.mockReturnValue(true);
+    healthkitMocks.subscribeToChanges.mockReset();
+    healthkitMocks.subscribeToChanges.mockImplementation(() => ({ remove: vi.fn() }));
   });
 
   it("maps sleep samples into Dayframe sleep segments", () => {
@@ -398,6 +422,42 @@ describe("HealthKit mapping", () => {
       strength_training: true,
       swimming: false
     });
+  });
+
+  it("enables automatic sleep and workout sync after Health permission is granted", async () => {
+    const permission = await requestHealthKitPermissions();
+
+    expect(permission.status).toBe("available");
+    expect(healthkitMocks.configureBackgroundTypes).toHaveBeenCalledWith(
+      ["HKCategoryTypeIdentifierSleepAnalysis", "HKWorkoutTypeIdentifier"],
+      1
+    );
+    expect(healthkitMocks.enableBackgroundDelivery).toHaveBeenCalledWith("HKCategoryTypeIdentifierSleepAnalysis", 1);
+    expect(healthkitMocks.enableBackgroundDelivery).toHaveBeenCalledWith("HKWorkoutTypeIdentifier", 1);
+    await expect(isHealthKitAutomaticSyncEnabled()).resolves.toBe(true);
+  });
+
+  it("does not mark automatic sync enabled when HealthKit background delivery is unavailable", async () => {
+    healthkitMocks.enableBackgroundDelivery.mockResolvedValue(false);
+
+    await expect(configureHealthKitAutomaticSync()).resolves.toBe(false);
+    await expect(isHealthKitAutomaticSyncEnabled()).resolves.toBe(false);
+  });
+
+  it("subscribes to HealthKit sleep and workout changes only after automatic sync is enabled", async () => {
+    await expect(startHealthKitChangeObservers(vi.fn())).resolves.toBeNull();
+
+    await configureHealthKitAutomaticSync();
+    const onChange = vi.fn();
+    const subscription = await startHealthKitChangeObservers(onChange);
+    const sleepCallback = healthkitMocks.subscribeToChanges.mock.calls[0][1];
+
+    expect(healthkitMocks.subscribeToChanges).toHaveBeenCalledWith("HKCategoryTypeIdentifierSleepAnalysis", expect.any(Function));
+    expect(healthkitMocks.subscribeToChanges).toHaveBeenCalledWith("HKWorkoutTypeIdentifier", expect.any(Function));
+
+    sleepCallback({ errorMessage: undefined });
+    expect(onChange).toHaveBeenCalledWith("HKCategoryTypeIdentifierSleepAnalysis", undefined);
+    subscription?.remove();
   });
 
   it("reprocesses existing Health review items with saved preferences", async () => {

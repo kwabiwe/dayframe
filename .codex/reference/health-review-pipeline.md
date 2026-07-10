@@ -28,6 +28,8 @@ HealthKit is an input signal, not a separate user-facing product model. Sleep st
 
 Do not patch one step without checking the adjacent step on either side.
 
+Automatic Health sync needs both JS wiring and native launch wiring: after Health permission is granted, Dayframe should configure/enable background delivery for sleep and workouts, subscribe to observer changes while JS is running, and keep `BackgroundDeliveryManager.shared.setupBackgroundObservers()` in AppDelegate so cold-launch delivery works.
+
 ## Health Debug Export
 
 TestFlight build `0.1.0 (1)` added a bounded Health debug export in Settings.

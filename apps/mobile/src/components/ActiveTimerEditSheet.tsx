@@ -147,9 +147,6 @@ export function ActiveTimerEditSheet({
       ? Math.max(0, Math.floor((Date.now() - previewStartAt.getTime()) / 1000))
       : elapsedSeconds;
 
-  if (!entry) return null;
-  const editingEntry = entry;
-
   const busy = saving || stopping || deleting;
   const canStop = isRunningMode && Boolean(onStop);
   const canDelete = !isRunningMode && Boolean(onDelete);
@@ -199,6 +196,9 @@ export function ActiveTimerEditSheet({
       }).start();
     }
   }), [busy, dismissDragY, onCancel, windowDimensions.height]);
+
+  if (!entry) return null;
+  const editingEntry = entry;
 
   async function saveChanges() {
     if (busy) return;
