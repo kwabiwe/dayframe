@@ -1,10 +1,10 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-11 19:34 BST
+Last verified: 2026-07-11 20:38 BST
 
 ## Verification Snapshot
 
-- Local repo: `main` synced with `origin/main`; PR #44 is merged and TestFlight build 19 is verified.
+- Local repo: branch `agent/settings-route-single-source` is active for PR #45 after `main`/`origin/main` sync.
 - GitHub: PR #44 is merged; no open PRs and no GitHub issues at merge verification time.
 - Latest verified TestFlight build: `0.1.0 (19)`.
 - Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, and App Store Connect build state.
@@ -23,13 +23,14 @@ Last verified: 2026-07-11 19:34 BST
 
 | Item | Status | Evidence | Next action |
 | --- | --- | --- | --- |
+| Settings sub-settings back navigation | In progress | KB confirmed PR #44 still glitches across all Settings sub-settings: native back-swipe from a sub-setting can reveal the same sub-setting again. Codex 5.6 Sol agreed the cause is mixed local section state plus route params. | PR #45 should make the Settings route param the single source of truth, remove local `settingsSection` mutation and `beforeRemove`, then ship a new TestFlight build for real-device validation. |
 | Background Shortcuts and Live Activity | Next | PR #43 review confirmed NFC Shortcuts work, but the deep-link handoff briefly opens Dayframe and shows `Shortcut queued`. | Replace the deep-link-only Shortcut handoff with a native/background queue path, then add an iOS Live Activity/Dynamic Island timer as the confirmation surface for active tracking. |
 
 ## Recently Shipped Or Addressed
 
 | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Calendar compact blocks and Settings swipe-back | Watch | PR #44, build `0.1.0 (19)`, delivery UUID `997c7e8e-9556-4a54-a586-c71e1b80061b`. | Calendar blocks now keep near-true duration height and suppress title/meta labels until there is enough vertical space; Settings sub-screens are route-backed so native iOS back-swipe can return to Settings instead of Today. Watch KB's real-device calendar density and Settings back-swipe validation before marking fully settled. |
+| Calendar compact blocks and Settings swipe-back | Watch | PR #44, build `0.1.0 (19)`, delivery UUID `997c7e8e-9556-4a54-a586-c71e1b80061b`; PR #45 follow-up active for the remaining Settings sub-settings back-navigation glitch. | Calendar blocks now keep near-true duration height and suppress title/meta labels until there is enough vertical space. PR #44 did not fully fix Settings sub-setting back navigation because the old Settings route could retain local sub-setting state; PR #45 handles that follow-up. |
 | Mobile review polish and Shortcut stop follow-up | Watch | PR #43, build `0.1.0 (18)`, delivery UUID `5540f30c-5002-4a0b-a217-709eed42c6a7`; PR #44, build `0.1.0 (19)`, followed up the failed swipe-back fix. | Settings header logo removed; timer start/stop uses a subtle progress bar instead of a layout-jumping full spinner; saved-place review reasons explain review-first visits; Shortcuts adds `Stop tracking` plus cached category/workspace options for `Start tracking`. Shortcut starts/stops still show the deep-link queued splash, so that is split into the background Shortcuts/Live Activity follow-up. |
 | Siri Shortcuts, NFC handoff, and mobile Settings grouping | Watch | PR #42, build `0.1.0 (17)`, delivery UUID `81a9567e-18db-4d0a-9eda-34e24aa71882`. | Adds the first iOS `Start tracking` App Intent for Apple Shortcuts/NFC automations with description and category parameters, removes Shortcut/NFC auto-default mappings, uses Dayframe's current workspace, preserves the offline queue handoff, and reorganizes mobile Settings into grouped sub-settings. Watch real-device Shortcut/NFC setup and category matching before marking fully settled. |
 | More reliable offline and mobile sync | Watch | PR #41, build `0.1.0 (16)`, delivery UUID `c84e56c7-931a-4b4b-b28c-b6a66be04219`. | Adds retry backoff metadata, automatic foreground/focus queue drain, manual force sync/retry, queue diagnostics counts, and diagnostics export for mobile queued events. Watch real-device Shortcut/NFC/geofence/Health queue recovery, idempotency, and reconnect behaviour. |

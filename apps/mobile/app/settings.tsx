@@ -11,7 +11,7 @@ import {
   View
 } from "react-native";
 import Svg, { Path } from "react-native-svg";
-import { router, useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
   DAYFRAME_PALETTE,
@@ -84,9 +84,9 @@ export default function SettingsScreen() {
     theme,
     themePreference
   } = useMobileTheme();
-  const navigation = useNavigation();
   const params = useLocalSearchParams<{ section?: string | string[] }>();
   const routeSettingsSection = normalizeSettingsSection(params.section);
+  const settingsSection = routeSettingsSection;
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [queue, setQueue] = useState<QueuedEvent[]>([]);
   const [lastSyncResult, setLastSyncResult] = useState<SyncQueueResult | null>(null);
@@ -106,7 +106,6 @@ export default function SettingsScreen() {
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [editingCategoryName, setEditingCategoryName] = useState("");
   const [editingCategoryColor, setEditingCategoryColor] = useState("lime");
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>("index");
   const refreshInFlight = useRef(false);
   const categoryEditRef = useRef<TextInput>(null);
 
@@ -149,10 +148,6 @@ export default function SettingsScreen() {
       void load({ silent: true });
     }, [load, reloadThemePreference])
   );
-
-  useEffect(() => {
-    setSettingsSection(routeSettingsSection);
-  }, [routeSettingsSection]);
 
   useEffect(() => {
     getHealthImportStatus().then(setHealthStatus).catch(() => {
@@ -210,29 +205,11 @@ export default function SettingsScreen() {
   const categoryCount = data?.categories.length ?? 0;
   const workspaceLabel = data?.workspace?.name ?? "Default workspace";
 
-  useEffect(() => {
-    const unsubscribe = navigation.addListener("beforeRemove", (event) => {
-      if (settingsSection === "index" || routeSettingsSection !== "index") return;
-      event.preventDefault();
-      setSettingsSection("index");
-    });
-
-    return unsubscribe;
-  }, [navigation, routeSettingsSection, settingsSection]);
-
   function goBack() {
-    if (settingsSection === "index") {
-      router.back();
-      return;
-    }
-    setSettingsSection("index");
-    if (routeSettingsSection !== "index") {
-      router.back();
-    }
+    router.back();
   }
 
   function openSettingsSection(section: Exclude<SettingsSection, "index">) {
-    setSettingsSection(section);
     router.push({ pathname: "/settings", params: { section } });
   }
 
