@@ -30,6 +30,7 @@ import {
 import {
   AuthRequiredError,
   archiveCategory,
+  buildQueueDiagnosticsSnapshot,
   clearFailedQueuedEvents,
   createCategory,
   fetchBootstrap,
@@ -316,7 +317,7 @@ export default function SettingsScreen() {
     setSyncingQueue(true);
     setSyncStatusMessage(options?.syncingMessage ?? "Syncing device data...");
     try {
-      const result = await syncQueue();
+      const result = await syncQueue({ forceRetry: true });
       setQueue(result.remaining);
       setLastSyncResult(result);
       setSyncStatusMessage(null);
@@ -382,6 +383,20 @@ export default function SettingsScreen() {
       await load({ silent: true });
     } catch (error) {
       setSyncStatusMessage(error instanceof Error ? error.message : "Unable to clear failed events.");
+    }
+  }
+
+  async function exportQueueDiagnostics() {
+    try {
+      const latestQueue = await readQueue();
+      const snapshot = buildQueueDiagnosticsSnapshot(latestQueue, lastSyncResult);
+      await Share.share({
+        title: `Dayframe queue diagnostics ${snapshot.exportedAt}`,
+        message: JSON.stringify(snapshot, null, 2)
+      });
+      setQueue(latestQueue);
+    } catch (error) {
+      setSyncStatusMessage(error instanceof Error ? error.message : "Unable to export queue diagnostics.");
     }
   }
 
@@ -852,6 +867,12 @@ export default function SettingsScreen() {
                   Queued {queueDiagnostics.queuedCount} · Last synced {lastSyncResult?.syncedCount ?? 0} · Failed{" "}
                   {queueDiagnostics.failedCount}
                 </Text>
+                {queueDiagnostics.failedCount > 0 ? (
+                  <Text style={styles.accountMeta}>
+                    Retryable {queueDiagnostics.retryableFailedCount} · Invalid {queueDiagnostics.permanentFailedCount}
+                    {queueDiagnostics.nextRetryAt ? ` · Next retry ${formatQueueTime(queueDiagnostics.nextRetryAt)}` : ""}
+                  </Text>
+                ) : null}
                 {firstFailedEvent ? (
                   <>
                     <Text style={styles.label}>First failed event</Text>
@@ -865,6 +886,11 @@ export default function SettingsScreen() {
                     {firstFailedEvent.lastAttemptedAt || firstFailedEvent.failedAt ? (
                       <Text style={styles.accountMeta}>
                         Last attempt {formatQueueTime(firstFailedEvent.lastAttemptedAt ?? firstFailedEvent.failedAt)}
+                      </Text>
+                    ) : null}
+                    {firstFailedEvent.nextRetryAt ? (
+                      <Text style={styles.accountMeta}>
+                        Next automatic retry {formatQueueTime(firstFailedEvent.nextRetryAt)}
                       </Text>
                     ) : null}
                   </>
@@ -898,6 +924,9 @@ export default function SettingsScreen() {
                 onPress={confirmClearFailedQueue}
               >
                 <Text style={styles.secondaryButtonText}>Clear failed/invalid</Text>
+              </Pressable>
+              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={exportQueueDiagnostics}>
+                <Text style={styles.secondaryButtonText}>Export diagnostics</Text>
               </Pressable>
             </View>
           </View>

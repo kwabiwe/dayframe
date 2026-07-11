@@ -214,6 +214,7 @@ export type QueuedEvent = Omit<ActivityEventInput, "occurredAt" | "workspaceId" 
   lastError?: string;
   lastStatusCode?: number;
   lastAttemptedAt?: string;
+  nextRetryAt?: string;
   failureKind?: QueueFailureKind;
 };
 
@@ -243,13 +244,32 @@ export type SyncQueueResult = {
 export type QueueDiagnostics = {
   queuedCount: number;
   failedCount: number;
+  retryableFailedCount: number;
+  permanentFailedCount: number;
   clearableFailedCount: number;
+  oldestQueuedAt?: string;
+  nextRetryAt?: string;
+  lastAttemptedAt?: string;
   firstFailed?: QueuedEvent;
+};
+
+export type QueueDiagnosticsSnapshot = {
+  exportedAt: string;
+  diagnostics: QueueDiagnostics;
+  lastSyncResult?: {
+    syncedCount: number;
+    remainingCount: number;
+    failedCount: number;
+    stopped: boolean;
+    firstError?: QueueFailureReport;
+  };
+  queue: Array<Omit<QueuedEvent, "occurredAt"> & { occurredAt: string }>;
 };
 
 type SyncQueueOptions = {
   retryFailed?: boolean;
   onlyFailed?: boolean;
+  forceRetry?: boolean;
 };
 
 type StoredQueuedEvent = Partial<Omit<QueuedEvent, "occurredAt">> & {
@@ -268,6 +288,7 @@ type QueueableEvent = Omit<
   | "lastError"
   | "lastStatusCode"
   | "lastAttemptedAt"
+  | "nextRetryAt"
   | "failureKind"
 >;
 
@@ -397,16 +418,46 @@ export async function readQueue(): Promise<QueuedEvent[]> {
 
 export function getQueueDiagnostics(queue: QueuedEvent[]): QueueDiagnostics {
   const failed = queue.filter(hasQueueFailure);
+  const retryableFailed = failed.filter((item) => !isPermanentlyFailedEvent(item));
+  const permanentFailed = failed.filter(isPermanentlyFailedEvent);
   return {
     queuedCount: queue.length,
     failedCount: failed.length,
+    retryableFailedCount: retryableFailed.length,
+    permanentFailedCount: permanentFailed.length,
     clearableFailedCount: queue.filter(isClearableFailedEvent).length,
+    oldestQueuedAt: earliestIso(queue.map((item) => item.queuedAt)),
+    nextRetryAt: earliestIso(retryableFailed.map((item) => item.nextRetryAt)),
+    lastAttemptedAt: latestIso(queue.map((item) => item.lastAttemptedAt)),
     firstFailed: failed[0]
   };
 }
 
+export function buildQueueDiagnosticsSnapshot(
+  queue: QueuedEvent[],
+  lastSyncResult?: SyncQueueResult | null
+): QueueDiagnosticsSnapshot {
+  return {
+    exportedAt: new Date().toISOString(),
+    diagnostics: getQueueDiagnostics(queue),
+    lastSyncResult: lastSyncResult
+      ? {
+          syncedCount: lastSyncResult.syncedCount,
+          remainingCount: lastSyncResult.remainingCount,
+          failedCount: lastSyncResult.failedCount,
+          stopped: lastSyncResult.stopped,
+          firstError: lastSyncResult.firstError
+        }
+      : undefined,
+    queue: queue.map((item) => ({
+      ...item,
+      occurredAt: item.occurredAt.toISOString()
+    }))
+  };
+}
+
 export async function retryFailedQueuedEvents() {
-  return syncQueue({ retryFailed: true, onlyFailed: true });
+  return syncQueue({ retryFailed: true, onlyFailed: true, forceRetry: true });
 }
 
 export async function clearFailedQueuedEvents() {
@@ -428,6 +479,7 @@ export async function syncQueue(options: SyncQueueOptions = {}): Promise<SyncQue
   const synced: string[] = [];
   let firstError: QueueFailureReport | undefined;
   let stopped = false;
+  const now = new Date();
 
   for (let index = 0; index < queue.length; index += 1) {
     const item = queue[index];
@@ -444,6 +496,17 @@ export async function syncQueue(options: SyncQueueOptions = {}): Promise<SyncQue
         item.lastStatusCode
       );
       continue;
+    }
+    if (hasQueueFailure(item) && !options.retryFailed && !options.forceRetry && !isQueueRetryDue(item, now)) {
+      remaining.push(item, ...queue.slice(index + 1));
+      firstError ??= queueFailureReport(
+        item,
+        `Next retry ${formatRetryIso(item.nextRetryAt)}.`,
+        item.failureKind ?? "network",
+        item.lastStatusCode
+      );
+      stopped = true;
+      break;
     }
 
     const attemptedAt = new Date().toISOString();
@@ -834,6 +897,7 @@ function migrateQueuedEvent(item: StoredQueuedEvent, index: number): QueuedEvent
     lastError: typeof item.lastError === "string" && item.lastError.trim() ? item.lastError : undefined,
     lastStatusCode,
     lastAttemptedAt: validIsoString(item.lastAttemptedAt),
+    nextRetryAt: validIsoString(item.nextRetryAt),
     failureKind
   };
 }
@@ -876,6 +940,7 @@ function markQueueFailure(
   failureKind: QueueFailureKind,
   statusCode?: number
 ): QueuedEvent {
+  const nextRetryAt = nextQueueRetryAt(attemptedAt, (item.failureCount ?? 0) + 1, failureKind);
   return {
     ...item,
     failedAt: new Date().toISOString(),
@@ -883,6 +948,7 @@ function markQueueFailure(
     lastError: message,
     lastStatusCode: statusCode,
     lastAttemptedAt: attemptedAt,
+    nextRetryAt,
     failureKind
   };
 }
@@ -902,6 +968,23 @@ function isClearableFailedEvent(item: QueuedEvent) {
   return isPermanentlyFailedEvent(item);
 }
 
+const retryBackoffSeconds = [30, 120, 300, 900, 1800, 3600];
+
+function nextQueueRetryAt(attemptedAt: string, failureCount: number, failureKind: QueueFailureKind) {
+  if (failureKind === "permanent") return undefined;
+  const attemptedDate = new Date(attemptedAt);
+  const baseMs = Number.isNaN(attemptedDate.getTime()) ? Date.now() : attemptedDate.getTime();
+  const backoffSeconds = retryBackoffSeconds[Math.min(Math.max(failureCount, 1), retryBackoffSeconds.length) - 1];
+  return new Date(baseMs + backoffSeconds * 1000).toISOString();
+}
+
+function isQueueRetryDue(item: QueuedEvent, now: Date) {
+  if (!item.nextRetryAt) return true;
+  const retryAt = new Date(item.nextRetryAt);
+  if (Number.isNaN(retryAt.getTime())) return true;
+  return retryAt.getTime() <= now.getTime();
+}
+
 function queueFailureReport(
   item: QueuedEvent,
   message: string,
@@ -917,6 +1000,22 @@ function queueFailureReport(
     statusCode,
     failureKind
   };
+}
+
+function earliestIso(values: Array<string | undefined>) {
+  return values
+    .filter((value): value is string => Boolean(validIsoString(value)))
+    .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0];
+}
+
+function latestIso(values: Array<string | undefined>) {
+  return values
+    .filter((value): value is string => Boolean(validIsoString(value)))
+    .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
+}
+
+function formatRetryIso(value?: string) {
+  return value ?? "after the retry window";
 }
 
 function queueSyncResult(

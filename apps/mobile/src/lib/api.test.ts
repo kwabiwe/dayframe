@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { QueuedEvent } from "./api";
 
 const secureStore = vi.hoisted(() => new Map<string, string>());
 const asyncStore = vi.hoisted(() => new Map<string, string>());
@@ -31,6 +32,7 @@ vi.mock("./config", () => ({
 
 const {
   AuthRequiredError,
+  buildQueueDiagnosticsSnapshot,
   clearFailedQueuedEvents,
   confirmReviewItem,
   createCategory,
@@ -62,6 +64,7 @@ const {
 
 describe("mobile API client", () => {
   beforeEach(() => {
+    vi.useRealTimers();
     secureStore.clear();
     asyncStore.clear();
     vi.restoreAllMocks();
@@ -390,6 +393,8 @@ describe("mobile API client", () => {
   });
 
   it("keeps network failures queued for retry with failure metadata", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-06T08:20:00.000Z"));
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
     await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: { offline: true } });
     vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("Network request failed"))));
@@ -404,11 +409,77 @@ describe("mobile API client", () => {
       expect.objectContaining({
         failureCount: 1,
         failureKind: "network",
-        lastError: "Network request failed"
+        lastError: "Network request failed",
+        lastAttemptedAt: "2026-07-06T08:20:00.000Z",
+        nextRetryAt: "2026-07-06T08:20:30.000Z"
       })
     );
     expect(persisted).toHaveLength(1);
     expect(persisted[0].rawPayload).toEqual({ offline: true });
+  });
+
+  it("respects retry backoff before automatic queue sync tries a failed item again", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-06T08:20:00.000Z"));
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    asyncStore.set(
+      "dayframe.offlineQueue.v1",
+      JSON.stringify([
+        storedQueuedEvent({
+          localId: "network-local",
+          failedAt: "2026-07-06T08:20:00.000Z",
+          failureKind: "network",
+          failureCount: 1,
+          lastError: "Network request failed",
+          lastAttemptedAt: "2026-07-06T08:20:00.000Z",
+          nextRetryAt: "2026-07-06T08:20:30.000Z"
+        })
+      ])
+    );
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ eventId: "event-1" }, 201)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await syncQueue();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.syncedCount).toBe(0);
+    expect(result.remainingCount).toBe(1);
+    expect(result.stopped).toBe(true);
+    expect(result.firstError).toEqual(
+      expect.objectContaining({
+        localId: "network-local",
+        failureKind: "network",
+        message: "Next retry 2026-07-06T08:20:30.000Z."
+      })
+    );
+  });
+
+  it("manual failed retry bypasses retry backoff", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-06T08:20:10.000Z"));
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    asyncStore.set(
+      "dayframe.offlineQueue.v1",
+      JSON.stringify([
+        storedQueuedEvent({
+          localId: "network-local",
+          failedAt: "2026-07-06T08:20:00.000Z",
+          failureKind: "network",
+          failureCount: 1,
+          lastError: "Network request failed",
+          lastAttemptedAt: "2026-07-06T08:20:00.000Z",
+          nextRetryAt: "2026-07-06T08:20:30.000Z"
+        })
+      ])
+    );
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ eventId: "event-1" }, 201)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await retryFailedQueuedEvents();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.synced).toEqual(["network-local"]);
+    expect(result.remaining).toHaveLength(0);
   });
 
   it("clears the session token when queued event sync returns 401", async () => {
@@ -489,6 +560,68 @@ describe("mobile API client", () => {
     expect(result.removed.map((item) => item.localId)).toEqual(["invalid-local"]);
     expect(remainingIds).toEqual(["network-local", "healthy-local"]);
     await expect(readQueue()).resolves.toHaveLength(2);
+  });
+
+  it("builds an exportable queue diagnostics snapshot", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-06T08:22:00.000Z"));
+    const queue = [
+      storedQueuedEvent({
+        localId: "network-local",
+        failedAt: "2026-07-06T08:20:00.000Z",
+        failureKind: "network",
+        failureCount: 1,
+        lastError: "Network request failed",
+        lastAttemptedAt: "2026-07-06T08:20:00.000Z",
+        nextRetryAt: "2026-07-06T08:20:30.000Z",
+        rawPayload: { origin: "shortcut" }
+      }),
+      storedQueuedEvent({
+        localId: "invalid-local",
+        failedAt: "2026-07-06T08:21:00.000Z",
+        failureKind: "permanent",
+        failureCount: 1,
+        lastError: "type: Invalid event type",
+        lastStatusCode: 400,
+        lastAttemptedAt: "2026-07-06T08:21:00.000Z"
+      })
+    ].map((item, index) => readMigratedQueuedEventForTest(item, index));
+
+    const snapshot = buildQueueDiagnosticsSnapshot(queue, {
+      synced: [],
+      remaining: queue,
+      failed: queue,
+      syncedCount: 0,
+      remainingCount: 2,
+      failedCount: 2,
+      stopped: true
+    });
+
+    expect(snapshot.exportedAt).toBe("2026-07-06T08:22:00.000Z");
+    expect(snapshot.diagnostics).toEqual(
+      expect.objectContaining({
+        queuedCount: 2,
+        failedCount: 2,
+        retryableFailedCount: 1,
+        permanentFailedCount: 1,
+        clearableFailedCount: 1,
+        nextRetryAt: "2026-07-06T08:20:30.000Z",
+        lastAttemptedAt: "2026-07-06T08:21:00.000Z"
+      })
+    );
+    expect(snapshot.queue[0]).toEqual(
+      expect.objectContaining({
+        occurredAt: "2026-07-06T08:15:00.000Z",
+        rawPayload: { origin: "shortcut" }
+      })
+    );
+    expect(snapshot.lastSyncResult).toEqual(
+      expect.objectContaining({
+        remainingCount: 2,
+        failedCount: 2,
+        stopped: true
+      })
+    );
   });
 
   it("starts timers with an optional category and no project", async () => {
@@ -1166,5 +1299,14 @@ function storedQueuedEvent(overrides: Record<string, unknown> = {}) {
     queuedAt: "2026-07-06T08:16:00.000Z",
     rawPayload: {},
     ...overrides
+  };
+}
+
+function readMigratedQueuedEventForTest(item: ReturnType<typeof storedQueuedEvent>, _index: number): QueuedEvent {
+  return {
+    ...item,
+    source: item.source as QueuedEvent["source"],
+    type: item.type as QueuedEvent["type"],
+    occurredAt: new Date(item.occurredAt)
   };
 }

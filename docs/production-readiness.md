@@ -109,7 +109,7 @@ As of 2026-07-11, the active internal TestFlight lane has verified build `0.1.0 
 ## Remaining Before Wider Daily Beta Use
 
 - Keep duplicate/overlapping Sleep on Watch and collect real production row metadata before adding any merge/delete logic.
-- Harden offline/mobile failed queue recovery with visible failed states, manual retry, idempotency checks, and diagnostics/export.
+- Keep offline/mobile queue recovery on Watch while real-device testing confirms foreground queue drains, retry backoff, manual retry, idempotency, and diagnostics export.
 - Add safe account deletion, workspace deletion, and stronger privacy controls for raw Health/location payloads and integration tokens.
 - Add token management UI before Home Assistant or other local bridge inputs are promoted beyond manual/local setup.
 - Add the Home Assistant/Cockpit bridge only after ingestion contracts and token controls are stable.

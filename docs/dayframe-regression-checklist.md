@@ -28,7 +28,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 
 - Web and mobile use authenticated workspace-scoped API calls.
 - Mobile foreground start/stop actions attempt immediate API sync and only fall back to the offline queue for genuine network/offline failure.
-- Offline queue sync preserves shortcut, NFC, geofence, Apple Health, and other background event paths.
+- Offline queue sync preserves shortcut, NFC, geofence, Apple Health, and other background event paths, respects retry backoff for automatic retries, and exposes retry/export diagnostics in Settings.
 - Bootstrap data remains backward compatible for web and mobile consumers.
 - No duplicate React keys, hydration errors, or framework runtime overlays appear during normal use.
 
