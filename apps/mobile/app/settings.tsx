@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import {
   Alert,
   Pressable,
@@ -70,11 +70,76 @@ import {
   type MobileTheme
 } from "@/lib/mobileTheme";
 import { REVIEW_COPY, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
+import {
+  SETTINGS_HEALTH_SNAPSHOT_TTL_MS,
+  SETTINGS_SNAPSHOT_TTL_MS,
+  shouldRefreshSettingsSnapshot,
+  shouldShowSettingsRefreshSpinner
+} from "@/lib/settingsRefresh";
 import { syncShortcutCatalog } from "@/lib/shortcuts";
 
 type Category = MobileBootstrap["categories"][number];
 type SettingsSection = "index" | "profile" | "categories" | "automations" | "health" | "sync" | "appearance";
 type SettingsIcon = "profile" | "categories" | "automations" | "health" | "sync" | "appearance" | "review";
+
+type SettingsSnapshot = {
+  data: MobileBootstrap | null;
+  queue: QueuedEvent[];
+  lastSyncResult: SyncQueueResult | null;
+  syncStatusMessage: string | null;
+  locationStatus: string;
+  locationDiagnostics: LocationVisitDiagnostics | null;
+  healthStatus: HealthImportStatus[];
+  healthImportPreferences: HealthImportPreferences | null;
+  healthAutoLogMappings: HealthAutoLogMappings;
+  updatedAt: number;
+  healthUpdatedAt: number;
+};
+
+let cachedSettingsSnapshot: SettingsSnapshot | null = null;
+
+function defaultSettingsSnapshot(): SettingsSnapshot {
+  return {
+    data: null,
+    queue: [],
+    lastSyncResult: null,
+    syncStatusMessage: null,
+    locationStatus: "Not requested",
+    locationDiagnostics: null,
+    healthStatus: [],
+    healthImportPreferences: null,
+    healthAutoLogMappings: {},
+    updatedAt: 0,
+    healthUpdatedAt: 0
+  };
+}
+
+function readSettingsSnapshot() {
+  return cachedSettingsSnapshot;
+}
+
+function updateSettingsSnapshot(patch: Partial<SettingsSnapshot>) {
+  cachedSettingsSnapshot = {
+    ...(cachedSettingsSnapshot ?? defaultSettingsSnapshot()),
+    ...patch
+  };
+}
+
+function isSettingsSnapshotFresh(now = Date.now()) {
+  return !shouldRefreshSettingsSnapshot(cachedSettingsSnapshot?.updatedAt, now, SETTINGS_SNAPSHOT_TTL_MS);
+}
+
+function isSettingsHealthSnapshotFresh(now = Date.now()) {
+  return !shouldRefreshSettingsSnapshot(
+    cachedSettingsSnapshot?.healthUpdatedAt,
+    now,
+    SETTINGS_HEALTH_SNAPSHOT_TTL_MS
+  );
+}
+
+function resolveStateAction<T>(action: SetStateAction<T>, current: T): T {
+  return typeof action === "function" ? (action as (value: T) => T)(current) : action;
+}
 
 export default function SettingsScreen() {
   const {
@@ -87,18 +152,25 @@ export default function SettingsScreen() {
   const params = useLocalSearchParams<{ section?: string | string[] }>();
   const routeSettingsSection = normalizeSettingsSection(params.section);
   const settingsSection = routeSettingsSection;
-  const [data, setData] = useState<MobileBootstrap | null>(null);
-  const [queue, setQueue] = useState<QueuedEvent[]>([]);
-  const [lastSyncResult, setLastSyncResult] = useState<SyncQueueResult | null>(null);
+  const cachedSnapshot = readSettingsSnapshot();
+  const [data, setData] = useState<MobileBootstrap | null>(cachedSnapshot?.data ?? null);
+  const [queue, setQueue] = useState<QueuedEvent[]>(cachedSnapshot?.queue ?? []);
+  const [lastSyncResult, setLastSyncResult] = useState<SyncQueueResult | null>(cachedSnapshot?.lastSyncResult ?? null);
   const [syncingQueue, setSyncingQueue] = useState(false);
-  const [syncStatusMessage, setSyncStatusMessage] = useState<string | null>(null);
+  const [syncStatusMessage, setSyncStatusMessage] = useState<string | null>(cachedSnapshot?.syncStatusMessage ?? null);
   const [showQueueDetails, setShowQueueDetails] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [locationStatus, setLocationStatus] = useState("Not requested");
-  const [locationDiagnostics, setLocationDiagnostics] = useState<LocationVisitDiagnostics | null>(null);
-  const [healthStatus, setHealthStatus] = useState<HealthImportStatus[]>([]);
-  const [healthImportPreferences, setHealthImportPreferences] = useState<HealthImportPreferences | null>(null);
-  const [healthAutoLogMappings, setHealthAutoLogMappings] = useState<HealthAutoLogMappings>({});
+  const [refreshing, setRefreshing] = useState(false);
+  const [locationStatus, setLocationStatus] = useState(cachedSnapshot?.locationStatus ?? "Not requested");
+  const [locationDiagnostics, setLocationDiagnostics] = useState<LocationVisitDiagnostics | null>(
+    cachedSnapshot?.locationDiagnostics ?? null
+  );
+  const [healthStatus, setHealthStatus] = useState<HealthImportStatus[]>(cachedSnapshot?.healthStatus ?? []);
+  const [healthImportPreferences, setHealthImportPreferences] = useState<HealthImportPreferences | null>(
+    cachedSnapshot?.healthImportPreferences ?? null
+  );
+  const [healthAutoLogMappings, setHealthAutoLogMappings] = useState<HealthAutoLogMappings>(
+    cachedSnapshot?.healthAutoLogMappings ?? {}
+  );
   const [healthDebugStatus, setHealthDebugStatus] = useState<string | null>(null);
   const [exportingHealthDebug, setExportingHealthDebug] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
@@ -109,21 +181,86 @@ export default function SettingsScreen() {
   const refreshInFlight = useRef(false);
   const categoryEditRef = useRef<TextInput>(null);
 
-  const load = useCallback(async (options?: { silent?: boolean }) => {
+  const setDataAndCache = useCallback((action: SetStateAction<MobileBootstrap | null>) => {
+    setData((current) => {
+      const next = resolveStateAction(action, current);
+      updateSettingsSnapshot({ data: next });
+      return next;
+    });
+  }, []);
+
+  const setQueueAndCache = useCallback((action: SetStateAction<QueuedEvent[]>) => {
+    setQueue((current) => {
+      const next = resolveStateAction(action, current);
+      updateSettingsSnapshot({ queue: next });
+      return next;
+    });
+  }, []);
+
+  const setLastSyncResultAndCache = useCallback((action: SetStateAction<SyncQueueResult | null>) => {
+    setLastSyncResult((current) => {
+      const next = resolveStateAction(action, current);
+      updateSettingsSnapshot({ lastSyncResult: next });
+      return next;
+    });
+  }, []);
+
+  const setSyncStatusMessageAndCache = useCallback((action: SetStateAction<string | null>) => {
+    setSyncStatusMessage((current) => {
+      const next = resolveStateAction(action, current);
+      updateSettingsSnapshot({ syncStatusMessage: next });
+      return next;
+    });
+  }, []);
+
+  const setHealthStatusAndCache = useCallback((action: SetStateAction<HealthImportStatus[]>) => {
+    setHealthStatus((current) => {
+      const next = resolveStateAction(action, current);
+      updateSettingsSnapshot({ healthStatus: next, healthUpdatedAt: Date.now() });
+      return next;
+    });
+  }, []);
+
+  const setHealthImportPreferencesAndCache = useCallback((action: SetStateAction<HealthImportPreferences | null>) => {
+    setHealthImportPreferences((current) => {
+      const next = resolveStateAction(action, current);
+      updateSettingsSnapshot({ healthImportPreferences: next, healthUpdatedAt: Date.now() });
+      return next;
+    });
+  }, []);
+
+  const setHealthAutoLogMappingsAndCache = useCallback((action: SetStateAction<HealthAutoLogMappings>) => {
+    setHealthAutoLogMappings((current) => {
+      const next = resolveStateAction(action, current);
+      updateSettingsSnapshot({ healthAutoLogMappings: next, healthUpdatedAt: Date.now() });
+      return next;
+    });
+  }, []);
+
+  const load = useCallback(async (options?: { silent?: boolean; trigger?: "navigation" | "focus" | "pull" }) => {
     if (refreshInFlight.current) return;
     refreshInFlight.current = true;
-    if (!options?.silent) setLoading(true);
+    const showRefreshIndicator = shouldShowSettingsRefreshSpinner(options?.trigger ?? "navigation");
+    if (showRefreshIndicator) setRefreshing(true);
     try {
       const [bootstrap, queued, location] = await Promise.all([
         fetchBootstrap(),
         readQueue(),
         getLocationVisitDiagnostics()
       ]);
+      const nextLocationStatus = locationStatusText(location);
+      updateSettingsSnapshot({
+        data: bootstrap,
+        queue: queued,
+        locationDiagnostics: location,
+        locationStatus: nextLocationStatus,
+        updatedAt: Date.now()
+      });
       setData(bootstrap);
       syncShortcutCatalog(bootstrap);
       setQueue(queued);
       setLocationDiagnostics(location);
-      setLocationStatus(locationStatusText(location));
+      setLocationStatus(nextLocationStatus);
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         router.replace("/");
@@ -134,24 +271,27 @@ export default function SettingsScreen() {
       }
     } finally {
       refreshInFlight.current = false;
-      if (!options?.silent) setLoading(false);
+      if (showRefreshIndicator) setRefreshing(false);
     }
   }, []);
 
   useEffect(() => {
-    void load();
+    if (!isSettingsSnapshotFresh()) void load({ silent: true });
   }, [load]);
 
   useFocusEffect(
     useCallback(() => {
       void reloadThemePreference();
-      void load({ silent: true });
+      if (!isSettingsSnapshotFresh()) void load({ silent: true, trigger: "focus" });
     }, [load, reloadThemePreference])
   );
 
   useEffect(() => {
-    getHealthImportStatus().then(setHealthStatus).catch(() => {
-      setHealthStatus([
+    if (settingsSection !== "index" && settingsSection !== "health") return;
+    if (settingsSection === "index" && isSettingsHealthSnapshotFresh()) return;
+
+    getHealthImportStatus().then(setHealthStatusAndCache).catch(() => {
+      setHealthStatusAndCache([
         {
           provider: "healthkit",
           status: "error",
@@ -159,11 +299,18 @@ export default function SettingsScreen() {
         }
       ]);
     });
-    getHealthImportPreferences().then(setHealthImportPreferences).catch(() => undefined);
-    getHealthAutoLogMappings().then(setHealthAutoLogMappings).catch(() => undefined);
-  }, []);
+    getHealthImportPreferences().then(setHealthImportPreferencesAndCache).catch(() => undefined);
+    getHealthAutoLogMappings().then(setHealthAutoLogMappingsAndCache).catch(() => undefined);
+  }, [
+    setHealthAutoLogMappingsAndCache,
+    setHealthImportPreferencesAndCache,
+    setHealthStatusAndCache,
+    settingsSection
+  ]);
 
   useEffect(() => {
+    if (settingsSection !== "index" && settingsSection !== "automations") return;
+
     if (!data?.places.length) {
       void refreshLocationDiagnostics();
       return;
@@ -173,7 +320,7 @@ export default function SettingsScreen() {
         void refreshLocationDiagnostics(count > 0 ? `Monitoring ${count} saved ${count === 1 ? "place" : "places"}.` : undefined);
       })
       .catch(() => undefined);
-  }, [data?.places]);
+  }, [data?.places, settingsSection]);
 
   const healthAvailability =
     healthStatus.find((item) => item.provider === "healthkit" && item.kind === "availability") ??
@@ -327,12 +474,12 @@ export default function SettingsScreen() {
 
   async function syncAndReload(options?: { syncingMessage?: string }) {
     setSyncingQueue(true);
-    setSyncStatusMessage(options?.syncingMessage ?? "Syncing device data...");
+    setSyncStatusMessageAndCache(options?.syncingMessage ?? "Syncing device data...");
     try {
       const result = await syncQueue({ forceRetry: true });
-      setQueue(result.remaining);
-      setLastSyncResult(result);
-      setSyncStatusMessage(null);
+      setQueueAndCache(result.remaining);
+      setLastSyncResultAndCache(result);
+      setSyncStatusMessageAndCache(null);
       await load();
       return result;
     } catch (error) {
@@ -340,7 +487,7 @@ export default function SettingsScreen() {
         router.replace("/");
         return null;
       }
-      setSyncStatusMessage(error instanceof Error ? error.message : "Unable to sync queued events.");
+      setSyncStatusMessageAndCache(error instanceof Error ? error.message : "Unable to sync queued events.");
       return null;
     } finally {
       setSyncingQueue(false);
@@ -349,19 +496,19 @@ export default function SettingsScreen() {
 
   async function retryFailedAndReload() {
     setSyncingQueue(true);
-    setSyncStatusMessage("Retrying failed items...");
+    setSyncStatusMessageAndCache("Retrying failed items...");
     try {
       const result = await retryFailedQueuedEvents();
-      setQueue(result.remaining);
-      setLastSyncResult(result);
-      setSyncStatusMessage(null);
+      setQueueAndCache(result.remaining);
+      setLastSyncResultAndCache(result);
+      setSyncStatusMessageAndCache(null);
       await load();
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         router.replace("/");
         return;
       }
-      setSyncStatusMessage(error instanceof Error ? error.message : "Unable to retry failed events.");
+      setSyncStatusMessageAndCache(error instanceof Error ? error.message : "Unable to retry failed events.");
     } finally {
       setSyncingQueue(false);
     }
@@ -387,14 +534,14 @@ export default function SettingsScreen() {
   async function clearFailedQueue() {
     try {
       const result = await clearFailedQueuedEvents();
-      setQueue(result.remaining);
-      setLastSyncResult(null);
-      setSyncStatusMessage(
+      setQueueAndCache(result.remaining);
+      setLastSyncResultAndCache(null);
+      setSyncStatusMessageAndCache(
         `${result.removedCount} failed queued ${result.removedCount === 1 ? "event was" : "events were"} removed. ${result.remainingCount} queued ${result.remainingCount === 1 ? "event remains" : "events remain"}.`
       );
       await load({ silent: true });
     } catch (error) {
-      setSyncStatusMessage(error instanceof Error ? error.message : "Unable to clear failed events.");
+      setSyncStatusMessageAndCache(error instanceof Error ? error.message : "Unable to clear failed events.");
     }
   }
 
@@ -406,9 +553,9 @@ export default function SettingsScreen() {
         title: `Dayframe queue diagnostics ${snapshot.exportedAt}`,
         message: JSON.stringify(snapshot, null, 2)
       });
-      setQueue(latestQueue);
+      setQueueAndCache(latestQueue);
     } catch (error) {
-      setSyncStatusMessage(error instanceof Error ? error.message : "Unable to export queue diagnostics.");
+      setSyncStatusMessageAndCache(error instanceof Error ? error.message : "Unable to export queue diagnostics.");
     }
   }
 
@@ -420,6 +567,7 @@ export default function SettingsScreen() {
     }
 
     const status = await requestLocationAccess();
+    updateSettingsSnapshot({ locationStatus: status });
     setLocationStatus(status);
     if (status.startsWith("Always allowed") && data) {
       await startGeofences(data.places);
@@ -431,8 +579,13 @@ export default function SettingsScreen() {
 
   async function refreshLocationDiagnostics(fallbackStatus?: string) {
     const diagnostics = await getLocationVisitDiagnostics();
+    const nextLocationStatus = fallbackStatus ?? locationStatusText(diagnostics);
+    updateSettingsSnapshot({
+      locationDiagnostics: diagnostics,
+      locationStatus: nextLocationStatus
+    });
     setLocationDiagnostics(diagnostics);
-    setLocationStatus(fallbackStatus ?? locationStatusText(diagnostics));
+    setLocationStatus(nextLocationStatus);
   }
 
   async function connectAppleHealth() {
@@ -447,7 +600,7 @@ export default function SettingsScreen() {
 
   async function syncAppleHealth(options?: { silent?: boolean }) {
     try {
-      setSyncStatusMessage("Syncing Health data...");
+      setSyncStatusMessageAndCache("Syncing Health data...");
       const sleep = await importHealthKitSleep();
       updateHealthStatus(sleep);
       const workout = await importHealthKitWorkouts();
@@ -458,7 +611,7 @@ export default function SettingsScreen() {
     } catch (error) {
       if (error instanceof AuthRequiredError) return;
       const message = friendlyHealthKitError(error, "sync Apple Health");
-      setSyncStatusMessage(message);
+      setSyncStatusMessageAndCache(message);
       if (!options?.silent) {
         Alert.alert("Apple Health", message);
       }
@@ -468,14 +621,14 @@ export default function SettingsScreen() {
   async function updateHealthImportPreference(type: HealthImportPreferenceKey, enabled: boolean) {
     const current = healthImportPreferences ?? await getHealthImportPreferences();
     const optimistic = { ...current, [type]: enabled };
-    setHealthImportPreferences(optimistic);
+    setHealthImportPreferencesAndCache(optimistic);
     try {
       const saved = await setHealthImportPreference(type, enabled);
-      setHealthImportPreferences(saved);
+      setHealthImportPreferencesAndCache(saved);
       await reprocessExistingHealthReviewItems(saved, { force: true, mappings: healthAutoLogMappings });
       await load({ silent: true });
     } catch (error) {
-      setHealthImportPreferences(current);
+      setHealthImportPreferencesAndCache(current);
       Alert.alert("Apple Health", error instanceof Error ? error.message : "Unable to save Health preference.");
     }
   }
@@ -492,15 +645,15 @@ export default function SettingsScreen() {
     } else {
       delete optimistic[type];
     }
-    setHealthAutoLogMappings(optimistic);
+    setHealthAutoLogMappingsAndCache(optimistic);
     try {
       const saved = await setHealthAutoLogMapping(type, nextMapping);
-      setHealthAutoLogMappings(saved);
+      setHealthAutoLogMappingsAndCache(saved);
       const preferences = healthImportPreferences ?? await getHealthImportPreferences();
       await reprocessExistingHealthReviewItems(preferences, { force: true, mappings: saved });
       await load({ silent: true });
     } catch (error) {
-      setHealthAutoLogMappings(current);
+      setHealthAutoLogMappingsAndCache(current);
       Alert.alert("Apple Health", error instanceof Error ? error.message : "Unable to save Health mapping.");
     }
   }
@@ -529,14 +682,14 @@ export default function SettingsScreen() {
   }
 
   function updateHealthStatus(status: HealthImportStatus) {
-    setHealthStatus((current) => [
+    setHealthStatusAndCache((current) => [
       status,
       ...current.filter((item) => !(item.provider === status.provider && item.kind === status.kind))
     ]);
   }
 
   function patchCategory(id: string, patch: Partial<Category>) {
-    setData((current) => {
+    setDataAndCache((current) => {
       if (!current) return current;
       return {
         ...current,
@@ -549,8 +702,8 @@ export default function SettingsScreen() {
 
   async function signOut() {
     await logout();
-    setData(null);
-    setQueue(await readQueue());
+    setDataAndCache(null);
+    setQueueAndCache(await readQueue());
     router.replace("/");
   }
 
@@ -561,8 +714,8 @@ export default function SettingsScreen() {
         keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl
-            refreshing={loading}
-            onRefresh={() => load()}
+            refreshing={refreshing}
+            onRefresh={() => load({ trigger: "pull" })}
             tintColor={theme.accent}
             colors={[theme.accent]}
           />

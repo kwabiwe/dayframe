@@ -1,10 +1,10 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-11 20:52 BST
+Last verified: 2026-07-11 21:16 BST
 
 ## Verification Snapshot
 
-- Local repo: `main` synced with `origin/main`; PR #45 is merged and build 20 is verified in TestFlight.
+- Local repo: branch `agent/settings-silent-refresh` is active for PR #46 Settings cached navigation and silent refresh.
 - GitHub: PR #45 is merged; no open PRs and no GitHub issues at merge verification time.
 - Latest verified TestFlight build: `0.1.0 (20)`.
 - Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, and App Store Connect build state.
@@ -23,12 +23,14 @@ Last verified: 2026-07-11 20:52 BST
 
 | Item | Status | Evidence | Next action |
 | --- | --- | --- | --- |
+| Settings cached navigation and silent refresh | In progress | Branch `agent/settings-silent-refresh`; focused mobile tests and typecheck passing locally. | Keep route-backed Settings sub-screens, but reuse the cached Settings snapshot during navigation, avoid visible refresh spinners except explicit pull-to-refresh, and restrict Health/location diagnostics to relevant sections. |
 | Background Shortcuts and Live Activity | Next | PR #43 review confirmed NFC Shortcuts work, but the deep-link handoff briefly opens Dayframe and shows `Shortcut queued`. | Replace the deep-link-only Shortcut handoff with a native/background queue path, then add an iOS Live Activity/Dynamic Island timer as the confirmation surface for active tracking. |
 
 ## Recently Shipped Or Addressed
 
 | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- |
+| Settings cached navigation and silent refresh | In progress | Branch `agent/settings-silent-refresh`; PR #46 pending. | Settings navigation should render from cached data immediately, silently refresh stale snapshots in the background, only show the pull-to-refresh spinner when the user explicitly pulls, and avoid Health/location diagnostic work on unrelated sub-settings. |
 | Settings sub-settings back navigation | Watch | PR #45, build `0.1.0 (20)`, delivery UUID `6bacb90a-006e-49f6-acc4-e1d2fbe64ee2`. | All Settings sub-settings now derive from the `section` route param only. Removed local `settingsSection` mutation and the manual `beforeRemove` interception so native iOS swipe-back and the header back button can pop normally to the Settings index. Watch real-device navigation through every Settings sub-section before marking settled. |
 | Calendar compact blocks and Settings swipe-back | Watch | PR #44, build `0.1.0 (19)`, delivery UUID `997c7e8e-9556-4a54-a586-c71e1b80061b`; PR #45, build `0.1.0 (20)`, followed up the remaining Settings sub-settings back-navigation glitch. | Calendar blocks now keep near-true duration height and suppress title/meta labels until there is enough vertical space. PR #44 did not fully fix Settings sub-setting back navigation because the old Settings route could retain local sub-setting state; PR #45 handles that follow-up. |
 | Mobile review polish and Shortcut stop follow-up | Watch | PR #43, build `0.1.0 (18)`, delivery UUID `5540f30c-5002-4a0b-a217-709eed42c6a7`; PR #44, build `0.1.0 (19)`, followed up the failed swipe-back fix. | Settings header logo removed; timer start/stop uses a subtle progress bar instead of a layout-jumping full spinner; saved-place review reasons explain review-first visits; Shortcuts adds `Stop tracking` plus cached category/workspace options for `Start tracking`. Shortcut starts/stops still show the deep-link queued splash, so that is split into the background Shortcuts/Live Activity follow-up. |
