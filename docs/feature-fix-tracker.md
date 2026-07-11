@@ -1,12 +1,12 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-10 20:04 BST
+Last verified: 2026-07-11 06:05 BST
 
 ## Verification Snapshot
 
-- Local repo: docs refresh branch created from `origin/main` at tracker commit `f5cc85e`.
-- GitHub: PR #37 is merged; no open PRs and no GitHub issues at merge verification time.
-- Latest verified TestFlight build: `0.1.0 (13)`.
+- Local repo: `main` synced with `origin/main` at PR #39 merge commit `026973f`.
+- GitHub: PR #39 is merged; no open PRs and no GitHub issues at release verification time.
+- Latest verified TestFlight build: `0.1.0 (14)`.
 - Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, and App Store Connect build state.
 
 ## Status Key
@@ -23,7 +23,6 @@ Last verified: 2026-07-10 20:04 BST
 
 | Item | Status | Evidence | Next action |
 | --- | --- | --- | --- |
-| Midnight Core reskin and supplied vector branding | In progress | Branch `codex/midnight-core-reskin` implements shared web/iOS tokens, derived wordmarks, reusable brand components and automated visual guardrails without changing product logic. | Complete final review and merge the focused reskin PR. Keep the system UI font: the outlined SVG needs no Sofia Pro font file or licensing dependency. |
 | Auto-log defaults during onboarding and non-Health imports | Next | PR #36 adds the compact Apple Health settings surface; onboarding and non-Health import defaults are not yet designed. | Design the next small surface for onboarding defaults and place/other import mappings if still needed after Apple Health validation. |
 | Duplicate/overlapping Sleep investigation | Next | PR #33 deliberately avoided automatic duplicate sleep merge/delete. | Inspect production row metadata before any merge/delete logic, identify whether duplicates come from HealthKit overlap, legacy rows, or reprocess behavior, then implement only a safe dedupe/merge path with auditability. |
 
@@ -31,6 +30,7 @@ Last verified: 2026-07-10 20:04 BST
 
 | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- |
+| Midnight Core reskin and supplied branding | Done | PR #39, build `0.1.0 (14)`, delivery UUID `e6425673-8e83-4d62-ae31-cc01e7fc6001`. | Shared web/iOS Midnight Core tokens, refreshed app icon, wordmarks, reusable brand components, and automated brand/theme guardrails shipped without changing core tracking logic. |
 | Calendar edit card keyboard avoidance regression | Watch | PR #37, build `0.1.0 (13)`, delivery UUID `8b5d4ac4-d0ca-4239-9719-4442aee56ec6`. | Edit sheet now uses screen-coordinate keyboard measurements, explicit keyboard-open sheet height, scrollable form body, and regression tests for small-iPhone keyboard-open layout. Watch KB's real-device keyboard/suggestion-bar check before marking fully settled. |
 | Cross-midnight continuation border polish | Done | PR #36, build `0.1.0 (12)`. | Continuation segments that started before midnight now drop the top border/top radii; segments continuing into the next day still drop the bottom border/bottom radii. |
 | Apple Health auto-log category and description customization | Watch | PR #36, build `0.1.0 (12)`. | Settings can map HealthKit sleep/workout types to category and description defaults; new imports and Health Review reprocess both use the mappings. Watch real device import/reprocess behaviour before marking fully settled. |
@@ -53,7 +53,7 @@ Last verified: 2026-07-10 20:04 BST
 | Sleep stages fragmented into REM/Core/Deep cards | Watch | PRs #23, #26, and #29. | Current imports group sessions; legacy sleep-stage backlog cleanup is merged. |
 | Health items left in Review without useful explanation | Watch | PRs #22, #25, #26, #27, and #29. | Diagnostics and left-in-review reasons exist; continue checking that reasons are clear on device. |
 | Geo/place default description mismatch | Done | PR #19 and PR #26. | Place names should remain reference/context; configured activity descriptions are used for geofence display and Confirm. |
-| TestFlight release preflight and compliance checks | Done | PR #31 plus build release runs through `0.1.0 (13)`. | Keep verifying processing state, encryption compliance, notes, and internal testing assignment before asking KB to test. Docs-only PRs do not need a TestFlight build unless they change release/build configuration. |
+| TestFlight release preflight and compliance checks | Done | PR #31 plus build release runs through `0.1.0 (14)`. | Keep verifying processing state, encryption compliance, notes, and internal testing assignment before asking KB to test. Docs-only PRs do not need a TestFlight build unless they change release/build configuration. |
 
 ## Future Tracks
 
