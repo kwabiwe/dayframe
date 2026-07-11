@@ -1,12 +1,12 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-11 06:43 BST
+Last verified: 2026-07-11 07:17 BST
 
 ## Verification Snapshot
 
-- Local repo: `main` synced with `origin/main` at PR #39 merge commit `026973f`.
-- GitHub: PR #39 is merged; no open PRs and no GitHub issues at release verification time.
-- Latest verified TestFlight build: `0.1.0 (14)`.
+- Local repo: `main` synced with `origin/main` at PR #40 merge commit `1dc16a4`.
+- GitHub: PR #40 is merged; no open PRs and no GitHub issues at release verification time.
+- Latest verified TestFlight build: `0.1.0 (15)`.
 - Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, and App Store Connect build state.
 
 ## Status Key
@@ -29,7 +29,7 @@ Last verified: 2026-07-11 06:43 BST
 
 | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Auto-log defaults during onboarding and non-Health imports | In progress | PR #40. | Adds Settings-managed defaults for mobile starts, Shortcuts, NFC, widgets, and Home Assistant buttons. Defaults only fill blank category/description values; explicit event values still win. |
+| Auto-log defaults during onboarding and non-Health imports | Done | PR #40, build `0.1.0 (15)`, delivery UUID `e6bcc257-2214-49c9-8614-5a201958a175`. | Adds Settings-managed defaults for mobile starts, Shortcuts, NFC, widgets, and Home Assistant buttons. Defaults only fill blank category/description values; explicit event values still win. |
 | Duplicate/overlapping Sleep investigation | Watch | `docs/investigations/2026-07-11-duplicate-sleep.md`; KB reports no current duplicates in TestFlight build `0.1.0 (14)`. | Existing idempotency, Health segment dedupe, covering-entry checks, overlap blocks, and legacy consolidation already guard the known paths. Do not add merge/delete logic without a real duplicate export or row sample. |
 | Midnight Core reskin and supplied branding | Done | PR #39, build `0.1.0 (14)`, delivery UUID `e6425673-8e83-4d62-ae31-cc01e7fc6001`. | Shared web/iOS Midnight Core tokens, refreshed app icon, wordmarks, reusable brand components, and automated brand/theme guardrails shipped without changing core tracking logic. |
 | Calendar edit card keyboard avoidance regression | Watch | PR #37, build `0.1.0 (13)`, delivery UUID `8b5d4ac4-d0ca-4239-9719-4442aee56ec6`. | Edit sheet now uses screen-coordinate keyboard measurements, explicit keyboard-open sheet height, scrollable form body, and regression tests for small-iPhone keyboard-open layout. Watch KB's real-device keyboard/suggestion-bar check before marking fully settled. |
