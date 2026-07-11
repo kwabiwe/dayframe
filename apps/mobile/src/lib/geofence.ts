@@ -429,7 +429,7 @@ async function recordPlaceExit(place: MonitoredPlace, region: DayframeRegion, oc
   });
   await writeSeenVisitIds([localId, ...seenVisitIds.filter((id) => id !== localId)].slice(0, MAX_SEEN_VISIT_IDS));
   await updateLocationDiagnostics({
-    lastStatus: `Queued ${place.name} visit for review.`,
+    lastStatus: `Queued ${place.name} visit for review. Saved-place visits are review-first before becoming time entries.`,
     lastPlaceName: place.name,
     lastEventAt: stoppedAt.toISOString(),
     lastGeofenceEvent: {

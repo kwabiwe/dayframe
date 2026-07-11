@@ -67,6 +67,7 @@ import {
   isOpenReviewItem,
   isReviewNeededEntry
 } from "@/lib/review";
+import { syncShortcutCatalog } from "@/lib/shortcuts";
 
 type TimeEntry = MobileBootstrap["entries"][number];
 type AuthView = "login" | "signup";
@@ -135,6 +136,7 @@ export default function HomeScreen() {
   const [activeEditVisible, setActiveEditVisible] = useState(false);
   const [activeEditSaving, setActiveEditSaving] = useState(false);
   const [activeEditStopping, setActiveEditStopping] = useState(false);
+  const [timerActionPending, setTimerActionPending] = useState<"start" | "stop" | null>(null);
   const [calendarEditSaving, setCalendarEditSaving] = useState(false);
   const [calendarEditDeleting, setCalendarEditDeleting] = useState(false);
   const [calendarGestureLocked, setCalendarGestureLocked] = useState(false);
@@ -147,6 +149,7 @@ export default function HomeScreen() {
   const mainScrollY = useRef(0);
   const entrance = useRef(new Animated.Value(0)).current;
   const chartBuild = useRef(new Animated.Value(1)).current;
+  const timerProgress = useRef(new Animated.Value(0)).current;
   const authNameRef = useRef<TextInput>(null);
   const authWorkspaceRef = useRef<TextInput>(null);
   const authEmailRef = useRef<TextInput>(null);
@@ -159,6 +162,7 @@ export default function HomeScreen() {
     try {
       const bootstrap = await fetchBootstrap({ date: formatDateKey(new Date()) });
       setData(bootstrap);
+      syncShortcutCatalog(bootstrap);
       setAuthState("authenticated");
     } catch (error) {
       if (error instanceof AuthRequiredError) {
@@ -414,12 +418,35 @@ export default function HomeScreen() {
     };
   }, [chartBuild, reduceMotion, summarySegments.length]);
 
+  useEffect(() => {
+    if (!timerActionPending) {
+      timerProgress.stopAnimation();
+      timerProgress.setValue(0);
+      return undefined;
+    }
+
+    timerProgress.setValue(0);
+    const animation = Animated.loop(
+      Animated.timing(timerProgress, {
+        toValue: 1,
+        duration: 900,
+        easing: Easing.inOut(Easing.quad),
+        useNativeDriver: true
+      })
+    );
+    animation.start();
+
+    return () => animation.stop();
+  }, [timerActionPending, timerProgress]);
+
   async function startTask(categoryId?: string | null) {
+    if (timerActionPending) return;
     const trimmedDescription = customDescription.trim();
+    setTimerActionPending("start");
     try {
       await startTimer(categoryId, trimmedDescription);
       if (trimmedDescription) setCustomDescription("");
-      await load();
+      await load({ silent: true });
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         setAuthState("signedOut");
@@ -438,14 +465,16 @@ export default function HomeScreen() {
         rawPayload: { origin: "mobile_custom_start_fallback" }
       });
       if (trimmedDescription) setCustomDescription("");
-      await syncAndReload();
+      await syncAndReload({ silent: true });
+    } finally {
+      setTimerActionPending(null);
     }
   }
 
-  async function syncAndReload() {
+  async function syncAndReload(options?: { silent?: boolean }) {
     try {
       await syncQueue();
-      await load();
+      await load({ silent: options?.silent });
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         setAuthState("signedOut");
@@ -554,10 +583,12 @@ export default function HomeScreen() {
   }, []);
 
   async function stopActiveTimer() {
+    if (timerActionPending) return false;
     setActiveEditStopping(true);
+    setTimerActionPending("stop");
     try {
       await stopTimer();
-      await load();
+      await load({ silent: true });
       return true;
     } catch (error) {
       if (error instanceof AuthRequiredError) {
@@ -571,10 +602,11 @@ export default function HomeScreen() {
         return false;
       }
       await queueStopTimer();
-      await syncAndReload();
+      await syncAndReload({ silent: true });
       return true;
     } finally {
       setActiveEditStopping(false);
+      setTimerActionPending(null);
     }
   }
 
@@ -653,6 +685,10 @@ export default function HomeScreen() {
       }
     ]
   };
+  const timerProgressTranslateX = timerProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-140, 320]
+  });
 
   if (authState === "signedOut") {
     return (
@@ -851,7 +887,11 @@ export default function HomeScreen() {
                       <Pressable
                         accessibilityLabel="Stop current timer"
                         accessibilityRole="button"
-                        style={pressable(styles.stopButton, styles.buttonPressed)}
+                        disabled={timerActionPending !== null}
+                        style={pressable(
+                          [styles.stopButton, timerActionPending ? styles.buttonDisabled : null],
+                          styles.buttonPressed
+                        )}
                         onPress={(event) => {
                           event.stopPropagation();
                           void stopActiveTimer();
@@ -873,6 +913,16 @@ export default function HomeScreen() {
                     </View>
                   ) : null}
                 </View>
+                <View style={styles.timerProgressSlot}>
+                  {timerActionPending ? (
+                    <Animated.View
+                      style={[
+                        styles.timerProgressFill,
+                        { transform: [{ translateX: timerProgressTranslateX }] }
+                      ]}
+                    />
+                  ) : null}
+                </View>
               </Pressable>
 
               <View style={styles.panel}>
@@ -890,7 +940,11 @@ export default function HomeScreen() {
                   <Pressable
                     accessibilityLabel="Start task"
                     accessibilityRole="button"
-                    style={pressable(styles.playButton, styles.buttonPressed)}
+                    disabled={timerActionPending !== null}
+                    style={pressable(
+                      [styles.playButton, timerActionPending ? styles.buttonDisabled : null],
+                      styles.buttonPressed
+                    )}
                     onPress={() => startTask(null)}
                   >
                     <PlayGlyph color={theme.onAccent} />

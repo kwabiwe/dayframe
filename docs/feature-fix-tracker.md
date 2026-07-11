@@ -1,6 +1,6 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-11 11:53 BST
+Last verified: 2026-07-11 15:16 BST
 
 ## Verification Snapshot
 
@@ -23,6 +23,7 @@ Last verified: 2026-07-11 11:53 BST
 
 | Item | Status | Evidence | Next action |
 | --- | --- | --- | --- |
+| Mobile review polish and Shortcut stop follow-up | In progress | Active branch `agent/mobile-review-polish-shortcuts`; Trello card `Mobile review polish`. | Ship Settings header/back navigation polish, subtle start/stop progress, clearer saved-place review copy, `Stop tracking` Shortcut, selectable category/workspace Shortcut options, then release to TestFlight build `0.1.0 (18)`. |
 | Live Activities with a timer | Next | Shortcut/NFC and Settings grouping shipped in PR #42/build `0.1.0 (17)`, so the offline handoff foundation is now available. | Add an iOS Live Activity/Dynamic Island timer for the active Dayframe entry, with accurate start/stop/edit/offline state handling. |
 
 ## Recently Shipped Or Addressed
@@ -71,7 +72,7 @@ Last verified: 2026-07-11 11:53 BST
 | Account deletion, workspace deletion, and stronger privacy controls | Future | README privacy model calls export/deletion next-phase work and raw event payloads are stored in `activity_events.raw_payload`. | Add user-facing export/delete flows for accounts and workspaces, hard-delete or anonymise scoped data, clear raw Health/location payloads and integration tokens, respect retention windows, and document what remains in backups/logs. |
 | Geofence and place automation expansion | Future | Earlier Dayframe planning covered HA/iOS geofence triggers for Gym, Home, School, Church, Office/client sites, family places, town/Chelmsford centre, and unknown stays. README and production-readiness docs already have event-first geofence foundations. | Expand location automation carefully: improve place setup/correction, use review-first defaults for ambiguous/broad/Home locations, support specific enter/exit rules, avoid automatic writes without confidence, and keep source evidence visible for every suggestion or created entry. |
 | Intelligent commute tracking and regular-place learning | Future | KB requested opt-in commuting intelligence and regular-place recording on 2026-07-11. | Add a separately toggleable continuous-location mode that can learn frequently visited places even when they are not saved, detect movement between saved or learned places, and propose commute/transition entries with battery, privacy, retention, pause/delete, and review-first controls. |
-| Home Assistant/local bridge inputs | Future | Production-readiness docs describe scoped ingest tokens and a future Home Assistant bridge payload; prior planning included HA buttons/zones as local signals. | Add token-management UI first, then a small local bridge path for HA button/geofence events into `/api/events`, with scoped/revocable tokens, idempotent payloads, and no uncontrolled direct time-entry writes. |
+| Home Assistant/local bridge inputs | Future | Production-readiness docs describe scoped ingest tokens and a future Home Assistant bridge payload; prior planning included HA buttons/zones as local signals. Trello also tracks Apple Home smart buttons here because Home automations run from the home hub rather than a normal iPhone Shortcut surface. | Add token-management UI first, then a small local bridge path for HA button/geofence/Apple Home smart-button events into `/api/events`, with scoped/revocable tokens, idempotent payloads, and no uncontrolled direct time-entry writes. |
 | Telegram/voice diary and correction intake | Future | Original life-tracking planning included Telegram/direct-chat corrections and end-of-day diary summaries that Major can turn into time entries. | Design a review-first correction/import lane where chat or voice notes become proposed edits or missing entries, show the evidence text, require confirmation before writing, and preserve an audit trail of what changed. |
 | Review split/merge and saved-place correction flows | Future | README known limitations still call out review split/merge and saved-place correction flows as not fully implemented. | Let users split, merge, trim, and correct suggested stays/time blocks from Review without losing raw event provenance; saved place corrections should improve future matching but not rewrite history silently. |
 | Reporting, export, backup, and restore confidence | Future | README and production-readiness docs expose workspace/time-entry/activity/review exports, but restore and larger-data reporting confidence are still future work. | Make Dayframe dependable as a system of record: richer filters, larger-data performance checks, CSV/JSON exports KB can trust, backup verification, restore/import tooling, and clear recovery docs. |

@@ -17,6 +17,7 @@ export async function enqueueShortcutAction(
   const categoryId = firstString(query.categoryId);
   const categoryName = firstString(query.categoryName) ?? firstString(query.category);
   const description = firstString(query.description);
+  const workspaceName = firstString(query.workspaceName) ?? firstString(query.workspace);
 
   if (action === "action/start") {
     return enqueueEvent({
@@ -26,7 +27,8 @@ export async function enqueueShortcutAction(
       description,
       rawPayload: {
         ...rawPayload,
-        ...(categoryName ? { categoryName } : {})
+        ...(categoryName ? { categoryName } : {}),
+        ...(workspaceName ? { workspaceName } : {})
       }
     });
   }

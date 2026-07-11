@@ -11,9 +11,8 @@ import {
   View
 } from "react-native";
 import Svg, { Path } from "react-native-svg";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, useNavigation } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { DayframeBrand } from "@/components/brand";
 import {
   DAYFRAME_PALETTE,
   paletteColorFor,
@@ -71,6 +70,7 @@ import {
   type MobileTheme
 } from "@/lib/mobileTheme";
 import { REVIEW_COPY, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
+import { syncShortcutCatalog } from "@/lib/shortcuts";
 
 type Category = MobileBootstrap["categories"][number];
 type SettingsSection = "index" | "profile" | "categories" | "automations" | "health" | "sync" | "appearance";
@@ -84,6 +84,7 @@ export default function SettingsScreen() {
     theme,
     themePreference
   } = useMobileTheme();
+  const navigation = useNavigation();
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [queue, setQueue] = useState<QueuedEvent[]>([]);
   const [lastSyncResult, setLastSyncResult] = useState<SyncQueueResult | null>(null);
@@ -118,6 +119,7 @@ export default function SettingsScreen() {
         getLocationVisitDiagnostics()
       ]);
       setData(bootstrap);
+      syncShortcutCatalog(bootstrap);
       setQueue(queued);
       setLocationDiagnostics(location);
       setLocationStatus(locationStatusText(location));
@@ -201,6 +203,16 @@ export default function SettingsScreen() {
   const settingsTitle = settingsSectionTitle(settingsSection);
   const categoryCount = data?.categories.length ?? 0;
   const workspaceLabel = data?.workspace?.name ?? "Default workspace";
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener("beforeRemove", (event) => {
+      if (settingsSection === "index") return;
+      event.preventDefault();
+      setSettingsSection("index");
+    });
+
+    return unsubscribe;
+  }, [navigation, settingsSection]);
 
   function goBack() {
     if (settingsSection === "index") {
@@ -576,11 +588,6 @@ export default function SettingsScreen() {
               <BackGlyph color={theme.accent} />
             </Pressable>
             <Text style={styles.settingsTitle} numberOfLines={1}>{settingsTitle}</Text>
-            <DayframeBrand
-              layout="compact"
-              size="sm"
-              tone={theme.mode === "dark" ? "light" : "dark"}
-            />
           </View>
 
           {settingsSection === "index" ? (
@@ -877,14 +884,14 @@ export default function SettingsScreen() {
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Shortcuts and NFC</Text>
             <Text style={styles.muted}>
-              Apple Shortcuts handles NFC triggers. Use Dayframe's Start tracking action with a description and category, and Dayframe uses the current workspace when the action runs.
+              Apple Shortcuts handles NFC triggers. Dayframe exposes Start tracking and Stop tracking actions; Start can use an optional description, category, and the current workspace.
             </Text>
           </View>
 
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Places</Text>
             <Text style={styles.muted}>
-              Places help Dayframe recognise where time was spent. Visits are reviewed before becoming time entries.
+              Places help Dayframe recognise where time was spent. Completed visits are review-first, even for specific places, so you can confirm the time window before it becomes a time entry.
             </Text>
             <View style={styles.buttonRow}>
               <Pressable

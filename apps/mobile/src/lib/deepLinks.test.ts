@@ -35,7 +35,7 @@ describe("Dayframe deep links", () => {
   it("keeps explicit Shortcut description values", async () => {
     await enqueueShortcutAction(
       "action/start",
-      { category: "Family", description: "School pickup" },
+      { category: "Family", description: "School pickup", workspace: "Personal" },
       { route: "action/start" }
     );
 
@@ -44,7 +44,17 @@ describe("Dayframe deep links", () => {
       type: "shortcut_action",
       categoryId: undefined,
       description: "School pickup",
-      rawPayload: { categoryName: "Family", route: "action/start" }
+      rawPayload: { categoryName: "Family", route: "action/start", workspaceName: "Personal" }
+    });
+  });
+
+  it("queues Shortcut stop actions", async () => {
+    await enqueueShortcutAction("action/stop", {}, { route: "action/stop" });
+
+    expect(apiMocks.enqueueEvent).toHaveBeenCalledWith({
+      source: "shortcut",
+      type: "timer_stop",
+      rawPayload: { route: "action/stop" }
     });
   });
 });
