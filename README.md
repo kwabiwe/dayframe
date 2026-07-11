@@ -68,17 +68,21 @@ Seed data is fictional and generic:
 
 ## Design System
 
-Dayframe uses an industrial productivity visual system: mono typography, flat surfaces, 1px borders, tabular timer numerals and lime as the primary brand accent. The app supports light and dark modes with semantic tokens for background, surface, muted surface, border, primary/secondary text, accent, success, warning and danger. Theme mode defaults to the browser/device system setting. Web users can override it in Settings with System, Light or Dark; no theme picker is shown in the main header.
+Dayframe uses the Midnight Core visual system: a near-black midnight-navy canvas, layered neutral surfaces, compact rounded controls, restrained elevation and coral for primary action and active state. The light theme is a designed neutral companion rather than an inversion. UI typography remains system-first, with tabular numerals for timers and reports; the outlined Dayframe wordmark needs no font file.
+
+Shared semantic tokens cover backgrounds, inset/raised/muted surfaces, borders, primary/secondary/muted text, accent states, focus, success, warning, danger, info, chart tracks, overlays, disabled content and shadows. Theme mode defaults to the browser/device system setting. Web and iOS users can choose System, Light or Dark in Settings.
 
 The approved entity/chart palette is shared from `packages/shared` and uses palette keys instead of arbitrary user-selected hex values:
 
 `lime`, `teal`, `sky`, `blue`, `violet`, `rose`, `amber`, `orange`, `red`, `steel`, `moss`, `graphite`.
 
-Categories and tags are created with a swatch selector on web. Legacy clients/projects can still be created for compatibility and migration testing. The API normalizes submitted colors to approved palette keys, and legacy seeded hex values are still resolved into approved colors for compatibility. New seed data stores palette keys directly.
+The stable `lime` key displays as Mint in Midnight Core; key names and deterministic mappings remain unchanged for storage and API compatibility. Categories and tags are created with a swatch selector on web. Legacy clients/projects can still be created for compatibility and migration testing. The API normalizes submitted colors to approved palette keys, and legacy seeded hex values are still resolved into approved colors for compatibility. New seed data stores palette keys directly.
 
 Charts use the same palette resolver on web and mobile. If a report/source/place does not have a stored color, Dayframe cycles through the palette deterministically from the row name so chart colors remain stable. The dashboard time-spent chart and mobile activity summary both render circular donut charts. Web reports use animated bar widths and category-aware timeline marks. The mobile activity summary uses `react-native-svg` to render a donut chart split by category.
 
 Motion is intentionally restrained: panels ease in, buttons show press feedback, timer state color changes are immediate, report bars animate their widths, and the mobile donut draws once when the summary period first appears.
+
+See [the Dayframe brand and style guide](docs/brand-style-guide.md) for canonical artwork, wordmark variants, exact tokens, accessibility guidance and platform usage.
 
 ## Time Review Views
 

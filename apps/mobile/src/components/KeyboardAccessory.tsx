@@ -171,7 +171,7 @@ function AccessoryButton({
           accessoryStyles.buttonText,
           {
             color: primary
-              ? theme.mode === "dark" ? theme.background : "#FFFFFF"
+              ? theme.onAccent
               : disabled ? theme.textSecondary : theme.accent
           }
         ]}
@@ -199,7 +199,7 @@ const accessoryStyles = StyleSheet.create({
     gap: 8
   },
   button: {
-    minHeight: 36,
+    minHeight: 44,
     minWidth: 76,
     borderWidth: 1,
     borderRadius: 999,
@@ -212,7 +212,7 @@ const accessoryStyles = StyleSheet.create({
     transform: [{ translateY: 1 }]
   },
   buttonDisabled: {
-    opacity: 0.45
+    opacity: 0.62
   },
   buttonText: {
     fontFamily: "System",

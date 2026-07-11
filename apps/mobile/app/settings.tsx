@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
-  Image,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -14,6 +13,7 @@ import {
 import Svg, { Path } from "react-native-svg";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { DayframeBrand } from "@/components/brand";
 import {
   DAYFRAME_PALETTE,
   paletteColorFor,
@@ -543,10 +543,10 @@ export default function SettingsScreen() {
             >
               <BackGlyph color={theme.accent} />
             </Pressable>
-            <Image
-              source={require("../assets/dayframe_logo_banner.png")}
-              style={styles.logoImage}
-              resizeMode="contain"
+            <DayframeBrand
+              layout="compact"
+              size="sm"
+              tone={theme.mode === "dark" ? "light" : "dark"}
             />
           </View>
 
@@ -582,6 +582,9 @@ export default function SettingsScreen() {
                 const selected = option.value === themePreference;
                 return (
                   <Pressable
+                    accessibilityLabel={`${option.label} theme`}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
                     key={option.value}
                     style={pressable(
                       [styles.segmentButton, selected ? styles.segmentButtonSelected : null],
@@ -602,14 +605,19 @@ export default function SettingsScreen() {
             <Text style={styles.sectionTitle}>Categories</Text>
             <View style={styles.categoryList}>
               {(data?.categories ?? []).map((category) => {
-                const categoryColor = paletteColorFor(category.color, category.name);
+                const categoryColor = paletteColorFor(category.color, category.name, theme.mode);
                 const editing = editingCategoryId === category.id;
 
                 if (editing) {
                   return (
                     <View key={category.id} style={styles.categoryEditCard}>
                       <View style={styles.categoryEditHeader}>
-                        <View style={[styles.colorDot, { backgroundColor: paletteColorFor(editingCategoryColor, category.name) }]} />
+                        <View
+                          style={[
+                            styles.colorDot,
+                            { backgroundColor: paletteColorFor(editingCategoryColor, category.name, theme.mode) }
+                          ]}
+                        />
                         <TextInput
                           ref={categoryEditRef}
                           style={[styles.textInput, styles.categoryEditInput]}
@@ -624,15 +632,16 @@ export default function SettingsScreen() {
                       <View style={styles.paletteGrid}>
                         {DAYFRAME_PALETTE.map((color) => {
                           const selected = editingCategoryColor === color.key;
-                          return (
-                            <Pressable
-                              key={color.key}
-                              accessibilityLabel={`${color.label} category colour`}
-                              accessibilityRole="button"
+                            return (
+                              <Pressable
+                                key={color.key}
+                                accessibilityLabel={`${color.label} category colour`}
+                                accessibilityRole="button"
+                                accessibilityState={{ selected }}
                               style={pressable(
                                 [
                                   styles.paletteSwatch,
-                                  { backgroundColor: color.hex },
+                                  { backgroundColor: paletteColorFor(color.key, color.label, theme.mode) },
                                   selected ? styles.paletteSwatchSelected : null
                                 ],
                                 styles.buttonPressed
@@ -701,7 +710,7 @@ export default function SettingsScreen() {
                         onPress={() => toggleCategoryPin(category)}
                       >
                         {category.isPinned ? (
-                          <PinGlyph color={theme.accent} />
+                          <PinGlyph color={theme.accentText} />
                         ) : (
                           <PinOffGlyph color={theme.textSecondary} />
                         )}
@@ -731,7 +740,7 @@ export default function SettingsScreen() {
                 onPress={() => setPinNewCategory((current) => !current)}
               >
                 {pinNewCategory ? (
-                  <PinGlyph color={theme.accent} />
+                  <PinGlyph color={theme.accentText} />
                 ) : (
                   <PinOffGlyph color={theme.textSecondary} />
                 )}
@@ -742,7 +751,7 @@ export default function SettingsScreen() {
                 style={pressable(styles.categoryIconButtonPrimary, styles.buttonPressed)}
                 onPress={addCategory}
               >
-                <PlusGlyph color={theme.mode === "dark" ? theme.background : "#FFFFFF"} />
+                <PlusGlyph color={theme.onAccent} />
               </Pressable>
             </View>
           </View>
@@ -944,7 +953,7 @@ export default function SettingsScreen() {
                         value={enabled}
                         onValueChange={(value) => updateHealthImportPreference(option.key, value)}
                         trackColor={{ false: theme.borderStrong, true: theme.accent }}
-                        thumbColor={theme.mode === "dark" ? theme.textPrimary : "#FFFFFF"}
+                        thumbColor={enabled ? theme.onAccent : theme.surfaceRaised}
                         ios_backgroundColor={theme.borderStrong}
                       />
                     </View>
@@ -959,6 +968,7 @@ export default function SettingsScreen() {
                           <Pressable
                             accessibilityRole="button"
                             accessibilityLabel={`${option.label} default Health category`}
+                            accessibilityState={{ selected: !mapping.categoryId }}
                             onPress={() => updateHealthAutoLogMapping(option.key, { categoryId: null })}
                             style={pressable(
                               [
@@ -984,6 +994,7 @@ export default function SettingsScreen() {
                                 key={`${option.key}:${category.id}`}
                                 accessibilityRole="button"
                                 accessibilityLabel={`${option.label} category ${category.name}`}
+                                accessibilityState={{ selected }}
                                 onPress={() => updateHealthAutoLogMapping(option.key, { categoryId: category.id })}
                                 style={pressable(
                                   [
@@ -993,7 +1004,12 @@ export default function SettingsScreen() {
                                   styles.buttonPressed
                                 )}
                               >
-                                <View style={[styles.colorDot, { backgroundColor: paletteColorFor(category.color, category.name) }]} />
+                                <View
+                                  style={[
+                                    styles.colorDot,
+                                    { backgroundColor: paletteColorFor(category.color, category.name, theme.mode) }
+                                  ]}
+                                />
                                 <Text
                                   style={[
                                     styles.categoryChoiceText,

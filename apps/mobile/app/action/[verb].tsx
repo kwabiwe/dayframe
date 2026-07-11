@@ -1,11 +1,14 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect } from "react";
 import { StyleSheet, Text, View } from "react-native";
+import { DayframeBrand } from "@/components/brand";
 import { enqueueShortcutAction } from "@/lib/deepLinks";
+import { useMobileTheme } from "@/lib/mobileTheme";
 
 type LocalParams = Record<string, string | string[]>;
 
 export default function ShortcutActionRoute() {
+  const { theme } = useMobileTheme();
   const params = useLocalSearchParams<LocalParams>();
   const serializedParams = JSON.stringify(params);
 
@@ -37,9 +40,13 @@ export default function ShortcutActionRoute() {
   }, [serializedParams]);
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Dayframe</Text>
-      <Text style={styles.caption}>Shortcut queued</Text>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
+      <DayframeBrand
+        layout="horizontal"
+        size="lg"
+        tone={theme.mode === "dark" ? "light" : "dark"}
+      />
+      <Text style={[styles.caption, { color: theme.textSecondary }]}>Shortcut queued</Text>
     </View>
   );
 }
@@ -53,18 +60,11 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    gap: 10,
-    backgroundColor: "#000000"
-  },
-  title: {
-    color: "#C6FF4A",
-    fontFamily: "Menlo",
-    fontSize: 26,
-    fontWeight: "800"
+    gap: 16,
+    padding: 24
   },
   caption: {
-    color: "#8B9383",
-    fontFamily: "Menlo",
+    fontFamily: "System",
     fontSize: 14
   }
 });

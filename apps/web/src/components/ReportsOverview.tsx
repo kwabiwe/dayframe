@@ -1,4 +1,4 @@
-import { paletteColorFor } from "@dayframe/shared";
+import { paletteCssColorFor } from "@dayframe/shared";
 import { formatDuration } from "@/lib/format";
 import type { ReportRow, ReportSeriesPoint } from "@/lib/queries";
 
@@ -32,7 +32,7 @@ export function ReportsOverview({
       id: row.id,
       name: row.name,
       seconds: row.seconds,
-      color: paletteColorFor(row.color, row.name)
+      color: paletteCssColorFor(row.color, row.name)
     }));
   const totalSeconds = categorySegments.reduce((sum, segment) => sum + segment.seconds, 0);
   const visibleSegments = buildVisibleSegments(categorySegments);
@@ -60,6 +60,7 @@ export function ReportsOverview({
         <div className="reports-donut-panel">
           <div
             className={`reports-donut${totalSeconds === 0 ? " is-empty" : ""}`}
+            role="img"
             aria-label={`Category total ${formatDuration(totalSeconds)}`}
           >
             <svg className="reports-donut-svg" viewBox="0 0 120 120" aria-hidden="true" focusable="false">
@@ -133,7 +134,13 @@ export function ReportsOverview({
               <p>{formatDuration(weekTotal)} tracked</p>
             </div>
           </div>
-          <div className="reports-week-bars" aria-label="Tracked time by day this week">
+          <div
+            className="reports-week-bars"
+            role="img"
+            aria-label={`Tracked time this week: ${weekSeries
+              .map((point) => `${point.label} ${formatDuration(point.seconds)}`)
+              .join(", ")}`}
+          >
             {weekSeries.map((point) => {
               const height = weekTotal > 0 ? Math.max(8, (point.seconds / weekMax) * 100) : 4;
               return (
@@ -169,7 +176,7 @@ function buildVisibleSegments(segments: Segment[]) {
       id: "other-categories",
       name: "Other",
       seconds: otherSeconds,
-      color: paletteColorFor("graphite", "Other")
+      color: paletteCssColorFor("graphite", "Other")
     }
   ];
 }

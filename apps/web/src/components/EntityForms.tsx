@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   DAYFRAME_PALETTE,
   draftAutomationRuleFromText,
-  paletteColorFor,
+  paletteCssColorFor,
   paletteKeyFor,
   type AutomationRuleDraft
 } from "@dayframe/shared";
@@ -468,7 +468,7 @@ function ColorCell({ value }: { value: string }) {
     <span className="inline-flex items-center gap-2">
       <span
         className="h-3 w-3 rounded-full border border-[var(--line-strong)]"
-        style={{ backgroundColor: paletteColorFor(value) }}
+        style={{ backgroundColor: paletteCssColorFor(value) }}
       />
       {color?.label ?? key}
     </span>

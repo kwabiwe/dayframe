@@ -53,7 +53,7 @@ export function TimelineRail({ entries }: { entries: TimeEntryRow[] }) {
                       {formatTime(entry.startedAt)} -{" "}
                       {entry.stoppedAt ? formatTime(entry.stoppedAt) : "Running"}
                     </div>
-                    <div className="mt-1 font-semibold text-[var(--accent)]">
+                    <div className="mt-1 font-semibold text-[var(--accent-text)]">
                       {formatDuration(entry.durationSeconds)}
                     </div>
                   </div>

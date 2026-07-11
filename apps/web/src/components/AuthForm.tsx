@@ -111,13 +111,13 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
         </label>
 
         {error ? (
-          <p className="border border-[var(--danger)] bg-[var(--surface-inset)] px-3 py-2 text-sm text-[var(--danger)]">
+          <p className="border border-[var(--danger)] bg-[var(--surface-inset)] px-3 py-2 text-sm text-[var(--danger-text)]">
             {error}
           </p>
         ) : null}
 
         {notice ? (
-          <p className="border border-[var(--accent)] bg-[var(--surface-inset)] px-3 py-2 text-sm text-[var(--accent)]">
+          <p className="border border-[var(--accent)] bg-[var(--surface-inset)] px-3 py-2 text-sm text-[var(--accent-text)]">
             {notice}
           </p>
         ) : null}
@@ -132,7 +132,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
 
         <p className="text-sm text-[var(--muted)]">
           {isSignup ? "Already have an account?" : "New to Dayframe?"}{" "}
-          <Link className="font-semibold text-[var(--accent)]" href={isSignup ? "/login" : "/signup"}>
+          <Link className="font-semibold text-[var(--accent-text)]" href={isSignup ? "/login" : "/signup"}>
             {isSignup ? "Log in" : "Create one"}
           </Link>
         </p>

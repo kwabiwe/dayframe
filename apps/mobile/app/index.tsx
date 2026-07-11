@@ -5,7 +5,6 @@ import {
   Animated,
   AppState,
   Easing,
-  Image,
   Linking,
   PanResponder,
   Pressable,
@@ -21,6 +20,7 @@ import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { calendarBlockContinuationEdges, paletteColorFor } from "@dayframe/shared";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
+import { DayframeBrand } from "@/components/brand";
 import { useKeyboardAccessory, type KeyboardAccessoryField } from "@/components/KeyboardAccessory";
 import {
   AuthRequiredError,
@@ -139,6 +139,7 @@ export default function HomeScreen() {
   const [calendarEditDeleting, setCalendarEditDeleting] = useState(false);
   const [calendarGestureLocked, setCalendarGestureLocked] = useState(false);
   const [chartProgress, setChartProgress] = useState(1);
+  const reduceMotion = useReduceMotionPreference();
   const refreshInFlight = useRef(false);
   const healthAutoSyncInFlight = useRef(false);
   const mainScrollRef = useRef<ScrollView>(null);
@@ -202,13 +203,18 @@ export default function HomeScreen() {
   }, [authState, load]);
 
   useEffect(() => {
+    if (reduceMotion) {
+      entrance.setValue(1);
+      return;
+    }
+    entrance.setValue(0);
     Animated.timing(entrance, {
       toValue: 1,
       duration: 320,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true
     }).start();
-  }, [entrance]);
+  }, [entrance, reduceMotion]);
 
   useEffect(() => {
     void load();
@@ -316,8 +322,8 @@ export default function HomeScreen() {
     [data?.activeEntry, data?.dayEntries, data?.entries]
   );
   const summarySegments = useMemo(
-    () => buildTodaySummarySegments(summaryEntries, now),
-    [summaryEntries, now]
+    () => buildTodaySummarySegments(summaryEntries, now, theme.mode),
+    [summaryEntries, now, theme.mode]
   );
   const summaryTotal = summarySegments.reduce((sum, segment) => sum + segment.seconds, 0);
   const summaryHasSuggestedActivity = useMemo(() => {
@@ -331,7 +337,11 @@ export default function HomeScreen() {
     });
   }, [data?.reviewItems, now, summaryEntries, todayKey]);
   const activeCategoryColor = data?.activeEntry?.categoryName
-    ? paletteColorFor(data.activeEntry.categoryColor ?? data.activeEntry.categoryId, data.activeEntry.categoryName)
+    ? paletteColorFor(
+        data.activeEntry.categoryColor ?? data.activeEntry.categoryId,
+        data.activeEntry.categoryName,
+        theme.mode
+      )
     : null;
   const activeDescription = displayTimerDescription(data?.activeEntry);
   const recentStoppedAt = useMemo(
@@ -347,8 +357,8 @@ export default function HomeScreen() {
     [calendarEntries, now, selectedDayKey]
   );
   const reports = useMemo(
-    () => buildReports(data, reportRange, todayKey, now),
-    [data, now, reportRange, todayKey]
+    () => buildReports(data, reportRange, todayKey, now, theme.mode),
+    [data, now, reportRange, theme.mode, todayKey]
   );
 
   useEffect(() => {
@@ -357,6 +367,11 @@ export default function HomeScreen() {
 
   useEffect(() => {
     chartBuild.stopAnimation();
+    if (reduceMotion) {
+      chartBuild.setValue(1);
+      setChartProgress(1);
+      return undefined;
+    }
     chartBuild.setValue(0);
     const listenerId = chartBuild.addListener(({ value }) => setChartProgress(value));
     Animated.timing(chartBuild, {
@@ -369,7 +384,7 @@ export default function HomeScreen() {
     return () => {
       chartBuild.removeListener(listenerId);
     };
-  }, [chartBuild, summarySegments.length]);
+  }, [chartBuild, reduceMotion, summarySegments.length]);
 
   async function startTask(categoryId?: string | null) {
     const trimmedDescription = customDescription.trim();
@@ -617,10 +632,10 @@ export default function HomeScreen() {
         <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
           <View style={styles.header}>
             <View style={styles.logoLockup}>
-              <Image
-                source={require("../assets/dayframe_logo_banner.png")}
-                style={styles.logoImage}
-                resizeMode="contain"
+              <DayframeBrand
+                layout="horizontal"
+                size="md"
+                tone={theme.mode === "dark" ? "light" : "dark"}
               />
             </View>
           </View>
@@ -741,10 +756,10 @@ export default function HomeScreen() {
         <Animated.View style={[styles.contentStack, enteringStyle]}>
           <View style={styles.header}>
             <View style={styles.logoLockup}>
-              <Image
-                source={require("../assets/dayframe_logo_banner.png")}
-                style={styles.logoImage}
-                resizeMode="contain"
+              <DayframeBrand
+                layout="horizontal"
+                size="md"
+                tone={theme.mode === "dark" ? "light" : "dark"}
               />
             </View>
             <Pressable
@@ -769,6 +784,12 @@ export default function HomeScreen() {
                   pressed && data?.activeEntry ? styles.buttonPressed : null
                 ]}
               >
+                {activeCategoryColor ? (
+                  <View
+                    pointerEvents="none"
+                    style={[styles.activeTimerAccentRail, { backgroundColor: activeCategoryColor }]}
+                  />
+                ) : null}
                 <View style={styles.activeTimerHeader}>
                   {data?.activeEntry ? (
                     <View style={styles.activeTimerTextStack}>
@@ -784,7 +805,8 @@ export default function HomeScreen() {
                       {activeDescription && data.activeEntry.categoryName ? (
                         <Text style={styles.activeDescription}>{data.activeEntry.categoryName}</Text>
                       ) : null}
-                      <Text style={styles.muted}>{formatClockDuration(activeDurationSeconds)} running</Text>
+                      <Text style={styles.activeElapsed}>{formatClockDuration(activeDurationSeconds)}</Text>
+                      <Text style={styles.activeElapsedLabel}>Running</Text>
                     </View>
                   ) : (
                     <View style={styles.activeTimerTextStack}>
@@ -807,7 +829,7 @@ export default function HomeScreen() {
                           void stopActiveTimer();
                         }}
                       >
-                        <StopGlyph color={theme.mode === "dark" ? theme.background : "#FFFFFF"} />
+                        <StopGlyph color={theme.onAccent} />
                       </Pressable>
                       <Pressable
                         accessibilityLabel="Delete running timer"
@@ -818,7 +840,7 @@ export default function HomeScreen() {
                           confirmDeleteActiveTimer();
                         }}
                       >
-                        <TrashGlyph color={theme.danger} />
+                        <TrashGlyph color={theme.onDanger} />
                       </Pressable>
                     </View>
                   ) : null}
@@ -843,7 +865,7 @@ export default function HomeScreen() {
                     style={pressable(styles.playButton, styles.buttonPressed)}
                     onPress={() => startTask(null)}
                   >
-                    <PlayGlyph color={theme.mode === "dark" ? theme.background : "#FFFFFF"} />
+                    <PlayGlyph color={theme.onAccent} />
                   </Pressable>
                 </View>
                 {quickActions.length > 0 ? (
@@ -854,7 +876,7 @@ export default function HomeScreen() {
                     contentContainerStyle={styles.compactCategoryScroller}
                   >
                     {quickActions.map((category) => {
-                      const categoryColor = paletteColorFor(category.color, category.name);
+                      const categoryColor = paletteColorFor(category.color, category.name, theme.mode);
                       return (
                         <Pressable
                           key={category.id}
@@ -989,7 +1011,7 @@ function FloatingTabBar({
 }) {
   const liquidGlassAvailable = useLiquidGlassAvailability();
   const tabs: Array<{ id: MobileTab; label: string }> = [
-    { id: "timer", label: "Timer" },
+    { id: "timer", label: "Today" },
     { id: "calendar", label: "Calendar" },
     { id: "reports", label: "Reports" }
   ];
@@ -998,7 +1020,7 @@ function FloatingTabBar({
     <>
       {tabs.map((tab) => {
         const selected = tab.id === activeTab;
-        const color = selected ? theme.accent : theme.textSecondary;
+        const color = selected ? theme.accentText : theme.textSecondary;
 
         return (
           <Pressable
@@ -1013,7 +1035,7 @@ function FloatingTabBar({
               pressed ? styles.buttonPressed : null
             ]}
           >
-            {tab.id === "timer" ? <TimerTabGlyph color={color} /> : null}
+            {tab.id === "timer" ? <TodayTabGlyph color={color} /> : null}
             {tab.id === "calendar" ? <CalendarTabGlyph color={color} /> : null}
             {tab.id === "reports" ? <ReportsTabGlyph color={color} /> : null}
             <Text style={[
@@ -1040,7 +1062,7 @@ function FloatingTabBar({
             glassEffectStyle="regular"
             isInteractive
             style={styles.floatingTabBarGlass}
-            tintColor={theme.mode === "dark" ? "rgba(23, 32, 40, 0.44)" : "rgba(255, 255, 255, 0.50)"}
+            tintColor={theme.glassTint}
           >
             {tabItems}
           </GlassView>
@@ -1064,9 +1086,14 @@ function useLiquidGlassAvailability() {
         if (mounted) setReduceTransparency(enabled);
       })
       .catch(() => undefined);
+    const subscription = AccessibilityInfo.addEventListener(
+      "reduceTransparencyChanged",
+      setReduceTransparency
+    );
 
     return () => {
       mounted = false;
+      subscription.remove();
     };
   }, []);
 
@@ -1078,6 +1105,31 @@ function useLiquidGlassAvailability() {
       return false;
     }
   }, [reduceTransparency]);
+}
+
+function useReduceMotionPreference() {
+  // Default to the accessibility-safe state until iOS resolves the preference.
+  const [reduceMotion, setReduceMotion] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then((enabled) => {
+        if (mounted) setReduceMotion(enabled);
+      })
+      .catch(() => undefined);
+    const subscription = AccessibilityInfo.addEventListener(
+      "reduceMotionChanged",
+      setReduceMotion
+    );
+
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
+  }, []);
+
+  return reduceMotion;
 }
 
 function CalendarTab({
@@ -1123,6 +1175,7 @@ function CalendarTab({
   total: number;
   weekDays: Array<{ key: string; date: Date }>;
 }) {
+  const reduceMotion = useReduceMotionPreference();
   const pinchStartDistance = useRef<number | null>(null);
   const pinchStartHourHeight = useRef(hourHeight);
   const pinchAnchorY = useRef(0);
@@ -1151,6 +1204,10 @@ function CalendarTab({
 
   useEffect(() => {
     calendarTransition.stopAnimation();
+    if (reduceMotion) {
+      calendarTransition.setValue(1);
+      return;
+    }
     calendarTransition.setValue(0);
     Animated.timing(calendarTransition, {
       toValue: 1,
@@ -1158,7 +1215,7 @@ function CalendarTab({
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true
     }).start();
-  }, [calendarTransition, selectedDayKey]);
+  }, [calendarTransition, reduceMotion, selectedDayKey]);
 
   const calendarTransitionStyle = {
     opacity: calendarTransition.interpolate({
@@ -1314,7 +1371,7 @@ function CalendarTab({
               ) : null}
               {outsideAxisEntries.map((entry) => {
                 const reviewNeeded = isCalendarReviewNeeded(entry);
-                const color = entryCategoryColor(entry);
+                const color = entryCategoryColor(entry, theme.mode);
                 const blockColor = reviewNeeded ? theme.textSecondary : color;
 
                 return (
@@ -1374,7 +1431,7 @@ function CalendarTab({
 
             {visibleBlocks.map(({ entry, metrics }) => {
               const reviewNeeded = isCalendarReviewNeeded(entry);
-              const color = entryCategoryColor(entry);
+              const color = entryCategoryColor(entry, theme.mode);
               const blockColor = reviewNeeded ? theme.textSecondary : color;
               const title = displayEntryTitle(entry);
               const compact = metrics.height <= 54;
@@ -1599,7 +1656,12 @@ function ReportsTab({
         </View>
         <View style={styles.reportDailyChart}>
           {dailyBars.map((bar) => (
-            <View key={bar.key} style={styles.reportDailySlot}>
+            <View
+              key={bar.key}
+              accessibilityLabel={`${bar.label}: ${formatDuration(bar.seconds)}`}
+              accessible
+              style={styles.reportDailySlot}
+            >
               <View style={styles.reportDailyTrack}>
                 <View
                   style={[
@@ -1668,11 +1730,18 @@ function TrashGlyph({ color }: { color: string }) {
   );
 }
 
-function TimerTabGlyph({ color }: { color: string }) {
+function TodayTabGlyph({ color }: { color: string }) {
   return (
     <Svg width={20} height={20} viewBox="0 0 24 24">
-      <Circle cx={12} cy={13} r={7} fill="none" stroke={color} strokeWidth={2} />
-      <Path d="M9 3h6M12 7v6l4 2" fill="none" stroke={color} strokeLinecap="round" strokeWidth={2} />
+      <Path
+        d="M7 3v3M17 3v3M5 8h14M6 5h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"
+        fill="none"
+        stroke={color}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+      />
+      <Path d="M9 12h6v4H9z" fill={color} />
     </Svg>
   );
 }
@@ -1784,14 +1853,25 @@ function DonutChart({
   const size = 264;
   const center = size / 2;
   const outerRadius = 122;
-  const innerRadius = 58;
+  const innerRadius = 82;
   let cursor = 0;
 
   return (
-    <View style={styles.chartBox}>
-      <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+    <View
+      accessibilityLabel={`Tracked time total ${formatDuration(total)}. Category details follow the chart.`}
+      accessibilityRole="image"
+      accessible
+      style={styles.chartBox}
+    >
+      <Svg
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        width={size}
+        height={size}
+        viewBox={`0 0 ${size} ${size}`}
+      >
         <Circle cx={center} cy={center} r={outerRadius} fill={theme.chartTrack} />
-        <Circle cx={center} cy={center} r={innerRadius} fill={theme.surface} />
+        <Circle cx={center} cy={center} r={innerRadius} fill={theme.surfaceRaised} />
         <G>
           {total > 0
             ? segments.map((segment) => {
@@ -1874,7 +1954,13 @@ function dedupeEntriesById(entries: TimeEntry[]) {
   return Array.from(byId.values());
 }
 
-function buildReports(data: MobileBootstrap | null, range: ReportRange, todayKey: string, now: number) {
+function buildReports(
+  data: MobileBootstrap | null,
+  range: ReportRange,
+  todayKey: string,
+  now: number,
+  mode: MobileTheme["mode"]
+) {
   const weekStart = data?.dateRange?.weekStart ? new Date(data.dateRange.weekStart) : startOfWeekDate(new Date(now));
   const weekEnd = addDaysToDate(weekStart, 7);
   const todayStart = dateFromKey(todayKey);
@@ -1897,7 +1983,7 @@ function buildReports(data: MobileBootstrap | null, range: ReportRange, todayKey
   return {
     todayTotal,
     weekTotal,
-    segments: buildCategorySegments(confirmedSelectedEntries, rangeStart, rangeEnd, now),
+    segments: buildCategorySegments(confirmedSelectedEntries, rangeStart, rangeEnd, now, mode),
     dailyBars: buildDailyBars(confirmedWeekEntries, weekStart, now),
     hasSuggestedActivity: hasReviewNeededActivityForRange({
       entries: selectedEntries,
@@ -1928,7 +2014,8 @@ function buildCategorySegments(
   entries: TimeEntry[],
   rangeStart: Date,
   rangeEnd: Date,
-  now: number
+  now: number,
+  mode: MobileTheme["mode"]
 ): SummarySegment[] {
   const totals = new Map<string, Omit<SummarySegment, "share">>();
 
@@ -1944,7 +2031,7 @@ function buildCategorySegments(
       key,
       categoryName,
       seconds: (current?.seconds ?? 0) + seconds,
-      color: current?.color ?? entryCategoryColor(entry)
+      color: current?.color ?? entryCategoryColor(entry, mode)
     });
   }
 
@@ -2059,8 +2146,12 @@ function entryDurationSeconds(entry: TimeEntry, now: number) {
   return Math.max(entry.durationSeconds, Math.floor((now - startedAt) / 1000));
 }
 
-function entryCategoryColor(entry: TimeEntry) {
-  return paletteColorFor(entry.categoryColor ?? entry.categoryId, entry.categoryName ?? "Uncategorized");
+function entryCategoryColor(entry: TimeEntry, mode: MobileTheme["mode"]) {
+  return paletteColorFor(
+    entry.categoryColor ?? entry.categoryId,
+    entry.categoryName ?? "Uncategorized",
+    mode
+  );
 }
 
 function displayEntryTitle(entry: TimeEntry) {
@@ -2199,7 +2290,11 @@ function colorWithAlpha(hex: string, alpha: number) {
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }
 
-function buildTodaySummarySegments(entries: TimeEntry[], now: number): SummarySegment[] {
+function buildTodaySummarySegments(
+  entries: TimeEntry[],
+  now: number,
+  mode: MobileTheme["mode"]
+): SummarySegment[] {
   const periodStart = startOfToday(now);
   const totals = new Map<string, Omit<SummarySegment, "share">>();
 
@@ -2216,7 +2311,7 @@ function buildTodaySummarySegments(entries: TimeEntry[], now: number): SummarySe
       key,
       categoryName,
       seconds: (current?.seconds ?? 0) + seconds,
-      color: current?.color ?? entryCategoryColor(entry)
+      color: current?.color ?? entryCategoryColor(entry, mode)
     });
   }
 

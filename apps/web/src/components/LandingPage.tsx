@@ -1,6 +1,6 @@
-import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, CheckCircle2, Clock3, HeartPulse, MapPin, ShieldCheck } from "lucide-react";
+import { DayframeBrand } from "@/components/brand/DayframeBrand";
 
 const productPoints = [
   {
@@ -25,7 +25,7 @@ export function LandingPage() {
     <main className="landing-page">
       <nav className="landing-nav" aria-label="Public navigation">
         <Link href="/" className="landing-brand" aria-label="Dayframe home">
-          <Image src="/logos/dayframe_logo_banner.png" alt="Dayframe" width={2172} height={724} priority />
+          <DayframeBrand decorative size="lg" />
         </Link>
         <div>
           <Link href="/login">Log in</Link>

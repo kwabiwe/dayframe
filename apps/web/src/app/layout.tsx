@@ -9,7 +9,7 @@ export const metadata: Metadata = {
   title: "Dayframe",
   description: "Customizable time intelligence for manual and location-based activity signals.",
   icons: {
-    icon: "/logos/dayframe_logo.png"
+    icon: "/logos/dayframe-colour-logo-transparent.svg"
   }
 };
 

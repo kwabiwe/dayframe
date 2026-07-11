@@ -38,6 +38,6 @@ describe("time entry display helpers", () => {
         categoryColor: "lime",
         categoryName: "Work"
       })
-    ).toBe("#BFE8D9");
+    ).toBe("var(--palette-lime)");
   });
 });

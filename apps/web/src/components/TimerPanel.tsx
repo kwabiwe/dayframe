@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { paletteColorFor } from "@dayframe/shared";
+import { paletteCssColorFor } from "@dayframe/shared";
 import { Play, Square, Trash2 } from "lucide-react";
 import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
 import { timeEntryCategoryColor, timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
@@ -173,7 +173,7 @@ export function TimerPanel({
       className="industrial-panel"
       style={{
         borderColor: activeEntry
-          ? paletteColorFor(activeEntry.categoryColor, activeEntry.categoryName ?? activeEntry.id)
+          ? paletteCssColorFor(activeEntry.categoryColor, activeEntry.categoryName ?? activeEntry.id)
           : undefined
       }}
     >
@@ -234,7 +234,7 @@ export function TimerPanel({
         <div className="grid grid-cols-[1fr_auto] items-end gap-3 p-4 lg:block">
           <div>
             <span className="industrial-field-label">Duration</span>
-            <div className="tabular text-3xl font-semibold leading-none text-[var(--accent)]">
+            <div className="tabular text-3xl font-semibold leading-none text-[var(--accent-text)]">
               {formatClockDuration(activeDurationSeconds)}
             </div>
           </div>
@@ -286,7 +286,7 @@ export function TimerPanel({
           {recentEntries.slice(0, 4).map((entry) => (
             <button
               key={entry.id}
-              className="focus-ring motion-row flex w-full items-center justify-between rounded-lg border border-[var(--line)] bg-[var(--surface-inset)] px-3 py-2 text-left text-sm hover:border-[var(--accent)] hover:text-[var(--accent)]"
+              className="focus-ring motion-row flex w-full items-center justify-between rounded-lg border border-[var(--line)] bg-[var(--surface-inset)] px-3 py-2 text-left text-sm hover:border-[var(--accent)] hover:text-[var(--accent-text)]"
               style={{ borderLeftWidth: 4, borderLeftColor: timeEntryCategoryColor(entry) }}
               type="button"
               disabled={isBusy}

@@ -1,7 +1,7 @@
-import Image from "next/image";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AuthForm } from "@/components/AuthForm";
+import { DayframeBrand } from "@/components/brand/DayframeBrand";
 import { getOptionalPageSession } from "@/lib/auth/server";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +13,7 @@ export default async function SignupPage() {
   return (
     <main className="auth-page bg-[var(--background)] px-5 py-10 text-[var(--foreground)]">
       <Link href="/" className="auth-home-link" aria-label="Dayframe home">
-        <Image src="/logos/dayframe_logo_banner.png" alt="Dayframe" width={2172} height={724} priority />
+        <DayframeBrand decorative size="lg" />
       </Link>
       <AuthForm mode="signup" />
     </main>

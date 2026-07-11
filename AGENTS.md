@@ -83,7 +83,7 @@ npm run export:workspace -- ./dayframe-backup.json
 - Database queries should use typed rows with `query<T>()` or `pool.connect()` transactions.
 - User-facing source labels should go through formatting helpers; do not expose raw strings like `manual_app` in UI.
 - Use palette keys from `packages/shared`; avoid arbitrary hex color pickers.
-- For frontend changes, preserve the current Dayframe visual system: restrained, rounded, pastel logo palette, accessible light/dark tokens, compact productivity UI.
+- For frontend changes, preserve the current Dayframe Midnight Core visual system: midnight-navy dark canvas, designed light companion, restrained rounded surfaces, coral primary states, unchanged colour logo artwork, accessible semantic tokens, and compact productivity UI.
 - Use lucide icons where practical.
 - All floating UI surfaces must be mobile-safe. Popovers, dropdowns, menus, modals, profile panels, workspace switchers, help panels, search palettes, and notification panels must fit within phone viewports without horizontal overflow.
 - On narrow screens, desktop popovers should become centered dialogs, full-width sheets, or bottom sheets with `max-width: calc(100vw - 24px)`, `max-height`, internal scrolling, visible close controls, and 44px minimum touch targets.
@@ -144,6 +144,7 @@ npm run build
 ## Important Files
 
 - `docs/PRD.md`: product requirements and MVP scope.
+- `docs/brand-style-guide.md`: canonical logo usage, Midnight Core tokens, typography, component states, charts, and accessibility.
 - `docs/vercel-supabase-hosting.md`: production hosting/auth runbook.
 - `docs/dayframe-regression-checklist.md`: feature checklist to avoid regressions.
 - `.codex/reference/product-model.md`: category/task-first product rules.

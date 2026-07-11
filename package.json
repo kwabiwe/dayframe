@@ -20,6 +20,7 @@
     "build": "npm run build -w @dayframe/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
+    "check:brand-assets": "node scripts/check-brand-assets.mjs",
     "testflight:preflight": "node scripts/dayframe-testflight-preflight.mjs"
   },
   "devDependencies": {

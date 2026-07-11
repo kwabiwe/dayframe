@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
-  Image,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -14,6 +13,7 @@ import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import { paletteColorFor } from "@dayframe/shared";
+import { DayframeBrand } from "@/components/brand";
 import {
   AuthRequiredError,
   createPlace,
@@ -331,10 +331,10 @@ export default function PlacesScreen() {
             >
               <BackGlyph color={theme.accent} />
             </Pressable>
-            <Image
-              source={require("../assets/dayframe_logo_banner.png")}
-              style={styles.logoImage}
-              resizeMode="contain"
+            <DayframeBrand
+              layout="compact"
+              size="sm"
+              tone={theme.mode === "dark" ? "light" : "dark"}
             />
           </View>
 
@@ -434,7 +434,7 @@ export default function PlacesScreen() {
                     label="No default"
                     selected={!defaultCategoryId}
                     onPress={() => setDefaultCategoryId("")}
-                    themeAccent={theme.accent}
+                    theme={theme}
                     styles={styles}
                   />
                   {categories.map((category) => (
@@ -444,7 +444,7 @@ export default function PlacesScreen() {
                       label={category.name}
                       selected={defaultCategoryId === category.id}
                       onPress={() => setDefaultCategoryId(category.id)}
-                      themeAccent={theme.accent}
+                      theme={theme}
                       styles={styles}
                     />
                   ))}
@@ -583,19 +583,20 @@ function CategoryChoice({
   label,
   selected,
   onPress,
-  themeAccent,
+  theme,
   styles
 }: {
   category?: Category;
   label: string;
   selected: boolean;
   onPress: () => void;
-  themeAccent: string;
+  theme: MobileTheme;
   styles: MobileStyles;
 }) {
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityState={{ selected }}
       style={pressable(
         [styles.categoryChoice, selected ? styles.categoryChoiceSelected : null],
         styles.buttonPressed
@@ -603,12 +604,17 @@ function CategoryChoice({
       onPress={onPress}
     >
       {category ? (
-        <View style={[styles.colorDot, { backgroundColor: paletteColorFor(category.color, category.name) }]} />
+        <View
+          style={[
+            styles.colorDot,
+            { backgroundColor: paletteColorFor(category.color, category.name, theme.mode) }
+          ]}
+        />
       ) : null}
       <Text style={[styles.categoryChoiceText, selected ? styles.categoryChoiceTextSelected : null]}>
         {label}
       </Text>
-      {selected ? <CheckGlyph color={themeAccent} /> : null}
+      {selected ? <CheckGlyph color={theme.accentText} /> : null}
     </Pressable>
   );
 }
