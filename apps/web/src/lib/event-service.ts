@@ -396,7 +396,7 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
           candidate.placeId ?? null,
           parsed.source,
           candidate.confidence,
-          parsed.description ?? (isExplicitStartEvent(parsed.type) ? null : candidate.title),
+          parsed.description ?? candidate.description ?? (isExplicitStartEvent(parsed.type) ? null : candidate.title),
           parsed.occurredAt,
           eventId
         ]

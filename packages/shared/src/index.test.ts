@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   applyActivityEvent,
+  autoLogDefaultMappingFor,
   calendarBlockContinuationEdges,
   draftAutomationRuleFromText,
   healthAutoLogMappingFor,
   healthWorkoutLabel,
+  normalizeActivityEvent,
+  normalizeAutoLogDefaultMappings,
   normalizeHealthAutoLogMappings,
   normalizeHealthWorkoutType,
   shouldAutoConfirmHealthSleep,
@@ -282,6 +285,96 @@ describe("Health auto-log mappings", () => {
       description: "Rest"
     });
     expect(healthAutoLogMappingFor("running", mappings)).toEqual({});
+  });
+});
+
+describe("non-Health auto-log defaults", () => {
+  it("normalizes supported source defaults and drops unknown keys", () => {
+    const mappings = normalizeAutoLogDefaultMappings({
+      shortcut: {
+        categoryId: "category-shortcut",
+        description: "  Shortcut start  "
+      },
+      nfc: {
+        categoryId: "",
+        description: "Tap tag"
+      },
+      health_sleep: {
+        categoryId: "ignored",
+        description: "ignored"
+      }
+    });
+
+    expect(mappings).toEqual({
+      shortcut: {
+        categoryId: "category-shortcut",
+        description: "Shortcut start"
+      },
+      nfc: {
+        categoryId: null,
+        description: "Tap tag"
+      }
+    });
+    expect(autoLogDefaultMappingFor("shortcut", mappings)).toEqual({
+      categoryId: "category-shortcut",
+      description: "Shortcut start"
+    });
+    expect(autoLogDefaultMappingFor("health_sleep", mappings)).toEqual({});
+  });
+
+  it("uses non-Health defaults only when explicit event values are blank", () => {
+    const defaulted = normalizeActivityEvent(
+      {
+        source: "shortcut",
+        type: "shortcut_action",
+        occurredAt: new Date("2026-07-11T08:00:00.000Z")
+      },
+      {
+        ...context,
+        autoLogDefaults: {
+          shortcut: {
+            categoryId: categoryId("focus"),
+            description: "Shortcut start"
+          }
+        }
+      }
+    );
+
+    expect(defaulted).toEqual(
+      expect.objectContaining({
+        action: "start_timer",
+        categoryId: categoryId("focus"),
+        title: "Shortcut start",
+        description: "Shortcut start"
+      })
+    );
+
+    const explicit = normalizeActivityEvent(
+      {
+        source: "shortcut",
+        type: "shortcut_action",
+        occurredAt: new Date("2026-07-11T08:00:00.000Z"),
+        categoryId: categoryId("family"),
+        description: "School run"
+      },
+      {
+        ...context,
+        autoLogDefaults: {
+          shortcut: {
+            categoryId: categoryId("focus"),
+            description: "Shortcut start"
+          }
+        }
+      }
+    );
+
+    expect(explicit).toEqual(
+      expect.objectContaining({
+        categoryId: categoryId("family"),
+        title: "School run",
+        description: "School run"
+      })
+    );
   });
 });
 

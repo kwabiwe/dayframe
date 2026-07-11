@@ -15,12 +15,14 @@ export async function enqueueShortcutAction(
   rawPayload: Record<string, unknown> = {}
 ) {
   const categoryId = firstString(query.categoryId);
+  const description = firstString(query.description);
 
-  if (action === "action/start" && categoryId) {
+  if (action === "action/start") {
     return enqueueEvent({
       source: "shortcut",
       type: "shortcut_action",
       categoryId,
+      description,
       rawPayload
     });
   }
