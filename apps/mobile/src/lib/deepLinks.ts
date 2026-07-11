@@ -15,6 +15,7 @@ export async function enqueueShortcutAction(
   rawPayload: Record<string, unknown> = {}
 ) {
   const categoryId = firstString(query.categoryId);
+  const categoryName = firstString(query.categoryName) ?? firstString(query.category);
   const description = firstString(query.description);
 
   if (action === "action/start") {
@@ -23,7 +24,10 @@ export async function enqueueShortcutAction(
       type: "shortcut_action",
       categoryId,
       description,
-      rawPayload
+      rawPayload: {
+        ...rawPayload,
+        ...(categoryName ? { categoryName } : {})
+      }
     });
   }
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Alert,
   Pressable,
@@ -15,12 +15,8 @@ import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { DayframeBrand } from "@/components/brand";
 import {
-  AUTO_LOG_DEFAULT_SOURCE_OPTIONS,
   DAYFRAME_PALETTE,
   paletteColorFor,
-  type AutoLogDefaultMapping,
-  type AutoLogDefaultMappings,
-  type AutoLogDefaultSource,
   type DayframePaletteKey,
   type HealthAutoLogMapping,
   type HealthAutoLogMappings,
@@ -34,12 +30,10 @@ import {
   clearFailedQueuedEvents,
   createCategory,
   fetchBootstrap,
-  getAutoLogDefaults,
   getQueueDiagnostics,
   logout,
   readQueue,
   retryFailedQueuedEvents,
-  setAutoLogDefaultMapping,
   syncQueue,
   updateCategory,
   type MobileBootstrap,
@@ -72,11 +66,15 @@ import {
 import {
   pressable,
   themeOptions,
-  useMobileTheme
+  useMobileTheme,
+  type MobileStyles,
+  type MobileTheme
 } from "@/lib/mobileTheme";
 import { REVIEW_COPY, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
 
 type Category = MobileBootstrap["categories"][number];
+type SettingsSection = "index" | "profile" | "categories" | "automations" | "health" | "sync" | "appearance";
+type SettingsIcon = "profile" | "categories" | "automations" | "health" | "sync" | "appearance" | "review";
 
 export default function SettingsScreen() {
   const {
@@ -98,7 +96,6 @@ export default function SettingsScreen() {
   const [healthStatus, setHealthStatus] = useState<HealthImportStatus[]>([]);
   const [healthImportPreferences, setHealthImportPreferences] = useState<HealthImportPreferences | null>(null);
   const [healthAutoLogMappings, setHealthAutoLogMappings] = useState<HealthAutoLogMappings>({});
-  const [autoLogDefaults, setAutoLogDefaults] = useState<AutoLogDefaultMappings>({});
   const [healthDebugStatus, setHealthDebugStatus] = useState<string | null>(null);
   const [exportingHealthDebug, setExportingHealthDebug] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
@@ -106,6 +103,7 @@ export default function SettingsScreen() {
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [editingCategoryName, setEditingCategoryName] = useState("");
   const [editingCategoryColor, setEditingCategoryColor] = useState("lime");
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("index");
   const refreshInFlight = useRef(false);
   const categoryEditRef = useRef<TextInput>(null);
 
@@ -160,7 +158,6 @@ export default function SettingsScreen() {
     });
     getHealthImportPreferences().then(setHealthImportPreferences).catch(() => undefined);
     getHealthAutoLogMappings().then(setHealthAutoLogMappings).catch(() => undefined);
-    getAutoLogDefaults().then(setAutoLogDefaults).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -201,6 +198,18 @@ export default function SettingsScreen() {
   });
   const locationMonitoringAllowed = locationDiagnostics?.backgroundPermission === "granted";
   const locationActionLabel = locationMonitoringAllowed ? "Refresh monitoring" : "Enable";
+  const settingsTitle = settingsSectionTitle(settingsSection);
+  const categoryCount = data?.categories.length ?? 0;
+  const workspaceLabel = data?.workspace?.name ?? "Default workspace";
+
+  function goBack() {
+    if (settingsSection === "index") {
+      router.back();
+      return;
+    }
+    setSettingsSection("index");
+  }
+
   useEffect(() => {
     if (!editingCategoryId) return undefined;
 
@@ -493,28 +502,6 @@ export default function SettingsScreen() {
     }
   }
 
-  async function updateAutoLogDefault(source: AutoLogDefaultSource, patch: AutoLogDefaultMapping) {
-    const current = autoLogDefaults;
-    const nextMapping = {
-      ...(current[source] ?? {}),
-      ...patch
-    };
-    const optimistic = { ...current };
-    if (nextMapping.categoryId || nextMapping.description) {
-      optimistic[source] = nextMapping;
-    } else {
-      delete optimistic[source];
-    }
-    setAutoLogDefaults(optimistic);
-    try {
-      const saved = await setAutoLogDefaultMapping(source, nextMapping);
-      setAutoLogDefaults(saved);
-    } catch (error) {
-      setAutoLogDefaults(current);
-      Alert.alert("Auto-log defaults", error instanceof Error ? error.message : "Unable to save auto-log defaults.");
-    }
-  }
-
   async function exportAppleHealthDebug() {
     setExportingHealthDebug(true);
     setHealthDebugStatus("Preparing Health debug export...");
@@ -584,10 +571,11 @@ export default function SettingsScreen() {
               accessibilityLabel="Back"
               accessibilityRole="button"
               style={pressable(styles.iconButton, styles.buttonPressed)}
-              onPress={() => router.back()}
+              onPress={goBack}
             >
               <BackGlyph color={theme.accent} />
             </Pressable>
+            <Text style={styles.settingsTitle} numberOfLines={1}>{settingsTitle}</Text>
             <DayframeBrand
               layout="compact"
               size="sm"
@@ -595,57 +583,109 @@ export default function SettingsScreen() {
             />
           </View>
 
-          <View style={styles.panel}>
-            <Text style={styles.sectionTitle}>Settings</Text>
-            <Text style={styles.muted}>Account, categories, device sync and permissions.</Text>
-          </View>
-
-          <View style={styles.panel}>
-            <View style={styles.summaryHeader}>
-              <View>
-                <Text style={styles.label}>{REVIEW_COPY.needsReview}</Text>
-                <Text style={styles.sectionTitle}>Review</Text>
+          {settingsSection === "index" ? (
+            <>
+              <View style={styles.panel}>
+                <Text style={styles.sectionTitle}>Settings</Text>
+                <Text style={styles.muted}>Grouped controls for account, tracking, automation, sync and permissions.</Text>
               </View>
-              <Text style={styles.summaryTotal}>{openReviewCount}</Text>
-            </View>
-            <Text style={styles.muted}>Suggested activity from Health and places stays here until it is confirmed.</Text>
-            <View style={styles.buttonRow}>
-              <Pressable
-                accessibilityRole="button"
-                style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                onPress={() => router.push("./review")}
-              >
-                <Text style={styles.secondaryButtonText}>Open Review</Text>
-              </Pressable>
-            </View>
-          </View>
 
-          <View style={styles.panel}>
-            <Text style={styles.label}>Theme</Text>
-            <View style={styles.segmentedControl}>
-              {themeOptions.map((option) => {
-                const selected = option.value === themePreference;
-                return (
-                  <Pressable
-                    accessibilityLabel={`${option.label} theme`}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected }}
-                    key={option.value}
-                    style={pressable(
-                      [styles.segmentButton, selected ? styles.segmentButtonSelected : null],
-                      styles.buttonPressed
-                    )}
-                    onPress={() => setThemePreference(option.value)}
-                  >
-                    <Text style={[styles.segmentButtonText, selected ? styles.segmentButtonTextSelected : null]}>
-                      {option.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
+              <SettingsGroup title="Dayframe">
+                <SettingsMenuRow
+                  icon="profile"
+                  label="Profile & workspace"
+                  value={workspaceLabel}
+                  styles={styles}
+                  theme={theme}
+                  onPress={() => setSettingsSection("profile")}
+                />
+                <SettingsMenuRow
+                  icon="categories"
+                  label="Categories"
+                  value={`${categoryCount} ${categoryCount === 1 ? "category" : "categories"}`}
+                  styles={styles}
+                  theme={theme}
+                  onPress={() => setSettingsSection("categories")}
+                />
+                <SettingsMenuRow
+                  icon="appearance"
+                  label="Appearance"
+                  value={themePreference === "system" ? "System" : themePreference === "dark" ? "Dark" : "Light"}
+                  styles={styles}
+                  theme={theme}
+                  onPress={() => setSettingsSection("appearance")}
+                />
+              </SettingsGroup>
 
+              <SettingsGroup title="Tracking">
+                <SettingsMenuRow
+                  icon="automations"
+                  label="Automations"
+                  value="Shortcuts, NFC, places"
+                  styles={styles}
+                  theme={theme}
+                  onPress={() => setSettingsSection("automations")}
+                />
+                <SettingsMenuRow
+                  icon="health"
+                  label="Apple Health"
+                  value={healthAvailability?.notes ?? "Sleep and workouts"}
+                  styles={styles}
+                  theme={theme}
+                  onPress={() => setSettingsSection("health")}
+                />
+                <SettingsMenuRow
+                  icon="review"
+                  label={REVIEW_COPY.needsReview}
+                  value={`${openReviewCount} open`}
+                  styles={styles}
+                  theme={theme}
+                  onPress={() => router.push("./review")}
+                />
+              </SettingsGroup>
+
+              <SettingsGroup title="Device">
+                <SettingsMenuRow
+                  icon="sync"
+                  label="Sync & diagnostics"
+                  value={deviceSyncStatus}
+                  styles={styles}
+                  theme={theme}
+                  onPress={() => setSettingsSection("sync")}
+                />
+              </SettingsGroup>
+            </>
+          ) : null}
+
+          {settingsSection === "appearance" ? (
+            <View style={styles.panel}>
+              <Text style={styles.label}>Theme</Text>
+              <View style={styles.segmentedControl}>
+                {themeOptions.map((option) => {
+                  const selected = option.value === themePreference;
+                  return (
+                    <Pressable
+                      accessibilityLabel={`${option.label} theme`}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      key={option.value}
+                      style={pressable(
+                        [styles.segmentButton, selected ? styles.segmentButtonSelected : null],
+                        styles.buttonPressed
+                      )}
+                      onPress={() => setThemePreference(option.value)}
+                    >
+                      <Text style={[styles.segmentButtonText, selected ? styles.segmentButtonTextSelected : null]}>
+                        {option.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          ) : null}
+
+          {settingsSection === "categories" ? (
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Categories</Text>
             <View style={styles.categoryList}>
@@ -800,7 +840,9 @@ export default function SettingsScreen() {
               </Pressable>
             </View>
           </View>
+          ) : null}
 
+          {settingsSection === "profile" ? (
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Account</Text>
             {data?.user || data?.workspace ? (
@@ -828,6 +870,16 @@ export default function SettingsScreen() {
               </Pressable>
             </View>
           </View>
+          ) : null}
+
+          {settingsSection === "automations" ? (
+          <>
+          <View style={styles.panel}>
+            <Text style={styles.sectionTitle}>Shortcuts and NFC</Text>
+            <Text style={styles.muted}>
+              Apple Shortcuts handles NFC triggers. Use Dayframe's Start tracking action with a description and category, and Dayframe uses the current workspace when the action runs.
+            </Text>
+          </View>
 
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Places</Text>
@@ -844,7 +896,10 @@ export default function SettingsScreen() {
               </Pressable>
             </View>
           </View>
+          </>
+          ) : null}
 
+          {settingsSection === "sync" ? (
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Device sync</Text>
             <Text style={styles.statusText}>{deviceSyncStatus}</Text>
@@ -930,111 +985,9 @@ export default function SettingsScreen() {
               </Pressable>
             </View>
           </View>
+          ) : null}
 
-          <View style={styles.panel}>
-            <Text style={styles.sectionTitle}>Auto-log defaults</Text>
-            <Text style={styles.muted}>
-              Defaults fill blank starts from mobile, Shortcut, NFC, widgets and Home Assistant buttons.
-            </Text>
-            <View style={styles.healthPreferenceList}>
-              {AUTO_LOG_DEFAULT_SOURCE_OPTIONS.map((option) => {
-                const mapping = autoLogDefaults[option.source] ?? {};
-                const categoryName = data?.categories.find((category) => category.id === mapping.categoryId)?.name;
-                return (
-                  <View key={option.source} style={styles.healthPreferenceRow}>
-                    <View style={styles.healthPreferenceHeader}>
-                      <View style={styles.healthPreferenceText}>
-                        <Text style={styles.categoryName}>{option.label}</Text>
-                        <Text style={styles.categoryMeta}>
-                          {defaultAutoLogSummary(categoryName, mapping.description)}
-                        </Text>
-                      </View>
-                    </View>
-                    <View style={styles.healthMappingPanel}>
-                      <Text style={styles.healthMappingLabel}>Category</Text>
-                      <ScrollView
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        contentContainerStyle={styles.categoryChoiceScroller}
-                      >
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={`${option.label} no default category`}
-                          accessibilityState={{ selected: !mapping.categoryId }}
-                          onPress={() => updateAutoLogDefault(option.source, { categoryId: null })}
-                          style={pressable(
-                            [
-                              styles.categoryChoice,
-                              !mapping.categoryId ? styles.categoryChoiceSelected : null
-                            ],
-                            styles.buttonPressed
-                          )}
-                        >
-                          <Text
-                            style={[
-                              styles.categoryChoiceText,
-                              !mapping.categoryId ? styles.categoryChoiceTextSelected : null
-                            ]}
-                          >
-                            No default
-                          </Text>
-                        </Pressable>
-                        {(data?.categories ?? []).map((category) => {
-                          const selected = mapping.categoryId === category.id;
-                          return (
-                            <Pressable
-                              key={`${option.source}:${category.id}`}
-                              accessibilityRole="button"
-                              accessibilityLabel={`${option.label} default category ${category.name}`}
-                              accessibilityState={{ selected }}
-                              onPress={() => updateAutoLogDefault(option.source, { categoryId: category.id })}
-                              style={pressable(
-                                [
-                                  styles.categoryChoice,
-                                  selected ? styles.categoryChoiceSelected : null
-                                ],
-                                styles.buttonPressed
-                              )}
-                            >
-                              <View
-                                style={[
-                                  styles.colorDot,
-                                  { backgroundColor: paletteColorFor(category.color, category.name, theme.mode) }
-                                ]}
-                              />
-                              <Text
-                                style={[
-                                  styles.categoryChoiceText,
-                                  selected ? styles.categoryChoiceTextSelected : null
-                                ]}
-                              >
-                                {category.name}
-                              </Text>
-                            </Pressable>
-                          );
-                        })}
-                      </ScrollView>
-                      <Text style={styles.healthMappingLabel}>Description</Text>
-                      <TextInput
-                        key={`${option.source}:${mapping.description ?? ""}`}
-                        style={[styles.textInput, styles.healthMappingInput]}
-                        defaultValue={mapping.description ?? ""}
-                        placeholder={option.defaultDescription}
-                        placeholderTextColor={theme.textSecondary}
-                        returnKeyType="done"
-                        onEndEditing={(event) =>
-                          updateAutoLogDefault(option.source, {
-                            description: event.nativeEvent.text.trim() || null
-                          })
-                        }
-                      />
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
-          </View>
-
+          {settingsSection === "automations" ? (
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Location</Text>
             <Text style={styles.muted}>
@@ -1080,7 +1033,9 @@ export default function SettingsScreen() {
               </Pressable>
             </View>
           </View>
+          ) : null}
 
+          {settingsSection === "health" ? (
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Apple Health</Text>
             <Text style={styles.muted}>
@@ -1225,10 +1180,130 @@ export default function SettingsScreen() {
               </Pressable>
             </View>
           </View>
+          ) : null}
         </View>
       </ScrollView>
     </SafeAreaView>
   );
+}
+
+function SettingsGroup({ children, title }: { children: ReactNode; title: string }) {
+  const { styles } = useMobileTheme();
+  return (
+    <View style={styles.settingsGroup}>
+      <Text style={styles.settingsGroupTitle}>{title}</Text>
+      <View style={styles.settingsGroupRows}>{children}</View>
+    </View>
+  );
+}
+
+function SettingsMenuRow({
+  icon,
+  label,
+  onPress,
+  styles,
+  theme,
+  value
+}: {
+  icon: SettingsIcon;
+  label: string;
+  onPress: () => void;
+  styles: MobileStyles;
+  theme: MobileTheme;
+  value?: string;
+}) {
+  return (
+    <Pressable
+      accessibilityLabel={label}
+      accessibilityRole="button"
+      style={pressable(styles.settingsMenuRow, styles.buttonPressed)}
+      onPress={onPress}
+    >
+      <View style={styles.settingsMenuIcon}>
+        <SettingsRowGlyph name={icon} color={theme.accentText} />
+      </View>
+      <View style={styles.settingsMenuText}>
+        <Text style={styles.settingsMenuTitle} numberOfLines={1}>{label}</Text>
+        {value ? <Text style={styles.settingsMenuMeta} numberOfLines={1}>{value}</Text> : null}
+      </View>
+      <ChevronGlyph color={theme.textSecondary} />
+    </Pressable>
+  );
+}
+
+function SettingsRowGlyph({ color, name }: { color: string; name: SettingsIcon }) {
+  switch (name) {
+    case "profile":
+      return (
+        <Svg width={18} height={18} viewBox="0 0 24 24">
+          <Path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" fill="none" stroke={color} strokeWidth={2} />
+          <Path d="M4 21a8 8 0 0 1 16 0" fill="none" stroke={color} strokeLinecap="round" strokeWidth={2} />
+        </Svg>
+      );
+    case "categories":
+      return (
+        <Svg width={18} height={18} viewBox="0 0 24 24">
+          <Path d="M5 5h6v6H5V5Zm8 0h6v6h-6V5ZM5 13h6v6H5v-6Zm8 0h6v6h-6v-6Z" fill="none" stroke={color} strokeLinejoin="round" strokeWidth={2} />
+        </Svg>
+      );
+    case "automations":
+      return (
+        <Svg width={18} height={18} viewBox="0 0 24 24">
+          <Path d="m13 3-8 11h6l-1 7 9-12h-6l0-6Z" fill="none" stroke={color} strokeLinejoin="round" strokeWidth={2} />
+        </Svg>
+      );
+    case "health":
+      return (
+        <Svg width={18} height={18} viewBox="0 0 24 24">
+          <Path d="M12 5v14M5 12h14" stroke={color} strokeLinecap="round" strokeWidth={2.2} />
+        </Svg>
+      );
+    case "sync":
+      return (
+        <Svg width={18} height={18} viewBox="0 0 24 24">
+          <Path d="M17 7H7l3-3M7 17h10l-3 3" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
+        </Svg>
+      );
+    case "appearance":
+      return (
+        <Svg width={18} height={18} viewBox="0 0 24 24">
+          <Path d="M12 4a8 8 0 1 0 8 8 6 6 0 0 1-8-8Z" fill="none" stroke={color} strokeLinejoin="round" strokeWidth={2} />
+        </Svg>
+      );
+    case "review":
+      return (
+        <Svg width={18} height={18} viewBox="0 0 24 24">
+          <Path d="m5 12 4 4L19 6" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} />
+        </Svg>
+      );
+  }
+}
+
+function ChevronGlyph({ color }: { color: string }) {
+  return (
+    <Svg width={18} height={18} viewBox="0 0 24 24">
+      <Path d="m9 6 6 6-6 6" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
+    </Svg>
+  );
+}
+
+function settingsSectionTitle(section: SettingsSection) {
+  switch (section) {
+    case "profile":
+      return "Profile";
+    case "categories":
+      return "Categories";
+    case "automations":
+      return "Automations";
+    case "health":
+      return "Health";
+    case "sync":
+      return "Sync";
+    case "appearance":
+      return "Appearance";
+    case "index":
+      return "Settings";
+  }
 }
 
 function BackGlyph({ color }: { color: string }) {
@@ -1348,14 +1423,6 @@ function defaultHealthCategoryLabel(type: HealthImportPreferenceKey) {
 
 function defaultHealthDescription(type: HealthImportPreferenceKey) {
   return HEALTH_IMPORT_PREFERENCE_OPTIONS.find((option) => option.key === type)?.label ?? "Health activity";
-}
-
-function defaultAutoLogSummary(categoryName?: string, description?: string | null) {
-  const parts = [
-    categoryName ? `Category ${categoryName}` : "No default category",
-    description ? `Description ${description}` : "No default description"
-  ];
-  return parts.join(" · ");
 }
 
 const sourceLabels: Record<string, string> = {

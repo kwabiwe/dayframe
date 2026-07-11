@@ -161,6 +161,60 @@ function createStyles(theme: MobileTheme) {
       justifyContent: "space-between",
       gap: 12
     },
+    settingsGroup: {
+      gap: 8
+    },
+    settingsGroupTitle: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "800",
+      paddingHorizontal: 4
+    },
+    settingsGroupRows: {
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surface,
+      borderRadius: 16,
+      overflow: "hidden"
+    },
+    settingsMenuRow: {
+      minHeight: 66,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.border,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 11
+    },
+    settingsMenuIcon: {
+      width: 34,
+      height: 34,
+      borderWidth: 1,
+      borderColor: theme.border,
+      borderRadius: 10,
+      backgroundColor: theme.surfaceInset,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    settingsMenuText: {
+      flex: 1,
+      minWidth: 0,
+      gap: 3
+    },
+    settingsMenuTitle: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 14,
+      fontWeight: "800"
+    },
+    settingsMenuMeta: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "700"
+    },
     logoLockup: {
       flexShrink: 1,
       gap: 4

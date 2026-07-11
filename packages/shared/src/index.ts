@@ -173,25 +173,6 @@ export type HealthAutoLogMapping = {
 };
 export type HealthAutoLogMappings = Partial<Record<HealthImportPreferenceKey, HealthAutoLogMapping>>;
 
-export const AUTO_LOG_DEFAULT_SOURCE_OPTIONS = [
-  { source: "mobile_app", label: "Mobile starts", defaultDescription: "Mobile start" },
-  { source: "shortcut", label: "Shortcuts", defaultDescription: "Shortcut" },
-  { source: "nfc", label: "NFC", defaultDescription: "NFC action" },
-  { source: "widget", label: "Widget", defaultDescription: "Widget action" },
-  { source: "ha_button", label: "Home Assistant button", defaultDescription: "Home Assistant button" }
-] as const satisfies ReadonlyArray<{
-  source: EventSource;
-  label: string;
-  defaultDescription: string;
-}>;
-
-export type AutoLogDefaultSource = (typeof AUTO_LOG_DEFAULT_SOURCE_OPTIONS)[number]["source"];
-export type AutoLogDefaultMapping = {
-  categoryId?: string | null;
-  description?: string | null;
-};
-export type AutoLogDefaultMappings = Partial<Record<AutoLogDefaultSource, AutoLogDefaultMapping>>;
-
 export const DEFAULT_HEALTH_IMPORT_PREFERENCES = Object.fromEntries(
   HEALTH_IMPORT_PREFERENCE_OPTIONS.map((option) => [option.key, option.defaultEnabled])
 ) as HealthImportPreferences;
@@ -222,34 +203,6 @@ export function healthAutoLogMappingFor(
   mappings?: HealthAutoLogMappings | null
 ): HealthAutoLogMapping {
   return mappings?.[key] ?? {};
-}
-
-export function normalizeAutoLogDefaultMappings(input: unknown): AutoLogDefaultMappings {
-  const values = isObjectRecord(input) ? input : {};
-  const mappings: AutoLogDefaultMappings = {};
-
-  for (const option of AUTO_LOG_DEFAULT_SOURCE_OPTIONS) {
-    const raw = values[option.source];
-    if (!isObjectRecord(raw)) continue;
-
-    const categoryId = normalizeMappingText(raw.categoryId);
-    const description = normalizeMappingText(raw.description);
-    if (!categoryId && !description) continue;
-
-    mappings[option.source] = {
-      categoryId,
-      description
-    };
-  }
-
-  return mappings;
-}
-
-export function autoLogDefaultMappingFor(
-  source: EventSource,
-  mappings?: AutoLogDefaultMappings | null
-): AutoLogDefaultMapping {
-  return isAutoLogDefaultSource(source) ? mappings?.[source] ?? {} : {};
 }
 
 export function calendarBlockContinuationEdges(input: {
@@ -417,7 +370,6 @@ export type NormalizationContext = {
   categories: CategorySummary[];
   places: PlaceSummary[];
   automationRules: AutomationRuleSummary[];
-  autoLogDefaults?: AutoLogDefaultMappings;
   unknownStayThresholdMinutes?: number;
 };
 
@@ -727,18 +679,17 @@ export function normalizeActivityEvent(
   }
 
   if (explicitStartTypes.has(event.type)) {
-    const sourceDefault = autoLogDefaultMappingFor(event.source, context.autoLogDefaults);
-    const defaultDescription = sourceDefault.description ?? undefined;
+    const categoryFromPayload = categoryFromEventPayload(event, context.categories);
     const projectId = event.projectId ?? matchingRule?.projectId ?? project?.id;
     return {
       action: "start_timer",
       confidence: sourceConfidence,
       reviewStatus: "confirmed",
       projectId,
-      categoryId: event.categoryId ?? matchingRule?.categoryId ?? sourceDefault.categoryId ?? project?.categoryId ?? undefined,
+      categoryId: event.categoryId ?? matchingRule?.categoryId ?? categoryFromPayload?.id ?? project?.categoryId ?? undefined,
       placeId: event.placeId ?? place?.id,
-      title: event.description ?? defaultDescription ?? project?.name ?? "Timer started",
-      description: event.description ?? defaultDescription,
+      title: event.description ?? project?.name ?? "Timer started",
+      description: event.description,
       reason: "Manual, NFC, widget and shortcut signals are treated as high-confidence explicit starts.",
       shouldClosePrevious: true
     };
@@ -969,10 +920,6 @@ function normalizeMappingText(value: unknown) {
   return trimmed ? trimmed.slice(0, 160) : null;
 }
 
-function isAutoLogDefaultSource(value: EventSource): value is AutoLogDefaultSource {
-  return AUTO_LOG_DEFAULT_SOURCE_OPTIONS.some((option) => option.source === value);
-}
-
 function timestampMs(value: unknown) {
   const date =
     value instanceof Date
@@ -1006,6 +953,19 @@ function findPlaceByName(places: PlaceSummary[], value: unknown) {
 
 function findCategoryByName(categories: CategorySummary[], value: string) {
   return categories.find((category) => category.name.toLowerCase() === value.toLowerCase());
+}
+
+function categoryFromEventPayload(
+  event: ParsedActivityEvent,
+  categories: CategorySummary[]
+) {
+  const categoryName = stringFromPayload(event.rawPayload.categoryName) ?? stringFromPayload(event.rawPayload.category);
+  if (!categoryName) return undefined;
+  return findCategoryByName(categories, categoryName);
+}
+
+function stringFromPayload(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function visitActivityDescription(event: ParsedActivityEvent, place: PlaceSummary | undefined) {

@@ -35,7 +35,7 @@ describe("Dayframe deep links", () => {
   it("keeps explicit Shortcut description values", async () => {
     await enqueueShortcutAction(
       "action/start",
-      { description: "School pickup" },
+      { category: "Family", description: "School pickup" },
       { route: "action/start" }
     );
 
@@ -44,7 +44,7 @@ describe("Dayframe deep links", () => {
       type: "shortcut_action",
       categoryId: undefined,
       description: "School pickup",
-      rawPayload: { route: "action/start" }
+      rawPayload: { categoryName: "Family", route: "action/start" }
     });
   });
 });

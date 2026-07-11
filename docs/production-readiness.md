@@ -62,7 +62,7 @@ Behavior defaults:
 - Broad enter/exit: review-first.
 - Home: ambiguous and review-first by default.
 - Unknown stays over the threshold create review items.
-- Mobile start, Shortcut, NFC, widget, and Home Assistant button events can use local auto-log defaults to fill blank category/description values while preserving explicit event values.
+- Manual mobile starts and Siri Shortcut/NFC starts use the values supplied by the user or Shortcut; blank manual starts stay blank. Auto-log defaults are reserved for user-enabled automatic sources such as Health imports, walking/running, places, and future commute/place learning.
 
 Expo Go cannot fully exercise background geofencing; use a development build.
 
