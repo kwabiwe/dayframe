@@ -1,6 +1,6 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-11 09:06 BST
+Last verified: 2026-07-11 10:59 BST
 
 ## Verification Snapshot
 
@@ -23,14 +23,14 @@ Last verified: 2026-07-11 09:06 BST
 
 | Item | Status | Evidence | Next action |
 | --- | --- | --- | --- |
-| Select next implementation slice | Next | PR #41 completed the previous Next item and build `0.1.0 (16)` is verified in TestFlight. | Pick the next PR from the tracked backlog, likely NFC Shortcuts, Live Activities, preview lane, privacy/deletion, or another KB-prioritised item. |
+| Siri Shortcuts, NFC handoff, and mobile Settings grouping | In progress | Active branch `agent/dayframe-shortcuts-settings`; local mobile/shared tests passed and native iOS simulator build validates the App Intent metadata. | Finish docs/checks, merge, upload the next TestFlight build, then verify Apple processing, export compliance, TestFlight notes, internal group assignment, and build state. |
 
 ## Recently Shipped Or Addressed
 
 | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- |
 | More reliable offline and mobile sync | Watch | PR #41, build `0.1.0 (16)`, delivery UUID `c84e56c7-931a-4b4b-b28c-b6a66be04219`. | Adds retry backoff metadata, automatic foreground/focus queue drain, manual force sync/retry, queue diagnostics counts, and diagnostics export for mobile queued events. Watch real-device Shortcut/NFC/geofence/Health queue recovery, idempotency, and reconnect behaviour. |
-| Auto-log defaults during onboarding and non-Health imports | Done | PR #40, build `0.1.0 (15)`, delivery UUID `e6bcc257-2214-49c9-8614-5a201958a175`. | Adds Settings-managed defaults for mobile starts, Shortcuts, NFC, widgets, and Home Assistant buttons. Defaults only fill blank category/description values; explicit event values still win. |
+| Auto-log defaults during onboarding and non-Health imports | Watch | PR #40, build `0.1.0 (15)`, delivery UUID `e6bcc257-2214-49c9-8614-5a201958a175`; follow-up branch `agent/dayframe-shortcuts-settings`. | Corrected direction: auto-log defaults are only for user-enabled automatic sources such as Health, walking/running, places, and future commute/place learning. Manual mobile starts and Siri Shortcut/NFC starts should use only the values supplied by the user or Shortcut. |
 | Duplicate/overlapping Sleep investigation | Watch | `docs/investigations/2026-07-11-duplicate-sleep.md`; KB reports no current duplicates in TestFlight build `0.1.0 (14)`. | Existing idempotency, Health segment dedupe, covering-entry checks, overlap blocks, and legacy consolidation already guard the known paths. Do not add merge/delete logic without a real duplicate export or row sample. |
 | Midnight Core reskin and supplied branding | Done | PR #39, build `0.1.0 (14)`, delivery UUID `e6425673-8e83-4d62-ae31-cc01e7fc6001`. | Shared web/iOS Midnight Core tokens, refreshed app icon, wordmarks, reusable brand components, and automated brand/theme guardrails shipped without changing core tracking logic. |
 | Calendar edit card keyboard avoidance regression | Watch | PR #37, build `0.1.0 (13)`, delivery UUID `8b5d4ac4-d0ca-4239-9719-4442aee56ec6`. | Edit sheet now uses screen-coordinate keyboard measurements, explicit keyboard-open sheet height, scrollable form body, and regression tests for small-iPhone keyboard-open layout. Watch KB's real-device keyboard/suggestion-bar check before marking fully settled. |
@@ -61,7 +61,7 @@ Last verified: 2026-07-11 09:06 BST
 
 | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| NFC support through iOS Shortcuts | Future | README already describes NFC/Shortcut-style event ingestion and notes full native NFC scanning as a known limitation. | Build the practical first path around iOS Shortcuts/NFC tags: tag scan triggers a Shortcut/deep link, Dayframe queues an event-first start/stop/review action, offline queue and idempotency still work, and users get template Shortcuts for common actions. Native NFC scanning can be considered later if Shortcuts is not enough. |
+| NFC support through iOS Shortcuts | In progress | Active branch `agent/dayframe-shortcuts-settings` adds the first `Start tracking` App Intent and keeps NFC as an Apple Shortcuts trigger, not a Dayframe trigger. | Build the practical first path around iOS Shortcuts/NFC tags: tag scan runs a Dayframe Shortcut action with description/category parameters, Dayframe uses the current/default workspace, queues the start through the offline path, and keeps native NFC scanning out of scope unless Shortcuts is not enough. |
 | Live Activities with a timer | Future | Mobile already has an active timer and shared web/mobile timer sync; no ActivityKit extension exists yet. | Add an iOS Live Activity/Dynamic Island timer for the active Dayframe entry, showing task/category and elapsed time, keeping state accurate across start/stop/edit/sync, and handling stale/offline states without misleading the user. |
 | Dayframe integration with Cockpit | Future | Prior Dayframe/Cockpit planning expects Cockpit to read Dayframe when it is ready instead of Toggl. | Start with a small token-protected read-only Cockpit API/stream for current timer, today timeline, source/confidence, and next suggested action; avoid write/mutation controls until explicitly approved. |
 | Natural-language rules that create time entries | Planned | PR #30 proves draft/simulate only; earlier guardrails require deterministic, auditable writes. | Expand the Rule assistant into saveable rules that can propose or create time entries only after a preview/simulation step, with user approval, evidence shown, disable/edit/audit controls, and no direct LLM-to-database write path. |

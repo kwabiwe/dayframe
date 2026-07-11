@@ -2,14 +2,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
 import {
   ActivityEventInputSchema,
-  AUTO_LOG_DEFAULT_SOURCE_OPTIONS,
-  autoLogDefaultMappingFor,
-  normalizeAutoLogDefaultMappings,
   type ActivityEventInput,
   type ActivityEventType,
-  type AutoLogDefaultMapping,
-  type AutoLogDefaultMappings,
-  type AutoLogDefaultSource,
   type EventSource,
   type HealthAutoLogMappings,
   type HealthImportPreferences
@@ -18,7 +12,6 @@ import { DAYFRAME_API_BASE } from "./config";
 
 const QUEUE_KEY = "dayframe.offlineQueue.v1";
 const SESSION_TOKEN_KEY = "dayframe.localSessionToken.v1";
-const AUTO_LOG_DEFAULTS_KEY = "dayframe.autoLogDefaults.v1";
 const DEFAULT_PLACE_RADIUS_METERS = 100;
 const DEFAULT_PLACE_PRIORITY = 5;
 
@@ -365,11 +358,10 @@ export async function clearSessionToken() {
 
 export async function enqueueEvent(input: ActivityEventDraft) {
   const { localId, ...eventInput } = input;
-  const eventWithDefaults = await applyAutoLogDefaultsToEvent(eventInput);
   const parsed = ActivityEventInputSchema.parse({
-    ...eventWithDefaults,
+    ...eventInput,
     occurredAt: input.occurredAt ?? new Date(),
-    rawPayload: eventWithDefaults.rawPayload ?? {}
+    rawPayload: eventInput.rawPayload ?? {}
   });
   const queue = await readQueue();
   const queuedLocalId = normalizeLocalId(localId) ?? generatedLocalId();
@@ -381,32 +373,6 @@ export async function enqueueEvent(input: ActivityEventDraft) {
   });
   await writeQueue(queue);
   return queue;
-}
-
-export async function getAutoLogDefaults(): Promise<AutoLogDefaultMappings> {
-  const raw = await AsyncStorage.getItem(AUTO_LOG_DEFAULTS_KEY);
-  if (!raw) return {};
-  try {
-    return normalizeAutoLogDefaultMappings(JSON.parse(raw));
-  } catch {
-    return {};
-  }
-}
-
-export async function setAutoLogDefaultMapping(
-  source: AutoLogDefaultSource,
-  mapping: AutoLogDefaultMapping
-): Promise<AutoLogDefaultMappings> {
-  const current = await getAutoLogDefaults();
-  const nextMapping = normalizeAutoLogDefaultMappings({ [source]: mapping })[source] ?? {};
-  const next = { ...current };
-  if (nextMapping.categoryId || nextMapping.description) {
-    next[source] = nextMapping;
-  } else {
-    delete next[source];
-  }
-  await AsyncStorage.setItem(AUTO_LOG_DEFAULTS_KEY, JSON.stringify(next));
-  return next;
 }
 
 export async function readQueue(): Promise<QueuedEvent[]> {
@@ -553,14 +519,12 @@ export async function syncQueue(options: SyncQueueOptions = {}): Promise<SyncQue
 }
 
 export async function startTimer(categoryId?: string | null, description?: string) {
-  const defaults = await getAutoLogDefaults();
-  const mobileDefault = autoLogDefaultMappingFor("mobile_app", defaults);
   const trimmedDescription = description?.trim();
   return postTimerAction({
     mode: "start",
     source: "mobile_app",
-    categoryId: categoryId ?? mobileDefault.categoryId ?? undefined,
-    description: trimmedDescription || mobileDefault.description || undefined
+    categoryId: categoryId ?? undefined,
+    description: trimmedDescription || undefined
   });
 }
 
@@ -833,32 +797,6 @@ export function isNetworkTimerError(error: unknown) {
 }
 
 const permanentStatusCodes = new Set([400, 413, 422]);
-const autoLogDefaultSources = new Set<EventSource>(
-  AUTO_LOG_DEFAULT_SOURCE_OPTIONS.map((option) => option.source)
-);
-const autoLogDefaultEventTypes = new Set<ActivityEventType>([
-  "timer_start",
-  "timer_switch",
-  "quick_action",
-  "nfc_action",
-  "shortcut_action"
-]);
-
-async function applyAutoLogDefaultsToEvent(input: Omit<ActivityEventDraft, "localId">) {
-  if (!autoLogDefaultSources.has(input.source) || !autoLogDefaultEventTypes.has(input.type)) {
-    return input;
-  }
-
-  const mapping = autoLogDefaultMappingFor(input.source, await getAutoLogDefaults());
-  if (!mapping.categoryId && !mapping.description) return input;
-
-  const description = input.description?.trim();
-  return {
-    ...input,
-    categoryId: input.categoryId ?? mapping.categoryId ?? undefined,
-    description: description || mapping.description || undefined
-  };
-}
 
 function migrateQueuedEvent(item: StoredQueuedEvent, index: number): QueuedEvent {
   const queueItem = { ...item };

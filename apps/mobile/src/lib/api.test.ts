@@ -43,7 +43,6 @@ const {
   dismissReviewItem,
   enqueueEvent,
   fetchBootstrap,
-  getAutoLogDefaults,
   getQueueDiagnostics,
   getSessionToken,
   isNetworkTimerError,
@@ -52,7 +51,6 @@ const {
   reprocessHealthReviewItems,
   retryFailedQueuedEvents,
   saveEditedReviewItem,
-  setAutoLogDefaultMapping,
   startTimer,
   signup,
   syncQueue,
@@ -290,41 +288,10 @@ describe("mobile API client", () => {
     expect(queue[0].localId).toBe("location-visit-1");
   });
 
-  it("applies non-Health auto-log defaults to blank queued start events", async () => {
-    await setAutoLogDefaultMapping("shortcut", {
-      categoryId: "20000000-0000-4000-8000-000000000001",
-      description: "Shortcut start"
-    });
-
-    await enqueueEvent({ source: "shortcut", type: "shortcut_action" });
-
-    const queue = await readQueue();
-    expect(queue).toHaveLength(1);
-    expect(queue[0]).toEqual(
-      expect.objectContaining({
-        source: "shortcut",
-        type: "shortcut_action",
-        categoryId: "20000000-0000-4000-8000-000000000001",
-        description: "Shortcut start"
-      })
-    );
-    await expect(getAutoLogDefaults()).resolves.toEqual({
-      shortcut: {
-        categoryId: "20000000-0000-4000-8000-000000000001",
-        description: "Shortcut start"
-      }
-    });
-  });
-
-  it("keeps explicit queued event values ahead of auto-log defaults", async () => {
-    await setAutoLogDefaultMapping("nfc", {
-      categoryId: "20000000-0000-4000-8000-000000000001",
-      description: "NFC default"
-    });
-
+  it("queues Shortcut starts only with values supplied by the Shortcut", async () => {
     await enqueueEvent({
-      source: "nfc",
-      type: "nfc_action",
+      source: "shortcut",
+      type: "shortcut_action",
       categoryId: "20000000-0000-4000-8000-000000000004",
       description: "School pickup"
     });
@@ -332,6 +299,8 @@ describe("mobile API client", () => {
     const queue = await readQueue();
     expect(queue[0]).toEqual(
       expect.objectContaining({
+        source: "shortcut",
+        type: "shortcut_action",
         categoryId: "20000000-0000-4000-8000-000000000004",
         description: "School pickup"
       })
@@ -680,31 +649,6 @@ describe("mobile API client", () => {
           mode: "start",
           source: "mobile_app",
           categoryId: "20000000-0000-4000-8000-000000000001"
-        })
-      })
-    );
-  });
-
-  it("uses mobile auto-log defaults for direct blank starts", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
-    await setAutoLogDefaultMapping("mobile_app", {
-      categoryId: "20000000-0000-4000-8000-000000000002",
-      description: "Mobile default"
-    });
-    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 201)));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await startTimer(null, "   ");
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://dayframe.test/api/time-entries",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          mode: "start",
-          source: "mobile_app",
-          categoryId: "20000000-0000-4000-8000-000000000002",
-          description: "Mobile default"
         })
       })
     );
