@@ -15,8 +15,12 @@ import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { DayframeBrand } from "@/components/brand";
 import {
+  AUTO_LOG_DEFAULT_SOURCE_OPTIONS,
   DAYFRAME_PALETTE,
   paletteColorFor,
+  type AutoLogDefaultMapping,
+  type AutoLogDefaultMappings,
+  type AutoLogDefaultSource,
   type DayframePaletteKey,
   type HealthAutoLogMapping,
   type HealthAutoLogMappings,
@@ -29,10 +33,12 @@ import {
   clearFailedQueuedEvents,
   createCategory,
   fetchBootstrap,
+  getAutoLogDefaults,
   getQueueDiagnostics,
   logout,
   readQueue,
   retryFailedQueuedEvents,
+  setAutoLogDefaultMapping,
   syncQueue,
   updateCategory,
   type MobileBootstrap,
@@ -91,6 +97,7 @@ export default function SettingsScreen() {
   const [healthStatus, setHealthStatus] = useState<HealthImportStatus[]>([]);
   const [healthImportPreferences, setHealthImportPreferences] = useState<HealthImportPreferences | null>(null);
   const [healthAutoLogMappings, setHealthAutoLogMappings] = useState<HealthAutoLogMappings>({});
+  const [autoLogDefaults, setAutoLogDefaults] = useState<AutoLogDefaultMappings>({});
   const [healthDebugStatus, setHealthDebugStatus] = useState<string | null>(null);
   const [exportingHealthDebug, setExportingHealthDebug] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
@@ -152,6 +159,7 @@ export default function SettingsScreen() {
     });
     getHealthImportPreferences().then(setHealthImportPreferences).catch(() => undefined);
     getHealthAutoLogMappings().then(setHealthAutoLogMappings).catch(() => undefined);
+    getAutoLogDefaults().then(setAutoLogDefaults).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -467,6 +475,28 @@ export default function SettingsScreen() {
     } catch (error) {
       setHealthAutoLogMappings(current);
       Alert.alert("Apple Health", error instanceof Error ? error.message : "Unable to save Health mapping.");
+    }
+  }
+
+  async function updateAutoLogDefault(source: AutoLogDefaultSource, patch: AutoLogDefaultMapping) {
+    const current = autoLogDefaults;
+    const nextMapping = {
+      ...(current[source] ?? {}),
+      ...patch
+    };
+    const optimistic = { ...current };
+    if (nextMapping.categoryId || nextMapping.description) {
+      optimistic[source] = nextMapping;
+    } else {
+      delete optimistic[source];
+    }
+    setAutoLogDefaults(optimistic);
+    try {
+      const saved = await setAutoLogDefaultMapping(source, nextMapping);
+      setAutoLogDefaults(saved);
+    } catch (error) {
+      setAutoLogDefaults(current);
+      Alert.alert("Auto-log defaults", error instanceof Error ? error.message : "Unable to save auto-log defaults.");
     }
   }
 
@@ -873,6 +903,110 @@ export default function SettingsScreen() {
           </View>
 
           <View style={styles.panel}>
+            <Text style={styles.sectionTitle}>Auto-log defaults</Text>
+            <Text style={styles.muted}>
+              Defaults fill blank starts from mobile, Shortcut, NFC, widgets and Home Assistant buttons.
+            </Text>
+            <View style={styles.healthPreferenceList}>
+              {AUTO_LOG_DEFAULT_SOURCE_OPTIONS.map((option) => {
+                const mapping = autoLogDefaults[option.source] ?? {};
+                const categoryName = data?.categories.find((category) => category.id === mapping.categoryId)?.name;
+                return (
+                  <View key={option.source} style={styles.healthPreferenceRow}>
+                    <View style={styles.healthPreferenceHeader}>
+                      <View style={styles.healthPreferenceText}>
+                        <Text style={styles.categoryName}>{option.label}</Text>
+                        <Text style={styles.categoryMeta}>
+                          {defaultAutoLogSummary(categoryName, mapping.description)}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.healthMappingPanel}>
+                      <Text style={styles.healthMappingLabel}>Category</Text>
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.categoryChoiceScroller}
+                      >
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`${option.label} no default category`}
+                          accessibilityState={{ selected: !mapping.categoryId }}
+                          onPress={() => updateAutoLogDefault(option.source, { categoryId: null })}
+                          style={pressable(
+                            [
+                              styles.categoryChoice,
+                              !mapping.categoryId ? styles.categoryChoiceSelected : null
+                            ],
+                            styles.buttonPressed
+                          )}
+                        >
+                          <Text
+                            style={[
+                              styles.categoryChoiceText,
+                              !mapping.categoryId ? styles.categoryChoiceTextSelected : null
+                            ]}
+                          >
+                            No default
+                          </Text>
+                        </Pressable>
+                        {(data?.categories ?? []).map((category) => {
+                          const selected = mapping.categoryId === category.id;
+                          return (
+                            <Pressable
+                              key={`${option.source}:${category.id}`}
+                              accessibilityRole="button"
+                              accessibilityLabel={`${option.label} default category ${category.name}`}
+                              accessibilityState={{ selected }}
+                              onPress={() => updateAutoLogDefault(option.source, { categoryId: category.id })}
+                              style={pressable(
+                                [
+                                  styles.categoryChoice,
+                                  selected ? styles.categoryChoiceSelected : null
+                                ],
+                                styles.buttonPressed
+                              )}
+                            >
+                              <View
+                                style={[
+                                  styles.colorDot,
+                                  { backgroundColor: paletteColorFor(category.color, category.name, theme.mode) }
+                                ]}
+                              />
+                              <Text
+                                style={[
+                                  styles.categoryChoiceText,
+                                  selected ? styles.categoryChoiceTextSelected : null
+                                ]}
+                              >
+                                {category.name}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </ScrollView>
+                      <Text style={styles.healthMappingLabel}>Description</Text>
+                      <TextInput
+                        key={`${option.source}:${mapping.description ?? ""}`}
+                        style={[styles.textInput, styles.healthMappingInput]}
+                        defaultValue={mapping.description ?? ""}
+                        placeholder={option.defaultDescription}
+                        placeholderTextColor={theme.textSecondary}
+                        returnKeyType="done"
+                        onEndEditing={(event) =>
+                          updateAutoLogDefault(option.source, {
+                            description: event.nativeEvent.text.trim() || null
+                          })
+                        }
+                      />
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+
+          <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Location</Text>
             <Text style={styles.muted}>
               Dayframe can recognise visits to saved places. Visits are reviewed before becoming time entries.
@@ -1185,6 +1319,14 @@ function defaultHealthCategoryLabel(type: HealthImportPreferenceKey) {
 
 function defaultHealthDescription(type: HealthImportPreferenceKey) {
   return HEALTH_IMPORT_PREFERENCE_OPTIONS.find((option) => option.key === type)?.label ?? "Health activity";
+}
+
+function defaultAutoLogSummary(categoryName?: string, description?: string | null) {
+  const parts = [
+    categoryName ? `Category ${categoryName}` : "No default category",
+    description ? `Description ${description}` : "No default description"
+  ];
+  return parts.join(" · ");
 }
 
 const sourceLabels: Record<string, string> = {

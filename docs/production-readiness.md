@@ -62,6 +62,7 @@ Behavior defaults:
 - Broad enter/exit: review-first.
 - Home: ambiguous and review-first by default.
 - Unknown stays over the threshold create review items.
+- Mobile start, Shortcut, NFC, widget, and Home Assistant button events can use local auto-log defaults to fill blank category/description values while preserving explicit event values.
 
 Expo Go cannot fully exercise background geofencing; use a development build.
 
@@ -79,6 +80,7 @@ Implemented:
 - Server-side audit/dedupe into `health_sleep_segments` and `health_workouts`.
 - Foreground sync, HealthKit observer callbacks, and native background-delivery wiring for sleep/workout changes.
 - Apple Health mapping defaults for category and description, applied to new imports and Health Review reprocess.
+- Duplicate/overlapping Sleep guardrails are documented in `docs/investigations/2026-07-11-duplicate-sleep.md`; keep merge/delete logic evidence-led.
 
 HealthKit requires a native iOS build/device and does not work in plain Expo Go.
 
@@ -102,11 +104,11 @@ Deletion/privacy groundwork remains: implement safe user/workspace deletion with
 
 ## Current Internal Beta State
 
-As of 2026-07-10, the active internal TestFlight lane has verified build `0.1.0 (13)` in `Internal Health Debug`. The product is usable for owner testing, but several areas remain `Watch`, `Planned`, or `Future` in `docs/feature-fix-tracker.md`.
+As of 2026-07-11, the active internal TestFlight lane has verified build `0.1.0 (14)` in `Internal Health Debug`. The product is usable for owner testing, but several areas remain `Watch`, `Planned`, or `Future` in `docs/feature-fix-tracker.md`.
 
 ## Remaining Before Wider Daily Beta Use
 
-- Investigate duplicate/overlapping Sleep entries from real production row metadata before adding any merge/delete logic.
+- Keep duplicate/overlapping Sleep on Watch and collect real production row metadata before adding any merge/delete logic.
 - Harden offline/mobile failed queue recovery with visible failed states, manual retry, idempotency checks, and diagnostics/export.
 - Add safe account deletion, workspace deletion, and stronger privacy controls for raw Health/location payloads and integration tokens.
 - Add token management UI before Home Assistant or other local bridge inputs are promoted beyond manual/local setup.

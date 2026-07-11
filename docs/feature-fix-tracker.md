@@ -1,6 +1,6 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-11 06:05 BST
+Last verified: 2026-07-11 06:43 BST
 
 ## Verification Snapshot
 
@@ -23,13 +23,14 @@ Last verified: 2026-07-11 06:05 BST
 
 | Item | Status | Evidence | Next action |
 | --- | --- | --- | --- |
-| Auto-log defaults during onboarding and non-Health imports | Next | PR #36 adds the compact Apple Health settings surface; onboarding and non-Health import defaults are not yet designed. | Design the next small surface for onboarding defaults and place/other import mappings if still needed after Apple Health validation. |
-| Duplicate/overlapping Sleep investigation | Next | PR #33 deliberately avoided automatic duplicate sleep merge/delete. | Inspect production row metadata before any merge/delete logic, identify whether duplicates come from HealthKit overlap, legacy rows, or reprocess behavior, then implement only a safe dedupe/merge path with auditability. |
+| More reliable offline and mobile sync | Next | README and regression checklist already describe the mobile offline queue for Shortcut, NFC, geofence, Apple Health, and background event paths. | Harden failed queue recovery: visible failed/synced states, manual retry, safe backoff, conflict/idempotency checks, queue diagnostics/export, recovery from partial API failures, and web/mobile active-timer reconciliation after reconnect. |
 
 ## Recently Shipped Or Addressed
 
 | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- |
+| Auto-log defaults during onboarding and non-Health imports | In progress | PR #40. | Adds Settings-managed defaults for mobile starts, Shortcuts, NFC, widgets, and Home Assistant buttons. Defaults only fill blank category/description values; explicit event values still win. |
+| Duplicate/overlapping Sleep investigation | Watch | `docs/investigations/2026-07-11-duplicate-sleep.md`; KB reports no current duplicates in TestFlight build `0.1.0 (14)`. | Existing idempotency, Health segment dedupe, covering-entry checks, overlap blocks, and legacy consolidation already guard the known paths. Do not add merge/delete logic without a real duplicate export or row sample. |
 | Midnight Core reskin and supplied branding | Done | PR #39, build `0.1.0 (14)`, delivery UUID `e6425673-8e83-4d62-ae31-cc01e7fc6001`. | Shared web/iOS Midnight Core tokens, refreshed app icon, wordmarks, reusable brand components, and automated brand/theme guardrails shipped without changing core tracking logic. |
 | Calendar edit card keyboard avoidance regression | Watch | PR #37, build `0.1.0 (13)`, delivery UUID `8b5d4ac4-d0ca-4239-9719-4442aee56ec6`. | Edit sheet now uses screen-coordinate keyboard measurements, explicit keyboard-open sheet height, scrollable form body, and regression tests for small-iPhone keyboard-open layout. Watch KB's real-device keyboard/suggestion-bar check before marking fully settled. |
 | Cross-midnight continuation border polish | Done | PR #36, build `0.1.0 (12)`. | Continuation segments that started before midnight now drop the top border/top radii; segments continuing into the next day still drop the bottom border/bottom radii. |
@@ -67,7 +68,7 @@ Last verified: 2026-07-11 06:05 BST
 | Durable repo tracker | Done | This document. | Update this file whenever a planned item moves, ships, is skipped, or needs live-watch status. |
 | Full automation rule creation/editing | Future | PR #30 proves draft/simulate only. | Needs UI for saving, simulating, explaining, editing, disabling, and auditing rules. |
 | Account deletion, workspace deletion, and stronger privacy controls | Future | README privacy model calls export/deletion next-phase work and raw event payloads are stored in `activity_events.raw_payload`. | Add user-facing export/delete flows for accounts and workspaces, hard-delete or anonymise scoped data, clear raw Health/location payloads and integration tokens, respect retention windows, and document what remains in backups/logs. |
-| More reliable offline and mobile sync | Planned | README and regression checklist already describe the mobile offline queue for Shortcut, NFC, geofence, Apple Health, and background event paths. | Harden failed queue recovery: visible failed/synced states, manual retry, safe backoff, conflict/idempotency checks, queue diagnostics/export, recovery from partial API failures, and web/mobile active-timer reconciliation after reconnect. |
+| More reliable offline and mobile sync | Next | README and regression checklist already describe the mobile offline queue for Shortcut, NFC, geofence, Apple Health, and background event paths. | Harden failed queue recovery: visible failed/synced states, manual retry, safe backoff, conflict/idempotency checks, queue diagnostics/export, recovery from partial API failures, and web/mobile active-timer reconciliation after reconnect. |
 | Geofence and place automation expansion | Future | Earlier Dayframe planning covered HA/iOS geofence triggers for Gym, Home, School, Church, Office/client sites, family places, town/Chelmsford centre, and unknown stays. README and production-readiness docs already have event-first geofence foundations. | Expand location automation carefully: improve place setup/correction, use review-first defaults for ambiguous/broad/Home locations, support specific enter/exit rules, avoid automatic writes without confidence, and keep source evidence visible for every suggestion or created entry. |
 | Home Assistant/local bridge inputs | Future | Production-readiness docs describe scoped ingest tokens and a future Home Assistant bridge payload; prior planning included HA buttons/zones as local signals. | Add token-management UI first, then a small local bridge path for HA button/geofence events into `/api/events`, with scoped/revocable tokens, idempotent payloads, and no uncontrolled direct time-entry writes. |
 | Telegram/voice diary and correction intake | Future | Original life-tracking planning included Telegram/direct-chat corrections and end-of-day diary summaries that Major can turn into time entries. | Design a review-first correction/import lane where chat or voice notes become proposed edits or missing entries, show the evidence text, require confirmation before writing, and preserve an audit trail of what changed. |
