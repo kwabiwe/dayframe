@@ -13,6 +13,7 @@ import {
 import Svg, { Path } from "react-native-svg";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { scheduleLayoutTransition, useReduceMotionPreference } from "@/lib/motion";
 import {
   DAYFRAME_PALETTE,
   paletteColorFor,
@@ -142,6 +143,7 @@ function resolveStateAction<T>(action: SetStateAction<T>, current: T): T {
 }
 
 export default function SettingsScreen() {
+  const reduceMotion = useReduceMotionPreference();
   const {
     reloadThemePreference,
     setThemePreference,
@@ -389,12 +391,14 @@ export default function SettingsScreen() {
   }
 
   function beginEditCategory(category: Category) {
+    scheduleLayoutTransition(reduceMotion);
     setEditingCategoryId(category.id);
     setEditingCategoryName(category.name);
     setEditingCategoryColor(category.color);
   }
 
   function cancelEditCategory() {
+    scheduleLayoutTransition(reduceMotion);
     setEditingCategoryId(null);
     setEditingCategoryName("");
     setEditingCategoryColor("lime");
@@ -1060,7 +1064,10 @@ export default function SettingsScreen() {
             <Pressable
               accessibilityRole="button"
               style={pressable(styles.detailsToggle, styles.buttonPressed)}
-              onPress={() => setShowQueueDetails((current) => !current)}
+              onPress={() => {
+                scheduleLayoutTransition(reduceMotion);
+                setShowQueueDetails((current) => !current);
+              }}
             >
               <Text style={styles.detailsToggleText}>
                 {showQueueDetails ? "Hide troubleshooting details" : "Troubleshooting details..."}

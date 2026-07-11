@@ -24,6 +24,7 @@ Last verified: 2026-07-11 21:31 BST
 | Item | Status | Evidence | Next action |
 | --- | --- | --- | --- |
 | Background Shortcuts and Live Activity | Next | PR #43 review confirmed NFC Shortcuts work, but the deep-link handoff briefly opens Dayframe and shows `Shortcut queued`. | Replace the deep-link-only Shortcut handoff with a native/background queue path, then add an iOS Live Activity/Dynamic Island timer as the confirmation surface for active tracking. |
+| Mobile navigation continuity and dark transition backgrounds | In progress | Real-device screenshots from build `0.1.0 (21)` and `docs/investigations/2026-07-11-mobile-navigation-vignette.md`. | Verify dark/light Settings, Review and Places push/pop/swipe-back transitions on a physical iPhone, including Reduce Motion. |
 
 ## Recently Shipped Or Addressed
 

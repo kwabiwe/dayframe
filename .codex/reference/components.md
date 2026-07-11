@@ -19,6 +19,7 @@ Use this when working on frontend components.
 - Show loading, empty, success, and error states for user-facing actions.
 - Task title is optional. Category is optional and should be editable while a timer is running.
 - Surface friendly, actionable permission messages; never display raw native exception strings to users.
+- Treat route state as the source of truth for same-route mobile sub-settings. Do not mirror the active route section into local state or intercept native back gestures to repair duplicated navigation state.
 
 ## Review Checklist
 

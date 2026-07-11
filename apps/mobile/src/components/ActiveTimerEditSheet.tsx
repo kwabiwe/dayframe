@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  AccessibilityInfo,
   Alert,
   Animated,
   Dimensions,
@@ -22,6 +21,7 @@ import { paletteColorFor } from "@dayframe/shared";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
 import { editSheetKeyboardLayout, keyboardInsetFromScreenY } from "@/lib/editSheetKeyboard";
 import type { MobileBootstrap, MobileTimeEntry, TimeEntryUpdatePatch } from "@/lib/api";
+import { MOBILE_MOTION, useReduceMotionPreference } from "@/lib/motion";
 
 type Category = MobileBootstrap["categories"][number];
 type EditSheetMode = "running" | "entry";
@@ -73,31 +73,12 @@ export function ActiveTimerEditSheet({
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [pickerStartAt, setPickerStartAt] = useState<Date | null>(null);
-  // Suppress the sheet transition until iOS resolves the accessibility setting.
-  const [reduceMotion, setReduceMotion] = useState(true);
+  const reduceMotion = useReduceMotionPreference();
   const dismissDragY = useRef(new Animated.Value(0)).current;
   const descriptionInputRef = useRef<TextInput>(null);
-  const editScrollerRef = useRef<ScrollView>(null);
   const timeInputRef = useRef<TextInput>(null);
 
   const entryId = entry?.id ?? null;
-
-  useEffect(() => {
-    let mounted = true;
-    AccessibilityInfo.isReduceMotionEnabled()
-      .then((enabled) => {
-        if (mounted) setReduceMotion(enabled);
-      })
-      .catch(() => undefined);
-    const subscription = AccessibilityInfo.addEventListener(
-      "reduceMotionChanged",
-      setReduceMotion
-    );
-    return () => {
-      mounted = false;
-      subscription.remove();
-    };
-  }, []);
 
   useEffect(() => {
     if (!entry || !visible) return;
@@ -210,7 +191,7 @@ export function ActiveTimerEditSheet({
         }
         Animated.timing(dismissDragY, {
           toValue: windowDimensions.height,
-          duration: 220,
+          duration: MOBILE_MOTION.sheet,
           useNativeDriver: true
         }).start(({ finished }) => {
           dismissDragY.setValue(0);
@@ -335,9 +316,6 @@ export function ActiveTimerEditSheet({
 
   function focusDescriptionField() {
     setDatePickerOpen(false);
-    setTimeout(() => {
-      editScrollerRef.current?.scrollTo({ y: 56, animated: true });
-    }, 80);
   }
 
   function updateStoppedDateText(value: string) {
@@ -469,7 +447,6 @@ export function ActiveTimerEditSheet({
               </View>
 
               <ScrollView
-                ref={editScrollerRef}
                 contentContainerStyle={[
                   styles.activeEditContent,
                   keyboardLayout.keyboardOpen ? { paddingBottom: keyboardLayout.contentPaddingBottom } : null

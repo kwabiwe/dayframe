@@ -5,8 +5,10 @@
     "scheme": "dayframe",
     "version": "0.1.0",
     "orientation": "portrait",
+    "backgroundColor": "#050914",
     "userInterfaceStyle": "automatic",
     "ios": {
+      "backgroundColor": "#050914",
       "icon": "./assets/dayframe_app_icon.png",
       "supportsTablet": true,
       "bundleIdentifier": "com.layereight.dayframe",
@@ -23,6 +25,7 @@
     },
     "plugins": [
       "expo-router",
+      "expo-system-ui",
       "expo-location",
       [
         "@kingstinct/react-native-healthkit",

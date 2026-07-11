@@ -73,6 +73,7 @@ import {
   isReviewNeededEntry
 } from "@/lib/review";
 import { syncShortcutCatalog } from "@/lib/shortcuts";
+import { scheduleLayoutTransition, useReduceMotionPreference } from "@/lib/motion";
 
 type TimeEntry = MobileBootstrap["entries"][number];
 type AuthView = "login" | "signup";
@@ -158,6 +159,21 @@ export default function HomeScreen() {
   const authWorkspaceRef = useRef<TextInput>(null);
   const authEmailRef = useRef<TextInput>(null);
   const authPasswordRef = useRef<TextInput>(null);
+
+  const changeTab = useCallback((nextTab: MobileTab) => {
+    scheduleLayoutTransition(reduceMotion);
+    setActiveTab(nextTab);
+  }, [reduceMotion]);
+
+  const changeReportRange = useCallback((nextRange: ReportRange) => {
+    scheduleLayoutTransition(reduceMotion);
+    setReportRange(nextRange);
+  }, [reduceMotion]);
+
+  const changeReportChart = useCallback((nextView: ReportChartView) => {
+    scheduleLayoutTransition(reduceMotion);
+    setReportChartView(nextView);
+  }, [reduceMotion]);
 
   const load = useCallback(async (options?: { silent?: boolean }) => {
     if (refreshInFlight.current) return;
@@ -1031,12 +1047,12 @@ export default function HomeScreen() {
               range={reportRange}
               segments={reports.segments}
               hasSuggestedActivity={reports.hasSuggestedActivity}
-              onChartViewChange={setReportChartView}
+              onChartViewChange={changeReportChart}
               styles={styles}
               theme={theme}
               todayTotal={reports.todayTotal}
               weekTotal={reports.weekTotal}
-              onRangeChange={setReportRange}
+              onRangeChange={changeReportRange}
             />
           ) : null}
         </Animated.View>
@@ -1044,7 +1060,7 @@ export default function HomeScreen() {
       <FloatingTabBar
         activeTab={activeTab}
         bottomInset={insets.bottom}
-        onChange={setActiveTab}
+        onChange={changeTab}
         styles={styles}
         theme={theme}
       />
@@ -1191,31 +1207,6 @@ function useLiquidGlassAvailability() {
       return false;
     }
   }, [reduceTransparency]);
-}
-
-function useReduceMotionPreference() {
-  // Default to the accessibility-safe state until iOS resolves the preference.
-  const [reduceMotion, setReduceMotion] = useState(true);
-
-  useEffect(() => {
-    let mounted = true;
-    AccessibilityInfo.isReduceMotionEnabled()
-      .then((enabled) => {
-        if (mounted) setReduceMotion(enabled);
-      })
-      .catch(() => undefined);
-    const subscription = AccessibilityInfo.addEventListener(
-      "reduceMotionChanged",
-      setReduceMotion
-    );
-
-    return () => {
-      mounted = false;
-      subscription.remove();
-    };
-  }, []);
-
-  return reduceMotion;
 }
 
 function CalendarTab({
