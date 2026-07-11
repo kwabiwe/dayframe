@@ -1,12 +1,12 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-11 07:17 BST
+Last verified: 2026-07-11 09:06 BST
 
 ## Verification Snapshot
 
-- Local repo: `main` synced with `origin/main` at PR #40 merge commit `1dc16a4`.
-- GitHub: PR #40 is merged; no open PRs and no GitHub issues at release verification time.
-- Latest verified TestFlight build: `0.1.0 (15)`.
+- Local repo: `main` synced with `origin/main` at PR #41 merge commit `c525830`.
+- GitHub: PR #41 is merged; no open PRs and no GitHub issues at release verification time.
+- Latest verified TestFlight build: `0.1.0 (16)`.
 - Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, and App Store Connect build state.
 
 ## Status Key
@@ -23,12 +23,13 @@ Last verified: 2026-07-11 07:17 BST
 
 | Item | Status | Evidence | Next action |
 | --- | --- | --- | --- |
-| More reliable offline and mobile sync | In progress | PR #41; README and regression checklist already describe the mobile offline queue for Shortcut, NFC, geofence, Apple Health, and background event paths. | Harden failed queue recovery: visible failed/synced states, manual retry, safe backoff, conflict/idempotency checks, queue diagnostics/export, recovery from partial API failures, and web/mobile active-timer reconciliation after reconnect. |
+| Select next implementation slice | Next | PR #41 completed the previous Next item and build `0.1.0 (16)` is verified in TestFlight. | Pick the next PR from the tracked backlog, likely NFC Shortcuts, Live Activities, preview lane, privacy/deletion, or another KB-prioritised item. |
 
 ## Recently Shipped Or Addressed
 
 | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- |
+| More reliable offline and mobile sync | Watch | PR #41, build `0.1.0 (16)`, delivery UUID `c84e56c7-931a-4b4b-b28c-b6a66be04219`. | Adds retry backoff metadata, automatic foreground/focus queue drain, manual force sync/retry, queue diagnostics counts, and diagnostics export for mobile queued events. Watch real-device Shortcut/NFC/geofence/Health queue recovery, idempotency, and reconnect behaviour. |
 | Auto-log defaults during onboarding and non-Health imports | Done | PR #40, build `0.1.0 (15)`, delivery UUID `e6bcc257-2214-49c9-8614-5a201958a175`. | Adds Settings-managed defaults for mobile starts, Shortcuts, NFC, widgets, and Home Assistant buttons. Defaults only fill blank category/description values; explicit event values still win. |
 | Duplicate/overlapping Sleep investigation | Watch | `docs/investigations/2026-07-11-duplicate-sleep.md`; KB reports no current duplicates in TestFlight build `0.1.0 (14)`. | Existing idempotency, Health segment dedupe, covering-entry checks, overlap blocks, and legacy consolidation already guard the known paths. Do not add merge/delete logic without a real duplicate export or row sample. |
 | Midnight Core reskin and supplied branding | Done | PR #39, build `0.1.0 (14)`, delivery UUID `e6425673-8e83-4d62-ae31-cc01e7fc6001`. | Shared web/iOS Midnight Core tokens, refreshed app icon, wordmarks, reusable brand components, and automated brand/theme guardrails shipped without changing core tracking logic. |
@@ -54,7 +55,7 @@ Last verified: 2026-07-11 07:17 BST
 | Sleep stages fragmented into REM/Core/Deep cards | Watch | PRs #23, #26, and #29. | Current imports group sessions; legacy sleep-stage backlog cleanup is merged. |
 | Health items left in Review without useful explanation | Watch | PRs #22, #25, #26, #27, and #29. | Diagnostics and left-in-review reasons exist; continue checking that reasons are clear on device. |
 | Geo/place default description mismatch | Done | PR #19 and PR #26. | Place names should remain reference/context; configured activity descriptions are used for geofence display and Confirm. |
-| TestFlight release preflight and compliance checks | Done | PR #31 plus build release runs through `0.1.0 (14)`. | Keep verifying processing state, encryption compliance, notes, and internal testing assignment before asking KB to test. Docs-only PRs do not need a TestFlight build unless they change release/build configuration. |
+| TestFlight release preflight and compliance checks | Done | PR #31 plus build release runs through `0.1.0 (16)`. | Keep verifying processing state, encryption compliance, notes, and internal testing assignment before asking KB to test. Docs-only PRs do not need a TestFlight build unless they change release/build configuration. |
 
 ## Future Tracks
 
