@@ -1,11 +1,11 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-11 15:16 BST
+Last verified: 2026-07-11 15:19 BST
 
 ## Verification Snapshot
 
-- Local repo: `main` synced with `origin/main`; release verification recorded for build 17 in this tracker update.
-- GitHub: PR #42 is merged; no open PRs and no GitHub issues at release verification time.
+- Local repo: `main` synced with `origin/main`; PR #43 is merged and waiting for TestFlight build 18 release verification.
+- GitHub: PR #43 is merged; no open PRs and no GitHub issues at release verification time.
 - Latest verified TestFlight build: `0.1.0 (17)`.
 - Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, and App Store Connect build state.
 
@@ -23,13 +23,13 @@ Last verified: 2026-07-11 15:16 BST
 
 | Item | Status | Evidence | Next action |
 | --- | --- | --- | --- |
-| Mobile review polish and Shortcut stop follow-up | In progress | Active branch `agent/mobile-review-polish-shortcuts`; Trello card `Mobile review polish`. | Ship Settings header/back navigation polish, subtle start/stop progress, clearer saved-place review copy, `Stop tracking` Shortcut, selectable category/workspace Shortcut options, then release to TestFlight build `0.1.0 (18)`. |
 | Live Activities with a timer | Next | Shortcut/NFC and Settings grouping shipped in PR #42/build `0.1.0 (17)`, so the offline handoff foundation is now available. | Add an iOS Live Activity/Dynamic Island timer for the active Dayframe entry, with accurate start/stop/edit/offline state handling. |
 
 ## Recently Shipped Or Addressed
 
 | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- |
+| Mobile review polish and Shortcut stop follow-up | Release pending | PR #43 merged into `main` at `d1dec8c`; TestFlight build `0.1.0 (18)` pending. | Settings header logo removed and sub-setting swipe/back returns to Settings index; timer start/stop uses a subtle progress bar instead of a layout-jumping full spinner; saved-place review reasons explain review-first visits; Shortcuts adds `Stop tracking` plus cached category/workspace options for `Start tracking`. |
 | Siri Shortcuts, NFC handoff, and mobile Settings grouping | Watch | PR #42, build `0.1.0 (17)`, delivery UUID `81a9567e-18db-4d0a-9eda-34e24aa71882`. | Adds the first iOS `Start tracking` App Intent for Apple Shortcuts/NFC automations with description and category parameters, removes Shortcut/NFC auto-default mappings, uses Dayframe's current workspace, preserves the offline queue handoff, and reorganizes mobile Settings into grouped sub-settings. Watch real-device Shortcut/NFC setup and category matching before marking fully settled. |
 | More reliable offline and mobile sync | Watch | PR #41, build `0.1.0 (16)`, delivery UUID `c84e56c7-931a-4b4b-b28c-b6a66be04219`. | Adds retry backoff metadata, automatic foreground/focus queue drain, manual force sync/retry, queue diagnostics counts, and diagnostics export for mobile queued events. Watch real-device Shortcut/NFC/geofence/Health queue recovery, idempotency, and reconnect behaviour. |
 | Auto-log defaults during onboarding and non-Health imports | Watch | PR #40, build `0.1.0 (15)`, delivery UUID `e6bcc257-2214-49c9-8614-5a201958a175`; PR #42, build `0.1.0 (17)`, corrected the Shortcut/NFC direction. | Auto-log defaults are only for user-enabled automatic sources such as Health, walking/running, places, and future commute/place learning. Manual mobile starts and Siri Shortcut/NFC starts use only the values supplied by the user or Shortcut. |
