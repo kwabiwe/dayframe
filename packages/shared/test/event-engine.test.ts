@@ -196,6 +196,7 @@ describe("event normalization", () => {
     );
     expect(reviewCandidate.action).toBe("create_review_item");
     expect(reviewCandidate.reviewStatus).toBe("needs_review");
+    expect(reviewCandidate.reason).toContain("review-first");
 
     const stopCandidate = normalizeActivityEvent(
       {

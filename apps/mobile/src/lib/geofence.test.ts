@@ -114,6 +114,9 @@ describe("mobile geofence visit candidates", () => {
       confidence: "medium_high",
       source: "ios_geofence"
     });
+    await expect(getLocationVisitDiagnostics()).resolves.toMatchObject({
+      lastStatus: "Queued Gym visit for review. Saved-place visits are review-first before becoming time entries."
+    });
   });
 
   it("does not queue a visit candidate below the dwell threshold", async () => {
@@ -206,7 +209,8 @@ describe("mobile geofence visit candidates", () => {
         foregroundPermission: "granted",
         backgroundPermission: "granted",
         activeMonitorCount: 1,
-        lastStatus: "Queued Gym visit for review.",
+        lastStatus:
+          "Queued Gym visit for review. Saved-place visits are review-first before becoming time entries.",
         lastPlaceName: "Gym",
         lastGeofenceEvent: {
           transition: "exit",

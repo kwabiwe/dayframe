@@ -753,7 +753,7 @@ export function normalizeActivityEvent(
           ? "Home exits are ambiguous and stay review-first by default."
           : matchingRule?.enabled && matchingRule.action === "stop_timer"
             ? "Location rules create after-the-fact review candidates instead of stopping live timers."
-            : "Specific geofence exits are reviewed as completed visit evidence.",
+            : "Place visits are review-first by default, even for saved places. Confirm this completed visit before Dayframe turns it into tracked time.",
       shouldClosePrevious: false
     };
   }

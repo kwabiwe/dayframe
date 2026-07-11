@@ -571,6 +571,18 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       gap: 8
     },
+    timerProgressSlot: {
+      height: 3,
+      borderRadius: 999,
+      backgroundColor: theme.mode === "dark" ? "rgba(255,255,255,0.06)" : "rgba(8,14,24,0.08)",
+      overflow: "hidden"
+    },
+    timerProgressFill: {
+      width: 108,
+      height: "100%",
+      borderRadius: 999,
+      backgroundColor: theme.accent
+    },
     activeTitleRow: {
       flexDirection: "row",
       alignItems: "center",
