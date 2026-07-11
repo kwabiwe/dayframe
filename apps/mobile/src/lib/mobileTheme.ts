@@ -470,13 +470,21 @@ function createStyles(theme: MobileTheme) {
       position: "absolute",
       left: 76,
       right: 10,
-      minHeight: 44,
       borderWidth: 1,
       borderRadius: 13,
       paddingHorizontal: 10,
       paddingVertical: 7,
       gap: 4,
       justifyContent: "center"
+    },
+    calendarBlockCompact: {
+      paddingVertical: 4,
+      gap: 0
+    },
+    calendarBlockTiny: {
+      borderRadius: 8,
+      paddingHorizontal: 0,
+      paddingVertical: 0
     },
     calendarBlockActive: {
       borderStyle: "dashed"

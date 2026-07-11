@@ -1,11 +1,11 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-11 17:32 BST
+Last verified: 2026-07-11 19:22 BST
 
 ## Verification Snapshot
 
-- Local repo: `main` synced with `origin/main`; PR #43 is merged and TestFlight build 18 is verified.
-- GitHub: PR #43 is merged; no open PRs and no GitHub issues at release verification time.
+- Local repo: branch `agent/calendar-compact-settings-swipe` is active for PR #44.
+- GitHub: PR #43 is merged; no open PRs and no GitHub issues at PR #44 start time.
 - Latest verified TestFlight build: `0.1.0 (18)`.
 - Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, and App Store Connect build state.
 
@@ -23,13 +23,14 @@ Last verified: 2026-07-11 17:32 BST
 
 | Item | Status | Evidence | Next action |
 | --- | --- | --- | --- |
-| Live Activities with a timer | Next | Shortcut/NFC and Settings grouping shipped in PR #42/build `0.1.0 (17)`, so the offline handoff foundation is now available. | Add an iOS Live Activity/Dynamic Island timer for the active Dayframe entry, with accurate start/stop/edit/offline state handling. |
+| Calendar compact blocks and Settings swipe-back | In progress | Trello card `PR44 calendar + settings fix`; branch `agent/calendar-compact-settings-swipe`. | Keep Calendar block height close to actual duration and hide labels when the block is too small; make nested Settings screens return to Settings on native iOS back-swipe instead of popping to Today. |
+| Background Shortcuts and Live Activity | Planned | PR #43 review confirmed NFC Shortcuts work, but the deep-link handoff briefly opens Dayframe and shows `Shortcut queued`. | Replace the deep-link-only Shortcut handoff with a native/background queue path, then add an iOS Live Activity/Dynamic Island timer as the confirmation surface for active tracking. |
 
 ## Recently Shipped Or Addressed
 
 | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Mobile review polish and Shortcut stop follow-up | Watch | PR #43, build `0.1.0 (18)`, delivery UUID `5540f30c-5002-4a0b-a217-709eed42c6a7`. | Settings header logo removed and sub-setting swipe/back returns to Settings index; timer start/stop uses a subtle progress bar instead of a layout-jumping full spinner; saved-place review reasons explain review-first visits; Shortcuts adds `Stop tracking` plus cached category/workspace options for `Start tracking`. Watch real-device nested Settings swipe-back, start/stop progress, saved-place review copy, and Shortcut category/workspace option behaviour before marking fully settled. |
+| Mobile review polish and Shortcut stop follow-up | Watch | PR #43, build `0.1.0 (18)`, delivery UUID `5540f30c-5002-4a0b-a217-709eed42c6a7`; PR #44 follow-up active for the failed swipe-back fix. | Settings header logo removed; timer start/stop uses a subtle progress bar instead of a layout-jumping full spinner; saved-place review reasons explain review-first visits; Shortcuts adds `Stop tracking` plus cached category/workspace options for `Start tracking`. PR #43 did not fully fix nested Settings swipe-back, and Shortcut starts/stops still show the deep-link queued splash, so those are split into PR #44 and the background Shortcuts/Live Activity follow-up. |
 | Siri Shortcuts, NFC handoff, and mobile Settings grouping | Watch | PR #42, build `0.1.0 (17)`, delivery UUID `81a9567e-18db-4d0a-9eda-34e24aa71882`. | Adds the first iOS `Start tracking` App Intent for Apple Shortcuts/NFC automations with description and category parameters, removes Shortcut/NFC auto-default mappings, uses Dayframe's current workspace, preserves the offline queue handoff, and reorganizes mobile Settings into grouped sub-settings. Watch real-device Shortcut/NFC setup and category matching before marking fully settled. |
 | More reliable offline and mobile sync | Watch | PR #41, build `0.1.0 (16)`, delivery UUID `c84e56c7-931a-4b4b-b28c-b6a66be04219`. | Adds retry backoff metadata, automatic foreground/focus queue drain, manual force sync/retry, queue diagnostics counts, and diagnostics export for mobile queued events. Watch real-device Shortcut/NFC/geofence/Health queue recovery, idempotency, and reconnect behaviour. |
 | Auto-log defaults during onboarding and non-Health imports | Watch | PR #40, build `0.1.0 (15)`, delivery UUID `e6bcc257-2214-49c9-8614-5a201958a175`; PR #42, build `0.1.0 (17)`, corrected the Shortcut/NFC direction. | Auto-log defaults are only for user-enabled automatic sources such as Health, walking/running, places, and future commute/place learning. Manual mobile starts and Siri Shortcut/NFC starts use only the values supplied by the user or Shortcut. |

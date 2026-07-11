@@ -11,7 +11,7 @@ import {
   View
 } from "react-native";
 import Svg, { Path } from "react-native-svg";
-import { router, useFocusEffect, useNavigation } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
   DAYFRAME_PALETTE,
@@ -85,6 +85,8 @@ export default function SettingsScreen() {
     themePreference
   } = useMobileTheme();
   const navigation = useNavigation();
+  const params = useLocalSearchParams<{ section?: string | string[] }>();
+  const routeSettingsSection = normalizeSettingsSection(params.section);
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [queue, setQueue] = useState<QueuedEvent[]>([]);
   const [lastSyncResult, setLastSyncResult] = useState<SyncQueueResult | null>(null);
@@ -149,6 +151,10 @@ export default function SettingsScreen() {
   );
 
   useEffect(() => {
+    setSettingsSection(routeSettingsSection);
+  }, [routeSettingsSection]);
+
+  useEffect(() => {
     getHealthImportStatus().then(setHealthStatus).catch(() => {
       setHealthStatus([
         {
@@ -206,13 +212,13 @@ export default function SettingsScreen() {
 
   useEffect(() => {
     const unsubscribe = navigation.addListener("beforeRemove", (event) => {
-      if (settingsSection === "index") return;
+      if (settingsSection === "index" || routeSettingsSection !== "index") return;
       event.preventDefault();
       setSettingsSection("index");
     });
 
     return unsubscribe;
-  }, [navigation, settingsSection]);
+  }, [navigation, routeSettingsSection, settingsSection]);
 
   function goBack() {
     if (settingsSection === "index") {
@@ -220,6 +226,14 @@ export default function SettingsScreen() {
       return;
     }
     setSettingsSection("index");
+    if (routeSettingsSection !== "index") {
+      router.back();
+    }
+  }
+
+  function openSettingsSection(section: Exclude<SettingsSection, "index">) {
+    setSettingsSection(section);
+    router.push({ pathname: "/settings", params: { section } });
   }
 
   useEffect(() => {
@@ -604,7 +618,7 @@ export default function SettingsScreen() {
                   value={workspaceLabel}
                   styles={styles}
                   theme={theme}
-                  onPress={() => setSettingsSection("profile")}
+                  onPress={() => openSettingsSection("profile")}
                 />
                 <SettingsMenuRow
                   icon="categories"
@@ -612,7 +626,7 @@ export default function SettingsScreen() {
                   value={`${categoryCount} ${categoryCount === 1 ? "category" : "categories"}`}
                   styles={styles}
                   theme={theme}
-                  onPress={() => setSettingsSection("categories")}
+                  onPress={() => openSettingsSection("categories")}
                 />
                 <SettingsMenuRow
                   icon="appearance"
@@ -620,7 +634,7 @@ export default function SettingsScreen() {
                   value={themePreference === "system" ? "System" : themePreference === "dark" ? "Dark" : "Light"}
                   styles={styles}
                   theme={theme}
-                  onPress={() => setSettingsSection("appearance")}
+                  onPress={() => openSettingsSection("appearance")}
                 />
               </SettingsGroup>
 
@@ -631,7 +645,7 @@ export default function SettingsScreen() {
                   value="Shortcuts, NFC, places"
                   styles={styles}
                   theme={theme}
-                  onPress={() => setSettingsSection("automations")}
+                  onPress={() => openSettingsSection("automations")}
                 />
                 <SettingsMenuRow
                   icon="health"
@@ -639,7 +653,7 @@ export default function SettingsScreen() {
                   value={healthAvailability?.notes ?? "Sleep and workouts"}
                   styles={styles}
                   theme={theme}
-                  onPress={() => setSettingsSection("health")}
+                  onPress={() => openSettingsSection("health")}
                 />
                 <SettingsMenuRow
                   icon="review"
@@ -658,7 +672,7 @@ export default function SettingsScreen() {
                   value={deviceSyncStatus}
                   styles={styles}
                   theme={theme}
-                  onPress={() => setSettingsSection("sync")}
+                  onPress={() => openSettingsSection("sync")}
                 />
               </SettingsGroup>
             </>
@@ -1310,6 +1324,21 @@ function settingsSectionTitle(section: SettingsSection) {
       return "Appearance";
     case "index":
       return "Settings";
+  }
+}
+
+function normalizeSettingsSection(value: string | string[] | undefined): SettingsSection {
+  const section = Array.isArray(value) ? value[0] : value;
+  switch (section) {
+    case "profile":
+    case "categories":
+    case "automations":
+    case "health":
+    case "sync":
+    case "appearance":
+      return section;
+    default:
+      return "index";
   }
 }
 
