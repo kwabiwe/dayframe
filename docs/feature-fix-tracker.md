@@ -1,12 +1,12 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-11 11:06 BST
+Last verified: 2026-07-11 11:53 BST
 
 ## Verification Snapshot
 
-- Local repo: `main` synced with `origin/main` at PR #42 merge commit `2d23f34`.
+- Local repo: `main` synced with `origin/main`; release verification recorded for build 17 in this tracker update.
 - GitHub: PR #42 is merged; no open PRs and no GitHub issues at release verification time.
-- Latest verified TestFlight build: `0.1.0 (16)`.
+- Latest verified TestFlight build: `0.1.0 (17)`.
 - Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, and App Store Connect build state.
 
 ## Status Key
@@ -23,14 +23,15 @@ Last verified: 2026-07-11 11:06 BST
 
 | Item | Status | Evidence | Next action |
 | --- | --- | --- | --- |
-| Siri Shortcuts, NFC handoff, and mobile Settings grouping | Release pending | PR #42 merged at `2d23f34`; local tests, typecheck, lint, web build, brand check, native iOS simulator build, and TestFlight preflight passed. | Upload build `0.1.0 (17)`, then verify Apple processing, export compliance, TestFlight notes, internal group assignment, and build state. |
+| Live Activities with a timer | Next | Shortcut/NFC and Settings grouping shipped in PR #42/build `0.1.0 (17)`, so the offline handoff foundation is now available. | Add an iOS Live Activity/Dynamic Island timer for the active Dayframe entry, with accurate start/stop/edit/offline state handling. |
 
 ## Recently Shipped Or Addressed
 
 | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- |
+| Siri Shortcuts, NFC handoff, and mobile Settings grouping | Watch | PR #42, build `0.1.0 (17)`, delivery UUID `81a9567e-18db-4d0a-9eda-34e24aa71882`. | Adds the first iOS `Start tracking` App Intent for Apple Shortcuts/NFC automations with description and category parameters, removes Shortcut/NFC auto-default mappings, uses Dayframe's current workspace, preserves the offline queue handoff, and reorganizes mobile Settings into grouped sub-settings. Watch real-device Shortcut/NFC setup and category matching before marking fully settled. |
 | More reliable offline and mobile sync | Watch | PR #41, build `0.1.0 (16)`, delivery UUID `c84e56c7-931a-4b4b-b28c-b6a66be04219`. | Adds retry backoff metadata, automatic foreground/focus queue drain, manual force sync/retry, queue diagnostics counts, and diagnostics export for mobile queued events. Watch real-device Shortcut/NFC/geofence/Health queue recovery, idempotency, and reconnect behaviour. |
-| Auto-log defaults during onboarding and non-Health imports | Watch | PR #40, build `0.1.0 (15)`, delivery UUID `e6bcc257-2214-49c9-8614-5a201958a175`; PR #42 follow-up is release pending. | Corrected direction: auto-log defaults are only for user-enabled automatic sources such as Health, walking/running, places, and future commute/place learning. Manual mobile starts and Siri Shortcut/NFC starts should use only the values supplied by the user or Shortcut. |
+| Auto-log defaults during onboarding and non-Health imports | Watch | PR #40, build `0.1.0 (15)`, delivery UUID `e6bcc257-2214-49c9-8614-5a201958a175`; PR #42, build `0.1.0 (17)`, corrected the Shortcut/NFC direction. | Auto-log defaults are only for user-enabled automatic sources such as Health, walking/running, places, and future commute/place learning. Manual mobile starts and Siri Shortcut/NFC starts use only the values supplied by the user or Shortcut. |
 | Duplicate/overlapping Sleep investigation | Watch | `docs/investigations/2026-07-11-duplicate-sleep.md`; KB reports no current duplicates in TestFlight build `0.1.0 (14)`. | Existing idempotency, Health segment dedupe, covering-entry checks, overlap blocks, and legacy consolidation already guard the known paths. Do not add merge/delete logic without a real duplicate export or row sample. |
 | Midnight Core reskin and supplied branding | Done | PR #39, build `0.1.0 (14)`, delivery UUID `e6425673-8e83-4d62-ae31-cc01e7fc6001`. | Shared web/iOS Midnight Core tokens, refreshed app icon, wordmarks, reusable brand components, and automated brand/theme guardrails shipped without changing core tracking logic. |
 | Calendar edit card keyboard avoidance regression | Watch | PR #37, build `0.1.0 (13)`, delivery UUID `8b5d4ac4-d0ca-4239-9719-4442aee56ec6`. | Edit sheet now uses screen-coordinate keyboard measurements, explicit keyboard-open sheet height, scrollable form body, and regression tests for small-iPhone keyboard-open layout. Watch KB's real-device keyboard/suggestion-bar check before marking fully settled. |
@@ -55,14 +56,13 @@ Last verified: 2026-07-11 11:06 BST
 | Sleep stages fragmented into REM/Core/Deep cards | Watch | PRs #23, #26, and #29. | Current imports group sessions; legacy sleep-stage backlog cleanup is merged. |
 | Health items left in Review without useful explanation | Watch | PRs #22, #25, #26, #27, and #29. | Diagnostics and left-in-review reasons exist; continue checking that reasons are clear on device. |
 | Geo/place default description mismatch | Done | PR #19 and PR #26. | Place names should remain reference/context; configured activity descriptions are used for geofence display and Confirm. |
-| TestFlight release preflight and compliance checks | Done | PR #31 plus build release runs through `0.1.0 (16)`. | Keep verifying processing state, encryption compliance, notes, and internal testing assignment before asking KB to test. Docs-only PRs do not need a TestFlight build unless they change release/build configuration. |
+| TestFlight release preflight and compliance checks | Done | PR #31 plus build release runs through `0.1.0 (17)`. | Keep verifying processing state, encryption compliance, notes, and internal testing assignment before asking KB to test. Docs-only PRs do not need a TestFlight build unless they change release/build configuration. |
 
 ## Future Tracks
 
 | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| NFC support through iOS Shortcuts | Release pending | PR #42 adds the first `Start tracking` App Intent and keeps NFC as an Apple Shortcuts trigger, not a Dayframe trigger. | Verify in build `0.1.0 (17)`: tag scan runs a Dayframe Shortcut action with description/category parameters, Dayframe uses the current/default workspace, and queues the start through the offline path. Native NFC scanning remains out of scope unless Shortcuts is not enough. |
-| Live Activities with a timer | Future | Mobile already has an active timer and shared web/mobile timer sync; no ActivityKit extension exists yet. | Add an iOS Live Activity/Dynamic Island timer for the active Dayframe entry, showing task/category and elapsed time, keeping state accurate across start/stop/edit/sync, and handling stale/offline states without misleading the user. |
+| Native NFC scanning beyond Shortcuts | Future | PR #42 shipped the preferred Apple Shortcuts-driven NFC route; NFC tags trigger Shortcuts, not Dayframe directly. | Revisit native NFC scanning only if Apple Shortcuts is not enough. Any native path should still queue idempotent start/stop/review events and keep user-controlled setup. |
 | Dayframe integration with Cockpit | Future | Prior Dayframe/Cockpit planning expects Cockpit to read Dayframe when it is ready instead of Toggl. | Start with a small token-protected read-only Cockpit API/stream for current timer, today timeline, source/confidence, and next suggested action; avoid write/mutation controls until explicitly approved. |
 | Natural-language rules that create time entries | Planned | PR #30 proves draft/simulate only; earlier guardrails require deterministic, auditable writes. | Expand the Rule assistant into saveable rules that can propose or create time entries only after a preview/simulation step, with user approval, evidence shown, disable/edit/audit controls, and no direct LLM-to-database write path. |
 | Dayframe Preview / pre-prod lane | Future | Repeatedly noted as useful after the current fast TestFlight lane stabilises. | Create a separate preview/staging path with its own app identity or bundle, staging Vercel/Supabase environment, staging secrets, TestFlight group/build lane, and release checklist so KB can test risky changes before production/main TestFlight. |

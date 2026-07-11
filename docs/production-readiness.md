@@ -104,7 +104,7 @@ Deletion/privacy groundwork remains: implement safe user/workspace deletion with
 
 ## Current Internal Beta State
 
-As of 2026-07-11, the active internal TestFlight lane has verified build `0.1.0 (16)` in `Internal Health Debug`. The product is usable for owner testing, but several areas remain `Watch`, `Planned`, or `Future` in `docs/feature-fix-tracker.md`.
+As of 2026-07-11, the active internal TestFlight lane has verified build `0.1.0 (17)` in `Internal Health Debug`. The product is usable for owner testing, but several areas remain `Watch`, `Planned`, or `Future` in `docs/feature-fix-tracker.md`.
 
 ## Remaining Before Wider Daily Beta Use
 
