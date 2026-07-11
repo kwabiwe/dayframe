@@ -1,12 +1,12 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-11 21:19 BST
+Last verified: 2026-07-11 21:31 BST
 
 ## Verification Snapshot
 
-- Local repo: `main` synced with `origin/main`; PR #46 is merged and waiting for TestFlight build 21 release verification.
-- GitHub: PR #46 is merged; no open PRs and no GitHub issues at merge verification time.
-- Latest verified TestFlight build: `0.1.0 (20)`.
+- Local repo: `main` synced with `origin/main`; PR #46 is merged and verified in TestFlight build 21.
+- GitHub: PR #46 is merged; no open PRs and no GitHub issues at release verification time.
+- Latest verified TestFlight build: `0.1.0 (21)`.
 - Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, and App Store Connect build state.
 
 ## Status Key
@@ -29,7 +29,7 @@ Last verified: 2026-07-11 21:19 BST
 
 | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Settings cached navigation and silent refresh | Release pending | PR #46 merged into `main` at `25b350e`; TestFlight build `0.1.0 (21)` pending. | Settings navigation renders from cached data immediately, silently refreshes stale snapshots in the background, only shows the pull-to-refresh spinner when the user explicitly pulls, and avoids Health/location diagnostic work on unrelated sub-settings. |
+| Settings cached navigation and silent refresh | Watch | PR #46, build `0.1.0 (21)`, delivery UUID `56aafea3-fe4a-491e-a57a-ac3a7840be14`. | Settings navigation renders from cached data immediately, silently refreshes stale snapshots in the background, only shows the pull-to-refresh spinner when the user explicitly pulls, and avoids Health/location diagnostic work on unrelated sub-settings. Watch real-device Settings navigation across Profile, Categories, Appearance, Automations, Health, and Sync before marking settled. |
 | Settings sub-settings back navigation | Watch | PR #45, build `0.1.0 (20)`, delivery UUID `6bacb90a-006e-49f6-acc4-e1d2fbe64ee2`. | All Settings sub-settings now derive from the `section` route param only. Removed local `settingsSection` mutation and the manual `beforeRemove` interception so native iOS swipe-back and the header back button can pop normally to the Settings index. Watch real-device navigation through every Settings sub-section before marking settled. |
 | Calendar compact blocks and Settings swipe-back | Watch | PR #44, build `0.1.0 (19)`, delivery UUID `997c7e8e-9556-4a54-a586-c71e1b80061b`; PR #45, build `0.1.0 (20)`, followed up the remaining Settings sub-settings back-navigation glitch. | Calendar blocks now keep near-true duration height and suppress title/meta labels until there is enough vertical space. PR #44 did not fully fix Settings sub-setting back navigation because the old Settings route could retain local sub-setting state; PR #45 handles that follow-up. |
 | Mobile review polish and Shortcut stop follow-up | Watch | PR #43, build `0.1.0 (18)`, delivery UUID `5540f30c-5002-4a0b-a217-709eed42c6a7`; PR #44, build `0.1.0 (19)`, followed up the failed swipe-back fix. | Settings header logo removed; timer start/stop uses a subtle progress bar instead of a layout-jumping full spinner; saved-place review reasons explain review-first visits; Shortcuts adds `Stop tracking` plus cached category/workspace options for `Start tracking`. Shortcut starts/stops still show the deep-link queued splash, so that is split into the background Shortcuts/Live Activity follow-up. |
@@ -60,7 +60,7 @@ Last verified: 2026-07-11 21:19 BST
 | Sleep stages fragmented into REM/Core/Deep cards | Watch | PRs #23, #26, and #29. | Current imports group sessions; legacy sleep-stage backlog cleanup is merged. |
 | Health items left in Review without useful explanation | Watch | PRs #22, #25, #26, #27, and #29. | Diagnostics and left-in-review reasons exist; continue checking that reasons are clear on device. |
 | Geo/place default description mismatch | Done | PR #19 and PR #26. | Place names should remain reference/context; configured activity descriptions are used for geofence display and Confirm. |
-| TestFlight release preflight and compliance checks | Done | PR #31 plus build release runs through `0.1.0 (20)`. | Keep verifying processing state, encryption compliance, notes, and internal testing assignment before asking KB to test. Docs-only PRs do not need a TestFlight build unless they change release/build configuration. |
+| TestFlight release preflight and compliance checks | Done | PR #31 plus build release runs through `0.1.0 (21)`. | Keep verifying processing state, encryption compliance, notes, and internal testing assignment before asking KB to test. Docs-only PRs do not need a TestFlight build unless they change release/build configuration. |
 
 ## Future Tracks
 
