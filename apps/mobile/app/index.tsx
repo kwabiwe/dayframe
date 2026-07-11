@@ -141,6 +141,7 @@ export default function HomeScreen() {
   const [chartProgress, setChartProgress] = useState(1);
   const reduceMotion = useReduceMotionPreference();
   const refreshInFlight = useRef(false);
+  const queueSyncInFlight = useRef(false);
   const healthAutoSyncInFlight = useRef(false);
   const mainScrollRef = useRef<ScrollView>(null);
   const mainScrollY = useRef(0);
@@ -174,6 +175,29 @@ export default function HomeScreen() {
     }
   }, []);
 
+  const syncQueuedEvents = useCallback(async () => {
+    if (queueSyncInFlight.current) return null;
+    queueSyncInFlight.current = true;
+    try {
+      return await syncQueue();
+    } finally {
+      queueSyncInFlight.current = false;
+    }
+  }, []);
+
+  const syncQueuedEventsAndReload = useCallback(async () => {
+    if (authState !== "authenticated") return;
+    try {
+      await syncQueuedEvents();
+      await load({ silent: true });
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        setData(null);
+        setAuthState("signedOut");
+      }
+    }
+  }, [authState, load, syncQueuedEvents]);
+
   const syncHealthKitAndReload = useCallback(async (reason: "foreground" | "observer" = "foreground") => {
     if (authState !== "authenticated" || healthAutoSyncInFlight.current) return;
 
@@ -187,7 +211,7 @@ export default function HomeScreen() {
     try {
       await importHealthKitSleep();
       await importHealthKitWorkouts();
-      await syncQueue();
+      await syncQueuedEvents();
       await reprocessExistingHealthReviewItems(undefined, { force: reason === "observer" });
       await load({ silent: true });
     } catch (error) {
@@ -200,7 +224,7 @@ export default function HomeScreen() {
     } finally {
       healthAutoSyncInFlight.current = false;
     }
-  }, [authState, load]);
+  }, [authState, load, syncQueuedEvents]);
 
   useEffect(() => {
     if (reduceMotion) {
@@ -250,8 +274,12 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       void reloadThemePreference();
-      if (authState === "authenticated") void load({ silent: true });
-    }, [authState, load, reloadThemePreference])
+      if (authState === "authenticated") {
+        void syncQueuedEventsAndReload();
+      } else {
+        void load({ silent: true });
+      }
+    }, [authState, load, reloadThemePreference, syncQueuedEventsAndReload])
   );
 
   useEffect(() => {
@@ -270,11 +298,11 @@ export default function HomeScreen() {
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active" && authState === "authenticated") {
         void syncHealthKitAndReload("foreground");
-        void load({ silent: true });
+        void syncQueuedEventsAndReload();
       }
     });
     return () => subscription.remove();
-  }, [authState, load, syncHealthKitAndReload]);
+  }, [authState, syncHealthKitAndReload, syncQueuedEventsAndReload]);
 
   useEffect(() => {
     const subscription = Linking.addEventListener("url", async ({ url }) => {
