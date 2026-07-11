@@ -1,12 +1,12 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-11 15:19 BST
+Last verified: 2026-07-11 17:32 BST
 
 ## Verification Snapshot
 
-- Local repo: `main` synced with `origin/main`; PR #43 is merged and waiting for TestFlight build 18 release verification.
+- Local repo: `main` synced with `origin/main`; PR #43 is merged and TestFlight build 18 is verified.
 - GitHub: PR #43 is merged; no open PRs and no GitHub issues at release verification time.
-- Latest verified TestFlight build: `0.1.0 (17)`.
+- Latest verified TestFlight build: `0.1.0 (18)`.
 - Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, and App Store Connect build state.
 
 ## Status Key
@@ -29,7 +29,7 @@ Last verified: 2026-07-11 15:19 BST
 
 | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Mobile review polish and Shortcut stop follow-up | Release pending | PR #43 merged into `main` at `d1dec8c`; TestFlight build `0.1.0 (18)` pending. | Settings header logo removed and sub-setting swipe/back returns to Settings index; timer start/stop uses a subtle progress bar instead of a layout-jumping full spinner; saved-place review reasons explain review-first visits; Shortcuts adds `Stop tracking` plus cached category/workspace options for `Start tracking`. |
+| Mobile review polish and Shortcut stop follow-up | Watch | PR #43, build `0.1.0 (18)`, delivery UUID `5540f30c-5002-4a0b-a217-709eed42c6a7`. | Settings header logo removed and sub-setting swipe/back returns to Settings index; timer start/stop uses a subtle progress bar instead of a layout-jumping full spinner; saved-place review reasons explain review-first visits; Shortcuts adds `Stop tracking` plus cached category/workspace options for `Start tracking`. Watch real-device nested Settings swipe-back, start/stop progress, saved-place review copy, and Shortcut category/workspace option behaviour before marking fully settled. |
 | Siri Shortcuts, NFC handoff, and mobile Settings grouping | Watch | PR #42, build `0.1.0 (17)`, delivery UUID `81a9567e-18db-4d0a-9eda-34e24aa71882`. | Adds the first iOS `Start tracking` App Intent for Apple Shortcuts/NFC automations with description and category parameters, removes Shortcut/NFC auto-default mappings, uses Dayframe's current workspace, preserves the offline queue handoff, and reorganizes mobile Settings into grouped sub-settings. Watch real-device Shortcut/NFC setup and category matching before marking fully settled. |
 | More reliable offline and mobile sync | Watch | PR #41, build `0.1.0 (16)`, delivery UUID `c84e56c7-931a-4b4b-b28c-b6a66be04219`. | Adds retry backoff metadata, automatic foreground/focus queue drain, manual force sync/retry, queue diagnostics counts, and diagnostics export for mobile queued events. Watch real-device Shortcut/NFC/geofence/Health queue recovery, idempotency, and reconnect behaviour. |
 | Auto-log defaults during onboarding and non-Health imports | Watch | PR #40, build `0.1.0 (15)`, delivery UUID `e6bcc257-2214-49c9-8614-5a201958a175`; PR #42, build `0.1.0 (17)`, corrected the Shortcut/NFC direction. | Auto-log defaults are only for user-enabled automatic sources such as Health, walking/running, places, and future commute/place learning. Manual mobile starts and Siri Shortcut/NFC starts use only the values supplied by the user or Shortcut. |
@@ -57,7 +57,7 @@ Last verified: 2026-07-11 15:19 BST
 | Sleep stages fragmented into REM/Core/Deep cards | Watch | PRs #23, #26, and #29. | Current imports group sessions; legacy sleep-stage backlog cleanup is merged. |
 | Health items left in Review without useful explanation | Watch | PRs #22, #25, #26, #27, and #29. | Diagnostics and left-in-review reasons exist; continue checking that reasons are clear on device. |
 | Geo/place default description mismatch | Done | PR #19 and PR #26. | Place names should remain reference/context; configured activity descriptions are used for geofence display and Confirm. |
-| TestFlight release preflight and compliance checks | Done | PR #31 plus build release runs through `0.1.0 (17)`. | Keep verifying processing state, encryption compliance, notes, and internal testing assignment before asking KB to test. Docs-only PRs do not need a TestFlight build unless they change release/build configuration. |
+| TestFlight release preflight and compliance checks | Done | PR #31 plus build release runs through `0.1.0 (18)`. | Keep verifying processing state, encryption compliance, notes, and internal testing assignment before asking KB to test. Docs-only PRs do not need a TestFlight build unless they change release/build configuration. |
 
 ## Future Tracks
 
