@@ -39,6 +39,11 @@ import {
   type TimeEntryUpdatePatch
 } from "@/lib/api";
 import {
+  calendarBlockPresentation,
+  calendarVisibleBlockHeight,
+  CALENDAR_BLOCK_META_MIN_HEIGHT
+} from "@/lib/calendarBlocks";
+import {
   calendarSwipeDelta,
   formatCalendarHourLabel,
   shouldCaptureCalendarSwipe
@@ -106,7 +111,6 @@ const CALENDAR_HOURS_MODES: Record<CalendarHoursMode, CalendarHours & { label: s
 const TIMELINE_DEFAULT_HOUR_HEIGHT = 72;
 const TIMELINE_MIN_HOUR_HEIGHT = 48;
 const TIMELINE_MAX_HOUR_HEIGHT = 128;
-const TIMELINE_MIN_BLOCK_HEIGHT = 44;
 const CALENDAR_HOUR_LABEL_HEIGHT = 22;
 const CALENDAR_CURRENT_TIME_LABEL_HEIGHT = 18;
 
@@ -1516,21 +1520,24 @@ function CalendarTab({
               const color = entryCategoryColor(entry, theme.mode);
               const blockColor = reviewNeeded ? theme.textSecondary : color;
               const title = displayEntryTitle(entry);
-              const compact = metrics.height <= 54;
+              const presentation = calendarBlockPresentation(metrics.height);
 
               return (
                 <Pressable
                   key={entry.id}
                   accessibilityLabel={`${reviewNeeded ? REVIEW_COPY.needsReview : entry.isActive ? "Edit running timer" : "Open time block"}: ${title}`}
                   accessibilityRole="button"
+                  hitSlop={presentation.tiny ? 8 : 4}
                   onPress={() => openCalendarEntry(entry, onOpenActive, onOpenDetail, onOpenReviewItem)}
                   style={({ pressed }) => [
                     styles.calendarBlock,
                     entry.isActive ? styles.calendarBlockActive : null,
                     reviewNeeded ? styles.calendarBlockReview : null,
+                    presentation.tiny ? styles.calendarBlockTiny : null,
+                    presentation.compact ? styles.calendarBlockCompact : null,
                     {
                       top: metrics.top,
-                      height: Math.max(TIMELINE_MIN_BLOCK_HEIGHT, metrics.height),
+                      height: metrics.height,
                       borderColor: reviewNeeded ? theme.borderStrong : color,
                       backgroundColor: colorWithAlpha(blockColor, reviewNeeded ? 0.12 : entry.isActive ? 0.16 : 0.28)
                     },
@@ -1539,13 +1546,17 @@ function CalendarTab({
                     pressed ? styles.buttonPressed : null
                   ]}
                 >
-                  <View style={styles.calendarBlockTitleRow}>
-                    <View style={[styles.colorDot, { backgroundColor: blockColor }]} />
-                    <Text style={styles.calendarBlockTitle} numberOfLines={1}>{title}</Text>
-                  </View>
-                  <Text style={styles.calendarBlockMeta} numberOfLines={compact ? 1 : 2}>
-                    {calendarBlockMeta(entry, now, reviewNeeded, metrics)}
-                  </Text>
+                  {presentation.showTitle ? (
+                    <View style={styles.calendarBlockTitleRow}>
+                      <View style={[styles.colorDot, { backgroundColor: blockColor }]} />
+                      <Text style={styles.calendarBlockTitle} numberOfLines={1}>{title}</Text>
+                    </View>
+                  ) : null}
+                  {presentation.showMeta ? (
+                    <Text style={styles.calendarBlockMeta} numberOfLines={metrics.height < CALENDAR_BLOCK_META_MIN_HEIGHT + 16 ? 1 : 2}>
+                      {calendarBlockMeta(entry, now, reviewNeeded, metrics)}
+                    </Text>
+                  ) : null}
                 </Pressable>
               );
             })}
@@ -2206,7 +2217,7 @@ function getTimelineMetrics(
 
   return {
     top: (topMinutes / 60) * hourHeight,
-    height: Math.max(TIMELINE_MIN_BLOCK_HEIGHT, (durationMinutes / 60) * hourHeight),
+    height: calendarVisibleBlockHeight(durationMinutes, hourHeight),
     startsBeforeDay: continuation.startsBeforeDay,
     continuesIntoNextDay: continuation.continuesIntoNextDay
   };
