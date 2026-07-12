@@ -38,6 +38,18 @@ struct StopTrackingIntent: AppIntent {
   }
 }
 
+@available(iOS 17.0, *)
+struct DayframeLiveActivityStopIntent: LiveActivityIntent {
+  static var title: LocalizedStringResource = "Stop timer"
+  static var description = IntentDescription("Stop the current Dayframe timer from the Live Activity.")
+  static var openAppWhenRun: Bool = false
+
+  func perform() async throws -> some IntentResult {
+    await DayframeShortcutPerformer.perform(.stop)
+    return .result()
+  }
+}
+
 @available(iOS 16.4, *)
 struct DayframeShortcuts: AppShortcutsProvider {
   static var appShortcuts: [AppShortcut] {
