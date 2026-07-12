@@ -1,13 +1,13 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-12 08:57 BST
+Last verified: 2026-07-12 09:19 BST
 
 ## Verification Snapshot
 
-- Local repo: `main` is synced with `origin/main`; PR #48 is merged and release verification is in progress.
-- GitHub: PR #48 is merged; no open PRs at merge verification time.
-- Latest verified TestFlight build: `0.1.0 (22)`.
-- Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, and App Store Connect build state.
+- Local repo: `main` includes PR #48; TestFlight build `0.1.0 (23)` is verified and the iOS build number is restored to the repo default.
+- GitHub: PR #48 is merged; no open PRs at release verification time.
+- Latest verified TestFlight build: `0.1.0 (23)`.
+- Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, local archive/export/upload logs, and App Store Connect build state.
 
 ## Status Key
 
@@ -23,12 +23,13 @@ Last verified: 2026-07-12 08:57 BST
 
 | Item | Status | Evidence | Next action |
 | --- | --- | --- | --- |
-| Background Shortcuts and Live Activity | Release pending | PR #48 merged as `15cfd6f`; local validation passes `npm run test`, `npm run typecheck`, `npm run lint`, `npm run build`, `npm run testflight:preflight`, plist lint, `git diff --check`, iOS simulator Debug build, iPhoneOS Release build, and Codex 5.6 Sol follow-up review. Places sub-setting header/spinner cleanup is bundled here. | Run the TestFlight lane, then watch real-device Shortcut/NFC actions to confirm Dayframe no longer foregrounds for Start/Stop and the Live Activity/Dynamic Island timer is the visible confirmation surface. |
+| PR48 real-device Shortcut/NFC + Live Activity verification | Watch | PR #48, build `0.1.0 (23)`, delivery/build ID `8ecf06ec-7953-489e-85cf-5c21fcf3e15e`; App Store Connect `VALID`, export compliance false, `Internal Health Debug`, and `IN_BETA_TESTING`. | On a physical iPhone, test Shortcut/NFC Start and Stop while Dayframe is closed/suspended, check offline queue replay, and confirm the Live Activity/Dynamic Island timer is the visible confirmation surface instead of a Dayframe foreground splash. |
 
 ## Recently Shipped Or Addressed
 
 | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- |
+| Background Shortcuts and Live Activity | Watch | PR #48, build `0.1.0 (23)`, delivery/build ID `8ecf06ec-7953-489e-85cf-5c21fcf3e15e`. | Adds native queued Start/Stop App Intent handling for Shortcut/NFC triggers, drains native Shortcut events through the normal mobile offline queue, adds a Live Activity/Dynamic Island timer confirmation surface, and bundles the Settings > Automations > Places cleanup that removes the distracting right-side logo/spinner. Watch real-device Shortcut/NFC foreground behaviour, suspended/offline queue replay, and Live Activity/Dynamic Island lifecycle before marking settled. |
 | Mobile navigation continuity and dark transition backgrounds | Watch | PR #47, build `0.1.0 (22)`, delivery/build ID `a2fa4831-5c22-4f2b-b455-f4263c2ee03c`. | Binds Expo Router/native containers to Dayframe light/dark theme surfaces, uses flat gesture-compatible native-stack transitions without the rounded-card shadow, centralises Reduce Motion-aware timings, removes the delayed description-field scroll jump, and includes the `ExpoSystemUI` native pod for runtime root background updates. Verify dark/light Settings, Review and Places push/pop/swipe-back transitions on a physical iPhone, including Reduce Motion. |
 | Settings cached navigation and silent refresh | Watch | PR #46, build `0.1.0 (21)`, delivery UUID `56aafea3-fe4a-491e-a57a-ac3a7840be14`. | Settings navigation renders from cached data immediately, silently refreshes stale snapshots in the background, only shows the pull-to-refresh spinner when the user explicitly pulls, and avoids Health/location diagnostic work on unrelated sub-settings. Watch real-device Settings navigation across Profile, Categories, Appearance, Automations, Health, and Sync before marking settled. |
 | Settings sub-settings back navigation | Watch | PR #45, build `0.1.0 (20)`, delivery UUID `6bacb90a-006e-49f6-acc4-e1d2fbe64ee2`. | All Settings sub-settings now derive from the `section` route param only. Removed local `settingsSection` mutation and the manual `beforeRemove` interception so native iOS swipe-back and the header back button can pop normally to the Settings index. Watch real-device navigation through every Settings sub-section before marking settled. |
@@ -61,7 +62,7 @@ Last verified: 2026-07-12 08:57 BST
 | Sleep stages fragmented into REM/Core/Deep cards | Watch | PRs #23, #26, and #29. | Current imports group sessions; legacy sleep-stage backlog cleanup is merged. |
 | Health items left in Review without useful explanation | Watch | PRs #22, #25, #26, #27, and #29. | Diagnostics and left-in-review reasons exist; continue checking that reasons are clear on device. |
 | Geo/place default description mismatch | Done | PR #19 and PR #26. | Place names should remain reference/context; configured activity descriptions are used for geofence display and Confirm. |
-| TestFlight release preflight and compliance checks | Done | PR #31 plus build release runs through `0.1.0 (22)`. | Keep verifying processing state, encryption compliance, notes, and internal testing assignment before asking KB to test. Docs-only PRs do not need a TestFlight build unless they change release/build configuration. |
+| TestFlight release preflight and compliance checks | Done | PR #31 plus build release runs through `0.1.0 (23)`. | Keep verifying processing state, encryption compliance, notes, and internal testing assignment before asking KB to test. Docs-only PRs do not need a TestFlight build unless they change release/build configuration. |
 
 ## Future Tracks
 
