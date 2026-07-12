@@ -1,12 +1,12 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-12 10:24 BST
+Last verified: 2026-07-12 11:01 BST
 
 ## Verification Snapshot
 
-- Local repo: `main` includes PR #49; TestFlight build `0.1.0 (23)` is verified and the iOS build number is restored to the repo default.
+- Local repo: `main` includes PR #49; TestFlight build `0.1.0 (24)` is verified and the iOS build number is restored to the repo default.
 - GitHub: PR #49 is merged; no open PRs at release verification time.
-- Latest verified TestFlight build: `0.1.0 (23)`.
+- Latest verified TestFlight build: `0.1.0 (24)`.
 - Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, local archive/export/upload logs, and App Store Connect build state.
 
 ## Status Key
@@ -23,14 +23,14 @@ Last verified: 2026-07-12 10:24 BST
 
 | Item | Status | Evidence | Next action |
 | --- | --- | --- | --- |
-| Live Activity Dynamic Island polish release | Release pending | PR #49 merged to `main` at `a0e527a`. Local checks passed: tests, typecheck, lint, web build, TestFlight preflight, Debug simulator build, and Release iPhoneOS build. | Upload the next internal TestFlight build, then verify compact Dynamic Island width, expanded text alignment, and the Live Activity stop button on a physical iPhone. |
+| Live Activity Dynamic Island polish verification | Watch | PR #49, build `0.1.0 (24)`, delivery/build ID `30ad5c74-704f-4d64-80a7-c721467df1cb`; App Store Connect `VALID`, export compliance false, `Internal Health Debug`, and `IN_BETA_TESTING`. | Verify compact Dynamic Island width, expanded Live Activity text alignment, and the Live Activity stop button on a physical iPhone. |
 | PR48 real-device Shortcut/NFC + Live Activity verification | Watch | PR #48, build `0.1.0 (23)`, delivery/build ID `8ecf06ec-7953-489e-85cf-5c21fcf3e15e`; App Store Connect `VALID`, export compliance false, `Internal Health Debug`, and `IN_BETA_TESTING`. | On a physical iPhone, test Shortcut/NFC Start and Stop while Dayframe is closed/suspended, check offline queue replay, and confirm the Live Activity/Dynamic Island timer is the visible confirmation surface instead of a Dayframe foreground splash. |
 
 ## Recently Shipped Or Addressed
 
 | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Live Activity Dynamic Island polish | Release pending | PR #49 merged to `main` at `a0e527a`; TestFlight upload pending. | Tightens compact Dynamic Island content to a small timer plus stop control, reworks expanded Live Activity text/control alignment to avoid clipping, and adds an iOS 17 Live Activity stop button backed by the existing native stop queue. |
+| Live Activity Dynamic Island polish | Watch | PR #49, build `0.1.0 (24)`, delivery/build ID `30ad5c74-704f-4d64-80a7-c721467df1cb`. | Tightens compact Dynamic Island content to a small timer plus stop control, reworks expanded Live Activity text/control alignment to avoid clipping, and adds an iOS 17 Live Activity stop button backed by the existing native stop queue. |
 | Background Shortcuts and Live Activity | Watch | PR #48, build `0.1.0 (23)`, delivery/build ID `8ecf06ec-7953-489e-85cf-5c21fcf3e15e`. | Adds native queued Start/Stop App Intent handling for Shortcut/NFC triggers, drains native Shortcut events through the normal mobile offline queue, adds a Live Activity/Dynamic Island timer confirmation surface, and bundles the Settings > Automations > Places cleanup that removes the distracting right-side logo/spinner. Watch real-device Shortcut/NFC foreground behaviour, suspended/offline queue replay, and Live Activity/Dynamic Island lifecycle before marking settled. |
 | Mobile navigation continuity and dark transition backgrounds | Watch | PR #47, build `0.1.0 (22)`, delivery/build ID `a2fa4831-5c22-4f2b-b455-f4263c2ee03c`. | Binds Expo Router/native containers to Dayframe light/dark theme surfaces, uses flat gesture-compatible native-stack transitions without the rounded-card shadow, centralises Reduce Motion-aware timings, removes the delayed description-field scroll jump, and includes the `ExpoSystemUI` native pod for runtime root background updates. Verify dark/light Settings, Review and Places push/pop/swipe-back transitions on a physical iPhone, including Reduce Motion. |
 | Settings cached navigation and silent refresh | Watch | PR #46, build `0.1.0 (21)`, delivery UUID `56aafea3-fe4a-491e-a57a-ac3a7840be14`. | Settings navigation renders from cached data immediately, silently refreshes stale snapshots in the background, only shows the pull-to-refresh spinner when the user explicitly pulls, and avoids Health/location diagnostic work on unrelated sub-settings. Watch real-device Settings navigation across Profile, Categories, Appearance, Automations, Health, and Sync before marking settled. |
