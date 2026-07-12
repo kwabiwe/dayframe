@@ -114,6 +114,9 @@ describe("category persistence", () => {
     const client = {
       query: vi.fn(async (statement: string, values?: unknown[]) => {
         void values;
+        if (statement.includes("for update")) {
+          return { rows: [{ id: "active-1", startedAt: "2026-07-05T09:00:00.000Z" }] };
+        }
         return statement.includes("returning id") ? { rows: [{ id: "event-1" }] } : { rows: [] };
       }),
       release: vi.fn()
@@ -131,7 +134,7 @@ describe("category persistence", () => {
     );
 
     const closeActiveCall = client.query.mock.calls.find(([statement]) =>
-      String(statement).includes("where workspace_id = $2 and user_id = $3 and stopped_at is null")
+      String(statement).includes("set stopped_at = $1")
     );
     expect(closeActiveCall?.[1]).toEqual([occurredAt, session.workspaceId, session.userId]);
 
@@ -150,6 +153,36 @@ describe("category persistence", () => {
       occurredAt,
       "event-1"
     ]);
+    expect(client.release).toHaveBeenCalled();
+  });
+
+  it("rolls back when a replacement start would stop the active timer before it began", async () => {
+    const occurredAt = new Date("2026-07-05T09:30:00.000Z");
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        if (statement.includes("for update")) {
+          return { rows: [{ id: "active-1", startedAt: "2026-07-05T09:45:00.000Z" }] };
+        }
+        return statement.includes("returning id") ? { rows: [{ id: "event-1" }] } : { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(processActivityEvent(
+      {
+        source: "manual_app",
+        type: "timer_start",
+        occurredAt,
+        categoryId: categoryId()
+      },
+      session
+    )).rejects.toThrow(/Start time must be after/);
+
+    expect(client.query).toHaveBeenCalledWith("rollback");
+    expect(client.query.mock.calls.some(([statement]) => String(statement).includes("set stopped_at = $1"))).toBe(false);
+    expect(client.query.mock.calls.some(([statement]) => String(statement).includes("insert into time_entries"))).toBe(false);
     expect(client.release).toHaveBeenCalled();
   });
 });

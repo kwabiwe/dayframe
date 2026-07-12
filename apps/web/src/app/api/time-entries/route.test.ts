@@ -21,7 +21,15 @@ vi.mock("@/lib/ingest-auth", () => ({
 vi.mock("@/lib/event-service", () => ({
   processActivityEvent: mocks.processActivityEvent,
   createManualEntry: mocks.createManualEntry,
-  splitActiveEntry: mocks.splitActiveEntry
+  splitActiveEntry: mocks.splitActiveEntry,
+  TimerReplacementWindowError: class TimerReplacementWindowError extends Error {
+    status = 409;
+
+    constructor(message = "Start time must be after the currently running timer's start time.") {
+      super(message);
+      this.name = "TimerReplacementWindowError";
+    }
+  }
 }));
 
 const { POST } = await import("./route");
@@ -78,6 +86,21 @@ describe("POST /api/time-entries", () => {
     );
   });
 
+  it("starts a bare uncategorized timer without description or category", async () => {
+    const response = await POST(jsonRequest({ mode: "start", projectId: "", categoryId: "", description: "   " }));
+
+    expect(response.status).toBe(201);
+    expect(mocks.processActivityEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "timer_start",
+        projectId: undefined,
+        categoryId: undefined,
+        description: undefined
+      }),
+      session
+    );
+  });
+
   it("starts a timer at a provided start time", async () => {
     const startedAt = "2026-07-04T09:15:00.000Z";
     const response = await POST(jsonRequest({ mode: "start", categoryId: categoryId(), description: "Focus", startedAt }));
@@ -93,6 +116,21 @@ describe("POST /api/time-entries", () => {
       }),
       session
     );
+  });
+
+  it("returns a client error when a replacement start time would corrupt the active timer", async () => {
+    const replacementError = new Error("Start time must be after the currently running timer's start time.");
+    replacementError.name = "TimerReplacementWindowError";
+    Object.assign(replacementError, { status: 409 });
+    Object.setPrototypeOf(replacementError, (await import("@/lib/event-service")).TimerReplacementWindowError.prototype);
+    mocks.processActivityEvent.mockRejectedValueOnce(replacementError);
+
+    const response = await POST(jsonRequest({ mode: "start", startedAt: "2026-07-04T09:15:00.000Z" }));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Start time must be after the currently running timer's start time."
+    });
   });
 
   it("creates a manual entry with no legacy project", async () => {

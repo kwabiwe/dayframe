@@ -20,8 +20,9 @@ describe("edit sheet keyboard layout", () => {
 
     expect(layout).toEqual({
       bottomLift: 301,
-      contentPaddingBottom: 96,
+      contentPaddingBottom: 32,
       keyboardOpen: true,
+      sheetMaxHeight: 629,
       sheetHeight: 328,
       topSafeGap: 38
     });
@@ -37,8 +38,23 @@ describe("edit sheet keyboard layout", () => {
     });
 
     expect(layout.bottomLift).toBe(302);
+    expect(layout.contentPaddingBottom).toBe(32);
+    expect(layout.sheetMaxHeight).toBe(779);
     expect(layout.sheetHeight).toBe(477);
     expect(layout.topSafeGap).toBe(65);
+  });
+
+  it("caps the closed sheet below the Dynamic Island safe area", () => {
+    const layout = editSheetKeyboardLayout({
+      bottomInset: 34,
+      keyboardInset: 0,
+      topInset: 59,
+      windowHeight: 852
+    });
+
+    expect(layout.topSafeGap).toBe(77);
+    expect(layout.sheetMaxHeight).toBe(775);
+    expect(layout.sheetHeight).toBeNull();
   });
 
   it("leaves normal bottom-sheet layout alone when the keyboard is closed", () => {
@@ -51,6 +67,7 @@ describe("edit sheet keyboard layout", () => {
       bottomLift: 0,
       contentPaddingBottom: 18,
       keyboardOpen: false,
+      sheetMaxHeight: 779,
       sheetHeight: null,
       topSafeGap: 65
     });

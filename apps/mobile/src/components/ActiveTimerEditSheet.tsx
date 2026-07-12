@@ -3,6 +3,7 @@ import {
   Alert,
   Animated,
   Dimensions,
+  Easing,
   Keyboard,
   type KeyboardEvent,
   Modal,
@@ -28,7 +29,7 @@ type EditSheetMode = "running" | "entry" | "start";
 type StartTimerInput = {
   categoryId: string | null;
   description: string | null;
-  startedAt: string;
+  startedAt?: string | null;
 };
 
 type ActiveTimerEditSheetProps = {
@@ -82,10 +83,12 @@ export function ActiveTimerEditSheet({
   const [stoppedTimeText, setStoppedTimeText] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [keyboardInset, setKeyboardInset] = useState(0);
+  const [startTimeEdited, setStartTimeEdited] = useState(false);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [pickerStartAt, setPickerStartAt] = useState<Date | null>(null);
   const reduceMotion = useReduceMotionPreference();
   const dismissDragY = useRef(new Animated.Value(0)).current;
+  const keyboardLift = useRef(new Animated.Value(0)).current;
   const descriptionInputRef = useRef<TextInput>(null);
   const timeInputRef = useRef<TextInput>(null);
 
@@ -105,6 +108,7 @@ export function ActiveTimerEditSheet({
       setStoppedDateText("");
       setStoppedTimeText("");
       setPickerStartAt(startedAt);
+      setStartTimeEdited(false);
       setDatePickerOpen(false);
       setValidationError(null);
       return;
@@ -124,6 +128,7 @@ export function ActiveTimerEditSheet({
       setStoppedTimeText("");
     }
     setPickerStartAt(startedAt);
+    setStartTimeEdited(false);
     setDatePickerOpen(false);
     setValidationError(null);
   }, [entryId, initialCategoryId, initialDescription, isStartMode, visible]);
@@ -132,7 +137,22 @@ export function ActiveTimerEditSheet({
     if (!visible) {
       setKeyboardInset(0);
       dismissDragY.setValue(0);
+      keyboardLift.setValue(0);
       return undefined;
+    }
+
+    function animateKeyboardLift(toValue: number, event?: KeyboardEvent) {
+      keyboardLift.stopAnimation();
+      if (reduceMotion) {
+        keyboardLift.setValue(toValue);
+        return;
+      }
+      Animated.timing(keyboardLift, {
+        toValue,
+        duration: Math.max(120, Math.min(event?.duration ?? MOBILE_MOTION.sheet, 360)),
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false
+      }).start();
     }
 
     function updateKeyboardInset(event: KeyboardEvent) {
@@ -144,7 +164,14 @@ export function ActiveTimerEditSheet({
         screenHeight,
         windowHeight
       });
+      const nextLayout = editSheetKeyboardLayout({
+        bottomInset: insets.bottom,
+        keyboardInset: nextInset,
+        topInset: insets.top,
+        windowHeight: windowDimensions.height
+      });
       setKeyboardInset(nextInset);
+      animateKeyboardLift(nextLayout.bottomLift, event);
     }
 
     const changeSubscription = Keyboard.addListener(
@@ -156,6 +183,7 @@ export function ActiveTimerEditSheet({
       (event) => {
         Keyboard.scheduleLayoutAnimation(event);
         setKeyboardInset(0);
+        animateKeyboardLift(0, event);
       }
     );
 
@@ -163,7 +191,7 @@ export function ActiveTimerEditSheet({
       changeSubscription.remove();
       hideSubscription.remove();
     };
-  }, [dismissDragY, visible]);
+  }, [dismissDragY, insets.bottom, insets.top, keyboardLift, reduceMotion, visible, windowDimensions.height]);
 
   const parsedStart = useMemo(
     () => parseLocalDateTime(dateText, timeText),
@@ -176,11 +204,13 @@ export function ActiveTimerEditSheet({
   const previewStartAt = datePickerOpen && pickerStartAt
     ? parseLocalDateTime(formatDateInput(pickerStartAt), timeText).date
     : parsedStart.date;
-  const elapsedPreviewSeconds = isEntryMode && parsedStart.date && parsedStop.date
-    ? Math.max(0, Math.floor((parsedStop.date.getTime() - parsedStart.date.getTime()) / 1000))
-    : previewStartAt && previewStartAt.getTime() <= Date.now()
-      ? Math.max(0, Math.floor((Date.now() - previewStartAt.getTime()) / 1000))
-      : elapsedSeconds;
+  const elapsedPreviewSeconds = isStartMode
+    ? 0
+    : isEntryMode && parsedStart.date && parsedStop.date
+      ? Math.max(0, Math.floor((parsedStop.date.getTime() - parsedStart.date.getTime()) / 1000))
+      : previewStartAt && previewStartAt.getTime() <= Date.now()
+        ? Math.max(0, Math.floor((Date.now() - previewStartAt.getTime()) / 1000))
+        : elapsedSeconds;
 
   const busy = saving || stopping || deleting;
   const canStop = isRunningMode && Boolean(onStop);
@@ -191,7 +221,8 @@ export function ActiveTimerEditSheet({
     : isRunningMode ? "Cancel editing timer" : "Cancel editing entry";
   const saveLabel = isRunningMode ? "Save timer edits" : "Save entry edits";
   const sheetTitle = isStartMode ? "Start task" : isRunningMode ? "Edit timer" : "Edit entry";
-  const elapsedLabel = isStartMode ? "Elapsed" : isRunningMode ? "Running" : "Duration";
+  const elapsedLabel = isEntryMode ? "Duration" : null;
+  const elapsedText = isStartMode ? "--:--" : formatClockDuration(elapsedPreviewSeconds);
   const keyboardLayout = editSheetKeyboardLayout({
     bottomInset: insets.bottom,
     keyboardInset,
@@ -201,10 +232,10 @@ export function ActiveTimerEditSheet({
   const keyboardAwareSheetStyle = keyboardLayout.keyboardOpen
     ? {
         height: keyboardLayout.sheetHeight ?? undefined,
-        marginBottom: keyboardLayout.bottomLift,
-        maxHeight: keyboardLayout.sheetHeight ?? undefined
+        maxHeight: keyboardLayout.sheetHeight ?? keyboardLayout.sheetMaxHeight
       }
-    : null;
+    : { maxHeight: keyboardLayout.sheetMaxHeight };
+  const sheetTranslateY = Animated.add(dismissDragY, Animated.multiply(keyboardLift, -1));
   const dismissResponder = useMemo(() => PanResponder.create({
     onMoveShouldSetPanResponder: (_event, gesture) =>
       !busy && gesture.dy > 8 && Math.abs(gesture.dy) > Math.abs(gesture.dx) * 1.2,
@@ -321,7 +352,7 @@ export function ActiveTimerEditSheet({
     const ok = await onStart({
       categoryId: selectedCategoryId,
       description: description.trim() || null,
-      startedAt: parsed.date.toISOString()
+      startedAt: startTimeEdited ? parsed.date.toISOString() : null
     });
     if (ok) onCancel();
   }
@@ -362,11 +393,13 @@ export function ActiveTimerEditSheet({
     setDateText(formatDateInput(stoppedAt));
     setTimeText(formatTimeInput(stoppedAt));
     setPickerStartAt(stoppedAt);
+    if (isStartMode) setStartTimeEdited(true);
     setDatePickerOpen(false);
     setValidationError(null);
   }
 
   function updateTimeText(value: string) {
+    if (isStartMode) setStartTimeEdited(true);
     setTimeText(formatEditableTime(value));
     setValidationError(null);
   }
@@ -405,6 +438,7 @@ export function ActiveTimerEditSheet({
       return;
     }
     setDateText(formatDateInput(pickerStartAt));
+    if (isStartMode) setStartTimeEdited(true);
     setDatePickerOpen(false);
     setValidationError(null);
   }
@@ -467,7 +501,7 @@ export function ActiveTimerEditSheet({
               style={[
                 styles.activeEditSheet,
                 keyboardAwareSheetStyle,
-                { transform: [{ translateY: dismissDragY }] }
+                { transform: [{ translateY: sheetTranslateY }] }
               ]}
             >
               <View {...dismissResponder.panHandlers}>
@@ -522,8 +556,8 @@ export function ActiveTimerEditSheet({
               >
                 <View style={styles.activeEditHeroRow}>
                   <View style={styles.activeEditElapsedStack}>
-                    <Text style={styles.activeEditElapsed}>{formatClockDuration(elapsedPreviewSeconds)}</Text>
-                    <Text style={styles.activeEditElapsedLabel}>{elapsedLabel}</Text>
+                    <Text style={styles.activeEditElapsed}>{elapsedText}</Text>
+                    {elapsedLabel ? <Text style={styles.activeEditElapsedLabel}>{elapsedLabel}</Text> : null}
                   </View>
                   {canStop ? (
                     <Pressable
