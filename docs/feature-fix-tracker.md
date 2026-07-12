@@ -1,12 +1,12 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-12 01:04 BST
+Last verified: 2026-07-12 01:21 BST
 
 ## Verification Snapshot
 
-- Local repo: `main` synced with `origin/main`; PR #47 is merged and waiting for TestFlight build 22 release verification.
+- Local repo: `main` synced with `origin/main`; PR #47 is merged and verified in TestFlight build 22.
 - GitHub: PR #47 is merged; no open PRs and no GitHub issues at merge verification time.
-- Latest verified TestFlight build: `0.1.0 (21)`.
+- Latest verified TestFlight build: `0.1.0 (22)`.
 - Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, and App Store Connect build state.
 
 ## Status Key
@@ -29,7 +29,7 @@ Last verified: 2026-07-12 01:04 BST
 
 | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Mobile navigation continuity and dark transition backgrounds | Release pending | PR #47 merged into `main` at `5f0a3ef`; TestFlight build `0.1.0 (22)` pending. | Binds Expo Router/native containers to Dayframe light/dark theme surfaces, uses flat gesture-compatible native-stack transitions without the rounded-card shadow, centralises Reduce Motion-aware timings, removes the delayed description-field scroll jump, and includes the `ExpoSystemUI` native pod for runtime root background updates. Verify dark/light Settings, Review and Places push/pop/swipe-back transitions on a physical iPhone, including Reduce Motion. |
+| Mobile navigation continuity and dark transition backgrounds | Watch | PR #47, build `0.1.0 (22)`, delivery/build ID `a2fa4831-5c22-4f2b-b455-f4263c2ee03c`. | Binds Expo Router/native containers to Dayframe light/dark theme surfaces, uses flat gesture-compatible native-stack transitions without the rounded-card shadow, centralises Reduce Motion-aware timings, removes the delayed description-field scroll jump, and includes the `ExpoSystemUI` native pod for runtime root background updates. Verify dark/light Settings, Review and Places push/pop/swipe-back transitions on a physical iPhone, including Reduce Motion. |
 | Settings cached navigation and silent refresh | Watch | PR #46, build `0.1.0 (21)`, delivery UUID `56aafea3-fe4a-491e-a57a-ac3a7840be14`. | Settings navigation renders from cached data immediately, silently refreshes stale snapshots in the background, only shows the pull-to-refresh spinner when the user explicitly pulls, and avoids Health/location diagnostic work on unrelated sub-settings. Watch real-device Settings navigation across Profile, Categories, Appearance, Automations, Health, and Sync before marking settled. |
 | Settings sub-settings back navigation | Watch | PR #45, build `0.1.0 (20)`, delivery UUID `6bacb90a-006e-49f6-acc4-e1d2fbe64ee2`. | All Settings sub-settings now derive from the `section` route param only. Removed local `settingsSection` mutation and the manual `beforeRemove` interception so native iOS swipe-back and the header back button can pop normally to the Settings index. Watch real-device navigation through every Settings sub-section before marking settled. |
 | Calendar compact blocks and Settings swipe-back | Watch | PR #44, build `0.1.0 (19)`, delivery UUID `997c7e8e-9556-4a54-a586-c71e1b80061b`; PR #45, build `0.1.0 (20)`, followed up the remaining Settings sub-settings back-navigation glitch. | Calendar blocks now keep near-true duration height and suppress title/meta labels until there is enough vertical space. PR #44 did not fully fix Settings sub-setting back navigation because the old Settings route could retain local sub-setting state; PR #45 handles that follow-up. |
@@ -61,7 +61,7 @@ Last verified: 2026-07-12 01:04 BST
 | Sleep stages fragmented into REM/Core/Deep cards | Watch | PRs #23, #26, and #29. | Current imports group sessions; legacy sleep-stage backlog cleanup is merged. |
 | Health items left in Review without useful explanation | Watch | PRs #22, #25, #26, #27, and #29. | Diagnostics and left-in-review reasons exist; continue checking that reasons are clear on device. |
 | Geo/place default description mismatch | Done | PR #19 and PR #26. | Place names should remain reference/context; configured activity descriptions are used for geofence display and Confirm. |
-| TestFlight release preflight and compliance checks | Done | PR #31 plus build release runs through `0.1.0 (21)`. | Keep verifying processing state, encryption compliance, notes, and internal testing assignment before asking KB to test. Docs-only PRs do not need a TestFlight build unless they change release/build configuration. |
+| TestFlight release preflight and compliance checks | Done | PR #31 plus build release runs through `0.1.0 (22)`. | Keep verifying processing state, encryption compliance, notes, and internal testing assignment before asking KB to test. Docs-only PRs do not need a TestFlight build unless they change release/build configuration. |
 
 ## Future Tracks
 
