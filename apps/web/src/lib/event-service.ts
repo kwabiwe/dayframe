@@ -375,12 +375,13 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
         [parsed.occurredAt, parsed.workspaceId, parsed.userId]
       );
     } else if (candidate.action === "start_timer") {
+      const startedAt = suggestedStartedAtForEvent(parsed);
       if (candidate.shouldClosePrevious) {
         await client.query(
           `update time_entries
            set stopped_at = $1, updated_at = now()
            where workspace_id = $2 and user_id = $3 and stopped_at is null`,
-          [parsed.occurredAt, parsed.workspaceId, parsed.userId]
+          [startedAt, parsed.workspaceId, parsed.userId]
         );
       }
 
@@ -408,7 +409,7 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
           parsed.source,
           candidate.confidence,
           parsed.description ?? candidate.description ?? (isExplicitStartEvent(parsed.type) ? null : candidate.title),
-          parsed.occurredAt,
+          startedAt,
           eventId
         ]
       );
@@ -2674,6 +2675,10 @@ function healthSleepSegmentsForEvent(event: ReturnType<typeof ActivityEventInput
 }
 
 function suggestedStartedAtForEvent(event: ReturnType<typeof ActivityEventInputSchema.parse>) {
+  if (isExplicitStartEvent(event.type)) {
+    return timestampStringOrNull(event.rawPayload.startedAt) ?? event.occurredAt;
+  }
+
   if (event.type === "health_sleep_import" || event.type === "health_workout_import") {
     return timestampStringOrNull(event.rawPayload.startedAt) ?? event.occurredAt;
   }

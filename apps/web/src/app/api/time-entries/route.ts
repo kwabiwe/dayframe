@@ -46,16 +46,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true }, { status: 201 });
     }
 
+    const startedAt = optionalTimestamp(body.startedAt, "startedAt");
+    const occurredAt = startedAt ? new Date(startedAt) : new Date();
+    const rawPayload = startedAt ? { origin, startedAt } : { origin };
+
     const result = await processActivityEvent(
       {
         source: eventSource,
         type: "timer_start",
-        occurredAt: new Date(),
+        occurredAt,
         projectId: optionalString(body.projectId),
         categoryId: optionalString(body.categoryId),
         placeId: optionalString(body.placeId),
         description: optionalString(body.description),
-        rawPayload: { origin }
+        rawPayload
       },
       session
     );
@@ -92,4 +96,13 @@ function requiredString(value: unknown, field: string) {
   const next = optionalString(value);
   if (!next) throw new BadRequestError(`${field} is required.`);
   return next;
+}
+
+function optionalTimestamp(value: unknown, field: string) {
+  const next = optionalString(value);
+  if (!next) return undefined;
+  const parsed = new Date(next);
+  if (Number.isNaN(parsed.getTime())) throw new BadRequestError(`${field} must be a valid date.`);
+  if (parsed.getTime() > Date.now()) throw new BadRequestError(`${field} cannot be in the future.`);
+  return parsed.toISOString();
 }

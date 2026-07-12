@@ -634,6 +634,27 @@ describe("mobile API client", () => {
     );
   });
 
+  it("starts timers at a user-selected start time", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 201)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startTimer(null, "Backfilled task", "2026-07-12T12:15:00.000Z");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/time-entries",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          mode: "start",
+          source: "mobile_app",
+          description: "Backfilled task",
+          startedAt: "2026-07-12T12:15:00.000Z"
+        })
+      })
+    );
+  });
+
   it("omits blank timer descriptions from mobile starts", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 201)));
