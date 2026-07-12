@@ -13,6 +13,7 @@ import {
 
 export type ResolveSessionOptions = {
   allowIngestToken?: boolean;
+  allowBearerIntegrationToken?: boolean;
   requiredScopes?: string[];
 };
 
@@ -48,6 +49,10 @@ export async function resolveRequestSession(
   }
 
   if (authMode === "local") {
+    if (options.allowIngestToken && options.allowBearerIntegrationToken && bearer) {
+      return resolveBearerIntegrationOrAppSession(bearer, requiredScopes, "local");
+    }
+
     if (appToken) {
       const session = await resolveLocalSession(appToken);
       return scopedSession(session, requiredScopes);
@@ -62,6 +67,10 @@ export async function resolveRequestSession(
   }
 
   if (authMode === "provider") {
+    if (options.allowIngestToken && options.allowBearerIntegrationToken && bearer) {
+      return resolveBearerIntegrationOrAppSession(bearer, requiredScopes, "provider");
+    }
+
     if (appToken) {
       const session = await resolveLocalSession(appToken, "provider");
       return scopedSession(session, requiredScopes);
@@ -76,6 +85,24 @@ export async function resolveRequestSession(
   }
 
   const session = resolveAppSession();
+  return scopedSession(session, requiredScopes);
+}
+
+async function resolveBearerIntegrationOrAppSession(
+  bearer: string,
+  requiredScopes: string[],
+  authMode: "local" | "provider"
+) {
+  try {
+    const tokenSession = await resolveTokenSession(bearer);
+    return scopedSession(tokenSession, requiredScopes);
+  } catch (error) {
+    if (!(error instanceof AuthError) || error.message !== "Invalid integration token.") {
+      throw error;
+    }
+  }
+
+  const session = await resolveLocalSession(bearer, authMode);
   return scopedSession(session, requiredScopes);
 }
 

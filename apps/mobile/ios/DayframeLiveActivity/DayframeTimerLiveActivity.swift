@@ -25,7 +25,7 @@ struct DayframeTimerLiveActivity: Widget {
           }
         }
         DynamicIslandExpandedRegion(.bottom) {
-          DayframeLiveActivityLabel(state: context.state)
+          DayframeLiveActivityLabel(state: context.state, size: .expandedIsland)
             .frame(maxWidth: .infinity, alignment: .leading)
             .offset(y: -3)
         }
@@ -57,7 +57,7 @@ private struct DayframeLockScreenTimerView: View {
     HStack(alignment: .center, spacing: 14) {
       VStack(alignment: .leading, spacing: 10) {
         DayframeElapsedTimerText(state: state, size: .lockScreen)
-        DayframeLiveActivityLabel(state: state)
+        DayframeLiveActivityLabel(state: state, size: .lockScreen)
       }
       Spacer(minLength: 12)
       if state.isRunning {
@@ -71,22 +71,55 @@ private struct DayframeLockScreenTimerView: View {
 
 private struct DayframeLiveActivityLabel: View {
   let state: DayframeTimerAttributes.ContentState
+  let size: DayframeLiveActivityLabelSize
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 3) {
+    VStack(alignment: .leading, spacing: size.spacing) {
       Text(state.title)
-        .font(.system(size: 19, weight: .semibold, design: .default))
+        .font(.system(size: size.titleSize, weight: .semibold, design: .default))
         .lineLimit(1)
         .minimumScaleFactor(0.72)
         .frame(maxWidth: .infinity, alignment: .leading)
       if let categoryName = state.categoryName {
         Text(categoryName)
-          .font(.system(size: 14, weight: .medium, design: .default))
+          .font(.system(size: size.categorySize, weight: .medium, design: .default))
           .foregroundStyle(.secondary)
           .lineLimit(1)
           .minimumScaleFactor(0.75)
           .frame(maxWidth: .infinity, alignment: .leading)
       }
+    }
+  }
+}
+
+private enum DayframeLiveActivityLabelSize {
+  case expandedIsland
+  case lockScreen
+
+  var titleSize: CGFloat {
+    switch self {
+    case .expandedIsland:
+      return 19
+    case .lockScreen:
+      return 20
+    }
+  }
+
+  var categorySize: CGFloat {
+    switch self {
+    case .expandedIsland:
+      return 14
+    case .lockScreen:
+      return 16
+    }
+  }
+
+  var spacing: CGFloat {
+    switch self {
+    case .expandedIsland:
+      return 3
+    case .lockScreen:
+      return 5
     }
   }
 }

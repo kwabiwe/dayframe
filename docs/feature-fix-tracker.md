@@ -1,11 +1,11 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-12 11:01 BST
+Last verified: 2026-07-12 12:50 BST
 
 ## Verification Snapshot
 
-- Local repo: `main` includes PR #49; TestFlight build `0.1.0 (24)` is verified and the iOS build number is restored to the repo default.
-- GitHub: PR #49 is merged; no open PRs at release verification time.
+- Local repo: PR #50 is open from `agent/internal-cockpit-timer-api`; `main` includes PR #49 and TestFlight build `0.1.0 (24)`.
+- GitHub: PR #50 is open and intentionally unmerged while natural-language rule creation is added.
 - Latest verified TestFlight build: `0.1.0 (24)`.
 - Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, local archive/export/upload logs, and App Store Connect build state.
 
@@ -23,6 +23,7 @@ Last verified: 2026-07-12 11:01 BST
 
 | Item | Status | Evidence | Next action |
 | --- | --- | --- | --- |
+| Generic integration timer API and natural-language rule creation | In progress | PR #50 branch `agent/internal-cockpit-timer-api`; `GET /api/integrations/v1/time/current` with `time:read`; Rule assistant save path now creates review-first geofence-exit rules with category/project/activity description after preview. | Finish full validation, Codex 5.6 Sol second-opinion review, and PR update. Do not merge until KB approves. |
 | Live Activity Dynamic Island polish verification | Watch | PR #49, build `0.1.0 (24)`, delivery/build ID `30ad5c74-704f-4d64-80a7-c721467df1cb`; App Store Connect `VALID`, export compliance false, `Internal Health Debug`, and `IN_BETA_TESTING`. | Verify compact Dynamic Island width, expanded Live Activity text alignment, and the Live Activity stop button on a physical iPhone. |
 | PR48 real-device Shortcut/NFC + Live Activity verification | Watch | PR #48, build `0.1.0 (23)`, delivery/build ID `8ecf06ec-7953-489e-85cf-5c21fcf3e15e`; App Store Connect `VALID`, export compliance false, `Internal Health Debug`, and `IN_BETA_TESTING`. | On a physical iPhone, test Shortcut/NFC Start and Stop while Dayframe is closed/suspended, check offline queue replay, and confirm the Live Activity/Dynamic Island timer is the visible confirmation surface instead of a Dayframe foreground splash. |
 
@@ -72,7 +73,7 @@ Last verified: 2026-07-12 11:01 BST
 | --- | --- | --- | --- |
 | Native NFC scanning beyond Shortcuts | Future | PR #42 shipped the preferred Apple Shortcuts-driven NFC route; NFC tags trigger Shortcuts, not Dayframe directly. | Revisit native NFC scanning only if Apple Shortcuts is not enough. Any native path should still queue idempotent start/stop/review events and keep user-controlled setup. |
 | Dayframe integration with Cockpit | Future | Prior Dayframe/Cockpit planning expects Cockpit to read Dayframe when it is ready instead of Toggl. | Start with a small token-protected read-only Cockpit API/stream for current timer, today timeline, source/confidence, and next suggested action; avoid write/mutation controls until explicitly approved. |
-| Natural-language rules that create time entries | Planned | PR #30 proves draft/simulate only; earlier guardrails require deterministic, auditable writes. | Expand the Rule assistant into saveable rules that can propose or create time entries only after a preview/simulation step, with user approval, evidence shown, disable/edit/audit controls, and no direct LLM-to-database write path. |
+| Natural-language rules that create time entries | In progress | PR #50 builds on the PR #30 draft/simulate slice with deterministic, review-first rule saves. | Keep sequence/calendar auto-write execution out of v1 until simulation and audit controls are stronger; first saved version creates review items that become time entries only after confirmation. |
 | Dayframe Preview / pre-prod lane | Future | Repeatedly noted as useful after the current fast TestFlight lane stabilises. | Create a separate preview/staging path with its own app identity or bundle, staging Vercel/Supabase environment, staging secrets, TestFlight group/build lane, and release checklist so KB can test risky changes before production/main TestFlight. |
 | Durable repo tracker | Done | This document. | Update this file whenever a planned item moves, ships, is skipped, or needs live-watch status. |
 | Full automation rule creation/editing | Future | PR #30 proves draft/simulate only. | Needs UI for saving, simulating, explaining, editing, disabling, and auditing rules. |

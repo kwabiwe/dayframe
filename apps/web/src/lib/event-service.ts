@@ -134,6 +134,8 @@ const HEALTH_SLEEP_SCHEMA_MIGRATION =
 const HEALTH_RLS_MIGRATION = "supabase/migrations/202607020001_dayframe_rls.sql";
 const PLACE_DEFAULT_ACTIVITY_DESCRIPTION_MIGRATION =
   "supabase/migrations/202607070002_place_default_activity_description.sql";
+const AUTOMATION_RULE_ACTIVITY_DESCRIPTION_MIGRATION =
+  "supabase/migrations/202607120001_automation_rule_activity_description.sql";
 const DEFAULT_HEALTH_REPROCESS_BATCH_SIZE = 12;
 const MAX_HEALTH_REPROCESS_BATCH_SIZE = 25;
 const LEGACY_SLEEP_CONSOLIDATION_BATCH_SIZE = 120;
@@ -147,6 +149,15 @@ function missingPlaceDefaultActivityDescriptionColumnError(cause: unknown) {
     "places",
     "default_activity_description",
     PLACE_DEFAULT_ACTIVITY_DESCRIPTION_MIGRATION,
+    cause
+  );
+}
+
+function missingAutomationRuleActivityDescriptionColumnError(cause: unknown) {
+  return missingRequiredColumnError(
+    "automation_rules",
+    "activity_description",
+    AUTOMATION_RULE_ACTIVITY_DESCRIPTION_MIGRATION,
     cause
   );
 }
@@ -1100,22 +1111,34 @@ export async function resolveReviewItem(
               ri.event_id as "eventId",
               case
                 when ae.event_type = 'geofence_exit'
+                  and nullif(ri.title, '') is not null
+                  and ri.title <> coalesce(pl.name, '')
+                then ri.title
+                when ae.event_type = 'geofence_exit'
                   and nullif(pl.default_activity_description, '') is not null
                 then pl.default_activity_description
                 else ri.title
               end as title,
               ri.status,
-              ri.suggested_project_id as "suggestedProjectId",
-              ri.suggested_category_id as "suggestedCategoryId",
-              ri.suggested_place_id as "suggestedPlaceId",
+              p.id as "suggestedProjectId",
+              c.id as "suggestedCategoryId",
+              pl.id as "suggestedPlaceId",
               ri.suggested_started_at as "suggestedStartedAt",
               ri.suggested_stopped_at as "suggestedStoppedAt",
               ri.confidence,
               ae.source as "eventSource",
               ae.event_type as "eventType"
        from review_items ri
-       left join activity_events ae on ae.id = ri.event_id
-       left join places pl on pl.id = ri.suggested_place_id
+       left join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id
+       left join places pl on pl.id = ri.suggested_place_id and pl.workspace_id = ri.workspace_id
+       left join projects p
+         on p.id = ri.suggested_project_id
+        and p.workspace_id = ri.workspace_id
+        and p.is_archived = false
+       left join categories c
+         on c.id = ri.suggested_category_id
+        and c.workspace_id = ri.workspace_id
+        and c.is_archived = false
        where ri.id = $1 and ri.workspace_id = $2
        for update of ri nowait`,
       [id, session.workspaceId]
@@ -1195,6 +1218,16 @@ export async function resolveReviewItem(
     }
 
     if (action === "create_rule" && item.eventSource && item.eventType) {
+      await assertAutomationRuleReferences(
+        {
+          placeId: item.suggestedPlaceId,
+          projectId: item.suggestedProjectId,
+          categoryId: item.suggestedCategoryId
+        },
+        session,
+        client
+      );
+
       await client.query(
         `insert into automation_rules (
             workspace_id,
@@ -1205,10 +1238,11 @@ export async function resolveReviewItem(
             action,
             project_id,
             category_id,
+            activity_description,
             confidence_threshold,
             enabled
          )
-         values ($1, $2, $3, $4, $5, 'suggest_timer', $6, $7, $8, true)`,
+         values ($1, $2, $3, $4, $5, 'suggest_timer', $6, $7, $8, $9, true)`,
         [
           session.workspaceId,
           `Suggestion from ${item.title}`,
@@ -1217,6 +1251,7 @@ export async function resolveReviewItem(
           item.suggestedPlaceId,
           item.suggestedProjectId,
           item.suggestedCategoryId,
+          item.title,
           item.confidence
         ]
       );
@@ -2034,34 +2069,72 @@ export async function createEntity(
         throw error;
       }
     case "automation_rule":
-      return query(
-        `insert into automation_rules (
-            workspace_id,
-            name,
-            trigger_source,
-            trigger_type,
-            place_id,
-            action,
-            project_id,
-            category_id,
-            confidence_threshold,
-            enabled
-         )
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)`,
-        [
-          session.workspaceId,
-          String(input.name ?? "New automation"),
-          String(input.triggerSource ?? "geofence_specific"),
-          String(input.triggerType ?? "geofence_enter"),
-          nullableString(input.placeId),
-          String(input.action ?? "suggest_timer"),
-          nullableString(input.projectId),
-          nullableString(input.categoryId),
-          String(input.confidenceThreshold ?? "medium_high")
-        ]
-      );
+      try {
+        const placeId = nullableString(input.placeId);
+        const projectId = nullableString(input.projectId);
+        const categoryId = nullableString(input.categoryId);
+        await assertAutomationRuleReferences({ placeId, projectId, categoryId }, session);
+
+        return await query(
+          `insert into automation_rules (
+              workspace_id,
+              name,
+              trigger_source,
+              trigger_type,
+              place_id,
+              action,
+              project_id,
+              category_id,
+              activity_description,
+              confidence_threshold,
+              enabled
+           )
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)`,
+          [
+            session.workspaceId,
+            String(input.name ?? "New automation"),
+            String(input.triggerSource ?? "geofence_specific"),
+            String(input.triggerType ?? "geofence_enter"),
+            placeId,
+            String(input.action ?? "suggest_timer"),
+            projectId,
+            categoryId,
+            normalizeOptionalText(input.activityDescription),
+            String(input.confidenceThreshold ?? "medium_high")
+          ]
+        );
+      } catch (error) {
+        if (isUndefinedColumnError(error, "activity_description")) {
+          throw missingAutomationRuleActivityDescriptionColumnError(error);
+        }
+        throw error;
+      }
     default:
       throw new Error(`Unsupported entity: ${entity}`);
+  }
+}
+
+async function assertAutomationRuleReferences(
+  input: { placeId: string | null; projectId: string | null; categoryId: string | null },
+  session: RequestSession,
+  client?: pg.PoolClient
+) {
+  const statement = `select ($2::uuid is null or exists (
+              select 1 from places where id = $2::uuid and workspace_id = $1
+            )) as "placeOk",
+            ($3::uuid is null or exists (
+              select 1 from projects where id = $3::uuid and workspace_id = $1 and is_archived = false
+            )) as "projectOk",
+            ($4::uuid is null or exists (
+              select 1 from categories where id = $4::uuid and workspace_id = $1 and is_archived = false
+            )) as "categoryOk"`;
+  const values = [session.workspaceId, input.placeId, input.projectId, input.categoryId];
+  const result = client
+    ? await client.query<{ placeOk: boolean; projectOk: boolean; categoryOk: boolean }>(statement, values)
+    : await query<{ placeOk: boolean; projectOk: boolean; categoryOk: boolean }>(statement, values);
+  const row = result.rows[0];
+  if (!row?.placeOk || !row.projectOk || !row.categoryOk) {
+    throw new Error("Automation rule references must belong to the active workspace.");
   }
 }
 

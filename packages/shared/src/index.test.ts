@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyActivityEvent,
+  automationRuleInputFromDraft,
   calendarBlockContinuationEdges,
   draftAutomationRuleFromText,
   healthAutoLogMappingFor,
@@ -363,9 +364,179 @@ describe("automation rule drafting", () => {
     expect(draft.outcome.mode).toBe("review_first");
     expect(draft.unsupported[0]).toMatch(/more detail/i);
   });
+
+  it("turns a supported draft into a review-first saved rule input", () => {
+    const draft = draftAutomationRuleFromText({
+      text: "If I drive to Chelmsford rail station and come back home shortly after, log it as picking up or dropping my wife.",
+      categories: [{ id: categoryId("family"), name: "Family" }],
+      places: [{ id: "place-station", name: "Chelmsford Station" }]
+    });
+
+    const savePlan = automationRuleInputFromDraft({
+      draft,
+      categories: [{ id: categoryId("family"), name: "Family" }],
+      places: [{ id: "place-station", name: "Chelmsford Station" }]
+    });
+
+    expect(savePlan.blockers).toEqual([]);
+    expect(savePlan.values).toMatchObject({
+      name: "Chelmsford Station pickup/drop-off",
+      triggerSource: "geofence_specific",
+      triggerType: "geofence_exit",
+      placeId: "place-station",
+      action: "create_review_item",
+      categoryId: categoryId("family"),
+      activityDescription: "Train station pickup/drop-off",
+      confidenceThreshold: "medium_high"
+    });
+    expect(savePlan.notes.join(" ")).toMatch(/review-first/i);
+  });
+
+  it("blocks saving drafts that do not resolve to a saved place", () => {
+    const draft = draftAutomationRuleFromText({
+      text: "When I leave the gym, log a workout.",
+      categories: [{ id: categoryId("gym"), name: "Gym" }],
+      places: []
+    });
+
+    const savePlan = automationRuleInputFromDraft({
+      draft,
+      categories: [{ id: categoryId("gym"), name: "Gym" }],
+      places: []
+    });
+
+    expect(savePlan.values).toBeUndefined();
+    expect(savePlan.blockers.join(" ")).toMatch(/saved place/i);
+  });
+
+  it("does not replace an unresolved named category with the place default", () => {
+    const draft = draftAutomationRuleFromText({
+      text: "When I leave the train station after pickup my wife, log it.",
+      categories: [],
+      places: [{ id: "place-station", name: "Train Station" }]
+    });
+
+    const savePlan = automationRuleInputFromDraft({
+      draft,
+      categories: [],
+      places: [
+        {
+          id: "place-station",
+          name: "Train Station",
+          defaultCategoryId: categoryId("travel")
+        }
+      ]
+    });
+
+    expect(savePlan.values).toBeUndefined();
+    expect(savePlan.blockers.join(" ")).toMatch(/Add "Family" as a category/);
+  });
+
+  it("saves broad-place rules with a broad geofence source", () => {
+    const draft = draftAutomationRuleFromText({
+      text: "When I leave the town centre, log errands.",
+      categories: [{ id: categoryId("errands"), name: "Errands" }],
+      places: [{ id: placeId("town"), name: "Town Centre" }]
+    });
+
+    const savePlan = automationRuleInputFromDraft({
+      draft,
+      categories: [{ id: categoryId("errands"), name: "Errands" }],
+      places: [{ id: placeId("town"), name: "Town Centre", radiusMeters: 500 }]
+    });
+
+    expect(savePlan.values).toMatchObject({
+      placeId: placeId("town"),
+      triggerSource: "geofence_broad",
+      triggerType: "geofence_exit"
+    });
+  });
+
+  it("prefers the longest saved place name when drafting from text", () => {
+    const draft = draftAutomationRuleFromText({
+      text: "When I leave Home Office, log focused work.",
+      categories: [{ id: categoryId("focus"), name: "Focus" }],
+      places: [
+        { id: placeId("home"), name: "Home" },
+        { id: placeId("home-office"), name: "Home Office" }
+      ]
+    });
+
+    expect(draft.placeName).toBe("Home Office");
+  });
+});
+
+describe("automation rule normalization", () => {
+  it("uses saved natural-language rule descriptions for place-exit review items", () => {
+    const event = normalizeActivityEvent(
+      {
+        source: "geofence_specific",
+        type: "geofence_exit",
+        occurredAt: new Date("2026-07-12T09:30:00.000Z"),
+        placeId: placeId("station"),
+        rawPayload: {}
+      },
+      {
+        projects: [],
+        categories: [{ id: categoryId("family"), name: "Family" }],
+        places: [
+          {
+            id: placeId("station"),
+            name: "Chelmsford Station",
+            radiusMeters: 100,
+            priority: 5,
+            defaultProjectId: null,
+            defaultCategoryId: null,
+            defaultActivityDescription: null,
+            autoStart: false
+          }
+        ],
+        automationRules: [
+          {
+            id: "rule-station",
+            name: "Chelmsford Station pickup/drop-off",
+            triggerSource: "geofence_specific",
+            triggerType: "geofence_exit",
+            placeId: placeId("station"),
+            action: "create_review_item",
+            projectId: null,
+            categoryId: categoryId("family"),
+            activityDescription: "Train station pickup/drop-off",
+            enabled: true
+          }
+        ]
+      }
+    );
+
+    expect(event).toEqual(
+      expect.objectContaining({
+        action: "create_review_item",
+        reviewStatus: "needs_review",
+        title: "Train station pickup/drop-off",
+        categoryId: categoryId("family")
+      })
+    );
+  });
 });
 
 function categoryId(seed: string) {
-  const suffix = seed === "focus" ? "0001" : seed === "health" ? "0003" : seed === "family" ? "0004" : "0002";
+  const suffix =
+    seed === "focus"
+      ? "0001"
+      : seed === "health"
+        ? "0003"
+        : seed === "family"
+          ? "0004"
+          : seed === "travel"
+            ? "0005"
+            : seed === "errands"
+              ? "0006"
+              : "0002";
   return `20000000-0000-4000-8000-00000000${suffix}`;
+}
+
+function placeId(seed: string) {
+  const suffix =
+    seed === "station" ? "0007" : seed === "home-office" ? "0008" : seed === "town" ? "0009" : "0001";
+  return `30000000-0000-4000-8000-00000000${suffix}`;
 }

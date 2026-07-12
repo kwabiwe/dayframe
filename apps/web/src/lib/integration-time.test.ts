@@ -88,9 +88,25 @@ describe("getIntegrationTimeCurrentSnapshot", () => {
       updatedAt: "2026-07-12T10:30:00.000Z"
     });
     expect(mocks.query).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining("p.id as \"projectId\""),
+      [session.workspaceId, session.userId, "2026-07-12T11:00:00.000Z"]
+    );
+    const activeTimerQuery = String(mocks.query.mock.calls[0]?.[0]);
+    expect(activeTimerQuery).toContain("p.workspace_id = te.workspace_id");
+    expect(activeTimerQuery).toContain("cl.workspace_id = te.workspace_id");
+    expect(activeTimerQuery).toContain("cat.workspace_id = te.workspace_id");
+    expect(activeTimerQuery).toContain("pl.workspace_id = te.workspace_id");
+    expect(activeTimerQuery).toContain("t.workspace_id = te.workspace_id");
+    expect(mocks.query).toHaveBeenNthCalledWith(
       2,
-      expect.stringContaining("coalesce(te.stopped_at, $5::timestamptz)"),
-      expect.arrayContaining(["2026-07-12T11:00:00.000Z"])
+      expect.stringContaining("least(coalesce(te.stopped_at, $3::timestamptz), bounds.day_end)"),
+      [
+        session.workspaceId,
+        session.userId,
+        "2026-07-12T11:00:00.000Z",
+        "Europe/London"
+      ]
     );
   });
 });

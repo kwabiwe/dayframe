@@ -68,6 +68,7 @@ describe("/api/integrations/v1/time/current", () => {
     expect(payload).toEqual(snapshot);
     expect(mocks.resolveRequestSession).toHaveBeenCalledWith(request, {
       allowIngestToken: true,
+      allowBearerIntegrationToken: true,
       requiredScopes: ["time:read"]
     });
     expect(mocks.getIntegrationTimeCurrentSnapshot).toHaveBeenCalledWith(session);

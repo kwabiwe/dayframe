@@ -8,6 +8,7 @@ export async function GET(request: Request) {
   try {
     const session = await resolveRequestSession(request, {
       allowIngestToken: true,
+      allowBearerIntegrationToken: true,
       requiredScopes: ["time:read"]
     });
     const snapshot = await getIntegrationTimeCurrentSnapshot(session);

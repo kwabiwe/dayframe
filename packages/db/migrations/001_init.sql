@@ -135,6 +135,7 @@ create table if not exists automation_rules (
   action text not null,
   project_id uuid references projects(id) on delete set null,
   category_id uuid references categories(id) on delete set null,
+  activity_description text,
   confidence_threshold text not null default 'medium_high',
   enabled boolean not null default true,
   created_at timestamptz not null default now()
@@ -332,6 +333,7 @@ create table if not exists audit_log (
 );
 
 alter table activity_events add column if not exists client_event_id text;
+alter table automation_rules add column if not exists activity_description text;
 alter table categories add column if not exists is_pinned boolean not null default false;
 alter table health_workouts add column if not exists external_sample_id text;
 alter table health_workouts add column if not exists provider text not null default 'healthkit';

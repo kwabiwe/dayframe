@@ -65,6 +65,7 @@ export type AutomationRuleRow = {
   projectName: string | null;
   categoryId: string | null;
   categoryName: string | null;
+  activityDescription: string | null;
   confidenceThreshold: string;
   enabled: boolean;
 };
@@ -288,6 +289,7 @@ export async function getNormalizationContext(
       action: rule.action as AutomationRuleSummary["action"],
       projectId: rule.projectId,
       categoryId: rule.categoryId,
+      activityDescription: rule.activityDescription,
       enabled: rule.enabled
     }))
   };
@@ -360,8 +362,8 @@ async function getProjects(session: RequestSession) {
             p.category_id as "categoryId",
             cat.name as "categoryName"
      from projects p
-     left join clients c on c.id = p.client_id
-     left join categories cat on cat.id = p.category_id
+     left join clients c on c.id = p.client_id and c.workspace_id = p.workspace_id
+     left join categories cat on cat.id = p.category_id and cat.workspace_id = p.workspace_id
      where p.workspace_id = $1 and p.is_archived = false
      order by p.name`,
     [session.workspaceId]
@@ -389,15 +391,15 @@ async function getPlaces(session: RequestSession) {
               pl.longitude,
               pl.radius_meters as "radiusMeters",
               pl.priority,
-              pl.default_project_id as "defaultProjectId",
+              p.id as "defaultProjectId",
               p.name as "defaultProjectName",
-              pl.default_category_id as "defaultCategoryId",
+              c.id as "defaultCategoryId",
               c.name as "defaultCategoryName",
               pl.default_activity_description as "defaultActivityDescription",
               pl.auto_start as "autoStart"
        from places pl
-       left join projects p on p.id = pl.default_project_id
-       left join categories c on c.id = pl.default_category_id
+       left join projects p on p.id = pl.default_project_id and p.workspace_id = pl.workspace_id
+       left join categories c on c.id = pl.default_category_id and c.workspace_id = pl.workspace_id
        where pl.workspace_id = $1
        order by pl.priority desc, pl.name`,
       [session.workspaceId]
@@ -417,29 +419,60 @@ async function getPlaces(session: RequestSession) {
 }
 
 async function getAutomationRules(session: RequestSession) {
-  const result = await query<AutomationRuleRow>(
-    `select ar.id,
-            ar.name,
-            ar.trigger_source as "triggerSource",
-            ar.trigger_type as "triggerType",
-            ar.place_id as "placeId",
-            pl.name as "placeName",
-            ar.action,
-            ar.project_id as "projectId",
-            p.name as "projectName",
-            ar.category_id as "categoryId",
-            c.name as "categoryName",
-            ar.confidence_threshold as "confidenceThreshold",
-            ar.enabled
-     from automation_rules ar
-     left join places pl on pl.id = ar.place_id
-     left join projects p on p.id = ar.project_id
-     left join categories c on c.id = ar.category_id
-     where ar.workspace_id = $1
-     order by ar.created_at desc`,
-    [session.workspaceId]
-  );
-  return result.rows;
+  try {
+    const result = await query<AutomationRuleRow>(
+      `select ar.id,
+              ar.name,
+              ar.trigger_source as "triggerSource",
+              ar.trigger_type as "triggerType",
+              pl.id as "placeId",
+              pl.name as "placeName",
+              ar.action,
+              p.id as "projectId",
+              p.name as "projectName",
+              c.id as "categoryId",
+              c.name as "categoryName",
+              ar.activity_description as "activityDescription",
+              ar.confidence_threshold as "confidenceThreshold",
+              ar.enabled
+       from automation_rules ar
+       left join places pl on pl.id = ar.place_id and pl.workspace_id = ar.workspace_id
+       left join projects p on p.id = ar.project_id and p.workspace_id = ar.workspace_id and p.is_archived = false
+       left join categories c on c.id = ar.category_id and c.workspace_id = ar.workspace_id and c.is_archived = false
+       where ar.workspace_id = $1
+       order by ar.created_at desc`,
+      [session.workspaceId]
+    );
+    return result.rows;
+  } catch (error) {
+    if (isUndefinedColumnError(error, "activity_description")) {
+      const result = await query<AutomationRuleRow>(
+        `select ar.id,
+                ar.name,
+                ar.trigger_source as "triggerSource",
+                ar.trigger_type as "triggerType",
+                pl.id as "placeId",
+                pl.name as "placeName",
+                ar.action,
+                p.id as "projectId",
+                p.name as "projectName",
+                c.id as "categoryId",
+                c.name as "categoryName",
+                null::text as "activityDescription",
+                ar.confidence_threshold as "confidenceThreshold",
+                ar.enabled
+         from automation_rules ar
+         left join places pl on pl.id = ar.place_id and pl.workspace_id = ar.workspace_id
+         left join projects p on p.id = ar.project_id and p.workspace_id = ar.workspace_id and p.is_archived = false
+         left join categories c on c.id = ar.category_id and c.workspace_id = ar.workspace_id and c.is_archived = false
+         where ar.workspace_id = $1
+         order by ar.created_at desc`,
+        [session.workspaceId]
+      );
+      return result.rows;
+    }
+    throw error;
+  }
 }
 
 async function getTimeEntries(
@@ -460,14 +493,14 @@ async function getTimeEntries(
 
   const result = await query<TimeEntryRow>(
     `select te.id,
-            te.project_id as "projectId",
+            p.id as "projectId",
             p.name as "projectName",
             p.color as "projectColor",
             cl.name as "clientName",
-            te.category_id as "categoryId",
+            cat.id as "categoryId",
             cat.name as "categoryName",
             cat.color as "categoryColor",
-            te.place_id as "placeId",
+            pl.id as "placeId",
             pl.name as "placeName",
             te.source,
             te.confidence,
@@ -483,10 +516,10 @@ async function getTimeEntries(
             ) as "tagNames",
             extract(epoch from (coalesce(te.stopped_at, now()) - te.started_at))::int as "durationSeconds"
      from time_entries te
-     left join projects p on p.id = te.project_id
-     left join clients cl on cl.id = p.client_id
-     left join categories cat on cat.id = te.category_id
-     left join places pl on pl.id = te.place_id
+     left join projects p on p.id = te.project_id and p.workspace_id = te.workspace_id
+     left join clients cl on cl.id = p.client_id and cl.workspace_id = te.workspace_id
+     left join categories cat on cat.id = te.category_id and cat.workspace_id = te.workspace_id
+     left join places pl on pl.id = te.place_id and pl.workspace_id = te.workspace_id
      where ${where.join(" and ")}
      order by te.started_at desc
      limit $${values.length}`,
@@ -498,14 +531,14 @@ async function getTimeEntries(
 async function getActiveEntry(session: RequestSession) {
   const result = await query<TimeEntryRow>(
     `select te.id,
-            te.project_id as "projectId",
+            p.id as "projectId",
             p.name as "projectName",
             p.color as "projectColor",
             cl.name as "clientName",
-            te.category_id as "categoryId",
+            cat.id as "categoryId",
             cat.name as "categoryName",
             cat.color as "categoryColor",
-            te.place_id as "placeId",
+            pl.id as "placeId",
             pl.name as "placeName",
             te.source,
             te.confidence,
@@ -521,10 +554,10 @@ async function getActiveEntry(session: RequestSession) {
             ) as "tagNames",
             extract(epoch from (now() - te.started_at))::int as "durationSeconds"
      from time_entries te
-     left join projects p on p.id = te.project_id
-     left join clients cl on cl.id = p.client_id
-     left join categories cat on cat.id = te.category_id
-     left join places pl on pl.id = te.place_id
+     left join projects p on p.id = te.project_id and p.workspace_id = te.workspace_id
+     left join clients cl on cl.id = p.client_id and cl.workspace_id = te.workspace_id
+     left join categories cat on cat.id = te.category_id and cat.workspace_id = te.workspace_id
+     left join places pl on pl.id = te.place_id and pl.workspace_id = te.workspace_id
      where te.workspace_id = $1 and te.user_id = $2 and te.stopped_at is null
      order by te.started_at desc
      limit 1`,
@@ -539,6 +572,10 @@ async function getReviewItems(session: RequestSession) {
             ri.type,
             case
               when ae.event_type = 'geofence_exit'
+                and nullif(ri.title, '') is not null
+                and ri.title <> coalesce(pl.name, '')
+              then ri.title
+              when ae.event_type = 'geofence_exit'
                 and nullif(pl.default_activity_description, '') is not null
               then pl.default_activity_description
               else ri.title
@@ -549,9 +586,9 @@ async function getReviewItems(session: RequestSession) {
             c.name as "categoryName",
             c.color as "categoryColor",
             pl.name as "placeName",
-            ri.suggested_project_id as "suggestedProjectId",
-            ri.suggested_category_id as "suggestedCategoryId",
-            ri.suggested_place_id as "suggestedPlaceId",
+            p.id as "suggestedProjectId",
+            c.id as "suggestedCategoryId",
+            pl.id as "suggestedPlaceId",
             ri.suggested_started_at as "suggestedStartedAt",
             ri.suggested_stopped_at as "suggestedStoppedAt",
             ri.confidence,
@@ -559,10 +596,10 @@ async function getReviewItems(session: RequestSession) {
             ri.notes,
             ri.created_at as "createdAt"
      from review_items ri
-     left join activity_events ae on ae.id = ri.event_id
-     left join projects p on p.id = ri.suggested_project_id
-     left join categories c on c.id = ri.suggested_category_id
-     left join places pl on pl.id = ri.suggested_place_id
+     left join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id
+     left join projects p on p.id = ri.suggested_project_id and p.workspace_id = ri.workspace_id
+     left join categories c on c.id = ri.suggested_category_id and c.workspace_id = ri.workspace_id
+     left join places pl on pl.id = ri.suggested_place_id and pl.workspace_id = ri.workspace_id
      where ri.workspace_id = $1
        and ri.status = 'open'
      order by ri.created_at desc
@@ -584,9 +621,9 @@ async function getActivityEvents(session: RequestSession) {
             c.name as "categoryName",
             pl.name as "placeName"
      from activity_events ae
-     left join projects p on p.id = ae.suggested_project_id
-     left join categories c on c.id = ae.suggested_category_id
-     left join places pl on pl.id = ae.suggested_place_id
+     left join projects p on p.id = ae.suggested_project_id and p.workspace_id = ae.workspace_id
+     left join categories c on c.id = ae.suggested_category_id and c.workspace_id = ae.workspace_id
+     left join places pl on pl.id = ae.suggested_place_id and pl.workspace_id = ae.workspace_id
      where ae.workspace_id = $1
      order by ae.occurred_at desc
      limit 24`,

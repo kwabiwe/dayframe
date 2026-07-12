@@ -27,6 +27,8 @@ type TodayTotalRow = {
   todaySeconds: number;
 };
 
+const INTEGRATION_TIME_ZONE = "Europe/London";
+
 export type IntegrationTimeCurrentSnapshot = {
   ok: true;
   serverNow: string;
@@ -68,18 +70,17 @@ export async function getIntegrationTimeCurrentSnapshot(
   session: RequestSession
 ): Promise<IntegrationTimeCurrentSnapshot> {
   const serverNow = new Date();
-  const { dayStart, dayEnd } = currentLocalDayRange(serverNow);
   const [activeResult, totalResult] = await Promise.all([
     query<IntegrationTimeEntryRow>(
       `select te.id,
-              te.project_id as "projectId",
+              p.id as "projectId",
               p.name as "projectName",
               p.color as "projectColor",
               cl.name as "clientName",
-              te.category_id as "categoryId",
+              cat.id as "categoryId",
               cat.name as "categoryName",
               cat.color as "categoryColor",
-              te.place_id as "placeId",
+              pl.id as "placeId",
               pl.name as "placeName",
               te.source,
               te.confidence,
@@ -91,29 +92,42 @@ export async function getIntegrationTimeCurrentSnapshot(
               (
                 select coalesce(array_agg(t.name order by t.name), '{}')
                 from time_entry_tags tet
-                join tags t on t.id = tet.tag_id
+                join tags t on t.id = tet.tag_id and t.workspace_id = te.workspace_id
                 where tet.time_entry_id = te.id
               ) as "tagNames",
               extract(epoch from ($3::timestamptz - te.started_at))::int as "elapsedSeconds"
        from time_entries te
-       left join projects p on p.id = te.project_id
-       left join clients cl on cl.id = p.client_id
-       left join categories cat on cat.id = te.category_id
-       left join places pl on pl.id = te.place_id
+       left join projects p on p.id = te.project_id and p.workspace_id = te.workspace_id
+       left join clients cl on cl.id = p.client_id and cl.workspace_id = te.workspace_id
+       left join categories cat on cat.id = te.category_id and cat.workspace_id = te.workspace_id
+       left join places pl on pl.id = te.place_id and pl.workspace_id = te.workspace_id
        where te.workspace_id = $1 and te.user_id = $2 and te.stopped_at is null
        order by te.started_at desc
        limit 1`,
       [session.workspaceId, session.userId, serverNow.toISOString()]
     ),
     query<TodayTotalRow>(
-      `select coalesce(sum(extract(epoch from (coalesce(te.stopped_at, $5::timestamptz) - te.started_at))), 0)::int
+      `with bounds as (
+         select (($3::timestamptz at time zone $4)::date at time zone $4) as day_start,
+                ((($3::timestamptz at time zone $4)::date + interval '1 day') at time zone $4) as day_end
+       )
+       select coalesce(
+                sum(
+                  extract(epoch from (
+                    least(coalesce(te.stopped_at, $3::timestamptz), bounds.day_end)
+                    - greatest(te.started_at, bounds.day_start)
+                  ))
+                ),
+                0
+              )::int
               as "todaySeconds"
        from time_entries te
+       cross join bounds
        where te.workspace_id = $1
          and te.user_id = $2
-         and te.started_at >= $3::timestamptz
-         and te.started_at < $4::timestamptz`,
-      [session.workspaceId, session.userId, dayStart.toISOString(), dayEnd.toISOString(), serverNow.toISOString()]
+         and te.started_at < bounds.day_end
+         and coalesce(te.stopped_at, $3::timestamptz) > bounds.day_start`,
+      [session.workspaceId, session.userId, serverNow.toISOString(), INTEGRATION_TIME_ZONE]
     )
   ]);
 
@@ -165,12 +179,4 @@ function publicEntry(row: IntegrationTimeEntryRow): IntegrationTimeEntry {
     tags: row.tagNames,
     updatedAt: row.updatedAt
   };
-}
-
-function currentLocalDayRange(now: Date) {
-  const dayStart = new Date(now);
-  dayStart.setHours(0, 0, 0, 0);
-  const dayEnd = new Date(dayStart);
-  dayEnd.setDate(dayEnd.getDate() + 1);
-  return { dayStart, dayEnd };
 }

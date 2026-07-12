@@ -4,12 +4,14 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   DAYFRAME_PALETTE,
+  automationRuleInputFromDraft,
   draftAutomationRuleFromText,
   paletteCssColorFor,
   paletteKeyFor,
-  type AutomationRuleDraft
+  type AutomationRuleDraft,
+  type AutomationRuleDraftSavePlan
 } from "@dayframe/shared";
-import { Pencil, Plus, Save, WandSparkles } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Pencil, Plus, Save, WandSparkles } from "lucide-react";
 import type {
   AutomationRuleRow,
   CategoryRow,
@@ -49,6 +51,7 @@ export function EntityForms({
               rule.placeName ?? "Any place",
               rule.action,
               rule.categoryName ?? "Uncategorized",
+              rule.activityDescription ?? "Default place label",
               rule.enabled ? "Enabled" : "Disabled"
             ]
           }))}
@@ -261,6 +264,7 @@ function CreateAutomationForm({
         label="Event"
         options={[
           { id: "geofence_enter", name: "geofence_enter" },
+          { id: "geofence_exit", name: "geofence_exit" },
           { id: "nfc_action", name: "nfc_action" },
           { id: "shortcut_action", name: "shortcut_action" }
         ]}
@@ -289,11 +293,45 @@ function RuleDraftAssistant({
   categories: CategoryRow[];
   places: PlaceRow[];
 }) {
+  const router = useRouter();
   const [text, setText] = useState("");
   const [draft, setDraft] = useState<AutomationRuleDraft | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isPending, startTransition] = useTransition();
 
   function draftRule() {
+    setSaveError(null);
+    setSaveMessage(null);
     setDraft(draftAutomationRuleFromText({ text, categories, places }));
+  }
+
+  const savePlan = draft ? automationRuleInputFromDraft({ draft, categories, places }) : null;
+
+  async function saveDraftRule() {
+    if (!savePlan?.values || isSaving) return;
+    setSaveError(null);
+    setSaveMessage(null);
+    setIsSaving(true);
+
+    try {
+      const response = await fetch("/api/entities", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entity: "automation_rule", values: savePlan.values })
+      });
+
+      if (!response.ok) {
+        setSaveError("Rule could not be saved. Check the saved place/category and try again.");
+        return;
+      }
+
+      setSaveMessage("Rule saved. Matching place exits will now create review items.");
+      startTransition(() => router.refresh());
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   return (
@@ -321,12 +359,35 @@ function RuleDraftAssistant({
         <WandSparkles size={16} />
         Draft rule
       </button>
-      {draft ? <RuleDraftPreview draft={draft} /> : null}
+      {draft && savePlan ? (
+        <RuleDraftPreview
+          draft={draft}
+          savePlan={savePlan}
+          onSave={saveDraftRule}
+          isSaving={isSaving || isPending}
+          saveError={saveError}
+          saveMessage={saveMessage}
+        />
+      ) : null}
     </section>
   );
 }
 
-function RuleDraftPreview({ draft }: { draft: AutomationRuleDraft }) {
+function RuleDraftPreview({
+  draft,
+  savePlan,
+  onSave,
+  isSaving,
+  saveError,
+  saveMessage
+}: {
+  draft: AutomationRuleDraft;
+  savePlan: AutomationRuleDraftSavePlan;
+  onSave: () => void;
+  isSaving: boolean;
+  saveError: string | null;
+  saveMessage: string | null;
+}) {
   return (
     <div className="mt-4 space-y-3 border-t border-[var(--line)] pt-4 text-sm">
       <div>
@@ -347,6 +408,48 @@ function RuleDraftPreview({ draft }: { draft: AutomationRuleDraft }) {
       <RuleDraftList title="Evidence checks" items={draft.conditions} />
       <RuleDraftList title="Simulation checks" items={draft.simulationChecks} />
       {draft.unsupported.length > 0 ? <RuleDraftList title="Not enabled yet" items={draft.unsupported} /> : null}
+      <div className="space-y-2 border-t border-[var(--line)] pt-3">
+        <p className="text-xs font-semibold text-[var(--muted)]">Saveable rule</p>
+        {savePlan.values ? (
+          <div className="grid gap-1 text-xs text-[var(--muted)]">
+            <p>
+              <span className="text-[var(--muted)]">Place:</span>{" "}
+              <span className="text-[var(--foreground)]">{draft.placeName ?? "Not set"}</span>
+            </p>
+            <p>
+              <span className="text-[var(--foreground)]">{savePlan.values.triggerSource}</span> /{" "}
+              <span className="text-[var(--foreground)]">{savePlan.values.triggerType}</span>
+            </p>
+            <p>
+              <span className="text-[var(--foreground)]">{savePlan.values.action}</span> ·{" "}
+              {savePlan.values.activityDescription ?? "Default place label"}
+            </p>
+          </div>
+        ) : null}
+        <RuleDraftList title="Save notes" items={savePlan.notes} />
+        {savePlan.blockers.length > 0 ? <RuleDraftList title="Before saving" items={savePlan.blockers} /> : null}
+        {saveError ? (
+          <p className="flex items-start gap-2 text-xs text-red-300">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+            {saveError}
+          </p>
+        ) : null}
+        {saveMessage ? (
+          <p className="flex items-start gap-2 text-xs text-emerald-300">
+            <CheckCircle2 size={14} className="mt-0.5 shrink-0" />
+            {saveMessage}
+          </p>
+        ) : null}
+        <button
+          className="industrial-button-primary focus-ring w-full text-sm disabled:opacity-50"
+          type="button"
+          onClick={onSave}
+          disabled={!savePlan.values || isSaving}
+        >
+          <Save size={16} />
+          Save reviewed rule
+        </button>
+      </div>
     </div>
   );
 }
