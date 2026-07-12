@@ -121,7 +121,7 @@ export function DashboardRealtime({ initialData }: { initialData: BootstrapData 
 
   return (
     <div className="swiss-dashboard">
-      <CurrentTimerPanel key={data.activeEntry?.id ?? "inactive"} data={data} onSynced={setData} />
+      <CurrentTimerPanel data={data} onSynced={setData} />
       <section className="swiss-top-grid">
         <MetricCard
           title="Today"
@@ -191,16 +191,20 @@ export function CurrentTimerPanel({
   const [startedAtDraft, setStartedAtDraft] = useState(() => timeInputValue(data.activeEntry?.startedAt));
   const [startEditError, setStartEditError] = useState<string | null>(null);
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
+  const [draftEntryId, setDraftEntryId] = useState(data.activeEntry?.id ?? null);
   const activeDetailsSyncRef = useRef("");
-  const clearDraftAfterStopRef = useRef(false);
   const timerActionInFlightRef = useRef(false);
   const categoryMenuRef = useRef<HTMLDivElement | null>(null);
   const descriptionInputRef = useRef<HTMLInputElement | null>(null);
   const active = data.activeEntry;
+  const activeId = active?.id ?? null;
   const [now, setNow] = useState(() =>
     active ? new Date(active.startedAt).getTime() + active.durationSeconds * 1000 : 0
   );
   const selectedCategory = data.categories.find((category) => category.id === categoryId) ?? null;
+  const selectedCategoryName = categoryId
+    ? selectedCategory?.name ?? active?.categoryName ?? "Category"
+    : "Uncategorized";
   const activeStartedAtMs = active ? new Date(active.startedAt).getTime() : 0;
   const activeBaselineNow = active ? activeStartedAtMs + active.durationSeconds * 1000 : 0;
   const effectiveNow = active ? Math.max(now, activeBaselineNow) : now;
@@ -211,8 +215,8 @@ export function CurrentTimerPanel({
   const activeAccent = active
     ? timeEntryAccentColor({
         ...active,
-        categoryName: categoryId ? selectedCategory?.name ?? active.categoryName : active.categoryName,
-        categoryColor: categoryId ? selectedCategory?.color ?? active.categoryColor : active.categoryColor,
+        categoryName: categoryId ? selectedCategory?.name ?? active.categoryName : null,
+        categoryColor: categoryId ? selectedCategory?.color ?? active.categoryColor : null,
         description: description.trim() || active.description
       })
     : undefined;
@@ -222,6 +226,32 @@ export function CurrentTimerPanel({
     const interval = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(interval);
   }, [active?.id]);
+
+  useEffect(() => {
+    if (draftEntryId === activeId) return;
+
+    const handle = window.setTimeout(() => {
+      activeDetailsSyncRef.current = "";
+      setCategoryMenuOpen(false);
+      setIsEditingStartedAt(false);
+      setStartEditError(null);
+      setDraftEntryId(activeId);
+
+      if (active) {
+        setDescription(active.description ?? "");
+        setCategoryId(active.categoryId ?? "");
+        setStartedAtDraft(timeInputValue(active.startedAt));
+        return;
+      }
+
+      const emptyDraft = emptyTimerEntryDraft();
+      setDescription(emptyDraft.description);
+      setCategoryId(emptyDraft.categoryId);
+      setStartedAtDraft("");
+    }, 0);
+
+    return () => window.clearTimeout(handle);
+  }, [active, activeId, draftEntryId]);
 
   useEffect(() => {
     if (!categoryMenuOpen) return undefined;
@@ -245,14 +275,8 @@ export function CurrentTimerPanel({
   }, [categoryMenuOpen]);
 
   useEffect(() => {
-    if (!active) {
+    if (!active || draftEntryId !== active.id) {
       activeDetailsSyncRef.current = "";
-      if (clearDraftAfterStopRef.current) {
-        clearDraftAfterStopRef.current = false;
-        const emptyDraft = emptyTimerEntryDraft();
-        setDescription(emptyDraft.description);
-        setCategoryId(emptyDraft.categoryId);
-      }
       return undefined;
     }
 
@@ -288,7 +312,7 @@ export function CurrentTimerPanel({
     }, 650);
 
     return () => window.clearTimeout(syncHandle);
-  }, [active, categoryId, description]);
+  }, [active, categoryId, description, draftEntryId]);
 
   const refresh = useCallback(async () => {
     const response = await fetch(`/api/bootstrap?date=${data.dateRange.selectedDate}`, {
@@ -354,7 +378,6 @@ export function CurrentTimerPanel({
         }
         throw new Error(errorMessage);
       }
-      if (mode === "stop") clearDraftAfterStopRef.current = true;
       await refresh();
     } catch (error) {
       setTimerError(error instanceof Error ? error.message : "Unable to update the timer.");
@@ -386,7 +409,6 @@ export function CurrentTimerPanel({
         throw new Error(errorMessage);
       }
       setIsDeleteDialogOpen(false);
-      clearDraftAfterStopRef.current = true;
       await refresh();
     } catch (error) {
       setDeleteError(error instanceof Error ? error.message : "Unable to delete the running timer.");
@@ -516,7 +538,7 @@ export function CurrentTimerPanel({
 
   return (
     <section
-      className="swiss-panel swiss-current-timer"
+      className={["swiss-panel swiss-current-timer", active ? "is-running" : "is-idle"].join(" ")}
       style={activeAccent ? ({ "--timer-accent": activeAccent } as CSSProperties) : undefined}
     >
       <div className="swiss-timer-entrybar">
@@ -528,7 +550,7 @@ export function CurrentTimerPanel({
               value={description}
               onChange={(event) => setDescription(event.target.value)}
               onKeyDown={startTimerFromDescriptionKey}
-              placeholder="Describe the task"
+              placeholder={active ? "Add a task description" : "What are you working on?"}
               aria-label="Task description"
             />
           </label>
@@ -552,7 +574,7 @@ export function CurrentTimerPanel({
                         : "transparent"
                     }}
                   />
-                  <span>{selectedCategory?.name ?? "Uncategorized"}</span>
+                  <span>{selectedCategoryName}</span>
                 </span>
                 <ChevronDown size={16} aria-hidden="true" />
               </button>
@@ -635,67 +657,72 @@ export function CurrentTimerPanel({
             </div>
           </div>
         </form>
-        {active ? (
-          <div className="swiss-active-timer-meta">
-            {isEditingStartedAt ? (
-              <form className="swiss-start-time-editor" onSubmit={saveActiveStartTime}>
-                <label>
-                  <span>Running since</span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]{2}:[0-9]{2}"
-                    placeholder="17:15"
-                    value={startedAtDraft}
-                    onChange={(event) => setStartedAtDraft(event.target.value)}
-                    aria-label="Active timer start time"
-                  />
-                </label>
+        <div
+          className={["swiss-active-timer-meta-shell", active ? "is-visible" : ""].filter(Boolean).join(" ")}
+          aria-hidden={!active}
+        >
+          {active ? (
+            <div className="swiss-active-timer-meta">
+              {isEditingStartedAt ? (
+                <form className="swiss-start-time-editor" onSubmit={saveActiveStartTime}>
+                  <label>
+                    <span>Start time</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]{2}:[0-9]{2}"
+                      placeholder="17:15"
+                      value={startedAtDraft}
+                      onChange={(event) => setStartedAtDraft(event.target.value)}
+                      aria-label="Active timer start time"
+                    />
+                  </label>
+                  <button
+                    className="swiss-start-time-save"
+                    type="submit"
+                    disabled={isBusy}
+                    aria-label="Save active timer start time"
+                  >
+                    <CheckCircle2 size={13} />
+                    Save
+                  </button>
+                  <button
+                    className="swiss-start-time-cancel"
+                    type="button"
+                    disabled={isBusy}
+                    aria-label="Cancel editing active timer start time"
+                    onClick={() => {
+                      setStartedAtDraft(timeInputValue(active.startedAt));
+                      setIsEditingStartedAt(false);
+                      setStartEditError(null);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </form>
+              ) : (
                 <button
-                  className="swiss-start-time-save"
-                  type="submit"
-                  disabled={isBusy}
-                  aria-label="Save active timer start time"
-                >
-                  <CheckCircle2 size={13} />
-                  Save
-                </button>
-                <button
-                  className="swiss-start-time-cancel"
+                  className="swiss-active-start-edit"
                   type="button"
-                  disabled={isBusy}
-                  aria-label="Cancel editing active timer start time"
+                  aria-label={`Edit active timer start time. Started at ${formatTime(active.startedAt)}`}
                   onClick={() => {
                     setStartedAtDraft(timeInputValue(active.startedAt));
-                    setIsEditingStartedAt(false);
+                    setIsEditingStartedAt(true);
                     setStartEditError(null);
                   }}
                 >
-                  Cancel
+                  <span>Started {formatTime(active.startedAt)}</span>
+                  <Edit3 size={13} />
                 </button>
-              </form>
-            ) : (
-              <button
-                className="swiss-active-start-edit"
-                type="button"
-                aria-label={`Edit active timer start time. Running since ${formatTime(active.startedAt)}`}
-                onClick={() => {
-                  setStartedAtDraft(timeInputValue(active.startedAt));
-                  setIsEditingStartedAt(true);
-                  setStartEditError(null);
-                }}
-              >
-                <span>Running since {formatTime(active.startedAt)}</span>
-                <Edit3 size={13} />
-              </button>
-            )}
-            {startEditError ? (
-              <span className="swiss-start-time-error" role="alert">
-                {startEditError}
-              </span>
-            ) : null}
-          </div>
-        ) : null}
+              )}
+              {startEditError ? (
+                <span className="swiss-start-time-error" role="alert">
+                  {startEditError}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
       </div>
 
       {timerError ? <p className="swiss-inline-error">{timerError}</p> : null}
@@ -713,8 +740,8 @@ export function CurrentTimerPanel({
       ) : null}
 
       {quickActions.length > 0 ? (
-        <div className="swiss-quick-actions-strip" aria-label="Frequent quick actions">
-          <span>Frequent</span>
+        <div className="swiss-quick-actions-strip" aria-label="Quick actions">
+          <span>Quick actions</span>
           <div>
             {quickActions.map((action) => (
               <button
@@ -726,7 +753,6 @@ export function CurrentTimerPanel({
                 <Play size={13} fill="currentColor" strokeWidth={0} />
                 <i style={{ backgroundColor: action.color }} />
                 <b>{action.label}</b>
-                {action.detail ? <small>{action.detail}</small> : null}
               </button>
             ))}
           </div>
@@ -739,7 +765,6 @@ export function CurrentTimerPanel({
 type LearnedQuickAction = {
   categoryId: string | null;
   label: string;
-  detail: string | null;
   color: string;
 };
 
@@ -772,7 +797,6 @@ function buildLearnedQuickActions(data: BootstrapData): LearnedQuickAction[] {
   return [...pinned, ...learnedUnpinned, ...fallback].slice(0, 6).map((category) => ({
     categoryId: category.id,
     label: category.name,
-    detail: category.isPinned ? "Pinned" : null,
     color: paletteCssColorFor(category.color, category.name)
   }));
 }
