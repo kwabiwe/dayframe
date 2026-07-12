@@ -33,6 +33,7 @@ import {
   validatePlaceForm
 } from "@/lib/places";
 import { pressable, useMobileTheme, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
+import { scheduleLayoutTransition, useReduceMotionPreference } from "@/lib/motion";
 
 type Category = MobileBootstrap["categories"][number];
 
@@ -46,6 +47,7 @@ type PlaceFormMode =
     };
 
 export default function PlacesScreen() {
+  const reduceMotion = useReduceMotionPreference();
   const { styles, theme } = useMobileTheme();
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [loading, setLoading] = useState(false);
@@ -93,6 +95,7 @@ export default function PlacesScreen() {
   );
 
   function beginAddPlace() {
+    scheduleLayoutTransition(reduceMotion);
     setFormMode({ type: "create" });
     setPlaceName("");
     setLatitudeText("");
@@ -142,6 +145,7 @@ export default function PlacesScreen() {
   }
 
   function beginEditPlace(place: MobilePlace) {
+    scheduleLayoutTransition(reduceMotion);
     setFormMode({ type: "edit", place });
     setPlaceName(place.name);
     setLatitudeText(formatOptionalCoordinate(place.latitude));
@@ -155,6 +159,7 @@ export default function PlacesScreen() {
   }
 
   function cancelForm() {
+    scheduleLayoutTransition(reduceMotion);
     setFormMode(null);
     setPlaceName("");
     setLatitudeText("");

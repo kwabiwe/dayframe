@@ -87,6 +87,8 @@ PODS:
     - ExpoModulesCore
   - ExpoSymbols (56.0.6):
     - ExpoModulesCore
+  - ExpoSystemUI (56.0.5):
+    - ExpoModulesCore
   - ExpoTaskManager (56.0.20):
     - ExpoModulesCore
     - UMAppLoader
@@ -2323,6 +2325,7 @@ DEPENDENCIES:
   - ExpoRouter (from `../../../node_modules/expo-router/ios`)
   - ExpoSecureStore (from `../../../node_modules/expo-secure-store/ios`)
   - ExpoSymbols (from `../../../node_modules/expo-symbols/ios`)
+  - ExpoSystemUI (from `../../../node_modules/expo-system-ui/ios`)
   - ExpoTaskManager (from `../../../node_modules/expo-task-manager/ios`)
   - "ExpoUI (from `../../../node_modules/@expo/ui/ios`)"
   - FBLazyVector (from `../../../node_modules/react-native/Libraries/FBLazyVector`)
@@ -2449,6 +2452,8 @@ EXTERNAL SOURCES:
     :path: "../../../node_modules/expo-secure-store/ios"
   ExpoSymbols:
     :path: "../../../node_modules/expo-symbols/ios"
+  ExpoSystemUI:
+    :path: "../../../node_modules/expo-system-ui/ios"
   ExpoTaskManager:
     :path: "../../../node_modules/expo-task-manager/ios"
   ExpoUI:
@@ -2644,6 +2649,7 @@ SPEC CHECKSUMS:
   ExpoRouter: c82c4297fdca966ec5fb98422e8c72015a341e00
   ExpoSecureStore: f1bd083c1b7b8d4142013ffcc0082d377d9f49f4
   ExpoSymbols: 377747de25bcb1ab68ec68f23d81fb81d43eae83
+  ExpoSystemUI: 8f4fb641c6a6ebe2a01dda0fbd3fdd952ab5823a
   ExpoTaskManager: 6bb6debe614a5f28fabb07f2b73b0c19b8562b73
   ExpoUI: 56780db669fe580d74c4e0710668c37ba331cf04
   FBLazyVector: 24e62c765683b8d89006a88a2c8f5cf019f0074d

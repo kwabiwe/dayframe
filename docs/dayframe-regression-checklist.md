@@ -53,6 +53,8 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - The first mobile tab visibly reads “Today”, uses a day-overview icon and retains the internal timer behaviour.
 - Favicon and app icon use the symbol alone; the iOS icon is opaque and legible at home-screen size.
 - Charts use shared palette/track tokens, exact textual values and non-colour cues without changing calculations.
+- In System, Light and Dark, push, pop and interactive swipe-back transitions between Settings, Review and Places keep the whole viewport on the resolved theme canvas with no white corner leaks, rounded-card vignette or overlapping scene chrome.
+- Reduce Motion removes route and layout motion without hiding navigation state changes or loading feedback.
 
 ## Validation Commands
 

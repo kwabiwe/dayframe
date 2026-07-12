@@ -12,6 +12,7 @@ Use this when implementing visual UI.
 - Mobile first screen should match the simple dashboard sketch: logo, active timer, start task, Today summary.
 - Use Midnight Core consistently: near-black midnight navy, layered neutral surfaces, compact rounded controls, restrained elevation and coral primary/active states.
 - Treat light mode as a designed neutral companion. Preserve the same hierarchy and semantic roles rather than mechanically inverting dark mode.
+- Keep native navigation containers, Expo root views and screen content on the resolved theme canvas. During push, pop and swipe-back transitions, no default white window, rounded-card vignette or mismatched scene background should be visible.
 - Keep system-first typography. Use tabular numerals for timers and report figures; do not reintroduce all-monospace UI typography.
 
 ## Brand Artwork

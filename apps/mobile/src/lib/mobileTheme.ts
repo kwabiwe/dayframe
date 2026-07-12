@@ -9,6 +9,7 @@ import {
   type ReactNode
 } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as SystemUI from "expo-system-ui";
 import {
   StyleSheet,
   View,
@@ -70,6 +71,10 @@ export function MobileThemeProvider({ children }: { children: ReactNode }) {
     : themePreference;
   const theme = useMemo(() => createMobileTheme(resolvedThemeMode), [resolvedThemeMode]);
   const styles = useMemo(() => createStyles(theme), [theme]);
+
+  useEffect(() => {
+    void SystemUI.setBackgroundColorAsync(theme.background).catch(() => undefined);
+  }, [theme.background]);
 
   const value = useMemo<MobileThemeContextValue>(() => ({
     reloadThemePreference,
