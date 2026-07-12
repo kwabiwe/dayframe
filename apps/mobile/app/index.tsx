@@ -30,6 +30,7 @@ import {
   isNetworkTimerError,
   login,
   queueStopTimer,
+  readQueue,
   signup,
   startTimer,
   stopTimer,
@@ -59,6 +60,7 @@ import {
   startHealthKitChangeObservers,
   type HealthKitChangeSubscription
 } from "@/lib/health";
+import { syncLiveActivityForEntry } from "@/lib/liveActivity";
 import {
   pressable,
   useMobileTheme,
@@ -72,7 +74,7 @@ import {
   isOpenReviewItem,
   isReviewNeededEntry
 } from "@/lib/review";
-import { syncShortcutCatalog } from "@/lib/shortcuts";
+import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
 import { scheduleLayoutTransition, useReduceMotionPreference } from "@/lib/motion";
 
 type TimeEntry = MobileBootstrap["entries"][number];
@@ -150,6 +152,8 @@ export default function HomeScreen() {
   const refreshInFlight = useRef(false);
   const queueSyncInFlight = useRef(false);
   const healthAutoSyncInFlight = useRef(false);
+  const liveActivityReconciliationDeferred = useRef(false);
+  const pendingNativeShortcutLocalIds = useRef<Set<string>>(new Set());
   const mainScrollRef = useRef<ScrollView>(null);
   const mainScrollY = useRef(0);
   const entrance = useRef(new Animated.Value(0)).current;
@@ -175,12 +179,56 @@ export default function HomeScreen() {
     setReportChartView(nextView);
   }, [reduceMotion]);
 
+  const syncQueuedEvents = useCallback(async () => {
+    if (queueSyncInFlight.current) return null;
+    queueSyncInFlight.current = true;
+    try {
+      const nativeDrain = await drainNativeShortcutQueue();
+      for (const localId of nativeDrain.transferredLocalIds) {
+        pendingNativeShortcutLocalIds.current.add(localId);
+      }
+      const syncResult = await syncQueue();
+      for (const localId of syncResult.synced) {
+        pendingNativeShortcutLocalIds.current.delete(localId);
+      }
+      const hasRemainingShortcutEvents = syncResult.remaining.some((event) => event.source === "shortcut");
+      if (hasRemainingShortcutEvents) {
+        liveActivityReconciliationDeferred.current = true;
+      } else if (pendingNativeShortcutLocalIds.current.size === 0) {
+        liveActivityReconciliationDeferred.current = false;
+      }
+      return syncResult;
+    } finally {
+      queueSyncInFlight.current = false;
+    }
+  }, []);
+
   const load = useCallback(async (options?: { silent?: boolean }) => {
     if (refreshInFlight.current) return;
     refreshInFlight.current = true;
     if (!options?.silent) setLoading(true);
     try {
-      const bootstrap = await fetchBootstrap({ date: formatDateKey(new Date()) });
+      const date = formatDateKey(new Date());
+      let bootstrap = await fetchBootstrap({ date });
+      const nativeDrain = await drainNativeShortcutQueue();
+      for (const localId of nativeDrain.transferredLocalIds) {
+        pendingNativeShortcutLocalIds.current.add(localId);
+      }
+      if (nativeDrain.transferredCount > 0 || pendingNativeShortcutLocalIds.current.size > 0) {
+        liveActivityReconciliationDeferred.current = true;
+        const syncResult = await syncQueue();
+        for (const localId of syncResult.synced) {
+          pendingNativeShortcutLocalIds.current.delete(localId);
+        }
+        const hasRemainingShortcutEvents = syncResult.remaining.some((event) => event.source === "shortcut");
+        if (pendingNativeShortcutLocalIds.current.size === 0 && !hasRemainingShortcutEvents) {
+          bootstrap = await fetchBootstrap({ date });
+          liveActivityReconciliationDeferred.current = false;
+        }
+      } else {
+        const pendingQueue = await readQueue().catch(() => []);
+        liveActivityReconciliationDeferred.current = pendingQueue.some((event) => event.source === "shortcut");
+      }
       setData(bootstrap);
       syncShortcutCatalog(bootstrap);
       setAuthState("authenticated");
@@ -196,16 +244,6 @@ export default function HomeScreen() {
     } finally {
       refreshInFlight.current = false;
       if (!options?.silent) setLoading(false);
-    }
-  }, []);
-
-  const syncQueuedEvents = useCallback(async () => {
-    if (queueSyncInFlight.current) return null;
-    queueSyncInFlight.current = true;
-    try {
-      return await syncQueue();
-    } finally {
-      queueSyncInFlight.current = false;
     }
   }, []);
 
@@ -416,6 +454,11 @@ export default function HomeScreen() {
   useEffect(() => {
     if (!data?.activeEntry && activeEditVisible) setActiveEditVisible(false);
   }, [activeEditVisible, data?.activeEntry]);
+
+  useEffect(() => {
+    if (liveActivityReconciliationDeferred.current) return;
+    void syncLiveActivityForEntry(data?.activeEntry ?? null);
+  }, [data]);
 
   useEffect(() => {
     chartBuild.stopAnimation();

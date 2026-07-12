@@ -13,9 +13,41 @@
 		779A5666A26D5B5BAFD1A287 /* libPods-Dayframe.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A6DC16DC66C3BC0A0812E20 /* libPods-Dayframe.a */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
 		DFA7110001BC49B8811A0001 /* DayframeShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7110001BC49B8811A0002 /* DayframeShortcuts.swift */; };
+		DFA7120001BC49B8811A0001 /* DayframeLiveActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0011 /* DayframeLiveActivityAttributes.swift */; };
+		DFA7120001BC49B8811A0002 /* DayframeLiveActivityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0012 /* DayframeLiveActivityController.swift */; };
+		DFA7120001BC49B8811A0003 /* DayframeLiveActivityModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0013 /* DayframeLiveActivityModule.swift */; };
+		DFA7120001BC49B8811A0004 /* DayframeLiveActivityModuleBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0014 /* DayframeLiveActivityModuleBridge.m */; };
+		DFA7120001BC49B8811A0005 /* DayframeLiveActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0011 /* DayframeLiveActivityAttributes.swift */; };
+		DFA7120001BC49B8811A0006 /* DayframeLiveActivityBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0015 /* DayframeLiveActivityBundle.swift */; };
+		DFA7120001BC49B8811A0007 /* DayframeTimerLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0016 /* DayframeTimerLiveActivity.swift */; };
+		DFA7120001BC49B8811A0008 /* DayframeLiveActivity.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0019 /* DayframeLiveActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
 		F8E5DEB5A642AF9128DE2E3F /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 47826C218DF2CD53638292FB /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		DFA7120001BC49B8811A0032 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DFA7120001BC49B8811A0031;
+			remoteInfo = DayframeLiveActivity;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		DFA7120001BC49B8811A0024 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				DFA7120001BC49B8811A0008 /* DayframeLiveActivity.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		0728297A5966D57372FD6B88 /* Pods-Dayframe.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Dayframe.debug.xcconfig"; path = "Target Support Files/Pods-Dayframe/Pods-Dayframe.debug.xcconfig"; sourceTree = "<group>"; };
@@ -28,6 +60,15 @@
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = Dayframe/SplashScreen.storyboard; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
 		DFA7110001BC49B8811A0002 /* DayframeShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeShortcuts.swift; path = Dayframe/DayframeShortcuts.swift; sourceTree = "<group>"; };
+		DFA7120001BC49B8811A0011 /* DayframeLiveActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeLiveActivityAttributes.swift; path = Dayframe/DayframeLiveActivityAttributes.swift; sourceTree = "<group>"; };
+		DFA7120001BC49B8811A0012 /* DayframeLiveActivityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeLiveActivityController.swift; path = Dayframe/DayframeLiveActivityController.swift; sourceTree = "<group>"; };
+		DFA7120001BC49B8811A0013 /* DayframeLiveActivityModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeLiveActivityModule.swift; path = Dayframe/DayframeLiveActivityModule.swift; sourceTree = "<group>"; };
+		DFA7120001BC49B8811A0014 /* DayframeLiveActivityModuleBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = DayframeLiveActivityModuleBridge.m; path = Dayframe/DayframeLiveActivityModuleBridge.m; sourceTree = "<group>"; };
+		DFA7120001BC49B8811A0015 /* DayframeLiveActivityBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayframeLiveActivityBundle.swift; sourceTree = "<group>"; };
+		DFA7120001BC49B8811A0016 /* DayframeTimerLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayframeTimerLiveActivity.swift; sourceTree = "<group>"; };
+		DFA7120001BC49B8811A0017 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		DFA7120001BC49B8811A0018 /* DayframeLiveActivity.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = DayframeLiveActivity.entitlements; sourceTree = "<group>"; };
+		DFA7120001BC49B8811A0019 /* DayframeLiveActivity.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = DayframeLiveActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = Dayframe/AppDelegate.swift; sourceTree = "<group>"; };
 		F11748442D0722820044C1D9 /* Dayframe-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "Dayframe-Bridging-Header.h"; path = "Dayframe/Dayframe-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -40,6 +81,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				779A5666A26D5B5BAFD1A287 /* libPods-Dayframe.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DFA7120001BC49B8811A0022 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -59,6 +107,10 @@
 			children = (
 				F11748412D0307B40044C1D9 /* AppDelegate.swift */,
 				DFA7110001BC49B8811A0002 /* DayframeShortcuts.swift */,
+				DFA7120001BC49B8811A0011 /* DayframeLiveActivityAttributes.swift */,
+				DFA7120001BC49B8811A0012 /* DayframeLiveActivityController.swift */,
+				DFA7120001BC49B8811A0013 /* DayframeLiveActivityModule.swift */,
+				DFA7120001BC49B8811A0014 /* DayframeLiveActivityModuleBridge.m */,
 				F11748442D0722820044C1D9 /* Dayframe-Bridging-Header.h */,
 				BB2F792B24A3F905000567C9 /* Supporting */,
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
@@ -89,6 +141,7 @@
 			isa = PBXGroup;
 			children = (
 				13B07FAE1A68108700A75B9A /* Dayframe */,
+				DFA7120001BC49B8811A0050 /* DayframeLiveActivity */,
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
@@ -104,6 +157,7 @@
 			isa = PBXGroup;
 			children = (
 				13B07F961A680F5B00A75B9A /* Dayframe.app */,
+				DFA7120001BC49B8811A0019 /* DayframeLiveActivity.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -135,6 +189,17 @@
 			path = Dayframe/Supporting;
 			sourceTree = "<group>";
 		};
+		DFA7120001BC49B8811A0050 /* DayframeLiveActivity */ = {
+			isa = PBXGroup;
+			children = (
+				DFA7120001BC49B8811A0015 /* DayframeLiveActivityBundle.swift */,
+				DFA7120001BC49B8811A0016 /* DayframeTimerLiveActivity.swift */,
+				DFA7120001BC49B8811A0017 /* Info.plist */,
+				DFA7120001BC49B8811A0018 /* DayframeLiveActivity.entitlements */,
+			);
+			path = DayframeLiveActivity;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -147,6 +212,7 @@
 				13B07F871A680F5B00A75B9A /* Sources */,
 				13B07F8C1A680F5B00A75B9A /* Frameworks */,
 				13B07F8E1A680F5B00A75B9A /* Resources */,
+				DFA7120001BC49B8811A0024 /* Embed App Extensions */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */,
 				986EA460A2C4C44DDFF08D75 /* [CP] Embed Pods Frameworks */,
@@ -154,11 +220,29 @@
 			buildRules = (
 			);
 			dependencies = (
+				DFA7120001BC49B8811A0033 /* PBXTargetDependency */,
 			);
 			name = Dayframe;
 			productName = Dayframe;
 			productReference = 13B07F961A680F5B00A75B9A /* Dayframe.app */;
 			productType = "com.apple.product-type.application";
+		};
+		DFA7120001BC49B8811A0031 /* DayframeLiveActivity */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DFA7120001BC49B8811A0040 /* Build configuration list for PBXNativeTarget "DayframeLiveActivity" */;
+			buildPhases = (
+				DFA7120001BC49B8811A0021 /* Sources */,
+				DFA7120001BC49B8811A0022 /* Frameworks */,
+				DFA7120001BC49B8811A0023 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = DayframeLiveActivity;
+			productName = DayframeLiveActivity;
+			productReference = DFA7120001BC49B8811A0019 /* DayframeLiveActivity.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -170,6 +254,9 @@
 				TargetAttributes = {
 					13B07F861A680F5B00A75B9A = {
 						LastSwiftMigration = 1250;
+					};
+					DFA7120001BC49B8811A0031 = {
+						CreatedOnToolsVersion = 26.6;
 					};
 				};
 			};
@@ -187,6 +274,7 @@
 			projectRoot = "";
 			targets = (
 				13B07F861A680F5B00A75B9A /* Dayframe */,
+				DFA7120001BC49B8811A0031 /* DayframeLiveActivity */,
 			);
 		};
 /* End PBXProject section */
@@ -200,6 +288,13 @@
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
 				F8E5DEB5A642AF9128DE2E3F /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DFA7120001BC49B8811A0023 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -346,13 +441,83 @@
 			files = (
 				F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */,
 				DFA7110001BC49B8811A0001 /* DayframeShortcuts.swift in Sources */,
+				DFA7120001BC49B8811A0001 /* DayframeLiveActivityAttributes.swift in Sources */,
+				DFA7120001BC49B8811A0002 /* DayframeLiveActivityController.swift in Sources */,
+				DFA7120001BC49B8811A0003 /* DayframeLiveActivityModule.swift in Sources */,
+				DFA7120001BC49B8811A0004 /* DayframeLiveActivityModuleBridge.m in Sources */,
 				04BED18508AD6E4F9E2FCC38 /* ExpoModulesProvider.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DFA7120001BC49B8811A0021 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DFA7120001BC49B8811A0005 /* DayframeLiveActivityAttributes.swift in Sources */,
+				DFA7120001BC49B8811A0006 /* DayframeLiveActivityBundle.swift in Sources */,
+				DFA7120001BC49B8811A0007 /* DayframeTimerLiveActivity.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		DFA7120001BC49B8811A0033 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DFA7120001BC49B8811A0031 /* DayframeLiveActivity */;
+			targetProxy = DFA7120001BC49B8811A0032 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		DFA7120001BC49B8811A0041 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = DayframeLiveActivity/DayframeLiveActivity.entitlements;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = DayframeLiveActivity/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.layereight.dayframe.DayframeLiveActivity;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Debug;
+		};
+		DFA7120001BC49B8811A0042 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = DayframeLiveActivity/DayframeLiveActivity.entitlements;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = DayframeLiveActivity/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.layereight.dayframe.DayframeLiveActivity;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Release;
+		};
 		13B07F941A680F5B00A75B9A /* Debug */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 0728297A5966D57372FD6B88 /* Pods-Dayframe.debug.xcconfig */;
@@ -563,6 +728,15 @@
 			buildConfigurations = (
 				13B07F941A680F5B00A75B9A /* Debug */,
 				13B07F951A680F5B00A75B9A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		DFA7120001BC49B8811A0040 /* Build configuration list for PBXNativeTarget "DayframeLiveActivity" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DFA7120001BC49B8811A0041 /* Debug */,
+				DFA7120001BC49B8811A0042 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

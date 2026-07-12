@@ -77,7 +77,7 @@ import {
   shouldRefreshSettingsSnapshot,
   shouldShowSettingsRefreshSpinner
 } from "@/lib/settingsRefresh";
-import { syncShortcutCatalog } from "@/lib/shortcuts";
+import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
 
 type Category = MobileBootstrap["categories"][number];
 type SettingsSection = "index" | "profile" | "categories" | "automations" | "health" | "sync" | "appearance";
@@ -245,6 +245,7 @@ export default function SettingsScreen() {
     const showRefreshIndicator = shouldShowSettingsRefreshSpinner(options?.trigger ?? "navigation");
     if (showRefreshIndicator) setRefreshing(true);
     try {
+      await drainNativeShortcutQueue();
       const [bootstrap, queued, location] = await Promise.all([
         fetchBootstrap(),
         readQueue(),

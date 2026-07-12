@@ -13,7 +13,6 @@ import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import { paletteColorFor } from "@dayframe/shared";
-import { DayframeBrand } from "@/components/brand";
 import {
   AuthRequiredError,
   createPlace,
@@ -50,7 +49,7 @@ export default function PlacesScreen() {
   const reduceMotion = useReduceMotionPreference();
   const { styles, theme } = useMobileTheme();
   const [data, setData] = useState<MobileBootstrap | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [locating, setLocating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -66,8 +65,8 @@ export default function PlacesScreen() {
   const [locationPrecise, setLocationPrecise] = useState(true);
   const saveInFlight = useRef(false);
 
-  const load = useCallback(async (options?: { silent?: boolean }) => {
-    if (!options?.silent) setLoading(true);
+  const load = useCallback(async (options?: { refresh?: boolean; silent?: boolean }) => {
+    if (options?.refresh) setRefreshing(true);
     try {
       const bootstrap = await fetchBootstrap();
       setData(bootstrap);
@@ -80,7 +79,7 @@ export default function PlacesScreen() {
         Alert.alert("Places", error instanceof Error ? error.message : "Unable to load places.");
       }
     } finally {
-      if (!options?.silent) setLoading(false);
+      if (options?.refresh) setRefreshing(false);
     }
   }, []);
 
@@ -319,8 +318,8 @@ export default function PlacesScreen() {
         keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl
-            refreshing={loading}
-            onRefresh={() => load()}
+            refreshing={refreshing}
+            onRefresh={() => load({ refresh: true })}
             tintColor={theme.accent}
             colors={[theme.accent]}
           />
@@ -336,11 +335,7 @@ export default function PlacesScreen() {
             >
               <BackGlyph color={theme.accent} />
             </Pressable>
-            <DayframeBrand
-              layout="compact"
-              size="sm"
-              tone={theme.mode === "dark" ? "light" : "dark"}
-            />
+            <Text style={styles.settingsTitle} numberOfLines={1}>Places</Text>
           </View>
 
           <View style={styles.panel}>
