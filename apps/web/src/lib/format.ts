@@ -133,6 +133,7 @@ const sourceLabels: Record<string, string> = {
   calendar: "Calendar",
   health_sleep: "Health sleep",
   health_workout: "Health workout",
+  location_learning: "Location learning",
   home_assistant: "Home Assistant",
   ha_button: "Home Assistant button",
   ha_geofence: "Home Assistant geofence"
@@ -146,6 +147,8 @@ const eventLabels: Record<string, string> = {
   manual_entry: "Manual entry",
   geofence_enter: "Entered place",
   geofence_exit: "Left place",
+  commute_detected: "Commute detected",
+  learned_place_visit: "Learned place visit",
   review_accept: "Accepted review",
   review_ignore: "Ignored review",
   review_rule: "Created rule",

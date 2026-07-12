@@ -32,6 +32,7 @@ export const EventSourceSchema = z.enum([
   "calendar",
   "health_sleep",
   "health_workout",
+  "location_learning",
   "home_assistant",
   "ha_button",
   "ha_geofence"
@@ -69,6 +70,8 @@ export const ActivityEventTypeSchema = z.enum([
   "geofence_enter",
   "geofence_exit",
   "unknown_stay",
+  "commute_detected",
+  "learned_place_visit",
   "nfc_action",
   "shortcut_action",
   "calendar_hint",
@@ -734,6 +737,8 @@ export function confidenceForSource(source: EventSource): Confidence {
     case "health_workout":
     case "ha_button":
       return "high";
+    case "location_learning":
+      return "medium";
     case "ha_geofence":
     case "geofence_specific":
       return "medium_high";
@@ -873,6 +878,39 @@ export function normalizeActivityEvent(
         durationMinutes >= threshold
           ? "Unknown stays longer than the configured threshold need human review."
           : "Short unknown stays are retained as raw events only.",
+      shouldClosePrevious: false
+    };
+  }
+
+  if (event.type === "commute_detected") {
+    const fromName = stringFromPayload(event.rawPayload.fromPlaceName) ?? "previous place";
+    const toName = stringFromPayload(event.rawPayload.toPlaceName) ?? stringFromPayload(event.rawPayload.placeName) ?? "next place";
+    const travelCategory = findCategoryByName(context.categories, "Travel");
+    return {
+      action: "create_review_item",
+      confidence: "medium",
+      reviewStatus: "needs_review",
+      categoryId: event.categoryId ?? travelCategory?.id,
+      placeId: event.placeId ?? place?.id,
+      title: event.description ?? `Commute from ${fromName} to ${toName}`,
+      reason: "Commute learning proposes transitions between visits, but keeps them review-first before creating time.",
+      shouldClosePrevious: false
+    };
+  }
+
+  if (event.type === "learned_place_visit") {
+    const candidateName =
+      stringFromPayload(event.rawPayload.placeName) ??
+      stringFromPayload(event.rawPayload.candidateName) ??
+      "Regular place candidate";
+    return {
+      action: "create_review_item",
+      confidence: "low",
+      reviewStatus: "needs_review",
+      categoryId: event.categoryId,
+      placeId: event.placeId ?? place?.id,
+      title: event.description ?? candidateName,
+      reason: "Regular-place learning keeps unsaved or uncertain places in Review until confirmed.",
       shouldClosePrevious: false
     };
   }
