@@ -23,6 +23,7 @@ vi.mock("./queries", () => ({
 
 const {
   createPlace,
+  createEntity,
   deletePlace,
   deleteTimeEntry,
   processActivityEvent,
@@ -255,6 +256,66 @@ describe("place persistence", () => {
       "delete from places where id = $1 and workspace_id = $2 returning id",
       [placeId(), session.workspaceId]
     );
+  });
+});
+
+describe("automation rule persistence", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("persists natural-language activity descriptions on automation rules", async () => {
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{ placeOk: true, projectOk: true, categoryOk: true }] })
+      .mockResolvedValueOnce({ rows: [{ id: "rule-1" }] });
+
+    await createEntity(
+      "automation_rule",
+      {
+        name: "Chelmsford Station pickup/drop-off",
+        triggerSource: "geofence_specific",
+        triggerType: "geofence_exit",
+        placeId: placeId(),
+        action: "create_review_item",
+        categoryId: categoryId(),
+        activityDescription: "Train station pickup/drop-off",
+        confidenceThreshold: "medium_high"
+      },
+      session
+    );
+
+    expect(mocks.query).toHaveBeenLastCalledWith(
+      expect.stringContaining("activity_description"),
+      [
+        session.workspaceId,
+        "Chelmsford Station pickup/drop-off",
+        "geofence_specific",
+        "geofence_exit",
+        placeId(),
+        "create_review_item",
+        null,
+        categoryId(),
+        "Train station pickup/drop-off",
+        "medium_high"
+      ]
+    );
+  });
+
+  it("rejects automation rules that reference entities outside the workspace", async () => {
+    mocks.query.mockResolvedValueOnce({ rows: [{ placeOk: false, projectOk: true, categoryOk: true }] });
+
+    await expect(
+      createEntity(
+        "automation_rule",
+        {
+          name: "Foreign place",
+          placeId: placeId(),
+          categoryId: categoryId()
+        },
+        session
+      )
+    ).rejects.toThrow(/active workspace/);
+    expect(mocks.query).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -1675,6 +1736,70 @@ describe("review item resolution", () => {
       "2026-06-07T06:27:00.000Z",
       "event-1"
     ]);
+    expect(client.query).toHaveBeenCalledWith("commit");
+  });
+
+  it("validates review-created automation rule references before saving", async () => {
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes("from review_items ri")) {
+          return {
+            rows: [
+              {
+                id: "review-rule",
+                eventId: "event-rule",
+                title: "Station pickup",
+                status: "open",
+                suggestedProjectId: null,
+                suggestedCategoryId: categoryId(),
+                suggestedPlaceId: placeId(),
+                suggestedStartedAt: "2026-07-04T19:09:00.000Z",
+                suggestedStoppedAt: "2026-07-04T19:46:00.000Z",
+                confidence: "medium_high",
+                eventSource: "geofence_specific",
+                eventType: "geofence_exit"
+              }
+            ]
+          };
+        }
+        if (statement.includes("select ($2::uuid is null or exists")) {
+          return { rows: [{ placeOk: true, projectOk: true, categoryOk: true }] };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await resolveReviewItem("review-rule", "create_rule", session);
+
+    const reviewSelect = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("from review_items ri")
+    );
+    expect(reviewSelect?.[0]).toContain('p.id as "suggestedProjectId"');
+    expect(reviewSelect?.[0]).toContain('c.id as "suggestedCategoryId"');
+    expect(reviewSelect?.[0]).toContain('pl.id as "suggestedPlaceId"');
+    expect(reviewSelect?.[0]).toContain("ae.workspace_id = ri.workspace_id");
+    expect(client.query).toHaveBeenCalledWith(expect.stringContaining("select ($2::uuid is null or exists"), [
+      session.workspaceId,
+      placeId(),
+      null,
+      categoryId()
+    ]);
+    expect(client.query).toHaveBeenCalledWith(
+      expect.stringContaining("insert into automation_rules"),
+      [
+        session.workspaceId,
+        "Suggestion from Station pickup",
+        "geofence_specific",
+        "geofence_exit",
+        placeId(),
+        null,
+        categoryId(),
+        "Station pickup",
+        "medium_high"
+      ]
+    );
     expect(client.query).toHaveBeenCalledWith("commit");
   });
 

@@ -362,6 +362,7 @@ export type AutomationRuleSummary = {
   action: AutomationAction;
   projectId?: string | null;
   categoryId?: string | null;
+  activityDescription?: string | null;
   enabled: boolean;
 };
 
@@ -395,6 +396,101 @@ export type AutomationRuleDraft = {
   simulationChecks: string[];
   unsupported: string[];
 };
+
+export type AutomationRuleDraftSaveValues = {
+  name: string;
+  triggerSource: EventSource;
+  triggerType: ActivityEventType;
+  placeId: string;
+  action: AutomationAction;
+  projectId?: string | null;
+  categoryId?: string | null;
+  activityDescription?: string | null;
+  confidenceThreshold: Confidence;
+};
+
+export type AutomationRuleDraftSavePlan = {
+  values?: AutomationRuleDraftSaveValues;
+  blockers: string[];
+  notes: string[];
+};
+
+export function automationRuleInputFromDraft(input: {
+  draft: AutomationRuleDraft;
+  places?: Array<Pick<PlaceSummary, "id" | "name"> & Partial<Pick<PlaceSummary, "radiusMeters" | "defaultProjectId" | "defaultCategoryId" | "defaultActivityDescription">>>;
+  categories?: Array<Pick<CategorySummary, "id" | "name">>;
+}): AutomationRuleDraftSavePlan {
+  const { draft } = input;
+  const places = input.places ?? [];
+  const categories = input.categories ?? [];
+  const blockers: string[] = [];
+  const notes: string[] = [];
+
+  if (draft.title === "Empty rule draft" || !draft.outcome.description.trim()) {
+    blockers.push("Enter a rule request before saving.");
+  }
+
+  const place = draft.placeName ? findNamedDraftItem(places, draft.placeName) : undefined;
+  if (!draft.placeName) {
+    blockers.push("Name a saved place in the rule request.");
+  } else if (!place) {
+    blockers.push(`Add "${draft.placeName}" as a saved place before saving this rule.`);
+  }
+
+  const category = draft.outcome.categoryName
+    ? findNamedDraftItem(categories, draft.outcome.categoryName)
+    : undefined;
+  let categoryId: string | null = null;
+  if (draft.outcome.categoryName && category) {
+    categoryId = category.id;
+  } else if (draft.outcome.categoryName && !category) {
+    blockers.push(`Add "${draft.outcome.categoryName}" as a category before saving this rule.`);
+  } else {
+    categoryId = place?.defaultCategoryId ?? null;
+  }
+  if (!draft.outcome.categoryName && !categoryId) {
+    blockers.push("Choose a category before saving this rule.");
+  }
+
+  if (draft.outcome.mode === "auto_log_when_matched") {
+    notes.push("The first saved version stays review-first until simulation proves automatic writes are safe.");
+  }
+
+  if (draft.unsupported.length > 0) {
+    notes.push("Advanced evidence checks stay in the preview until the sequence engine supports them.");
+  }
+
+  if (blockers.length > 0 || !place) {
+    notes.unshift("Saved v1 rules match place exits and create review items only.");
+    return { blockers, notes };
+  }
+
+  notes.unshift(
+    `Saved v1 trigger: any exit from ${place.name}. It creates review items only; confirming the review creates the time entry.`
+  );
+
+  const activityDescription =
+    normalizeMappingText(draft.outcome.description) ??
+    normalizeMappingText(place.defaultActivityDescription) ??
+    draft.title;
+  const triggerSource = (place.radiusMeters ?? 0) > 250 ? "geofence_broad" : "geofence_specific";
+
+  return {
+    values: {
+      name: draft.title.slice(0, 160),
+      triggerSource,
+      triggerType: "geofence_exit",
+      placeId: place.id,
+      action: "create_review_item",
+      projectId: place.defaultProjectId ?? null,
+      categoryId,
+      activityDescription,
+      confidenceThreshold: "medium_high"
+    },
+    blockers,
+    notes
+  };
+}
 
 export function draftAutomationRuleFromText(input: {
   text: string;
@@ -542,7 +638,9 @@ function normalizeDraftText(value: string) {
 }
 
 function inferDraftPlaceName(normalizedText: string, places: Array<Pick<PlaceSummary, "name">>) {
-  const exact = places.find((place) => normalizedText.includes(place.name.toLowerCase()));
+  const exact = places
+    .filter((place) => normalizedText.includes(place.name.toLowerCase()))
+    .sort((left, right) => right.name.length - left.name.length)[0];
   if (exact) return exact.name;
   if (normalizedText.includes("chelmsford") && normalizedText.includes("station")) return "Chelmsford Station";
   if (normalizedText.includes("rail station") || normalizedText.includes("train station")) return "Train station";
@@ -565,6 +663,11 @@ function inferDraftCategoryName(normalizedText: string, categories: Array<Pick<C
     return category?.name ?? hint.category;
   }
   return null;
+}
+
+function findNamedDraftItem<T extends { name: string }>(items: T[], name: string) {
+  const normalizedName = name.trim().toLowerCase();
+  return items.find((item) => item.name.trim().toLowerCase() === normalizedName);
 }
 
 function isStationRoundTripDraft(normalizedText: string) {
@@ -737,7 +840,7 @@ export function normalizeActivityEvent(
     const isHome = place?.name.toLowerCase() === "home";
     const projectId = matchingRule?.projectId ?? place?.defaultProjectId ?? undefined;
     const categoryId = matchingRule?.categoryId ?? place?.defaultCategoryId ?? undefined;
-    const title = visitActivityDescription(event, place);
+    const title = visitActivityDescription(event, place, matchingRule);
 
     return {
       action: "create_review_item",
@@ -968,9 +1071,16 @@ function stringFromPayload(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function visitActivityDescription(event: ParsedActivityEvent, place: PlaceSummary | undefined) {
+function visitActivityDescription(
+  event: ParsedActivityEvent,
+  place: PlaceSummary | undefined,
+  rule?: AutomationRuleSummary
+) {
   const eventDescription = event.description?.trim();
   if (eventDescription) return eventDescription;
+
+  const ruleDescription = rule?.activityDescription?.trim();
+  if (ruleDescription) return ruleDescription;
 
   const placeDefault = place?.defaultActivityDescription?.trim();
   if (placeDefault) return placeDefault;

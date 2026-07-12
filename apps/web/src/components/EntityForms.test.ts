@@ -13,3 +13,14 @@ describe("Places entity UI copy", () => {
     expect(source).not.toMatch(/\bTags?\b/);
   });
 });
+
+describe("Automation rule assistant UI", () => {
+  it("exposes reviewed natural-language rule saving", () => {
+    const entityForms = readFileSync(fileURLToPath(new URL("./EntityForms.tsx", import.meta.url)), "utf8");
+
+    expect(entityForms).toContain("Save reviewed rule");
+    expect(entityForms).toContain("geofence_exit");
+    expect(entityForms).toContain("automationRuleInputFromDraft");
+    expect(entityForms).toContain("activityDescription");
+  });
+});
