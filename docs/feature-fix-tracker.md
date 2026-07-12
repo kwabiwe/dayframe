@@ -1,11 +1,11 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-12 08:30 BST
+Last verified: 2026-07-12 08:31 BST
 
 ## Verification Snapshot
 
 - Local repo: `agent/background-shortcuts-live-activity` is active for the next implementation PR; `main` was synced with `origin/main` before branching.
-- GitHub: PR #47 is merged; no open PRs and no GitHub issues at branch start.
+- GitHub: PR #47 is merged; draft PR #48 is open for Background Shortcuts and Live Activity.
 - Latest verified TestFlight build: `0.1.0 (22)`.
 - Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, and App Store Connect build state.
 
@@ -23,7 +23,7 @@ Last verified: 2026-07-12 08:30 BST
 
 | Item | Status | Evidence | Next action |
 | --- | --- | --- | --- |
-| Background Shortcuts and Live Activity | In progress | Active branch `agent/background-shortcuts-live-activity`; local validation passes `npm run test`, `npm run typecheck`, `npm run lint`, `npm run build`, `npm run testflight:preflight`, plist lint, `git diff --check`, iOS simulator Debug build, iPhoneOS Release build, and Codex 5.6 Sol follow-up review. Places sub-setting header/spinner cleanup is bundled here. | Open PR #48, then run the TestFlight lane after merge. Watch real-device Shortcut/NFC actions to confirm Dayframe no longer foregrounds for Start/Stop and the Live Activity/Dynamic Island timer is the visible confirmation surface. |
+| Background Shortcuts and Live Activity | In progress | Draft PR #48 is open from `agent/background-shortcuts-live-activity`; local validation passes `npm run test`, `npm run typecheck`, `npm run lint`, `npm run build`, `npm run testflight:preflight`, plist lint, `git diff --check`, iOS simulator Debug build, iPhoneOS Release build, and Codex 5.6 Sol follow-up review. Places sub-setting header/spinner cleanup is bundled here. | Review/merge PR #48, then run the TestFlight lane after merge. Watch real-device Shortcut/NFC actions to confirm Dayframe no longer foregrounds for Start/Stop and the Live Activity/Dynamic Island timer is the visible confirmation surface. |
 
 ## Recently Shipped Or Addressed
 
