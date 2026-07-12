@@ -1,11 +1,11 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-11 21:31 BST
+Last verified: 2026-07-12 01:04 BST
 
 ## Verification Snapshot
 
-- Local repo: `main` synced with `origin/main`; PR #46 is merged and verified in TestFlight build 21.
-- GitHub: PR #46 is merged; no open PRs and no GitHub issues at release verification time.
+- Local repo: `main` synced with `origin/main`; PR #47 is merged and waiting for TestFlight build 22 release verification.
+- GitHub: PR #47 is merged; no open PRs and no GitHub issues at merge verification time.
 - Latest verified TestFlight build: `0.1.0 (21)`.
 - Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, and App Store Connect build state.
 
@@ -24,12 +24,12 @@ Last verified: 2026-07-11 21:31 BST
 | Item | Status | Evidence | Next action |
 | --- | --- | --- | --- |
 | Background Shortcuts and Live Activity | Next | PR #43 review confirmed NFC Shortcuts work, but the deep-link handoff briefly opens Dayframe and shows `Shortcut queued`. | Replace the deep-link-only Shortcut handoff with a native/background queue path, then add an iOS Live Activity/Dynamic Island timer as the confirmation surface for active tracking. |
-| Mobile navigation continuity and dark transition backgrounds | In progress | Real-device screenshots from build `0.1.0 (21)` and `docs/investigations/2026-07-11-mobile-navigation-vignette.md`. | Verify dark/light Settings, Review and Places push/pop/swipe-back transitions on a physical iPhone, including Reduce Motion. |
 
 ## Recently Shipped Or Addressed
 
 | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- |
+| Mobile navigation continuity and dark transition backgrounds | Release pending | PR #47 merged into `main` at `5f0a3ef`; TestFlight build `0.1.0 (22)` pending. | Binds Expo Router/native containers to Dayframe light/dark theme surfaces, uses flat gesture-compatible native-stack transitions without the rounded-card shadow, centralises Reduce Motion-aware timings, removes the delayed description-field scroll jump, and includes the `ExpoSystemUI` native pod for runtime root background updates. Verify dark/light Settings, Review and Places push/pop/swipe-back transitions on a physical iPhone, including Reduce Motion. |
 | Settings cached navigation and silent refresh | Watch | PR #46, build `0.1.0 (21)`, delivery UUID `56aafea3-fe4a-491e-a57a-ac3a7840be14`. | Settings navigation renders from cached data immediately, silently refreshes stale snapshots in the background, only shows the pull-to-refresh spinner when the user explicitly pulls, and avoids Health/location diagnostic work on unrelated sub-settings. Watch real-device Settings navigation across Profile, Categories, Appearance, Automations, Health, and Sync before marking settled. |
 | Settings sub-settings back navigation | Watch | PR #45, build `0.1.0 (20)`, delivery UUID `6bacb90a-006e-49f6-acc4-e1d2fbe64ee2`. | All Settings sub-settings now derive from the `section` route param only. Removed local `settingsSection` mutation and the manual `beforeRemove` interception so native iOS swipe-back and the header back button can pop normally to the Settings index. Watch real-device navigation through every Settings sub-section before marking settled. |
 | Calendar compact blocks and Settings swipe-back | Watch | PR #44, build `0.1.0 (19)`, delivery UUID `997c7e8e-9556-4a54-a586-c71e1b80061b`; PR #45, build `0.1.0 (20)`, followed up the remaining Settings sub-settings back-navigation glitch. | Calendar blocks now keep near-true duration height and suppress title/meta labels until there is enough vertical space. PR #44 did not fully fix Settings sub-setting back navigation because the old Settings route could retain local sub-setting state; PR #45 handles that follow-up. |
