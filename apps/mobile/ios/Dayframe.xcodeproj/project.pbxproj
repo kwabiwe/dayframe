@@ -13,8 +13,10 @@
 		779A5666A26D5B5BAFD1A287 /* libPods-Dayframe.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A6DC16DC66C3BC0A0812E20 /* libPods-Dayframe.a */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
 		DFA7110001BC49B8811A0001 /* DayframeShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7110001BC49B8811A0002 /* DayframeShortcuts.swift */; };
+		DFA7130001BC49B8811A0001 /* DayframeShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7110001BC49B8811A0002 /* DayframeShortcuts.swift */; };
 		DFA7120001BC49B8811A0001 /* DayframeLiveActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0011 /* DayframeLiveActivityAttributes.swift */; };
 		DFA7120001BC49B8811A0002 /* DayframeLiveActivityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0012 /* DayframeLiveActivityController.swift */; };
+		DFA7130001BC49B8811A0002 /* DayframeLiveActivityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0012 /* DayframeLiveActivityController.swift */; };
 		DFA7120001BC49B8811A0003 /* DayframeLiveActivityModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0013 /* DayframeLiveActivityModule.swift */; };
 		DFA7120001BC49B8811A0004 /* DayframeLiveActivityModuleBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0014 /* DayframeLiveActivityModuleBridge.m */; };
 		DFA7120001BC49B8811A0005 /* DayframeLiveActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0011 /* DayframeLiveActivityAttributes.swift */; };
@@ -453,7 +455,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				DFA7130001BC49B8811A0001 /* DayframeShortcuts.swift in Sources */,
 				DFA7120001BC49B8811A0005 /* DayframeLiveActivityAttributes.swift in Sources */,
+				DFA7130001BC49B8811A0002 /* DayframeLiveActivityController.swift in Sources */,
 				DFA7120001BC49B8811A0006 /* DayframeLiveActivityBundle.swift in Sources */,
 				DFA7120001BC49B8811A0007 /* DayframeTimerLiveActivity.swift in Sources */,
 			);
