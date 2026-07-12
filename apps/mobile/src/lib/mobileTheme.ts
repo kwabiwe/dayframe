@@ -616,12 +616,6 @@ function createStyles(theme: MobileTheme) {
       fontWeight: "800",
       fontVariant: ["tabular-nums"]
     },
-    activeElapsedLabel: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "700"
-    },
     muted: {
       fontSize: 13,
       lineHeight: 20,
@@ -1003,21 +997,39 @@ function createStyles(theme: MobileTheme) {
       gap: 7,
       paddingRight: 4
     },
-    categoryPill: {
+    quickActionsBlock: {
+      gap: 6
+    },
+    quickActionsLabel: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 11,
+      fontWeight: "800",
+      textTransform: "uppercase",
+      paddingHorizontal: 2
+    },
+    categoryPillTouch: {
       minHeight: 44,
+      justifyContent: "center"
+    },
+    categoryPill: {
+      minHeight: 32,
       borderWidth: 1,
       backgroundColor: theme.surfaceInset,
       borderRadius: 999,
-      paddingHorizontal: 10,
-      paddingVertical: 7,
+      paddingHorizontal: 11,
+      paddingVertical: 4,
       flexDirection: "row",
       alignItems: "center",
       gap: 7
     },
+    categoryPillMuted: {
+      borderColor: theme.borderStrong
+    },
     categoryPillText: {
       color: theme.textPrimary,
       fontFamily: monoFont,
-      fontSize: 13,
+      fontSize: 12,
       fontWeight: "800"
     },
     quickCategoryHint: {
@@ -1034,6 +1046,10 @@ function createStyles(theme: MobileTheme) {
       borderWidth: 1,
       borderColor: theme.borderStrong,
       borderRadius: 999
+    },
+    colorDotMuted: {
+      backgroundColor: "transparent",
+      borderColor: theme.textSecondary
     },
     categoryList: {
       gap: 8
