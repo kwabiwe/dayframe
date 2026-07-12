@@ -25,9 +25,9 @@ As of 2026-07-12, Dayframe uses this internal release lane:
 - Bundle id: `com.layereight.dayframe`
 - Team: `65M773ZG6M`
 - Version: `0.1.0`
-- Latest verified build: `0.1.0 (27)`
+- Latest verified build: `0.1.0 (28)`
 - Group: `Internal Health Debug`
-- Latest delivery UUID: `e0df39a1-9b1d-4a65-ad6b-9144f64d8c3a`
+- Latest delivery UUID: `305f791f-b912-4f68-a016-e3a6c45a8cb5`
 - Current release rule: implementation PRs are not done until the merged code is in a verified internal TestFlight build.
 
 Docs-only or planning-only PRs do not require a TestFlight build unless they change build, release, signing, environment, or runtime configuration.
