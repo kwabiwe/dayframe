@@ -4,6 +4,7 @@ import * as TaskManager from "expo-task-manager";
 import { enqueueEvent } from "./api";
 
 export const DAYFRAME_GEOFENCE_TASK = "DAYFRAME_GEOFENCE_TASK";
+export const DAYFRAME_LOCATION_LEARNING_TASK = "DAYFRAME_LOCATION_LEARNING_TASK";
 export const LOCATION_VISIT_DWELL_THRESHOLD_MINUTES = 5;
 export const LOCATION_VISIT_DWELL_THRESHOLD_MS = LOCATION_VISIT_DWELL_THRESHOLD_MINUTES * 60_000;
 
@@ -37,6 +38,25 @@ export type LocationVisitDiagnostics = {
     queuedAt: string;
     durationSeconds: number;
   };
+  locationLearningEnabled?: boolean;
+  locationLearningActive?: boolean;
+  lastLearningSampleAt?: string;
+  lastLearnedPlaceCandidate?: {
+    candidateName: string;
+    startedAt: string;
+    stoppedAt: string;
+    queuedAt: string;
+    durationSeconds: number;
+    sampleCount: number;
+  };
+  lastCommuteCandidate?: {
+    fromPlaceName: string;
+    toPlaceName: string;
+    startedAt: string;
+    stoppedAt: string;
+    queuedAt: string;
+    durationSeconds: number;
+  };
   lastMonitorRefreshAt?: string;
   lastVisitQueuedAt?: string;
 };
@@ -44,6 +64,8 @@ export type LocationVisitDiagnostics = {
 type MonitoredPlace = {
   id: string;
   name: string;
+  latitude: number;
+  longitude: number;
   radiusMeters: number;
   priority: number;
   defaultCategoryId?: string | null;
@@ -62,6 +84,24 @@ type OpenVisit = {
   defaultActivityDescription?: string | null;
 };
 
+type CompletedVisit = {
+  placeId: string;
+  placeName: string;
+  startedAt: string;
+  stoppedAt: string;
+};
+
+type LearnedPlaceCluster = {
+  id: string;
+  latitude: number;
+  longitude: number;
+  radiusMeters: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  sampleCount: number;
+  lastQueuedAt?: string;
+};
+
 type GeofenceTransition = "enter" | "exit";
 
 const IOS_GEOFENCE_LIMIT = 20;
@@ -69,7 +109,19 @@ const MONITORED_PLACES_KEY = "dayframe.location.monitoredPlaces.v1";
 const OPEN_VISITS_KEY = "dayframe.location.openVisits.v1";
 const SEEN_VISIT_IDS_KEY = "dayframe.location.seenVisits.v1";
 const LOCATION_DIAGNOSTICS_KEY = "dayframe.location.diagnostics.v1";
+const LOCATION_LEARNING_ENABLED_KEY = "dayframe.location.learning.enabled.v1";
+const LEARNED_PLACE_CLUSTERS_KEY = "dayframe.location.learning.clusters.v1";
+const LAST_COMPLETED_VISIT_KEY = "dayframe.location.lastCompletedVisit.v1";
 const MAX_SEEN_VISIT_IDS = 500;
+const LOCATION_LEARNING_SAMPLE_INTERVAL_MS = 15 * 60_000;
+const LOCATION_LEARNING_DISTANCE_INTERVAL_METERS = 250;
+const LEARNED_PLACE_RADIUS_METERS = 160;
+const LEARNED_PLACE_MIN_SAMPLE_COUNT = 3;
+const LEARNED_PLACE_MIN_DWELL_MS = 20 * 60_000;
+const LEARNED_PLACE_QUEUE_COOLDOWN_MS = 24 * 60 * 60_000;
+const MAX_LEARNED_PLACE_CLUSTERS = 24;
+const MIN_COMMUTE_DURATION_MS = 3 * 60_000;
+const MAX_COMMUTE_DURATION_MS = 6 * 60 * 60_000;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 TaskManager.defineTask(DAYFRAME_GEOFENCE_TASK, async ({ data, error }) => {
@@ -93,6 +145,23 @@ TaskManager.defineTask(DAYFRAME_GEOFENCE_TASK, async ({ data, error }) => {
   if (!transition) return;
 
   await recordGeofenceTransition(transition, payload.region);
+});
+
+TaskManager.defineTask(DAYFRAME_LOCATION_LEARNING_TASK, async ({ data, error }) => {
+  if (error) {
+    await updateLocationDiagnostics({
+      lastStatus: "Location learning reported an error.",
+      lastEventAt: new Date().toISOString()
+    });
+    return;
+  }
+  const enabled = await getLocationLearningEnabled();
+  if (!enabled) return;
+  const payload = data as { locations?: Location.LocationObject[] };
+  const places = await readMonitoredPlaces();
+  for (const location of payload.locations ?? []) {
+    await recordLocationLearningSample(location, Object.values(places));
+  }
 });
 
 export async function requestLocationAccess() {
@@ -127,6 +196,53 @@ export async function requestLocationAccess() {
   return background.canAskAgain
     ? `Allowed while using the app. Enable Always access to monitor places in the background.${accuracyNote}`
     : `Allowed while using the app. Open iOS Settings to enable Always access for background place monitoring.${accuracyNote}`;
+}
+
+export async function getLocationLearningEnabled() {
+  return AsyncStorage.getItem(LOCATION_LEARNING_ENABLED_KEY).then((value) => value === "true");
+}
+
+export async function setLocationLearningEnabled(
+  enabled: boolean,
+  places: Array<{
+    id: string;
+    name: string;
+    latitude?: number | null;
+    longitude?: number | null;
+    radiusMeters: number;
+    priority?: number;
+  }> = []
+) {
+  if (!enabled) {
+    await AsyncStorage.setItem(LOCATION_LEARNING_ENABLED_KEY, "false");
+    await stopLocationLearningIfStarted();
+    await updateLocationDiagnostics({
+      locationLearningEnabled: false,
+      locationLearningActive: false,
+      lastStatus: "Commute and regular-place learning is paused.",
+      lastEventAt: new Date().toISOString()
+    });
+    return "Commute and regular-place learning is paused.";
+  }
+
+  const foreground = await Location.getForegroundPermissionsAsync();
+  const background = await Location.getBackgroundPermissionsAsync();
+  if (foreground.status !== "granted" || background.status !== "granted") {
+    await AsyncStorage.setItem(LOCATION_LEARNING_ENABLED_KEY, "false");
+    await updateLocationDiagnostics({
+      foregroundPermission: permissionLabel(foreground.status),
+      backgroundPermission: permissionLabel(background.status),
+      locationLearningEnabled: false,
+      locationLearningActive: false,
+      lastStatus: "Enable Always location access before turning on commute and regular-place learning.",
+      lastEventAt: new Date().toISOString()
+    });
+    return "Enable Always location access before turning on commute and regular-place learning.";
+  }
+
+  await AsyncStorage.setItem(LOCATION_LEARNING_ENABLED_KEY, "true");
+  await startLocationLearning(places);
+  return "Commute and regular-place learning is on. Suggestions stay in Review.";
 }
 
 export async function startGeofences(
@@ -180,6 +296,38 @@ export async function startGeofences(
   return regions.length;
 }
 
+export async function startLocationLearning(
+  places: Array<{
+    id: string;
+    name: string;
+    latitude?: number | null;
+    longitude?: number | null;
+    radiusMeters: number;
+  }> = []
+) {
+  const enabled = await getLocationLearningEnabled();
+  if (!enabled) {
+    await updateLocationDiagnostics({ locationLearningEnabled: false, locationLearningActive: false });
+    return false;
+  }
+
+  if (places.length > 0) await writeMonitoredPlaces(places.map(monitoredPlaceFromInput));
+  await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, {
+    accuracy: Location.Accuracy.Balanced,
+    timeInterval: LOCATION_LEARNING_SAMPLE_INTERVAL_MS,
+    distanceInterval: LOCATION_LEARNING_DISTANCE_INTERVAL_METERS,
+    pausesUpdatesAutomatically: true,
+    showsBackgroundLocationIndicator: false
+  });
+  await updateLocationDiagnostics({
+    locationLearningEnabled: true,
+    locationLearningActive: true,
+    lastStatus: "Commute and regular-place learning is on. Suggestions stay in Review.",
+    lastMonitorRefreshAt: new Date().toISOString()
+  });
+  return true;
+}
+
 export async function refreshGeofencesForPlaces(
   places: Array<{
     id: string;
@@ -205,15 +353,130 @@ export async function refreshGeofencesForPlaces(
     return 0;
   }
   await updateLocationDiagnostics({ foregroundPermission, backgroundPermission });
+  if (await getLocationLearningEnabled()) await startLocationLearning(places);
   return startGeofences(places);
 }
 
-export async function createUnknownStayCandidate(durationMinutes: number) {
+export async function createUnknownStayCandidate(
+  durationMinutes: number,
+  location?: { latitude: number; longitude: number; accuracy?: number | null }
+) {
+  if (location && await getLocationLearningEnabled()) {
+    await queueLearnedPlaceVisit({
+      latitude: location.latitude,
+      longitude: location.longitude,
+      accuracy: location.accuracy ?? null,
+      firstSeenAt: new Date(Date.now() - durationMinutes * 60_000).toISOString(),
+      lastSeenAt: new Date().toISOString(),
+      sampleCount: 1
+    });
+  }
+
   return enqueueEvent({
     source: "geofence_broad",
     type: "unknown_stay",
-    rawPayload: { durationMinutes }
+    rawPayload: {
+      durationMinutes,
+      latitude: location?.latitude,
+      longitude: location?.longitude,
+      accuracy: location?.accuracy ?? undefined
+    }
   });
+}
+
+export async function recordLocationLearningSample(
+  location: Location.LocationObject,
+  savedPlaces: MonitoredPlace[] = []
+) {
+  if (!await getLocationLearningEnabled()) return { status: "disabled" as const, queued: false };
+
+  const latitude = location.coords.latitude;
+  const longitude = location.coords.longitude;
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return { status: "invalid_location" as const, queued: false };
+  }
+
+  const accuracy = typeof location.coords.accuracy === "number" ? location.coords.accuracy : null;
+  if (accuracy !== null && accuracy > 300) {
+    await updateLocationDiagnostics({
+      lastStatus: "Ignored a low-accuracy location-learning sample.",
+      lastLearningSampleAt: new Date(location.timestamp).toISOString()
+    });
+    return { status: "low_accuracy" as const, queued: false };
+  }
+
+  const savedPlace = savedPlaces.find((place) =>
+    distanceMeters(latitude, longitude, place.latitude, place.longitude) <= place.radiusMeters + 80
+  );
+  if (savedPlace) {
+    await updateLocationDiagnostics({
+      lastStatus: `Location learning ignored ${savedPlace.name} because it is already saved.`,
+      lastLearningSampleAt: new Date(location.timestamp).toISOString()
+    });
+    return { status: "saved_place" as const, queued: false };
+  }
+
+  const sampledAt = new Date(location.timestamp || Date.now()).toISOString();
+  const clusters = await readLearnedPlaceClusters();
+  const existingIndex = clusters.findIndex((cluster) =>
+    distanceMeters(latitude, longitude, cluster.latitude, cluster.longitude) <= cluster.radiusMeters
+  );
+  const existing = existingIndex >= 0 ? clusters[existingIndex] : null;
+  const sampleCount = (existing?.sampleCount ?? 0) + 1;
+  const nextCluster: LearnedPlaceCluster = existing
+    ? {
+        ...existing,
+        latitude: ((existing.latitude * existing.sampleCount) + latitude) / sampleCount,
+        longitude: ((existing.longitude * existing.sampleCount) + longitude) / sampleCount,
+        lastSeenAt: sampledAt,
+        sampleCount
+      }
+    : {
+        id: learnedPlaceClusterId(latitude, longitude, sampledAt),
+        latitude,
+        longitude,
+        radiusMeters: LEARNED_PLACE_RADIUS_METERS,
+        firstSeenAt: sampledAt,
+        lastSeenAt: sampledAt,
+        sampleCount
+      };
+
+  const nextClusters =
+    existingIndex >= 0
+      ? clusters.map((cluster, index) => index === existingIndex ? nextCluster : cluster)
+      : [nextCluster, ...clusters].slice(0, MAX_LEARNED_PLACE_CLUSTERS);
+  await writeLearnedPlaceClusters(nextClusters);
+
+  const dwellMs = new Date(nextCluster.lastSeenAt).getTime() - new Date(nextCluster.firstSeenAt).getTime();
+  const lastQueuedMs = nextCluster.lastQueuedAt ? new Date(nextCluster.lastQueuedAt).getTime() : 0;
+  const queuedRecently = Number.isFinite(lastQueuedMs) && Date.now() - lastQueuedMs < LEARNED_PLACE_QUEUE_COOLDOWN_MS;
+  if (
+    nextCluster.sampleCount < LEARNED_PLACE_MIN_SAMPLE_COUNT ||
+    dwellMs < LEARNED_PLACE_MIN_DWELL_MS ||
+    queuedRecently
+  ) {
+    await updateLocationDiagnostics({
+      lastStatus: "Location learning recorded a regular-place sample.",
+      lastLearningSampleAt: sampledAt
+    });
+    return { status: "sampled" as const, queued: false, sampleCount: nextCluster.sampleCount };
+  }
+
+  await queueLearnedPlaceVisit({
+    latitude: nextCluster.latitude,
+    longitude: nextCluster.longitude,
+    accuracy,
+    firstSeenAt: nextCluster.firstSeenAt,
+    lastSeenAt: nextCluster.lastSeenAt,
+    sampleCount: nextCluster.sampleCount,
+    clusterId: nextCluster.id
+  });
+  const queuedAt = new Date().toISOString();
+  await writeLearnedPlaceClusters(
+    nextClusters.map((cluster) => cluster.id === nextCluster.id ? { ...cluster, lastQueuedAt: queuedAt } : cluster)
+  );
+
+  return { status: "learned_place_queued" as const, queued: true, sampleCount: nextCluster.sampleCount };
 }
 
 export async function recordGeofenceTransition(
@@ -241,10 +504,12 @@ export async function recordGeofenceTransition(
 }
 
 export async function getLocationVisitDiagnostics(): Promise<LocationVisitDiagnostics> {
-  const [stored, foreground, background] = await Promise.all([
+  const [stored, foreground, background, learningEnabled, learningActive] = await Promise.all([
     readLocationDiagnostics(),
     Location.getForegroundPermissionsAsync().catch(() => null),
-    Location.getBackgroundPermissionsAsync().catch(() => null)
+    Location.getBackgroundPermissionsAsync().catch(() => null),
+    getLocationLearningEnabled().catch(() => false),
+    Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => false)
   ]);
   const foregroundPermission = permissionLabel(foreground?.status);
   const backgroundPermission = permissionLabel(background?.status);
@@ -258,6 +523,11 @@ export async function getLocationVisitDiagnostics(): Promise<LocationVisitDiagno
     lastEventAt: stored.lastEventAt,
     lastGeofenceEvent: stored.lastGeofenceEvent,
     lastQueuedVisitCandidate: stored.lastQueuedVisitCandidate,
+    locationLearningEnabled: learningEnabled,
+    locationLearningActive: learningEnabled && learningActive,
+    lastLearningSampleAt: stored.lastLearningSampleAt,
+    lastLearnedPlaceCandidate: stored.lastLearnedPlaceCandidate,
+    lastCommuteCandidate: stored.lastCommuteCandidate,
     lastMonitorRefreshAt: stored.lastMonitorRefreshAt,
     lastVisitQueuedAt: stored.lastVisitQueuedAt
   };
@@ -427,6 +697,16 @@ async function recordPlaceExit(place: MonitoredPlace, region: DayframeRegion, oc
       defaultActivityDescription
     }
   });
+  const currentVisit = {
+    placeId: place.id,
+    placeName: place.name,
+    startedAt: startedAt.toISOString(),
+    stoppedAt: stoppedAt.toISOString()
+  };
+  if (await getLocationLearningEnabled()) {
+    await queueCommuteCandidate(currentVisit).catch(() => undefined);
+  }
+  await writeLastCompletedVisit(currentVisit);
   await writeSeenVisitIds([localId, ...seenVisitIds.filter((id) => id !== localId)].slice(0, MAX_SEEN_VISIT_IDS));
   await updateLocationDiagnostics({
     lastStatus: `Queued ${place.name} visit for review. Saved-place visits are review-first before becoming time entries.`,
@@ -453,6 +733,8 @@ async function recordPlaceExit(place: MonitoredPlace, region: DayframeRegion, oc
 function monitoredPlaceFromInput(place: {
   id: string;
   name: string;
+  latitude?: number | null;
+  longitude?: number | null;
   radiusMeters: number;
   priority?: number;
   defaultCategoryId?: string | null;
@@ -462,6 +744,8 @@ function monitoredPlaceFromInput(place: {
   return {
     id: place.id,
     name: place.name,
+    latitude: typeof place.latitude === "number" ? place.latitude : 0,
+    longitude: typeof place.longitude === "number" ? place.longitude : 0,
     radiusMeters: place.radiusMeters,
     priority: place.priority ?? 0,
     defaultCategoryId: place.defaultCategoryId,
@@ -473,6 +757,11 @@ function monitoredPlaceFromInput(place: {
 async function stopGeofencesIfStarted() {
   const started = await Location.hasStartedGeofencingAsync(DAYFRAME_GEOFENCE_TASK).catch(() => false);
   if (started) await Location.stopGeofencingAsync(DAYFRAME_GEOFENCE_TASK);
+}
+
+async function stopLocationLearningIfStarted() {
+  const started = await Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => false);
+  if (started) await Location.stopLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK);
 }
 
 function geofenceSource(radiusMeters: number): "geofence_specific" | "geofence_broad" {
@@ -490,6 +779,145 @@ function geofenceEvidenceLocalId(transition: GeofenceTransition, placeId: string
 
 function visitLocalId(visit: Pick<OpenVisit, "placeId" | "enteredAt">) {
   return `location-visit-${visit.placeId}-${new Date(visit.enteredAt).getTime()}`;
+}
+
+async function queueCommuteCandidate(currentVisit: CompletedVisit) {
+  const previousVisit = await readLastCompletedVisit();
+  if (!previousVisit || previousVisit.placeId === currentVisit.placeId) return;
+
+  const startedAt = new Date(previousVisit.stoppedAt);
+  const stoppedAt = new Date(currentVisit.startedAt);
+  const durationMs = stoppedAt.getTime() - startedAt.getTime();
+  if (!Number.isFinite(durationMs) || durationMs < MIN_COMMUTE_DURATION_MS || durationMs > MAX_COMMUTE_DURATION_MS) {
+    return;
+  }
+
+  const durationSeconds = Math.round(durationMs / 1000);
+  const localId = `location-commute-${previousVisit.placeId}-${currentVisit.placeId}-${startedAt.getTime()}-${stoppedAt.getTime()}`;
+  await enqueueEvent({
+    localId,
+    source: "location_learning",
+    type: "commute_detected",
+    occurredAt: stoppedAt,
+    description: `Commute from ${previousVisit.placeName} to ${currentVisit.placeName}`,
+    rawPayload: {
+      provider: "expo_location",
+      evidenceKind: "commute_between_place_visits",
+      fromPlaceId: previousVisit.placeId,
+      fromPlaceName: previousVisit.placeName,
+      toPlaceId: currentVisit.placeId,
+      toPlaceName: currentVisit.placeName,
+      startedAt: startedAt.toISOString(),
+      stoppedAt: stoppedAt.toISOString(),
+      durationSeconds,
+      durationMinutes: Math.round(durationSeconds / 60),
+      confidence: "medium",
+      reviewFirst: true
+    }
+  });
+
+  await updateLocationDiagnostics({
+    lastStatus: `Queued commute from ${previousVisit.placeName} to ${currentVisit.placeName} for review.`,
+    lastCommuteCandidate: {
+      fromPlaceName: previousVisit.placeName,
+      toPlaceName: currentVisit.placeName,
+      startedAt: startedAt.toISOString(),
+      stoppedAt: stoppedAt.toISOString(),
+      queuedAt: new Date().toISOString(),
+      durationSeconds
+    },
+    lastEventAt: stoppedAt.toISOString()
+  });
+}
+
+async function queueLearnedPlaceVisit(input: {
+  latitude: number;
+  longitude: number;
+  accuracy?: number | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  sampleCount: number;
+  clusterId?: string;
+}) {
+  const latitude = roundedCoordinate(input.latitude);
+  const longitude = roundedCoordinate(input.longitude);
+  const startedAt = new Date(input.firstSeenAt);
+  const stoppedAt = new Date(input.lastSeenAt);
+  const durationSeconds = Math.max(0, Math.round((stoppedAt.getTime() - startedAt.getTime()) / 1000));
+  const clusterKey = learnedPlaceClusterKey(latitude, longitude);
+  const localId = `location-learned-${input.clusterId ?? clusterKey}-${stoppedAt.getTime()}`;
+  const candidateName = `Regular place near ${latitude.toFixed(3)}, ${longitude.toFixed(3)}`;
+  await enqueueEvent({
+    localId,
+    source: "location_learning",
+    type: "learned_place_visit",
+    occurredAt: stoppedAt,
+    description: candidateName,
+    rawPayload: {
+      provider: "expo_location",
+      evidenceKind: "learned_place_visit",
+      candidateName,
+      clusterKey,
+      latitude,
+      longitude,
+      accuracy: input.accuracy ?? null,
+      radiusMeters: LEARNED_PLACE_RADIUS_METERS,
+      startedAt: startedAt.toISOString(),
+      stoppedAt: stoppedAt.toISOString(),
+      durationSeconds,
+      durationMinutes: Math.round(durationSeconds / 60),
+      sampleCount: input.sampleCount,
+      confidence: "low",
+      rawLocationRetentionDays: 7,
+      reviewFirst: true
+    }
+  });
+  await updateLocationDiagnostics({
+    lastStatus: "Queued regular-place candidate for review.",
+    lastLearningSampleAt: stoppedAt.toISOString(),
+    lastLearnedPlaceCandidate: {
+      candidateName,
+      startedAt: startedAt.toISOString(),
+      stoppedAt: stoppedAt.toISOString(),
+      queuedAt: new Date().toISOString(),
+      durationSeconds,
+      sampleCount: input.sampleCount
+    }
+  });
+}
+
+function learnedPlaceClusterId(latitude: number, longitude: number, sampledAt: string) {
+  return `${learnedPlaceClusterKey(latitude, longitude)}-${new Date(sampledAt).getTime()}`;
+}
+
+function learnedPlaceClusterKey(latitude: number, longitude: number) {
+  return `${latitude.toFixed(3)},${longitude.toFixed(3)}`;
+}
+
+function roundedCoordinate(value: number) {
+  return Number(value.toFixed(6));
+}
+
+function distanceMeters(
+  leftLatitude: number,
+  leftLongitude: number,
+  rightLatitude?: number | null,
+  rightLongitude?: number | null
+) {
+  if (typeof rightLatitude !== "number" || typeof rightLongitude !== "number") return Number.POSITIVE_INFINITY;
+  const earthRadiusMeters = 6_371_000;
+  const leftPhi = degreesToRadians(leftLatitude);
+  const rightPhi = degreesToRadians(rightLatitude);
+  const deltaPhi = degreesToRadians(rightLatitude - leftLatitude);
+  const deltaLambda = degreesToRadians(rightLongitude - leftLongitude);
+  const a =
+    Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+    Math.cos(leftPhi) * Math.cos(rightPhi) * Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+  return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function degreesToRadians(value: number) {
+  return (value * Math.PI) / 180;
 }
 
 async function readMonitoredPlaces() {
@@ -519,6 +947,22 @@ async function readSeenVisitIds() {
 
 async function writeSeenVisitIds(ids: string[]) {
   await AsyncStorage.setItem(SEEN_VISIT_IDS_KEY, JSON.stringify(ids));
+}
+
+async function readLastCompletedVisit() {
+  return parseJson<CompletedVisit | null>(await AsyncStorage.getItem(LAST_COMPLETED_VISIT_KEY), null);
+}
+
+async function writeLastCompletedVisit(visit: CompletedVisit) {
+  await AsyncStorage.setItem(LAST_COMPLETED_VISIT_KEY, JSON.stringify(visit));
+}
+
+async function readLearnedPlaceClusters() {
+  return parseJson<LearnedPlaceCluster[]>(await AsyncStorage.getItem(LEARNED_PLACE_CLUSTERS_KEY), []);
+}
+
+async function writeLearnedPlaceClusters(clusters: LearnedPlaceCluster[]) {
+  await AsyncStorage.setItem(LEARNED_PLACE_CLUSTERS_KEY, JSON.stringify(clusters));
 }
 
 async function readLocationDiagnostics(): Promise<LocationVisitDiagnostics> {

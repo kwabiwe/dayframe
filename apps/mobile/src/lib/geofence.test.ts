@@ -4,8 +4,11 @@ const asyncStore = vi.hoisted(() => new Map<string, string>());
 const secureStore = vi.hoisted(() => new Map<string, string>());
 const locationMocks = vi.hoisted(() => ({
   startGeofencingAsync: vi.fn(() => Promise.resolve()),
+  startLocationUpdatesAsync: vi.fn(() => Promise.resolve()),
   stopGeofencingAsync: vi.fn(() => Promise.resolve()),
+  stopLocationUpdatesAsync: vi.fn(() => Promise.resolve()),
   hasStartedGeofencingAsync: vi.fn(() => Promise.resolve(false)),
+  hasStartedLocationUpdatesAsync: vi.fn(() => Promise.resolve(false)),
   getForegroundPermissionsAsync: vi.fn(() => Promise.resolve({ status: "granted", granted: true })),
   getBackgroundPermissionsAsync: vi.fn(() => Promise.resolve({ status: "granted", granted: true })),
   requestForegroundPermissionsAsync: vi.fn(() => Promise.resolve({ status: "granted", granted: true })),
@@ -35,6 +38,7 @@ vi.mock("expo-secure-store", () => ({
 }));
 
 vi.mock("expo-location", () => ({
+  Accuracy: { Balanced: 3 },
   GeofencingEventType: { Enter: 1, Exit: 2 },
   ...locationMocks
 }));
@@ -50,7 +54,9 @@ vi.mock("./config", () => ({
 const {
   LOCATION_VISIT_DWELL_THRESHOLD_MINUTES,
   getLocationVisitDiagnostics,
+  recordLocationLearningSample,
   recordGeofenceTransition,
+  setLocationLearningEnabled,
   startGeofences
 } = await import("./geofence");
 const { readQueue, syncQueue } = await import("./api");
@@ -74,6 +80,26 @@ const region = {
   latitude: place.latitude,
   longitude: place.longitude,
   radius: place.radiusMeters,
+  notifyOnEnter: true,
+  notifyOnExit: true
+};
+
+const homePlace = {
+  ...place,
+  id: "30000000-0000-4000-8000-000000000001",
+  name: "Home",
+  latitude: 51.49,
+  longitude: -0.11,
+  defaultCategoryId: null,
+  defaultCategoryName: null,
+  defaultActivityDescription: null
+};
+
+const homeRegion = {
+  identifier: homePlace.id,
+  latitude: homePlace.latitude,
+  longitude: homePlace.longitude,
+  radius: homePlace.radiusMeters,
   notifyOnEnter: true,
   notifyOnExit: true
 };
@@ -195,6 +221,89 @@ describe("mobile geofence visit candidates", () => {
     expect(result.syncedCount).toBe(0);
     expect(result.remaining.some((item) => item.type === "geofence_exit")).toBe(true);
     expect(persisted.some((item) => item.type === "geofence_exit")).toBe(true);
+  });
+
+  it("does not queue commute candidates until commute learning is enabled", async () => {
+    await startGeofences([homePlace, place]);
+    await recordGeofenceTransition("enter", homeRegion, new Date("2026-07-06T07:45:00.000Z"));
+    await recordGeofenceTransition("exit", homeRegion, new Date("2026-07-06T08:00:00.000Z"));
+    await recordGeofenceTransition("enter", region, new Date("2026-07-06T08:25:00.000Z"));
+    await recordGeofenceTransition("exit", region, new Date("2026-07-06T08:40:00.000Z"));
+
+    const queue = await readQueue();
+
+    expect(queue.some((item) => item.type === "commute_detected")).toBe(false);
+  });
+
+  it("queues a review-first commute candidate between consecutive saved-place visits when enabled", async () => {
+    await setLocationLearningEnabled(true, [homePlace, place]);
+    await startGeofences([homePlace, place]);
+    await recordGeofenceTransition("enter", homeRegion, new Date("2026-07-06T07:45:00.000Z"));
+    await recordGeofenceTransition("exit", homeRegion, new Date("2026-07-06T08:00:00.000Z"));
+    await recordGeofenceTransition("enter", region, new Date("2026-07-06T08:25:00.000Z"));
+    await recordGeofenceTransition("exit", region, new Date("2026-07-06T08:40:00.000Z"));
+
+    const queue = await readQueue();
+    const commute = queue.find((item) => item.type === "commute_detected");
+
+    expect(commute).toEqual(
+      expect.objectContaining({
+        source: "location_learning",
+        description: "Commute from Home to Gym"
+      })
+    );
+    expect(commute?.rawPayload).toMatchObject({
+      evidenceKind: "commute_between_place_visits",
+      fromPlaceName: "Home",
+      toPlaceName: "Gym",
+      startedAt: "2026-07-06T08:00:00.000Z",
+      stoppedAt: "2026-07-06T08:25:00.000Z",
+      reviewFirst: true
+    });
+  });
+
+  it("queues a learned regular-place candidate only after repeated unsaved samples", async () => {
+    await setLocationLearningEnabled(true, [place]);
+    const baseSample = {
+      coords: {
+        latitude: 51.61,
+        longitude: -0.22,
+        altitude: null,
+        accuracy: 35,
+        altitudeAccuracy: null,
+        heading: null,
+        speed: null
+      }
+    };
+    await recordLocationLearningSample(
+      { ...baseSample, timestamp: new Date("2026-07-06T09:00:00.000Z").getTime() },
+      [place]
+    );
+    await recordLocationLearningSample(
+      { ...baseSample, timestamp: new Date("2026-07-06T09:08:00.000Z").getTime() },
+      [place]
+    );
+    await recordLocationLearningSample(
+      { ...baseSample, timestamp: new Date("2026-07-06T09:24:00.000Z").getTime() },
+      [place]
+    );
+
+    const queue = await readQueue();
+    const learned = queue.find((item) => item.type === "learned_place_visit");
+
+    expect(learned).toEqual(
+      expect.objectContaining({
+        source: "location_learning",
+        description: "Regular place near 51.610, -0.220"
+      })
+    );
+    expect(learned?.rawPayload).toMatchObject({
+      evidenceKind: "learned_place_visit",
+      latitude: 51.61,
+      longitude: -0.22,
+      sampleCount: 3,
+      reviewFirst: true
+    });
   });
 
   it("reports monitor count and last visit status for diagnostics", async () => {

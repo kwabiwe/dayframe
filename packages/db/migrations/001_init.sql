@@ -114,6 +114,35 @@ create table if not exists places (
   created_at timestamptz not null default now()
 );
 
+create table if not exists learned_places (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  user_id uuid not null references users(id) on delete cascade,
+  place_id uuid references places(id) on delete set null,
+  cluster_key text not null,
+  name text not null,
+  latitude double precision not null,
+  longitude double precision not null,
+  radius_meters integer not null default 160,
+  visit_count integer not null default 1,
+  sample_count integer not null default 1,
+  first_seen_at timestamptz not null,
+  last_seen_at timestamptz not null,
+  last_started_at timestamptz,
+  last_stopped_at timestamptz,
+  confidence text not null default 'low',
+  status text not null default 'candidate',
+  raw_location_retention_days integer not null default 7,
+  raw_payload jsonb not null default '{}',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint learned_places_radius_positive check (radius_meters > 0),
+  constraint learned_places_visit_count_positive check (visit_count > 0),
+  constraint learned_places_sample_count_positive check (sample_count > 0),
+  constraint learned_places_status_check check (status in ('candidate', 'accepted', 'ignored')),
+  unique (workspace_id, user_id, cluster_key)
+);
+
 create table if not exists geofences (
   id uuid primary key default gen_random_uuid(),
   workspace_id uuid not null references workspaces(id) on delete cascade,
@@ -347,6 +376,7 @@ create index if not exists idx_time_entries_active on time_entries(workspace_id,
 create index if not exists idx_activity_events_workspace_occurred on activity_events(workspace_id, occurred_at desc);
 create unique index if not exists idx_activity_events_client_event_id on activity_events(workspace_id, user_id, client_event_id) where client_event_id is not null;
 create index if not exists idx_categories_workspace_pinned on categories(workspace_id, is_pinned desc, name) where is_archived = false;
+create index if not exists idx_learned_places_workspace_status on learned_places(workspace_id, user_id, status, last_seen_at desc);
 create index if not exists idx_review_items_workspace_status on review_items(workspace_id, status, created_at desc);
 create index if not exists idx_review_items_open_health_event on review_items(workspace_id, event_id, suggested_started_at desc, created_at desc) where status = 'open';
 create index if not exists idx_activity_events_health_review_lookup on activity_events(workspace_id, user_id, event_type, occurred_at desc, id) where event_type in ('health_sleep_import', 'health_workout_import');

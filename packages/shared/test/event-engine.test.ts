@@ -315,6 +315,55 @@ describe("event normalization", () => {
     expect(candidate.reviewStatus).toBe("needs_review");
   });
 
+  it("keeps commute learning review-first and prefers a Travel category when present", () => {
+    const candidate = normalizeActivityEvent(
+      {
+        source: "location_learning",
+        type: "commute_detected",
+        occurredAt: new Date("2026-06-20T08:45:00Z"),
+        rawPayload: {
+          fromPlaceName: "Home",
+          toPlaceName: "Gym",
+          startedAt: "2026-06-20T08:15:00.000Z",
+          stoppedAt: "2026-06-20T08:45:00.000Z"
+        }
+      },
+      {
+        ...context,
+        categories: [...context.categories, { id: "20000000-0000-4000-8000-000000000010", name: "Travel" }]
+      }
+    );
+
+    expect(candidate.action).toBe("create_review_item");
+    expect(candidate.reviewStatus).toBe("needs_review");
+    expect(candidate.categoryId).toBe("20000000-0000-4000-8000-000000000010");
+    expect(candidate.title).toBe("Commute from Home to Gym");
+  });
+
+  it("keeps learned regular-place visits review-first", () => {
+    const candidate = normalizeActivityEvent(
+      {
+        source: "location_learning",
+        type: "learned_place_visit",
+        occurredAt: new Date("2026-06-20T09:15:00Z"),
+        rawPayload: {
+          candidateName: "Regular place near 51.501, -0.120",
+          latitude: 51.501,
+          longitude: -0.12,
+          startedAt: "2026-06-20T08:45:00.000Z",
+          stoppedAt: "2026-06-20T09:15:00.000Z",
+          sampleCount: 3
+        }
+      },
+      context
+    );
+
+    expect(candidate.action).toBe("create_review_item");
+    expect(candidate.reviewStatus).toBe("needs_review");
+    expect(candidate.confidence).toBe("low");
+    expect(candidate.title).toBe("Regular place near 51.501, -0.120");
+  });
+
   it("maps HealthKit sleep stages into Dayframe stages", () => {
     expect(mapHealthKitSleepStage(0)).toBe("in_bed");
     expect(mapHealthKitSleepStage(3)).toBe("asleep_core");

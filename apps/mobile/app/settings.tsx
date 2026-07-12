@@ -45,6 +45,7 @@ import {
   getLocationVisitDiagnostics,
   requestLocationAccess,
   refreshGeofencesForPlaces,
+  setLocationLearningEnabled,
   startGeofences,
   type LocationVisitDiagnostics
 } from "@/lib/geofence";
@@ -580,6 +581,21 @@ export default function SettingsScreen() {
     } else {
       await refreshLocationDiagnostics(status);
     }
+  }
+
+  async function toggleLocationLearning(enabled: boolean) {
+    if (enabled && !locationMonitoringAllowed) {
+      const status = await requestLocationAccess();
+      updateSettingsSnapshot({ locationStatus: status });
+      setLocationStatus(status);
+      if (!status.startsWith("Always allowed")) {
+        await refreshLocationDiagnostics(status);
+        return;
+      }
+    }
+
+    const status = await setLocationLearningEnabled(enabled, data?.places ?? []);
+    await refreshLocationDiagnostics(status);
   }
 
   async function refreshLocationDiagnostics(fallbackStatus?: string) {
@@ -1153,6 +1169,29 @@ export default function SettingsScreen() {
               Dayframe can recognise visits to saved places. Visits are reviewed before becoming time entries.
               Place visits do not start live timers.
             </Text>
+            <View style={styles.healthPreferenceRow}>
+              <View style={styles.healthPreferenceHeader}>
+                <View style={styles.healthPreferenceText}>
+                  <Text style={styles.categoryName}>Commute + place learning</Text>
+                  <Text style={styles.categoryMeta}>
+                    {locationDiagnostics?.locationLearningEnabled
+                      ? "Review-first suggestions from coarse background location"
+                      : "Paused until you turn it on"}
+                  </Text>
+                </View>
+                <Switch
+                  accessibilityLabel="Commute and regular-place learning"
+                  value={locationDiagnostics?.locationLearningEnabled ?? false}
+                  onValueChange={toggleLocationLearning}
+                  trackColor={{ false: theme.borderStrong, true: theme.accent }}
+                  thumbColor={locationDiagnostics?.locationLearningEnabled ? theme.onAccent : theme.surfaceRaised}
+                  ios_backgroundColor={theme.borderStrong}
+                />
+              </View>
+              <Text style={styles.muted}>
+                Learns repeated unsaved places and commutes between visits. Suggestions stay in Review and can be paused here.
+              </Text>
+            </View>
             <Text style={styles.statusText}>{locationStatus}</Text>
             {locationDiagnostics ? (
               <>
@@ -1173,6 +1212,21 @@ export default function SettingsScreen() {
                     Last candidate: {locationDiagnostics.lastQueuedVisitCandidate.placeName} ·{" "}
                     {formatDurationMinutes(locationDiagnostics.lastQueuedVisitCandidate.durationSeconds)} ·{" "}
                     {formatQueueTime(locationDiagnostics.lastQueuedVisitCandidate.queuedAt)}
+                  </Text>
+                ) : null}
+                {locationDiagnostics.lastCommuteCandidate ? (
+                  <Text style={styles.muted}>
+                    Last commute: {locationDiagnostics.lastCommuteCandidate.fromPlaceName} →{" "}
+                    {locationDiagnostics.lastCommuteCandidate.toPlaceName} ·{" "}
+                    {formatDurationMinutes(locationDiagnostics.lastCommuteCandidate.durationSeconds)} ·{" "}
+                    {formatQueueTime(locationDiagnostics.lastCommuteCandidate.queuedAt)}
+                  </Text>
+                ) : null}
+                {locationDiagnostics.lastLearnedPlaceCandidate ? (
+                  <Text style={styles.muted}>
+                    Last learned place: {locationDiagnostics.lastLearnedPlaceCandidate.candidateName} ·{" "}
+                    {locationDiagnostics.lastLearnedPlaceCandidate.sampleCount} samples ·{" "}
+                    {formatQueueTime(locationDiagnostics.lastLearnedPlaceCandidate.queuedAt)}
                   </Text>
                 ) : null}
                 {locationDiagnostics.lastStatus &&
@@ -1610,6 +1664,7 @@ const sourceLabels: Record<string, string> = {
   calendar: "Calendar",
   health_sleep: "Health sleep",
   health_workout: "Health workout",
+  location_learning: "Location learning",
   home_assistant: "Home Assistant",
   ha_button: "Home Assistant button",
   ha_geofence: "Home Assistant geofence"
@@ -1623,6 +1678,8 @@ const eventLabels: Record<string, string> = {
   geofence_enter: "Entered place",
   geofence_exit: "Left place",
   unknown_stay: "Unknown stay",
+  commute_detected: "Commute detected",
+  learned_place_visit: "Learned place visit",
   nfc_action: "NFC action",
   shortcut_action: "Shortcut action",
   calendar_hint: "Calendar hint",

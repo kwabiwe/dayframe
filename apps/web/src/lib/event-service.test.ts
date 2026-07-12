@@ -156,6 +156,110 @@ describe("category persistence", () => {
     expect(client.release).toHaveBeenCalled();
   });
 
+  it("creates a review-only commute candidate from location learning", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        if (statement.includes("insert into activity_events")) return { rows: [{ id: "event-commute" }] };
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await processActivityEvent(
+      {
+        source: "location_learning",
+        type: "commute_detected",
+        occurredAt: new Date("2026-07-06T08:25:00.000Z"),
+        rawPayload: {
+          fromPlaceName: "Home",
+          toPlaceName: "Gym",
+          startedAt: "2026-07-06T08:00:00.000Z",
+          stoppedAt: "2026-07-06T08:25:00.000Z"
+        }
+      },
+      session
+    );
+
+    expect(result.candidate).toMatchObject({
+      action: "create_review_item",
+      reviewStatus: "needs_review",
+      title: "Commute from Home to Gym"
+    });
+    expect(client.query.mock.calls.some(([statement]) => String(statement).includes("insert into time_entries"))).toBe(false);
+    const reviewInsert = client.query.mock.calls.find(([statement]) => String(statement).includes("insert into review_items"));
+    expect(reviewInsert?.[1]).toEqual([
+      session.workspaceId,
+      "event-commute",
+      "commute_detected_suggestion",
+      "Commute from Home to Gym",
+      null,
+      null,
+      null,
+      "2026-07-06T08:00:00.000Z",
+      "2026-07-06T08:25:00.000Z",
+      "medium",
+      "Commute learning proposes transitions between visits, but keeps them review-first before creating time."
+    ]);
+  });
+
+  it("rolls learned place visits into learned_places while keeping the visit in review", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        if (statement.includes("insert into activity_events")) return { rows: [{ id: "event-learned" }] };
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await processActivityEvent(
+      {
+        source: "location_learning",
+        type: "learned_place_visit",
+        occurredAt: new Date("2026-07-06T09:24:00.000Z"),
+        description: "Regular place near 51.610, -0.220",
+        rawPayload: {
+          candidateName: "Regular place near 51.610, -0.220",
+          clusterKey: "51.610,-0.220",
+          latitude: 51.61,
+          longitude: -0.22,
+          radiusMeters: 160,
+          startedAt: "2026-07-06T09:00:00.000Z",
+          stoppedAt: "2026-07-06T09:24:00.000Z",
+          sampleCount: 3
+        }
+      },
+      session
+    );
+
+    expect(result.candidate).toMatchObject({
+      action: "create_review_item",
+      reviewStatus: "needs_review",
+      confidence: "low"
+    });
+    const learnedPlaceInsert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into learned_places")
+    );
+    expect(learnedPlaceInsert?.[1]).toEqual([
+      session.workspaceId,
+      session.userId,
+      null,
+      "51.610,-0.220",
+      "Regular place near 51.610, -0.220",
+      51.61,
+      -0.22,
+      160,
+      3,
+      "2026-07-06T09:00:00.000Z",
+      "2026-07-06T09:24:00.000Z",
+      expect.any(String)
+    ]);
+    expect(client.query.mock.calls.some(([statement]) => String(statement).includes("insert into time_entries"))).toBe(false);
+  });
+
   it("rolls back when a replacement start would stop the active timer before it began", async () => {
     const occurredAt = new Date("2026-07-05T09:30:00.000Z");
     const client = {

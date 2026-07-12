@@ -145,6 +145,7 @@ const PLACE_DEFAULT_ACTIVITY_DESCRIPTION_MIGRATION =
   "supabase/migrations/202607070002_place_default_activity_description.sql";
 const AUTOMATION_RULE_ACTIVITY_DESCRIPTION_MIGRATION =
   "supabase/migrations/202607120001_automation_rule_activity_description.sql";
+const LOCATION_LEARNING_MIGRATION = "supabase/migrations/202607120002_location_learning.sql";
 const DEFAULT_HEALTH_REPROCESS_BATCH_SIZE = 12;
 const MAX_HEALTH_REPROCESS_BATCH_SIZE = 25;
 const LEGACY_SLEEP_CONSOLIDATION_BATCH_SIZE = 120;
@@ -240,6 +241,43 @@ function eventSyncReadinessError(error: unknown, eventType: ActivityEventType) {
         "raw_payload"
       ]
     });
+  }
+
+  if (eventType === "learned_place_visit") {
+    return learnedPlacesReadinessError(error);
+  }
+
+  return undefined;
+}
+
+function learnedPlacesReadinessError(error: unknown) {
+  if (isUndefinedTableError(error, "learned_places")) {
+    return databaseReadinessError(
+      `Database schema is missing public.learned_places. Run ${LOCATION_LEARNING_MIGRATION} before syncing location-learning events.`,
+      "public.learned_places",
+      LOCATION_LEARNING_MIGRATION,
+      error
+    );
+  }
+
+  const missingColumn = [
+    "workspace_id",
+    "user_id",
+    "cluster_key",
+    "latitude",
+    "longitude",
+    "visit_count",
+    "raw_payload"
+  ].find((column) => isUndefinedColumnError(error, column));
+  if (missingColumn) return missingRequiredColumnError("learned_places", missingColumn, LOCATION_LEARNING_MIGRATION, error);
+
+  if (isInvalidConflictTargetError(error)) {
+    return databaseReadinessError(
+      `Database schema is missing the learned_places workspace/user/cluster key. Run ${LOCATION_LEARNING_MIGRATION} before syncing location-learning events.`,
+      "learned_places_workspace_user_cluster_key",
+      LOCATION_LEARNING_MIGRATION,
+      error
+    );
   }
 
   return undefined;
@@ -556,6 +594,10 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
           JSON.stringify(parsed.rawPayload)
         ]
       );
+    }
+
+    if (parsed.type === "learned_place_visit") {
+      await upsertLearnedPlaceVisit(client, parsed, session);
     }
 
     await client.query("commit");
@@ -2722,6 +2764,82 @@ function healthSleepSegmentsForEvent(event: ReturnType<typeof ActivityEventInput
   ];
 }
 
+async function upsertLearnedPlaceVisit(
+  client: pg.PoolClient,
+  event: ReturnType<typeof ActivityEventInputSchema.parse>,
+  session: RequestSession
+) {
+  const latitude = numberOrNull(event.rawPayload.latitude);
+  const longitude = numberOrNull(event.rawPayload.longitude);
+  if (latitude === null || longitude === null) return;
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return;
+
+  const radiusMeters = Math.max(50, Math.min(500, Math.round(numberOrNull(event.rawPayload.radiusMeters) ?? 160)));
+  const startedAt = timestampStringOrNull(event.rawPayload.startedAt) ?? event.occurredAt.toISOString();
+  const stoppedAt = timestampStringOrNull(event.rawPayload.stoppedAt) ?? event.occurredAt.toISOString();
+  const clusterKey = stringOrNull(event.rawPayload.clusterKey) ?? learnedPlaceClusterKey(latitude, longitude);
+  const candidateName =
+    stringOrNull(event.rawPayload.placeName) ??
+    stringOrNull(event.rawPayload.candidateName) ??
+    `Regular place near ${latitude.toFixed(3)}, ${longitude.toFixed(3)}`;
+  const sampleCount = Math.max(1, Math.round(numberOrNull(event.rawPayload.sampleCount) ?? 1));
+
+  await client.query(
+    `insert into learned_places (
+        workspace_id,
+        user_id,
+        place_id,
+        cluster_key,
+        name,
+        latitude,
+        longitude,
+        radius_meters,
+        visit_count,
+        sample_count,
+        first_seen_at,
+        last_seen_at,
+        last_started_at,
+        last_stopped_at,
+        confidence,
+        status,
+        raw_payload
+     )
+     values ($1, $2, $3, $4, $5, $6, $7, $8, 1, $9, $10, $11, $10, $11, 'low', 'candidate', $12::jsonb)
+     on conflict (workspace_id, user_id, cluster_key)
+     do update
+       set name = coalesce(nullif(excluded.name, ''), learned_places.name),
+           latitude = ((learned_places.latitude * learned_places.visit_count) + excluded.latitude) / (learned_places.visit_count + 1),
+           longitude = ((learned_places.longitude * learned_places.visit_count) + excluded.longitude) / (learned_places.visit_count + 1),
+           radius_meters = greatest(learned_places.radius_meters, excluded.radius_meters),
+           visit_count = learned_places.visit_count + 1,
+           sample_count = learned_places.sample_count + excluded.sample_count,
+           first_seen_at = least(learned_places.first_seen_at, excluded.first_seen_at),
+           last_seen_at = greatest(learned_places.last_seen_at, excluded.last_seen_at),
+           last_started_at = excluded.last_started_at,
+           last_stopped_at = excluded.last_stopped_at,
+           raw_payload = excluded.raw_payload,
+           updated_at = now()`,
+    [
+      session.workspaceId,
+      session.userId,
+      event.placeId ?? null,
+      clusterKey,
+      candidateName,
+      latitude,
+      longitude,
+      radiusMeters,
+      sampleCount,
+      startedAt,
+      stoppedAt,
+      JSON.stringify(event.rawPayload)
+    ]
+  );
+}
+
+function learnedPlaceClusterKey(latitude: number, longitude: number) {
+  return `${latitude.toFixed(3)},${longitude.toFixed(3)}`;
+}
+
 function suggestedStartedAtForEvent(event: ReturnType<typeof ActivityEventInputSchema.parse>) {
   if (isExplicitStartEvent(event.type)) {
     return timestampStringOrNull(event.rawPayload.startedAt) ?? event.occurredAt;
@@ -2732,6 +2850,10 @@ function suggestedStartedAtForEvent(event: ReturnType<typeof ActivityEventInputS
   }
 
   if (event.type === "unknown_stay") {
+    return timestampStringOrNull(event.rawPayload.startedAt) ?? event.occurredAt;
+  }
+
+  if (event.type === "commute_detected" || event.type === "learned_place_visit") {
     return timestampStringOrNull(event.rawPayload.startedAt) ?? event.occurredAt;
   }
 
@@ -2752,6 +2874,10 @@ function suggestedStoppedAtForEvent(event: ReturnType<typeof ActivityEventInputS
     if (stoppedAt) return stoppedAt;
     const durationMinutes = numberOrNull(event.rawPayload.durationMinutes);
     return durationMinutes ? new Date(event.occurredAt.getTime() + durationMinutes * 60_000).toISOString() : null;
+  }
+
+  if (event.type === "commute_detected" || event.type === "learned_place_visit") {
+    return timestampStringOrNull(event.rawPayload.stoppedAt) ?? timestampStringOrNull(event.rawPayload.endedAt);
   }
 
   if (event.type === "geofence_exit") {
