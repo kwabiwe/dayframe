@@ -76,6 +76,11 @@ import {
 } from "@/lib/review";
 import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
 import { scheduleLayoutTransition, useReduceMotionPreference } from "@/lib/motion";
+import {
+  activeTimerPresentation,
+  buildMobileQuickActions,
+  displayTimerDescription
+} from "@/lib/timerPresentation";
 
 type TimeEntry = MobileBootstrap["entries"][number];
 type AuthView = "login" | "signup";
@@ -433,7 +438,9 @@ export default function HomeScreen() {
         theme.mode
       )
     : null;
-  const activeDescription = displayTimerDescription(data?.activeEntry);
+  const activeTimerCopy = activeTimerPresentation(data?.activeEntry ?? null);
+  const activeCategoryLabel = activeTimerCopy.categoryLabel;
+  const activeTitle = activeTimerCopy.title;
   const recentStoppedAt = useMemo(
     () => recentStoppedEntryTime(data?.entries ?? [], data?.activeEntry ?? null),
     [data?.activeEntry, data?.entries]
@@ -509,6 +516,7 @@ export default function HomeScreen() {
     try {
       await startTimer(categoryId, trimmedDescription);
       if (trimmedDescription) setCustomDescription("");
+      scheduleLayoutTransition(reduceMotion);
       await load({ silent: true });
     } catch (error) {
       if (error instanceof AuthRequiredError) {
@@ -528,6 +536,7 @@ export default function HomeScreen() {
         rawPayload: { origin: "mobile_custom_start_fallback" }
       });
       if (trimmedDescription) setCustomDescription("");
+      scheduleLayoutTransition(reduceMotion);
       await syncAndReload({ silent: true });
     } finally {
       setTimerActionPending(null);
@@ -651,6 +660,7 @@ export default function HomeScreen() {
     setTimerActionPending("stop");
     try {
       await stopTimer();
+      scheduleLayoutTransition(reduceMotion);
       await load({ silent: true });
       return true;
     } catch (error) {
@@ -665,6 +675,7 @@ export default function HomeScreen() {
         return false;
       }
       await queueStopTimer();
+      scheduleLayoutTransition(reduceMotion);
       await syncAndReload({ silent: true });
       return true;
     } finally {
@@ -696,7 +707,8 @@ export default function HomeScreen() {
   async function deleteActiveTimer(entryId: string) {
     try {
       await deleteTimeEntry(entryId);
-      await load();
+      scheduleLayoutTransition(reduceMotion);
+      await load({ silent: true });
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         setAuthState("signedOut");
@@ -926,14 +938,13 @@ export default function HomeScreen() {
                           <View style={[styles.colorDot, { backgroundColor: activeCategoryColor }]} />
                         ) : null}
                         <Text style={[styles.timerText, styles.activeTitleText]} numberOfLines={2}>
-                          {activeDescription ?? data.activeEntry.categoryName ?? "Running"}
+                          {activeTitle}
                         </Text>
                       </View>
-                      {activeDescription && data.activeEntry.categoryName ? (
-                        <Text style={styles.activeDescription}>{data.activeEntry.categoryName}</Text>
+                      {activeCategoryLabel ? (
+                        <Text style={styles.activeDescription}>{activeCategoryLabel}</Text>
                       ) : null}
                       <Text style={styles.activeElapsed}>{formatClockDuration(activeDurationSeconds)}</Text>
-                      <Text style={styles.activeElapsedLabel}>Running</Text>
                     </View>
                   ) : (
                     <View style={styles.activeTimerTextStack}>
@@ -1013,7 +1024,8 @@ export default function HomeScreen() {
                     <PlayGlyph color={theme.onAccent} />
                   </Pressable>
                 </View>
-                {quickActions.length > 0 ? (
+                <View style={styles.quickActionsBlock}>
+                  <Text style={styles.quickActionsLabel}>Quick actions</Text>
                   <ScrollView
                     horizontal
                     keyboardShouldPersistTaps="handled"
@@ -1021,27 +1033,40 @@ export default function HomeScreen() {
                     contentContainerStyle={styles.compactCategoryScroller}
                   >
                     {quickActions.map((category) => {
-                      const categoryColor = paletteColorFor(category.color, category.name, theme.mode);
+                      const categoryColor = category.isUncategorized
+                        ? null
+                        : paletteColorFor(category.color, category.name, theme.mode);
                       return (
                         <Pressable
-                          key={category.id}
+                          key={category.id ?? "uncategorized"}
                           accessibilityRole="button"
                           accessibilityLabel={`Start ${category.name}`}
-                          style={pressable(
-                            [styles.categoryPill, { borderColor: categoryColor }],
-                            styles.buttonPressed
-                          )}
+                          style={pressable(styles.categoryPillTouch, styles.buttonPressed)}
                           onPress={() => startTask(category.id)}
                         >
-                          <View style={[styles.colorDot, { backgroundColor: categoryColor }]} />
-                          <Text style={styles.categoryPillText}>{category.name}</Text>
+                          <View
+                            style={[
+                              styles.categoryPill,
+                              categoryColor
+                                ? { borderColor: categoryColor }
+                                : styles.categoryPillMuted
+                            ]}
+                          >
+                            <View
+                              style={[
+                                styles.colorDot,
+                                categoryColor
+                                  ? { backgroundColor: categoryColor }
+                                  : styles.colorDotMuted
+                              ]}
+                            />
+                            <Text style={styles.categoryPillText}>{category.name}</Text>
+                          </View>
                         </Pressable>
                       );
                     })}
                   </ScrollView>
-                ) : (
-                  <Text style={styles.quickCategoryHint}>Pin categories in Settings</Text>
-                )}
+                </View>
               </View>
 
               <TodaySummary
@@ -2452,11 +2477,6 @@ function buildTodaySummarySegments(
     .slice(0, 8);
 }
 
-function buildMobileQuickActions(data: MobileBootstrap | null) {
-  if (!data) return [];
-  return data.categories.filter((category) => category.isPinned).slice(0, 8);
-}
-
 function recentStoppedEntryTime(entries: TimeEntry[], activeEntry: MobileBootstrap["activeEntry"]) {
   if (!activeEntry) return null;
   const activeStart = new Date(activeEntry.startedAt).getTime();
@@ -2480,11 +2500,6 @@ function recentStoppedEntryTime(entries: TimeEntry[], activeEntry: MobileBootstr
   }
 
   return recentStop;
-}
-
-function displayTimerDescription(entry: MobileBootstrap["activeEntry"] | null | undefined) {
-  if (!entry?.description) return null;
-  return entry.description === "Start activity" ? null : entry.description;
 }
 
 function startOfToday(now: number) {
