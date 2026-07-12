@@ -89,7 +89,7 @@ async function resolveTokenSession(token: string): Promise<RequestSession> {
     return {
       ...getDevSession(),
       authMode: "token",
-      scopes: ["events:write", "events:read", "exports:read"]
+      scopes: ["events:write", "events:read", "time:read", "exports:read"]
     };
   }
 

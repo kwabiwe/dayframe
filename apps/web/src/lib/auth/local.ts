@@ -184,7 +184,7 @@ export async function resolveLocalSession(
     userId: row.userId,
     workspaceId: row.workspaceId,
     authMode,
-    scopes: ["app:read", "app:write", "events:write", "exports:read"]
+    scopes: ["app:read", "app:write", "events:write", "time:read", "exports:read"]
   };
 }
 

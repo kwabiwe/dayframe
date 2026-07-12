@@ -34,7 +34,7 @@ export function getDevSession(workspaceId?: string | null): RequestSession {
     userId: DEV_USER_ID,
     workspaceId: normalizeDevWorkspaceId(workspaceId),
     authMode: "dev",
-    scopes: ["app:read", "app:write", "events:write", "exports:read"]
+    scopes: ["app:read", "app:write", "events:write", "time:read", "exports:read"]
   };
 }
 

@@ -27,7 +27,7 @@ struct DayframeTimerLiveActivity: Widget {
         DynamicIslandExpandedRegion(.bottom) {
           DayframeLiveActivityLabel(state: context.state)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 4)
+            .offset(y: -3)
         }
       } compactLeading: {
         DayframeElapsedTimerText(state: context.state, size: .compact)
@@ -73,15 +73,15 @@ private struct DayframeLiveActivityLabel: View {
   let state: DayframeTimerAttributes.ContentState
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 5) {
+    VStack(alignment: .leading, spacing: 3) {
       Text(state.title)
-        .font(.system(size: 20, weight: .semibold, design: .default))
+        .font(.system(size: 19, weight: .semibold, design: .default))
         .lineLimit(1)
         .minimumScaleFactor(0.72)
         .frame(maxWidth: .infinity, alignment: .leading)
       if let categoryName = state.categoryName {
         Text(categoryName)
-          .font(.system(size: 16, weight: .medium, design: .default))
+          .font(.system(size: 14, weight: .medium, design: .default))
           .foregroundStyle(.secondary)
           .lineLimit(1)
           .minimumScaleFactor(0.75)
