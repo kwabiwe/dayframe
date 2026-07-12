@@ -518,13 +518,14 @@ export async function syncQueue(options: SyncQueueOptions = {}): Promise<SyncQue
   return queueSyncResult(synced, remaining, firstError, stopped);
 }
 
-export async function startTimer(categoryId?: string | null, description?: string) {
+export async function startTimer(categoryId?: string | null, description?: string, startedAt?: string) {
   const trimmedDescription = description?.trim();
   return postTimerAction({
     mode: "start",
     source: "mobile_app",
     categoryId: categoryId ?? undefined,
-    description: trimmedDescription || undefined
+    description: trimmedDescription || undefined,
+    startedAt
   });
 }
 

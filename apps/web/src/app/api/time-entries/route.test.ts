@@ -78,6 +78,23 @@ describe("POST /api/time-entries", () => {
     );
   });
 
+  it("starts a timer at a provided start time", async () => {
+    const startedAt = "2026-07-04T09:15:00.000Z";
+    const response = await POST(jsonRequest({ mode: "start", categoryId: categoryId(), description: "Focus", startedAt }));
+
+    expect(response.status).toBe(201);
+    expect(mocks.processActivityEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "timer_start",
+        occurredAt: new Date(startedAt),
+        categoryId: categoryId(),
+        description: "Focus",
+        rawPayload: { origin: "web_timer", startedAt }
+      }),
+      session
+    );
+  });
+
   it("creates a manual entry with no legacy project", async () => {
     const response = await POST(
       jsonRequest({

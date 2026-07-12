@@ -30,7 +30,7 @@ export function activeTimerPresentation(entry: ActiveTimerEntry) {
 }
 
 export function buildMobileQuickActions(data: Pick<MobileBootstrap, "categories"> | null): MobileQuickAction[] {
-  const pinned = data
+  return data
     ? data.categories
         .filter((category) => category.isPinned)
         .slice(0, 8)
@@ -41,14 +41,4 @@ export function buildMobileQuickActions(data: Pick<MobileBootstrap, "categories"
           name: category.name
         }))
     : [];
-
-  return [
-    {
-      color: null,
-      id: null,
-      isUncategorized: true,
-      name: "Uncategorized"
-    },
-    ...pinned
-  ];
 }

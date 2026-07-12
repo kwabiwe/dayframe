@@ -579,6 +579,10 @@ function createStyles(theme: MobileTheme) {
       gap: 5,
       minWidth: 0
     },
+    activeTimerExpandedContent: {
+      overflow: "hidden",
+      gap: 5
+    },
     activeTimerActions: {
       flexDirection: "row",
       alignItems: "center",
@@ -1341,6 +1345,12 @@ function createStyles(theme: MobileTheme) {
       flex: 1,
       minHeight: 44
     },
+    startInputText: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 14,
+      fontWeight: "700"
+    },
     playButton: {
       width: 52,
       height: 52,
@@ -1453,20 +1463,19 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       justifyContent: "center"
     },
+    sheetHeaderSpacer: {
+      width: 52,
+      height: 52
+    },
     sheetSaveButton: {
       width: 52,
       height: 52,
       borderWidth: 1,
-      borderColor: theme.accent,
-      backgroundColor: theme.accent,
+      borderColor: theme.controlBorder,
+      backgroundColor: theme.surfaceInset,
       borderRadius: 999,
       alignItems: "center",
-      justifyContent: "center",
-      shadowColor: theme.shadow,
-      shadowOpacity: 1,
-      shadowRadius: 10,
-      shadowOffset: { width: 0, height: 6 },
-      elevation: 3
+      justifyContent: "center"
     },
     activeEditScroller: {
       flexShrink: 1,
@@ -1799,6 +1808,16 @@ function createStyles(theme: MobileTheme) {
       shadowRadius: 9,
       shadowOffset: { width: 0, height: 5 },
       elevation: 3
+    },
+    activeEditStartButton: {
+      width: 52,
+      height: 52,
+      borderWidth: 1,
+      borderColor: theme.accent,
+      backgroundColor: theme.accentSoft,
+      borderRadius: 999,
+      alignItems: "center",
+      justifyContent: "center"
     },
     activeEditStopButtonText: {
       color: theme.onAccent,

@@ -34,19 +34,26 @@ struct DayframeTimerLiveActivity: Widget {
           .frame(minWidth: 34, idealWidth: 42, maxWidth: 52, alignment: .leading)
       } compactTrailing: {
         if context.state.isRunning {
-          DayframeLiveActivityStopButton(size: 26, iconSize: 12)
+          DayframeLiveActivityStatusIcon(isRunning: true, size: 16)
         } else {
-          Image(systemName: "checkmark.circle.fill")
-            .font(.system(size: 16, weight: .semibold))
-            .foregroundStyle(.secondary)
+          DayframeLiveActivityStatusIcon(isRunning: false, size: 16)
         }
       } minimal: {
-        Image(systemName: context.state.isRunning ? "stop.fill" : "checkmark.circle.fill")
-          .font(.system(size: 11, weight: .semibold))
-          .foregroundStyle(context.state.isRunning ? dayframeLiveActivityAccent : .secondary)
+        DayframeLiveActivityStatusIcon(isRunning: context.state.isRunning, size: 11)
       }
       .keylineTint(dayframeLiveActivityAccent)
     }
+  }
+}
+
+private struct DayframeLiveActivityStatusIcon: View {
+  let isRunning: Bool
+  let size: CGFloat
+
+  var body: some View {
+    Image(systemName: isRunning ? "timer" : "checkmark.circle.fill")
+      .font(.system(size: size, weight: .semibold))
+      .foregroundStyle(isRunning ? dayframeLiveActivityAccent : .secondary)
   }
 }
 

@@ -24,16 +24,24 @@ import type { MobileBootstrap, MobileTimeEntry, TimeEntryUpdatePatch } from "@/l
 import { MOBILE_MOTION, useReduceMotionPreference } from "@/lib/motion";
 
 type Category = MobileBootstrap["categories"][number];
-type EditSheetMode = "running" | "entry";
+type EditSheetMode = "running" | "entry" | "start";
+type StartTimerInput = {
+  categoryId: string | null;
+  description: string | null;
+  startedAt: string;
+};
 
 type ActiveTimerEditSheetProps = {
   categories: Category[];
   elapsedSeconds: number;
   entry: MobileTimeEntry | null;
+  initialCategoryId?: string | null;
+  initialDescription?: string;
   lastStoppedAt: string | null;
   onCancel: () => void;
   onDelete?: (entryId: string) => Promise<boolean>;
-  onSave: (entryId: string, patch: TimeEntryUpdatePatch) => Promise<boolean>;
+  onSave?: (entryId: string, patch: TimeEntryUpdatePatch) => Promise<boolean>;
+  onStart?: (input: StartTimerInput) => Promise<boolean>;
   onStop?: () => Promise<boolean>;
   mode?: EditSheetMode;
   deleting?: boolean;
@@ -48,11 +56,14 @@ export function ActiveTimerEditSheet({
   categories,
   elapsedSeconds,
   entry,
+  initialCategoryId = null,
+  initialDescription = "",
   lastStoppedAt,
   mode = "running",
   onCancel,
   onDelete,
   onSave,
+  onStart,
   onStop,
   deleting = false,
   saving,
@@ -79,9 +90,26 @@ export function ActiveTimerEditSheet({
   const timeInputRef = useRef<TextInput>(null);
 
   const entryId = entry?.id ?? null;
+  const isStartMode = mode === "start";
+  const isRunningMode = mode === "running";
+  const isEntryMode = mode === "entry";
 
   useEffect(() => {
-    if (!entry || !visible) return;
+    if (!visible) return;
+    if (isStartMode) {
+      const startedAt = new Date();
+      setDescription(initialDescription);
+      setSelectedCategoryId(initialCategoryId);
+      setDateText(formatDateInput(startedAt));
+      setTimeText(formatTimeInput(startedAt));
+      setStoppedDateText("");
+      setStoppedTimeText("");
+      setPickerStartAt(startedAt);
+      setDatePickerOpen(false);
+      setValidationError(null);
+      return;
+    }
+    if (!entry) return;
     const startedAt = new Date(entry.startedAt);
     setDescription(entry.description ?? "");
     setSelectedCategoryId(entry.categoryId);
@@ -98,7 +126,7 @@ export function ActiveTimerEditSheet({
     setPickerStartAt(startedAt);
     setDatePickerOpen(false);
     setValidationError(null);
-  }, [entryId, visible]);
+  }, [entryId, initialCategoryId, initialDescription, isStartMode, visible]);
 
   useEffect(() => {
     if (!visible) {
@@ -148,8 +176,7 @@ export function ActiveTimerEditSheet({
   const previewStartAt = datePickerOpen && pickerStartAt
     ? parseLocalDateTime(formatDateInput(pickerStartAt), timeText).date
     : parsedStart.date;
-  const isRunningMode = mode === "running";
-  const elapsedPreviewSeconds = !isRunningMode && parsedStart.date && parsedStop.date
+  const elapsedPreviewSeconds = isEntryMode && parsedStart.date && parsedStop.date
     ? Math.max(0, Math.floor((parsedStop.date.getTime() - parsedStart.date.getTime()) / 1000))
     : previewStartAt && previewStartAt.getTime() <= Date.now()
       ? Math.max(0, Math.floor((Date.now() - previewStartAt.getTime()) / 1000))
@@ -157,11 +184,14 @@ export function ActiveTimerEditSheet({
 
   const busy = saving || stopping || deleting;
   const canStop = isRunningMode && Boolean(onStop);
-  const canDelete = !isRunningMode && Boolean(onDelete);
-  const cancelLabel = isRunningMode ? "Cancel editing timer" : "Cancel editing entry";
+  const canStart = isStartMode && Boolean(onStart);
+  const canDelete = !isStartMode && Boolean(onDelete);
+  const cancelLabel = isStartMode
+    ? "Cancel starting task"
+    : isRunningMode ? "Cancel editing timer" : "Cancel editing entry";
   const saveLabel = isRunningMode ? "Save timer edits" : "Save entry edits";
-  const sheetTitle = isRunningMode ? "Edit timer" : "Edit entry";
-  const elapsedLabel = isRunningMode ? "Running" : "Duration";
+  const sheetTitle = isStartMode ? "Start task" : isRunningMode ? "Edit timer" : "Edit entry";
+  const elapsedLabel = isStartMode ? "Elapsed" : isRunningMode ? "Running" : "Duration";
   const keyboardLayout = editSheetKeyboardLayout({
     bottomInset: insets.bottom,
     keyboardInset,
@@ -224,11 +254,15 @@ export function ActiveTimerEditSheet({
     }
   }), [busy, dismissDragY, onCancel, reduceMotion, windowDimensions.height]);
 
-  if (!entry) return null;
-  const editingEntry = entry;
+  if (!entry && !isStartMode) return null;
+
+  function fallbackStartAt() {
+    if (entry) return new Date(entry.startedAt);
+    return parsedStart.date ?? new Date();
+  }
 
   async function saveChanges() {
-    if (busy) return;
+    if (busy || !entry || !onSave) return;
     const parsed = datePickerOpen && pickerStartAt
       ? parseLocalDateTime(formatDateInput(pickerStartAt), timeText)
       : parseLocalDateTime(dateText, timeText);
@@ -247,7 +281,7 @@ export function ActiveTimerEditSheet({
       startedAt: parsed.date.toISOString()
     };
 
-    if (!isRunningMode) {
+    if (isEntryMode) {
       const stopped = parseLocalDateTime(stoppedDateText, stoppedTimeText);
       if (stopped.error || !stopped.date) {
         setValidationError(stopped.error ?? "Choose a valid end date and time.");
@@ -265,7 +299,30 @@ export function ActiveTimerEditSheet({
     }
 
     setValidationError(null);
-    const ok = await onSave(editingEntry.id, patch);
+    const ok = await onSave(entry.id, patch);
+    if (ok) onCancel();
+  }
+
+  async function startFromSheet() {
+    if (busy || !onStart) return;
+    const parsed = datePickerOpen && pickerStartAt
+      ? parseLocalDateTime(formatDateInput(pickerStartAt), timeText)
+      : parseLocalDateTime(dateText, timeText);
+    if (parsed.error || !parsed.date) {
+      setValidationError(parsed.error ?? "Choose a valid start date and time.");
+      return;
+    }
+    if (parsed.date.getTime() > Date.now()) {
+      setValidationError("Start time cannot be in the future.");
+      return;
+    }
+
+    setValidationError(null);
+    const ok = await onStart({
+      categoryId: selectedCategoryId,
+      description: description.trim() || null,
+      startedAt: parsed.date.toISOString()
+    });
     if (ok) onCancel();
   }
 
@@ -294,8 +351,8 @@ export function ActiveTimerEditSheet({
   }
 
   async function deleteEntryFromSheet() {
-    if (busy || !onDelete) return;
-    const ok = await onDelete(editingEntry.id);
+    if (busy || !entry || !onDelete) return;
+    const ok = await onDelete(entry.id);
     if (ok) onCancel();
   }
 
@@ -330,7 +387,7 @@ export function ActiveTimerEditSheet({
 
   function openStartPicker() {
     Keyboard.dismiss();
-    const currentStart = parsedStart.date ?? new Date(editingEntry.startedAt);
+    const currentStart = parsedStart.date ?? fallbackStartAt();
     setPickerStartAt(currentStart);
     setDatePickerOpen(true);
     setValidationError(null);
@@ -353,14 +410,14 @@ export function ActiveTimerEditSheet({
   }
 
   function cancelStartPicker() {
-    setPickerStartAt(parsedStart.date ?? new Date(editingEntry.startedAt));
+    setPickerStartAt(parsedStart.date ?? fallbackStartAt());
     setDatePickerOpen(false);
     setValidationError(null);
   }
 
   function adjustPickerDate(days: number) {
     setPickerStartAt((current) => {
-      const next = new Date((current ?? parsedStart.date ?? new Date(editingEntry.startedAt)).getTime());
+      const next = new Date((current ?? parsedStart.date ?? fallbackStartAt()).getTime());
       next.setDate(next.getDate() + days);
       next.setSeconds(0, 0);
       return next;
@@ -370,7 +427,7 @@ export function ActiveTimerEditSheet({
 
   function setPickerToToday() {
     setPickerStartAt((current) => {
-      const source = current ?? parsedStart.date ?? new Date(editingEntry.startedAt);
+      const source = current ?? parsedStart.date ?? fallbackStartAt();
       const today = new Date();
       const next = new Date(
         today.getFullYear(),
@@ -386,7 +443,7 @@ export function ActiveTimerEditSheet({
     setValidationError(null);
   }
 
-  const displayedStartAt = previewStartAt ?? new Date(editingEntry.startedAt);
+  const displayedStartAt = previewStartAt ?? fallbackStartAt();
   const pickerDate = pickerStartAt ?? displayedStartAt;
 
   return (
@@ -430,19 +487,23 @@ export function ActiveTimerEditSheet({
                     <CloseGlyph color={theme.textPrimary} />
                   </Pressable>
                   <Text style={styles.sheetTitle}>{sheetTitle}</Text>
-                  <Pressable
-                    accessibilityLabel={saveLabel}
-                    accessibilityRole="button"
-                    disabled={busy}
-                    onPress={saveChanges}
-                    style={({ pressed }) => [
-                      styles.sheetSaveButton,
-                      pressed && !busy ? styles.buttonPressed : null,
-                      busy ? styles.buttonDisabled : null
-                    ]}
-                  >
-                    <CheckGlyph color={theme.onAccent} />
-                  </Pressable>
+                  {isStartMode ? (
+                    <View style={styles.sheetHeaderSpacer} />
+                  ) : (
+                    <Pressable
+                      accessibilityLabel={saveLabel}
+                      accessibilityRole="button"
+                      disabled={busy}
+                      onPress={saveChanges}
+                      style={({ pressed }) => [
+                        styles.sheetSaveButton,
+                        pressed && !busy ? styles.buttonPressed : null,
+                        busy ? styles.buttonDisabled : null
+                      ]}
+                    >
+                      <CheckGlyph color={theme.accentText} />
+                    </Pressable>
+                  )}
                 </View>
               </View>
 
@@ -479,13 +540,28 @@ export function ActiveTimerEditSheet({
                       <StopGlyph color={theme.onAccent} />
                     </Pressable>
                   ) : null}
+                  {canStart ? (
+                    <Pressable
+                      accessibilityLabel="Start timer from start sheet"
+                      accessibilityRole="button"
+                      disabled={busy}
+                      onPress={startFromSheet}
+                      style={({ pressed }) => [
+                        styles.activeEditStartButton,
+                        pressed && !busy ? styles.buttonPressed : null,
+                        busy ? styles.buttonDisabled : null
+                      ]}
+                    >
+                      <PlayGlyph color={theme.accentText} />
+                    </Pressable>
+                  ) : null}
                 </View>
 
                 <View style={styles.activeEditSection}>
                   <Text style={styles.activeEditSectionLabel}>Description</Text>
                   <TextInput
                     ref={descriptionInputRef}
-                    accessibilityLabel={isRunningMode ? "Timer description" : "Entry description"}
+                    accessibilityLabel={isStartMode ? "Task description" : isRunningMode ? "Timer description" : "Entry description"}
                     blurOnSubmit
                     editable={!busy}
                     onFocus={focusDescriptionField}
@@ -636,7 +712,7 @@ export function ActiveTimerEditSheet({
                   ) : null}
                 </View>
 
-                {!isRunningMode ? (
+                {isEntryMode ? (
                   <View style={styles.activeEditSection}>
                     <Text style={styles.activeEditSectionLabel}>End time</Text>
                     <View style={styles.activeEditTimeRow}>
@@ -942,6 +1018,14 @@ function CheckGlyph({ color }: { color: string }) {
   return (
     <Svg width={22} height={22} viewBox="0 0 24 24">
       <Path d="m5 12 4 4L19 6" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} />
+    </Svg>
+  );
+}
+
+function PlayGlyph({ color }: { color: string }) {
+  return (
+    <Svg width={18} height={18} viewBox="0 0 24 24">
+      <Path d="M8 5v14l11-7L8 5Z" fill={color} />
     </Svg>
   );
 }

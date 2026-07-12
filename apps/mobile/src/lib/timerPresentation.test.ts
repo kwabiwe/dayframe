@@ -37,7 +37,7 @@ describe("mobile timer presentation", () => {
     expect(displayTimerDescription({ description: "Start activity" })).toBeNull();
   });
 
-  it("keeps uncategorized available before pinned quick actions", () => {
+  it("keeps quick actions to pinned categories only", () => {
     expect(
       buildMobileQuickActions({
         categories: [
@@ -47,7 +47,6 @@ describe("mobile timer presentation", () => {
         ]
       }).map((action) => ({ id: action.id, name: action.name }))
     ).toEqual([
-      { id: null, name: "Uncategorized" },
       { id: "focus", name: "Focus" },
       { id: "family", name: "Family" }
     ]);

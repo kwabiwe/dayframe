@@ -75,7 +75,7 @@ import {
   isReviewNeededEntry
 } from "@/lib/review";
 import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
-import { scheduleLayoutTransition, useReduceMotionPreference } from "@/lib/motion";
+import { MOBILE_MOTION, scheduleLayoutTransition, useReduceMotionPreference } from "@/lib/motion";
 import {
   activeTimerPresentation,
   buildMobileQuickActions,
@@ -108,6 +108,11 @@ type SummarySegment = {
   seconds: number;
   share: number;
   color: string;
+};
+type StartTimerSheetInput = {
+  categoryId: string | null;
+  description: string | null;
+  startedAt: string;
 };
 
 const AUTH_KEYBOARD_ACCESSORY_ID = "dayframe-auth-keyboard-accessory";
@@ -145,10 +150,14 @@ export default function HomeScreen() {
   const [authNotice, setAuthNotice] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [customDescription, setCustomDescription] = useState("");
+  const [startSheetVisible, setStartSheetVisible] = useState(false);
+  const [startSheetSaving, setStartSheetSaving] = useState(false);
   const [activeEditVisible, setActiveEditVisible] = useState(false);
   const [activeEditSaving, setActiveEditSaving] = useState(false);
   const [activeEditStopping, setActiveEditStopping] = useState(false);
+  const [activeEditDeleting, setActiveEditDeleting] = useState(false);
   const [timerActionPending, setTimerActionPending] = useState<"start" | "stop" | null>(null);
+  const [presentedActiveEntry, setPresentedActiveEntry] = useState<TimeEntry | null>(null);
   const [calendarEditSaving, setCalendarEditSaving] = useState(false);
   const [calendarEditDeleting, setCalendarEditDeleting] = useState(false);
   const [calendarGestureLocked, setCalendarGestureLocked] = useState(false);
@@ -163,6 +172,7 @@ export default function HomeScreen() {
   const mainScrollY = useRef(0);
   const entrance = useRef(new Animated.Value(0)).current;
   const chartBuild = useRef(new Animated.Value(1)).current;
+  const activeTimerExpansion = useRef(new Animated.Value(0)).current;
   const timerProgress = useRef(new Animated.Value(0)).current;
   const authNameRef = useRef<TextInput>(null);
   const authWorkspaceRef = useRef<TextInput>(null);
@@ -407,6 +417,68 @@ export default function HomeScreen() {
         Math.floor((now - new Date(data.activeEntry.startedAt).getTime()) / 1000)
       )
     : 0;
+  const hasLiveActiveTimer = Boolean(data?.activeEntry);
+
+  useEffect(() => {
+    if (data?.activeEntry) {
+      setPresentedActiveEntry(data.activeEntry);
+      return undefined;
+    }
+
+    if (reduceMotion) {
+      setPresentedActiveEntry(null);
+      return undefined;
+    }
+
+    const timeout = setTimeout(() => {
+      setPresentedActiveEntry(null);
+    }, MOBILE_MOTION.layout + 80);
+    return () => clearTimeout(timeout);
+  }, [data?.activeEntry, reduceMotion]);
+
+  useEffect(() => {
+    const toValue = hasLiveActiveTimer ? 1 : 0;
+    if (reduceMotion) {
+      activeTimerExpansion.setValue(toValue);
+      return undefined;
+    }
+    const animation = Animated.timing(activeTimerExpansion, {
+      toValue,
+      duration: MOBILE_MOTION.layout,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [activeTimerExpansion, hasLiveActiveTimer, reduceMotion]);
+
+  const activeTimerDetailsStyle = {
+    opacity: activeTimerExpansion,
+    maxHeight: activeTimerExpansion.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0, 96]
+    })
+  };
+  const activeTimerActionsStyle = {
+    opacity: activeTimerExpansion,
+    transform: [
+      {
+        scale: activeTimerExpansion.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0.94, 1]
+        })
+      }
+    ]
+  };
+  const displayedActiveEntry = data?.activeEntry ?? presentedActiveEntry;
+  const displayedActiveDurationSeconds = displayedActiveEntry && data?.activeEntry
+    ? activeDurationSeconds
+    : displayedActiveEntry
+      ? Math.max(
+          displayedActiveEntry.durationSeconds,
+          Math.floor((now - new Date(displayedActiveEntry.startedAt).getTime()) / 1000)
+        )
+      : 0;
   const todayKey = useMemo(() => formatDateKey(new Date(now)), [now]);
   const weekDays = useMemo(
     () => buildWeekStripDays(selectedDayKey, now),
@@ -431,14 +503,14 @@ export default function HomeScreen() {
       reviewItems: data?.reviewItems ?? []
     });
   }, [data?.reviewItems, now, summaryEntries, todayKey]);
-  const activeCategoryColor = data?.activeEntry?.categoryName
+  const activeCategoryColor = displayedActiveEntry?.categoryName
     ? paletteColorFor(
-        data.activeEntry.categoryColor ?? data.activeEntry.categoryId,
-        data.activeEntry.categoryName,
+        displayedActiveEntry.categoryColor ?? displayedActiveEntry.categoryId,
+        displayedActiveEntry.categoryName,
         theme.mode
       )
     : null;
-  const activeTimerCopy = activeTimerPresentation(data?.activeEntry ?? null);
+  const activeTimerCopy = activeTimerPresentation(displayedActiveEntry ?? null);
   const activeCategoryLabel = activeTimerCopy.categoryLabel;
   const activeTitle = activeTimerCopy.title;
   const recentStoppedAt = useMemo(
@@ -510,34 +582,62 @@ export default function HomeScreen() {
   }, [timerActionPending, timerProgress]);
 
   async function startTask(categoryId?: string | null) {
-    if (timerActionPending) return;
-    const trimmedDescription = customDescription.trim();
+    return startTaskWith({
+      categoryId: categoryId ?? null,
+      description: customDescription,
+      startedAt: null
+    });
+  }
+
+  async function startTaskFromSheet(input: StartTimerSheetInput) {
+    setStartSheetSaving(true);
+    try {
+      return await startTaskWith(input);
+    } finally {
+      setStartSheetSaving(false);
+    }
+  }
+
+  async function startTaskWith(input: {
+    categoryId?: string | null;
+    description?: string | null;
+    startedAt?: string | null;
+  }) {
+    if (timerActionPending) return false;
+    const trimmedDescription = input.description?.trim() ?? "";
+    const startedAt = input.startedAt ?? undefined;
     setTimerActionPending("start");
     try {
-      await startTimer(categoryId, trimmedDescription);
+      await startTimer(input.categoryId ?? null, trimmedDescription, startedAt);
       if (trimmedDescription) setCustomDescription("");
       scheduleLayoutTransition(reduceMotion);
       await load({ silent: true });
+      return true;
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         setAuthState("signedOut");
         setData(null);
-        return;
+        return false;
       }
       if (!isNetworkTimerError(error)) {
         Alert.alert("Timer not started", error instanceof Error ? error.message : "Unable to start this timer.");
-        return;
+        return false;
       }
       await enqueueEvent({
         source: "mobile_app",
         type: "timer_start",
-        categoryId: categoryId ?? undefined,
+        occurredAt: startedAt ? new Date(startedAt) : undefined,
+        categoryId: input.categoryId ?? undefined,
         description: trimmedDescription || undefined,
-        rawPayload: { origin: "mobile_custom_start_fallback" }
+        rawPayload: {
+          origin: "mobile_custom_start_fallback",
+          ...(startedAt ? { startedAt } : {})
+        }
       });
       if (trimmedDescription) setCustomDescription("");
       scheduleLayoutTransition(reduceMotion);
       await syncAndReload({ silent: true });
+      return true;
     } finally {
       setTimerActionPending(null);
     }
@@ -705,17 +805,22 @@ export default function HomeScreen() {
   }
 
   async function deleteActiveTimer(entryId: string) {
+    setActiveEditDeleting(true);
     try {
       await deleteTimeEntry(entryId);
       scheduleLayoutTransition(reduceMotion);
       await load({ silent: true });
+      return true;
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         setAuthState("signedOut");
         setData(null);
-        return;
+        return false;
       }
       Alert.alert("Timer not deleted", error instanceof Error ? error.message : "Unable to delete this timer.");
+      return false;
+    } finally {
+      setActiveEditDeleting(false);
     }
   }
 
@@ -914,13 +1019,13 @@ export default function HomeScreen() {
           {activeTab === "timer" ? (
             <>
               <Pressable
-                accessibilityLabel={data?.activeEntry ? "Edit running timer" : undefined}
-                accessibilityRole={data?.activeEntry ? "button" : undefined}
-                disabled={!data?.activeEntry}
+                accessibilityLabel={hasLiveActiveTimer ? "Edit running timer" : undefined}
+                accessibilityRole={hasLiveActiveTimer ? "button" : undefined}
+                disabled={!hasLiveActiveTimer}
                 onPress={() => setActiveEditVisible(true)}
                 style={({ pressed }) => [
                   styles.timerPanel,
-                  pressed && data?.activeEntry ? styles.buttonPressed : null
+                  pressed && hasLiveActiveTimer ? styles.buttonPressed : null
                 ]}
               >
                 {activeCategoryColor ? (
@@ -930,34 +1035,30 @@ export default function HomeScreen() {
                   />
                 ) : null}
                 <View style={styles.activeTimerHeader}>
-                  {data?.activeEntry ? (
-                    <View style={styles.activeTimerTextStack}>
-                      <Text style={styles.label}>Active timer</Text>
-                      <View style={styles.activeTitleRow}>
-                        {activeCategoryColor ? (
-                          <View style={[styles.colorDot, { backgroundColor: activeCategoryColor }]} />
-                        ) : null}
-                        <Text style={[styles.timerText, styles.activeTitleText]} numberOfLines={2}>
-                          {activeTitle}
-                        </Text>
-                      </View>
+                  <View style={styles.activeTimerTextStack}>
+                    <Text style={styles.label}>Active timer</Text>
+                    <View style={styles.activeTitleRow}>
+                      {displayedActiveEntry && activeCategoryColor ? (
+                        <View style={[styles.colorDot, { backgroundColor: activeCategoryColor }]} />
+                      ) : null}
+                      <Text style={[styles.timerText, styles.activeTitleText]} numberOfLines={2}>
+                        {activeTitle}
+                      </Text>
+                    </View>
+                    <Animated.View style={[styles.activeTimerExpandedContent, activeTimerDetailsStyle]}>
                       {activeCategoryLabel ? (
                         <Text style={styles.activeDescription}>{activeCategoryLabel}</Text>
                       ) : null}
-                      <Text style={styles.activeElapsed}>{formatClockDuration(activeDurationSeconds)}</Text>
-                    </View>
-                  ) : (
-                    <View style={styles.activeTimerTextStack}>
-                      <Text style={styles.label}>Active timer</Text>
-                      <View style={styles.activeTitleRow}>
-                        <Text style={[styles.timerText, styles.activeTitleText]} numberOfLines={2}>
-                          Start task below
-                        </Text>
-                      </View>
-                    </View>
-                  )}
-                  {data?.activeEntry ? (
-                    <View style={styles.activeTimerActions}>
+                      {displayedActiveEntry ? (
+                        <Text style={styles.activeElapsed}>{formatClockDuration(displayedActiveDurationSeconds)}</Text>
+                      ) : null}
+                    </Animated.View>
+                  </View>
+                  {displayedActiveEntry ? (
+                    <Animated.View
+                      pointerEvents={hasLiveActiveTimer ? "auto" : "none"}
+                      style={[styles.activeTimerActions, activeTimerActionsStyle]}
+                    >
                       <Pressable
                         accessibilityLabel="Stop current timer"
                         accessibilityRole="button"
@@ -984,7 +1085,7 @@ export default function HomeScreen() {
                       >
                         <TrashGlyph color={theme.onDanger} />
                       </Pressable>
-                    </View>
+                    </Animated.View>
                   ) : null}
                 </View>
                 <View style={styles.timerProgressSlot}>
@@ -1002,15 +1103,16 @@ export default function HomeScreen() {
               <View style={styles.panel}>
                 <Text style={styles.sectionTitle}>Start task</Text>
                 <View style={styles.startInputRow}>
-                  <TextInput
-                    style={[styles.textInput, styles.startInput]}
-                    value={customDescription}
-                    onChangeText={setCustomDescription}
-                    onSubmitEditing={() => startTask(null)}
-                    placeholder="What are you working on?"
-                    placeholderTextColor={theme.textSecondary}
-                    returnKeyType="done"
-                  />
+                  <Pressable
+                    accessibilityLabel="Open start task sheet"
+                    accessibilityRole="button"
+                    style={pressable([styles.textInput, styles.startInput], styles.buttonPressed)}
+                    onPress={() => setStartSheetVisible(true)}
+                  >
+                    <Text style={styles.startInputText} numberOfLines={1}>
+                      {customDescription.trim() || "What are you working on?"}
+                    </Text>
+                  </Pressable>
                   <Pressable
                     accessibilityLabel="Start task"
                     accessibilityRole="button"
@@ -1134,12 +1236,29 @@ export default function HomeScreen() {
       />
       <ActiveTimerEditSheet
         categories={data?.categories ?? []}
+        elapsedSeconds={0}
+        entry={null}
+        initialDescription={customDescription}
+        lastStoppedAt={recentStoppedAt}
+        mode="start"
+        onCancel={() => setStartSheetVisible(false)}
+        onStart={startTaskFromSheet}
+        saving={startSheetSaving || timerActionPending === "start"}
+        stopping={false}
+        styles={styles}
+        theme={theme}
+        visible={startSheetVisible}
+      />
+      <ActiveTimerEditSheet
+        categories={data?.categories ?? []}
         elapsedSeconds={activeDurationSeconds}
         entry={data?.activeEntry ?? null}
         lastStoppedAt={recentStoppedAt}
         onCancel={() => setActiveEditVisible(false)}
+        onDelete={deleteActiveTimer}
         onSave={saveActiveTimerEdit}
         onStop={stopActiveTimer}
+        deleting={activeEditDeleting}
         saving={activeEditSaving}
         stopping={activeEditStopping}
         styles={styles}
