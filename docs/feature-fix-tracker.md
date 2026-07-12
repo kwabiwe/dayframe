@@ -1,11 +1,11 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-12 12:50 BST
+Last verified: 2026-07-12 14:15 BST
 
 ## Verification Snapshot
 
-- Local repo: PR #50 is open from `agent/internal-cockpit-timer-api`; `main` includes PR #49 and TestFlight build `0.1.0 (24)`.
-- GitHub: PR #50 is open and intentionally unmerged while natural-language rule creation is added.
+- Local repo: `main` includes PR #50 merge commit `c24be99`; TestFlight release is pending for build `0.1.0 (25)`.
+- GitHub: no open PRs; PR #50 is merged.
 - Latest verified TestFlight build: `0.1.0 (24)`.
 - Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, local archive/export/upload logs, and App Store Connect build state.
 
@@ -23,7 +23,7 @@ Last verified: 2026-07-12 12:50 BST
 
 | Item | Status | Evidence | Next action |
 | --- | --- | --- | --- |
-| Generic integration timer API and natural-language rule creation | In progress | PR #50 branch `agent/internal-cockpit-timer-api`; `GET /api/integrations/v1/time/current` with `time:read`; Rule assistant save path now creates review-first geofence-exit rules with category/project/activity description after preview. | Finish full validation, Codex 5.6 Sol second-opinion review, and PR update. Do not merge until KB approves. |
+| Generic integration timer API and natural-language rule creation | Release pending | PR #50 merged to `main` at `c24be99`; `GET /api/integrations/v1/time/current` with `time:read`; Rule assistant save path creates review-first geofence-exit rules with category/project/activity description after preview. | Run hosted migration/deploy checks and TestFlight build `0.1.0 (25)`, then ask KB to verify Cockpit/API, saved rules, and the Live Activity expanded-label nudge. |
 | Live Activity Dynamic Island polish verification | Watch | PR #49, build `0.1.0 (24)`, delivery/build ID `30ad5c74-704f-4d64-80a7-c721467df1cb`; App Store Connect `VALID`, export compliance false, `Internal Health Debug`, and `IN_BETA_TESTING`. | Verify compact Dynamic Island width, expanded Live Activity text alignment, and the Live Activity stop button on a physical iPhone. |
 | PR48 real-device Shortcut/NFC + Live Activity verification | Watch | PR #48, build `0.1.0 (23)`, delivery/build ID `8ecf06ec-7953-489e-85cf-5c21fcf3e15e`; App Store Connect `VALID`, export compliance false, `Internal Health Debug`, and `IN_BETA_TESTING`. | On a physical iPhone, test Shortcut/NFC Start and Stop while Dayframe is closed/suspended, check offline queue replay, and confirm the Live Activity/Dynamic Island timer is the visible confirmation surface instead of a Dayframe foreground splash. |
 
