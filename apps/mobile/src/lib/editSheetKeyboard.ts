@@ -1,6 +1,6 @@
 const DEFAULT_TOP_GAP = 18;
 const DEFAULT_MIN_TOP_GAP = 32;
-const DEFAULT_KEYBOARD_CONTENT_PADDING = 96;
+const DEFAULT_KEYBOARD_CONTENT_PADDING = 32;
 const DEFAULT_CONTENT_PADDING = 18;
 
 export type KeyboardInsetInput = {
@@ -21,6 +21,7 @@ export type EditSheetKeyboardLayout = {
   contentPaddingBottom: number;
   keyboardOpen: boolean;
   sheetHeight: number | null;
+  sheetMaxHeight: number;
   topSafeGap: number;
 };
 
@@ -43,12 +44,14 @@ export function editSheetKeyboardLayout({
   const bottomLift = keyboardOpen ? Math.max(0, keyboardInset - bottomInset) : 0;
   const topSafeGap = Math.max(topInset + DEFAULT_TOP_GAP, DEFAULT_MIN_TOP_GAP);
   const availableHeight = Math.max(0, windowHeight - topSafeGap - bottomLift);
+  const sheetMaxHeight = Math.max(0, windowHeight - topSafeGap);
 
   return {
     bottomLift,
     contentPaddingBottom: keyboardOpen ? DEFAULT_KEYBOARD_CONTENT_PADDING : DEFAULT_CONTENT_PADDING,
     keyboardOpen,
     sheetHeight: keyboardOpen ? availableHeight : null,
+    sheetMaxHeight,
     topSafeGap
   };
 }

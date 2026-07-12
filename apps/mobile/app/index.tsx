@@ -112,7 +112,7 @@ type SummarySegment = {
 type StartTimerSheetInput = {
   categoryId: string | null;
   description: string | null;
-  startedAt: string;
+  startedAt?: string | null;
 };
 
 const AUTH_KEYBOARD_ACCESSORY_ID = "dayframe-auth-keyboard-accessory";

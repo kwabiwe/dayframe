@@ -100,6 +100,15 @@ export class ReviewResolutionError extends Error {
   }
 }
 
+export class TimerReplacementWindowError extends Error {
+  status = 409;
+
+  constructor(message = "Start time must be after the currently running timer's start time.") {
+    super(message);
+    this.name = "TimerReplacementWindowError";
+  }
+}
+
 type OverlapBlockingEntry = {
   id: string;
   description: string | null;
@@ -296,6 +305,9 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
 
   try {
     await client.query("begin");
+    if (candidate.action === "start_timer" || candidate.action === "stop_timer") {
+      await lockUserTimerState(client, session);
+    }
 
     if (parsed.clientEventId) {
       const existingEvent = await client.query<{ id: string }>(
@@ -377,12 +389,7 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
     } else if (candidate.action === "start_timer") {
       const startedAt = suggestedStartedAtForEvent(parsed);
       if (candidate.shouldClosePrevious) {
-        await client.query(
-          `update time_entries
-           set stopped_at = $1, updated_at = now()
-           where workspace_id = $2 and user_id = $3 and stopped_at is null`,
-          [startedAt, parsed.workspaceId, parsed.userId]
-        );
+        await closeActiveTimersForReplacement(client, session, startedAt);
       }
 
       await client.query(
@@ -559,6 +566,47 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
   } finally {
     client.release();
   }
+}
+
+async function lockUserTimerState(client: pg.PoolClient, session: RequestSession) {
+  await client.query(
+    "select pg_advisory_xact_lock(hashtext($1), hashtext($2))",
+    [session.workspaceId, session.userId]
+  );
+}
+
+async function closeActiveTimersForReplacement(
+  client: pg.PoolClient,
+  session: RequestSession,
+  stoppedAt: string | Date
+) {
+  const activeResult = await client.query<{ id: string; startedAt: string | Date }>(
+    `select id, started_at as "startedAt"
+     from time_entries
+     where workspace_id = $1 and user_id = $2 and stopped_at is null
+     order by started_at desc
+     limit 1
+     for update`,
+    [session.workspaceId, session.userId]
+  );
+  const activeEntry = activeResult.rows[0];
+  if (!activeEntry) return;
+
+  const activeStartedMs = new Date(activeEntry.startedAt).getTime();
+  const stoppedMs = new Date(stoppedAt).getTime();
+  if (!Number.isFinite(activeStartedMs) || !Number.isFinite(stoppedMs) || stoppedMs <= activeStartedMs) {
+    throw new TimerReplacementWindowError();
+  }
+
+  await client.query(
+    `update time_entries
+     set stopped_at = $1, updated_at = now()
+     where workspace_id = $2
+       and user_id = $3
+       and stopped_at is null
+       and started_at < $1`,
+    [stoppedAt, session.workspaceId, session.userId]
+  );
 }
 
 export async function createManualEntry(input: {
