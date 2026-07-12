@@ -786,6 +786,10 @@ html[data-theme="dark"] .swiss-theme-icon-on-dark {
   padding: 16px;
   box-shadow: 0 8px 24px color-mix(in srgb, var(--shadow-color) 46%, transparent);
   overflow: visible;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    padding 180ms ease;
 }
 
 .swiss-timer-entrybar {
@@ -1084,11 +1088,33 @@ html[data-theme="dark"] .swiss-theme-icon-on-dark {
   background: transparent;
 }
 
+.swiss-active-timer-meta-shell {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  overflow: hidden;
+  transform: translateY(-4px);
+  transition:
+    grid-template-rows 220ms ease,
+    opacity 180ms ease,
+    transform 220ms ease,
+    border-color 180ms ease,
+    padding-top 180ms ease;
+}
+
+.swiss-active-timer-meta-shell.is-visible {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .swiss-active-timer-meta {
   display: grid;
+  min-height: 0;
   gap: 6px;
   margin: 0;
   border-top: 1px solid var(--line);
+  overflow: hidden;
   padding-top: 8px;
   color: var(--muted);
   font-size: 12px;
@@ -1236,9 +1262,9 @@ html[data-theme="dark"] .swiss-theme-icon-on-dark {
 .swiss-quick-actions-strip {
   grid-column: 1 / -1;
   display: grid;
-  gap: 8px;
+  gap: 7px;
   border-top: 1px solid var(--line);
-  padding-top: 12px;
+  padding-top: 10px;
 }
 
 .swiss-quick-actions-strip > span {
@@ -1256,48 +1282,65 @@ html[data-theme="dark"] .swiss-theme-icon-on-dark {
 }
 
 .swiss-quick-actions-strip button {
+  position: relative;
   display: inline-flex;
+  isolation: isolate;
   min-height: 44px;
   max-width: 240px;
   align-items: center;
-  gap: 7px;
-  border: 1px solid var(--control-border);
+  gap: 6px;
+  border: 0;
   border-radius: 999px;
-  background: var(--surface-inset);
+  background: transparent;
   color: var(--foreground);
-  padding: 0 12px;
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 8%, transparent);
-  font-size: 13px;
+  padding: 0 10px;
+  box-shadow: none;
+  font-size: 12px;
+  font-weight: 750;
   transition:
-    border-color 140ms ease,
-    background-color 140ms ease,
     transform 140ms ease,
     box-shadow 140ms ease;
 }
 
-.swiss-quick-actions-strip button:hover {
+.swiss-quick-actions-strip button::before {
+  position: absolute;
+  inset: 3px 0;
+  z-index: -1;
+  border: 1px solid var(--control-border);
+  border-radius: 999px;
+  background: var(--surface-inset);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 8%, transparent);
+  content: "";
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.swiss-quick-actions-strip button:hover::before {
   border-color: color-mix(in srgb, var(--accent) 46%, var(--line));
   background: var(--surface);
   box-shadow: 0 6px 16px color-mix(in srgb, var(--foreground) 10%, transparent);
+}
+
+.swiss-quick-actions-strip button:hover {
   transform: translateY(-1px);
 }
 
+.swiss-quick-actions-strip button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
 .swiss-quick-actions-strip i {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border: 1px solid color-mix(in srgb, var(--foreground) 18%, transparent);
   border-radius: 999px;
 }
 
 .swiss-quick-actions-strip b {
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.swiss-quick-actions-strip small {
-  overflow: hidden;
-  color: var(--muted);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3861,6 +3904,10 @@ kbd {
 
   .swiss-day-footer button:last-child {
     justify-self: start;
+  }
+
+  .swiss-quick-actions-strip button::before {
+    inset: 2px 0;
   }
 }
 

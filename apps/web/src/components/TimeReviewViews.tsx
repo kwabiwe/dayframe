@@ -174,7 +174,7 @@ export function TimeReviewViews({
 
   return (
     <section className="space-y-5">
-      <CurrentTimerPanel key={data.activeEntry?.id ?? "inactive"} data={data} onSynced={setData} />
+      <CurrentTimerPanel data={data} onSynced={setData} />
 
       <div className="industrial-panel rounded-xl p-4">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
