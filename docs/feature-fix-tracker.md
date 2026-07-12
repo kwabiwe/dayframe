@@ -1,12 +1,12 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-12 15:13 BST
+Last verified: 2026-07-12 17:03 BST
 
 ## Verification Snapshot
 
-- Local repo: `main` includes PR #51; TestFlight build `0.1.0 (26)` is verified and the iOS build number is restored to the repo default.
-- GitHub: no open PRs; PR #51 is merged.
-- Latest verified TestFlight build: `0.1.0 (26)`.
+- Local repo: `main` includes PR #52; TestFlight build `0.1.0 (27)` is verified and the iOS build number is restored to the repo default.
+- GitHub: no open PRs; PR #52 is merged.
+- Latest verified TestFlight build: `0.1.0 (27)`.
 - Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, local archive/export/upload logs, and App Store Connect build state.
 
 ## Status Key
@@ -23,7 +23,7 @@ Last verified: 2026-07-12 15:13 BST
 
 | Item | Status | Evidence | Next action |
 | --- | --- | --- | --- |
-| Today timer improvements verification | Watch | PR #51, build `0.1.0 (26)`, delivery/build ID `1614e6b0-9ce8-4ee7-b763-515ec0e1629d`; App Store Connect `VALID`, export compliance false, `Internal Health Debug`, and `IN_BETA_TESTING`. Vercel production deployment for `360ec83` completed. | Verify the active timer expansion feels smooth, blank active timer copy reads clearly, `Uncategorized` appears immediately, `Frequent` is now `Quick actions`, and pinned category pills feel visually thinner without losing tap comfort. |
+| Today timer improvements verification | Watch | PR #52, build `0.1.0 (27)`, delivery/build ID `e0df39a1-9b1d-4a65-ad6b-9144f64d8c3a`; App Store Connect `VALID`, export compliance false, `Internal Health Debug`, and `IN_BETA_TESTING`. PR #51/build `0.1.0 (26)` changed the web Today timer only; PR #52 applies the same polish to the actual iOS Today screen. Latest Vercel production deployment for merge `af2370f` was cancelled, but PR #52 is mobile-only and the TestFlight artifact contains the fix. | Verify the iOS Today active timer expansion feels smooth, blank active timer copy reads clearly, `Uncategorized` appears immediately, `Frequent` is now `Quick actions`, and pinned category pills feel visually thinner without losing tap comfort. |
 | Generic integration timer API and natural-language rule creation verification | Watch | PR #50, build `0.1.0 (25)`, delivery/build ID `605005f7-f4c3-4f19-89cb-48ed87b0829a`; App Store Connect `VALID`, export compliance false, `Internal Health Debug`, and `IN_BETA_TESTING`. Vercel production deployment for `c24be99` completed; local Vercel env pull returned blank `DATABASE_URL`, so hosted Supabase migration `202607120001_automation_rule_activity_description.sql` still needs live schema verification. | Verify Cockpit/API current timer read, saved natural-language rule creation, Review-first geofence rule output, and the Live Activity expanded-label nudge on device/hosted production. |
 | Live Activity Dynamic Island polish verification | Watch | PR #49, build `0.1.0 (24)`, delivery/build ID `30ad5c74-704f-4d64-80a7-c721467df1cb`; App Store Connect `VALID`, export compliance false, `Internal Health Debug`, and `IN_BETA_TESTING`. | Verify compact Dynamic Island width, expanded Live Activity text alignment, and the Live Activity stop button on a physical iPhone. |
 | PR48 real-device Shortcut/NFC + Live Activity verification | Watch | PR #48, build `0.1.0 (23)`, delivery/build ID `8ecf06ec-7953-489e-85cf-5c21fcf3e15e`; App Store Connect `VALID`, export compliance false, `Internal Health Debug`, and `IN_BETA_TESTING`. | On a physical iPhone, test Shortcut/NFC Start and Stop while Dayframe is closed/suspended, check offline queue replay, and confirm the Live Activity/Dynamic Island timer is the visible confirmation surface instead of a Dayframe foreground splash. |
@@ -32,7 +32,7 @@ Last verified: 2026-07-12 15:13 BST
 
 | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Today timer panel polish | Watch | PR #51, build `0.1.0 (26)`, delivery/build ID `1614e6b0-9ce8-4ee7-b763-515ec0e1629d`. | Keeps the active timer detail panel mounted for smoother expansion, improves blank active timer copy to `Add a task description`, shows `Uncategorized` immediately when selected, renames `Frequent` to `Quick actions`, and makes quick-action/pinned category pills visually thinner while preserving 44px tap targets. |
+| Today timer panel polish | Watch | PR #51 covered web only; PR #52, build `0.1.0 (27)`, delivery/build ID `e0df39a1-9b1d-4a65-ad6b-9144f64d8c3a`, applies the fix to iOS. | Removes the old visible `Running` fallback/status from the iOS Today active timer, improves blank active timer copy to `Add a task description`, shows `Uncategorized` immediately, adds `Uncategorized` as the first quick action, renames `Frequent` to `Quick actions`, makes quick-action/pinned category pills visually thinner while preserving 44px tap targets, and adds layout transitions for start/stop/delete. |
 | Generic integration timer API and natural-language rule creation | Watch | PR #50, build `0.1.0 (25)`, delivery/build ID `605005f7-f4c3-4f19-89cb-48ed87b0829a`. | Adds the generic `GET /api/integrations/v1/time/current` endpoint with `time:read` tokens, documents the integration API, lets the automation assistant save review-first geofence-exit rules with category/project/activity description, hardens workspace scoping, and bundles the Live Activity expanded-label nudge. Hosted Supabase migration application could not be verified from this machine because Vercel env pull returned blank secret values. |
 | Live Activity Dynamic Island polish | Watch | PR #49, build `0.1.0 (24)`, delivery/build ID `30ad5c74-704f-4d64-80a7-c721467df1cb`. | Tightens compact Dynamic Island content to a small timer plus stop control, reworks expanded Live Activity text/control alignment to avoid clipping, and adds an iOS 17 Live Activity stop button backed by the existing native stop queue. |
 | Background Shortcuts and Live Activity | Watch | PR #48, build `0.1.0 (23)`, delivery/build ID `8ecf06ec-7953-489e-85cf-5c21fcf3e15e`. | Adds native queued Start/Stop App Intent handling for Shortcut/NFC triggers, drains native Shortcut events through the normal mobile offline queue, adds a Live Activity/Dynamic Island timer confirmation surface, and bundles the Settings > Automations > Places cleanup that removes the distracting right-side logo/spinner. Watch real-device Shortcut/NFC foreground behaviour, suspended/offline queue replay, and Live Activity/Dynamic Island lifecycle before marking settled. |
@@ -68,7 +68,7 @@ Last verified: 2026-07-12 15:13 BST
 | Sleep stages fragmented into REM/Core/Deep cards | Watch | PRs #23, #26, and #29. | Current imports group sessions; legacy sleep-stage backlog cleanup is merged. |
 | Health items left in Review without useful explanation | Watch | PRs #22, #25, #26, #27, and #29. | Diagnostics and left-in-review reasons exist; continue checking that reasons are clear on device. |
 | Geo/place default description mismatch | Done | PR #19 and PR #26. | Place names should remain reference/context; configured activity descriptions are used for geofence display and Confirm. |
-| TestFlight release preflight and compliance checks | Done | PR #31 plus build release runs through `0.1.0 (26)`. | Keep verifying processing state, encryption compliance, notes, and internal testing assignment before asking KB to test. Docs-only PRs do not need a TestFlight build unless they change release/build configuration. |
+| TestFlight release preflight and compliance checks | Done | PR #31 plus build release runs through `0.1.0 (27)`. | Keep verifying processing state, encryption compliance, notes, and internal testing assignment before asking KB to test. Docs-only PRs do not need a TestFlight build unless they change release/build configuration. |
 
 ## Future Tracks
 
