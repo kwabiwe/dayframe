@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
+  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -12,12 +13,17 @@ import * as Location from "expo-location";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
-import { paletteColorFor } from "@dayframe/shared";
+import {
+  formatLocationCoordinates,
+  locationAddressSummary,
+  paletteColorFor
+} from "@dayframe/shared";
 import {
   AuthRequiredError,
   createPlace,
   deletePlace,
   fetchBootstrap,
+  forgetLearnedPlace,
   ignoreLearnedPlace,
   updatePlace,
   type MobileBootstrap,
@@ -57,6 +63,8 @@ export default function PlacesScreen() {
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [ignoringLearnedId, setIgnoringLearnedId] = useState<string | null>(null);
+  const [forgettingLearnedId, setForgettingLearnedId] = useState<string | null>(null);
+  const [selectedLearnedPlace, setSelectedLearnedPlace] = useState<MobileLearnedPlace | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [formMode, setFormMode] = useState<PlaceFormMode | null>(null);
   const [placeName, setPlaceName] = useState("");
@@ -113,6 +121,7 @@ export default function PlacesScreen() {
 
   function beginSaveLearnedPlace(learnedPlace: MobileLearnedPlace) {
     scheduleLayoutTransition(reduceMotion);
+    setSelectedLearnedPlace(null);
     setFormMode({ type: "create", learnedPlace });
     setPlaceName(learnedPlace.name);
     setLatitudeText(formatCoordinate(learnedPlace.latitude));
@@ -291,6 +300,22 @@ export default function PlacesScreen() {
     }
   }
 
+  function confirmIgnoreLearnedCandidate(learnedPlace: MobileLearnedPlace) {
+    Alert.alert(
+      "Ignore learned place",
+      "Ignore hides this learned location from save suggestions. It will not create or confirm any time entries.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Ignore",
+          onPress: () => {
+            void ignoreLearnedCandidate(learnedPlace);
+          }
+        }
+      ]
+    );
+  }
+
   async function ignoreLearnedCandidate(learnedPlace: MobileLearnedPlace) {
     setIgnoringLearnedId(learnedPlace.id);
     try {
@@ -311,6 +336,43 @@ export default function PlacesScreen() {
     }
   }
 
+  function confirmForgetLearnedCandidate(learnedPlace: MobileLearnedPlace) {
+    Alert.alert(
+      "Forget learned place",
+      "Forget deletes this learned candidate. Dayframe may learn it again later if future visits provide enough evidence.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Forget",
+          style: "destructive",
+          onPress: () => {
+            void forgetLearnedCandidate(learnedPlace);
+          }
+        }
+      ]
+    );
+  }
+
+  async function forgetLearnedCandidate(learnedPlace: MobileLearnedPlace) {
+    setForgettingLearnedId(learnedPlace.id);
+    try {
+      await forgetLearnedPlace(learnedPlace.id);
+      removeLocalLearnedPlace(learnedPlace.id);
+      await refreshAfterPlaceChange({
+        prefix: "Learned place forgotten.",
+        removeLearnedPlaceId: learnedPlace.id
+      });
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        router.replace("/");
+        return;
+      }
+      Alert.alert("Places", error instanceof Error ? error.message : "Unable to forget learned place.");
+    } finally {
+      setForgettingLearnedId(null);
+    }
+  }
+
   function upsertLocalPlace(place: MobilePlace) {
     setData((current) => current ? reconcileBootstrapPlaces(current, { upsertPlace: place }) : current);
   }
@@ -320,6 +382,7 @@ export default function PlacesScreen() {
   }
 
   function removeLocalLearnedPlace(id: string) {
+    setSelectedLearnedPlace((current) => current?.id === id ? null : current);
     setData((current) => current ? reconcileBootstrapPlaces(current, { removeLearnedPlaceId: id }) : current);
   }
 
@@ -569,10 +632,9 @@ export default function PlacesScreen() {
                     key={learnedPlace.id}
                     learnedPlace={learnedPlace}
                     ignoring={ignoringLearnedId === learnedPlace.id}
+                    onOpen={() => setSelectedLearnedPlace(learnedPlace)}
                     onSave={() => beginSaveLearnedPlace(learnedPlace)}
-                    onIgnore={() => {
-                      void ignoreLearnedCandidate(learnedPlace);
-                    }}
+                    onIgnore={() => confirmIgnoreLearnedCandidate(learnedPlace)}
                     theme={theme}
                     styles={styles}
                   />
@@ -584,6 +646,19 @@ export default function PlacesScreen() {
           </View>
         </View>
       </ScrollView>
+      <LearnedPlaceDetailSheet
+        categories={categories}
+        forgetting={Boolean(selectedLearnedPlace && forgettingLearnedId === selectedLearnedPlace.id)}
+        ignoring={Boolean(selectedLearnedPlace && ignoringLearnedId === selectedLearnedPlace.id)}
+        learnedPlace={selectedLearnedPlace}
+        onClose={() => setSelectedLearnedPlace(null)}
+        onEdit={(learnedPlace) => beginSaveLearnedPlace(learnedPlace)}
+        onForget={(learnedPlace) => confirmForgetLearnedCandidate(learnedPlace)}
+        onIgnore={(learnedPlace) => confirmIgnoreLearnedCandidate(learnedPlace)}
+        onSave={(learnedPlace) => beginSaveLearnedPlace(learnedPlace)}
+        styles={styles}
+        theme={theme}
+      />
     </SafeAreaView>
   );
 }
@@ -653,6 +728,7 @@ function PlaceRow({
 function LearnedPlaceRow({
   learnedPlace,
   ignoring,
+  onOpen,
   onSave,
   onIgnore,
   theme,
@@ -660,16 +736,22 @@ function LearnedPlaceRow({
 }: {
   learnedPlace: MobileLearnedPlace;
   ignoring: boolean;
+  onOpen: () => void;
   onSave: () => void;
   onIgnore: () => void;
   theme: MobileTheme;
   styles: MobileStyles;
 }) {
   return (
-    <View style={styles.placeRow}>
+    <Pressable
+      accessibilityLabel={`Open learned place ${learnedPlace.name}`}
+      accessibilityRole="button"
+      style={pressable(styles.placeRow, styles.buttonPressed)}
+      onPress={onOpen}
+    >
       <MapPinGlyph color={theme.textSecondary} />
       <View style={styles.placeTextStack}>
-        <Text style={styles.placeName} numberOfLines={1}>{learnedPlace.name}</Text>
+        <Text style={styles.placeName} numberOfLines={2}>{learnedPlace.name}</Text>
         <Text style={styles.placeMeta} numberOfLines={2}>
           {formatLearnedPlaceMeta(learnedPlace)}
         </Text>
@@ -678,10 +760,10 @@ function LearnedPlaceRow({
         <Pressable
           accessibilityLabel={`Save ${learnedPlace.name} as a place`}
           accessibilityRole="button"
-          style={pressable(styles.secondaryButton, styles.buttonPressed)}
+          style={pressable(styles.learnedPlaceSaveButton, styles.buttonPressed)}
           onPress={onSave}
         >
-          <Text style={styles.secondaryButtonText}>Save</Text>
+          <Text style={styles.learnedPlaceSaveButtonText}>Save</Text>
         </Pressable>
         <Pressable
           accessibilityLabel={`Ignore ${learnedPlace.name}`}
@@ -697,6 +779,149 @@ function LearnedPlaceRow({
           <ArchiveGlyph color={theme.textSecondary} />
         </Pressable>
       </View>
+    </Pressable>
+  );
+}
+
+function LearnedPlaceDetailSheet({
+  categories,
+  forgetting,
+  ignoring,
+  learnedPlace,
+  onClose,
+  onEdit,
+  onForget,
+  onIgnore,
+  onSave,
+  styles,
+  theme
+}: {
+  categories: Category[];
+  forgetting: boolean;
+  ignoring: boolean;
+  learnedPlace: MobileLearnedPlace | null;
+  onClose: () => void;
+  onEdit: (learnedPlace: MobileLearnedPlace) => void;
+  onForget: (learnedPlace: MobileLearnedPlace) => void;
+  onIgnore: (learnedPlace: MobileLearnedPlace) => void;
+  onSave: (learnedPlace: MobileLearnedPlace) => void;
+  styles: MobileStyles;
+  theme: MobileTheme;
+}) {
+  if (!learnedPlace) return null;
+
+  const address = locationAddressSummary(learnedPlace.rawPayload?.address);
+  const coordinates = formatLocationCoordinates(learnedPlace.latitude, learnedPlace.longitude, 6);
+  const associatedCategory = learnedPlaceCategoryLabel(learnedPlace, categories);
+  const disabled = ignoring || forgetting;
+
+  return (
+    <Modal animationType="slide" onRequestClose={onClose} transparent visible>
+      <View style={styles.sheetOverlay}>
+        <Pressable accessibilityLabel="Close learned place details" style={styles.sheetBackdrop} onPress={onClose} />
+        <View style={styles.activeEditSheet}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.sheetHeader}>
+            <Pressable
+              accessibilityLabel="Close"
+              accessibilityRole="button"
+              style={pressable(styles.sheetIconButton, styles.buttonPressed)}
+              onPress={onClose}
+            >
+              <CloseGlyph color={theme.accent} />
+            </Pressable>
+            <Text style={styles.sheetTitle} numberOfLines={2}>Learned place</Text>
+            <View style={styles.sheetHeaderSpacer} />
+          </View>
+
+          <ScrollView style={styles.activeEditScroller} contentContainerStyle={styles.activeEditContent}>
+            <Text style={styles.sectionTitle}>{learnedPlace.name}</Text>
+            <Text style={styles.muted}>
+              Learned-only candidates are not saved places until you save them. Ignore hides this suggestion; Forget deletes the candidate.
+            </Text>
+
+            <View style={styles.accountList}>
+              <LearnedPlaceDetailRow label="Resolved name" value={learnedPlace.name} styles={styles} />
+              <LearnedPlaceDetailRow label="Address/postcode" value={address ?? "Not resolved"} styles={styles} />
+              <LearnedPlaceDetailRow label="Coordinates" value={coordinates ?? "Unavailable"} styles={styles} />
+              <LearnedPlaceDetailRow
+                label="Detected visits"
+                value={`${learnedPlace.visitCount} ${learnedPlace.visitCount === 1 ? "visit" : "visits"}`}
+                styles={styles}
+              />
+              <LearnedPlaceDetailRow
+                label="Samples"
+                value={`${learnedPlace.sampleCount} ${learnedPlace.sampleCount === 1 ? "sample" : "samples"}`}
+                styles={styles}
+              />
+              <LearnedPlaceDetailRow label="Last seen" value={formatShortDateTime(learnedPlace.lastSeenAt)} styles={styles} />
+              <LearnedPlaceDetailRow label="Learned radius" value={`${learnedPlace.radiusMeters}m`} styles={styles} />
+              <LearnedPlaceDetailRow label="Category/activity" value={associatedCategory} styles={styles} />
+              <LearnedPlaceDetailRow label="Status" value="Learned-only candidate" styles={styles} />
+            </View>
+
+            <View style={styles.buttonRow}>
+              <Pressable
+                accessibilityRole="button"
+                style={pressable(styles.primaryInlineButton, styles.buttonPressed)}
+                onPress={() => onSave(learnedPlace)}
+              >
+                <Text style={styles.primaryButtonText}>Save place</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                style={pressable(styles.secondaryButton, styles.buttonPressed)}
+                onPress={() => onEdit(learnedPlace)}
+              >
+                <Text style={styles.secondaryButtonText}>Edit before saving</Text>
+              </Pressable>
+            </View>
+            <View style={styles.buttonRow}>
+              <Pressable
+                accessibilityRole="button"
+                disabled={disabled}
+                style={({ pressed }) => [
+                  styles.secondaryButton,
+                  disabled ? styles.buttonDisabled : null,
+                  pressed && !disabled ? styles.buttonPressed : null
+                ]}
+                onPress={() => onIgnore(learnedPlace)}
+              >
+                <Text style={styles.secondaryButtonText}>{ignoring ? "Ignoring..." : "Ignore"}</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                disabled={disabled}
+                style={({ pressed }) => [
+                  styles.activeEditDeleteButton,
+                  disabled ? styles.buttonDisabled : null,
+                  pressed && !disabled ? styles.buttonPressed : null
+                ]}
+                onPress={() => onForget(learnedPlace)}
+              >
+                <Text style={styles.activeEditDeleteText}>{forgetting ? "Forgetting..." : "Forget"}</Text>
+              </Pressable>
+            </View>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function LearnedPlaceDetailRow({
+  label,
+  value,
+  styles
+}: {
+  label: string;
+  value: string;
+  styles: MobileStyles;
+}) {
+  return (
+    <View style={styles.accountRow}>
+      <Text style={styles.label}>{label}</Text>
+      <Text style={styles.accountValue} numberOfLines={3}>{value}</Text>
     </View>
   );
 }
@@ -784,6 +1009,23 @@ function formatLearnedPlaceMeta(learnedPlace: MobileLearnedPlace) {
   return `${visits} · ${samples} · ${learnedPlace.radiusMeters}m radius · Last seen ${lastSeen}`;
 }
 
+function learnedPlaceCategoryLabel(learnedPlace: MobileLearnedPlace, categories: Category[]) {
+  const raw = learnedPlace.rawPayload ?? {};
+  const categoryName = typeof raw.categoryName === "string" && raw.categoryName.trim()
+    ? raw.categoryName.trim()
+    : null;
+  if (categoryName) return categoryName;
+  const categoryId = typeof raw.categoryId === "string" ? raw.categoryId : null;
+  const category = categoryId ? categories.find((candidate) => candidate.id === categoryId) : null;
+  const description = typeof raw.activityDescription === "string" && raw.activityDescription.trim()
+    ? raw.activityDescription.trim()
+    : null;
+  if (category && description) return `${category.name} · ${description}`;
+  if (category) return category.name;
+  if (description) return description;
+  return "Not set until saved";
+}
+
 function formatShortDateTime(value: string) {
   const timestamp = new Date(value);
   if (Number.isNaN(timestamp.getTime())) return "recently";
@@ -806,6 +1048,14 @@ function BackGlyph({ color }: { color: string }) {
   return (
     <Svg width={20} height={20} viewBox="0 0 24 24">
       <Path d="M15 5 8 12l7 7" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.3} />
+    </Svg>
+  );
+}
+
+function CloseGlyph({ color }: { color: string }) {
+  return (
+    <Svg width={18} height={18} viewBox="0 0 24 24">
+      <Path d="M6 6l12 12M18 6 6 18" stroke={color} strokeLinecap="round" strokeWidth={2.4} />
     </Svg>
   );
 }

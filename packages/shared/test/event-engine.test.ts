@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   applyActivityEvent,
+  formatLocationCoordinates,
+  locationAddressSummary,
   mapHealthKitSleepStage,
   normalizeActivityEvent,
+  readableLocationNameFromParts,
   type NormalizationContext,
   type TimelineState
 } from "../src";
@@ -348,6 +351,10 @@ describe("event normalization", () => {
         occurredAt: new Date("2026-06-20T09:15:00Z"),
         rawPayload: {
           candidateName: "Regular place near 51.501, -0.120",
+          address: {
+            street: "New London Road",
+            postalCode: "CM2 0XX"
+          },
           latitude: 51.501,
           longitude: -0.12,
           startedAt: "2026-06-20T08:45:00.000Z",
@@ -361,7 +368,28 @@ describe("event normalization", () => {
     expect(candidate.action).toBe("create_review_item");
     expect(candidate.reviewStatus).toBe("needs_review");
     expect(candidate.confidence).toBe("low");
-    expect(candidate.title).toBe("Regular place near 51.501, -0.120");
+    expect(candidate.title).toBe("Near New London Road");
+  });
+
+  it("formats readable location names without promoting coordinates to primary copy", () => {
+    expect(readableLocationNameFromParts({
+      address: { name: "Tesco Springfield", street: "Springfield Road", postalCode: "CM2 6QT" },
+      latitude: 51.7484,
+      longitude: 0.4381
+    })).toBe("Near Tesco Springfield");
+    expect(readableLocationNameFromParts({
+      address: { name: "12 New London Road", streetNumber: "12", street: "New London Road", postalCode: "CM2 0XX" },
+      latitude: 51.7484,
+      longitude: 0.4381
+    })).toBe("Near New London Road");
+    expect(readableLocationNameFromParts({
+      fallbackName: "Regular place near 51.748, 0.438",
+      latitude: 51.7484,
+      longitude: 0.4381
+    })).toBe("Unknown place near 51.748, 0.438");
+    expect(locationAddressSummary({ street: "New London Road", city: "Chelmsford", postalCode: "CM2 0XX" }))
+      .toBe("New London Road, Chelmsford, CM2 0XX");
+    expect(formatLocationCoordinates(51.7484, 0.4381)).toBe("51.748, 0.438");
   });
 
   it("maps HealthKit sleep stages into Dayframe stages", () => {

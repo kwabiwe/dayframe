@@ -9,6 +9,7 @@ import {
   normalizeActivityEvent,
   shouldAutoConfirmHealthSleep,
   shouldAutoConfirmHealthWorkout,
+  readableLocationNameFromParts,
   type ActivityEventType,
   type ActivityEventInput,
   type HealthAutoLogMappings,
@@ -919,6 +920,28 @@ export async function updateLearnedPlaceStatus(
          and status = 'candidate'
        returning id`,
       [learnedPlaceId, session.workspaceId, session.userId, status]
+    );
+    return result.rows[0] ?? null;
+  } catch (error) {
+    const readinessError = learnedPlacesReadinessError(error);
+    if (readinessError) throw readinessError;
+    throw error;
+  }
+}
+
+export async function deleteLearnedPlace(
+  learnedPlaceId: string,
+  session: RequestSession = getDevSession()
+) {
+  try {
+    const result = await query<{ id: string }>(
+      `delete from learned_places
+       where id = $1
+         and workspace_id = $2
+         and user_id = $3
+         and status = 'candidate'
+       returning id`,
+      [learnedPlaceId, session.workspaceId, session.userId]
     );
     return result.rows[0] ?? null;
   } catch (error) {
@@ -2407,7 +2430,7 @@ function commuteCategorySpec() {
 }
 
 function reviewItemDescriptionForConfirmedEntry(item: Pick<HealthReviewItemRow, "eventType" | "title">) {
-  if (item.eventType === "commute_detected") return null;
+  if (item.eventType === "commute_detected" || item.eventType === "learned_place_visit") return null;
   return item.title;
 }
 
@@ -2908,10 +2931,15 @@ async function upsertLearnedPlaceVisit(
   const startedAt = timestampStringOrNull(event.rawPayload.startedAt) ?? event.occurredAt.toISOString();
   const stoppedAt = timestampStringOrNull(event.rawPayload.stoppedAt) ?? event.occurredAt.toISOString();
   const clusterKey = stringOrNull(event.rawPayload.clusterKey) ?? learnedPlaceClusterKey(latitude, longitude);
-  const candidateName =
-    stringOrNull(event.rawPayload.placeName) ??
-    stringOrNull(event.rawPayload.candidateName) ??
-    `Regular place near ${latitude.toFixed(3)}, ${longitude.toFixed(3)}`;
+  const candidateName = readableLocationNameFromParts({
+    address: event.rawPayload.address,
+    latitude,
+    longitude,
+    fallbackName:
+      event.description ??
+      stringOrNull(event.rawPayload.placeName) ??
+      stringOrNull(event.rawPayload.candidateName)
+  });
   const sampleCount = Math.max(1, Math.round(numberOrNull(event.rawPayload.sampleCount) ?? 1));
 
   await client.query(

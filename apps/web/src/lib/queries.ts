@@ -73,6 +73,7 @@ export type LearnedPlaceRow = {
   lastStoppedAt: string | null;
   confidence: string;
   status: "candidate" | "accepted" | "ignored";
+  rawPayload: Record<string, unknown> | null;
 };
 
 export type AutomationRuleRow = {
@@ -131,6 +132,7 @@ export type ReviewItemRow = {
   confidence: string;
   status: string;
   notes: string | null;
+  rawPayload: Record<string, unknown> | null;
   createdAt: string;
 };
 
@@ -459,7 +461,8 @@ async function getLearnedPlaces(session: RequestSession, limit = 10) {
               last_started_at as "lastStartedAt",
               last_stopped_at as "lastStoppedAt",
               confidence,
-              status
+              status,
+              raw_payload as "rawPayload"
        from learned_places
        where workspace_id = $1
          and user_id = $2
@@ -658,6 +661,7 @@ async function getReviewItems(session: RequestSession) {
             ri.confidence,
             ri.status,
             ri.notes,
+            ae.raw_payload as "rawPayload",
             ri.created_at as "createdAt"
      from review_items ri
      left join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id

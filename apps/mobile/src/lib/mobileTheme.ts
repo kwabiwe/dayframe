@@ -724,7 +724,8 @@ function createStyles(theme: MobileTheme) {
       height: 32,
       borderWidth: 1,
       borderColor: theme.borderStrong,
-      borderRadius: 999
+      borderRadius: 999,
+      overflow: "hidden"
     },
     legendText: {
       flex: 1,
@@ -849,6 +850,33 @@ function createStyles(theme: MobileTheme) {
       fontSize: 12,
       lineHeight: 17
     },
+    reviewNoteButton: {
+      minHeight: 44,
+      borderWidth: 1,
+      borderColor: theme.warning,
+      backgroundColor: theme.surfaceMuted,
+      borderRadius: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 10
+    },
+    reviewNoteText: {
+      flex: 1,
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "800",
+      lineHeight: 17
+    },
+    reviewNoteAction: {
+      color: theme.accentText,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "800"
+    },
     reportRangeRow: {
       flexDirection: "row",
       gap: 8
@@ -938,9 +966,11 @@ function createStyles(theme: MobileTheme) {
     },
     reportCategorySwatch: {
       width: 12,
+      height: 36,
       borderWidth: 1,
       borderColor: theme.borderStrong,
-      borderRadius: 999
+      borderRadius: 999,
+      overflow: "hidden"
     },
     reportCategoryBody: {
       flex: 1,
@@ -962,6 +992,13 @@ function createStyles(theme: MobileTheme) {
     reportBarFill: {
       height: "100%",
       borderRadius: 999
+    },
+    reportBarFillUncategorized: {
+      borderWidth: 1,
+      borderColor: theme.borderStrong
+    },
+    uncategorizedSwatch: {
+      backgroundColor: theme.surfaceMuted
     },
     reportDailyChart: {
       height: 150,
@@ -1093,6 +1130,22 @@ function createStyles(theme: MobileTheme) {
     placeActions: {
       flexDirection: "row",
       gap: 4
+    },
+    learnedPlaceSaveButton: {
+      minHeight: 38,
+      borderWidth: 1,
+      borderColor: theme.controlBorder,
+      backgroundColor: theme.surfaceRaised,
+      borderRadius: 999,
+      paddingHorizontal: 10,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    learnedPlaceSaveButtonText: {
+      color: theme.accentText,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "800"
     },
     placeForm: {
       borderWidth: 1,

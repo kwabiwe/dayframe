@@ -759,7 +759,7 @@ export default function SettingsScreen() {
             <>
               <View style={styles.panel}>
                 <Text style={styles.sectionTitle}>Settings</Text>
-                <Text style={styles.muted}>Grouped controls for account, tracking, automation, sync and permissions.</Text>
+                <Text style={styles.muted}>Grouped controls for account, tracking, places, sync and permissions.</Text>
               </View>
 
               <SettingsGroup title="Dayframe">
@@ -792,8 +792,8 @@ export default function SettingsScreen() {
               <SettingsGroup title="Tracking">
                 <SettingsMenuRow
                   icon="automations"
-                  label="Automations"
-                  value="Shortcuts, NFC, places"
+                  label="Places & Location"
+                  value="Places, permissions, learning"
                   styles={styles}
                   theme={theme}
                   onPress={() => openSettingsSection("automations")}
@@ -1046,13 +1046,6 @@ export default function SettingsScreen() {
 
           {settingsSection === "automations" ? (
           <>
-          <View style={styles.panel}>
-            <Text style={styles.sectionTitle}>Shortcuts and NFC</Text>
-            <Text style={styles.muted}>
-              Apple Shortcuts handles NFC triggers. Dayframe exposes Start tracking and Stop tracking actions; Start can use an optional description, category, and the current workspace.
-            </Text>
-          </View>
-
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Places</Text>
             <Text style={styles.muted}>
@@ -1507,7 +1500,7 @@ function settingsSectionTitle(section: SettingsSection) {
     case "categories":
       return "Categories";
     case "automations":
-      return "Automations";
+      return "Places & Location";
     case "health":
       return "Health";
     case "sync":
@@ -1677,9 +1670,9 @@ const eventLabels: Record<string, string> = {
   quick_action: "Quick action",
   geofence_enter: "Entered place",
   geofence_exit: "Left place",
-  unknown_stay: "Unknown stay",
+  unknown_stay: "Detected stay",
   commute_detected: "Commute detected",
-  learned_place_visit: "Learned place visit",
+  learned_place_visit: "Detected visit",
   nfc_action: "NFC action",
   shortcut_action: "Shortcut action",
   calendar_hint: "Calendar hint",

@@ -9,6 +9,7 @@ const session = {
 
 const mocks = vi.hoisted(() => ({
   resolveRequestSession: vi.fn(),
+  deleteLearnedPlace: vi.fn(),
   updateLearnedPlaceStatus: vi.fn()
 }));
 
@@ -17,15 +18,17 @@ vi.mock("@/lib/ingest-auth", () => ({
 }));
 
 vi.mock("@/lib/event-service", () => ({
+  deleteLearnedPlace: mocks.deleteLearnedPlace,
   updateLearnedPlaceStatus: mocks.updateLearnedPlaceStatus
 }));
 
-const { PATCH } = await import("./route");
+const { DELETE, PATCH } = await import("./route");
 
 describe("/api/learned-places", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.resolveRequestSession.mockResolvedValue(session);
+    mocks.deleteLearnedPlace.mockResolvedValue({ id: learnedPlaceId() });
     mocks.updateLearnedPlaceStatus.mockResolvedValue({ id: learnedPlaceId() });
   });
 
@@ -36,6 +39,17 @@ describe("/api/learned-places", () => {
     expect(response.status).toBe(200);
     expect(payload).toEqual({ ok: true, id: learnedPlaceId(), status: "ignored" });
     expect(mocks.updateLearnedPlaceStatus).toHaveBeenCalledWith(learnedPlaceId(), "ignored", session);
+  });
+
+  it("forgets learned place candidates", async () => {
+    const response = await DELETE(new Request(`https://dayframe.test/api/learned-places?id=${learnedPlaceId()}`, {
+      method: "DELETE"
+    }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({ ok: true, id: learnedPlaceId(), status: "forgotten" });
+    expect(mocks.deleteLearnedPlace).toHaveBeenCalledWith(learnedPlaceId(), session);
   });
 });
 

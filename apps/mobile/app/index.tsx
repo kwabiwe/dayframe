@@ -14,7 +14,7 @@ import {
   TextInput,
   View
 } from "react-native";
-import Svg, { Circle, G, Path } from "react-native-svg";
+import Svg, { Circle, Defs, G, Path, Pattern, Rect } from "react-native-svg";
 import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from "expo-glass-effect";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -70,6 +70,7 @@ import {
 import {
   REVIEW_COPY,
   buildReviewItemDraftEntry,
+  countReviewNeededActivityForRange,
   hasReviewNeededActivityForRange,
   isOpenReviewItem,
   isReviewNeededEntry
@@ -108,6 +109,7 @@ type SummarySegment = {
   seconds: number;
   share: number;
   color: string;
+  isUncategorized: boolean;
 };
 type StartTimerSheetInput = {
   categoryId: string | null;
@@ -493,9 +495,9 @@ export default function HomeScreen() {
     [summaryEntries, now, theme.mode]
   );
   const summaryTotal = summarySegments.reduce((sum, segment) => sum + segment.seconds, 0);
-  const summaryHasSuggestedActivity = useMemo(() => {
+  const summaryReviewCount = useMemo(() => {
     const rangeStart = dateFromKey(todayKey);
-    return hasReviewNeededActivityForRange({
+    return countReviewNeededActivityForRange({
       entries: summaryEntries,
       now,
       rangeEnd: addDaysToDate(rangeStart, 1),
@@ -1173,7 +1175,8 @@ export default function HomeScreen() {
 
               <TodaySummary
                 chartProgress={chartProgress}
-                hasSuggestedActivity={summaryHasSuggestedActivity}
+                onOpenReview={() => router.push("./review")}
+                reviewCount={summaryReviewCount}
                 segments={summarySegments}
                 styles={styles}
                 theme={theme}
@@ -1874,7 +1877,7 @@ function ReportsTab({
                 <View style={styles.legendList}>
                   {segments.map((segment) => (
                     <View key={segment.key} style={styles.legendRow}>
-                      <View style={[styles.legendSwatch, { backgroundColor: segment.color }]} />
+                      <SegmentSwatch segment={segment} styles={styles} theme={theme} variant="legend" />
                       <View style={styles.legendText}>
                         <Text style={styles.legendPlace} numberOfLines={1}>{segment.categoryName}</Text>
                         <Text style={styles.legendProject}>Category</Text>
@@ -1891,7 +1894,7 @@ function ReportsTab({
               <View style={styles.reportCategoryList}>
                 {segments.map((segment) => (
                   <View key={segment.key} style={styles.reportCategoryRow}>
-                    <View style={[styles.reportCategorySwatch, { backgroundColor: segment.color }]} />
+                    <SegmentSwatch segment={segment} styles={styles} theme={theme} variant="report" />
                     <View style={styles.reportCategoryBody}>
                       <View style={styles.reportCategoryHeader}>
                         <Text style={styles.legendPlace} numberOfLines={1}>{segment.categoryName}</Text>
@@ -1901,6 +1904,7 @@ function ReportsTab({
                         <View
                           style={[
                             styles.reportBarFill,
+                            segment.isUncategorized ? styles.reportBarFillUncategorized : null,
                             {
                               backgroundColor: segment.color,
                               width: `${Math.max(4, Math.round((segment.seconds / maxSegmentSeconds) * 100))}%`
@@ -2056,14 +2060,16 @@ function CloseGlyph({ color }: { color: string }) {
 
 function TodaySummary({
   chartProgress,
-  hasSuggestedActivity,
+  onOpenReview,
+  reviewCount,
   segments,
   styles,
   theme,
   total
 }: {
   chartProgress: number;
-  hasSuggestedActivity: boolean;
+  onOpenReview: () => void;
+  reviewCount: number;
   segments: SummarySegment[];
   styles: MobileStyles;
   theme: MobileTheme;
@@ -2082,8 +2088,21 @@ function TodaySummary({
       <View style={styles.chartWrap}>
         <DonutChart progress={chartProgress} segments={segments} styles={styles} theme={theme} total={total} />
       </View>
-      {hasSuggestedActivity ? (
-        <Text style={styles.reviewNote}>{REVIEW_COPY.suggestedNote}</Text>
+      {reviewCount > 0 ? (
+        <Pressable
+          accessibilityLabel={`${reviewCount} ${reviewCount === 1 ? "item needs" : "items need"} review. Open Review.`}
+          accessibilityRole="button"
+          onPress={onOpenReview}
+          style={({ pressed }) => [
+            styles.reviewNoteButton,
+            pressed ? styles.buttonPressed : null
+          ]}
+        >
+          <Text style={styles.reviewNoteText}>
+            {reviewCount} {reviewCount === 1 ? "item needs" : "items need"} review
+          </Text>
+          <Text style={styles.reviewNoteAction}>Open Review</Text>
+        </Pressable>
       ) : null}
 
       <View style={styles.legendList}>
@@ -2092,7 +2111,7 @@ function TodaySummary({
         ) : null}
         {segments.map((segment) => (
           <View key={segment.key} style={styles.legendRow}>
-            <View style={[styles.legendSwatch, { backgroundColor: segment.color }]} />
+            <SegmentSwatch segment={segment} styles={styles} theme={theme} variant="legend" />
             <View style={styles.legendText}>
               <Text style={styles.legendPlace}>{segment.categoryName}</Text>
               <Text style={styles.legendProject}>Category</Text>
@@ -2141,6 +2160,17 @@ function DonutChart({
         height={size}
         viewBox={`0 0 ${size} ${size}`}
       >
+        <Defs>
+          <Pattern id="uncategorizedHatch" patternUnits="userSpaceOnUse" width={8} height={8}>
+            <Rect width={8} height={8} fill={uncategorizedFillColor(theme.mode)} />
+            <Path
+              d="M-2 8 8 -2M2 10 10 2"
+              stroke={uncategorizedStripeColor(theme.mode)}
+              strokeLinecap="round"
+              strokeWidth={1.4}
+            />
+          </Pattern>
+        </Defs>
         <Circle cx={center} cy={center} r={outerRadius} fill={theme.chartTrack} />
         <Circle cx={center} cy={center} r={innerRadius} fill={theme.surfaceRaised} />
         <G>
@@ -2157,7 +2187,10 @@ function DonutChart({
                   <Path
                     key={segment.key}
                     d={donutSlicePath(center, center, outerRadius, innerRadius, start, end)}
-                    fill={segment.color}
+                    fill={segment.isUncategorized ? "url(#uncategorizedHatch)" : segment.color}
+                    stroke={segment.isUncategorized ? uncategorizedStripeColor(theme.mode) : undefined}
+                    strokeOpacity={segment.isUncategorized ? 0.65 : undefined}
+                    strokeWidth={segment.isUncategorized ? 0.75 : undefined}
                   />
                 );
               })
@@ -2168,6 +2201,41 @@ function DonutChart({
         <Text style={styles.chartCenterLabel}>Total</Text>
         <Text style={styles.chartCenterValue}>{formatDuration(total)}</Text>
       </View>
+    </View>
+  );
+}
+
+function SegmentSwatch({
+  segment,
+  styles,
+  theme,
+  variant
+}: {
+  segment: SummarySegment;
+  styles: MobileStyles;
+  theme: MobileTheme;
+  variant: "legend" | "report";
+}) {
+  const swatchStyle = variant === "legend" ? styles.legendSwatch : styles.reportCategorySwatch;
+  if (!segment.isUncategorized) {
+    return <View style={[swatchStyle, { backgroundColor: segment.color }]} />;
+  }
+
+  const width = 12;
+  const height = variant === "legend" ? 32 : 36;
+  return (
+    <View style={[swatchStyle, styles.uncategorizedSwatch]}>
+      <Svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
+        <Rect width={width} height={height} fill={uncategorizedFillColor(theme.mode)} />
+        {Array.from({ length: 8 }, (_, index) => (
+          <Path
+            key={index}
+            d={`M${index * 6 - height} ${height} L${index * 6} 0`}
+            stroke={uncategorizedStripeColor(theme.mode)}
+            strokeWidth={1.4}
+          />
+        ))}
+      </Svg>
     </View>
   );
 }
@@ -2295,6 +2363,7 @@ function buildCategorySegments(
     if (startedAt < rangeStart || startedAt >= rangeEnd) continue;
     const categoryName = entry.categoryName ?? "Uncategorized";
     const key = entry.categoryId ?? "uncategorized";
+    const isUncategorized = !entry.categoryId && !entry.categoryName;
     const current = totals.get(key);
     const seconds = entryDurationSeconds(entry, now);
 
@@ -2302,7 +2371,8 @@ function buildCategorySegments(
       key,
       categoryName,
       seconds: (current?.seconds ?? 0) + seconds,
-      color: current?.color ?? entryCategoryColor(entry, mode)
+      color: current?.color ?? entryCategoryColor(entry, mode),
+      isUncategorized: current?.isUncategorized ?? isUncategorized
     });
   }
 
@@ -2418,6 +2488,7 @@ function entryDurationSeconds(entry: TimeEntry, now: number) {
 }
 
 function entryCategoryColor(entry: TimeEntry, mode: MobileTheme["mode"]) {
+  if (!entry.categoryId && !entry.categoryName) return uncategorizedFillColor(mode);
   return paletteColorFor(
     entry.categoryColor ?? entry.categoryId,
     entry.categoryName ?? "Uncategorized",
@@ -2561,6 +2632,14 @@ function colorWithAlpha(hex: string, alpha: number) {
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }
 
+function uncategorizedFillColor(mode: MobileTheme["mode"]) {
+  return mode === "dark" ? "#323946" : "#EEF2F6";
+}
+
+function uncategorizedStripeColor(mode: MobileTheme["mode"]) {
+  return mode === "dark" ? "#8792A3" : "#98A4B3";
+}
+
 function buildTodaySummarySegments(
   entries: TimeEntry[],
   now: number,
@@ -2575,6 +2654,7 @@ function buildTodaySummarySegments(
     if (startedAt < periodStart) continue;
     const categoryName = entry.categoryName ?? "Uncategorized";
     const key = entry.categoryId ?? "uncategorized";
+    const isUncategorized = !entry.categoryId && !entry.categoryName;
     const current = totals.get(key);
     const seconds = entryDurationSeconds(entry, now);
 
@@ -2582,7 +2662,8 @@ function buildTodaySummarySegments(
       key,
       categoryName,
       seconds: (current?.seconds ?? 0) + seconds,
-      color: current?.color ?? entryCategoryColor(entry, mode)
+      color: current?.color ?? entryCategoryColor(entry, mode),
+      isUncategorized: current?.isUncategorized ?? isUncategorized
     });
   }
 

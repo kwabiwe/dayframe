@@ -2,12 +2,13 @@ import type { MobileBootstrap, MobileReviewItem, MobileTimeEntry } from "./api";
 
 export const REVIEW_COPY = {
   needsReview: "Needs review",
-  suggestedActivity: "Suggested activity",
+  suggestedActivity: "Suggested time entry",
+  detectedVisit: "Detected visit",
   confirm: "Confirm",
   edit: "Edit",
-  dismiss: "Dismiss",
-  suggestedNote: "Some suggested activity needs review.",
-  emptyState: "No suggested activity needs review."
+  dismiss: "Ignore",
+  suggestedNote: "Some suggested time needs review.",
+  emptyState: "No detected visits or suggested time entries need review."
 } as const;
 
 type MobileCategory = MobileBootstrap["categories"][number];
@@ -64,7 +65,7 @@ export function buildReviewItemDraftEntry(
     source: item.eventSource ?? "manual_app",
     confidence: item.confidence,
     reviewStatus: "needs_review",
-    description: item.title.trim() || REVIEW_COPY.suggestedActivity,
+    description: reviewItemDraftDescription(item),
     startedAt: item.suggestedStartedAt ?? new Date(now).toISOString(),
     stoppedAt: item.suggestedStoppedAt ?? new Date(now).toISOString(),
     durationSeconds: reviewItemDurationSeconds(item, now)
@@ -91,6 +92,30 @@ export function hasReviewNeededActivityForRange({
       reviewItemOverlapsRange(item, rangeStart, rangeEnd, now)
     ))
   );
+}
+
+export function countReviewNeededActivityForRange({
+  entries,
+  now,
+  rangeEnd,
+  rangeStart,
+  reviewItems
+}: {
+  entries: MobileTimeEntry[];
+  now: number;
+  rangeEnd: Date;
+  rangeStart: Date;
+  reviewItems: MobileReviewItem[];
+}) {
+  const reviewEntryIds = new Set(
+    entries
+      .filter((entry) => isReviewNeededEntry(entry) && entryOverlapsRange(entry, rangeStart, rangeEnd, now))
+      .map((entry) => entry.id)
+  );
+  const openReviewIds = reviewItems
+    .filter((item) => isOpenReviewItem(item) && reviewItemOverlapsRange(item, rangeStart, rangeEnd, now))
+    .map((item) => item.id);
+  return reviewEntryIds.size + openReviewIds.length;
 }
 
 function entryOverlapsRange(entry: MobileTimeEntry, rangeStart: Date, rangeEnd: Date, now: number) {
@@ -121,6 +146,12 @@ function fallbackHealthCategory(item: MobileReviewItem, categories: MobileCatego
   const preferredName = item.eventType === "health_sleep_import" ? "sleep" : "health";
   return categories.find((candidate) => candidate.name.trim().toLowerCase() === preferredName)
     ?? categories.find((candidate) => candidate.name.trim().toLowerCase() === "health");
+}
+
+function reviewItemDraftDescription(item: MobileReviewItem) {
+  if (item.eventType === "commute_detected" || item.eventType === "learned_place_visit") return null;
+  const title = item.title.trim();
+  return title || REVIEW_COPY.suggestedActivity;
 }
 
 function isHealthReviewItem(item: Pick<MobileReviewItem, "eventSource" | "eventType">) {

@@ -10,7 +10,7 @@ import {
 import Svg, { Path } from "react-native-svg";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { paletteColorFor } from "@dayframe/shared";
+import { paletteColorFor, readableLocationNameFromParts } from "@dayframe/shared";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { DayframeBrand } from "@/components/brand";
 import {
@@ -191,7 +191,7 @@ export default function ReviewScreen() {
   function beginReviewItemEdit(item: MobileReviewItem) {
     const draftEntry = buildReviewItemDraftEntry(item, data?.categories ?? [], now);
     if (!draftEntry || !hasSuggestedTimeWindow(item)) {
-      Alert.alert("Edit", "This suggested activity does not include a start and end time yet.");
+      Alert.alert("Edit", "This suggested time entry does not include a start and end time yet.");
       return;
     }
     setEditTarget({ kind: "reviewItem", item, entry: draftEntry });
@@ -271,7 +271,7 @@ export default function ReviewScreen() {
               </View>
               <Text style={styles.summaryTotal}>{totalNeedsReview}</Text>
             </View>
-            <Text style={styles.muted}>Suggested activity from Health and places stays here until it is confirmed.</Text>
+            <Text style={styles.muted}>Detected visits and suggested time entries stay here until you confirm, edit or ignore them.</Text>
           </View>
 
           <ReviewDiagnosticsPanel
@@ -280,7 +280,7 @@ export default function ReviewScreen() {
           />
 
           <View style={styles.lifecyclePanel}>
-            <Text style={styles.sectionTitle}>{REVIEW_COPY.suggestedActivity}</Text>
+            <Text style={styles.sectionTitle}>Review items</Text>
             {totalNeedsReview === 0 ? (
               <Text style={styles.muted}>{REVIEW_COPY.emptyState}</Text>
             ) : null}
@@ -360,6 +360,7 @@ function ReviewItemCard({
   theme: ReturnType<typeof useMobileTheme>["theme"];
 }) {
   const durationSeconds = reviewItemDurationSeconds(item, now);
+  const title = reviewItemTitle(item);
   const categoryName = reviewItemCategoryName(item);
   const categoryColor = reviewItemCategoryColor(
     item,
@@ -368,12 +369,13 @@ function ReviewItemCard({
     theme.mode
   );
   const controlsDisabled = loading || disabled;
+  const contextLines = reviewItemContextLines(item, categoryName);
 
   return (
     <View style={styles.reviewCard}>
       <View style={styles.reviewCardHeader}>
         <View style={styles.reviewTitleStack}>
-          <Text style={styles.reviewTitle} numberOfLines={2}>{item.title || REVIEW_COPY.suggestedActivity}</Text>
+          <Text style={styles.reviewTitle} numberOfLines={2}>{title}</Text>
           <Text style={styles.reviewMetaLine}>{formatReviewItemMeta(item, durationSeconds)}</Text>
           <Text style={styles.reviewMetaLine}>{formatReviewItemSource(item)}</Text>
         </View>
@@ -392,6 +394,9 @@ function ReviewItemCard({
       {item.notes ? (
         <Text style={styles.reviewMetaLine}>{item.notes}</Text>
       ) : null}
+      {contextLines.map((line) => (
+        <Text key={line} style={styles.reviewMetaLine}>{line}</Text>
+      ))}
 
       <View style={styles.reviewActions}>
         <Pressable
@@ -519,7 +524,7 @@ function ReviewNeededEntryCard({
           <Text style={styles.reviewSecondaryButtonText}>{REVIEW_COPY.edit}</Text>
         </Pressable>
       </View>
-      <Text style={styles.reviewMetaLine}>Confirm and dismiss are available for suggested activity.</Text>
+      <Text style={styles.reviewMetaLine}>Confirm and ignore are available for suggested time entries.</Text>
     </View>
   );
 }
@@ -538,12 +543,57 @@ function collectReviewNeededEntries(data: MobileBootstrap | null) {
   );
 }
 
+function reviewItemTitle(item: MobileReviewItem) {
+  if (item.eventType === "commute_detected") return "Commute detected";
+  if (isLocationReviewItem(item)) {
+    return readableLocationNameFromParts({
+      address: item.rawPayload?.address,
+      latitude: item.rawPayload?.latitude,
+      longitude: item.rawPayload?.longitude,
+      fallbackName: item.title || item.placeName
+    });
+  }
+  return item.title || REVIEW_COPY.suggestedActivity;
+}
+
 function formatReviewItemMeta(item: MobileReviewItem, durationSeconds: number) {
-  const parts: string[] = [REVIEW_COPY.suggestedActivity];
+  const parts: string[] = [reviewItemKindLabel(item)];
   const timeWindow = formatReviewItemTimeWindow(item);
   if (timeWindow) parts.push(timeWindow);
   if (durationSeconds > 0) parts.push(formatDuration(durationSeconds));
   return parts.join(" · ");
+}
+
+function reviewItemKindLabel(item: MobileReviewItem) {
+  if (item.eventType === "commute_detected") return "Commute";
+  if (isLocationReviewItem(item)) return REVIEW_COPY.detectedVisit;
+  if (isHealthReviewItem(item)) return "Health import";
+  return REVIEW_COPY.suggestedActivity;
+}
+
+function reviewItemContextLines(item: MobileReviewItem, categoryName: string) {
+  if (item.eventType === "commute_detected") {
+    return [
+      "Dayframe detected travel between places.",
+      "Confirming creates a Commute time entry with no description."
+    ];
+  }
+
+  if (!isLocationReviewItem(item)) return [];
+
+  const match = item.suggestedPlaceId || item.placeName
+    ? "Matched saved place"
+    : item.eventType === "learned_place_visit"
+      ? "Matched learned place"
+      : "Unknown location";
+  const confirmTarget = categoryName === "No category"
+    ? "Confirming creates an uncategorized time entry. Edit first to choose a category or description."
+    : `Confirming creates a ${categoryName} time entry. Edit first to change the category or add a description.`;
+  return [
+    "Dayframe detected a stay at this location.",
+    `${match}. Needs review before time is logged.`,
+    confirmTarget
+  ];
 }
 
 function formatReviewItemSource(item: MobileReviewItem) {
@@ -578,6 +628,18 @@ function isHealthSource(source: string | null | undefined) {
   return source?.startsWith("health_") ?? false;
 }
 
+function isLocationReviewItem(item: Pick<MobileReviewItem, "eventSource" | "eventType">) {
+  return (
+    item.eventType === "learned_place_visit" ||
+    item.eventType === "geofence_exit" ||
+    item.eventType === "unknown_stay" ||
+    item.eventSource === "location_learning" ||
+    item.eventSource === "geofence_specific" ||
+    item.eventSource === "geofence_broad" ||
+    item.eventSource === "ha_geofence"
+  );
+}
+
 function formatReviewItemTimeWindow(item: MobileReviewItem) {
   if (!item.suggestedStartedAt) return null;
   const startedAt = new Date(item.suggestedStartedAt);
@@ -595,7 +657,11 @@ function formatSourceLabel(source: string | null) {
       return "Apple Health workout";
     case "geofence_specific":
     case "geofence_broad":
-      return "Place visit";
+      return "Saved place visit";
+    case "ha_geofence":
+      return "Home Assistant place visit";
+    case "location_learning":
+      return "Location learning";
     case "calendar":
       return "Calendar hint";
     case "mobile_app":

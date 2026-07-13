@@ -25,6 +25,7 @@ const {
   createPlace,
   createPlaceFromLearnedPlace,
   createEntity,
+  deleteLearnedPlace,
   deletePlace,
   deleteTimeEntry,
   processActivityEvent,
@@ -228,6 +229,11 @@ describe("category persistence", () => {
         description: "Regular place near 51.610, -0.220",
         rawPayload: {
           candidateName: "Regular place near 51.610, -0.220",
+          address: {
+            street: "Springfield Road",
+            city: "Chelmsford",
+            postalCode: "CM2 6QT"
+          },
           clusterKey: "51.610,-0.220",
           latitude: 51.61,
           longitude: -0.22,
@@ -253,7 +259,7 @@ describe("category persistence", () => {
       session.userId,
       null,
       "51.610,-0.220",
-      "Regular place near 51.610, -0.220",
+      "Near Springfield Road",
       51.61,
       -0.22,
       160,
@@ -415,6 +421,21 @@ describe("place persistence", () => {
     expect(mocks.query).toHaveBeenCalledWith(
       expect.stringContaining("set status = $4"),
       ["40000000-0000-4000-8000-000000000001", session.workspaceId, session.userId, "ignored"]
+    );
+  });
+
+  it("forgets learned candidates without touching saved places", async () => {
+    mocks.query.mockResolvedValueOnce({ rows: [{ id: "40000000-0000-4000-8000-000000000001" }] });
+
+    const result = await deleteLearnedPlace(
+      "40000000-0000-4000-8000-000000000001",
+      session
+    );
+
+    expect(result?.id).toBe("40000000-0000-4000-8000-000000000001");
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining("delete from learned_places"),
+      ["40000000-0000-4000-8000-000000000001", session.workspaceId, session.userId]
     );
   });
 

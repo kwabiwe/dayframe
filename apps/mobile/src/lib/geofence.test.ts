@@ -12,7 +12,16 @@ const locationMocks = vi.hoisted(() => ({
   getForegroundPermissionsAsync: vi.fn(() => Promise.resolve({ status: "granted", granted: true })),
   getBackgroundPermissionsAsync: vi.fn(() => Promise.resolve({ status: "granted", granted: true })),
   requestForegroundPermissionsAsync: vi.fn(() => Promise.resolve({ status: "granted", granted: true })),
-  requestBackgroundPermissionsAsync: vi.fn(() => Promise.resolve({ status: "granted", granted: true }))
+  requestBackgroundPermissionsAsync: vi.fn(() => Promise.resolve({ status: "granted", granted: true })),
+  reverseGeocodeAsync: vi.fn(() => Promise.resolve([
+    {
+      name: "Tesco Springfield",
+      street: "Springfield Road",
+      city: "Chelmsford",
+      postalCode: "CM2 6QT",
+      formattedAddress: "Springfield Road, Chelmsford CM2 6QT"
+    }
+  ]))
 }));
 
 vi.mock("@react-native-async-storage/async-storage", () => ({
@@ -294,11 +303,21 @@ describe("mobile geofence visit candidates", () => {
     expect(learned).toEqual(
       expect.objectContaining({
         source: "location_learning",
-        description: "Regular place near 51.610, -0.220"
+        description: "Near Tesco Springfield"
       })
     );
+    expect(locationMocks.reverseGeocodeAsync).toHaveBeenCalledWith({
+      latitude: 51.61,
+      longitude: -0.22
+    });
     expect(learned?.rawPayload).toMatchObject({
       evidenceKind: "learned_place_visit",
+      candidateName: "Near Tesco Springfield",
+      address: expect.objectContaining({
+        name: "Tesco Springfield",
+        street: "Springfield Road",
+        postalCode: "CM2 6QT"
+      }),
       latitude: 51.61,
       longitude: -0.22,
       sampleCount: 3,
