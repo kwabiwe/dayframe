@@ -287,6 +287,95 @@ describe("Health auto-log mappings", () => {
   });
 });
 
+describe("commute learning normalization", () => {
+  const commuteContext: NormalizationContext = {
+    projects: [],
+    categories: [{ id: categoryId("commute"), name: "Commute" }],
+    places: [
+      {
+        id: placeId("home"),
+        name: "Home",
+        radiusMeters: 100,
+        priority: 10,
+        defaultProjectId: null,
+        defaultCategoryId: null,
+        defaultActivityDescription: null,
+        autoStart: false
+      },
+      {
+        id: placeId("work"),
+        name: "Work",
+        radiusMeters: 120,
+        priority: 8,
+        defaultProjectId: null,
+        defaultCategoryId: null,
+        defaultActivityDescription: null,
+        autoStart: false
+      }
+    ],
+    automationRules: []
+  };
+
+  it("auto-logs clean saved-place to saved-place commutes", () => {
+    const event = normalizeActivityEvent(
+      {
+        source: "location_learning",
+        type: "commute_detected",
+        occurredAt: new Date("2026-07-13T08:25:00.000Z"),
+        rawPayload: {
+          fromPlaceId: placeId("home"),
+          fromPlaceName: "Home",
+          toPlaceId: placeId("work"),
+          toPlaceName: "Work",
+          startedAt: "2026-07-13T08:00:00.000Z",
+          stoppedAt: "2026-07-13T08:25:00.000Z",
+          reviewFirst: false
+        }
+      },
+      commuteContext
+    );
+
+    expect(event).toEqual(
+      expect.objectContaining({
+        action: "create_time_entry",
+        reviewStatus: "confirmed",
+        confidence: "medium_high",
+        categoryId: categoryId("commute"),
+        title: "Commute"
+      })
+    );
+  });
+
+  it("keeps uncertain commute endpoints review-first", () => {
+    const event = normalizeActivityEvent(
+      {
+        source: "location_learning",
+        type: "commute_detected",
+        occurredAt: new Date("2026-07-13T08:25:00.000Z"),
+        rawPayload: {
+          fromPlaceId: placeId("home"),
+          fromPlaceName: "Home",
+          toPlaceName: "Near Springfield Road",
+          startedAt: "2026-07-13T08:00:00.000Z",
+          stoppedAt: "2026-07-13T08:25:00.000Z",
+          reviewFirst: true
+        }
+      },
+      commuteContext
+    );
+
+    expect(event).toEqual(
+      expect.objectContaining({
+        action: "create_review_item",
+        reviewStatus: "needs_review",
+        confidence: "medium",
+        categoryId: categoryId("commute"),
+        title: "Possible commute from Home to Near Springfield Road"
+      })
+    );
+  });
+});
+
 describe("explicit Shortcut starts", () => {
   it("keeps blank Shortcut starts uncategorized without applying source defaults", () => {
     const started = normalizeActivityEvent(
@@ -527,7 +616,7 @@ function categoryId(seed: string) {
         ? "0003"
         : seed === "family"
           ? "0004"
-          : seed === "travel"
+          : seed === "travel" || seed === "commute"
             ? "0005"
             : seed === "errands"
               ? "0006"
@@ -537,6 +626,16 @@ function categoryId(seed: string) {
 
 function placeId(seed: string) {
   const suffix =
-    seed === "station" ? "0007" : seed === "home-office" ? "0008" : seed === "town" ? "0009" : "0001";
+    seed === "station"
+      ? "0007"
+      : seed === "home-office"
+        ? "0008"
+        : seed === "town"
+          ? "0009"
+          : seed === "home"
+            ? "0010"
+            : seed === "work"
+              ? "0011"
+              : "0001";
   return `30000000-0000-4000-8000-00000000${suffix}`;
 }

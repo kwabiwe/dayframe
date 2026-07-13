@@ -5,6 +5,7 @@ import {
   countReviewNeededActivityForRange,
   hasReviewNeededActivityForRange,
   hasSuggestedTimeWindow,
+  isCalendarPreviewReviewItem,
   isOpenReviewItem,
   isReviewNeededEntry,
   reviewItemDurationSeconds
@@ -22,6 +23,12 @@ describe("mobile review helpers", () => {
     expect(isOpenReviewItem({ status: "open" })).toBe(true);
     expect(isOpenReviewItem({ status: "accepted" })).toBe(false);
     expect(isOpenReviewItem({ status: "ignored" })).toBe(false);
+  });
+
+  it("limits calendar review previews to commute candidates", () => {
+    expect(isCalendarPreviewReviewItem({ eventType: "commute_detected" })).toBe(true);
+    expect(isCalendarPreviewReviewItem({ eventType: "learned_place_visit" })).toBe(false);
+    expect(isCalendarPreviewReviewItem({ eventType: "health_workout_import" })).toBe(false);
   });
 
   it("requires a valid suggested start and stop before building an editable draft", () => {
