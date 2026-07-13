@@ -25,9 +25,9 @@ As of 2026-07-13, Dayframe uses this internal release lane:
 - Bundle id: `com.layereight.dayframe`
 - Team: `65M773ZG6M`
 - Version: `0.1.0`
-- Latest verified build: `0.1.0 (30)`
+- Latest verified build: `0.1.0 (31)`
 - Group: `Internal Health Debug`
-- Latest delivery UUID: `ff5b3866-4375-4084-a8a2-b90a8f115931`
+- Latest delivery UUID: `6a66f8de-e4c8-4a44-ba77-1fb76d48148b`
 - Current release rule: implementation PRs are not done until the merged code is in a verified internal TestFlight build.
 
 Docs-only or planning-only PRs do not require a TestFlight build unless they change build, release, signing, environment, or runtime configuration.
@@ -94,7 +94,7 @@ If the app version stays the same, increment build:
 0.1.0 (1) -> 0.1.0 (2)
 ```
 
-Record the new build number in the tracker, PR/release note, and final handoff. The committed iOS `CFBundleVersion` should stay at the repo default after release unless the project deliberately changes that convention; previous releases temporarily bumped the build number for archive/upload and restored it afterwards.
+Record the new build number in the tracker, PR/release note, and final handoff. The committed iOS `CURRENT_PROJECT_VERSION` should stay at the repo default after release unless the project deliberately changes that convention; previous releases temporarily bumped the build number for archive/upload and restored it afterwards. The app and extension `Info.plist` files should resolve `CFBundleVersion` from `$(CURRENT_PROJECT_VERSION)` so archive validation sees matching build numbers.
 
 ## Preflight Before Archive
 

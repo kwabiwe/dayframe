@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const iosDir = join(repoRoot, "apps/mobile/ios");
+const xcodebuildPath = "/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild";
 const bundleId = process.env.DAYFRAME_IOS_BUNDLE_ID ?? "com.layereight.dayframe";
 const teamId = process.env.DAYFRAME_APPLE_TEAM_ID ?? "65M773ZG6M";
 const ascEnvPath =
@@ -53,6 +54,35 @@ function plistValue(plistPath, keyPath) {
   } catch {
     return null;
   }
+}
+
+const buildSettingsCache = new Map();
+
+function xcodeBuildSettings(target, configuration = "Release") {
+  const cacheKey = `${target}:${configuration}`;
+  if (buildSettingsCache.has(cacheKey)) return buildSettingsCache.get(cacheKey);
+  const settings = {};
+  const output = run(xcodebuildPath, [
+    "-project",
+    join(iosDir, "Dayframe.xcodeproj"),
+    "-target",
+    target,
+    "-configuration",
+    configuration,
+    "-showBuildSettings"
+  ]);
+  for (const line of output.split(/\r?\n/)) {
+    const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)$/);
+    if (match) settings[match[1]] = match[2].trim();
+  }
+  buildSettingsCache.set(cacheKey, settings);
+  return settings;
+}
+
+function resolveBuildSettingTokens(value, target) {
+  if (!value) return value;
+  const settings = xcodeBuildSettings(target);
+  return value.replace(/\$\(([^)]+)\)/g, (token, key) => settings[key] ?? token);
 }
 
 function parseEnvFile(path) {
@@ -119,8 +149,8 @@ console.log(`Bundle: ${bundleId}`);
 console.log(`Team:   ${teamId}`);
 console.log("");
 
-if (existsSync("/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild")) {
-  const version = run("/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild", ["-version"])
+if (existsSync(xcodebuildPath)) {
+  const version = run(xcodebuildPath, ["-version"])
     .split(/\r?\n/)
     .filter(Boolean)
     .join(", ");
@@ -137,8 +167,8 @@ if (activeDeveloperDir === "/Applications/Xcode.app/Contents/Developer") {
 }
 
 const infoPlist = join(iosDir, "Dayframe/Info.plist");
-const version = plistValue(infoPlist, ":CFBundleShortVersionString");
-const build = plistValue(infoPlist, ":CFBundleVersion");
+const version = resolveBuildSettingTokens(plistValue(infoPlist, ":CFBundleShortVersionString"), "Dayframe");
+const build = resolveBuildSettingTokens(plistValue(infoPlist, ":CFBundleVersion"), "Dayframe");
 if (version && build) pass(`iOS bundle version is ${version} (${build})`);
 else fail("Unable to read iOS bundle version/build", infoPlist);
 
