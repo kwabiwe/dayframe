@@ -62,7 +62,8 @@ Behavior defaults:
 - Broad enter/exit: review-first.
 - Home: ambiguous and review-first by default.
 - Unknown stays over the threshold create review items.
-- Manual mobile starts and Siri Shortcut/NFC starts use the values supplied by the user or Shortcut; blank manual starts stay blank. Auto-log defaults are reserved for user-enabled automatic sources such as Health imports, walking/running, places, and future commute/place learning.
+- Manual mobile starts and Siri Shortcut/NFC starts use the values supplied by the user or Shortcut; blank manual starts stay blank. Auto-log defaults are reserved for user-enabled automatic sources such as Health imports, walking/running, places, and opt-in commute/place learning.
+- Opt-in commute/place learning captures coarse mobile location samples, saved-place visit transitions, review-first commute candidates, and learned unsaved-place candidates. It defaults off and should stay review-first until real-device behaviour is trusted.
 
 Expo Go cannot fully exercise background geofencing; use a development build.
 
@@ -104,7 +105,7 @@ Deletion/privacy groundwork remains: implement safe user/workspace deletion with
 
 ## Current Internal Beta State
 
-As of 2026-07-12, the active internal TestFlight lane has verified build `0.1.0 (29)` in `Internal Health Debug`. The product is usable for owner testing, but several areas remain `Watch`, `Planned`, or `Future` in `docs/feature-fix-tracker.md`.
+As of 2026-07-13, the active internal TestFlight lane has verified build `0.1.0 (30)` in `Internal Health Debug`. The product is usable for owner testing, but several areas remain `Watch`, `Planned`, or `Future` in `docs/feature-fix-tracker.md`.
 
 ## Remaining Before Wider Daily Beta Use
 
