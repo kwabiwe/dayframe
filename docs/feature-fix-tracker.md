@@ -1,12 +1,13 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-13 08:07 BST
+Last verified: 2026-07-13 11:54 BST
 
 ## Verification Snapshot
 
 - Local repo: `main` includes PR #56 `Add learned place management and commute category logging`.
 - GitHub: no open PRs at verification time; PR #56 is merged.
 - Latest verified TestFlight build: `0.1.0 (31)`.
+- Web app parity audit completed for recent mobile-heavy PRs #32-#56; suitable web follow-ups are tracked below and mirrored to Trello with the `Web App` label. Native-only work such as App Intents, Live Activities, background HealthKit observers, iOS Settings navigation, and keyboard/safe-area fixes is intentionally excluded from the web backlog.
 - Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, Vercel production deployment, production Supabase schema, local archive/export/upload logs, and App Store Connect build state.
 
 ## Status Key
@@ -28,6 +29,16 @@ Last verified: 2026-07-13 08:07 BST
 | Generic integration timer API and natural-language rule creation verification | Watch | PR #50, build `0.1.0 (25)`, delivery/build ID `605005f7-f4c3-4f19-89cb-48ed87b0829a`; App Store Connect `VALID`, export compliance false, `Internal Health Debug`, and `IN_BETA_TESTING`. Vercel production deployment for `c24be99` completed, production migration `202607120001_automation_rule_activity_description.sql` was applied, and `automation_rules.activity_description` exists. | Verify Cockpit/API current timer read, saved natural-language rule creation, Review-first geofence rule output, and the Live Activity expanded-label nudge on device/hosted production. |
 | Live Activity Dynamic Island polish verification | Watch | PR #49, build `0.1.0 (24)`, delivery/build ID `30ad5c74-704f-4d64-80a7-c721467df1cb`; App Store Connect `VALID`, export compliance false, `Internal Health Debug`, and `IN_BETA_TESTING`. | Verify compact Dynamic Island width, expanded Live Activity text alignment, and the Live Activity stop button on a physical iPhone. |
 | PR48 real-device Shortcut/NFC + Live Activity verification | Watch | PR #48, build `0.1.0 (23)`, delivery/build ID `8ecf06ec-7953-489e-85cf-5c21fcf3e15e`; App Store Connect `VALID`, export compliance false, `Internal Health Debug`, and `IN_BETA_TESTING`. | On a physical iPhone, test Shortcut/NFC Start and Stop while Dayframe is closed/suspended, check offline queue replay, and confirm the Live Activity/Dynamic Island timer is the visible confirmation surface instead of a Dayframe foreground splash. |
+
+## Web App Parity Backlog
+
+| Item | Status | Evidence | Next action |
+| --- | --- | --- | --- |
+| Web Today summary and Uncategorized treatment parity | Planned | Audit of PR #51-#54 and the 2026-07-13 Today screenshot review. Web already has timer-panel polish from PR #51, but category-less `Uncategorized` in web summary charts still falls through the normal deterministic palette path and can read like a real category. | Give `Uncategorized` the same deliberate neutral/hatched treatment in web charts, legends, timeline summaries and related category-list rows. Keep review counts synchronised and make dashboard review affordances feel like navigation or focused review links, not accidental one-click confirmation. |
+| Web Review detected-visit clarity | Planned | PR #43 clarified saved-place review copy on mobile, while PR #55-#56 added commute and learned-place review items. Web `ReviewInbox` and dashboard review rows still present generic titles/actions and dashboard rows currently accept on click. | Format location-learning reviews as detected visits or commute suggestions with start/end, duration, confidence, matched saved/learned/unknown place, why review is needed, and what accepting will create. Do not imply Dayframe knows the activity solely from location evidence; raw coordinates should be secondary detail. |
+| Web learned-place detail management | Planned | PR #56 added a web learned-place candidate list with Save/Ignore, capped at 10, but it does not yet have the richer details/actions planned for mobile. | Make learned-place rows tappable and add a detail drawer/sheet showing full name, address/postcode when available, coordinates, visits/samples, last seen, radius, category/activity association and saved-vs-learned status. Support Save, Edit, Ignore and Forget with clear semantics. |
+| Shared readable learned-place naming for web and mobile | Planned | Reverse-geocoding inspection found that only the manual mobile `Use current location` flow calls `expo-location.reverseGeocodeAsync`; background learned-place visits currently create `Regular place near {lat}, {lng}` in `queueLearnedPlaceVisit`, and the web server persists that candidate name into `review_items` and `learned_places`. | Add a shared privacy-conscious display-name resolver/fallback for location-learning candidates: recognised venue/business when confidently available, then street/locality, then postcode, then coordinates only as fallback. Reuse any address data already captured in payloads and avoid duplicate geocoding or rate-limit-heavy lookups. |
+| Web calendar 24-hour and cross-midnight parity | Planned | PR #35 made the mobile Calendar fixed 24-hour after PR #33-#34 calendar work. Web still has an Awake/24h mode in `/timeline` and the dashboard timeline uses a fixed daytime window. | Decide whether web should match mobile's fixed 24-hour model. If aligned, remove the Awake/24h split, keep 00:00 boundary labels and continuation styling, and make sleep/commute blocks remain visible in calendar and weekly reporting without forcing Today into sleep history. |
 
 ## Recently Shipped Or Addressed
 
