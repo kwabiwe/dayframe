@@ -966,14 +966,25 @@ export function normalizeActivityEvent(
     const fromName = stringFromPayload(event.rawPayload.fromPlaceName) ?? "previous place";
     const toName = stringFromPayload(event.rawPayload.toPlaceName) ?? stringFromPayload(event.rawPayload.placeName) ?? "next place";
     const commuteCategory = findCategoryByName(context.categories, "Commute") ?? findCategoryByName(context.categories, "Travel");
+    const fromPlaceId = stringFromPayload(event.rawPayload.fromPlaceId);
+    const toPlaceId = stringFromPayload(event.rawPayload.toPlaceId);
+    const fromSavedPlace = fromPlaceId ? context.places.find((candidate) => candidate.id === fromPlaceId) : undefined;
+    const toSavedPlace = toPlaceId ? context.places.find((candidate) => candidate.id === toPlaceId) : undefined;
+    const canAutoLog =
+      event.rawPayload.reviewFirst === false &&
+      Boolean(fromSavedPlace) &&
+      Boolean(toSavedPlace) &&
+      fromSavedPlace?.id !== toSavedPlace?.id;
     return {
-      action: "create_review_item",
-      confidence: "medium",
-      reviewStatus: "needs_review",
+      action: canAutoLog ? "create_time_entry" : "create_review_item",
+      confidence: canAutoLog ? "medium_high" : "medium",
+      reviewStatus: canAutoLog ? "confirmed" : "needs_review",
       categoryId: event.categoryId ?? commuteCategory?.id,
       placeId: event.placeId ?? place?.id,
-      title: event.description ?? `Commute from ${fromName} to ${toName}`,
-      reason: "Commute learning proposes transitions between visits, but keeps them review-first before creating time.",
+      title: canAutoLog ? "Commute" : event.description ?? `Possible commute from ${fromName} to ${toName}`,
+      reason: canAutoLog
+        ? "A clean transition between two saved places can be logged automatically as category-only commute time."
+        : "Commute learning found movement between places, but an uncertain endpoint keeps it review-first.",
       shouldClosePrevious: false
     };
   }

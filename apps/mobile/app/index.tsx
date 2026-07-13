@@ -72,6 +72,7 @@ import {
   buildReviewItemDraftEntry,
   countReviewNeededActivityForRange,
   hasReviewNeededActivityForRange,
+  isCalendarPreviewReviewItem,
   isOpenReviewItem,
   isReviewNeededEntry
 } from "@/lib/review";
@@ -2271,6 +2272,7 @@ function buildCalendarEntries(data: MobileBootstrap | null, selectedDayKey: stri
   const reviewEntries: CalendarEntry[] = [];
   for (const item of data.reviewItems ?? []) {
     if (!isOpenReviewItem(item)) continue;
+    if (!isCalendarPreviewReviewItem(item)) continue;
     const draft = buildReviewItemDraftEntry(item, data.categories, now);
     if (!draft) continue;
     const entry: CalendarEntry = {

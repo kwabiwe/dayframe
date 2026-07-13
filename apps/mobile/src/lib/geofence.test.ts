@@ -244,7 +244,7 @@ describe("mobile geofence visit candidates", () => {
     expect(queue.some((item) => item.type === "commute_detected")).toBe(false);
   });
 
-  it("queues a review-first commute candidate between consecutive saved-place visits when enabled", async () => {
+  it("queues an auto-log commute candidate between consecutive saved-place visits when enabled", async () => {
     await setLocationLearningEnabled(true, [homePlace, place]);
     await startGeofences([homePlace, place]);
     await recordGeofenceTransition("enter", homeRegion, new Date("2026-07-06T07:45:00.000Z"));
@@ -257,18 +257,47 @@ describe("mobile geofence visit candidates", () => {
 
     expect(commute).toEqual(
       expect.objectContaining({
-        source: "location_learning",
-        description: "Commute from Home to Gym"
+        source: "location_learning"
       })
     );
+    expect(commute?.description).toBeUndefined();
     expect(commute?.rawPayload).toMatchObject({
-      evidenceKind: "commute_between_place_visits",
+      evidenceKind: "commute_between_saved_place_visits",
       fromPlaceName: "Home",
       toPlaceName: "Gym",
       startedAt: "2026-07-06T08:00:00.000Z",
       stoppedAt: "2026-07-06T08:25:00.000Z",
-      reviewFirst: true
+      confidence: "medium_high",
+      reviewFirst: false
     });
+  });
+
+  it("snaps nearby noisy location-learning samples to saved places instead of learning duplicates", async () => {
+    const narrowHome = { ...homePlace, radiusMeters: 10 };
+    await setLocationLearningEnabled(true, [narrowHome]);
+
+    const result = await recordLocationLearningSample(
+      {
+        coords: {
+          latitude: homePlace.latitude + 0.00018,
+          longitude: homePlace.longitude,
+          altitude: null,
+          accuracy: 15,
+          altitudeAccuracy: null,
+          heading: null,
+          speed: null
+        },
+        timestamp: new Date("2026-07-06T09:00:00.000Z").getTime()
+      },
+      [narrowHome]
+    );
+
+    const queue = await readQueue();
+    const diagnostics = await getLocationVisitDiagnostics();
+
+    expect(result).toEqual(expect.objectContaining({ status: "saved_place", queued: false }));
+    expect(queue.some((item) => item.type === "learned_place_visit")).toBe(false);
+    expect(diagnostics.lastStatus).toContain("matched Home");
   });
 
   it("queues a learned regular-place candidate only after repeated unsaved samples", async () => {
@@ -297,7 +326,24 @@ describe("mobile geofence visit candidates", () => {
       [place]
     );
 
-    const queue = await readQueue();
+    let queue = await readQueue();
+    expect(queue.some((item) => item.type === "learned_place_visit")).toBe(false);
+    expect(locationMocks.reverseGeocodeAsync).not.toHaveBeenCalled();
+
+    await recordLocationLearningSample(
+      { ...baseSample, timestamp: new Date("2026-07-07T09:00:00.000Z").getTime() },
+      [place]
+    );
+    await recordLocationLearningSample(
+      { ...baseSample, timestamp: new Date("2026-07-07T09:12:00.000Z").getTime() },
+      [place]
+    );
+    await recordLocationLearningSample(
+      { ...baseSample, timestamp: new Date("2026-07-07T09:25:00.000Z").getTime() },
+      [place]
+    );
+
+    queue = await readQueue();
     const learned = queue.find((item) => item.type === "learned_place_visit");
 
     expect(learned).toEqual(
@@ -320,7 +366,11 @@ describe("mobile geofence visit candidates", () => {
       }),
       latitude: 51.61,
       longitude: -0.22,
-      sampleCount: 3,
+      startedAt: "2026-07-07T09:00:00.000Z",
+      stoppedAt: "2026-07-07T09:25:00.000Z",
+      sampleCount: 6,
+      distinctDayCount: 2,
+      visitCount: 2,
       reviewFirst: true
     });
   });

@@ -318,7 +318,7 @@ describe("event normalization", () => {
     expect(candidate.reviewStatus).toBe("needs_review");
   });
 
-  it("keeps commute learning review-first and prefers a Travel category when present", () => {
+  it("keeps uncertain commute learning review-first and prefers a Travel category when present", () => {
     const candidate = normalizeActivityEvent(
       {
         source: "location_learning",
@@ -340,7 +340,7 @@ describe("event normalization", () => {
     expect(candidate.action).toBe("create_review_item");
     expect(candidate.reviewStatus).toBe("needs_review");
     expect(candidate.categoryId).toBe("20000000-0000-4000-8000-000000000010");
-    expect(candidate.title).toBe("Commute from Home to Gym");
+    expect(candidate.title).toBe("Possible commute from Home to Gym");
   });
 
   it("keeps learned regular-place visits review-first", () => {

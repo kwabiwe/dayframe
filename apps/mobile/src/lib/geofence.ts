@@ -86,10 +86,14 @@ type OpenVisit = {
 };
 
 type CompletedVisit = {
-  placeId: string;
+  kind?: "saved_place" | "learned_place" | "unknown_place";
+  placeId?: string;
   placeName: string;
   startedAt: string;
   stoppedAt: string;
+  latitude?: number;
+  longitude?: number;
+  clusterKey?: string;
 };
 
 type LearnedPlaceCluster = {
@@ -97,10 +101,15 @@ type LearnedPlaceCluster = {
   latitude: number;
   longitude: number;
   radiusMeters: number;
+  visitCount?: number;
   firstSeenAt: string;
   lastSeenAt: string;
+  currentVisitStartedAt?: string;
+  currentVisitSampleCount?: number;
+  seenDayKeys?: string[];
   sampleCount: number;
   lastQueuedAt?: string;
+  lastCommuteQueuedAt?: string;
 };
 
 type GeofenceTransition = "enter" | "exit";
@@ -118,11 +127,20 @@ const LOCATION_LEARNING_SAMPLE_INTERVAL_MS = 15 * 60_000;
 const LOCATION_LEARNING_DISTANCE_INTERVAL_METERS = 250;
 const LEARNED_PLACE_RADIUS_METERS = 160;
 const LEARNED_PLACE_MIN_SAMPLE_COUNT = 3;
+const LEARNED_PLACE_MIN_VISIT_COUNT = 2;
+const LEARNED_PLACE_MIN_DISTINCT_DAYS = 2;
 const LEARNED_PLACE_MIN_DWELL_MS = 20 * 60_000;
+const LEARNED_PLACE_COMMUTE_DWELL_MS = 15 * 60_000;
 const LEARNED_PLACE_QUEUE_COOLDOWN_MS = 24 * 60 * 60_000;
+const LEARNED_PLACE_COMMUTE_QUEUE_COOLDOWN_MS = 6 * 60 * 60_000;
+const LEARNED_PLACE_VISIT_GAP_MS = 3 * 60 * 60_000;
 const MAX_LEARNED_PLACE_CLUSTERS = 24;
 const MIN_COMMUTE_DURATION_MS = 3 * 60_000;
 const MAX_COMMUTE_DURATION_MS = 6 * 60 * 60_000;
+const SAVED_PLACE_ACCURACY_BUFFER_MIN_METERS = 25;
+const SAVED_PLACE_ACCURACY_BUFFER_MAX_METERS = 100;
+const SAVED_PLACE_MIN_EFFECTIVE_RADIUS_METERS = 75;
+const SAVED_PLACE_LEARNING_SUPPRESSION_METERS = 150;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 TaskManager.defineTask(DAYFRAME_GEOFENCE_TASK, async ({ data, error }) => {
@@ -362,17 +380,6 @@ export async function createUnknownStayCandidate(
   durationMinutes: number,
   location?: { latitude: number; longitude: number; accuracy?: number | null }
 ) {
-  if (location && await getLocationLearningEnabled()) {
-    await queueLearnedPlaceVisit({
-      latitude: location.latitude,
-      longitude: location.longitude,
-      accuracy: location.accuracy ?? null,
-      firstSeenAt: new Date(Date.now() - durationMinutes * 60_000).toISOString(),
-      lastSeenAt: new Date().toISOString(),
-      sampleCount: 1
-    });
-  }
-
   return enqueueEvent({
     source: "geofence_broad",
     type: "unknown_stay",
@@ -406,30 +413,56 @@ export async function recordLocationLearningSample(
     return { status: "low_accuracy" as const, queued: false };
   }
 
-  const savedPlace = savedPlaces.find((place) =>
-    distanceMeters(latitude, longitude, place.latitude, place.longitude) <= place.radiusMeters + 80
-  );
-  if (savedPlace) {
+  const savedPlaceMatch = nearestSavedPlaceMatch(latitude, longitude, accuracy, savedPlaces);
+  if (savedPlaceMatch?.withinEffectiveRadius) {
     await updateLocationDiagnostics({
-      lastStatus: `Location learning ignored ${savedPlace.name} because it is already saved.`,
+      lastStatus: `Location learning matched ${savedPlaceMatch.place.name}; noisy samples stay attached to saved places.`,
       lastLearningSampleAt: new Date(location.timestamp).toISOString()
     });
     return { status: "saved_place" as const, queued: false };
   }
+  if (savedPlaceMatch?.withinSuppressionRadius) {
+    await updateLocationDiagnostics({
+      lastStatus: `Location learning suppressed a nearby sample so it does not become a duplicate of ${savedPlaceMatch.place.name}.`,
+      lastLearningSampleAt: new Date(location.timestamp).toISOString()
+    });
+    return { status: "near_saved_place" as const, queued: false };
+  }
 
   const sampledAt = new Date(location.timestamp || Date.now()).toISOString();
+  const sampledDayKey = dateKey(sampledAt);
   const clusters = await readLearnedPlaceClusters();
   const existingIndex = clusters.findIndex((cluster) =>
     distanceMeters(latitude, longitude, cluster.latitude, cluster.longitude) <= cluster.radiusMeters
   );
   const existing = existingIndex >= 0 ? clusters[existingIndex] : null;
   const sampleCount = (existing?.sampleCount ?? 0) + 1;
+  const existingDayKeys = normalizedDayKeys(existing, sampledDayKey);
+  const lastSeenMs = existing ? new Date(existing.lastSeenAt).getTime() : NaN;
+  const sampledMs = new Date(sampledAt).getTime();
+  const startsNewVisit =
+    !existing ||
+    !Number.isFinite(lastSeenMs) ||
+    !Number.isFinite(sampledMs) ||
+    sampledMs - lastSeenMs > LEARNED_PLACE_VISIT_GAP_MS;
+  const visitCount = (existing?.visitCount ?? 1) + (existing && startsNewVisit ? 1 : 0);
+  const currentVisitStartedAt = startsNewVisit
+    ? sampledAt
+    : existing?.currentVisitStartedAt ?? existing?.firstSeenAt ?? sampledAt;
+  const currentVisitSampleCount = startsNewVisit
+    ? 1
+    : (existing?.currentVisitSampleCount ?? existing?.sampleCount ?? 0) + 1;
+  const seenDayKeys = uniqueStrings([...existingDayKeys, sampledDayKey]);
   const nextCluster: LearnedPlaceCluster = existing
     ? {
         ...existing,
         latitude: ((existing.latitude * existing.sampleCount) + latitude) / sampleCount,
         longitude: ((existing.longitude * existing.sampleCount) + longitude) / sampleCount,
         lastSeenAt: sampledAt,
+        currentVisitStartedAt,
+        currentVisitSampleCount,
+        seenDayKeys,
+        visitCount,
         sampleCount
       }
     : {
@@ -437,8 +470,12 @@ export async function recordLocationLearningSample(
         latitude,
         longitude,
         radiusMeters: LEARNED_PLACE_RADIUS_METERS,
+        visitCount: 1,
         firstSeenAt: sampledAt,
         lastSeenAt: sampledAt,
+        currentVisitStartedAt: sampledAt,
+        currentVisitSampleCount: 1,
+        seenDayKeys: [sampledDayKey],
         sampleCount
       };
 
@@ -448,11 +485,37 @@ export async function recordLocationLearningSample(
       : [nextCluster, ...clusters].slice(0, MAX_LEARNED_PLACE_CLUSTERS);
   await writeLearnedPlaceClusters(nextClusters);
 
-  const dwellMs = new Date(nextCluster.lastSeenAt).getTime() - new Date(nextCluster.firstSeenAt).getTime();
+  const dwellMs = new Date(nextCluster.lastSeenAt).getTime() - new Date(currentVisitStartedAt).getTime();
   const lastQueuedMs = nextCluster.lastQueuedAt ? new Date(nextCluster.lastQueuedAt).getTime() : 0;
   const queuedRecently = Number.isFinite(lastQueuedMs) && Date.now() - lastQueuedMs < LEARNED_PLACE_QUEUE_COOLDOWN_MS;
+  const lastCommuteQueuedMs = nextCluster.lastCommuteQueuedAt ? new Date(nextCluster.lastCommuteQueuedAt).getTime() : 0;
+  const commuteQueuedRecently =
+    Number.isFinite(lastCommuteQueuedMs) && Date.now() - lastCommuteQueuedMs < LEARNED_PLACE_COMMUTE_QUEUE_COOLDOWN_MS;
+  if (dwellMs >= LEARNED_PLACE_COMMUTE_DWELL_MS && !commuteQueuedRecently && await readLastCompletedVisit()) {
+    const commuteName = await readableLearnedPlaceName(nextCluster.latitude, nextCluster.longitude);
+    const queued = await queueCommuteCandidate({
+      kind: "unknown_place",
+      placeName: commuteName,
+      startedAt: currentVisitStartedAt,
+      stoppedAt: nextCluster.lastSeenAt,
+      latitude: nextCluster.latitude,
+      longitude: nextCluster.longitude,
+      clusterKey: learnedPlaceClusterKey(nextCluster.latitude, nextCluster.longitude)
+    }).catch(() => false);
+    if (queued) {
+      nextCluster.lastCommuteQueuedAt = new Date().toISOString();
+      await writeLearnedPlaceClusters(
+        nextClusters.map((cluster) => cluster.id === nextCluster.id ? nextCluster : cluster)
+      );
+    }
+  }
+
+  const hasRepeatEvidence =
+    (nextCluster.visitCount ?? 1) >= LEARNED_PLACE_MIN_VISIT_COUNT &&
+    (nextCluster.seenDayKeys?.length ?? 1) >= LEARNED_PLACE_MIN_DISTINCT_DAYS;
   if (
     nextCluster.sampleCount < LEARNED_PLACE_MIN_SAMPLE_COUNT ||
+    !hasRepeatEvidence ||
     dwellMs < LEARNED_PLACE_MIN_DWELL_MS ||
     queuedRecently
   ) {
@@ -467,10 +530,13 @@ export async function recordLocationLearningSample(
     latitude: nextCluster.latitude,
     longitude: nextCluster.longitude,
     accuracy,
-    firstSeenAt: nextCluster.firstSeenAt,
+    firstSeenAt: currentVisitStartedAt,
     lastSeenAt: nextCluster.lastSeenAt,
     sampleCount: nextCluster.sampleCount,
-    clusterId: nextCluster.id
+    clusterFirstSeenAt: nextCluster.firstSeenAt,
+    clusterId: nextCluster.id,
+    distinctDayCount: nextCluster.seenDayKeys?.length ?? 1,
+    visitCount: nextCluster.visitCount ?? 1
   });
   const queuedAt = new Date().toISOString();
   await writeLearnedPlaceClusters(
@@ -699,10 +765,13 @@ async function recordPlaceExit(place: MonitoredPlace, region: DayframeRegion, oc
     }
   });
   const currentVisit = {
+    kind: "saved_place" as const,
     placeId: place.id,
     placeName: place.name,
     startedAt: startedAt.toISOString(),
-    stoppedAt: stoppedAt.toISOString()
+    stoppedAt: stoppedAt.toISOString(),
+    latitude: place.latitude,
+    longitude: place.longitude
   };
   if (await getLocationLearningEnabled()) {
     await queueCommuteCandidate(currentVisit).catch(() => undefined);
@@ -784,41 +853,54 @@ function visitLocalId(visit: Pick<OpenVisit, "placeId" | "enteredAt">) {
 
 async function queueCommuteCandidate(currentVisit: CompletedVisit) {
   const previousVisit = await readLastCompletedVisit();
-  if (!previousVisit || previousVisit.placeId === currentVisit.placeId) return;
+  if (!previousVisit || sameVisitEndpoint(previousVisit, currentVisit)) return false;
 
   const startedAt = new Date(previousVisit.stoppedAt);
   const stoppedAt = new Date(currentVisit.startedAt);
   const durationMs = stoppedAt.getTime() - startedAt.getTime();
   if (!Number.isFinite(durationMs) || durationMs < MIN_COMMUTE_DURATION_MS || durationMs > MAX_COMMUTE_DURATION_MS) {
-    return;
+    return false;
   }
 
   const durationSeconds = Math.round(durationMs / 1000);
-  const localId = `location-commute-${previousVisit.placeId}-${currentVisit.placeId}-${startedAt.getTime()}-${stoppedAt.getTime()}`;
+  const reviewFirst = !isSavedPlaceVisit(previousVisit) || !isSavedPlaceVisit(currentVisit);
+  const fromKey = visitEndpointKey(previousVisit);
+  const toKey = visitEndpointKey(currentVisit);
+  const localId = `location-commute-${fromKey}-${toKey}-${startedAt.getTime()}`;
   await enqueueEvent({
     localId,
     source: "location_learning",
     type: "commute_detected",
     occurredAt: stoppedAt,
-    description: `Commute from ${previousVisit.placeName} to ${currentVisit.placeName}`,
+    description: reviewFirst ? "Possible commute" : undefined,
     rawPayload: {
       provider: "expo_location",
-      evidenceKind: "commute_between_place_visits",
+      evidenceKind: reviewFirst ? "commute_between_stationary_visits" : "commute_between_saved_place_visits",
+      fromKind: previousVisit.kind ?? "saved_place",
       fromPlaceId: previousVisit.placeId,
       fromPlaceName: previousVisit.placeName,
+      fromClusterKey: previousVisit.clusterKey,
+      fromLatitude: previousVisit.latitude,
+      fromLongitude: previousVisit.longitude,
+      toKind: currentVisit.kind ?? "saved_place",
       toPlaceId: currentVisit.placeId,
       toPlaceName: currentVisit.placeName,
+      toClusterKey: currentVisit.clusterKey,
+      toLatitude: currentVisit.latitude,
+      toLongitude: currentVisit.longitude,
       startedAt: startedAt.toISOString(),
       stoppedAt: stoppedAt.toISOString(),
       durationSeconds,
       durationMinutes: Math.round(durationSeconds / 60),
-      confidence: "medium",
-      reviewFirst: true
+      confidence: reviewFirst ? "medium" : "medium_high",
+      reviewFirst
     }
   });
 
   await updateLocationDiagnostics({
-    lastStatus: `Queued commute from ${previousVisit.placeName} to ${currentVisit.placeName} for review.`,
+    lastStatus: reviewFirst
+      ? `Queued possible commute from ${previousVisit.placeName} to ${currentVisit.placeName} for review.`
+      : `Queued commute from ${previousVisit.placeName} to ${currentVisit.placeName} for auto-log.`,
     lastCommuteCandidate: {
       fromPlaceName: previousVisit.placeName,
       toPlaceName: currentVisit.placeName,
@@ -829,6 +911,7 @@ async function queueCommuteCandidate(currentVisit: CompletedVisit) {
     },
     lastEventAt: stoppedAt.toISOString()
   });
+  return true;
 }
 
 async function queueLearnedPlaceVisit(input: {
@@ -838,7 +921,10 @@ async function queueLearnedPlaceVisit(input: {
   firstSeenAt: string;
   lastSeenAt: string;
   sampleCount: number;
+  clusterFirstSeenAt?: string;
   clusterId?: string;
+  distinctDayCount?: number;
+  visitCount?: number;
 }) {
   const latitude = roundedCoordinate(input.latitude);
   const longitude = roundedCoordinate(input.longitude);
@@ -861,6 +947,7 @@ async function queueLearnedPlaceVisit(input: {
       candidateName,
       address,
       clusterKey,
+      clusterFirstSeenAt: input.clusterFirstSeenAt ?? startedAt.toISOString(),
       latitude,
       longitude,
       accuracy: input.accuracy ?? null,
@@ -870,6 +957,8 @@ async function queueLearnedPlaceVisit(input: {
       durationSeconds,
       durationMinutes: Math.round(durationSeconds / 60),
       sampleCount: input.sampleCount,
+      distinctDayCount: input.distinctDayCount ?? 1,
+      visitCount: input.visitCount ?? 1,
       confidence: "low",
       rawLocationRetentionDays: 7,
       reviewFirst: true
@@ -887,6 +976,20 @@ async function queueLearnedPlaceVisit(input: {
       sampleCount: input.sampleCount
     }
   });
+  await writeLastCompletedVisit({
+    kind: "learned_place",
+    placeName: candidateName,
+    startedAt: startedAt.toISOString(),
+    stoppedAt: stoppedAt.toISOString(),
+    latitude,
+    longitude,
+    clusterKey
+  });
+}
+
+async function readableLearnedPlaceName(latitude: number, longitude: number) {
+  const address = await reverseGeocodeLearnedPlace(roundedCoordinate(latitude), roundedCoordinate(longitude));
+  return readableLocationNameFromParts({ address, latitude, longitude });
 }
 
 async function reverseGeocodeLearnedPlace(latitude: number, longitude: number): Promise<LocationDisplayAddress | null> {
@@ -916,6 +1019,73 @@ function learnedPlaceClusterId(latitude: number, longitude: number, sampledAt: s
 
 function learnedPlaceClusterKey(latitude: number, longitude: number) {
   return `${latitude.toFixed(3)},${longitude.toFixed(3)}`;
+}
+
+function nearestSavedPlaceMatch(
+  latitude: number,
+  longitude: number,
+  accuracy: number | null,
+  savedPlaces: MonitoredPlace[]
+) {
+  const matches = savedPlaces
+    .map((place) => {
+      const distance = distanceMeters(latitude, longitude, place.latitude, place.longitude);
+      const effectiveRadius = effectiveSavedPlaceRadius(place, accuracy);
+      const suppressionRadius = Math.max(effectiveRadius, SAVED_PLACE_LEARNING_SUPPRESSION_METERS);
+      return {
+        place,
+        distance,
+        effectiveRadius,
+        suppressionRadius,
+        withinEffectiveRadius: distance <= effectiveRadius,
+        withinSuppressionRadius: distance <= suppressionRadius
+      };
+    })
+    .filter((match) => Number.isFinite(match.distance))
+    .sort((left, right) => left.distance - right.distance);
+  return matches[0] ?? null;
+}
+
+function effectiveSavedPlaceRadius(place: MonitoredPlace, accuracy: number | null) {
+  const accuracyBuffer = clampMeters(
+    accuracy ?? SAVED_PLACE_ACCURACY_BUFFER_MIN_METERS,
+    SAVED_PLACE_ACCURACY_BUFFER_MIN_METERS,
+    SAVED_PLACE_ACCURACY_BUFFER_MAX_METERS
+  );
+  return Math.max(place.radiusMeters + accuracyBuffer, SAVED_PLACE_MIN_EFFECTIVE_RADIUS_METERS);
+}
+
+function clampMeters(value: number, minimum: number, maximum: number) {
+  return Math.max(minimum, Math.min(maximum, value));
+}
+
+function sameVisitEndpoint(previousVisit: CompletedVisit, currentVisit: CompletedVisit) {
+  return visitEndpointKey(previousVisit) === visitEndpointKey(currentVisit);
+}
+
+function visitEndpointKey(visit: CompletedVisit) {
+  return visit.placeId ?? visit.clusterKey ?? `${visit.kind ?? "unknown_place"}:${visit.placeName}`;
+}
+
+function isSavedPlaceVisit(visit: CompletedVisit) {
+  return (visit.kind ?? "saved_place") === "saved_place" && Boolean(visit.placeId);
+}
+
+function normalizedDayKeys(cluster: LearnedPlaceCluster | null, fallbackDayKey: string) {
+  if (!cluster) return [fallbackDayKey];
+  const stored = Array.isArray(cluster.seenDayKeys) ? cluster.seenDayKeys.filter(Boolean) : [];
+  if (stored.length > 0) return uniqueStrings(stored);
+  return uniqueStrings([dateKey(cluster.firstSeenAt), dateKey(cluster.lastSeenAt), fallbackDayKey]);
+}
+
+function dateKey(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso.slice(0, 10);
+  return date.toISOString().slice(0, 10);
+}
+
+function uniqueStrings(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean)));
 }
 
 function roundedCoordinate(value: number) {

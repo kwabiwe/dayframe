@@ -390,6 +390,15 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
       };
     }
 
+    if (parsed.type === "learned_place_visit" && await hasIgnoredLearnedPlaceCluster(client, parsed, session)) {
+      candidate = {
+        ...candidate,
+        action: "record_only",
+        reviewStatus: "ignored",
+        reason: "This learned-place cluster was ignored, so Dayframe suppresses future save/review prompts for it."
+      };
+    }
+
     if (candidate.action === "create_time_entry" && isHealthEvent(parsed.type)) {
       const conflict = await hasOverlappingTimeEntry(client, parsed, session);
       if (conflict) {
@@ -398,6 +407,18 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
           action: "create_review_item",
           reviewStatus: "needs_review",
           reason: "This Health activity overlaps existing time and needs review before becoming confirmed time."
+        };
+      }
+    }
+
+    if (candidate.action === "create_time_entry" && parsed.type === "commute_detected") {
+      const conflict = await hasOverlappingTimeEntry(client, parsed, session);
+      if (conflict) {
+        candidate = {
+          ...candidate,
+          action: "create_review_item",
+          reviewStatus: "needs_review",
+          reason: "This commute overlaps existing time and needs review before becoming confirmed time."
         };
       }
     }
@@ -506,7 +527,7 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
           candidate.placeId ?? null,
           parsed.source,
           candidate.confidence,
-          parsed.description ?? candidate.title,
+          descriptionForCreatedTimeEntry(parsed, candidate),
           startedAt,
           stoppedAt,
           eventId
@@ -617,7 +638,7 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
       );
     }
 
-    if (parsed.type === "learned_place_visit") {
+    if (parsed.type === "learned_place_visit" && candidate.reviewStatus !== "ignored") {
       await upsertLearnedPlaceVisit(client, parsed, session);
     }
 
@@ -2434,6 +2455,14 @@ function reviewItemDescriptionForConfirmedEntry(item: Pick<HealthReviewItemRow, 
   return item.title;
 }
 
+function descriptionForCreatedTimeEntry(
+  event: ReturnType<typeof ActivityEventInputSchema.parse>,
+  candidate: { title: string; description?: string }
+) {
+  if (event.type === "commute_detected") return null;
+  return event.description ?? candidate.description ?? candidate.title;
+}
+
 async function ensureHealthEventCategoryId(
   client: pg.PoolClient,
   session: RequestSession,
@@ -2941,6 +2970,8 @@ async function upsertLearnedPlaceVisit(
       stringOrNull(event.rawPayload.candidateName)
   });
   const sampleCount = Math.max(1, Math.round(numberOrNull(event.rawPayload.sampleCount) ?? 1));
+  const visitCount = Math.max(1, Math.round(numberOrNull(event.rawPayload.visitCount) ?? 1));
+  const firstSeenAt = timestampStringOrNull(event.rawPayload.clusterFirstSeenAt) ?? startedAt;
 
   await client.query(
     `insert into learned_places (
@@ -2962,14 +2993,14 @@ async function upsertLearnedPlaceVisit(
         status,
         raw_payload
      )
-     values ($1, $2, $3, $4, $5, $6, $7, $8, 1, $9, $10, $11, $10, $11, 'low', 'candidate', $12::jsonb)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $11, $12, 'low', 'candidate', $13::jsonb)
      on conflict (workspace_id, user_id, cluster_key)
      do update
        set name = coalesce(nullif(excluded.name, ''), learned_places.name),
            latitude = ((learned_places.latitude * learned_places.visit_count) + excluded.latitude) / (learned_places.visit_count + 1),
            longitude = ((learned_places.longitude * learned_places.visit_count) + excluded.longitude) / (learned_places.visit_count + 1),
            radius_meters = greatest(learned_places.radius_meters, excluded.radius_meters),
-           visit_count = learned_places.visit_count + 1,
+           visit_count = greatest(learned_places.visit_count + 1, excluded.visit_count),
            sample_count = learned_places.sample_count + excluded.sample_count,
            first_seen_at = least(learned_places.first_seen_at, excluded.first_seen_at),
            last_seen_at = greatest(learned_places.last_seen_at, excluded.last_seen_at),
@@ -2986,12 +3017,38 @@ async function upsertLearnedPlaceVisit(
       latitude,
       longitude,
       radiusMeters,
+      visitCount,
       sampleCount,
-      startedAt,
+      firstSeenAt,
       stoppedAt,
       JSON.stringify(event.rawPayload)
     ]
   );
+}
+
+async function hasIgnoredLearnedPlaceCluster(
+  client: pg.PoolClient,
+  event: ReturnType<typeof ActivityEventInputSchema.parse>,
+  session: RequestSession
+) {
+  const latitude = numberOrNull(event.rawPayload.latitude);
+  const longitude = numberOrNull(event.rawPayload.longitude);
+  const clusterKey =
+    stringOrNull(event.rawPayload.clusterKey) ??
+    (latitude !== null && longitude !== null ? learnedPlaceClusterKey(latitude, longitude) : null);
+  if (!clusterKey) return false;
+
+  const result = await client.query<{ id: string }>(
+    `select id
+     from learned_places
+     where workspace_id = $1
+       and user_id = $2
+       and cluster_key = $3
+       and status = 'ignored'
+     limit 1`,
+    [session.workspaceId, session.userId, clusterKey]
+  );
+  return Boolean(result.rows[0]);
 }
 
 function learnedPlaceClusterKey(latitude: number, longitude: number) {
