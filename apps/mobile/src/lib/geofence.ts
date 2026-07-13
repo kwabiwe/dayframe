@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
+import { readableLocationNameFromParts, type LocationDisplayAddress } from "@dayframe/shared";
 import { enqueueEvent } from "./api";
 
 export const DAYFRAME_GEOFENCE_TASK = "DAYFRAME_GEOFENCE_TASK";
@@ -846,7 +847,8 @@ async function queueLearnedPlaceVisit(input: {
   const durationSeconds = Math.max(0, Math.round((stoppedAt.getTime() - startedAt.getTime()) / 1000));
   const clusterKey = learnedPlaceClusterKey(latitude, longitude);
   const localId = `location-learned-${input.clusterId ?? clusterKey}-${stoppedAt.getTime()}`;
-  const candidateName = `Regular place near ${latitude.toFixed(3)}, ${longitude.toFixed(3)}`;
+  const address = await reverseGeocodeLearnedPlace(latitude, longitude);
+  const candidateName = readableLocationNameFromParts({ address, latitude, longitude });
   await enqueueEvent({
     localId,
     source: "location_learning",
@@ -857,6 +859,7 @@ async function queueLearnedPlaceVisit(input: {
       provider: "expo_location",
       evidenceKind: "learned_place_visit",
       candidateName,
+      address,
       clusterKey,
       latitude,
       longitude,
@@ -873,7 +876,7 @@ async function queueLearnedPlaceVisit(input: {
     }
   });
   await updateLocationDiagnostics({
-    lastStatus: "Queued regular-place candidate for review.",
+    lastStatus: "Queued detected visit for review.",
     lastLearningSampleAt: stoppedAt.toISOString(),
     lastLearnedPlaceCandidate: {
       candidateName,
@@ -884,6 +887,27 @@ async function queueLearnedPlaceVisit(input: {
       sampleCount: input.sampleCount
     }
   });
+}
+
+async function reverseGeocodeLearnedPlace(latitude: number, longitude: number): Promise<LocationDisplayAddress | null> {
+  if (typeof Location.reverseGeocodeAsync !== "function") return null;
+  try {
+    const [address] = await Location.reverseGeocodeAsync({ latitude, longitude });
+    if (!address) return null;
+    return {
+      name: address.name ?? null,
+      street: address.street ?? null,
+      streetNumber: address.streetNumber ?? null,
+      district: address.district ?? null,
+      city: address.city ?? null,
+      subregion: address.subregion ?? null,
+      region: address.region ?? null,
+      postalCode: address.postalCode ?? null,
+      formattedAddress: address.formattedAddress ?? null
+    };
+  } catch {
+    return null;
+  }
 }
 
 function learnedPlaceClusterId(latitude: number, longitude: number, sampledAt: string) {

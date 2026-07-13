@@ -72,6 +72,7 @@ export type MobileReviewItem = {
   confidence: string;
   status: string;
   notes: string | null;
+  rawPayload: Record<string, unknown> | null;
   createdAt: string;
 };
 
@@ -123,6 +124,7 @@ export type MobileBootstrap = {
     lastStoppedAt: string | null;
     confidence: string;
     status: "candidate" | "accepted" | "ignored";
+    rawPayload: Record<string, unknown> | null;
   }>;
   reviewItems: MobileReviewItem[];
 };
@@ -798,6 +800,19 @@ export async function ignoreLearnedPlace(id: string) {
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to ignore learned place"));
   return readApiJson<{ ok: true; id: string; status: "ignored" }>(response, "Unable to ignore learned place");
+}
+
+export async function forgetLearnedPlace(id: string) {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/learned-places?id=${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: await authHeaders()
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to forget learned place"));
+  return readApiJson<{ ok: true; id: string; status: "forgotten" }>(response, "Unable to forget learned place");
 }
 
 export async function updatePlace(id: string, input: PlaceMutationInput) {

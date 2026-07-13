@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { ZodError, z } from "zod";
 import { authErrorResponse } from "@/lib/api-errors";
-import { updateLearnedPlaceStatus } from "@/lib/event-service";
+import { deleteLearnedPlace, updateLearnedPlaceStatus } from "@/lib/event-service";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 
 const learnedPlaceUpdateSchema = z.object({
@@ -16,6 +16,21 @@ export async function PATCH(request: Request) {
     const learnedPlace = await updateLearnedPlaceStatus(body.id, body.status, session);
     if (!learnedPlace) return NextResponse.json({ error: "Learned place not found." }, { status: 404 });
     return NextResponse.json({ ok: true, id: learnedPlace.id, status: body.status });
+  } catch (error) {
+    const response = authErrorResponse(error);
+    if (response) return response;
+    if (error instanceof ZodError) return NextResponse.json({ issues: error.issues }, { status: 400 });
+    throw error;
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const session = await resolveRequestSession(request);
+    const id = z.string().uuid().parse(new URL(request.url).searchParams.get("id"));
+    const learnedPlace = await deleteLearnedPlace(id, session);
+    if (!learnedPlace) return NextResponse.json({ error: "Learned place not found." }, { status: 404 });
+    return NextResponse.json({ ok: true, id: learnedPlace.id, status: "forgotten" });
   } catch (error) {
     const response = authErrorResponse(error);
     if (response) return response;

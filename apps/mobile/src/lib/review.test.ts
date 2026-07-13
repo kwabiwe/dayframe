@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   REVIEW_COPY,
   buildReviewItemDraftEntry,
+  countReviewNeededActivityForRange,
   hasReviewNeededActivityForRange,
   hasSuggestedTimeWindow,
   isOpenReviewItem,
@@ -102,6 +103,24 @@ describe("mobile review helpers", () => {
     );
   });
 
+  it("does not turn detected visit titles into draft descriptions", () => {
+    expect(
+      buildReviewItemDraftEntry(
+        reviewItem({
+          title: "Near New London Road",
+          eventSource: "location_learning",
+          eventType: "learned_place_visit"
+        }),
+        [category()],
+        Date.now()
+      )
+    ).toEqual(
+      expect.objectContaining({
+        description: null
+      })
+    );
+  });
+
   it("detects review-needed activity inside a report range", () => {
     const rangeStart = new Date("2026-07-07T00:00:00.000Z");
     const rangeEnd = new Date("2026-07-08T00:00:00.000Z");
@@ -131,6 +150,21 @@ describe("mobile review helpers", () => {
         reviewItems: [reviewItem()]
       })
     ).toBe(true);
+    expect(
+      countReviewNeededActivityForRange({
+        entries: [
+          timeEntry({
+            reviewStatus: "needs_review",
+            startedAt: "2026-07-07T12:00:00.000Z",
+            stoppedAt: "2026-07-07T12:30:00.000Z"
+          })
+        ],
+        now: Date.parse("2026-07-07T13:00:00.000Z"),
+        rangeEnd,
+        rangeStart,
+        reviewItems: [reviewItem()]
+      })
+    ).toBe(2);
   });
 
   it("does not treat incomplete review suggestions as running across later ranges", () => {
@@ -171,10 +205,11 @@ describe("mobile review helpers", () => {
 
     expect(copy).toEqual(expect.arrayContaining([
       "Needs review",
-      "Suggested activity",
+      "Suggested time entry",
+      "Detected visit",
       "Confirm",
       "Edit",
-      "Dismiss"
+      "Ignore"
     ]));
     expect(copy.join(" ")).not.toMatch(/\b(projects?|clients?|tags?)\b/i);
   });
@@ -205,6 +240,7 @@ function reviewItem(overrides: Partial<MobileReviewItem> = {}): MobileReviewItem
     confidence: "medium_high",
     status: "open",
     notes: null,
+    rawPayload: null,
     createdAt: "2026-07-07T10:05:00.000Z",
     ...overrides
   };

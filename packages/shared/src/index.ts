@@ -21,6 +21,86 @@ export const DEMO_USER_ID = "00000000-0000-4000-8000-000000000001";
 export const DEMO_WORKSPACE_ID = "00000000-0000-4000-8000-000000000010";
 export const DEFAULT_UNKNOWN_STAY_THRESHOLD_MINUTES = 20;
 
+export type LocationDisplayAddress = {
+  name?: unknown;
+  street?: unknown;
+  streetNumber?: unknown;
+  district?: unknown;
+  city?: unknown;
+  subregion?: unknown;
+  region?: unknown;
+  postalCode?: unknown;
+  formattedAddress?: unknown;
+};
+
+export function formatLocationCoordinates(
+  latitude: unknown,
+  longitude: unknown,
+  precision = 3
+) {
+  const lat = finiteCoordinate(latitude);
+  const lng = finiteCoordinate(longitude);
+  if (lat === null || lng === null) return null;
+  return `${lat.toFixed(precision)}, ${lng.toFixed(precision)}`;
+}
+
+export function locationAddressSummary(address: unknown) {
+  const record = isObjectRecord(address) ? address : {};
+  const formattedAddress = cleanLocationText(record.formattedAddress);
+  if (formattedAddress) return formattedAddress;
+
+  const streetParts = [
+    cleanLocationText(record.streetNumber),
+    cleanLocationText(record.street)
+  ].filter(Boolean);
+  const locality = firstCleanLocationText(record.district, record.city, record.subregion, record.region);
+  const postalCode = cleanLocationText(record.postalCode);
+
+  return [streetParts.join(" "), locality, postalCode].filter(Boolean).join(", ") || null;
+}
+
+export function readableLocationNameFromParts(input: {
+  address?: unknown;
+  latitude?: unknown;
+  longitude?: unknown;
+  fallbackName?: unknown;
+}) {
+  const address = isObjectRecord(input.address) ? input.address : {};
+  const street = cleanLocationText(address.street);
+  const streetNumber = cleanLocationText(address.streetNumber);
+  const venueName = cleanLocationText(address.name);
+  const locality = firstCleanLocationText(address.district, address.city, address.subregion, address.region);
+  const postalCode = cleanLocationText(address.postalCode);
+  const fallbackName = cleanLocationText(input.fallbackName);
+  const coordinates = formatLocationCoordinates(input.latitude, input.longitude);
+
+  if (
+    venueName &&
+    !looksLikeCoordinateText(venueName) &&
+    !looksLikeStreetAddressName({ name: venueName, street, streetNumber })
+  ) {
+    return nearLabel(venueName);
+  }
+
+  if (street && !looksLikeCoordinateText(street)) {
+    return nearLabel(street);
+  }
+
+  if (locality && !looksLikeCoordinateText(locality)) {
+    return nearLabel(locality);
+  }
+
+  if (postalCode && !looksLikeCoordinateText(postalCode)) {
+    return `${postalCode} area`;
+  }
+
+  if (fallbackName && !looksLikeCoordinateFallback(fallbackName)) {
+    return fallbackName;
+  }
+
+  return coordinates ? `Unknown place near ${coordinates}` : "Unknown place";
+}
+
 export const EventSourceSchema = z.enum([
   "manual_app",
   "mobile_app",
@@ -899,18 +979,24 @@ export function normalizeActivityEvent(
   }
 
   if (event.type === "learned_place_visit") {
-    const candidateName =
-      stringFromPayload(event.rawPayload.placeName) ??
-      stringFromPayload(event.rawPayload.candidateName) ??
-      "Regular place candidate";
+    const candidateName = readableLocationNameFromParts({
+      address: event.rawPayload.address,
+      latitude: event.rawPayload.latitude,
+      longitude: event.rawPayload.longitude,
+      fallbackName:
+        event.description ??
+        stringFromPayload(event.rawPayload.placeName) ??
+        stringFromPayload(event.rawPayload.candidateName)
+    });
     return {
       action: "create_review_item",
       confidence: "low",
       reviewStatus: "needs_review",
       categoryId: event.categoryId,
       placeId: event.placeId ?? place?.id,
-      title: event.description ?? candidateName,
-      reason: "Regular-place learning keeps unsaved or uncertain places in Review until confirmed.",
+      title: candidateName,
+      reason:
+        "Dayframe detected a stay at an unsaved location. Confirming creates a time entry only after review.",
       shouldClosePrevious: false
     };
   }
@@ -1107,6 +1193,57 @@ function categoryFromEventPayload(
 
 function stringFromPayload(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function finiteCoordinate(value: unknown) {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (typeof value === "string" && !value.trim()) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function cleanLocationText(value: unknown) {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const trimmed = String(value).trim().replace(/\s+/g, " ");
+  return trimmed ? trimmed.slice(0, 160) : null;
+}
+
+function firstCleanLocationText(...values: unknown[]) {
+  for (const value of values) {
+    const text = cleanLocationText(value);
+    if (text) return text;
+  }
+  return null;
+}
+
+function nearLabel(value: string) {
+  return value.toLowerCase().startsWith("near ") ? value : `Near ${value}`;
+}
+
+function looksLikeStreetAddressName(input: {
+  name: string;
+  street: string | null;
+  streetNumber: string | null;
+}) {
+  if (!input.street || !input.streetNumber) return false;
+  const normalizedName = input.name.toLowerCase();
+  return (
+    normalizedName.includes(input.street.toLowerCase()) &&
+    normalizedName.includes(input.streetNumber.toLowerCase())
+  );
+}
+
+function looksLikeCoordinateFallback(value: string) {
+  const normalized = value.toLowerCase();
+  return (
+    looksLikeCoordinateText(value) ||
+    /^regular place near\s+-?\d+(\.\d+)?,\s*-?\d+(\.\d+)?$/.test(normalized) ||
+    /^unknown place near\s+-?\d+(\.\d+)?,\s*-?\d+(\.\d+)?$/.test(normalized)
+  );
+}
+
+function looksLikeCoordinateText(value: string) {
+  return /^-?\d+(\.\d+)?,\s*-?\d+(\.\d+)?$/.test(value.trim());
 }
 
 function visitActivityDescription(
