@@ -59,6 +59,19 @@ type PlaceRowLike = {
   autoStart: boolean;
 };
 
+type PlaceMutationFields = {
+  name: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  radiusMeters?: number | null;
+  priority?: number | null;
+  defaultCategoryId?: string | null;
+  defaultActivityDescription?: string | null;
+  autoStart?: boolean;
+};
+
+type QueryRunner = <T extends pg.QueryResultRow>(statement: string, values?: unknown[]) => Promise<{ rows: T[] }>;
+
 export type ReviewResolutionCode =
   | "review_item_not_found"
   | "already_resolved"
@@ -366,6 +379,13 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
       candidate = {
         ...candidate,
         categoryId: await ensureHealthEventCategoryId(client, session, parsed.type)
+      };
+    }
+
+    if (parsed.type === "commute_detected" && !candidate.categoryId) {
+      candidate = {
+        ...candidate,
+        categoryId: await ensureCommuteCategoryId(client, session)
       };
     }
 
@@ -823,21 +843,99 @@ export async function archiveCategory(id: string, session: RequestSession = getD
 }
 
 export async function createPlace(
-  input: {
-    name: string;
-    latitude?: number | null;
-    longitude?: number | null;
-    radiusMeters?: number | null;
-    priority?: number | null;
-    defaultCategoryId?: string | null;
-    defaultActivityDescription?: string | null;
-    autoStart?: boolean;
-  },
+  input: PlaceMutationFields,
   session: RequestSession = getDevSession()
+) {
+  return insertPlaceRecord(
+    <T extends pg.QueryResultRow>(statement: string, values?: unknown[]) => query<T>(statement, values),
+    input,
+    session
+  );
+}
+
+export async function createPlaceFromLearnedPlace(
+  learnedPlaceId: string,
+  input: PlaceMutationFields,
+  session: RequestSession = getDevSession()
+) {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const learnedPlace = await client.query<{ id: string }>(
+      `select id
+       from learned_places
+       where id = $1
+         and workspace_id = $2
+         and user_id = $3
+         and status = 'candidate'
+       for update`,
+      [learnedPlaceId, session.workspaceId, session.userId]
+    );
+    if (!learnedPlace.rows[0]) {
+      await client.query("rollback");
+      return null;
+    }
+
+    const place = await insertPlaceRecord(
+      <T extends pg.QueryResultRow>(statement: string, values?: unknown[]) => client.query<T>(statement, values),
+      input,
+      session
+    );
+    await client.query(
+      `update learned_places
+       set status = 'accepted',
+           place_id = $4,
+           updated_at = now()
+       where id = $1
+         and workspace_id = $2
+         and user_id = $3`,
+      [learnedPlaceId, session.workspaceId, session.userId, place.id]
+    );
+    await client.query("commit");
+    return place;
+  } catch (error) {
+    await client.query("rollback");
+    const readinessError = learnedPlacesReadinessError(error);
+    if (readinessError) throw readinessError;
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function updateLearnedPlaceStatus(
+  learnedPlaceId: string,
+  status: "ignored",
+  session: RequestSession = getDevSession()
+) {
+  try {
+    const result = await query<{ id: string }>(
+      `update learned_places
+       set status = $4,
+           updated_at = now()
+       where id = $1
+         and workspace_id = $2
+         and user_id = $3
+         and status = 'candidate'
+       returning id`,
+      [learnedPlaceId, session.workspaceId, session.userId, status]
+    );
+    return result.rows[0] ?? null;
+  } catch (error) {
+    const readinessError = learnedPlacesReadinessError(error);
+    if (readinessError) throw readinessError;
+    throw error;
+  }
+}
+
+async function insertPlaceRecord(
+  runQuery: QueryRunner,
+  input: PlaceMutationFields,
+  session: RequestSession
 ) {
   const name = normalizeName(input.name, "New place");
   try {
-    const result = await query<PlaceRowLike>(
+    const result = await runQuery<PlaceRowLike>(
       `with inserted as (
          insert into places (
             workspace_id,
@@ -1298,7 +1396,7 @@ export async function resolveReviewItem(
             item.suggestedPlaceId,
             item.eventSource,
             item.confidence,
-            item.title,
+            reviewItemDescriptionForConfirmedEntry(item),
             window.startedAt,
             window.stoppedAt,
             item.eventId
@@ -2304,12 +2402,44 @@ function healthCategorySpecForEventType(eventType: string | null | undefined) {
   return { name: "Health", color: "moss" };
 }
 
+function commuteCategorySpec() {
+  return { name: "Commute", color: "sky" };
+}
+
+function reviewItemDescriptionForConfirmedEntry(item: Pick<HealthReviewItemRow, "eventType" | "title">) {
+  if (item.eventType === "commute_detected") return null;
+  return item.title;
+}
+
 async function ensureHealthEventCategoryId(
   client: pg.PoolClient,
   session: RequestSession,
   eventType: string | null | undefined
 ) {
   const spec = healthCategorySpecForEventType(eventType);
+  const existing = await client.query<{ id: string }>(
+    `select id
+     from categories
+     where workspace_id = $1
+       and lower(name) = lower($2)
+       and coalesce(is_archived, false) = false
+     order by created_at asc
+     limit 1`,
+    [session.workspaceId, spec.name]
+  );
+  if (existing.rows[0]) return existing.rows[0].id;
+
+  const created = await client.query<{ id: string }>(
+    `insert into categories (workspace_id, name, color, is_pinned)
+     values ($1, $2, $3, false)
+     returning id`,
+    [session.workspaceId, spec.name, spec.color]
+  );
+  return created.rows[0].id;
+}
+
+async function ensureCommuteCategoryId(client: pg.PoolClient, session: RequestSession) {
+  const spec = commuteCategorySpec();
   const existing = await client.query<{ id: string }>(
     `select id
      from categories

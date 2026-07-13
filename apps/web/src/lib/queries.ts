@@ -5,7 +5,13 @@ import type {
   PlaceSummary,
   ProjectSummary
 } from "@dayframe/shared";
-import { isUndefinedColumnError, missingRequiredColumnError, query } from "./db";
+import {
+  databaseReadinessError,
+  isUndefinedColumnError,
+  isUndefinedTableError,
+  missingRequiredColumnError,
+  query
+} from "./db";
 import { getDevSession, type RequestSession } from "./session";
 
 export type ClientRow = {
@@ -51,6 +57,22 @@ export type PlaceRow = {
   defaultCategoryName: string | null;
   defaultActivityDescription: string | null;
   autoStart: boolean;
+};
+
+export type LearnedPlaceRow = {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  radiusMeters: number;
+  visitCount: number;
+  sampleCount: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  lastStartedAt: string | null;
+  lastStoppedAt: string | null;
+  confidence: string;
+  status: "candidate" | "accepted" | "ignored";
 };
 
 export type AutomationRuleRow = {
@@ -165,6 +187,7 @@ export type BootstrapData = {
   projects: ProjectRow[];
   tags: TagRow[];
   places: PlaceRow[];
+  learnedPlaces: LearnedPlaceRow[];
   automationRules: AutomationRuleRow[];
   entries: TimeEntryRow[];
   dayEntries: TimeEntryRow[];
@@ -190,6 +213,7 @@ export async function getBootstrapData(
     projects,
     tags,
     places,
+    learnedPlaces,
     automationRules,
     entries,
     dayEntries,
@@ -206,6 +230,7 @@ export async function getBootstrapData(
     getProjects(session),
     getTags(session),
     getPlaces(session),
+    getLearnedPlaces(session),
     getAutomationRules(session),
     getTimeEntries(session),
     getTimeEntries(session, {
@@ -234,6 +259,7 @@ export async function getBootstrapData(
     projects,
     tags,
     places,
+    learnedPlaces,
     automationRules,
     entries,
     dayEntries,
@@ -411,6 +437,44 @@ async function getPlaces(session: RequestSession) {
         "places",
         "default_activity_description",
         "supabase/migrations/202607070002_place_default_activity_description.sql",
+        error
+      );
+    }
+    throw error;
+  }
+}
+
+async function getLearnedPlaces(session: RequestSession, limit = 10) {
+  try {
+    const result = await query<LearnedPlaceRow>(
+      `select id,
+              name,
+              latitude,
+              longitude,
+              radius_meters as "radiusMeters",
+              visit_count as "visitCount",
+              sample_count as "sampleCount",
+              first_seen_at as "firstSeenAt",
+              last_seen_at as "lastSeenAt",
+              last_started_at as "lastStartedAt",
+              last_stopped_at as "lastStoppedAt",
+              confidence,
+              status
+       from learned_places
+       where workspace_id = $1
+         and user_id = $2
+         and status = 'candidate'
+       order by visit_count desc, last_seen_at desc, sample_count desc, name
+       limit $3`,
+      [session.workspaceId, session.userId, limit]
+    );
+    return result.rows;
+  } catch (error) {
+    if (isUndefinedTableError(error, "learned_places")) {
+      throw databaseReadinessError(
+        "Database schema is missing public.learned_places. Run supabase/migrations/202607120002_location_learning.sql before viewing learned places.",
+        "public.learned_places",
+        "supabase/migrations/202607120002_location_learning.sql",
         error
       );
     }

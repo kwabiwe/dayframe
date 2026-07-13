@@ -19,6 +19,7 @@ export default async function PlacesPage() {
         <EntityForms
           mode="places"
           categories={data.categories}
+          learnedPlaces={data.learnedPlaces}
           places={data.places}
           automationRules={data.automationRules}
         />

@@ -23,6 +23,7 @@ vi.mock("./queries", () => ({
 
 const {
   createPlace,
+  createPlaceFromLearnedPlace,
   createEntity,
   deletePlace,
   deleteTimeEntry,
@@ -30,6 +31,7 @@ const {
   reprocessHealthReviewItems,
   resolveReviewItem,
   TimeEntryNotFoundError,
+  updateLearnedPlaceStatus,
   updateCategory,
   updatePlace
 } = await import("./event-service");
@@ -160,6 +162,8 @@ describe("category persistence", () => {
     const client = {
       query: vi.fn(async (statement: string, values?: unknown[]) => {
         void values;
+        if (statement.includes("from categories")) return { rows: [] };
+        if (statement.includes("insert into categories")) return { rows: [{ id: commuteCategoryId() }] };
         if (statement.includes("insert into activity_events")) return { rows: [{ id: "event-commute" }] };
         return { rows: [] };
       }),
@@ -185,6 +189,7 @@ describe("category persistence", () => {
     expect(result.candidate).toMatchObject({
       action: "create_review_item",
       reviewStatus: "needs_review",
+      categoryId: commuteCategoryId(),
       title: "Commute from Home to Gym"
     });
     expect(client.query.mock.calls.some(([statement]) => String(statement).includes("insert into time_entries"))).toBe(false);
@@ -195,7 +200,7 @@ describe("category persistence", () => {
       "commute_detected_suggestion",
       "Commute from Home to Gym",
       null,
-      null,
+      commuteCategoryId(),
       null,
       "2026-07-06T08:00:00.000Z",
       "2026-07-06T08:25:00.000Z",
@@ -340,6 +345,76 @@ describe("place persistence", () => {
         "Workout",
         false
       ]
+    );
+  });
+
+  it("promotes a learned candidate while creating a saved place", async () => {
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes("from learned_places")) return { rows: [{ id: "learned-1" }] };
+        if (statement.includes("with inserted as")) {
+          return {
+            rows: [{
+              id: placeId(),
+              name: "Office",
+              latitude: 51.5,
+              longitude: -0.12,
+              radiusMeters: 160,
+              priority: 5,
+              defaultProjectId: null,
+              defaultProjectName: null,
+              defaultCategoryId: null,
+              defaultCategoryName: null,
+              defaultActivityDescription: null,
+              autoStart: false
+            }]
+          };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await createPlaceFromLearnedPlace(
+      "40000000-0000-4000-8000-000000000001",
+      {
+        name: "Office",
+        latitude: 51.5,
+        longitude: -0.12,
+        radiusMeters: 160,
+        priority: 5,
+        autoStart: false
+      },
+      session
+    );
+
+    expect(result?.id).toBe(placeId());
+    expect(client.query).toHaveBeenCalledWith("begin");
+    expect(client.query).toHaveBeenCalledWith(
+      expect.stringContaining("from learned_places"),
+      ["40000000-0000-4000-8000-000000000001", session.workspaceId, session.userId]
+    );
+    expect(client.query).toHaveBeenCalledWith(
+      expect.stringContaining("set status = 'accepted'"),
+      ["40000000-0000-4000-8000-000000000001", session.workspaceId, session.userId, placeId()]
+    );
+    expect(client.query).toHaveBeenCalledWith("commit");
+  });
+
+  it("ignores learned candidates without touching saved places", async () => {
+    mocks.query.mockResolvedValueOnce({ rows: [{ id: "40000000-0000-4000-8000-000000000001" }] });
+
+    const result = await updateLearnedPlaceStatus(
+      "40000000-0000-4000-8000-000000000001",
+      "ignored",
+      session
+    );
+
+    expect(result?.id).toBe("40000000-0000-4000-8000-000000000001");
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining("set status = $4"),
+      ["40000000-0000-4000-8000-000000000001", session.workspaceId, session.userId, "ignored"]
     );
   });
 
@@ -1876,6 +1951,59 @@ describe("review item resolution", () => {
     expect(client.query).toHaveBeenCalledWith("commit");
   });
 
+  it("accepts commute reviews as category-only entries without descriptions", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        if (statement.includes("from review_items ri")) {
+          return {
+            rows: [
+              {
+                id: "review-commute",
+                eventId: "event-commute",
+                title: "Commute from Home to Office",
+                status: "open",
+                suggestedProjectId: null,
+                suggestedCategoryId: commuteCategoryId(),
+                suggestedPlaceId: null,
+                suggestedStartedAt: "2026-07-06T08:00:00.000Z",
+                suggestedStoppedAt: "2026-07-06T08:42:00.000Z",
+                confidence: "medium",
+                eventSource: "location_learning",
+                eventType: "commute_detected"
+              }
+            ]
+          };
+        }
+        if (statement.includes("created_from_event_id = $3")) return { rows: [] };
+        if (statement.includes("insert into time_entries")) return { rows: [{ id: "entry-commute" }] };
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await resolveReviewItem("review-commute", "accept", session);
+
+    const entryInsert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into time_entries")
+    );
+    expect(entryInsert?.[1]).toEqual([
+      session.workspaceId,
+      session.userId,
+      null,
+      commuteCategoryId(),
+      null,
+      "location_learning",
+      "medium",
+      null,
+      "2026-07-06T08:00:00.000Z",
+      "2026-07-06T08:42:00.000Z",
+      "event-commute"
+    ]);
+    expect(client.query).toHaveBeenCalledWith("commit");
+  });
+
   it("validates review-created automation rule references before saving", async () => {
     const client = {
       query: vi.fn(async (statement: string) => {
@@ -2090,6 +2218,10 @@ function healthCategoryId() {
 
 function sleepCategoryId() {
   return "20000000-0000-4000-8000-000000000008";
+}
+
+function commuteCategoryId() {
+  return "20000000-0000-4000-8000-000000000009";
 }
 
 function placeId() {

@@ -15,6 +15,7 @@ import { AlertTriangle, CheckCircle2, Pencil, Plus, Save, WandSparkles } from "l
 import type {
   AutomationRuleRow,
   CategoryRow,
+  LearnedPlaceRow,
   PlaceRow
 } from "@/lib/queries";
 
@@ -25,17 +26,19 @@ type EntityListRow = {
 
 export function EntityForms({
   categories,
+  learnedPlaces,
   places,
   automationRules,
   mode
 }: {
   categories: CategoryRow[];
+  learnedPlaces?: LearnedPlaceRow[];
   places: PlaceRow[];
   automationRules: AutomationRuleRow[];
   mode: "places" | "automation";
 }) {
   if (mode === "places") {
-    return <PlacesManager categories={categories} places={places} />;
+    return <PlacesManager categories={categories} learnedPlaces={learnedPlaces ?? []} places={places} />;
   }
 
   return (
@@ -67,17 +70,36 @@ export function EntityForms({
 
 function PlacesManager({
   categories,
+  learnedPlaces,
   places
 }: {
   categories: CategoryRow[];
+  learnedPlaces: LearnedPlaceRow[];
   places: PlaceRow[];
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [promoting, setPromoting] = useState<LearnedPlaceRow | null>(null);
+  const [ignoringId, setIgnoringId] = useState<string | null>(null);
 
   function refresh() {
     startTransition(() => router.refresh());
+  }
+
+  async function ignoreLearnedPlace(learnedPlace: LearnedPlaceRow) {
+    setIgnoringId(learnedPlace.id);
+    try {
+      await fetch("/api/learned-places", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: learnedPlace.id, status: "ignored" })
+      });
+      if (promoting?.id === learnedPlace.id) setPromoting(null);
+      refresh();
+    } finally {
+      setIgnoringId(null);
+    }
   }
 
   async function updatePlace(place: PlaceRow, formData: FormData) {
@@ -185,8 +207,26 @@ function PlacesManager({
             <p className="px-4 py-5 text-sm text-[var(--muted)]">No places yet.</p>
           ) : null}
         </div>
+        <div className="border-t border-[var(--line)] px-4 py-3">
+          <h3 className="text-sm font-semibold">Learned places</h3>
+          <p className="mt-1 text-xs text-[var(--muted)]">Top candidates from repeated visits.</p>
+        </div>
+        <div className="divide-y divide-[var(--line)]">
+          {learnedPlaces.map((learnedPlace) => (
+            <LearnedPlaceCandidate
+              key={learnedPlace.id}
+              learnedPlace={learnedPlace}
+              ignoring={ignoringId === learnedPlace.id}
+              onPromote={() => setPromoting(learnedPlace)}
+              onIgnore={() => void ignoreLearnedPlace(learnedPlace)}
+            />
+          ))}
+          {learnedPlaces.length === 0 ? (
+            <p className="px-4 py-5 text-sm text-[var(--muted)]">No learned candidates yet.</p>
+          ) : null}
+        </div>
       </section>
-      <CreatePlaceForm categories={categories} />
+      <CreatePlaceForm categories={categories} learnedPlace={promoting} onCreated={() => setPromoting(null)} />
     </div>
   );
 }
@@ -213,20 +253,93 @@ function EntityList({ title, rows }: { title: string; rows: EntityListRow[] }) {
   );
 }
 
-function CreatePlaceForm({
-  categories
+function LearnedPlaceCandidate({
+  learnedPlace,
+  ignoring,
+  onPromote,
+  onIgnore
 }: {
-  categories: CategoryRow[];
+  learnedPlace: LearnedPlaceRow;
+  ignoring: boolean;
+  onPromote: () => void;
+  onIgnore: () => void;
 }) {
   return (
-    <EntityForm title="New place" entity="place">
-      <TextInput name="name" label="Name" placeholder="Place name" required />
+    <div className="motion-row flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between">
+      <div className="min-w-0">
+        <h3 className="truncate text-sm font-semibold">{learnedPlace.name}</h3>
+        <p className="mt-1 text-xs text-[var(--muted)]">{formatLearnedPlaceMeta(learnedPlace)}</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className="industrial-button-primary focus-ring text-sm" onClick={onPromote}>
+          <Plus size={15} />
+          Save as place
+        </button>
+        <button
+          type="button"
+          className="industrial-button focus-ring text-sm disabled:opacity-50"
+          disabled={ignoring}
+          onClick={onIgnore}
+        >
+          Ignore
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CreatePlaceForm({
+  categories,
+  learnedPlace,
+  onCreated
+}: {
+  categories: CategoryRow[];
+  learnedPlace?: LearnedPlaceRow | null;
+  onCreated?: () => void;
+}) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+
+  async function submit(formData: FormData) {
+    await fetch("/api/places", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        learnedPlaceId: learnedPlace?.id,
+        name: formString(formData.get("name")),
+        latitude: formNullableNumber(formData.get("latitude")),
+        longitude: formNullableNumber(formData.get("longitude")),
+        radiusMeters: formNumber(formData.get("radiusMeters")),
+        priority: formNumber(formData.get("priority")),
+        defaultCategoryId: formOptionalString(formData.get("categoryId")),
+        defaultActivityDescription: formOptionalString(formData.get("defaultActivityDescription")),
+        autoStart: false
+      })
+    });
+    onCreated?.();
+    startTransition(() => router.refresh());
+  }
+
+  return (
+    <form action={submit} className="space-y-3 border border-[var(--line)] bg-[var(--surface-strong)] p-4">
+      <h2 className="text-base font-semibold">{learnedPlace ? "Save learned place" : "New place"}</h2>
+      <TextInput name="name" label="Name" defaultValue={learnedPlace?.name} placeholder="Place name" required />
       <div className="grid grid-cols-2 gap-3">
-        <NumberInput name="latitude" label="Latitude" step="0.000001" />
-        <NumberInput name="longitude" label="Longitude" step="0.000001" />
+        <NumberInput
+          name="latitude"
+          label="Latitude"
+          defaultValue={formatOptionalNumber(learnedPlace?.latitude ?? null)}
+          step="0.000001"
+        />
+        <NumberInput
+          name="longitude"
+          label="Longitude"
+          defaultValue={formatOptionalNumber(learnedPlace?.longitude ?? null)}
+          step="0.000001"
+        />
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <NumberInput name="radiusMeters" label="Radius" defaultValue="100" />
+        <NumberInput name="radiusMeters" label="Radius" defaultValue={String(learnedPlace?.radiusMeters ?? 100)} />
         <NumberInput name="priority" label="Priority" defaultValue="5" />
       </div>
       <SelectInput name="categoryId" label="Default category" options={categories} />
@@ -235,7 +348,15 @@ function CreatePlaceForm({
         label="Default activity description"
         placeholder="School drop-off/pickup"
       />
-    </EntityForm>
+      <button
+        className="industrial-button-primary focus-ring w-full text-sm disabled:opacity-50"
+        type="submit"
+        disabled={isPending}
+      >
+        <Plus size={16} />
+        Create
+      </button>
+    </form>
   );
 }
 
@@ -627,6 +748,18 @@ function formNullableNumber(value: FormDataEntryValue | null) {
 function formNumber(value: FormDataEntryValue | null) {
   const number = formNullableNumber(value);
   return number ?? undefined;
+}
+
+function formatLearnedPlaceMeta(learnedPlace: LearnedPlaceRow) {
+  const visits = learnedPlace.visitCount === 1 ? "1 visit" : `${learnedPlace.visitCount} visits`;
+  const samples = learnedPlace.sampleCount === 1 ? "1 sample" : `${learnedPlace.sampleCount} samples`;
+  return `${visits} · ${samples} · ${learnedPlace.radiusMeters}m radius · Last seen ${formatShortDate(learnedPlace.lastSeenAt)}`;
+}
+
+function formatShortDate(value: string) {
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) return "recently";
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(timestamp);
 }
 
 function formatOptionalNumber(value: number | null) {
