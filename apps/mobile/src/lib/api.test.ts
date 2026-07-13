@@ -45,6 +45,7 @@ const {
   fetchBootstrap,
   getQueueDiagnostics,
   getSessionToken,
+  ignoreLearnedPlace,
   isNetworkTimerError,
   login,
   readQueue,
@@ -830,6 +831,70 @@ describe("mobile API client", () => {
       "https://dayframe.test/api/bootstrap",
       expect.objectContaining({
         headers: { Authorization: "Bearer session-token" }
+      })
+    );
+  });
+
+  it("promotes learned places through the hosted places API", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const savedPlace = {
+      id: "30000000-0000-4000-8000-000000000001",
+      name: "Office",
+      latitude: 51.5,
+      longitude: -0.12,
+      radiusMeters: 160,
+      priority: 5,
+      defaultProjectId: null,
+      defaultCategoryId: null,
+      defaultActivityDescription: null
+    };
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true, place: savedPlace }, 201)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await createPlace({
+      learnedPlaceId: "40000000-0000-4000-8000-000000000001",
+      name: "Office",
+      latitude: 51.5,
+      longitude: -0.12,
+      radiusMeters: 160,
+      priority: 5
+    });
+
+    expect(result.place).toEqual(savedPlace);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/places",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          name: "Office",
+          latitude: 51.5,
+          longitude: -0.12,
+          radiusMeters: 160,
+          priority: 5,
+          defaultCategoryId: null,
+          defaultActivityDescription: null,
+          autoStart: false,
+          learnedPlaceId: "40000000-0000-4000-8000-000000000001"
+        })
+      })
+    );
+  });
+
+  it("ignores learned places through the hosted API", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true, id: "learned-1", status: "ignored" }, 200)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await ignoreLearnedPlace("40000000-0000-4000-8000-000000000001");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/learned-places",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          id: "40000000-0000-4000-8000-000000000001",
+          status: "ignored"
+        })
       })
     );
   });

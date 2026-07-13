@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { ZodError, z } from "zod";
 import { authErrorResponse } from "@/lib/api-errors";
-import { createPlace, deletePlace, updatePlace } from "@/lib/event-service";
+import { createPlace, createPlaceFromLearnedPlace, deletePlace, updatePlace } from "@/lib/event-service";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import { getBootstrapData } from "@/lib/queries";
 
@@ -17,6 +17,7 @@ const placeFieldsSchema = z.object({
 });
 
 const placeCreateSchema = placeFieldsSchema.extend({
+  learnedPlaceId: z.string().uuid().optional(),
   radiusMeters: z.number().int().min(25).max(2000).default(100),
   priority: z.number().int().min(0).max(100).default(5)
 });
@@ -41,13 +42,17 @@ export async function POST(request: Request) {
   try {
     const session = await resolveRequestSession(request);
     const body = placeCreateSchema.parse(await request.json());
-    const place = await createPlace(
-      {
-        ...body,
-        autoStart: false
-      },
-      session
-    );
+    const { learnedPlaceId, ...placeInput } = body;
+    const place = learnedPlaceId
+      ? await createPlaceFromLearnedPlace(learnedPlaceId, { ...placeInput, autoStart: false }, session)
+      : await createPlace(
+        {
+          ...placeInput,
+          autoStart: false
+        },
+        session
+      );
+    if (!place) return NextResponse.json({ error: "Learned place not found." }, { status: 404 });
     return NextResponse.json({ ok: true, place }, { status: 201 });
   } catch (error) {
     const response = authErrorResponse(error);

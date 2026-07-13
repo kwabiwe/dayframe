@@ -109,6 +109,21 @@ export type MobileBootstrap = {
     defaultActivityDescription?: string | null;
     autoStart?: boolean;
   }>;
+  learnedPlaces?: Array<{
+    id: string;
+    name: string;
+    latitude: number;
+    longitude: number;
+    radiusMeters: number;
+    visitCount: number;
+    sampleCount: number;
+    firstSeenAt: string;
+    lastSeenAt: string;
+    lastStartedAt: string | null;
+    lastStoppedAt: string | null;
+    confidence: string;
+    status: "candidate" | "accepted" | "ignored";
+  }>;
   reviewItems: MobileReviewItem[];
 };
 
@@ -118,6 +133,7 @@ export type MobileCategoryResponse = {
 };
 
 export type MobilePlace = MobileBootstrap["places"][number];
+export type MobileLearnedPlace = NonNullable<MobileBootstrap["learnedPlaces"]>[number];
 
 export type MobilePlaceResponse = {
   ok: true;
@@ -125,6 +141,7 @@ export type MobilePlaceResponse = {
 };
 
 export type PlaceMutationInput = {
+  learnedPlaceId?: string;
   name?: string;
   latitude?: number | null;
   longitude?: number | null;
@@ -709,6 +726,33 @@ export async function archiveCategory(id: string) {
 }
 
 export async function createPlace(input: { name: string } & PlaceMutationInput) {
+  if (input.learnedPlaceId) {
+    const response = await fetch(`${DAYFRAME_API_BASE}/api/places`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(await authHeaders())
+      },
+      body: JSON.stringify({
+        name: input.name.trim(),
+        latitude: input.latitude ?? null,
+        longitude: input.longitude ?? null,
+        radiusMeters: input.radiusMeters ?? DEFAULT_PLACE_RADIUS_METERS,
+        priority: input.priority ?? DEFAULT_PLACE_PRIORITY,
+        defaultCategoryId: input.defaultCategoryId ?? null,
+        defaultActivityDescription: input.defaultActivityDescription?.trim() || null,
+        autoStart: false,
+        learnedPlaceId: input.learnedPlaceId
+      })
+    });
+    if (response.status === 401) {
+      await clearSessionToken();
+      throw new AuthRequiredError();
+    }
+    if (!response.ok) throw new Error(await errorMessage(response, "Unable to save learned place"));
+    return readPlaceResponse(response, "Unable to save learned place");
+  }
+
   const response = await fetch(`${DAYFRAME_API_BASE}/api/entities`, {
     method: "POST",
     headers: {
@@ -737,6 +781,23 @@ export async function createPlace(input: { name: string } & PlaceMutationInput) 
     throw new Error("Place was saved, but the refreshed place list did not include it.");
   }
   return { ok: true, place };
+}
+
+export async function ignoreLearnedPlace(id: string) {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/learned-places`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify({ id, status: "ignored" })
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to ignore learned place"));
+  return readApiJson<{ ok: true; id: string; status: "ignored" }>(response, "Unable to ignore learned place");
 }
 
 export async function updatePlace(id: string, input: PlaceMutationInput) {

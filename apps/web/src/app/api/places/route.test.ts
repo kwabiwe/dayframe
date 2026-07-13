@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   resolveRequestSession: vi.fn(),
   getBootstrapData: vi.fn(),
   createPlace: vi.fn(),
+  createPlaceFromLearnedPlace: vi.fn(),
   updatePlace: vi.fn(),
   deletePlace: vi.fn()
 }));
@@ -25,6 +26,7 @@ vi.mock("@/lib/queries", () => ({
 
 vi.mock("@/lib/event-service", () => ({
   createPlace: mocks.createPlace,
+  createPlaceFromLearnedPlace: mocks.createPlaceFromLearnedPlace,
   updatePlace: mocks.updatePlace,
   deletePlace: mocks.deletePlace
 }));
@@ -39,6 +41,7 @@ describe("/api/places", () => {
       places: [placeRow()]
     });
     mocks.createPlace.mockResolvedValue(placeRow());
+    mocks.createPlaceFromLearnedPlace.mockResolvedValue(placeRow());
     mocks.updatePlace.mockResolvedValue({ ...placeRow(), name: "Gym" });
     mocks.deletePlace.mockResolvedValue({ id: placeId() });
   });
@@ -79,6 +82,33 @@ describe("/api/places", () => {
       },
       session
     );
+  });
+
+  it("promotes a learned place through the place create endpoint", async () => {
+    const response = await POST(
+      jsonRequest({
+        learnedPlaceId: learnedPlaceId(),
+        name: "Office",
+        latitude: 51.5,
+        longitude: -0.12,
+        radiusMeters: 160
+      })
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.createPlaceFromLearnedPlace).toHaveBeenCalledWith(
+      learnedPlaceId(),
+      {
+        name: "Office",
+        latitude: 51.5,
+        longitude: -0.12,
+        radiusMeters: 160,
+        priority: 5,
+        autoStart: false
+      },
+      session
+    );
+    expect(mocks.createPlace).not.toHaveBeenCalled();
   });
 
   it("edits the mobile-supported place fields", async () => {
@@ -142,6 +172,10 @@ function placeRow() {
 
 function placeId() {
   return "30000000-0000-4000-8000-000000000001";
+}
+
+function learnedPlaceId() {
+  return "40000000-0000-4000-8000-000000000001";
 }
 
 function categoryId() {

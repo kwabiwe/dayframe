@@ -18,8 +18,10 @@ import {
   createPlace,
   deletePlace,
   fetchBootstrap,
+  ignoreLearnedPlace,
   updatePlace,
   type MobileBootstrap,
+  type MobileLearnedPlace,
   type MobilePlace
 } from "@/lib/api";
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
@@ -39,6 +41,7 @@ type Category = MobileBootstrap["categories"][number];
 type PlaceFormMode =
   | {
       type: "create";
+      learnedPlace?: MobileLearnedPlace;
     }
   | {
       type: "edit";
@@ -53,6 +56,7 @@ export default function PlacesScreen() {
   const [locating, setLocating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [ignoringLearnedId, setIgnoringLearnedId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [formMode, setFormMode] = useState<PlaceFormMode | null>(null);
   const [placeName, setPlaceName] = useState("");
@@ -105,6 +109,20 @@ export default function PlacesScreen() {
     setLocationAccuracy(null);
     setLocationPrecise(true);
     setStatusMessage(null);
+  }
+
+  function beginSaveLearnedPlace(learnedPlace: MobileLearnedPlace) {
+    scheduleLayoutTransition(reduceMotion);
+    setFormMode({ type: "create", learnedPlace });
+    setPlaceName(learnedPlace.name);
+    setLatitudeText(formatCoordinate(learnedPlace.latitude));
+    setLongitudeText(formatCoordinate(learnedPlace.longitude));
+    setRadiusMeters(String(learnedPlace.radiusMeters));
+    setDefaultCategoryId("");
+    setDefaultActivityDescription("");
+    setLocationAccuracy(null);
+    setLocationPrecise(true);
+    setStatusMessage("Review the learned place before saving it.");
   }
 
   async function useCurrentLocation() {
@@ -189,7 +207,9 @@ export default function PlacesScreen() {
     setSaving(true);
     try {
       if (formMode.type === "create") {
+        const learnedPlaceId = formMode.learnedPlace?.id;
         const response = await createPlace({
+          learnedPlaceId,
           name: validation.value.name,
           latitude: validation.value.latitude,
           longitude: validation.value.longitude,
@@ -202,7 +222,8 @@ export default function PlacesScreen() {
         cancelForm();
         await refreshAfterPlaceChange({
           prefix: "Place saved.",
-          upsertPlace: response.place
+          upsertPlace: response.place,
+          removeLearnedPlaceId: learnedPlaceId
         });
       } else {
         const response = await updatePlace(formMode.place.id, {
@@ -270,6 +291,26 @@ export default function PlacesScreen() {
     }
   }
 
+  async function ignoreLearnedCandidate(learnedPlace: MobileLearnedPlace) {
+    setIgnoringLearnedId(learnedPlace.id);
+    try {
+      await ignoreLearnedPlace(learnedPlace.id);
+      removeLocalLearnedPlace(learnedPlace.id);
+      await refreshAfterPlaceChange({
+        prefix: "Learned place ignored.",
+        removeLearnedPlaceId: learnedPlace.id
+      });
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        router.replace("/");
+        return;
+      }
+      Alert.alert("Places", error instanceof Error ? error.message : "Unable to ignore learned place.");
+    } finally {
+      setIgnoringLearnedId(null);
+    }
+  }
+
   function upsertLocalPlace(place: MobilePlace) {
     setData((current) => current ? reconcileBootstrapPlaces(current, { upsertPlace: place }) : current);
   }
@@ -278,10 +319,15 @@ export default function PlacesScreen() {
     setData((current) => current ? reconcileBootstrapPlaces(current, { removePlaceId: id }) : current);
   }
 
+  function removeLocalLearnedPlace(id: string) {
+    setData((current) => current ? reconcileBootstrapPlaces(current, { removeLearnedPlaceId: id }) : current);
+  }
+
   async function refreshAfterPlaceChange(options: {
     prefix: string;
     upsertPlace?: MobilePlace;
     removePlaceId?: string;
+    removeLearnedPlaceId?: string;
   }) {
     try {
       const bootstrap = await fetchBootstrap();
@@ -306,6 +352,7 @@ export default function PlacesScreen() {
   }
 
   const places = data?.places ?? [];
+  const learnedPlaces = data?.learnedPlaces ?? [];
   const categories = data?.categories ?? [];
   const createWarning = formMode?.type === "create"
     ? locationAccuracyWarning(locationAccuracy, locationPrecise)
@@ -361,7 +408,11 @@ export default function PlacesScreen() {
 
           {formMode ? (
             <View style={styles.placeForm}>
-              <Text style={styles.label}>{formMode.type === "create" ? "New place" : "Edit place"}</Text>
+              <Text style={styles.label}>
+                {formMode.type === "create"
+                  ? formMode.learnedPlace ? "Save learned place" : "New place"
+                  : "Edit place"}
+              </Text>
               <TextInput
                 style={styles.textInput}
                 value={placeName}
@@ -509,6 +560,27 @@ export default function PlacesScreen() {
             ) : (
               <Text style={styles.muted}>No places yet. Add a place with coordinates or use your current location.</Text>
             )}
+            <View style={styles.settingsDivider} />
+            <Text style={styles.sectionTitle}>Learned places</Text>
+            {learnedPlaces.length > 0 ? (
+              <View style={styles.placeList}>
+                {learnedPlaces.map((learnedPlace) => (
+                  <LearnedPlaceRow
+                    key={learnedPlace.id}
+                    learnedPlace={learnedPlace}
+                    ignoring={ignoringLearnedId === learnedPlace.id}
+                    onSave={() => beginSaveLearnedPlace(learnedPlace)}
+                    onIgnore={() => {
+                      void ignoreLearnedCandidate(learnedPlace);
+                    }}
+                    theme={theme}
+                    styles={styles}
+                  />
+                ))}
+              </View>
+            ) : (
+              <Text style={styles.muted}>No learned candidates yet.</Text>
+            )}
           </View>
         </View>
       </ScrollView>
@@ -578,6 +650,57 @@ function PlaceRow({
   );
 }
 
+function LearnedPlaceRow({
+  learnedPlace,
+  ignoring,
+  onSave,
+  onIgnore,
+  theme,
+  styles
+}: {
+  learnedPlace: MobileLearnedPlace;
+  ignoring: boolean;
+  onSave: () => void;
+  onIgnore: () => void;
+  theme: MobileTheme;
+  styles: MobileStyles;
+}) {
+  return (
+    <View style={styles.placeRow}>
+      <MapPinGlyph color={theme.textSecondary} />
+      <View style={styles.placeTextStack}>
+        <Text style={styles.placeName} numberOfLines={1}>{learnedPlace.name}</Text>
+        <Text style={styles.placeMeta} numberOfLines={2}>
+          {formatLearnedPlaceMeta(learnedPlace)}
+        </Text>
+      </View>
+      <View style={styles.placeActions}>
+        <Pressable
+          accessibilityLabel={`Save ${learnedPlace.name} as a place`}
+          accessibilityRole="button"
+          style={pressable(styles.secondaryButton, styles.buttonPressed)}
+          onPress={onSave}
+        >
+          <Text style={styles.secondaryButtonText}>Save</Text>
+        </Pressable>
+        <Pressable
+          accessibilityLabel={`Ignore ${learnedPlace.name}`}
+          accessibilityRole="button"
+          disabled={ignoring}
+          style={({ pressed }) => [
+            styles.categoryIconButton,
+            ignoring ? styles.buttonDisabled : null,
+            pressed ? styles.buttonPressed : null
+          ]}
+          onPress={onIgnore}
+        >
+          <ArchiveGlyph color={theme.textSecondary} />
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 function CategoryChoice({
   category,
   label,
@@ -630,7 +753,7 @@ async function suggestCurrentPlaceName(latitude: number, longitude: number) {
 
 function reconcileBootstrapPlaces(
   data: MobileBootstrap,
-  options: { upsertPlace?: MobilePlace; removePlaceId?: string }
+  options: { upsertPlace?: MobilePlace; removePlaceId?: string; removeLearnedPlaceId?: string }
 ): MobileBootstrap {
   const withoutChangedPlace = data.places.filter((place) => {
     if (options.removePlaceId && place.id === options.removePlaceId) return false;
@@ -640,7 +763,10 @@ function reconcileBootstrapPlaces(
   const places = options.upsertPlace
     ? sortPlaces([options.upsertPlace, ...withoutChangedPlace])
     : sortPlaces(withoutChangedPlace);
-  return { ...data, places };
+  const learnedPlaces = options.removeLearnedPlaceId
+    ? (data.learnedPlaces ?? []).filter((learnedPlace) => learnedPlace.id !== options.removeLearnedPlaceId)
+    : data.learnedPlaces;
+  return { ...data, places, learnedPlaces };
 }
 
 function sortPlaces(places: MobilePlace[]) {
@@ -648,6 +774,22 @@ function sortPlaces(places: MobilePlace[]) {
     const priorityDelta = (right.priority ?? 0) - (left.priority ?? 0);
     if (priorityDelta !== 0) return priorityDelta;
     return left.name.localeCompare(right.name);
+  });
+}
+
+function formatLearnedPlaceMeta(learnedPlace: MobileLearnedPlace) {
+  const visits = learnedPlace.visitCount === 1 ? "1 visit" : `${learnedPlace.visitCount} visits`;
+  const samples = learnedPlace.sampleCount === 1 ? "1 sample" : `${learnedPlace.sampleCount} samples`;
+  const lastSeen = formatShortDateTime(learnedPlace.lastSeenAt);
+  return `${visits} · ${samples} · ${learnedPlace.radiusMeters}m radius · Last seen ${lastSeen}`;
+}
+
+function formatShortDateTime(value: string) {
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) return "recently";
+  return timestamp.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric"
   });
 }
 
