@@ -580,10 +580,15 @@ export type RecentActivityEntry = {
   categoryName?: string | null;
   categoryColor?: string | null;
   description?: string | null;
+  eventType?: string | null;
+  reviewStatus?: string | null;
+  source?: string | null;
   startedAt: string;
   stoppedAt?: string | null;
   durationSeconds?: number | null;
 };
+
+export type RecentActivitySuggestionSection = "recent" | "often_used" | "suggested_now";
 
 export type RecentActivitySuggestion = {
   key: string;
@@ -592,25 +597,37 @@ export type RecentActivitySuggestion = {
   categoryColor: string | null;
   description: string;
   lastSeenAt: string;
+  score: number;
+  section: RecentActivitySuggestionSection;
   useCount: number;
   totalSeconds: number;
 };
 
 export function buildRecentActivitySuggestions(
   entries: RecentActivityEntry[],
-  options: { limit?: number; minDurationSeconds?: number } = {}
+  options: { contextDate?: Date | string; limit?: number; minDurationSeconds?: number } = {}
 ): RecentActivitySuggestion[] {
   const limit = options.limit ?? 4;
   const minDurationSeconds = options.minDurationSeconds ?? 60;
-  const suggestions = new Map<string, RecentActivitySuggestion>();
+  const suggestions = new Map<string, ScoredRecentActivitySuggestion>();
+  const contextDate = options.contextDate ? new Date(options.contextDate) : new Date();
+  const contextMs = Number.isFinite(contextDate.getTime()) ? contextDate.getTime() : Date.now();
+  const contextBucket = timeOfDayBucket(new Date(contextMs));
+  const contextDay = new Date(contextMs).getDay();
+  const contextDayKind = dayKind(new Date(contextMs));
 
   for (const entry of entries) {
     const description = normalizeRecentActivityDescription(entry.description);
     if (!description || !entry.stoppedAt) continue;
+    if (!isRecentActivitySuggestionEligible(entry)) continue;
     if ((entry.durationSeconds ?? 0) < minDurationSeconds) continue;
 
     const lastSeenMs = Date.parse(entry.stoppedAt);
     if (!Number.isFinite(lastSeenMs)) continue;
+    const startedAt = new Date(entry.startedAt);
+    const matchesTimeBucket = Number.isFinite(startedAt.getTime()) && timeOfDayBucket(startedAt) === contextBucket;
+    const matchesDay = Number.isFinite(startedAt.getTime()) && startedAt.getDay() === contextDay;
+    const matchesDayKind = Number.isFinite(startedAt.getTime()) && dayKind(startedAt) === contextDayKind;
 
     const categoryId = entry.categoryId ?? null;
     const key = `${categoryId ?? "uncategorized"}:${description.toLocaleLowerCase()}`;
@@ -623,14 +640,22 @@ export function buildRecentActivitySuggestions(
         categoryColor: entry.categoryColor ?? null,
         description,
         lastSeenAt: entry.stoppedAt,
+        score: 0,
+        section: "recent",
         useCount: 1,
-        totalSeconds: Math.max(0, entry.durationSeconds ?? 0)
+        totalSeconds: Math.max(0, entry.durationSeconds ?? 0),
+        timeBucketMatches: matchesTimeBucket ? 1 : 0,
+        dayMatches: matchesDay ? 1 : 0,
+        dayKindMatches: matchesDayKind ? 1 : 0
       });
       continue;
     }
 
     current.useCount += 1;
     current.totalSeconds += Math.max(0, entry.durationSeconds ?? 0);
+    current.timeBucketMatches += matchesTimeBucket ? 1 : 0;
+    current.dayMatches += matchesDay ? 1 : 0;
+    current.dayKindMatches += matchesDayKind ? 1 : 0;
     if (lastSeenMs > Date.parse(current.lastSeenAt)) {
       current.lastSeenAt = entry.stoppedAt;
       current.description = description;
@@ -640,12 +665,86 @@ export function buildRecentActivitySuggestions(
   }
 
   return [...suggestions.values()]
+    .map((suggestion) => scoreRecentActivitySuggestion(suggestion, contextMs))
     .sort((a, b) =>
-      b.useCount - a.useCount ||
+      b.score - a.score ||
       Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt) ||
-      b.totalSeconds - a.totalSeconds
+      b.useCount - a.useCount ||
+      a.description.localeCompare(b.description)
     )
     .slice(0, limit);
+}
+
+const manualSuggestionSources = new Set(["manual_app", "mobile_app"]);
+const excludedSuggestionEventTypes = new Set([
+  "geofence_enter",
+  "geofence_exit",
+  "unknown_stay",
+  "commute_detected",
+  "learned_place_visit",
+  "nfc_action",
+  "shortcut_action",
+  "calendar_hint",
+  "health_sleep_import",
+  "health_workout_import"
+]);
+
+export function isRecentActivitySuggestionEligible(entry: RecentActivityEntry) {
+  if (entry.source && !manualSuggestionSources.has(entry.source)) return false;
+  if (entry.reviewStatus && entry.reviewStatus !== "confirmed") return false;
+  if (entry.eventType && excludedSuggestionEventTypes.has(entry.eventType)) return false;
+  return true;
+}
+
+type ScoredRecentActivitySuggestion = RecentActivitySuggestion & {
+  dayKindMatches: number;
+  dayMatches: number;
+  timeBucketMatches: number;
+};
+
+function scoreRecentActivitySuggestion(
+  suggestion: ScoredRecentActivitySuggestion,
+  contextMs: number
+): RecentActivitySuggestion {
+  const lastSeenMs = Date.parse(suggestion.lastSeenAt);
+  const daysAgo = Number.isFinite(lastSeenMs)
+    ? Math.max(0, (contextMs - lastSeenMs) / 86_400_000)
+    : 90;
+  const recencyScore = Math.max(0, 60 - Math.min(60, daysAgo * 3));
+  const frequencyScore = Math.log2(suggestion.useCount + 1) * 18;
+  const contextScore = suggestion.useCount >= 2
+    ? suggestion.timeBucketMatches * 7 + suggestion.dayMatches * 5 + suggestion.dayKindMatches * 2
+    : 0;
+  const durationScore = Math.min(6, Math.log2(Math.max(1, suggestion.totalSeconds / 60)));
+  const score = Math.round((recencyScore + frequencyScore + contextScore + durationScore) * 100) / 100;
+  const section: RecentActivitySuggestionSection =
+    suggestion.useCount >= 2 && contextScore >= 16
+      ? "suggested_now"
+      : suggestion.useCount >= 2
+        ? "often_used"
+        : "recent";
+
+  return {
+    categoryColor: suggestion.categoryColor,
+    categoryId: suggestion.categoryId,
+    categoryName: suggestion.categoryName,
+    description: suggestion.description,
+    key: suggestion.key,
+    lastSeenAt: suggestion.lastSeenAt,
+    score,
+    section,
+    totalSeconds: suggestion.totalSeconds,
+    useCount: suggestion.useCount
+  };
+}
+
+function timeOfDayBucket(date: Date) {
+  return Math.floor(date.getHours() / 3);
+}
+
+function dayKind(date: Date) {
+  const day = date.getDay();
+  return day === 0 || day === 6 ? "weekend" : "weekday";
 }
 
 function normalizeRecentActivityDescription(value: string | null | undefined) {

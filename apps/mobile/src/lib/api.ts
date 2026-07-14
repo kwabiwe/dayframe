@@ -7,7 +7,8 @@ import {
   type EventSource,
   type HealthAutoLogMappings,
   type HealthImportPreferences,
-  type LocationDisplayAddress
+  type LocationDisplayAddress,
+  type RecentActivitySuggestion
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
 
@@ -139,6 +140,7 @@ export type MobileBootstrap = {
     rawPayload: Record<string, unknown> | null;
   }>;
   reviewItems: MobileReviewItem[];
+  taskSuggestions?: RecentActivitySuggestion[];
 };
 
 export type MobileCategoryResponse = {

@@ -3,8 +3,10 @@ import type {
   CategorySummary,
   NormalizationContext,
   PlaceSummary,
-  ProjectSummary
+  ProjectSummary,
+  RecentActivitySuggestion
 } from "@dayframe/shared";
+import { buildRecentActivitySuggestions } from "@dayframe/shared";
 import {
   databaseReadinessError,
   isUndefinedColumnError,
@@ -208,6 +210,7 @@ export type BootstrapData = {
   activeEntry: TimeEntryRow | null;
   reviewItems: ReviewItemRow[];
   activityEvents: ActivityRow[];
+  taskSuggestions: RecentActivitySuggestion[];
   stats: DashboardStats;
   todaySeries: DashboardSeriesPoint[];
   weekSeries: DashboardSeriesPoint[];
@@ -234,6 +237,7 @@ export async function getBootstrapData(
     activeEntry,
     reviewItems,
     activityEvents,
+    taskSuggestions,
     stats
   ] = await Promise.all([
     getUser(session),
@@ -259,6 +263,7 @@ export async function getBootstrapData(
     getActiveEntry(session),
     getReviewItems(session),
     getActivityEvents(session),
+    getTaskSuggestions(session),
     getDashboardStats(session, dateRange)
   ]);
 
@@ -280,6 +285,7 @@ export async function getBootstrapData(
     activeEntry,
     reviewItems,
     activityEvents,
+    taskSuggestions,
     stats,
     todaySeries: buildHourlySeries(dayEntries),
     weekSeries: buildWeekSeries(weekEntries, dateRange)
@@ -633,6 +639,53 @@ async function getTimeEntries(
     values
   );
   return result.rows;
+}
+
+export async function getTaskSuggestions(session: RequestSession) {
+  const result = await query<{
+    id: string;
+    categoryId: string | null;
+    categoryName: string | null;
+    categoryColor: string | null;
+    description: string | null;
+    durationSeconds: number;
+    eventType: string | null;
+    reviewStatus: string | null;
+    source: string | null;
+    startedAt: string;
+    stoppedAt: string | null;
+  }>(
+    `select te.id,
+            cat.id as "categoryId",
+            cat.name as "categoryName",
+            cat.color as "categoryColor",
+            te.description,
+            extract(epoch from (te.stopped_at - te.started_at))::int as "durationSeconds",
+            ae.event_type as "eventType",
+            te.review_status as "reviewStatus",
+            te.source,
+            te.started_at as "startedAt",
+            te.stopped_at as "stoppedAt"
+     from time_entries te
+     left join activity_events ae on ae.id = te.created_from_event_id and ae.workspace_id = te.workspace_id
+     left join categories cat on cat.id = te.category_id and cat.workspace_id = te.workspace_id and cat.is_archived = false
+     where te.workspace_id = $1
+       and te.user_id = $2
+       and te.review_status = 'confirmed'
+       and te.stopped_at is not null
+       and te.started_at >= now() - interval '120 days'
+       and te.source in ('manual_app', 'mobile_app')
+       and nullif(btrim(coalesce(te.description, '')), '') is not null
+     order by te.stopped_at desc
+     limit 500`,
+    [session.workspaceId, session.userId]
+  );
+
+  return buildRecentActivitySuggestions(result.rows, {
+    contextDate: new Date(),
+    limit: 9,
+    minDurationSeconds: 60
+  });
 }
 
 async function getActiveEntry(session: RequestSession) {

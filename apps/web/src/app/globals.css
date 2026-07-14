@@ -1259,6 +1259,120 @@ html[data-theme="dark"] .swiss-theme-icon-on-dark {
   font-weight: 700;
 }
 
+.swiss-task-suggestions {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-inset);
+  padding: 10px;
+}
+
+.swiss-task-suggestions-header,
+.swiss-task-suggestion-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.swiss-task-suggestions-header span,
+.swiss-task-suggestion-section > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.swiss-task-suggestions-header button,
+.swiss-task-suggestion-actions button {
+  min-height: 36px;
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--foreground);
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.swiss-task-suggestion-section {
+  display: grid;
+  gap: 6px;
+}
+
+.swiss-task-suggestion-section > div {
+  display: grid;
+  gap: 7px;
+}
+
+.swiss-task-suggestion-section button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 48px;
+  border: 1px solid var(--control-border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--foreground);
+  padding: 8px 9px;
+  text-align: left;
+}
+
+.swiss-task-suggestion-section button:hover,
+.swiss-task-suggestion-section button:focus-visible,
+.swiss-task-suggestions-header button:hover,
+.swiss-task-suggestions-header button:focus-visible,
+.swiss-task-suggestion-actions button:hover,
+.swiss-task-suggestion-actions button:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 46%, var(--line));
+  outline: none;
+}
+
+.swiss-task-suggestion-section i {
+  width: 10px;
+  height: 10px;
+  border: 1px solid color-mix(in srgb, var(--foreground) 18%, transparent);
+  border-radius: 999px;
+}
+
+.swiss-task-suggestion-section b,
+.swiss-task-suggestion-section small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.swiss-task-suggestion-section b {
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.swiss-task-suggestion-section small {
+  margin-top: 1px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.swiss-task-suggestion-section em {
+  color: var(--accent);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 850;
+}
+
+.swiss-task-suggestions p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+
 .swiss-menu-list + .swiss-inline-error {
   padding: 0 16px 12px;
 }

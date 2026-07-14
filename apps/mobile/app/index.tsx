@@ -154,6 +154,7 @@ export default function HomeScreen() {
   const [now, setNow] = useState(() => Date.now());
   const [customDescription, setCustomDescription] = useState("");
   const [startSheetVisible, setStartSheetVisible] = useState(false);
+  const [startSheetSuggesting, setStartSheetSuggesting] = useState(false);
   const [startSheetSaving, setStartSheetSaving] = useState(false);
   const [activeEditVisible, setActiveEditVisible] = useState(false);
   const [activeEditSaving, setActiveEditSaving] = useState(false);
@@ -585,6 +586,11 @@ export default function HomeScreen() {
   }, [timerActionPending, timerProgress]);
 
   async function startTask(categoryId?: string | null, description = customDescription) {
+    if (!data?.activeEntry && !categoryId && !description.trim()) {
+      setStartSheetSuggesting(true);
+      setStartSheetVisible(true);
+      return false;
+    }
     return startTaskWith({
       categoryId: categoryId ?? null,
       description,
@@ -1110,7 +1116,10 @@ export default function HomeScreen() {
                     accessibilityLabel="Open start task sheet"
                     accessibilityRole="button"
                     style={pressable([styles.textInput, styles.startInput], styles.buttonPressed)}
-                    onPress={() => setStartSheetVisible(true)}
+                    onPress={() => {
+                      setStartSheetSuggesting(false);
+                      setStartSheetVisible(true);
+                    }}
                   >
                     <Text style={styles.startInputText} numberOfLines={1}>
                       {customDescription.trim() || "What are you working on?"}
@@ -1252,11 +1261,16 @@ export default function HomeScreen() {
         initialDescription={customDescription}
         lastStoppedAt={recentStoppedAt}
         mode="start"
-        onCancel={() => setStartSheetVisible(false)}
+        onCancel={() => {
+          setStartSheetSuggesting(false);
+          setStartSheetVisible(false);
+        }}
         onStart={startTaskFromSheet}
         saving={startSheetSaving || timerActionPending === "start"}
+        showTaskSuggestions={startSheetSuggesting}
         stopping={false}
         styles={styles}
+        taskSuggestions={data?.taskSuggestions ?? []}
         theme={theme}
         visible={startSheetVisible}
       />
