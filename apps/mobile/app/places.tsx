@@ -5,6 +5,7 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
+  Switch,
   Text,
   TextInput,
   View
@@ -73,6 +74,7 @@ export default function PlacesScreen() {
   const [latitudeText, setLatitudeText] = useState("");
   const [longitudeText, setLongitudeText] = useState("");
   const [radiusMeters, setRadiusMeters] = useState(String(DEFAULT_PLACE_RADIUS_METERS));
+  const [loggingEnabled, setLoggingEnabled] = useState(true);
   const [defaultCategoryId, setDefaultCategoryId] = useState("");
   const [defaultActivityDescription, setDefaultActivityDescription] = useState("");
   const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
@@ -118,6 +120,7 @@ export default function PlacesScreen() {
     setLatitudeText("");
     setLongitudeText("");
     setRadiusMeters(String(DEFAULT_PLACE_RADIUS_METERS));
+    setLoggingEnabled(true);
     setDefaultCategoryId("");
     setDefaultActivityDescription("");
     setLocationAccuracy(null);
@@ -133,6 +136,7 @@ export default function PlacesScreen() {
     setLatitudeText(formatCoordinate(learnedPlace.latitude));
     setLongitudeText(formatCoordinate(learnedPlace.longitude));
     setRadiusMeters(String(learnedPlace.radiusMeters));
+    setLoggingEnabled(true);
     setDefaultCategoryId("");
     setDefaultActivityDescription("");
     setLocationAccuracy(null);
@@ -183,6 +187,7 @@ export default function PlacesScreen() {
     setLatitudeText(formatOptionalCoordinate(place.latitude));
     setLongitudeText(formatOptionalCoordinate(place.longitude));
     setRadiusMeters(String(place.radiusMeters));
+    setLoggingEnabled(place.loggingEnabled !== false);
     setDefaultCategoryId(place.defaultCategoryId ?? "");
     setDefaultActivityDescription(place.defaultActivityDescription ?? "");
     setLocationAccuracy(null);
@@ -197,6 +202,7 @@ export default function PlacesScreen() {
     setLatitudeText("");
     setLongitudeText("");
     setRadiusMeters(String(DEFAULT_PLACE_RADIUS_METERS));
+    setLoggingEnabled(true);
     setDefaultCategoryId("");
     setDefaultActivityDescription("");
     setLocationAccuracy(null);
@@ -210,8 +216,8 @@ export default function PlacesScreen() {
       latitude: latitudeText,
       longitude: longitudeText,
       radiusMeters,
-      defaultCategoryId,
-      defaultActivityDescription
+      defaultCategoryId: loggingEnabled ? defaultCategoryId : "",
+      defaultActivityDescription: loggingEnabled ? defaultActivityDescription : ""
     });
     if (!validation.ok) {
       Alert.alert("Places", validation.message);
@@ -230,8 +236,9 @@ export default function PlacesScreen() {
           longitude: validation.value.longitude,
           radiusMeters: validation.value.radiusMeters,
           priority: 5,
-          defaultCategoryId: validation.value.defaultCategoryId,
-          defaultActivityDescription: validation.value.defaultActivityDescription
+          loggingEnabled,
+          defaultCategoryId: loggingEnabled ? validation.value.defaultCategoryId : null,
+          defaultActivityDescription: loggingEnabled ? validation.value.defaultActivityDescription : null
         });
         upsertLocalPlace(response.place);
         cancelForm();
@@ -246,8 +253,9 @@ export default function PlacesScreen() {
           latitude: validation.value.latitude,
           longitude: validation.value.longitude,
           radiusMeters: validation.value.radiusMeters,
-          defaultCategoryId: validation.value.defaultCategoryId,
-          defaultActivityDescription: validation.value.defaultActivityDescription
+          loggingEnabled,
+          defaultCategoryId: loggingEnabled ? validation.value.defaultCategoryId : null,
+          defaultActivityDescription: loggingEnabled ? validation.value.defaultActivityDescription : null
         });
         upsertLocalPlace(response.place);
         cancelForm();
@@ -551,40 +559,70 @@ export default function PlacesScreen() {
                   <Text style={styles.diagnosticText}>Meters from this place.</Text>
                 </View>
               </View>
-              <View style={styles.activeEditSection}>
-                <Text style={styles.label}>Default category</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryChoiceScroller}>
-                  <CategoryChoice
-                    label="No default"
-                    selected={!defaultCategoryId}
-                    onPress={() => setDefaultCategoryId("")}
-                    theme={theme}
-                    styles={styles}
+              <View style={styles.healthPreferenceRow}>
+                <View style={styles.healthPreferenceHeader}>
+                  <View style={styles.healthPreferenceText}>
+                    <Text style={styles.categoryName}>Log visits</Text>
+                    <Text style={styles.categoryMeta}>
+                      {loggingEnabled
+                        ? "Detected visits can become review items."
+                        : "Visits here are kept as location evidence only."}
+                    </Text>
+                  </View>
+                  <Switch
+                    accessibilityLabel={`${placeName || "Place"} visit logging`}
+                    value={loggingEnabled}
+                    onValueChange={(enabled) => {
+                      setLoggingEnabled(enabled);
+                      if (!enabled) {
+                        setDefaultCategoryId("");
+                        setDefaultActivityDescription("");
+                      }
+                    }}
+                    trackColor={{ false: theme.borderStrong, true: theme.accent }}
+                    thumbColor={loggingEnabled ? theme.onAccent : theme.surfaceRaised}
+                    ios_backgroundColor={theme.borderStrong}
                   />
-                  {categories.map((category) => (
-                    <CategoryChoice
-                      key={category.id}
-                      category={category}
-                      label={category.name}
-                      selected={defaultCategoryId === category.id}
-                      onPress={() => setDefaultCategoryId(category.id)}
-                      theme={theme}
-                      styles={styles}
+                </View>
+              </View>
+              {loggingEnabled ? (
+                <>
+                  <View style={styles.activeEditSection}>
+                    <Text style={styles.label}>Default category</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryChoiceScroller}>
+                      <CategoryChoice
+                        label="No default"
+                        selected={!defaultCategoryId}
+                        onPress={() => setDefaultCategoryId("")}
+                        theme={theme}
+                        styles={styles}
+                      />
+                      {categories.map((category) => (
+                        <CategoryChoice
+                          key={category.id}
+                          category={category}
+                          label={category.name}
+                          selected={defaultCategoryId === category.id}
+                          onPress={() => setDefaultCategoryId(category.id)}
+                          theme={theme}
+                          styles={styles}
+                        />
+                      ))}
+                    </ScrollView>
+                  </View>
+                  <View style={styles.activeEditSection}>
+                    <Text style={styles.label}>Default activity description</Text>
+                    <TextInput
+                      style={styles.textInput}
+                      value={defaultActivityDescription}
+                      onChangeText={setDefaultActivityDescription}
+                      placeholder="School drop-off/pickup"
+                      placeholderTextColor={theme.textSecondary}
+                      returnKeyType="done"
                     />
-                  ))}
-                </ScrollView>
-              </View>
-              <View style={styles.activeEditSection}>
-                <Text style={styles.label}>Default activity description</Text>
-                <TextInput
-                  style={styles.textInput}
-                  value={defaultActivityDescription}
-                  onChangeText={setDefaultActivityDescription}
-                  placeholder="School drop-off/pickup"
-                  placeholderTextColor={theme.textSecondary}
-                  returnKeyType="done"
-                />
-              </View>
+                  </View>
+                </>
+              ) : null}
               {locationAccuracy !== null ? (
                 <Text style={styles.diagnosticText}>{formatLocationAccuracy(locationAccuracy)}</Text>
               ) : null}
@@ -695,18 +733,21 @@ function PlaceRow({
     place.defaultCategoryName ??
     categories.find((category) => category.id === place.defaultCategoryId)?.name ??
     null;
+  const visitLoggingEnabled = place.loggingEnabled !== false;
   return (
     <View style={styles.placeRow}>
       <MapPinGlyph color={theme.accent} />
       <View style={styles.placeTextStack}>
         <Text style={styles.placeName} numberOfLines={1}>{place.name}</Text>
-        {place.defaultActivityDescription ? (
+        {visitLoggingEnabled && place.defaultActivityDescription ? (
           <Text style={styles.placeMeta} numberOfLines={2}>
             {place.defaultActivityDescription}
           </Text>
         ) : null}
         <Text style={styles.placeMeta} numberOfLines={2}>
-          {defaultCategoryName ?? "No default category"} · {place.radiusMeters}m radius
+          {visitLoggingEnabled
+            ? `${defaultCategoryName ?? "No default category"} · ${place.radiusMeters}m radius`
+            : `Visit logging off · ${place.radiusMeters}m radius`}
         </Text>
       </View>
       <View style={styles.placeActions}>
@@ -1027,7 +1068,7 @@ function CategoryChoice({
           styles.categoryChoice,
           category ? { borderColor: chipColor } : null,
           selected ? styles.categoryChoiceSelected : null,
-          selected ? { backgroundColor: "#FFFFFF", borderColor: chipColor } : null
+          selected ? { borderColor: chipColor } : null
         ],
         styles.buttonPressed
       )}

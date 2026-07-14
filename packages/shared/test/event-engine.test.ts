@@ -245,6 +245,27 @@ describe("event normalization", () => {
     expect(candidate.title).toBe("Workout");
   });
 
+  it("keeps saved place visits record-only when place logging is disabled", () => {
+    const candidate = normalizeActivityEvent(
+      {
+        source: "geofence_specific",
+        type: "geofence_exit",
+        occurredAt: new Date("2026-06-20T13:00:00Z"),
+        placeId: ids.gymPlace
+      },
+      {
+        ...context,
+        places: context.places.map((place) =>
+          place.id === ids.gymPlace ? { ...place, loggingEnabled: false } : place
+        )
+      }
+    );
+
+    expect(candidate.action).toBe("record_only");
+    expect(candidate.reviewStatus).toBe("confirmed");
+    expect(candidate.reason).toContain("Visit logging is turned off");
+  });
+
   it("falls back to the place name when a geofence place has no default activity description", () => {
     const candidate = normalizeActivityEvent(
       {

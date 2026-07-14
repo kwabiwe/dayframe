@@ -574,6 +574,88 @@ export type CategorySummary = {
   isPinned?: boolean;
 };
 
+export type RecentActivityEntry = {
+  id?: string;
+  categoryId?: string | null;
+  categoryName?: string | null;
+  categoryColor?: string | null;
+  description?: string | null;
+  startedAt: string;
+  stoppedAt?: string | null;
+  durationSeconds?: number | null;
+};
+
+export type RecentActivitySuggestion = {
+  key: string;
+  categoryId: string | null;
+  categoryName: string | null;
+  categoryColor: string | null;
+  description: string;
+  lastSeenAt: string;
+  useCount: number;
+  totalSeconds: number;
+};
+
+export function buildRecentActivitySuggestions(
+  entries: RecentActivityEntry[],
+  options: { limit?: number; minDurationSeconds?: number } = {}
+): RecentActivitySuggestion[] {
+  const limit = options.limit ?? 4;
+  const minDurationSeconds = options.minDurationSeconds ?? 60;
+  const suggestions = new Map<string, RecentActivitySuggestion>();
+
+  for (const entry of entries) {
+    const description = normalizeRecentActivityDescription(entry.description);
+    if (!description || !entry.stoppedAt) continue;
+    if ((entry.durationSeconds ?? 0) < minDurationSeconds) continue;
+
+    const lastSeenMs = Date.parse(entry.stoppedAt);
+    if (!Number.isFinite(lastSeenMs)) continue;
+
+    const categoryId = entry.categoryId ?? null;
+    const key = `${categoryId ?? "uncategorized"}:${description.toLocaleLowerCase()}`;
+    const current = suggestions.get(key);
+    if (!current) {
+      suggestions.set(key, {
+        key,
+        categoryId,
+        categoryName: entry.categoryName ?? null,
+        categoryColor: entry.categoryColor ?? null,
+        description,
+        lastSeenAt: entry.stoppedAt,
+        useCount: 1,
+        totalSeconds: Math.max(0, entry.durationSeconds ?? 0)
+      });
+      continue;
+    }
+
+    current.useCount += 1;
+    current.totalSeconds += Math.max(0, entry.durationSeconds ?? 0);
+    if (lastSeenMs > Date.parse(current.lastSeenAt)) {
+      current.lastSeenAt = entry.stoppedAt;
+      current.description = description;
+      current.categoryName = entry.categoryName ?? current.categoryName;
+      current.categoryColor = entry.categoryColor ?? current.categoryColor;
+    }
+  }
+
+  return [...suggestions.values()]
+    .sort((a, b) =>
+      b.useCount - a.useCount ||
+      Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt) ||
+      b.totalSeconds - a.totalSeconds
+    )
+    .slice(0, limit);
+}
+
+function normalizeRecentActivityDescription(value: string | null | undefined) {
+  const description = String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!description || description === "Start activity") return null;
+  return description;
+}
+
 export type PlaceSummary = {
   id: string;
   name: string;
@@ -583,6 +665,7 @@ export type PlaceSummary = {
   defaultCategoryId?: string | null;
   defaultActivityDescription?: string | null;
   autoStart: boolean;
+  loggingEnabled?: boolean;
 };
 
 export type AutomationRuleSummary = {
@@ -1075,6 +1158,20 @@ export function normalizeActivityEvent(
     const projectId = matchingRule?.projectId ?? place?.defaultProjectId ?? undefined;
     const categoryId = matchingRule?.categoryId ?? place?.defaultCategoryId ?? undefined;
     const title = visitActivityDescription(event, place, matchingRule);
+
+    if (place?.loggingEnabled === false || event.rawPayload.loggingEnabled === false) {
+      return {
+        action: "record_only",
+        confidence: broadPlace || isHome ? "low" : "medium_high",
+        reviewStatus: "confirmed",
+        projectId,
+        categoryId,
+        placeId: place?.id,
+        title,
+        reason: "Visit logging is turned off for this saved place, so the visit is kept as location evidence only.",
+        shouldClosePrevious: false
+      };
+    }
 
     return {
       action: "create_review_item",

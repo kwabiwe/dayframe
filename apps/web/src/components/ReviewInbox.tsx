@@ -29,6 +29,7 @@ export function ReviewInbox({ items }: { items: ReviewItemRow[] }) {
 function ReviewItemCard({ item }: { item: ReviewItemRow }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const display = reviewItemDisplay(item);
 
   async function act(action: string) {
     await fetch(`/api/review/${item.id}`, {
@@ -44,10 +45,9 @@ function ReviewItemCard({ item }: { item: ReviewItemRow }) {
       <div className="min-w-0">
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div className="min-w-0">
-            <h3 className="text-base font-semibold">{item.title}</h3>
+            <h3 className="text-base font-semibold">{display.title}</h3>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              {item.categoryName ?? "Needs category"} / {item.placeName ?? "No place"} /{" "}
-              {formatSourceLabel(item.eventSource ?? "review")}
+              {display.meta}
             </p>
           </div>
           <span className="industrial-chip shrink-0 text-xs">{item.confidence}</span>
@@ -55,7 +55,7 @@ function ReviewItemCard({ item }: { item: ReviewItemRow }) {
 
         <div className="mt-3 flex flex-wrap gap-2 text-xs">
           <span className="industrial-chip">{formatSourceLabel(item.eventSource ?? "review")}</span>
-          <span className="industrial-chip">{formatEventLabel(item.eventType ?? item.type)}</span>
+          <span className="industrial-chip">{display.kind}</span>
           <span className="industrial-chip tabular">
             {formatDate(item.createdAt)} {formatTime(item.createdAt)}
           </span>
@@ -106,4 +106,29 @@ function ReviewItemCard({ item }: { item: ReviewItemRow }) {
       </div>
     </article>
   );
+}
+
+function reviewItemDisplay(item: ReviewItemRow) {
+  const evidenceKind = typeof item.rawPayload?.evidenceKind === "string" ? item.rawPayload.evidenceKind : null;
+  const eventType = item.eventType ?? item.type;
+  const kind =
+    eventType === "commute_detected"
+      ? "Commute suggestion"
+      : eventType === "learned_place_visit" || eventType === "geofence_exit" || evidenceKind === "learned_place"
+        ? "Detected visit"
+        : formatEventLabel(eventType);
+  const title = kind === "Detected visit" && item.placeName
+    ? `Detected visit to ${item.placeName}`
+    : kind === "Commute suggestion"
+      ? "Commute suggestion"
+      : item.title;
+  const meta = [
+    item.categoryName ?? "Needs category",
+    item.placeName ?? "No place",
+    kind,
+    formatSourceLabel(item.eventSource ?? "review")
+  ]
+    .filter((part, index, parts) => part && parts.indexOf(part) === index)
+    .join(" / ");
+  return { kind, meta, title };
 }

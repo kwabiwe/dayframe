@@ -9,7 +9,7 @@ import type {
   PointerEvent as ReactPointerEvent
 } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { paletteCssColorFor } from "@dayframe/shared";
+import { buildRecentActivitySuggestions, paletteCssColorFor } from "@dayframe/shared";
 import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import {
@@ -61,8 +61,8 @@ import {
   timeBlockDensityClassNames
 } from "@/lib/time-block-display";
 
-const dayStartHour = 7;
-const dayEndHour = 21;
+const dayStartHour = 0;
+const dayEndHour = 24;
 const resizeSnapMinutes = 15;
 const minEntryMinutes = 15;
 const timelineAxisLabelHeight = 22;
@@ -155,7 +155,7 @@ export function DashboardRealtime({ initialData }: { initialData: BootstrapData 
           onEntryUpdated={refreshData}
         />
         <aside className="swiss-side-stack">
-          <DashboardReviewInbox items={data.reviewItems} onSynced={refreshData} />
+          <DashboardReviewInbox items={data.reviewItems} />
           <RecentActivityPanel data={data} />
         </aside>
       </section>
@@ -423,7 +423,7 @@ export function CurrentTimerPanel({
     setCategoryMenuOpen(false);
     await timerAction("start", {
       categoryId: action.categoryId,
-      description: description.trim() || null
+      description: action.description ?? (description.trim() || null)
     });
   }
 
@@ -745,14 +745,17 @@ export function CurrentTimerPanel({
           <div>
             {quickActions.map((action) => (
               <button
-                key={action.categoryId ?? action.label}
+                key={action.key}
                 type="button"
                 disabled={isBusy}
                 onClick={() => startQuickAction(action)}
               >
                 <Play size={13} fill="currentColor" strokeWidth={0} />
                 <i style={{ backgroundColor: action.color }} />
-                <b>{action.label}</b>
+                <span>
+                  <b>{action.label}</b>
+                  {action.meta ? <small>{action.meta}</small> : null}
+                </span>
               </button>
             ))}
           </div>
@@ -764,41 +767,37 @@ export function CurrentTimerPanel({
 
 type LearnedQuickAction = {
   categoryId: string | null;
+  description: string | null;
   label: string;
   color: string;
+  key: string;
+  meta: string | null;
 };
 
 function buildLearnedQuickActions(data: BootstrapData): LearnedQuickAction[] {
   const categoriesById = new Map(data.categories.map((category) => [category.id, category]));
-  const scored = new Map<string, { count: number; seconds: number; lastSeen: number }>();
-
-  for (const entry of data.entries) {
-    if (!entry.categoryId) continue;
-    const current = scored.get(entry.categoryId) ?? { count: 0, seconds: 0, lastSeen: 0 };
-    current.count += 1;
-    current.seconds += entry.durationSeconds;
-    current.lastSeen = Math.max(current.lastSeen, new Date(entry.startedAt).getTime());
-    scored.set(entry.categoryId, current);
-  }
-
-  const learned = [...scored.entries()]
-    .map(([categoryId, score]) => ({ categoryId, score, category: categoriesById.get(categoryId) }))
-    .filter((item): item is { categoryId: string; score: { count: number; seconds: number; lastSeen: number }; category: NonNullable<ReturnType<typeof categoriesById.get>> } =>
-      Boolean(item.category)
-    )
-    .sort((a, b) => b.score.count - a.score.count || b.score.lastSeen - a.score.lastSeen)
-    .map(({ category }) => category);
-  const pinned = data.categories.filter((category) => category.isPinned);
-  const usedIds = new Set(pinned.map((category) => category.id));
-  const learnedUnpinned = learned.filter((category) => !usedIds.has(category.id));
-  for (const category of learnedUnpinned) usedIds.add(category.id);
-  const fallback = data.categories.filter((category) => !usedIds.has(category.id));
-
-  return [...pinned, ...learnedUnpinned, ...fallback].slice(0, 6).map((category) => ({
+  const recent = buildRecentActivitySuggestions(data.entries, { limit: 4 }).map((suggestion) => {
+    const category = suggestion.categoryId ? categoriesById.get(suggestion.categoryId) : null;
+    const categoryName = suggestion.categoryName ?? category?.name ?? "Uncategorized";
+    return {
+      categoryId: suggestion.categoryId,
+      description: suggestion.description,
+      label: suggestion.description,
+      color: paletteCssColorFor(suggestion.categoryColor ?? category?.color ?? "slate", categoryName),
+      key: `recent:${suggestion.key}`,
+      meta: categoryName
+    };
+  });
+  const pinned = data.categories.filter((category) => category.isPinned).map((category) => ({
     categoryId: category.id,
+    description: null,
     label: category.name,
-    color: paletteCssColorFor(category.color, category.name)
+    color: paletteCssColorFor(category.color, category.name),
+    key: `category:${category.id}`,
+    meta: null
   }));
+
+  return [...recent, ...pinned].slice(0, 6);
 }
 
 function MetricCard({
@@ -1523,28 +1522,11 @@ function timelineBlockDetailsLabel(
 }
 
 function DashboardReviewInbox({
-  items,
-  onSynced
+  items
 }: {
   items: BootstrapData["reviewItems"];
-  onSynced: () => Promise<void>;
 }) {
-  const [busyId, setBusyId] = useState<string | null>(null);
   const openItems = items.filter((item) => item.status === "open").slice(0, 5);
-
-  async function accept(id: string) {
-    setBusyId(id);
-    try {
-      await fetch(`/api/review/${id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "accept" })
-      });
-      await onSynced();
-    } finally {
-      setBusyId(null);
-    }
-  }
 
   return (
     <section className="swiss-panel swiss-list-panel">
@@ -1553,31 +1535,34 @@ function DashboardReviewInbox({
         <span>{items.filter((item) => item.status === "open").length} items</span>
       </div>
       <div className="swiss-review-list">
-        {openItems.map((item) => (
-          <button key={item.id} type="button" className="swiss-review-row" onClick={() => accept(item.id)}>
-            <span className="swiss-checkbox">{busyId === item.id ? <CheckCircle2 size={13} /> : null}</span>
-            <HelpCircle size={20} />
-            <span>
-              <strong>{item.title}</strong>
-              <small>
-                {item.categoryName ?? formatEventLabel(item.eventType ?? item.type)} ·{" "}
-                {item.suggestedStartedAt ? formatTime(item.suggestedStartedAt) : "Needs time"}
-              </small>
-            </span>
-            <b>
-              {item.suggestedStartedAt && item.suggestedStoppedAt
-                ? formatDuration(
-                    Math.round(
-                      (new Date(item.suggestedStoppedAt).getTime() -
-                        new Date(item.suggestedStartedAt).getTime()) /
-                        1000
+        {openItems.map((item) => {
+          const display = reviewItemDisplay(item);
+          return (
+            <Link key={item.id} href="/review" className="swiss-review-row">
+              <span className="swiss-checkbox" />
+              <HelpCircle size={20} />
+              <span>
+                <strong>{display.title}</strong>
+                <small>
+                  {display.meta} ·{" "}
+                  {item.suggestedStartedAt ? formatTime(item.suggestedStartedAt) : "Needs time"}
+                </small>
+              </span>
+              <b>
+                {item.suggestedStartedAt && item.suggestedStoppedAt
+                  ? formatDuration(
+                      Math.round(
+                        (new Date(item.suggestedStoppedAt).getTime() -
+                          new Date(item.suggestedStartedAt).getTime()) /
+                          1000
+                      )
                     )
-                  )
-                : "—"}
-            </b>
-            <ArrowRight size={16} />
-          </button>
-        ))}
+                  : "—"}
+              </b>
+              <ArrowRight size={16} />
+            </Link>
+          );
+        })}
         {openItems.length === 0 ? <p className="swiss-empty-list">No open review items.</p> : null}
       </div>
       <Link href="/review" className="swiss-panel-link">
@@ -1585,6 +1570,26 @@ function DashboardReviewInbox({
       </Link>
     </section>
   );
+}
+
+function reviewItemDisplay(item: BootstrapData["reviewItems"][number]) {
+  const evidenceKind = typeof item.rawPayload?.evidenceKind === "string" ? item.rawPayload.evidenceKind : null;
+  const eventType = item.eventType ?? item.type;
+  const typeLabel =
+    eventType === "commute_detected"
+      ? "Commute suggestion"
+      : eventType === "learned_place_visit" || eventType === "geofence_exit" || evidenceKind === "learned_place"
+        ? "Detected visit"
+        : formatEventLabel(eventType);
+  const title = typeLabel === "Detected visit" && item.placeName
+    ? `Detected visit to ${item.placeName}`
+    : typeLabel === "Commute suggestion"
+      ? "Commute suggestion"
+      : item.title;
+  const meta = [item.categoryName ?? "Needs category", item.placeName, typeLabel]
+    .filter((part, index, parts): part is string => Boolean(part) && parts.indexOf(part) === index)
+    .join(" · ");
+  return { title, meta };
 }
 
 function RecentActivityPanel({ data }: { data: BootstrapData }) {

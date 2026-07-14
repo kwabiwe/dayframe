@@ -185,8 +185,23 @@ describe("mobile geofence visit candidates", () => {
     expect(visit?.rawPayload).toMatchObject({
       defaultCategoryId: place.defaultCategoryId,
       defaultCategoryName: place.defaultCategoryName,
-      defaultActivityDescription: "Workout"
+      defaultActivityDescription: "Workout",
+      loggingEnabled: true
     });
+  });
+
+  it("does not queue saved-place visit reviews when logging is disabled for that place", async () => {
+    await startGeofences([{ ...place, loggingEnabled: false }]);
+    const enter = await recordGeofenceTransition("enter", region, new Date("2026-07-06T09:00:00.000Z"));
+    const exit = await recordGeofenceTransition("exit", region, new Date("2026-07-06T09:10:00.000Z"));
+
+    const queue = await readQueue();
+    const diagnostics = await getLocationVisitDiagnostics();
+
+    expect(enter).toEqual(expect.objectContaining({ status: "logging_disabled_enter", queued: false }));
+    expect(exit).toEqual(expect.objectContaining({ status: "logging_disabled_visit", queued: false }));
+    expect(queue.some((item) => item.type === "geofence_exit")).toBe(false);
+    expect(diagnostics.lastStatus).toContain("visit logging is off");
   });
 
   it("falls back to the place name when no default activity description is set", async () => {

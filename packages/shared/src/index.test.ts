@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyActivityEvent,
   automationRuleInputFromDraft,
+  buildRecentActivitySuggestions,
   calendarBlockContinuationEdges,
   classifyLocationLearningEvidence,
   draftAutomationRuleFromText,
@@ -71,6 +72,47 @@ describe("location learning classification", () => {
       averageAccuracyMeters: 20,
       maxClusterSpreadMeters: 20
     }).kind).toBe("one_off_activity");
+  });
+});
+
+describe("recent activity suggestions", () => {
+  it("deduplicates nonblank completed entries by category and description", () => {
+    expect(buildRecentActivitySuggestions([
+      {
+        categoryId: "admin",
+        categoryName: "Admin",
+        categoryColor: "teal",
+        description: "Inbox triage",
+        durationSeconds: 600,
+        startedAt: "2026-07-13T09:00:00.000Z",
+        stoppedAt: "2026-07-13T09:10:00.000Z"
+      },
+      {
+        categoryId: "admin",
+        categoryName: "Admin",
+        categoryColor: "teal",
+        description: "  Inbox   triage ",
+        durationSeconds: 900,
+        startedAt: "2026-07-14T09:00:00.000Z",
+        stoppedAt: "2026-07-14T09:15:00.000Z"
+      },
+      {
+        categoryId: "focus",
+        categoryName: "Focus",
+        description: "",
+        durationSeconds: 1200,
+        startedAt: "2026-07-14T10:00:00.000Z",
+        stoppedAt: "2026-07-14T10:20:00.000Z"
+      }
+    ])).toEqual([
+      expect.objectContaining({
+        categoryId: "admin",
+        description: "Inbox triage",
+        lastSeenAt: "2026-07-14T09:15:00.000Z",
+        totalSeconds: 1500,
+        useCount: 2
+      })
+    ]);
   });
 });
 

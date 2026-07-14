@@ -137,6 +137,32 @@ describe("/api/places", () => {
     );
   });
 
+  it("clears default logging fields when place visit logging is turned off", async () => {
+    const response = await PATCH(
+      jsonRequest({
+        id: placeId(),
+        name: "Home",
+        loggingEnabled: false,
+        defaultCategoryId: categoryId(),
+        defaultActivityDescription: "Home time"
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.updatePlace).toHaveBeenCalledWith(
+      placeId(),
+      {
+        id: placeId(),
+        name: "Home",
+        loggingEnabled: false,
+        defaultCategoryId: null,
+        defaultActivityDescription: null,
+        autoStart: false
+      },
+      session
+    );
+  });
+
   it("deletes a place by id", async () => {
     const response = await DELETE(new Request(`https://dayframe.test/api/places?id=${placeId()}`, { method: "DELETE" }));
 
@@ -166,7 +192,8 @@ function placeRow() {
     defaultCategoryId: categoryId(),
     defaultCategoryName: "Health",
     defaultActivityDescription: "School drop-off/pickup",
-    autoStart: false
+    autoStart: false,
+    loggingEnabled: true
   };
 }
 

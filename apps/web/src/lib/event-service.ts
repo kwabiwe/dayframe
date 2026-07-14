@@ -62,6 +62,7 @@ type PlaceRowLike = {
   defaultCategoryName: string | null;
   defaultActivityDescription: string | null;
   autoStart: boolean;
+  loggingEnabled: boolean;
 };
 
 type PlaceMutationFields = {
@@ -73,6 +74,7 @@ type PlaceMutationFields = {
   defaultCategoryId?: string | null;
   defaultActivityDescription?: string | null;
   autoStart?: boolean;
+  loggingEnabled?: boolean;
 };
 
 type QueryRunner = <T extends pg.QueryResultRow>(statement: string, values?: unknown[]) => Promise<{ rows: T[] }>;
@@ -161,6 +163,7 @@ const HEALTH_SLEEP_SCHEMA_MIGRATION =
 const HEALTH_RLS_MIGRATION = "supabase/migrations/202607020001_dayframe_rls.sql";
 const PLACE_DEFAULT_ACTIVITY_DESCRIPTION_MIGRATION =
   "supabase/migrations/202607070002_place_default_activity_description.sql";
+const PLACE_LOGGING_ENABLED_MIGRATION = "supabase/migrations/202607140002_place_logging_enabled.sql";
 const AUTOMATION_RULE_ACTIVITY_DESCRIPTION_MIGRATION =
   "supabase/migrations/202607120001_automation_rule_activity_description.sql";
 const LOCATION_LEARNING_MIGRATION = "supabase/migrations/202607140001_location_learning_intelligence.sql";
@@ -177,6 +180,15 @@ function missingPlaceDefaultActivityDescriptionColumnError(cause: unknown) {
     "places",
     "default_activity_description",
     PLACE_DEFAULT_ACTIVITY_DESCRIPTION_MIGRATION,
+    cause
+  );
+}
+
+function missingPlaceLoggingEnabledColumnError(cause: unknown) {
+  return missingRequiredColumnError(
+    "places",
+    "logging_enabled",
+    PLACE_LOGGING_ENABLED_MIGRATION,
     cause
   );
 }
@@ -1089,9 +1101,10 @@ async function insertPlaceRecord(
             default_project_id,
             default_category_id,
             default_activity_description,
-            auto_start
+            auto_start,
+            logging_enabled
          )
-         values ($1, $2, $3, $4, $5, $6, null, $7, $8, $9)
+         values ($1, $2, $3, $4, $5, $6, null, $7, $8, $9, $10)
          returning id,
                    name,
                    latitude,
@@ -1101,7 +1114,8 @@ async function insertPlaceRecord(
                    default_project_id,
                    default_category_id,
                    default_activity_description,
-                   auto_start
+                   auto_start,
+                   logging_enabled
        )
        select inserted.id,
               inserted.name,
@@ -1114,7 +1128,8 @@ async function insertPlaceRecord(
               inserted.default_category_id as "defaultCategoryId",
               c.name as "defaultCategoryName",
               inserted.default_activity_description as "defaultActivityDescription",
-              inserted.auto_start as "autoStart"
+              inserted.auto_start as "autoStart",
+              inserted.logging_enabled as "loggingEnabled"
        from inserted
        left join projects p on p.id = inserted.default_project_id
        left join categories c on c.id = inserted.default_category_id`,
@@ -1127,7 +1142,8 @@ async function insertPlaceRecord(
         normalizePlacePriority(input.priority),
         nullableString(input.defaultCategoryId),
         normalizeOptionalText(input.defaultActivityDescription),
-        Boolean(input.autoStart)
+        Boolean(input.autoStart),
+        input.loggingEnabled !== false
       ]
     );
 
@@ -1135,6 +1151,9 @@ async function insertPlaceRecord(
   } catch (error) {
     if (isUndefinedColumnError(error, "default_activity_description")) {
       throw missingPlaceDefaultActivityDescriptionColumnError(error);
+    }
+    if (isUndefinedColumnError(error, "logging_enabled")) {
+      throw missingPlaceLoggingEnabledColumnError(error);
     }
     throw error;
   }
@@ -1151,6 +1170,7 @@ export async function updatePlace(
     defaultCategoryId?: string | null;
     defaultActivityDescription?: string | null;
     autoStart?: boolean;
+    loggingEnabled?: boolean;
   },
   session: RequestSession = getDevSession()
 ) {
@@ -1162,6 +1182,7 @@ export async function updatePlace(
   const hasDefaultCategory = Object.prototype.hasOwnProperty.call(input, "defaultCategoryId");
   const hasDefaultActivityDescription = Object.prototype.hasOwnProperty.call(input, "defaultActivityDescription");
   const hasAutoStart = Object.prototype.hasOwnProperty.call(input, "autoStart");
+  const hasLoggingEnabled = Object.prototype.hasOwnProperty.call(input, "loggingEnabled");
 
   try {
     const result = await query<PlaceRowLike>(
@@ -1174,7 +1195,8 @@ export async function updatePlace(
              priority = case when $11 then $12 else priority end,
              default_category_id = case when $13 then $14 else default_category_id end,
              default_activity_description = case when $15 then $16 else default_activity_description end,
-             auto_start = case when $17 then $18 else auto_start end
+             auto_start = case when $17 then $18 else auto_start end,
+             logging_enabled = case when $19 then $20 else logging_enabled end
          where id = $1 and workspace_id = $2
          returning id,
                    name,
@@ -1185,7 +1207,8 @@ export async function updatePlace(
                    default_project_id,
                    default_category_id,
                    default_activity_description,
-                   auto_start
+                   auto_start,
+                   logging_enabled
        )
        select updated.id,
               updated.name,
@@ -1198,7 +1221,8 @@ export async function updatePlace(
               updated.default_category_id as "defaultCategoryId",
               c.name as "defaultCategoryName",
               updated.default_activity_description as "defaultActivityDescription",
-              updated.auto_start as "autoStart"
+              updated.auto_start as "autoStart",
+              updated.logging_enabled as "loggingEnabled"
        from updated
        left join projects p on p.id = updated.default_project_id
        left join categories c on c.id = updated.default_category_id`,
@@ -1220,7 +1244,9 @@ export async function updatePlace(
         hasDefaultActivityDescription,
         normalizeOptionalText(input.defaultActivityDescription),
         hasAutoStart,
-        Boolean(input.autoStart)
+        Boolean(input.autoStart),
+        hasLoggingEnabled,
+        input.loggingEnabled !== false
       ]
     );
 
@@ -1228,6 +1254,9 @@ export async function updatePlace(
   } catch (error) {
     if (isUndefinedColumnError(error, "default_activity_description")) {
       throw missingPlaceDefaultActivityDescriptionColumnError(error);
+    }
+    if (isUndefinedColumnError(error, "logging_enabled")) {
+      throw missingPlaceLoggingEnabledColumnError(error);
     }
     throw error;
   }
@@ -2379,9 +2408,10 @@ export async function createEntity(
               default_project_id,
               default_category_id,
               default_activity_description,
-              auto_start
+              auto_start,
+              logging_enabled
            )
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
           [
             session.workspaceId,
             String(input.name ?? "New place"),
@@ -2392,12 +2422,16 @@ export async function createEntity(
             nullableString(input.projectId),
             nullableString(input.categoryId),
             normalizeOptionalText(input.defaultActivityDescription),
-            Boolean(input.autoStart)
+            Boolean(input.autoStart),
+            input.loggingEnabled !== false
           ]
         );
       } catch (error) {
         if (isUndefinedColumnError(error, "default_activity_description")) {
           throw missingPlaceDefaultActivityDescriptionColumnError(error);
+        }
+        if (isUndefinedColumnError(error, "logging_enabled")) {
+          throw missingPlaceLoggingEnabledColumnError(error);
         }
         throw error;
       }

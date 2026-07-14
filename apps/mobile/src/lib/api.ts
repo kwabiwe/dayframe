@@ -110,6 +110,7 @@ export type MobileBootstrap = {
     defaultCategoryName?: string | null;
     defaultActivityDescription?: string | null;
     autoStart?: boolean;
+    loggingEnabled?: boolean;
   }>;
   learnedPlaces?: Array<{
     id: string;
@@ -162,6 +163,7 @@ export type PlaceMutationInput = {
   priority?: number;
   defaultCategoryId?: string | null;
   defaultActivityDescription?: string | null;
+  loggingEnabled?: boolean;
 };
 
 export type TimeEntryUpdatePatch = {
@@ -752,9 +754,10 @@ export async function createPlace(input: { name: string } & PlaceMutationInput) 
         longitude: input.longitude ?? null,
         radiusMeters: input.radiusMeters ?? DEFAULT_PLACE_RADIUS_METERS,
         priority: input.priority ?? DEFAULT_PLACE_PRIORITY,
-        defaultCategoryId: input.defaultCategoryId ?? null,
-        defaultActivityDescription: input.defaultActivityDescription?.trim() || null,
+        defaultCategoryId: input.loggingEnabled === false ? null : input.defaultCategoryId ?? null,
+        defaultActivityDescription: input.loggingEnabled === false ? null : input.defaultActivityDescription?.trim() || null,
         autoStart: false,
+        loggingEnabled: input.loggingEnabled !== false,
         learnedPlaceId: input.learnedPlaceId
       })
     });
@@ -1229,9 +1232,10 @@ function placeEntityValues(input: { name: string } & PlaceMutationInput) {
     longitude: input.longitude ?? null,
     radiusMeters: input.radiusMeters ?? DEFAULT_PLACE_RADIUS_METERS,
     priority: input.priority ?? DEFAULT_PLACE_PRIORITY,
-    categoryId: input.defaultCategoryId ?? null,
-    defaultActivityDescription: input.defaultActivityDescription?.trim() || null,
-    autoStart: false
+    categoryId: input.loggingEnabled === false ? null : input.defaultCategoryId ?? null,
+    defaultActivityDescription: input.loggingEnabled === false ? null : input.defaultActivityDescription?.trim() || null,
+    autoStart: false,
+    loggingEnabled: input.loggingEnabled !== false
   };
 }
 
@@ -1243,7 +1247,8 @@ function findCreatedPlace(places: MobilePlace[], input: { name: string } & Place
     sameNullableNumber(place.longitude, values.longitude) &&
     Number(place.radiusMeters) === Number(values.radiusMeters) &&
     (place.defaultCategoryId ?? null) === values.categoryId &&
-    (place.defaultActivityDescription ?? null) === values.defaultActivityDescription
+    (place.defaultActivityDescription ?? null) === values.defaultActivityDescription &&
+    (place.loggingEnabled ?? true) === values.loggingEnabled
   ) ?? null;
 }
 

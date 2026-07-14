@@ -13,7 +13,8 @@ const placeFieldsSchema = z.object({
   priority: z.number().int().min(0).max(100).optional(),
   defaultCategoryId: z.string().uuid().nullable().optional(),
   defaultActivityDescription: z.string().trim().max(240).nullable().optional(),
-  autoStart: z.boolean().optional()
+  autoStart: z.boolean().optional(),
+  loggingEnabled: z.boolean().optional()
 });
 
 const placeCreateSchema = placeFieldsSchema.extend({
@@ -43,15 +44,10 @@ export async function POST(request: Request) {
     const session = await resolveRequestSession(request);
     const body = placeCreateSchema.parse(await request.json());
     const { learnedPlaceId, ...placeInput } = body;
+    const normalizedPlaceInput = normalizePlaceLoggingInput(placeInput);
     const place = learnedPlaceId
-      ? await createPlaceFromLearnedPlace(learnedPlaceId, { ...placeInput, autoStart: false }, session)
-      : await createPlace(
-        {
-          ...placeInput,
-          autoStart: false
-        },
-        session
-      );
+      ? await createPlaceFromLearnedPlace(learnedPlaceId, normalizedPlaceInput, session)
+      : await createPlace(normalizedPlaceInput, session);
     if (!place) return NextResponse.json({ error: "Learned place not found." }, { status: 404 });
     return NextResponse.json({ ok: true, place }, { status: 201 });
   } catch (error) {
@@ -66,12 +62,10 @@ export async function PATCH(request: Request) {
   try {
     const session = await resolveRequestSession(request);
     const body = placeUpdateSchema.parse(await request.json());
+    const normalizedBody = normalizePlaceLoggingInput(body);
     const place = await updatePlace(
       body.id,
-      {
-        ...body,
-        autoStart: false
-      },
+      normalizedBody,
       session
     );
     if (!place) return NextResponse.json({ error: "Place not found." }, { status: 404 });
@@ -82,6 +76,20 @@ export async function PATCH(request: Request) {
     if (error instanceof ZodError) return NextResponse.json({ issues: error.issues }, { status: 400 });
     throw error;
   }
+}
+
+function normalizePlaceLoggingInput<T extends {
+  autoStart?: boolean;
+  defaultActivityDescription?: string | null;
+  defaultCategoryId?: string | null;
+  loggingEnabled?: boolean;
+}>(input: T) {
+  return {
+    ...input,
+    defaultCategoryId: input.loggingEnabled === false ? null : input.defaultCategoryId,
+    defaultActivityDescription: input.loggingEnabled === false ? null : input.defaultActivityDescription,
+    autoStart: false
+  };
 }
 
 export async function DELETE(request: Request) {

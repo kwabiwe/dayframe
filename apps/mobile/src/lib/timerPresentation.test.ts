@@ -37,18 +37,30 @@ describe("mobile timer presentation", () => {
     expect(displayTimerDescription({ description: "Start activity" })).toBeNull();
   });
 
-  it("keeps quick actions to pinned categories only", () => {
+  it("uses recent activity suggestions before pinned category fallbacks", () => {
     expect(
       buildMobileQuickActions({
         categories: [
           category({ id: "focus", isPinned: true, name: "Focus" }),
           category({ id: "admin", isPinned: false, name: "Admin" }),
           category({ id: "family", isPinned: true, name: "Family" })
+        ],
+        entries: [
+          entry({
+            categoryColor: "teal",
+            categoryId: "admin",
+            categoryName: "Admin",
+            description: "Inbox triage",
+            durationSeconds: 1200,
+            startedAt: "2026-07-13T09:00:00.000Z",
+            stoppedAt: "2026-07-13T09:20:00.000Z"
+          })
         ]
-      }).map((action) => ({ id: action.id, name: action.name }))
+      }).map((action) => ({ description: action.description, id: action.id, name: action.name, subtitle: action.subtitle }))
     ).toEqual([
-      { id: "focus", name: "Focus" },
-      { id: "family", name: "Family" }
+      { description: "Inbox triage", id: "admin", name: "Inbox triage", subtitle: "Admin" },
+      { description: undefined, id: "focus", name: "Focus", subtitle: null },
+      { description: undefined, id: "family", name: "Family", subtitle: null }
     ]);
   });
 });
@@ -59,6 +71,28 @@ function category(input: Partial<MobileBootstrap["categories"][number]>): Mobile
     id: "category-id",
     isPinned: false,
     name: "Category",
+    ...input
+  };
+}
+
+function entry(input: Partial<MobileBootstrap["entries"][number]>): MobileBootstrap["entries"][number] {
+  return {
+    categoryColor: null,
+    categoryId: null,
+    categoryName: null,
+    clientName: null,
+    confidence: "manual",
+    description: null,
+    durationSeconds: 0,
+    id: "entry-id",
+    placeName: null,
+    projectColor: null,
+    projectId: null,
+    projectName: null,
+    reviewStatus: "confirmed",
+    source: "manual",
+    startedAt: "2026-07-13T09:00:00.000Z",
+    stoppedAt: "2026-07-13T09:01:00.000Z",
     ...input
   };
 }

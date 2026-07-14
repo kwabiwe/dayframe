@@ -110,6 +110,7 @@ create table if not exists places (
   default_category_id uuid references categories(id) on delete set null,
   default_activity_description text,
   auto_start boolean not null default false,
+  logging_enabled boolean not null default true,
   raw_location_retention_days integer not null default 7,
   created_at timestamptz not null default now()
 );

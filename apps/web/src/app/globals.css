@@ -932,7 +932,7 @@ html[data-theme="dark"] .swiss-theme-icon-on-dark {
   align-items: center;
   gap: 8px;
   min-height: 44px;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: 12px;
   background: transparent;
   color: var(--foreground);
@@ -949,9 +949,13 @@ html[data-theme="dark"] .swiss-theme-icon-on-dark {
 }
 
 .swiss-category-option:hover,
-.swiss-category-option:focus-visible,
-.swiss-category-option.is-selected {
+.swiss-category-option:focus-visible {
   background: color-mix(in srgb, var(--timer-accent, var(--accent)) 10%, var(--surface-muted));
+}
+
+.swiss-category-option.is-selected {
+  border-color: color-mix(in srgb, var(--timer-accent, var(--accent)) 58%, var(--line));
+  background: color-mix(in srgb, var(--timer-accent, var(--accent)) 16%, var(--surface-muted));
 }
 
 .swiss-category-option.is-muted {
@@ -1341,6 +1345,17 @@ html[data-theme="dark"] .swiss-theme-icon-on-dark {
 
 .swiss-quick-actions-strip b {
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.swiss-quick-actions-strip small {
+  display: block;
+  overflow: hidden;
+  margin-top: 1px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1864,6 +1879,7 @@ html[data-theme="dark"] .swiss-theme-icon-on-dark {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
+  font-weight: 650;
 }
 
 .swiss-time-block > div:first-of-type {

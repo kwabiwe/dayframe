@@ -898,7 +898,7 @@ function CategoryChip({
           styles.activeEditCategoryChip,
           selected ? styles.activeEditCategoryChipSelected : null,
           category ? { borderColor: color } : null,
-          selected ? { backgroundColor: "#FFFFFF", borderColor: color } : null
+          selected ? { borderColor: color } : null
         ],
         styles.buttonPressed
       )}
@@ -911,6 +911,7 @@ function CategoryChip({
       ]}>
         {label}
       </Text>
+      {selected ? <CheckGlyph color={color} /> : null}
     </Pressable>
   );
 }

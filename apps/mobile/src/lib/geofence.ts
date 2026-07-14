@@ -78,6 +78,7 @@ type MonitoredPlace = {
   defaultCategoryId?: string | null;
   defaultCategoryName?: string | null;
   defaultActivityDescription?: string | null;
+  loggingEnabled?: boolean;
 };
 
 type OpenVisit = {
@@ -89,6 +90,7 @@ type OpenVisit = {
   defaultCategoryId?: string | null;
   defaultCategoryName?: string | null;
   defaultActivityDescription?: string | null;
+  loggingEnabled?: boolean;
 };
 
 type CompletedVisit = {
@@ -240,6 +242,7 @@ export async function setLocationLearningEnabled(
     longitude?: number | null;
     radiusMeters: number;
     priority?: number;
+    loggingEnabled?: boolean;
   }> = []
 ) {
   if (!enabled) {
@@ -285,6 +288,7 @@ export async function startGeofences(
     defaultCategoryId?: string | null;
     defaultCategoryName?: string | null;
     defaultActivityDescription?: string | null;
+    loggingEnabled?: boolean;
   }>
 ) {
   const monitorablePlaces = places
@@ -332,6 +336,7 @@ export async function startLocationLearning(
     latitude?: number | null;
     longitude?: number | null;
     radiusMeters: number;
+    loggingEnabled?: boolean;
   }> = []
 ) {
   const enabled = await getLocationLearningEnabled();
@@ -721,9 +726,24 @@ async function recordPlaceEnter(place: MonitoredPlace, region: DayframeRegion, o
     source,
     defaultCategoryId: place.defaultCategoryId,
     defaultCategoryName: place.defaultCategoryName,
-    defaultActivityDescription: place.defaultActivityDescription
+    defaultActivityDescription: place.defaultActivityDescription,
+    loggingEnabled: place.loggingEnabled !== false
   };
   await writeOpenVisits(openVisits);
+  if (place.loggingEnabled === false) {
+    await updateLocationDiagnostics({
+      lastStatus: `Entered ${place.name}. Visit logging is off for this place.`,
+      lastPlaceName: place.name,
+      lastEventAt: occurredAt.toISOString(),
+      lastGeofenceEvent: {
+        transition: "enter",
+        placeName: place.name,
+        occurredAt: occurredAt.toISOString()
+      }
+    });
+    return { status: "logging_disabled_enter" as const, queued: false };
+  }
+
   await enqueueEvent({
     localId: geofenceEvidenceLocalId("enter", place.id, occurredAt),
     source,
@@ -740,7 +760,8 @@ async function recordPlaceEnter(place: MonitoredPlace, region: DayframeRegion, o
       region: place.id,
       radius: region.radius || place.radiusMeters,
       transition: "enter",
-      isBroad: source === "geofence_broad"
+      isBroad: source === "geofence_broad",
+      loggingEnabled: true
     }
   });
   await updateLocationDiagnostics({
@@ -829,6 +850,35 @@ async function recordPlaceExit(place: MonitoredPlace, region: DayframeRegion, oc
   const defaultActivityDescription = normalizedActivityDescription(
     place.defaultActivityDescription ?? openVisit.defaultActivityDescription
   );
+  const currentVisit = {
+    kind: "saved_place" as const,
+    placeId: place.id,
+    placeName: place.name,
+    startedAt: startedAt.toISOString(),
+    stoppedAt: stoppedAt.toISOString(),
+    latitude: place.latitude,
+    longitude: place.longitude
+  };
+
+  if (place.loggingEnabled === false || openVisit.loggingEnabled === false) {
+    if (await getLocationLearningEnabled()) {
+      await queueCommuteCandidate(currentVisit).catch(() => undefined);
+    }
+    await writeLastCompletedVisit(currentVisit);
+    await writeSeenVisitIds([localId, ...seenVisitIds.filter((id) => id !== localId)].slice(0, MAX_SEEN_VISIT_IDS));
+    await updateLocationDiagnostics({
+      lastStatus: `Skipped ${place.name} visit review because visit logging is off for this place.`,
+      lastPlaceName: place.name,
+      lastEventAt: stoppedAt.toISOString(),
+      lastGeofenceEvent: {
+        transition: "exit",
+        placeName: place.name,
+        occurredAt: stoppedAt.toISOString()
+      }
+    });
+    return { status: "logging_disabled_visit" as const, queued: false, durationSeconds, localId };
+  }
+
   await enqueueEvent({
     localId,
     source,
@@ -857,18 +907,10 @@ async function recordPlaceExit(place: MonitoredPlace, region: DayframeRegion, oc
       isBroad: source === "geofence_broad",
       defaultCategoryId: place.defaultCategoryId ?? openVisit.defaultCategoryId ?? null,
       defaultCategoryName: place.defaultCategoryName ?? openVisit.defaultCategoryName ?? null,
-      defaultActivityDescription
+      defaultActivityDescription,
+      loggingEnabled: true
     }
   });
-  const currentVisit = {
-    kind: "saved_place" as const,
-    placeId: place.id,
-    placeName: place.name,
-    startedAt: startedAt.toISOString(),
-    stoppedAt: stoppedAt.toISOString(),
-    latitude: place.latitude,
-    longitude: place.longitude
-  };
   if (await getLocationLearningEnabled()) {
     await queueCommuteCandidate(currentVisit).catch(() => undefined);
   }
@@ -906,6 +948,7 @@ function monitoredPlaceFromInput(place: {
   defaultCategoryId?: string | null;
   defaultCategoryName?: string | null;
   defaultActivityDescription?: string | null;
+  loggingEnabled?: boolean;
 }): MonitoredPlace {
   return {
     id: place.id,
@@ -916,7 +959,8 @@ function monitoredPlaceFromInput(place: {
     priority: place.priority ?? 0,
     defaultCategoryId: place.defaultCategoryId,
     defaultCategoryName: place.defaultCategoryName,
-    defaultActivityDescription: normalizedActivityDescription(place.defaultActivityDescription)
+    defaultActivityDescription: normalizedActivityDescription(place.defaultActivityDescription),
+    loggingEnabled: place.loggingEnabled !== false
   };
 }
 
