@@ -30,6 +30,7 @@ const {
   deleteTimeEntry,
   processActivityEvent,
   reprocessHealthReviewItems,
+  resolveLearnedPlaceLocation,
   resolveReviewItem,
   TimeEntryNotFoundError,
   updateLearnedPlaceStatus,
@@ -290,7 +291,7 @@ describe("category persistence", () => {
     expect(client.query.mock.calls.some(([statement]) => String(statement).includes("insert into review_items"))).toBe(false);
   });
 
-  it("rolls learned place visits into learned_places while keeping the visit in review", async () => {
+  it("records a weak learned-place event without surfacing or upserting it", async () => {
     const client = {
       query: vi.fn(async (statement: string, values?: unknown[]) => {
         void values;
@@ -326,10 +327,106 @@ describe("category persistence", () => {
       session
     );
 
+    expect(result.candidate).toMatchObject({ action: "record_only", reviewStatus: "confirmed", confidence: "hint" });
+    const learnedPlaceInsert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into learned_places")
+    );
+    expect(learnedPlaceInsert).toBeUndefined();
+    expect(client.query.mock.calls.some(([statement]) => String(statement).includes("insert into review_items"))).toBe(false);
+    expect(client.query.mock.calls.some(([statement]) => String(statement).includes("insert into time_entries"))).toBe(false);
+  });
+
+  it("keeps a single long learned stay as one-off review evidence without a place upsert", async () => {
+    const client = {
+      query: vi.fn(async (statement: string) => (
+        statement.includes("insert into activity_events")
+          ? { rows: [{ id: "event-one-off" }] }
+          : { rows: [] }
+      )),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await processActivityEvent({
+      source: "location_learning",
+      type: "learned_place_visit",
+      occurredAt: new Date("2026-07-06T10:15:00.000Z"),
+      rawPayload: {
+        candidateName: "Near Rainsford Road",
+        clusterKey: "51.740,0.456",
+        latitude: 51.739532,
+        longitude: 0.45631,
+        startedAt: "2026-07-06T09:00:00.000Z",
+        stoppedAt: "2026-07-06T10:15:00.000Z",
+        durationSeconds: 4500,
+        sampleCount: 5,
+        currentVisitSampleCount: 5,
+        visitCount: 1,
+        distinctDayCount: 1,
+        averageAccuracyMeters: 30,
+        maxClusterSpreadMeters: 35
+      }
+    }, session);
+
     expect(result.candidate).toMatchObject({
       action: "create_review_item",
       reviewStatus: "needs_review",
       confidence: "low"
+    });
+    expect(result.candidate.reason).toContain("not a saved-place suggestion");
+    expect(client.query.mock.calls.some(([statement]) => String(statement).includes("insert into review_items"))).toBe(true);
+    expect(client.query.mock.calls.some(([statement]) => String(statement).includes("insert into learned_places"))).toBe(false);
+  });
+
+  it("upserts a repeated stable cluster as a saveable learned-place candidate", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        return (
+        statement.includes("insert into activity_events")
+          ? { rows: [{ id: "event-learned" }] }
+          : { rows: [] }
+        );
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await processActivityEvent({
+      source: "location_learning",
+      type: "learned_place_visit",
+      occurredAt: new Date("2026-07-07T09:25:00.000Z"),
+      rawPayload: {
+        address: {
+          name: "Tesco Springfield",
+          street: "Springfield Road",
+          city: "Chelmsford",
+          postalCode: "CM2 6QT",
+          formattedAddress: "Springfield Road, Chelmsford, CM2 6QT"
+        },
+        clusterKey: "51.610,-0.220",
+        latitude: 51.61,
+        longitude: -0.22,
+        radiusMeters: 160,
+        clusterFirstSeenAt: "2026-07-06T09:00:00.000Z",
+        startedAt: "2026-07-07T09:00:00.000Z",
+        stoppedAt: "2026-07-07T09:25:00.000Z",
+        sampleCount: 6,
+        currentVisitSampleCount: 3,
+        visitCount: 2,
+        distinctDayCount: 2,
+        totalDwellMs: 49 * 60_000,
+        longestDwellMs: 25 * 60_000,
+        averageAccuracyMeters: 35,
+        maxClusterSpreadMeters: 40
+      }
+    }, session);
+
+    expect(result.candidate).toMatchObject({
+      action: "create_review_item",
+      reviewStatus: "needs_review",
+      confidence: "medium",
+      title: "Tesco Springfield"
     });
     const learnedPlaceInsert = client.query.mock.calls.find(([statement]) =>
       String(statement).includes("insert into learned_places")
@@ -339,17 +436,25 @@ describe("category persistence", () => {
       session.userId,
       null,
       "51.610,-0.220",
-      "Near Springfield Road",
+      "Tesco Springfield",
       51.61,
       -0.22,
       160,
-      1,
-      3,
+      2,
+      2,
+      6,
+      2940,
+      1500,
+      35,
+      40,
       "2026-07-06T09:00:00.000Z",
-      "2026-07-06T09:24:00.000Z",
+      "2026-07-07T09:25:00.000Z",
+      "medium",
+      expect.any(String),
+      "Tesco Springfield",
+      "Springfield Road, Chelmsford, CM2 6QT",
       expect.any(String)
     ]);
-    expect(client.query.mock.calls.some(([statement]) => String(statement).includes("insert into time_entries"))).toBe(false);
   });
 
   it("suppresses learned-place prompts for ignored clusters", async () => {
@@ -518,10 +623,63 @@ describe("place persistence", () => {
       expect.stringContaining("from learned_places"),
       ["40000000-0000-4000-8000-000000000001", session.workspaceId, session.userId]
     );
+    expect(String(client.query.mock.calls.find(([statement]) => String(statement).includes("from learned_places"))?.[0]))
+      .toContain("classification = 'place_candidate'");
     expect(client.query).toHaveBeenCalledWith(
       expect.stringContaining("set status = 'accepted'"),
       ["40000000-0000-4000-8000-000000000001", session.workspaceId, session.userId, placeId()]
     );
+    expect(client.query).toHaveBeenCalledWith("commit");
+  });
+
+  it("caches a lazy geocode only for a scoped saveable candidate", async () => {
+    const address = {
+      name: "PureGym Chelmsford",
+      street: "New London Road",
+      city: "Chelmsford",
+      postalCode: "CM2 0SW",
+      formattedAddress: "New London Road, Chelmsford, CM2 0SW"
+    };
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        if (statement.includes("select latitude, longitude")) {
+          return { rows: [{ latitude: 51.735, longitude: 0.47 }] };
+        }
+        if (statement.includes("update learned_places")) {
+          return {
+            rows: [{
+              id: "40000000-0000-4000-8000-000000000001",
+              name: "PureGym Chelmsford",
+              address,
+              poiName: "PureGym Chelmsford",
+              formattedAddress: address.formattedAddress,
+              geocodedAt: "2026-07-14T10:00:00.000Z"
+            }]
+          };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await resolveLearnedPlaceLocation(
+      "40000000-0000-4000-8000-000000000001",
+      address,
+      session
+    );
+
+    expect(result).toMatchObject({ name: "PureGym Chelmsford", formattedAddress: address.formattedAddress });
+    const scopedSelect = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("select latitude, longitude")
+    );
+    expect(scopedSelect?.[0]).toContain("classification = 'place_candidate'");
+    expect(scopedSelect?.[1]).toEqual([
+      "40000000-0000-4000-8000-000000000001",
+      session.workspaceId,
+      session.userId
+    ]);
     expect(client.query).toHaveBeenCalledWith("commit");
   });
 
@@ -2140,6 +2298,57 @@ describe("review item resolution", () => {
       "event-commute"
     ]);
     expect(client.query).toHaveBeenCalledWith("commit");
+  });
+
+  it("accepts one-off location reviews without turning the place label into an activity description", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        if (statement.includes("from review_items ri")) {
+          return {
+            rows: [{
+              id: "review-one-off",
+              eventId: "event-one-off",
+              title: "Tesco Springfield",
+              status: "open",
+              suggestedProjectId: null,
+              suggestedCategoryId: null,
+              suggestedPlaceId: null,
+              suggestedStartedAt: "2026-07-06T09:00:00.000Z",
+              suggestedStoppedAt: "2026-07-06T10:15:00.000Z",
+              confidence: "low",
+              eventSource: "location_learning",
+              eventType: "unknown_stay",
+              rawPayload: { evidenceKind: "one_off_activity" }
+            }]
+          };
+        }
+        if (statement.includes("created_from_event_id = $3")) return { rows: [] };
+        if (statement.includes("insert into time_entries")) return { rows: [{ id: "entry-one-off" }] };
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await resolveReviewItem("review-one-off", "accept", session);
+
+    const entryInsert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into time_entries")
+    );
+    expect(entryInsert?.[1]).toEqual([
+      session.workspaceId,
+      session.userId,
+      null,
+      null,
+      null,
+      "location_learning",
+      "low",
+      null,
+      "2026-07-06T09:00:00.000Z",
+      "2026-07-06T10:15:00.000Z",
+      "event-one-off"
+    ]);
   });
 
   it("validates review-created automation rule references before saving", async () => {

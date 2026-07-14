@@ -33,6 +33,7 @@ import {
   REVIEW_COPY,
   buildReviewItemDraftEntry,
   hasSuggestedTimeWindow,
+  isOneOffLocationReviewItem,
   isOpenReviewItem,
   isReviewNeededEntry,
   reviewItemDurationSeconds
@@ -566,6 +567,7 @@ function formatReviewItemMeta(item: MobileReviewItem, durationSeconds: number) {
 
 function reviewItemKindLabel(item: MobileReviewItem) {
   if (item.eventType === "commute_detected") return "Commute";
+  if (isOneOffLocationReviewItem(item)) return "One-off activity";
   if (isLocationReviewItem(item)) return REVIEW_COPY.detectedVisit;
   if (isHealthReviewItem(item)) return "Health import";
   return REVIEW_COPY.suggestedActivity;
@@ -580,6 +582,17 @@ function reviewItemContextLines(item: MobileReviewItem, categoryName: string) {
   }
 
   if (!isLocationReviewItem(item)) return [];
+
+  if (isOneOffLocationReviewItem(item)) {
+    const confirmTarget = categoryName === "No category"
+      ? "Confirming creates an uncategorized time entry. Edit first to choose a category or description."
+      : `Confirming creates a ${categoryName} time entry. Edit first to change the category or add a description.`;
+    return [
+      "Dayframe detected one significant stay at this location.",
+      "It is reviewable as time spent here, but it is not a suggestion to save this place.",
+      confirmTarget
+    ];
+  }
 
   const match = item.suggestedPlaceId || item.placeName
     ? "Matched saved place"

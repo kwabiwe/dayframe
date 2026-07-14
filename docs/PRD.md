@@ -378,6 +378,8 @@ Deliverables:
 - ✅ HealthKit walking/workout summary import.
 - ✅ Trusted-place auto-start.
 - ✅ Broad/unknown geofence review suggestions.
+- ✅ Learned-location evidence separates repeat place suggestions, significant one-off stays, and weak/pass-through noise.
+- ✅ Learned-place details cache readable address/POI resolution and keep coordinates secondary.
 - ⚠️ Export path exists; account/workspace deletion and raw sensitive payload hard-deletion are still future work.
 
 Validation:

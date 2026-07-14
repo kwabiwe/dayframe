@@ -6,6 +6,7 @@ import {
   hasReviewNeededActivityForRange,
   hasSuggestedTimeWindow,
   isCalendarPreviewReviewItem,
+  isOneOffLocationReviewItem,
   isOpenReviewItem,
   isReviewNeededEntry,
   reviewItemDurationSeconds
@@ -29,6 +30,18 @@ describe("mobile review helpers", () => {
     expect(isCalendarPreviewReviewItem({ eventType: "commute_detected" })).toBe(true);
     expect(isCalendarPreviewReviewItem({ eventType: "learned_place_visit" })).toBe(false);
     expect(isCalendarPreviewReviewItem({ eventType: "health_workout_import" })).toBe(false);
+  });
+
+  it("labels significant single stays as one-off location activity evidence", () => {
+    const item = reviewItem({
+      eventSource: "location_learning",
+      eventType: "unknown_stay",
+      rawPayload: { evidenceKind: "one_off_activity" }
+    });
+    expect(isOneOffLocationReviewItem(item)).toBe(true);
+    expect(buildReviewItemDraftEntry(item, [category()], Date.now())).toEqual(
+      expect.objectContaining({ description: null })
+    );
   });
 
   it("requires a valid suggested start and stop before building an editable draft", () => {

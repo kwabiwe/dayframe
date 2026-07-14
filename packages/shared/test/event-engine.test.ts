@@ -359,7 +359,14 @@ describe("event normalization", () => {
           longitude: -0.12,
           startedAt: "2026-06-20T08:45:00.000Z",
           stoppedAt: "2026-06-20T09:15:00.000Z",
-          sampleCount: 3
+          sampleCount: 6,
+          currentVisitSampleCount: 3,
+          visitCount: 2,
+          distinctDayCount: 2,
+          totalDwellMs: 50 * 60_000,
+          longestDwellMs: 30 * 60_000,
+          averageAccuracyMeters: 35,
+          maxClusterSpreadMeters: 40
         }
       },
       context
@@ -367,7 +374,7 @@ describe("event normalization", () => {
 
     expect(candidate.action).toBe("create_review_item");
     expect(candidate.reviewStatus).toBe("needs_review");
-    expect(candidate.confidence).toBe("low");
+    expect(candidate.confidence).toBe("medium");
     expect(candidate.title).toBe("Near New London Road");
   });
 
@@ -376,7 +383,7 @@ describe("event normalization", () => {
       address: { name: "Tesco Springfield", street: "Springfield Road", postalCode: "CM2 6QT" },
       latitude: 51.7484,
       longitude: 0.4381
-    })).toBe("Near Tesco Springfield");
+    })).toBe("Tesco Springfield");
     expect(readableLocationNameFromParts({
       address: { name: "12 New London Road", streetNumber: "12", street: "New London Road", postalCode: "CM2 0XX" },
       latitude: 51.7484,
@@ -389,6 +396,12 @@ describe("event normalization", () => {
     })).toBe("Unknown place near 51.748, 0.438");
     expect(locationAddressSummary({ street: "New London Road", city: "Chelmsford", postalCode: "CM2 0XX" }))
       .toBe("New London Road, Chelmsford, CM2 0XX");
+    expect(locationAddressSummary({
+      streetNumber: "206",
+      street: "Rainsford Road",
+      district: "Marconi",
+      postalCode: "CM1 2PD"
+    })).toBe("206 Rainsford Road, Marconi, CM1 2PD");
     expect(formatLocationCoordinates(51.7484, 0.4381)).toBe("51.748, 0.438");
   });
 

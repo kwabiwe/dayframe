@@ -16,6 +16,7 @@
     "@kingstinct/react-native-healthkit": "^14.0.2",
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~56.0.14",
+    "expo-clipboard": "~56.0.4",
     "expo-glass-effect": "~56.0.4",
     "expo-linking": "~56.0.15",
     "expo-location": "~56.0.19",

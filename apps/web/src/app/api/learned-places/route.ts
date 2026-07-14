@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { ZodError, z } from "zod";
 import { authErrorResponse } from "@/lib/api-errors";
-import { deleteLearnedPlace, updateLearnedPlaceStatus } from "@/lib/event-service";
+import {
+  deleteLearnedPlace,
+  resolveLearnedPlaceLocation,
+  updateLearnedPlaceStatus
+} from "@/lib/event-service";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 
 const learnedPlaceUpdateSchema = z.object({
@@ -9,10 +13,35 @@ const learnedPlaceUpdateSchema = z.object({
   status: z.literal("ignored")
 });
 
+const locationAddressSchema = z.object({
+  name: z.string().trim().max(160).nullable().optional(),
+  street: z.string().trim().max(160).nullable().optional(),
+  streetNumber: z.string().trim().max(40).nullable().optional(),
+  district: z.string().trim().max(160).nullable().optional(),
+  city: z.string().trim().max(160).nullable().optional(),
+  subregion: z.string().trim().max(160).nullable().optional(),
+  region: z.string().trim().max(160).nullable().optional(),
+  postalCode: z.string().trim().max(40).nullable().optional(),
+  formattedAddress: z.string().trim().max(320).nullable().optional()
+});
+
+const learnedPlaceResolutionSchema = z.object({
+  id: z.string().uuid(),
+  action: z.literal("resolve_location"),
+  address: locationAddressSchema
+});
+
+const learnedPlacePatchSchema = z.union([learnedPlaceUpdateSchema, learnedPlaceResolutionSchema]);
+
 export async function PATCH(request: Request) {
   try {
     const session = await resolveRequestSession(request);
-    const body = learnedPlaceUpdateSchema.parse(await request.json());
+    const body = learnedPlacePatchSchema.parse(await request.json());
+    if ("action" in body) {
+      const learnedPlace = await resolveLearnedPlaceLocation(body.id, body.address, session);
+      if (!learnedPlace) return NextResponse.json({ error: "Learned place not found." }, { status: 404 });
+      return NextResponse.json({ ok: true, learnedPlace });
+    }
     const learnedPlace = await updateLearnedPlaceStatus(body.id, body.status, session);
     if (!learnedPlace) return NextResponse.json({ error: "Learned place not found." }, { status: 404 });
     return NextResponse.json({ ok: true, id: learnedPlace.id, status: body.status });

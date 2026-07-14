@@ -21,6 +21,150 @@ export const DEMO_USER_ID = "00000000-0000-4000-8000-000000000001";
 export const DEMO_WORKSPACE_ID = "00000000-0000-4000-8000-000000000010";
 export const DEFAULT_UNKNOWN_STAY_THRESHOLD_MINUTES = 20;
 
+export const LOCATION_LEARNING_THRESHOLDS = {
+  sampleIntervalMs: 15 * 60_000,
+  distanceIntervalMeters: 250,
+  clusterRadiusMeters: 160,
+  visitGapMs: 3 * 60 * 60_000,
+  maxSampleAccuracyMeters: 200,
+  maxAverageAccuracyMeters: 100,
+  maxClusterSpreadMeters: 140,
+  placeCandidate: {
+    minVisitCount: 2,
+    minDistinctDays: 2,
+    minSampleCount: 6,
+    minTotalDwellMs: 40 * 60_000,
+    minLongestDwellMs: 20 * 60_000
+  },
+  oneOffActivity: {
+    minSampleCount: 4,
+    minDwellMs: 60 * 60_000
+  },
+  learnedPlaceQueueCooldownMs: 24 * 60 * 60_000,
+  oneOffQueueCooldownMs: 24 * 60 * 60_000,
+  commuteDwellMs: 15 * 60_000,
+  commuteQueueCooldownMs: 6 * 60 * 60_000
+} as const;
+
+export type LocationLearningEvidence = {
+  visitCount: number;
+  distinctDays: number;
+  sampleCount: number;
+  totalDwellMs: number;
+  longestDwellMs: number;
+  currentDwellMs: number;
+  currentVisitSampleCount: number;
+  averageAccuracyMeters: number | null;
+  maxClusterSpreadMeters: number | null;
+  radiusMeters: number;
+  firstSeenAt?: string | null;
+  lastSeenAt?: string | null;
+};
+
+export type LocationLearningClassificationKind = "place_candidate" | "one_off_activity" | "noise";
+
+export type LocationLearningClassification = {
+  kind: LocationLearningClassificationKind;
+  confidence: "medium" | "low" | "hint";
+  score: number;
+  reason: string;
+};
+
+export function classifyLocationLearningEvidence(
+  evidenceInput: Partial<LocationLearningEvidence>
+): LocationLearningClassification {
+  const evidence = normalizeLocationLearningEvidence(evidenceInput);
+  const thresholds = LOCATION_LEARNING_THRESHOLDS;
+  const accurate =
+    evidence.averageAccuracyMeters === null ||
+    evidence.averageAccuracyMeters <= thresholds.maxAverageAccuracyMeters;
+  const stable =
+    evidence.maxClusterSpreadMeters === null ||
+    evidence.maxClusterSpreadMeters <= thresholds.maxClusterSpreadMeters;
+  const hasPlaceEvidence =
+    evidence.visitCount >= thresholds.placeCandidate.minVisitCount &&
+    evidence.distinctDays >= thresholds.placeCandidate.minDistinctDays &&
+    evidence.sampleCount >= thresholds.placeCandidate.minSampleCount &&
+    evidence.totalDwellMs >= thresholds.placeCandidate.minTotalDwellMs &&
+    evidence.longestDwellMs >= thresholds.placeCandidate.minLongestDwellMs &&
+    accurate &&
+    stable;
+  const hasOneOffEvidence =
+    evidence.visitCount === 1 &&
+    evidence.distinctDays === 1 &&
+    evidence.sampleCount >= thresholds.oneOffActivity.minSampleCount &&
+    evidence.currentVisitSampleCount >= thresholds.oneOffActivity.minSampleCount &&
+    evidence.longestDwellMs >= thresholds.oneOffActivity.minDwellMs &&
+    accurate &&
+    stable;
+  const score = locationLearningEvidenceScore(evidence, { accurate, stable });
+
+  if (hasPlaceEvidence) {
+    return {
+      kind: "place_candidate",
+      confidence: "medium",
+      score,
+      reason: "Repeated visits on different days, meaningful dwell, sample quality and cluster stability support a place suggestion."
+    };
+  }
+
+  if (hasOneOffEvidence) {
+    return {
+      kind: "one_off_activity",
+      confidence: "low",
+      score,
+      reason: "This is one significant stay, but there is not enough recurrence to suggest saving a place."
+    };
+  }
+
+  return {
+    kind: "noise",
+    confidence: "hint",
+    score,
+    reason: !accurate
+      ? "Location accuracy is too broad for a reliable suggestion."
+      : !stable
+        ? "Samples are too dispersed to represent a stable place."
+        : "The cluster does not yet have enough repeat visits or meaningful one-off dwell to surface."
+  };
+}
+
+export function locationLearningEvidenceFromPayload(payload: Record<string, unknown>) {
+  const currentDwellMs = dwellMsFromPayload(payload);
+  const visitCount = positiveWholeNumber(payload.visitCount, 1);
+  const distinctDays = positiveWholeNumber(
+    payload.distinctDayCount ?? payload.distinctDays,
+    distinctDayCountFromPayload(payload)
+  );
+  const explicitTotalDwellMs = nonNegativeFiniteNumber(payload.totalDwellMs)
+    ?? secondsToMs(payload.totalDwellSeconds);
+  const totalDwellMs = explicitTotalDwellMs
+    ?? (visitCount > 1 ? currentDwellMs * visitCount : currentDwellMs);
+
+  return normalizeLocationLearningEvidence({
+    visitCount,
+    distinctDays,
+    sampleCount: positiveWholeNumber(payload.sampleCount, 1),
+    totalDwellMs,
+    longestDwellMs:
+      nonNegativeFiniteNumber(payload.longestDwellMs)
+      ?? secondsToMs(payload.longestDwellSeconds)
+      ?? currentDwellMs,
+    currentDwellMs,
+    currentVisitSampleCount: positiveWholeNumber(
+      payload.currentVisitSampleCount,
+      positiveWholeNumber(payload.sampleCount, 1)
+    ),
+    averageAccuracyMeters:
+      nonNegativeFiniteNumber(payload.averageAccuracyMeters)
+      ?? nonNegativeFiniteNumber(payload.accuracy),
+    maxClusterSpreadMeters: nonNegativeFiniteNumber(payload.maxClusterSpreadMeters),
+    radiusMeters: positiveWholeNumber(payload.radiusMeters, LOCATION_LEARNING_THRESHOLDS.clusterRadiusMeters),
+    firstSeenAt: cleanLocationText(payload.clusterFirstSeenAt ?? payload.startedAt),
+    lastSeenAt: cleanLocationText(payload.stoppedAt ?? payload.lastSeenAt)
+  });
+}
+
 export type LocationDisplayAddress = {
   name?: unknown;
   street?: unknown;
@@ -79,7 +223,7 @@ export function readableLocationNameFromParts(input: {
     !looksLikeCoordinateText(venueName) &&
     !looksLikeStreetAddressName({ name: venueName, street, streetNumber })
   ) {
-    return nearLabel(venueName);
+    return venueName;
   }
 
   if (street && !looksLikeCoordinateText(street)) {
@@ -99,6 +243,11 @@ export function readableLocationNameFromParts(input: {
   }
 
   return coordinates ? `Unknown place near ${coordinates}` : "Unknown place";
+}
+
+export function isCoordinateBasedLocationName(value: unknown) {
+  const name = cleanLocationText(value);
+  return name ? looksLikeCoordinateFallback(name) : false;
 }
 
 export const EventSourceSchema = z.enum([
@@ -949,14 +1098,25 @@ export function normalizeActivityEvent(
   if (event.type === "unknown_stay") {
     const durationMinutes = Number(event.rawPayload.durationMinutes ?? 0);
     const threshold = context.unknownStayThresholdMinutes ?? DEFAULT_UNKNOWN_STAY_THRESHOLD_MINUTES;
+    const isLearnedOneOff = event.rawPayload.evidenceKind === "one_off_activity";
+    const locationName = readableLocationNameFromParts({
+      address: event.rawPayload.address,
+      latitude: event.rawPayload.latitude,
+      longitude: event.rawPayload.longitude,
+      fallbackName: event.description ?? stringFromPayload(event.rawPayload.candidateName)
+    });
     return {
       action: durationMinutes >= threshold ? "create_review_item" : "record_only",
       confidence: "low",
       reviewStatus: durationMinutes >= threshold ? "needs_review" : "confirmed",
-      title: durationMinutes >= threshold ? "Review unknown stay" : "Record short unknown stay",
+      title: durationMinutes >= threshold
+        ? isLearnedOneOff ? locationName : "Review unknown stay"
+        : "Record short unknown stay",
       reason:
         durationMinutes >= threshold
-          ? "Unknown stays longer than the configured threshold need human review."
+          ? isLearnedOneOff
+            ? "Dayframe detected one significant stay here. It can be reviewed as time spent here, but it is not a saved-place suggestion."
+            : "Unknown stays longer than the configured threshold need human review."
           : "Short unknown stays are retained as raw events only.",
       shouldClosePrevious: false
     };
@@ -990,6 +1150,9 @@ export function normalizeActivityEvent(
   }
 
   if (event.type === "learned_place_visit") {
+    const classification = classifyLocationLearningEvidence(
+      locationLearningEvidenceFromPayload(event.rawPayload)
+    );
     const candidateName = readableLocationNameFromParts({
       address: event.rawPayload.address,
       latitude: event.rawPayload.latitude,
@@ -999,15 +1162,29 @@ export function normalizeActivityEvent(
         stringFromPayload(event.rawPayload.placeName) ??
         stringFromPayload(event.rawPayload.candidateName)
     });
+    if (classification.kind === "noise") {
+      return {
+        action: "record_only",
+        confidence: "hint",
+        reviewStatus: "confirmed",
+        categoryId: event.categoryId,
+        placeId: event.placeId ?? place?.id,
+        title: candidateName,
+        reason: classification.reason,
+        shouldClosePrevious: false
+      };
+    }
     return {
       action: "create_review_item",
-      confidence: "low",
+      confidence: classification.confidence,
       reviewStatus: "needs_review",
       categoryId: event.categoryId,
       placeId: event.placeId ?? place?.id,
       title: candidateName,
       reason:
-        "Dayframe detected a stay at an unsaved location. Confirming creates a time entry only after review.",
+        classification.kind === "one_off_activity"
+          ? "Dayframe detected one significant stay here. It can be reviewed as time spent here, but it is not a saved-place suggestion."
+          : "Repeated visits suggest this may be a place worth saving. The detected time still needs review before it is logged.",
       shouldClosePrevious: false
     };
   }
@@ -1236,8 +1413,11 @@ function looksLikeStreetAddressName(input: {
   street: string | null;
   streetNumber: string | null;
 }) {
-  if (!input.street || !input.streetNumber) return false;
   const normalizedName = input.name.toLowerCase();
+  if (input.streetNumber && normalizedName === input.streetNumber.toLowerCase()) return true;
+  if (input.street && normalizedName === input.street.toLowerCase()) return true;
+  if (/^\d+[a-z]?(\s|$)/i.test(input.name)) return true;
+  if (!input.street || !input.streetNumber) return false;
   return (
     normalizedName.includes(input.street.toLowerCase()) &&
     normalizedName.includes(input.streetNumber.toLowerCase())
@@ -1248,6 +1428,7 @@ function looksLikeCoordinateFallback(value: string) {
   const normalized = value.toLowerCase();
   return (
     looksLikeCoordinateText(value) ||
+    /^(near|place near)\s+-?\d+(\.\d+)?,\s*-?\d+(\.\d+)?$/.test(normalized) ||
     /^regular place near\s+-?\d+(\.\d+)?,\s*-?\d+(\.\d+)?$/.test(normalized) ||
     /^unknown place near\s+-?\d+(\.\d+)?,\s*-?\d+(\.\d+)?$/.test(normalized)
   );
@@ -1255,6 +1436,84 @@ function looksLikeCoordinateFallback(value: string) {
 
 function looksLikeCoordinateText(value: string) {
   return /^-?\d+(\.\d+)?,\s*-?\d+(\.\d+)?$/.test(value.trim());
+}
+
+function normalizeLocationLearningEvidence(
+  evidence: Partial<LocationLearningEvidence>
+): LocationLearningEvidence {
+  return {
+    visitCount: positiveWholeNumber(evidence.visitCount, 1),
+    distinctDays: positiveWholeNumber(evidence.distinctDays, 1),
+    sampleCount: positiveWholeNumber(evidence.sampleCount, 1),
+    totalDwellMs: nonNegativeFiniteNumber(evidence.totalDwellMs) ?? 0,
+    longestDwellMs: nonNegativeFiniteNumber(evidence.longestDwellMs) ?? 0,
+    currentDwellMs: nonNegativeFiniteNumber(evidence.currentDwellMs) ?? 0,
+    currentVisitSampleCount: positiveWholeNumber(evidence.currentVisitSampleCount, 1),
+    averageAccuracyMeters: nonNegativeFiniteNumber(evidence.averageAccuracyMeters),
+    maxClusterSpreadMeters: nonNegativeFiniteNumber(evidence.maxClusterSpreadMeters),
+    radiusMeters: positiveWholeNumber(
+      evidence.radiusMeters,
+      LOCATION_LEARNING_THRESHOLDS.clusterRadiusMeters
+    ),
+    firstSeenAt: evidence.firstSeenAt ?? null,
+    lastSeenAt: evidence.lastSeenAt ?? null
+  };
+}
+
+function locationLearningEvidenceScore(
+  evidence: LocationLearningEvidence,
+  quality: { accurate: boolean; stable: boolean }
+) {
+  const thresholds = LOCATION_LEARNING_THRESHOLDS;
+  const points =
+    Math.min(25, Math.max(0, evidence.visitCount - 1) * 15) +
+    Math.min(20, Math.max(0, evidence.distinctDays - 1) * 20) +
+    Math.min(15, Math.round((evidence.sampleCount / thresholds.placeCandidate.minSampleCount) * 15)) +
+    Math.min(20, Math.round((evidence.totalDwellMs / thresholds.placeCandidate.minTotalDwellMs) * 20)) +
+    (quality.accurate ? 10 : 0) +
+    (quality.stable ? 10 : 0);
+  return Math.min(100, points);
+}
+
+function dwellMsFromPayload(payload: Record<string, unknown>) {
+  const explicit = nonNegativeFiniteNumber(payload.currentDwellMs)
+    ?? secondsToMs(payload.durationSeconds)
+    ?? minutesToMs(payload.durationMinutes);
+  if (explicit !== null) return explicit;
+  const startedAt = timestampMs(payload.startedAt);
+  const stoppedAt = timestampMs(payload.stoppedAt ?? payload.lastSeenAt);
+  if (startedAt === null || stoppedAt === null) return 0;
+  return Math.max(0, stoppedAt - startedAt);
+}
+
+function distinctDayCountFromPayload(payload: Record<string, unknown>) {
+  const firstSeenAt = timestampMs(payload.clusterFirstSeenAt ?? payload.startedAt);
+  const lastSeenAt = timestampMs(payload.stoppedAt ?? payload.lastSeenAt);
+  if (firstSeenAt === null || lastSeenAt === null) return 1;
+  return new Date(firstSeenAt).toISOString().slice(0, 10) === new Date(lastSeenAt).toISOString().slice(0, 10)
+    ? 1
+    : 2;
+}
+
+function positiveWholeNumber(value: unknown, fallback: number) {
+  const parsed = nonNegativeFiniteNumber(value);
+  return parsed !== null && parsed >= 1 ? Math.round(parsed) : fallback;
+}
+
+function nonNegativeFiniteNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function secondsToMs(value: unknown) {
+  const seconds = nonNegativeFiniteNumber(value);
+  return seconds === null ? null : seconds * 1000;
+}
+
+function minutesToMs(value: unknown) {
+  const minutes = nonNegativeFiniteNumber(value);
+  return minutes === null ? null : minutes * 60_000;
 }
 
 function visitActivityDescription(

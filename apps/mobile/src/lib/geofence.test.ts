@@ -300,7 +300,7 @@ describe("mobile geofence visit candidates", () => {
     expect(diagnostics.lastStatus).toContain("matched Home");
   });
 
-  it("queues a learned regular-place candidate only after repeated unsaved samples", async () => {
+  it("keeps a weak one-visit cluster out of Learned places", async () => {
     await setLocationLearningEnabled(true, [place]);
     const baseSample = {
       coords: {
@@ -321,13 +321,18 @@ describe("mobile geofence visit candidates", () => {
       { ...baseSample, timestamp: new Date("2026-07-06T09:08:00.000Z").getTime() },
       [place]
     );
-    await recordLocationLearningSample(
+    const weakResult = await recordLocationLearningSample(
       { ...baseSample, timestamp: new Date("2026-07-06T09:24:00.000Z").getTime() },
       [place]
     );
 
     let queue = await readQueue();
     expect(queue.some((item) => item.type === "learned_place_visit")).toBe(false);
+    expect(queue.some((item) => item.rawPayload?.evidenceKind === "one_off_activity")).toBe(false);
+    expect(weakResult).toMatchObject({
+      queued: false,
+      classification: { kind: "noise" }
+    });
     expect(locationMocks.reverseGeocodeAsync).not.toHaveBeenCalled();
 
     await recordLocationLearningSample(
@@ -338,7 +343,7 @@ describe("mobile geofence visit candidates", () => {
       { ...baseSample, timestamp: new Date("2026-07-07T09:12:00.000Z").getTime() },
       [place]
     );
-    await recordLocationLearningSample(
+    const repeatedResult = await recordLocationLearningSample(
       { ...baseSample, timestamp: new Date("2026-07-07T09:25:00.000Z").getTime() },
       [place]
     );
@@ -346,10 +351,14 @@ describe("mobile geofence visit candidates", () => {
     queue = await readQueue();
     const learned = queue.find((item) => item.type === "learned_place_visit");
 
+    expect(repeatedResult).toMatchObject({
+      queued: true,
+      classification: { kind: "place_candidate" }
+    });
     expect(learned).toEqual(
       expect.objectContaining({
         source: "location_learning",
-        description: "Near Tesco Springfield"
+        description: "Tesco Springfield"
       })
     );
     expect(locationMocks.reverseGeocodeAsync).toHaveBeenCalledWith({
@@ -358,7 +367,7 @@ describe("mobile geofence visit candidates", () => {
     });
     expect(learned?.rawPayload).toMatchObject({
       evidenceKind: "learned_place_visit",
-      candidateName: "Near Tesco Springfield",
+      candidateName: "Tesco Springfield",
       address: expect.objectContaining({
         name: "Tesco Springfield",
         street: "Springfield Road",
@@ -371,7 +380,58 @@ describe("mobile geofence visit candidates", () => {
       sampleCount: 6,
       distinctDayCount: 2,
       visitCount: 2,
+      totalDwellMs: 49 * 60_000,
+      longestDwellMs: 25 * 60_000,
+      classification: "place_candidate",
       reviewFirst: true
+    });
+  });
+
+  it("queues one long visit as a one-off activity instead of a learned place", async () => {
+    await setLocationLearningEnabled(true, [place]);
+    const baseSample = {
+      coords: {
+        latitude: 51.61,
+        longitude: -0.22,
+        altitude: null,
+        accuracy: 30,
+        altitudeAccuracy: null,
+        heading: null,
+        speed: null
+      }
+    };
+
+    for (const minutes of [0, 15, 30, 45]) {
+      await recordLocationLearningSample(
+        { ...baseSample, timestamp: new Date(`2026-07-06T09:${String(minutes).padStart(2, "0")}:00.000Z`).getTime() },
+        [place]
+      );
+    }
+    const result = await recordLocationLearningSample(
+      { ...baseSample, timestamp: new Date("2026-07-06T10:01:00.000Z").getTime() },
+      [place]
+    );
+
+    const queue = await readQueue();
+    const oneOff = queue.find((item) => item.rawPayload?.evidenceKind === "one_off_activity");
+
+    expect(result).toMatchObject({
+      status: "one_off_activity_queued",
+      queued: true,
+      classification: { kind: "one_off_activity" }
+    });
+    expect(queue.some((item) => item.type === "learned_place_visit")).toBe(false);
+    expect(oneOff).toMatchObject({
+      source: "location_learning",
+      type: "unknown_stay",
+      description: "Tesco Springfield",
+      rawPayload: expect.objectContaining({
+        classification: "one_off_activity",
+        visitCount: 1,
+        distinctDayCount: 1,
+        sampleCount: 5,
+        durationMinutes: 61
+      })
     });
   });
 
