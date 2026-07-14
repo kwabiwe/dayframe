@@ -836,14 +836,26 @@ type LearnedQuickAction = {
 };
 
 function buildLearnedQuickActions(data: BootstrapData): LearnedQuickAction[] {
-  const pinned = data.categories.filter((category) => category.isPinned).map((category) => ({
-    categoryId: category.id,
-    description: null,
-    label: category.name,
-    color: paletteCssColorFor(category.color, category.name),
-    key: `category:${category.id}`,
-    meta: null
-  }));
+  const usageByCategory = new Map((data.categoryUsage ?? []).map((rank) => [rank.categoryId, rank]));
+  const pinned = data.categories
+    .map((category, index) => ({ category, index, usage: usageByCategory.get(category.id) }))
+    .filter(({ category }) => category.isPinned)
+    .sort((a, b) =>
+      (b.usage?.score ?? 0) - (a.usage?.score ?? 0) ||
+      (b.usage?.useCount ?? 0) - (a.usage?.useCount ?? 0) ||
+      Date.parse(b.usage?.lastSeenAt ?? "1970-01-01T00:00:00.000Z") -
+        Date.parse(a.usage?.lastSeenAt ?? "1970-01-01T00:00:00.000Z") ||
+      a.index - b.index ||
+      a.category.name.localeCompare(b.category.name)
+    )
+    .map(({ category }) => ({
+      categoryId: category.id,
+      description: null,
+      label: category.name,
+      color: paletteCssColorFor(category.color, category.name),
+      key: `category:${category.id}`,
+      meta: null
+    }));
 
   return pinned.slice(0, 6);
 }

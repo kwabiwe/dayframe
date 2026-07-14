@@ -91,7 +91,8 @@ import {
   activeTimerPresentation,
   applySuggestionToRunningTimer,
   buildMobileQuickActions,
-  displayTimerDescription
+  displayTimerDescription,
+  sortMobileCategoriesByUsage
 } from "@/lib/timerPresentation";
 
 type TimeEntry = MobileBootstrap["entries"][number];
@@ -174,6 +175,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [activeEditStopping, setActiveEditStopping] = useState(false);
   const [activeEditDeleting, setActiveEditDeleting] = useState(false);
   const [timerActionPending, setTimerActionPending] = useState<"start" | "stop" | null>(null);
+  const [pendingActiveEntry, setPendingActiveEntry] = useState<TimeEntry | null>(null);
   const [presentedActiveEntry, setPresentedActiveEntry] = useState<TimeEntry | null>(null);
   const [calendarEditSaving, setCalendarEditSaving] = useState(false);
   const [calendarEditDeleting, setCalendarEditDeleting] = useState(false);
@@ -405,6 +407,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }, []);
 
   const quickActions = useMemo(() => buildMobileQuickActions(data), [data]);
+  const sortedCategories = useMemo(
+    () => sortMobileCategoriesByUsage(data?.categories ?? [], data?.categoryUsage ?? []).map(({ category }) => category),
+    [data?.categories, data?.categoryUsage]
+  );
   const authKeyboardFields = useMemo<KeyboardAccessoryField[]>(() => (
     authView === "signup"
       ? [
@@ -423,12 +429,17 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     fields: authKeyboardFields,
     theme
   });
-  const activeDurationSeconds = activeTimerElapsedSeconds(data?.activeEntry, now);
-  const hasLiveActiveTimer = Boolean(data?.activeEntry);
+  const activeEntryForDisplay = data?.activeEntry ?? pendingActiveEntry;
+  const activeDurationSeconds = activeTimerElapsedSeconds(activeEntryForDisplay, now);
+  const hasLiveActiveTimer = Boolean(activeEntryForDisplay);
 
   useEffect(() => {
-    if (data?.activeEntry) {
-      setPresentedActiveEntry(data.activeEntry);
+    if (data?.activeEntry && pendingActiveEntry) setPendingActiveEntry(null);
+  }, [data?.activeEntry, pendingActiveEntry]);
+
+  useEffect(() => {
+    if (activeEntryForDisplay) {
+      setPresentedActiveEntry(activeEntryForDisplay);
       return undefined;
     }
 
@@ -441,7 +452,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       setPresentedActiveEntry(null);
     }, MOBILE_MOTION.layout + 80);
     return () => clearTimeout(timeout);
-  }, [data?.activeEntry, reduceMotion]);
+  }, [activeEntryForDisplay, reduceMotion]);
 
   useEffect(() => {
     const toValue = hasLiveActiveTimer ? 1 : 0;
@@ -477,8 +488,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       }
     ]
   };
-  const displayedActiveEntry = data?.activeEntry ?? presentedActiveEntry;
-  const displayedActiveDurationSeconds = displayedActiveEntry && data?.activeEntry
+  const displayedActiveEntry = activeEntryForDisplay ?? presentedActiveEntry;
+  const displayedActiveDurationSeconds = displayedActiveEntry && activeEntryForDisplay
     ? activeDurationSeconds
     : activeTimerElapsedSeconds(displayedActiveEntry, now);
   const todayKey = useMemo(() => formatDateKey(new Date(now)), [now]);
@@ -515,6 +526,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const activeTimerCopy = activeTimerPresentation(displayedActiveEntry ?? null);
   const activeCategoryLabel = activeTimerCopy.categoryLabel;
   const activeTitle = activeTimerCopy.title;
+  const activeTitleIsPlaceholder = Boolean(displayedActiveEntry) && !displayTimerDescription(displayedActiveEntry);
   const recentStoppedAt = useMemo(
     () => recentStoppedEntryTime(data?.entries ?? [], data?.activeEntry ?? null),
     [data?.activeEntry, data?.entries]
@@ -536,10 +548,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     [data?.taskSuggestions]
   );
   useEffect(() => {
-    if (!data?.activeEntry && activeEditVisible) {
+    if (!activeEntryForDisplay && activeEditVisible) {
       setActiveEditVisible(false);
     }
-  }, [activeEditVisible, data?.activeEntry]);
+  }, [activeEditVisible, activeEntryForDisplay]);
 
   useEffect(() => {
     if (liveActivityReconciliationDeferred.current) return;
@@ -590,15 +602,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   async function startTask(categoryId?: string | null, description = customDescription) {
     if (!data?.activeEntry && !categoryId && !description.trim()) {
+      setStartSheetVisible(false);
+      setActiveEditVisible(true);
       const ok = await startTaskWith({
         categoryId: null,
         description: null,
         startedAt: null
       });
-      if (ok) {
-        setStartSheetVisible(false);
-        setActiveEditVisible(true);
-      }
+      if (!ok) setActiveEditVisible(false);
       return ok;
     }
     return startTaskWith({
@@ -655,6 +666,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     if (timerActionPending) return false;
     const trimmedDescription = input.description?.trim() ?? "";
     const startedAt = input.startedAt ?? undefined;
+    if (!data?.activeEntry) {
+      setPendingActiveEntry(pendingEntryFromStartInput({
+        categories: data?.categories ?? [],
+        categoryId: input.categoryId ?? null,
+        description: trimmedDescription || null,
+        startedAt
+      }));
+    }
     setTimerActionPending("start");
     try {
       await startTimer(input.categoryId ?? null, trimmedDescription, startedAt);
@@ -663,6 +682,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       await load({ silent: true });
       return true;
     } catch (error) {
+      setPendingActiveEntry(null);
       if (error instanceof AuthRequiredError) {
         setAuthState("signedOut");
         setData(null);
@@ -831,26 +851,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       setActiveEditStopping(false);
       setTimerActionPending(null);
     }
-  }
-
-  function confirmDeleteActiveTimer() {
-    const activeEntry = data?.activeEntry;
-    if (!activeEntry) return;
-
-    Alert.alert(
-      "Delete running timer",
-      "Delete this running timer? This removes the entry instead of stopping it.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => {
-            void deleteActiveTimer(activeEntry.id);
-          }
-        }
-      ]
-    );
   }
 
   async function deleteActiveTimer(entryId: string) {
@@ -1090,7 +1090,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                       {displayedActiveEntry && activeCategoryColor ? (
                         <View style={[styles.colorDot, { backgroundColor: activeCategoryColor }]} />
                       ) : null}
-                      <Text style={[styles.timerText, styles.activeTitleText]} numberOfLines={2}>
+                      <Text
+                        style={[
+                          styles.timerText,
+                          styles.activeTitleText,
+                          activeTitleIsPlaceholder ? styles.activeTitlePlaceholderText : null
+                        ]}
+                        numberOfLines={2}
+                      >
                         {activeTitle}
                       </Text>
                     </View>
@@ -1122,17 +1129,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                         }}
                       >
                         <StopGlyph color={theme.onAccent} />
-                      </Pressable>
-                      <Pressable
-                        accessibilityLabel="Delete running timer"
-                        accessibilityRole="button"
-                        style={pressable(styles.deleteTimerButton, styles.buttonPressed)}
-                        onPress={(event) => {
-                          event.stopPropagation();
-                          confirmDeleteActiveTimer();
-                        }}
-                      >
-                        <TrashGlyph color={theme.onDanger} />
                       </Pressable>
                     </Animated.View>
                   ) : null}
@@ -1302,7 +1298,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     <DashboardContext.Provider value={{ renderTab: renderDashboardTab }}>
       {children}
       <ActiveTimerEditSheet
-        categories={data?.categories ?? []}
+        categories={sortedCategories}
         elapsedSeconds={0}
         entry={null}
         initialDescription={customDescription}
@@ -1319,9 +1315,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         visible={startSheetVisible}
       />
       <ActiveTimerEditSheet
-        categories={data?.categories ?? []}
+        categories={sortedCategories}
         elapsedSeconds={activeDurationSeconds}
-        entry={data?.activeEntry ?? null}
+        entry={activeEntryForDisplay ?? null}
         lastStoppedAt={recentStoppedAt}
         onApplySuggestion={applyRunningTimerSuggestion}
         onCancel={() => {
@@ -1331,7 +1327,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         onSave={saveActiveTimerEdit}
         onStop={stopActiveTimer}
         deleting={activeEditDeleting}
-        saving={activeEditSaving}
+        saving={activeEditSaving || timerActionPending === "start"}
         stopping={activeEditStopping}
         styles={styles}
         suggestions={compactTaskSuggestions}
@@ -1339,7 +1335,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         visible={activeEditVisible}
       />
       <ActiveTimerEditSheet
-        categories={data?.categories ?? []}
+        categories={sortedCategories}
         elapsedSeconds={calendarEditEntry ? entryDurationSeconds(calendarEditEntry, now) : 0}
         entry={calendarEditEntry}
         lastStoppedAt={null}
@@ -1960,17 +1956,6 @@ function StopGlyph({ color }: { color: string }) {
   );
 }
 
-function TrashGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={18} height={18} viewBox="0 0 24 24">
-      <Path
-        d="M9 4h6l1 2h4v2H4V6h4l1-2Zm-2 6h10l-.7 10H7.7L7 10Zm3 2v6h1.5v-6H10Zm2.5 0v6H14v-6h-1.5Z"
-        fill={color}
-      />
-    </Svg>
-  );
-}
-
 function CloseGlyph({ color }: { color: string }) {
   return (
     <Svg width={22} height={22} viewBox="0 0 24 24">
@@ -2269,6 +2254,36 @@ function mergeActiveEntry(entries: TimeEntry[], activeEntry: MobileBootstrap["ac
     });
   }
   return Array.from(byId.values());
+}
+
+function pendingEntryFromStartInput(input: {
+  categories: MobileBootstrap["categories"];
+  categoryId: string | null;
+  description: string | null;
+  startedAt?: string | null;
+}): TimeEntry {
+  const category = input.categoryId
+    ? input.categories.find((candidate) => candidate.id === input.categoryId)
+    : null;
+
+  return {
+    categoryColor: category?.color ?? null,
+    categoryId: category?.id ?? input.categoryId,
+    categoryName: category?.name ?? null,
+    clientName: null,
+    confidence: "high",
+    description: input.description,
+    durationSeconds: 0,
+    id: "pending-active-timer",
+    placeName: null,
+    projectColor: null,
+    projectId: null,
+    projectName: null,
+    reviewStatus: "confirmed",
+    source: "mobile_app",
+    startedAt: input.startedAt ?? new Date().toISOString(),
+    stoppedAt: null
+  };
 }
 
 function buildCategorySegments(

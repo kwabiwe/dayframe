@@ -603,6 +603,14 @@ export type RecentActivitySuggestion = {
   totalSeconds: number;
 };
 
+export type CategoryUsageRank = {
+  categoryId: string;
+  lastSeenAt: string;
+  score: number;
+  totalSeconds: number;
+  useCount: number;
+};
+
 export function buildRecentActivitySuggestions(
   entries: RecentActivityEntry[],
   options: { contextDate?: Date | string; limit?: number; minDurationSeconds?: number } = {}
@@ -619,7 +627,7 @@ export function buildRecentActivitySuggestions(
   for (const entry of entries) {
     const description = normalizeRecentActivityDescription(entry.description);
     if (!description || !entry.stoppedAt) continue;
-    if (!isRecentActivitySuggestionEligible(entry)) continue;
+    if (!isManualLearningEntryEligible(entry)) continue;
     if ((entry.durationSeconds ?? 0) < minDurationSeconds) continue;
 
     const lastSeenMs = Date.parse(entry.stoppedAt);
@@ -644,6 +652,7 @@ export function buildRecentActivitySuggestions(
         section: "recent",
         useCount: 1,
         totalSeconds: Math.max(0, entry.durationSeconds ?? 0),
+        recentWindowCount: contextMs - lastSeenMs <= 14 * 86_400_000 ? 1 : 0,
         timeBucketMatches: matchesTimeBucket ? 1 : 0,
         dayMatches: matchesDay ? 1 : 0,
         dayKindMatches: matchesDayKind ? 1 : 0
@@ -653,6 +662,7 @@ export function buildRecentActivitySuggestions(
 
     current.useCount += 1;
     current.totalSeconds += Math.max(0, entry.durationSeconds ?? 0);
+    current.recentWindowCount += contextMs - lastSeenMs <= 14 * 86_400_000 ? 1 : 0;
     current.timeBucketMatches += matchesTimeBucket ? 1 : 0;
     current.dayMatches += matchesDay ? 1 : 0;
     current.dayKindMatches += matchesDayKind ? 1 : 0;
@@ -670,6 +680,86 @@ export function buildRecentActivitySuggestions(
   return compactRecentActivitySuggestionOrder(scored).slice(0, limit);
 }
 
+export function buildCategoryUsageRanks(
+  entries: RecentActivityEntry[],
+  options: { contextDate?: Date | string; limit?: number; minDurationSeconds?: number } = {}
+): CategoryUsageRank[] {
+  const limit = options.limit ?? 50;
+  const minDurationSeconds = options.minDurationSeconds ?? 60;
+  const contextDate = options.contextDate ? new Date(options.contextDate) : new Date();
+  const contextMs = Number.isFinite(contextDate.getTime()) ? contextDate.getTime() : Date.now();
+  const ranks = new Map<string, CategoryUsageRank & {
+    dayKindMatches: number;
+    dayMatches: number;
+    timeBucketMatches: number;
+  }>();
+  const contextBucket = timeOfDayBucket(new Date(contextMs));
+  const contextDay = new Date(contextMs).getDay();
+  const contextDayKind = dayKind(new Date(contextMs));
+
+  for (const entry of entries) {
+    if (!entry.categoryId || !entry.stoppedAt) continue;
+    if (!isManualLearningEntryEligible(entry)) continue;
+    if ((entry.durationSeconds ?? 0) < minDurationSeconds) continue;
+
+    const lastSeenMs = Date.parse(entry.stoppedAt);
+    if (!Number.isFinite(lastSeenMs)) continue;
+    const startedAt = new Date(entry.startedAt);
+    const matchesTimeBucket = Number.isFinite(startedAt.getTime()) && timeOfDayBucket(startedAt) === contextBucket;
+    const matchesDay = Number.isFinite(startedAt.getTime()) && startedAt.getDay() === contextDay;
+    const matchesDayKind = Number.isFinite(startedAt.getTime()) && dayKind(startedAt) === contextDayKind;
+    const current = ranks.get(entry.categoryId);
+
+    if (!current) {
+      ranks.set(entry.categoryId, {
+        categoryId: entry.categoryId,
+        dayKindMatches: matchesDayKind ? 1 : 0,
+        dayMatches: matchesDay ? 1 : 0,
+        lastSeenAt: entry.stoppedAt,
+        score: 0,
+        timeBucketMatches: matchesTimeBucket ? 1 : 0,
+        totalSeconds: Math.max(0, entry.durationSeconds ?? 0),
+        useCount: 1
+      });
+      continue;
+    }
+
+    current.dayKindMatches += matchesDayKind ? 1 : 0;
+    current.dayMatches += matchesDay ? 1 : 0;
+    current.timeBucketMatches += matchesTimeBucket ? 1 : 0;
+    current.totalSeconds += Math.max(0, entry.durationSeconds ?? 0);
+    current.useCount += 1;
+    if (lastSeenMs > Date.parse(current.lastSeenAt)) current.lastSeenAt = entry.stoppedAt;
+  }
+
+  return [...ranks.values()]
+    .map((rank) => {
+      const lastSeenMs = Date.parse(rank.lastSeenAt);
+      const daysAgo = Number.isFinite(lastSeenMs)
+        ? Math.max(0, (contextMs - lastSeenMs) / 86_400_000)
+        : 90;
+      const frequencyScore = boundedLogScore(rank.useCount, 12);
+      const recencyScore = Math.exp(-daysAgo / 21);
+      const contextScore = rank.useCount >= 3
+        ? Math.max(rank.timeBucketMatches / rank.useCount, rank.dayMatches / rank.useCount, rank.dayKindMatches / rank.useCount * 0.75)
+        : 0;
+      return {
+        categoryId: rank.categoryId,
+        lastSeenAt: rank.lastSeenAt,
+        score: roundScore(100 * (0.55 * frequencyScore + 0.25 * recencyScore + 0.20 * contextScore)),
+        totalSeconds: rank.totalSeconds,
+        useCount: rank.useCount
+      };
+    })
+    .sort((a, b) =>
+      b.score - a.score ||
+      b.useCount - a.useCount ||
+      Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt) ||
+      a.categoryId.localeCompare(b.categoryId)
+    )
+    .slice(0, limit);
+}
+
 const manualSuggestionSources = new Set(["manual_app", "mobile_app"]);
 const excludedSuggestionEventTypes = new Set([
   "geofence_enter",
@@ -684,16 +774,21 @@ const excludedSuggestionEventTypes = new Set([
   "health_workout_import"
 ]);
 
-export function isRecentActivitySuggestionEligible(entry: RecentActivityEntry) {
+function isManualLearningEntryEligible(entry: RecentActivityEntry) {
   if (!entry.source || !manualSuggestionSources.has(entry.source)) return false;
   if (entry.reviewStatus !== "confirmed") return false;
   if (entry.eventType && excludedSuggestionEventTypes.has(entry.eventType)) return false;
   return true;
 }
 
+export function isRecentActivitySuggestionEligible(entry: RecentActivityEntry) {
+  return isManualLearningEntryEligible(entry);
+}
+
 type ScoredRecentActivitySuggestion = RecentActivitySuggestion & {
   dayKindMatches: number;
   dayMatches: number;
+  recentWindowCount: number;
   timeBucketMatches: number;
 };
 
@@ -705,15 +800,29 @@ function scoreRecentActivitySuggestion(
   const daysAgo = Number.isFinite(lastSeenMs)
     ? Math.max(0, (contextMs - lastSeenMs) / 86_400_000)
     : 90;
-  const recencyScore = Math.max(0, 60 - Math.min(60, daysAgo * 3));
-  const frequencyScore = Math.log2(suggestion.useCount + 1) * 18;
-  const contextScore = suggestion.useCount >= 2
-    ? suggestion.timeBucketMatches * 7 + suggestion.dayMatches * 5 + suggestion.dayKindMatches * 2
+  const frequencyScore = boundedLogScore(suggestion.useCount, 10);
+  const recencyScore = Math.exp(-daysAgo / 10);
+  const timeAffinityScore = suggestion.useCount >= 3
+    ? suggestion.timeBucketMatches / suggestion.useCount
     : 0;
-  const durationScore = Math.min(6, Math.log2(Math.max(1, suggestion.totalSeconds / 60)));
-  const score = Math.round((recencyScore + frequencyScore + contextScore + durationScore) * 100) / 100;
+  const dayAffinityScore = suggestion.useCount >= 3
+    ? Math.max(suggestion.dayMatches / suggestion.useCount, suggestion.dayKindMatches / suggestion.useCount * 0.75)
+    : 0;
+  const recentRepetitionScore = Math.min(1, suggestion.recentWindowCount / 3);
+  const categoryAffinityScore = suggestion.categoryId ? 0.65 : 0;
+  const score = roundScore(100 * (
+    0.30 * frequencyScore +
+    0.20 * recencyScore +
+    0.20 * timeAffinityScore +
+    0.15 * dayAffinityScore +
+    0.10 * recentRepetitionScore +
+    0.05 * categoryAffinityScore
+  ));
+  const contextScore = suggestion.useCount >= 3
+    ? timeAffinityScore + dayAffinityScore
+    : 0;
   const section: RecentActivitySuggestionSection =
-    suggestion.useCount >= 2 && contextScore >= 16
+    suggestion.useCount >= 3 && contextScore >= 0.9
       ? "suggested_now"
       : suggestion.useCount >= 2
         ? "often_used"
@@ -731,6 +840,14 @@ function scoreRecentActivitySuggestion(
     totalSeconds: suggestion.totalSeconds,
     useCount: suggestion.useCount
   };
+}
+
+function boundedLogScore(value: number, maxValue: number) {
+  return Math.min(1, Math.log1p(Math.max(0, value)) / Math.log1p(maxValue));
+}
+
+function roundScore(value: number) {
+  return Math.round(value * 100) / 100;
 }
 
 function compactRecentActivitySuggestionOrder(

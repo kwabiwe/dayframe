@@ -4,6 +4,7 @@ import {
   ActivityEventInputSchema,
   type ActivityEventInput,
   type ActivityEventType,
+  type CategoryUsageRank,
   type EventSource,
   type HealthAutoLogMappings,
   type HealthImportPreferences,
@@ -140,6 +141,7 @@ export type MobileBootstrap = {
     rawPayload: Record<string, unknown> | null;
   }>;
   reviewItems: MobileReviewItem[];
+  categoryUsage?: CategoryUsageRank[];
   taskSuggestions?: RecentActivitySuggestion[];
 };
 

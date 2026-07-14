@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getNormalizationContext, getTaskSuggestions } from "./queries";
+import { getCategoryUsageRanks, getNormalizationContext, getTaskSuggestions } from "./queries";
 import type { RequestSession } from "./session";
 
 const mocks = vi.hoisted(() => ({
@@ -122,6 +122,47 @@ describe("task suggestions query", () => {
       expect.objectContaining({
         categoryId: "category-1",
         description: "Architecture review"
+      })
+    ]);
+  });
+
+  it("builds category usage ranks from manual category history", async () => {
+    mocks.query.mockImplementation(async (statement: string, values: unknown[]) => {
+      expect(statement).toContain("te.category_id is not null");
+      expect(statement).toContain("te.source in ('manual_app', 'mobile_app')");
+      expect(values).toEqual([session.workspaceId, session.userId]);
+      return {
+        rows: [
+          {
+            id: "manual-1",
+            categoryId: "coding",
+            description: null,
+            durationSeconds: 1800,
+            eventType: "timer_start",
+            reviewStatus: "confirmed",
+            source: "manual_app",
+            startedAt: "2026-07-14T09:00:00.000Z",
+            stoppedAt: "2026-07-14T09:30:00.000Z"
+          },
+          {
+            id: "manual-2",
+            categoryId: "coding",
+            description: "Implementation",
+            durationSeconds: 1800,
+            eventType: "timer_start",
+            reviewStatus: "confirmed",
+            source: "mobile_app",
+            startedAt: "2026-07-13T09:00:00.000Z",
+            stoppedAt: "2026-07-13T09:30:00.000Z"
+          }
+        ]
+      };
+    });
+
+    await expect(getCategoryUsageRanks(session)).resolves.toEqual([
+      expect.objectContaining({
+        categoryId: "coding",
+        useCount: 2
       })
     ]);
   });

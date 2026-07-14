@@ -93,9 +93,11 @@ export function ActiveTimerEditSheet({
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [pickerStartAt, setPickerStartAt] = useState<Date | null>(null);
   const [suggestionsVisible, setSuggestionsVisible] = useState(false);
+  const [suggestionsMounted, setSuggestionsMounted] = useState(false);
   const reduceMotion = useReduceMotionPreference();
   const dismissDragY = useRef(new Animated.Value(0)).current;
   const keyboardLift = useRef(new Animated.Value(0)).current;
+  const suggestionsProgress = useRef(new Animated.Value(0)).current;
   const descriptionInputRef = useRef<TextInput>(null);
   const timeInputRef = useRef<TextInput>(null);
   const suggestionsPanelRef = useRef<View>(null);
@@ -153,6 +155,8 @@ export function ActiveTimerEditSheet({
       setKeyboardInset(0);
       dismissDragY.setValue(0);
       keyboardLift.setValue(0);
+      suggestionsProgress.setValue(0);
+      setSuggestionsMounted(false);
       return undefined;
     }
 
@@ -206,7 +210,27 @@ export function ActiveTimerEditSheet({
       changeSubscription.remove();
       hideSubscription.remove();
     };
-  }, [dismissDragY, insets.bottom, insets.top, keyboardLift, reduceMotion, visible, windowDimensions.height]);
+  }, [dismissDragY, insets.bottom, insets.top, keyboardLift, reduceMotion, suggestionsProgress, visible, windowDimensions.height]);
+
+  useEffect(() => {
+    if (suggestionsVisible) setSuggestionsMounted(true);
+    if (reduceMotion) {
+      suggestionsProgress.setValue(suggestionsVisible ? 1 : 0);
+      if (!suggestionsVisible) setSuggestionsMounted(false);
+      return undefined;
+    }
+
+    const animation = Animated.timing(suggestionsProgress, {
+      toValue: suggestionsVisible ? 1 : 0,
+      duration: suggestionsVisible ? 160 : 180,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false
+    });
+    animation.start(({ finished }) => {
+      if (finished && !suggestionsVisible) setSuggestionsMounted(false);
+    });
+    return () => animation.stop();
+  }, [reduceMotion, suggestionsProgress, suggestionsVisible]);
 
   const parsedStart = useMemo(
     () => parseLocalDateTime(dateText, timeText),
@@ -302,6 +326,21 @@ export function ActiveTimerEditSheet({
       }).start();
     }
   }), [busy, dismissDragY, onCancel, reduceMotion, windowDimensions.height]);
+  const suggestionsAnimatedStyle = {
+    maxHeight: suggestionsProgress.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0, 280]
+    }),
+    opacity: suggestionsProgress,
+    transform: [
+      {
+        translateY: suggestionsProgress.interpolate({
+          inputRange: [0, 1],
+          outputRange: [-6, 0]
+        })
+      }
+    ]
+  };
 
   if (!entry && !isStartMode) return null;
 
@@ -449,9 +488,13 @@ export function ActiveTimerEditSheet({
     setValidationError(null);
   }
 
+  function hideSuggestionsForManualEdit() {
+    setSuggestionsVisible(false);
+  }
+
   function focusDescriptionField() {
     setDatePickerOpen(false);
-    setSuggestionsVisible(false);
+    hideSuggestionsForManualEdit();
   }
 
   function updateStoppedDateText(value: string) {
@@ -466,6 +509,7 @@ export function ActiveTimerEditSheet({
 
   function openStartPicker() {
     Keyboard.dismiss();
+    hideSuggestionsForManualEdit();
     const currentStart = parsedStart.date ?? fallbackStartAt();
     setPickerStartAt(currentStart);
     setDatePickerOpen(true);
@@ -542,11 +586,12 @@ export function ActiveTimerEditSheet({
           style={styles.sheetBackdrop}
         />
         <View pointerEvents="box-none" style={styles.sheetKeyboardAvoidingView}>
-          <SafeAreaView edges={["bottom"]} pointerEvents="box-none" style={styles.sheetSafeArea}>
+          <SafeAreaView edges={[]} pointerEvents="box-none" style={styles.sheetSafeArea}>
             <Animated.View
               style={[
                 styles.activeEditSheet,
                 keyboardAwareSheetStyle,
+                { paddingBottom: Math.max(10, Math.min(16, insets.bottom)) },
                 { transform: [{ translateY: sheetTranslateY }] }
               ]}
             >
@@ -640,11 +685,11 @@ export function ActiveTimerEditSheet({
                   ) : null}
                 </View>
 
-                {suggestionsVisible ? (
-                  <View
+                {suggestionsMounted ? (
+                  <Animated.View
                     ref={suggestionsPanelRef}
                     accessibilityLabel="Suggestions for this running timer"
-                    style={styles.taskSuggestionsPanel}
+                    style={[styles.taskSuggestionsPanel, suggestionsAnimatedStyle]}
                   >
                     <Text style={styles.taskSuggestionsTitle}>SUGGESTIONS</Text>
                     <View style={styles.taskSuggestionsList}>
@@ -662,7 +707,7 @@ export function ActiveTimerEditSheet({
                         />
                       ))}
                     </View>
-                  </View>
+                  </Animated.View>
                 ) : null}
 
                 <View style={styles.activeEditSection}>
@@ -700,7 +745,10 @@ export function ActiveTimerEditSheet({
                       selected={selectedCategoryId === null}
                       styles={styles}
                       theme={theme}
-                      onPress={() => setSelectedCategoryId(null)}
+                      onPress={() => {
+                        hideSuggestionsForManualEdit();
+                        setSelectedCategoryId(null);
+                      }}
                     />
                     {categories.map((category) => (
                       <CategoryChip
@@ -709,7 +757,10 @@ export function ActiveTimerEditSheet({
                         selected={selectedCategoryId === category.id}
                         styles={styles}
                         theme={theme}
-                        onPress={() => setSelectedCategoryId(category.id)}
+                        onPress={() => {
+                          hideSuggestionsForManualEdit();
+                          setSelectedCategoryId(category.id);
+                        }}
                       />
                     ))}
                   </ScrollView>
@@ -737,7 +788,10 @@ export function ActiveTimerEditSheet({
                       keyboardType={Platform.OS === "ios" ? "numbers-and-punctuation" : "numeric"}
                       maxLength={5}
                       onChangeText={updateTimeText}
-                      onFocus={() => setDatePickerOpen(false)}
+                      onFocus={() => {
+                        setDatePickerOpen(false);
+                        hideSuggestionsForManualEdit();
+                      }}
                       onPressIn={() => {
                         if (!busy) timeInputRef.current?.focus();
                       }}
