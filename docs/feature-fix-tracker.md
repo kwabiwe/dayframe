@@ -1,12 +1,12 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-14 07:45 BST
+Last verified: 2026-07-14 09:38 BST
 
 ## Verification Snapshot
 
-- Local repo: `main` includes PR #59 `Improve learned place intelligence`; there are no open PRs.
-- GitHub: PR #59 is merged as `b0904c0`.
-- Latest verified TestFlight build: `0.1.0 (34)`.
+- Local repo: `main` includes PR #60 `Polish mobile UI consistency`; there are no open PRs.
+- GitHub: PR #60 is merged as `58e910f`.
+- Latest verified TestFlight build: `0.1.0 (35)`.
 - Web app parity audit completed for recent mobile-heavy PRs #32-#57; suitable web follow-ups are tracked below and mirrored to Trello with the `Web App` label. Native-only work such as App Intents, Live Activities, background HealthKit observers, iOS Settings navigation, and keyboard/safe-area fixes is intentionally excluded from the web backlog.
 - Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, Vercel production deployment, production Supabase schema, local archive/export/upload logs, and App Store Connect build state.
 
@@ -24,6 +24,7 @@ Last verified: 2026-07-14 07:45 BST
 
 | Item | Status | Evidence | Next action |
 | --- | --- | --- | --- |
+| Mobile UI consistency polish | Watch | PR #60 merged as `58e910f`; build `0.1.0 (35)`, delivery/build ID `9a6d7561-27cd-482c-bb85-fb94ad75ca47`; App Store Connect `VALID`, export compliance false, `Internal Health Debug`, and `IN_BETA_TESTING`. Vercel alias `https://dayframe-web.vercel.app` remains Ready at `https://dayframe-b8fyfbutk-dayframeworkshop.vercel.app`; PR #60 is mobile-only, so web/API behaviour was not functionally changed by this release. | On a physical iPhone, verify Settings/Places/Review headers stay visible while scrolling, all Settings sub-settings retain usable back/title controls, button text is vertically centred, Learned Places `Save` is a rounded rectangle rather than an oval, selected category chips invert to white fill with category-coloured text/border/dot, play/stop inner glyphs are slightly larger without changing button size, and Calendar entry titles feel lighter. |
 | Learned-place evidence classification and readable details | Watch | PR #59 merged as `b0904c0`; migration `202607140001_location_learning_intelligence.sql` applied by KB before release; build `0.1.0 (34)`, delivery/build ID `b06d7137-2205-4120-9840-644e2ba51bcb`; App Store Connect `VALID`, export compliance false, `Internal Health Debug`, and `IN_BETA_TESTING`. Vercel production is Ready at `https://dayframe-8872s0wlu-dayframeworkshop.vercel.app` and aliased to `https://dayframe-web.vercel.app`. | On a physical iPhone, verify weak one-visit clusters stay hidden, a single 60+ minute stable stay appears only in Review, repeat visits can become a Place suggestion, legacy coordinate names resolve, and address copy pastes cleanly into Maps. |
 | Location trust and commute candidate correctness | Watch | PR #58 merged as `46e4217`; build `0.1.0 (33)`, delivery/build ID `c0304b80-293c-42aa-9873-79ccc05acb8b`; App Store Connect `VALID`, export compliance false, `Internal Health Debug`, and `IN_BETA_TESTING`. Vercel production is Ready at `https://dayframe-mpbgzyaig-dayframeworkshop.vercel.app` and aliased to `https://dayframe-web.vercel.app`. | On device, verify Home GPS drift within roughly 20m does not create an unknown learned place, one-off visits do not surface as learned places, clean saved-place commutes auto-log category-only `Commute`, uncertain commutes appear as dotted Calendar review candidates, ignored learned places do not return, and reports count confirmed entries only. |
 | Today/Review/Places location polish | Watch | PR #57 merged as `8095bde`; build `0.1.0 (32)`, delivery/build ID `c6298983-04bb-439c-b36f-14e2c09a9d8a`; App Store Connect `VALID`, export compliance false, `Internal Health Debug`, and `IN_BETA_TESTING`. Vercel production is Ready at `https://dayframe-h22k3bwge-dayframeworkshop.vercel.app` and aliased to `https://dayframe-web.vercel.app`. | On a physical iPhone, verify hatched `Uncategorized`, tappable Today Review notice, readable learned-place names, learned-place detail actions, detected-visit Review copy, `Places & Location` settings rename, and Shortcuts/NFC panel removal. |
@@ -47,6 +48,7 @@ Last verified: 2026-07-14 07:45 BST
 
 | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- |
+| Mobile UI consistency polish | Watch | PR #60, build `0.1.0 (35)`, delivery/build ID `9a6d7561-27cd-482c-bb85-fb94ad75ca47`. | Keeps Settings/Places/Review back/title headers fixed above scrolling content, tightens shared mobile button centering and line heights, changes Learned Places `Save` from oval to rounded rectangle, makes category chips thinner with selected colour inversion, slightly enlarges play/stop glyphs without resizing buttons, and reduces Calendar entry title weight. |
 | Learned-place evidence classification and readable details | Watch | PR #59, build `0.1.0 (34)`, delivery/build ID `b06d7137-2205-4120-9840-644e2ba51bcb`; production migration `202607140001_location_learning_intelligence.sql` applied by KB before release. | Server-enforced classification hides weak/pass-through clusters, routes long single stays to one-off Review items, requires repeat evidence before saveable Places, keeps learned-place evidence monotonic, caches/backfills readable POI/address data, and makes address/coordinates copyable from the mobile detail sheet. |
 | Location trust and commute candidate correctness | Watch | PR #58, build `0.1.0 (33)`, delivery/build ID `c0304b80-293c-42aa-9873-79ccc05acb8b`. | Adds accuracy-aware saved-place snapping for GPS drift, repeat-visit/distinct-day thresholds before learned places surface, ignored learned-place cluster suppression, saved-place-to-saved-place category-only commute auto-log, uncertain commute Review/calendar previews, and Calendar filtering so learned-place visits do not appear as activity blocks. |
 | Today/Review/Places location polish | Watch | PR #57, build `0.1.0 (32)`, delivery/build ID `c6298983-04bb-439c-b36f-14e2c09a9d8a`. | Gives `Uncategorized` a neutral hatched treatment, makes the Today review notice tappable, resolves learned/detected-place names through venue/address/locality/postcode before coordinates, adds learned-place details with Save/Edit/Ignore/Forget, clarifies detected-visit Review copy, renames settings to `Places & Location`, and removes the Shortcuts/NFC panel from that screen. |
@@ -88,7 +90,7 @@ Last verified: 2026-07-14 07:45 BST
 | Sleep stages fragmented into REM/Core/Deep cards | Watch | PRs #23, #26, and #29. | Current imports group sessions; legacy sleep-stage backlog cleanup is merged. |
 | Health items left in Review without useful explanation | Watch | PRs #22, #25, #26, #27, and #29. | Diagnostics and left-in-review reasons exist; continue checking that reasons are clear on device. |
 | Geo/place default description mismatch | Done | PR #19 and PR #26. | Place names should remain reference/context; configured activity descriptions are used for geofence display and Confirm. |
-| TestFlight release preflight and compliance checks | Done | PR #31 plus build release runs through `0.1.0 (34)`. | Keep verifying processing state, encryption compliance, notes, and internal testing assignment before asking KB to test. Docs-only PRs do not need a TestFlight build unless they change release/build configuration. Build 31 fixed the app `Info.plist` to use `$(CURRENT_PROJECT_VERSION)` so the app and Live Activity extension build numbers match during archive/export, and builds 32-34 verified that path again. |
+| TestFlight release preflight and compliance checks | Done | PR #31 plus build release runs through `0.1.0 (35)`. | Keep verifying processing state, encryption compliance, notes, and internal testing assignment before asking KB to test. Docs-only PRs do not need a TestFlight build unless they change release/build configuration. Build 31 fixed the app `Info.plist` to use `$(CURRENT_PROJECT_VERSION)` so the app and Live Activity extension build numbers match during archive/export, and builds 32-35 verified that path again. |
 
 ## Future Tracks
 
