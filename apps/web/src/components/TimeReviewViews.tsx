@@ -31,7 +31,7 @@ import {
 
 type TimeView = "calendar" | "list" | "timesheet";
 type CalendarMode = "week" | "day";
-type CalendarHoursMode = "awake" | "fullDay";
+type CalendarHoursMode = "fullDay";
 
 const viewItems: Array<{ id: TimeView; label: string; icon: ReactNode }> = [
   { id: "calendar", label: "Calendar", icon: <CalendarDays size={16} /> },
@@ -40,7 +40,6 @@ const viewItems: Array<{ id: TimeView; label: string; icon: ReactNode }> = [
 ];
 
 const calendarHourModes: Record<CalendarHoursMode, { label: string; startHour: number; endHour: number }> = {
-  awake: { label: "Awake", startHour: 6, endHour: 22 },
   fullDay: { label: "24h", startHour: 0, endHour: 24 }
 };
 const calendarSnapMinutes = 15;
@@ -68,10 +67,6 @@ function isTimeView(value: string | null): value is TimeView {
 
 function isCalendarMode(value: string | null): value is CalendarMode {
   return value === "week" || value === "day";
-}
-
-function isCalendarHoursMode(value: string | null): value is CalendarHoursMode {
-  return value === "awake" || value === "fullDay";
 }
 
 function readTimelinePreference(key: string) {
@@ -117,19 +112,15 @@ export function TimeReviewViews({
   const [data, setData] = useState(initialData);
   const [activeViewOverride, setActiveViewOverride] = useState<TimeView | null>(null);
   const [calendarModeOverride, setCalendarModeOverride] = useState<CalendarMode | null>(null);
-  const [calendarHoursModeOverride, setCalendarHoursModeOverride] = useState<CalendarHoursMode | null>(null);
   const [weekAnchor, setWeekAnchor] = useState(() => startOfWeek(new Date(initialData.dateRange.selectedDate)));
   const timelineViewStorageKey = `dayframe.timeline.${data.workspace.id}.view`;
   const calendarModeStorageKey = `dayframe.timeline.${data.workspace.id}.calendarMode`;
-  const calendarHoursStorageKey = `dayframe.timeline.${data.workspace.id}.hours`;
   const storedView = useTimelinePreference(timelineViewStorageKey);
   const storedCalendarMode = useTimelinePreference(calendarModeStorageKey);
-  const storedCalendarHours = useTimelinePreference(calendarHoursStorageKey);
   const activeView = activeViewOverride ?? (isTimeView(storedView) ? storedView : "calendar");
   const calendarMode =
     calendarModeOverride ?? (isCalendarMode(storedCalendarMode) ? storedCalendarMode : "week");
-  const calendarHoursMode =
-    calendarHoursModeOverride ?? (isCalendarHoursMode(storedCalendarHours) ? storedCalendarHours : "awake");
+  const calendarHoursMode: CalendarHoursMode = "fullDay";
 
   const refreshData = useCallback(async () => {
     try {
@@ -158,11 +149,6 @@ export function TimeReviewViews({
   function updateCalendarMode(mode: CalendarMode) {
     setCalendarModeOverride(mode);
     writeTimelinePreference(calendarModeStorageKey, mode);
-  }
-
-  function updateCalendarHoursMode(mode: CalendarHoursMode) {
-    setCalendarHoursModeOverride(mode);
-    writeTimelinePreference(calendarHoursStorageKey, mode);
   }
 
   const weekDays = useMemo(() => getWeekDays(weekAnchor), [weekAnchor]);
@@ -240,7 +226,6 @@ export function TimeReviewViews({
           entries={weekEntries}
           onSynced={refreshData}
           places={data.places}
-          setCalendarHoursMode={updateCalendarHoursMode}
           setCalendarMode={updateCalendarMode}
           weekDays={weekDays}
         />
@@ -266,7 +251,6 @@ function CalendarReview({
   entries,
   onSynced,
   places,
-  setCalendarHoursMode,
   setCalendarMode,
   weekDays
 }: {
@@ -276,7 +260,6 @@ function CalendarReview({
   entries: TimeEntryRow[];
   onSynced: () => Promise<void>;
   places: PlaceRow[];
-  setCalendarHoursMode: (mode: CalendarHoursMode) => void;
   setCalendarMode: (mode: CalendarMode) => void;
   weekDays: Date[];
 }) {
@@ -475,19 +458,6 @@ function CalendarReview({
             >
               +
             </button>
-          </span>
-          <span className="swiss-view-switch" role="group" aria-label="Calendar hours">
-            {(["awake", "fullDay"] as CalendarHoursMode[]).map((mode) => (
-              <button
-                key={mode}
-                className={calendarHoursMode === mode ? "is-selected" : ""}
-                type="button"
-                aria-pressed={calendarHoursMode === mode}
-                onClick={() => setCalendarHoursMode(mode)}
-              >
-                {calendarHourModes[mode].label}
-              </button>
-            ))}
           </span>
         </div>
       </div>

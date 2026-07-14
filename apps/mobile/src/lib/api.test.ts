@@ -821,7 +821,8 @@ describe("mobile API client", () => {
             priority: 5,
             categoryId: "20000000-0000-4000-8000-000000000001",
             defaultActivityDescription: "School drop-off/pickup",
-            autoStart: false
+            autoStart: false,
+            loggingEnabled: true
           }
         })
       })
@@ -874,6 +875,7 @@ describe("mobile API client", () => {
           defaultCategoryId: null,
           defaultActivityDescription: null,
           autoStart: false,
+          loggingEnabled: true,
           learnedPlaceId: "40000000-0000-4000-8000-000000000001"
         })
       })

@@ -1260,7 +1260,8 @@ function createStyles(theme: MobileTheme) {
     },
     categoryChoiceSelected: {
       borderColor: theme.accent,
-      backgroundColor: theme.accentSoft
+      borderWidth: 1.5,
+      backgroundColor: theme.surfaceMuted
     },
     categoryChoiceText: {
       color: theme.textPrimary,
@@ -1633,6 +1634,7 @@ function createStyles(theme: MobileTheme) {
     },
     activeEditCategoryChipSelected: {
       borderColor: theme.accent,
+      borderWidth: 1.5,
       backgroundColor: theme.surfaceMuted
     },
     activeEditCategoryChipText: {

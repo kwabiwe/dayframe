@@ -571,7 +571,8 @@ describe("place persistence", () => {
         5,
         categoryId(),
         "Workout",
-        false
+        false,
+        true
       ]
     );
   });
@@ -750,7 +751,9 @@ describe("place persistence", () => {
         true,
         null,
         false,
-        false
+        false,
+        false,
+        true
       ]
     );
   });

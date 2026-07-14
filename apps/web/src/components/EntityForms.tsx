@@ -11,7 +11,7 @@ import {
   type AutomationRuleDraft,
   type AutomationRuleDraftSavePlan
 } from "@dayframe/shared";
-import { AlertTriangle, CheckCircle2, Pencil, Plus, Save, WandSparkles } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Copy, MapPin, Pencil, Plus, Save, Trash2, WandSparkles } from "lucide-react";
 import type {
   AutomationRuleRow,
   CategoryRow,
@@ -81,7 +81,9 @@ function PlacesManager({
   const [isPending, startTransition] = useTransition();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [promoting, setPromoting] = useState<LearnedPlaceRow | null>(null);
+  const [selectedLearnedPlace, setSelectedLearnedPlace] = useState<LearnedPlaceRow | null>(null);
   const [ignoringId, setIgnoringId] = useState<string | null>(null);
+  const [forgettingId, setForgettingId] = useState<string | null>(null);
 
   function refresh() {
     startTransition(() => router.refresh());
@@ -96,13 +98,26 @@ function PlacesManager({
         body: JSON.stringify({ id: learnedPlace.id, status: "ignored" })
       });
       if (promoting?.id === learnedPlace.id) setPromoting(null);
+      if (selectedLearnedPlace?.id === learnedPlace.id) setSelectedLearnedPlace(null);
       refresh();
     } finally {
       setIgnoringId(null);
     }
   }
 
-  async function updatePlace(place: PlaceRow, formData: FormData) {
+  async function forgetLearnedPlace(learnedPlace: LearnedPlaceRow) {
+    setForgettingId(learnedPlace.id);
+    try {
+      await fetch(`/api/learned-places?id=${encodeURIComponent(learnedPlace.id)}`, { method: "DELETE" });
+      if (promoting?.id === learnedPlace.id) setPromoting(null);
+      if (selectedLearnedPlace?.id === learnedPlace.id) setSelectedLearnedPlace(null);
+      refresh();
+    } finally {
+      setForgettingId(null);
+    }
+  }
+
+  async function updatePlace(place: PlaceRow, formData: FormData, loggingEnabled: boolean) {
     await fetch("/api/places", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -113,8 +128,9 @@ function PlacesManager({
         longitude: formNullableNumber(formData.get("longitude")),
         radiusMeters: formNumber(formData.get("radiusMeters")),
         priority: formNumber(formData.get("priority")),
-        defaultCategoryId: formOptionalString(formData.get("defaultCategoryId")),
-        defaultActivityDescription: formOptionalString(formData.get("defaultActivityDescription")),
+        loggingEnabled,
+        defaultCategoryId: loggingEnabled ? formOptionalString(formData.get("defaultCategoryId")) : null,
+        defaultActivityDescription: loggingEnabled ? formOptionalString(formData.get("defaultActivityDescription")) : null,
         autoStart: false
       })
     });
@@ -131,52 +147,14 @@ function PlacesManager({
         <div className="divide-y divide-[var(--line)]">
           {places.map((place) =>
             editingId === place.id ? (
-              <form
+              <PlaceEditForm
                 key={place.id}
-                action={(formData) => updatePlace(place, formData)}
-                className="grid gap-3 px-4 py-4 lg:grid-cols-2"
-              >
-                <TextInput name="name" label="Name" defaultValue={place.name} required />
-                <TextInput
-                  name="defaultActivityDescription"
-                  label="Default activity description"
-                  defaultValue={place.defaultActivityDescription ?? ""}
-                  placeholder="School drop-off/pickup"
-                />
-                <NumberInput
-                  name="latitude"
-                  label="Latitude"
-                  defaultValue={formatOptionalNumber(place.latitude)}
-                  step="0.000001"
-                />
-                <NumberInput
-                  name="longitude"
-                  label="Longitude"
-                  defaultValue={formatOptionalNumber(place.longitude)}
-                  step="0.000001"
-                />
-                <NumberInput name="radiusMeters" label="Radius" defaultValue={String(place.radiusMeters)} />
-                <NumberInput name="priority" label="Priority" defaultValue={String(place.priority)} />
-                <SelectInput
-                  name="defaultCategoryId"
-                  label="Default category"
-                  options={categories}
-                  defaultValue={place.defaultCategoryId ?? ""}
-                />
-                <div className="flex items-end gap-2">
-                  <button className="industrial-button-primary focus-ring text-sm" disabled={isPending}>
-                    <Save size={15} />
-                    Save
-                  </button>
-                  <button
-                    type="button"
-                    className="industrial-button focus-ring text-sm"
-                    onClick={() => setEditingId(null)}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </form>
+                categories={categories}
+                isPending={isPending}
+                onCancel={() => setEditingId(null)}
+                onUpdate={updatePlace}
+                place={place}
+              />
             ) : (
               <div
                 key={place.id}
@@ -184,12 +162,17 @@ function PlacesManager({
               >
                 <div className="min-w-0">
                   <h3 className="truncate text-sm font-semibold">{place.name}</h3>
+                  {place.loggingEnabled === false ? (
+                    <p className="mt-1 text-xs font-semibold text-[var(--accent-text)]">Visit logging off</p>
+                  ) : (
+                    <p className="mt-1 text-xs text-[var(--muted)]">
+                      {place.defaultActivityDescription ?? "No default activity description"}
+                    </p>
+                  )}
                   <p className="mt-1 text-xs text-[var(--muted)]">
-                    {place.defaultActivityDescription ?? "No default activity description"}
-                  </p>
-                  <p className="mt-1 text-xs text-[var(--muted)]">
-                    {place.defaultCategoryName ?? "No default category"} · {place.radiusMeters}m radius ·
-                    Priority {place.priority}
+                    {place.loggingEnabled === false
+                      ? `${place.radiusMeters}m radius · Priority ${place.priority}`
+                      : `${place.defaultCategoryName ?? "No default category"} · ${place.radiusMeters}m radius · Priority ${place.priority}`}
                   </p>
                 </div>
                 <button
@@ -217,6 +200,8 @@ function PlacesManager({
               key={learnedPlace.id}
               learnedPlace={learnedPlace}
               ignoring={ignoringId === learnedPlace.id}
+              selected={selectedLearnedPlace?.id === learnedPlace.id}
+              onOpen={() => setSelectedLearnedPlace(learnedPlace)}
               onPromote={() => setPromoting(learnedPlace)}
               onIgnore={() => void ignoreLearnedPlace(learnedPlace)}
             />
@@ -225,9 +210,84 @@ function PlacesManager({
             <p className="px-4 py-5 text-sm text-[var(--muted)]">No learned candidates yet.</p>
           ) : null}
         </div>
+        {selectedLearnedPlace ? (
+          <LearnedPlaceDetail
+            forgetting={forgettingId === selectedLearnedPlace.id}
+            ignoring={ignoringId === selectedLearnedPlace.id}
+            learnedPlace={selectedLearnedPlace}
+            onForget={() => void forgetLearnedPlace(selectedLearnedPlace)}
+            onIgnore={() => void ignoreLearnedPlace(selectedLearnedPlace)}
+            onPromote={() => setPromoting(selectedLearnedPlace)}
+          />
+        ) : null}
       </section>
       <CreatePlaceForm categories={categories} learnedPlace={promoting} onCreated={() => setPromoting(null)} />
     </div>
+  );
+}
+
+function PlaceEditForm({
+  categories,
+  isPending,
+  onCancel,
+  onUpdate,
+  place
+}: {
+  categories: CategoryRow[];
+  isPending: boolean;
+  onCancel: () => void;
+  onUpdate: (place: PlaceRow, formData: FormData, loggingEnabled: boolean) => Promise<void>;
+  place: PlaceRow;
+}) {
+  const [loggingEnabled, setLoggingEnabled] = useState(place.loggingEnabled !== false);
+
+  return (
+    <form
+      action={(formData) => onUpdate(place, formData, loggingEnabled)}
+      className="grid gap-3 px-4 py-4 lg:grid-cols-2"
+    >
+      <TextInput name="name" label="Name" defaultValue={place.name} required />
+      <NumberInput
+        name="latitude"
+        label="Latitude"
+        defaultValue={formatOptionalNumber(place.latitude)}
+        step="0.000001"
+      />
+      <NumberInput
+        name="longitude"
+        label="Longitude"
+        defaultValue={formatOptionalNumber(place.longitude)}
+        step="0.000001"
+      />
+      <NumberInput name="radiusMeters" label="Radius" defaultValue={String(place.radiusMeters)} />
+      <NumberInput name="priority" label="Priority" defaultValue={String(place.priority)} />
+      <PlaceLoggingToggle loggingEnabled={loggingEnabled} onChange={setLoggingEnabled} />
+      {loggingEnabled ? (
+        <>
+          <SelectInput
+            name="defaultCategoryId"
+            label="Default category"
+            options={categories}
+            defaultValue={place.defaultCategoryId ?? ""}
+          />
+          <TextInput
+            name="defaultActivityDescription"
+            label="Default activity description"
+            defaultValue={place.defaultActivityDescription ?? ""}
+            placeholder="School drop-off/pickup"
+          />
+        </>
+      ) : null}
+      <div className="flex items-end gap-2">
+        <button className="industrial-button-primary focus-ring text-sm" disabled={isPending}>
+          <Save size={15} />
+          Save
+        </button>
+        <button type="button" className="industrial-button focus-ring text-sm" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -256,21 +316,29 @@ function EntityList({ title, rows }: { title: string; rows: EntityListRow[] }) {
 function LearnedPlaceCandidate({
   learnedPlace,
   ignoring,
+  selected,
+  onOpen,
   onPromote,
   onIgnore
 }: {
   learnedPlace: LearnedPlaceRow;
   ignoring: boolean;
+  selected: boolean;
+  onOpen: () => void;
   onPromote: () => void;
   onIgnore: () => void;
 }) {
   return (
-    <div className="motion-row flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between">
-      <div className="min-w-0">
+    <div className={["motion-row flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between", selected ? "bg-[var(--surface-muted)]" : ""].join(" ")}>
+      <button type="button" className="min-w-0 text-left" onClick={onOpen}>
         <h3 className="truncate text-sm font-semibold">{learnedPlace.name}</h3>
         <p className="mt-1 text-xs text-[var(--muted)]">{formatLearnedPlaceMeta(learnedPlace)}</p>
-      </div>
+      </button>
       <div className="flex flex-wrap gap-2">
+        <button type="button" className="industrial-button focus-ring text-sm" onClick={onOpen}>
+          <MapPin size={15} />
+          Details
+        </button>
         <button type="button" className="industrial-button-primary focus-ring text-sm" onClick={onPromote}>
           <Plus size={15} />
           Save as place
@@ -288,6 +356,112 @@ function LearnedPlaceCandidate({
   );
 }
 
+function LearnedPlaceDetail({
+  forgetting,
+  ignoring,
+  learnedPlace,
+  onForget,
+  onIgnore,
+  onPromote
+}: {
+  forgetting: boolean;
+  ignoring: boolean;
+  learnedPlace: LearnedPlaceRow;
+  onForget: () => void;
+  onIgnore: () => void;
+  onPromote: () => void;
+}) {
+  const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
+  const address = learnedPlaceAddress(learnedPlace);
+  const coordinates = learnedPlaceCoordinates(learnedPlace);
+
+  async function copyValue(label: string, value: string | null) {
+    if (!value) return;
+    await navigator.clipboard?.writeText(value);
+    setCopiedLabel(label);
+    window.setTimeout(() => setCopiedLabel((current) => current === label ? null : current), 1600);
+  }
+
+  return (
+    <div className="border-t border-[var(--line)] bg-[var(--surface-muted)] px-4 py-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold">Learned place detail</h3>
+          <p className="mt-1 text-xs text-[var(--muted)]">Review evidence before saving this as a place.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="industrial-button-primary focus-ring text-sm" onClick={onPromote}>
+            <Plus size={15} />
+            Save
+          </button>
+          <button
+            type="button"
+            className="industrial-button focus-ring text-sm disabled:opacity-50"
+            disabled={ignoring}
+            onClick={onIgnore}
+          >
+            Ignore
+          </button>
+          <button
+            type="button"
+            className="industrial-button-danger focus-ring text-sm disabled:opacity-50"
+            disabled={forgetting}
+            onClick={onForget}
+          >
+            <Trash2 size={15} />
+            Forget
+          </button>
+        </div>
+      </div>
+      <dl className="mt-4 grid gap-3 text-sm md:grid-cols-2">
+        <LearnedPlaceDetailRow label="Resolved name / POI" value={learnedPlace.poiName ?? learnedPlace.name} />
+        <LearnedPlaceDetailRow
+          copyLabel={copiedLabel}
+          label="Address"
+          onCopy={() => copyValue("Address", address)}
+          value={address ?? "Address not resolved yet"}
+        />
+        <LearnedPlaceDetailRow
+          copyLabel={copiedLabel}
+          label="Coordinates"
+          onCopy={() => copyValue("Coordinates", coordinates)}
+          value={coordinates}
+        />
+        <LearnedPlaceDetailRow label="Evidence" value={formatLearnedPlaceMeta(learnedPlace)} />
+        <LearnedPlaceDetailRow label="Dwell" value={formatLearnedPlaceDwell(learnedPlace)} />
+        <LearnedPlaceDetailRow label="Status" value="Place suggestion · Not saved" />
+      </dl>
+    </div>
+  );
+}
+
+function LearnedPlaceDetailRow({
+  copyLabel,
+  label,
+  onCopy,
+  value
+}: {
+  copyLabel?: string | null;
+  label: string;
+  onCopy?: () => void;
+  value: string;
+}) {
+  return (
+    <div className="rounded-lg border border-[var(--line)] bg-[var(--surface-strong)] px-3 py-3">
+      <dt className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">{label}</dt>
+      <dd className="mt-1 flex items-start justify-between gap-2 text-sm text-[var(--foreground)]">
+        <span className="min-w-0 break-words">{value}</span>
+        {onCopy ? (
+          <button type="button" className="industrial-button focus-ring shrink-0 text-xs" onClick={onCopy}>
+            <Copy size={13} />
+            {copyLabel === label ? "Copied" : "Copy"}
+          </button>
+        ) : null}
+      </dd>
+    </div>
+  );
+}
+
 function CreatePlaceForm({
   categories,
   learnedPlace,
@@ -299,6 +473,7 @@ function CreatePlaceForm({
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [loggingEnabled, setLoggingEnabled] = useState(true);
 
   async function submit(formData: FormData) {
     await fetch("/api/places", {
@@ -311,11 +486,13 @@ function CreatePlaceForm({
         longitude: formNullableNumber(formData.get("longitude")),
         radiusMeters: formNumber(formData.get("radiusMeters")),
         priority: formNumber(formData.get("priority")),
-        defaultCategoryId: formOptionalString(formData.get("categoryId")),
-        defaultActivityDescription: formOptionalString(formData.get("defaultActivityDescription")),
+        loggingEnabled,
+        defaultCategoryId: loggingEnabled ? formOptionalString(formData.get("categoryId")) : null,
+        defaultActivityDescription: loggingEnabled ? formOptionalString(formData.get("defaultActivityDescription")) : null,
         autoStart: false
       })
     });
+    setLoggingEnabled(true);
     onCreated?.();
     startTransition(() => router.refresh());
   }
@@ -342,12 +519,17 @@ function CreatePlaceForm({
         <NumberInput name="radiusMeters" label="Radius" defaultValue={String(learnedPlace?.radiusMeters ?? 100)} />
         <NumberInput name="priority" label="Priority" defaultValue="5" />
       </div>
-      <SelectInput name="categoryId" label="Default category" options={categories} />
-      <TextInput
-        name="defaultActivityDescription"
-        label="Default activity description"
-        placeholder="School drop-off/pickup"
-      />
+      <PlaceLoggingToggle loggingEnabled={loggingEnabled} onChange={setLoggingEnabled} />
+      {loggingEnabled ? (
+        <>
+          <SelectInput name="categoryId" label="Default category" options={categories} />
+          <TextInput
+            name="defaultActivityDescription"
+            label="Default activity description"
+            placeholder="School drop-off/pickup"
+          />
+        </>
+      ) : null}
       <button
         className="industrial-button-primary focus-ring w-full text-sm disabled:opacity-50"
         type="submit"
@@ -357,6 +539,34 @@ function CreatePlaceForm({
         Create
       </button>
     </form>
+  );
+}
+
+function PlaceLoggingToggle({
+  loggingEnabled,
+  onChange
+}: {
+  loggingEnabled: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <label className="flex items-start justify-between gap-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-3 text-sm">
+      <span className="min-w-0">
+        <span className="block font-semibold">Log visits</span>
+        <span className="mt-1 block text-xs leading-5 text-[var(--muted)]">
+          {loggingEnabled
+            ? "Detected visits can become review items."
+            : "Visits here are kept as location evidence only."}
+        </span>
+      </span>
+      <input
+        aria-label="Log visits for this place"
+        checked={loggingEnabled}
+        className="mt-1 h-5 w-5 accent-[var(--accent)]"
+        onChange={(event) => onChange(event.target.checked)}
+        type="checkbox"
+      />
+    </label>
   );
 }
 
@@ -755,6 +965,41 @@ function formatLearnedPlaceMeta(learnedPlace: LearnedPlaceRow) {
   const days = learnedPlace.distinctDayCount === 1 ? "1 day" : `${learnedPlace.distinctDayCount} days`;
   const samples = learnedPlace.sampleCount === 1 ? "1 sample" : `${learnedPlace.sampleCount} samples`;
   return `${visits} across ${days} · ${samples} · Last seen ${formatShortDate(learnedPlace.lastSeenAt)}`;
+}
+
+function learnedPlaceAddress(learnedPlace: LearnedPlaceRow) {
+  if (learnedPlace.formattedAddress) return learnedPlace.formattedAddress;
+  const address = learnedPlace.address ?? {};
+  const parts = [
+    stringRecordValue(address, "name"),
+    [stringRecordValue(address, "streetNumber"), stringRecordValue(address, "street")].filter(Boolean).join(" "),
+    stringRecordValue(address, "district"),
+    stringRecordValue(address, "city"),
+    stringRecordValue(address, "postalCode")
+  ].filter(Boolean);
+  return parts.length ? [...new Set(parts)].join(", ") : null;
+}
+
+function learnedPlaceCoordinates(learnedPlace: LearnedPlaceRow) {
+  return `${learnedPlace.latitude.toFixed(6)}, ${learnedPlace.longitude.toFixed(6)}`;
+}
+
+function formatLearnedPlaceDwell(learnedPlace: LearnedPlaceRow) {
+  return `${formatDwellSeconds(learnedPlace.totalDwellSeconds)} total · ${formatDwellSeconds(learnedPlace.longestDwellSeconds)} longest stay`;
+}
+
+function formatDwellSeconds(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "0m";
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.round((seconds % 3600) / 60);
+  if (hours > 0 && minutes > 0) return `${hours}h ${minutes}m`;
+  if (hours > 0) return `${hours}h`;
+  return `${Math.max(1, minutes)}m`;
+}
+
+function stringRecordValue(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function formatShortDate(value: string) {

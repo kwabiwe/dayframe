@@ -57,6 +57,7 @@ export type PlaceRow = {
   defaultCategoryName: string | null;
   defaultActivityDescription: string | null;
   autoStart: boolean;
+  loggingEnabled: boolean;
 };
 
 export type LearnedPlaceRow = {
@@ -313,10 +314,11 @@ export async function getNormalizationContext(
       name: place.name,
       radiusMeters: place.radiusMeters,
       priority: place.priority,
-            defaultProjectId: place.defaultProjectId,
-            defaultCategoryId: place.defaultCategoryId,
-            defaultActivityDescription: place.defaultActivityDescription,
-            autoStart: place.autoStart
+      defaultProjectId: place.defaultProjectId,
+      defaultCategoryId: place.defaultCategoryId,
+      defaultActivityDescription: place.defaultActivityDescription,
+      autoStart: place.autoStart,
+      loggingEnabled: place.loggingEnabled
     })),
     automationRules: automationRules.map<AutomationRuleSummary>((rule) => ({
       id: rule.id,
@@ -434,7 +436,8 @@ async function getPlaces(session: RequestSession) {
               c.id as "defaultCategoryId",
               c.name as "defaultCategoryName",
               pl.default_activity_description as "defaultActivityDescription",
-              pl.auto_start as "autoStart"
+              pl.auto_start as "autoStart",
+              pl.logging_enabled as "loggingEnabled"
        from places pl
        left join projects p on p.id = pl.default_project_id and p.workspace_id = pl.workspace_id
        left join categories c on c.id = pl.default_category_id and c.workspace_id = pl.workspace_id
@@ -449,6 +452,14 @@ async function getPlaces(session: RequestSession) {
         "places",
         "default_activity_description",
         "supabase/migrations/202607070002_place_default_activity_description.sql",
+        error
+      );
+    }
+    if (isUndefinedColumnError(error, "logging_enabled")) {
+      throw missingRequiredColumnError(
+        "places",
+        "logging_enabled",
+        "supabase/migrations/202607140002_place_logging_enabled.sql",
         error
       );
     }

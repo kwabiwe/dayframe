@@ -584,10 +584,10 @@ export default function HomeScreen() {
     return () => animation.stop();
   }, [timerActionPending, timerProgress]);
 
-  async function startTask(categoryId?: string | null) {
+  async function startTask(categoryId?: string | null, description = customDescription) {
     return startTaskWith({
       categoryId: categoryId ?? null,
-      description: customDescription,
+      description,
       startedAt: null
     });
   }
@@ -1137,17 +1137,17 @@ export default function HomeScreen() {
                     showsHorizontalScrollIndicator={false}
                     contentContainerStyle={styles.compactCategoryScroller}
                   >
-                    {quickActions.map((category) => {
-                      const categoryColor = category.isUncategorized
+                    {quickActions.map((action) => {
+                      const categoryColor = action.isUncategorized
                         ? null
-                        : paletteColorFor(category.color, category.name, theme.mode);
+                        : paletteColorFor(action.color, action.subtitle ?? action.name, theme.mode);
                       return (
                         <Pressable
-                          key={category.id ?? "uncategorized"}
+                          key={action.key}
                           accessibilityRole="button"
-                          accessibilityLabel={`Start ${category.name}`}
+                          accessibilityLabel={`Start ${action.name}`}
                           style={pressable(styles.categoryPillTouch, styles.buttonPressed)}
-                          onPress={() => startTask(category.id)}
+                          onPress={() => startTask(action.id, action.description ?? customDescription)}
                         >
                           <View
                             style={[
@@ -1165,7 +1165,14 @@ export default function HomeScreen() {
                                   : styles.colorDotMuted
                               ]}
                             />
-                            <Text style={styles.categoryPillText}>{category.name}</Text>
+                            <View>
+                              <Text style={styles.categoryPillText} numberOfLines={1}>{action.name}</Text>
+                              {action.subtitle ? (
+                                <Text style={styles.quickCategoryHint} numberOfLines={1}>
+                                  {action.subtitle}
+                                </Text>
+                              ) : null}
+                            </View>
                           </View>
                         </Pressable>
                       );

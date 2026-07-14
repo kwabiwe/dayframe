@@ -1300,7 +1300,7 @@ export default function SettingsScreen() {
                               [
                                 styles.categoryChoice,
                                 !mapping.categoryId ? styles.categoryChoiceSelected : null,
-                                !mapping.categoryId ? { backgroundColor: "#FFFFFF", borderColor: theme.accent } : null
+                                !mapping.categoryId ? { borderColor: theme.accent } : null
                               ],
                               styles.buttonPressed
                             )}
@@ -1314,6 +1314,7 @@ export default function SettingsScreen() {
                             >
                               Default {defaultHealthCategoryLabel(option.key)}
                             </Text>
+                            {!mapping.categoryId ? <CheckGlyph color={theme.accent} /> : null}
                           </Pressable>
                           {(data?.categories ?? []).map((category) => {
                             const selected = mapping.categoryId === category.id;
@@ -1330,7 +1331,7 @@ export default function SettingsScreen() {
                                     styles.categoryChoice,
                                     { borderColor: categoryColor },
                                     selected ? styles.categoryChoiceSelected : null,
-                                    selected ? { backgroundColor: "#FFFFFF", borderColor: categoryColor } : null
+                                    selected ? { borderColor: categoryColor } : null
                                   ],
                                   styles.buttonPressed
                                 )}
@@ -1350,6 +1351,7 @@ export default function SettingsScreen() {
                                 >
                                   {category.name}
                                 </Text>
+                                {selected ? <CheckGlyph color={categoryColor} /> : null}
                               </Pressable>
                             );
                           })}
@@ -1491,6 +1493,14 @@ function SettingsRowGlyph({ color, name }: { color: string; name: SettingsIcon }
         </Svg>
       );
   }
+}
+
+function CheckGlyph({ color }: { color: string }) {
+  return (
+    <Svg width={15} height={15} viewBox="0 0 24 24">
+      <Path d="m5 12 4 4 10-10" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.4} />
+    </Svg>
+  );
 }
 
 function ChevronGlyph({ color }: { color: string }) {
