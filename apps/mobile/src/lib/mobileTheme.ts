@@ -149,6 +149,22 @@ function createStyles(theme: MobileTheme) {
     contentStack: {
       gap: 16
     },
+    settingsScrollView: {
+      flex: 1
+    },
+    settingsScrollContent: {
+      paddingHorizontal: 16,
+      paddingTop: 8,
+      paddingBottom: 18,
+      backgroundColor: theme.background
+    },
+    settingsFloatingHeader: {
+      paddingHorizontal: 16,
+      paddingTop: 18,
+      paddingBottom: 10,
+      backgroundColor: theme.background,
+      zIndex: 10
+    },
     tabScreenStack: {
       gap: 16
     },
@@ -161,6 +177,7 @@ function createStyles(theme: MobileTheme) {
       paddingTop: 6
     },
     settingsHeader: {
+      minHeight: 44,
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
@@ -519,7 +536,7 @@ function createStyles(theme: MobileTheme) {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 13,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     calendarBlockMeta: {
       color: theme.textPrimary,
@@ -1132,12 +1149,14 @@ function createStyles(theme: MobileTheme) {
       gap: 4
     },
     learnedPlaceSaveButton: {
-      minHeight: 38,
+      minHeight: 44,
+      minWidth: 52,
       borderWidth: 1,
       borderColor: theme.controlBorder,
       backgroundColor: theme.surfaceRaised,
-      borderRadius: 999,
-      paddingHorizontal: 10,
+      borderRadius: 11,
+      paddingHorizontal: 12,
+      paddingVertical: 0,
       alignItems: "center",
       justifyContent: "center"
     },
@@ -1145,7 +1164,9 @@ function createStyles(theme: MobileTheme) {
       color: theme.accentText,
       fontFamily: monoFont,
       fontSize: 12,
-      fontWeight: "800"
+      fontWeight: "800",
+      lineHeight: 16,
+      textAlign: "center"
     },
     placeForm: {
       borderWidth: 1,
@@ -1226,13 +1247,13 @@ function createStyles(theme: MobileTheme) {
       paddingRight: 4
     },
     categoryChoice: {
-      minHeight: 44,
+      minHeight: 32,
       borderWidth: 1,
       borderColor: theme.controlBorder,
       backgroundColor: theme.surface,
       borderRadius: 999,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
+      paddingHorizontal: 11,
+      paddingVertical: 4,
       flexDirection: "row",
       alignItems: "center",
       gap: 7
@@ -1244,8 +1265,9 @@ function createStyles(theme: MobileTheme) {
     categoryChoiceText: {
       color: theme.textPrimary,
       fontFamily: monoFont,
-      fontSize: 13,
-      fontWeight: "800"
+      fontSize: 12,
+      fontWeight: "800",
+      lineHeight: 16
     },
     categoryChoiceTextSelected: {
       color: theme.accentText
@@ -1376,6 +1398,7 @@ function createStyles(theme: MobileTheme) {
       backgroundColor: theme.accent,
       borderRadius: 14,
       paddingHorizontal: 16,
+      paddingVertical: 0,
       alignItems: "center",
       justifyContent: "center"
     },
@@ -1386,8 +1409,9 @@ function createStyles(theme: MobileTheme) {
       backgroundColor: theme.accent,
       borderRadius: 14,
       paddingHorizontal: 16,
-      paddingVertical: 10,
-      alignItems: "center"
+      paddingVertical: 0,
+      alignItems: "center",
+      justifyContent: "center"
     },
     startInputRow: {
       flexDirection: "row",
@@ -1596,13 +1620,13 @@ function createStyles(theme: MobileTheme) {
       paddingRight: 4
     },
     activeEditCategoryChip: {
-      minHeight: 44,
+      minHeight: 32,
       borderWidth: 1,
       borderColor: theme.controlBorder,
       backgroundColor: theme.surfaceInset,
       borderRadius: 999,
       paddingHorizontal: 11,
-      paddingVertical: 8,
+      paddingVertical: 4,
       flexDirection: "row",
       alignItems: "center",
       gap: 7
@@ -1614,8 +1638,9 @@ function createStyles(theme: MobileTheme) {
     activeEditCategoryChipText: {
       color: theme.textPrimary,
       fontFamily: monoFont,
-      fontSize: 13,
-      fontWeight: "800"
+      fontSize: 12,
+      fontWeight: "800",
+      lineHeight: 16
     },
     activeEditCategoryChipTextSelected: {
       color: theme.accentText
@@ -1890,7 +1915,10 @@ function createStyles(theme: MobileTheme) {
     primaryButtonText: {
       color: theme.onAccent,
       fontWeight: "800",
-      fontFamily: monoFont
+      fontFamily: monoFont,
+      fontSize: 13,
+      lineHeight: 17,
+      textAlign: "center"
     },
     secondaryButton: {
       minHeight: 44,
@@ -1899,7 +1927,8 @@ function createStyles(theme: MobileTheme) {
       backgroundColor: theme.surfaceInset,
       borderRadius: 14,
       paddingHorizontal: 14,
-      paddingVertical: 10,
+      paddingVertical: 0,
+      alignItems: "center",
       justifyContent: "center"
     },
     authSecondaryButton: {
@@ -1914,7 +1943,10 @@ function createStyles(theme: MobileTheme) {
     secondaryButtonText: {
       color: theme.accentText,
       fontWeight: "800",
-      fontFamily: monoFont
+      fontFamily: monoFont,
+      fontSize: 13,
+      lineHeight: 17,
+      textAlign: "center"
     },
     authSecondaryButtonText: {
       lineHeight: 18,

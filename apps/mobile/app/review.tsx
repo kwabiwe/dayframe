@@ -236,8 +236,26 @@ export default function ReviewScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <View style={styles.settingsFloatingHeader}>
+        <View style={styles.settingsHeader}>
+          <Pressable
+            accessibilityLabel="Back"
+            accessibilityRole="button"
+            style={pressable(styles.iconButton, styles.buttonPressed)}
+            onPress={() => router.back()}
+          >
+            <BackGlyph color={theme.accent} />
+          </Pressable>
+          <DayframeBrand
+            layout="compact"
+            size="sm"
+            tone={theme.mode === "dark" ? "light" : "dark"}
+          />
+        </View>
+      </View>
       <ScrollView
-        contentContainerStyle={styles.container}
+        style={styles.settingsScrollView}
+        contentContainerStyle={styles.settingsScrollContent}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -248,22 +266,6 @@ export default function ReviewScreen() {
         }
       >
         <View style={styles.contentStack}>
-          <View style={styles.settingsHeader}>
-            <Pressable
-              accessibilityLabel="Back"
-              accessibilityRole="button"
-              style={pressable(styles.iconButton, styles.buttonPressed)}
-              onPress={() => router.back()}
-            >
-              <BackGlyph color={theme.accent} />
-            </Pressable>
-            <DayframeBrand
-              layout="compact"
-              size="sm"
-              tone={theme.mode === "dark" ? "light" : "dark"}
-            />
-          </View>
-
           <View style={styles.panel}>
             <View style={styles.summaryHeader}>
               <View>

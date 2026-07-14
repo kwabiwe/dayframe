@@ -730,8 +730,22 @@ export default function SettingsScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <View style={styles.settingsFloatingHeader}>
+        <View style={styles.settingsHeader}>
+          <Pressable
+            accessibilityLabel="Back"
+            accessibilityRole="button"
+            style={pressable(styles.iconButton, styles.buttonPressed)}
+            onPress={goBack}
+          >
+            <BackGlyph color={theme.accent} />
+          </Pressable>
+          <Text style={styles.settingsTitle} numberOfLines={1}>{settingsTitle}</Text>
+        </View>
+      </View>
       <ScrollView
-        contentContainerStyle={styles.container}
+        style={styles.settingsScrollView}
+        contentContainerStyle={styles.settingsScrollContent}
         keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl
@@ -743,18 +757,6 @@ export default function SettingsScreen() {
         }
       >
         <View style={styles.contentStack}>
-          <View style={styles.settingsHeader}>
-            <Pressable
-              accessibilityLabel="Back"
-              accessibilityRole="button"
-              style={pressable(styles.iconButton, styles.buttonPressed)}
-              onPress={goBack}
-            >
-              <BackGlyph color={theme.accent} />
-            </Pressable>
-            <Text style={styles.settingsTitle} numberOfLines={1}>{settingsTitle}</Text>
-          </View>
-
           {settingsSection === "index" ? (
             <>
               <View style={styles.panel}>
@@ -1297,7 +1299,8 @@ export default function SettingsScreen() {
                             style={pressable(
                               [
                                 styles.categoryChoice,
-                                !mapping.categoryId ? styles.categoryChoiceSelected : null
+                                !mapping.categoryId ? styles.categoryChoiceSelected : null,
+                                !mapping.categoryId ? { backgroundColor: "#FFFFFF", borderColor: theme.accent } : null
                               ],
                               styles.buttonPressed
                             )}
@@ -1305,7 +1308,8 @@ export default function SettingsScreen() {
                             <Text
                               style={[
                                 styles.categoryChoiceText,
-                                !mapping.categoryId ? styles.categoryChoiceTextSelected : null
+                                !mapping.categoryId ? styles.categoryChoiceTextSelected : null,
+                                !mapping.categoryId ? { color: theme.accent } : null
                               ]}
                             >
                               Default {defaultHealthCategoryLabel(option.key)}
@@ -1313,6 +1317,7 @@ export default function SettingsScreen() {
                           </Pressable>
                           {(data?.categories ?? []).map((category) => {
                             const selected = mapping.categoryId === category.id;
+                            const categoryColor = paletteColorFor(category.color, category.name, theme.mode);
                             return (
                               <Pressable
                                 key={`${option.key}:${category.id}`}
@@ -1323,7 +1328,9 @@ export default function SettingsScreen() {
                                 style={pressable(
                                   [
                                     styles.categoryChoice,
-                                    selected ? styles.categoryChoiceSelected : null
+                                    { borderColor: categoryColor },
+                                    selected ? styles.categoryChoiceSelected : null,
+                                    selected ? { backgroundColor: "#FFFFFF", borderColor: categoryColor } : null
                                   ],
                                   styles.buttonPressed
                                 )}
@@ -1331,13 +1338,14 @@ export default function SettingsScreen() {
                                 <View
                                   style={[
                                     styles.colorDot,
-                                    { backgroundColor: paletteColorFor(category.color, category.name, theme.mode) }
+                                    { backgroundColor: categoryColor, borderColor: categoryColor }
                                   ]}
                                 />
                                 <Text
                                   style={[
                                     styles.categoryChoiceText,
-                                    selected ? styles.categoryChoiceTextSelected : null
+                                    selected ? styles.categoryChoiceTextSelected : null,
+                                    selected ? { color: categoryColor } : null
                                   ]}
                                 >
                                   {category.name}
