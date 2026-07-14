@@ -897,15 +897,17 @@ function CategoryChip({
         [
           styles.activeEditCategoryChip,
           selected ? styles.activeEditCategoryChipSelected : null,
-          category ? { borderColor: color } : null
+          category ? { borderColor: color } : null,
+          selected ? { backgroundColor: "#FFFFFF", borderColor: color } : null
         ],
         styles.buttonPressed
       )}
     >
-      <View style={[styles.colorDot, { backgroundColor: category ? color : "transparent" }]} />
+      <View style={[styles.colorDot, { backgroundColor: category ? color : "transparent", borderColor: color }]} />
       <Text style={[
         styles.activeEditCategoryChipText,
-        selected ? styles.activeEditCategoryChipTextSelected : null
+        selected ? styles.activeEditCategoryChipTextSelected : null,
+        selected ? { color } : null
       ]}>
         {label}
       </Text>
@@ -1058,16 +1060,16 @@ function CheckGlyph({ color }: { color: string }) {
 
 function PlayGlyph({ color }: { color: string }) {
   return (
-    <Svg width={18} height={18} viewBox="0 0 24 24">
-      <Path d="M8 5v14l11-7L8 5Z" fill={color} />
+    <Svg width={20} height={20} viewBox="0 0 24 24">
+      <Path d="M7 4v16l13-8L7 4Z" fill={color} />
     </Svg>
   );
 }
 
 function StopGlyph({ color }: { color: string }) {
   return (
-    <Svg width={18} height={18} viewBox="0 0 24 24">
-      <Path d="M7 7h10v10H7V7Z" fill={color} />
+    <Svg width={19} height={19} viewBox="0 0 24 24">
+      <Path d="M6 6h12v12H6V6Z" fill={color} />
     </Svg>
   );
 }

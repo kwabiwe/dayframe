@@ -431,8 +431,22 @@ export default function PlacesScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <View style={styles.settingsFloatingHeader}>
+        <View style={styles.settingsHeader}>
+          <Pressable
+            accessibilityLabel="Back"
+            accessibilityRole="button"
+            style={pressable(styles.iconButton, styles.buttonPressed)}
+            onPress={() => router.back()}
+          >
+            <BackGlyph color={theme.accent} />
+          </Pressable>
+          <Text style={styles.settingsTitle} numberOfLines={1}>Places</Text>
+        </View>
+      </View>
       <ScrollView
-        contentContainerStyle={styles.container}
+        style={styles.settingsScrollView}
+        contentContainerStyle={styles.settingsScrollContent}
         keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl
@@ -444,18 +458,6 @@ export default function PlacesScreen() {
         }
       >
         <View style={styles.contentStack}>
-          <View style={styles.settingsHeader}>
-            <Pressable
-              accessibilityLabel="Back"
-              accessibilityRole="button"
-              style={pressable(styles.iconButton, styles.buttonPressed)}
-              onPress={() => router.back()}
-            >
-              <BackGlyph color={theme.accent} />
-            </Pressable>
-            <Text style={styles.settingsTitle} numberOfLines={1}>Places</Text>
-          </View>
-
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Places</Text>
             <Text style={styles.muted}>Places help Dayframe recognise where time was spent.</Text>
@@ -1013,12 +1015,20 @@ function CategoryChoice({
   theme: MobileTheme;
   styles: MobileStyles;
 }) {
+  const chipColor = category
+    ? paletteColorFor(category.color, category.name, theme.mode)
+    : theme.accent;
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityState={{ selected }}
       style={pressable(
-        [styles.categoryChoice, selected ? styles.categoryChoiceSelected : null],
+        [
+          styles.categoryChoice,
+          category ? { borderColor: chipColor } : null,
+          selected ? styles.categoryChoiceSelected : null,
+          selected ? { backgroundColor: "#FFFFFF", borderColor: chipColor } : null
+        ],
         styles.buttonPressed
       )}
       onPress={onPress}
@@ -1027,14 +1037,20 @@ function CategoryChoice({
         <View
           style={[
             styles.colorDot,
-            { backgroundColor: paletteColorFor(category.color, category.name, theme.mode) }
+            { backgroundColor: chipColor, borderColor: chipColor }
           ]}
         />
       ) : null}
-      <Text style={[styles.categoryChoiceText, selected ? styles.categoryChoiceTextSelected : null]}>
+      <Text
+        style={[
+          styles.categoryChoiceText,
+          selected ? styles.categoryChoiceTextSelected : null,
+          selected ? { color: chipColor } : null
+        ]}
+      >
         {label}
       </Text>
-      {selected ? <CheckGlyph color={theme.accentText} /> : null}
+      {selected ? <CheckGlyph color={chipColor} /> : null}
     </Pressable>
   );
 }

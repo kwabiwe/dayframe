@@ -1982,15 +1982,15 @@ function SettingsGlyph({ color }: { color: string }) {
 function PlayGlyph({ color }: { color: string }) {
   return (
     <Svg width={20} height={20} viewBox="0 0 24 24">
-      <Path d="M8 5v14l11-7L8 5Z" fill={color} />
+      <Path d="M7 4v16l13-8L7 4Z" fill={color} />
     </Svg>
   );
 }
 
 function StopGlyph({ color }: { color: string }) {
   return (
-    <Svg width={18} height={18} viewBox="0 0 24 24">
-      <Path d="M7 7h10v10H7V7Z" fill={color} />
+    <Svg width={19} height={19} viewBox="0 0 24 24">
+      <Path d="M6 6h12v12H6V6Z" fill={color} />
     </Svg>
   );
 }
