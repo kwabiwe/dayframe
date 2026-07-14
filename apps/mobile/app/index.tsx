@@ -1,5 +1,8 @@
-import { Redirect } from "expo-router";
+import { Redirect, type Href } from "expo-router";
+
+const todayTabHref = "/(tabs)/today" as Href;
 
 export default function IndexRoute() {
-  return <Redirect href="/(tabs)/today" />;
+  // Expo's typed-route generator does not currently include unstable-native-tabs children.
+  return <Redirect href={todayTabHref} />;
 }
