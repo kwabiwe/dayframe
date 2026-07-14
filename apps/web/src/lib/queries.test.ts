@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getNormalizationContext } from "./queries";
+import { getNormalizationContext, getTaskSuggestions } from "./queries";
 import type { RequestSession } from "./session";
 
 const mocks = vi.hoisted(() => ({
@@ -72,6 +72,57 @@ describe("query normalization context", () => {
         activityDescription: "Train station pickup/drop-off",
         enabled: true
       }
+    ]);
+  });
+});
+
+describe("task suggestions query", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("builds task suggestions from current-user manual history only", async () => {
+    mocks.query.mockImplementation(async (statement: string, values: unknown[]) => {
+      expect(statement).toContain("te.user_id = $2");
+      expect(statement).toContain("te.source in ('manual_app', 'mobile_app')");
+      expect(values).toEqual([session.workspaceId, session.userId]);
+      return {
+        rows: [
+          {
+            id: "manual-1",
+            categoryId: "category-1",
+            categoryName: "Focus",
+            categoryColor: "blue",
+            description: "Architecture review",
+            durationSeconds: 1800,
+            eventType: "timer_start",
+            reviewStatus: "confirmed",
+            source: "manual_app",
+            startedAt: "2026-07-14T09:00:00.000Z",
+            stoppedAt: "2026-07-14T09:30:00.000Z"
+          },
+          {
+            id: "sleep-1",
+            categoryId: "health",
+            categoryName: "Health",
+            categoryColor: "red",
+            description: "Sleep",
+            durationSeconds: 8 * 3600,
+            eventType: "health_sleep_import",
+            reviewStatus: "confirmed",
+            source: "health_sleep",
+            startedAt: "2026-07-14T00:00:00.000Z",
+            stoppedAt: "2026-07-14T08:00:00.000Z"
+          }
+        ]
+      };
+    });
+
+    await expect(getTaskSuggestions(session)).resolves.toEqual([
+      expect.objectContaining({
+        categoryId: "category-1",
+        description: "Architecture review"
+      })
     ]);
   });
 });

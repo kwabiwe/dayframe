@@ -1613,6 +1613,115 @@ function createStyles(theme: MobileTheme) {
       fontSize: 12,
       fontWeight: "800"
     },
+    taskSuggestionsPanel: {
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 14,
+      padding: 10,
+      gap: 10
+    },
+    taskSuggestionsHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 8
+    },
+    taskSuggestionsTitle: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "800",
+      letterSpacing: 0.4
+    },
+    taskSuggestionsDismissButton: {
+      minHeight: 36,
+      borderWidth: 1,
+      borderColor: theme.controlBorder,
+      backgroundColor: theme.surface,
+      borderRadius: 10,
+      paddingHorizontal: 10,
+      justifyContent: "center"
+    },
+    taskSuggestionsDismissText: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "800"
+    },
+    taskSuggestionsList: {
+      gap: 7
+    },
+    taskSuggestionSection: {
+      gap: 7
+    },
+    taskSuggestionSectionLabel: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 11,
+      fontWeight: "800"
+    },
+    taskSuggestionRow: {
+      minHeight: 50,
+      borderWidth: 1,
+      borderColor: theme.controlBorder,
+      backgroundColor: theme.surface,
+      borderRadius: 12,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 9
+    },
+    taskSuggestionTextStack: {
+      flex: 1,
+      minWidth: 0,
+      gap: 2
+    },
+    taskSuggestionTitle: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "800"
+    },
+    taskSuggestionMeta: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 11,
+      fontWeight: "700"
+    },
+    taskSuggestionStartText: {
+      color: theme.accentText,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "800"
+    },
+    taskSuggestionsEmpty: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "700"
+    },
+    taskSuggestionsActions: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8
+    },
+    taskSuggestionsActionButton: {
+      minHeight: 40,
+      borderWidth: 1,
+      borderColor: theme.controlBorder,
+      backgroundColor: theme.surface,
+      borderRadius: 10,
+      paddingHorizontal: 10,
+      justifyContent: "center"
+    },
+    taskSuggestionsActionText: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "800"
+    },
     activeEditDescriptionInput: {
       minHeight: 52
     },

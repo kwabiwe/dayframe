@@ -9,7 +9,7 @@ import type {
   PointerEvent as ReactPointerEvent
 } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buildRecentActivitySuggestions, paletteCssColorFor } from "@dayframe/shared";
+import { paletteCssColorFor } from "@dayframe/shared";
 import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import {
@@ -191,6 +191,7 @@ export function CurrentTimerPanel({
   const [startedAtDraft, setStartedAtDraft] = useState(() => timeInputValue(data.activeEntry?.startedAt));
   const [startEditError, setStartEditError] = useState<string | null>(null);
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [draftEntryId, setDraftEntryId] = useState(data.activeEntry?.id ?? null);
   const activeDetailsSyncRef = useRef("");
   const timerActionInFlightRef = useRef(false);
@@ -212,6 +213,7 @@ export function CurrentTimerPanel({
     ? Math.max(active.durationSeconds, Math.floor((effectiveNow - activeStartedAtMs) / 1000))
     : 0;
   const quickActions = useMemo(() => buildLearnedQuickActions(data), [data]);
+  const taskSuggestions = data.taskSuggestions ?? [];
   const activeAccent = active
     ? timeEntryAccentColor({
         ...active,
@@ -233,6 +235,7 @@ export function CurrentTimerPanel({
     const handle = window.setTimeout(() => {
       activeDetailsSyncRef.current = "";
       setCategoryMenuOpen(false);
+      setSuggestionsOpen(false);
       setIsEditingStartedAt(false);
       setStartEditError(null);
       setDraftEntryId(activeId);
@@ -273,6 +276,17 @@ export function CurrentTimerPanel({
       document.removeEventListener("keydown", closeOnEscape);
     };
   }, [categoryMenuOpen]);
+
+  useEffect(() => {
+    if (!suggestionsOpen) return undefined;
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setSuggestionsOpen(false);
+    }
+
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [suggestionsOpen]);
 
   useEffect(() => {
     if (!active || draftEntryId !== active.id) {
@@ -379,6 +393,7 @@ export function CurrentTimerPanel({
         throw new Error(errorMessage);
       }
       await refresh();
+      setSuggestionsOpen(false);
     } catch (error) {
       setTimerError(error instanceof Error ? error.message : "Unable to update the timer.");
     } finally {
@@ -421,20 +436,42 @@ export function CurrentTimerPanel({
   async function startQuickAction(action: LearnedQuickAction) {
     setCategoryId(action.categoryId ?? "");
     setCategoryMenuOpen(false);
+    setSuggestionsOpen(false);
     await timerAction("start", {
       categoryId: action.categoryId,
-      description: action.description ?? (description.trim() || null)
+      description: description.trim() || null
     });
+  }
+
+  async function startSuggestion(suggestion: BootstrapData["taskSuggestions"][number]) {
+    setDescription(suggestion.description);
+    setCategoryId(suggestion.categoryId ?? "");
+    setCategoryMenuOpen(false);
+    setSuggestionsOpen(false);
+    await timerAction("start", {
+      categoryId: suggestion.categoryId,
+      description: suggestion.description
+    });
+  }
+
+  function shouldOpenSuggestionsBeforeStart() {
+    return !active && !categoryId && !description.trim();
   }
 
   function chooseCategory(nextCategoryId: string) {
     setCategoryId(nextCategoryId);
     setCategoryMenuOpen(false);
+    setSuggestionsOpen(false);
   }
 
   async function submitTimerEntry(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!shouldStartTimerFromEntrySubmit({ hasActiveTimer: Boolean(active), isBusy })) return;
+    if (shouldOpenSuggestionsBeforeStart()) {
+      setTimerError(null);
+      setSuggestionsOpen(true);
+      return;
+    }
     await timerAction("start");
   }
 
@@ -442,6 +479,11 @@ export function CurrentTimerPanel({
     if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
     event.preventDefault();
     if (!shouldStartTimerFromEntrySubmit({ hasActiveTimer: Boolean(active), isBusy })) return;
+    if (shouldOpenSuggestionsBeforeStart()) {
+      setTimerError(null);
+      setSuggestionsOpen(true);
+      return;
+    }
     void timerAction("start");
   }
 
@@ -465,7 +507,8 @@ export function CurrentTimerPanel({
         return;
       }
 
-      focusTimerInput();
+      setTimerError(null);
+      setSuggestionsOpen(true);
     }
 
     window.addEventListener(TIMER_FOCUS_EVENT, focusTimerInput);
@@ -739,6 +782,20 @@ export function CurrentTimerPanel({
         />
       ) : null}
 
+      {suggestionsOpen && !active ? (
+        <TaskSuggestionsPanel
+          isBusy={isBusy}
+          onClose={() => setSuggestionsOpen(false)}
+          onEnterAnother={() => {
+            setSuggestionsOpen(false);
+            descriptionInputRef.current?.focus();
+          }}
+          onSelect={(suggestion) => void startSuggestion(suggestion)}
+          onStartBlank={() => void timerAction("start", { categoryId: null, description: null })}
+          suggestions={taskSuggestions}
+        />
+      ) : null}
+
       {quickActions.length > 0 ? (
         <div className="swiss-quick-actions-strip" aria-label="Quick actions">
           <span>Quick actions</span>
@@ -775,19 +832,6 @@ type LearnedQuickAction = {
 };
 
 function buildLearnedQuickActions(data: BootstrapData): LearnedQuickAction[] {
-  const categoriesById = new Map(data.categories.map((category) => [category.id, category]));
-  const recent = buildRecentActivitySuggestions(data.entries, { limit: 4 }).map((suggestion) => {
-    const category = suggestion.categoryId ? categoriesById.get(suggestion.categoryId) : null;
-    const categoryName = suggestion.categoryName ?? category?.name ?? "Uncategorized";
-    return {
-      categoryId: suggestion.categoryId,
-      description: suggestion.description,
-      label: suggestion.description,
-      color: paletteCssColorFor(suggestion.categoryColor ?? category?.color ?? "slate", categoryName),
-      key: `recent:${suggestion.key}`,
-      meta: categoryName
-    };
-  });
   const pinned = data.categories.filter((category) => category.isPinned).map((category) => ({
     categoryId: category.id,
     description: null,
@@ -797,7 +841,85 @@ function buildLearnedQuickActions(data: BootstrapData): LearnedQuickAction[] {
     meta: null
   }));
 
-  return [...recent, ...pinned].slice(0, 6);
+  return pinned.slice(0, 6);
+}
+
+const suggestionSectionLabels = {
+  suggested_now: "Suggested now",
+  often_used: "Often used",
+  recent: "Recent"
+} as const;
+
+function TaskSuggestionsPanel({
+  isBusy,
+  onClose,
+  onEnterAnother,
+  onSelect,
+  onStartBlank,
+  suggestions
+}: {
+  isBusy: boolean;
+  onClose: () => void;
+  onEnterAnother: () => void;
+  onSelect: (suggestion: BootstrapData["taskSuggestions"][number]) => void;
+  onStartBlank: () => void;
+  suggestions: BootstrapData["taskSuggestions"];
+}) {
+  const sections = (Object.keys(suggestionSectionLabels) as Array<keyof typeof suggestionSectionLabels>)
+    .map((section) => ({
+      label: suggestionSectionLabels[section],
+      suggestions: suggestions.filter((suggestion) => suggestion.section === section)
+    }))
+    .filter((section) => section.suggestions.length > 0);
+
+  return (
+    <div className="swiss-task-suggestions" role="dialog" aria-label="Suggestions">
+      <div className="swiss-task-suggestions-header">
+        <span>SUGGESTIONS</span>
+        <button type="button" onClick={onClose} disabled={isBusy}>
+          Dismiss
+        </button>
+      </div>
+      {sections.length > 0 ? (
+        sections.map((section) => (
+          <div className="swiss-task-suggestion-section" key={section.label}>
+            <span>{section.label}</span>
+            <div>
+              {section.suggestions.map((suggestion) => (
+                <button
+                  key={suggestion.key}
+                  type="button"
+                  disabled={isBusy}
+                  onClick={() => onSelect(suggestion)}
+                >
+                  <i
+                    style={{
+                      backgroundColor: paletteCssColorFor(suggestion.categoryColor ?? "slate", suggestion.categoryName ?? "Category")
+                    }}
+                  />
+                  <span>
+                    <b>{suggestion.description}</b>
+                    <small>{suggestion.categoryName ?? "Uncategorized"}</small>
+                  </span>
+                  <em>Start</em>
+                </button>
+              ))}
+            </div>
+          </div>
+        ))
+      ) : (
+        <p>No manual activity suggestions yet.</p>
+      )}
+      <div className="swiss-task-suggestion-actions">
+        <button type="button" disabled={isBusy} onClick={onStartBlank}>
+          Start without details
+        </button>
+        <button type="button" disabled={isBusy} onClick={onEnterAnother}>
+          Enter another task
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function MetricCard({

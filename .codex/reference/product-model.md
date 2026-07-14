@@ -8,7 +8,7 @@ Use this when changing timer flows, dashboards, reports, entity management, onbo
 - The primary user-facing fields are task title/description and category.
 - Task title is optional.
 - Category is optional and can be added while a task is running.
-- Quick actions should combine pinned categories with most-used categories.
+- Quick actions should show user-pinned categories only. Learned or recent tasks belong in task-entry suggestions, not the pinned category strip.
 - Existing projects may be converted into categories.
 - Projects and clients are legacy/internal compatibility until explicitly approved for user-facing UX again.
 

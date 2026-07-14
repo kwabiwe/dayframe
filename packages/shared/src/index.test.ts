@@ -114,6 +114,104 @@ describe("recent activity suggestions", () => {
       })
     ]);
   });
+
+  it("excludes automatic and unresolved activity from task-entry suggestions", () => {
+    expect(buildRecentActivitySuggestions([
+      {
+        categoryId: "health",
+        categoryName: "Health",
+        description: "Sleep",
+        durationSeconds: 8 * 3600,
+        eventType: "health_sleep_import",
+        reviewStatus: "confirmed",
+        source: "health_sleep",
+        startedAt: "2026-07-14T00:00:00.000Z",
+        stoppedAt: "2026-07-14T08:00:00.000Z"
+      },
+      {
+        categoryId: "health",
+        categoryName: "Health",
+        description: "Workout Walking",
+        durationSeconds: 1800,
+        eventType: "health_workout_import",
+        reviewStatus: "confirmed",
+        source: "health_workout",
+        startedAt: "2026-07-14T08:00:00.000Z",
+        stoppedAt: "2026-07-14T08:30:00.000Z"
+      },
+      {
+        categoryId: "travel",
+        categoryName: "Travel",
+        description: "Commute",
+        durationSeconds: 2400,
+        eventType: "commute_detected",
+        reviewStatus: "confirmed",
+        source: "location_learning",
+        startedAt: "2026-07-14T08:30:00.000Z",
+        stoppedAt: "2026-07-14T09:10:00.000Z"
+      },
+      {
+        categoryId: "focus",
+        categoryName: "Focus",
+        description: "Write design notes",
+        durationSeconds: 1800,
+        eventType: "timer_start",
+        reviewStatus: "confirmed",
+        source: "manual_app",
+        startedAt: "2026-07-14T09:30:00.000Z",
+        stoppedAt: "2026-07-14T10:00:00.000Z"
+      },
+      {
+        categoryId: "focus",
+        categoryName: "Focus",
+        description: "Draft review",
+        durationSeconds: 1800,
+        eventType: "timer_start",
+        reviewStatus: "needs_review",
+        source: "manual_app",
+        startedAt: "2026-07-14T10:00:00.000Z",
+        stoppedAt: "2026-07-14T10:30:00.000Z"
+      }
+    ])).toEqual([
+      expect.objectContaining({
+        categoryId: "focus",
+        description: "Write design notes"
+      })
+    ]);
+  });
+
+  it("promotes repeated contextual manual work into suggested now", () => {
+    const suggestions = buildRecentActivitySuggestions([
+      {
+        categoryId: "focus",
+        categoryName: "Focus",
+        description: "Architecture review",
+        durationSeconds: 1800,
+        eventType: "timer_start",
+        reviewStatus: "confirmed",
+        source: "manual_app",
+        startedAt: "2026-07-07T09:15:00.000Z",
+        stoppedAt: "2026-07-07T09:45:00.000Z"
+      },
+      {
+        categoryId: "focus",
+        categoryName: "Focus",
+        description: "Architecture review",
+        durationSeconds: 2400,
+        eventType: "timer_start",
+        reviewStatus: "confirmed",
+        source: "mobile_app",
+        startedAt: "2026-07-14T09:05:00.000Z",
+        stoppedAt: "2026-07-14T09:45:00.000Z"
+      }
+    ], { contextDate: "2026-07-21T09:30:00.000Z" });
+
+    expect(suggestions[0]).toMatchObject({
+      description: "Architecture review",
+      section: "suggested_now",
+      useCount: 2
+    });
+  });
 });
 
 const context: NormalizationContext = {
