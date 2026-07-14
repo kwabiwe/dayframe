@@ -685,8 +685,8 @@ const excludedSuggestionEventTypes = new Set([
 ]);
 
 export function isRecentActivitySuggestionEligible(entry: RecentActivityEntry) {
-  if (entry.source && !manualSuggestionSources.has(entry.source)) return false;
-  if (entry.reviewStatus && entry.reviewStatus !== "confirmed") return false;
+  if (!entry.source || !manualSuggestionSources.has(entry.source)) return false;
+  if (entry.reviewStatus !== "confirmed") return false;
   if (entry.eventType && excludedSuggestionEventTypes.has(entry.eventType)) return false;
   return true;
 }

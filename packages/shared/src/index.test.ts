@@ -84,6 +84,9 @@ describe("recent activity suggestions", () => {
         categoryColor: "teal",
         description: "Inbox triage",
         durationSeconds: 600,
+        eventType: "timer_start",
+        reviewStatus: "confirmed",
+        source: "manual_app",
         startedAt: "2026-07-13T09:00:00.000Z",
         stoppedAt: "2026-07-13T09:10:00.000Z"
       },
@@ -93,6 +96,9 @@ describe("recent activity suggestions", () => {
         categoryColor: "teal",
         description: "  Inbox   triage ",
         durationSeconds: 900,
+        eventType: "timer_start",
+        reviewStatus: "confirmed",
+        source: "mobile_app",
         startedAt: "2026-07-14T09:00:00.000Z",
         stoppedAt: "2026-07-14T09:15:00.000Z"
       },
@@ -101,6 +107,9 @@ describe("recent activity suggestions", () => {
         categoryName: "Focus",
         description: "",
         durationSeconds: 1200,
+        eventType: "timer_start",
+        reviewStatus: "confirmed",
+        source: "manual_app",
         startedAt: "2026-07-14T10:00:00.000Z",
         stoppedAt: "2026-07-14T10:20:00.000Z"
       }
@@ -171,6 +180,39 @@ describe("recent activity suggestions", () => {
         source: "manual_app",
         startedAt: "2026-07-14T10:00:00.000Z",
         stoppedAt: "2026-07-14T10:30:00.000Z"
+      },
+      {
+        categoryId: "travel",
+        categoryName: "Travel",
+        description: "School geofence",
+        durationSeconds: 1200,
+        eventType: "geofence_enter",
+        reviewStatus: "confirmed",
+        source: "manual_app",
+        startedAt: "2026-07-14T10:30:00.000Z",
+        stoppedAt: "2026-07-14T10:50:00.000Z"
+      },
+      {
+        categoryId: "admin",
+        categoryName: "Admin",
+        description: "Automation shortcut",
+        durationSeconds: 1200,
+        eventType: "shortcut_action",
+        reviewStatus: "confirmed",
+        source: "mobile_app",
+        startedAt: "2026-07-14T11:00:00.000Z",
+        stoppedAt: "2026-07-14T11:20:00.000Z"
+      },
+      {
+        categoryId: "focus",
+        categoryName: "Focus",
+        description: "Unknown provenance",
+        durationSeconds: 1200,
+        eventType: "timer_start",
+        reviewStatus: "confirmed",
+        source: null,
+        startedAt: "2026-07-14T11:30:00.000Z",
+        stoppedAt: "2026-07-14T11:50:00.000Z"
       }
     ])).toEqual([
       expect.objectContaining({
