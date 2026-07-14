@@ -98,6 +98,18 @@ Required checks:
 - No duplicate React keys or runtime overlays.
 - Light and dark theme remain legible.
 
+## Native iOS Tabs And App Chrome
+
+Required checks when changing the mobile root navigator or tab bar:
+
+- Run the mobile typecheck and full mobile unit suite.
+- Run an iOS native build; a web or Expo Go render does not validate the native tab controller.
+- Verify Today, Calendar and Reports use real routes and retain their state when switching tabs.
+- Verify the system owns tab material and safe-area insets; do not add a second `GlassView`, manual tab height or bottom spacer.
+- On iOS 26, check native Liquid Glass, system tab spacing and scroll-down minimisation in both light and dark appearance.
+- On the minimum supported iOS version, check the standard native tab fallback remains readable and reachable.
+- Re-test Settings/Review/Places push and swipe-back, Today timer start/stop/edit, Calendar scroll/swipe/pinch, pull-to-refresh, Reduce Motion and Reduce Transparency.
+
 ## Brand, Theme, And Visual Reskins
 
 Required checks when changing brand artwork, shared theme tokens, app chrome or visual-system documentation:

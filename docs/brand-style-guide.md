@@ -238,7 +238,7 @@ Motion is short and purposeful: approximately 120–220 ms for control feedback 
 
 ### Platform differences
 
-Web may remain denser and uses hover, keyboard focus and responsive dialogs. iOS uses safe-area-aware screens, Dynamic Type, native press feedback, sheets and the existing glass-effect fallback. Both platforms use the same semantic colour roles, brand geometry, hierarchy and state meaning; platform conventions may change mechanics, not identity.
+Web may remain denser and uses hover, keyboard focus and responsive dialogs. iOS uses safe-area-aware screens, Dynamic Type, native press feedback and sheets. Primary tabs use the system tab controller so supported iOS releases own the Liquid Glass material, layout and accessibility behaviour; do not recreate that navigation material with an overlaid JavaScript glass view. Both platforms use the same semantic colour roles, brand geometry, hierarchy and state meaning; platform conventions may change mechanics, not identity.
 
 ## Brand release checklist
 

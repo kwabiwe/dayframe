@@ -181,6 +181,7 @@ Mobile:
 - Expo 56
 - React Native 0.85
 - Expo Router
+- Expo Router Native Tabs backed by the iOS system tab controller
 - Expo SecureStore
 - AsyncStorage
 - Expo Location / Task Manager
