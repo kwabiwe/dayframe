@@ -1,5 +1,6 @@
 import {
   ActivityEventInputSchema,
+  classifyLocationLearningEvidence,
   DEFAULT_HEALTH_IMPORT_PREFERENCES,
   HEALTH_IMPORT_PREFERENCE_OPTIONS,
   healthAutoLogMappingFor,
@@ -7,9 +8,12 @@ import {
   normalizeHealthAutoLogMappings,
   normalizePaletteKey,
   normalizeActivityEvent,
+  locationAddressSummary,
+  locationLearningEvidenceFromPayload,
   shouldAutoConfirmHealthSleep,
   shouldAutoConfirmHealthWorkout,
   readableLocationNameFromParts,
+  type LocationDisplayAddress,
   type ActivityEventType,
   type ActivityEventInput,
   type HealthAutoLogMappings,
@@ -159,7 +163,7 @@ const PLACE_DEFAULT_ACTIVITY_DESCRIPTION_MIGRATION =
   "supabase/migrations/202607070002_place_default_activity_description.sql";
 const AUTOMATION_RULE_ACTIVITY_DESCRIPTION_MIGRATION =
   "supabase/migrations/202607120001_automation_rule_activity_description.sql";
-const LOCATION_LEARNING_MIGRATION = "supabase/migrations/202607120002_location_learning.sql";
+const LOCATION_LEARNING_MIGRATION = "supabase/migrations/202607140001_location_learning_intelligence.sql";
 const DEFAULT_HEALTH_REPROCESS_BATCH_SIZE = 12;
 const MAX_HEALTH_REPROCESS_BATCH_SIZE = 25;
 const LEGACY_SLEEP_CONSOLIDATION_BATCH_SIZE = 120;
@@ -281,6 +285,10 @@ function learnedPlacesReadinessError(error: unknown) {
     "latitude",
     "longitude",
     "visit_count",
+    "distinct_day_count",
+    "total_dwell_seconds",
+    "longest_dwell_seconds",
+    "classification",
     "raw_payload"
   ].find((column) => isUndefinedColumnError(error, column));
   if (missingColumn) return missingRequiredColumnError("learned_places", missingColumn, LOCATION_LEARNING_MIGRATION, error);
@@ -638,7 +646,11 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
       );
     }
 
-    if (parsed.type === "learned_place_visit" && candidate.reviewStatus !== "ignored") {
+    if (
+      parsed.type === "learned_place_visit" &&
+      candidate.reviewStatus !== "ignored" &&
+      classifyLocationLearningEvidence(locationLearningEvidenceFromPayload(parsed.rawPayload)).kind === "place_candidate"
+    ) {
       await upsertLearnedPlaceVisit(client, parsed, session);
     }
 
@@ -890,6 +902,7 @@ export async function createPlaceFromLearnedPlace(
          and workspace_id = $2
          and user_id = $3
          and status = 'candidate'
+         and classification = 'place_candidate'
        for update`,
       [learnedPlaceId, session.workspaceId, session.userId]
     );
@@ -947,6 +960,91 @@ export async function updateLearnedPlaceStatus(
     const readinessError = learnedPlacesReadinessError(error);
     if (readinessError) throw readinessError;
     throw error;
+  }
+}
+
+export async function resolveLearnedPlaceLocation(
+  learnedPlaceId: string,
+  rawAddress: unknown,
+  session: RequestSession = getDevSession()
+) {
+  const address = normalizedLocationAddress(rawAddress);
+  if (!address) return null;
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const existing = await client.query<{ latitude: number; longitude: number }>(
+      `select latitude, longitude
+       from learned_places
+       where id = $1
+         and workspace_id = $2
+         and user_id = $3
+         and status = 'candidate'
+         and classification = 'place_candidate'
+       for update`,
+      [learnedPlaceId, session.workspaceId, session.userId]
+    );
+    const learnedPlace = existing.rows[0];
+    if (!learnedPlace) {
+      await client.query("rollback");
+      return null;
+    }
+
+    const name = readableLocationNameFromParts({
+      address,
+      latitude: learnedPlace.latitude,
+      longitude: learnedPlace.longitude
+    });
+    const addressName = stringOrNull(address.name);
+    const poiName = addressName === name ? addressName : null;
+    const formattedAddress = locationAddressSummary(address);
+    const result = await client.query<{
+      id: string;
+      name: string;
+      address: Record<string, unknown> | null;
+      poiName: string | null;
+      formattedAddress: string | null;
+      geocodedAt: string;
+    }>(
+      `update learned_places
+       set name = $4,
+           address = $5::jsonb,
+           poi_name = $6,
+           formatted_address = $7,
+           geocoded_at = now(),
+           raw_payload = coalesce(raw_payload, '{}'::jsonb) || jsonb_build_object(
+             'address', $5::jsonb,
+             'candidateName', $4
+           ),
+           updated_at = now()
+       where id = $1
+         and workspace_id = $2
+         and user_id = $3
+       returning id,
+                 name,
+                 address,
+                 poi_name as "poiName",
+                 formatted_address as "formattedAddress",
+                 geocoded_at as "geocodedAt"`,
+      [
+        learnedPlaceId,
+        session.workspaceId,
+        session.userId,
+        name,
+        JSON.stringify(address),
+        poiName,
+        formattedAddress
+      ]
+    );
+    await client.query("commit");
+    return result.rows[0] ?? null;
+  } catch (error) {
+    await client.query("rollback");
+    const readinessError = learnedPlacesReadinessError(error);
+    if (readinessError) throw readinessError;
+    throw error;
+  } finally {
+    client.release();
   }
 }
 
@@ -1339,6 +1437,7 @@ export async function resolveReviewItem(
       confidence: string;
       eventSource: string | null;
       eventType: string | null;
+      rawPayload: Record<string, unknown> | null;
     }>(
       `select ri.id,
               ri.event_id as "eventId",
@@ -1360,7 +1459,8 @@ export async function resolveReviewItem(
               ri.suggested_stopped_at as "suggestedStoppedAt",
               ri.confidence,
               ae.source as "eventSource",
-              ae.event_type as "eventType"
+              ae.event_type as "eventType",
+              ae.raw_payload as "rawPayload"
        from review_items ri
        left join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id
        left join places pl on pl.id = ri.suggested_place_id and pl.workspace_id = ri.workspace_id
@@ -2450,8 +2550,14 @@ function commuteCategorySpec() {
   return { name: "Commute", color: "sky" };
 }
 
-function reviewItemDescriptionForConfirmedEntry(item: Pick<HealthReviewItemRow, "eventType" | "title">) {
-  if (item.eventType === "commute_detected" || item.eventType === "learned_place_visit") return null;
+function reviewItemDescriptionForConfirmedEntry(
+  item: Pick<HealthReviewItemRow, "eventType" | "title"> & { rawPayload?: Record<string, unknown> | null }
+) {
+  if (
+    item.eventType === "commute_detected" ||
+    item.eventType === "learned_place_visit" ||
+    item.rawPayload?.evidenceKind === "one_off_activity"
+  ) return null;
   return item.title;
 }
 
@@ -2910,6 +3016,22 @@ function stringOrNull(value: unknown) {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+function normalizedLocationAddress(value: unknown): LocationDisplayAddress | null {
+  if (!isRecord(value)) return null;
+  const address: LocationDisplayAddress = {
+    name: stringOrNull(value.name),
+    street: stringOrNull(value.street),
+    streetNumber: stringOrNull(value.streetNumber),
+    district: stringOrNull(value.district),
+    city: stringOrNull(value.city),
+    subregion: stringOrNull(value.subregion),
+    region: stringOrNull(value.region),
+    postalCode: stringOrNull(value.postalCode),
+    formattedAddress: stringOrNull(value.formattedAddress)
+  };
+  return Object.values(address).some(Boolean) ? address : null;
+}
+
 function timestampStringOrNull(value: unknown) {
   const timestamp = stringOrNull(value);
   if (!timestamp) return null;
@@ -2970,8 +3092,15 @@ async function upsertLearnedPlaceVisit(
       stringOrNull(event.rawPayload.candidateName)
   });
   const sampleCount = Math.max(1, Math.round(numberOrNull(event.rawPayload.sampleCount) ?? 1));
-  const visitCount = Math.max(1, Math.round(numberOrNull(event.rawPayload.visitCount) ?? 1));
+  const evidence = locationLearningEvidenceFromPayload(event.rawPayload);
+  const classification = classifyLocationLearningEvidence(evidence);
+  if (classification.kind !== "place_candidate") return;
+  const visitCount = evidence.visitCount;
   const firstSeenAt = timestampStringOrNull(event.rawPayload.clusterFirstSeenAt) ?? startedAt;
+  const address = normalizedLocationAddress(event.rawPayload.address);
+  const addressName = stringOrNull(address?.name);
+  const poiName = addressName === candidateName ? addressName : null;
+  const formattedAddress = locationAddressSummary(address);
 
   await client.query(
     `insert into learned_places (
@@ -2984,28 +3113,59 @@ async function upsertLearnedPlaceVisit(
         longitude,
         radius_meters,
         visit_count,
+        distinct_day_count,
         sample_count,
+        total_dwell_seconds,
+        longest_dwell_seconds,
+        average_accuracy_meters,
+        max_cluster_spread_meters,
         first_seen_at,
         last_seen_at,
         last_started_at,
         last_stopped_at,
         confidence,
+        classification,
         status,
+        address,
+        poi_name,
+        formatted_address,
+        geocoded_at,
         raw_payload
      )
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $11, $12, 'low', 'candidate', $13::jsonb)
+     values (
+       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+       $16, $17, $16, $17, $18, 'place_candidate', 'candidate', $19::jsonb, $20, $21,
+       case when $19::jsonb is null then null else now() end, $22::jsonb
+     )
      on conflict (workspace_id, user_id, cluster_key)
      do update
-       set name = coalesce(nullif(excluded.name, ''), learned_places.name),
-           latitude = ((learned_places.latitude * learned_places.visit_count) + excluded.latitude) / (learned_places.visit_count + 1),
-           longitude = ((learned_places.longitude * learned_places.visit_count) + excluded.longitude) / (learned_places.visit_count + 1),
+       set name = case
+             when excluded.address is not null or learned_places.address is null then excluded.name
+             else learned_places.name
+           end,
+           latitude = excluded.latitude,
+           longitude = excluded.longitude,
            radius_meters = greatest(learned_places.radius_meters, excluded.radius_meters),
-           visit_count = greatest(learned_places.visit_count + 1, excluded.visit_count),
-           sample_count = learned_places.sample_count + excluded.sample_count,
+           visit_count = greatest(learned_places.visit_count, excluded.visit_count),
+           distinct_day_count = greatest(learned_places.distinct_day_count, excluded.distinct_day_count),
+           sample_count = greatest(learned_places.sample_count, excluded.sample_count),
+           total_dwell_seconds = greatest(learned_places.total_dwell_seconds, excluded.total_dwell_seconds),
+           longest_dwell_seconds = greatest(learned_places.longest_dwell_seconds, excluded.longest_dwell_seconds),
+           average_accuracy_meters = coalesce(excluded.average_accuracy_meters, learned_places.average_accuracy_meters),
+           max_cluster_spread_meters = greatest(
+             coalesce(learned_places.max_cluster_spread_meters, 0),
+             coalesce(excluded.max_cluster_spread_meters, 0)
+           ),
            first_seen_at = least(learned_places.first_seen_at, excluded.first_seen_at),
            last_seen_at = greatest(learned_places.last_seen_at, excluded.last_seen_at),
            last_started_at = excluded.last_started_at,
            last_stopped_at = excluded.last_stopped_at,
+           confidence = excluded.confidence,
+           classification = excluded.classification,
+           address = coalesce(excluded.address, learned_places.address),
+           poi_name = coalesce(excluded.poi_name, learned_places.poi_name),
+           formatted_address = coalesce(excluded.formatted_address, learned_places.formatted_address),
+           geocoded_at = coalesce(excluded.geocoded_at, learned_places.geocoded_at),
            raw_payload = excluded.raw_payload,
            updated_at = now()`,
     [
@@ -3018,9 +3178,18 @@ async function upsertLearnedPlaceVisit(
       longitude,
       radiusMeters,
       visitCount,
+      evidence.distinctDays,
       sampleCount,
+      Math.round(evidence.totalDwellMs / 1000),
+      Math.round(evidence.longestDwellMs / 1000),
+      evidence.averageAccuracyMeters,
+      evidence.maxClusterSpreadMeters,
       firstSeenAt,
       stoppedAt,
+      classification.confidence,
+      address ? JSON.stringify(address) : null,
+      poiName,
+      formattedAddress,
       JSON.stringify(event.rawPayload)
     ]
   );

@@ -25,6 +25,12 @@ export function isCalendarPreviewReviewItem(item: Pick<MobileReviewItem, "eventT
   return item.eventType === "commute_detected";
 }
 
+export function isOneOffLocationReviewItem(
+  item: Pick<MobileReviewItem, "rawPayload">
+) {
+  return item.rawPayload?.evidenceKind === "one_off_activity";
+}
+
 export function hasSuggestedTimeWindow(
   item: Pick<MobileReviewItem, "suggestedStartedAt" | "suggestedStoppedAt">
 ) {
@@ -153,7 +159,11 @@ function fallbackHealthCategory(item: MobileReviewItem, categories: MobileCatego
 }
 
 function reviewItemDraftDescription(item: MobileReviewItem) {
-  if (item.eventType === "commute_detected" || item.eventType === "learned_place_visit") return null;
+  if (
+    item.eventType === "commute_detected" ||
+    item.eventType === "learned_place_visit" ||
+    isOneOffLocationReviewItem(item)
+  ) return null;
   const title = item.title.trim();
   return title || REVIEW_COPY.suggestedActivity;
 }

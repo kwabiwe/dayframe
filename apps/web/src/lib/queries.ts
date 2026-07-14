@@ -66,13 +66,23 @@ export type LearnedPlaceRow = {
   longitude: number;
   radiusMeters: number;
   visitCount: number;
+  distinctDayCount: number;
   sampleCount: number;
+  totalDwellSeconds: number;
+  longestDwellSeconds: number;
+  averageAccuracyMeters: number | null;
+  maxClusterSpreadMeters: number | null;
   firstSeenAt: string;
   lastSeenAt: string;
   lastStartedAt: string | null;
   lastStoppedAt: string | null;
   confidence: string;
+  classification: "place_candidate" | "one_off_activity" | "noise";
   status: "candidate" | "accepted" | "ignored";
+  address: Record<string, unknown> | null;
+  poiName: string | null;
+  formattedAddress: string | null;
+  geocodedAt: string | null;
   rawPayload: Record<string, unknown> | null;
 };
 
@@ -455,24 +465,43 @@ async function getLearnedPlaces(session: RequestSession, limit = 10) {
               longitude,
               radius_meters as "radiusMeters",
               visit_count as "visitCount",
+              distinct_day_count as "distinctDayCount",
               sample_count as "sampleCount",
+              total_dwell_seconds as "totalDwellSeconds",
+              longest_dwell_seconds as "longestDwellSeconds",
+              average_accuracy_meters as "averageAccuracyMeters",
+              max_cluster_spread_meters as "maxClusterSpreadMeters",
               first_seen_at as "firstSeenAt",
               last_seen_at as "lastSeenAt",
               last_started_at as "lastStartedAt",
               last_stopped_at as "lastStoppedAt",
               confidence,
+              classification,
               status,
+              address,
+              poi_name as "poiName",
+              formatted_address as "formattedAddress",
+              geocoded_at as "geocodedAt",
               raw_payload as "rawPayload"
        from learned_places
        where workspace_id = $1
          and user_id = $2
          and status = 'candidate'
+         and classification = 'place_candidate'
        order by visit_count desc, last_seen_at desc, sample_count desc, name
        limit $3`,
       [session.workspaceId, session.userId, limit]
     );
     return result.rows;
   } catch (error) {
+    if (isUndefinedColumnError(error, "classification")) {
+      throw missingRequiredColumnError(
+        "learned_places",
+        "classification",
+        "supabase/migrations/202607140001_location_learning_intelligence.sql",
+        error
+      );
+    }
     if (isUndefinedTableError(error, "learned_places")) {
       throw databaseReadinessError(
         "Database schema is missing public.learned_places. Run supabase/migrations/202607120002_location_learning.sql before viewing learned places.",

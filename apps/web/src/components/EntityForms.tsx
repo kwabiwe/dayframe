@@ -752,8 +752,9 @@ function formNumber(value: FormDataEntryValue | null) {
 
 function formatLearnedPlaceMeta(learnedPlace: LearnedPlaceRow) {
   const visits = learnedPlace.visitCount === 1 ? "1 visit" : `${learnedPlace.visitCount} visits`;
+  const days = learnedPlace.distinctDayCount === 1 ? "1 day" : `${learnedPlace.distinctDayCount} days`;
   const samples = learnedPlace.sampleCount === 1 ? "1 sample" : `${learnedPlace.sampleCount} samples`;
-  return `${visits} · ${samples} · ${learnedPlace.radiusMeters}m radius · Last seen ${formatShortDate(learnedPlace.lastSeenAt)}`;
+  return `${visits} across ${days} · ${samples} · Last seen ${formatShortDate(learnedPlace.lastSeenAt)}`;
 }
 
 function formatShortDate(value: string) {

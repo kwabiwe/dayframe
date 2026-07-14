@@ -6,7 +6,8 @@ import {
   type ActivityEventType,
   type EventSource,
   type HealthAutoLogMappings,
-  type HealthImportPreferences
+  type HealthImportPreferences,
+  type LocationDisplayAddress
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
 
@@ -117,13 +118,23 @@ export type MobileBootstrap = {
     longitude: number;
     radiusMeters: number;
     visitCount: number;
+    distinctDayCount: number;
     sampleCount: number;
+    totalDwellSeconds: number;
+    longestDwellSeconds: number;
+    averageAccuracyMeters: number | null;
+    maxClusterSpreadMeters: number | null;
     firstSeenAt: string;
     lastSeenAt: string;
     lastStartedAt: string | null;
     lastStoppedAt: string | null;
     confidence: string;
+    classification: "place_candidate" | "one_off_activity" | "noise";
     status: "candidate" | "accepted" | "ignored";
+    address: Record<string, unknown> | null;
+    poiName: string | null;
+    formattedAddress: string | null;
+    geocodedAt: string | null;
     rawPayload: Record<string, unknown> | null;
   }>;
   reviewItems: MobileReviewItem[];
@@ -800,6 +811,29 @@ export async function ignoreLearnedPlace(id: string) {
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to ignore learned place"));
   return readApiJson<{ ok: true; id: string; status: "ignored" }>(response, "Unable to ignore learned place");
+}
+
+export async function resolveLearnedPlaceLocation(id: string, address: LocationDisplayAddress) {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/learned-places`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify({ id, action: "resolve_location", address })
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to resolve learned place"));
+  return readJsonResponse<{
+    ok: true;
+    learnedPlace: Pick<
+      MobileLearnedPlace,
+      "id" | "name" | "address" | "poiName" | "formattedAddress" | "geocodedAt"
+    >;
+  }>(response);
 }
 
 export async function forgetLearnedPlace(id: string) {

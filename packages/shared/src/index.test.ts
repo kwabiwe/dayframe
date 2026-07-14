@@ -3,6 +3,7 @@ import {
   applyActivityEvent,
   automationRuleInputFromDraft,
   calendarBlockContinuationEdges,
+  classifyLocationLearningEvidence,
   draftAutomationRuleFromText,
   healthAutoLogMappingFor,
   healthWorkoutLabel,
@@ -14,6 +15,64 @@ import {
   type NormalizationContext,
   type TimelineState
 } from "./index";
+
+describe("location learning classification", () => {
+  it("ignores a weak pass-through cluster", () => {
+    expect(classifyLocationLearningEvidence({
+      visitCount: 1,
+      distinctDays: 1,
+      sampleCount: 3,
+      totalDwellMs: 12 * 60_000,
+      longestDwellMs: 12 * 60_000,
+      currentDwellMs: 12 * 60_000,
+      currentVisitSampleCount: 3,
+      averageAccuracyMeters: 35,
+      maxClusterSpreadMeters: 45
+    })).toMatchObject({ kind: "noise", confidence: "hint" });
+  });
+
+  it("classifies a single long dwell as a one-off activity", () => {
+    expect(classifyLocationLearningEvidence({
+      visitCount: 1,
+      distinctDays: 1,
+      sampleCount: 5,
+      totalDwellMs: 75 * 60_000,
+      longestDwellMs: 75 * 60_000,
+      currentDwellMs: 75 * 60_000,
+      currentVisitSampleCount: 5,
+      averageAccuracyMeters: 30,
+      maxClusterSpreadMeters: 35
+    })).toMatchObject({ kind: "one_off_activity", confidence: "low" });
+  });
+
+  it("classifies repeated stable visits as a saveable place candidate", () => {
+    expect(classifyLocationLearningEvidence({
+      visitCount: 2,
+      distinctDays: 2,
+      sampleCount: 6,
+      totalDwellMs: 49 * 60_000,
+      longestDwellMs: 25 * 60_000,
+      currentDwellMs: 25 * 60_000,
+      currentVisitSampleCount: 3,
+      averageAccuracyMeters: 35,
+      maxClusterSpreadMeters: 40
+    })).toMatchObject({ kind: "place_candidate", confidence: "medium" });
+  });
+
+  it("never classifies one visit as a regular place", () => {
+    expect(classifyLocationLearningEvidence({
+      visitCount: 1,
+      distinctDays: 1,
+      sampleCount: 10,
+      totalDwellMs: 4 * 60 * 60_000,
+      longestDwellMs: 4 * 60 * 60_000,
+      currentDwellMs: 4 * 60 * 60_000,
+      currentVisitSampleCount: 10,
+      averageAccuracyMeters: 20,
+      maxClusterSpreadMeters: 20
+    }).kind).toBe("one_off_activity");
+  });
+});
 
 const context: NormalizationContext = {
   projects: [],

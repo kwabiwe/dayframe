@@ -10,14 +10,11 @@ import {
   View
 } from "react-native";
 import * as Location from "expo-location";
+import * as Clipboard from "expo-clipboard";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
-import {
-  formatLocationCoordinates,
-  locationAddressSummary,
-  paletteColorFor
-} from "@dayframe/shared";
+import { paletteColorFor } from "@dayframe/shared";
 import {
   AuthRequiredError,
   createPlace,
@@ -31,6 +28,11 @@ import {
   type MobilePlace
 } from "@/lib/api";
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
+import { backfillLearnedPlaceLocations } from "@/lib/locationGeocoding";
+import {
+  copyLearnedPlaceDetail,
+  learnedPlaceDetailValues
+} from "@/lib/learnedPlaces";
 import {
   DEFAULT_PLACE_RADIUS_METERS,
   foregroundLocationPermissionGuidance,
@@ -82,6 +84,10 @@ export default function PlacesScreen() {
     try {
       const bootstrap = await fetchBootstrap();
       setData(bootstrap);
+      void backfillLearnedPlaceLocations(bootstrap.learnedPlaces ?? []).then((resolved) => {
+        if (resolved.length === 0) return;
+        setData((current) => current ? mergeLearnedPlaceResolutions(current, resolved) : current);
+      });
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         router.replace("/");
@@ -415,7 +421,9 @@ export default function PlacesScreen() {
   }
 
   const places = data?.places ?? [];
-  const learnedPlaces = data?.learnedPlaces ?? [];
+  const learnedPlaces = (data?.learnedPlaces ?? []).filter(
+    (learnedPlace) => learnedPlace.classification === "place_candidate"
+  );
   const categories = data?.categories ?? [];
   const createWarning = formMode?.type === "create"
     ? locationAccuracyWarning(locationAccuracy, locationPrecise)
@@ -625,6 +633,7 @@ export default function PlacesScreen() {
             )}
             <View style={styles.settingsDivider} />
             <Text style={styles.sectionTitle}>Learned places</Text>
+            <Text style={styles.muted}>Place suggestions require repeat visits on different days and stable location evidence.</Text>
             {learnedPlaces.length > 0 ? (
               <View style={styles.placeList}>
                 {learnedPlaces.map((learnedPlace) => (
@@ -742,23 +751,24 @@ function LearnedPlaceRow({
   theme: MobileTheme;
   styles: MobileStyles;
 }) {
+  const displayName = learnedPlace.name;
   return (
     <Pressable
-      accessibilityLabel={`Open learned place ${learnedPlace.name}`}
+      accessibilityLabel={`Open place suggestion ${displayName}`}
       accessibilityRole="button"
       style={pressable(styles.placeRow, styles.buttonPressed)}
       onPress={onOpen}
     >
       <MapPinGlyph color={theme.textSecondary} />
       <View style={styles.placeTextStack}>
-        <Text style={styles.placeName} numberOfLines={2}>{learnedPlace.name}</Text>
+        <Text style={styles.placeName} numberOfLines={2}>{displayName}</Text>
         <Text style={styles.placeMeta} numberOfLines={2}>
           {formatLearnedPlaceMeta(learnedPlace)}
         </Text>
       </View>
       <View style={styles.placeActions}>
         <Pressable
-          accessibilityLabel={`Save ${learnedPlace.name} as a place`}
+          accessibilityLabel={`Save ${displayName} as a place`}
           accessibilityRole="button"
           style={pressable(styles.learnedPlaceSaveButton, styles.buttonPressed)}
           onPress={onSave}
@@ -766,7 +776,7 @@ function LearnedPlaceRow({
           <Text style={styles.learnedPlaceSaveButtonText}>Save</Text>
         </Pressable>
         <Pressable
-          accessibilityLabel={`Ignore ${learnedPlace.name}`}
+          accessibilityLabel={`Ignore ${displayName}`}
           accessibilityRole="button"
           disabled={ignoring}
           style={({ pressed }) => [
@@ -808,12 +818,24 @@ function LearnedPlaceDetailSheet({
   styles: MobileStyles;
   theme: MobileTheme;
 }) {
+  const [copyToast, setCopyToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCopyToast(null);
+  }, [learnedPlace?.id]);
+
   if (!learnedPlace) return null;
 
-  const address = locationAddressSummary(learnedPlace.rawPayload?.address);
-  const coordinates = formatLocationCoordinates(learnedPlace.latitude, learnedPlace.longitude, 6);
+  const details = learnedPlaceDetailValues(learnedPlace);
   const associatedCategory = learnedPlaceCategoryLabel(learnedPlace, categories);
   const disabled = ignoring || forgetting;
+
+  async function copyDetail(label: string, value: string | null) {
+    const copied = await copyLearnedPlaceDetail(value, Clipboard.setStringAsync);
+    if (!copied) return;
+    setCopyToast(`${label} copied`);
+    setTimeout(() => setCopyToast(null), 2_000);
+  }
 
   return (
     <Modal animationType="slide" onRequestClose={onClose} transparent visible>
@@ -830,20 +852,34 @@ function LearnedPlaceDetailSheet({
             >
               <CloseGlyph color={theme.accent} />
             </Pressable>
-            <Text style={styles.sheetTitle} numberOfLines={2}>Learned place</Text>
+            <Text style={styles.sheetTitle} numberOfLines={2}>Place suggestion</Text>
             <View style={styles.sheetHeaderSpacer} />
           </View>
 
           <ScrollView style={styles.activeEditScroller} contentContainerStyle={styles.activeEditContent}>
-            <Text style={styles.sectionTitle}>{learnedPlace.name}</Text>
+            <Text style={styles.sectionTitle}>{details.name}</Text>
             <Text style={styles.muted}>
-              Learned-only candidates are not saved places until you save them. Ignore hides this suggestion; Forget deletes the candidate.
+              Repeat visits suggest this may be worth saving. It remains unsaved until you choose Save place.
             </Text>
 
             <View style={styles.accountList}>
-              <LearnedPlaceDetailRow label="Resolved name" value={learnedPlace.name} styles={styles} />
-              <LearnedPlaceDetailRow label="Address/postcode" value={address ?? "Not resolved"} styles={styles} />
-              <LearnedPlaceDetailRow label="Coordinates" value={coordinates ?? "Unavailable"} styles={styles} />
+              <LearnedPlaceDetailRow label="Resolved name / POI" value={details.name} styles={styles} />
+              <LearnedPlaceDetailRow
+                copyLabel="address"
+                label="Address/postcode"
+                onCopy={details.address ? () => void copyDetail("Address", details.address) : undefined}
+                value={details.address ?? "Not resolved"}
+                styles={styles}
+                theme={theme}
+              />
+              <LearnedPlaceDetailRow
+                copyLabel="coordinates"
+                label="Coordinates"
+                onCopy={details.coordinates ? () => void copyDetail("Coordinates", details.coordinates) : undefined}
+                value={details.coordinates ?? "Unavailable"}
+                styles={styles}
+                theme={theme}
+              />
               <LearnedPlaceDetailRow
                 label="Detected visits"
                 value={`${learnedPlace.visitCount} ${learnedPlace.visitCount === 1 ? "visit" : "visits"}`}
@@ -854,11 +890,27 @@ function LearnedPlaceDetailSheet({
                 value={`${learnedPlace.sampleCount} ${learnedPlace.sampleCount === 1 ? "sample" : "samples"}`}
                 styles={styles}
               />
+              <LearnedPlaceDetailRow
+                label="Distinct days"
+                value={`${learnedPlace.distinctDayCount} ${learnedPlace.distinctDayCount === 1 ? "day" : "days"}`}
+                styles={styles}
+              />
+              <LearnedPlaceDetailRow
+                label="Dwell evidence"
+                value={`${formatDwell(learnedPlace.totalDwellSeconds)} total · ${formatDwell(learnedPlace.longestDwellSeconds)} longest stay`}
+                styles={styles}
+              />
               <LearnedPlaceDetailRow label="Last seen" value={formatShortDateTime(learnedPlace.lastSeenAt)} styles={styles} />
               <LearnedPlaceDetailRow label="Learned radius" value={`${learnedPlace.radiusMeters}m`} styles={styles} />
               <LearnedPlaceDetailRow label="Category/activity" value={associatedCategory} styles={styles} />
-              <LearnedPlaceDetailRow label="Status" value="Learned-only candidate" styles={styles} />
+              <LearnedPlaceDetailRow label="Status" value="Place suggestion · Not saved" styles={styles} />
             </View>
+
+            {copyToast ? (
+              <View accessibilityLiveRegion="polite" style={styles.copyToast}>
+                <Text style={styles.copyToastText}>{copyToast}</Text>
+              </View>
+            ) : null}
 
             <View style={styles.buttonRow}>
               <Pressable
@@ -910,17 +962,37 @@ function LearnedPlaceDetailSheet({
 }
 
 function LearnedPlaceDetailRow({
+  copyLabel,
   label,
+  onCopy,
   value,
-  styles
+  styles,
+  theme
 }: {
+  copyLabel?: string;
   label: string;
+  onCopy?: () => void;
   value: string;
   styles: MobileStyles;
+  theme?: MobileTheme;
 }) {
   return (
     <View style={styles.accountRow}>
-      <Text style={styles.label}>{label}</Text>
+      <View style={styles.learnedPlaceDetailHeader}>
+        <Text style={styles.label}>{label}</Text>
+        {onCopy && theme ? (
+          <Pressable
+            accessibilityLabel={`Copy ${copyLabel ?? label}`}
+            accessibilityRole="button"
+            hitSlop={6}
+            style={pressable(styles.learnedPlaceCopyButton, styles.buttonPressed)}
+            onPress={onCopy}
+          >
+            <CopyGlyph color={theme.accent} />
+            <Text style={styles.learnedPlaceCopyText}>Copy</Text>
+          </Pressable>
+        ) : null}
+      </View>
       <Text style={styles.accountValue} numberOfLines={3}>{value}</Text>
     </View>
   );
@@ -994,6 +1066,23 @@ function reconcileBootstrapPlaces(
   return { ...data, places, learnedPlaces };
 }
 
+function mergeLearnedPlaceResolutions(
+  data: MobileBootstrap,
+  resolved: Array<Pick<
+    MobileLearnedPlace,
+    "id" | "name" | "address" | "poiName" | "formattedAddress" | "geocodedAt"
+  >>
+): MobileBootstrap {
+  const byId = new Map(resolved.map((learnedPlace) => [learnedPlace.id, learnedPlace]));
+  return {
+    ...data,
+    learnedPlaces: (data.learnedPlaces ?? []).map((learnedPlace) => {
+      const resolution = byId.get(learnedPlace.id);
+      return resolution ? { ...learnedPlace, ...resolution } : learnedPlace;
+    })
+  };
+}
+
 function sortPlaces(places: MobilePlace[]) {
   return [...places].sort((left, right) => {
     const priorityDelta = (right.priority ?? 0) - (left.priority ?? 0);
@@ -1004,9 +1093,18 @@ function sortPlaces(places: MobilePlace[]) {
 
 function formatLearnedPlaceMeta(learnedPlace: MobileLearnedPlace) {
   const visits = learnedPlace.visitCount === 1 ? "1 visit" : `${learnedPlace.visitCount} visits`;
+  const days = learnedPlace.distinctDayCount === 1 ? "1 day" : `${learnedPlace.distinctDayCount} days`;
   const samples = learnedPlace.sampleCount === 1 ? "1 sample" : `${learnedPlace.sampleCount} samples`;
   const lastSeen = formatShortDateTime(learnedPlace.lastSeenAt);
-  return `${visits} · ${samples} · ${learnedPlace.radiusMeters}m radius · Last seen ${lastSeen}`;
+  return `${visits} across ${days} · ${samples} · Last seen ${lastSeen}`;
+}
+
+function formatDwell(seconds: number) {
+  const minutes = Math.max(0, Math.round(Number(seconds) / 60));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return remainder > 0 ? `${hours}h ${remainder}m` : `${hours}h`;
 }
 
 function learnedPlaceCategoryLabel(learnedPlace: MobileLearnedPlace, categories: Category[]) {
@@ -1065,6 +1163,15 @@ function MapPinGlyph({ color }: { color: string }) {
     <Svg width={18} height={18} viewBox="0 0 24 24">
       <Path d="M12 21s7-5.2 7-12a7 7 0 0 0-14 0c0 6.8 7 12 7 12Z" fill="none" stroke={color} strokeLinejoin="round" strokeWidth={2} />
       <Path d="M12 12.2a2.4 2.4 0 1 0 0-4.8 2.4 2.4 0 0 0 0 4.8Z" fill="none" stroke={color} strokeWidth={2} />
+    </Svg>
+  );
+}
+
+function CopyGlyph({ color }: { color: string }) {
+  return (
+    <Svg width={15} height={15} viewBox="0 0 24 24">
+      <Path d="M9 9h10v10H9z" fill="none" stroke={color} strokeLinejoin="round" strokeWidth={2} />
+      <Path d="M15 9V5H5v10h4" fill="none" stroke={color} strokeLinejoin="round" strokeWidth={2} />
     </Svg>
   );
 }

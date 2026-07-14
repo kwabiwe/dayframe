@@ -75,6 +75,19 @@ Required checks:
 - Completed entry persistence.
 - No duplicate active timers.
 
+## Location Learning And Places
+
+Required checks when changing background location sampling, learned places, or detected-stay Review behavior:
+
+- Shared classification tests for weak/noise, one-off activity, and repeated place evidence.
+- Mobile geofence and offline queue tests.
+- Web event-service and learned-place route tests.
+- Shared, mobile, and web typechecks.
+- Apply/verify the latest hosted learned-place migration before testing a deployed API.
+- On a physical iPhone, verify weak pass-through samples stay hidden, one long visit appears only in Review, repeated visits can appear under Learned places, and saved-place commute behavior is unchanged.
+- Open the learned-place detail sheet at phone width and verify the address and coordinates copy actions, internal scrolling, close control, and no horizontal overflow.
+- Check that cached geocoding prevents repeated lookups and that a coordinate-only legacy candidate resolves lazily when Apple/Expo returns an address.
+
 ## Calendar And Review UI
 
 Required checks:
