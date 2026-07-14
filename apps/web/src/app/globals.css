@@ -808,11 +808,12 @@ html[data-theme="dark"] .swiss-theme-icon-on-dark {
 }
 
 .swiss-work-input {
+  position: relative;
   display: grid;
   gap: 7px;
 }
 
-.swiss-work-input span {
+.swiss-work-input label {
   color: var(--muted);
   font-size: 15px;
   font-weight: 700;
@@ -1260,25 +1261,30 @@ html[data-theme="dark"] .swiss-theme-icon-on-dark {
 }
 
 .swiss-task-suggestions {
-  grid-column: 1 / -1;
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
   display: grid;
-  gap: 10px;
+  width: min(100%, 560px);
+  max-height: min(332px, calc(100vh - 220px));
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--surface-inset);
-  padding: 10px;
+  box-shadow: 0 14px 36px color-mix(in srgb, var(--shadow-color) 36%, transparent);
+  overflow: hidden;
 }
 
-.swiss-task-suggestions-header,
-.swiss-task-suggestion-actions {
+.swiss-task-suggestions-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  min-height: 42px;
+  border-bottom: 1px solid var(--line);
+  padding: 0 12px;
 }
 
-.swiss-task-suggestions-header span,
-.swiss-task-suggestion-section > span {
+.swiss-task-suggestions-header span {
   color: var(--muted);
   font-size: 12px;
   font-weight: 800;
@@ -1286,91 +1292,76 @@ html[data-theme="dark"] .swiss-theme-icon-on-dark {
   text-transform: uppercase;
 }
 
-.swiss-task-suggestions-header button,
-.swiss-task-suggestion-actions button {
-  min-height: 36px;
-  border: 1px solid var(--control-border);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--foreground);
-  padding: 0 10px;
-  font-size: 12px;
-  font-weight: 800;
+.swiss-task-suggestions-list {
+  display: grid;
+  overflow-y: auto;
 }
 
-.swiss-task-suggestion-section {
+.swiss-task-suggestions-list button {
   display: grid;
-  gap: 6px;
-}
-
-.swiss-task-suggestion-section > div {
-  display: grid;
-  gap: 7px;
-}
-
-.swiss-task-suggestion-section button {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 9px;
-  min-height: 48px;
-  border: 1px solid var(--control-border);
-  border-radius: 9px;
-  background: var(--surface);
+  gap: 10px;
+  min-height: 46px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
   color: var(--foreground);
-  padding: 8px 9px;
+  padding: 8px 12px;
   text-align: left;
 }
 
-.swiss-task-suggestion-section button:hover,
-.swiss-task-suggestion-section button:focus-visible,
-.swiss-task-suggestions-header button:hover,
-.swiss-task-suggestions-header button:focus-visible,
-.swiss-task-suggestion-actions button:hover,
-.swiss-task-suggestion-actions button:focus-visible {
-  border-color: color-mix(in srgb, var(--accent) 46%, var(--line));
+.swiss-task-suggestions-list button:first-child {
+  border-top: 0;
+}
+
+.swiss-task-suggestions-list button:hover,
+.swiss-task-suggestions-list button:focus-visible {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
   outline: none;
 }
 
-.swiss-task-suggestion-section i {
+.swiss-task-suggestions-list i {
   width: 10px;
   height: 10px;
+  display: inline-block;
+  flex: 0 0 auto;
   border: 1px solid color-mix(in srgb, var(--foreground) 18%, transparent);
   border-radius: 999px;
 }
 
-.swiss-task-suggestion-section b,
-.swiss-task-suggestion-section small {
-  display: block;
+.swiss-task-suggestions-list span {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.swiss-task-suggestions-list b,
+.swiss-task-suggestions-list small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.swiss-task-suggestion-section b {
+.swiss-task-suggestions-list b {
   font-size: 13px;
   font-weight: 750;
 }
 
-.swiss-task-suggestion-section small {
-  margin-top: 1px;
+.swiss-task-suggestions-list small {
+  display: inline-flex;
+  min-width: 80px;
+  align-items: center;
+  gap: 5px;
   color: var(--muted);
   font-size: 11px;
   font-weight: 650;
 }
 
-.swiss-task-suggestion-section em {
+.swiss-task-suggestions-list svg {
   color: var(--accent);
-  font-size: 12px;
-  font-style: normal;
-  font-weight: 850;
-}
-
-.swiss-task-suggestions p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 650;
+  justify-self: end;
 }
 
 .swiss-menu-list + .swiss-inline-error {

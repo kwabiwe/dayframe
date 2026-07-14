@@ -212,6 +212,97 @@ describe("recent activity suggestions", () => {
       useCount: 2
     });
   });
+
+  it("caps compact suggestions at six with the newest manual task first and frequent tasks ranked by use", () => {
+    const frequentEntries = Array.from({ length: 5 }, (_, index) => ({
+      categoryId: "focus",
+      categoryName: "Focus",
+      description: "Frequent planning",
+      durationSeconds: 900,
+      eventType: "timer_start",
+      reviewStatus: "confirmed",
+      source: "manual_app",
+      startedAt: `2026-07-0${index + 1}T10:00:00.000Z`,
+      stoppedAt: `2026-07-0${index + 1}T10:15:00.000Z`
+    }));
+    const mediumEntries = Array.from({ length: 3 }, (_, index) => ({
+      categoryId: "admin",
+      categoryName: "Admin",
+      description: "Admin sweep",
+      durationSeconds: 900,
+      eventType: "timer_start",
+      reviewStatus: "confirmed",
+      source: "manual_app",
+      startedAt: `2026-07-0${index + 1}T12:00:00.000Z`,
+      stoppedAt: `2026-07-0${index + 1}T12:15:00.000Z`
+    }));
+
+    const suggestions = buildRecentActivitySuggestions([
+      ...frequentEntries,
+      ...mediumEntries,
+      {
+        categoryId: "family",
+        categoryName: "Family",
+        description: "Newest school run",
+        durationSeconds: 900,
+        eventType: "timer_start",
+        reviewStatus: "confirmed",
+        source: "manual_app",
+        startedAt: "2026-07-14T15:00:00.000Z",
+        stoppedAt: "2026-07-14T15:15:00.000Z"
+      },
+      {
+        categoryId: "misc",
+        categoryName: "Misc",
+        description: "Overflow old",
+        durationSeconds: 900,
+        eventType: "timer_start",
+        reviewStatus: "confirmed",
+        source: "manual_app",
+        startedAt: "2026-06-01T15:00:00.000Z",
+        stoppedAt: "2026-06-01T15:15:00.000Z"
+      },
+      {
+        categoryId: "misc",
+        categoryName: "Misc",
+        description: "One-off notes",
+        durationSeconds: 900,
+        eventType: "timer_start",
+        reviewStatus: "confirmed",
+        source: "manual_app",
+        startedAt: "2026-07-13T15:00:00.000Z",
+        stoppedAt: "2026-07-13T15:15:00.000Z"
+      },
+      {
+        categoryId: "misc",
+        categoryName: "Misc",
+        description: "Another one-off",
+        durationSeconds: 900,
+        eventType: "timer_start",
+        reviewStatus: "confirmed",
+        source: "manual_app",
+        startedAt: "2026-07-12T15:00:00.000Z",
+        stoppedAt: "2026-07-12T15:15:00.000Z"
+      },
+      {
+        categoryId: "misc",
+        categoryName: "Misc",
+        description: "Spare one-off",
+        durationSeconds: 900,
+        eventType: "timer_start",
+        reviewStatus: "confirmed",
+        source: "manual_app",
+        startedAt: "2026-07-11T15:00:00.000Z",
+        stoppedAt: "2026-07-11T15:15:00.000Z"
+      }
+    ], { contextDate: "2026-07-14T16:00:00.000Z" });
+
+    expect(suggestions).toHaveLength(6);
+    expect(suggestions[0].description).toBe("Newest school run");
+    expect(suggestions.findIndex((suggestion) => suggestion.description === "Frequent planning"))
+      .toBeLessThan(suggestions.findIndex((suggestion) => suggestion.description === "Admin sweep"));
+    expect(suggestions.some((suggestion) => suggestion.description === "Overflow old")).toBe(false);
+  });
 });
 
 const context: NormalizationContext = {

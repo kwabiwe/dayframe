@@ -18,7 +18,7 @@ import Svg, { Circle, Defs, G, Path, Pattern, Rect } from "react-native-svg";
 import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from "expo-glass-effect";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { calendarBlockContinuationEdges, paletteColorFor } from "@dayframe/shared";
+import { calendarBlockContinuationEdges, paletteColorFor, type RecentActivitySuggestion } from "@dayframe/shared";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { DayframeBrand } from "@/components/brand";
 import { useKeyboardAccessory, type KeyboardAccessoryField } from "@/components/KeyboardAccessory";
@@ -154,9 +154,9 @@ export default function HomeScreen() {
   const [now, setNow] = useState(() => Date.now());
   const [customDescription, setCustomDescription] = useState("");
   const [startSheetVisible, setStartSheetVisible] = useState(false);
-  const [startSheetSuggesting, setStartSheetSuggesting] = useState(false);
   const [startSheetSaving, setStartSheetSaving] = useState(false);
   const [activeEditVisible, setActiveEditVisible] = useState(false);
+  const [todaySuggestionsVisible, setTodaySuggestionsVisible] = useState(false);
   const [activeEditSaving, setActiveEditSaving] = useState(false);
   const [activeEditStopping, setActiveEditStopping] = useState(false);
   const [activeEditDeleting, setActiveEditDeleting] = useState(false);
@@ -533,9 +533,23 @@ export default function HomeScreen() {
     () => buildReports(data, reportRange, todayKey, now, theme.mode),
     [data, now, reportRange, theme.mode, todayKey]
   );
+  const compactTaskSuggestions = useMemo(
+    () => (data?.taskSuggestions ?? []).slice(0, 6),
+    [data?.taskSuggestions]
+  );
+  const shouldShowTodaySuggestions = Boolean(
+    todaySuggestionsVisible &&
+    data?.activeEntry &&
+    !data.activeEntry.description &&
+    !data.activeEntry.categoryId &&
+    compactTaskSuggestions.length > 0
+  );
 
   useEffect(() => {
-    if (!data?.activeEntry && activeEditVisible) setActiveEditVisible(false);
+    if (!data?.activeEntry && activeEditVisible) {
+      setActiveEditVisible(false);
+      setTodaySuggestionsVisible(false);
+    }
   }, [activeEditVisible, data?.activeEntry]);
 
   useEffect(() => {
@@ -587,15 +601,51 @@ export default function HomeScreen() {
 
   async function startTask(categoryId?: string | null, description = customDescription) {
     if (!data?.activeEntry && !categoryId && !description.trim()) {
-      setStartSheetSuggesting(true);
-      setStartSheetVisible(true);
-      return false;
+      const ok = await startTaskWith({
+        categoryId: null,
+        description: null,
+        startedAt: null
+      });
+      if (ok) {
+        setStartSheetVisible(false);
+        setTodaySuggestionsVisible(true);
+      }
+      return ok;
     }
+    setTodaySuggestionsVisible(false);
     return startTaskWith({
       categoryId: categoryId ?? null,
       description,
       startedAt: null
     });
+  }
+
+  async function applyTodaySuggestion(suggestion: RecentActivitySuggestion) {
+    const activeEntry = data?.activeEntry;
+    if (!activeEntry || activeEditSaving) return;
+    setTodaySuggestionsVisible(false);
+    setActiveEditSaving(true);
+    try {
+      await updateTimeEntry(activeEntry.id, {
+        categoryId: suggestion.categoryId,
+        description: suggestion.description
+      });
+      await load({ silent: true });
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        setAuthState("signedOut");
+        setData(null);
+        return;
+      }
+      Alert.alert(
+        "Timer not saved",
+        isNetworkTimerError(error)
+          ? "Your timer details were not saved. Check your connection and try again."
+          : error instanceof Error ? error.message : "Unable to save this timer."
+      );
+    } finally {
+      setActiveEditSaving(false);
+    }
   }
 
   async function startTaskFromSheet(input: StartTimerSheetInput) {
@@ -1031,7 +1081,10 @@ export default function HomeScreen() {
                 accessibilityLabel={hasLiveActiveTimer ? "Edit running timer" : undefined}
                 accessibilityRole={hasLiveActiveTimer ? "button" : undefined}
                 disabled={!hasLiveActiveTimer}
-                onPress={() => setActiveEditVisible(true)}
+                onPress={() => {
+                  setTodaySuggestionsVisible(false);
+                  setActiveEditVisible(true);
+                }}
                 style={({ pressed }) => [
                   styles.timerPanel,
                   pressed && hasLiveActiveTimer ? styles.buttonPressed : null
@@ -1117,7 +1170,11 @@ export default function HomeScreen() {
                     accessibilityRole="button"
                     style={pressable([styles.textInput, styles.startInput], styles.buttonPressed)}
                     onPress={() => {
-                      setStartSheetSuggesting(false);
+                      setTodaySuggestionsVisible(false);
+                      if (data?.activeEntry) {
+                        setActiveEditVisible(true);
+                        return;
+                      }
                       setStartSheetVisible(true);
                     }}
                   >
@@ -1133,11 +1190,33 @@ export default function HomeScreen() {
                       [styles.playButton, timerActionPending ? styles.buttonDisabled : null],
                       styles.buttonPressed
                     )}
-                    onPress={() => startTask(null)}
+                    onPress={() => {
+                      void startTask(null);
+                    }}
                   >
                     <PlayGlyph color={theme.onAccent} />
                   </Pressable>
                 </View>
+                {shouldShowTodaySuggestions ? (
+                  <View style={styles.taskSuggestionsPanel}>
+                    <Text style={styles.taskSuggestionsTitle}>SUGGESTIONS</Text>
+                    <View style={styles.taskSuggestionsList}>
+                      {compactTaskSuggestions.map((suggestion, index) => (
+                        <TodayTaskSuggestionRow
+                          key={suggestion.key}
+                          disabled={activeEditSaving}
+                          isFirst={index === 0}
+                          onPress={() => {
+                            void applyTodaySuggestion(suggestion);
+                          }}
+                          suggestion={suggestion}
+                          styles={styles}
+                          theme={theme}
+                        />
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
                 <View style={styles.quickActionsBlock}>
                   <Text style={styles.quickActionsLabel}>Quick actions</Text>
                   <ScrollView
@@ -1156,7 +1235,10 @@ export default function HomeScreen() {
                           accessibilityRole="button"
                           accessibilityLabel={`Start ${action.name}`}
                           style={pressable(styles.categoryPillTouch, styles.buttonPressed)}
-                          onPress={() => startTask(action.id, action.description ?? customDescription)}
+                          onPress={() => {
+                            setTodaySuggestionsVisible(false);
+                            void startTask(action.id, action.description ?? customDescription);
+                          }}
                         >
                           <View
                             style={[
@@ -1215,6 +1297,7 @@ export default function HomeScreen() {
               getScrollY={() => mainScrollY.current}
               onGestureLockedChange={setCalendarGestureLocked}
               onOpenActive={() => {
+                setTodaySuggestionsVisible(false);
                 setCalendarEditEntry(null);
                 setActiveEditVisible(true);
               }}
@@ -1262,15 +1345,12 @@ export default function HomeScreen() {
         lastStoppedAt={recentStoppedAt}
         mode="start"
         onCancel={() => {
-          setStartSheetSuggesting(false);
           setStartSheetVisible(false);
         }}
         onStart={startTaskFromSheet}
         saving={startSheetSaving || timerActionPending === "start"}
-        showTaskSuggestions={startSheetSuggesting}
         stopping={false}
         styles={styles}
-        taskSuggestions={data?.taskSuggestions ?? []}
         theme={theme}
         visible={startSheetVisible}
       />
@@ -1279,7 +1359,10 @@ export default function HomeScreen() {
         elapsedSeconds={activeDurationSeconds}
         entry={data?.activeEntry ?? null}
         lastStoppedAt={recentStoppedAt}
-        onCancel={() => setActiveEditVisible(false)}
+        onCancel={() => {
+          setActiveEditVisible(false);
+          setTodaySuggestionsVisible(false);
+        }}
         onDelete={deleteActiveTimer}
         onSave={saveActiveTimerEdit}
         onStop={stopActiveTimer}
@@ -1307,6 +1390,51 @@ export default function HomeScreen() {
         visible={Boolean(calendarEditEntry)}
       />
     </SafeAreaView>
+  );
+}
+
+function TodayTaskSuggestionRow({
+  disabled,
+  isFirst,
+  onPress,
+  suggestion,
+  styles,
+  theme
+}: {
+  disabled: boolean;
+  isFirst: boolean;
+  onPress: () => void;
+  suggestion: RecentActivitySuggestion;
+  styles: MobileStyles;
+  theme: MobileTheme;
+}) {
+  const categoryName = suggestion.categoryName ?? "Uncategorized";
+  const color = paletteColorFor(suggestion.categoryColor ?? null, categoryName, theme.mode);
+
+  return (
+    <Pressable
+      accessibilityLabel={`Use ${suggestion.description} in ${categoryName}`}
+      accessibilityRole="button"
+      disabled={disabled}
+      onPress={onPress}
+      style={pressable(
+        [
+          styles.taskSuggestionRow,
+          !isFirst ? styles.taskSuggestionRowDivider : null,
+          disabled ? styles.buttonDisabled : null
+        ],
+        styles.buttonPressed
+      )}
+    >
+      <View style={styles.taskSuggestionTextStack}>
+        <Text style={styles.taskSuggestionTitle} numberOfLines={1}>{suggestion.description}</Text>
+        <View style={styles.taskSuggestionMetaRow}>
+          <View style={[styles.colorDot, { backgroundColor: color, borderColor: color }]} />
+          <Text style={styles.taskSuggestionMeta} numberOfLines={1}>{categoryName}</Text>
+        </View>
+      </View>
+      <PlayGlyph color={theme.accentText} />
+    </Pressable>
   );
 }
 

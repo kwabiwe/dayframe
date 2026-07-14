@@ -18,7 +18,7 @@ import {
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
-import { paletteColorFor, type RecentActivitySuggestion } from "@dayframe/shared";
+import { paletteColorFor } from "@dayframe/shared";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
 import { editSheetKeyboardLayout, keyboardInsetFromScreenY } from "@/lib/editSheetKeyboard";
 import type { MobileBootstrap, MobileTimeEntry, TimeEntryUpdatePatch } from "@/lib/api";
@@ -47,18 +47,10 @@ type ActiveTimerEditSheetProps = {
   mode?: EditSheetMode;
   deleting?: boolean;
   saving: boolean;
-  showTaskSuggestions?: boolean;
   stopping: boolean;
   styles: MobileStyles;
-  taskSuggestions?: RecentActivitySuggestion[];
   theme: MobileTheme;
   visible: boolean;
-};
-
-const taskSuggestionSectionLabels: Record<RecentActivitySuggestion["section"], string> = {
-  suggested_now: "Suggested now",
-  often_used: "Often used",
-  recent: "Recent"
 };
 
 export function ActiveTimerEditSheet({
@@ -76,10 +68,8 @@ export function ActiveTimerEditSheet({
   onStop,
   deleting = false,
   saving,
-  showTaskSuggestions = false,
   stopping,
   styles,
-  taskSuggestions = [],
   theme,
   visible
 }: ActiveTimerEditSheetProps) {
@@ -94,7 +84,6 @@ export function ActiveTimerEditSheet({
   const [validationError, setValidationError] = useState<string | null>(null);
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [startTimeEdited, setStartTimeEdited] = useState(false);
-  const [taskSuggestionsDismissed, setTaskSuggestionsDismissed] = useState(false);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [pickerStartAt, setPickerStartAt] = useState<Date | null>(null);
   const reduceMotion = useReduceMotionPreference();
@@ -120,7 +109,6 @@ export function ActiveTimerEditSheet({
       setStoppedTimeText("");
       setPickerStartAt(startedAt);
       setStartTimeEdited(false);
-      setTaskSuggestionsDismissed(false);
       setDatePickerOpen(false);
       setValidationError(null);
       return;
@@ -235,20 +223,6 @@ export function ActiveTimerEditSheet({
   const sheetTitle = isStartMode ? "Start task" : isRunningMode ? "Edit timer" : "Edit entry";
   const elapsedLabel = isEntryMode ? "Duration" : null;
   const elapsedText = isStartMode ? "--:--" : formatClockDuration(elapsedPreviewSeconds);
-  const visibleTaskSuggestions = isStartMode &&
-    showTaskSuggestions &&
-    !taskSuggestionsDismissed &&
-    !description.trim() &&
-    !selectedCategoryId;
-  const taskSuggestionSections = useMemo(() => {
-    const order: Array<RecentActivitySuggestion["section"]> = ["suggested_now", "often_used", "recent"];
-    return order
-      .map((section) => ({
-        label: taskSuggestionSectionLabels[section],
-        suggestions: taskSuggestions.filter((suggestion) => suggestion.section === section)
-      }))
-      .filter((section) => section.suggestions.length > 0);
-  }, [taskSuggestions]);
   const keyboardLayout = editSheetKeyboardLayout({
     bottomInset: insets.bottom,
     keyboardInset,
@@ -619,74 +593,6 @@ export function ActiveTimerEditSheet({
                   ) : null}
                 </View>
 
-                {visibleTaskSuggestions ? (
-                  <View style={styles.taskSuggestionsPanel}>
-                    <View style={styles.taskSuggestionsHeader}>
-                      <Text style={styles.taskSuggestionsTitle}>SUGGESTIONS</Text>
-                      <Pressable
-                        accessibilityLabel="Dismiss suggestions"
-                        accessibilityRole="button"
-                        disabled={busy}
-                        onPress={() => setTaskSuggestionsDismissed(true)}
-                        style={pressable(styles.taskSuggestionsDismissButton, styles.buttonPressed)}
-                      >
-                        <Text style={styles.taskSuggestionsDismissText}>Dismiss</Text>
-                      </Pressable>
-                    </View>
-                    {taskSuggestionSections.length > 0 ? (
-                      <View style={styles.taskSuggestionsList}>
-                        {taskSuggestionSections.map((section) => (
-                          <View key={section.label} style={styles.taskSuggestionSection}>
-                            <Text style={styles.taskSuggestionSectionLabel}>{section.label}</Text>
-                            {section.suggestions.map((suggestion) => (
-                              <TaskSuggestionRow
-                                key={suggestion.key}
-                                disabled={busy}
-                                onPress={() => {
-                                  void startFromSheet({
-                                    categoryId: suggestion.categoryId,
-                                    description: suggestion.description
-                                  });
-                                }}
-                                suggestion={suggestion}
-                                styles={styles}
-                                theme={theme}
-                              />
-                            ))}
-                          </View>
-                        ))}
-                      </View>
-                    ) : (
-                      <Text style={styles.taskSuggestionsEmpty}>No manual activity suggestions yet.</Text>
-                    )}
-                    <View style={styles.taskSuggestionsActions}>
-                      <Pressable
-                        accessibilityLabel="Start without details"
-                        accessibilityRole="button"
-                        disabled={busy}
-                        onPress={() => {
-                          void startFromSheet({ categoryId: null, description: null });
-                        }}
-                        style={pressable(styles.taskSuggestionsActionButton, styles.buttonPressed)}
-                      >
-                        <Text style={styles.taskSuggestionsActionText}>Start without details</Text>
-                      </Pressable>
-                      <Pressable
-                        accessibilityLabel="Enter another task"
-                        accessibilityRole="button"
-                        disabled={busy}
-                        onPress={() => {
-                          setTaskSuggestionsDismissed(true);
-                          descriptionInputRef.current?.focus();
-                        }}
-                        style={pressable(styles.taskSuggestionsActionButton, styles.buttonPressed)}
-                      >
-                        <Text style={styles.taskSuggestionsActionText}>Enter another task</Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                ) : null}
-
                 <View style={styles.activeEditSection}>
                   <Text style={styles.activeEditSectionLabel}>Description</Text>
                   <TextInput
@@ -962,43 +868,6 @@ function PickerStepper({
         </Pressable>
       </View>
     </View>
-  );
-}
-
-function TaskSuggestionRow({
-  disabled,
-  onPress,
-  suggestion,
-  styles,
-  theme
-}: {
-  disabled: boolean;
-  onPress: () => void;
-  suggestion: RecentActivitySuggestion;
-  styles: MobileStyles;
-  theme: MobileTheme;
-}) {
-  const categoryName = suggestion.categoryName ?? "Uncategorized";
-  const color = paletteColorFor(suggestion.categoryColor ?? null, categoryName, theme.mode);
-
-  return (
-    <Pressable
-      accessibilityLabel={`Start ${suggestion.description} in ${categoryName}`}
-      accessibilityRole="button"
-      disabled={disabled}
-      onPress={onPress}
-      style={pressable(
-        [styles.taskSuggestionRow, disabled ? styles.buttonDisabled : null],
-        styles.buttonPressed
-      )}
-    >
-      <View style={[styles.colorDot, { backgroundColor: color, borderColor: color }]} />
-      <View style={styles.taskSuggestionTextStack}>
-        <Text style={styles.taskSuggestionTitle} numberOfLines={1}>{suggestion.description}</Text>
-        <Text style={styles.taskSuggestionMeta} numberOfLines={1}>{categoryName}</Text>
-      </View>
-      <Text style={styles.taskSuggestionStartText}>Start</Text>
-    </Pressable>
   );
 }
 
