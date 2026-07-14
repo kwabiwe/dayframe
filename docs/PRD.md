@@ -398,7 +398,7 @@ Deliverables:
 - ✅ Review inbox improvements.
 - ✅ Reports and automation accuracy metrics.
 - ⚠️ Settings for permissions and export exist; deletion/privacy controls still need the next-phase work tracked in `docs/feature-fix-tracker.md`.
-- ✅ Internal TestFlight build workflow is active and verified through `0.1.0 (32)`.
+- ✅ Internal TestFlight build workflow is active and verified through `0.1.0 (34)`.
 
 Validation:
 
