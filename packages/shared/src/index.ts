@@ -607,7 +607,7 @@ export function buildRecentActivitySuggestions(
   entries: RecentActivityEntry[],
   options: { contextDate?: Date | string; limit?: number; minDurationSeconds?: number } = {}
 ): RecentActivitySuggestion[] {
-  const limit = options.limit ?? 4;
+  const limit = options.limit ?? 6;
   const minDurationSeconds = options.minDurationSeconds ?? 60;
   const suggestions = new Map<string, ScoredRecentActivitySuggestion>();
   const contextDate = options.contextDate ? new Date(options.contextDate) : new Date();
@@ -664,15 +664,10 @@ export function buildRecentActivitySuggestions(
     }
   }
 
-  return [...suggestions.values()]
-    .map((suggestion) => scoreRecentActivitySuggestion(suggestion, contextMs))
-    .sort((a, b) =>
-      b.score - a.score ||
-      Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt) ||
-      b.useCount - a.useCount ||
-      a.description.localeCompare(b.description)
-    )
-    .slice(0, limit);
+  const scored = [...suggestions.values()]
+    .map((suggestion) => scoreRecentActivitySuggestion(suggestion, contextMs));
+
+  return compactRecentActivitySuggestionOrder(scored).slice(0, limit);
 }
 
 const manualSuggestionSources = new Set(["manual_app", "mobile_app"]);
@@ -736,6 +731,52 @@ function scoreRecentActivitySuggestion(
     totalSeconds: suggestion.totalSeconds,
     useCount: suggestion.useCount
   };
+}
+
+function compactRecentActivitySuggestionOrder(
+  suggestions: RecentActivitySuggestion[]
+): RecentActivitySuggestion[] {
+  const selected = new Map<string, RecentActivitySuggestion>();
+  const add = (suggestion: RecentActivitySuggestion | undefined) => {
+    if (!suggestion || selected.has(suggestion.key)) return;
+    selected.set(suggestion.key, suggestion);
+  };
+
+  const byRecent = [...suggestions].sort((a, b) =>
+    Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt) ||
+    b.score - a.score ||
+    a.description.localeCompare(b.description)
+  );
+  const byContext = [...suggestions]
+    .filter((suggestion) => suggestion.section === "suggested_now")
+    .sort((a, b) =>
+      b.score - a.score ||
+      Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt) ||
+      b.useCount - a.useCount ||
+      a.description.localeCompare(b.description)
+    );
+  const byFrequency = [...suggestions]
+    .filter((suggestion) => suggestion.useCount >= 2)
+    .sort((a, b) =>
+      b.useCount - a.useCount ||
+      b.totalSeconds - a.totalSeconds ||
+      Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt) ||
+      b.score - a.score ||
+      a.description.localeCompare(b.description)
+    );
+  const byOverall = [...suggestions].sort((a, b) =>
+    b.score - a.score ||
+    Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt) ||
+    b.useCount - a.useCount ||
+    a.description.localeCompare(b.description)
+  );
+
+  add(byRecent[0]);
+  byContext.slice(0, 2).forEach(add);
+  byFrequency.forEach(add);
+  byOverall.forEach(add);
+
+  return [...selected.values()];
 }
 
 function timeOfDayBucket(date: Date) {

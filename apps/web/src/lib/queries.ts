@@ -683,7 +683,7 @@ export async function getTaskSuggestions(session: RequestSession) {
 
   return buildRecentActivitySuggestions(result.rows, {
     contextDate: new Date(),
-    limit: 9,
+    limit: 6,
     minDurationSeconds: 60
   });
 }
