@@ -600,6 +600,9 @@ export function CurrentTimerPanel({
               onFocus={() => {
                 if (!active) setSuggestionsOpen(true);
               }}
+              onClick={() => {
+                if (!active) setSuggestionsOpen(true);
+              }}
               onKeyDown={startTimerFromDescriptionKey}
               placeholder={active ? "Add a task description" : "What are you working on?"}
               aria-label="Task description"

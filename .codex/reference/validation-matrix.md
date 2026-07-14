@@ -74,6 +74,10 @@ Required checks:
 - Offline queue fallback path.
 - Completed entry persistence.
 - No duplicate active timers.
+- Active timer card and running edit sheet use the same exact active-entry timestamp and display the same elapsed seconds.
+- Empty mobile Play creates one timer, then opens the running edit sheet without showing start-state controls.
+- Applying a running-timer suggestion issues one entry update and never another timer-start request.
+- Running-sheet suggestions stay above Description/Category/Start time, cap at six, dismiss outside, and hide when Description receives focus.
 
 ## Location Learning And Places
 

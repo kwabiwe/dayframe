@@ -1543,7 +1543,7 @@ function createStyles(theme: MobileTheme) {
       borderWidth: 1,
       borderColor: theme.border,
       backgroundColor: theme.surfaceInset,
-      borderRadius: 12,
+      borderRadius: 10,
       overflow: "hidden"
     },
     taskSuggestionsTitle: {
@@ -1552,18 +1552,17 @@ function createStyles(theme: MobileTheme) {
       fontSize: 12,
       fontWeight: "800",
       letterSpacing: 0.4,
-      paddingHorizontal: 12,
-      paddingTop: 10,
-      paddingBottom: 9
+      paddingHorizontal: 11,
+      paddingVertical: 8
     },
     taskSuggestionsList: {
       borderTopWidth: 1,
       borderTopColor: theme.border
     },
     taskSuggestionRow: {
-      minHeight: 46,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
+      minHeight: 44,
+      paddingHorizontal: 11,
+      paddingVertical: 6,
       flexDirection: "row",
       alignItems: "center",
       gap: 10
@@ -1592,7 +1591,7 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       gap: 5,
       flexShrink: 2,
-      minWidth: 60
+      minWidth: 0
     },
     taskSuggestionMeta: {
       color: theme.textSecondary,

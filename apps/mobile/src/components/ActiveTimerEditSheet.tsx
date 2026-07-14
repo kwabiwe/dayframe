@@ -4,6 +4,7 @@ import {
   Animated,
   Dimensions,
   Easing,
+  type GestureResponderEvent,
   Keyboard,
   type KeyboardEvent,
   Modal,
@@ -18,11 +19,12 @@ import {
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
-import { paletteColorFor } from "@dayframe/shared";
+import { paletteColorFor, type RecentActivitySuggestion } from "@dayframe/shared";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
 import { editSheetKeyboardLayout, keyboardInsetFromScreenY } from "@/lib/editSheetKeyboard";
 import type { MobileBootstrap, MobileTimeEntry, TimeEntryUpdatePatch } from "@/lib/api";
 import { MOBILE_MOTION, useReduceMotionPreference } from "@/lib/motion";
+import { runningTimerSheetElapsedSeconds } from "@/lib/timerPresentation";
 
 type Category = MobileBootstrap["categories"][number];
 type EditSheetMode = "running" | "entry" | "start";
@@ -41,6 +43,7 @@ type ActiveTimerEditSheetProps = {
   lastStoppedAt: string | null;
   onCancel: () => void;
   onDelete?: (entryId: string) => Promise<boolean>;
+  onApplySuggestion?: (entryId: string, suggestion: RecentActivitySuggestion) => Promise<boolean>;
   onSave?: (entryId: string, patch: TimeEntryUpdatePatch) => Promise<boolean>;
   onStart?: (input: StartTimerInput) => Promise<boolean>;
   onStop?: () => Promise<boolean>;
@@ -49,6 +52,7 @@ type ActiveTimerEditSheetProps = {
   saving: boolean;
   stopping: boolean;
   styles: MobileStyles;
+  suggestions?: RecentActivitySuggestion[];
   theme: MobileTheme;
   visible: boolean;
 };
@@ -63,6 +67,7 @@ export function ActiveTimerEditSheet({
   mode = "running",
   onCancel,
   onDelete,
+  onApplySuggestion,
   onSave,
   onStart,
   onStop,
@@ -70,6 +75,7 @@ export function ActiveTimerEditSheet({
   saving,
   stopping,
   styles,
+  suggestions = [],
   theme,
   visible
 }: ActiveTimerEditSheetProps) {
@@ -86,11 +92,13 @@ export function ActiveTimerEditSheet({
   const [startTimeEdited, setStartTimeEdited] = useState(false);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [pickerStartAt, setPickerStartAt] = useState<Date | null>(null);
+  const [suggestionsVisible, setSuggestionsVisible] = useState(false);
   const reduceMotion = useReduceMotionPreference();
   const dismissDragY = useRef(new Animated.Value(0)).current;
   const keyboardLift = useRef(new Animated.Value(0)).current;
   const descriptionInputRef = useRef<TextInput>(null);
   const timeInputRef = useRef<TextInput>(null);
+  const suggestionsPanelRef = useRef<View>(null);
 
   const entryId = entry?.id ?? null;
   const isStartMode = mode === "start";
@@ -110,6 +118,7 @@ export function ActiveTimerEditSheet({
       setPickerStartAt(startedAt);
       setStartTimeEdited(false);
       setDatePickerOpen(false);
+      setSuggestionsVisible(false);
       setValidationError(null);
       return;
     }
@@ -130,8 +139,14 @@ export function ActiveTimerEditSheet({
     setPickerStartAt(startedAt);
     setStartTimeEdited(false);
     setDatePickerOpen(false);
+    setSuggestionsVisible(
+      isRunningMode &&
+      !entry.description &&
+      !entry.categoryId &&
+      suggestions.length > 0
+    );
     setValidationError(null);
-  }, [entryId, initialCategoryId, initialDescription, isStartMode, visible]);
+  }, [entryId, initialCategoryId, initialDescription, isRunningMode, isStartMode, suggestions.length, visible]);
 
   useEffect(() => {
     if (!visible) {
@@ -208,9 +223,12 @@ export function ActiveTimerEditSheet({
     ? 0
     : isEntryMode && parsedStart.date && parsedStop.date
       ? Math.max(0, Math.floor((parsedStop.date.getTime() - parsedStart.date.getTime()) / 1000))
-      : previewStartAt && previewStartAt.getTime() <= Date.now()
-        ? Math.max(0, Math.floor((Date.now() - previewStartAt.getTime()) / 1000))
-        : elapsedSeconds;
+      : runningTimerSheetElapsedSeconds({
+          activeElapsedSeconds: elapsedSeconds,
+          nowMs: Date.now(),
+          previewStartAt,
+          startTimeEdited
+        });
 
   const busy = saving || stopping || deleting;
   const canStop = isRunningMode && Boolean(onStop);
@@ -308,9 +326,12 @@ export function ActiveTimerEditSheet({
 
     const patch: TimeEntryUpdatePatch = {
       categoryId: selectedCategoryId,
-      description: description.trim() || null,
-      startedAt: parsed.date.toISOString()
+      description: description.trim() || null
     };
+
+    if (!isRunningMode || startTimeEdited) {
+      patch.startedAt = parsed.date.toISOString();
+    }
 
     if (isEntryMode) {
       const stopped = parseLocalDateTime(stoppedDateText, stoppedTimeText);
@@ -363,6 +384,30 @@ export function ActiveTimerEditSheet({
     if (ok) onCancel();
   }
 
+  async function applyRunningSuggestion(suggestion: RecentActivitySuggestion) {
+    if (busy || !entry || !onApplySuggestion) return;
+    const previousDescription = description;
+    const previousCategoryId = selectedCategoryId;
+    setDescription(suggestion.description);
+    setSelectedCategoryId(suggestion.categoryId);
+    setSuggestionsVisible(false);
+    const ok = await onApplySuggestion(entry.id, suggestion);
+    if (!ok) {
+      setDescription(previousDescription);
+      setSelectedCategoryId(previousCategoryId);
+      setSuggestionsVisible(true);
+    }
+  }
+
+  function dismissSuggestionsOnOutsideTouch(event: GestureResponderEvent) {
+    if (!suggestionsVisible) return;
+    const { pageX, pageY } = event.nativeEvent;
+    suggestionsPanelRef.current?.measureInWindow((x, y, width, height) => {
+      const isInside = pageX >= x && pageX <= x + width && pageY >= y && pageY <= y + height;
+      if (!isInside) setSuggestionsVisible(false);
+    });
+  }
+
   function confirmDeleteEntry() {
     if (busy || !onDelete) return;
     Alert.alert(
@@ -393,19 +438,20 @@ export function ActiveTimerEditSheet({
     setDateText(formatDateInput(stoppedAt));
     setTimeText(formatTimeInput(stoppedAt));
     setPickerStartAt(stoppedAt);
-    if (isStartMode) setStartTimeEdited(true);
+    if (!isEntryMode) setStartTimeEdited(true);
     setDatePickerOpen(false);
     setValidationError(null);
   }
 
   function updateTimeText(value: string) {
-    if (isStartMode) setStartTimeEdited(true);
+    if (!isEntryMode) setStartTimeEdited(true);
     setTimeText(formatEditableTime(value));
     setValidationError(null);
   }
 
   function focusDescriptionField() {
     setDatePickerOpen(false);
+    setSuggestionsVisible(false);
   }
 
   function updateStoppedDateText(value: string) {
@@ -438,7 +484,7 @@ export function ActiveTimerEditSheet({
       return;
     }
     setDateText(formatDateInput(pickerStartAt));
-    if (isStartMode) setStartTimeEdited(true);
+    if (!isEntryMode) setStartTimeEdited(true);
     setDatePickerOpen(false);
     setValidationError(null);
   }
@@ -548,6 +594,7 @@ export function ActiveTimerEditSheet({
                 ]}
                 keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
                 keyboardShouldPersistTaps="always"
+                onTouchStart={dismissSuggestionsOnOutsideTouch}
                 showsVerticalScrollIndicator={false}
                 style={[
                   styles.activeEditScroller,
@@ -592,6 +639,31 @@ export function ActiveTimerEditSheet({
                     </Pressable>
                   ) : null}
                 </View>
+
+                {suggestionsVisible ? (
+                  <View
+                    ref={suggestionsPanelRef}
+                    accessibilityLabel="Suggestions for this running timer"
+                    style={styles.taskSuggestionsPanel}
+                  >
+                    <Text style={styles.taskSuggestionsTitle}>SUGGESTIONS</Text>
+                    <View style={styles.taskSuggestionsList}>
+                      {suggestions.slice(0, 6).map((suggestion, index) => (
+                        <RunningTimerSuggestionRow
+                          key={suggestion.key}
+                          disabled={busy}
+                          isFirst={index === 0}
+                          onPress={() => {
+                            void applyRunningSuggestion(suggestion);
+                          }}
+                          suggestion={suggestion}
+                          styles={styles}
+                          theme={theme}
+                        />
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
 
                 <View style={styles.activeEditSection}>
                   <Text style={styles.activeEditSectionLabel}>Description</Text>
@@ -811,6 +883,56 @@ export function ActiveTimerEditSheet({
         </View>
       </View>
     </Modal>
+  );
+}
+
+function RunningTimerSuggestionRow({
+  disabled,
+  isFirst,
+  onPress,
+  suggestion,
+  styles,
+  theme
+}: {
+  disabled: boolean;
+  isFirst: boolean;
+  onPress: () => void;
+  suggestion: RecentActivitySuggestion;
+  styles: MobileStyles;
+  theme: MobileTheme;
+}) {
+  const categoryName = suggestion.categoryName;
+  const color = categoryName
+    ? paletteColorFor(suggestion.categoryColor ?? null, categoryName, theme.mode)
+    : null;
+
+  return (
+    <Pressable
+      accessibilityLabel={categoryName
+        ? `Apply ${suggestion.description} in ${categoryName} to this timer`
+        : `Apply ${suggestion.description} to this timer`}
+      accessibilityRole="button"
+      disabled={disabled}
+      onPress={onPress}
+      style={pressable(
+        [
+          styles.taskSuggestionRow,
+          !isFirst ? styles.taskSuggestionRowDivider : null,
+          disabled ? styles.buttonDisabled : null
+        ],
+        styles.buttonPressed
+      )}
+    >
+      <View style={styles.taskSuggestionTextStack}>
+        <Text style={styles.taskSuggestionTitle} numberOfLines={1}>{suggestion.description}</Text>
+        {categoryName && color ? (
+          <View style={styles.taskSuggestionMetaRow}>
+            <View style={[styles.colorDot, { backgroundColor: color, borderColor: color }]} />
+            <Text style={styles.taskSuggestionMeta} numberOfLines={1}>{categoryName}</Text>
+          </View>
+        ) : null}
+      </View>
+    </Pressable>
   );
 }
 

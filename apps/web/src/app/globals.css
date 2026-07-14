@@ -1262,12 +1262,12 @@ html[data-theme="dark"] .swiss-theme-icon-on-dark {
 
 .swiss-task-suggestions {
   position: absolute;
-  top: calc(100% + 8px);
+  top: calc(100% + 6px);
   left: 0;
   z-index: 20;
   display: grid;
-  width: min(100%, 560px);
-  max-height: min(332px, calc(100vh - 220px));
+  width: min(100%, 440px);
+  max-height: min(308px, calc(100vh - 220px));
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--surface-inset);
@@ -1279,7 +1279,7 @@ html[data-theme="dark"] .swiss-theme-icon-on-dark {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 42px;
+  min-height: 36px;
   border-bottom: 1px solid var(--line);
   padding: 0 12px;
 }
@@ -1302,12 +1302,13 @@ html[data-theme="dark"] .swiss-theme-icon-on-dark {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  min-height: 46px;
+  min-height: 44px;
   border: 0;
   border-top: 1px solid var(--line);
+  border-radius: 0;
   background: transparent;
   color: var(--foreground);
-  padding: 8px 12px;
+  padding: 6px 11px;
   text-align: left;
 }
 
