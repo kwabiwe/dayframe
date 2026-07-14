@@ -24,8 +24,6 @@ export type ThemePreference = ThemeMode | "system";
 export type MobileTheme = DayframeTheme & {
   mode: ThemeMode;
   pressed: string;
-  glassTint: string;
-  glassFallback: string;
 };
 export type MobileStyles = ReturnType<typeof createStyles>;
 
@@ -108,9 +106,7 @@ export function createMobileTheme(mode: ThemeMode): MobileTheme {
   return {
     ...base,
     mode,
-    pressed: base.accentPressed,
-    glassTint: withAlpha(base.surfaceRaised, mode === "dark" ? 0.76 : 0.72),
-    glassFallback: withAlpha(base.surfaceRaised, mode === "dark" ? 0.94 : 0.96)
+    pressed: base.accentPressed
   };
 }
 
@@ -123,16 +119,6 @@ export function pressable(baseStyle: StyleProp<ViewStyle>, pressedStyle: StylePr
 
 function isThemePreference(value: string | null): value is ThemePreference {
   return value === "system" || value === "light" || value === "dark";
-}
-
-function withAlpha(hex: string, alpha: number) {
-  const match = /^#?([0-9a-f]{6})$/i.exec(hex);
-  if (!match) return hex;
-  const value = match[1];
-  const red = Number.parseInt(value.slice(0, 2), 16);
-  const green = Number.parseInt(value.slice(2, 4), 16);
-  const blue = Number.parseInt(value.slice(4, 6), 16);
-  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }
 
 function createStyles(theme: MobileTheme) {
@@ -250,66 +236,6 @@ function createStyles(theme: MobileTheme) {
       borderRadius: 14,
       alignItems: "center",
       justifyContent: "center"
-    },
-    floatingTabBarWrap: {
-      position: "absolute",
-      left: 16,
-      right: 16,
-      alignItems: "center"
-    },
-    floatingTabBarShell: {
-      width: "100%",
-      maxWidth: 420,
-      minHeight: 72,
-      borderRadius: 28,
-      shadowColor: theme.shadow,
-      shadowOpacity: 1,
-      shadowRadius: theme.mode === "dark" ? 20 : 16,
-      shadowOffset: { width: 0, height: 12 },
-      elevation: 8
-    },
-    floatingTabBarGlass: {
-      minHeight: 72,
-      borderWidth: 1,
-      borderColor: theme.border,
-      borderRadius: 28,
-      padding: 6,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 4,
-      overflow: "hidden"
-    },
-    floatingTabBarFallback: {
-      minHeight: 72,
-      borderWidth: 1,
-      borderColor: theme.border,
-      backgroundColor: theme.glassFallback,
-      borderRadius: 28,
-      padding: 6,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 4,
-      overflow: "hidden"
-    },
-    floatingTabButton: {
-      flex: 1,
-      minHeight: 58,
-      borderRadius: 22,
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 3
-    },
-    floatingTabButtonSelected: {
-      backgroundColor: theme.accentSoft
-    },
-    floatingTabLabel: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 11,
-      fontWeight: "800"
-    },
-    floatingTabLabelSelected: {
-      color: theme.accentText
     },
     title: {
       fontSize: 30,
