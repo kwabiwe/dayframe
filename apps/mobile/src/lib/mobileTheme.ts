@@ -1447,11 +1447,14 @@ function createStyles(theme: MobileTheme) {
       backgroundColor: theme.borderStrong
     },
     sheetHeader: {
-      minHeight: 56,
+      minHeight: 42,
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
       gap: 12
+    },
+    sheetHeaderCentered: {
+      justifyContent: "center"
     },
     sheetTitle: {
       flex: 1,
@@ -1459,6 +1462,10 @@ function createStyles(theme: MobileTheme) {
       fontFamily: monoFont,
       fontSize: 16,
       fontWeight: "800",
+      textAlign: "left"
+    },
+    sheetTitleCentered: {
+      flex: 0,
       textAlign: "center"
     },
     sheetIconButton: {
@@ -1485,6 +1492,34 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       justifyContent: "center"
     },
+    sheetDoneButton: {
+      minHeight: 36,
+      borderWidth: 1,
+      borderColor: theme.controlBorder,
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 999,
+      paddingHorizontal: 16,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    sheetDoneText: {
+      color: theme.accentText,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "800"
+    },
+    sheetProgressSlot: {
+      height: 3,
+      borderRadius: 999,
+      backgroundColor: theme.mode === "dark" ? "rgba(255,255,255,0.06)" : "rgba(8,14,24,0.08)",
+      overflow: "hidden"
+    },
+    sheetProgressFill: {
+      width: 118,
+      height: "100%",
+      borderRadius: 999,
+      backgroundColor: theme.accent
+    },
     activeEditScroller: {
       flexShrink: 1,
       minHeight: 0
@@ -1494,7 +1529,7 @@ function createStyles(theme: MobileTheme) {
       minHeight: 0
     },
     activeEditContent: {
-      gap: 12,
+      gap: 10,
       paddingBottom: 8
     },
     activeEditDeleteButton: {
@@ -1515,7 +1550,7 @@ function createStyles(theme: MobileTheme) {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
-      gap: 14
+      gap: 12
     },
     activeEditElapsedStack: {
       flex: 1,
@@ -1524,7 +1559,7 @@ function createStyles(theme: MobileTheme) {
     activeEditElapsed: {
       color: theme.accentText,
       fontFamily: monoFont,
-      fontSize: 40,
+      fontSize: 36,
       fontWeight: "800",
       fontVariant: ["tabular-nums"]
     },
@@ -1553,20 +1588,20 @@ function createStyles(theme: MobileTheme) {
     taskSuggestionsTitle: {
       color: theme.textSecondary,
       fontFamily: monoFont,
-      fontSize: 12,
+      fontSize: 11,
       fontWeight: "800",
       letterSpacing: 0.4,
-      paddingHorizontal: 11,
-      paddingVertical: 8
+      paddingHorizontal: 10,
+      paddingVertical: 6
     },
     taskSuggestionsList: {
       borderTopWidth: 1,
       borderTopColor: theme.border
     },
     taskSuggestionRow: {
-      minHeight: 44,
-      paddingHorizontal: 11,
-      paddingVertical: 6,
+      minHeight: 38,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
       flexDirection: "row",
       alignItems: "center",
       gap: 10
@@ -1585,7 +1620,7 @@ function createStyles(theme: MobileTheme) {
     taskSuggestionTitle: {
       color: theme.textPrimary,
       fontFamily: monoFont,
-      fontSize: 13,
+      fontSize: 12,
       fontWeight: "800",
       flexShrink: 1,
       minWidth: 0
@@ -1605,7 +1640,7 @@ function createStyles(theme: MobileTheme) {
       flexShrink: 1
     },
     activeEditDescriptionInput: {
-      minHeight: 52
+      minHeight: 48
     },
     activeEditCategoryScroller: {
       gap: 8,
@@ -1648,11 +1683,11 @@ function createStyles(theme: MobileTheme) {
       minHeight: 48
     },
     activeEditTimeInput: {
-      width: 108,
-      minHeight: 56,
+      width: 94,
+      minHeight: 48,
       color: theme.accentText,
       fontFamily: monoFont,
-      fontSize: 20,
+      fontSize: 18,
       fontWeight: "800",
       fontVariant: ["tabular-nums"],
       textAlign: "center"
@@ -1660,13 +1695,13 @@ function createStyles(theme: MobileTheme) {
     activeEditStartSummary: {
       flex: 1,
       minWidth: 0,
-      minHeight: 56,
+      minHeight: 48,
       borderWidth: 1,
       borderColor: theme.controlBorder,
       backgroundColor: theme.surfaceInset,
       borderRadius: 14,
       paddingHorizontal: 12,
-      paddingVertical: 9,
+      paddingVertical: 8,
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
@@ -1679,7 +1714,7 @@ function createStyles(theme: MobileTheme) {
     activeEditStartDate: {
       color: theme.textPrimary,
       fontFamily: monoFont,
-      fontSize: 15,
+      fontSize: 14,
       fontWeight: "800"
     },
     activeEditStartMeta: {
@@ -1696,13 +1731,13 @@ function createStyles(theme: MobileTheme) {
       fontVariant: ["tabular-nums"]
     },
     activeEditLastStopButton: {
-      minHeight: 44,
-      borderWidth: 1,
-      borderColor: theme.border,
-      backgroundColor: theme.surfaceInset,
+      minHeight: 36,
+      borderWidth: 0,
+      borderColor: "transparent",
+      backgroundColor: "transparent",
       borderRadius: 12,
-      paddingHorizontal: 12,
-      paddingVertical: 9,
+      paddingHorizontal: 2,
+      paddingVertical: 4,
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",

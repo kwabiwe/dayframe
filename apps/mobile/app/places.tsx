@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
+  Animated,
+  Easing,
   Modal,
+  PanResponder,
   Pressable,
   RefreshControl,
   ScrollView,
   Switch,
   Text,
   TextInput,
+  useWindowDimensions,
   View
 } from "react-native";
 import * as Location from "expo-location";
@@ -16,6 +20,7 @@ import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import { paletteColorFor } from "@dayframe/shared";
+import { SheetMutationProgress } from "@/components/SheetMutationProgress";
 import {
   AuthRequiredError,
   createPlace,
@@ -862,16 +867,69 @@ function LearnedPlaceDetailSheet({
   theme: MobileTheme;
 }) {
   const [copyToast, setCopyToast] = useState<string | null>(null);
+  const reduceMotion = useReduceMotionPreference();
+  const windowDimensions = useWindowDimensions();
+  const dismissDragY = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     setCopyToast(null);
-  }, [learnedPlace?.id]);
+    dismissDragY.setValue(0);
+  }, [dismissDragY, learnedPlace?.id]);
 
   if (!learnedPlace) return null;
 
   const details = learnedPlaceDetailValues(learnedPlace);
   const associatedCategory = learnedPlaceCategoryLabel(learnedPlace, categories);
   const disabled = ignoring || forgetting;
+  const dismissResponder = PanResponder.create({
+    onMoveShouldSetPanResponder: (_event, gesture) =>
+      !disabled && gesture.dy > 8 && Math.abs(gesture.dy) > Math.abs(gesture.dx) * 1.2,
+    onPanResponderMove: (_event, gesture) => {
+      dismissDragY.setValue(Math.max(0, gesture.dy));
+    },
+    onPanResponderRelease: (_event, gesture) => {
+      const shouldDismiss = gesture.dy > 96 || gesture.vy > 0.85;
+      if (shouldDismiss) {
+        if (reduceMotion) {
+          dismissDragY.setValue(0);
+          onClose();
+          return;
+        }
+        Animated.timing(dismissDragY, {
+          toValue: windowDimensions.height,
+          duration: 180,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true
+        }).start(({ finished }) => {
+          dismissDragY.setValue(0);
+          if (finished) onClose();
+        });
+        return;
+      }
+      if (reduceMotion) {
+        dismissDragY.setValue(0);
+        return;
+      }
+      Animated.spring(dismissDragY, {
+        toValue: 0,
+        damping: 20,
+        stiffness: 220,
+        useNativeDriver: true
+      }).start();
+    },
+    onPanResponderTerminate: () => {
+      if (reduceMotion) {
+        dismissDragY.setValue(0);
+        return;
+      }
+      Animated.spring(dismissDragY, {
+        toValue: 0,
+        damping: 20,
+        stiffness: 220,
+        useNativeDriver: true
+      }).start();
+    }
+  });
 
   async function copyDetail(label: string, value: string | null) {
     const copied = await copyLearnedPlaceDetail(value, Clipboard.setStringAsync);
@@ -884,19 +942,22 @@ function LearnedPlaceDetailSheet({
     <Modal animationType="slide" onRequestClose={onClose} transparent visible>
       <View style={styles.sheetOverlay}>
         <Pressable accessibilityLabel="Close learned place details" style={styles.sheetBackdrop} onPress={onClose} />
-        <View style={styles.activeEditSheet}>
-          <View style={styles.sheetHandle} />
-          <View style={styles.sheetHeader}>
-            <Pressable
-              accessibilityLabel="Close"
-              accessibilityRole="button"
-              style={pressable(styles.sheetIconButton, styles.buttonPressed)}
-              onPress={onClose}
-            >
-              <CloseGlyph color={theme.accent} />
-            </Pressable>
-            <Text style={styles.sheetTitle} numberOfLines={2}>Place suggestion</Text>
-            <View style={styles.sheetHeaderSpacer} />
+        <Animated.View
+          style={[
+            styles.activeEditSheet,
+            { transform: [{ translateY: dismissDragY }] }
+          ]}
+        >
+          <View {...dismissResponder.panHandlers}>
+            <View style={styles.sheetHandle} />
+            <View style={[styles.sheetHeader, styles.sheetHeaderCentered]}>
+              <Text style={[styles.sheetTitle, styles.sheetTitleCentered]} numberOfLines={2}>Place suggestion</Text>
+            </View>
+            <SheetMutationProgress
+              accessibilityLabel={forgetting ? "Forgetting place suggestion" : ignoring ? "Ignoring place suggestion" : "Working"}
+              active={disabled}
+              styles={styles}
+            />
           </View>
 
           <ScrollView style={styles.activeEditScroller} contentContainerStyle={styles.activeEditContent}>
@@ -998,7 +1059,7 @@ function LearnedPlaceDetailSheet({
               </Pressable>
             </View>
           </ScrollView>
-        </View>
+        </Animated.View>
       </View>
     </Modal>
   );
@@ -1203,14 +1264,6 @@ function BackGlyph({ color }: { color: string }) {
   return (
     <Svg width={20} height={20} viewBox="0 0 24 24">
       <Path d="M15 5 8 12l7 7" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.3} />
-    </Svg>
-  );
-}
-
-function CloseGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={18} height={18} viewBox="0 0 24 24">
-      <Path d="M6 6l12 12M18 6 6 18" stroke={color} strokeLinecap="round" strokeWidth={2.4} />
     </Svg>
   );
 }

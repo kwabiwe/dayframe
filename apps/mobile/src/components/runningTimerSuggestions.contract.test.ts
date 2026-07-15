@@ -20,7 +20,8 @@ describe("running timer suggestion placement", () => {
 
     expect(suggestionsIndex).toBeGreaterThan(-1);
     expect(descriptionIndex).toBeGreaterThan(suggestionsIndex);
-    expect(editSheetSource).toContain("suggestions.slice(0, 6)");
+    expect(editSheetSource).toContain("const MAX_RUNNING_SUGGESTIONS = 4;");
+    expect(editSheetSource).toContain("suggestions.slice(0, MAX_RUNNING_SUGGESTIONS)");
     expect(editSheetSource).toContain("isRunningMode &&");
     expect(dashboardSource).not.toContain("shouldShowTodaySuggestions");
     expect(dashboardSource).not.toContain("TodayTaskSuggestionRow");
