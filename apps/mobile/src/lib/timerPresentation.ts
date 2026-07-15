@@ -87,13 +87,13 @@ export async function applySuggestionToRunningTimer(input: {
 }
 
 export function buildMobileQuickActions(
-  data: Pick<MobileBootstrap, "categories"> | null
+  data: Pick<MobileBootstrap, "categories" | "categoryUsage"> | null
 ): MobileQuickAction[] {
   if (!data) return [];
 
-  return data.categories
-    .filter((category) => category.isPinned)
-    .map((category) => ({
+  return sortMobileCategoriesByUsage(data.categories, data.categoryUsage)
+    .filter(({ category }) => category.isPinned)
+    .map(({ category }) => ({
       color: category.color ?? null,
       id: category.id,
       isUncategorized: false,
@@ -101,4 +101,22 @@ export function buildMobileQuickActions(
       name: category.name,
       subtitle: null
     }));
+}
+
+export function sortMobileCategoriesByUsage(
+  categories: MobileBootstrap["categories"],
+  categoryUsage: MobileBootstrap["categoryUsage"] = []
+) {
+  const usageByCategory = new Map((categoryUsage ?? []).map((rank) => [rank.categoryId, rank]));
+
+  return categories
+    .map((category, index) => ({ category, index, usage: usageByCategory.get(category.id) }))
+    .sort((a, b) =>
+      (b.usage?.score ?? 0) - (a.usage?.score ?? 0) ||
+      (b.usage?.useCount ?? 0) - (a.usage?.useCount ?? 0) ||
+      Date.parse(b.usage?.lastSeenAt ?? "1970-01-01T00:00:00.000Z") -
+        Date.parse(a.usage?.lastSeenAt ?? "1970-01-01T00:00:00.000Z") ||
+      a.index - b.index ||
+      a.category.name.localeCompare(b.category.name)
+    );
 }

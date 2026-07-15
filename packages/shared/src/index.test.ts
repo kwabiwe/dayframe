@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyActivityEvent,
   automationRuleInputFromDraft,
+  buildCategoryUsageRanks,
   buildRecentActivitySuggestions,
   calendarBlockContinuationEdges,
   classifyLocationLearningEvidence,
@@ -245,17 +246,28 @@ describe("recent activity suggestions", () => {
         source: "mobile_app",
         startedAt: "2026-07-14T09:05:00.000Z",
         stoppedAt: "2026-07-14T09:45:00.000Z"
+      },
+      {
+        categoryId: "focus",
+        categoryName: "Focus",
+        description: "Architecture review",
+        durationSeconds: 2100,
+        eventType: "timer_start",
+        reviewStatus: "confirmed",
+        source: "manual_app",
+        startedAt: "2026-07-16T09:10:00.000Z",
+        stoppedAt: "2026-07-16T09:45:00.000Z"
       }
     ], { contextDate: "2026-07-21T09:30:00.000Z" });
 
     expect(suggestions[0]).toMatchObject({
       description: "Architecture review",
       section: "suggested_now",
-      useCount: 2
+      useCount: 3
     });
   });
 
-  it("caps compact suggestions at six with the newest manual task first and frequent tasks ranked by use", () => {
+  it("caps compact suggestions at six with the newest manual task first and frequent/contextual tasks ahead of recent noise", () => {
     const frequentEntries = Array.from({ length: 5 }, (_, index) => ({
       categoryId: "focus",
       categoryName: "Focus",
@@ -343,7 +355,47 @@ describe("recent activity suggestions", () => {
     expect(suggestions[0].description).toBe("Newest school run");
     expect(suggestions.findIndex((suggestion) => suggestion.description === "Frequent planning"))
       .toBeLessThan(suggestions.findIndex((suggestion) => suggestion.description === "Admin sweep"));
+    expect(suggestions.findIndex((suggestion) => suggestion.description === "Admin sweep"))
+      .toBeLessThan(suggestions.findIndex((suggestion) => suggestion.description === "One-off notes"));
     expect(suggestions.some((suggestion) => suggestion.description === "Overflow old")).toBe(false);
+  });
+
+  it("ranks category usage from manual entries without requiring descriptions", () => {
+    const ranks = buildCategoryUsageRanks([
+      ...Array.from({ length: 4 }, (_, index) => ({
+        categoryId: "coding",
+        description: null,
+        durationSeconds: 1800,
+        eventType: "timer_start",
+        reviewStatus: "confirmed",
+        source: "manual_app",
+        startedAt: `2026-07-0${index + 1}T09:00:00.000Z`,
+        stoppedAt: `2026-07-0${index + 1}T09:30:00.000Z`
+      })),
+      {
+        categoryId: "chores",
+        description: "Laundry",
+        durationSeconds: 900,
+        eventType: "timer_start",
+        reviewStatus: "confirmed",
+        source: "manual_app",
+        startedAt: "2026-07-14T09:00:00.000Z",
+        stoppedAt: "2026-07-14T09:15:00.000Z"
+      },
+      {
+        categoryId: "health",
+        description: "Sleep",
+        durationSeconds: 28_800,
+        eventType: "health_sleep_import",
+        reviewStatus: "confirmed",
+        source: "health_sleep",
+        startedAt: "2026-07-14T00:00:00.000Z",
+        stoppedAt: "2026-07-14T08:00:00.000Z"
+      }
+    ], { contextDate: "2026-07-14T09:30:00.000Z" });
+
+    expect(ranks.map((rank) => rank.categoryId)).toEqual(["coding", "chores"]);
+    expect(ranks[0].useCount).toBe(4);
   });
 });
 

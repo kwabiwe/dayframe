@@ -1,12 +1,13 @@
 import type {
   AutomationRuleSummary,
   CategorySummary,
+  CategoryUsageRank,
   NormalizationContext,
   PlaceSummary,
   ProjectSummary,
   RecentActivitySuggestion
 } from "@dayframe/shared";
-import { buildRecentActivitySuggestions } from "@dayframe/shared";
+import { buildCategoryUsageRanks, buildRecentActivitySuggestions } from "@dayframe/shared";
 import {
   databaseReadinessError,
   isUndefinedColumnError,
@@ -210,6 +211,7 @@ export type BootstrapData = {
   activeEntry: TimeEntryRow | null;
   reviewItems: ReviewItemRow[];
   activityEvents: ActivityRow[];
+  categoryUsage: CategoryUsageRank[];
   taskSuggestions: RecentActivitySuggestion[];
   stats: DashboardStats;
   todaySeries: DashboardSeriesPoint[];
@@ -237,6 +239,7 @@ export async function getBootstrapData(
     activeEntry,
     reviewItems,
     activityEvents,
+    categoryUsage,
     taskSuggestions,
     stats
   ] = await Promise.all([
@@ -263,6 +266,7 @@ export async function getBootstrapData(
     getActiveEntry(session),
     getReviewItems(session),
     getActivityEvents(session),
+    getCategoryUsageRanks(session),
     getTaskSuggestions(session),
     getDashboardStats(session, dateRange)
   ]);
@@ -285,6 +289,7 @@ export async function getBootstrapData(
     activeEntry,
     reviewItems,
     activityEvents,
+    categoryUsage,
     taskSuggestions,
     stats,
     todaySeries: buildHourlySeries(dayEntries),
@@ -684,6 +689,48 @@ export async function getTaskSuggestions(session: RequestSession) {
   return buildRecentActivitySuggestions(result.rows, {
     contextDate: new Date(),
     limit: 6,
+    minDurationSeconds: 60
+  });
+}
+
+export async function getCategoryUsageRanks(session: RequestSession) {
+  const result = await query<{
+    id: string;
+    categoryId: string | null;
+    description: string | null;
+    durationSeconds: number;
+    eventType: string | null;
+    reviewStatus: string | null;
+    source: string | null;
+    startedAt: string;
+    stoppedAt: string | null;
+  }>(
+    `select te.id,
+            te.category_id as "categoryId",
+            te.description,
+            extract(epoch from (te.stopped_at - te.started_at))::int as "durationSeconds",
+            ae.event_type as "eventType",
+            te.review_status as "reviewStatus",
+            te.source,
+            te.started_at as "startedAt",
+            te.stopped_at as "stoppedAt"
+     from time_entries te
+     left join activity_events ae on ae.id = te.created_from_event_id and ae.workspace_id = te.workspace_id
+     where te.workspace_id = $1
+       and te.user_id = $2
+       and te.review_status = 'confirmed'
+       and te.stopped_at is not null
+       and te.started_at >= now() - interval '120 days'
+       and te.source in ('manual_app', 'mobile_app')
+       and te.category_id is not null
+     order by te.stopped_at desc
+     limit 1000`,
+    [session.workspaceId, session.userId]
+  );
+
+  return buildCategoryUsageRanks(result.rows, {
+    contextDate: new Date(),
+    limit: 50,
     minDurationSeconds: 60
   });
 }

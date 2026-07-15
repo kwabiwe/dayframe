@@ -33,7 +33,22 @@ describe("running timer suggestion placement", () => {
     );
 
     expect(startTaskSource).toContain("description: null");
+    expect(startTaskSource.indexOf("setActiveEditVisible(true)")).toBeLessThan(
+      startTaskSource.indexOf("await startTaskWith")
+    );
     expect(startTaskSource).toContain("setActiveEditVisible(true)");
+    expect(dashboardSource).toContain("pendingEntryFromStartInput");
     expect(dashboardSource).toContain("onApplySuggestion={applyRunningTimerSuggestion}");
+  });
+
+  it("keeps destructive running-timer deletion inside the edit sheet instead of the active timer card", () => {
+    const activeTimerCardSource = dashboardSource.slice(
+      dashboardSource.indexOf("<Text style={styles.label}>Active timer</Text>"),
+      dashboardSource.indexOf("<View style={styles.timerProgressSlot}>")
+    );
+
+    expect(activeTimerCardSource).not.toContain("Delete running timer");
+    expect(activeTimerCardSource).not.toContain("deleteTimerButton");
+    expect(editSheetSource).toContain("accessibilityLabel=\"Delete entry\"");
   });
 });

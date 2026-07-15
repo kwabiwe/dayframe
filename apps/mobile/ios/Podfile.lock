@@ -2648,7 +2648,7 @@ SPEC CHECKSUMS:
   ExpoLinking: f8a78524352bf2c3baed5b33c8b56cd57c448702
   ExpoLocation: 7e4bf2fe0797e65b4b294c0c2a4abce387d7f808
   ExpoLogBox: cdad5c9402a186574fb5924ea91df1f08ba9a98a
-  ExpoModulesCore: f3e978c52cc7c640a9f7b16615085a524fd7a1c1
+  ExpoModulesCore: 9e4a7b079090aa0c754332eb5658bc6bec16ddd3
   ExpoModulesJSI: e62656cfaffb5aeb3fdc1dd2bc49f77e87ed2261
   ExpoModulesWorklets: bf01b3310464f105c5f6dbd887db81a51c765d05
   ExpoModulesWorkletsAdapter: a773367f935d8446bba4eb5cdeed185a80fcd067
@@ -2659,7 +2659,7 @@ SPEC CHECKSUMS:
   ExpoTaskManager: 37b716a7eebc9722743fe6da3e0ce1a08ac50833
   ExpoUI: 1f2b09895d7479e3392732946cd71202574d667d
   FBLazyVector: 24e62c765683b8d89006a88a2c8f5cf019f0074d
-  hermes-engine: 9900246f026022138469c34d56e25f066e0e3519
+  hermes-engine: a8c04086612e1bd6bcc402edad9f19785617717d
   NitroModules: 16bc17a076b12304d608f7c915b9d321f56dfc19
   RCTDeprecation: a4c521821fab57cbb125b36effe84d897d0dfa12
   RCTRequired: 9f3a7e5645d4bc3f551593de7550bb66ab6e42bc
@@ -2669,7 +2669,7 @@ SPEC CHECKSUMS:
   React: e2dc35338068bbd299c66f043ae0d7f25de8499e
   React-callinvoker: 28b25d21b124c26cebaea713ba7d801b9351dc48
   React-Core: 02ed7d2ffb70437bdf2aba074a13078a7b0b9ff0
-  React-Core-prebuilt: b634622824989962556480500094e006d61ccda1
+  React-Core-prebuilt: 209cb786a1225a4511162ea9e7fc9e64b8d2f901
   React-CoreModules: b3a5a42dadcde3b5d47b325bd912eb2ced89e146
   React-cxxreact: fe8f88dda044e5905e99a00f41b7a874c3908716
   React-debug: 92944dc4d89f56d640e75498266cbde557a48189
@@ -2732,7 +2732,7 @@ SPEC CHECKSUMS:
   ReactAppDependencyProvider: 25c9c516839be2c5e3d3344f95dc7da5f7e63fc2
   ReactCodegen: dfe41c3f92bdf782bcf9b2c9d7c12cb9cfd82cb7
   ReactCommon: 7dfc3250793bf36cf221096ff59e1179e13eef7f
-  ReactNativeDependencies: a48a0ee9be78642568de72f287cb4118e53b280a
+  ReactNativeDependencies: 6724a5c601187d820d76c770182f58282cabb86e
   ReactNativeHealthkit: af20857324ceab69398bfb08924bb136b77a70a4
   RNCAsyncStorage: 2ad919e88b8bc2cd80e8697ce66d04d006743283
   RNCMaskedView: eb2b2e538afa907f05a5848a1a1ac26092e6fec9

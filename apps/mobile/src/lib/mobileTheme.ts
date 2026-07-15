@@ -551,6 +551,10 @@ function createStyles(theme: MobileTheme) {
     activeTitleText: {
       flex: 1
     },
+    activeTitlePlaceholderText: {
+      color: theme.textSecondary,
+      fontWeight: "700"
+    },
     activeDescription: {
       fontSize: 14,
       color: theme.textSecondary,
@@ -1491,7 +1495,7 @@ function createStyles(theme: MobileTheme) {
     },
     activeEditContent: {
       gap: 12,
-      paddingBottom: 18
+      paddingBottom: 8
     },
     activeEditDeleteButton: {
       alignSelf: "center",

@@ -100,6 +100,34 @@ describe("mobile timer presentation", () => {
       { description: undefined, id: "family", name: "Family", subtitle: null }
     ]);
   });
+
+  it("sorts pinned category quick actions by learned category usage", () => {
+    expect(
+      buildMobileQuickActions({
+        categories: [
+          category({ id: "family", isPinned: true, name: "Family" }),
+          category({ id: "coding", isPinned: true, name: "Coding" }),
+          category({ id: "chores", isPinned: true, name: "Chores" })
+        ],
+        categoryUsage: [
+          {
+            categoryId: "coding",
+            lastSeenAt: "2026-07-10T10:00:00.000Z",
+            score: 82,
+            totalSeconds: 10_800,
+            useCount: 6
+          },
+          {
+            categoryId: "chores",
+            lastSeenAt: "2026-07-14T10:00:00.000Z",
+            score: 54,
+            totalSeconds: 3600,
+            useCount: 2
+          }
+        ]
+      }).map((action) => action.name)
+    ).toEqual(["Coding", "Chores", "Family"]);
+  });
 });
 
 function category(input: Partial<MobileBootstrap["categories"][number]>): MobileBootstrap["categories"][number] {
