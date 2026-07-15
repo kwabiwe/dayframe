@@ -2,6 +2,10 @@ const DEFAULT_TOP_GAP = 18;
 const DEFAULT_MIN_TOP_GAP = 32;
 const DEFAULT_KEYBOARD_CONTENT_PADDING = 32;
 const DEFAULT_CONTENT_PADDING = 18;
+const DEFAULT_KEYBOARD_ANIMATION_DURATION = 260;
+const MAX_KEYBOARD_ANIMATION_DURATION = 360;
+const MIN_ANDROID_KEYBOARD_ANIMATION_DURATION = 120;
+const IOS_INTERACTIVE_FRAME_DURATION = 16;
 
 export type KeyboardInsetInput = {
   keyboardScreenY: number;
@@ -23,6 +27,11 @@ export type EditSheetKeyboardLayout = {
   sheetHeight: number | null;
   sheetMaxHeight: number;
   topSafeGap: number;
+};
+
+export type KeyboardLiftAnimationInput = {
+  eventDuration?: number;
+  platform: string;
 };
 
 export function keyboardInsetFromScreenY({
@@ -54,4 +63,15 @@ export function editSheetKeyboardLayout({
     sheetMaxHeight,
     topSafeGap
   };
+}
+
+export function keyboardLiftAnimationDuration({
+  eventDuration,
+  platform
+}: KeyboardLiftAnimationInput): number | null {
+  const rawDuration = eventDuration ?? DEFAULT_KEYBOARD_ANIMATION_DURATION;
+  if (platform === "ios" && rawDuration <= IOS_INTERACTIVE_FRAME_DURATION) return null;
+  const clampedDuration = Math.min(rawDuration, MAX_KEYBOARD_ANIMATION_DURATION);
+  if (platform === "ios") return Math.max(1, clampedDuration);
+  return Math.max(MIN_ANDROID_KEYBOARD_ANIMATION_DURATION, clampedDuration);
 }

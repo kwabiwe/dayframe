@@ -730,7 +730,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     setActiveEditSaving(true);
     try {
       await updateTimeEntry(entryId, patch);
-      await load();
+      await load({ silent: true });
       return true;
     } catch (error) {
       if (error instanceof AuthRequiredError) {
@@ -755,7 +755,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     setCalendarEditSaving(true);
     try {
       await updateTimeEntry(entryId, patch);
-      await load();
+      await load({ silent: true });
       return true;
     } catch (error) {
       if (error instanceof AuthRequiredError) {
@@ -780,7 +780,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     setCalendarEditDeleting(true);
     try {
       await deleteTimeEntry(entryId);
-      await load();
+      await load({ silent: true });
       return true;
     } catch (error) {
       if (error instanceof AuthRequiredError) {
@@ -1952,14 +1952,6 @@ function StopGlyph({ color }: { color: string }) {
   return (
     <Svg width={19} height={19} viewBox="0 0 24 24">
       <Path d="M6 6h12v12H6V6Z" fill={color} />
-    </Svg>
-  );
-}
-
-function CloseGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={22} height={22} viewBox="0 0 24 24">
-      <Path d="M6 6l12 12M18 6 6 18" stroke={color} strokeLinecap="round" strokeWidth={2.4} />
     </Svg>
   );
 }

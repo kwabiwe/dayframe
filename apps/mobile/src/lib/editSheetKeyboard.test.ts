@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { editSheetKeyboardLayout, keyboardInsetFromScreenY } from "./editSheetKeyboard";
+import {
+  editSheetKeyboardLayout,
+  keyboardInsetFromScreenY,
+  keyboardLiftAnimationDuration
+} from "./editSheetKeyboard";
 
 describe("edit sheet keyboard layout", () => {
   it("uses the larger screen coordinate space for keyboard frames", () => {
@@ -71,5 +75,23 @@ describe("edit sheet keyboard layout", () => {
       sheetHeight: null,
       topSafeGap: 65
     });
+  });
+
+  it("does not lag behind interactive iOS keyboard frames", () => {
+    expect(keyboardLiftAnimationDuration({
+      eventDuration: 0,
+      platform: "ios"
+    })).toBeNull();
+    expect(keyboardLiftAnimationDuration({
+      eventDuration: 250,
+      platform: "ios"
+    })).toBe(250);
+  });
+
+  it("keeps a minimum Android keyboard lift animation duration", () => {
+    expect(keyboardLiftAnimationDuration({
+      eventDuration: 0,
+      platform: "android"
+    })).toBe(120);
   });
 });

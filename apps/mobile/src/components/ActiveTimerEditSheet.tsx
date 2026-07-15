@@ -20,11 +20,18 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import { paletteColorFor, type RecentActivitySuggestion } from "@dayframe/shared";
+import { SheetMutationProgress } from "@/components/SheetMutationProgress";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
-import { editSheetKeyboardLayout, keyboardInsetFromScreenY } from "@/lib/editSheetKeyboard";
+import {
+  editSheetKeyboardLayout,
+  keyboardInsetFromScreenY,
+  keyboardLiftAnimationDuration
+} from "@/lib/editSheetKeyboard";
 import type { MobileBootstrap, MobileTimeEntry, TimeEntryUpdatePatch } from "@/lib/api";
 import { MOBILE_MOTION, useReduceMotionPreference } from "@/lib/motion";
 import { runningTimerSheetElapsedSeconds } from "@/lib/timerPresentation";
+
+const MAX_RUNNING_SUGGESTIONS = 4;
 
 type Category = MobileBootstrap["categories"][number];
 type EditSheetMode = "running" | "entry" | "start";
@@ -166,9 +173,17 @@ export function ActiveTimerEditSheet({
         keyboardLift.setValue(toValue);
         return;
       }
+      const duration = keyboardLiftAnimationDuration({
+        eventDuration: event?.duration,
+        platform: Platform.OS
+      });
+      if (duration === null) {
+        keyboardLift.setValue(toValue);
+        return;
+      }
       Animated.timing(keyboardLift, {
         toValue,
-        duration: Math.max(120, Math.min(event?.duration ?? MOBILE_MOTION.sheet, 360)),
+        duration,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: false
       }).start();
@@ -329,7 +344,7 @@ export function ActiveTimerEditSheet({
   const suggestionsAnimatedStyle = {
     maxHeight: suggestionsProgress.interpolate({
       inputRange: [0, 1],
-      outputRange: [0, 280]
+      outputRange: [0, 210]
     }),
     opacity: suggestionsProgress,
     transform: [
@@ -569,6 +584,7 @@ export function ActiveTimerEditSheet({
 
   const displayedStartAt = previewStartAt ?? fallbackStartAt();
   const pickerDate = pickerStartAt ?? displayedStartAt;
+  const showDoneButton = !isStartMode;
 
   return (
     <Modal
@@ -597,39 +613,31 @@ export function ActiveTimerEditSheet({
             >
               <View {...dismissResponder.panHandlers}>
                 <View style={styles.sheetHandle} />
-                <View style={styles.sheetHeader}>
-                  <Pressable
-                    accessibilityLabel={cancelLabel}
-                    accessibilityRole="button"
-                    disabled={busy}
-                    onPress={onCancel}
-                    style={({ pressed }) => [
-                      styles.sheetIconButton,
-                      pressed && !busy ? styles.buttonPressed : null,
-                      busy ? styles.buttonDisabled : null
-                    ]}
-                  >
-                    <CloseGlyph color={theme.textPrimary} />
-                  </Pressable>
-                  <Text style={styles.sheetTitle}>{sheetTitle}</Text>
-                  {isStartMode ? (
-                    <View style={styles.sheetHeaderSpacer} />
-                  ) : (
+                <View style={[styles.sheetHeader, showDoneButton ? null : styles.sheetHeaderCentered]}>
+                  <Text style={[styles.sheetTitle, showDoneButton ? null : styles.sheetTitleCentered]}>
+                    {sheetTitle}
+                  </Text>
+                  {showDoneButton ? (
                     <Pressable
                       accessibilityLabel={saveLabel}
                       accessibilityRole="button"
                       disabled={busy}
                       onPress={saveChanges}
                       style={({ pressed }) => [
-                        styles.sheetSaveButton,
+                        styles.sheetDoneButton,
                         pressed && !busy ? styles.buttonPressed : null,
                         busy ? styles.buttonDisabled : null
                       ]}
                     >
-                      <CheckGlyph color={theme.accentText} />
+                      <Text style={styles.sheetDoneText}>Done</Text>
                     </Pressable>
-                  )}
+                  ) : null}
                 </View>
+                <SheetMutationProgress
+                  accessibilityLabel={saving ? "Saving changes" : stopping ? "Stopping timer" : deleting ? "Deleting entry" : "Working"}
+                  active={busy}
+                  styles={styles}
+                />
               </View>
 
               <ScrollView
@@ -693,7 +701,7 @@ export function ActiveTimerEditSheet({
                   >
                     <Text style={styles.taskSuggestionsTitle}>SUGGESTIONS</Text>
                     <View style={styles.taskSuggestionsList}>
-                      {suggestions.slice(0, 6).map((suggestion, index) => (
+                      {suggestions.slice(0, MAX_RUNNING_SUGGESTIONS).map((suggestion, index) => (
                         <RunningTimerSuggestionRow
                           key={suggestion.key}
                           disabled={busy}
@@ -776,8 +784,9 @@ export function ActiveTimerEditSheet({
                       style={pressable(styles.activeEditStartSummary, styles.buttonPressed)}
                     >
                       <View style={styles.activeEditStartSummaryText}>
-                        <Text style={styles.activeEditStartDate}>{formatPickerDate(displayedStartAt)}</Text>
-                        <Text style={styles.activeEditStartMeta}>{formatDateInput(displayedStartAt)}</Text>
+                        <Text style={styles.activeEditStartDate} numberOfLines={1}>
+                          {formatPickerDate(displayedStartAt)} · {formatDateInput(displayedStartAt)}
+                        </Text>
                       </View>
                     </Pressable>
                     <TextInput
@@ -1219,14 +1228,6 @@ function formatClockDuration(seconds: number) {
   return `${hours}:${minutes.toString().padStart(2, "0")}:${remainingSeconds
     .toString()
     .padStart(2, "0")}`;
-}
-
-function CloseGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={22} height={22} viewBox="0 0 24 24">
-      <Path d="M6 6l12 12M18 6 6 18" stroke={color} strokeLinecap="round" strokeWidth={2.4} />
-    </Svg>
-  );
 }
 
 function CheckGlyph({ color }: { color: string }) {
