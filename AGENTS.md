@@ -12,7 +12,7 @@ Use `docs/PRD.md` for product direction, then check `docs/feature-fix-tracker.md
 
 - Monorepo: npm workspaces.
 - Web: Next.js App Router, React, TypeScript, Tailwind CSS, route handlers.
-- Mobile: Expo Router, React Native, iOS-first, HealthKit, Expo Location/Task Manager.
+- Mobile: Expo Router and React Native with targeted Swift/SwiftUI native modules for iOS-specific interaction surfaces, plus HealthKit and Expo Location/Task Manager.
 - Shared: Zod schemas, palette/theme constants, event normalization.
 - Database: Postgres/PostGIS via `pg`; Supabase Postgres/Auth for hosted production.
 - Tests: Vitest plus TypeScript checks.
@@ -101,6 +101,8 @@ npm run export:workspace -- ./dayframe-backup.json
 - Timer mutations on mobile should feel immediate. Do not show spinners or progress bars for normal start, stop, edit, delete, or suggestion-apply actions; update the UI optimistically and reconcile in the background. Keep visible spinners for deliberate pull-to-refresh only.
 - Mobile Play opens the running Edit Timer/suggestion flow consistently. Empty Play starts one bare timer then opens the sheet; Play while a timer is already running must not bypass suggestions or start a duplicate timer. Suggestions enrich the existing running entry.
 - iOS surfaces should follow the current fill-led design language: use canvas/surface/inset contrast, circular icon actions, pill text actions, compact divider-based lists, and avoid outline-heavy rounded rectangles unless the relevant reference doc says otherwise.
+- Targeted native iOS views must preserve the existing React Native ownership boundary: React owns authenticated bootstrap data, mutations, routing, and sheets; Swift receives a serializable presentation model and emits semantic user actions. Native views must not call Dayframe APIs or maintain a second timer/data store.
+- For Calendar zoom, use one native gesture/scroll owner for the whole timeline. A SwiftUI surface may wrap `UIScrollView` through `UIViewRepresentable` when that is required for continuous focal-point-preserving zoom; do not hand off from a temporary visual scale to a separately rebuilt React layout on gesture release.
 - Location and HealthKit permission flows belong in onboarding and Settings, not on the dashboard. Surface friendly, actionable permission states instead of raw native errors.
 - Logout/account controls belong under profile/account management, not as primary dashboard chrome.
 
@@ -135,6 +137,7 @@ npm run build
 ```
 
 - For mobile/native changes, also run the mobile typecheck and, when feasible, an iOS simulator build.
+- For Swift/SwiftUI native-view changes, reinstall CocoaPods/autolinked modules as needed, run a full native iOS build, and validate multi-touch or background behaviour on a physical iPhone when the simulator cannot reproduce it.
 - For timer/auth/sync changes, add or run regression coverage for web start, web stop, mobile start, mobile stop, active timer refresh, completed entry persistence, and queued event sync.
 - For UI changes, validate in a browser at desktop and mobile widths and check for console/runtime overlays.
 - For mobile UI/timer changes, read `docs/feature-fix-tracker.md`, `docs/brand-style-guide.md`, `.codex/reference/components.md`, `.codex/reference/style.md`, and `.codex/reference/validation-matrix.md` before implementation. Record any conflict between old docs and current tracker state in the PR instead of silently choosing one.

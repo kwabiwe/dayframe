@@ -23,6 +23,16 @@ Use this when working on frontend components.
 - Surface friendly, actionable permission messages; never display raw native exception strings to users.
 - Treat route state as the source of truth for same-route mobile sub-settings. Do not mirror the active route section into local state or intercept native back gestures to repair duplicated navigation state.
 
+## Native iOS View Boundaries
+
+- Use a standard local Expo module for a targeted Swift/SwiftUI view that lives inside the existing Expo app. Export an `ExpoView`, retain one `UIHostingController` for its SwiftUI hierarchy, and update its observable model through typed Expo `Record` props/view events. Do not use the experimental inline-module path, create a second app target, or migrate unrelated screens in the same PR.
+- React Native remains responsible for authenticated bootstrap data, API mutations, active-timer truth, selected route state, and presentation of the existing timer/entry/Review sheets.
+- Pass the native Calendar a serializable presentation model: selected/today day keys, week days, total, entries with timestamps and state flags, category display metadata, resolved theme roles, and accessibility/reduced-motion preferences.
+- Emit semantic actions such as select day, change day/week, open active timer, open completed entry, and open review item. Swift must not fetch Dayframe APIs, write the offline queue, or own a second copy of the timer/domain model.
+- Preserve native view identity across ordinary React prop updates so ticking time, bootstrap refreshes, and optimistic reconciliation do not reset zoom or scroll unexpectedly.
+- Give the timeline one gesture and vertical-scroll owner. A SwiftUI Calendar may wrap `UIScrollView` with `UIViewRepresentable` for continuous focal-point-preserving zoom; do not nest a competing React Native pinch/pan handler around it.
+- Map stable entry/review identifiers through callbacks and add contract tests for serialization, callback routing, and no duplicate mutation path.
+
 ## Review Checklist
 
 - [ ] Component follows existing naming and folder conventions.
@@ -33,3 +43,4 @@ Use this when working on frontend components.
 - [ ] Timer mutations feel immediate and do not show non-refresh loading indicators.
 - [ ] Dashboard changes preserve the core timer/start-task flow.
 - [ ] Permission controls are not placed on the dashboard.
+- [ ] Native iOS views preserve the React data/mutation boundary and do not reset interaction state during ordinary prop refreshes.

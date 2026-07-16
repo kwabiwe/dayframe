@@ -32,6 +32,8 @@ As of 2026-07-16, Dayframe uses this internal release lane:
 
 Docs-only or planning-only PRs do not require a TestFlight build unless they change build, release, signing, environment, or runtime configuration.
 
+Swift/SwiftUI native-view changes require a new binary. JavaScript/OTA or Vercel deployment evidence cannot prove that an updated native Calendar module is present.
+
 ## PR Success Lane
 
 For any Dayframe implementation PR that changes shipped app, API, database, mobile, sync, or release behavior, success means:
@@ -104,6 +106,8 @@ Run the preflight before spending time on a TestFlight archive/export:
 npm run testflight:preflight
 ```
 
+When a PR adds or changes a local Expo native module, run CocoaPods installation/autolinking and a clean-enough full Xcode build before archive. Because Dayframe checks in and customizes its native iOS project, do not run `expo prebuild --clean` unless the PR explicitly audits and preserves every custom native target, entitlement, App Intent and Live Activity file.
+
 The preflight checks the failure points that have disrupted recent Dayframe releases:
 
 - full Xcode is installed
@@ -169,6 +173,7 @@ From the physical iPhone, verify:
 - The app diagnostics or Settings show the expected API base URL.
 - Health permissions are granted.
 - The current account/workspace matches the server logs being inspected.
+- For native Calendar releases, repeated pinch-in/pinch-out, vertical pan, day/week navigation, active/completed/review entry taps, theme changes, Dynamic Type, VoiceOver, Reduce Motion, and Reduce Transparency all use the updated native surface without a release-time zoom snap.
 
 Simulator testing is useful for UI and API state, but it cannot validate the user's real Apple Health database.
 

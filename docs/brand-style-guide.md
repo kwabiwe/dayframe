@@ -238,9 +238,11 @@ Use the shared palette, `chartTrack`, stable segment ordering and exact value la
 
 Motion is short and purposeful: approximately 120–220 ms for control feedback and 180–300 ms for panels or chart reveals. Use standard ease-out timing, avoid decorative looping motion, and provide a reduced-motion path that removes nonessential transitions without hiding state changes.
 
+Direct-manipulation gestures are not decorative motion. Calendar scrolling and pinch zoom must be owned by one native interaction surface and update continuously with the fingers. Do not simulate zoom with one visual transform and then snap to a separately rebuilt layout on release. SwiftUI may wrap a UIKit scroll view when that provides the correct system gesture, focal-point, deceleration and accessibility behaviour.
+
 ### Platform differences
 
-Web may remain denser and uses hover, keyboard focus and responsive dialogs. iOS uses safe-area-aware screens, Dynamic Type, native press feedback and sheets. Primary tabs use the system tab controller so supported iOS releases own the Liquid Glass material, layout and accessibility behaviour; do not recreate that navigation material with an overlaid JavaScript glass view. Both platforms use the same semantic colour roles, brand geometry, hierarchy and state meaning; platform conventions may change mechanics, not identity.
+Web may remain denser and uses hover, keyboard focus and responsive dialogs. iOS uses safe-area-aware screens, Dynamic Type, native press feedback and sheets. Primary tabs use the system tab controller so supported iOS releases own the Liquid Glass material, layout and accessibility behaviour; do not recreate that navigation material with an overlaid JavaScript glass view. Targeted SwiftUI views must consume the resolved Dayframe semantic roles passed through their native boundary rather than inventing a separate palette or hard-coding nearby colours. Both platforms use the same semantic colour roles, brand geometry, hierarchy and state meaning; platform conventions may change mechanics, not identity.
 
 ## Brand release checklist
 

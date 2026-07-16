@@ -8,7 +8,7 @@ The core value proposition is to reduce manual time-tracking friction without lo
 
 The MVP goal is to make Dayframe reliable for personal use and a small friends beta: hosted on Vercel, backed by Supabase Postgres/Auth, iOS-only for mobile, offline-capable for hours or days, and privacy-conscious around health and precise location data.
 
-Current reality as of 2026-07-16: Dayframe is in an active internal TestFlight lane, with build `0.1.0 (46)` verified for KB testing after PR #71. The tracker in `docs/feature-fix-tracker.md` is the source of truth for what is `Done`, still under `Watch`, or planned next.
+Current reality as of 2026-07-16: Dayframe is in an active internal TestFlight lane, with build `0.1.0 (46)` verified for KB testing after PR #71. Physical-device feedback found that the React Native Calendar pinch still does not meet the product's smoothness bar, so a targeted native SwiftUI Calendar surface is the accepted next correction. The tracker in `docs/feature-fix-tracker.md` is the source of truth for what is `Done`, still under `Watch`, or planned next.
 
 ## 2. Mission
 
@@ -119,7 +119,7 @@ Deployment:
 
 High-level architecture:
 
-- `apps/mobile`: Expo/React Native iOS app for manual timers, geofences, HealthKit import, offline queue, and sync.
+- `apps/mobile`: Expo/React Native iOS app for manual timers, geofences, HealthKit import, offline queue, and sync, with targeted Swift/SwiftUI native modules where a platform interaction needs native ownership.
 - `apps/web`: Next.js App Router web app and API routes for timer/review/reporting/auth.
 - `packages/shared`: shared schemas, event normalization, palette/types, and state-machine behavior.
 - `packages/db`: Postgres/PostGIS migrations, seed/setup scripts, import/export utilities.
@@ -132,6 +132,7 @@ Key patterns:
 - Review-first ambiguity: uncertain signals become `review_items`.
 - Workspace scoping: every user data table is scoped by workspace and protected through app session checks and Supabase RLS.
 - Mobile offline queue: mobile writes local queued events, then syncs to API when available.
+- Hybrid iOS boundary: React Native owns authenticated data, API mutations, route state, and shared sheets. A native SwiftUI surface receives a serializable presentation model and emits semantic actions back to React Native; it does not create a parallel API, session, timer, or persistence layer.
 
 ## 7. Tools / Features
 
@@ -186,6 +187,7 @@ Mobile:
 - AsyncStorage
 - Expo Location / Task Manager
 - `@kingstinct/react-native-healthkit`
+- Swift/SwiftUI local Expo modules for targeted iOS surfaces; UIKit may be wrapped through SwiftUI when a system interaction such as continuous scroll-view zoom requires it.
 
 Database/infrastructure:
 
@@ -324,6 +326,7 @@ Quality indicators:
 - Mobile typecheck/build path remains healthy.
 - Sensitive raw data is not sent to analytics.
 - TestFlight release evidence is captured before KB is asked to test mobile changes.
+- Calendar pinch/scroll interactions remain continuous under the fingers, preserve the focal point, and do not snap through a second layout path when the gesture ends.
 
 User experience goals:
 
@@ -400,6 +403,7 @@ Deliverables:
 - ✅ Reports and automation accuracy metrics.
 - ⚠️ Settings for permissions and export exist; deletion/privacy controls still need the next-phase work tracked in `docs/feature-fix-tracker.md`.
 - ✅ Internal TestFlight build workflow is active and verified through `0.1.0 (46)`.
+- ⚠️ A native SwiftUI Calendar surface is the accepted next beta-hardening step after build `0.1.0 (46)` failed the physical-device pinch smoothness acceptance check.
 
 Validation:
 

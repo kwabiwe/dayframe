@@ -15,6 +15,7 @@ Use this when implementing visual UI.
 - Keep native navigation containers, Expo root views and screen content on the resolved theme canvas. During push, pop and swipe-back transitions, no default white window, rounded-card vignette or mismatched scene background should be visible.
 - Keep system-first typography. Use tabular numerals for timers and report figures; do not reintroduce all-monospace UI typography.
 - On iOS, prefer the current fill-led design language: canvas/surface/inset contrast, compact divider-based lists, circular icon-only actions, and pill text actions. Avoid outline-heavy rounded rectangles as the default container/control treatment.
+- SwiftUI surfaces must use the resolved semantic Dayframe colours supplied by the app boundary, San Francisco/system typography, tabular timer/time numerals, and the same compact fill-led hierarchy as adjacent React Native screens.
 
 ## Brand Artwork
 
@@ -35,6 +36,7 @@ Use this when implementing visual UI.
 - Pair category colours with labels, dots, rails or borders. Never rely on colour alone or assume a palette colour is accessible body text.
 - Use a 44 px/pt minimum interactive target and visible focus/selected states. Web may use 1 px borders for dense controls; iOS should prefer fill, spacing, and hairline dividers over default outlines.
 - Use `surfaceInset` for inputs, `surfaceRaised` for floating surfaces and `chartTrack` behind chart data.
+- Calendar grid lines use hairline dividers; category colour remains a data cue on softly filled blocks, while readable labels use semantic text roles. Zoom must not change the visual design language or introduce a second native-only palette.
 - Disabled controls retain readable labels and an obvious unavailable state; do not fade the whole control to near invisibility.
 
 ## Responsive Design
