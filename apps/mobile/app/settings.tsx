@@ -759,11 +759,6 @@ export default function SettingsScreen() {
         <View style={styles.contentStack}>
           {settingsSection === "index" ? (
             <>
-              <View style={styles.panel}>
-                <Text style={styles.sectionTitle}>Settings</Text>
-                <Text style={styles.muted}>Grouped controls for account, tracking, places, sync and permissions.</Text>
-              </View>
-
               <SettingsGroup title="Dayframe">
                 <SettingsMenuRow
                   icon="profile"
@@ -787,6 +782,7 @@ export default function SettingsScreen() {
                   value={themePreference === "system" ? "System" : themePreference === "dark" ? "Dark" : "Light"}
                   styles={styles}
                   theme={theme}
+                  last
                   onPress={() => openSettingsSection("appearance")}
                 />
               </SettingsGroup>
@@ -814,6 +810,7 @@ export default function SettingsScreen() {
                   value={`${openReviewCount} open`}
                   styles={styles}
                   theme={theme}
+                  last
                   onPress={() => router.push("./review")}
                 />
               </SettingsGroup>
@@ -825,6 +822,7 @@ export default function SettingsScreen() {
                   value={deviceSyncStatus}
                   styles={styles}
                   theme={theme}
+                  last
                   onPress={() => openSettingsSection("sync")}
                 />
               </SettingsGroup>
@@ -1497,6 +1495,7 @@ function AppearancePreviewCard({
 function SettingsMenuRow({
   icon,
   label,
+  last = false,
   onPress,
   styles,
   theme,
@@ -1504,27 +1503,31 @@ function SettingsMenuRow({
 }: {
   icon: SettingsIcon;
   label: string;
+  last?: boolean;
   onPress: () => void;
   styles: MobileStyles;
   theme: MobileTheme;
   value?: string;
 }) {
   return (
-    <Pressable
-      accessibilityLabel={label}
-      accessibilityRole="button"
-      style={pressable(styles.settingsMenuRow, styles.buttonPressed)}
-      onPress={onPress}
-    >
-      <View style={styles.settingsMenuIcon}>
-        <SettingsRowGlyph name={icon} color={theme.accentText} />
-      </View>
-      <View style={styles.settingsMenuText}>
-        <Text style={styles.settingsMenuTitle} numberOfLines={1}>{label}</Text>
-        {value ? <Text style={styles.settingsMenuMeta} numberOfLines={1}>{value}</Text> : null}
-      </View>
-      <ChevronGlyph color={theme.textSecondary} />
-    </Pressable>
+    <View>
+      <Pressable
+        accessibilityLabel={label}
+        accessibilityRole="button"
+        style={pressable(styles.settingsMenuRow, styles.buttonPressed)}
+        onPress={onPress}
+      >
+        <View style={styles.settingsMenuIcon}>
+          <SettingsRowGlyph name={icon} color={theme.accentText} />
+        </View>
+        <View style={styles.settingsMenuText}>
+          <Text style={styles.settingsMenuTitle} numberOfLines={1}>{label}</Text>
+          {value ? <Text style={styles.settingsMenuMeta} numberOfLines={1}>{value}</Text> : null}
+        </View>
+        <ChevronGlyph color={theme.textSecondary} />
+      </Pressable>
+      {!last ? <View pointerEvents="none" style={styles.settingsMenuDivider} /> : null}
+    </View>
   );
 }
 

@@ -1,4 +1,5 @@
 import { NativeModules, Platform, Settings } from "react-native";
+import { paletteColorFor } from "@dayframe/shared";
 import { enqueueEvent, type MobileBootstrap } from "./api";
 
 const SHORTCUT_CATALOG_KEY = "dayframe.shortcutCatalog.v1";
@@ -34,6 +35,7 @@ export function syncShortcutCatalog(data: Pick<MobileBootstrap, "categories" | "
     },
     categories: data.categories
       .map((category) => ({
+        color: paletteColorFor(category.color, category.name, "dark"),
         id: category.id,
         name: category.name
       }))

@@ -3,7 +3,6 @@ import {
   Animated,
   Dimensions,
   Easing,
-  type GestureResponderEvent,
   Keyboard,
   type KeyboardEvent,
   Modal,
@@ -19,6 +18,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import { paletteColorFor, type RecentActivitySuggestion } from "@dayframe/shared";
+import { FloatingDatePicker } from "@/components/FloatingDatePicker";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
 import {
   editSheetKeyboardLayout,
@@ -32,25 +32,18 @@ import { runningTimerSheetElapsedSeconds } from "@/lib/timerPresentation";
 const MAX_RUNNING_SUGGESTIONS = 6;
 
 type Category = MobileBootstrap["categories"][number];
-type EditSheetMode = "running" | "entry" | "start";
-type StartTimerInput = {
-  categoryId: string | null;
-  description: string | null;
-  startedAt?: string | null;
-};
+type EditSheetMode = "running" | "entry" | "add";
 
 type ActiveTimerEditSheetProps = {
   categories: Category[];
+  descriptionPlaceholder?: string;
   elapsedSeconds: number;
   entry: MobileTimeEntry | null;
-  initialCategoryId?: string | null;
-  initialDescription?: string;
   lastStoppedAt: string | null;
   onCancel: () => void;
   onDelete?: (entryId: string) => Promise<boolean>;
   onApplySuggestion?: (entryId: string, suggestion: RecentActivitySuggestion) => Promise<boolean>;
   onSave?: (entryId: string, patch: TimeEntryUpdatePatch) => Promise<boolean>;
-  onStart?: (input: StartTimerInput) => Promise<boolean>;
   onStop?: () => Promise<boolean>;
   mode?: EditSheetMode;
   deleting?: boolean;
@@ -64,17 +57,15 @@ type ActiveTimerEditSheetProps = {
 
 export function ActiveTimerEditSheet({
   categories,
+  descriptionPlaceholder = "What are you working on?",
   elapsedSeconds,
   entry,
-  initialCategoryId = null,
-  initialDescription = "",
   lastStoppedAt,
   mode = "running",
   onCancel,
   onDelete,
   onApplySuggestion,
   onSave,
-  onStart,
   onStop,
   deleting = false,
   saving,
@@ -106,31 +97,15 @@ export function ActiveTimerEditSheet({
   const suggestionsProgress = useRef(new Animated.Value(0)).current;
   const descriptionInputRef = useRef<TextInput>(null);
   const timeInputRef = useRef<TextInput>(null);
-  const suggestionsPanelRef = useRef<View>(null);
 
   const entryId = entry?.id ?? null;
-  const isStartMode = mode === "start";
   const isRunningMode = mode === "running";
   const isEntryMode = mode === "entry";
+  const isAddMode = mode === "add";
+  const hasStoppedTime = isEntryMode || isAddMode;
 
   useEffect(() => {
     if (!visible) return;
-    if (isStartMode) {
-      const startedAt = new Date();
-      setDescription(initialDescription);
-      setSelectedCategoryId(initialCategoryId);
-      setDateText(formatDateInput(startedAt));
-      setTimeText(formatTimeInput(startedAt));
-      setStoppedDateText("");
-      setStoppedTimeText("");
-      setPickerStartAt(startedAt);
-      setStartTimeEdited(false);
-      setDatePickerOpen(false);
-      setSuggestionsVisible(false);
-      setDeleteConfirmationVisible(false);
-      setValidationError(null);
-      return;
-    }
     if (!entry) return;
     const startedAt = new Date(entry.startedAt);
     setDescription(entry.description ?? "");
@@ -151,12 +126,11 @@ export function ActiveTimerEditSheet({
     setSuggestionsVisible(
       isRunningMode &&
       !entry.description &&
-      !entry.categoryId &&
       suggestions.length > 0
     );
     setDeleteConfirmationVisible(false);
     setValidationError(null);
-  }, [entry?.categoryId, entry?.description, entryId, initialCategoryId, initialDescription, isRunningMode, isStartMode, suggestions.length, visible]);
+  }, [entry?.categoryId, entry?.description, entryId, isRunningMode, suggestions.length, visible]);
 
   useEffect(() => {
     if (!visible) {
@@ -259,9 +233,7 @@ export function ActiveTimerEditSheet({
   const previewStartAt = datePickerOpen && pickerStartAt
     ? parseLocalDateTime(formatDateInput(pickerStartAt), timeText).date
     : parsedStart.date;
-  const elapsedPreviewSeconds = isStartMode
-    ? 0
-    : isEntryMode && parsedStart.date && parsedStop.date
+  const elapsedPreviewSeconds = hasStoppedTime && parsedStart.date && parsedStop.date
       ? Math.max(0, Math.floor((parsedStop.date.getTime() - parsedStart.date.getTime()) / 1000))
       : runningTimerSheetElapsedSeconds({
           activeElapsedSeconds: elapsedSeconds,
@@ -272,15 +244,12 @@ export function ActiveTimerEditSheet({
 
   const busy = saving || stopping || deleting;
   const canStop = isRunningMode && Boolean(onStop);
-  const canStart = isStartMode && Boolean(onStart);
-  const canDelete = !isStartMode && Boolean(onDelete);
-  const cancelLabel = isStartMode
-    ? "Cancel starting task"
-    : isRunningMode ? "Cancel editing timer" : "Cancel editing entry";
-  const saveLabel = isRunningMode ? "Save timer edits" : "Save entry edits";
-  const sheetTitle = isStartMode ? "Start task" : isRunningMode ? "Edit timer" : "Edit entry";
-  const elapsedLabel = isEntryMode ? "Duration" : null;
-  const elapsedText = isStartMode ? "--:--" : formatClockDuration(elapsedPreviewSeconds);
+  const canDelete = Boolean(onDelete);
+  const cancelLabel = isRunningMode ? "Cancel editing timer" : isAddMode ? "Cancel adding time" : "Cancel editing entry";
+  const saveLabel = isRunningMode ? "Save timer edits" : isAddMode ? "Create time entry" : "Save entry edits";
+  const sheetTitle = isAddMode ? "Add time" : "Edit entry";
+  const elapsedLabel = hasStoppedTime ? "Duration" : null;
+  const elapsedText = formatClockDuration(elapsedPreviewSeconds);
   const keyboardLayout = editSheetKeyboardLayout({
     bottomInset: insets.bottom,
     keyboardInset,
@@ -358,7 +327,7 @@ export function ActiveTimerEditSheet({
     ]
   };
 
-  if (!entry && !isStartMode) return null;
+  if (!entry) return null;
 
   function fallbackStartAt() {
     if (entry) return new Date(entry.startedAt);
@@ -388,7 +357,7 @@ export function ActiveTimerEditSheet({
       patch.startedAt = parsed.date.toISOString();
     }
 
-    if (isEntryMode) {
+    if (hasStoppedTime) {
       const stopped = parseLocalDateTime(stoppedDateText, stoppedTimeText);
       if (stopped.error || !stopped.date) {
         setValidationError(stopped.error ?? "Choose a valid end date and time.");
@@ -407,29 +376,6 @@ export function ActiveTimerEditSheet({
 
     setValidationError(null);
     const ok = await onSave(entry.id, patch);
-    if (ok) onCancel();
-  }
-
-  async function startFromSheet(override?: { categoryId?: string | null; description?: string | null }) {
-    if (busy || !onStart) return;
-    const parsed = datePickerOpen && pickerStartAt
-      ? parseLocalDateTime(formatDateInput(pickerStartAt), timeText)
-      : parseLocalDateTime(dateText, timeText);
-    if (parsed.error || !parsed.date) {
-      setValidationError(parsed.error ?? "Choose a valid start date and time.");
-      return;
-    }
-    if (parsed.date.getTime() > Date.now()) {
-      setValidationError("Start time cannot be in the future.");
-      return;
-    }
-
-    setValidationError(null);
-    const ok = await onStart({
-      categoryId: override && "categoryId" in override ? override.categoryId ?? null : selectedCategoryId,
-      description: override && "description" in override ? override.description ?? null : description.trim() || null,
-      startedAt: startTimeEdited ? parsed.date.toISOString() : null
-    });
     if (ok) onCancel();
   }
 
@@ -454,15 +400,6 @@ export function ActiveTimerEditSheet({
     }
   }
 
-  function dismissSuggestionsOnOutsideTouch(event: GestureResponderEvent) {
-    if (!suggestionsVisible) return;
-    const { pageX, pageY } = event.nativeEvent;
-    suggestionsPanelRef.current?.measureInWindow((x, y, width, height) => {
-      const isInside = pageX >= x && pageX <= x + width && pageY >= y && pageY <= y + height;
-      if (!isInside) setSuggestionsVisible(false);
-    });
-  }
-
   function confirmDeleteEntry() {
     if (busy || !onDelete) return;
     Keyboard.dismiss();
@@ -482,24 +419,24 @@ export function ActiveTimerEditSheet({
     setDateText(formatDateInput(stoppedAt));
     setTimeText(formatTimeInput(stoppedAt));
     setPickerStartAt(stoppedAt);
-    if (!isEntryMode) setStartTimeEdited(true);
+    if (!hasStoppedTime) setStartTimeEdited(true);
     setDatePickerOpen(false);
     setValidationError(null);
   }
 
   function updateTimeText(value: string) {
-    if (!isEntryMode) setStartTimeEdited(true);
+    if (!hasStoppedTime) setStartTimeEdited(true);
     setTimeText(formatEditableTime(value));
     setValidationError(null);
   }
 
-  function hideSuggestionsForManualEdit() {
+  function hideSuggestionsForDescriptionEntry() {
     setSuggestionsVisible(false);
   }
 
   function focusDescriptionField() {
     setDatePickerOpen(false);
-    hideSuggestionsForManualEdit();
+    hideSuggestionsForDescriptionEntry();
   }
 
   function updateStoppedDateText(value: string) {
@@ -514,16 +451,14 @@ export function ActiveTimerEditSheet({
 
   function openStartPicker() {
     Keyboard.dismiss();
-    hideSuggestionsForManualEdit();
     const currentStart = parsedStart.date ?? fallbackStartAt();
     setPickerStartAt(currentStart);
     setDatePickerOpen(true);
     setValidationError(null);
   }
 
-  function applyStartPicker() {
-    if (!pickerStartAt) return;
-    const parsed = parseLocalDateTime(formatDateInput(pickerStartAt), timeText);
+  function selectStartDate(date: Date) {
+    const parsed = parseLocalDateTime(formatDateInput(date), timeText);
     if (parsed.error || !parsed.date) {
       setValidationError(parsed.error ?? "Choose a valid start date and time.");
       return;
@@ -532,52 +467,20 @@ export function ActiveTimerEditSheet({
       setValidationError("Start time cannot be in the future.");
       return;
     }
-    setDateText(formatDateInput(pickerStartAt));
-    if (!isEntryMode) setStartTimeEdited(true);
+    setPickerStartAt(parsed.date);
+    setDateText(formatDateInput(parsed.date));
+    if (isRunningMode) setStartTimeEdited(true);
     setDatePickerOpen(false);
-    setValidationError(null);
-  }
-
-  function cancelStartPicker() {
-    setPickerStartAt(parsedStart.date ?? fallbackStartAt());
-    setDatePickerOpen(false);
-    setValidationError(null);
-  }
-
-  function adjustPickerDate(days: number) {
-    setPickerStartAt((current) => {
-      const next = new Date((current ?? parsedStart.date ?? fallbackStartAt()).getTime());
-      next.setDate(next.getDate() + days);
-      next.setSeconds(0, 0);
-      return next;
-    });
-    setValidationError(null);
-  }
-
-  function setPickerToToday() {
-    setPickerStartAt((current) => {
-      const source = current ?? parsedStart.date ?? fallbackStartAt();
-      const today = new Date();
-      const next = new Date(
-        today.getFullYear(),
-        today.getMonth(),
-        today.getDate(),
-        source.getHours(),
-        source.getMinutes(),
-        0,
-        0
-      );
-      return next;
-    });
     setValidationError(null);
   }
 
   const displayedStartAt = previewStartAt ?? fallbackStartAt();
   const pickerDate = pickerStartAt ?? displayedStartAt;
-  const showDoneButton = !isStartMode;
+  const showDoneButton = Boolean(onSave);
 
   return (
-    <Modal
+    <>
+      <Modal
       animationType={reduceMotion ? "none" : "slide"}
       onRequestClose={() => {
         if (deleteConfirmationVisible) {
@@ -600,6 +503,8 @@ export function ActiveTimerEditSheet({
         <View pointerEvents="box-none" style={styles.sheetKeyboardAvoidingView}>
           <SafeAreaView edges={[]} pointerEvents="box-none" style={styles.sheetSafeArea}>
             <Animated.View
+              accessibilityLabel={isRunningMode ? "Edit timer" : sheetTitle}
+              accessibilityViewIsModal
               style={[
                 styles.activeEditSheet,
                 keyboardAwareSheetStyle,
@@ -609,10 +514,8 @@ export function ActiveTimerEditSheet({
             >
               <View {...dismissResponder.panHandlers}>
                 <View style={styles.sheetHandle} />
-                <View style={[styles.sheetHeader, showDoneButton ? null : styles.sheetHeaderCentered]}>
-                  <Text style={[styles.sheetTitle, showDoneButton ? null : styles.sheetTitleCentered]}>
-                    {sheetTitle}
-                  </Text>
+                <View style={[styles.sheetHeader, isRunningMode ? styles.sheetHeaderRunning : null]}>
+                  {!isRunningMode ? <Text style={styles.sheetTitle}>{sheetTitle}</Text> : null}
                   {showDoneButton ? (
                     <Pressable
                       accessibilityLabel={saveLabel}
@@ -638,7 +541,6 @@ export function ActiveTimerEditSheet({
                 ]}
                 keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
                 keyboardShouldPersistTaps="always"
-                onTouchStart={dismissSuggestionsOnOutsideTouch}
                 showsVerticalScrollIndicator={false}
                 style={[
                   styles.activeEditScroller,
@@ -665,28 +567,10 @@ export function ActiveTimerEditSheet({
                       <StopGlyph color={theme.onAccent} />
                     </Pressable>
                   ) : null}
-                  {canStart ? (
-                    <Pressable
-                      accessibilityLabel="Start timer from start sheet"
-                      accessibilityRole="button"
-                      disabled={busy}
-                      onPress={() => {
-                        void startFromSheet();
-                      }}
-                      style={({ pressed }) => [
-                        styles.activeEditStartButton,
-                        pressed && !busy ? styles.buttonPressed : null,
-                        busy ? styles.buttonDisabled : null
-                      ]}
-                    >
-                      <PlayGlyph color={theme.accentText} />
-                    </Pressable>
-                  ) : null}
                 </View>
 
                 {suggestionsMounted ? (
                   <Animated.View
-                    ref={suggestionsPanelRef}
                     accessibilityLabel="Suggestions for this running timer"
                     style={[styles.taskSuggestionsPanel, suggestionsAnimatedStyle]}
                   >
@@ -713,7 +597,7 @@ export function ActiveTimerEditSheet({
                   <Text style={styles.activeEditSectionLabel}>Description</Text>
                   <TextInput
                     ref={descriptionInputRef}
-                    accessibilityLabel={isStartMode ? "Task description" : isRunningMode ? "Timer description" : "Entry description"}
+                    accessibilityLabel={isRunningMode ? "Timer description" : "Entry description"}
                     blurOnSubmit
                     editable={!busy}
                     onFocus={focusDescriptionField}
@@ -724,7 +608,7 @@ export function ActiveTimerEditSheet({
                     value={description}
                     onChangeText={setDescription}
                     onSubmitEditing={Keyboard.dismiss}
-                    placeholder="What are you working on?"
+                    placeholder={descriptionPlaceholder}
                     placeholderTextColor={theme.textSecondary}
                     returnKeyType="done"
                     showSoftInputOnFocus
@@ -745,7 +629,6 @@ export function ActiveTimerEditSheet({
                       styles={styles}
                       theme={theme}
                       onPress={() => {
-                        hideSuggestionsForManualEdit();
                         setSelectedCategoryId(null);
                       }}
                     />
@@ -757,7 +640,6 @@ export function ActiveTimerEditSheet({
                         styles={styles}
                         theme={theme}
                         onPress={() => {
-                          hideSuggestionsForManualEdit();
                           setSelectedCategoryId(category.id);
                         }}
                       />
@@ -790,7 +672,6 @@ export function ActiveTimerEditSheet({
                       onChangeText={updateTimeText}
                       onFocus={() => {
                         setDatePickerOpen(false);
-                        hideSuggestionsForManualEdit();
                       }}
                       onPressIn={() => {
                         if (!busy) timeInputRef.current?.focus();
@@ -817,64 +698,9 @@ export function ActiveTimerEditSheet({
                     </Pressable>
                   ) : null}
                   {validationError ? <Text style={styles.errorText}>{validationError}</Text> : null}
-                  {datePickerOpen ? (
-                    <View style={styles.activeEditPickerPanel}>
-                      <View style={styles.activeEditPickerHeader}>
-                        <View style={styles.activeEditPickerHeaderText}>
-                          <Text style={styles.activeEditPickerTitle}>Choose date</Text>
-                          <Text style={styles.activeEditPickerMeta}>
-                            {formatPickerDate(pickerDate)} · {formatDateInput(pickerDate)}
-                          </Text>
-                        </View>
-                        <View style={styles.activeEditPickerActions}>
-                          <Pressable
-                            accessibilityLabel="Cancel start time picker"
-                            accessibilityRole="button"
-                            onPress={cancelStartPicker}
-                            style={pressable(styles.activeEditPickerSecondaryButton, styles.buttonPressed)}
-                          >
-                            <Text style={styles.activeEditPickerSecondaryText}>Cancel</Text>
-                          </Pressable>
-                          <Pressable
-                            accessibilityLabel="Apply start date"
-                            accessibilityRole="button"
-                            onPress={applyStartPicker}
-                            style={pressable(styles.activeEditPickerPrimaryButton, styles.buttonPressed)}
-                          >
-                            <Text style={styles.activeEditPickerPrimaryText}>Apply</Text>
-                          </Pressable>
-                        </View>
-                      </View>
-
-                      <View style={styles.activeEditPickerShortcutRow}>
-                        <Pressable
-                          accessibilityLabel="Set start date to today"
-                          accessibilityRole="button"
-                          onPress={setPickerToToday}
-                          style={pressable(styles.activeEditPickerChip, styles.buttonPressed)}
-                        >
-                          <Text style={styles.activeEditPickerChipText}>Today</Text>
-                        </Pressable>
-                      </View>
-
-                      <View style={styles.activeEditPickerGrid}>
-                        <PickerStepper
-                          decrementLabel="Previous day"
-                          disableIncrement={isPickerDateIncrementFuture(pickerDate, 1)}
-                          incrementLabel="Next day"
-                          label="Date"
-                          onDecrement={() => adjustPickerDate(-1)}
-                          onIncrement={() => adjustPickerDate(1)}
-                          value={formatShortPickerDate(pickerDate)}
-                          styles={styles}
-                          theme={theme}
-                        />
-                      </View>
-                    </View>
-                  ) : null}
                 </View>
 
-                {isEntryMode ? (
+                {hasStoppedTime ? (
                   <View style={styles.activeEditSection}>
                     <Text style={styles.activeEditSectionLabel}>End time</Text>
                     <View style={styles.activeEditTimeRow}>
@@ -968,8 +794,18 @@ export function ActiveTimerEditSheet({
             </Animated.View>
           </SafeAreaView>
         </View>
+        <FloatingDatePicker
+          maxDate={new Date()}
+          onClose={() => setDatePickerOpen(false)}
+          onSelect={selectStartDate}
+          selectedDate={pickerDate}
+          styles={styles}
+          theme={theme}
+          visible={datePickerOpen}
+        />
       </View>
-    </Modal>
+      </Modal>
+    </>
   );
 }
 
@@ -1020,63 +856,6 @@ function RunningTimerSuggestionRow({
         ) : null}
       </View>
     </Pressable>
-  );
-}
-
-function PickerStepper({
-  decrementLabel,
-  disableIncrement,
-  incrementLabel,
-  label,
-  onDecrement,
-  onIncrement,
-  styles,
-  theme,
-  value
-}: {
-  decrementLabel: string;
-  disableIncrement?: boolean;
-  incrementLabel: string;
-  label: string;
-  onDecrement: () => void;
-  onIncrement: () => void;
-  styles: MobileStyles;
-  theme: MobileTheme;
-  value: string;
-}) {
-  return (
-    <View style={styles.activeEditPickerStepper}>
-      <Text style={styles.activeEditPickerStepperLabel}>{label}</Text>
-      <View style={styles.activeEditPickerStepperControls}>
-        <Pressable
-          accessibilityLabel={decrementLabel}
-          accessibilityRole="button"
-          onPress={onDecrement}
-          style={pressable(styles.activeEditPickerStepperButton, styles.buttonPressed)}
-        >
-          <Text style={styles.activeEditPickerStepperButtonText}>-</Text>
-        </Pressable>
-        <Text style={styles.activeEditPickerStepperValue} numberOfLines={1}>{value}</Text>
-        <Pressable
-          accessibilityLabel={incrementLabel}
-          accessibilityRole="button"
-          disabled={disableIncrement}
-          onPress={onIncrement}
-          style={({ pressed }) => [
-            styles.activeEditPickerStepperButton,
-            pressed && !disableIncrement ? styles.buttonPressed : null,
-            disableIncrement ? styles.buttonDisabled : null
-          ]}
-        >
-          <Text style={[
-            styles.activeEditPickerStepperButtonText,
-            disableIncrement ? { color: theme.textSecondary } : null
-          ]}>
-            +
-          </Text>
-        </Pressable>
-      </View>
-    </View>
   );
 }
 
@@ -1153,28 +932,10 @@ function parseLocalDateTime(dateText: string, timeText: string): { date: Date | 
   return { date, error: null };
 }
 
-function isPickerDateIncrementFuture(date: Date, days: number) {
-  const next = new Date(date.getTime());
-  next.setDate(next.getDate() + days);
-  next.setSeconds(0, 0);
-  const today = new Date();
-  const nextDate = new Date(next.getFullYear(), next.getMonth(), next.getDate()).getTime();
-  const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
-  return nextDate > todayDate;
-}
-
 function formatPickerDate(date: Date) {
   if (isToday(date)) return "Today";
   return date.toLocaleDateString(undefined, {
     weekday: "short",
-    month: "short",
-    day: "numeric"
-  });
-}
-
-function formatShortPickerDate(date: Date) {
-  if (isToday(date)) return "Today";
-  return date.toLocaleDateString(undefined, {
     month: "short",
     day: "numeric"
   });
@@ -1249,14 +1010,6 @@ function formatClockDuration(seconds: number) {
   return `${hours}:${minutes.toString().padStart(2, "0")}:${remainingSeconds
     .toString()
     .padStart(2, "0")}`;
-}
-
-function PlayGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={20} height={20} viewBox="0 0 24 24">
-      <Path d="M7 4v16l13-8L7 4Z" fill={color} />
-    </Svg>
-  );
 }
 
 function colorWithAlpha(hex: string, alpha: number) {

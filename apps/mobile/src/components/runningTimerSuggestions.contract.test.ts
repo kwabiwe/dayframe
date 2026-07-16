@@ -26,6 +26,9 @@ describe("running timer suggestion placement", () => {
     expect(dashboardSource).not.toContain("shouldShowTodaySuggestions");
     expect(dashboardSource).not.toContain("TodayTaskSuggestionRow");
     expect(editSheetSource).not.toContain("selected ? <CheckGlyph");
+    expect(editSheetSource).not.toContain("dismissSuggestionsOnOutsideTouch");
+    expect(editSheetSource).not.toContain("hideSuggestionsForManualEdit");
+    expect(editSheetSource).not.toContain("!entry.categoryId &&");
   });
 
   it("opens the running edit sheet after an empty timer starts", () => {
@@ -43,14 +46,19 @@ describe("running timer suggestion placement", () => {
     expect(dashboardSource).toContain("onApplySuggestion={applyRunningTimerSuggestion}");
     expect(dashboardSource).toContain("if (latestData.current?.activeEntry)");
     expect(dashboardSource).toContain("setActiveEditVisible(true)");
+    expect(dashboardSource).not.toContain('mode="start"');
+    expect(dashboardSource).toContain('accessibilityLabel="Add past time"');
+    expect(dashboardSource).toContain('mode="add"');
   });
 
   it("keeps destructive running-timer deletion inside the edit sheet instead of the active timer card", () => {
     const activeTimerCardSource = dashboardSource.slice(
-      dashboardSource.indexOf("<Text style={styles.label}>Active timer</Text>"),
-      dashboardSource.indexOf("accessibilityLabel=\"Open start task sheet\"")
+      dashboardSource.indexOf('accessibilityLabel={hasLiveActiveTimer ? "Edit running timer"'),
+      dashboardSource.indexOf('accessibilityLabel="Start timer and add details"')
     );
 
+    expect(activeTimerCardSource.length).toBeGreaterThan(0);
+    expect(activeTimerCardSource).not.toContain("Active timer</Text>");
     expect(activeTimerCardSource).not.toContain("Delete running timer");
     expect(activeTimerCardSource).not.toContain("deleteTimerButton");
     expect(editSheetSource).toContain("accessibilityLabel=\"Delete entry\"");

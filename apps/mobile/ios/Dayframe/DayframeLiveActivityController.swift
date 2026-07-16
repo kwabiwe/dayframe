@@ -2,7 +2,12 @@ import ActivityKit
 import Foundation
 
 enum DayframeLiveActivityController {
-  static func start(title: String, categoryName: String?, startedAt: Date = Date()) async -> Bool {
+  static func start(
+    title: String,
+    categoryName: String?,
+    categoryColor: String? = nil,
+    startedAt: Date = Date()
+  ) async -> Bool {
     guard #available(iOS 16.2, *) else {
       return false
     }
@@ -17,6 +22,7 @@ enum DayframeLiveActivityController {
     let state = DayframeTimerAttributes.ContentState(
       title: cleanTitle(title),
       categoryName: cleanText(categoryName),
+      categoryColor: cleanText(categoryColor),
       startedAt: startedAt,
       elapsedSeconds: 0,
       isRunning: true
@@ -49,6 +55,7 @@ enum DayframeLiveActivityController {
       let state = DayframeTimerAttributes.ContentState(
         title: activity.content.state.title,
         categoryName: activity.content.state.categoryName,
+        categoryColor: activity.content.state.categoryColor,
         startedAt: activity.content.state.startedAt,
         elapsedSeconds: elapsedSeconds(from: activity.content.state.startedAt),
         isRunning: false

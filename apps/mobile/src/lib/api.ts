@@ -97,6 +97,7 @@ export type MobileBootstrap = {
   }>;
   categories: Array<{ id: string; name: string; color: string; isPinned: boolean }>;
   entries: MobileTimeEntry[];
+  historyEntries?: MobileTimeEntry[];
   dayEntries?: MobileTimeEntry[];
   weekEntries?: MobileTimeEntry[];
   places: Array<{

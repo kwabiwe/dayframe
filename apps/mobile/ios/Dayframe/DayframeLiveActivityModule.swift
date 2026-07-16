@@ -8,10 +8,11 @@ class DayframeLiveActivityModule: NSObject {
     false
   }
 
-  @objc(start:categoryName:startedAt:resolver:rejecter:)
+  @objc(start:categoryName:categoryColor:startedAt:resolver:rejecter:)
   func start(
     title: String,
     categoryName: String?,
+    categoryColor: String?,
     startedAt: String?,
     resolve: @escaping RCTPromiseResolveBlock,
     reject: @escaping RCTPromiseRejectBlock
@@ -20,6 +21,7 @@ class DayframeLiveActivityModule: NSObject {
       let didStart = await DayframeLiveActivityController.start(
         title: title,
         categoryName: categoryName,
+        categoryColor: categoryColor,
         startedAt: Self.date(from: startedAt) ?? Date()
       )
       resolve(didStart)

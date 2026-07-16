@@ -88,12 +88,19 @@ private struct DayframeLiveActivityLabel: View {
         .minimumScaleFactor(0.72)
         .frame(maxWidth: .infinity, alignment: .leading)
       if let categoryName = state.categoryName {
-        Text(categoryName)
-          .font(.system(size: size.categorySize, weight: .medium, design: .default))
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-          .minimumScaleFactor(0.75)
-          .frame(maxWidth: .infinity, alignment: .leading)
+        HStack(spacing: 7) {
+          if let categoryColor = Color(dayframeHex: state.categoryColor) {
+            Circle()
+              .fill(categoryColor)
+              .frame(width: 8, height: 8)
+          }
+          Text(categoryName)
+            .font(.system(size: size.categorySize, weight: .medium, design: .default))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
       }
     }
   }
@@ -223,4 +230,17 @@ private func formatElapsedSeconds(_ seconds: Int) -> String {
   return hours > 0
     ? String(format: "%d:%02d:%02d", hours, minutes, remainingSeconds)
     : String(format: "%d:%02d", minutes, remainingSeconds)
+}
+
+private extension Color {
+  init?(dayframeHex value: String?) {
+    guard let value else { return nil }
+    let cleaned = value.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+    guard cleaned.count == 6, let rgb = UInt64(cleaned, radix: 16) else { return nil }
+    self.init(
+      red: Double((rgb >> 16) & 0xFF) / 255,
+      green: Double((rgb >> 8) & 0xFF) / 255,
+      blue: Double(rgb & 0xFF) / 255
+    )
+  }
 }
