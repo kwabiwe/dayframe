@@ -8,7 +8,7 @@ The core value proposition is to reduce manual time-tracking friction without lo
 
 The MVP goal is to make Dayframe reliable for personal use and a small friends beta: hosted on Vercel, backed by Supabase Postgres/Auth, iOS-only for mobile, offline-capable for hours or days, and privacy-conscious around health and precise location data.
 
-Current reality as of 2026-07-16: Dayframe is in an active internal TestFlight lane, with build `0.1.0 (45)` verified for KB testing after PR #70. The tracker in `docs/feature-fix-tracker.md` is the source of truth for what is `Done`, still under `Watch`, or planned next.
+Current reality as of 2026-07-16: Dayframe is in an active internal TestFlight lane, with build `0.1.0 (46)` verified for KB testing after PR #71. The tracker in `docs/feature-fix-tracker.md` is the source of truth for what is `Done`, still under `Watch`, or planned next.
 
 ## 2. Mission
 
@@ -399,7 +399,7 @@ Deliverables:
 - ✅ Review inbox improvements.
 - ✅ Reports and automation accuracy metrics.
 - ⚠️ Settings for permissions and export exist; deletion/privacy controls still need the next-phase work tracked in `docs/feature-fix-tracker.md`.
-- ✅ Internal TestFlight build workflow is active and verified through `0.1.0 (45)`.
+- ✅ Internal TestFlight build workflow is active and verified through `0.1.0 (46)`.
 
 Validation:
 

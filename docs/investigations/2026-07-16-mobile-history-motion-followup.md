@@ -65,3 +65,9 @@ Branch: `codex/mobile-history-motion-followup`
 - `npm run lint`, `npm run typecheck`, `npm run test`, `npm run build`, `npm run check:brand-assets`, and `npm run ios -w @dayframe/mobile` passed. The suite completed 172 mobile, 138 web, and 56 shared tests.
 - `npm run testflight:preflight` ran and correctly blocked archive/export because this machine lacks the Apple Distribution identity, App Store provisioning profile, and local App Store Connect API environment file. This is release-environment state rather than an application regression.
 - The available simulator automation exposes no true two-finger gesture action. Calendar pinch performance is therefore closed by the removal of per-frame React updates, worklet/unit evidence, successful native rendering, and a documented physical-device acceptance check.
+
+Post-merge release:
+
+- After PR #71 merged to `main` as `2c3173b`, the release machine reran `npm run test`, `npm run typecheck`, `npm run lint`, `npm run build`, `npm run check:brand-assets`, `git diff --check`, and `npm run testflight:preflight`.
+- TestFlight build `0.1.0 (46)` was archived, exported, uploaded, and verified in App Store Connect with delivery/build ID `7c372c50-15f7-40c2-a67c-582220c41da0`, `processingState=VALID`, `usesNonExemptEncryption=false`, en-GB notes set, `Internal Health Debug` all-build access, and `internalBuildState=IN_BETA_TESTING`.
+- Vercel production verified PR #71 runtime commit `2c3173b` as Ready at `https://dayframe-kb4uorezi-dayframeworkshop.vercel.app`; later docs-only release commits may advance the alias without changing runtime code.
