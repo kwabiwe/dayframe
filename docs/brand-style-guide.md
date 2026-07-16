@@ -98,9 +98,9 @@ Eight-digit HEX values below include alpha as the last two digits. RGB entries f
 | `surfaceRaised` | `#1B2230` | `27, 34, 48` | Menus, floating panels and sheets that need elevation. |
 | `surfaceInset` | `#101622` | `16, 22, 34` | Inputs, wells and inset regions. |
 | `surfaceMuted` | `#202838` | `32, 40, 56` | Selected or softly highlighted surfaces; retain a non-colour selection cue. |
-| `border` | `#2A3345` | `42, 51, 69` | Default 1 px dividers and outlines. |
-| `borderStrong` | `#3B465B` | `59, 70, 91` | Selected outlines and higher-emphasis separation. |
-| `controlBorder` | `#64718A` | `100, 113, 138` | Essential input/control boundary; at least 3:1 against dark surface and inset roles. |
+| `border` | `#2A3345` | `42, 51, 69` | Hairline dividers and web-only outlines; not a default iOS container treatment. |
+| `borderStrong` | `#3B465B` | `59, 70, 91` | Selected outlines where fill cannot communicate state. |
+| `controlBorder` | `#64718A` | `100, 113, 138` | Essential web input/control boundary; at least 3:1 against dark surface and inset roles. |
 | `textPrimary` | `#F7F8FB` | `247, 248, 251` | Main text and values; 18.73:1 on `background`. |
 | `textSecondary` | `#8993A7` | `137, 147, 167` | Supporting copy; 6.44:1 on `background`. |
 | `textMuted` | `#707B91` | `112, 123, 145` | Tertiary copy; 4.67:1 on `background` but only 4.05:1 on `surface`, so do not use it for small body text on cards. |
@@ -130,12 +130,12 @@ Eight-digit HEX values below include alpha as the last two digits. RGB entries f
 | --- | --- | --- | --- |
 | `background` | `#F4F6F9` | `244, 246, 249` | Root canvas. |
 | `surface` | `#FFFFFF` | `255, 255, 255` | Primary cards and panels. |
-| `surfaceRaised` | `#FFFFFF` | `255, 255, 255` | Elevated menus, popovers and sheets; elevation comes from border/shadow. |
+| `surfaceRaised` | `#FFFFFF` | `255, 255, 255` | Elevated menus, popovers and sheets; on iOS elevation comes from canvas contrast and restrained shadow. |
 | `surfaceInset` | `#F7F8FB` | `247, 248, 251` | Inputs and inset areas. |
 | `surfaceMuted` | `#EEF1F6` | `238, 241, 246` | Selected and muted surfaces; retain a non-colour cue. |
-| `border` | `#DDE2EA` | `221, 226, 234` | Default 1 px borders and dividers. |
-| `borderStrong` | `#BCC5D2` | `188, 197, 210` | Selected and higher-emphasis outlines. |
-| `controlBorder` | `#7D8797` | `125, 135, 151` | Essential input/control boundary; 3.63:1 against white. |
+| `border` | `#DDE2EA` | `221, 226, 234` | Hairline dividers and web-only outlines; not a default iOS container treatment. |
+| `borderStrong` | `#BCC5D2` | `188, 197, 210` | Selected outlines where fill cannot communicate state, such as palette swatches. |
+| `controlBorder` | `#7D8797` | `125, 135, 151` | Essential web input/control boundary; 3.63:1 against white. |
 | `textPrimary` | `#111827` | `17, 24, 39` | Main text and values; 16.39:1 on `background`. |
 | `textSecondary` | `#667085` | `102, 112, 133` | Supporting text; 4.97:1 on white `surface`. |
 | `textMuted` | `#667085` | `102, 112, 133` | Tertiary text; use state/opacity separately rather than a paler inaccessible grey. |
@@ -182,7 +182,7 @@ The five lead chart colours are Coral, Violet, Amber, Mint and Blue. Preserve de
 
 ## Typography
 
-The product UI uses system fonts. On iOS use San Francisco through React Native’s `System` family. On web use the existing system-first stack: `-apple-system`, `BlinkMacSystemFont`, `"SF Pro Text"`, `"Segoe UI"`, sans-serif. Do not add Sofia Pro or another font dependency: the Dayframe wordmark is outline geometry and needs no font file.
+The product UI uses system fonts. On iOS use San Francisco through React Native’s `System` family and favour its lighter regular/semi-bold hierarchy instead of uniformly heavy text. On web use the existing system-first stack: `-apple-system`, `BlinkMacSystemFont`, `"SF Pro Text"`, `"Segoe UI"`, sans-serif. Do not add Sofia Pro or another font dependency: the Dayframe wordmark is outline geometry and needs no font file.
 
 | Role | Size | Weight | Line height | Letter spacing |
 | --- | ---: | ---: | ---: | ---: |
@@ -202,9 +202,11 @@ Use `font-variant-numeric: tabular-nums` on timers, durations, clock labels and 
 
 Use the shared spacing scale `4, 8, 12, 16, 20, 24, 32`. Prefer 20 px/pt mobile panels, 14–18 compact cards and controls, and 24–28 floating navigation. Pills may be fully rounded. Keep interactive targets at least 44×44 px/pt.
 
+On iOS, icon-only buttons are circular and text buttons are pills. Avoid rounded-square button silhouettes. Separate panels from the canvas with `surface`/`surfaceRaised` fill, and use inset fills or hairline dividers for structure inside a panel.
+
 ### Borders, elevation and shadows
 
-Default borders are 1 px. Use `borderStrong` for selection or strong separation, not thicker arbitrary rules. Reserve elevation for sheets, menus and floating navigation:
+Borders are not the default iOS grouping mechanism. Prefer canvas/surface contrast, inset fills and light internal dividers; reserve an outline for cases where fill cannot communicate state, such as a selected colour swatch. Web may continue to use 1 px borders where dense controls, focus, or tabular separation require them. Reserve elevation for sheets, menus and floating navigation:
 
 - dark: `0 12px 32px rgba(0, 0, 0, 0.32)`;
 - light: `0 12px 28px rgba(17, 24, 39, 0.10)`.
@@ -218,10 +220,10 @@ Use Lucide on web and the established `react-native-svg` glyph style on mobile. 
 ### Component states
 
 - **Primary:** `accent` background with `onAccent` content; use `accentHover` and `accentPressed`; retain a readable disabled label.
-- **Secondary:** `surface` or `surfaceInset`, visible `border`, `textPrimary`, and the shared focus ring.
+- **Secondary:** on iOS use a `surfaceMuted` pill or circle with no outline; on web use `surface` or `surfaceInset` plus the shared focus ring.
 - **Destructive:** `danger`, never primary coral; confirmation behaviour remains intact.
-- **Inputs:** `surfaceInset`, default border, stronger focus border and a visible `focus` halo. Placeholder text must remain readable.
-- **Selection:** combine colour with a check, outline, label, position or icon. Use `surfaceMuted`/`accentSoft` deliberately.
+- **Inputs:** on iOS use `surfaceInset`/`surfaceMuted` fill and keyboard focus; on web keep the visible focus boundary and halo. Placeholder text must remain readable.
+- **Selection:** use a clearly differentiated fill plus selected-state semantics. Add a check or outline only when the fill and label are not sufficiently distinct; category pills do not need a redundant checkmark.
 - **Loading/empty/error:** use consistent surfaces and plain, actionable copy. Never display raw native exceptions.
 
 ### Focus and accessibility

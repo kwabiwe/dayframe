@@ -832,8 +832,8 @@ export default function SettingsScreen() {
           ) : null}
 
           {settingsSection === "appearance" ? (
-            <View style={styles.panel}>
-              <Text style={styles.label}>Theme</Text>
+            <View style={styles.appearanceStack}>
+              <Text style={styles.appearanceIntro}>Choose how Dayframe follows your iPhone.</Text>
               <View style={styles.segmentedControl}>
                 {themeOptions.map((option) => {
                   const selected = option.value === themePreference;
@@ -856,12 +856,41 @@ export default function SettingsScreen() {
                   );
                 })}
               </View>
+              <View style={styles.appearanceSelectionCard}>
+                <Text style={styles.appearanceSelectionTitle}>
+                  {themePreference === "system" ? "System" : themePreference === "light" ? "Light" : "Dark"}
+                </Text>
+                <Text style={styles.appearanceSelectionMeta}>
+                  {themePreference === "system"
+                    ? "Automatically matches iOS appearance."
+                    : themePreference === "light"
+                      ? "Uses the designed light companion throughout Dayframe."
+                      : "Uses Midnight Core throughout Dayframe."}
+                </Text>
+              </View>
+
+              <Text style={styles.appearanceSectionLabel}>Preview</Text>
+              <View style={styles.appearancePreviewRow}>
+                <AppearancePreviewCard mode="light" selected={themePreference === "light"} styles={styles} />
+                <AppearancePreviewCard mode="dark" selected={themePreference === "dark"} styles={styles} />
+              </View>
+
+              <Text style={styles.appearanceSectionLabel}>Display details</Text>
+              <View style={styles.appearanceDetailsCard}>
+                <View style={styles.appearanceDetailRow}>
+                  <Text style={styles.appearanceDetailTitle}>Midnight Core</Text>
+                  <Text style={styles.appearanceDetailMeta}>Always preserved</Text>
+                </View>
+                <View style={[styles.appearanceDetailRow, styles.appearanceDetailDivider]}>
+                  <Text style={styles.appearanceDetailTitle}>Colour logo</Text>
+                  <Text style={styles.appearanceDetailMeta}>Never recoloured</Text>
+                </View>
+              </View>
             </View>
           ) : null}
 
           {settingsSection === "categories" ? (
           <View style={styles.panel}>
-            <Text style={styles.sectionTitle}>Categories</Text>
             <View style={styles.categoryList}>
               {(data?.categories ?? []).map((category) => {
                 const categoryColor = paletteColorFor(category.color, category.name, theme.mode);
@@ -919,6 +948,14 @@ export default function SettingsScreen() {
                           <Text style={styles.secondaryButtonText}>Cancel</Text>
                         </Pressable>
                         <Pressable
+                          accessibilityLabel={`Delete ${category.name}`}
+                          accessibilityRole="button"
+                          style={pressable(styles.secondaryButton, styles.buttonPressed)}
+                          onPress={() => confirmDeleteCategory(category)}
+                        >
+                          <Text style={styles.activeEditDeleteText}>Delete</Text>
+                        </Pressable>
+                        <Pressable
                           accessibilityRole="button"
                           style={pressable(styles.primaryInlineButton, styles.buttonPressed)}
                           onPress={() => saveCategoryEdit(category)}
@@ -931,31 +968,25 @@ export default function SettingsScreen() {
                 }
 
                 return (
-                  <View key={category.id} style={[styles.categoryRow, category.isPinned ? styles.categoryRowPinned : null]}>
-                    <View style={[styles.colorDot, { backgroundColor: categoryColor }]} />
-                    <View style={styles.categoryTextStack}>
-                      <Text style={styles.categoryName} numberOfLines={1}>{category.name}</Text>
-                      <Text style={[styles.categoryMeta, category.isPinned ? styles.categoryMetaPinned : null]}>
-                        {category.isPinned ? "Pinned" : "Unpinned"}
-                      </Text>
-                    </View>
+                  <View
+                    key={category.id}
+                    style={[styles.categoryRow, category.isPinned ? styles.categoryRowPinned : null]}
+                  >
+                    <Pressable
+                      accessibilityLabel={`Edit ${category.name}`}
+                      accessibilityRole="button"
+                      onPress={() => beginEditCategory(category)}
+                      style={pressable(styles.categoryRowMain, styles.buttonPressed)}
+                    >
+                      <View style={[styles.colorDot, { backgroundColor: categoryColor }]} />
+                      <View style={styles.categoryTextStack}>
+                        <Text style={styles.categoryName} numberOfLines={1}>{category.name}</Text>
+                        <Text style={[styles.categoryMeta, category.isPinned ? styles.categoryMetaPinned : null]}>
+                          {category.isPinned ? "Pinned" : "Unpinned"}
+                        </Text>
+                      </View>
+                    </Pressable>
                     <View style={styles.categoryActions}>
-                      <Pressable
-                        accessibilityLabel={`Edit ${category.name}`}
-                        accessibilityRole="button"
-                        style={pressable(styles.categoryIconButton, styles.buttonPressed)}
-                        onPress={() => beginEditCategory(category)}
-                      >
-                        <PencilGlyph color={theme.accent} />
-                      </Pressable>
-                      <Pressable
-                        accessibilityLabel={`Delete ${category.name}`}
-                        accessibilityRole="button"
-                        style={pressable(styles.categoryIconButton, styles.buttonPressed)}
-                        onPress={() => confirmDeleteCategory(category)}
-                      >
-                        <ArchiveGlyph color={theme.danger} />
-                      </Pressable>
                       <Pressable
                         accessibilityLabel={category.isPinned ? `Unpin ${category.name}` : `Pin ${category.name}`}
                         accessibilityRole="button"
@@ -1413,6 +1444,45 @@ function SettingsGroup({ children, title }: { children: ReactNode; title: string
   );
 }
 
+function AppearancePreviewCard({
+  mode,
+  selected,
+  styles
+}: {
+  mode: "light" | "dark";
+  selected: boolean;
+  styles: MobileStyles;
+}) {
+  const dark = mode === "dark";
+  return (
+    <View style={styles.appearancePreviewColumn}>
+      <Text style={styles.appearancePreviewLabel}>{dark ? "Dark" : "Light"}</Text>
+      <View style={[
+        styles.appearancePreviewCard,
+        dark ? styles.appearancePreviewCardDark : styles.appearancePreviewCardLight,
+        selected ? styles.appearancePreviewCardSelected : null
+      ]}>
+        <View style={[
+          styles.appearancePreviewSurface,
+          dark ? styles.appearancePreviewSurfaceDark : styles.appearancePreviewSurfaceLight
+        ]}>
+          <View style={[styles.appearancePreviewLine, dark ? styles.appearancePreviewLineDark : styles.appearancePreviewLineLight]} />
+          <View style={[styles.appearancePreviewLineShort, dark ? styles.appearancePreviewLineMutedDark : styles.appearancePreviewLineMutedLight]} />
+          <View style={styles.appearancePreviewAccent} />
+        </View>
+        <View style={[
+          styles.appearancePreviewPill,
+          dark ? styles.appearancePreviewPillDark : styles.appearancePreviewPillLight
+        ]}>
+          <Text style={[styles.appearancePreviewPillText, dark ? styles.appearancePreviewPillTextDark : null]}>
+            Midnight Core
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
 function SettingsMenuRow({
   icon,
   label,
@@ -1549,25 +1619,6 @@ function BackGlyph({ color }: { color: string }) {
   return (
     <Svg width={20} height={20} viewBox="0 0 24 24">
       <Path d="M15 5 8 12l7 7" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.3} />
-    </Svg>
-  );
-}
-
-function PencilGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={18} height={18} viewBox="0 0 24 24">
-      <Path d="M4 20h4l10.5-10.5-4-4L4 16v4Z" fill="none" stroke={color} strokeLinejoin="round" strokeWidth={2} />
-      <Path d="m13.5 6.5 4 4" stroke={color} strokeLinecap="round" strokeWidth={2} />
-    </Svg>
-  );
-}
-
-function ArchiveGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={18} height={18} viewBox="0 0 24 24">
-      <Path d="M5 7h14" stroke={color} strokeLinecap="round" strokeWidth={2} />
-      <Path d="M9 7V5h6v2" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
-      <Path d="M8 10v9h8v-9" fill="none" stroke={color} strokeLinejoin="round" strokeWidth={2} />
     </Svg>
   );
 }

@@ -129,11 +129,12 @@ function createStyles(theme: MobileTheme) {
     },
     container: {
       paddingHorizontal: 16,
-      paddingVertical: 18,
+      paddingTop: 12,
+      paddingBottom: 20,
       backgroundColor: theme.background
     },
     contentStack: {
-      gap: 16
+      gap: 12
     },
     settingsScrollView: {
       flex: 1
@@ -152,15 +153,15 @@ function createStyles(theme: MobileTheme) {
       zIndex: 10
     },
     tabScreenStack: {
-      gap: 16
+      gap: 12
     },
     header: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
       gap: 12,
-      paddingHorizontal: 6,
-      paddingTop: 6
+      paddingHorizontal: 2,
+      paddingTop: 2
     },
     settingsHeader: {
       minHeight: 44,
@@ -176,33 +177,31 @@ function createStyles(theme: MobileTheme) {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 12,
-      fontWeight: "800",
+      fontWeight: "600",
+      letterSpacing: 0.4,
+      textTransform: "uppercase",
       paddingHorizontal: 4
     },
     settingsGroupRows: {
-      borderWidth: 1,
-      borderColor: theme.border,
       backgroundColor: theme.surface,
-      borderRadius: 16,
+      borderRadius: 18,
       overflow: "hidden"
     },
     settingsMenuRow: {
-      minHeight: 66,
+      minHeight: 58,
       borderBottomWidth: 1,
       borderBottomColor: theme.border,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
       flexDirection: "row",
       alignItems: "center",
       gap: 11
     },
     settingsMenuIcon: {
-      width: 34,
-      height: 34,
-      borderWidth: 1,
-      borderColor: theme.border,
-      borderRadius: 10,
-      backgroundColor: theme.surfaceInset,
+      width: 36,
+      height: 36,
+      borderRadius: 999,
+      backgroundColor: theme.surfaceMuted,
       alignItems: "center",
       justifyContent: "center"
     },
@@ -215,38 +214,236 @@ function createStyles(theme: MobileTheme) {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 14,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     settingsMenuMeta: {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 12,
-      fontWeight: "700"
+      fontWeight: "500"
+    },
+    appearanceStack: {
+      gap: 14
+    },
+    appearanceIntro: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 14,
+      lineHeight: 20,
+      paddingHorizontal: 2
+    },
+    appearanceSelectionCard: {
+      backgroundColor: theme.accentSoft,
+      borderRadius: 18,
+      padding: 16,
+      gap: 5
+    },
+    appearanceSelectionTitle: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 16,
+      fontWeight: "600"
+    },
+    appearanceSelectionMeta: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 13,
+      lineHeight: 18
+    },
+    appearanceSectionLabel: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 11,
+      fontWeight: "600",
+      letterSpacing: 0.5,
+      textTransform: "uppercase",
+      paddingHorizontal: 2,
+      marginTop: 4
+    },
+    appearancePreviewRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 12
+    },
+    appearancePreviewColumn: {
+      flex: 1,
+      minWidth: 0,
+      gap: 8
+    },
+    appearancePreviewLabel: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 14,
+      fontWeight: "600",
+      paddingHorizontal: 2
+    },
+    appearancePreviewCard: {
+      borderRadius: 20,
+      padding: 12,
+      gap: 10
+    },
+    appearancePreviewCardLight: {
+      backgroundColor: "#FFFFFF"
+    },
+    appearancePreviewCardDark: {
+      backgroundColor: "#050914"
+    },
+    appearancePreviewCardSelected: {
+      shadowColor: theme.shadow,
+      shadowOpacity: 1,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 5 },
+      elevation: 3
+    },
+    appearancePreviewSurface: {
+      minHeight: 76,
+      borderRadius: 14,
+      padding: 12,
+      gap: 9,
+      justifyContent: "center"
+    },
+    appearancePreviewSurfaceLight: {
+      backgroundColor: "#F4F6F9"
+    },
+    appearancePreviewSurfaceDark: {
+      backgroundColor: "#1B2230"
+    },
+    appearancePreviewLine: {
+      height: 7,
+      width: "68%",
+      borderRadius: 999
+    },
+    appearancePreviewLineShort: {
+      height: 7,
+      width: "88%",
+      borderRadius: 999
+    },
+    appearancePreviewLineLight: {
+      backgroundColor: "#111827"
+    },
+    appearancePreviewLineDark: {
+      backgroundColor: "#F7F8FB"
+    },
+    appearancePreviewLineMutedLight: {
+      backgroundColor: "#667085"
+    },
+    appearancePreviewLineMutedDark: {
+      backgroundColor: "#8993A7"
+    },
+    appearancePreviewAccent: {
+      width: 48,
+      height: 8,
+      borderRadius: 999,
+      backgroundColor: "#F45D43"
+    },
+    appearancePreviewPill: {
+      minHeight: 38,
+      borderRadius: 999,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 8
+    },
+    appearancePreviewPillLight: {
+      backgroundColor: "#EEF1F6"
+    },
+    appearancePreviewPillDark: {
+      backgroundColor: "#202838"
+    },
+    appearancePreviewPillText: {
+      color: "#111827",
+      fontFamily: monoFont,
+      fontSize: 11,
+      fontWeight: "500"
+    },
+    appearancePreviewPillTextDark: {
+      color: "#F7F8FB"
+    },
+    appearanceDetailsCard: {
+      backgroundColor: theme.surface,
+      borderRadius: 18,
+      overflow: "hidden",
+      paddingHorizontal: 14
+    },
+    appearanceDetailRow: {
+      minHeight: 56,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 12
+    },
+    appearanceDetailDivider: {
+      borderTopWidth: 1,
+      borderTopColor: theme.border
+    },
+    appearanceDetailTitle: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 14,
+      fontWeight: "500"
+    },
+    appearanceDetailMeta: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "400",
+      textAlign: "right"
     },
     logoLockup: {
       flexShrink: 1,
       gap: 4
     },
+    datePill: {
+      minHeight: 38,
+      borderRadius: 999,
+      backgroundColor: theme.surface,
+      paddingHorizontal: 14,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 5
+    },
+    datePillText: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "600"
+    },
+    todayHeading: {
+      gap: 2,
+      paddingHorizontal: 2,
+      paddingBottom: 2
+    },
+    todayTitle: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 28,
+      fontWeight: "700",
+      letterSpacing: -0.35
+    },
+    todaySubtitle: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "400"
+    },
     iconButton: {
       width: 44,
       height: 44,
-      borderWidth: 1,
-      borderColor: theme.controlBorder,
-      backgroundColor: theme.surfaceRaised,
-      borderRadius: 14,
+      backgroundColor: theme.surfaceMuted,
+      borderRadius: 999,
       alignItems: "center",
       justifyContent: "center"
     },
     title: {
       fontSize: 30,
-      fontWeight: "800",
+      fontWeight: "700",
       color: theme.textPrimary,
       fontFamily: monoFont
     },
     settingsTitle: {
       flex: 1,
       fontSize: 22,
-      fontWeight: "800",
+      fontWeight: "700",
       color: theme.textPrimary,
       fontFamily: monoFont,
       textAlign: "right"
@@ -258,26 +455,24 @@ function createStyles(theme: MobileTheme) {
       fontFamily: monoFont
     },
     panel: {
-      borderWidth: 1,
-      borderColor: theme.border,
       backgroundColor: theme.surface,
-      borderRadius: 20,
-      padding: 16,
-      gap: 12
+      borderRadius: 18,
+      padding: 14,
+      gap: 10
     },
     timerPanel: {
       position: "relative",
-      borderWidth: 1,
-      borderColor: theme.border,
       backgroundColor: theme.surfaceRaised,
-      borderRadius: 20,
-      padding: 16,
-      gap: 10,
+      borderRadius: 18,
+      minHeight: 116,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      gap: 8,
       shadowColor: theme.shadow,
       shadowOpacity: 1,
-      shadowRadius: theme.mode === "dark" ? 16 : 12,
-      shadowOffset: { width: 0, height: 8 },
-      elevation: 4
+      shadowRadius: theme.mode === "dark" ? 12 : 8,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 2
     },
     activeTimerAccentRail: {
       position: "absolute",
@@ -288,12 +483,10 @@ function createStyles(theme: MobileTheme) {
       borderRadius: 999
     },
     lifecyclePanel: {
-      borderWidth: 1,
-      borderColor: theme.border,
       backgroundColor: theme.surfaceRaised,
-      borderRadius: 20,
-      padding: 16,
-      gap: 14
+      borderRadius: 18,
+      padding: 14,
+      gap: 12
     },
     calendarWeekStrip: {
       flexDirection: "row",
@@ -303,33 +496,30 @@ function createStyles(theme: MobileTheme) {
     calendarDayButton: {
       flex: 1,
       minWidth: 0,
-      minHeight: 64,
-      borderWidth: 1,
-      borderColor: theme.border,
-      backgroundColor: theme.surfaceInset,
-      borderRadius: 16,
+      minHeight: 56,
+      backgroundColor: theme.surfaceMuted,
+      borderRadius: 14,
       alignItems: "center",
       justifyContent: "center",
       gap: 4
     },
     calendarDayButtonSelected: {
-      borderColor: theme.accent,
       backgroundColor: theme.accentSoft
     },
     calendarDayButtonToday: {
-      borderColor: theme.focus
+      backgroundColor: theme.surfaceMuted
     },
     calendarWeekday: {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 11,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     calendarDayNumber: {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 18,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     calendarDayTextSelected: {
       color: theme.accentText
@@ -341,9 +531,7 @@ function createStyles(theme: MobileTheme) {
     },
     calendarOptionChip: {
       minHeight: 44,
-      borderWidth: 1,
-      borderColor: theme.border,
-      backgroundColor: theme.surfaceInset,
+      backgroundColor: theme.surfaceMuted,
       borderRadius: 999,
       paddingHorizontal: 13,
       alignItems: "center",
@@ -357,15 +545,13 @@ function createStyles(theme: MobileTheme) {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 12,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     calendarOptionChipTextSelected: {
       color: theme.accentText
     },
     calendarTimelinePanel: {
-      borderWidth: 1,
-      borderColor: theme.border,
-      backgroundColor: theme.surfaceInset,
+      backgroundColor: theme.surfaceMuted,
       borderRadius: 18,
       overflow: "hidden"
     },
@@ -384,9 +570,8 @@ function createStyles(theme: MobileTheme) {
     },
     calendarOutsideBlock: {
       minHeight: 52,
-      borderWidth: 1,
-      borderStyle: "dashed",
       borderRadius: 13,
+      backgroundColor: theme.surfaceMuted,
       paddingHorizontal: 10,
       paddingVertical: 8,
       gap: 4,
@@ -403,7 +588,7 @@ function createStyles(theme: MobileTheme) {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 11,
-      fontWeight: "800",
+      fontWeight: "600",
       textAlign: "right",
       paddingRight: 8
     },
@@ -418,7 +603,6 @@ function createStyles(theme: MobileTheme) {
       position: "absolute",
       left: 76,
       right: 10,
-      borderWidth: 1,
       borderRadius: 13,
       paddingHorizontal: 10,
       paddingVertical: 7,
@@ -468,13 +652,13 @@ function createStyles(theme: MobileTheme) {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 11,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     calendarReviewLabel: {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 10,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     currentTimeRow: {
       position: "absolute",
@@ -490,7 +674,7 @@ function createStyles(theme: MobileTheme) {
       color: theme.accentText,
       fontFamily: monoFont,
       fontSize: 11,
-      fontWeight: "800",
+      fontWeight: "600",
       textAlign: "right",
       paddingRight: 8
     },
@@ -503,11 +687,13 @@ function createStyles(theme: MobileTheme) {
     label: {
       fontSize: 11,
       color: theme.textSecondary,
-      fontFamily: monoFont
+      fontFamily: monoFont,
+      fontWeight: "600",
+      letterSpacing: 0.5
     },
     timerText: {
       fontSize: 18,
-      fontWeight: "800",
+      fontWeight: "600",
       color: theme.textPrimary,
       fontFamily: monoFont
     },
@@ -563,8 +749,8 @@ function createStyles(theme: MobileTheme) {
     activeElapsed: {
       color: theme.accentText,
       fontFamily: monoFont,
-      fontSize: 32,
-      fontWeight: "800",
+      fontSize: 30,
+      fontWeight: "700",
       fontVariant: ["tabular-nums"]
     },
     muted: {
@@ -580,8 +766,8 @@ function createStyles(theme: MobileTheme) {
       paddingBottom: 10
     },
     sectionTitle: {
-      fontSize: 16,
-      fontWeight: "800",
+      fontSize: 17,
+      fontWeight: "600",
       color: theme.textPrimary,
       fontFamily: monoFont
     },
@@ -595,51 +781,48 @@ function createStyles(theme: MobileTheme) {
       color: theme.accentText,
       fontFamily: monoFont,
       fontSize: 20,
-      fontWeight: "800",
+      fontWeight: "600",
       fontVariant: ["tabular-nums"]
     },
     segmentedControl: {
       flexDirection: "row",
-      borderWidth: 1,
-      borderColor: theme.border,
-      borderRadius: 12,
-      backgroundColor: theme.surfaceMuted,
-      overflow: "hidden"
+      borderRadius: 999,
+      backgroundColor: theme.mode === "dark" ? theme.surfaceMuted : theme.textPrimary,
+      padding: 4
     },
     segmentButton: {
       flex: 1,
-      minHeight: 44,
+      minHeight: 36,
       alignItems: "center",
       justifyContent: "center",
-      borderRightWidth: 1,
-      borderRightColor: theme.border,
-      paddingVertical: 9
+      borderRadius: 999,
+      paddingVertical: 7
     },
     segmentButtonSelected: {
-      backgroundColor: theme.accentSoft
+      backgroundColor: theme.mode === "dark" ? theme.textPrimary : theme.surfaceRaised
     },
     segmentButtonText: {
-      color: theme.textSecondary,
+      color: theme.mode === "dark" ? theme.textSecondary : theme.surface,
       fontFamily: monoFont,
-      fontWeight: "700"
+      fontWeight: "600"
     },
     segmentButtonTextSelected: {
-      color: theme.accentText
+      color: theme.mode === "dark" ? theme.background : theme.textPrimary
     },
     chartWrap: {
       alignItems: "center",
       paddingVertical: 2
     },
     chartBox: {
-      width: 264,
-      height: 264,
+      width: 184,
+      height: 184,
       alignItems: "center",
       justifyContent: "center"
     },
     chartCenter: {
       position: "absolute",
-      width: 116,
-      height: 116,
+      width: 86,
+      height: 86,
       alignItems: "center",
       justifyContent: "center"
     },
@@ -652,7 +835,7 @@ function createStyles(theme: MobileTheme) {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 18,
-      fontWeight: "800",
+      fontWeight: "600",
       fontVariant: ["tabular-nums"]
     },
     legendList: {
@@ -669,8 +852,6 @@ function createStyles(theme: MobileTheme) {
     legendSwatch: {
       width: 12,
       height: 32,
-      borderWidth: 1,
-      borderColor: theme.borderStrong,
       borderRadius: 999,
       overflow: "hidden"
     },
@@ -682,7 +863,7 @@ function createStyles(theme: MobileTheme) {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 14,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     legendProject: {
       color: theme.textSecondary,
@@ -697,7 +878,7 @@ function createStyles(theme: MobileTheme) {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 13,
-      fontWeight: "800",
+      fontWeight: "600",
       fontVariant: ["tabular-nums"]
     },
     legendShare: {
@@ -709,9 +890,7 @@ function createStyles(theme: MobileTheme) {
       gap: 10
     },
     reviewCard: {
-      borderWidth: 1,
-      borderColor: theme.border,
-      backgroundColor: theme.surfaceInset,
+      backgroundColor: theme.surfaceRaised,
       borderRadius: 16,
       padding: 14,
       gap: 12
@@ -725,8 +904,6 @@ function createStyles(theme: MobileTheme) {
     reviewBadge: {
       alignSelf: "flex-start",
       minHeight: 28,
-      borderWidth: 1,
-      borderColor: theme.warning,
       backgroundColor: theme.surfaceMuted,
       borderRadius: 999,
       paddingHorizontal: 10,
@@ -736,7 +913,7 @@ function createStyles(theme: MobileTheme) {
       color: theme.warningText,
       fontFamily: monoFont,
       fontSize: 11,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     reviewTitleStack: {
       flex: 1,
@@ -747,7 +924,7 @@ function createStyles(theme: MobileTheme) {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 15,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     reviewMetaLine: {
       color: theme.textSecondary,
@@ -762,20 +939,16 @@ function createStyles(theme: MobileTheme) {
     },
     reviewPrimaryButton: {
       minHeight: 44,
-      borderWidth: 1,
-      borderColor: theme.accent,
       backgroundColor: theme.accent,
-      borderRadius: 12,
+      borderRadius: 999,
       paddingHorizontal: 14,
       alignItems: "center",
       justifyContent: "center"
     },
     reviewSecondaryButton: {
       minHeight: 44,
-      borderWidth: 1,
-      borderColor: theme.controlBorder,
-      backgroundColor: theme.surface,
-      borderRadius: 12,
+      backgroundColor: theme.surfaceMuted,
+      borderRadius: 999,
       paddingHorizontal: 14,
       alignItems: "center",
       justifyContent: "center"
@@ -783,11 +956,9 @@ function createStyles(theme: MobileTheme) {
     reviewSecondaryButtonText: {
       color: theme.accentText,
       fontFamily: monoFont,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     reviewNote: {
-      borderWidth: 1,
-      borderColor: theme.warning,
       backgroundColor: theme.surfaceMuted,
       borderRadius: 12,
       paddingHorizontal: 10,
@@ -799,10 +970,8 @@ function createStyles(theme: MobileTheme) {
     },
     reviewNoteButton: {
       minHeight: 44,
-      borderWidth: 1,
-      borderColor: theme.warning,
       backgroundColor: theme.surfaceMuted,
-      borderRadius: 12,
+      borderRadius: 999,
       paddingHorizontal: 12,
       paddingVertical: 10,
       flexDirection: "row",
@@ -815,38 +984,42 @@ function createStyles(theme: MobileTheme) {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 12,
-      fontWeight: "800",
+      fontWeight: "600",
       lineHeight: 17
     },
     reviewNoteAction: {
       color: theme.accentText,
       fontFamily: monoFont,
       fontSize: 12,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     reportRangeRow: {
       flexDirection: "row",
       gap: 8
     },
+    reportScreenTitle: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 28,
+      fontWeight: "700",
+      letterSpacing: -0.35
+    },
     reportRangeChip: {
       minHeight: 44,
-      borderWidth: 1,
-      borderColor: theme.border,
-      backgroundColor: theme.surfaceInset,
+      backgroundColor: theme.surfaceMuted,
       borderRadius: 999,
       paddingHorizontal: 16,
       alignItems: "center",
       justifyContent: "center"
     },
     reportRangeChipSelected: {
-      borderColor: theme.accent,
       backgroundColor: theme.accentSoft
     },
     reportRangeChipText: {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 13,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     reportRangeChipTextSelected: {
       color: theme.accentText
@@ -854,30 +1027,29 @@ function createStyles(theme: MobileTheme) {
     reportChartSwitchRow: {
       flexDirection: "row",
       alignSelf: "flex-start",
-      borderWidth: 1,
-      borderColor: theme.border,
-      backgroundColor: theme.surfaceInset,
+      backgroundColor: theme.mode === "dark" ? theme.surfaceMuted : theme.textPrimary,
       borderRadius: 999,
-      overflow: "hidden"
+      padding: 4
     },
     reportChartSwitchButton: {
-      minHeight: 44,
-      minWidth: 72,
+      minHeight: 36,
+      minWidth: 68,
+      borderRadius: 999,
       paddingHorizontal: 13,
       alignItems: "center",
       justifyContent: "center"
     },
     reportChartSwitchButtonSelected: {
-      backgroundColor: theme.accentSoft
+      backgroundColor: theme.mode === "dark" ? theme.textPrimary : theme.surfaceRaised
     },
     reportChartSwitchText: {
-      color: theme.textSecondary,
+      color: theme.mode === "dark" ? theme.textSecondary : theme.surface,
       fontFamily: monoFont,
       fontSize: 12,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     reportChartSwitchTextSelected: {
-      color: theme.accentText
+      color: theme.mode === "dark" ? theme.background : theme.textPrimary
     },
     reportTotalsRow: {
       flexDirection: "row",
@@ -886,9 +1058,7 @@ function createStyles(theme: MobileTheme) {
     reportTotalCard: {
       flex: 1,
       minHeight: 78,
-      borderWidth: 1,
-      borderColor: theme.border,
-      backgroundColor: theme.surfaceInset,
+      backgroundColor: theme.surfaceMuted,
       borderRadius: 16,
       paddingHorizontal: 12,
       paddingVertical: 10,
@@ -898,7 +1068,7 @@ function createStyles(theme: MobileTheme) {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 22,
-      fontWeight: "800",
+      fontWeight: "600",
       fontVariant: ["tabular-nums"]
     },
     reportCategoryList: {
@@ -914,8 +1084,6 @@ function createStyles(theme: MobileTheme) {
     reportCategorySwatch: {
       width: 12,
       height: 36,
-      borderWidth: 1,
-      borderColor: theme.borderStrong,
       borderRadius: 999,
       overflow: "hidden"
     },
@@ -941,8 +1109,7 @@ function createStyles(theme: MobileTheme) {
       borderRadius: 999
     },
     reportBarFillUncategorized: {
-      borderWidth: 1,
-      borderColor: theme.borderStrong
+      backgroundColor: theme.surfaceMuted
     },
     uncategorizedSwatch: {
       backgroundColor: theme.surfaceMuted
@@ -963,9 +1130,7 @@ function createStyles(theme: MobileTheme) {
     reportDailyTrack: {
       flex: 1,
       width: "100%",
-      borderWidth: 1,
-      borderColor: theme.border,
-      backgroundColor: theme.surfaceInset,
+      backgroundColor: theme.surfaceMuted,
       borderRadius: 999,
       justifyContent: "flex-end",
       overflow: "hidden"
@@ -979,7 +1144,84 @@ function createStyles(theme: MobileTheme) {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 11,
-      fontWeight: "800"
+      fontWeight: "600"
+    },
+    todaySummaryBlock: {
+      gap: 8
+    },
+    todayEntryCard: {
+      backgroundColor: theme.surface,
+      borderRadius: 18,
+      overflow: "hidden",
+      paddingHorizontal: 14
+    },
+    todayEntryRow: {
+      minHeight: 56,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10
+    },
+    todayEntryDivider: {
+      borderTopWidth: 1,
+      borderTopColor: theme.border
+    },
+    todayEntryDot: {
+      width: 9,
+      height: 9,
+      borderRadius: 999
+    },
+    todayEntryText: {
+      flex: 1,
+      minWidth: 0,
+      gap: 2
+    },
+    todayEntryTitle: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 14,
+      fontWeight: "600"
+    },
+    todayEntryMeta: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 11,
+      fontWeight: "400"
+    },
+    todayEntryDuration: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "600",
+      fontVariant: ["tabular-nums"]
+    },
+    todayEmptyText: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 13,
+      lineHeight: 18,
+      paddingVertical: 18
+    },
+    todayTrackedRow: {
+      minHeight: 48,
+      borderRadius: 16,
+      backgroundColor: theme.surfaceMuted,
+      paddingHorizontal: 14,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between"
+    },
+    todayTrackedLabel: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "500"
+    },
+    todayTrackedValue: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 17,
+      fontWeight: "700",
+      fontVariant: ["tabular-nums"]
     },
     compactCategoryScroller: {
       gap: 7,
@@ -992,7 +1234,7 @@ function createStyles(theme: MobileTheme) {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 11,
-      fontWeight: "800",
+      fontWeight: "600",
       textTransform: "uppercase",
       paddingHorizontal: 2
     },
@@ -1002,8 +1244,7 @@ function createStyles(theme: MobileTheme) {
     },
     categoryPill: {
       minHeight: 32,
-      borderWidth: 1,
-      backgroundColor: theme.surfaceInset,
+      backgroundColor: theme.surfaceMuted,
       borderRadius: 999,
       paddingHorizontal: 11,
       paddingVertical: 4,
@@ -1012,13 +1253,13 @@ function createStyles(theme: MobileTheme) {
       gap: 7
     },
     categoryPillMuted: {
-      borderColor: theme.borderStrong
+      backgroundColor: theme.surfaceMuted
     },
     categoryPillText: {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 12,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     quickCategoryHint: {
       color: theme.textSecondary,
@@ -1029,10 +1270,8 @@ function createStyles(theme: MobileTheme) {
       paddingTop: 2
     },
     colorDot: {
-      width: 12,
-      height: 12,
-      borderWidth: 1,
-      borderColor: theme.borderStrong,
+      width: 9,
+      height: 9,
       borderRadius: 999
     },
     colorDotMuted: {
@@ -1040,16 +1279,14 @@ function createStyles(theme: MobileTheme) {
       borderColor: theme.textSecondary
     },
     categoryList: {
-      gap: 8
+      gap: 0
     },
     placeList: {
       gap: 8
     },
     placeRow: {
       minHeight: 62,
-      borderWidth: 1,
-      borderColor: theme.border,
-      backgroundColor: theme.surfaceInset,
+      backgroundColor: theme.surfaceRaised,
       borderRadius: 16,
       paddingHorizontal: 10,
       paddingVertical: 8,
@@ -1066,7 +1303,7 @@ function createStyles(theme: MobileTheme) {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 14,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     placeMeta: {
       color: theme.textSecondary,
@@ -1081,10 +1318,8 @@ function createStyles(theme: MobileTheme) {
     learnedPlaceSaveButton: {
       minHeight: 44,
       minWidth: 52,
-      borderWidth: 1,
-      borderColor: theme.controlBorder,
-      backgroundColor: theme.surfaceRaised,
-      borderRadius: 11,
+      backgroundColor: theme.surfaceMuted,
+      borderRadius: 999,
       paddingHorizontal: 12,
       paddingVertical: 0,
       alignItems: "center",
@@ -1094,14 +1329,12 @@ function createStyles(theme: MobileTheme) {
       color: theme.accentText,
       fontFamily: monoFont,
       fontSize: 12,
-      fontWeight: "800",
+      fontWeight: "600",
       lineHeight: 16,
       textAlign: "center"
     },
     placeForm: {
-      borderWidth: 1,
-      borderColor: theme.borderStrong,
-      backgroundColor: theme.surfaceInset,
+      backgroundColor: theme.surfaceRaised,
       borderRadius: 14,
       padding: 12,
       gap: 10
@@ -1140,9 +1373,7 @@ function createStyles(theme: MobileTheme) {
     },
     healthPreferenceRow: {
       minHeight: 58,
-      borderWidth: 1,
-      borderColor: theme.border,
-      backgroundColor: theme.surfaceInset,
+      backgroundColor: theme.surfaceRaised,
       borderRadius: 16,
       paddingHorizontal: 12,
       paddingVertical: 10,
@@ -1166,7 +1397,7 @@ function createStyles(theme: MobileTheme) {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 11,
-      fontWeight: "800",
+      fontWeight: "600",
       textTransform: "uppercase"
     },
     healthMappingInput: {
@@ -1178,9 +1409,7 @@ function createStyles(theme: MobileTheme) {
     },
     categoryChoice: {
       minHeight: 32,
-      borderWidth: 1,
-      borderColor: theme.controlBorder,
-      backgroundColor: theme.surface,
+      backgroundColor: theme.surfaceMuted,
       borderRadius: 999,
       paddingHorizontal: 11,
       paddingVertical: 4,
@@ -1189,35 +1418,39 @@ function createStyles(theme: MobileTheme) {
       gap: 7
     },
     categoryChoiceSelected: {
-      borderColor: theme.accent,
-      borderWidth: 1.5,
-      backgroundColor: theme.surfaceMuted
+      backgroundColor: theme.accentSoft
     },
     categoryChoiceText: {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 12,
-      fontWeight: "800",
+      fontWeight: "600",
       lineHeight: 16
     },
     categoryChoiceTextSelected: {
       color: theme.accentText
     },
     categoryRow: {
-      minHeight: 48,
-      borderWidth: 1,
-      borderColor: theme.border,
-      backgroundColor: theme.surfaceInset,
-      borderRadius: 14,
-      paddingHorizontal: 10,
-      paddingVertical: 6,
+      minHeight: 54,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.border,
+      backgroundColor: "transparent",
+      paddingHorizontal: 2,
+      paddingVertical: 5,
       flexDirection: "row",
       alignItems: "center",
       gap: 8
     },
     categoryRowPinned: {
-      borderColor: theme.accent,
-      backgroundColor: theme.accentSoft
+      backgroundColor: "transparent"
+    },
+    categoryRowMain: {
+      flex: 1,
+      minWidth: 0,
+      minHeight: 44,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8
     },
     categoryTextStack: {
       flex: 1,
@@ -1228,13 +1461,13 @@ function createStyles(theme: MobileTheme) {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 13,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     categoryMeta: {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 11,
-      fontWeight: "700"
+      fontWeight: "400"
     },
     categoryMetaPinned: {
       color: theme.accentText
@@ -1246,32 +1479,25 @@ function createStyles(theme: MobileTheme) {
     categoryIconButton: {
       width: 44,
       height: 44,
-      borderWidth: 1,
-      borderColor: theme.controlBorder,
-      backgroundColor: theme.surface,
-      borderRadius: 11,
+      backgroundColor: theme.surfaceMuted,
+      borderRadius: 999,
       alignItems: "center",
       justifyContent: "center"
     },
     categoryIconButtonSelected: {
-      borderColor: theme.accent,
       backgroundColor: theme.accentSoft
     },
     categoryIconButtonPrimary: {
       width: 44,
       height: 44,
-      borderWidth: 1,
-      borderColor: theme.accent,
       backgroundColor: theme.accent,
-      borderRadius: 12,
+      borderRadius: 999,
       alignItems: "center",
       justifyContent: "center"
     },
     categoryEditCard: {
-      borderWidth: 1,
-      borderColor: theme.borderStrong,
-      backgroundColor: theme.surfaceInset,
-      borderRadius: 12,
+      backgroundColor: theme.surfaceMuted,
+      borderRadius: 16,
       padding: 10,
       gap: 10
     },
@@ -1311,9 +1537,7 @@ function createStyles(theme: MobileTheme) {
     },
     textInput: {
       minHeight: 48,
-      borderWidth: 1,
-      borderColor: theme.controlBorder,
-      backgroundColor: theme.surfaceInset,
+      backgroundColor: theme.surfaceMuted,
       borderRadius: 14,
       color: theme.textPrimary,
       fontFamily: monoFont,
@@ -1324,10 +1548,8 @@ function createStyles(theme: MobileTheme) {
     primaryButton: {
       marginTop: 8,
       minHeight: 48,
-      borderWidth: 1,
-      borderColor: theme.accent,
       backgroundColor: theme.accent,
-      borderRadius: 14,
+      borderRadius: 999,
       paddingHorizontal: 16,
       paddingVertical: 0,
       alignItems: "center",
@@ -1335,10 +1557,8 @@ function createStyles(theme: MobileTheme) {
     },
     primaryInlineButton: {
       minHeight: 44,
-      borderWidth: 1,
-      borderColor: theme.accent,
       backgroundColor: theme.accent,
-      borderRadius: 14,
+      borderRadius: 999,
       paddingHorizontal: 16,
       paddingVertical: 0,
       alignItems: "center",
@@ -1362,8 +1582,6 @@ function createStyles(theme: MobileTheme) {
     playButton: {
       width: 52,
       height: 52,
-      borderWidth: 1,
-      borderColor: theme.accent,
       backgroundColor: theme.accent,
       borderRadius: 999,
       alignItems: "center",
@@ -1377,8 +1595,6 @@ function createStyles(theme: MobileTheme) {
     stopButton: {
       width: 44,
       height: 44,
-      borderWidth: 1,
-      borderColor: theme.accent,
       backgroundColor: theme.accent,
       borderRadius: 999,
       alignItems: "center",
@@ -1392,8 +1608,6 @@ function createStyles(theme: MobileTheme) {
     deleteTimerButton: {
       width: 44,
       height: 44,
-      borderWidth: 1,
-      borderColor: theme.danger,
       backgroundColor: theme.danger,
       borderRadius: 999,
       alignItems: "center",
@@ -1403,6 +1617,127 @@ function createStyles(theme: MobileTheme) {
       flex: 1,
       justifyContent: "flex-end",
       backgroundColor: theme.overlay
+    },
+    datePickerOverlay: {
+      flex: 1,
+      justifyContent: "flex-start",
+      alignItems: "center",
+      paddingHorizontal: 16,
+      paddingTop: 118,
+      backgroundColor: theme.overlay
+    },
+    datePickerSheet: {
+      width: "100%",
+      maxWidth: 361,
+      borderRadius: 24,
+      backgroundColor: theme.surfaceRaised,
+      padding: 16,
+      gap: 10,
+      shadowColor: theme.shadow,
+      shadowOpacity: 1,
+      shadowRadius: 20,
+      shadowOffset: { width: 0, height: 10 },
+      elevation: 8
+    },
+    datePickerHeader: {
+      minHeight: 44,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 8
+    },
+    datePickerNavButton: {
+      width: 44,
+      height: 44,
+      borderRadius: 999,
+      backgroundColor: theme.surfaceMuted,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    datePickerMonth: {
+      flex: 1,
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 17,
+      fontWeight: "600",
+      textAlign: "center"
+    },
+    datePickerWeekdays: {
+      flexDirection: "row"
+    },
+    datePickerWeekday: {
+      width: `${100 / 7}%`,
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 11,
+      fontWeight: "600",
+      textAlign: "center"
+    },
+    datePickerGrid: {
+      flexDirection: "row",
+      flexWrap: "wrap"
+    },
+    datePickerDay: {
+      width: `${100 / 7}%`,
+      minHeight: 44,
+      borderRadius: 999,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    datePickerDayToday: {
+      backgroundColor: theme.surfaceMuted
+    },
+    datePickerDaySelected: {
+      backgroundColor: theme.accent
+    },
+    datePickerDayText: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 14,
+      fontWeight: "500",
+      fontVariant: ["tabular-nums"]
+    },
+    datePickerDayTextOutside: {
+      color: theme.textSecondary,
+      opacity: 0.5
+    },
+    datePickerDayTextSelected: {
+      color: theme.onAccent,
+      fontWeight: "700"
+    },
+    datePickerActions: {
+      flexDirection: "row",
+      justifyContent: "flex-end",
+      gap: 8,
+      paddingTop: 2
+    },
+    datePickerTodayButton: {
+      minHeight: 44,
+      borderRadius: 999,
+      backgroundColor: theme.surfaceMuted,
+      paddingHorizontal: 16,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    datePickerTodayText: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "600"
+    },
+    datePickerDoneButton: {
+      minHeight: 44,
+      borderRadius: 999,
+      backgroundColor: theme.accent,
+      paddingHorizontal: 18,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    datePickerDoneText: {
+      color: theme.onAccent,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "700"
     },
     sheetBackdrop: {
       position: "absolute",
@@ -1424,13 +1759,9 @@ function createStyles(theme: MobileTheme) {
       maxHeight: "96%",
       borderTopLeftRadius: 24,
       borderTopRightRadius: 24,
-      borderTopWidth: 1,
-      borderLeftWidth: 1,
-      borderRightWidth: 1,
-      borderColor: theme.border,
       backgroundColor: theme.surfaceRaised,
-      paddingHorizontal: 18,
-      paddingTop: 10,
+      paddingHorizontal: 16,
+      paddingTop: 8,
       paddingBottom: 10,
       gap: 8,
       shadowColor: theme.shadow,
@@ -1460,8 +1791,8 @@ function createStyles(theme: MobileTheme) {
       flex: 1,
       color: theme.textPrimary,
       fontFamily: monoFont,
-      fontSize: 16,
-      fontWeight: "800",
+      fontSize: 18,
+      fontWeight: "600",
       textAlign: "left"
     },
     sheetTitleCentered: {
@@ -1471,9 +1802,7 @@ function createStyles(theme: MobileTheme) {
     sheetIconButton: {
       width: 52,
       height: 52,
-      borderWidth: 1,
-      borderColor: theme.controlBorder,
-      backgroundColor: theme.surfaceInset,
+      backgroundColor: theme.surfaceMuted,
       borderRadius: 999,
       alignItems: "center",
       justifyContent: "center"
@@ -1485,18 +1814,14 @@ function createStyles(theme: MobileTheme) {
     sheetSaveButton: {
       width: 52,
       height: 52,
-      borderWidth: 1,
-      borderColor: theme.controlBorder,
-      backgroundColor: theme.surfaceInset,
+      backgroundColor: theme.surfaceMuted,
       borderRadius: 999,
       alignItems: "center",
       justifyContent: "center"
     },
     sheetDoneButton: {
       minHeight: 36,
-      borderWidth: 1,
-      borderColor: theme.controlBorder,
-      backgroundColor: theme.surfaceInset,
+      backgroundColor: theme.surfaceMuted,
       borderRadius: 999,
       paddingHorizontal: 16,
       alignItems: "center",
@@ -1506,7 +1831,7 @@ function createStyles(theme: MobileTheme) {
       color: theme.accentText,
       fontFamily: monoFont,
       fontSize: 13,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     sheetProgressSlot: {
       height: 3,
@@ -1544,7 +1869,7 @@ function createStyles(theme: MobileTheme) {
       color: theme.dangerText,
       fontFamily: monoFont,
       fontSize: 13,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     activeEditHeroRow: {
       flexDirection: "row",
@@ -1554,20 +1879,21 @@ function createStyles(theme: MobileTheme) {
     },
     activeEditElapsedStack: {
       flex: 1,
-      minWidth: 0
+      minWidth: 0,
+      alignItems: "center"
     },
     activeEditElapsed: {
       color: theme.accentText,
       fontFamily: monoFont,
-      fontSize: 36,
-      fontWeight: "800",
+      fontSize: 34,
+      fontWeight: "700",
       fontVariant: ["tabular-nums"]
     },
     activeEditElapsedLabel: {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 12,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     activeEditSection: {
       gap: 8
@@ -1576,32 +1902,30 @@ function createStyles(theme: MobileTheme) {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 12,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     taskSuggestionsPanel: {
-      borderWidth: 1,
-      borderColor: theme.border,
-      backgroundColor: theme.surfaceInset,
-      borderRadius: 10,
+      backgroundColor: theme.surfaceMuted,
+      borderRadius: 16,
       overflow: "hidden"
     },
     taskSuggestionsTitle: {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 11,
-      fontWeight: "800",
+      fontWeight: "600",
       letterSpacing: 0.4,
-      paddingHorizontal: 10,
-      paddingVertical: 6
+      paddingHorizontal: 12,
+      paddingVertical: 8
     },
     taskSuggestionsList: {
       borderTopWidth: 1,
       borderTopColor: theme.border
     },
     taskSuggestionRow: {
-      minHeight: 38,
-      paddingHorizontal: 10,
-      paddingVertical: 5,
+      minHeight: 44,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
       flexDirection: "row",
       alignItems: "center",
       gap: 10
@@ -1621,7 +1945,7 @@ function createStyles(theme: MobileTheme) {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 12,
-      fontWeight: "800",
+      fontWeight: "500",
       flexShrink: 1,
       minWidth: 0
     },
@@ -1636,7 +1960,7 @@ function createStyles(theme: MobileTheme) {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 11,
-      fontWeight: "700",
+      fontWeight: "400",
       flexShrink: 1
     },
     activeEditDescriptionInput: {
@@ -1648,9 +1972,7 @@ function createStyles(theme: MobileTheme) {
     },
     activeEditCategoryChip: {
       minHeight: 32,
-      borderWidth: 1,
-      borderColor: theme.controlBorder,
-      backgroundColor: theme.surfaceInset,
+      backgroundColor: theme.surfaceMuted,
       borderRadius: 999,
       paddingHorizontal: 11,
       paddingVertical: 4,
@@ -1659,19 +1981,17 @@ function createStyles(theme: MobileTheme) {
       gap: 7
     },
     activeEditCategoryChipSelected: {
-      borderColor: theme.accent,
-      borderWidth: 1.5,
-      backgroundColor: theme.surfaceMuted
+      backgroundColor: theme.accentSoft
     },
     activeEditCategoryChipText: {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 12,
-      fontWeight: "800",
+      fontWeight: "600",
       lineHeight: 16
     },
     activeEditCategoryChipTextSelected: {
-      color: theme.accentText
+      color: theme.textPrimary
     },
     activeEditTimeRow: {
       flexDirection: "row",
@@ -1688,7 +2008,7 @@ function createStyles(theme: MobileTheme) {
       color: theme.accentText,
       fontFamily: monoFont,
       fontSize: 18,
-      fontWeight: "800",
+      fontWeight: "600",
       fontVariant: ["tabular-nums"],
       textAlign: "center"
     },
@@ -1696,9 +2016,7 @@ function createStyles(theme: MobileTheme) {
       flex: 1,
       minWidth: 0,
       minHeight: 48,
-      borderWidth: 1,
-      borderColor: theme.controlBorder,
-      backgroundColor: theme.surfaceInset,
+      backgroundColor: theme.surfaceMuted,
       borderRadius: 14,
       paddingHorizontal: 12,
       paddingVertical: 8,
@@ -1715,7 +2033,7 @@ function createStyles(theme: MobileTheme) {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 14,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     activeEditStartMeta: {
       color: theme.textSecondary,
@@ -1727,7 +2045,7 @@ function createStyles(theme: MobileTheme) {
       color: theme.accentText,
       fontFamily: monoFont,
       fontSize: 20,
-      fontWeight: "800",
+      fontWeight: "600",
       fontVariant: ["tabular-nums"]
     },
     activeEditLastStopButton: {
@@ -1748,17 +2066,15 @@ function createStyles(theme: MobileTheme) {
       color: theme.accentText,
       fontFamily: monoFont,
       fontSize: 13,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     activeEditLastStopMeta: {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 13,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     activeEditPickerPanel: {
-      borderWidth: 1,
-      borderColor: theme.border,
       backgroundColor: theme.surfaceMuted,
       borderRadius: 16,
       padding: 12,
@@ -1778,7 +2094,7 @@ function createStyles(theme: MobileTheme) {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 14,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     activeEditPickerMeta: {
       color: theme.textSecondary,
@@ -1793,8 +2109,6 @@ function createStyles(theme: MobileTheme) {
     },
     activeEditPickerPrimaryButton: {
       minHeight: 44,
-      borderWidth: 1,
-      borderColor: theme.accent,
       backgroundColor: theme.accent,
       borderRadius: 999,
       paddingHorizontal: 12,
@@ -1805,13 +2119,11 @@ function createStyles(theme: MobileTheme) {
       color: theme.onAccent,
       fontFamily: monoFont,
       fontSize: 12,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     activeEditPickerSecondaryButton: {
       minHeight: 44,
-      borderWidth: 1,
-      borderColor: theme.controlBorder,
-      backgroundColor: theme.surfaceInset,
+      backgroundColor: theme.surfaceRaised,
       borderRadius: 999,
       paddingHorizontal: 12,
       alignItems: "center",
@@ -1821,7 +2133,7 @@ function createStyles(theme: MobileTheme) {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 12,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     activeEditPickerShortcutRow: {
       flexDirection: "row",
@@ -1830,9 +2142,7 @@ function createStyles(theme: MobileTheme) {
     },
     activeEditPickerChip: {
       minHeight: 44,
-      borderWidth: 1,
-      borderColor: theme.controlBorder,
-      backgroundColor: theme.surfaceInset,
+      backgroundColor: theme.surfaceRaised,
       borderRadius: 999,
       paddingHorizontal: 12,
       alignItems: "center",
@@ -1842,15 +2152,13 @@ function createStyles(theme: MobileTheme) {
       color: theme.accentText,
       fontFamily: monoFont,
       fontSize: 12,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     activeEditPickerGrid: {
       gap: 8
     },
     activeEditPickerStepper: {
-      borderWidth: 1,
-      borderColor: theme.border,
-      backgroundColor: theme.surface,
+      backgroundColor: theme.surfaceRaised,
       borderRadius: 14,
       paddingHorizontal: 10,
       paddingVertical: 8,
@@ -1864,7 +2172,7 @@ function createStyles(theme: MobileTheme) {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 11,
-      fontWeight: "800",
+      fontWeight: "600",
       textAlign: "left"
     },
     activeEditPickerStepperControls: {
@@ -1877,9 +2185,7 @@ function createStyles(theme: MobileTheme) {
     activeEditPickerStepperButton: {
       width: 44,
       height: 44,
-      borderWidth: 1,
-      borderColor: theme.controlBorder,
-      backgroundColor: theme.surfaceInset,
+      backgroundColor: theme.surfaceMuted,
       borderRadius: 999,
       alignItems: "center",
       justifyContent: "center"
@@ -1888,7 +2194,7 @@ function createStyles(theme: MobileTheme) {
       color: theme.accentText,
       fontFamily: monoFont,
       fontSize: 18,
-      fontWeight: "800",
+      fontWeight: "600",
       lineHeight: 20
     },
     activeEditPickerStepperValue: {
@@ -1897,14 +2203,12 @@ function createStyles(theme: MobileTheme) {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 15,
-      fontWeight: "800",
+      fontWeight: "600",
       textAlign: "center"
     },
     activeEditStopButton: {
       width: 52,
       height: 52,
-      borderWidth: 1,
-      borderColor: theme.accent,
       backgroundColor: theme.accent,
       borderRadius: 999,
       alignItems: "center",
@@ -1918,8 +2222,6 @@ function createStyles(theme: MobileTheme) {
     activeEditStartButton: {
       width: 52,
       height: 52,
-      borderWidth: 1,
-      borderColor: theme.accent,
       backgroundColor: theme.accentSoft,
       borderRadius: 999,
       alignItems: "center",
@@ -1929,7 +2231,7 @@ function createStyles(theme: MobileTheme) {
       color: theme.onAccent,
       fontFamily: monoFont,
       fontSize: 15,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     buttonPressed: {
       borderColor: theme.pressed,
@@ -1942,7 +2244,7 @@ function createStyles(theme: MobileTheme) {
     },
     primaryButtonText: {
       color: theme.onAccent,
-      fontWeight: "800",
+      fontWeight: "600",
       fontFamily: monoFont,
       fontSize: 13,
       lineHeight: 17,
@@ -1950,10 +2252,8 @@ function createStyles(theme: MobileTheme) {
     },
     secondaryButton: {
       minHeight: 44,
-      borderWidth: 1,
-      borderColor: theme.controlBorder,
-      backgroundColor: theme.surfaceInset,
-      borderRadius: 14,
+      backgroundColor: theme.surfaceMuted,
+      borderRadius: 999,
       paddingHorizontal: 14,
       paddingVertical: 0,
       alignItems: "center",
@@ -1970,7 +2270,7 @@ function createStyles(theme: MobileTheme) {
     },
     secondaryButtonText: {
       color: theme.accentText,
-      fontWeight: "800",
+      fontWeight: "600",
       fontFamily: monoFont,
       fontSize: 13,
       lineHeight: 17,
@@ -1995,9 +2295,7 @@ function createStyles(theme: MobileTheme) {
       gap: 8
     },
     accountRow: {
-      borderWidth: 1,
-      borderColor: theme.border,
-      backgroundColor: theme.surfaceInset,
+      backgroundColor: theme.surfaceRaised,
       borderRadius: 12,
       paddingHorizontal: 10,
       paddingVertical: 8,
@@ -2024,12 +2322,10 @@ function createStyles(theme: MobileTheme) {
       color: theme.accentText,
       fontFamily: monoFont,
       fontSize: 12,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     copyToast: {
       alignSelf: "center",
-      borderWidth: 1,
-      borderColor: theme.controlBorder,
       backgroundColor: theme.surfaceRaised,
       borderRadius: 999,
       paddingHorizontal: 14,
@@ -2039,13 +2335,13 @@ function createStyles(theme: MobileTheme) {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 12,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     accountValue: {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 13,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     accountMeta: {
       color: theme.textSecondary,
@@ -2053,9 +2349,7 @@ function createStyles(theme: MobileTheme) {
       fontSize: 12
     },
     queueDiagnosticCard: {
-      borderWidth: 1,
-      borderColor: theme.borderStrong,
-      backgroundColor: theme.surfaceInset,
+      backgroundColor: theme.surfaceRaised,
       borderRadius: 12,
       paddingHorizontal: 10,
       paddingVertical: 8,
@@ -2071,7 +2365,7 @@ function createStyles(theme: MobileTheme) {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 13,
-      fontWeight: "800"
+      fontWeight: "600"
     },
     buttonRow: {
       flexDirection: "row",
@@ -2085,10 +2379,8 @@ function createStyles(theme: MobileTheme) {
       fontFamily: monoFont
     },
     errorText: {
-      borderWidth: 1,
-      borderColor: theme.danger,
       color: theme.dangerText,
-      backgroundColor: theme.surfaceInset,
+      backgroundColor: theme.surfaceMuted,
       borderRadius: 12,
       paddingHorizontal: 10,
       paddingVertical: 8,
