@@ -1,13 +1,19 @@
 import { NativeModules, Platform } from "react-native";
+import { paletteColorFor } from "@dayframe/shared";
 import type { MobileBootstrap } from "./api";
 
 type LiveActivityEntry = Pick<
   NonNullable<MobileBootstrap["activeEntry"]>,
-  "categoryName" | "description" | "id" | "startedAt"
+  "categoryColor" | "categoryName" | "description" | "id" | "startedAt"
 >;
 
 type DayframeLiveActivityModule = {
-  start(title: string, categoryName?: string | null, startedAt?: string | null): Promise<boolean>;
+  start(
+    title: string,
+    categoryName?: string | null,
+    categoryColor?: string | null,
+    startedAt?: string | null
+  ): Promise<boolean>;
   stop(): Promise<boolean>;
 };
 
@@ -26,10 +32,18 @@ export async function syncLiveActivityForEntry(entry: LiveActivityEntry | null |
   }
 
   const title = displayLiveActivityTitle(entry);
-  const key = [entry.id, entry.startedAt, title, entry.categoryName ?? ""].join("|");
+  const categoryColor = entry.categoryName
+    ? paletteColorFor(entry.categoryColor ?? entry.categoryName, entry.categoryName, "dark")
+    : null;
+  const key = [entry.id, entry.startedAt, title, entry.categoryName ?? "", categoryColor ?? ""].join("|");
   if (lastSyncedLiveActivityKey === key) return;
 
-  const didStart = await nativeLiveActivity.start(title, entry.categoryName, entry.startedAt).catch(() => false);
+  const didStart = await nativeLiveActivity.start(
+    title,
+    entry.categoryName,
+    categoryColor,
+    entry.startedAt
+  ).catch(() => false);
   if (didStart) lastSyncedLiveActivityKey = key;
 }
 

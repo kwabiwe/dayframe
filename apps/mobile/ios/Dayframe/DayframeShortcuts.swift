@@ -97,9 +97,11 @@ private enum DayframeShortcutPerformer {
 
     switch action {
     case .start(_, let categoryName, _):
+      let category = catalog.category(named: categoryName)
       _ = await DayframeLiveActivityController.start(
         title: event.description ?? "Tracking",
-        categoryName: dayframeCleanText(categoryName),
+        categoryName: category?.name ?? dayframeCleanText(categoryName),
+        categoryColor: category?.color,
         startedAt: event.occurredAt
       )
     case .stop:
@@ -303,6 +305,7 @@ private struct DayframeShortcutWorkspace: Decodable {
 }
 
 private struct DayframeShortcutCategory: Decodable {
+  let color: String?
   let id: String
   let name: String
 }

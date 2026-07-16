@@ -15,8 +15,8 @@ import {
   Animated,
   AppState,
   Easing,
+  FlatList,
   Linking,
-  Modal,
   PanResponder,
   Pressable,
   RefreshControl,
@@ -34,6 +34,7 @@ import { DayframeBrand } from "@/components/brand";
 import { useKeyboardAccessory, type KeyboardAccessoryField } from "@/components/KeyboardAccessory";
 import {
   AuthRequiredError,
+  createManualTimeEntry,
   deleteTimeEntry,
   enqueueEvent,
   fetchBootstrap,
@@ -75,6 +76,7 @@ import {
   type HealthKitChangeSubscription
 } from "@/lib/health";
 import { syncLiveActivityForEntry } from "@/lib/liveActivity";
+import { buildHistoryDaySections, historyDayLabel, type HistoryDaySection } from "@/lib/historyPresentation";
 import {
   pressable,
   useMobileTheme,
@@ -84,7 +86,6 @@ import {
 import {
   REVIEW_COPY,
   buildReviewItemDraftEntry,
-  countReviewNeededActivityForRange,
   hasReviewNeededActivityForRange,
   isCalendarPreviewReviewItem,
   isOpenReviewItem,
@@ -131,12 +132,6 @@ type SummarySegment = {
   color: string;
   isUncategorized: boolean;
 };
-type StartTimerSheetInput = {
-  categoryId: string | null;
-  description: string | null;
-  startedAt?: string | null;
-};
-
 const AUTH_KEYBOARD_ACCESSORY_ID = "dayframe-auth-keyboard-accessory";
 const RECENT_LAST_STOP_WINDOW_MS = 24 * 60 * 60 * 1000;
 const CALENDAR_HOURS_MODES: Record<CalendarHoursMode, CalendarHours & { label: string; accessibilityLabel: string }> = {
@@ -162,8 +157,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [authState, setAuthState] = useState<AuthState>("checking");
   const [selectedDayKey, setSelectedDayKey] = useState(() => formatDateKey(new Date()));
-  const [datePickerVisible, setDatePickerVisible] = useState(false);
-  const [datePickerMonth, setDatePickerMonth] = useState(() => startOfMonth(new Date()));
   const [reportRange, setReportRange] = useState<ReportRange>("today");
   const [calendarEditEntry, setCalendarEditEntry] = useState<CalendarEntry | null>(null);
   const [calendarHoursMode] = useState<CalendarHoursMode>("fullDay");
@@ -177,8 +170,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [authError, setAuthError] = useState<string | null>(null);
   const [authNotice, setAuthNotice] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const [customDescription, setCustomDescription] = useState("");
-  const [startSheetVisible, setStartSheetVisible] = useState(false);
+  const [manualDraftEntry, setManualDraftEntry] = useState<TimeEntry | null>(null);
+  const [manualEntrySaving, setManualEntrySaving] = useState(false);
   const [activeEditVisible, setActiveEditVisible] = useState(false);
   const [presentedActiveEntry, setPresentedActiveEntry] = useState<TimeEntry | null>(null);
   const [calendarGestureLocked, setCalendarGestureLocked] = useState(false);
@@ -538,29 +531,29 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     () => buildWeekStripDays(selectedDayKey, now),
     [now, selectedDayKey]
   );
-  const summaryEntries = useMemo(() => {
+  const historySourceEntries = useMemo(() => {
     if (!data) return [];
     return mergeActiveEntry(
-      dedupeEntriesById([...(data.entries ?? []), ...(data.weekEntries ?? []), ...(data.dayEntries ?? [])]),
+      dedupeEntriesById([
+        ...(data.historyEntries ?? data.entries ?? []),
+        ...(data.entries ?? []),
+        ...(data.weekEntries ?? []),
+        ...(data.dayEntries ?? [])
+      ]),
       data.activeEntry
-    )
-      .filter((entry) => entryOverlapsDay(entry, selectedDayKey, now))
-      .sort((left, right) => new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime());
-  }, [data, now, selectedDayKey]);
-  const summaryTotal = useMemo(
-    () => sumOverlappingDaySeconds(summaryEntries.filter((entry) => !isReviewNeededEntry(entry)), selectedDayKey, now),
-    [now, selectedDayKey, summaryEntries]
+    );
+  }, [data]);
+  const historySections = useMemo(
+    () => buildHistoryDaySections({
+      entries: historySourceEntries.filter((entry) => !isReviewNeededEntry(entry)),
+      nowMs: now
+    }),
+    [historySourceEntries, now]
   );
-  const summaryReviewCount = useMemo(() => {
-    const rangeStart = dateFromKey(selectedDayKey);
-    return countReviewNeededActivityForRange({
-      entries: summaryEntries,
-      now,
-      rangeEnd: addDaysToDate(rangeStart, 1),
-      rangeStart,
-      reviewItems: data?.reviewItems ?? []
-    });
-  }, [data?.reviewItems, now, selectedDayKey, summaryEntries]);
+  const openReviewCount = useMemo(
+    () => (data?.reviewItems ?? []).filter(isOpenReviewItem).length,
+    [data?.reviewItems]
+  );
   const activeCategoryColor = displayedActiveEntry?.categoryName
     ? paletteColorFor(
         displayedActiveEntry.categoryColor ?? displayedActiveEntry.categoryId,
@@ -603,14 +596,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     void syncLiveActivityForEntry(data?.activeEntry ?? null);
   }, [data]);
 
-  async function startTask(categoryId?: string | null, description = customDescription) {
-    if (latestData.current?.activeEntry && !categoryId && !description.trim()) {
-      setStartSheetVisible(false);
+  async function startTask(categoryId?: string | null, description = "") {
+    if (latestData.current?.activeEntry) {
       setActiveEditVisible(true);
-      return true;
+      return false;
     }
-    if (!latestData.current?.activeEntry && !categoryId && !description.trim()) {
-      setStartSheetVisible(false);
+    if (!categoryId && !description.trim()) {
       setActiveEditVisible(true);
       const ok = await startTaskWith({
         categoryId: null,
@@ -625,6 +616,43 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       description,
       startedAt: null
     });
+  }
+
+  function openManualEntry() {
+    if (latestData.current?.activeEntry) {
+      setActiveEditVisible(true);
+      return;
+    }
+    setManualDraftEntry(createManualDraftEntry(recentStoppedAt, now));
+  }
+
+  async function saveManualEntry(_entryId: string, patch: TimeEntryUpdatePatch) {
+    if (!patch.startedAt || !patch.stoppedAt || manualEntrySaving) return false;
+    setManualEntrySaving(true);
+    try {
+      await createManualTimeEntry({
+        categoryId: patch.categoryId ?? null,
+        description: patch.description ?? null,
+        startedAt: patch.startedAt,
+        stoppedAt: patch.stoppedAt
+      });
+      await load({ silent: true });
+      return true;
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        latestData.current = null;
+        setAuthState("signedOut");
+        setData(null);
+        return false;
+      }
+      Alert.alert(
+        "Time not added",
+        error instanceof Error ? error.message : "Unable to add this time entry."
+      );
+      return false;
+    } finally {
+      setManualEntrySaving(false);
+    }
   }
 
   async function applyRunningTimerSuggestion(entryId: string, suggestion: RecentActivitySuggestion) {
@@ -671,10 +699,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     return true;
   }
 
-  async function startTaskFromSheet(input: StartTimerSheetInput) {
-    return startTaskWith(input);
-  }
-
   async function startTaskWith(input: {
     categoryId?: string | null;
     description?: string | null;
@@ -696,7 +720,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     const previousData = latestData.current;
     nextTimerMutationVersion(optimisticId);
     updateDashboardData((current) => optimisticStartTimer(current, pendingEntry));
-    if (trimmedDescription) setCustomDescription("");
     scheduleLayoutTransition(reduceMotion);
 
     enqueueTimerMutation(async () => {
@@ -799,16 +822,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       return dayKey;
     });
   }, []);
-
-  const openDatePicker = useCallback(() => {
-    setDatePickerMonth(startOfMonth(dateFromKey(selectedDayKey)));
-    setDatePickerVisible(true);
-  }, [selectedDayKey]);
-
-  const selectDashboardDay = useCallback((dayKey: string) => {
-    selectCalendarDay(dayKey);
-    setDatePickerVisible(false);
-  }, [selectCalendarDay]);
 
   const scrollCalendarTo = useCallback((y: number) => {
     calendarScrollY.current = y;
@@ -1029,7 +1042,220 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     );
   }
 
+  function renderTodayTab(isFocused: boolean) {
+    const currentDate = new Date(now);
+    return (
+      <SafeAreaView collapsable={false} edges={["top", "left", "right"]} style={styles.safeArea}>
+        <FlatList
+          contentContainerStyle={[styles.container, styles.todayListContent]}
+          data={historySections}
+          keyExtractor={(section) => section.key}
+          refreshControl={
+            <RefreshControl
+              refreshing={isFocused && refreshing}
+              onRefresh={() => load({ visibleRefresh: true })}
+              tintColor={theme.accent}
+              colors={[theme.accent]}
+            />
+          }
+          ListHeaderComponent={(
+            <Animated.View style={[styles.contentStack, enteringStyle, styles.todayListHeader]}>
+              <View style={styles.header}>
+                <View style={styles.logoLockup}>
+                  <DayframeBrand
+                    layout="horizontal"
+                    size="md"
+                    tone={theme.mode === "dark" ? "light" : "dark"}
+                  />
+                </View>
+                <Pressable
+                  accessibilityLabel="Open settings"
+                  accessibilityRole="button"
+                  style={pressable(styles.iconButton, styles.buttonPressed)}
+                  onPress={() => router.push("/settings")}
+                >
+                  <SettingsGlyph color={theme.accent} />
+                </Pressable>
+              </View>
+
+              <View style={styles.todayHeading}>
+                <Text style={styles.todayTitle}>Today</Text>
+                <Text style={styles.todaySubtitle}>{formatLongDay(currentDate)}</Text>
+              </View>
+
+              {displayedActiveEntry ? (
+                <Pressable
+                  accessibilityLabel={hasLiveActiveTimer ? "Edit running timer" : undefined}
+                  accessibilityRole={hasLiveActiveTimer ? "button" : undefined}
+                  disabled={!hasLiveActiveTimer}
+                  onPress={() => setActiveEditVisible(true)}
+                  style={({ pressed }) => [
+                    styles.timerPanel,
+                    pressed && hasLiveActiveTimer ? styles.buttonPressed : null
+                  ]}
+                >
+                  {activeCategoryColor ? (
+                    <View
+                      pointerEvents="none"
+                      style={[styles.activeTimerAccentRail, { backgroundColor: activeCategoryColor }]}
+                    />
+                  ) : null}
+                  <View style={styles.activeTimerHeader}>
+                    <View style={styles.activeTimerTextStack}>
+                      <View style={styles.activeTitleRow}>
+                        {activeCategoryColor ? (
+                          <View style={[styles.colorDot, { backgroundColor: activeCategoryColor }]} />
+                        ) : null}
+                        <Text
+                          style={[
+                            styles.timerText,
+                            styles.activeTitleText,
+                            activeTitleIsPlaceholder ? styles.activeTitlePlaceholderText : null
+                          ]}
+                          numberOfLines={2}
+                        >
+                          {activeTitle}
+                        </Text>
+                      </View>
+                      <Animated.View style={[styles.activeTimerExpandedContent, activeTimerDetailsStyle]}>
+                        {activeCategoryLabel ? (
+                          <Text style={styles.activeDescription}>{activeCategoryLabel}</Text>
+                        ) : null}
+                        <Text style={styles.activeElapsed}>{formatClockDuration(displayedActiveDurationSeconds)}</Text>
+                      </Animated.View>
+                    </View>
+                    <Animated.View
+                      pointerEvents={hasLiveActiveTimer ? "auto" : "none"}
+                      style={[styles.activeTimerActions, activeTimerActionsStyle]}
+                    >
+                      <Pressable
+                        accessibilityLabel="Stop current timer"
+                        accessibilityRole="button"
+                        style={pressable(styles.stopButton, styles.buttonPressed)}
+                        onPress={(event) => {
+                          event.stopPropagation();
+                          void stopActiveTimer();
+                        }}
+                      >
+                        <StopGlyph color={theme.onAccent} />
+                      </Pressable>
+                    </Animated.View>
+                  </View>
+                </Pressable>
+              ) : (
+                <>
+                  <View style={styles.panel}>
+                    <View style={styles.startInputRow}>
+                      <Pressable
+                        accessibilityLabel="Start timer and add details"
+                        accessibilityRole="button"
+                        style={pressable([styles.textInput, styles.startInput], styles.buttonPressed)}
+                        onPress={() => {
+                          void startTask(null);
+                        }}
+                      >
+                        <Text style={styles.startInputText} numberOfLines={1}>What are you working on?</Text>
+                      </Pressable>
+                      <View style={styles.startActionColumn}>
+                        <Pressable
+                          accessibilityLabel="Start task"
+                          accessibilityRole="button"
+                          style={pressable(styles.playButton, styles.buttonPressed)}
+                          onPress={() => {
+                            void startTask(null);
+                          }}
+                        >
+                          <PlayGlyph color={theme.onAccent} />
+                        </Pressable>
+                        <Pressable
+                          accessibilityLabel="Add past time"
+                          accessibilityRole="button"
+                          style={pressable(styles.addPastTimeButton, styles.buttonPressed)}
+                          onPress={openManualEntry}
+                        >
+                          <PlusGlyph color={theme.accentText} />
+                        </Pressable>
+                      </View>
+                    </View>
+                  </View>
+
+                  <View style={styles.quickActionsBlock}>
+                    <Text style={styles.quickActionsLabel}>Quick actions</Text>
+                    <ScrollView
+                      horizontal
+                      keyboardShouldPersistTaps="handled"
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.compactCategoryScroller}
+                    >
+                      {quickActions.map((action) => {
+                        const categoryColor = action.isUncategorized
+                          ? null
+                          : paletteColorFor(action.color, action.subtitle ?? action.name, theme.mode);
+                        return (
+                          <Pressable
+                            key={action.key}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Start ${action.name}`}
+                            style={pressable(styles.categoryPillTouch, styles.buttonPressed)}
+                            onPress={() => {
+                              void startTask(action.id, action.description ?? "");
+                            }}
+                          >
+                            <View
+                              style={[
+                                styles.categoryPill,
+                                categoryColor
+                                  ? { backgroundColor: colorWithAlpha(categoryColor, theme.mode === "dark" ? 0.18 : 0.13) }
+                                  : styles.categoryPillMuted
+                              ]}
+                            >
+                              <View
+                                style={[
+                                  styles.colorDot,
+                                  categoryColor ? { backgroundColor: categoryColor } : styles.colorDotMuted
+                                ]}
+                              />
+                              <Text style={styles.categoryPillText} numberOfLines={1}>{action.name}</Text>
+                            </View>
+                          </Pressable>
+                        );
+                      })}
+                    </ScrollView>
+                  </View>
+                </>
+              )}
+            </Animated.View>
+          )}
+          renderItem={({ item }) => (
+            <HistoryDayCard
+              activeTimerRunning={Boolean(displayedActiveEntry)}
+              now={now}
+              onOpenEntry={(entry) => {
+                if (!entry.stoppedAt) {
+                  setActiveEditVisible(true);
+                  return;
+                }
+                setCalendarEditEntry({ ...entry, isActive: false });
+              }}
+              onOpenReview={() => router.push("/review")}
+              onReplayEntry={(entry) => {
+                void startTask(entry.categoryId, entry.description ?? "");
+              }}
+              reviewCount={item.isToday ? openReviewCount : 0}
+              section={item}
+              styles={styles}
+              theme={theme}
+            />
+          )}
+          ItemSeparatorComponent={() => <View style={styles.historyDayGap} />}
+          showsVerticalScrollIndicator={false}
+        />
+      </SafeAreaView>
+    );
+  }
+
   function renderDashboardTab(tab: DayframeDashboardTab, isFocused: boolean) {
+    if (tab === "timer") return renderTodayTab(isFocused);
     return (
       <SafeAreaView collapsable={false} edges={["top", "left", "right"]} style={styles.safeArea}>
         <ScrollView
@@ -1063,204 +1289,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               />
             </View>
             <Pressable
-              accessibilityLabel={tab === "timer" ? "Choose day" : "Open settings"}
+              accessibilityLabel="Open settings"
               accessibilityRole="button"
-              style={pressable(tab === "timer" ? styles.datePill : styles.iconButton, styles.buttonPressed)}
-              onPress={tab === "timer" ? openDatePicker : () => router.push("/settings")}
+              style={pressable(styles.iconButton, styles.buttonPressed)}
+              onPress={() => router.push("/settings")}
             >
-              {tab === "timer" ? (
-                <>
-                  <Text style={styles.datePillText}>{selectedDayKey === todayKey ? "Today" : formatCompactDay(dateFromKey(selectedDayKey))}</Text>
-                  <ChevronDownGlyph color={theme.textSecondary} />
-                </>
-              ) : (
-                <SettingsGlyph color={theme.accent} />
-              )}
+              <SettingsGlyph color={theme.accent} />
             </Pressable>
           </View>
-
-          {tab === "timer" ? (
-            <>
-              <View style={styles.todayHeading}>
-                <Text style={styles.todayTitle}>{formatSelectedDayTitle(dateFromKey(selectedDayKey))}</Text>
-                <Text style={styles.todaySubtitle}>{formatLongDay(dateFromKey(selectedDayKey))}</Text>
-              </View>
-
-              {displayedActiveEntry ? <Pressable
-                accessibilityLabel={hasLiveActiveTimer ? "Edit running timer" : undefined}
-                accessibilityRole={hasLiveActiveTimer ? "button" : undefined}
-                disabled={!hasLiveActiveTimer}
-                onPress={() => {
-                  setActiveEditVisible(true);
-                }}
-                style={({ pressed }) => [
-                  styles.timerPanel,
-                  pressed && hasLiveActiveTimer ? styles.buttonPressed : null
-                ]}
-              >
-                {activeCategoryColor ? (
-                  <View
-                    pointerEvents="none"
-                    style={[styles.activeTimerAccentRail, { backgroundColor: activeCategoryColor }]}
-                  />
-                ) : null}
-                <View style={styles.activeTimerHeader}>
-                  <View style={styles.activeTimerTextStack}>
-                    <Text style={styles.label}>Active timer</Text>
-                    <View style={styles.activeTitleRow}>
-                      {displayedActiveEntry && activeCategoryColor ? (
-                        <View style={[styles.colorDot, { backgroundColor: activeCategoryColor }]} />
-                      ) : null}
-                      <Text
-                        style={[
-                          styles.timerText,
-                          styles.activeTitleText,
-                          activeTitleIsPlaceholder ? styles.activeTitlePlaceholderText : null
-                        ]}
-                        numberOfLines={2}
-                      >
-                        {activeTitle}
-                      </Text>
-                    </View>
-                    <Animated.View style={[styles.activeTimerExpandedContent, activeTimerDetailsStyle]}>
-                      {activeCategoryLabel ? (
-                        <Text style={styles.activeDescription}>{activeCategoryLabel}</Text>
-                      ) : null}
-                      {displayedActiveEntry ? (
-                        <Text style={styles.activeElapsed}>{formatClockDuration(displayedActiveDurationSeconds)}</Text>
-                      ) : null}
-                    </Animated.View>
-                  </View>
-                  {displayedActiveEntry ? (
-                    <Animated.View
-                      pointerEvents={hasLiveActiveTimer ? "auto" : "none"}
-                      style={[styles.activeTimerActions, activeTimerActionsStyle]}
-                    >
-                      <Pressable
-                        accessibilityLabel="Stop current timer"
-                        accessibilityRole="button"
-                        style={pressable(styles.stopButton, styles.buttonPressed)}
-                        onPress={(event) => {
-                          event.stopPropagation();
-                          void stopActiveTimer();
-                        }}
-                      >
-                        <StopGlyph color={theme.onAccent} />
-                      </Pressable>
-                    </Animated.View>
-                  ) : null}
-                </View>
-              </Pressable> : null}
-
-              <View style={styles.panel}>
-                <Text style={styles.label}>START TASK</Text>
-                <View style={styles.startInputRow}>
-                  <Pressable
-                    accessibilityLabel="Open start task sheet"
-                    accessibilityRole="button"
-                    style={pressable([styles.textInput, styles.startInput], styles.buttonPressed)}
-                    onPress={() => {
-                      if (data?.activeEntry) {
-                        setActiveEditVisible(true);
-                        return;
-                      }
-                      setStartSheetVisible(true);
-                    }}
-                  >
-                    <Text style={styles.startInputText} numberOfLines={1}>
-                      {customDescription.trim() || "What are you working on?"}
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    accessibilityLabel="Start task"
-                    accessibilityRole="button"
-                    style={pressable(styles.playButton, styles.buttonPressed)}
-                    onPress={() => {
-                      if (latestData.current?.activeEntry) {
-                        setStartSheetVisible(false);
-                        setActiveEditVisible(true);
-                        return;
-                      }
-                      void startTask(null);
-                    }}
-                  >
-                    <PlayGlyph color={theme.onAccent} />
-                  </Pressable>
-                </View>
-              </View>
-
-              <View style={styles.quickActionsBlock}>
-                <Text style={styles.quickActionsLabel}>Quick actions</Text>
-                <ScrollView
-                  horizontal
-                  keyboardShouldPersistTaps="handled"
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.compactCategoryScroller}
-                >
-                  {quickActions.map((action) => {
-                    const categoryColor = action.isUncategorized
-                      ? null
-                      : paletteColorFor(action.color, action.subtitle ?? action.name, theme.mode);
-                    return (
-                      <Pressable
-                        key={action.key}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Start ${action.name}`}
-                        style={pressable(styles.categoryPillTouch, styles.buttonPressed)}
-                        onPress={() => {
-                          void startTask(action.id, action.description ?? customDescription);
-                        }}
-                      >
-                        <View
-                          style={[
-                            styles.categoryPill,
-                            categoryColor
-                              ? { backgroundColor: colorWithAlpha(categoryColor, theme.mode === "dark" ? 0.18 : 0.13) }
-                              : styles.categoryPillMuted
-                          ]}
-                        >
-                          <View
-                            style={[
-                              styles.colorDot,
-                              categoryColor
-                                ? { backgroundColor: categoryColor }
-                                : styles.colorDotMuted
-                            ]}
-                          />
-                          <View>
-                            <Text style={styles.categoryPillText} numberOfLines={1}>{action.name}</Text>
-                            {action.subtitle ? (
-                              <Text style={styles.quickCategoryHint} numberOfLines={1}>
-                                {action.subtitle}
-                              </Text>
-                            ) : null}
-                          </View>
-                        </View>
-                      </Pressable>
-                    );
-                  })}
-                </ScrollView>
-              </View>
-
-              <TodaySummary
-                dayKey={selectedDayKey}
-                entries={summaryEntries}
-                now={now}
-                onOpenEntry={(entry) => {
-                  if (!entry.stoppedAt) {
-                    setActiveEditVisible(true);
-                    return;
-                  }
-                  setCalendarEditEntry({ ...entry, isActive: false });
-                }}
-                onOpenReview={() => router.push("/review")}
-                reviewCount={summaryReviewCount}
-                styles={styles}
-                theme={theme}
-                total={summaryTotal}
-              />
-            </>
-          ) : null}
 
           {tab === "calendar" ? (
             <CalendarTab
@@ -1315,20 +1351,20 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       {children}
       <ActiveTimerEditSheet
         categories={sortedCategories}
-        elapsedSeconds={0}
-        entry={null}
-        initialDescription={customDescription}
+        descriptionPlaceholder="What have you been working on?"
+        elapsedSeconds={manualDraftEntry?.durationSeconds ?? 0}
+        entry={manualDraftEntry}
         lastStoppedAt={recentStoppedAt}
-        mode="start"
+        mode="add"
         onCancel={() => {
-          setStartSheetVisible(false);
+          setManualDraftEntry(null);
         }}
-        onStart={startTaskFromSheet}
-        saving={false}
+        onSave={saveManualEntry}
+        saving={manualEntrySaving}
         stopping={false}
         styles={styles}
         theme={theme}
-        visible={startSheetVisible}
+        visible={Boolean(manualDraftEntry)}
       />
       <ActiveTimerEditSheet
         categories={sortedCategories}
@@ -1365,17 +1401,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         styles={styles}
         theme={theme}
         visible={Boolean(calendarEditEntry)}
-      />
-      <DashboardDatePicker
-        month={datePickerMonth}
-        onChangeMonth={(offset) => setDatePickerMonth((current) => addMonths(current, offset))}
-        onClose={() => setDatePickerVisible(false)}
-        onSelect={selectDashboardDay}
-        selectedDayKey={selectedDayKey}
-        styles={styles}
-        theme={theme}
-        todayKey={todayKey}
-        visible={datePickerVisible}
       />
     </DashboardContext.Provider>
   );
@@ -2004,10 +2029,18 @@ function SettingsGlyph({ color }: { color: string }) {
   );
 }
 
-function PlayGlyph({ color }: { color: string }) {
+function PlayGlyph({ color, size = 20 }: { color: string; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path d="M7 4v16l13-8L7 4Z" fill={color} />
+    </Svg>
+  );
+}
+
+function PlusGlyph({ color }: { color: string }) {
   return (
     <Svg width={20} height={20} viewBox="0 0 24 24">
-      <Path d="M7 4v16l13-8L7 4Z" fill={color} />
+      <Path d="M12 5v14M5 12h14" fill="none" stroke={color} strokeLinecap="round" strokeWidth={2.2} />
     </Svg>
   );
 }
@@ -2020,192 +2053,73 @@ function StopGlyph({ color }: { color: string }) {
   );
 }
 
-function ChevronDownGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={14} height={14} viewBox="0 0 24 24">
-      <Path d="m7 10 5 5 5-5" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
-    </Svg>
-  );
-}
-
-function DashboardDatePicker({
-  month,
-  onChangeMonth,
-  onClose,
-  onSelect,
-  selectedDayKey,
-  styles,
-  theme,
-  todayKey,
-  visible
-}: {
-  month: Date;
-  onChangeMonth: (offset: number) => void;
-  onClose: () => void;
-  onSelect: (dayKey: string) => void;
-  selectedDayKey: string;
-  styles: MobileStyles;
-  theme: MobileTheme;
-  todayKey: string;
-  visible: boolean;
-}) {
-  const days = monthGridDays(month);
-  return (
-    <Modal animationType="fade" onRequestClose={onClose} transparent visible={visible}>
-      <View style={styles.datePickerOverlay}>
-        <Pressable accessibilityLabel="Close date picker" accessibilityRole="button" onPress={onClose} style={styles.sheetBackdrop} />
-        <View accessibilityLabel="Choose a date" accessibilityRole="summary" style={styles.datePickerSheet}>
-          <View style={styles.datePickerHeader}>
-            <Pressable
-              accessibilityLabel="Previous month"
-              accessibilityRole="button"
-              onPress={() => onChangeMonth(-1)}
-              style={pressable(styles.datePickerNavButton, styles.buttonPressed)}
-            >
-              <CalendarChevronGlyph color={theme.textPrimary} direction="left" />
-            </Pressable>
-            <Text style={styles.datePickerMonth}>{month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</Text>
-            <Pressable
-              accessibilityLabel="Next month"
-              accessibilityRole="button"
-              onPress={() => onChangeMonth(1)}
-              style={pressable(styles.datePickerNavButton, styles.buttonPressed)}
-            >
-              <CalendarChevronGlyph color={theme.textPrimary} direction="right" />
-            </Pressable>
-          </View>
-          <View style={styles.datePickerWeekdays}>
-            {["M", "T", "W", "T", "F", "S", "S"].map((label, index) => (
-              <Text key={`${label}-${index}`} style={styles.datePickerWeekday}>{label}</Text>
-            ))}
-          </View>
-          <View style={styles.datePickerGrid}>
-            {days.map((date) => {
-              const dayKey = formatDateKey(date);
-              const selected = dayKey === selectedDayKey;
-              const isToday = dayKey === todayKey;
-              const inMonth = date.getMonth() === month.getMonth();
-              return (
-                <Pressable
-                  key={dayKey}
-                  accessibilityLabel={formatLongDay(date)}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected }}
-                  onPress={() => onSelect(dayKey)}
-                  style={({ pressed }) => [
-                    styles.datePickerDay,
-                    isToday ? styles.datePickerDayToday : null,
-                    selected ? styles.datePickerDaySelected : null,
-                    pressed ? styles.buttonPressed : null
-                  ]}
-                >
-                  <Text style={[
-                    styles.datePickerDayText,
-                    !inMonth ? styles.datePickerDayTextOutside : null,
-                    selected ? styles.datePickerDayTextSelected : null
-                  ]}>
-                    {date.getDate()}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          <View style={styles.datePickerActions}>
-            <Pressable
-              accessibilityLabel="Show today"
-              accessibilityRole="button"
-              onPress={() => onSelect(todayKey)}
-              style={pressable(styles.datePickerTodayButton, styles.buttonPressed)}
-            >
-              <Text style={styles.datePickerTodayText}>Today</Text>
-            </Pressable>
-            <Pressable
-              accessibilityLabel="Close date picker"
-              accessibilityRole="button"
-              onPress={onClose}
-              style={pressable(styles.datePickerDoneButton, styles.buttonPressed)}
-            >
-              <Text style={styles.datePickerDoneText}>Done</Text>
-            </Pressable>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
-function CalendarChevronGlyph({ color, direction }: { color: string; direction: "left" | "right" }) {
-  return (
-    <Svg width={18} height={18} viewBox="0 0 24 24">
-      <Path
-        d={direction === "left" ? "m15 18-6-6 6-6" : "m9 18 6-6-6-6"}
-        fill="none"
-        stroke={color}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-      />
-    </Svg>
-  );
-}
-
-function TodaySummary({
-  dayKey,
-  entries,
+function HistoryDayCard({
+  activeTimerRunning,
   now,
   onOpenEntry,
   onOpenReview,
+  onReplayEntry,
   reviewCount,
+  section,
   styles,
-  theme,
-  total
+  theme
 }: {
-  dayKey: string;
-  entries: TimeEntry[];
+  activeTimerRunning: boolean;
   now: number;
   onOpenEntry: (entry: TimeEntry) => void;
   onOpenReview: () => void;
+  onReplayEntry: (entry: TimeEntry) => void;
   reviewCount: number;
+  section: HistoryDaySection;
   styles: MobileStyles;
   theme: MobileTheme;
-  total: number;
 }) {
-  const visibleEntries = entries.filter((entry) => !isReviewNeededEntry(entry)).slice(0, 5);
-  const dayStart = dateFromKey(dayKey);
-  const dayEnd = addDaysToDate(dayStart, 1);
-
   return (
     <View style={styles.todaySummaryBlock}>
-      <Text style={styles.quickActionsLabel}>
-        {dayKey === formatDateKey(new Date(now)) ? "TODAY" : formatCompactDay(dayStart).toUpperCase()}
-      </Text>
+      <Text style={styles.historyDayTitle}>{historyDayLabel(section, now)}</Text>
       <View style={styles.todayEntryCard}>
-        {visibleEntries.length === 0 ? (
+        {section.entries.length === 0 ? (
           <Text style={styles.todayEmptyText}>No tracked time for this day.</Text>
-        ) : visibleEntries.map((entry, index) => (
-          <Pressable
-            key={entry.id}
-            accessibilityLabel={`Edit ${displayEntryTitle(entry)}`}
-            accessibilityRole="button"
-            onPress={() => onOpenEntry(entry)}
-            style={({ pressed }) => [
+        ) : section.entries.map(({ entry, overlapSeconds }, index) => {
+          const canReplay = !activeTimerRunning && Boolean(entry.categoryId || entry.description?.trim());
+          return (
+            <View
+              key={`${section.key}:${entry.id}`}
+              style={[
               styles.todayEntryRow,
-              index > 0 ? styles.todayEntryDivider : null,
-              pressed ? styles.buttonPressed : null
-            ]}
-          >
-            <View style={[styles.todayEntryDot, { backgroundColor: entryCategoryColor(entry, theme.mode) }]} />
-            <View style={styles.todayEntryText}>
-              <Text style={styles.todayEntryTitle} numberOfLines={1}>{displayEntryTitle(entry)}</Text>
-              <Text style={styles.todayEntryMeta} numberOfLines={1}>
-                {formatEntryTimeRange(entry, now)}{entry.categoryName ? ` · ${entry.categoryName}` : ""}
-              </Text>
+                index > 0 ? styles.todayEntryDivider : null
+              ]}
+            >
+              <Pressable
+                accessibilityLabel={`Edit ${displayEntryTitle(entry)}`}
+                accessibilityRole="button"
+                onPress={() => onOpenEntry(entry)}
+                style={({ pressed }) => [styles.historyEntryMain, pressed ? styles.buttonPressed : null]}
+              >
+                <View style={[styles.todayEntryDot, { backgroundColor: entryCategoryColor(entry, theme.mode) }]} />
+                <View style={styles.todayEntryText}>
+                  <Text style={styles.todayEntryTitle} numberOfLines={1}>{displayEntryTitle(entry)}</Text>
+                  <Text style={styles.todayEntryMeta} numberOfLines={1}>
+                    {formatEntryTimeRange(entry, now)}{entry.categoryName ? ` · ${entry.categoryName}` : ""}
+                  </Text>
+                </View>
+              </Pressable>
+              <View style={styles.historyEntryActions}>
+                <Text style={styles.todayEntryDuration}>{formatDuration(overlapSeconds)}</Text>
+                {canReplay ? (
+                  <Pressable
+                    accessibilityLabel={`Start ${displayEntryTitle(entry)} now`}
+                    accessibilityRole="button"
+                    onPress={() => onReplayEntry(entry)}
+                    style={pressable(styles.historyReplayButton, styles.buttonPressed)}
+                  >
+                    <PlayGlyph color={theme.accentText} size={14} />
+                  </Pressable>
+                ) : null}
+              </View>
             </View>
-            <Text style={styles.todayEntryDuration}>
-              {formatDuration(entryOverlapSeconds(entry, dayStart, dayEnd, now))}
-            </Text>
-          </Pressable>
-        ))}
+          );
+        })}
       </View>
       {reviewCount > 0 ? (
         <Pressable
@@ -2225,7 +2139,7 @@ function TodaySummary({
       ) : null}
       <View style={styles.todayTrackedRow}>
         <Text style={styles.todayTrackedLabel}>Tracked</Text>
-        <Text style={styles.todayTrackedValue}>{formatDuration(total)}</Text>
+        <Text style={styles.todayTrackedValue}>{formatDuration(section.totalSeconds)}</Text>
       </View>
     </View>
   );
@@ -2484,6 +2398,31 @@ function pendingEntryFromStartInput(input: {
   };
 }
 
+function createManualDraftEntry(lastStoppedAt: string | null, nowMs: number): TimeEntry {
+  const stoppedAt = new Date(nowMs);
+  const lastStopMs = lastStoppedAt ? Date.parse(lastStoppedAt) : Number.NaN;
+  const useLastStop = Number.isFinite(lastStopMs) && lastStopMs < nowMs && nowMs - lastStopMs <= RECENT_LAST_STOP_WINDOW_MS;
+  const startedAt = new Date(useLastStop ? lastStopMs : nowMs - 30 * 60 * 1000);
+  return {
+    categoryColor: null,
+    categoryId: null,
+    categoryName: null,
+    clientName: null,
+    confidence: "manual",
+    description: null,
+    durationSeconds: Math.max(60, Math.floor((stoppedAt.getTime() - startedAt.getTime()) / 1000)),
+    id: `manual-draft:${nowMs}`,
+    placeName: null,
+    projectColor: null,
+    projectId: null,
+    projectName: null,
+    reviewStatus: "confirmed",
+    source: "manual_app",
+    startedAt: startedAt.toISOString(),
+    stoppedAt: stoppedAt.toISOString()
+  };
+}
+
 function buildCategorySegments(
   entries: TimeEntry[],
   rangeStart: Date,
@@ -2690,10 +2629,6 @@ function formatSelectedDayTitle(date: Date) {
   });
 }
 
-function formatCompactDay(date: Date) {
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
 function formatLongDay(date: Date) {
   return date.toLocaleDateString(undefined, {
     weekday: "long",
@@ -2760,26 +2695,6 @@ function addDaysToDate(date: Date, days: number) {
   return copy;
 }
 
-function startOfMonth(date: Date) {
-  const copy = new Date(date);
-  copy.setDate(1);
-  copy.setHours(0, 0, 0, 0);
-  return copy;
-}
-
-function addMonths(date: Date, months: number) {
-  const copy = startOfMonth(date);
-  copy.setMonth(copy.getMonth() + months);
-  return copy;
-}
-
-function monthGridDays(month: Date) {
-  const firstDay = startOfMonth(month);
-  const mondayOffset = (firstDay.getDay() + 6) % 7;
-  const gridStart = addDaysToDate(firstDay, -mondayOffset);
-  return Array.from({ length: 42 }, (_, index) => addDaysToDate(gridStart, index));
-}
-
 function isSameLocalDay(left: Date, right: Date) {
   return (
     left.getFullYear() === right.getFullYear() &&
@@ -2806,43 +2721,6 @@ function uncategorizedStripeColor(mode: MobileTheme["mode"]) {
   return mode === "dark" ? "#8792A3" : "#98A4B3";
 }
 
-function buildTodaySummarySegments(
-  entries: TimeEntry[],
-  now: number,
-  mode: MobileTheme["mode"]
-): SummarySegment[] {
-  const periodStart = startOfToday(now);
-  const totals = new Map<string, Omit<SummarySegment, "share">>();
-
-  for (const entry of entries) {
-    if (isReviewNeededEntry(entry)) continue;
-    const startedAt = new Date(entry.startedAt).getTime();
-    if (startedAt < periodStart) continue;
-    const categoryName = entry.categoryName ?? "Uncategorized";
-    const key = entry.categoryId ?? "uncategorized";
-    const isUncategorized = !entry.categoryId && !entry.categoryName;
-    const current = totals.get(key);
-    const seconds = entryDurationSeconds(entry, now);
-
-    totals.set(key, {
-      key,
-      categoryName,
-      seconds: (current?.seconds ?? 0) + seconds,
-      color: current?.color ?? entryCategoryColor(entry, mode),
-      isUncategorized: current?.isUncategorized ?? isUncategorized
-    });
-  }
-
-  const total = Array.from(totals.values()).reduce((sum, segment) => sum + segment.seconds, 0);
-  return Array.from(totals.values())
-    .map((segment) => ({
-      ...segment,
-      share: total > 0 ? Math.round((segment.seconds / total) * 100) : 0
-    }))
-    .sort((a, b) => b.seconds - a.seconds)
-    .slice(0, 8);
-}
-
 function recentStoppedEntryTime(entries: TimeEntry[], activeEntry: MobileBootstrap["activeEntry"]) {
   if (!activeEntry) return null;
   const activeStart = new Date(activeEntry.startedAt).getTime();
@@ -2866,11 +2744,6 @@ function recentStoppedEntryTime(entries: TimeEntry[], activeEntry: MobileBootstr
   }
 
   return recentStop;
-}
-
-function startOfToday(now: number) {
-  const date = new Date(now);
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 }
 
 function pad2(value: number) {

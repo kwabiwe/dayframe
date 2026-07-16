@@ -136,6 +136,12 @@ function createStyles(theme: MobileTheme) {
     contentStack: {
       gap: 12
     },
+    todayListHeader: {
+      marginBottom: 12
+    },
+    todayListContent: {
+      paddingBottom: 112
+    },
     settingsScrollView: {
       flex: 1
     },
@@ -189,13 +195,19 @@ function createStyles(theme: MobileTheme) {
     },
     settingsMenuRow: {
       minHeight: 58,
-      borderBottomWidth: 1,
-      borderBottomColor: theme.border,
       paddingHorizontal: 14,
       paddingVertical: 8,
       flexDirection: "row",
       alignItems: "center",
       gap: 11
+    },
+    settingsMenuDivider: {
+      position: "absolute",
+      left: 61,
+      right: 14,
+      bottom: 0,
+      height: 1,
+      backgroundColor: theme.border
     },
     settingsMenuIcon: {
       width: 36,
@@ -464,7 +476,7 @@ function createStyles(theme: MobileTheme) {
       position: "relative",
       backgroundColor: theme.surfaceRaised,
       borderRadius: 18,
-      minHeight: 116,
+      minHeight: 104,
       paddingHorizontal: 16,
       paddingVertical: 14,
       gap: 8,
@@ -1137,6 +1149,16 @@ function createStyles(theme: MobileTheme) {
     todaySummaryBlock: {
       gap: 8
     },
+    historyDayGap: {
+      height: 14
+    },
+    historyDayTitle: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 15,
+      fontWeight: "600",
+      paddingHorizontal: 2
+    },
     todayEntryCard: {
       backgroundColor: theme.surface,
       borderRadius: 18,
@@ -1147,7 +1169,7 @@ function createStyles(theme: MobileTheme) {
       minHeight: 56,
       flexDirection: "row",
       alignItems: "center",
-      gap: 10
+      gap: 4
     },
     todayEntryDivider: {
       borderTopWidth: 1,
@@ -1181,6 +1203,27 @@ function createStyles(theme: MobileTheme) {
       fontSize: 13,
       fontWeight: "600",
       fontVariant: ["tabular-nums"]
+    },
+    historyEntryMain: {
+      flex: 1,
+      minWidth: 0,
+      minHeight: 56,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10
+    },
+    historyEntryActions: {
+      minHeight: 44,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 3
+    },
+    historyReplayButton: {
+      width: 44,
+      height: 44,
+      borderRadius: 999,
+      alignItems: "center",
+      justifyContent: "center"
     },
     todayEmptyText: {
       color: theme.textSecondary,
@@ -1554,22 +1597,27 @@ function createStyles(theme: MobileTheme) {
     },
     startInputRow: {
       flexDirection: "row",
-      alignItems: "center",
+      alignItems: "flex-start",
       gap: 8
     },
     startInput: {
       flex: 1,
-      minHeight: 44
+      minHeight: 44,
+      justifyContent: "center"
     },
     startInputText: {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 14,
-      fontWeight: "700"
+      fontWeight: "600",
+      lineHeight: 18
+    },
+    startActionColumn: {
+      gap: 8
     },
     playButton: {
-      width: 52,
-      height: 52,
+      width: 44,
+      height: 44,
       backgroundColor: theme.accent,
       borderRadius: 999,
       alignItems: "center",
@@ -1579,6 +1627,14 @@ function createStyles(theme: MobileTheme) {
       shadowRadius: 10,
       shadowOffset: { width: 0, height: 6 },
       elevation: 3
+    },
+    addPastTimeButton: {
+      width: 44,
+      height: 44,
+      backgroundColor: theme.accentSoft,
+      borderRadius: 999,
+      alignItems: "center",
+      justifyContent: "center"
     },
     stopButton: {
       width: 44,
@@ -1607,7 +1663,11 @@ function createStyles(theme: MobileTheme) {
       backgroundColor: theme.overlay
     },
     datePickerOverlay: {
-      flex: 1,
+      position: "absolute",
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
       justifyContent: "flex-start",
       alignItems: "center",
       paddingHorizontal: 16,
@@ -1847,6 +1907,9 @@ function createStyles(theme: MobileTheme) {
       justifyContent: "space-between",
       gap: 12
     },
+    sheetHeaderRunning: {
+      justifyContent: "flex-end"
+    },
     sheetHeaderCentered: {
       justifyContent: "center"
     },
@@ -1943,7 +2006,7 @@ function createStyles(theme: MobileTheme) {
     activeEditElapsedStack: {
       flex: 1,
       minWidth: 0,
-      alignItems: "center"
+      alignItems: "flex-start"
     },
     activeEditElapsed: {
       color: theme.accentText,
@@ -2270,8 +2333,8 @@ function createStyles(theme: MobileTheme) {
       textAlign: "center"
     },
     activeEditStopButton: {
-      width: 52,
-      height: 52,
+      width: 44,
+      height: 44,
       backgroundColor: theme.accent,
       borderRadius: 999,
       alignItems: "center",

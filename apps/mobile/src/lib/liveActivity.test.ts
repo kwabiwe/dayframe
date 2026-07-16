@@ -43,17 +43,24 @@ describe("Live Activity sync", () => {
       id: "entry-1",
       startedAt: "2026-07-12T06:45:00.000Z",
       description: "School run",
-      categoryName: "Family"
+      categoryName: "Family",
+      categoryColor: "violet"
     });
     await syncLiveActivityForEntry({
       id: "entry-1",
       startedAt: "2026-07-12T06:45:00.000Z",
       description: "School run",
-      categoryName: "Family"
+      categoryName: "Family",
+      categoryColor: "violet"
     });
 
     expect(mocks.start).toHaveBeenCalledTimes(1);
-    expect(mocks.start).toHaveBeenCalledWith("School run", "Family", "2026-07-12T06:45:00.000Z");
+    expect(mocks.start).toHaveBeenCalledWith(
+      "School run",
+      "Family",
+      "#7D6EE6",
+      "2026-07-12T06:45:00.000Z"
+    );
   });
 
   it("retries active-entry reconciliation when native start reports failure", async () => {
@@ -65,7 +72,8 @@ describe("Live Activity sync", () => {
       id: "entry-1",
       startedAt: "2026-07-12T06:45:00.000Z",
       description: "School run",
-      categoryName: "Family"
+      categoryName: "Family",
+      categoryColor: "violet"
     };
 
     await syncLiveActivityForEntry(entry);

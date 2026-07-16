@@ -4,6 +4,7 @@
 
 RCT_EXTERN_METHOD(start:(NSString *)title
                   categoryName:(NSString *)categoryName
+                  categoryColor:(NSString *)categoryColor
                   startedAt:(NSString *)startedAt
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)

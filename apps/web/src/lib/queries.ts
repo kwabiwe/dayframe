@@ -206,6 +206,7 @@ export type BootstrapData = {
   learnedPlaces: LearnedPlaceRow[];
   automationRules: AutomationRuleRow[];
   entries: TimeEntryRow[];
+  historyEntries: TimeEntryRow[];
   dayEntries: TimeEntryRow[];
   weekEntries: TimeEntryRow[];
   activeEntry: TimeEntryRow | null;
@@ -223,6 +224,7 @@ export async function getBootstrapData(
   options: { selectedDate?: string | Date | null } = {}
 ): Promise<BootstrapData> {
   const dateRange = buildDashboardDateRange(options.selectedDate);
+  const historyStart = addDays(new Date(dateRange.dayStart), -59).toISOString();
   const [
     user,
     workspaces,
@@ -234,6 +236,7 @@ export async function getBootstrapData(
     learnedPlaces,
     automationRules,
     entries,
+    historyEntries,
     dayEntries,
     weekEntries,
     activeEntry,
@@ -253,6 +256,11 @@ export async function getBootstrapData(
     getLearnedPlaces(session),
     getAutomationRules(session),
     getTimeEntries(session),
+    getTimeEntries(session, {
+      overlappingFrom: historyStart,
+      startedBefore: dateRange.dayEnd,
+      limit: 2000
+    }),
     getTimeEntries(session, {
       startedFrom: dateRange.dayStart,
       startedBefore: dateRange.dayEnd,
@@ -284,6 +292,7 @@ export async function getBootstrapData(
     learnedPlaces,
     automationRules,
     entries,
+    historyEntries,
     dayEntries,
     weekEntries,
     activeEntry,
@@ -595,10 +604,14 @@ async function getAutomationRules(session: RequestSession) {
 
 async function getTimeEntries(
   session: RequestSession,
-  options: { startedFrom?: string; startedBefore?: string; limit?: number } = {}
+  options: { overlappingFrom?: string; startedFrom?: string; startedBefore?: string; limit?: number } = {}
 ) {
   const where = ["te.workspace_id = $1"];
   const values: Array<string | number> = [session.workspaceId];
+  if (options.overlappingFrom) {
+    values.push(options.overlappingFrom);
+    where.push(`coalesce(te.stopped_at, now()) > $${values.length}`);
+  }
   if (options.startedFrom) {
     values.push(options.startedFrom);
     where.push(`te.started_at >= $${values.length}`);
