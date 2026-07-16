@@ -4,7 +4,6 @@ import {
   useCallback,
   useContext,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -17,7 +16,6 @@ import {
   Easing,
   FlatList,
   Linking,
-  PanResponder,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -26,12 +24,10 @@ import {
   View
 } from "react-native";
 import Svg, { Circle, Defs, G, Path, Pattern, Rect } from "react-native-svg";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import Reanimated, { useAnimatedStyle, useSharedValue } from "react-native-reanimated";
-import { scheduleOnRN } from "react-native-worklets";
 import { router, useFocusEffect, useIsFocused } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { calendarBlockContinuationEdges, paletteColorFor, type RecentActivitySuggestion } from "@dayframe/shared";
+import { paletteColorFor, type RecentActivitySuggestion } from "@dayframe/shared";
+import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { DayframeBrand } from "@/components/brand";
 import { useKeyboardAccessory, type KeyboardAccessoryField } from "@/components/KeyboardAccessory";
@@ -55,18 +51,6 @@ import {
   type MobileBootstrap,
   type TimeEntryUpdatePatch
 } from "@/lib/api";
-import {
-  calendarBlockPresentation,
-  calendarVisibleBlockHeight,
-  CALENDAR_BLOCK_META_MIN_HEIGHT
-} from "@/lib/calendarBlocks";
-import {
-  anchoredCalendarScrollY,
-  calendarPinchTransform,
-  calendarSwipeDelta,
-  formatCalendarHourLabel,
-  shouldCaptureCalendarSwipe
-} from "@/lib/calendarGestures";
 import { handleDayframeUrl } from "@/lib/deepLinks";
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
 import {
@@ -93,15 +77,25 @@ import {
   type MobileTheme
 } from "@/lib/mobileTheme";
 import {
+  buildNativeCalendarBridgeState,
+  routeNativeCalendarOpenEvent,
+  routeNativeCalendarRefresh,
+  type NativeCalendarActionKind,
+  type NativeCalendarEntry
+} from "@/lib/nativeCalendarPresentation";
+import {
   REVIEW_COPY,
-  buildReviewItemDraftEntry,
   hasReviewNeededActivityForRange,
-  isCalendarPreviewReviewItem,
   isOpenReviewItem,
   isReviewNeededEntry
 } from "@/lib/review";
 import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
-import { MOBILE_MOTION, scheduleLayoutTransition, useReduceMotionPreference } from "@/lib/motion";
+import {
+  MOBILE_MOTION,
+  scheduleLayoutTransition,
+  useReduceMotionPreference,
+  useReduceTransparencyPreference
+} from "@/lib/motion";
 import {
   activeTimerElapsedSeconds,
   activeTimerPresentation,
@@ -124,15 +118,6 @@ type AuthState = "checking" | "authenticated" | "signedOut";
 export type DayframeDashboardTab = "timer" | "calendar" | "reports";
 type ReportRange = "today" | "week";
 type ReportChartView = "pie" | "bars";
-type CalendarHoursMode = "fullDay";
-type CalendarEntry = TimeEntry & { isActive: boolean; reviewItemId?: string; isReviewSuggestion?: boolean };
-type CalendarHours = { startHour: number; endHour: number };
-type CalendarBlockMetrics = {
-  top: number;
-  height: number;
-  startsBeforeDay: boolean;
-  continuesIntoNextDay: boolean;
-};
 type SummarySegment = {
   key: string;
   categoryName: string;
@@ -143,14 +128,6 @@ type SummarySegment = {
 };
 const AUTH_KEYBOARD_ACCESSORY_ID = "dayframe-auth-keyboard-accessory";
 const RECENT_LAST_STOP_WINDOW_MS = 24 * 60 * 60 * 1000;
-const CALENDAR_HOURS_MODES: Record<CalendarHoursMode, CalendarHours & { label: string; accessibilityLabel: string }> = {
-  fullDay: { label: "24-hour", accessibilityLabel: "Show 24-hour calendar", startHour: 0, endHour: 24 }
-};
-const TIMELINE_DEFAULT_HOUR_HEIGHT = 72;
-const TIMELINE_MIN_HOUR_HEIGHT = 48;
-const TIMELINE_MAX_HOUR_HEIGHT = 128;
-const CALENDAR_HOUR_LABEL_HEIGHT = 22;
-const CALENDAR_CURRENT_TIME_LABEL_HEIGHT = 18;
 
 type DashboardContextValue = {
   renderTab: (tab: DayframeDashboardTab, isFocused: boolean) => ReactNode;
@@ -167,8 +144,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [authState, setAuthState] = useState<AuthState>("checking");
   const [selectedDayKey, setSelectedDayKey] = useState(() => formatDateKey(new Date()));
   const [reportRange, setReportRange] = useState<ReportRange>("today");
-  const [calendarEditEntry, setCalendarEditEntry] = useState<CalendarEntry | null>(null);
-  const [calendarHoursMode] = useState<CalendarHoursMode>("fullDay");
+  const [calendarEditEntry, setCalendarEditEntry] = useState<NativeCalendarEntry | null>(null);
   const [calendarTransitionDirection, setCalendarTransitionDirection] = useState(1);
   const [reportChartView, setReportChartView] = useState<ReportChartView>("pie");
   const [authView, setAuthView] = useState<AuthView>("login");
@@ -183,8 +159,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [manualEntrySaving, setManualEntrySaving] = useState(false);
   const [activeEditVisible, setActiveEditVisible] = useState(false);
   const [presentedActiveEntry, setPresentedActiveEntry] = useState<TimeEntry | null>(null);
-  const [calendarGestureLocked, setCalendarGestureLocked] = useState(false);
   const reduceMotion = useReduceMotionPreference();
+  const reduceTransparency = useReduceTransparencyPreference();
   const refreshInFlight = useRef(false);
   const queueSyncInFlight = useRef(false);
   const healthAutoSyncInFlight = useRef(false);
@@ -197,8 +173,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const timerMutationCount = useRef(0);
   const timerMutationVersions = useRef(new Map<string, number>());
   const activeEditorOpenFrame = useRef<number | null>(null);
-  const calendarScrollRef = useRef<ScrollView>(null);
-  const calendarScrollY = useRef(0);
   const entrance = useRef(new Animated.Value(0)).current;
   const activeTimerExpansion = useRef(new Animated.Value(0)).current;
   const authNameRef = useRef<TextInput>(null);
@@ -541,10 +515,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     ? activeDurationSeconds
     : activeTimerElapsedSeconds(displayedActiveEntry, now);
   const todayKey = useMemo(() => formatDateKey(new Date(now)), [now]);
-  const weekDays = useMemo(
-    () => buildWeekStripDays(selectedDayKey, now),
-    [now, selectedDayKey]
-  );
   const historySourceEntries = useMemo(() => {
     if (!data) return [];
     return mergeActiveEntry(
@@ -583,13 +553,27 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     () => recentStoppedEntryTime(data?.entries ?? [], data?.activeEntry ?? null),
     [data?.activeEntry, data?.entries]
   );
-  const calendarEntries = useMemo(
-    () => buildCalendarEntries(data, selectedDayKey, now),
-    [data, now, selectedDayKey]
-  );
-  const calendarTotal = useMemo(
-    () => sumOverlappingDaySeconds(calendarEntries.filter((entry) => !isCalendarReviewNeeded(entry)), selectedDayKey, now),
-    [calendarEntries, now, selectedDayKey]
+  const nativeCalendarBridge = useMemo(
+    () => buildNativeCalendarBridgeState({
+      data,
+      now,
+      reduceMotion,
+      reduceTransparency,
+      refreshing,
+      selectedDayKey,
+      theme,
+      transitionDirection: calendarTransitionDirection
+    }),
+    [
+      calendarTransitionDirection,
+      data,
+      now,
+      reduceMotion,
+      reduceTransparency,
+      refreshing,
+      selectedDayKey,
+      theme
+    ]
   );
   const reports = useMemo(
     () => buildReports(data, reportRange, todayKey, now, theme.mode),
@@ -851,11 +835,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     });
   }, []);
 
-  const scrollCalendarTo = useCallback((y: number) => {
-    calendarScrollY.current = y;
-    calendarScrollRef.current?.scrollTo({ animated: false, y });
-  }, []);
-  const getCalendarScrollY = useCallback(() => calendarScrollY.current, []);
   const shiftSelectedCalendarWeek = useCallback((weeks: number) => {
     shiftSelectedCalendarDay(weeks * 7);
   }, [shiftSelectedCalendarDay]);
@@ -1278,20 +1257,71 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   function renderDashboardTab(tab: DayframeDashboardTab, isFocused: boolean) {
     if (tab === "timer") return renderTodayTab(isFocused);
+    if (tab === "calendar") {
+      const routeOpenEvent = (kind: NativeCalendarActionKind, actionId: string) => {
+        routeNativeCalendarOpenEvent(
+          { actionId, kind },
+          nativeCalendarBridge.actionEntries,
+          {
+            onOpenActive: () => {
+              setCalendarEditEntry(null);
+              setActiveEditVisible(true);
+            },
+            onOpenCompleted: setCalendarEditEntry,
+            onOpenReview: () => router.push("/review")
+          }
+        );
+      };
+
+      return (
+        <SafeAreaView collapsable={false} edges={["top", "left", "right"]} style={styles.safeArea}>
+          <View style={styles.nativeCalendarScreen}>
+            <Animated.View style={[styles.nativeCalendarHeader, enteringStyle]}>
+              <View style={styles.logoLockup}>
+                <DayframeBrand
+                  layout="horizontal"
+                  size="md"
+                  tone={theme.mode === "dark" ? "light" : "dark"}
+                />
+              </View>
+              <Pressable
+                accessibilityLabel="Open settings"
+                accessibilityRole="button"
+                style={pressable(styles.iconButton, styles.buttonPressed)}
+                onPress={() => router.push("/settings")}
+              >
+                <SettingsGlyph color={theme.accent} />
+              </Pressable>
+            </Animated.View>
+            <DayframeCalendarView
+              model={{
+                ...nativeCalendarBridge.model,
+                refreshing: isFocused && refreshing
+              }}
+              onChangeDay={(event) => shiftSelectedCalendarDay(event.nativeEvent.days)}
+              onChangeWeek={(event) => shiftSelectedCalendarWeek(event.nativeEvent.weeks)}
+              onOpenActiveTimer={(event) => routeOpenEvent("active", event.nativeEvent.entryId)}
+              onOpenCompletedEntry={(event) => routeOpenEvent("completed", event.nativeEvent.entryId)}
+              onOpenReviewItem={(event) => routeOpenEvent("review", event.nativeEvent.reviewItemId)}
+              onRequestRefresh={() => {
+                routeNativeCalendarRefresh(() => {
+                  void load({ visibleRefresh: true });
+                });
+              }}
+              onSelectDay={(event) => selectCalendarDay(event.nativeEvent.dayKey)}
+              style={styles.nativeCalendarView}
+            />
+          </View>
+        </SafeAreaView>
+      );
+    }
+
     return (
       <SafeAreaView collapsable={false} edges={["top", "left", "right"]} style={styles.safeArea}>
         <ScrollView
-          ref={tab === "calendar" ? calendarScrollRef : undefined}
           contentContainerStyle={styles.container}
           directionalLockEnabled
           keyboardShouldPersistTaps="handled"
-          scrollEnabled={tab !== "calendar" || !calendarGestureLocked}
-          onScroll={(event) => {
-            if (tab === "calendar") {
-              calendarScrollY.current = event.nativeEvent.contentOffset.y;
-            }
-          }}
-          scrollEventThrottle={16}
           refreshControl={
             <RefreshControl
               refreshing={isFocused && refreshing}
@@ -1320,48 +1350,19 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             </Pressable>
           </View>
 
-          {tab === "calendar" ? (
-            <CalendarTab
-              calendarHoursMode={calendarHoursMode}
-              calendarTransitionDirection={calendarTransitionDirection}
-              entries={calendarEntries}
-              now={now}
-              onChangeDay={shiftSelectedCalendarDay}
-              onChangeWeek={shiftSelectedCalendarWeek}
-              getScrollY={getCalendarScrollY}
-              onScrollTo={scrollCalendarTo}
-              onGestureLockedChange={setCalendarGestureLocked}
-              onOpenActive={() => {
-                setCalendarEditEntry(null);
-                setActiveEditVisible(true);
-              }}
-              onOpenDetail={setCalendarEditEntry}
-              onOpenReviewItem={() => router.push("/review")}
-              onSelectDay={selectCalendarDay}
-              selectedDayKey={selectedDayKey}
-              styles={styles}
-              theme={theme}
-              todayKey={todayKey}
-              total={calendarTotal}
-              weekDays={weekDays}
-            />
-          ) : null}
-
-          {tab === "reports" ? (
-            <ReportsTab
-              chartView={reportChartView}
-              dailyBars={reports.dailyBars}
-              range={reportRange}
-              segments={reports.segments}
-              hasSuggestedActivity={reports.hasSuggestedActivity}
-              onChartViewChange={changeReportChart}
-              styles={styles}
-              theme={theme}
-              todayTotal={reports.todayTotal}
-              weekTotal={reports.weekTotal}
-              onRangeChange={changeReportRange}
-            />
-          ) : null}
+          <ReportsTab
+            chartView={reportChartView}
+            dailyBars={reports.dailyBars}
+            range={reportRange}
+            segments={reports.segments}
+            hasSuggestedActivity={reports.hasSuggestedActivity}
+            onChartViewChange={changeReportChart}
+            styles={styles}
+            theme={theme}
+            todayTotal={reports.todayTotal}
+            weekTotal={reports.weekTotal}
+            onRangeChange={changeReportRange}
+          />
           </Animated.View>
         </ScrollView>
       </SafeAreaView>
@@ -1433,424 +1434,6 @@ export function DayframeDashboardScreen({ tab }: { tab: DayframeDashboardTab }) 
   const isFocused = useIsFocused();
   if (!dashboard) throw new Error("DayframeDashboardScreen must be used within DayframeDashboardProvider");
   return dashboard.renderTab(tab, isFocused);
-}
-
-function CalendarTab({
-  calendarHoursMode,
-  calendarTransitionDirection,
-  entries,
-  getScrollY,
-  now,
-  onChangeDay,
-  onChangeWeek,
-  onGestureLockedChange,
-  onOpenActive,
-  onOpenDetail,
-  onOpenReviewItem,
-  onScrollTo,
-  onSelectDay,
-  selectedDayKey,
-  styles,
-  theme,
-  todayKey,
-  total,
-  weekDays
-}: {
-  calendarHoursMode: CalendarHoursMode;
-  calendarTransitionDirection: number;
-  entries: CalendarEntry[];
-  getScrollY: () => number;
-  now: number;
-  onChangeDay: (days: number) => void;
-  onChangeWeek: (weeks: number) => void;
-  onGestureLockedChange: (locked: boolean) => void;
-  onOpenActive: () => void;
-  onOpenDetail: (entry: CalendarEntry) => void;
-  onOpenReviewItem: (reviewItemId: string) => void;
-  onScrollTo: (y: number) => void;
-  onSelectDay: (dayKey: string) => void;
-  selectedDayKey: string;
-  styles: MobileStyles;
-  theme: MobileTheme;
-  todayKey: string;
-  total: number;
-  weekDays: Array<{ key: string; date: Date }>;
-}) {
-  const reduceMotion = useReduceMotionPreference();
-  const [calendarZoom, setCalendarZoom] = useState<{ hourHeight: number; scrollY: number | null }>({
-    hourHeight: TIMELINE_DEFAULT_HOUR_HEIGHT,
-    scrollY: null
-  });
-  const hourHeight = calendarZoom.hourHeight;
-  const pinchScale = useSharedValue(1);
-  const pinchTranslateY = useSharedValue(0);
-  const pinchStartFocalY = useSharedValue(0);
-  const pinchStartHourHeight = useSharedValue(hourHeight);
-  const calendarTransition = useRef(new Animated.Value(1)).current;
-  const calendarHours = CALENDAR_HOURS_MODES[calendarHoursMode];
-  const timelineHeight = (calendarHours.endHour - calendarHours.startHour) * hourHeight;
-  const selectedDate = dateFromKey(selectedDayKey);
-  const currentMinute = minutesSinceStartOfDay(new Date(now));
-  const showCurrentTime = selectedDayKey === todayKey;
-  const currentLineTop = Math.min(
-    timelineHeight,
-    Math.max(0, ((currentMinute - calendarHours.startHour * 60) / 60) * hourHeight)
-  );
-  const currentTimeRowTop = clamp(currentLineTop - CALENDAR_CURRENT_TIME_LABEL_HEIGHT / 2, 0, timelineHeight - CALENDAR_CURRENT_TIME_LABEL_HEIGHT);
-  const currentTimeOutsideAxis =
-    showCurrentTime &&
-    (currentMinute < calendarHours.startHour * 60 || currentMinute > calendarHours.endHour * 60);
-  const visibleBlocks = entries
-    .map((entry) => ({ entry, metrics: getTimelineMetrics(entry, selectedDayKey, now, hourHeight, calendarHours) }))
-    .filter((item): item is { entry: CalendarEntry; metrics: CalendarBlockMetrics } => Boolean(item.metrics));
-  const visibleBlockIds = new Set(visibleBlocks.map(({ entry }) => entry.id));
-  const outsideAxisEntries = entries.filter((entry) => !visibleBlockIds.has(entry.id)).slice(0, 3);
-
-  const commitPinchZoom = useCallback((
-    nextHourHeight: number,
-    startHourHeight: number,
-    startFocalY: number,
-    currentFocalY: number
-  ) => {
-    setCalendarZoom({
-      hourHeight: nextHourHeight,
-      scrollY: anchoredCalendarScrollY({
-        anchorY: startFocalY,
-        currentMidpointY: currentFocalY,
-        nextHourHeight,
-        startHourHeight,
-        startMidpointY: startFocalY,
-        startScrollY: getScrollY()
-      })
-    });
-  }, [getScrollY]);
-
-  const pinchGesture = useMemo(() => Gesture.Pinch()
-    .onStart((event) => {
-      "worklet";
-      pinchStartFocalY.value = event.focalY;
-      pinchStartHourHeight.value = hourHeight;
-      pinchScale.value = 1;
-      pinchTranslateY.value = 0;
-      scheduleOnRN(onGestureLockedChange, true);
-    })
-    .onUpdate((event) => {
-      "worklet";
-      const transform = calendarPinchTransform({
-        currentFocalY: event.focalY,
-        gestureScale: event.scale,
-        maxHourHeight: TIMELINE_MAX_HOUR_HEIGHT,
-        minHourHeight: TIMELINE_MIN_HOUR_HEIGHT,
-        startFocalY: pinchStartFocalY.value,
-        startHourHeight: pinchStartHourHeight.value
-      });
-      pinchScale.value = transform.scale;
-      pinchTranslateY.value = transform.translateY;
-    })
-    .onEnd((event, success) => {
-      "worklet";
-      if (!success) return;
-      const transform = calendarPinchTransform({
-        currentFocalY: event.focalY,
-        gestureScale: event.scale,
-        maxHourHeight: TIMELINE_MAX_HOUR_HEIGHT,
-        minHourHeight: TIMELINE_MIN_HOUR_HEIGHT,
-        startFocalY: pinchStartFocalY.value,
-        startHourHeight: pinchStartHourHeight.value
-      });
-      scheduleOnRN(
-        commitPinchZoom,
-        transform.hourHeight,
-        pinchStartHourHeight.value,
-        pinchStartFocalY.value,
-        event.focalY
-      );
-    })
-    .onFinalize((_event, success) => {
-      "worklet";
-      if (!success) {
-        pinchScale.value = 1;
-        pinchTranslateY.value = 0;
-      }
-      scheduleOnRN(onGestureLockedChange, false);
-    }), [
-    commitPinchZoom,
-    hourHeight,
-    onGestureLockedChange,
-    pinchScale,
-    pinchStartFocalY,
-    pinchStartHourHeight,
-    pinchTranslateY
-  ]);
-
-  const pinchAnimatedStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateY: pinchTranslateY.value },
-      { scaleY: pinchScale.value }
-    ]
-  }));
-
-  useLayoutEffect(() => {
-    if (calendarZoom.scrollY === null) return;
-    onScrollTo(calendarZoom.scrollY);
-    pinchScale.set(1);
-    pinchTranslateY.set(0);
-  }, [calendarZoom, onScrollTo, pinchScale, pinchTranslateY]);
-
-  useEffect(() => {
-    calendarTransition.stopAnimation();
-    if (reduceMotion) {
-      calendarTransition.setValue(1);
-      return;
-    }
-    calendarTransition.setValue(0);
-    Animated.timing(calendarTransition, {
-      toValue: 1,
-      duration: 210,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true
-    }).start();
-  }, [calendarTransition, reduceMotion, selectedDayKey]);
-
-  const calendarTransitionStyle = {
-    opacity: calendarTransition.interpolate({
-      inputRange: [0, 1],
-      outputRange: [0.78, 1]
-    }),
-    transform: [
-      {
-        translateX: calendarTransition.interpolate({
-          inputRange: [0, 1],
-          outputRange: [calendarTransitionDirection * 24, 0]
-        })
-      }
-    ]
-  };
-
-  const dayGestureResponder = useMemo(() => PanResponder.create({
-    onMoveShouldSetPanResponder: (event, gesture) => {
-      if (event.nativeEvent.touches.length !== 1) return false;
-      return shouldCaptureCalendarSwipe(gesture);
-    },
-    onMoveShouldSetPanResponderCapture: (event, gesture) => {
-      if (event.nativeEvent.touches.length !== 1) return false;
-      return shouldCaptureCalendarSwipe(gesture);
-    },
-    onPanResponderGrant: () => {
-      onGestureLockedChange(true);
-    },
-    onPanResponderRelease: (_event, gesture) => {
-      onGestureLockedChange(false);
-      const delta = calendarSwipeDelta("day", gesture);
-      if (delta === 0) return;
-      onChangeDay(delta);
-    },
-    onPanResponderTerminationRequest: () => false,
-    onPanResponderTerminate: () => {
-      onGestureLockedChange(false);
-    }
-  }), [onChangeDay, onGestureLockedChange]);
-
-  const weekGestureResponder = useMemo(() => PanResponder.create({
-    onMoveShouldSetPanResponderCapture: (_event, gesture) =>
-      shouldCaptureCalendarSwipe(gesture),
-    onMoveShouldSetPanResponder: (_event, gesture) =>
-      shouldCaptureCalendarSwipe(gesture),
-    onPanResponderGrant: () => {
-      onGestureLockedChange(true);
-    },
-    onPanResponderRelease: (_event, gesture) => {
-      onGestureLockedChange(false);
-      const delta = calendarSwipeDelta("week", gesture);
-      if (delta === 0) return;
-      onChangeWeek(delta);
-    },
-    onPanResponderTerminationRequest: () => false,
-    onPanResponderTerminate: () => {
-      onGestureLockedChange(false);
-    }
-  }), [onChangeWeek, onGestureLockedChange]);
-
-  return (
-    <View style={styles.tabScreenStack}>
-      <View style={styles.panel} {...weekGestureResponder.panHandlers}>
-        <View style={styles.calendarWeekStrip}>
-          {weekDays.map((day) => {
-            const selected = day.key === selectedDayKey;
-            const isTodayDay = day.key === todayKey;
-
-            return (
-              <Pressable
-                key={day.key}
-                accessibilityLabel={`Show ${formatSelectedDayTitle(day.date)}`}
-                accessibilityRole="button"
-                accessibilityState={{ selected }}
-                onPress={() => onSelectDay(day.key)}
-                style={({ pressed }) => [
-                  styles.calendarDayButton,
-                  selected ? styles.calendarDayButtonSelected : null,
-                  isTodayDay ? styles.calendarDayButtonToday : null,
-                  pressed ? styles.buttonPressed : null
-                ]}
-              >
-                <Text style={[
-                  styles.calendarWeekday,
-                  selected ? styles.calendarDayTextSelected : null
-                ]}>
-                  {formatWeekday(day.date)}
-                </Text>
-                <Text style={[
-                  styles.calendarDayNumber,
-                  selected ? styles.calendarDayTextSelected : null
-                ]}>
-                  {day.date.getDate()}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      </View>
-
-      <View style={styles.lifecyclePanel} {...dayGestureResponder.panHandlers}>
-        <View style={styles.summaryHeader}>
-          <View>
-            <Text style={styles.label}>Calendar</Text>
-            <Text style={styles.sectionTitle}>{formatSelectedDayTitle(selectedDate)}</Text>
-          </View>
-          <Text style={styles.summaryTotal}>{formatDuration(total)}</Text>
-        </View>
-
-        <Animated.View style={[styles.calendarTimelinePanel, calendarTransitionStyle]}>
-          {currentTimeOutsideAxis || outsideAxisEntries.length > 0 ? (
-            <View style={styles.calendarEdgeStack}>
-              {currentTimeOutsideAxis ? (
-                <View pointerEvents="none" style={styles.calendarEdgeTimeRow}>
-                  <View style={styles.currentTimeLine} />
-                </View>
-              ) : null}
-              {outsideAxisEntries.map((entry) => {
-                const reviewNeeded = isCalendarReviewNeeded(entry);
-                const color = entryCategoryColor(entry, theme.mode);
-                const blockColor = reviewNeeded ? theme.textSecondary : color;
-
-                return (
-                  <Pressable
-                    key={entry.id}
-                    accessibilityLabel={`${reviewNeeded ? REVIEW_COPY.needsReview : entry.isActive ? "Edit running timer" : "Open time block"} outside visible calendar hours`}
-                    accessibilityRole="button"
-                    onPress={() => openCalendarEntry(entry, onOpenActive, onOpenDetail, onOpenReviewItem)}
-                    style={({ pressed }) => [
-                      styles.calendarOutsideBlock,
-                      entry.isActive ? styles.calendarBlockActive : null,
-                      reviewNeeded ? styles.calendarBlockReview : null,
-                      {
-                        borderColor: reviewNeeded ? theme.borderStrong : color,
-                        backgroundColor: colorWithAlpha(blockColor, reviewNeeded ? 0.12 : entry.isActive ? 0.16 : 0.24)
-                      },
-                      pressed ? styles.buttonPressed : null
-                    ]}
-                  >
-                    <View style={styles.calendarBlockTitleRow}>
-                      <View
-                        style={[styles.colorDot, { backgroundColor: blockColor }]}
-                      />
-                      <Text style={styles.calendarBlockTitle} numberOfLines={1}>
-                        {displayEntryTitle(entry)}
-                      </Text>
-                    </View>
-                    <Text style={styles.calendarBlockMeta} numberOfLines={1}>
-                      {calendarBlockMeta(entry, now, reviewNeeded)}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          ) : null}
-
-          <GestureDetector gesture={pinchGesture}>
-            <Reanimated.View
-              style={[
-                styles.calendarTimelineCanvas,
-                { height: timelineHeight, transformOrigin: ["50%", 0, 0] },
-                pinchAnimatedStyle
-              ]}
-            >
-            {Array.from({ length: calendarHours.endHour - calendarHours.startHour + 1 }, (_, index) => {
-              const hour = calendarHours.startHour + index;
-              const lineTop = index * hourHeight;
-              const labelTop = clamp(lineTop - CALENDAR_HOUR_LABEL_HEIGHT / 2, 0, timelineHeight - CALENDAR_HOUR_LABEL_HEIGHT);
-
-              return (
-                <Fragment key={hour}>
-                  <Text style={[styles.calendarHourLabel, { top: labelTop }]}>
-                    {formatCalendarHourLabel(hour)}
-                  </Text>
-                  <View pointerEvents="none" style={[styles.calendarHourLine, { top: lineTop }]} />
-                </Fragment>
-              );
-            })}
-
-            {visibleBlocks.map(({ entry, metrics }) => {
-              const reviewNeeded = isCalendarReviewNeeded(entry);
-              const color = entryCategoryColor(entry, theme.mode);
-              const blockColor = reviewNeeded ? theme.textSecondary : color;
-              const title = displayEntryTitle(entry);
-              const presentation = calendarBlockPresentation(metrics.height);
-
-              return (
-                <Pressable
-                  key={entry.id}
-                  accessibilityLabel={`${reviewNeeded ? REVIEW_COPY.needsReview : entry.isActive ? "Edit running timer" : "Open time block"}: ${title}`}
-                  accessibilityRole="button"
-                  hitSlop={presentation.tiny ? 8 : 4}
-                  onPress={() => openCalendarEntry(entry, onOpenActive, onOpenDetail, onOpenReviewItem)}
-                  style={({ pressed }) => [
-                    styles.calendarBlock,
-                    entry.isActive ? styles.calendarBlockActive : null,
-                    reviewNeeded ? styles.calendarBlockReview : null,
-                    presentation.tiny ? styles.calendarBlockTiny : null,
-                    presentation.compact ? styles.calendarBlockCompact : null,
-                    {
-                      top: metrics.top,
-                      height: metrics.height,
-                      borderColor: reviewNeeded ? theme.borderStrong : color,
-                      backgroundColor: colorWithAlpha(blockColor, reviewNeeded ? 0.12 : entry.isActive ? 0.16 : 0.28)
-                    },
-                    metrics.startsBeforeDay ? styles.calendarBlockFromPrevious : null,
-                    metrics.continuesIntoNextDay ? styles.calendarBlockIntoNext : null,
-                    pressed ? styles.buttonPressed : null
-                  ]}
-                >
-                  {presentation.showTitle ? (
-                    <View style={styles.calendarBlockTitleRow}>
-                      <View style={[styles.colorDot, { backgroundColor: blockColor }]} />
-                      <Text style={styles.calendarBlockTitle} numberOfLines={1}>{title}</Text>
-                    </View>
-                  ) : null}
-                  {presentation.showMeta ? (
-                    <Text style={styles.calendarBlockMeta} numberOfLines={metrics.height < CALENDAR_BLOCK_META_MIN_HEIGHT + 16 ? 1 : 2}>
-                      {calendarBlockMeta(entry, now, reviewNeeded, metrics)}
-                    </Text>
-                  ) : null}
-                </Pressable>
-              );
-            })}
-
-            {showCurrentTime ? (
-              <View pointerEvents="none" style={[styles.currentTimeRow, { top: currentTimeRowTop }]}>
-                <View style={styles.currentTimeLine} />
-              </View>
-            ) : null}
-            </Reanimated.View>
-          </GestureDetector>
-        </Animated.View>
-
-        {visibleBlocks.length === 0 ? (
-          <Text style={styles.muted}>No tracked time for this day.</Text>
-        ) : null}
-      </View>
-    </View>
-  );
 }
 
 function ReportsTab({
@@ -2365,54 +1948,6 @@ function SegmentSwatch({
   );
 }
 
-function buildWeekStripDays(selectedDayKey: string | undefined, now: number) {
-  const selectedDate = selectedDayKey ? dateFromKey(selectedDayKey) : new Date(now);
-  const start = startOfWeekDate(selectedDate);
-  if (Number.isNaN(start.getTime())) {
-    return buildWeekStripDays(undefined, now);
-  }
-  start.setHours(0, 0, 0, 0);
-  return Array.from({ length: 7 }, (_, index) => {
-    const date = addDaysToDate(start, index);
-    return {
-      key: formatDateKey(date),
-      date
-    };
-  });
-}
-
-function buildCalendarEntries(data: MobileBootstrap | null, selectedDayKey: string, now: number): CalendarEntry[] {
-  if (!data) return [];
-  const mergedEntries = mergeActiveEntry(
-    dedupeEntriesById([...(data.entries ?? []), ...(data.weekEntries ?? [])]),
-    data.activeEntry
-  );
-  const timeEntries = mergedEntries
-    .filter((entry) => entryOverlapsDay(entry, selectedDayKey, now))
-    .map((entry) => ({
-      ...entry,
-      isActive: data.activeEntry?.id === entry.id || !entry.stoppedAt
-    }));
-  const reviewEntries: CalendarEntry[] = [];
-  for (const item of data.reviewItems ?? []) {
-    if (!isOpenReviewItem(item)) continue;
-    if (!isCalendarPreviewReviewItem(item)) continue;
-    const draft = buildReviewItemDraftEntry(item, data.categories, now);
-    if (!draft) continue;
-    const entry: CalendarEntry = {
-      ...draft,
-      id: `review:${item.id}`,
-      isActive: false,
-      isReviewSuggestion: true,
-      reviewItemId: item.id
-    };
-    if (entryOverlapsDay(entry, selectedDayKey, now)) reviewEntries.push(entry);
-  }
-
-  return [...timeEntries, ...reviewEntries]
-    .sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
-}
-
 function dedupeEntriesById(entries: TimeEntry[]) {
   const byId = new Map<string, TimeEntry>();
   for (const entry of entries) byId.set(entry.id, entry);
@@ -2577,11 +2112,6 @@ function buildDailyBars(entries: TimeEntry[], weekStart: Date, now: number) {
   });
 }
 
-function sumOverlappingDaySeconds(entries: TimeEntry[], dayKey: string, now: number) {
-  const dayStart = dateFromKey(dayKey);
-  return sumRangeSeconds(entries, dayStart, addDaysToDate(dayStart, 1), now);
-}
-
 function sumStartedInDaySeconds(entries: TimeEntry[], dayKey: string, now: number) {
   return entries.reduce((sum, entry) => {
     if (formatDateKey(new Date(entry.startedAt)) !== dayKey) return sum;
@@ -2605,60 +2135,6 @@ function entryOverlapSeconds(entry: TimeEntry, rangeStart: Date, rangeEnd: Date,
   return Math.floor((overlapEnd - overlapStart) / 1000);
 }
 
-function getTimelineMetrics(
-  entry: CalendarEntry,
-  selectedDayKey: string,
-  now: number,
-  hourHeight: number,
-  calendarHours: CalendarHours
-): CalendarBlockMetrics | null {
-  const dayStart = dateFromKey(selectedDayKey);
-  const dayEnd = addDaysToDate(dayStart, 1);
-  const axisStart = new Date(dayStart);
-  axisStart.setHours(calendarHours.startHour, 0, 0, 0);
-  const axisEnd = new Date(dayStart);
-  axisEnd.setHours(calendarHours.endHour, 0, 0, 0);
-  const startedAt = new Date(entry.startedAt);
-  const stoppedAt = entry.stoppedAt ? new Date(entry.stoppedAt) : new Date(now);
-  const visibleStart = new Date(Math.max(startedAt.getTime(), axisStart.getTime()));
-  const visibleEnd = new Date(Math.min(stoppedAt.getTime(), axisEnd.getTime()));
-
-  if (
-    Number.isNaN(startedAt.getTime()) ||
-    Number.isNaN(stoppedAt.getTime()) ||
-    visibleEnd <= axisStart ||
-    visibleStart >= axisEnd ||
-    visibleEnd <= visibleStart
-  ) {
-    return null;
-  }
-
-  const topMinutes = (visibleStart.getTime() - axisStart.getTime()) / 60000;
-  const durationMinutes = Math.max(1, (visibleEnd.getTime() - visibleStart.getTime()) / 60000);
-  const continuation = calendarBlockContinuationEdges({
-    startedAt,
-    stoppedAt,
-    dayStart,
-    dayEnd
-  });
-
-  return {
-    top: (topMinutes / 60) * hourHeight,
-    height: calendarVisibleBlockHeight(durationMinutes, hourHeight),
-    startsBeforeDay: continuation.startsBeforeDay,
-    continuesIntoNextDay: continuation.continuesIntoNextDay
-  };
-}
-
-function entryOverlapsDay(entry: TimeEntry, dayKey: string, now: number) {
-  const dayStart = dateFromKey(dayKey);
-  const dayEnd = addDaysToDate(dayStart, 1);
-  const startedAt = new Date(entry.startedAt);
-  const stoppedAt = entry.stoppedAt ? new Date(entry.stoppedAt) : new Date(now);
-  if (Number.isNaN(startedAt.getTime()) || Number.isNaN(stoppedAt.getTime())) return false;
-  return startedAt < dayEnd && stoppedAt > dayStart;
-}
-
 function entryDurationSeconds(entry: TimeEntry, now: number) {
   const startedAt = new Date(entry.startedAt).getTime();
   if (entry.stoppedAt) return Math.max(0, entry.durationSeconds);
@@ -2679,61 +2155,10 @@ function displayEntryTitle(entry: TimeEntry) {
   return displayTimerDescription(entry) ?? entry.categoryName ?? "Uncategorized";
 }
 
-function isCalendarReviewNeeded(entry: CalendarEntry) {
-  return Boolean(entry.reviewItemId || entry.isReviewSuggestion || isReviewNeededEntry(entry));
-}
-
-function openCalendarEntry(
-  entry: CalendarEntry,
-  onOpenActive: () => void,
-  onOpenDetail: (entry: CalendarEntry) => void,
-  onOpenReviewItem: (reviewItemId: string) => void
-) {
-  if (entry.reviewItemId) {
-    onOpenReviewItem(entry.reviewItemId);
-    return;
-  }
-  if (entry.isActive) {
-    onOpenActive();
-    return;
-  }
-  onOpenDetail(entry);
-}
-
-function calendarBlockMeta(
-  entry: CalendarEntry,
-  now: number,
-  reviewNeeded: boolean,
-  metrics?: Pick<CalendarBlockMetrics, "continuesIntoNextDay">
-) {
-  const timeLabel = formatEntryTimeRange(entry, now);
-  const suffix = entry.isActive ? "running" : formatDuration(entryDurationSeconds(entry, now));
-  const labels = [
-    reviewNeeded ? REVIEW_COPY.needsReview : null,
-    metrics?.continuesIntoNextDay ? "Continues next day" : null,
-    timeLabel,
-    suffix
-  ].filter(Boolean);
-  return labels.join(" · ");
-}
-
 function formatEntryTimeRange(entry: TimeEntry, now: number) {
   const startedAt = new Date(entry.startedAt);
   const stoppedAt = entry.stoppedAt ? new Date(entry.stoppedAt) : new Date(now);
   return `${formatTimeOfDay(startedAt)}-${entry.stoppedAt ? formatTimeOfDay(stoppedAt) : "now"}`;
-}
-
-function minutesSinceStartOfDay(date: Date) {
-  return date.getHours() * 60 + date.getMinutes() + date.getSeconds() / 60;
-}
-
-function formatSelectedDayTitle(date: Date) {
-  if (isSameLocalDay(date, new Date())) return "Today";
-  return date.toLocaleDateString(undefined, {
-    weekday: "long",
-    month: "short",
-    day: "numeric"
-  });
 }
 
 function formatLongDay(date: Date) {
@@ -2788,14 +2213,6 @@ function addDaysToDate(date: Date, days: number) {
   const copy = new Date(date);
   copy.setDate(copy.getDate() + days);
   return copy;
-}
-
-function isSameLocalDay(left: Date, right: Date) {
-  return (
-    left.getFullYear() === right.getFullYear() &&
-    left.getMonth() === right.getMonth() &&
-    left.getDate() === right.getDate()
-  );
 }
 
 function colorWithAlpha(hex: string, alpha: number) {

@@ -169,6 +169,25 @@ function createStyles(theme: MobileTheme) {
       paddingHorizontal: 2,
       paddingTop: 2
     },
+    nativeCalendarScreen: {
+      flex: 1,
+      backgroundColor: theme.background
+    },
+    nativeCalendarHeader: {
+      minHeight: 56,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 12,
+      paddingHorizontal: 18,
+      paddingTop: 12,
+      paddingBottom: 4,
+      backgroundColor: theme.background
+    },
+    nativeCalendarView: {
+      flex: 1,
+      backgroundColor: theme.background
+    },
     settingsHeader: {
       minHeight: 44,
       flexDirection: "row",
