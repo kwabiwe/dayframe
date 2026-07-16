@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Alert,
   Animated,
   Dimensions,
   Easing,
@@ -20,7 +19,6 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import { paletteColorFor, type RecentActivitySuggestion } from "@dayframe/shared";
-import { SheetMutationProgress } from "@/components/SheetMutationProgress";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
 import {
   editSheetKeyboardLayout,
@@ -101,6 +99,7 @@ export function ActiveTimerEditSheet({
   const [pickerStartAt, setPickerStartAt] = useState<Date | null>(null);
   const [suggestionsVisible, setSuggestionsVisible] = useState(false);
   const [suggestionsMounted, setSuggestionsMounted] = useState(false);
+  const [deleteConfirmationVisible, setDeleteConfirmationVisible] = useState(false);
   const reduceMotion = useReduceMotionPreference();
   const dismissDragY = useRef(new Animated.Value(0)).current;
   const keyboardLift = useRef(new Animated.Value(0)).current;
@@ -128,6 +127,7 @@ export function ActiveTimerEditSheet({
       setStartTimeEdited(false);
       setDatePickerOpen(false);
       setSuggestionsVisible(false);
+      setDeleteConfirmationVisible(false);
       setValidationError(null);
       return;
     }
@@ -154,8 +154,9 @@ export function ActiveTimerEditSheet({
       !entry.categoryId &&
       suggestions.length > 0
     );
+    setDeleteConfirmationVisible(false);
     setValidationError(null);
-  }, [entryId, initialCategoryId, initialDescription, isRunningMode, isStartMode, suggestions.length, visible]);
+  }, [entry?.categoryId, entry?.description, entryId, initialCategoryId, initialDescription, isRunningMode, isStartMode, suggestions.length, visible]);
 
   useEffect(() => {
     if (!visible) {
@@ -464,24 +465,13 @@ export function ActiveTimerEditSheet({
 
   function confirmDeleteEntry() {
     if (busy || !onDelete) return;
-    Alert.alert(
-      "Delete entry",
-      "Delete this time entry? This cannot be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => {
-            void deleteEntryFromSheet();
-          }
-        }
-      ]
-    );
+    Keyboard.dismiss();
+    setDeleteConfirmationVisible(true);
   }
 
   async function deleteEntryFromSheet() {
     if (busy || !entry || !onDelete) return;
+    setDeleteConfirmationVisible(false);
     const ok = await onDelete(entry.id);
     if (ok) onCancel();
   }
@@ -589,7 +579,13 @@ export function ActiveTimerEditSheet({
   return (
     <Modal
       animationType={reduceMotion ? "none" : "slide"}
-      onRequestClose={onCancel}
+      onRequestClose={() => {
+        if (deleteConfirmationVisible) {
+          setDeleteConfirmationVisible(false);
+          return;
+        }
+        onCancel();
+      }}
       presentationStyle="overFullScreen"
       transparent
       visible={visible}
@@ -633,11 +629,6 @@ export function ActiveTimerEditSheet({
                     </Pressable>
                   ) : null}
                 </View>
-                <SheetMutationProgress
-                  accessibilityLabel={saving ? "Saving changes" : stopping ? "Stopping timer" : deleting ? "Deleting entry" : "Working"}
-                  active={busy}
-                  styles={styles}
-                />
               </View>
 
               <ScrollView
@@ -929,18 +920,51 @@ export function ActiveTimerEditSheet({
                     accessibilityRole="button"
                     disabled={busy}
                     onPress={confirmDeleteEntry}
+                    onTouchStart={(event) => event.stopPropagation()}
                     style={({ pressed }) => [
                       styles.activeEditDeleteButton,
                       pressed && !busy ? styles.buttonPressed : null,
                       busy ? styles.buttonDisabled : null
                     ]}
                   >
-                    <Text style={styles.activeEditDeleteText}>
-                      {deleting ? "Deleting..." : "Delete entry"}
-                    </Text>
+                    <Text style={styles.activeEditDeleteText}>Delete entry</Text>
                   </Pressable>
                 ) : null}
               </ScrollView>
+              {deleteConfirmationVisible ? (
+                <View
+                  accessibilityLabel="Confirm delete entry"
+                  accessibilityViewIsModal
+                  style={styles.sheetDeleteConfirmationOverlay}
+                >
+                  <View style={styles.sheetDeleteConfirmationCard}>
+                    <Text style={styles.sheetDeleteConfirmationTitle}>Delete entry?</Text>
+                    <Text style={styles.sheetDeleteConfirmationText}>
+                      This time entry will be removed. This cannot be undone.
+                    </Text>
+                    <View style={styles.sheetDeleteConfirmationActions}>
+                      <Pressable
+                        accessibilityLabel="Cancel deleting entry"
+                        accessibilityRole="button"
+                        onPress={() => setDeleteConfirmationVisible(false)}
+                        style={pressable(styles.sheetDeleteConfirmationCancel, styles.buttonPressed)}
+                      >
+                        <Text style={styles.sheetDeleteConfirmationCancelText}>Cancel</Text>
+                      </Pressable>
+                      <Pressable
+                        accessibilityLabel="Confirm delete entry"
+                        accessibilityRole="button"
+                        onPress={() => {
+                          void deleteEntryFromSheet();
+                        }}
+                        style={pressable(styles.sheetDeleteConfirmationDelete, styles.buttonPressed)}
+                      >
+                        <Text style={styles.sheetDeleteConfirmationDeleteText}>Delete</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                </View>
+              ) : null}
             </Animated.View>
           </SafeAreaView>
         </View>

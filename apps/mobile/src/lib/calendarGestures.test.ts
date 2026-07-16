@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  anchoredCalendarScrollY,
   calendarSwipeDelta,
   formatCalendarHourLabel,
   shouldCaptureCalendarSwipe,
@@ -7,6 +8,36 @@ import {
 } from "./calendarGestures";
 
 describe("calendar gestures", () => {
+  it("keeps the pinch anchor under a stationary gesture midpoint", () => {
+    expect(anchoredCalendarScrollY({
+      anchorY: 300,
+      currentMidpointY: 220,
+      nextHourHeight: 108,
+      startHourHeight: 72,
+      startMidpointY: 220,
+      startScrollY: 400
+    })).toBe(550);
+  });
+
+  it("accounts for midpoint translation while pinching and clamps the scroll origin", () => {
+    expect(anchoredCalendarScrollY({
+      anchorY: 300,
+      currentMidpointY: 250,
+      nextHourHeight: 108,
+      startHourHeight: 72,
+      startMidpointY: 220,
+      startScrollY: 400
+    })).toBe(520);
+    expect(anchoredCalendarScrollY({
+      anchorY: 20,
+      currentMidpointY: 300,
+      nextHourHeight: 48,
+      startHourHeight: 72,
+      startMidpointY: 200,
+      startScrollY: 0
+    })).toBe(0);
+  });
+
   it("formats wrapped timeline hour labels as clock times", () => {
     expect(formatCalendarHourLabel(0)).toBe("00:00");
     expect(formatCalendarHourLabel(24)).toBe("00:00");

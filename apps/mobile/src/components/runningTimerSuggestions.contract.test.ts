@@ -41,16 +41,26 @@ describe("running timer suggestion placement", () => {
     expect(startTaskSource).toContain("setActiveEditVisible(true)");
     expect(dashboardSource).toContain("pendingEntryFromStartInput");
     expect(dashboardSource).toContain("onApplySuggestion={applyRunningTimerSuggestion}");
+    expect(dashboardSource).toContain("if (latestData.current?.activeEntry)");
+    expect(dashboardSource).toContain("setActiveEditVisible(true)");
   });
 
   it("keeps destructive running-timer deletion inside the edit sheet instead of the active timer card", () => {
     const activeTimerCardSource = dashboardSource.slice(
       dashboardSource.indexOf("<Text style={styles.label}>Active timer</Text>"),
-      dashboardSource.indexOf("<View style={styles.timerProgressSlot}>")
+      dashboardSource.indexOf("accessibilityLabel=\"Open start task sheet\"")
     );
 
     expect(activeTimerCardSource).not.toContain("Delete running timer");
     expect(activeTimerCardSource).not.toContain("deleteTimerButton");
     expect(editSheetSource).toContain("accessibilityLabel=\"Delete entry\"");
+  });
+
+  it("keeps timer mutations visually immediate and confirms deletion without replacing sheet content", () => {
+    expect(dashboardSource).not.toContain("timerActionPending");
+    expect(dashboardSource).not.toContain("timerProgressSlot");
+    expect(editSheetSource).not.toContain("SheetMutationProgress");
+    expect(editSheetSource).toContain("sheetDeleteConfirmationOverlay");
+    expect(editSheetSource).toContain("accessibilityViewIsModal");
   });
 });

@@ -659,6 +659,7 @@ export async function getTaskSuggestions(session: RequestSession) {
     source: string | null;
     startedAt: string;
     stoppedAt: string | null;
+    userConfirmed: boolean;
   }>(
     `select te.id,
             cat.id as "categoryId",
@@ -670,7 +671,14 @@ export async function getTaskSuggestions(session: RequestSession) {
             te.review_status as "reviewStatus",
             te.source,
             te.started_at as "startedAt",
-            te.stopped_at as "stoppedAt"
+            te.stopped_at as "stoppedAt",
+            exists (
+              select 1
+              from review_items accepted_review
+              where accepted_review.event_id = te.created_from_event_id
+                and accepted_review.workspace_id = te.workspace_id
+                and accepted_review.status = 'accepted'
+            ) and coalesce(ae.event_type, '') not in ('health_sleep_import', 'health_workout_import') as "userConfirmed"
      from time_entries te
      left join activity_events ae on ae.id = te.created_from_event_id and ae.workspace_id = te.workspace_id
      left join categories cat on cat.id = te.category_id and cat.workspace_id = te.workspace_id and cat.is_archived = false
@@ -678,11 +686,22 @@ export async function getTaskSuggestions(session: RequestSession) {
        and te.user_id = $2
        and te.review_status = 'confirmed'
        and te.stopped_at is not null
-       and te.started_at >= now() - interval '120 days'
-       and te.source in ('manual_app', 'mobile_app')
+       and (
+         te.source in ('manual_app', 'mobile_app')
+         or (
+           coalesce(ae.event_type, '') not in ('health_sleep_import', 'health_workout_import')
+           and exists (
+             select 1
+             from review_items accepted_review
+             where accepted_review.event_id = te.created_from_event_id
+               and accepted_review.workspace_id = te.workspace_id
+               and accepted_review.status = 'accepted'
+           )
+         )
+       )
        and nullif(btrim(coalesce(te.description, '')), '') is not null
      order by te.stopped_at desc
-     limit 500`,
+     limit 5000`,
     [session.workspaceId, session.userId]
   );
 

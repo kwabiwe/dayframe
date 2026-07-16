@@ -586,6 +586,7 @@ export type RecentActivityEntry = {
   startedAt: string;
   stoppedAt?: string | null;
   durationSeconds?: number | null;
+  userConfirmed?: boolean;
 };
 
 export type RecentActivitySuggestionSection = "recent" | "often_used" | "suggested_now";
@@ -775,8 +776,9 @@ const excludedSuggestionEventTypes = new Set([
 ]);
 
 function isManualLearningEntryEligible(entry: RecentActivityEntry) {
-  if (!entry.source || !manualSuggestionSources.has(entry.source)) return false;
   if (entry.reviewStatus !== "confirmed") return false;
+  if (entry.userConfirmed) return true;
+  if (!entry.source || !manualSuggestionSources.has(entry.source)) return false;
   if (entry.eventType && excludedSuggestionEventTypes.has(entry.eventType)) return false;
   return true;
 }
@@ -811,11 +813,11 @@ function scoreRecentActivitySuggestion(
   const recentRepetitionScore = Math.min(1, suggestion.recentWindowCount / 3);
   const categoryAffinityScore = suggestion.categoryId ? 0.65 : 0;
   const score = roundScore(100 * (
-    0.30 * frequencyScore +
-    0.20 * recencyScore +
-    0.20 * timeAffinityScore +
-    0.15 * dayAffinityScore +
-    0.10 * recentRepetitionScore +
+    0.34 * frequencyScore +
+    0.12 * recencyScore +
+    0.24 * timeAffinityScore +
+    0.18 * dayAffinityScore +
+    0.07 * recentRepetitionScore +
     0.05 * categoryAffinityScore
   ));
   const contextScore = suggestion.useCount >= 3
@@ -853,47 +855,13 @@ function roundScore(value: number) {
 function compactRecentActivitySuggestionOrder(
   suggestions: RecentActivitySuggestion[]
 ): RecentActivitySuggestion[] {
-  const selected = new Map<string, RecentActivitySuggestion>();
-  const add = (suggestion: RecentActivitySuggestion | undefined) => {
-    if (!suggestion || selected.has(suggestion.key)) return;
-    selected.set(suggestion.key, suggestion);
-  };
-
-  const byRecent = [...suggestions].sort((a, b) =>
-    Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt) ||
+  return [...suggestions].sort((a, b) =>
     b.score - a.score ||
-    a.description.localeCompare(b.description)
-  );
-  const byContext = [...suggestions]
-    .filter((suggestion) => suggestion.section === "suggested_now")
-    .sort((a, b) =>
-      b.score - a.score ||
-      Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt) ||
-      b.useCount - a.useCount ||
-      a.description.localeCompare(b.description)
-    );
-  const byFrequency = [...suggestions]
-    .filter((suggestion) => suggestion.useCount >= 2)
-    .sort((a, b) =>
-      b.useCount - a.useCount ||
-      b.totalSeconds - a.totalSeconds ||
-      Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt) ||
-      b.score - a.score ||
-      a.description.localeCompare(b.description)
-    );
-  const byOverall = [...suggestions].sort((a, b) =>
-    b.score - a.score ||
-    Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt) ||
     b.useCount - a.useCount ||
+    b.totalSeconds - a.totalSeconds ||
+    Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt) ||
     a.description.localeCompare(b.description)
   );
-
-  add(byRecent[0]);
-  byContext.slice(0, 2).forEach(add);
-  byFrequency.forEach(add);
-  byOverall.forEach(add);
-
-  return [...selected.values()];
 }
 
 function timeOfDayBucket(date: Date) {

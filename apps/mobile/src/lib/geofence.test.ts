@@ -7,10 +7,11 @@ const locationMocks = vi.hoisted(() => ({
   startLocationUpdatesAsync: vi.fn(() => Promise.resolve()),
   stopGeofencingAsync: vi.fn(() => Promise.resolve()),
   stopLocationUpdatesAsync: vi.fn(() => Promise.resolve()),
-  hasStartedGeofencingAsync: vi.fn(() => Promise.resolve(false)),
+  hasStartedGeofencingAsync: vi.fn(() => Promise.resolve(true)),
   hasStartedLocationUpdatesAsync: vi.fn(() => Promise.resolve(false)),
   getForegroundPermissionsAsync: vi.fn(() => Promise.resolve({ status: "granted", granted: true })),
   getBackgroundPermissionsAsync: vi.fn(() => Promise.resolve({ status: "granted", granted: true })),
+  getLastKnownPositionAsync: vi.fn<() => Promise<unknown>>(() => Promise.resolve(null)),
   requestForegroundPermissionsAsync: vi.fn(() => Promise.resolve({ status: "granted", granted: true })),
   requestBackgroundPermissionsAsync: vi.fn(() => Promise.resolve({ status: "granted", granted: true })),
   reverseGeocodeAsync: vi.fn(() => Promise.resolve([
@@ -62,6 +63,7 @@ vi.mock("./config", () => ({
 
 const {
   LOCATION_VISIT_DWELL_THRESHOLD_MINUTES,
+  evaluateGeofenceTransitionEvidence,
   getLocationVisitDiagnostics,
   recordLocationLearningSample,
   recordGeofenceTransition,
@@ -118,6 +120,78 @@ describe("mobile geofence visit candidates", () => {
     asyncStore.clear();
     secureStore.clear();
     vi.clearAllMocks();
+  });
+
+  it("rehydrates unchanged region state without repeatedly re-registering iOS geofences", async () => {
+    await startGeofences([place]);
+    await startGeofences([place]);
+
+    expect(locationMocks.startGeofencingAsync).toHaveBeenCalledOnce();
+    expect(locationMocks.startGeofencingAsync).toHaveBeenCalledWith(
+      "DAYFRAME_GEOFENCE_TASK",
+      [expect.objectContaining({ identifier: place.id, radius: place.radiusMeters })]
+    );
+  });
+
+  it("reports saved places excluded by the iOS twenty-region limit", async () => {
+    const places = Array.from({ length: 22 }, (_, index) => ({
+      ...place,
+      id: `30000000-0000-4000-8000-${String(index + 10).padStart(12, "0")}`,
+      name: `Place ${index + 1}`,
+      priority: 100 - index
+    }));
+
+    await expect(startGeofences(places)).resolves.toBe(20);
+    await expect(getLocationVisitDiagnostics()).resolves.toMatchObject({
+      activeMonitorCount: 20,
+      configuredMonitorCount: 22,
+      excludedMonitorCount: 2,
+      excludedPlaceNames: ["Place 21", "Place 22"],
+      geofencingActive: true
+    });
+  });
+
+  it("rejects a false enter when a fresh accurate fix is clearly outside the saved radius", async () => {
+    await startGeofences([place]);
+    const occurredAt = new Date("2026-07-06T08:00:00.000Z");
+    locationMocks.getLastKnownPositionAsync.mockResolvedValueOnce({
+      coords: {
+        latitude: 52.5,
+        longitude: -0.12,
+        altitude: null,
+        accuracy: 10,
+        altitudeAccuracy: null,
+        heading: null,
+        speed: null
+      },
+      timestamp: occurredAt.getTime()
+    });
+
+    const result = await recordGeofenceTransition("enter", region, occurredAt);
+    const queue = await readQueue();
+    const diagnostics = await getLocationVisitDiagnostics();
+
+    expect(result).toEqual(expect.objectContaining({ status: "evidence_rejected_enter", queued: false }));
+    expect(queue.some((item) => item.type === "geofence_enter")).toBe(false);
+    expect(diagnostics.lastTransitionEvidence).toMatchObject({
+      transition: "enter",
+      placeName: "Gym",
+      outcome: "rejected_far_from_region",
+      configuredRadiusMeters: 100,
+      accuracyMeters: 10
+    });
+  });
+
+  it("does not reject an enter from a stale location fix", () => {
+    expect(evaluateGeofenceTransitionEvidence({
+      transition: "enter",
+      placeName: "School",
+      occurredAt: new Date("2026-07-06T08:02:00.000Z"),
+      configuredRadiusMeters: 100,
+      distanceMeters: 800,
+      accuracyMeters: 10,
+      sampleAgeMs: 2 * 60_000
+    })).toMatchObject({ outcome: "no_recent_location" });
   });
 
   it("queues a review-safe visit candidate from an enter/exit pair", async () => {

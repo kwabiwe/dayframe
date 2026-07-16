@@ -2,6 +2,15 @@ export type CalendarSwipeGesture = { dx: number; dy: number; vx: number };
 
 export type CalendarSwipeAxis = "day" | "week";
 
+export type AnchoredCalendarScrollInput = {
+  anchorY: number;
+  currentMidpointY: number;
+  nextHourHeight: number;
+  startHourHeight: number;
+  startMidpointY: number;
+  startScrollY: number;
+};
+
 const CALENDAR_SWIPE_CAPTURE_DISTANCE = 6;
 const CALENDAR_SWIPE_CAPTURE_INTENT_DISTANCE = 14;
 const CALENDAR_SWIPE_COMMIT_DISTANCE = 16;
@@ -41,6 +50,23 @@ export function calendarSwipeDelta(axis: CalendarSwipeAxis, gesture: CalendarSwi
   if (!shouldCommitCalendarSwipe(gesture)) return 0;
   if (axis === "week") return gesture.dx < 0 ? -1 : 1;
   return gesture.dx < 0 ? 1 : -1;
+}
+
+export function anchoredCalendarScrollY({
+  anchorY,
+  currentMidpointY,
+  nextHourHeight,
+  startHourHeight,
+  startMidpointY,
+  startScrollY
+}: AnchoredCalendarScrollInput) {
+  if (!Number.isFinite(startHourHeight) || startHourHeight <= 0) {
+    return Math.max(0, startScrollY);
+  }
+  const scale = nextHourHeight / startHourHeight;
+  const scaledAnchorOffset = anchorY * (scale - 1);
+  const fingerTranslation = startMidpointY - currentMidpointY;
+  return Math.max(0, startScrollY + scaledAnchorOffset + fingerTranslation);
 }
 
 function pad2(value: number) {

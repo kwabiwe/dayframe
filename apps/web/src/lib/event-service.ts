@@ -478,6 +478,7 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
       ]
     );
     const eventId = eventResult.rows[0].id;
+    let timeEntryId: string | undefined;
 
     if (candidate.action === "stop_timer") {
       await client.query(
@@ -492,7 +493,7 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
         await closeActiveTimersForReplacement(client, session, startedAt);
       }
 
-      await client.query(
+      const timeEntryResult = await client.query<{ id: string }>(
         `insert into time_entries (
             workspace_id,
             user_id,
@@ -506,7 +507,8 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
             started_at,
             created_from_event_id
          )
-         values ($1, $2, $3, $4, $5, $6, $7, 'confirmed', $8, $9, $10)`,
+         values ($1, $2, $3, $4, $5, $6, $7, 'confirmed', $8, $9, $10)
+         returning id`,
         [
           parsed.workspaceId,
           parsed.userId,
@@ -520,6 +522,7 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
           eventId
         ]
       );
+      timeEntryId = timeEntryResult.rows[0]?.id;
     } else if (candidate.action === "create_time_entry") {
       const startedAt = suggestedStartedAtForEvent(parsed);
       const stoppedAt = suggestedStoppedAtForEvent(parsed);
@@ -667,7 +670,7 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
     }
 
     await client.query("commit");
-    return { eventId, candidate };
+    return { eventId, candidate, timeEntryId };
   } catch (error) {
     await client.query("rollback");
     throw eventSyncReadinessError(error, parsed.type) ?? error;
