@@ -36,12 +36,19 @@ describe("running timer suggestion placement", () => {
       dashboardSource.indexOf("async function startTask("),
       dashboardSource.indexOf("async function applyRunningTimerSuggestion(")
     );
-
-    expect(startTaskSource).toContain("description: null");
-    expect(startTaskSource.indexOf("setActiveEditVisible(true)")).toBeLessThan(
-      startTaskSource.indexOf("await startTaskWith")
+    const blankStartSource = startTaskSource.slice(
+      startTaskSource.indexOf("if (!categoryId && !description.trim())"),
+      startTaskSource.indexOf("function startBlankTask()")
     );
-    expect(startTaskSource).toContain("setActiveEditVisible(true)");
+
+    expect(blankStartSource).toContain("description: null");
+    expect(blankStartSource.indexOf("await startTaskWith")).toBeLessThan(
+      blankStartSource.indexOf("setActiveEditVisible(true)")
+    );
+    expect(blankStartSource).toContain("{ animateLayout: false }");
+    expect(blankStartSource).toContain("requestAnimationFrame");
+    expect(blankStartSource).toContain("setActiveEditVisible(true)");
+    expect(dashboardSource.match(/onPress=\{startBlankTask\}/g)).toHaveLength(2);
     expect(dashboardSource).toContain("pendingEntryFromStartInput");
     expect(dashboardSource).toContain("onApplySuggestion={applyRunningTimerSuggestion}");
     expect(dashboardSource).toContain("if (latestData.current?.activeEntry)");
@@ -49,6 +56,15 @@ describe("running timer suggestion placement", () => {
     expect(dashboardSource).not.toContain('mode="start"');
     expect(dashboardSource).toContain('accessibilityLabel="Add past time"');
     expect(dashboardSource).toContain('mode="add"');
+  });
+
+  it("resets suggestions by visible timer session rather than optimistic id replacement", () => {
+    expect(editSheetSource).toContain("const editorSessionKey = entryStartedAt");
+    expect(editSheetSource).not.toContain("const entryId = entry?.id");
+    expect(editSheetSource).toContain("const editorSnapshot = useRef");
+    expect(editSheetSource).toContain("descriptionEntryStarted.current = true");
+    expect(editSheetSource).toContain("suggestionsProgress.setValue(shouldShowSuggestions ? 1 : 0)");
+    expect(editSheetSource).toContain("snapshot.suggestionsAvailable");
   });
 
   it("keeps destructive running-timer deletion inside the edit sheet instead of the active timer card", () => {

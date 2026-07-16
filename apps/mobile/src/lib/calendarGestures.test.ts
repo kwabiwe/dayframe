@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   anchoredCalendarScrollY,
+  calendarPinchTransform,
   calendarSwipeDelta,
   formatCalendarHourLabel,
   shouldCaptureCalendarSwipe,
@@ -36,6 +37,40 @@ describe("calendar gestures", () => {
       startMidpointY: 200,
       startScrollY: 0
     })).toBe(0);
+  });
+
+  it("keeps the live pinch focal point anchored without a React layout update", () => {
+    expect(calendarPinchTransform({
+      currentFocalY: 240,
+      gestureScale: 1.5,
+      maxHourHeight: 128,
+      minHourHeight: 48,
+      startFocalY: 240,
+      startHourHeight: 72
+    })).toEqual({ hourHeight: 108, scale: 1.5, translateY: -120 });
+  });
+
+  it("tracks focal-point movement and clamps the live pinch range", () => {
+    expect(calendarPinchTransform({
+      currentFocalY: 260,
+      gestureScale: 3,
+      maxHourHeight: 128,
+      minHourHeight: 48,
+      startFocalY: 240,
+      startHourHeight: 72
+    })).toEqual({
+      hourHeight: 128,
+      scale: 128 / 72,
+      translateY: 260 - 240 * (128 / 72)
+    });
+    expect(calendarPinchTransform({
+      currentFocalY: 200,
+      gestureScale: 0.1,
+      maxHourHeight: 128,
+      minHourHeight: 48,
+      startFocalY: 200,
+      startHourHeight: 72
+    }).hourHeight).toBe(48);
   });
 
   it("formats wrapped timeline hour labels as clock times", () => {

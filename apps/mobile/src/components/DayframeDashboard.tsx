@@ -26,6 +26,9 @@ import {
   View
 } from "react-native";
 import Svg, { Circle, Defs, G, Path, Pattern, Rect } from "react-native-svg";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Reanimated, { useAnimatedStyle, useSharedValue } from "react-native-reanimated";
+import { scheduleOnRN } from "react-native-worklets";
 import { router, useFocusEffect, useIsFocused } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { calendarBlockContinuationEdges, paletteColorFor, type RecentActivitySuggestion } from "@dayframe/shared";
@@ -59,6 +62,7 @@ import {
 } from "@/lib/calendarBlocks";
 import {
   anchoredCalendarScrollY,
+  calendarPinchTransform,
   calendarSwipeDelta,
   formatCalendarHourLabel,
   shouldCaptureCalendarSwipe
@@ -76,7 +80,12 @@ import {
   type HealthKitChangeSubscription
 } from "@/lib/health";
 import { syncLiveActivityForEntry } from "@/lib/liveActivity";
-import { buildHistoryDaySections, historyDayLabel, type HistoryDaySection } from "@/lib/historyPresentation";
+import {
+  buildHistoryDaySections,
+  groupHistoryDayEntries,
+  historyDayLabel,
+  type HistoryDaySection
+} from "@/lib/historyPresentation";
 import {
   pressable,
   useMobileTheme,
@@ -187,6 +196,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const timerMutationChain = useRef<Promise<void>>(Promise.resolve());
   const timerMutationCount = useRef(0);
   const timerMutationVersions = useRef(new Map<string, number>());
+  const activeEditorOpenFrame = useRef<number | null>(null);
   const calendarScrollRef = useRef<ScrollView>(null);
   const calendarScrollY = useRef(0);
   const entrance = useRef(new Animated.Value(0)).current;
@@ -368,6 +378,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       useNativeDriver: true
     }).start();
   }, [entrance, reduceMotion]);
+
+  useEffect(() => () => {
+    if (activeEditorOpenFrame.current !== null) cancelAnimationFrame(activeEditorOpenFrame.current);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -602,13 +616,23 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       return false;
     }
     if (!categoryId && !description.trim()) {
-      setActiveEditVisible(true);
-      const ok = await startTaskWith({
-        categoryId: null,
-        description: null,
-        startedAt: null
-      });
-      if (!ok) setActiveEditVisible(false);
+      const ok = await startTaskWith(
+        {
+          categoryId: null,
+          description: null,
+          startedAt: null
+        },
+        { animateLayout: false }
+      );
+      if (ok) {
+        if (activeEditorOpenFrame.current !== null) {
+          cancelAnimationFrame(activeEditorOpenFrame.current);
+        }
+        activeEditorOpenFrame.current = requestAnimationFrame(() => {
+          activeEditorOpenFrame.current = null;
+          setActiveEditVisible(true);
+        });
+      }
       return ok;
     }
     return startTaskWith({
@@ -616,6 +640,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       description,
       startedAt: null
     });
+  }
+
+  function startBlankTask() {
+    void startTask(null);
   }
 
   function openManualEntry() {
@@ -703,7 +731,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     categoryId?: string | null;
     description?: string | null;
     startedAt?: string | null;
-  }) {
+  }, options: { animateLayout?: boolean } = {}) {
     const trimmedDescription = input.description?.trim() ?? "";
     const startedAt = input.startedAt ?? new Date().toISOString();
     optimisticTimerSequence.current += 1;
@@ -720,7 +748,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     const previousData = latestData.current;
     nextTimerMutationVersion(optimisticId);
     updateDashboardData((current) => optimisticStartTimer(current, pendingEntry));
-    scheduleLayoutTransition(reduceMotion);
+    if (options.animateLayout !== false) scheduleLayoutTransition(reduceMotion);
 
     enqueueTimerMutation(async () => {
       try {
@@ -1143,86 +1171,80 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   </View>
                 </Pressable>
               ) : (
-                <>
-                  <View style={styles.panel}>
-                    <View style={styles.startInputRow}>
+                <View style={styles.panel}>
+                  <View style={styles.startInputRow}>
+                    <View style={styles.startComposerMain}>
                       <Pressable
                         accessibilityLabel="Start timer and add details"
                         accessibilityRole="button"
                         style={pressable([styles.textInput, styles.startInput], styles.buttonPressed)}
-                        onPress={() => {
-                          void startTask(null);
-                        }}
+                        onPress={startBlankTask}
                       >
                         <Text style={styles.startInputText} numberOfLines={1}>What are you working on?</Text>
                       </Pressable>
-                      <View style={styles.startActionColumn}>
-                        <Pressable
-                          accessibilityLabel="Start task"
-                          accessibilityRole="button"
-                          style={pressable(styles.playButton, styles.buttonPressed)}
-                          onPress={() => {
-                            void startTask(null);
-                          }}
-                        >
-                          <PlayGlyph color={theme.onAccent} />
-                        </Pressable>
-                        <Pressable
-                          accessibilityLabel="Add past time"
-                          accessibilityRole="button"
-                          style={pressable(styles.addPastTimeButton, styles.buttonPressed)}
-                          onPress={openManualEntry}
-                        >
-                          <PlusGlyph color={theme.accentText} />
-                        </Pressable>
-                      </View>
-                    </View>
-                  </View>
-
-                  <View style={styles.quickActionsBlock}>
-                    <Text style={styles.quickActionsLabel}>Quick actions</Text>
-                    <ScrollView
-                      horizontal
-                      keyboardShouldPersistTaps="handled"
-                      showsHorizontalScrollIndicator={false}
-                      contentContainerStyle={styles.compactCategoryScroller}
-                    >
-                      {quickActions.map((action) => {
-                        const categoryColor = action.isUncategorized
-                          ? null
-                          : paletteColorFor(action.color, action.subtitle ?? action.name, theme.mode);
-                        return (
-                          <Pressable
-                            key={action.key}
-                            accessibilityRole="button"
-                            accessibilityLabel={`Start ${action.name}`}
-                            style={pressable(styles.categoryPillTouch, styles.buttonPressed)}
-                            onPress={() => {
-                              void startTask(action.id, action.description ?? "");
-                            }}
-                          >
-                            <View
-                              style={[
-                                styles.categoryPill,
-                                categoryColor
-                                  ? { backgroundColor: colorWithAlpha(categoryColor, theme.mode === "dark" ? 0.18 : 0.13) }
-                                  : styles.categoryPillMuted
-                              ]}
+                      <ScrollView
+                        accessibilityLabel="Quick actions"
+                        horizontal
+                        keyboardShouldPersistTaps="handled"
+                        showsHorizontalScrollIndicator={false}
+                        style={styles.quickActionsInline}
+                        contentContainerStyle={styles.compactCategoryScroller}
+                      >
+                        {quickActions.map((action) => {
+                          const categoryColor = action.isUncategorized
+                            ? null
+                            : paletteColorFor(action.color, action.subtitle ?? action.name, theme.mode);
+                          return (
+                            <Pressable
+                              key={action.key}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Start ${action.name}`}
+                              style={pressable(styles.categoryPillTouch, styles.buttonPressed)}
+                              onPress={() => {
+                                void startTask(action.id, action.description ?? "");
+                              }}
                             >
                               <View
                                 style={[
-                                  styles.colorDot,
-                                  categoryColor ? { backgroundColor: categoryColor } : styles.colorDotMuted
+                                  styles.categoryPill,
+                                  categoryColor
+                                    ? { backgroundColor: colorWithAlpha(categoryColor, theme.mode === "dark" ? 0.18 : 0.13) }
+                                    : styles.categoryPillMuted
                                 ]}
-                              />
-                              <Text style={styles.categoryPillText} numberOfLines={1}>{action.name}</Text>
-                            </View>
-                          </Pressable>
-                        );
-                      })}
-                    </ScrollView>
+                              >
+                                <View
+                                  style={[
+                                    styles.colorDot,
+                                    categoryColor ? { backgroundColor: categoryColor } : styles.colorDotMuted
+                                  ]}
+                                />
+                                <Text style={styles.categoryPillText} numberOfLines={1}>{action.name}</Text>
+                              </View>
+                            </Pressable>
+                          );
+                        })}
+                      </ScrollView>
+                    </View>
+                    <View style={styles.startActionColumn}>
+                      <Pressable
+                        accessibilityLabel="Start task"
+                        accessibilityRole="button"
+                        style={pressable(styles.playButton, styles.buttonPressed)}
+                        onPress={startBlankTask}
+                      >
+                        <PlayGlyph color={theme.onAccent} />
+                      </Pressable>
+                      <Pressable
+                        accessibilityLabel="Add past time"
+                        accessibilityRole="button"
+                        style={pressable(styles.addPastTimeButton, styles.buttonPressed)}
+                        onPress={openManualEntry}
+                      >
+                        <PlusGlyph color={theme.accentText} />
+                      </Pressable>
+                    </View>
                   </View>
-                </>
+                </View>
               )}
             </Animated.View>
           )}
@@ -1460,15 +1482,10 @@ function CalendarTab({
     scrollY: null
   });
   const hourHeight = calendarZoom.hourHeight;
-  const pinchStartDistance = useRef<number | null>(null);
-  const pinchStartHourHeight = useRef(hourHeight);
-  const pinchAnchorY = useRef(0);
-  const pinchStartMidpointY = useRef(0);
-  const pinchStartScrollY = useRef(0);
-  const pendingZoom = useRef<{ hourHeight: number; midpointY: number } | null>(null);
-  const zoomFrame = useRef<number | null>(null);
-  const timelinePanelY = useRef(0);
-  const timelineCanvasY = useRef(0);
+  const pinchScale = useSharedValue(1);
+  const pinchTranslateY = useSharedValue(0);
+  const pinchStartFocalY = useSharedValue(0);
+  const pinchStartHourHeight = useSharedValue(hourHeight);
   const calendarTransition = useRef(new Animated.Value(1)).current;
   const calendarHours = CALENDAR_HOURS_MODES[calendarHoursMode];
   const timelineHeight = (calendarHours.endHour - calendarHours.startHour) * hourHeight;
@@ -1489,38 +1506,96 @@ function CalendarTab({
   const visibleBlockIds = new Set(visibleBlocks.map(({ entry }) => entry.id));
   const outsideAxisEntries = entries.filter((entry) => !visibleBlockIds.has(entry.id)).slice(0, 3);
 
-  const queuePinchZoom = useCallback((nextHourHeight: number, midpointY: number) => {
-    pendingZoom.current = {
-      hourHeight: clamp(nextHourHeight, TIMELINE_MIN_HOUR_HEIGHT, TIMELINE_MAX_HOUR_HEIGHT),
-      midpointY
-    };
-    if (zoomFrame.current !== null) return;
-    zoomFrame.current = requestAnimationFrame(() => {
-      zoomFrame.current = null;
-      const zoom = pendingZoom.current;
-      pendingZoom.current = null;
-      if (!zoom) return;
-      setCalendarZoom({
-        hourHeight: zoom.hourHeight,
-        scrollY: anchoredCalendarScrollY({
-          anchorY: pinchAnchorY.current,
-          currentMidpointY: zoom.midpointY,
-          nextHourHeight: zoom.hourHeight,
-          startHourHeight: pinchStartHourHeight.current,
-          startMidpointY: pinchStartMidpointY.current,
-          startScrollY: pinchStartScrollY.current
-        })
-      });
+  const commitPinchZoom = useCallback((
+    nextHourHeight: number,
+    startHourHeight: number,
+    startFocalY: number,
+    currentFocalY: number
+  ) => {
+    setCalendarZoom({
+      hourHeight: nextHourHeight,
+      scrollY: anchoredCalendarScrollY({
+        anchorY: startFocalY,
+        currentMidpointY: currentFocalY,
+        nextHourHeight,
+        startHourHeight,
+        startMidpointY: startFocalY,
+        startScrollY: getScrollY()
+      })
     });
-  }, []);
+  }, [getScrollY]);
+
+  const pinchGesture = useMemo(() => Gesture.Pinch()
+    .onStart((event) => {
+      "worklet";
+      pinchStartFocalY.value = event.focalY;
+      pinchStartHourHeight.value = hourHeight;
+      pinchScale.value = 1;
+      pinchTranslateY.value = 0;
+      scheduleOnRN(onGestureLockedChange, true);
+    })
+    .onUpdate((event) => {
+      "worklet";
+      const transform = calendarPinchTransform({
+        currentFocalY: event.focalY,
+        gestureScale: event.scale,
+        maxHourHeight: TIMELINE_MAX_HOUR_HEIGHT,
+        minHourHeight: TIMELINE_MIN_HOUR_HEIGHT,
+        startFocalY: pinchStartFocalY.value,
+        startHourHeight: pinchStartHourHeight.value
+      });
+      pinchScale.value = transform.scale;
+      pinchTranslateY.value = transform.translateY;
+    })
+    .onEnd((event, success) => {
+      "worklet";
+      if (!success) return;
+      const transform = calendarPinchTransform({
+        currentFocalY: event.focalY,
+        gestureScale: event.scale,
+        maxHourHeight: TIMELINE_MAX_HOUR_HEIGHT,
+        minHourHeight: TIMELINE_MIN_HOUR_HEIGHT,
+        startFocalY: pinchStartFocalY.value,
+        startHourHeight: pinchStartHourHeight.value
+      });
+      scheduleOnRN(
+        commitPinchZoom,
+        transform.hourHeight,
+        pinchStartHourHeight.value,
+        pinchStartFocalY.value,
+        event.focalY
+      );
+    })
+    .onFinalize((_event, success) => {
+      "worklet";
+      if (!success) {
+        pinchScale.value = 1;
+        pinchTranslateY.value = 0;
+      }
+      scheduleOnRN(onGestureLockedChange, false);
+    }), [
+    commitPinchZoom,
+    hourHeight,
+    onGestureLockedChange,
+    pinchScale,
+    pinchStartFocalY,
+    pinchStartHourHeight,
+    pinchTranslateY
+  ]);
+
+  const pinchAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateY: pinchTranslateY.value },
+      { scaleY: pinchScale.value }
+    ]
+  }));
 
   useLayoutEffect(() => {
-    if (calendarZoom.scrollY !== null) onScrollTo(calendarZoom.scrollY);
-  }, [calendarZoom, onScrollTo]);
-
-  useEffect(() => () => {
-    if (zoomFrame.current !== null) cancelAnimationFrame(zoomFrame.current);
-  }, []);
+    if (calendarZoom.scrollY === null) return;
+    onScrollTo(calendarZoom.scrollY);
+    pinchScale.set(1);
+    pinchTranslateY.set(0);
+  }, [calendarZoom, onScrollTo, pinchScale, pinchTranslateY]);
 
   useEffect(() => {
     calendarTransition.stopAnimation();
@@ -1553,56 +1628,28 @@ function CalendarTab({
   };
 
   const dayGestureResponder = useMemo(() => PanResponder.create({
-    onStartShouldSetPanResponder: (event) => event.nativeEvent.touches.length >= 2,
-    onStartShouldSetPanResponderCapture: (event) => event.nativeEvent.touches.length >= 2,
     onMoveShouldSetPanResponder: (event, gesture) => {
-      if (event.nativeEvent.touches.length >= 2) return true;
+      if (event.nativeEvent.touches.length !== 1) return false;
       return shouldCaptureCalendarSwipe(gesture);
     },
     onMoveShouldSetPanResponderCapture: (event, gesture) => {
-      if (event.nativeEvent.touches.length >= 2) return true;
+      if (event.nativeEvent.touches.length !== 1) return false;
       return shouldCaptureCalendarSwipe(gesture);
     },
-    onPanResponderGrant: (event) => {
+    onPanResponderGrant: () => {
       onGestureLockedChange(true);
-      if (event.nativeEvent.touches.length >= 2) {
-        pinchStartDistance.current = touchDistance(event.nativeEvent.touches);
-        pinchStartHourHeight.current = hourHeight;
-        pinchStartScrollY.current = getScrollY();
-        pinchStartMidpointY.current = touchMidpointLocationY(event.nativeEvent.touches);
-        pinchAnchorY.current = clamp(
-          pinchStartMidpointY.current - timelinePanelY.current - timelineCanvasY.current,
-          0,
-          timelineHeight
-        );
-      } else {
-        pinchStartDistance.current = null;
-      }
-    },
-    onPanResponderMove: (event) => {
-      if (event.nativeEvent.touches.length < 2 || !pinchStartDistance.current) return;
-      const distance = touchDistance(event.nativeEvent.touches);
-      if (!distance) return;
-      queuePinchZoom(
-        pinchStartHourHeight.current * (distance / pinchStartDistance.current),
-        touchMidpointLocationY(event.nativeEvent.touches)
-      );
     },
     onPanResponderRelease: (_event, gesture) => {
-      const wasPinching = Boolean(pinchStartDistance.current);
-      pinchStartDistance.current = null;
       onGestureLockedChange(false);
-      if (wasPinching) return;
       const delta = calendarSwipeDelta("day", gesture);
       if (delta === 0) return;
       onChangeDay(delta);
     },
     onPanResponderTerminationRequest: () => false,
     onPanResponderTerminate: () => {
-      pinchStartDistance.current = null;
       onGestureLockedChange(false);
     }
-  }), [getScrollY, hourHeight, onChangeDay, onGestureLockedChange, queuePinchZoom, timelineHeight]);
+  }), [onChangeDay, onGestureLockedChange]);
 
   const weekGestureResponder = useMemo(() => PanResponder.create({
     onMoveShouldSetPanResponderCapture: (_event, gesture) =>
@@ -1673,12 +1720,7 @@ function CalendarTab({
           <Text style={styles.summaryTotal}>{formatDuration(total)}</Text>
         </View>
 
-        <Animated.View
-          onLayout={(event) => {
-            timelinePanelY.current = event.nativeEvent.layout.y;
-          }}
-          style={[styles.calendarTimelinePanel, calendarTransitionStyle]}
-        >
+        <Animated.View style={[styles.calendarTimelinePanel, calendarTransitionStyle]}>
           {currentTimeOutsideAxis || outsideAxisEntries.length > 0 ? (
             <View style={styles.calendarEdgeStack}>
               {currentTimeOutsideAxis ? (
@@ -1725,12 +1767,14 @@ function CalendarTab({
             </View>
           ) : null}
 
-          <View
-            onLayout={(event) => {
-              timelineCanvasY.current = event.nativeEvent.layout.y;
-            }}
-            style={[styles.calendarTimelineCanvas, { height: timelineHeight }]}
-          >
+          <GestureDetector gesture={pinchGesture}>
+            <Reanimated.View
+              style={[
+                styles.calendarTimelineCanvas,
+                { height: timelineHeight, transformOrigin: ["50%", 0, 0] },
+                pinchAnimatedStyle
+              ]}
+            >
             {Array.from({ length: calendarHours.endHour - calendarHours.startHour + 1 }, (_, index) => {
               const hour = calendarHours.startHour + index;
               const lineTop = index * hourHeight;
@@ -1797,7 +1841,8 @@ function CalendarTab({
                 <View style={styles.currentTimeLine} />
               </View>
             ) : null}
-          </View>
+            </Reanimated.View>
+          </GestureDetector>
         </Animated.View>
 
         {visibleBlocks.length === 0 ? (
@@ -2074,50 +2119,105 @@ function HistoryDayCard({
   styles: MobileStyles;
   theme: MobileTheme;
 }) {
+  const reduceMotion = useReduceMotionPreference();
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
+  const entryGroups = useMemo(() => groupHistoryDayEntries(section.entries), [section.entries]);
+
+  function toggleGroup(groupKey: string) {
+    scheduleLayoutTransition(reduceMotion);
+    setExpandedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(groupKey)) next.delete(groupKey);
+      else next.add(groupKey);
+      return next;
+    });
+  }
+
   return (
     <View style={styles.todaySummaryBlock}>
       <Text style={styles.historyDayTitle}>{historyDayLabel(section, now)}</Text>
       <View style={styles.todayEntryCard}>
         {section.entries.length === 0 ? (
           <Text style={styles.todayEmptyText}>No tracked time for this day.</Text>
-        ) : section.entries.map(({ entry, overlapSeconds }, index) => {
+        ) : entryGroups.map((group, index) => {
+          const { entry } = group.representative;
+          const grouped = group.entries.length > 1;
+          const expanded = grouped && expandedGroups.has(group.key);
           const canReplay = !activeTimerRunning && Boolean(entry.categoryId || entry.description?.trim());
+          const title = displayEntryTitle(entry);
           return (
-            <View
-              key={`${section.key}:${entry.id}`}
-              style={[
-              styles.todayEntryRow,
-                index > 0 ? styles.todayEntryDivider : null
-              ]}
-            >
-              <Pressable
-                accessibilityLabel={`Edit ${displayEntryTitle(entry)}`}
-                accessibilityRole="button"
-                onPress={() => onOpenEntry(entry)}
-                style={({ pressed }) => [styles.historyEntryMain, pressed ? styles.buttonPressed : null]}
+            <Fragment key={`${section.key}:${group.key}`}>
+              <View
+                style={[
+                  styles.todayEntryRow,
+                  index > 0 ? styles.todayEntryDivider : null
+                ]}
               >
-                <View style={[styles.todayEntryDot, { backgroundColor: entryCategoryColor(entry, theme.mode) }]} />
-                <View style={styles.todayEntryText}>
-                  <Text style={styles.todayEntryTitle} numberOfLines={1}>{displayEntryTitle(entry)}</Text>
-                  <Text style={styles.todayEntryMeta} numberOfLines={1}>
-                    {formatEntryTimeRange(entry, now)}{entry.categoryName ? ` · ${entry.categoryName}` : ""}
-                  </Text>
+                <Pressable
+                  accessibilityLabel={grouped
+                    ? `${expanded ? "Collapse" : "Expand"} ${group.entries.length} ${title} entries`
+                    : `Edit ${title}`}
+                  accessibilityRole="button"
+                  accessibilityState={grouped ? { expanded } : undefined}
+                  onPress={() => {
+                    if (grouped) toggleGroup(group.key);
+                    else onOpenEntry(entry);
+                  }}
+                  style={({ pressed }) => [styles.historyEntryMain, pressed ? styles.buttonPressed : null]}
+                >
+                  {grouped ? (
+                    <View style={styles.historyGroupCountBadge}>
+                      <Text style={styles.historyGroupCountText}>{group.entries.length}</Text>
+                    </View>
+                  ) : null}
+                  <View style={[styles.todayEntryDot, { backgroundColor: entryCategoryColor(entry, theme.mode) }]} />
+                  <View style={styles.todayEntryText}>
+                    <Text style={styles.todayEntryTitle} numberOfLines={1}>{title}</Text>
+                    <Text style={styles.todayEntryMeta} numberOfLines={1}>
+                      {grouped
+                        ? historyGroupMeta(entry, group.entries.length)
+                        : `${formatEntryTimeRange(entry, now)}${entry.categoryName ? ` · ${entry.categoryName}` : ""}`}
+                    </Text>
+                  </View>
+                </Pressable>
+                <View style={styles.historyEntryActions}>
+                  <Text style={styles.todayEntryDuration}>{formatDuration(group.totalSeconds)}</Text>
+                  {canReplay ? (
+                    <Pressable
+                      accessibilityLabel={`Start ${title} now`}
+                      accessibilityRole="button"
+                      onPress={() => onReplayEntry(entry)}
+                      style={pressable(styles.historyReplayButton, styles.buttonPressed)}
+                    >
+                      <PlayGlyph color={theme.accentText} size={14} />
+                    </Pressable>
+                  ) : null}
                 </View>
-              </Pressable>
-              <View style={styles.historyEntryActions}>
-                <Text style={styles.todayEntryDuration}>{formatDuration(overlapSeconds)}</Text>
-                {canReplay ? (
-                  <Pressable
-                    accessibilityLabel={`Start ${displayEntryTitle(entry)} now`}
-                    accessibilityRole="button"
-                    onPress={() => onReplayEntry(entry)}
-                    style={pressable(styles.historyReplayButton, styles.buttonPressed)}
-                  >
-                    <PlayGlyph color={theme.accentText} size={14} />
-                  </Pressable>
-                ) : null}
               </View>
-            </View>
+              {expanded ? (
+                <View style={styles.historyGroupChildren}>
+                  {group.entries.map(({ entry: childEntry, overlapSeconds }, childIndex) => (
+                    <Pressable
+                      key={childEntry.id}
+                      accessibilityLabel={`Edit ${displayEntryTitle(childEntry)} from ${formatEntryTimeRange(childEntry, now)}`}
+                      accessibilityRole="button"
+                      onPress={() => onOpenEntry(childEntry)}
+                      style={({ pressed }) => [
+                        styles.historyGroupChild,
+                        childIndex > 0 ? styles.historyGroupChildDivider : null,
+                        pressed ? styles.buttonPressed : null
+                      ]}
+                    >
+                      <View style={[styles.todayEntryDot, { backgroundColor: entryCategoryColor(childEntry, theme.mode) }]} />
+                      <Text style={styles.historyGroupChildTime} numberOfLines={1}>
+                        {formatEntryTimeRange(childEntry, now)}
+                      </Text>
+                      <Text style={styles.todayEntryDuration}>{formatDuration(overlapSeconds)}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ) : null}
+            </Fragment>
           );
         })}
       </View>
@@ -2143,6 +2243,13 @@ function HistoryDayCard({
       </View>
     </View>
   );
+}
+
+function historyGroupMeta(entry: TimeEntry, count: number) {
+  const title = displayEntryTitle(entry).trim().toLocaleLowerCase();
+  const category = entry.categoryName?.trim();
+  if (!category || category.toLocaleLowerCase() === title) return `${count} entries`;
+  return `${count} entries · ${category}`;
 }
 
 function DonutChart({
@@ -2661,18 +2768,6 @@ function formatDateKey(date: Date) {
     pad2(date.getMonth() + 1),
     pad2(date.getDate())
   ].join("-");
-}
-
-function touchDistance(touches: ArrayLike<{ pageX: number; pageY: number }>) {
-  if (touches.length < 2) return 0;
-  const first = touches[0];
-  const second = touches[1];
-  return Math.hypot(second.pageX - first.pageX, second.pageY - first.pageY);
-}
-
-function touchMidpointLocationY(touches: ArrayLike<{ locationY: number }>) {
-  if (touches.length < 2) return 0;
-  return (touches[0].locationY + touches[1].locationY) / 2;
 }
 
 function clamp(value: number, min: number, max: number) {

@@ -111,3 +111,39 @@ Generated screenshots remain local QA artifacts and are intentionally not commit
 - Opened Settings and verified the intro card is absent, dividers are inset, and the final row in each group has no divider.
 
 final result: passed
+
+---
+
+# Mobile Today grouping and gesture follow-up QA
+
+## Source and implementation truth
+
+- Source visual truth: `/tmp/codex-remote-attachments/019f61fe-062d-7251-a378-255853b42867/1E640E91-94B0-49CF-AE01-58A20D005251/1-Photo-1.jpg` and `/tmp/codex-remote-attachments/019f61fe-062d-7251-a378-255853b42867/1E640E91-94B0-49CF-AE01-58A20D005251/2-Photo-2.jpg`.
+- Implementation screenshots: `/tmp/dayframe-history-motion-audit/06-after-today-collapsed.png`, `/tmp/dayframe-history-motion-audit/07-after-today-expanded.png`, `/tmp/dayframe-history-motion-audit/08-after-today-dark-expanded.png`, `/tmp/dayframe-history-motion-audit/09-after-calendar-dark.png`, `/tmp/dayframe-history-motion-audit/10-after-running-suggestions-dark.png`, and `/tmp/dayframe-history-motion-audit/11-after-description-focus-dark.png`.
+- Viewport: iPhone 17 simulator, 1206 x 2622 pixels, iOS 26.5.
+- States: collapsed history, expanded history, inline Quick Actions, Calendar, blank running editor with six suggestions, and Description focus with suggestions hidden. Light and dark appearances were checked.
+
+## Combined comparison evidence
+
+- Toggl grouping reference beside the expanded Dayframe implementation: `/tmp/dayframe-history-motion-audit/12-comparison-grouping-dark.png`.
+- Calendar reference beside the native Dayframe implementation: `/tmp/dayframe-history-motion-audit/13-comparison-calendar-dark.png`.
+- Both combined images were inspected at original resolution after the final UI iteration.
+
+## Findings
+
+- No actionable P0, P1, or P2 visual mismatch remains.
+- Typography: Dayframe keeps its lighter system hierarchy while matching the reference's compact title, metadata, duration, and count relationships.
+- Spacing and layout rhythm: collapsed groups materially shorten the list; expanded children use inset hairline dividers and remain dense without reducing their tap targets. Quick Actions now occupy the unused composer width and communicate horizontal overflow through the partially visible next pill.
+- Colors and tokens: grouped rows, suggestions, and Calendar use existing Midnight Core and light-companion semantic surfaces. The filled count control intentionally follows Dayframe's borderless circle/pill language instead of copying Toggl's outline.
+- Image and asset quality: the colour Dayframe logo remains unchanged and sharp; existing code-native icons remain aligned with the current product system.
+- Copy and content: descriptionless entries group by category, same-description entries retain category context, group totals equal their children, and suggestion rows show one-line descriptions with category metadata.
+- Accessibility and resilience: the group parent exposes collapsed/expanded state, every child stays individually editable, both empty-start surfaces share the same callback, and Description focus removes the suggestion region before the keyboard needs the space.
+
+## Motion verification
+
+- Empty-start presentation now commits the optimistic active timer before opening the running editor, avoiding an empty modal frame and competing card layout animation.
+- Suggestion presentation is keyed to the running session start timestamp rather than the optimistic/persisted entry ID. Late suggestions do not reopen after manual Description entry begins.
+- Calendar pinch uses Gesture Handler/Reanimated shared values during the gesture and commits React layout plus anchored scroll once on release. Unit coverage verifies focal anchoring and min/max clamping.
+- Automated simulator tooling cannot synthesize a genuine two-finger pinch, so the structural performance correction, native runtime render, and focal-point unit tests are the automated evidence; a physical-device feel check remains appropriate during TestFlight acceptance.
+
+final result: passed

@@ -13,6 +13,13 @@ export type HistoryDaySection = {
   totalSeconds: number;
 };
 
+export type HistoryEntryGroup = {
+  entries: HistoryDayEntry[];
+  key: string;
+  representative: HistoryDayEntry;
+  totalSeconds: number;
+};
+
 export function buildHistoryDaySections({
   days = 60,
   entries,
@@ -89,6 +96,40 @@ export function historyDayLabel(section: Pick<HistoryDaySection, "date" | "isTod
     month: "short",
     weekday: "short"
   });
+}
+
+export function groupHistoryDayEntries(entries: HistoryDayEntry[]): HistoryEntryGroup[] {
+  const groups = new Map<string, HistoryEntryGroup>();
+
+  for (const historyEntry of entries) {
+    const key = historyEntryGroupKey(historyEntry.entry);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.entries.push(historyEntry);
+      existing.totalSeconds += historyEntry.overlapSeconds;
+      continue;
+    }
+    groups.set(key, {
+      entries: [historyEntry],
+      key,
+      representative: historyEntry,
+      totalSeconds: historyEntry.overlapSeconds
+    });
+  }
+
+  return [...groups.values()];
+}
+
+function historyEntryGroupKey(entry: MobileTimeEntry) {
+  const categoryKey = entry.categoryId
+    ? `id:${entry.categoryId}`
+    : `name:${normalizeGroupText(entry.categoryName) || "uncategorized"}`;
+  const descriptionKey = normalizeGroupText(entry.description) || "no-description";
+  return `${categoryKey}|description:${descriptionKey}`;
+}
+
+function normalizeGroupText(value: string | null | undefined) {
+  return value?.trim().replace(/\s+/g, " ").toLocaleLowerCase() ?? "";
 }
 
 function startOfLocalDay(date: Date) {
