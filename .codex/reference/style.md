@@ -10,10 +10,11 @@ Use this when implementing visual UI.
 - Avoid one-note palettes and decorative clutter.
 - Dayframe should feel like a compact personal time tool, not a project-management or billing app.
 - Mobile first screen should match the simple dashboard sketch: logo, active timer, start task, Today summary.
-- Use Midnight Core consistently: near-black midnight navy, layered neutral surfaces, compact rounded controls, restrained elevation and coral primary/active states.
+- Use Midnight Core consistently: near-black midnight navy, layered neutral surfaces, compact controls, restrained elevation and coral primary/active states.
 - Treat light mode as a designed neutral companion. Preserve the same hierarchy and semantic roles rather than mechanically inverting dark mode.
 - Keep native navigation containers, Expo root views and screen content on the resolved theme canvas. During push, pop and swipe-back transitions, no default white window, rounded-card vignette or mismatched scene background should be visible.
 - Keep system-first typography. Use tabular numerals for timers and report figures; do not reintroduce all-monospace UI typography.
+- On iOS, prefer the current fill-led design language: canvas/surface/inset contrast, compact divider-based lists, circular icon-only actions, and pill text actions. Avoid outline-heavy rounded rectangles as the default container/control treatment.
 
 ## Brand Artwork
 
@@ -32,7 +33,7 @@ Use this when implementing visual UI.
 - Preserve palette keys and deterministic category/chart mapping. `lime` remains the stored key even though its Midnight Core display name is Mint.
 - Use coral for primary action and active state, `danger` for destructive action and category colours for data identity.
 - Pair category colours with labels, dots, rails or borders. Never rely on colour alone or assume a palette colour is accessible body text.
-- Use a 44 px/pt minimum interactive target, 1 px default borders, 14–20 px/pt panel/control radii and visible focus/selected states.
+- Use a 44 px/pt minimum interactive target and visible focus/selected states. Web may use 1 px borders for dense controls; iOS should prefer fill, spacing, and hairline dividers over default outlines.
 - Use `surfaceInset` for inputs, `surfaceRaised` for floating surfaces and `chartTrack` behind chart data.
 - Disabled controls retain readable labels and an obvious unavailable state; do not fade the whole control to near invisibility.
 
@@ -58,6 +59,7 @@ Use this when implementing visual UI.
 - [ ] Components align with the existing design system.
 - [ ] Buttons, forms, tabs, menus, and toggles use familiar interaction patterns.
 - [ ] Text does not overlap, clip, or overflow.
+- [ ] iOS screens avoid outline-heavy rounded-rectangle clutter and use fill/divider hierarchy consistent with `docs/brand-style-guide.md`.
 - [ ] Floating surfaces fit inside mobile viewports without horizontal scrolling or zooming.
 - [ ] Visual assets render correctly if used.
 - [ ] Canonical symbol geometry is unchanged and the correct wordmark tone is used for the resolved theme.

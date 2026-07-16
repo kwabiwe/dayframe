@@ -18,16 +18,16 @@ Do not conclude a fix failed until all relevant surfaces are checked.
 
 ## Current Internal TestFlight Lane
 
-As of 2026-07-14, Dayframe uses this internal release lane:
+As of 2026-07-16, Dayframe uses this internal release lane:
 
 - App: Dayframe Time Tracker
 - App Store Connect app id: `6787881096`
 - Bundle id: `com.layereight.dayframe`
 - Team: `65M773ZG6M`
 - Version: `0.1.0`
-- Latest verified build: `0.1.0 (40)`
+- Latest verified build: `0.1.0 (43)`
 - Group: `Internal Health Debug`
-- Latest delivery UUID: `b56f1311-d833-4d3a-8b2e-46c078fd348f`
+- Latest delivery/build ID: `510b1fd9-05b2-44f5-886c-f32c4b1a6a8b`
 - Current release rule: implementation PRs are not done until the merged code is in a verified internal TestFlight build.
 
 Docs-only or planning-only PRs do not require a TestFlight build unless they change build, release, signing, environment, or runtime configuration.
@@ -146,7 +146,7 @@ Before telling KB to test, verify all of these:
 - TestFlight notes are set for the relevant locale
 - build is attached to `Internal Health Debug`
 - build beta detail has `internalBuildState=IN_BETA_TESTING`
-- `externalBuildState=NOT_APPLICABLE` unless an external lane is explicitly introduced
+- external testing is not enabled for the current lane. App Store Connect may report `externalBuildState=READY_FOR_BETA_SUBMISSION` for internal-only builds; treat that as acceptable unless an external lane is explicitly introduced.
 
 If App Store Connect accepts the upload but shows missing compliance, patch the build export-compliance answer before assigning or verifying TestFlight state.
 

@@ -76,8 +76,11 @@ Required checks:
 - No duplicate active timers.
 - Active timer card and running edit sheet use the same exact active-entry timestamp and display the same elapsed seconds.
 - Empty mobile Play creates one timer, then opens the running edit sheet without showing start-state controls.
+- Pressing mobile Play while a timer is already running opens the same running edit sheet/suggestion flow instead of bypassing suggestions or starting a duplicate.
 - Applying a running-timer suggestion issues one entry update and never another timer-start request.
 - Running-sheet suggestions stay above Description/Category/Start time, cap at six, dismiss outside, and hide when Description receives focus.
+- Normal mobile timer mutations show no spinner, progress bar, or layout-moving loading state. Start, stop, edit, delete, and suggestion-apply should update optimistically and reconcile silently; pull-to-refresh remains the explicit visible-refresh path.
+- Edit Timer delete confirmation does not unmount/collapse the suggestions area or reflow the sheet content underneath.
 
 ## Location Learning And Places
 
@@ -98,6 +101,7 @@ Required checks:
 
 - Calendar, List, and Timesheet render.
 - Time blocks are clickable/editable.
+- Mobile anchored pinch zoom stays smooth and keeps the gesture midpoint anchored. Check for jitter, dropped-frame feel, scroll-position jumps, and excessive rerenders after calendar or gesture changes.
 - Review action buttons remain tappable and readable on phone width.
 - No duplicate React keys or runtime overlays.
 - Light and dark theme remain legible.

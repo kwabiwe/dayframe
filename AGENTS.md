@@ -6,7 +6,7 @@ Dayframe is a personal time-intelligence app. It combines fast manual task track
 
 The core invariant is **event-first tracking**: mobile/web/health/location signals become `activity_events` before they become `time_entries`. High-confidence explicit actions may create entries immediately. Ambiguous signals should become `review_items`.
 
-Use `docs/PRD.md` as the product source of truth. Use `docs/vercel-supabase-hosting.md` for hosted auth/deployment context.
+Use `docs/PRD.md` for product direction, then check `docs/feature-fix-tracker.md` for the current shipped/watch state before deciding what is next. Use `docs/vercel-supabase-hosting.md` for hosted auth/deployment context.
 
 ## Tech Stack
 
@@ -98,6 +98,9 @@ npm run export:workspace -- ./dayframe-backup.json
 - Keep `EXPO_PUBLIC_DAYFRAME_API_BASE` configurable for hosted Vercel, simulator, and physical iPhone testing.
 - When changing sync behavior, test both direct timer actions and queued event sync.
 - The mobile dashboard should stay focused on the primary flow: logo/header, active timer, start task, quick category actions, and Today summary.
+- Timer mutations on mobile should feel immediate. Do not show spinners or progress bars for normal start, stop, edit, delete, or suggestion-apply actions; update the UI optimistically and reconcile in the background. Keep visible spinners for deliberate pull-to-refresh only.
+- Mobile Play opens the running Edit Timer/suggestion flow consistently. Empty Play starts one bare timer then opens the sheet; Play while a timer is already running must not bypass suggestions or start a duplicate timer. Suggestions enrich the existing running entry.
+- iOS surfaces should follow the current fill-led design language: use canvas/surface/inset contrast, circular icon actions, pill text actions, compact divider-based lists, and avoid outline-heavy rounded rectangles unless the relevant reference doc says otherwise.
 - Location and HealthKit permission flows belong in onboarding and Settings, not on the dashboard. Surface friendly, actionable permission states instead of raw native errors.
 - Logout/account controls belong under profile/account management, not as primary dashboard chrome.
 
@@ -134,6 +137,7 @@ npm run build
 - For mobile/native changes, also run the mobile typecheck and, when feasible, an iOS simulator build.
 - For timer/auth/sync changes, add or run regression coverage for web start, web stop, mobile start, mobile stop, active timer refresh, completed entry persistence, and queued event sync.
 - For UI changes, validate in a browser at desktop and mobile widths and check for console/runtime overlays.
+- For mobile UI/timer changes, read `docs/feature-fix-tracker.md`, `docs/brand-style-guide.md`, `.codex/reference/components.md`, `.codex/reference/style.md`, and `.codex/reference/validation-matrix.md` before implementation. Record any conflict between old docs and current tracker state in the PR instead of silently choosing one.
 - For app chrome, account, workspace, navigation, settings, or floating-surface changes, explicitly test mobile overlay behavior at phone widths. Do not treat a generic responsive pass as sufficient.
 - For auth/deployment changes, verify `DAYFRAME_AUTH_MODE=dev`, `local`, and `provider` code paths where practical.
 - For hosted deployment changes, verify the Supabase schema has all columns/indexes used by the deployed code before smoke-testing Vercel.

@@ -8,7 +8,7 @@ Last verified: 2026-07-16 02:07 BST
 - GitHub: PR #68 is merged as `7ec7a76`.
 - Latest verified TestFlight build: `0.1.0 (43)`.
 - Web app parity audit completed for recent mobile-heavy PRs #32-#57; suitable web follow-ups are tracked below and mirrored to Trello with the `Web App` label. Native-only work such as App Intents, Live Activities, background HealthKit observers, iOS Settings navigation, and keyboard/safe-area fixes is intentionally excluded from the web backlog.
-- Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, Vercel production deployment, production Supabase schema, local archive/export/upload logs, and App Store Connect build state.
+- Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, local archive/export/upload logs, and App Store Connect build state. Vercel deployment and production Supabase schema are checked when the shipped change affects web/API/database behavior.
 
 ## Status Key
 
@@ -111,7 +111,7 @@ Last verified: 2026-07-16 02:07 BST
 | --- | --- | --- | --- |
 | Native NFC scanning beyond Shortcuts | Future | PR #42 shipped the preferred Apple Shortcuts-driven NFC route; NFC tags trigger Shortcuts, not Dayframe directly. | Revisit native NFC scanning only if Apple Shortcuts is not enough. Any native path should still queue idempotent start/stop/review events and keep user-controlled setup. |
 | Expanded Dayframe integration with Cockpit | Future | The read-only current-timer slice is in Watch via PR #50 and the deployed Cockpit timer strip. | Extend beyond the current timer only after KB verifies the strip: today timeline, source/confidence display, next suggested action, token-management UI, and no write/mutation controls unless explicitly approved. |
-| Natural-language rules that create time entries | In progress | PR #50 builds on the PR #30 draft/simulate slice with deterministic, review-first rule saves. | Keep sequence/calendar auto-write execution out of v1 until simulation and audit controls are stronger; first saved version creates review items that become time entries only after confirmation. |
+| Natural-language rules that create time entries | Planned | PR #50 builds on the PR #30 draft/simulate slice with deterministic, review-first rule saves; no active PR is open. | Keep sequence/calendar auto-write execution out of v1 until simulation and audit controls are stronger; first saved version creates review items that become time entries only after confirmation. |
 | Dayframe Preview / pre-prod lane | Future | Repeatedly noted as useful after the current fast TestFlight lane stabilises. | Create a separate preview/staging path with its own app identity or bundle, staging Vercel/Supabase environment, staging secrets, TestFlight group/build lane, and release checklist so KB can test risky changes before production/main TestFlight. |
 | Durable repo tracker | Done | This document. | Update this file whenever a planned item moves, ships, is skipped, or needs live-watch status. |
 | Full automation rule creation/editing | Future | PR #30 proves draft/simulate only. | Needs UI for saving, simulating, explaining, editing, disabling, and auditing rules. |

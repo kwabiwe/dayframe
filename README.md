@@ -15,7 +15,7 @@ The core rule is event-first: every signal becomes an `activity_events` row befo
 
 - Node.js and npm.
 - Docker Desktop for local Postgres/PostGIS.
-- Xcode for iOS. This workspace was verified with Xcode 26.5 at `/Applications/Xcode.app/Contents/Developer`.
+- Xcode for iOS. This workspace was verified with Xcode 26.6 at `/Applications/Xcode.app/Contents/Developer`.
 - CocoaPods for native iOS dependencies. `npm run ios:prebuild` installed it through Homebrew on this machine.
 
 ## Setup

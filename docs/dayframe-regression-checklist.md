@@ -12,6 +12,9 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Edits typed into the active timer description/category are saved before the entry is stopped.
 - Pinned and recent/frequent quick actions can start category-based tasks.
 - Continue/start-again actions use a play affordance and start the task.
+- On mobile, empty Play starts immediately and opens the running Edit Timer sheet; Play while a timer is already running opens the same suggestion/edit flow instead of bypassing suggestions. Suggestions enrich that same active timer rather than starting a duplicate.
+- Edit Timer delete confirmation appears without unmounting or collapsing the suggestions/edit content underneath.
+- Mobile timer start, stop, edit, delete, and suggestion-apply actions do not show spinners, progress bars, or layout-moving loading indicators. They update optimistically and reconcile silently; visible spinners are reserved for deliberate pull-to-refresh.
 
 ## Time Review
 
@@ -20,6 +23,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Calendar/time blocks can be resized from the top or bottom edge, snap to configured intervals, and save on release.
 - Selected time blocks can be deleted from edit controls, context actions, or keyboard delete/backspace where supported.
 - Calendar zoom controls change time granularity without breaking layout.
+- Mobile anchored pinch zoom remains smooth, keeps the zoom anchor under the gesture midpoint, and does not jitter or drop obvious frames during normal day/week navigation.
 - Calendar edit sheets stay visible when the iOS keyboard opens, with the focused field scrolled above the keyboard/suggestion bar.
 - List view groups entries by date, shows friendly source labels, and includes edit, start-again, and delete actions.
 - Timesheet view groups work by category/activity, shows day totals and row totals, and remains readable.
@@ -47,6 +51,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Outer and inner panels, popovers, tables, color swatches, and floating dialogs have consistent rounded corners.
 - Typography uses the current modern system font stack and stays compact in dense productivity surfaces.
 - Controls look restrained and functional; decorative visual changes must not reduce timer or review usability.
+- iOS surfaces use the current fill-led hierarchy: canvas/surface/inset contrast, compact divider-based lists, circular icon-only actions, and pill text actions instead of outline-heavy rounded-rectangle clutter.
 - The supplied colour symbol is unchanged; dark surfaces use the light wordmark artwork and light surfaces use the dark wordmark artwork.
 - Symbol and wordmark remain separate reusable elements with one accessible brand name or fully decorative semantics.
 - Primary application branding no longer uses the legacy PNG banner, CSS filters or a visible white image rectangle.
