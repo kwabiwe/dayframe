@@ -11,6 +11,15 @@ export type AnchoredCalendarScrollInput = {
   startScrollY: number;
 };
 
+export type CalendarPinchTransformInput = {
+  currentFocalY: number;
+  gestureScale: number;
+  maxHourHeight: number;
+  minHourHeight: number;
+  startFocalY: number;
+  startHourHeight: number;
+};
+
 const CALENDAR_SWIPE_CAPTURE_DISTANCE = 6;
 const CALENDAR_SWIPE_CAPTURE_INTENT_DISTANCE = 14;
 const CALENDAR_SWIPE_COMMIT_DISTANCE = 16;
@@ -67,6 +76,25 @@ export function anchoredCalendarScrollY({
   const scaledAnchorOffset = anchorY * (scale - 1);
   const fingerTranslation = startMidpointY - currentMidpointY;
   return Math.max(0, startScrollY + scaledAnchorOffset + fingerTranslation);
+}
+
+export function calendarPinchTransform({
+  currentFocalY,
+  gestureScale,
+  maxHourHeight,
+  minHourHeight,
+  startFocalY,
+  startHourHeight
+}: CalendarPinchTransformInput) {
+  "worklet";
+  const safeStartHourHeight = Number.isFinite(startHourHeight) && startHourHeight > 0
+    ? startHourHeight
+    : minHourHeight;
+  const unclampedHourHeight = safeStartHourHeight * (Number.isFinite(gestureScale) ? gestureScale : 1);
+  const hourHeight = Math.min(maxHourHeight, Math.max(minHourHeight, unclampedHourHeight));
+  const scale = hourHeight / safeStartHourHeight;
+  const translateY = currentFocalY - startFocalY * scale;
+  return { hourHeight, scale, translateY };
 }
 
 function pad2(value: number) {

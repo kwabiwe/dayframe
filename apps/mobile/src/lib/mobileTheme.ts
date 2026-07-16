@@ -1212,6 +1212,47 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       gap: 10
     },
+    historyGroupCountBadge: {
+      minWidth: 34,
+      height: 34,
+      borderRadius: 999,
+      paddingHorizontal: 8,
+      backgroundColor: theme.surfaceMuted,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    historyGroupCountText: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 14,
+      fontWeight: "600",
+      fontVariant: ["tabular-nums"]
+    },
+    historyGroupChildren: {
+      marginLeft: 44,
+      borderTopWidth: 1,
+      borderTopColor: theme.border
+    },
+    historyGroupChild: {
+      minHeight: 46,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 9,
+      paddingLeft: 10
+    },
+    historyGroupChildDivider: {
+      borderTopWidth: 1,
+      borderTopColor: theme.border
+    },
+    historyGroupChildTime: {
+      flex: 1,
+      minWidth: 0,
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "500",
+      fontVariant: ["tabular-nums"]
+    },
     historyEntryActions: {
       minHeight: 44,
       flexDirection: "row",
@@ -1258,16 +1299,9 @@ function createStyles(theme: MobileTheme) {
       gap: 7,
       paddingRight: 4
     },
-    quickActionsBlock: {
-      gap: 6
-    },
-    quickActionsLabel: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 11,
-      fontWeight: "600",
-      textTransform: "uppercase",
-      paddingHorizontal: 2
+    quickActionsInline: {
+      flexGrow: 0,
+      minHeight: 44
     },
     categoryPillTouch: {
       minHeight: 44,
@@ -1598,6 +1632,11 @@ function createStyles(theme: MobileTheme) {
     startInputRow: {
       flexDirection: "row",
       alignItems: "flex-start",
+      gap: 8
+    },
+    startComposerMain: {
+      flex: 1,
+      minWidth: 0,
       gap: 8
     },
     startInput: {

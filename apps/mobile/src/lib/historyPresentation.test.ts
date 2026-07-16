@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildHistoryDaySections, historyDayLabel } from "./historyPresentation";
+import { buildHistoryDaySections, groupHistoryDayEntries, historyDayLabel } from "./historyPresentation";
 import type { MobileTimeEntry } from "./api";
 
 describe("mobile history presentation", () => {
@@ -40,6 +40,33 @@ describe("mobile history presentation", () => {
 
     expect(sections[0].entries).toHaveLength(1);
     expect(sections[0].totalSeconds).toBe(900);
+  });
+
+  it("groups descriptionless tasks by category and totals their overlap", () => {
+    const grouped = groupHistoryDayEntries([
+      { entry: entry("work-one", new Date(2026, 6, 16, 9, 0), new Date(2026, 6, 16, 9, 30)), overlapSeconds: 1800 },
+      { entry: entry("work-two", new Date(2026, 6, 16, 10, 0), new Date(2026, 6, 16, 11, 0)), overlapSeconds: 3600 }
+    ].map((item) => ({
+      ...item,
+      entry: { ...item.entry, categoryId: "work", categoryName: "Work", description: null }
+    })));
+
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0].entries.map(({ entry: item }) => item.id)).toEqual(["work-one", "work-two"]);
+    expect(grouped[0].totalSeconds).toBe(5400);
+  });
+
+  it("groups matching descriptions case-insensitively but keeps categories separate", () => {
+    const base = [
+      { ...entry("school-one", new Date(2026, 6, 16, 9, 0), new Date(2026, 6, 16, 9, 30)), description: "School drop-off" },
+      { ...entry("school-two", new Date(2026, 6, 16, 10, 0), new Date(2026, 6, 16, 10, 30)), description: "  school   DROP-OFF " },
+      { ...entry("school-work", new Date(2026, 6, 16, 11, 0), new Date(2026, 6, 16, 11, 30)), categoryId: "work", categoryName: "Work", description: "School drop-off" }
+    ];
+    const grouped = groupHistoryDayEntries(base.map((item) => ({ entry: item, overlapSeconds: 1800 })));
+
+    expect(grouped).toHaveLength(2);
+    expect(grouped[0].entries).toHaveLength(2);
+    expect(grouped[1].entries).toHaveLength(1);
   });
 });
 

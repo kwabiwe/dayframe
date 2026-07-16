@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Dimensions,
@@ -96,24 +96,48 @@ export function ActiveTimerEditSheet({
   const keyboardLift = useRef(new Animated.Value(0)).current;
   const suggestionsProgress = useRef(new Animated.Value(0)).current;
   const descriptionInputRef = useRef<TextInput>(null);
+  const descriptionEntryStarted = useRef(false);
   const timeInputRef = useRef<TextInput>(null);
 
-  const entryId = entry?.id ?? null;
   const isRunningMode = mode === "running";
   const isEntryMode = mode === "entry";
   const isAddMode = mode === "add";
   const hasStoppedTime = isEntryMode || isAddMode;
+  const entryCategoryId = entry?.categoryId ?? null;
+  const entryDescription = entry?.description ?? null;
+  const entryStartedAt = entry?.startedAt ?? null;
+  const entryStoppedAt = entry?.stoppedAt ?? null;
+  const editorSessionKey = entryStartedAt ? `${mode}:${entryStartedAt}` : null;
+  const editorSnapshot = useRef({
+    categoryId: entryCategoryId,
+    description: entryDescription,
+    startedAt: entryStartedAt,
+    stoppedAt: entryStoppedAt,
+    suggestionsAvailable: suggestions.length > 0
+  });
+  editorSnapshot.current = {
+    categoryId: entryCategoryId,
+    description: entryDescription,
+    startedAt: entryStartedAt,
+    stoppedAt: entryStoppedAt,
+    suggestionsAvailable: suggestions.length > 0
+  };
 
-  useEffect(() => {
-    if (!visible) return;
-    if (!entry) return;
-    const startedAt = new Date(entry.startedAt);
-    setDescription(entry.description ?? "");
-    setSelectedCategoryId(entry.categoryId);
+  useLayoutEffect(() => {
+    if (!visible) {
+      descriptionEntryStarted.current = false;
+      return;
+    }
+    const snapshot = editorSnapshot.current;
+    if (!snapshot.startedAt) return;
+    const startedAt = new Date(snapshot.startedAt);
+    descriptionEntryStarted.current = false;
+    setDescription(snapshot.description ?? "");
+    setSelectedCategoryId(snapshot.categoryId);
     setDateText(formatDateInput(startedAt));
     setTimeText(formatTimeInput(startedAt));
-    if (entry.stoppedAt) {
-      const stoppedAt = new Date(entry.stoppedAt);
+    if (snapshot.stoppedAt) {
+      const stoppedAt = new Date(snapshot.stoppedAt);
       setStoppedDateText(formatDateInput(stoppedAt));
       setStoppedTimeText(formatTimeInput(stoppedAt));
     } else {
@@ -123,14 +147,30 @@ export function ActiveTimerEditSheet({
     setPickerStartAt(startedAt);
     setStartTimeEdited(false);
     setDatePickerOpen(false);
-    setSuggestionsVisible(
+    const shouldShowSuggestions = (
       isRunningMode &&
-      !entry.description &&
-      suggestions.length > 0
+      !snapshot.description &&
+      snapshot.suggestionsAvailable
     );
+    setSuggestionsMounted(shouldShowSuggestions);
+    setSuggestionsVisible(shouldShowSuggestions);
+    suggestionsProgress.setValue(shouldShowSuggestions ? 1 : 0);
     setDeleteConfirmationVisible(false);
     setValidationError(null);
-  }, [entry?.categoryId, entry?.description, entryId, isRunningMode, suggestions.length, visible]);
+  }, [
+    editorSessionKey,
+    isRunningMode,
+    suggestionsProgress,
+    visible
+  ]);
+
+  useLayoutEffect(() => {
+    if (!visible || !editorSessionKey || !isRunningMode || descriptionEntryStarted.current) return;
+    const shouldShowSuggestions = !entryDescription && suggestions.length > 0;
+    setSuggestionsMounted(shouldShowSuggestions);
+    setSuggestionsVisible(shouldShowSuggestions);
+    suggestionsProgress.setValue(shouldShowSuggestions ? 1 : 0);
+  }, [editorSessionKey, entryDescription, isRunningMode, suggestions.length, suggestionsProgress, visible]);
 
   useEffect(() => {
     if (!visible) {
@@ -389,6 +429,7 @@ export function ActiveTimerEditSheet({
     if (busy || !entry || !onApplySuggestion) return;
     const previousDescription = description;
     const previousCategoryId = selectedCategoryId;
+    descriptionEntryStarted.current = true;
     setDescription(suggestion.description);
     setSelectedCategoryId(suggestion.categoryId);
     setSuggestionsVisible(false);
@@ -436,6 +477,7 @@ export function ActiveTimerEditSheet({
 
   function focusDescriptionField() {
     setDatePickerOpen(false);
+    descriptionEntryStarted.current = true;
     hideSuggestionsForDescriptionEntry();
   }
 

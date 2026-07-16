@@ -79,6 +79,7 @@ Required checks:
 - Pressing mobile Play while a timer is already running opens the same running edit sheet/suggestion flow instead of bypassing suggestions or starting a duplicate.
 - Applying a running-timer suggestion issues one entry update and never another timer-start request.
 - Running-sheet suggestions stay above Description/Category/Start time, cap at six, dismiss outside, and hide when Description receives focus.
+- Suggestions that arrive after the running sheet opens may appear only while the description is still untouched; they must not reopen after manual entry has begun.
 - Normal mobile timer mutations show no spinner, progress bar, or layout-moving loading state. Start, stop, edit, delete, and suggestion-apply should update optimistically and reconcile silently; pull-to-refresh remains the explicit visible-refresh path.
 - Edit Timer delete confirmation does not unmount/collapse the suggestions area or reflow the sheet content underneath.
 
@@ -102,6 +103,8 @@ Required checks:
 - Calendar, List, and Timesheet render.
 - Time blocks are clickable/editable.
 - Mobile anchored pinch zoom stays smooth and keeps the gesture midpoint anchored. Check for jitter, dropped-frame feel, scroll-position jumps, and excessive rerenders after calendar or gesture changes.
+- During an active mobile pinch, update UI-thread gesture values only; commit React layout state and the anchored scroll position once when the gesture ends.
+- Repeated Today entries collapse by normalized description and category, descriptionless entries collapse by category, totals sum their children, and expanded children remain individually editable.
 - Review action buttons remain tappable and readable on phone width.
 - No duplicate React keys or runtime overlays.
 - Light and dark theme remain legible.
