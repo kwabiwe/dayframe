@@ -139,7 +139,7 @@ Post-merge release:
 
 - After PR #69 merged to `main` as `e1554e4`, the release machine reran `npm run test`, `npm run typecheck`, `npm run lint`, `npm run build`, `npm run check:brand-assets`, `git diff --check`, and `npm run testflight:preflight`.
 - TestFlight build `0.1.0 (44)` was archived, exported, uploaded, and verified in App Store Connect with delivery/build ID `c9c48192-4cc2-47a8-a272-0cf6bd6b5107`, `processingState=VALID`, `usesNonExemptEncryption=false`, en-GB notes set, `Internal Health Debug` all-build access, and `internalBuildState=IN_BETA_TESTING`.
-- Vercel production is Ready for commit `e1554e4` at `https://dayframe-ogjqj5sq5-dayframeworkshop.vercel.app`, aliased to `https://dayframe-web.vercel.app`.
+- Vercel production verified PR #69 runtime commit `e1554e4` as Ready at `https://dayframe-ogjqj5sq5-dayframeworkshop.vercel.app`; later docs-only release commits may advance the alias without changing runtime code.
 
 ## Closure criteria
 
