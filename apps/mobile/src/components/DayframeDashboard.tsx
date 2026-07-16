@@ -15,6 +15,7 @@ import {
   AppState,
   Easing,
   Linking,
+  Modal,
   PanResponder,
   Pressable,
   RefreshControl,
@@ -153,6 +154,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [loading, setLoading] = useState(false);
   const [authState, setAuthState] = useState<AuthState>("checking");
   const [selectedDayKey, setSelectedDayKey] = useState(() => formatDateKey(new Date()));
+  const [datePickerVisible, setDatePickerVisible] = useState(false);
+  const [datePickerMonth, setDatePickerMonth] = useState(() => startOfMonth(new Date()));
   const [reportRange, setReportRange] = useState<ReportRange>("today");
   const [calendarEditEntry, setCalendarEditEntry] = useState<CalendarEntry | null>(null);
   const [calendarHourHeight, setCalendarHourHeight] = useState(TIMELINE_DEFAULT_HOUR_HEIGHT);
@@ -180,7 +183,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [calendarEditSaving, setCalendarEditSaving] = useState(false);
   const [calendarEditDeleting, setCalendarEditDeleting] = useState(false);
   const [calendarGestureLocked, setCalendarGestureLocked] = useState(false);
-  const [chartProgress, setChartProgress] = useState(1);
   const reduceMotion = useReduceMotionPreference();
   const refreshInFlight = useRef(false);
   const queueSyncInFlight = useRef(false);
@@ -190,7 +192,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const calendarScrollRef = useRef<ScrollView>(null);
   const calendarScrollY = useRef(0);
   const entrance = useRef(new Animated.Value(0)).current;
-  const chartBuild = useRef(new Animated.Value(1)).current;
   const activeTimerExpansion = useRef(new Animated.Value(0)).current;
   const timerProgress = useRef(new Animated.Value(0)).current;
   const authNameRef = useRef<TextInput>(null);
@@ -497,17 +498,21 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     () => buildWeekStripDays(selectedDayKey, now),
     [now, selectedDayKey]
   );
-  const summaryEntries = useMemo(
-    () => mergeActiveEntry(data?.dayEntries ?? data?.entries ?? [], data?.activeEntry ?? null),
-    [data?.activeEntry, data?.dayEntries, data?.entries]
+  const summaryEntries = useMemo(() => {
+    if (!data) return [];
+    return mergeActiveEntry(
+      dedupeEntriesById([...(data.entries ?? []), ...(data.weekEntries ?? []), ...(data.dayEntries ?? [])]),
+      data.activeEntry
+    )
+      .filter((entry) => entryOverlapsDay(entry, selectedDayKey, now))
+      .sort((left, right) => new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime());
+  }, [data, now, selectedDayKey]);
+  const summaryTotal = useMemo(
+    () => sumOverlappingDaySeconds(summaryEntries.filter((entry) => !isReviewNeededEntry(entry)), selectedDayKey, now),
+    [now, selectedDayKey, summaryEntries]
   );
-  const summarySegments = useMemo(
-    () => buildTodaySummarySegments(summaryEntries, now, theme.mode),
-    [summaryEntries, now, theme.mode]
-  );
-  const summaryTotal = summarySegments.reduce((sum, segment) => sum + segment.seconds, 0);
   const summaryReviewCount = useMemo(() => {
-    const rangeStart = dateFromKey(todayKey);
+    const rangeStart = dateFromKey(selectedDayKey);
     return countReviewNeededActivityForRange({
       entries: summaryEntries,
       now,
@@ -515,7 +520,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       rangeStart,
       reviewItems: data?.reviewItems ?? []
     });
-  }, [data?.reviewItems, now, summaryEntries, todayKey]);
+  }, [data?.reviewItems, now, selectedDayKey, summaryEntries]);
   const activeCategoryColor = displayedActiveEntry?.categoryName
     ? paletteColorFor(
         displayedActiveEntry.categoryColor ?? displayedActiveEntry.categoryId,
@@ -557,27 +562,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     if (liveActivityReconciliationDeferred.current) return;
     void syncLiveActivityForEntry(data?.activeEntry ?? null);
   }, [data]);
-
-  useEffect(() => {
-    chartBuild.stopAnimation();
-    if (reduceMotion) {
-      chartBuild.setValue(1);
-      setChartProgress(1);
-      return undefined;
-    }
-    chartBuild.setValue(0);
-    const listenerId = chartBuild.addListener(({ value }) => setChartProgress(value));
-    Animated.timing(chartBuild, {
-      toValue: 1,
-      duration: 720,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false
-    }).start();
-
-    return () => {
-      chartBuild.removeListener(listenerId);
-    };
-  }, [chartBuild, reduceMotion, summarySegments.length]);
 
   useEffect(() => {
     if (!timerActionPending) {
@@ -809,6 +793,16 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       return dayKey;
     });
   }, []);
+
+  const openDatePicker = useCallback(() => {
+    setDatePickerMonth(startOfMonth(dateFromKey(selectedDayKey)));
+    setDatePickerVisible(true);
+  }, [selectedDayKey]);
+
+  const selectDashboardDay = useCallback((dayKey: string) => {
+    selectCalendarDay(dayKey);
+    setDatePickerVisible(false);
+  }, [selectCalendarDay]);
 
   const setCalendarZoom = useCallback((hourHeight: number, focus?: CalendarZoomFocus) => {
     const nextHourHeight = clamp(hourHeight, TIMELINE_MIN_HOUR_HEIGHT, TIMELINE_MAX_HOUR_HEIGHT);
@@ -1054,18 +1048,30 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               />
             </View>
             <Pressable
-              accessibilityLabel="Open settings"
+              accessibilityLabel={tab === "timer" ? "Choose day" : "Open settings"}
               accessibilityRole="button"
-              style={pressable(styles.iconButton, styles.buttonPressed)}
-              onPress={() => router.push("/settings")}
+              style={pressable(tab === "timer" ? styles.datePill : styles.iconButton, styles.buttonPressed)}
+              onPress={tab === "timer" ? openDatePicker : () => router.push("/settings")}
             >
-              <SettingsGlyph color={theme.accent} />
+              {tab === "timer" ? (
+                <>
+                  <Text style={styles.datePillText}>{selectedDayKey === todayKey ? "Today" : formatCompactDay(dateFromKey(selectedDayKey))}</Text>
+                  <ChevronDownGlyph color={theme.textSecondary} />
+                </>
+              ) : (
+                <SettingsGlyph color={theme.accent} />
+              )}
             </Pressable>
           </View>
 
           {tab === "timer" ? (
             <>
-              <Pressable
+              <View style={styles.todayHeading}>
+                <Text style={styles.todayTitle}>{formatSelectedDayTitle(dateFromKey(selectedDayKey))}</Text>
+                <Text style={styles.todaySubtitle}>{formatLongDay(dateFromKey(selectedDayKey))}</Text>
+              </View>
+
+              {displayedActiveEntry ? <Pressable
                 accessibilityLabel={hasLiveActiveTimer ? "Edit running timer" : undefined}
                 accessibilityRole={hasLiveActiveTimer ? "button" : undefined}
                 disabled={!hasLiveActiveTimer}
@@ -1143,10 +1149,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                     />
                   ) : null}
                 </View>
-              </Pressable>
+              </Pressable> : null}
 
               <View style={styles.panel}>
-                <Text style={styles.sectionTitle}>Start task</Text>
+                <Text style={styles.label}>START TASK</Text>
                 <View style={styles.startInputRow}>
                   <Pressable
                     accessibilityLabel="Open start task sheet"
@@ -1179,65 +1185,74 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                     <PlayGlyph color={theme.onAccent} />
                   </Pressable>
                 </View>
-                <View style={styles.quickActionsBlock}>
-                  <Text style={styles.quickActionsLabel}>Quick actions</Text>
-                  <ScrollView
-                    horizontal
-                    keyboardShouldPersistTaps="handled"
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.compactCategoryScroller}
-                  >
-                    {quickActions.map((action) => {
-                      const categoryColor = action.isUncategorized
-                        ? null
-                        : paletteColorFor(action.color, action.subtitle ?? action.name, theme.mode);
-                      return (
-                        <Pressable
-                          key={action.key}
-                          accessibilityRole="button"
-                          accessibilityLabel={`Start ${action.name}`}
-                          style={pressable(styles.categoryPillTouch, styles.buttonPressed)}
-                          onPress={() => {
-                            void startTask(action.id, action.description ?? customDescription);
-                          }}
+              </View>
+
+              <View style={styles.quickActionsBlock}>
+                <Text style={styles.quickActionsLabel}>Quick actions</Text>
+                <ScrollView
+                  horizontal
+                  keyboardShouldPersistTaps="handled"
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.compactCategoryScroller}
+                >
+                  {quickActions.map((action) => {
+                    const categoryColor = action.isUncategorized
+                      ? null
+                      : paletteColorFor(action.color, action.subtitle ?? action.name, theme.mode);
+                    return (
+                      <Pressable
+                        key={action.key}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Start ${action.name}`}
+                        style={pressable(styles.categoryPillTouch, styles.buttonPressed)}
+                        onPress={() => {
+                          void startTask(action.id, action.description ?? customDescription);
+                        }}
+                      >
+                        <View
+                          style={[
+                            styles.categoryPill,
+                            categoryColor
+                              ? { backgroundColor: colorWithAlpha(categoryColor, theme.mode === "dark" ? 0.18 : 0.13) }
+                              : styles.categoryPillMuted
+                          ]}
                         >
                           <View
                             style={[
-                              styles.categoryPill,
+                              styles.colorDot,
                               categoryColor
-                                ? { borderColor: categoryColor }
-                                : styles.categoryPillMuted
+                                ? { backgroundColor: categoryColor }
+                                : styles.colorDotMuted
                             ]}
-                          >
-                            <View
-                              style={[
-                                styles.colorDot,
-                                categoryColor
-                                  ? { backgroundColor: categoryColor }
-                                  : styles.colorDotMuted
-                              ]}
-                            />
-                            <View>
-                              <Text style={styles.categoryPillText} numberOfLines={1}>{action.name}</Text>
-                              {action.subtitle ? (
-                                <Text style={styles.quickCategoryHint} numberOfLines={1}>
-                                  {action.subtitle}
-                                </Text>
-                              ) : null}
-                            </View>
+                          />
+                          <View>
+                            <Text style={styles.categoryPillText} numberOfLines={1}>{action.name}</Text>
+                            {action.subtitle ? (
+                              <Text style={styles.quickCategoryHint} numberOfLines={1}>
+                                {action.subtitle}
+                              </Text>
+                            ) : null}
                           </View>
-                        </Pressable>
-                      );
-                    })}
-                  </ScrollView>
-                </View>
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
               </View>
 
               <TodaySummary
-                chartProgress={chartProgress}
+                dayKey={selectedDayKey}
+                entries={summaryEntries}
+                now={now}
+                onOpenEntry={(entry) => {
+                  if (!entry.stoppedAt) {
+                    setActiveEditVisible(true);
+                    return;
+                  }
+                  setCalendarEditEntry({ ...entry, isActive: false });
+                }}
                 onOpenReview={() => router.push("/review")}
                 reviewCount={summaryReviewCount}
-                segments={summarySegments}
                 styles={styles}
                 theme={theme}
                 total={summaryTotal}
@@ -1349,6 +1364,17 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         styles={styles}
         theme={theme}
         visible={Boolean(calendarEditEntry)}
+      />
+      <DashboardDatePicker
+        month={datePickerMonth}
+        onChangeMonth={(offset) => setDatePickerMonth((current) => addMonths(current, offset))}
+        onClose={() => setDatePickerVisible(false)}
+        onSelect={selectDashboardDay}
+        selectedDayKey={selectedDayKey}
+        styles={styles}
+        theme={theme}
+        todayKey={todayKey}
+        visible={datePickerVisible}
       />
     </DashboardContext.Provider>
   );
@@ -1751,6 +1777,7 @@ function ReportsTab({
   return (
     <View style={styles.tabScreenStack}>
       <View style={styles.panel}>
+        <Text style={styles.reportScreenTitle}>Reports</Text>
         <View style={styles.reportRangeRow}>
           {(["today", "week"] as const).map((option) => {
             const selected = option === range;
@@ -1956,35 +1983,192 @@ function StopGlyph({ color }: { color: string }) {
   );
 }
 
+function ChevronDownGlyph({ color }: { color: string }) {
+  return (
+    <Svg width={14} height={14} viewBox="0 0 24 24">
+      <Path d="m7 10 5 5 5-5" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
+    </Svg>
+  );
+}
+
+function DashboardDatePicker({
+  month,
+  onChangeMonth,
+  onClose,
+  onSelect,
+  selectedDayKey,
+  styles,
+  theme,
+  todayKey,
+  visible
+}: {
+  month: Date;
+  onChangeMonth: (offset: number) => void;
+  onClose: () => void;
+  onSelect: (dayKey: string) => void;
+  selectedDayKey: string;
+  styles: MobileStyles;
+  theme: MobileTheme;
+  todayKey: string;
+  visible: boolean;
+}) {
+  const days = monthGridDays(month);
+  return (
+    <Modal animationType="fade" onRequestClose={onClose} transparent visible={visible}>
+      <View style={styles.datePickerOverlay}>
+        <Pressable accessibilityLabel="Close date picker" accessibilityRole="button" onPress={onClose} style={styles.sheetBackdrop} />
+        <View accessibilityLabel="Choose a date" accessibilityRole="summary" style={styles.datePickerSheet}>
+          <View style={styles.datePickerHeader}>
+            <Pressable
+              accessibilityLabel="Previous month"
+              accessibilityRole="button"
+              onPress={() => onChangeMonth(-1)}
+              style={pressable(styles.datePickerNavButton, styles.buttonPressed)}
+            >
+              <CalendarChevronGlyph color={theme.textPrimary} direction="left" />
+            </Pressable>
+            <Text style={styles.datePickerMonth}>{month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</Text>
+            <Pressable
+              accessibilityLabel="Next month"
+              accessibilityRole="button"
+              onPress={() => onChangeMonth(1)}
+              style={pressable(styles.datePickerNavButton, styles.buttonPressed)}
+            >
+              <CalendarChevronGlyph color={theme.textPrimary} direction="right" />
+            </Pressable>
+          </View>
+          <View style={styles.datePickerWeekdays}>
+            {["M", "T", "W", "T", "F", "S", "S"].map((label, index) => (
+              <Text key={`${label}-${index}`} style={styles.datePickerWeekday}>{label}</Text>
+            ))}
+          </View>
+          <View style={styles.datePickerGrid}>
+            {days.map((date) => {
+              const dayKey = formatDateKey(date);
+              const selected = dayKey === selectedDayKey;
+              const isToday = dayKey === todayKey;
+              const inMonth = date.getMonth() === month.getMonth();
+              return (
+                <Pressable
+                  key={dayKey}
+                  accessibilityLabel={formatLongDay(date)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                  onPress={() => onSelect(dayKey)}
+                  style={({ pressed }) => [
+                    styles.datePickerDay,
+                    isToday ? styles.datePickerDayToday : null,
+                    selected ? styles.datePickerDaySelected : null,
+                    pressed ? styles.buttonPressed : null
+                  ]}
+                >
+                  <Text style={[
+                    styles.datePickerDayText,
+                    !inMonth ? styles.datePickerDayTextOutside : null,
+                    selected ? styles.datePickerDayTextSelected : null
+                  ]}>
+                    {date.getDate()}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <View style={styles.datePickerActions}>
+            <Pressable
+              accessibilityLabel="Show today"
+              accessibilityRole="button"
+              onPress={() => onSelect(todayKey)}
+              style={pressable(styles.datePickerTodayButton, styles.buttonPressed)}
+            >
+              <Text style={styles.datePickerTodayText}>Today</Text>
+            </Pressable>
+            <Pressable
+              accessibilityLabel="Close date picker"
+              accessibilityRole="button"
+              onPress={onClose}
+              style={pressable(styles.datePickerDoneButton, styles.buttonPressed)}
+            >
+              <Text style={styles.datePickerDoneText}>Done</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function CalendarChevronGlyph({ color, direction }: { color: string; direction: "left" | "right" }) {
+  return (
+    <Svg width={18} height={18} viewBox="0 0 24 24">
+      <Path
+        d={direction === "left" ? "m15 18-6-6 6-6" : "m9 18 6-6-6-6"}
+        fill="none"
+        stroke={color}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+      />
+    </Svg>
+  );
+}
+
 function TodaySummary({
-  chartProgress,
+  dayKey,
+  entries,
+  now,
+  onOpenEntry,
   onOpenReview,
   reviewCount,
-  segments,
   styles,
   theme,
   total
 }: {
-  chartProgress: number;
+  dayKey: string;
+  entries: TimeEntry[];
+  now: number;
+  onOpenEntry: (entry: TimeEntry) => void;
   onOpenReview: () => void;
   reviewCount: number;
-  segments: SummarySegment[];
   styles: MobileStyles;
   theme: MobileTheme;
   total: number;
 }) {
-  return (
-    <View style={styles.lifecyclePanel}>
-      <View style={styles.summaryHeader}>
-        <View>
-          <Text style={styles.label}>Today summary</Text>
-          <Text style={styles.sectionTitle}>Today</Text>
-        </View>
-        <Text style={styles.summaryTotal}>{formatDuration(total)}</Text>
-      </View>
+  const visibleEntries = entries.filter((entry) => !isReviewNeededEntry(entry)).slice(0, 5);
+  const dayStart = dateFromKey(dayKey);
+  const dayEnd = addDaysToDate(dayStart, 1);
 
-      <View style={styles.chartWrap}>
-        <DonutChart progress={chartProgress} segments={segments} styles={styles} theme={theme} total={total} />
+  return (
+    <View style={styles.todaySummaryBlock}>
+      <Text style={styles.quickActionsLabel}>
+        {dayKey === formatDateKey(new Date(now)) ? "TODAY" : formatCompactDay(dayStart).toUpperCase()}
+      </Text>
+      <View style={styles.todayEntryCard}>
+        {visibleEntries.length === 0 ? (
+          <Text style={styles.todayEmptyText}>No tracked time for this day.</Text>
+        ) : visibleEntries.map((entry, index) => (
+          <Pressable
+            key={entry.id}
+            accessibilityLabel={`Edit ${displayEntryTitle(entry)}`}
+            accessibilityRole="button"
+            onPress={() => onOpenEntry(entry)}
+            style={({ pressed }) => [
+              styles.todayEntryRow,
+              index > 0 ? styles.todayEntryDivider : null,
+              pressed ? styles.buttonPressed : null
+            ]}
+          >
+            <View style={[styles.todayEntryDot, { backgroundColor: entryCategoryColor(entry, theme.mode) }]} />
+            <View style={styles.todayEntryText}>
+              <Text style={styles.todayEntryTitle} numberOfLines={1}>{displayEntryTitle(entry)}</Text>
+              <Text style={styles.todayEntryMeta} numberOfLines={1}>
+                {formatEntryTimeRange(entry, now)}{entry.categoryName ? ` · ${entry.categoryName}` : ""}
+              </Text>
+            </View>
+            <Text style={styles.todayEntryDuration}>
+              {formatDuration(entryOverlapSeconds(entry, dayStart, dayEnd, now))}
+            </Text>
+          </Pressable>
+        ))}
       </View>
       {reviewCount > 0 ? (
         <Pressable
@@ -2002,24 +2186,9 @@ function TodaySummary({
           <Text style={styles.reviewNoteAction}>Open Review</Text>
         </Pressable>
       ) : null}
-
-      <View style={styles.legendList}>
-        {segments.length === 0 ? (
-          <Text style={styles.muted}>No tracked time today.</Text>
-        ) : null}
-        {segments.map((segment) => (
-          <View key={segment.key} style={styles.legendRow}>
-            <SegmentSwatch segment={segment} styles={styles} theme={theme} variant="legend" />
-            <View style={styles.legendText}>
-              <Text style={styles.legendPlace}>{segment.categoryName}</Text>
-              <Text style={styles.legendProject}>Category</Text>
-            </View>
-            <View style={styles.legendNumbers}>
-              <Text style={styles.legendDuration}>{formatDuration(segment.seconds)}</Text>
-              <Text style={styles.legendShare}>{segment.share}%</Text>
-            </View>
-          </View>
-        ))}
+      <View style={styles.todayTrackedRow}>
+        <Text style={styles.todayTrackedLabel}>Tracked</Text>
+        <Text style={styles.todayTrackedValue}>{formatDuration(total)}</Text>
       </View>
     </View>
   );
@@ -2038,10 +2207,10 @@ function DonutChart({
   theme: MobileTheme;
   total: number;
 }) {
-  const size = 264;
+  const size = 184;
   const center = size / 2;
-  const outerRadius = 122;
-  const innerRadius = 82;
+  const outerRadius = 84;
+  const innerRadius = 57;
   let cursor = 0;
 
   return (
@@ -2288,14 +2457,12 @@ function buildCategorySegments(
   const totals = new Map<string, Omit<SummarySegment, "share">>();
 
   for (const entry of entries) {
-    const startedAt = new Date(entry.startedAt);
-    if (startedAt < rangeStart || startedAt >= rangeEnd) continue;
+    const seconds = entryOverlapSeconds(entry, rangeStart, rangeEnd, now);
+    if (seconds <= 0) continue;
     const categoryName = entry.categoryName ?? "Uncategorized";
     const key = entry.categoryId ?? "uncategorized";
     const isUncategorized = !entry.categoryId && !entry.categoryName;
     const current = totals.get(key);
-    const seconds = entryDurationSeconds(entry, now);
-
     totals.set(key, {
       key,
       categoryName,
@@ -2486,6 +2653,19 @@ function formatSelectedDayTitle(date: Date) {
   });
 }
 
+function formatCompactDay(date: Date) {
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function formatLongDay(date: Date) {
+  return date.toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric"
+  });
+}
+
 function formatWeekday(date: Date) {
   return date.toLocaleDateString(undefined, { weekday: "short" });
 }
@@ -2541,6 +2721,26 @@ function addDaysToDate(date: Date, days: number) {
   const copy = new Date(date);
   copy.setDate(copy.getDate() + days);
   return copy;
+}
+
+function startOfMonth(date: Date) {
+  const copy = new Date(date);
+  copy.setDate(1);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
+}
+
+function addMonths(date: Date, months: number) {
+  const copy = startOfMonth(date);
+  copy.setMonth(copy.getMonth() + months);
+  return copy;
+}
+
+function monthGridDays(month: Date) {
+  const firstDay = startOfMonth(month);
+  const mondayOffset = (firstDay.getDay() + 6) % 7;
+  const gridStart = addDaysToDate(firstDay, -mondayOffset);
+  return Array.from({ length: 42 }, (_, index) => addDaysToDate(gridStart, index));
 }
 
 function isSameLocalDay(left: Date, right: Date) {

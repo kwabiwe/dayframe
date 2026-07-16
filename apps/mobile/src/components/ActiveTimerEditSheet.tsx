@@ -31,7 +31,7 @@ import type { MobileBootstrap, MobileTimeEntry, TimeEntryUpdatePatch } from "@/l
 import { MOBILE_MOTION, useReduceMotionPreference } from "@/lib/motion";
 import { runningTimerSheetElapsedSeconds } from "@/lib/timerPresentation";
 
-const MAX_RUNNING_SUGGESTIONS = 4;
+const MAX_RUNNING_SUGGESTIONS = 6;
 
 type Category = MobileBootstrap["categories"][number];
 type EditSheetMode = "running" | "entry" | "start";
@@ -344,7 +344,7 @@ export function ActiveTimerEditSheet({
   const suggestionsAnimatedStyle = {
     maxHeight: suggestionsProgress.interpolate({
       inputRange: [0, 1],
-      outputRange: [0, 210]
+      outputRange: [0, 306]
     }),
     opacity: suggestionsProgress,
     transform: [
@@ -785,7 +785,7 @@ export function ActiveTimerEditSheet({
                     >
                       <View style={styles.activeEditStartSummaryText}>
                         <Text style={styles.activeEditStartDate} numberOfLines={1}>
-                          {formatPickerDate(displayedStartAt)} · {formatDateInput(displayedStartAt)}
+                          {formatPickerDate(displayedStartAt)}
                         </Text>
                       </View>
                     </Pressable>
@@ -990,7 +990,7 @@ function RunningTimerSuggestionRow({
         <Text style={styles.taskSuggestionTitle} numberOfLines={1}>{suggestion.description}</Text>
         {categoryName && color ? (
           <View style={styles.taskSuggestionMetaRow}>
-            <View style={[styles.colorDot, { backgroundColor: color, borderColor: color }]} />
+            <View style={[styles.colorDot, { backgroundColor: color }]} />
             <Text style={styles.taskSuggestionMeta} numberOfLines={1}>{categoryName}</Text>
           </View>
         ) : null}
@@ -1084,21 +1084,18 @@ function CategoryChip({
         [
           styles.activeEditCategoryChip,
           selected ? styles.activeEditCategoryChipSelected : null,
-          category ? { borderColor: color } : null,
-          selected ? { borderColor: color } : null
+          selected ? { backgroundColor: category ? colorWithAlpha(color, theme.mode === "dark" ? 0.22 : 0.15) : theme.accentSoft } : null
         ],
         styles.buttonPressed
       )}
     >
-      <View style={[styles.colorDot, { backgroundColor: category ? color : "transparent", borderColor: color }]} />
+      <View style={[styles.colorDot, { backgroundColor: category ? color : theme.textSecondary }]} />
       <Text style={[
         styles.activeEditCategoryChipText,
-        selected ? styles.activeEditCategoryChipTextSelected : null,
-        selected ? { color } : null
+        selected ? styles.activeEditCategoryChipTextSelected : null
       ]}>
         {label}
       </Text>
-      {selected ? <CheckGlyph color={color} /> : null}
     </Pressable>
   );
 }
@@ -1230,20 +1227,22 @@ function formatClockDuration(seconds: number) {
     .padStart(2, "0")}`;
 }
 
-function CheckGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={22} height={22} viewBox="0 0 24 24">
-      <Path d="m5 12 4 4L19 6" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} />
-    </Svg>
-  );
-}
-
 function PlayGlyph({ color }: { color: string }) {
   return (
     <Svg width={20} height={20} viewBox="0 0 24 24">
       <Path d="M7 4v16l13-8L7 4Z" fill={color} />
     </Svg>
   );
+}
+
+function colorWithAlpha(hex: string, alpha: number) {
+  const match = /^#?([0-9a-f]{6})$/i.exec(hex);
+  if (!match) return hex;
+  const value = match[1];
+  const red = Number.parseInt(value.slice(0, 2), 16);
+  const green = Number.parseInt(value.slice(2, 4), 16);
+  const blue = Number.parseInt(value.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }
 
 function StopGlyph({ color }: { color: string }) {
