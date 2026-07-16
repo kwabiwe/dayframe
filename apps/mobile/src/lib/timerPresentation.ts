@@ -2,6 +2,9 @@ import type { RecentActivitySuggestion } from "@dayframe/shared";
 import type { MobileBootstrap, TimeEntryUpdatePatch } from "./api";
 
 type ActiveTimerEntry = MobileBootstrap["activeEntry"];
+type MobileTimeEntry = MobileBootstrap["entries"][number];
+
+export const OPTIMISTIC_TIMER_ID_PREFIX = "optimistic-active-timer:";
 
 export type MobileQuickAction = {
   color: string | null;
@@ -84,6 +87,123 @@ export async function applySuggestionToRunningTimer(input: {
   };
   await input.updateEntry(input.entryId, patch);
   return patch;
+}
+
+export function optimisticPatchTimeEntry(
+  data: MobileBootstrap | null,
+  entryId: string,
+  patch: TimeEntryUpdatePatch
+) {
+  if (!data) return data;
+  const patchEntry = (entry: MobileTimeEntry) =>
+    entry.id === entryId ? patchedMobileTimeEntry(entry, patch, data.categories) : entry;
+  return {
+    ...data,
+    activeEntry: data.activeEntry ? patchEntry(data.activeEntry) : null,
+    entries: data.entries.map(patchEntry),
+    dayEntries: data.dayEntries?.map(patchEntry),
+    weekEntries: data.weekEntries?.map(patchEntry)
+  };
+}
+
+export function optimisticDeleteTimeEntry(data: MobileBootstrap | null, entryId: string) {
+  if (!data) return data;
+  const keepOtherEntry = (entry: MobileTimeEntry) => entry.id !== entryId;
+  return {
+    ...data,
+    activeEntry: data.activeEntry?.id === entryId ? null : data.activeEntry,
+    entries: data.entries.filter(keepOtherEntry),
+    dayEntries: data.dayEntries?.filter(keepOtherEntry),
+    weekEntries: data.weekEntries?.filter(keepOtherEntry)
+  };
+}
+
+export function optimisticStopActiveTimer(data: MobileBootstrap | null, stoppedAt: string) {
+  if (!data?.activeEntry) return data;
+  const completed = patchedMobileTimeEntry(data.activeEntry, { stoppedAt }, data.categories);
+  return {
+    ...data,
+    activeEntry: null,
+    entries: upsertMobileEntry(data.entries, completed),
+    dayEntries: data.dayEntries ? upsertMobileEntry(data.dayEntries, completed) : data.dayEntries,
+    weekEntries: data.weekEntries ? upsertMobileEntry(data.weekEntries, completed) : data.weekEntries
+  };
+}
+
+export function optimisticStartTimer(data: MobileBootstrap | null, pendingEntry: MobileTimeEntry) {
+  if (!data) return data;
+  const replaced = data.activeEntry
+    ? patchedMobileTimeEntry(data.activeEntry, { stoppedAt: pendingEntry.startedAt }, data.categories)
+    : null;
+  const withReplacement = (entries: MobileTimeEntry[]) => {
+    const next = replaced ? upsertMobileEntry(entries, replaced) : entries;
+    return upsertMobileEntry(next, pendingEntry);
+  };
+  return {
+    ...data,
+    activeEntry: pendingEntry,
+    entries: withReplacement(data.entries),
+    dayEntries: data.dayEntries ? withReplacement(data.dayEntries) : data.dayEntries,
+    weekEntries: data.weekEntries ? withReplacement(data.weekEntries) : data.weekEntries
+  };
+}
+
+export function replaceOptimisticTimeEntryId(
+  data: MobileBootstrap | null,
+  optimisticId: string,
+  persistedId: string
+) {
+  if (!data) return data;
+  const replaceId = (entry: MobileTimeEntry) =>
+    entry.id === optimisticId ? { ...entry, id: persistedId } : entry;
+  return {
+    ...data,
+    activeEntry: data.activeEntry ? replaceId(data.activeEntry) : null,
+    entries: dedupeMobileEntries(data.entries.map(replaceId)),
+    dayEntries: data.dayEntries ? dedupeMobileEntries(data.dayEntries.map(replaceId)) : data.dayEntries,
+    weekEntries: data.weekEntries ? dedupeMobileEntries(data.weekEntries.map(replaceId)) : data.weekEntries
+  };
+}
+
+export function mobileTimeEntryById(data: MobileBootstrap | null, entryId: string) {
+  if (!data) return null;
+  if (data.activeEntry?.id === entryId) return data.activeEntry;
+  return [...data.entries, ...(data.dayEntries ?? []), ...(data.weekEntries ?? [])]
+    .find((entry) => entry.id === entryId) ?? null;
+}
+
+function patchedMobileTimeEntry(
+  entry: MobileTimeEntry,
+  patch: TimeEntryUpdatePatch,
+  categories: MobileBootstrap["categories"]
+): MobileTimeEntry {
+  const next: MobileTimeEntry = { ...entry, ...patch };
+  if (Object.prototype.hasOwnProperty.call(patch, "categoryId")) {
+    const category = patch.categoryId
+      ? categories.find((candidate) => candidate.id === patch.categoryId)
+      : null;
+    next.categoryId = patch.categoryId ?? null;
+    next.categoryName = category?.name ?? null;
+    next.categoryColor = category?.color ?? null;
+  }
+  const startedAtMs = Date.parse(next.startedAt);
+  const stoppedAtMs = next.stoppedAt ? Date.parse(next.stoppedAt) : NaN;
+  if (Number.isFinite(startedAtMs) && Number.isFinite(stoppedAtMs)) {
+    next.durationSeconds = Math.max(0, Math.floor((stoppedAtMs - startedAtMs) / 1000));
+  }
+  return next;
+}
+
+function upsertMobileEntry(entries: MobileTimeEntry[], nextEntry: MobileTimeEntry) {
+  const existingIndex = entries.findIndex((entry) => entry.id === nextEntry.id);
+  if (existingIndex < 0) return [nextEntry, ...entries];
+  return entries.map((entry, index) => index === existingIndex ? nextEntry : entry);
+}
+
+function dedupeMobileEntries(entries: MobileTimeEntry[]) {
+  const byId = new Map<string, MobileTimeEntry>();
+  for (const entry of entries) byId.set(entry.id, entry);
+  return [...byId.values()];
 }
 
 export function buildMobileQuickActions(

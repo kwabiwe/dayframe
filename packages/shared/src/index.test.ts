@@ -125,7 +125,7 @@ describe("recent activity suggestions", () => {
     ]);
   });
 
-  it("excludes automatic and unresolved activity from task-entry suggestions", () => {
+  it("excludes automatic and unresolved activity unless the user explicitly confirmed it", () => {
     expect(buildRecentActivitySuggestions([
       {
         categoryId: "health",
@@ -214,13 +214,23 @@ describe("recent activity suggestions", () => {
         source: null,
         startedAt: "2026-07-14T11:30:00.000Z",
         stoppedAt: "2026-07-14T11:50:00.000Z"
+      },
+      {
+        categoryId: "family",
+        categoryName: "Family",
+        description: "School pickup",
+        durationSeconds: 1200,
+        eventType: "geofence_exit",
+        reviewStatus: "confirmed",
+        source: "location_learning",
+        startedAt: "2026-07-14T15:00:00.000Z",
+        stoppedAt: "2026-07-14T15:20:00.000Z",
+        userConfirmed: true
       }
-    ])).toEqual([
-      expect.objectContaining({
-        categoryId: "focus",
-        description: "Write design notes"
-      })
-    ]);
+    ])).toEqual(expect.arrayContaining([
+      expect.objectContaining({ categoryId: "focus", description: "Write design notes" }),
+      expect.objectContaining({ categoryId: "family", description: "School pickup" })
+    ]));
   });
 
   it("promotes repeated contextual manual work into suggested now", () => {
@@ -267,7 +277,7 @@ describe("recent activity suggestions", () => {
     });
   });
 
-  it("caps compact suggestions at six with the newest manual task first and frequent/contextual tasks ahead of recent noise", () => {
+  it("caps compact suggestions at six with frequent contextual routines ahead of recent one-offs", () => {
     const frequentEntries = Array.from({ length: 5 }, (_, index) => ({
       categoryId: "focus",
       categoryName: "Focus",
@@ -352,7 +362,7 @@ describe("recent activity suggestions", () => {
     ], { contextDate: "2026-07-14T16:00:00.000Z" });
 
     expect(suggestions).toHaveLength(6);
-    expect(suggestions[0].description).toBe("Newest school run");
+    expect(suggestions[0].description).toBe("Frequent planning");
     expect(suggestions.findIndex((suggestion) => suggestion.description === "Frequent planning"))
       .toBeLessThan(suggestions.findIndex((suggestion) => suggestion.description === "Admin sweep"));
     expect(suggestions.findIndex((suggestion) => suggestion.description === "Admin sweep"))

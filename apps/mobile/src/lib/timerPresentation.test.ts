@@ -5,6 +5,11 @@ import {
   applySuggestionToRunningTimer,
   buildMobileQuickActions,
   displayTimerDescription,
+  optimisticDeleteTimeEntry,
+  optimisticPatchTimeEntry,
+  optimisticStartTimer,
+  optimisticStopActiveTimer,
+  replaceOptimisticTimeEntryId,
   runningTimerSheetElapsedSeconds
 } from "./timerPresentation";
 import type { MobileBootstrap } from "./api";
@@ -86,6 +91,51 @@ describe("mobile timer presentation", () => {
     expect(startTimer).not.toHaveBeenCalled();
   });
 
+  it("updates, stops and deletes a timer optimistically without waiting for a reload", () => {
+    const original = bootstrapWithActiveEntry();
+    const patched = optimisticPatchTimeEntry(original, "entry-running", {
+      categoryId: "focus",
+      description: "Architecture review"
+    });
+    expect(patched?.activeEntry).toMatchObject({
+      categoryId: "focus",
+      categoryName: "Focus",
+      description: "Architecture review"
+    });
+
+    const stopped = optimisticStopActiveTimer(patched, "2026-07-16T09:30:00.000Z");
+    expect(stopped?.activeEntry).toBeNull();
+    expect(stopped?.entries.find((entry) => entry.id === "entry-running")).toMatchObject({
+      durationSeconds: 1800,
+      stoppedAt: "2026-07-16T09:30:00.000Z"
+    });
+
+    const deleted = optimisticDeleteTimeEntry(stopped, "entry-running");
+    expect(deleted?.entries.some((entry) => entry.id === "entry-running")).toBe(false);
+  });
+
+  it("starts one optimistic timer and replaces its local id after persistence", () => {
+    const original = bootstrapWithActiveEntry();
+    const pending = {
+      ...original.activeEntry!,
+      id: "optimistic-active-timer:1",
+      categoryId: null,
+      categoryName: null,
+      description: null,
+      startedAt: "2026-07-16T10:00:00.000Z"
+    };
+    const started = optimisticStartTimer(original, pending);
+
+    expect(started?.activeEntry?.id).toBe("optimistic-active-timer:1");
+    expect(started?.entries.filter((entry) => entry.id === pending.id)).toHaveLength(1);
+    expect(started?.entries.find((entry) => entry.id === "entry-running")?.stoppedAt)
+      .toBe("2026-07-16T10:00:00.000Z");
+
+    const persisted = replaceOptimisticTimeEntryId(started, pending.id, "entry-server");
+    expect(persisted?.activeEntry?.id).toBe("entry-server");
+    expect(persisted?.entries.filter((entry) => entry.id === "entry-server")).toHaveLength(1);
+  });
+
   it("only uses pinned categories for quick actions", () => {
     expect(
       buildMobileQuickActions({
@@ -138,4 +188,30 @@ function category(input: Partial<MobileBootstrap["categories"][number]>): Mobile
     name: "Category",
     ...input
   };
+}
+
+function bootstrapWithActiveEntry(): MobileBootstrap {
+  const activeEntry: NonNullable<MobileBootstrap["activeEntry"]> = {
+    categoryColor: null,
+    categoryId: null,
+    categoryName: null,
+    clientName: null,
+    confidence: "manual",
+    description: null,
+    durationSeconds: 0,
+    id: "entry-running",
+    placeName: null,
+    projectColor: null,
+    projectId: null,
+    projectName: null,
+    reviewStatus: "confirmed",
+    source: "mobile_app",
+    startedAt: "2026-07-16T09:00:00.000Z",
+    stoppedAt: null
+  };
+  return {
+    activeEntry,
+    categories: [category({ id: "focus", name: "Focus" })],
+    entries: [activeEntry]
+  } as MobileBootstrap;
 }

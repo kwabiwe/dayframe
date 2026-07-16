@@ -717,18 +717,6 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       gap: 8
     },
-    timerProgressSlot: {
-      height: 3,
-      borderRadius: 999,
-      backgroundColor: theme.mode === "dark" ? "rgba(255,255,255,0.06)" : "rgba(8,14,24,0.08)",
-      overflow: "hidden"
-    },
-    timerProgressFill: {
-      width: 108,
-      height: "100%",
-      borderRadius: 999,
-      backgroundColor: theme.accent
-    },
     activeTitleRow: {
       flexDirection: "row",
       alignItems: "center",
@@ -1769,6 +1757,81 @@ function createStyles(theme: MobileTheme) {
       shadowRadius: 20,
       shadowOffset: { width: 0, height: -8 },
       elevation: 8
+    },
+    sheetDeleteConfirmationOverlay: {
+      position: "absolute",
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      zIndex: 10,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 20,
+      backgroundColor: theme.overlay,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24
+    },
+    sheetDeleteConfirmationCard: {
+      width: "100%",
+      maxWidth: 360,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      backgroundColor: theme.surfaceRaised,
+      padding: 18,
+      gap: 12,
+      shadowColor: theme.shadow,
+      shadowOpacity: 1,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 10
+    },
+    sheetDeleteConfirmationTitle: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 18,
+      fontWeight: "700"
+    },
+    sheetDeleteConfirmationText: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 14,
+      lineHeight: 20
+    },
+    sheetDeleteConfirmationActions: {
+      flexDirection: "row",
+      justifyContent: "flex-end",
+      gap: 8,
+      paddingTop: 4
+    },
+    sheetDeleteConfirmationCancel: {
+      minHeight: 44,
+      borderRadius: 999,
+      backgroundColor: theme.surfaceMuted,
+      paddingHorizontal: 18,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    sheetDeleteConfirmationCancelText: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "600"
+    },
+    sheetDeleteConfirmationDelete: {
+      minHeight: 44,
+      borderRadius: 999,
+      backgroundColor: theme.danger,
+      paddingHorizontal: 18,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    sheetDeleteConfirmationDeleteText: {
+      color: theme.onAccent,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "700"
     },
     sheetHandle: {
       alignSelf: "center",

@@ -30,6 +30,11 @@ export type LocationVisitDiagnostics = {
   foregroundPermission: LocationPermissionLabel;
   backgroundPermission: LocationPermissionLabel;
   activeMonitorCount: number;
+  configuredMonitorCount?: number;
+  excludedMonitorCount?: number;
+  geofencingActive?: boolean;
+  monitoredPlaceNames?: string[];
+  excludedPlaceNames?: string[];
   lastStatus?: string;
   lastPlaceName?: string;
   lastEventAt?: string;
@@ -38,6 +43,8 @@ export type LocationVisitDiagnostics = {
     placeName: string;
     occurredAt: string;
   };
+  lastTransitionEvidence?: GeofenceTransitionEvidence;
+  transitionEvidenceHistory?: GeofenceTransitionEvidence[];
   lastQueuedVisitCandidate?: {
     placeName: string;
     startedAt: string;
@@ -129,8 +136,20 @@ type LearnedPlaceCluster = {
 
 type GeofenceTransition = "enter" | "exit";
 
+export type GeofenceTransitionEvidence = {
+  transition: GeofenceTransition;
+  placeName: string;
+  occurredAt: string;
+  outcome: "accepted" | "rejected_far_from_region" | "no_recent_location";
+  configuredRadiusMeters: number;
+  distanceMeters?: number;
+  accuracyMeters?: number;
+  sampleAgeSeconds?: number;
+};
+
 const IOS_GEOFENCE_LIMIT = 20;
 const MONITORED_PLACES_KEY = "dayframe.location.monitoredPlaces.v1";
+const GEOFENCE_REGISTRATION_KEY = "dayframe.location.geofenceRegistration.v1";
 const OPEN_VISITS_KEY = "dayframe.location.openVisits.v1";
 const SEEN_VISIT_IDS_KEY = "dayframe.location.seenVisits.v1";
 const LOCATION_DIAGNOSTICS_KEY = "dayframe.location.diagnostics.v1";
@@ -138,6 +157,11 @@ const LOCATION_LEARNING_ENABLED_KEY = "dayframe.location.learning.enabled.v1";
 const LEARNED_PLACE_CLUSTERS_KEY = "dayframe.location.learning.clusters.v1";
 const LAST_COMPLETED_VISIT_KEY = "dayframe.location.lastCompletedVisit.v1";
 const MAX_SEEN_VISIT_IDS = 500;
+const MAX_TRANSITION_EVIDENCE_ITEMS = 12;
+const GEOFENCE_EVIDENCE_MAX_AGE_MS = 5 * 60_000;
+const GEOFENCE_ENTER_REJECTION_MAX_AGE_MS = 60_000;
+const GEOFENCE_EVIDENCE_REQUIRED_ACCURACY_METERS = 250;
+const GEOFENCE_ENTER_OUTSIDE_BUFFER_METERS = 100;
 const LOCATION_LEARNING_SAMPLE_INTERVAL_MS = LOCATION_LEARNING_THRESHOLDS.sampleIntervalMs;
 const LOCATION_LEARNING_DISTANCE_INTERVAL_METERS = LOCATION_LEARNING_THRESHOLDS.distanceIntervalMeters;
 const LEARNED_PLACE_RADIUS_METERS = LOCATION_LEARNING_THRESHOLDS.clusterRadiusMeters;
@@ -296,35 +320,61 @@ export async function startGeofences(
     .sort((left, right) => {
       const priorityDelta = (right.priority ?? 0) - (left.priority ?? 0);
       if (priorityDelta !== 0) return priorityDelta;
-      return left.radiusMeters - right.radiusMeters;
-    })
-    .slice(0, IOS_GEOFENCE_LIMIT);
-  const regions = monitorablePlaces
+      const radiusDelta = left.radiusMeters - right.radiusMeters;
+      if (radiusDelta !== 0) return radiusDelta;
+      return left.id.localeCompare(right.id);
+    });
+  const registeredPlaces = monitorablePlaces.slice(0, IOS_GEOFENCE_LIMIT);
+  const excludedPlaces = monitorablePlaces.slice(IOS_GEOFENCE_LIMIT);
+  const regions = registeredPlaces
     .map((place) => ({
       identifier: place.id,
       latitude: place.latitude as number,
       longitude: place.longitude as number,
-      radius: place.radiusMeters,
+      radius: normalizedGeofenceRadius(place.radiusMeters),
       notifyOnEnter: true,
       notifyOnExit: true
     }));
 
-  await writeMonitoredPlaces(monitorablePlaces.map(monitoredPlaceFromInput));
+  await writeMonitoredPlaces(registeredPlaces.map(monitoredPlaceFromInput));
 
   if (regions.length === 0) {
     await stopGeofencesIfStarted();
+    await AsyncStorage.setItem(GEOFENCE_REGISTRATION_KEY, "");
     await updateLocationDiagnostics({
       activeMonitorCount: 0,
+      configuredMonitorCount: 0,
+      excludedMonitorCount: 0,
+      excludedPlaceNames: [],
+      geofencingActive: false,
       lastStatus: "No saved places with coordinates to monitor.",
-      lastMonitorRefreshAt: new Date().toISOString()
+      lastMonitorRefreshAt: new Date().toISOString(),
+      monitoredPlaceNames: []
     });
     return 0;
   }
-  await Location.startGeofencingAsync(DAYFRAME_GEOFENCE_TASK, regions);
+
+  const registrationFingerprint = JSON.stringify(regions);
+  const [storedFingerprint, alreadyStarted] = await Promise.all([
+    AsyncStorage.getItem(GEOFENCE_REGISTRATION_KEY),
+    Location.hasStartedGeofencingAsync(DAYFRAME_GEOFENCE_TASK).catch(() => false)
+  ]);
+  if (!alreadyStarted || storedFingerprint !== registrationFingerprint) {
+    await Location.startGeofencingAsync(DAYFRAME_GEOFENCE_TASK, regions);
+    await AsyncStorage.setItem(GEOFENCE_REGISTRATION_KEY, registrationFingerprint);
+  }
+  const limitNote = excludedPlaces.length > 0
+    ? ` ${excludedPlaces.length} lower-priority ${excludedPlaces.length === 1 ? "place is" : "places are"} outside the iOS ${IOS_GEOFENCE_LIMIT}-region limit.`
+    : "";
   await updateLocationDiagnostics({
     activeMonitorCount: regions.length,
-    lastStatus: `Monitoring ${regions.length} saved ${regions.length === 1 ? "place" : "places"}.`,
-    lastMonitorRefreshAt: new Date().toISOString()
+    configuredMonitorCount: monitorablePlaces.length,
+    excludedMonitorCount: excludedPlaces.length,
+    excludedPlaceNames: excludedPlaces.map((place) => place.name),
+    geofencingActive: true,
+    lastStatus: `Monitoring ${regions.length} saved ${regions.length === 1 ? "place" : "places"}.${limitNote}`,
+    lastMonitorRefreshAt: new Date().toISOString(),
+    monitoredPlaceNames: registeredPlaces.map((place) => place.name)
   });
   return regions.length;
 }
@@ -370,6 +420,10 @@ export async function refreshGeofencesForPlaces(
     longitude?: number | null;
     radiusMeters: number;
     priority?: number;
+    defaultCategoryId?: string | null;
+    defaultCategoryName?: string | null;
+    defaultActivityDescription?: string | null;
+    loggingEnabled?: boolean;
   }>
 ) {
   const foreground = await Location.getForegroundPermissionsAsync();
@@ -381,6 +435,7 @@ export async function refreshGeofencesForPlaces(
       foregroundPermission,
       backgroundPermission,
       activeMonitorCount: 0,
+      geofencingActive: false,
       lastStatus: "Location needs Always access before saved places can be monitored.",
       lastMonitorRefreshAt: new Date().toISOString()
     });
@@ -664,6 +719,22 @@ export async function recordGeofenceTransition(
     return { status: "unknown_place" as const, queued: false };
   }
 
+  const evidence = await getGeofenceTransitionEvidence(transition, place, occurredAt);
+  await appendGeofenceTransitionEvidence(evidence);
+  if (evidence.outcome === "rejected_far_from_region") {
+    await updateLocationDiagnostics({
+      lastStatus: `Ignored an enter for ${place.name} because a recent location fix was clearly outside the saved radius.`,
+      lastPlaceName: place.name,
+      lastEventAt: occurredAt.toISOString(),
+      lastGeofenceEvent: {
+        transition,
+        placeName: place.name,
+        occurredAt: occurredAt.toISOString()
+      }
+    });
+    return { status: "evidence_rejected_enter" as const, queued: false, evidence };
+  }
+
   if (transition === "enter") {
     return recordPlaceEnter(place, region, occurredAt);
   }
@@ -672,10 +743,11 @@ export async function recordGeofenceTransition(
 }
 
 export async function getLocationVisitDiagnostics(): Promise<LocationVisitDiagnostics> {
-  const [stored, foreground, background, learningEnabled, learningActive] = await Promise.all([
+  const [stored, foreground, background, geofencingActive, learningEnabled, learningActive] = await Promise.all([
     readLocationDiagnostics(),
     Location.getForegroundPermissionsAsync().catch(() => null),
     Location.getBackgroundPermissionsAsync().catch(() => null),
+    Location.hasStartedGeofencingAsync(DAYFRAME_GEOFENCE_TASK).catch(() => false),
     getLocationLearningEnabled().catch(() => false),
     Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => false)
   ]);
@@ -685,11 +757,18 @@ export async function getLocationVisitDiagnostics(): Promise<LocationVisitDiagno
   return {
     foregroundPermission: foregroundPermission === "unknown" ? stored.foregroundPermission : foregroundPermission,
     backgroundPermission: backgroundPermission === "unknown" ? stored.backgroundPermission : backgroundPermission,
-    activeMonitorCount: stored.activeMonitorCount,
+    activeMonitorCount: geofencingActive ? stored.activeMonitorCount : 0,
+    configuredMonitorCount: stored.configuredMonitorCount,
+    excludedMonitorCount: stored.excludedMonitorCount,
+    geofencingActive,
+    monitoredPlaceNames: stored.monitoredPlaceNames,
+    excludedPlaceNames: stored.excludedPlaceNames,
     lastStatus: stored.lastStatus,
     lastPlaceName: stored.lastPlaceName,
     lastEventAt: stored.lastEventAt,
     lastGeofenceEvent: stored.lastGeofenceEvent,
+    lastTransitionEvidence: stored.lastTransitionEvidence,
+    transitionEvidenceHistory: stored.transitionEvidenceHistory,
     lastQueuedVisitCandidate: stored.lastQueuedVisitCandidate,
     locationLearningEnabled: learningEnabled,
     locationLearningActive: learningEnabled && learningActive,
@@ -962,6 +1041,98 @@ function monitoredPlaceFromInput(place: {
     defaultActivityDescription: normalizedActivityDescription(place.defaultActivityDescription),
     loggingEnabled: place.loggingEnabled !== false
   };
+}
+
+export function evaluateGeofenceTransitionEvidence(input: {
+  transition: GeofenceTransition;
+  placeName: string;
+  occurredAt: Date;
+  configuredRadiusMeters: number;
+  distanceMeters?: number | null;
+  accuracyMeters?: number | null;
+  sampleAgeMs?: number | null;
+}): GeofenceTransitionEvidence {
+  const base = {
+    transition: input.transition,
+    placeName: input.placeName,
+    occurredAt: input.occurredAt.toISOString(),
+    configuredRadiusMeters: normalizedGeofenceRadius(input.configuredRadiusMeters)
+  };
+  const distance = input.distanceMeters;
+  const accuracy = input.accuracyMeters;
+  const sampleAgeMs = input.sampleAgeMs;
+  if (
+    distance === null || distance === undefined || !Number.isFinite(distance) ||
+    accuracy === null || accuracy === undefined || !Number.isFinite(accuracy) ||
+    sampleAgeMs === null || sampleAgeMs === undefined || !Number.isFinite(sampleAgeMs) ||
+    sampleAgeMs > GEOFENCE_ENTER_REJECTION_MAX_AGE_MS ||
+    accuracy > GEOFENCE_EVIDENCE_REQUIRED_ACCURACY_METERS
+  ) {
+    return { ...base, outcome: "no_recent_location" };
+  }
+  const evidence = {
+    ...base,
+    accuracyMeters: Math.round(Math.max(0, accuracy)),
+    distanceMeters: Math.round(Math.max(0, distance)),
+    sampleAgeSeconds: Math.round(Math.max(0, sampleAgeMs) / 1000)
+  };
+  const clearlyOutside =
+    distance - Math.max(0, accuracy) >
+    base.configuredRadiusMeters + GEOFENCE_ENTER_OUTSIDE_BUFFER_METERS;
+  if (input.transition === "enter" && clearlyOutside) {
+    return { ...evidence, outcome: "rejected_far_from_region" };
+  }
+  return { ...evidence, outcome: "accepted" };
+}
+
+async function getGeofenceTransitionEvidence(
+  transition: GeofenceTransition,
+  place: MonitoredPlace,
+  occurredAt: Date
+) {
+  const location = await Location.getLastKnownPositionAsync({
+    maxAge: GEOFENCE_EVIDENCE_MAX_AGE_MS,
+    requiredAccuracy: GEOFENCE_EVIDENCE_REQUIRED_ACCURACY_METERS
+  }).catch(() => null);
+  if (!location) {
+    return evaluateGeofenceTransitionEvidence({
+      transition,
+      placeName: place.name,
+      occurredAt,
+      configuredRadiusMeters: place.radiusMeters
+    });
+  }
+  return evaluateGeofenceTransitionEvidence({
+    transition,
+    placeName: place.name,
+    occurredAt,
+    configuredRadiusMeters: place.radiusMeters,
+    distanceMeters: distanceMeters(
+      location.coords.latitude,
+      location.coords.longitude,
+      place.latitude,
+      place.longitude
+    ),
+    accuracyMeters: location.coords.accuracy,
+    sampleAgeMs: Math.abs(occurredAt.getTime() - location.timestamp)
+  });
+}
+
+async function appendGeofenceTransitionEvidence(evidence: GeofenceTransitionEvidence) {
+  const diagnostics = await readLocationDiagnostics();
+  const history = [
+    evidence,
+    ...(diagnostics.transitionEvidenceHistory ?? [])
+  ].slice(0, MAX_TRANSITION_EVIDENCE_ITEMS);
+  await updateLocationDiagnostics({
+    lastTransitionEvidence: evidence,
+    transitionEvidenceHistory: history
+  });
+}
+
+function normalizedGeofenceRadius(value: number) {
+  if (!Number.isFinite(value)) return 100;
+  return Math.max(25, Math.min(2000, Math.round(value)));
 }
 
 async function stopGeofencesIfStarted() {

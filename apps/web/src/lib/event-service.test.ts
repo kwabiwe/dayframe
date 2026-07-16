@@ -121,13 +121,15 @@ describe("category persistence", () => {
         if (statement.includes("for update")) {
           return { rows: [{ id: "active-1", startedAt: "2026-07-05T09:00:00.000Z" }] };
         }
-        return statement.includes("returning id") ? { rows: [{ id: "event-1" }] } : { rows: [] };
+        if (statement.includes("insert into activity_events")) return { rows: [{ id: "event-1" }] };
+        if (statement.includes("insert into time_entries")) return { rows: [{ id: "entry-1" }] };
+        return { rows: [] };
       }),
       release: vi.fn()
     };
     mocks.pool.connect.mockResolvedValueOnce(client);
 
-    await processActivityEvent(
+    const result = await processActivityEvent(
       {
         source: "manual_app",
         type: "timer_start",
@@ -136,6 +138,8 @@ describe("category persistence", () => {
       },
       session
     );
+
+    expect(result.timeEntryId).toBe("entry-1");
 
     const closeActiveCall = client.query.mock.calls.find(([statement]) =>
       String(statement).includes("set stopped_at = $1")

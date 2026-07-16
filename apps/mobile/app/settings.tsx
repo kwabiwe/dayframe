@@ -1226,11 +1226,22 @@ export default function SettingsScreen() {
                   {formatPermissionStatus(locationDiagnostics.backgroundPermission)}
                 </Text>
                 <Text style={styles.muted}>{locationMonitorCountText(locationDiagnostics)}</Text>
+                {(locationDiagnostics.excludedMonitorCount ?? 0) > 0 ? (
+                  <Text style={styles.muted}>
+                    Not monitored because of the iOS region limit: {locationDiagnostics.excludedPlaceNames?.join(", ") ?? locationDiagnostics.excludedMonitorCount}
+                  </Text>
+                ) : null}
                 {locationDiagnostics.lastGeofenceEvent ? (
                   <Text style={styles.muted}>
                     Last geofence: {formatGeofenceTransition(locationDiagnostics.lastGeofenceEvent.transition)}{" "}
                     {locationDiagnostics.lastGeofenceEvent.placeName} ·{" "}
                     {formatQueueTime(locationDiagnostics.lastGeofenceEvent.occurredAt)}
+                  </Text>
+                ) : null}
+                {locationDiagnostics.lastTransitionEvidence?.outcome === "rejected_far_from_region" ? (
+                  <Text style={styles.muted}>
+                    Last enter was ignored: {locationDiagnostics.lastTransitionEvidence.placeName} was about{" "}
+                    {locationDiagnostics.lastTransitionEvidence.distanceMeters ?? "?"}m from its saved centre.
                   </Text>
                 ) : null}
                 {locationDiagnostics.lastQueuedVisitCandidate ? (

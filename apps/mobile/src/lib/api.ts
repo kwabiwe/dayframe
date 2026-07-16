@@ -184,6 +184,11 @@ export type ManualTimeEntryInput = {
   stoppedAt: string;
 };
 
+export type TimerActionResult = {
+  eventId?: string;
+  timeEntryId?: string;
+};
+
 export type ReviewItemAction = "accept" | "ignore_once";
 
 export type HealthReviewReprocessResult = {
@@ -416,6 +421,41 @@ export async function readQueue(): Promise<QueuedEvent[]> {
   if (!raw) return [];
   const parsed = JSON.parse(raw) as StoredQueuedEvent[];
   return parsed.map(migrateQueuedEvent);
+}
+
+export async function updateQueuedTimerStart(
+  localId: string,
+  patch: Pick<TimeEntryUpdatePatch, "categoryId" | "description" | "startedAt">
+) {
+  const queue = await readQueue();
+  let updated = false;
+  const next = queue.map((item) => {
+    if (item.localId !== localId || item.type !== "timer_start") return item;
+    updated = true;
+    return {
+      ...item,
+      categoryId: Object.prototype.hasOwnProperty.call(patch, "categoryId")
+        ? patch.categoryId ?? undefined
+        : item.categoryId,
+      description: Object.prototype.hasOwnProperty.call(patch, "description")
+        ? patch.description?.trim() || undefined
+        : item.description,
+      occurredAt: patch.startedAt ? new Date(patch.startedAt) : item.occurredAt,
+      rawPayload: {
+        ...item.rawPayload,
+        ...(patch.startedAt ? { startedAt: patch.startedAt } : {})
+      }
+    };
+  });
+  if (updated) await writeQueue(next);
+  return updated;
+}
+
+export async function removeQueuedEvent(localId: string) {
+  const queue = await readQueue();
+  const next = queue.filter((item) => item.localId !== localId);
+  if (next.length !== queue.length) await writeQueue(next);
+  return next.length !== queue.length;
 }
 
 export function getQueueDiagnostics(queue: QueuedEvent[]): QueueDiagnostics {
@@ -1158,7 +1198,7 @@ async function postTimerAction(body: Record<string, unknown>) {
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Timer action failed"));
-  return readJsonResponse(response);
+  return readJsonResponse<TimerActionResult>(response);
 }
 
 async function authHeaders(): Promise<Record<string, string>> {

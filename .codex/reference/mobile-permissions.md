@@ -36,6 +36,16 @@ Recommended product states:
 
 Request foreground location first. Explain background/Always access before requesting it. If `canAskAgain` is false, provide an Open Settings action.
 
+## Geofence Runtime Guardrails
+
+- Keep the geofence task definition at module top level and keep `location` in the iOS background modes.
+- Rehydrate saved-place monitoring after authenticated bootstrap, not only after visiting Settings or Places.
+- Persist a fingerprint of the registered regions and skip unchanged `startGeofencingAsync` calls. iOS can report a region's initial state when monitoring starts, so unnecessary re-registration can look like a false enter.
+- Register saved places in deterministic priority order and expose every place excluded by iOS's 20-region limit in Settings diagnostics.
+- Pass the saved radius through to iOS after enforcing the product's 25-2000m bounds. Do not silently replace a user's radius with a different monitoring radius.
+- Treat a recent accurate location fix as corroborating evidence, not a requirement. Reject an enter only when the fix is clearly outside the saved radius plus the conservative boundary buffer; keep exit evidence so missed transitions remain diagnosable.
+- Persist privacy-safe transition evidence on device: place name, configured radius, distance/accuracy summary, outcome, and timestamp. Do not log raw coordinates or location payloads.
+
 ## HealthKit State
 
 HealthKit requires a native iOS build and real-device validation. Expo Go and many simulator paths cannot fully exercise it.

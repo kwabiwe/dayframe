@@ -4,6 +4,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -40,10 +41,12 @@ import {
   login,
   queueStopTimer,
   readQueue,
+  removeQueuedEvent,
   signup,
   startTimer,
   stopTimer,
   syncQueue,
+  updateQueuedTimerStart,
   updateTimeEntry,
   type MobileBootstrap,
   type TimeEntryUpdatePatch
@@ -54,11 +57,13 @@ import {
   CALENDAR_BLOCK_META_MIN_HEIGHT
 } from "@/lib/calendarBlocks";
 import {
+  anchoredCalendarScrollY,
   calendarSwipeDelta,
   formatCalendarHourLabel,
   shouldCaptureCalendarSwipe
 } from "@/lib/calendarGestures";
 import { handleDayframeUrl } from "@/lib/deepLinks";
+import { refreshGeofencesForPlaces } from "@/lib/geofence";
 import {
   configureHealthKitAutomaticSync,
   friendlyHealthKitError,
@@ -93,6 +98,13 @@ import {
   applySuggestionToRunningTimer,
   buildMobileQuickActions,
   displayTimerDescription,
+  mobileTimeEntryById,
+  optimisticDeleteTimeEntry,
+  optimisticPatchTimeEntry,
+  optimisticStartTimer,
+  optimisticStopActiveTimer,
+  OPTIMISTIC_TIMER_ID_PREFIX,
+  replaceOptimisticTimeEntryId,
   sortMobileCategoriesByUsage
 } from "@/lib/timerPresentation";
 
@@ -110,11 +122,6 @@ type CalendarBlockMetrics = {
   height: number;
   startsBeforeDay: boolean;
   continuesIntoNextDay: boolean;
-};
-type CalendarZoomFocus = {
-  anchorY: number;
-  startHourHeight: number;
-  startScrollY: number;
 };
 type SummarySegment = {
   key: string;
@@ -151,14 +158,14 @@ const DashboardContext = createContext<DashboardContextValue | null>(null);
 export function DayframeDashboardProvider({ children }: { children: ReactNode }) {
   const { reloadThemePreference, styles, theme } = useMobileTheme();
   const [data, setData] = useState<MobileBootstrap | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [authSubmitting, setAuthSubmitting] = useState(false);
   const [authState, setAuthState] = useState<AuthState>("checking");
   const [selectedDayKey, setSelectedDayKey] = useState(() => formatDateKey(new Date()));
   const [datePickerVisible, setDatePickerVisible] = useState(false);
   const [datePickerMonth, setDatePickerMonth] = useState(() => startOfMonth(new Date()));
   const [reportRange, setReportRange] = useState<ReportRange>("today");
   const [calendarEditEntry, setCalendarEditEntry] = useState<CalendarEntry | null>(null);
-  const [calendarHourHeight, setCalendarHourHeight] = useState(TIMELINE_DEFAULT_HOUR_HEIGHT);
   const [calendarHoursMode] = useState<CalendarHoursMode>("fullDay");
   const [calendarTransitionDirection, setCalendarTransitionDirection] = useState(1);
   const [reportChartView, setReportChartView] = useState<ReportChartView>("pie");
@@ -172,28 +179,25 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [now, setNow] = useState(() => Date.now());
   const [customDescription, setCustomDescription] = useState("");
   const [startSheetVisible, setStartSheetVisible] = useState(false);
-  const [startSheetSaving, setStartSheetSaving] = useState(false);
   const [activeEditVisible, setActiveEditVisible] = useState(false);
-  const [activeEditSaving, setActiveEditSaving] = useState(false);
-  const [activeEditStopping, setActiveEditStopping] = useState(false);
-  const [activeEditDeleting, setActiveEditDeleting] = useState(false);
-  const [timerActionPending, setTimerActionPending] = useState<"start" | "stop" | null>(null);
-  const [pendingActiveEntry, setPendingActiveEntry] = useState<TimeEntry | null>(null);
   const [presentedActiveEntry, setPresentedActiveEntry] = useState<TimeEntry | null>(null);
-  const [calendarEditSaving, setCalendarEditSaving] = useState(false);
-  const [calendarEditDeleting, setCalendarEditDeleting] = useState(false);
   const [calendarGestureLocked, setCalendarGestureLocked] = useState(false);
   const reduceMotion = useReduceMotionPreference();
   const refreshInFlight = useRef(false);
   const queueSyncInFlight = useRef(false);
   const healthAutoSyncInFlight = useRef(false);
+  const latestData = useRef<MobileBootstrap | null>(null);
   const liveActivityReconciliationDeferred = useRef(false);
+  const optimisticTimerIds = useRef(new Map<string, string>());
+  const optimisticTimerSequence = useRef(0);
   const pendingNativeShortcutLocalIds = useRef<Set<string>>(new Set());
+  const timerMutationChain = useRef<Promise<void>>(Promise.resolve());
+  const timerMutationCount = useRef(0);
+  const timerMutationVersions = useRef(new Map<string, number>());
   const calendarScrollRef = useRef<ScrollView>(null);
   const calendarScrollY = useRef(0);
   const entrance = useRef(new Animated.Value(0)).current;
   const activeTimerExpansion = useRef(new Animated.Value(0)).current;
-  const timerProgress = useRef(new Animated.Value(0)).current;
   const authNameRef = useRef<TextInput>(null);
   const authWorkspaceRef = useRef<TextInput>(null);
   const authEmailRef = useRef<TextInput>(null);
@@ -233,10 +237,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     }
   }, []);
 
-  const load = useCallback(async (options?: { silent?: boolean }) => {
+  const load = useCallback(async (options?: { silent?: boolean; visibleRefresh?: boolean }) => {
     if (refreshInFlight.current) return;
     refreshInFlight.current = true;
-    if (!options?.silent) setLoading(true);
+    if (options?.visibleRefresh) setRefreshing(true);
     try {
       const date = formatDateKey(new Date());
       let bootstrap = await fetchBootstrap({ date });
@@ -259,23 +263,63 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         const pendingQueue = await readQueue().catch(() => []);
         liveActivityReconciliationDeferred.current = pendingQueue.some((event) => event.source === "shortcut");
       }
+      latestData.current = bootstrap;
       setData(bootstrap);
       syncShortcutCatalog(bootstrap);
       setAuthState("authenticated");
+      void refreshGeofencesForPlaces(bootstrap.places).catch(() => undefined);
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         setData(null);
         setAuthState("signedOut");
         return;
       }
-      if (!options?.silent) {
+      if (!options?.silent && !options?.visibleRefresh) {
         Alert.alert("Dayframe API", error instanceof Error ? error.message : "Unable to load API");
       }
     } finally {
       refreshInFlight.current = false;
-      if (!options?.silent) setLoading(false);
+      if (options?.visibleRefresh) setRefreshing(false);
     }
   }, []);
+
+  function updateDashboardData(
+    update: (current: MobileBootstrap | null) => MobileBootstrap | null
+  ) {
+    setData((current) => {
+      const next = update(current);
+      latestData.current = next;
+      return next;
+    });
+  }
+
+  function nextTimerMutationVersion(entryId: string) {
+    const next = (timerMutationVersions.current.get(entryId) ?? 0) + 1;
+    timerMutationVersions.current.set(entryId, next);
+    return next;
+  }
+
+  function isCurrentTimerMutation(entryId: string, version: number) {
+    return timerMutationVersions.current.get(entryId) === version;
+  }
+
+  function persistedTimerEntryId(entryId: string) {
+    if (!entryId.startsWith(OPTIMISTIC_TIMER_ID_PREFIX)) return entryId;
+    return optimisticTimerIds.current.get(entryId) ?? null;
+  }
+
+  function enqueueTimerMutation(operation: () => Promise<void>) {
+    timerMutationCount.current += 1;
+    const run = timerMutationChain.current
+      .catch(() => undefined)
+      .then(operation)
+      .catch(() => undefined);
+    timerMutationChain.current = run;
+    void run.finally(() => {
+      timerMutationCount.current = Math.max(0, timerMutationCount.current - 1);
+      if (timerMutationCount.current === 0) void load({ silent: true });
+    });
+  }
 
   const syncQueuedEventsAndReload = useCallback(async () => {
     if (authState !== "authenticated") return;
@@ -430,13 +474,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     fields: authKeyboardFields,
     theme
   });
-  const activeEntryForDisplay = data?.activeEntry ?? pendingActiveEntry;
+  const activeEntryForDisplay = data?.activeEntry ?? null;
   const activeDurationSeconds = activeTimerElapsedSeconds(activeEntryForDisplay, now);
   const hasLiveActiveTimer = Boolean(activeEntryForDisplay);
-
-  useEffect(() => {
-    if (data?.activeEntry && pendingActiveEntry) setPendingActiveEntry(null);
-  }, [data?.activeEntry, pendingActiveEntry]);
 
   useEffect(() => {
     if (activeEntryForDisplay) {
@@ -563,29 +603,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     void syncLiveActivityForEntry(data?.activeEntry ?? null);
   }, [data]);
 
-  useEffect(() => {
-    if (!timerActionPending) {
-      timerProgress.stopAnimation();
-      timerProgress.setValue(0);
-      return undefined;
-    }
-
-    timerProgress.setValue(0);
-    const animation = Animated.loop(
-      Animated.timing(timerProgress, {
-        toValue: 1,
-        duration: 900,
-        easing: Easing.inOut(Easing.quad),
-        useNativeDriver: true
-      })
-    );
-    animation.start();
-
-    return () => animation.stop();
-  }, [timerActionPending, timerProgress]);
-
   async function startTask(categoryId?: string | null, description = customDescription) {
-    if (!data?.activeEntry && !categoryId && !description.trim()) {
+    if (latestData.current?.activeEntry && !categoryId && !description.trim()) {
+      setStartSheetVisible(false);
+      setActiveEditVisible(true);
+      return true;
+    }
+    if (!latestData.current?.activeEntry && !categoryId && !description.trim()) {
       setStartSheetVisible(false);
       setActiveEditVisible(true);
       const ok = await startTaskWith({
@@ -604,42 +628,51 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   async function applyRunningTimerSuggestion(entryId: string, suggestion: RecentActivitySuggestion) {
-    const activeEntry = data?.activeEntry;
-    if (!activeEntry || activeEntry.id !== entryId || activeEditSaving) return false;
-    setActiveEditSaving(true);
-    try {
-      await applySuggestionToRunningTimer({
-        entryId,
-        suggestion,
-        updateEntry: updateTimeEntry
-      });
-      await load({ silent: true });
-      return true;
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        setAuthState("signedOut");
-        setData(null);
-        return false;
+    const activeEntry = latestData.current?.activeEntry;
+    if (!activeEntry || activeEntry.id !== entryId) return false;
+    const patch: TimeEntryUpdatePatch = {
+      categoryId: suggestion.categoryId,
+      description: suggestion.description
+    };
+    const previousData = latestData.current;
+    const version = nextTimerMutationVersion(entryId);
+    updateDashboardData((current) => optimisticPatchTimeEntry(current, entryId, patch));
+    enqueueTimerMutation(async () => {
+      try {
+        const persistedId = persistedTimerEntryId(entryId);
+        if (persistedId) {
+          await applySuggestionToRunningTimer({
+            entryId: persistedId,
+            suggestion,
+            updateEntry: updateTimeEntry
+          });
+        } else {
+          await updateQueuedTimerStart(entryId, patch);
+        }
+      } catch (error) {
+        if (isCurrentTimerMutation(entryId, version)) {
+          latestData.current = previousData;
+          setData(previousData);
+        }
+        if (error instanceof AuthRequiredError) {
+          latestData.current = null;
+          setAuthState("signedOut");
+          setData(null);
+          return;
+        }
+        Alert.alert(
+          "Timer not saved",
+          isNetworkTimerError(error)
+            ? "Your timer details were not saved. Check your connection and try again."
+            : error instanceof Error ? error.message : "Unable to save this timer."
+        );
       }
-      Alert.alert(
-        "Timer not saved",
-        isNetworkTimerError(error)
-          ? "Your timer details were not saved. Check your connection and try again."
-          : error instanceof Error ? error.message : "Unable to save this timer."
-      );
-      return false;
-    } finally {
-      setActiveEditSaving(false);
-    }
+    });
+    return true;
   }
 
   async function startTaskFromSheet(input: StartTimerSheetInput) {
-    setStartSheetSaving(true);
-    try {
-      return await startTaskWith(input);
-    } finally {
-      setStartSheetSaving(false);
-    }
+    return startTaskWith(input);
   }
 
   async function startTaskWith(input: {
@@ -647,137 +680,110 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     description?: string | null;
     startedAt?: string | null;
   }) {
-    if (timerActionPending) return false;
     const trimmedDescription = input.description?.trim() ?? "";
-    const startedAt = input.startedAt ?? undefined;
-    if (!data?.activeEntry) {
-      setPendingActiveEntry(pendingEntryFromStartInput({
-        categories: data?.categories ?? [],
+    const startedAt = input.startedAt ?? new Date().toISOString();
+    optimisticTimerSequence.current += 1;
+    const optimisticId = `${OPTIMISTIC_TIMER_ID_PREFIX}${Date.now()}:${optimisticTimerSequence.current}`;
+    const pendingEntry = {
+      ...pendingEntryFromStartInput({
+        categories: latestData.current?.categories ?? [],
         categoryId: input.categoryId ?? null,
         description: trimmedDescription || null,
         startedAt
-      }));
-    }
-    setTimerActionPending("start");
-    try {
-      await startTimer(input.categoryId ?? null, trimmedDescription, startedAt);
-      if (trimmedDescription) setCustomDescription("");
-      scheduleLayoutTransition(reduceMotion);
-      await load({ silent: true });
-      return true;
-    } catch (error) {
-      setPendingActiveEntry(null);
-      if (error instanceof AuthRequiredError) {
-        setAuthState("signedOut");
-        setData(null);
-        return false;
-      }
-      if (!isNetworkTimerError(error)) {
-        Alert.alert("Timer not started", error instanceof Error ? error.message : "Unable to start this timer.");
-        return false;
-      }
-      await enqueueEvent({
-        source: "mobile_app",
-        type: "timer_start",
-        occurredAt: startedAt ? new Date(startedAt) : undefined,
-        categoryId: input.categoryId ?? undefined,
-        description: trimmedDescription || undefined,
-        rawPayload: {
-          origin: "mobile_custom_start_fallback",
-          ...(startedAt ? { startedAt } : {})
-        }
-      });
-      if (trimmedDescription) setCustomDescription("");
-      scheduleLayoutTransition(reduceMotion);
-      await syncAndReload({ silent: true });
-      return true;
-    } finally {
-      setTimerActionPending(null);
-    }
-  }
+      }),
+      id: optimisticId
+    };
+    const previousData = latestData.current;
+    nextTimerMutationVersion(optimisticId);
+    updateDashboardData((current) => optimisticStartTimer(current, pendingEntry));
+    if (trimmedDescription) setCustomDescription("");
+    scheduleLayoutTransition(reduceMotion);
 
-  async function syncAndReload(options?: { silent?: boolean }) {
-    try {
-      await syncQueue();
-      await load({ silent: options?.silent });
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        setAuthState("signedOut");
-        setData(null);
-        return;
+    enqueueTimerMutation(async () => {
+      try {
+        const result = await startTimer(input.categoryId ?? null, trimmedDescription, input.startedAt ?? undefined);
+        if (result.timeEntryId) {
+          optimisticTimerIds.current.set(optimisticId, result.timeEntryId);
+          updateDashboardData((current) =>
+            replaceOptimisticTimeEntryId(current, optimisticId, result.timeEntryId as string)
+          );
+        }
+      } catch (error) {
+        if (error instanceof AuthRequiredError) {
+          latestData.current = null;
+          setAuthState("signedOut");
+          setData(null);
+          return;
+        }
+        if (!isNetworkTimerError(error)) {
+          latestData.current = previousData;
+          setData(previousData);
+          Alert.alert("Timer not started", error instanceof Error ? error.message : "Unable to start this timer.");
+          return;
+        }
+        const queuedEntry = mobileTimeEntryById(latestData.current, optimisticId) ?? pendingEntry;
+        await enqueueEvent({
+          localId: optimisticId,
+          source: "mobile_app",
+          type: "timer_start",
+          occurredAt: new Date(queuedEntry.startedAt),
+          categoryId: queuedEntry.categoryId ?? undefined,
+          description: queuedEntry.description?.trim() || undefined,
+          rawPayload: {
+            origin: "mobile_custom_start_fallback",
+            startedAt: queuedEntry.startedAt
+          }
+        });
       }
-      throw error;
-    }
+    });
+    return true;
   }
 
   async function saveActiveTimerEdit(entryId: string, patch: TimeEntryUpdatePatch) {
-    setActiveEditSaving(true);
-    try {
-      await updateTimeEntry(entryId, patch);
-      await load({ silent: true });
-      return true;
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        setActiveEditVisible(false);
-        setAuthState("signedOut");
-        setData(null);
-        return false;
-      }
-      Alert.alert(
-        "Timer not saved",
-        isNetworkTimerError(error)
-          ? "Your changes were not saved. Check your connection and try again."
-          : error instanceof Error ? error.message : "Unable to save this timer."
-      );
-      return false;
-    } finally {
-      setActiveEditSaving(false);
-    }
+    return saveTimeEntryOptimistically(entryId, patch, "Timer not saved");
   }
 
   async function saveCalendarEntryEdit(entryId: string, patch: TimeEntryUpdatePatch) {
-    setCalendarEditSaving(true);
-    try {
-      await updateTimeEntry(entryId, patch);
-      await load({ silent: true });
-      return true;
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        setCalendarEditEntry(null);
-        setAuthState("signedOut");
-        setData(null);
-        return false;
+    return saveTimeEntryOptimistically(entryId, patch, "Entry not saved");
+  }
+
+  async function saveTimeEntryOptimistically(
+    entryId: string,
+    patch: TimeEntryUpdatePatch,
+    errorTitle: string
+  ) {
+    const previousData = latestData.current;
+    const version = nextTimerMutationVersion(entryId);
+    updateDashboardData((current) => optimisticPatchTimeEntry(current, entryId, patch));
+    enqueueTimerMutation(async () => {
+      try {
+        const persistedId = persistedTimerEntryId(entryId);
+        if (persistedId) await updateTimeEntry(persistedId, patch);
+        else await updateQueuedTimerStart(entryId, patch);
+      } catch (error) {
+        if (isCurrentTimerMutation(entryId, version)) {
+          latestData.current = previousData;
+          setData(previousData);
+        }
+        if (error instanceof AuthRequiredError) {
+          latestData.current = null;
+          setAuthState("signedOut");
+          setData(null);
+          return;
+        }
+        Alert.alert(
+          errorTitle,
+          isNetworkTimerError(error)
+            ? "Your changes were not saved. Check your connection and try again."
+            : error instanceof Error ? error.message : "Unable to save this entry."
+        );
       }
-      Alert.alert(
-        "Entry not saved",
-        isNetworkTimerError(error)
-          ? "Your changes were not saved. Check your connection and try again."
-          : error instanceof Error ? error.message : "Unable to save this entry."
-      );
-      return false;
-    } finally {
-      setCalendarEditSaving(false);
-    }
+    });
+    return true;
   }
 
   async function deleteCalendarEntry(entryId: string) {
-    setCalendarEditDeleting(true);
-    try {
-      await deleteTimeEntry(entryId);
-      await load({ silent: true });
-      return true;
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        setCalendarEditEntry(null);
-        setAuthState("signedOut");
-        setData(null);
-        return false;
-      }
-      Alert.alert("Entry not deleted", error instanceof Error ? error.message : "Unable to delete this entry.");
-      return false;
-    } finally {
-      setCalendarEditDeleting(false);
-    }
+    return deleteTimeEntryOptimistically(entryId, "Entry not deleted");
   }
 
   const shiftSelectedCalendarDay = useCallback((days: number) => {
@@ -804,73 +810,87 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     setDatePickerVisible(false);
   }, [selectCalendarDay]);
 
-  const setCalendarZoom = useCallback((hourHeight: number, focus?: CalendarZoomFocus) => {
-    const nextHourHeight = clamp(hourHeight, TIMELINE_MIN_HOUR_HEIGHT, TIMELINE_MAX_HOUR_HEIGHT);
-    setCalendarHourHeight(nextHourHeight);
-
-    if (focus && focus.startHourHeight > 0) {
-      const scale = nextHourHeight / focus.startHourHeight;
-      const nextScrollY = Math.max(0, focus.startScrollY + focus.anchorY * (scale - 1));
-      requestAnimationFrame(() => {
-        calendarScrollRef.current?.scrollTo({ y: nextScrollY, animated: false });
-      });
-    }
+  const scrollCalendarTo = useCallback((y: number) => {
+    calendarScrollY.current = y;
+    calendarScrollRef.current?.scrollTo({ animated: false, y });
   }, []);
+  const getCalendarScrollY = useCallback(() => calendarScrollY.current, []);
+  const shiftSelectedCalendarWeek = useCallback((weeks: number) => {
+    shiftSelectedCalendarDay(weeks * 7);
+  }, [shiftSelectedCalendarDay]);
 
   async function stopActiveTimer() {
-    if (timerActionPending) return false;
-    setActiveEditStopping(true);
-    setTimerActionPending("stop");
-    try {
-      await stopTimer();
-      scheduleLayoutTransition(reduceMotion);
-      await load({ silent: true });
-      return true;
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        setActiveEditVisible(false);
-        setAuthState("signedOut");
-        setData(null);
-        return false;
-      }
-      if (!isNetworkTimerError(error)) {
+    const activeEntry = latestData.current?.activeEntry;
+    if (!activeEntry) return false;
+    const previousData = latestData.current;
+    const version = nextTimerMutationVersion(activeEntry.id);
+    updateDashboardData((current) => optimisticStopActiveTimer(current, new Date().toISOString()));
+    scheduleLayoutTransition(reduceMotion);
+    enqueueTimerMutation(async () => {
+      try {
+        const persistedId = persistedTimerEntryId(activeEntry.id);
+        if (activeEntry.id.startsWith(OPTIMISTIC_TIMER_ID_PREFIX) && !persistedId) {
+          await queueStopTimer();
+        } else {
+          await stopTimer();
+        }
+      } catch (error) {
+        if (error instanceof AuthRequiredError) {
+          latestData.current = null;
+          setActiveEditVisible(false);
+          setAuthState("signedOut");
+          setData(null);
+          return;
+        }
+        if (isNetworkTimerError(error)) {
+          await queueStopTimer();
+          return;
+        }
+        if (isCurrentTimerMutation(activeEntry.id, version)) {
+          latestData.current = previousData;
+          setData(previousData);
+        }
         Alert.alert("Timer not stopped", error instanceof Error ? error.message : "Unable to stop this timer.");
-        return false;
       }
-      await queueStopTimer();
-      scheduleLayoutTransition(reduceMotion);
-      await syncAndReload({ silent: true });
-      return true;
-    } finally {
-      setActiveEditStopping(false);
-      setTimerActionPending(null);
-    }
+    });
+    return true;
   }
 
   async function deleteActiveTimer(entryId: string) {
-    setActiveEditDeleting(true);
-    try {
-      await deleteTimeEntry(entryId);
-      scheduleLayoutTransition(reduceMotion);
-      await load({ silent: true });
-      return true;
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        setAuthState("signedOut");
-        setData(null);
-        return false;
+    scheduleLayoutTransition(reduceMotion);
+    return deleteTimeEntryOptimistically(entryId, "Timer not deleted");
+  }
+
+  async function deleteTimeEntryOptimistically(entryId: string, errorTitle: string) {
+    const previousData = latestData.current;
+    const version = nextTimerMutationVersion(entryId);
+    updateDashboardData((current) => optimisticDeleteTimeEntry(current, entryId));
+    enqueueTimerMutation(async () => {
+      try {
+        const persistedId = persistedTimerEntryId(entryId);
+        if (persistedId) await deleteTimeEntry(persistedId);
+        else await removeQueuedEvent(entryId);
+      } catch (error) {
+        if (isCurrentTimerMutation(entryId, version)) {
+          latestData.current = previousData;
+          setData(previousData);
+        }
+        if (error instanceof AuthRequiredError) {
+          latestData.current = null;
+          setAuthState("signedOut");
+          setData(null);
+          return;
+        }
+        Alert.alert(errorTitle, error instanceof Error ? error.message : "Unable to delete this entry.");
       }
-      Alert.alert("Timer not deleted", error instanceof Error ? error.message : "Unable to delete this timer.");
-      return false;
-    } finally {
-      setActiveEditDeleting(false);
-    }
+    });
+    return true;
   }
 
   async function submitAuth() {
     setAuthError(null);
     setAuthNotice(null);
-    setLoading(true);
+    setAuthSubmitting(true);
     try {
       const auth = authView === "signup"
         ? await signup(
@@ -893,7 +913,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       setAuthError(error instanceof Error ? error.message : "Unable to authenticate");
       setAuthState("signedOut");
     } finally {
-      setLoading(false);
+      setAuthSubmitting(false);
     }
   }
 
@@ -908,11 +928,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       }
     ]
   };
-  const timerProgressTranslateX = timerProgress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-140, 320]
-  });
-
   if (authState === "signedOut") {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -993,7 +1008,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             {authError ? <Text style={styles.errorText}>{authError}</Text> : null}
             <Pressable style={pressable(styles.primaryButton, styles.buttonPressed)} onPress={submitAuth}>
               <Text style={styles.primaryButtonText}>
-                {loading ? "Working..." : authView === "signup" ? "Create account" : "Log in"}
+                {authSubmitting ? "Working..." : authView === "signup" ? "Create account" : "Log in"}
               </Text>
             </Pressable>
             <Pressable
@@ -1031,8 +1046,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           scrollEventThrottle={16}
           refreshControl={
             <RefreshControl
-              refreshing={isFocused && loading}
-              onRefresh={() => load()}
+              refreshing={isFocused && refreshing}
+              onRefresh={() => load({ visibleRefresh: true })}
               tintColor={theme.accent}
               colors={[theme.accent]}
             />
@@ -1124,11 +1139,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                       <Pressable
                         accessibilityLabel="Stop current timer"
                         accessibilityRole="button"
-                        disabled={timerActionPending !== null}
-                        style={pressable(
-                          [styles.stopButton, timerActionPending ? styles.buttonDisabled : null],
-                          styles.buttonPressed
-                        )}
+                        style={pressable(styles.stopButton, styles.buttonPressed)}
                         onPress={(event) => {
                           event.stopPropagation();
                           void stopActiveTimer();
@@ -1137,16 +1148,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                         <StopGlyph color={theme.onAccent} />
                       </Pressable>
                     </Animated.View>
-                  ) : null}
-                </View>
-                <View style={styles.timerProgressSlot}>
-                  {timerActionPending ? (
-                    <Animated.View
-                      style={[
-                        styles.timerProgressFill,
-                        { transform: [{ translateX: timerProgressTranslateX }] }
-                      ]}
-                    />
                   ) : null}
                 </View>
               </Pressable> : null}
@@ -1173,12 +1174,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   <Pressable
                     accessibilityLabel="Start task"
                     accessibilityRole="button"
-                    disabled={timerActionPending !== null}
-                    style={pressable(
-                      [styles.playButton, timerActionPending ? styles.buttonDisabled : null],
-                      styles.buttonPressed
-                    )}
+                    style={pressable(styles.playButton, styles.buttonPressed)}
                     onPress={() => {
+                      if (latestData.current?.activeEntry) {
+                        setStartSheetVisible(false);
+                        setActiveEditVisible(true);
+                        return;
+                      }
                       void startTask(null);
                     }}
                   >
@@ -1265,12 +1267,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               calendarHoursMode={calendarHoursMode}
               calendarTransitionDirection={calendarTransitionDirection}
               entries={calendarEntries}
-              hourHeight={calendarHourHeight}
               now={now}
               onChangeDay={shiftSelectedCalendarDay}
-              onChangeWeek={(weeks) => shiftSelectedCalendarDay(weeks * 7)}
-              onChangeZoom={setCalendarZoom}
-              getScrollY={() => calendarScrollY.current}
+              onChangeWeek={shiftSelectedCalendarWeek}
+              getScrollY={getCalendarScrollY}
+              onScrollTo={scrollCalendarTo}
               onGestureLockedChange={setCalendarGestureLocked}
               onOpenActive={() => {
                 setCalendarEditEntry(null);
@@ -1323,7 +1324,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           setStartSheetVisible(false);
         }}
         onStart={startTaskFromSheet}
-        saving={startSheetSaving || timerActionPending === "start"}
+        saving={false}
         stopping={false}
         styles={styles}
         theme={theme}
@@ -1341,9 +1342,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         onDelete={deleteActiveTimer}
         onSave={saveActiveTimerEdit}
         onStop={stopActiveTimer}
-        deleting={activeEditDeleting}
-        saving={activeEditSaving || timerActionPending === "start"}
-        stopping={activeEditStopping}
+        deleting={false}
+        saving={false}
+        stopping={false}
         styles={styles}
         suggestions={compactTaskSuggestions}
         theme={theme}
@@ -1358,8 +1359,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         onCancel={() => setCalendarEditEntry(null)}
         onDelete={deleteCalendarEntry}
         onSave={saveCalendarEntryEdit}
-        deleting={calendarEditDeleting}
-        saving={calendarEditSaving}
+        deleting={false}
+        saving={false}
         stopping={false}
         styles={styles}
         theme={theme}
@@ -1392,15 +1393,14 @@ function CalendarTab({
   calendarTransitionDirection,
   entries,
   getScrollY,
-  hourHeight,
   now,
   onChangeDay,
   onChangeWeek,
-  onChangeZoom,
   onGestureLockedChange,
   onOpenActive,
   onOpenDetail,
   onOpenReviewItem,
+  onScrollTo,
   onSelectDay,
   selectedDayKey,
   styles,
@@ -1413,15 +1413,14 @@ function CalendarTab({
   calendarTransitionDirection: number;
   entries: CalendarEntry[];
   getScrollY: () => number;
-  hourHeight: number;
   now: number;
   onChangeDay: (days: number) => void;
   onChangeWeek: (weeks: number) => void;
-  onChangeZoom: (hourHeight: number, focus?: CalendarZoomFocus) => void;
   onGestureLockedChange: (locked: boolean) => void;
   onOpenActive: () => void;
   onOpenDetail: (entry: CalendarEntry) => void;
   onOpenReviewItem: (reviewItemId: string) => void;
+  onScrollTo: (y: number) => void;
   onSelectDay: (dayKey: string) => void;
   selectedDayKey: string;
   styles: MobileStyles;
@@ -1431,10 +1430,18 @@ function CalendarTab({
   weekDays: Array<{ key: string; date: Date }>;
 }) {
   const reduceMotion = useReduceMotionPreference();
+  const [calendarZoom, setCalendarZoom] = useState<{ hourHeight: number; scrollY: number | null }>({
+    hourHeight: TIMELINE_DEFAULT_HOUR_HEIGHT,
+    scrollY: null
+  });
+  const hourHeight = calendarZoom.hourHeight;
   const pinchStartDistance = useRef<number | null>(null);
   const pinchStartHourHeight = useRef(hourHeight);
   const pinchAnchorY = useRef(0);
+  const pinchStartMidpointY = useRef(0);
   const pinchStartScrollY = useRef(0);
+  const pendingZoom = useRef<{ hourHeight: number; midpointY: number } | null>(null);
+  const zoomFrame = useRef<number | null>(null);
   const timelinePanelY = useRef(0);
   const timelineCanvasY = useRef(0);
   const calendarTransition = useRef(new Animated.Value(1)).current;
@@ -1456,6 +1463,39 @@ function CalendarTab({
     .filter((item): item is { entry: CalendarEntry; metrics: CalendarBlockMetrics } => Boolean(item.metrics));
   const visibleBlockIds = new Set(visibleBlocks.map(({ entry }) => entry.id));
   const outsideAxisEntries = entries.filter((entry) => !visibleBlockIds.has(entry.id)).slice(0, 3);
+
+  const queuePinchZoom = useCallback((nextHourHeight: number, midpointY: number) => {
+    pendingZoom.current = {
+      hourHeight: clamp(nextHourHeight, TIMELINE_MIN_HOUR_HEIGHT, TIMELINE_MAX_HOUR_HEIGHT),
+      midpointY
+    };
+    if (zoomFrame.current !== null) return;
+    zoomFrame.current = requestAnimationFrame(() => {
+      zoomFrame.current = null;
+      const zoom = pendingZoom.current;
+      pendingZoom.current = null;
+      if (!zoom) return;
+      setCalendarZoom({
+        hourHeight: zoom.hourHeight,
+        scrollY: anchoredCalendarScrollY({
+          anchorY: pinchAnchorY.current,
+          currentMidpointY: zoom.midpointY,
+          nextHourHeight: zoom.hourHeight,
+          startHourHeight: pinchStartHourHeight.current,
+          startMidpointY: pinchStartMidpointY.current,
+          startScrollY: pinchStartScrollY.current
+        })
+      });
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (calendarZoom.scrollY !== null) onScrollTo(calendarZoom.scrollY);
+  }, [calendarZoom, onScrollTo]);
+
+  useEffect(() => () => {
+    if (zoomFrame.current !== null) cancelAnimationFrame(zoomFrame.current);
+  }, []);
 
   useEffect(() => {
     calendarTransition.stopAnimation();
@@ -1504,8 +1544,9 @@ function CalendarTab({
         pinchStartDistance.current = touchDistance(event.nativeEvent.touches);
         pinchStartHourHeight.current = hourHeight;
         pinchStartScrollY.current = getScrollY();
+        pinchStartMidpointY.current = touchMidpointLocationY(event.nativeEvent.touches);
         pinchAnchorY.current = clamp(
-          touchMidpointLocationY(event.nativeEvent.touches) - timelinePanelY.current - timelineCanvasY.current,
+          pinchStartMidpointY.current - timelinePanelY.current - timelineCanvasY.current,
           0,
           timelineHeight
         );
@@ -1517,13 +1558,9 @@ function CalendarTab({
       if (event.nativeEvent.touches.length < 2 || !pinchStartDistance.current) return;
       const distance = touchDistance(event.nativeEvent.touches);
       if (!distance) return;
-      onChangeZoom(
+      queuePinchZoom(
         pinchStartHourHeight.current * (distance / pinchStartDistance.current),
-        {
-          anchorY: pinchAnchorY.current,
-          startHourHeight: pinchStartHourHeight.current,
-          startScrollY: pinchStartScrollY.current
-        }
+        touchMidpointLocationY(event.nativeEvent.touches)
       );
     },
     onPanResponderRelease: (_event, gesture) => {
@@ -1540,7 +1577,7 @@ function CalendarTab({
       pinchStartDistance.current = null;
       onGestureLockedChange(false);
     }
-  }), [getScrollY, hourHeight, onChangeDay, onChangeZoom, onGestureLockedChange, timelineHeight]);
+  }), [getScrollY, hourHeight, onChangeDay, onGestureLockedChange, queuePinchZoom, timelineHeight]);
 
   const weekGestureResponder = useMemo(() => PanResponder.create({
     onMoveShouldSetPanResponderCapture: (_event, gesture) =>

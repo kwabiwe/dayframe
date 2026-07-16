@@ -596,10 +596,16 @@ describe("mobile API client", () => {
 
   it("starts timers with an optional category and no project", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
-    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 201)));
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({
+      eventId: "event-1",
+      timeEntryId: "entry-1"
+    }, 201)));
     vi.stubGlobal("fetch", fetchMock);
 
-    await startTimer("20000000-0000-4000-8000-000000000001", "Write notes");
+    await expect(startTimer(
+      "20000000-0000-4000-8000-000000000001",
+      "Write notes"
+    )).resolves.toMatchObject({ timeEntryId: "entry-1" });
 
     expect(fetchMock).toHaveBeenCalledWith(
       "https://dayframe.test/api/time-entries",

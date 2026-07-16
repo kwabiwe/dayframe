@@ -81,10 +81,14 @@ describe("task suggestions query", () => {
     vi.resetAllMocks();
   });
 
-  it("builds task suggestions from current-user manual history only", async () => {
+  it("builds task suggestions from full manual and explicitly accepted history", async () => {
     mocks.query.mockImplementation(async (statement: string, values: unknown[]) => {
       expect(statement).toContain("te.user_id = $2");
       expect(statement).toContain("te.source in ('manual_app', 'mobile_app')");
+      expect(statement).toContain("accepted_review.status = 'accepted'");
+      expect(statement).toContain("not in ('health_sleep_import', 'health_workout_import')");
+      expect(statement).not.toContain("interval '120 days'");
+      expect(statement).toContain("limit 5000");
       expect(values).toEqual([session.workspaceId, session.userId]);
       return {
         rows: [
@@ -112,18 +116,31 @@ describe("task suggestions query", () => {
             reviewStatus: "confirmed",
             source: "health_sleep",
             startedAt: "2026-07-14T00:00:00.000Z",
-            stoppedAt: "2026-07-14T08:00:00.000Z"
+            stoppedAt: "2026-07-14T08:00:00.000Z",
+            userConfirmed: false
+          },
+          {
+            id: "school-1",
+            categoryId: "family",
+            categoryName: "Family",
+            categoryColor: "coral",
+            description: "School pickup",
+            durationSeconds: 1200,
+            eventType: "geofence_exit",
+            reviewStatus: "confirmed",
+            source: "geofence_specific",
+            startedAt: "2026-07-14T15:00:00.000Z",
+            stoppedAt: "2026-07-14T15:20:00.000Z",
+            userConfirmed: true
           }
         ]
       };
     });
 
-    await expect(getTaskSuggestions(session)).resolves.toEqual([
-      expect.objectContaining({
-        categoryId: "category-1",
-        description: "Architecture review"
-      })
-    ]);
+    await expect(getTaskSuggestions(session)).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ categoryId: "category-1", description: "Architecture review" }),
+      expect.objectContaining({ categoryId: "family", description: "School pickup" })
+    ]));
   });
 
   it("builds category usage ranks from manual category history", async () => {
