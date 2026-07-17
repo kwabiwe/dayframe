@@ -1,11 +1,14 @@
 import { PageHeader } from "@/components/PageHeader";
 import { ThemeSettings } from "@/components/ThemeSettings";
+import { GoalSettings } from "@/components/GoalSettings";
 import { resolvePageSession } from "@/lib/auth/server";
+import { getBootstrapData } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  await resolvePageSession();
+  const session = await resolvePageSession();
+  const data = await getBootstrapData(session);
 
   return (
     <>
@@ -16,6 +19,9 @@ export default async function SettingsPage() {
       <div className="grid gap-5 px-5 py-6 md:px-8 xl:grid-cols-2">
         <div className="xl:col-span-2">
           <ThemeSettings />
+        </div>
+        <div className="xl:col-span-2">
+          <GoalSettings dailyGoalMinutes={data.user.dailyGoalMinutes} weeklyGoalMinutes={data.user.weeklyGoalMinutes} />
         </div>
         <SettingsPanel
           title="Location retention"

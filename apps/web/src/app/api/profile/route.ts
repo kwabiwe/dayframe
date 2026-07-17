@@ -10,6 +10,8 @@ export async function PATCH(request: Request) {
     const body = (await request.json()) as {
       name?: string;
       workspaceName?: string;
+      dailyGoalMinutes?: number;
+      weeklyGoalMinutes?: number;
       currentPassword?: string;
       newPassword?: string;
     };
@@ -17,6 +19,15 @@ export async function PATCH(request: Request) {
     const workspaceName = body.workspaceName?.trim();
     const currentPassword = body.currentPassword ?? "";
     const newPassword = body.newPassword ?? "";
+    const dailyGoalMinutes = body.dailyGoalMinutes;
+    const weeklyGoalMinutes = body.weeklyGoalMinutes;
+
+    if (
+      (dailyGoalMinutes !== undefined && (!Number.isInteger(dailyGoalMinutes) || dailyGoalMinutes < 1 || dailyGoalMinutes > 1440)) ||
+      (weeklyGoalMinutes !== undefined && (!Number.isInteger(weeklyGoalMinutes) || weeklyGoalMinutes < 1 || weeklyGoalMinutes > 10080))
+    ) {
+      return NextResponse.json({ error: "Enter valid daily and weekly goals." }, { status: 400 });
+    }
 
     if (newPassword) {
       if (newPassword.length < 8) {
@@ -54,6 +65,16 @@ export async function PATCH(request: Request) {
         workspaceName.slice(0, 120),
         session.workspaceId
       ]);
+    }
+
+    if (dailyGoalMinutes !== undefined || weeklyGoalMinutes !== undefined) {
+      await query(
+        `update users
+         set daily_goal_minutes = coalesce($1, daily_goal_minutes),
+             weekly_goal_minutes = coalesce($2, weekly_goal_minutes)
+         where id = $3`,
+        [dailyGoalMinutes ?? null, weeklyGoalMinutes ?? null, session.userId]
+      );
     }
 
     return NextResponse.json({ ok: true });

@@ -119,6 +119,8 @@ export function DashboardRealtime({ initialData }: { initialData: BootstrapData 
     month: "long"
   }).format(selectedDate);
   const totalLogged = data.dayEntries.reduce((sum, entry) => sum + entry.durationSeconds, 0);
+  const dailyGoalSeconds = data.user.dailyGoalMinutes * 60;
+  const weeklyGoalSeconds = data.user.weeklyGoalMinutes * 60;
 
   return (
     <div className="swiss-dashboard">
@@ -128,16 +130,16 @@ export function DashboardRealtime({ initialData }: { initialData: BootstrapData 
           title="Today"
           value={formatDuration(data.stats.todaySeconds)}
           caption="Total time"
-          goalLabel="Goal 8:00"
-          progress={data.stats.todaySeconds / (8 * 3600)}
+          goalLabel={`Goal ${formatDuration(dailyGoalSeconds)}`}
+          progress={data.stats.todaySeconds / dailyGoalSeconds}
           series={data.todaySeries.map((point) => point.seconds)}
         />
         <MetricCard
           title="This week"
           value={formatDuration(data.stats.weekSeconds)}
           caption="Total time"
-          goalLabel="Goal 40:00"
-          progress={data.stats.weekSeconds / (40 * 3600)}
+          goalLabel={`Goal ${formatDuration(weeklyGoalSeconds)}`}
+          progress={data.stats.weekSeconds / weeklyGoalSeconds}
           series={data.weekSeries.map((point) => point.seconds)}
         />
         <ReviewSummaryCard items={data.reviewItems} />

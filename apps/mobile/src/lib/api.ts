@@ -80,7 +80,13 @@ export type MobileReviewItem = {
 };
 
 export type MobileBootstrap = {
-  user: { id: string; email: string; name: string };
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    dailyGoalMinutes?: number;
+    weeklyGoalMinutes?: number;
+  };
   workspace: { id: string; name: string };
   dateRange?: MobileDateRange;
   activeEntry: MobileTimeEntry | null;

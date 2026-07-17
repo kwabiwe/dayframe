@@ -45,6 +45,8 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 
 - Dashboard shows Today and This Week totals, review count, streak/summary, day timeline, review inbox, and recent activity.
 - Reports show category, source and place breakdowns as the normal user-facing views.
+- Reports use one explicit Day, Week, Month or Custom date range for every total, chart and breakdown; historical navigation never leaves a chart anchored to the real current week.
+- Entries crossing a report boundary contribute only the time inside the selected range. Daily and weekly goal progress uses persisted user goals and appears only for matching Day/Week ranges.
 - Categories, Places, Automation, Review Inbox, Settings, Search, Notifications, Profile, and Help remain navigable.
 - Review Inbox actions remain normal sized, readable, and do not overlay item content.
 

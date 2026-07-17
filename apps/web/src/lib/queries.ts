@@ -194,7 +194,7 @@ export type ReportRow = {
 };
 
 export type BootstrapData = {
-  user: { id: string; email: string; name: string };
+  user: { id: string; email: string; name: string; dailyGoalMinutes: number; weeklyGoalMinutes: number };
   workspace: { id: string; name: string };
   workspaces: Array<{ id: string; name: string }>;
   dateRange: DashboardDateRange;
@@ -356,13 +356,21 @@ export async function getNormalizationContext(
 }
 
 async function getUser(session: RequestSession) {
-  const result = await query<{ id: string; email: string; name: string }>(
-    `select id, email, name
+  const result = await query<{ id: string; email: string; name: string; dailyGoalMinutes: number; weeklyGoalMinutes: number }>(
+    `select id, email, name,
+            daily_goal_minutes as "dailyGoalMinutes",
+            weekly_goal_minutes as "weeklyGoalMinutes"
      from users
      where id = $1`,
     [session.userId]
   );
-  return result.rows[0] ?? { id: session.userId, email: "local@dayframe", name: "Dayframe user" };
+  return result.rows[0] ?? {
+    id: session.userId,
+    email: "local@dayframe",
+    name: "Dayframe user",
+    dailyGoalMinutes: 480,
+    weeklyGoalMinutes: 2400
+  };
 }
 
 async function getWorkspaces(session: RequestSession) {
@@ -976,43 +984,53 @@ function buildWeekSeries(entries: TimeEntryRow[], dateRange: DashboardDateRange)
   });
 }
 
-export async function getReports(session: RequestSession = getDevSession()) {
-  const dateRange = buildDashboardDateRange();
+export async function getReports(
+  session: RequestSession = getDevSession(),
+  range?: { start: Date; end: Date }
+) {
+  const rangeStart = (range?.start ?? startOfWeek(new Date())).toISOString();
+  const rangeEnd = (range?.end ?? addDays(startOfWeek(new Date()), 7)).toISOString();
   const [byCategory, bySource, byPlace, weekTotals] = await Promise.all([
     query<ReportRow>(
       `select coalesce(c.id::text, 'unassigned') as id,
               coalesce(c.name, 'Uncategorized') as name,
               c.color,
-              sum(extract(epoch from (coalesce(te.stopped_at, now()) - te.started_at)))::int as seconds
+              sum(extract(epoch from (least(coalesce(te.stopped_at, now()), $3::timestamptz) - greatest(te.started_at, $2::timestamptz))))::int as seconds
        from time_entries te
        left join categories c on c.id = te.category_id
        where te.workspace_id = $1
+         and te.started_at < $3::timestamptz
+         and coalesce(te.stopped_at, now()) > $2::timestamptz
        group by coalesce(c.id::text, 'unassigned'), coalesce(c.name, 'Uncategorized'), c.color
        order by seconds desc`,
-      [session.workspaceId]
+      [session.workspaceId, rangeStart, rangeEnd]
     ),
     query<ReportRow>(
       `select source as id,
               source as name,
               null::text as color,
-              sum(extract(epoch from (coalesce(stopped_at, now()) - started_at)))::int as seconds
+              sum(extract(epoch from (least(coalesce(stopped_at, now()), $3::timestamptz) - greatest(started_at, $2::timestamptz))))::int as seconds
        from time_entries
        where workspace_id = $1
+         and started_at < $3::timestamptz
+         and coalesce(stopped_at, now()) > $2::timestamptz
        group by source
        order by seconds desc`,
-      [session.workspaceId]
+      [session.workspaceId, rangeStart, rangeEnd]
     ),
     query<ReportRow>(
       `select coalesce(pl.id::text, 'no-place') as id,
               coalesce(pl.name, 'No place') as name,
               null::text as color,
-              sum(extract(epoch from (coalesce(te.stopped_at, now()) - te.started_at)))::int as seconds
+              sum(extract(epoch from (least(coalesce(te.stopped_at, now()), $3::timestamptz) - greatest(te.started_at, $2::timestamptz))))::int as seconds
        from time_entries te
        left join places pl on pl.id = te.place_id
        where te.workspace_id = $1
+         and te.started_at < $3::timestamptz
+         and coalesce(te.stopped_at, now()) > $2::timestamptz
        group by coalesce(pl.id::text, 'no-place'), coalesce(pl.name, 'No place')
        order by seconds desc`,
-      [session.workspaceId]
+      [session.workspaceId, rangeStart, rangeEnd]
     ),
     query<{ index: number; seconds: number }>(
       `with days as (
@@ -1025,23 +1043,24 @@ export async function getReports(session: RequestSession = getDevSession()) {
        )
        select (days.index - 1)::int as index,
               coalesce(sum(
-                extract(epoch from (coalesce(te.stopped_at, now()) - te.started_at))
+                extract(epoch from (least(coalesce(te.stopped_at, now()), days.day_start + interval '1 day') - greatest(te.started_at, days.day_start)))
               ), 0)::int as seconds
        from days
        left join time_entries te
          on te.workspace_id = $1
-        and te.started_at >= days.day_start
         and te.started_at < days.day_start + interval '1 day'
+        and coalesce(te.stopped_at, now()) > days.day_start
        group by days.index
        order by days.index`,
-      [session.workspaceId, dateRange.weekStart, dateRange.weekEnd]
+      [session.workspaceId, rangeStart, rangeEnd]
     )
   ]);
 
   const secondsByDay = new Map(weekTotals.rows.map((row) => [row.index, row.seconds]));
-  const weekStart = new Date(dateRange.weekStart);
-  const weekSeries = Array.from({ length: 7 }, (_, index) => {
-    const day = addDays(weekStart, index);
+  const seriesStart = new Date(rangeStart);
+  const seriesLength = Math.max(1, Math.round((new Date(rangeEnd).getTime() - seriesStart.getTime()) / 86_400_000));
+  const weekSeries = Array.from({ length: seriesLength }, (_, index) => {
+    const day = addDays(seriesStart, index);
     return {
       key: toDateKey(day),
       label: new Intl.DateTimeFormat("en-GB", { weekday: "short" }).format(day),
