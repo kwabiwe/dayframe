@@ -119,6 +119,31 @@ export function optimisticDeleteTimeEntry(data: MobileBootstrap | null, entryId:
   };
 }
 
+export function optimisticRestoreTimeEntries(
+  data: MobileBootstrap | null,
+  snapshot: MobileBootstrap | null,
+  entryIds: string[]
+) {
+  if (!data || !snapshot) return data;
+  const restoreIds = new Set(entryIds);
+  const restoreFrom = (current: MobileTimeEntry[], previous: MobileTimeEntry[] | undefined) => {
+    const restored = previous?.filter((entry) => restoreIds.has(entry.id)) ?? [];
+    return dedupeMobileEntries([...current, ...restored]);
+  };
+  return {
+    ...data,
+    activeEntry: data.activeEntry ?? (
+      snapshot.activeEntry && restoreIds.has(snapshot.activeEntry.id) ? snapshot.activeEntry : null
+    ),
+    entries: restoreFrom(data.entries, snapshot.entries),
+    historyEntries: data.historyEntries
+      ? restoreFrom(data.historyEntries, snapshot.historyEntries)
+      : data.historyEntries,
+    dayEntries: data.dayEntries ? restoreFrom(data.dayEntries, snapshot.dayEntries) : data.dayEntries,
+    weekEntries: data.weekEntries ? restoreFrom(data.weekEntries, snapshot.weekEntries) : data.weekEntries
+  };
+}
+
 export function optimisticStopActiveTimer(data: MobileBootstrap | null, stoppedAt: string) {
   if (!data?.activeEntry) return data;
   const completed = patchedMobileTimeEntry(data.activeEntry, { stoppedAt }, data.categories);

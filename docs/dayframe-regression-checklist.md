@@ -12,7 +12,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Edits typed into the active timer description/category are saved before the entry is stopped.
 - Pinned and recent/frequent quick actions can start category-based tasks.
 - Continue/start-again actions use a play affordance and start the task.
-- On mobile, empty Play starts immediately and opens the running Edit Timer sheet; Play while a timer is already running opens the same suggestion/edit flow instead of bypassing suggestions. Suggestions enrich that same active timer rather than starting a duplicate.
+- On mobile, empty Play starts immediately and opens the running Edit Timer sheet. A history replay action remains available while another timer runs and atomically switches to the selected task; suggestions in the active editor still enrich that same timer rather than starting a duplicate.
 - Edit Timer delete confirmation appears without unmounting or collapsing the suggestions/edit content underneath.
 - Mobile timer start, stop, edit, delete, and suggestion-apply actions do not show spinners, progress bars, or layout-moving loading indicators. They update optimistically and reconcile silently; visible spinners are reserved for deliberate pull-to-refresh.
 
@@ -29,8 +29,8 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Tapping an active entry, completed entry, or review candidate from the native Calendar opens the same existing React Native timer editor, entry editor, or Review flow. Native rendering must not create or mutate a second timer/data store.
 - Calendar edit sheets stay visible when the iOS keyboard opens, with the focused field scrolled above the keyboard/suggestion bar.
 - List view groups entries by date, shows friendly source labels, and includes edit, start-again, and delete actions.
-- Today history left-swipe uses a UI-thread gesture whose danger action and icon travel continuously with the row edge; it must not pop into place, compete with vertical scrolling, or delete collapsed aggregate groups. The duration keeps the normal 14-point trailing inset as a surface-coloured gap before the revealed danger action.
-- Today history deletion uses the app-owned borderless confirmation surface rather than a system alert. Cancel leaves the row untouched; Delete updates immediately and restores the row with a friendly error if persistence fails. Blank uncategorized entries remain individual rows with direct edit/delete access instead of collapsing into a non-deletable aggregate.
+- Today history left-swipe uses a UI-thread gesture whose danger action and icon travel continuously with the row edge; it must not pop into place or compete with vertical scrolling. A collapsed aggregate group can be deleted as one explicit, confirmed action covering all underlying entries. The duration keeps the normal 14-point trailing inset as a surface-coloured gap before the revealed danger action.
+- Today history deletion uses the app-owned borderless confirmation surface rather than a system alert. Cancel leaves rows untouched; Delete updates immediately and shows a bottom Undo snackbar before persistence is committed. Undo restores the exact entries, while persistence failure also restores them with a friendly error. Blank uncategorized entries remain individual rows with direct edit/delete access instead of collapsing into a non-deletable aggregate.
 - Timesheet view groups work by category/activity, shows day totals and row totals, and remains readable.
 
 ## Data And Sync
