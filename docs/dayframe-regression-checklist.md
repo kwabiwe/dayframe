@@ -29,8 +29,8 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Tapping an active entry, completed entry, or review candidate from the native Calendar opens the same existing React Native timer editor, entry editor, or Review flow. Native rendering must not create or mutate a second timer/data store.
 - Calendar edit sheets stay visible when the iOS keyboard opens, with the focused field scrolled above the keyboard/suggestion bar.
 - List view groups entries by date, shows friendly source labels, and includes edit, start-again, and delete actions.
-- Today history left-swipe uses a UI-thread gesture whose danger action and icon travel continuously with the row edge; it must not pop into place, compete with vertical scrolling, or delete collapsed aggregate groups.
-- Today history deletion uses the app-owned borderless confirmation surface rather than a system alert. Cancel leaves the row untouched; Delete updates immediately and restores the row with a friendly error if persistence fails.
+- Today history left-swipe uses a UI-thread gesture whose danger action and icon travel continuously with the row edge; it must not pop into place, compete with vertical scrolling, or delete collapsed aggregate groups. The duration keeps the normal 14-point trailing inset as a surface-coloured gap before the revealed danger action.
+- Today history deletion uses the app-owned borderless confirmation surface rather than a system alert. Cancel leaves the row untouched; Delete updates immediately and restores the row with a friendly error if persistence fails. Blank uncategorized entries remain individual rows with direct edit/delete access instead of collapsing into a non-deletable aggregate.
 - Timesheet view groups work by category/activity, shows day totals and row totals, and remains readable.
 
 ## Data And Sync

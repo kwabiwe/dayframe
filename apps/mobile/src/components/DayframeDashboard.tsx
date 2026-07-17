@@ -138,7 +138,9 @@ type SummarySegment = {
 };
 const AUTH_KEYBOARD_ACCESSORY_ID = "dayframe-auth-keyboard-accessory";
 const RECENT_LAST_STOP_WINDOW_MS = 24 * 60 * 60 * 1000;
-const HISTORY_DELETE_ACTION_WIDTH = 64;
+const HISTORY_DELETE_ACTION_BUTTON_WIDTH = 64;
+const HISTORY_DELETE_ACTION_GAP = 14;
+const HISTORY_DELETE_ACTION_WIDTH = HISTORY_DELETE_ACTION_BUTTON_WIDTH + HISTORY_DELETE_ACTION_GAP;
 
 type DashboardContextValue = {
   renderTab: (tab: DayframeDashboardTab, isFocused: boolean) => ReactNode;
@@ -1748,8 +1750,7 @@ function SwipeDeleteAction({
   return (
     <Reanimated.View
       style={[
-        styles.historySwipeDeleteAction,
-        { backgroundColor: theme.danger, minHeight },
+        { minHeight, width: HISTORY_DELETE_ACTION_WIDTH },
         animatedStyle
       ]}
     >
@@ -1762,6 +1763,11 @@ function SwipeDeleteAction({
         }}
         style={({ pressed }) => [
           styles.historySwipeDeleteActionPressable,
+          {
+            backgroundColor: theme.danger,
+            marginLeft: HISTORY_DELETE_ACTION_GAP,
+            width: HISTORY_DELETE_ACTION_BUTTON_WIDTH
+          },
           pressed ? styles.buttonPressed : null
         ]}
       >

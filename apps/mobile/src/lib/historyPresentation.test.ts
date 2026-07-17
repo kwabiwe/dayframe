@@ -56,6 +56,36 @@ describe("mobile history presentation", () => {
     expect(grouped[0].totalSeconds).toBe(5400);
   });
 
+  it("keeps blank uncategorized entries individual so each row can be deleted", () => {
+    const grouped = groupHistoryDayEntries([
+      entry("uncategorized-one", new Date(2026, 6, 16, 9, 0), new Date(2026, 6, 16, 9, 0)),
+      entry("uncategorized-two", new Date(2026, 6, 16, 10, 0), new Date(2026, 6, 16, 10, 0))
+    ].map((item) => ({
+      entry: { ...item, categoryId: null, categoryName: null, description: null },
+      overlapSeconds: 0
+    })));
+
+    expect(grouped).toHaveLength(2);
+    expect(grouped.map((group) => group.entries.map(({ entry: item }) => item.id))).toEqual([
+      ["uncategorized-one"],
+      ["uncategorized-two"]
+    ]);
+  });
+
+  it("still groups uncategorized entries that share a description", () => {
+    const grouped = groupHistoryDayEntries([
+      entry("uncategorized-walk-one", new Date(2026, 6, 16, 9, 0), new Date(2026, 6, 16, 9, 15)),
+      entry("uncategorized-walk-two", new Date(2026, 6, 16, 10, 0), new Date(2026, 6, 16, 10, 30))
+    ].map((item) => ({
+      entry: { ...item, categoryId: null, categoryName: null, description: "Walk" },
+      overlapSeconds: item.durationSeconds
+    })));
+
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0].entries).toHaveLength(2);
+    expect(grouped[0].totalSeconds).toBe(2700);
+  });
+
   it("groups matching descriptions case-insensitively but keeps categories separate", () => {
     const base = [
       { ...entry("school-one", new Date(2026, 6, 16, 9, 0), new Date(2026, 6, 16, 9, 30)), description: "School drop-off" },

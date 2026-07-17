@@ -29,6 +29,22 @@ describe("Today history swipe-to-delete contract", () => {
     expect(dashboardSource).toContain("friction={1}");
   });
 
+  it("keeps the normal trailing inset between duration text and the danger action", () => {
+    expect(dashboardSource).toContain("const HISTORY_DELETE_ACTION_BUTTON_WIDTH = 64");
+    expect(dashboardSource).toContain("const HISTORY_DELETE_ACTION_GAP = 14");
+    expect(dashboardSource).toContain("marginLeft: HISTORY_DELETE_ACTION_GAP");
+    expect(dashboardSource).toContain("width: HISTORY_DELETE_ACTION_BUTTON_WIDTH");
+  });
+
+  it("uses the semantic brand danger colours for swipe and confirmation actions", () => {
+    expect(dashboardSource).toContain("backgroundColor: theme.danger");
+    expect(dashboardSource).toContain("<TrashGlyph color={theme.onDanger}");
+    expect(mobileThemeSource).toContain("sheetDeleteConfirmationDelete:");
+    expect(mobileThemeSource).toContain("backgroundColor: theme.danger");
+    expect(mobileThemeSource).toContain("sheetDeleteConfirmationDeleteText:");
+    expect(mobileThemeSource).toContain("color: theme.onDanger");
+  });
+
   it("uses the app-owned confirmation instead of a system alert", () => {
     const historyRenderSource = dashboardSource.slice(
       dashboardSource.indexOf("renderItem={({ item }) =>"),

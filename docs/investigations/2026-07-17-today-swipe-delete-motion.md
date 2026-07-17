@@ -3,6 +3,8 @@
 Date: 2026-07-17
 Branch: `agent/today-swipe-delete-motion`
 Pull request: #75
+Follow-up branch: `agent/uncategorized-swipe-delete`
+Follow-up pull request: #76
 
 ## Reported symptoms
 
@@ -36,6 +38,20 @@ Pull request: #75
 - Extracted the existing Dayframe delete confirmation into a reusable component and used it from both Edit Timer and Today history.
 - Removed the confirmation card border while retaining raised-surface contrast, restrained elevation, semantic danger colour, VoiceOver modal semantics, accessibility escape, and Reduce Motion handling.
 - Kept the PR #74 scope rules: only stopped individual rows and expanded group children can swipe; collapsed groups remain aggregate-only; deletion stays optimistic and restores failed mutations.
+
+## Post-release build 49 follow-up
+
+- Physical-iPhone feedback showed two blank uncategorized entries collapsed under an `Uncategorized` aggregate. The aggregate correctly refused swipe-to-delete for bulk-deletion safety, but those entries then appeared not to be deletable without discovering and swiping the expanded children.
+- The grouping rule was too broad: entries with neither a category nor a description have no useful shared identity. They now remain individual rows, while descriptionless entries with a real category and uncategorized entries with matching descriptions retain the existing grouping behaviour.
+- The revealed danger action previously began directly against the displaced duration. The action track now includes a 14-point surface-coloured leading gap, matching the card's normal trailing inset, while the 64-point delete target stays unchanged.
+- Colour audit: both the swipe action and confirmation Delete pill use the semantic `danger` fill and `onDanger` foreground from Midnight Core, not the coral primary accent. Dark resolves to `#FF6B6B`/`#050914` (7.17:1); light resolves to `#D94F4F`/`#050914` (4.91:1). The confirmation remains borderless.
+
+### Follow-up validation
+
+- Focused history/swipe contract tests passed: 2 files and 12 tests, including blank uncategorized separation, described uncategorized grouping, the 14-point action gap, and semantic danger token use.
+- `npm run lint`, `npm run typecheck`, `npm run test`, `npm run build`, `npm run check:brand-assets`, and `git diff --check` passed. The full suite completed 175 mobile, 138 web, and 56 shared tests.
+- The first iOS simulator build reached the app target and exposed the known local CocoaPods sandbox/lock manifest mismatch. `npx pod-install` refreshed the sandbox; checksum-only `Podfile.lock` changes were excluded from the follow-up.
+- `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer EXPO_PUBLIC_DAYFRAME_API_BASE=https://dayframe-web.vercel.app npm run ios -w @dayframe/mobile -- --device 'iPhone 17 Pro' --no-bundler` then passed with zero errors and one existing duplicate-library warning, installed the app, and issued the simulator launch command. Authenticated Today data and swipe feel remain physical-iPhone acceptance checks.
 
 ## Closure criteria
 
