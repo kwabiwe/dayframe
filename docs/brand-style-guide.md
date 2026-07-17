@@ -200,13 +200,13 @@ Use `font-variant-numeric: tabular-nums` on timers, durations, clock labels and 
 
 ### Spacing and shape
 
-Use the shared spacing scale `4, 8, 12, 16, 20, 24, 32`. Prefer 20 px/pt mobile panels, 14–18 compact cards and controls, and 24–28 floating navigation. Pills may be fully rounded. Keep interactive targets at least 44×44 px/pt.
+Use the shared spacing scale `4, 8, 12, 16, 20, 24, 32`. Prefer 20–24 px/pt grouped surfaces, 14–18 compact cards and controls, and 24–28 floating navigation. Pills may be fully rounded. Keep interactive targets at least 44×44 px/pt.
 
-On iOS, icon-only buttons are circular and text buttons are pills. Avoid rounded-square button silhouettes. Separate panels from the canvas with `surface`/`surfaceRaised` fill, and use inset fills or hairline dividers for structure inside a panel.
+Across signed-in web and iOS surfaces, icon-only buttons are circular and compact text buttons are pills. Avoid rounded-square button silhouettes. Separate panels from the canvas with `surface`/`surfaceRaised` fill, and use inset fills or hairline dividers for structure inside a panel.
 
 ### Borders, elevation and shadows
 
-Borders are not the default iOS grouping mechanism. Prefer canvas/surface contrast, inset fills and light internal dividers; reserve an outline for cases where fill cannot communicate state, such as a selected colour swatch. Web may continue to use 1 px borders where dense controls, focus, or tabular separation require them. Reserve elevation for sheets, menus and floating navigation:
+Borders are not the default grouping mechanism. Prefer canvas/surface contrast, inset fills and light internal dividers; reserve lines for semantic data structure, focus, validation, essential control boundaries, calendar grids and cases where fill cannot communicate state, such as a selected colour swatch. Reserve elevation for sheets, menus and floating navigation:
 
 - dark: `0 12px 32px rgba(0, 0, 0, 0.32)`;
 - light: `0 12px 28px rgba(17, 24, 39, 0.10)`.
@@ -242,7 +242,7 @@ Direct-manipulation gestures are not decorative motion. Calendar scrolling and p
 
 ### Platform differences
 
-Web may remain denser and uses hover, keyboard focus and responsive dialogs. iOS uses safe-area-aware screens, Dynamic Type, native press feedback and sheets. Primary tabs use the system tab controller so supported iOS releases own the Liquid Glass material, layout and accessibility behaviour; do not recreate that navigation material with an overlaid JavaScript glass view. Targeted SwiftUI views must consume the resolved Dayframe semantic roles passed through their native boundary rather than inventing a separate palette or hard-coding nearby colours. Both platforms use the same semantic colour roles, brand geometry, hierarchy and state meaning; platform conventions may change mechanics, not identity.
+Web may remain denser and uses hover, keyboard focus and responsive dialogs, while retaining the same fill-led surface hierarchy, circular icon actions, pill text actions and divider-led lists as iOS. iOS uses safe-area-aware screens, Dynamic Type, native press feedback and sheets. Primary tabs use the system tab controller so supported iOS releases own the Liquid Glass material, layout and accessibility behaviour; do not recreate that navigation material with an overlaid JavaScript glass view. Targeted SwiftUI views must consume the resolved Dayframe semantic roles passed through their native boundary rather than inventing a separate palette or hard-coding nearby colours. Both platforms use the same semantic colour roles, brand geometry, hierarchy and state meaning; platform conventions may change mechanics, not identity.
 
 ## Brand release checklist
 

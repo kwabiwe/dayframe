@@ -4056,3 +4056,885 @@ kbd {
     transition-duration: 1ms !important;
   }
 }
+
+/* Fill-led web visual system
+ *
+ * Decorative outlines give way to the same canvas / surface / inset hierarchy
+ * used by Dayframe on iOS. Lines remain where they describe data structure,
+ * list separation, focus, validation, or calendar geometry.
+ */
+
+:root {
+  --web-radius-control: 16px;
+  --web-radius-group: 24px;
+  --web-radius-floating: 24px;
+  --web-touch-size: 44px;
+  --web-text-action-height: 52px;
+}
+
+.fill-page-header {
+  border: 0;
+  background: transparent;
+  padding-top: 28px;
+  padding-bottom: 16px;
+}
+
+.fill-page-header h1 {
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.fill-page-header p {
+  max-width: 58rem;
+  margin-top: 6px;
+  line-height: 1.5;
+}
+
+.fill-group-surface,
+.fill-inset-surface,
+.fill-toggle-row,
+.fill-list-action,
+.fill-date-pill,
+.fill-metric-pill {
+  border: 0;
+  box-shadow: none;
+}
+
+.fill-group-surface {
+  border-radius: var(--web-radius-group);
+  background: var(--surface);
+}
+
+.fill-inset-surface,
+.fill-toggle-row,
+.fill-list-action,
+.fill-date-pill,
+.fill-metric-pill {
+  border-radius: var(--web-radius-control);
+  background: var(--surface-inset);
+}
+
+.fill-list-action {
+  min-height: var(--web-touch-size);
+}
+
+.fill-icon-action {
+  width: var(--web-touch-size);
+  height: var(--web-touch-size);
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--foreground);
+}
+
+.fill-icon-action:hover {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-muted));
+  color: var(--accent-text);
+}
+
+.fill-icon-danger,
+.fill-icon-danger:hover {
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface-muted));
+  color: var(--danger-text);
+}
+
+.fill-date-pill,
+.fill-metric-pill {
+  min-height: var(--web-text-action-height);
+}
+
+.fill-date-pill {
+  border-radius: 999px;
+}
+
+.fill-metric-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+}
+
+.fill-segmented,
+.swiss-view-switch,
+.swiss-zoom-control {
+  gap: 4px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-inset);
+  padding: 4px;
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.fill-segmented-option,
+.swiss-view-switch button,
+.swiss-zoom-control button {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.fill-segmented-option[aria-pressed="true"],
+.swiss-view-switch button.is-selected {
+  background: var(--surface-muted);
+  color: var(--foreground);
+}
+
+.fill-panel-header {
+  min-height: 68px;
+  border-bottom: 1px solid var(--line);
+}
+
+.swiss-app-shell {
+  grid-template-columns: 232px minmax(0, 1fr);
+}
+
+.swiss-sidebar {
+  border-right: 0;
+  background: var(--surface);
+}
+
+.swiss-brand {
+  min-height: 86px;
+  border: 0;
+  background: transparent;
+  padding: 0 20px;
+}
+
+.swiss-nav {
+  gap: 4px;
+  padding: 4px 16px 20px;
+}
+
+.swiss-nav a {
+  gap: 12px;
+  min-height: var(--web-touch-size);
+  border-radius: var(--web-radius-control);
+  padding: 0 16px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.swiss-nav a:hover {
+  background: var(--surface-muted);
+  color: var(--foreground);
+}
+
+.swiss-nav a.is-active {
+  background: var(--accent-soft);
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.swiss-nav a.is-active::before {
+  content: none;
+}
+
+.swiss-sidebar-bottom {
+  border-top: 0;
+  padding: 12px 16px 16px;
+}
+
+.swiss-help-link {
+  min-height: var(--web-touch-size);
+  padding: 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.swiss-help-link:hover {
+  color: var(--foreground);
+}
+
+.swiss-profile-button {
+  border: 0;
+  border-radius: var(--web-radius-control);
+  background: var(--surface-inset);
+  padding: 12px;
+}
+
+.swiss-profile-button > span:first-child,
+.swiss-profile-summary > span,
+.swiss-mobile-account-button span {
+  border-radius: 999px;
+}
+
+.swiss-topbar {
+  min-height: 86px;
+  grid-template-columns: minmax(180px, 240px) minmax(300px, 1fr) minmax(260px, 320px);
+  border: 0;
+  background: color-mix(in srgb, var(--background) 92%, transparent);
+  padding: 0 32px;
+  box-shadow: none;
+}
+
+.swiss-workspace-button {
+  min-height: var(--web-text-action-height);
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-inset);
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.swiss-workspace-button:hover {
+  background: var(--surface-muted);
+}
+
+.swiss-date-switcher {
+  width: max-content;
+  justify-self: center;
+  gap: 4px;
+  min-height: var(--web-text-action-height);
+  border-radius: 999px;
+  background: var(--surface-inset);
+  padding: 4px;
+  font-size: 13px;
+}
+
+.swiss-date-switcher button,
+.swiss-top-actions button,
+.swiss-top-actions a {
+  width: var(--web-touch-size);
+  height: var(--web-touch-size);
+  border-radius: 999px;
+}
+
+.swiss-date-switcher button:hover,
+.swiss-top-actions button:hover,
+.swiss-top-actions a:hover {
+  background: var(--surface-muted);
+}
+
+.swiss-top-actions {
+  gap: 8px;
+}
+
+.swiss-top-actions button,
+.swiss-top-actions a {
+  background: var(--surface-inset);
+}
+
+.swiss-dashboard {
+  padding: 24px 32px 32px;
+}
+
+.swiss-panel,
+.industrial-panel,
+.industrial-panel-strong {
+  border: 0;
+  border-radius: var(--web-radius-group);
+  background: var(--surface);
+  box-shadow: none;
+}
+
+.swiss-current-timer {
+  gap: 16px;
+  margin-bottom: 24px;
+  border: 0;
+  border-radius: var(--web-radius-group);
+  background: var(--surface);
+  padding: 24px;
+  box-shadow: none;
+}
+
+.swiss-timer-entrybar,
+.swiss-timer-entry-form {
+  gap: 12px;
+}
+
+.swiss-work-input label,
+.swiss-category-field > span:first-child {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.swiss-work-input input {
+  min-height: 56px;
+  border: 0;
+  border-radius: var(--web-radius-control);
+  background: var(--surface-inset);
+  padding: 0 16px;
+  font-size: 15px;
+  font-weight: 400;
+  box-shadow: none;
+}
+
+.swiss-work-input input:focus,
+.swiss-work-input input:focus-visible {
+  border: 0;
+  box-shadow: 0 0 0 2px var(--focus);
+}
+
+.swiss-entrybar-actions {
+  grid-template-columns: minmax(220px, 360px) auto auto;
+  gap: 12px;
+}
+
+.swiss-category-trigger {
+  min-height: var(--web-text-action-height);
+  border: 0;
+  border-radius: var(--web-radius-control);
+  background: var(--surface-inset);
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: none;
+}
+
+.swiss-category-trigger:hover,
+.swiss-category-trigger[aria-expanded="true"] {
+  border: 0;
+  background: var(--surface-muted);
+}
+
+.swiss-category-menu,
+.swiss-task-suggestions {
+  border: 0;
+  border-radius: 20px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-floating);
+}
+
+.swiss-category-option {
+  grid-template-columns: auto minmax(0, 1fr);
+  border: 0;
+  border-radius: 14px;
+  font-weight: 500;
+}
+
+.swiss-category-option.is-selected {
+  border: 0;
+  background: var(--accent-soft);
+}
+
+.swiss-category-option.is-selected > svg {
+  display: none;
+}
+
+.swiss-entrybar-clock {
+  min-height: var(--web-text-action-height);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.swiss-command-play {
+  width: 56px;
+  height: 56px;
+  border: 0;
+  box-shadow: none;
+}
+
+.swiss-command-play.is-active {
+  min-width: 92px;
+  height: var(--web-text-action-height);
+  border: 0;
+  padding: 0 18px;
+  box-shadow: none;
+  font-weight: 600;
+}
+
+.swiss-command-delete {
+  width: var(--web-touch-size);
+  height: var(--web-touch-size);
+  border: 0;
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface-muted));
+  box-shadow: none;
+}
+
+.swiss-active-start-edit,
+.swiss-start-time-editor button,
+.swiss-note-row button,
+.swiss-primary-action,
+.swiss-menu-action,
+.swiss-dialog-actions button,
+.industrial-button,
+.industrial-button-primary,
+.industrial-button-danger {
+  border-radius: 999px;
+}
+
+.swiss-start-time-editor button,
+.swiss-note-row button,
+.swiss-menu-action,
+.swiss-dialog-actions button,
+.industrial-button {
+  border: 0;
+  background: var(--surface-muted);
+}
+
+.swiss-primary-action,
+.swiss-dialog-actions .swiss-primary-action,
+.industrial-button-primary {
+  border: 0;
+  background: var(--accent);
+}
+
+.swiss-dialog-actions .swiss-destructive-action,
+.industrial-button-danger {
+  border: 0;
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface-muted));
+}
+
+.swiss-quick-actions-strip {
+  padding-top: 14px;
+}
+
+.swiss-quick-actions-strip > span,
+.swiss-panel-label {
+  letter-spacing: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.swiss-quick-actions-strip button {
+  min-height: var(--web-touch-size);
+  padding: 0 13px;
+  transform: none;
+}
+
+.swiss-quick-actions-strip button::before {
+  inset: 4px 0;
+  border: 0;
+  background: var(--surface-inset);
+  box-shadow: none;
+}
+
+.swiss-quick-actions-strip button:hover,
+.swiss-quick-actions-strip button:hover::before {
+  border: 0;
+  background: var(--surface-muted);
+  box-shadow: none;
+  transform: none;
+}
+
+.swiss-top-grid {
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 16px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+
+.swiss-top-grid > .swiss-panel,
+.swiss-top-grid > .swiss-panel:last-child {
+  border: 0;
+  border-radius: 20px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.swiss-metric-card,
+.swiss-review-summary,
+.swiss-streak-card {
+  min-height: 204px;
+  padding: 20px;
+}
+
+.swiss-metric-value {
+  font-size: 30px;
+  font-weight: 600;
+}
+
+.swiss-mini-bars span {
+  border-radius: 999px 999px 4px 4px;
+}
+
+.swiss-dashboard-grid {
+  gap: 24px;
+  margin-top: 24px;
+}
+
+.swiss-day-header,
+.swiss-list-header {
+  min-height: 68px;
+  padding: 0 20px;
+}
+
+.swiss-day-header h2,
+.swiss-list-header h2 {
+  letter-spacing: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.swiss-day-header button {
+  border-radius: 999px;
+}
+
+.swiss-view-switch button,
+.swiss-zoom-control button {
+  min-width: var(--web-touch-size);
+  height: var(--web-touch-size);
+  border-right: 0;
+  padding: 0 12px;
+  font-weight: 500;
+}
+
+.swiss-zoom-control b {
+  min-width: 38px;
+  border-right: 0;
+  font-weight: 600;
+}
+
+.swiss-date-jump {
+  border: 0;
+  border-radius: var(--web-radius-control);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-floating);
+}
+
+.swiss-timeline-canvas,
+.swiss-time-axis {
+  background: var(--surface);
+}
+
+.swiss-time-block,
+.calendar-time-block {
+  border-width: 0 !important;
+  border-radius: 14px;
+}
+
+.swiss-time-block.is-running,
+.calendar-time-block.is-running {
+  border-width: 0 !important;
+  outline: 1px dotted currentColor;
+  outline-offset: -1px;
+}
+
+.swiss-time-block.is-selected,
+.calendar-time-block[aria-pressed="true"] {
+  outline-color: var(--focus);
+}
+
+.swiss-review-row,
+.swiss-activity-row,
+.swiss-notification-list a,
+.swiss-menu-list button {
+  background: transparent;
+}
+
+.swiss-review-row:hover,
+.swiss-activity-row:hover,
+.swiss-notification-list a:hover,
+.swiss-menu-list button:hover {
+  background: var(--surface-muted);
+}
+
+.swiss-checkbox {
+  border-color: var(--line-strong);
+  border-radius: 5px;
+}
+
+.swiss-floating-panel,
+.swiss-command-palette,
+.swiss-help-dialog,
+.swiss-dialog {
+  border: 0;
+  border-radius: var(--web-radius-floating);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-floating);
+}
+
+.swiss-floating-header button,
+.swiss-dialog-header button,
+.swiss-dialog-title button,
+.swiss-command-close {
+  width: var(--web-touch-size);
+  height: var(--web-touch-size);
+  border-radius: 999px;
+  background: var(--surface-muted);
+}
+
+.swiss-command-palette input {
+  min-height: var(--web-touch-size);
+}
+
+.theme-choice-card {
+  border: 0;
+  border-radius: var(--web-radius-control);
+  background: var(--surface-inset);
+}
+
+.theme-choice-card:hover {
+  background: var(--surface-muted);
+}
+
+.theme-choice-card.is-selected {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-inset));
+}
+
+.swiss-menu-action {
+  min-height: var(--web-text-action-height);
+}
+
+.swiss-password-fields,
+.swiss-form-message {
+  border: 0;
+  border-radius: var(--web-radius-control);
+}
+
+.industrial-field {
+  border-radius: var(--web-radius-control);
+  background: var(--surface-inset);
+}
+
+.industrial-chip {
+  border: 0;
+  background: var(--surface-muted);
+}
+
+.reports-page {
+  gap: 16px;
+  max-width: 1440px;
+}
+
+.reports-overview,
+.report-card {
+  box-shadow: none;
+}
+
+.reports-overview-header {
+  border-bottom: 0;
+  padding: 20px 24px 14px;
+}
+
+.reports-total-pill {
+  min-height: var(--web-text-action-height);
+  border: 0;
+  background: var(--surface-inset);
+}
+
+.reports-overview-grid {
+  gap: 16px;
+  padding: 0 20px 20px;
+}
+
+.reports-donut-panel,
+.reports-legend,
+.reports-week {
+  border: 0;
+  border-radius: 20px;
+  background: var(--surface-inset);
+}
+
+.reports-donut-panel {
+  background: var(--surface-inset);
+}
+
+.reports-donut {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.reports-donut-center {
+  border: 0;
+  background: var(--surface);
+}
+
+.reports-color-dot {
+  border: 0;
+}
+
+.reports-week-bar-track,
+.report-bar-track {
+  border: 0;
+  background: var(--chart-track);
+  box-shadow: none;
+}
+
+.reports-week-bar-track span,
+.report-bar-fill {
+  box-shadow: none;
+}
+
+.report-card-header {
+  min-height: 64px;
+  padding: 16px 20px;
+}
+
+.report-list-body {
+  padding: 16px 20px 20px;
+}
+
+.report-bar-row {
+  border-radius: 14px;
+  padding: 8px 0;
+}
+
+.reports-empty-state {
+  border: 0;
+  border-radius: var(--web-radius-control);
+}
+
+@media (max-width: 1180px) {
+  .swiss-app-shell {
+    grid-template-columns: 84px minmax(0, 1fr);
+  }
+
+  .swiss-nav a,
+  .swiss-help-link {
+    justify-content: center;
+    gap: 0;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .swiss-nav a.is-active::before {
+    content: none;
+  }
+
+  .swiss-top-grid,
+  .swiss-dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .swiss-top-grid > .swiss-panel,
+  .swiss-top-grid > .swiss-panel:last-child {
+    border: 0;
+    border-radius: 20px;
+  }
+}
+
+@media (max-width: 760px) {
+  .fill-page-header {
+    padding-top: 22px;
+    padding-bottom: 12px;
+  }
+
+  .swiss-sidebar {
+    background: var(--surface);
+  }
+
+  .swiss-brand {
+    min-height: 64px;
+    padding: 0 16px;
+  }
+
+  .swiss-nav {
+    gap: 6px;
+    padding: 6px 12px 12px;
+  }
+
+  .swiss-nav a {
+    flex: 0 0 var(--web-touch-size);
+    gap: 0;
+    padding: 0;
+    border-radius: 999px;
+    font-size: 0;
+  }
+
+  .swiss-topbar {
+    min-height: auto;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    background: var(--background);
+    padding: 12px;
+  }
+
+  .swiss-date-switcher {
+    order: -1;
+    width: min(100%, 330px);
+    justify-self: center;
+  }
+
+  .swiss-workspace-button {
+    max-width: min(100%, 280px);
+  }
+
+  .swiss-top-actions {
+    justify-content: flex-start;
+  }
+
+  .swiss-dashboard {
+    padding: 12px;
+  }
+
+  .swiss-panel,
+  .industrial-panel,
+  .industrial-panel-strong,
+  .fill-group-surface {
+    border-radius: 20px;
+  }
+
+  .swiss-current-timer {
+    margin-bottom: 16px;
+    padding: 16px;
+  }
+
+  .swiss-top-grid {
+    gap: 12px;
+  }
+
+  .swiss-metric-card,
+  .swiss-review-summary,
+  .swiss-streak-card {
+    min-height: 0;
+  }
+
+  .swiss-dashboard-grid {
+    gap: 16px;
+    margin-top: 16px;
+  }
+
+  .swiss-work-input input {
+    min-height: var(--web-text-action-height);
+  }
+
+  .swiss-entrybar-actions {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .swiss-category-field {
+    grid-column: 1 / -1;
+  }
+
+  .fill-segmented {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .fill-review-toolbar > div > div:first-child {
+    gap: 8px;
+  }
+
+  .fill-date-pill {
+    min-width: 0;
+    flex: 1 1 180px;
+  }
+
+  .fill-metric-pill {
+    flex: 1 1 100%;
+  }
+
+  .reports-overview-grid {
+    gap: 12px;
+    padding: 0 12px 12px;
+  }
+
+  .reports-overview-header {
+    padding: 18px 18px 12px;
+  }
+
+  .reports-donut-panel,
+  .reports-legend,
+  .reports-week {
+    border: 0;
+    border-radius: var(--web-radius-control);
+  }
+
+  .swiss-floating-panel,
+  .swiss-floating-panel.top-left,
+  .swiss-floating-panel.top-right,
+  .swiss-floating-panel.bottom-left,
+  .swiss-command-palette,
+  .swiss-help-dialog,
+  .swiss-dialog {
+    border-radius: var(--web-radius-floating);
+  }
+}

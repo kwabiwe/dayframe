@@ -54,12 +54,12 @@ export function TimeAllocationPie({ entries }: { entries: TimeEntryRow[] }) {
       </div>
       <div className="grid gap-5 p-4">
         <div
-          className="time-donut relative mx-auto aspect-square w-full max-w-[240px] rounded-full border border-[var(--line-strong)] bg-[var(--surface-inset)]"
+          className="time-donut relative mx-auto aspect-square w-full max-w-[240px] rounded-full bg-[var(--surface-inset)]"
           style={{ background }}
           role="img"
           aria-label={`Time spent total ${formatDuration(total)}`}
         >
-          <div className="absolute inset-[30%] grid place-items-center rounded-full border border-[var(--line-strong)] bg-[var(--surface)]">
+          <div className="absolute inset-[30%] grid place-items-center rounded-full bg-[var(--surface)]">
             <span className="tabular text-xl font-semibold text-[var(--accent-text)]">
               {formatDuration(total)}
             </span>

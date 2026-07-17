@@ -53,10 +53,10 @@ export function ThemeSettings() {
               key={item.value}
               type="button"
               className={[
-                "focus-ring flex min-h-[104px] flex-col items-start gap-3 border p-4 text-left",
+                "theme-choice-card focus-ring flex min-h-[104px] flex-col items-start gap-3 p-4 text-left",
                 selected
-                  ? "border-[var(--accent)] bg-[var(--surface-inset)] text-[var(--accent-text)]"
-                  : "border-[var(--control-border)] bg-[var(--surface)] text-[var(--foreground)] hover:border-[var(--accent)]"
+                  ? "is-selected text-[var(--accent-text)]"
+                  : "text-[var(--foreground)]"
               ].join(" ")}
               aria-pressed={selected}
               onClick={() => updateTheme(item.value)}
