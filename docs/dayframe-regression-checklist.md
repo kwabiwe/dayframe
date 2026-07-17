@@ -23,7 +23,10 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Calendar/time blocks can be resized from the top or bottom edge, snap to configured intervals, and save on release.
 - Selected time blocks can be deleted from edit controls, context actions, or keyboard delete/backspace where supported.
 - Calendar zoom controls change time granularity without breaking layout.
-- Mobile anchored pinch zoom remains smooth, keeps the zoom anchor under the gesture midpoint, and does not jitter or drop obvious frames during normal day/week navigation.
+- Mobile Calendar uses one native scroll/zoom owner for the timeline. Pinch remains continuous under the fingers, keeps the gesture midpoint anchored, and has no release-time snap, rubber-band handoff, blank frame, or obvious dropped-frame feel.
+- Hour labels, grid lines, entry blocks, cross-midnight continuation treatment, and the current-time line stay geometrically aligned throughout zoom.
+- Mobile Calendar preserves fixed 24-hour rendering, vertical scrolling, day/week navigation, selected-day state, and the user's useful zoom/scroll position across ordinary data refreshes.
+- Tapping an active entry, completed entry, or review candidate from the native Calendar opens the same existing React Native timer editor, entry editor, or Review flow. Native rendering must not create or mutate a second timer/data store.
 - Calendar edit sheets stay visible when the iOS keyboard opens, with the focused field scrolled above the keyboard/suggestion bar.
 - List view groups entries by date, shows friendly source labels, and includes edit, start-again, and delete actions.
 - Timesheet view groups work by category/activity, shows day totals and row totals, and remains readable.
@@ -60,6 +63,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Charts use shared palette/track tokens, exact textual values and non-colour cues without changing calculations.
 - In System, Light and Dark, push, pop and interactive swipe-back transitions between Settings, Review and Places keep the whole viewport on the resolved theme canvas with no white corner leaks, rounded-card vignette or overlapping scene chrome.
 - Reduce Motion removes route and layout motion without hiding navigation state changes or loading feedback.
+- Native SwiftUI surfaces use the same semantic Midnight Core roles, system typography, Dynamic Type, VoiceOver labels, Reduce Motion, and Reduce Transparency behaviour as the surrounding React Native app.
 
 ## Validation Commands
 

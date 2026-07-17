@@ -18,6 +18,7 @@
   },
   "include": [
     "app",
+    "modules",
     "src",
     "expo-env.d.ts",
     ".expo/types/**/*.ts"

@@ -102,12 +102,24 @@ Required checks:
 
 - Calendar, List, and Timesheet render.
 - Time blocks are clickable/editable.
-- Mobile anchored pinch zoom stays smooth and keeps the gesture midpoint anchored. Check for jitter, dropped-frame feel, scroll-position jumps, and excessive rerenders after calendar or gesture changes.
-- During an active mobile pinch, update UI-thread gesture values only; commit React layout state and the anchored scroll position once when the gesture ends.
+- The iOS Calendar native view is provided by the expected local Expo module, autolinks through CocoaPods, and compiles in a full native build. Expo Go or a web render is not acceptable evidence.
+- Mobile pinch zoom and vertical scrolling have one native owner. Check for continuous focal-point anchoring, no release-time snap/re-layout, no blank frame, no competing outer-scroll movement, and no obvious dropped-frame feel.
+- Hour labels, grid lines, blocks, continuation edges, and the current-time line remain aligned at minimum, default, intermediate, and maximum zoom.
+- Ordinary prop refreshes—including the one-second `now` tick, bootstrap refresh, entry updates, and optimistic-to-persisted ID reconciliation—do not recreate the native view or reset useful zoom/scroll state.
+- Day/week navigation, day selection, 24-hour boundaries, cross-midnight clipping, empty state, active entries, completed entries, and review candidates match the existing Calendar behaviour.
+- Native entry/review callbacks open the existing React Native sheets/routes using stable IDs and do not make direct API/timer mutations.
 - Repeated Today entries collapse by normalized description and category, descriptionless entries collapse by category, totals sum their children, and expanded children remain individually editable.
 - Review action buttons remain tappable and readable on phone width.
 - No duplicate React keys or runtime overlays.
 - Light and dark theme remain legible.
+
+Native Calendar evidence:
+
+- Run deterministic TypeScript bridge/serialization tests and Swift unit tests for native date clipping, block metrics, zoom bounds/state restoration, and callback identity where those helpers live.
+- Run `npx pod-install` (or the repository-equivalent CocoaPods install) after adding/changing the local native module; do not use destructive `expo prebuild --clean` as a shortcut over the checked-in native project.
+- Run the mobile typecheck, full mobile tests, and a full iOS simulator build.
+- On a physical iPhone, record repeated pinch-in/pinch-out while moving the midpoint, vertical pan at multiple zoom levels, day/week navigation, and entry/review taps. Inspect frame pacing with Xcode tooling when available; screenshots alone cannot validate gesture smoothness.
+- Verify System, Light, and Dark, Dynamic Type, VoiceOver, Reduce Motion, Reduce Transparency, and the minimum supported iOS version.
 
 ## Native iOS Tabs And App Chrome
 

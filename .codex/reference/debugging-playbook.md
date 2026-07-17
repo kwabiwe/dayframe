@@ -50,6 +50,8 @@ Do not stop at the first plausible explanation if another layer could still be b
 - Manual confirm fails due to expected validation but returns an unstructured error.
 - Sleep stages are treated as separate time entries instead of one sleep session.
 - Local simulator passes but physical iPhone HealthKit data has a different shape.
+- JavaScript contains a native-view fix but the installed iOS binary predates the Swift/module change, or CocoaPods/autolinking did not include the updated module.
+- A hybrid Calendar bug appears visual but is actually a stale prop/event contract, a recreated hosting controller, or competing React Native and native scroll/gesture owners.
 
 ## Before A Fix Branch
 
@@ -75,5 +77,6 @@ Before reporting a fix as done:
 1. Show the exact commit, branch, PR, TestFlight build, and Vercel deployment status involved.
 2. Run the relevant validation commands from `validation-matrix.md`.
 3. Manually validate the same journey the user reported, where feasible.
+   - For Calendar pinch/scroll reports, use a physical iPhone and capture repeated zoom-in, zoom-out, pan, entry-tap, and day-change evidence. Simulator screenshots alone cannot close a multi-touch performance issue.
 4. Update the investigation note with root cause, fix, evidence, and residual risks.
 5. Add one sentence to the relevant reference doc if the bug exposed a missing guardrail.

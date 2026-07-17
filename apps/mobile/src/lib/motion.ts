@@ -28,6 +28,29 @@ export function useReduceMotionPreference() {
   return reduceMotion;
 }
 
+export function useReduceTransparencyPreference() {
+  const [reduceTransparency, setReduceTransparency] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    void AccessibilityInfo.isReduceTransparencyEnabled()
+      .then((enabled) => {
+        if (mounted) setReduceTransparency(enabled);
+      })
+      .catch(() => undefined);
+    const subscription = AccessibilityInfo.addEventListener(
+      "reduceTransparencyChanged",
+      setReduceTransparency
+    );
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
+  }, []);
+
+  return reduceTransparency;
+}
+
 export function scheduleLayoutTransition(reduceMotion: boolean) {
   if (reduceMotion) return;
   LayoutAnimation.configureNext({

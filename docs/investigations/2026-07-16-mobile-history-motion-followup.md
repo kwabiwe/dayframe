@@ -71,3 +71,7 @@ Post-merge release:
 - After PR #71 merged to `main` as `2c3173b`, the release machine reran `npm run test`, `npm run typecheck`, `npm run lint`, `npm run build`, `npm run check:brand-assets`, `git diff --check`, and `npm run testflight:preflight`.
 - TestFlight build `0.1.0 (46)` was archived, exported, uploaded, and verified in App Store Connect with delivery/build ID `7c372c50-15f7-40c2-a67c-582220c41da0`, `processingState=VALID`, `usesNonExemptEncryption=false`, en-GB notes set, `Internal Health Debug` all-build access, and `internalBuildState=IN_BETA_TESTING`.
 - Vercel production verified PR #71 runtime commit `2c3173b` as Ready at `https://dayframe-kb4uorezi-dayframeworkshop.vercel.app`; later docs-only release commits may advance the alias without changing runtime code.
+
+## Post-release Calendar finding
+
+Physical-iPhone feedback on TestFlight build `0.1.0 (46)` did not accept the Calendar result: zoom remained clanky and felt worse overall even though the obvious jitter was reduced. The code-level goal of removing per-frame React state updates was met, but the product-level smoothness closure was not. The remaining work is reopened as the targeted native SwiftUI Calendar investigation in `docs/investigations/2026-07-16-native-calendar-zoom.md`.
