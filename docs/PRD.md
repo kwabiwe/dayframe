@@ -8,7 +8,7 @@ The core value proposition is to reduce manual time-tracking friction without lo
 
 The MVP goal is to make Dayframe reliable for personal use and a small friends beta: hosted on Vercel, backed by Supabase Postgres/Auth, iOS-only for mobile, offline-capable for hours or days, and privacy-conscious around health and precise location data.
 
-Current reality as of 2026-07-17: Dayframe is in an active internal TestFlight lane, with build `0.1.0 (47)` verified for KB testing after PR #72. The native SwiftUI Calendar surface has replaced the React Native Calendar renderer, and physical-device acceptance for pinch smoothness, taps, accessibility settings, and frame pacing remains under Watch. The tracker in `docs/feature-fix-tracker.md` is the source of truth for what is `Done`, still under `Watch`, or planned next.
+Current reality as of 2026-07-17: Dayframe is in an active internal TestFlight lane, with build `0.1.0 (48)` verified for KB testing after PR #74. The native SwiftUI Calendar surface remains under physical-device Watch for pinch smoothness, taps, accessibility settings, and frame pacing; the first Today history swipe-to-delete pass is also receiving a focused motion and in-app-confirmation follow-up after physical-device feedback. The tracker in `docs/feature-fix-tracker.md` is the source of truth for what is `Done`, still under `Watch`, or planned next.
 
 ## 2. Mission
 
@@ -402,7 +402,7 @@ Deliverables:
 - ✅ Review inbox improvements.
 - ✅ Reports and automation accuracy metrics.
 - ⚠️ Settings for permissions and export exist; deletion/privacy controls still need the next-phase work tracked in `docs/feature-fix-tracker.md`.
-- ✅ Internal TestFlight build workflow is active and verified through `0.1.0 (47)`.
+- ✅ Internal TestFlight build workflow is active and verified through `0.1.0 (48)`.
 - ⚠️ Native SwiftUI Calendar is in TestFlight build `0.1.0 (47)` and remains under physical-device Watch for pinch smoothness, entry/review taps, accessibility settings, and frame pacing.
 
 Validation:

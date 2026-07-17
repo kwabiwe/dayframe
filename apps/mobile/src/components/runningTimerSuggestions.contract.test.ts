@@ -12,6 +12,10 @@ const dashboardSource = readFileSync(
   fileURLToPath(new URL("./DayframeDashboard.tsx", import.meta.url)),
   "utf8"
 );
+const deleteConfirmationSource = readFileSync(
+  fileURLToPath(new URL("./DeleteEntryConfirmation.tsx", import.meta.url)),
+  "utf8"
+);
 
 describe("running timer suggestion placement", () => {
   it("keeps the compact suggestion list inside the running edit sheet above manual fields", () => {
@@ -84,7 +88,8 @@ describe("running timer suggestion placement", () => {
     expect(dashboardSource).not.toContain("timerActionPending");
     expect(dashboardSource).not.toContain("timerProgressSlot");
     expect(editSheetSource).not.toContain("SheetMutationProgress");
-    expect(editSheetSource).toContain("sheetDeleteConfirmationOverlay");
-    expect(editSheetSource).toContain("accessibilityViewIsModal");
+    expect(editSheetSource).toContain("<DeleteEntryConfirmation");
+    expect(deleteConfirmationSource).toContain("sheetDeleteConfirmationOverlay");
+    expect(deleteConfirmationSource).toContain("accessibilityViewIsModal");
   });
 });

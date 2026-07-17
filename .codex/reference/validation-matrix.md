@@ -82,6 +82,8 @@ Required checks:
 - Suggestions that arrive after the running sheet opens may appear only while the description is still untouched; they must not reopen after manual entry has begun.
 - Normal mobile timer mutations show no spinner, progress bar, or layout-moving loading state. Start, stop, edit, delete, and suggestion-apply should update optimistically and reconcile silently; pull-to-refresh remains the explicit visible-refresh path.
 - Edit Timer delete confirmation does not unmount/collapse the suggestions area or reflow the sheet content underneath.
+- Today history left-swipe keeps one smooth horizontal gesture on the UI thread: the danger action and icon travel with the row edge, the row settles without a release-time pop, and ordinary vertical scrolling does not open actions accidentally.
+- Today history delete uses the same app-owned borderless confirmation as Edit Timer, never the system alert. Verify Cancel, optimistic Delete, rollback on failure, individual rows, expanded grouped children, and collapsed-group safety.
 
 ## Location Learning And Places
 

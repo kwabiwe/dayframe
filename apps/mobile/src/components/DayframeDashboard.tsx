@@ -23,13 +23,22 @@ import {
   TextInput,
   View
 } from "react-native";
-import { Swipeable } from "react-native-gesture-handler";
+import ReanimatedSwipeable, {
+  type SwipeableMethods
+} from "react-native-gesture-handler/ReanimatedSwipeable";
+import Reanimated, {
+  Extrapolation,
+  interpolate,
+  useAnimatedStyle,
+  type SharedValue
+} from "react-native-reanimated";
 import Svg, { Circle, Defs, G, Path, Pattern, Rect } from "react-native-svg";
 import { router, useFocusEffect, useIsFocused } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { paletteColorFor, type RecentActivitySuggestion } from "@dayframe/shared";
 import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
+import { DeleteEntryConfirmation } from "@/components/DeleteEntryConfirmation";
 import { DayframeBrand } from "@/components/brand";
 import { useKeyboardAccessory, type KeyboardAccessoryField } from "@/components/KeyboardAccessory";
 import {
@@ -129,6 +138,7 @@ type SummarySegment = {
 };
 const AUTH_KEYBOARD_ACCESSORY_ID = "dayframe-auth-keyboard-accessory";
 const RECENT_LAST_STOP_WINDOW_MS = 24 * 60 * 60 * 1000;
+const HISTORY_DELETE_ACTION_WIDTH = 64;
 
 type DashboardContextValue = {
   renderTab: (tab: DayframeDashboardTab, isFocused: boolean) => ReactNode;
@@ -160,6 +170,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [manualEntrySaving, setManualEntrySaving] = useState(false);
   const [activeEditVisible, setActiveEditVisible] = useState(false);
   const [presentedActiveEntry, setPresentedActiveEntry] = useState<TimeEntry | null>(null);
+  const [historyDeleteEntry, setHistoryDeleteEntry] = useState<TimeEntry | null>(null);
   const reduceMotion = useReduceMotionPreference();
   const reduceTransparency = useReduceTransparencyPreference();
   const refreshInFlight = useRef(false);
@@ -1233,20 +1244,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               activeTimerRunning={Boolean(displayedActiveEntry)}
               now={now}
               onDeleteEntry={(entry) => {
-                Alert.alert(
-                  "Delete entry?",
-                  "This tracked time will be permanently deleted.",
-                  [
-                    { text: "Cancel", style: "cancel" },
-                    {
-                      text: "Delete",
-                      style: "destructive",
-                      onPress: () => {
-                        void deleteTimeEntryOptimistically(entry.id, "Entry not deleted");
-                      }
-                    }
-                  ]
-                );
+                setHistoryDeleteEntry(entry);
               }}
               onOpenEntry={(entry) => {
                 if (!entry.stoppedAt) {
@@ -1389,6 +1387,17 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   return (
     <DashboardContext.Provider value={{ renderTab: renderDashboardTab }}>
       {children}
+      <DeleteEntryConfirmation
+        onCancel={() => setHistoryDeleteEntry(null)}
+        onConfirm={() => {
+          const entry = historyDeleteEntry;
+          setHistoryDeleteEntry(null);
+          if (entry) void deleteTimeEntryOptimistically(entry.id, "Entry not deleted");
+        }}
+        presentation="screen"
+        styles={styles}
+        visible={Boolean(historyDeleteEntry)}
+      />
       <ActiveTimerEditSheet
         categories={sortedCategories}
         descriptionPlaceholder="What have you been working on?"
@@ -1706,6 +1715,62 @@ function TrashGlyph({ color }: { color: string }) {
   );
 }
 
+function SwipeDeleteAction({
+  accessibilityLabel,
+  entry,
+  minHeight,
+  onDelete,
+  styles,
+  swipeable,
+  theme,
+  translation
+}: {
+  accessibilityLabel: string;
+  entry: TimeEntry;
+  minHeight: number;
+  onDelete: (entry: TimeEntry) => void;
+  styles: MobileStyles;
+  swipeable: SwipeableMethods;
+  theme: MobileTheme;
+  translation: SharedValue<number>;
+}) {
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{
+      translateX: interpolate(
+        translation.value,
+        [-HISTORY_DELETE_ACTION_WIDTH, 0],
+        [0, HISTORY_DELETE_ACTION_WIDTH],
+        Extrapolation.CLAMP
+      )
+    }]
+  }));
+
+  return (
+    <Reanimated.View
+      style={[
+        styles.historySwipeDeleteAction,
+        { backgroundColor: theme.danger, minHeight },
+        animatedStyle
+      ]}
+    >
+      <Pressable
+        accessibilityLabel={`Delete ${accessibilityLabel}`}
+        accessibilityRole="button"
+        onPress={() => {
+          swipeable.close();
+          onDelete(entry);
+        }}
+        style={({ pressed }) => [
+          styles.historySwipeDeleteActionPressable,
+          pressed ? styles.buttonPressed : null
+        ]}
+      >
+        <TrashGlyph color={theme.onDanger} />
+      </Pressable>
+    </Reanimated.View>
+  );
+}
+
 function SwipeableHistoryEntry({
   accessibilityLabel,
   children,
@@ -1725,34 +1790,27 @@ function SwipeableHistoryEntry({
   styles: MobileStyles;
   theme: MobileTheme;
 }) {
-  const swipeable = useRef<Swipeable>(null);
-
   return (
-    <Swipeable
-      ref={swipeable}
+    <ReanimatedSwipeable
       enabled={enabled}
-      friction={2}
-      rightThreshold={40}
-      renderRightActions={() => enabled ? (
-        <Pressable
-          accessibilityLabel={`Delete ${accessibilityLabel}`}
-          accessibilityRole="button"
-          onPress={() => {
-            swipeable.current?.close();
-            onDelete(entry);
-          }}
-          style={({ pressed }) => [
-            styles.historySwipeDeleteAction,
-            { backgroundColor: theme.danger, minHeight },
-            pressed ? styles.buttonPressed : null
-          ]}
-        >
-          <TrashGlyph color={theme.onDanger} />
-        </Pressable>
+      friction={1}
+      overshootRight={false}
+      rightThreshold={HISTORY_DELETE_ACTION_WIDTH / 2}
+      renderRightActions={(_progress, translation, swipeable) => enabled ? (
+        <SwipeDeleteAction
+          accessibilityLabel={accessibilityLabel}
+          entry={entry}
+          minHeight={minHeight}
+          onDelete={onDelete}
+          styles={styles}
+          swipeable={swipeable}
+          theme={theme}
+          translation={translation}
+        />
       ) : null}
     >
       {children}
-    </Swipeable>
+    </ReanimatedSwipeable>
   );
 }
 
