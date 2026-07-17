@@ -1,4 +1,4 @@
-import { paletteCssColorFor } from "@dayframe/shared";
+import { categoryDisplay } from "@/lib/display";
 import { formatDuration, formatSourceLabel } from "@/lib/format";
 import type { ReportRow } from "@/lib/queries";
 
@@ -30,14 +30,15 @@ export function ReportBars({
           </div>
         ) : null}
         {rows.map((row) => {
-          const color = paletteCssColorFor(row.color, row.name);
+          const category = categoryDisplay(row.name, row.color);
+          const color = category.color;
           const share = total > 0 ? Math.round((row.seconds / total) * 100) : 0;
           return (
             <div key={row.id} className="report-bar-row motion-row">
               <div className="mb-2 flex items-center justify-between gap-3 text-sm">
                 <span className="flex min-w-0 items-center gap-2 font-semibold">
                   <span
-                    className="h-3 w-3 shrink-0 rounded-full border border-[var(--line-strong)]"
+                    className={`h-3 w-3 shrink-0 rounded-full border border-[var(--line-strong)]${category.isUncategorized ? " is-uncategorized" : ""}`}
                     style={{ backgroundColor: color }}
                   />
                   <span className="truncate">{isSourceReport ? formatSourceLabel(row.name) : row.name}</span>
@@ -48,7 +49,7 @@ export function ReportBars({
               </div>
               <div className="report-bar-track">
                 <div
-                  className="report-bar-fill"
+                  className={`report-bar-fill${category.isUncategorized ? " is-uncategorized" : ""}`}
                   style={{ width: `${Math.max(4, (row.seconds / max) * 100)}%`, backgroundColor: color }}
                 />
               </div>

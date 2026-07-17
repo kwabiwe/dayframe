@@ -1,4 +1,5 @@
 import { paletteCssColorFor } from "@dayframe/shared";
+import { categoryDisplay } from "@/lib/display";
 import { formatDuration } from "@/lib/format";
 import type { ReportRow, ReportSeriesPoint } from "@/lib/queries";
 
@@ -32,7 +33,7 @@ export function ReportsOverview({
       id: row.id,
       name: row.name,
       seconds: row.seconds,
-      color: paletteCssColorFor(row.color, row.name)
+      color: categoryDisplay(row.name, row.color).color
     }));
   const totalSeconds = categorySegments.reduce((sum, segment) => sum + segment.seconds, 0);
   const visibleSegments = buildVisibleSegments(categorySegments);
@@ -112,7 +113,7 @@ export function ReportsOverview({
                   return (
                     <div key={segment.id} className="reports-legend-row">
                       <span
-                        className="reports-color-dot"
+                        className={`reports-color-dot${segment.name.toLocaleLowerCase() === "uncategorized" ? " is-uncategorized" : ""}`}
                         style={{ backgroundColor: segment.color }}
                       />
                       <span className="min-w-0 truncate font-medium">{segment.name}</span>

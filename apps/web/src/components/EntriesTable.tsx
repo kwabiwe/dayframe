@@ -261,7 +261,7 @@ export function EntriesTable({
                   <td className="px-3 py-3 text-[var(--muted)]">
                     <span className="flex items-center gap-2">
                       <span
-                        className="h-3 w-3 shrink-0 rounded-full border border-[var(--line-strong)]"
+                        className={`h-3 w-3 shrink-0 rounded-full border border-[var(--line-strong)]${entry.categoryName ? "" : " is-uncategorized"}`}
                         style={{
                           backgroundColor: timeEntryCategoryColor(entry)
                         }}

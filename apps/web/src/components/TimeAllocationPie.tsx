@@ -1,5 +1,4 @@
-import { paletteCssColorFor } from "@dayframe/shared";
-import { timeEntryCategoryLabel } from "@/lib/display";
+import { categoryDisplay, timeEntryCategoryLabel } from "@/lib/display";
 import type { TimeEntryRow } from "@/lib/queries";
 import { formatDuration } from "@/lib/format";
 
@@ -28,7 +27,7 @@ export function TimeAllocationPie({ entries }: { entries: TimeEntryRow[] }) {
       id,
       name: value.name,
       seconds: value.seconds,
-      color: paletteCssColorFor(value.color, value.name)
+      color: categoryDisplay(value.name, value.color).color
     }))
     .sort((a, b) => b.seconds - a.seconds)
     .slice(0, 5);
@@ -78,7 +77,7 @@ export function TimeAllocationPie({ entries }: { entries: TimeEntryRow[] }) {
                 title={`${segment.name}: ${formatDuration(segment.seconds)} / ${share}%`}
               >
                 <span
-                  className="h-3 w-3 border border-[var(--line-strong)]"
+                  className={`h-3 w-3 border border-[var(--line-strong)]${segment.id === "uncategorized" ? " is-uncategorized" : ""}`}
                   style={{ backgroundColor: segment.color }}
                 />
                 <span className="min-w-0 truncate font-medium">{segment.name}</span>

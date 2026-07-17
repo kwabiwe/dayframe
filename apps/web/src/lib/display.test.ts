@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  categoryDisplay,
   timeEntryAccentColor,
   timeEntryCategoryLabel,
   timeEntryContextLabel,
@@ -29,6 +30,19 @@ describe("time entry display helpers", () => {
 
   it("keeps uncategorized wording quiet for category columns", () => {
     expect(timeEntryCategoryLabel({ categoryName: null })).toBe("Uncategorized");
+    expect(categoryDisplay(null, null)).toEqual({
+      label: "Uncategorized",
+      color: "var(--uncategorized-color)",
+      isUncategorized: true
+    });
+  });
+
+  it("keeps named categories on the shared palette", () => {
+    expect(categoryDisplay("Work", "lime")).toEqual({
+      label: "Work",
+      color: "var(--palette-lime)",
+      isUncategorized: false
+    });
   });
 
   it("falls back to the category colour when no project colour exists", () => {

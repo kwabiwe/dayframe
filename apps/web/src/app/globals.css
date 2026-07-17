@@ -4065,11 +4065,27 @@ kbd {
  */
 
 :root {
+  --uncategorized-color: var(--muted);
   --web-radius-control: 16px;
   --web-radius-group: 24px;
   --web-radius-floating: 24px;
   --web-touch-size: 44px;
   --web-text-action-height: 52px;
+}
+
+.is-uncategorized {
+  background-color: var(--surface-inset) !important;
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent 0 3px,
+    color-mix(in srgb, var(--muted) 42%, transparent) 3px 5px
+  ) !important;
+}
+
+.swiss-start-time-editor small {
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.2;
 }
 
 .fill-page-header {
