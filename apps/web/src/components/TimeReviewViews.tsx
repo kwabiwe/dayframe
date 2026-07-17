@@ -683,7 +683,7 @@ function TimesheetView({ entries, weekDays }: { entries: TimeEntryRow[]; weekDay
             <tr key={row.id} className="border-b border-[var(--line)] last:border-b-0">
               <td className="border-r border-[var(--line)] px-3 py-3">
                 <span className="flex items-center gap-2 font-semibold">
-                  <span className="h-3 w-3 border border-[var(--line-strong)]" style={{ backgroundColor: row.color }} />
+                  <span className={`h-3 w-3 border border-[var(--line-strong)]${row.categoryName ? "" : " is-uncategorized"}`} style={{ backgroundColor: row.color }} />
                   {row.label}
                 </span>
                 <span className="mt-1 block text-xs text-[var(--muted)]">

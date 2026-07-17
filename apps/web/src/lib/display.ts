@@ -39,7 +39,19 @@ export function timeEntryAccentColor(entry: TimeEntryDisplayFields) {
 }
 
 export function timeEntryCategoryColor(entry: TimeEntryDisplayFields) {
-  return paletteCssColorFor(entry.categoryColor, entry.categoryName ?? entry.id ?? "Category");
+  return entry.categoryName?.trim()
+    ? paletteCssColorFor(entry.categoryColor, entry.categoryName ?? entry.id ?? "Category")
+    : "var(--uncategorized-color)";
+}
+
+export function categoryDisplay(name?: string | null, color?: string | null) {
+  const label = cleanLabel(name) ?? "Uncategorized";
+  const isUncategorized = !cleanLabel(name) || label.toLocaleLowerCase() === "uncategorized";
+  return {
+    label,
+    color: isUncategorized ? "var(--uncategorized-color)" : paletteCssColorFor(color, label),
+    isUncategorized
+  };
 }
 
 function cleanLabel(value?: string | null) {

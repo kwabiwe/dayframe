@@ -36,6 +36,7 @@ import {
   timeEntryContextLabel,
   timeEntryTitle
 } from "@/lib/display";
+import { maskTimeInput, parseTimeInput } from "@/lib/time-input";
 import {
   dateTimeLocal,
   dateTimeLocalInputToIso,
@@ -733,10 +734,16 @@ export function CurrentTimerPanel({
                       inputMode="numeric"
                       pattern="[0-9]{2}:[0-9]{2}"
                       placeholder="17:15"
+                      maxLength={5}
                       value={startedAtDraft}
-                      onChange={(event) => setStartedAtDraft(event.target.value)}
+                      onChange={(event) => {
+                        setStartedAtDraft(maskTimeInput(event.target.value));
+                        setStartEditError(null);
+                      }}
                       aria-label="Active timer start time"
+                      aria-describedby="active-start-time-hint"
                     />
+                    <small id="active-start-time-hint">24-hour time (HH:MM)</small>
                   </label>
                   <button
                     className="swiss-start-time-save"
@@ -1958,23 +1965,12 @@ function timeInputValue(value?: string | Date | null) {
 }
 
 function dateWithTime(dateValue: string | Date, timeValue: string) {
-  const [hoursText, minutesText] = timeValue.split(":");
-  const hours = Number(hoursText);
-  const minutes = Number(minutesText);
-  if (
-    !Number.isInteger(hours) ||
-    !Number.isInteger(minutes) ||
-    hours < 0 ||
-    hours > 23 ||
-    minutes < 0 ||
-    minutes > 59
-  ) {
-    return null;
-  }
+  const parsed = parseTimeInput(timeValue);
+  if (!parsed) return null;
 
   const date = new Date(dateValue);
   if (Number.isNaN(date.getTime())) return null;
-  date.setHours(hours, minutes, 0, 0);
+  date.setHours(parsed.hours, parsed.minutes, 0, 0);
   return date;
 }
 
