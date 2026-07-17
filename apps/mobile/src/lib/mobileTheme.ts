@@ -1286,7 +1286,11 @@ function createStyles(theme: MobileTheme) {
       justifyContent: "center"
     },
     historySwipeDeleteAction: {
-      width: 64,
+      width: 64
+    },
+    historySwipeDeleteActionPressable: {
+      flex: 1,
+      width: "100%",
       alignItems: "center",
       justifyContent: "center"
     },
@@ -1895,12 +1899,17 @@ function createStyles(theme: MobileTheme) {
       borderTopLeftRadius: 24,
       borderTopRightRadius: 24
     },
+    deleteConfirmationModalRoot: {
+      flex: 1
+    },
+    screenDeleteConfirmationOverlay: {
+      borderTopLeftRadius: 0,
+      borderTopRightRadius: 0
+    },
     sheetDeleteConfirmationCard: {
       width: "100%",
       maxWidth: 360,
       borderRadius: 20,
-      borderWidth: 1,
-      borderColor: theme.borderStrong,
       backgroundColor: theme.surfaceRaised,
       padding: 18,
       gap: 12,
@@ -1951,7 +1960,7 @@ function createStyles(theme: MobileTheme) {
       justifyContent: "center"
     },
     sheetDeleteConfirmationDeleteText: {
-      color: theme.onAccent,
+      color: theme.onDanger,
       fontFamily: monoFont,
       fontSize: 13,
       fontWeight: "700"

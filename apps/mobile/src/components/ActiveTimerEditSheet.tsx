@@ -19,6 +19,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import Svg, { Path } from "react-native-svg";
 import { paletteColorFor, type RecentActivitySuggestion } from "@dayframe/shared";
 import { FloatingDatePicker } from "@/components/FloatingDatePicker";
+import { DeleteEntryConfirmation } from "@/components/DeleteEntryConfirmation";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
 import {
   editSheetKeyboardLayout,
@@ -799,40 +800,15 @@ export function ActiveTimerEditSheet({
                   </Pressable>
                 ) : null}
               </ScrollView>
-              {deleteConfirmationVisible ? (
-                <View
-                  accessibilityLabel="Confirm delete entry"
-                  accessibilityViewIsModal
-                  style={styles.sheetDeleteConfirmationOverlay}
-                >
-                  <View style={styles.sheetDeleteConfirmationCard}>
-                    <Text style={styles.sheetDeleteConfirmationTitle}>Delete entry?</Text>
-                    <Text style={styles.sheetDeleteConfirmationText}>
-                      This time entry will be removed. This cannot be undone.
-                    </Text>
-                    <View style={styles.sheetDeleteConfirmationActions}>
-                      <Pressable
-                        accessibilityLabel="Cancel deleting entry"
-                        accessibilityRole="button"
-                        onPress={() => setDeleteConfirmationVisible(false)}
-                        style={pressable(styles.sheetDeleteConfirmationCancel, styles.buttonPressed)}
-                      >
-                        <Text style={styles.sheetDeleteConfirmationCancelText}>Cancel</Text>
-                      </Pressable>
-                      <Pressable
-                        accessibilityLabel="Confirm delete entry"
-                        accessibilityRole="button"
-                        onPress={() => {
-                          void deleteEntryFromSheet();
-                        }}
-                        style={pressable(styles.sheetDeleteConfirmationDelete, styles.buttonPressed)}
-                      >
-                        <Text style={styles.sheetDeleteConfirmationDeleteText}>Delete</Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                </View>
-              ) : null}
+              <DeleteEntryConfirmation
+                deleting={deleting}
+                onCancel={() => setDeleteConfirmationVisible(false)}
+                onConfirm={() => {
+                  void deleteEntryFromSheet();
+                }}
+                styles={styles}
+                visible={deleteConfirmationVisible}
+              />
             </Animated.View>
           </SafeAreaView>
         </View>
