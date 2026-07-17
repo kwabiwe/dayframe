@@ -162,45 +162,45 @@ export function TimeReviewViews({
     <section className="space-y-5">
       <CurrentTimerPanel data={data} onSynced={setData} />
 
-      <div className="industrial-panel rounded-xl p-4">
+      <div className="industrial-panel fill-review-toolbar p-4">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex flex-wrap items-center gap-3">
             <button
-              className="focus-ring grid h-11 w-11 place-items-center rounded-xl border border-[var(--control-border)] bg-[var(--surface-inset)] hover:border-[var(--accent)] hover:text-[var(--accent-text)]"
+              className="fill-icon-action focus-ring grid h-11 w-11 place-items-center"
               type="button"
               aria-label="Previous week"
               onClick={() => setWeekAnchor(addDays(weekAnchor, -7))}
             >
               <ChevronLeft size={16} />
             </button>
-            <div className="min-w-[220px] rounded-lg border border-[var(--line)] bg-[var(--surface-inset)] px-3 py-2">
+            <div className="fill-date-pill min-w-[220px] px-3 py-2">
               <div className="text-sm font-semibold">This week</div>
               <div className="tabular mt-1 text-xs text-[var(--muted)]">
                 {formatDate(weekDays[0])} - {formatDate(weekDays[6])}
               </div>
             </div>
             <button
-              className="focus-ring grid h-11 w-11 place-items-center rounded-xl border border-[var(--control-border)] bg-[var(--surface-inset)] hover:border-[var(--accent)] hover:text-[var(--accent-text)]"
+              className="fill-icon-action focus-ring grid h-11 w-11 place-items-center"
               type="button"
               aria-label="Next week"
               onClick={() => setWeekAnchor(addDays(weekAnchor, 7))}
             >
               <ChevronRight size={16} />
             </button>
-            <div className="rounded-lg border border-[var(--line)] bg-[var(--surface-inset)] px-3 py-2 text-sm">
+            <div className="fill-metric-pill px-3 py-2 text-sm">
               <span className="text-[var(--muted)]">Week total </span>
               <span className="tabular font-semibold">{formatDuration(weekTotal)}</span>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 overflow-hidden rounded-lg border border-[var(--control-border)] bg-[var(--surface-inset)] sm:grid-cols-3">
+          <div className="fill-segmented grid grid-cols-1 sm:grid-cols-3">
             {viewItems.map((item) => {
               const selected = item.id === activeView;
               return (
                 <button
                   key={item.id}
                   className={[
-                    "focus-ring flex min-h-11 min-w-0 items-center justify-center gap-2 border-b border-[var(--control-border)] px-3 text-sm last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0",
+                    "fill-segmented-option focus-ring flex min-h-11 min-w-0 items-center justify-center gap-2 px-3 text-sm",
                     selected
                       ? "bg-[var(--accent)] text-[var(--on-accent)]"
                       : "text-[var(--foreground)] hover:text-[var(--accent-text)]"
@@ -420,8 +420,8 @@ function CalendarReview({
   }
 
   return (
-    <section className="industrial-panel">
-      <div className="flex flex-col gap-3 border-b border-[var(--line)] px-4 py-3 md:flex-row md:items-center md:justify-between">
+    <section className="industrial-panel fill-calendar-panel">
+      <div className="fill-panel-header flex flex-col gap-3 px-4 py-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="text-lg font-semibold">Calendar</h2>
           <p className="mt-1 text-sm text-[var(--muted)]">Double click a block to edit it. Drag the top or bottom edge to resize.</p>

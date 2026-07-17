@@ -126,7 +126,7 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
         />
       </section>
 
-      <form action={createCategory} className="space-y-4 rounded-xl border border-[var(--line)] bg-[var(--surface-strong)] p-4">
+      <form action={createCategory} className="fill-inset-surface space-y-4 p-4">
         <div>
           <h2 className="text-base font-semibold">New category</h2>
           <p className="mt-1 text-sm text-[var(--muted)]">Use categories for the type of work or activity you want to track.</p>

@@ -447,7 +447,7 @@ function LearnedPlaceDetailRow({
   value: string;
 }) {
   return (
-    <div className="rounded-lg border border-[var(--line)] bg-[var(--surface-strong)] px-3 py-3">
+    <div className="fill-inset-surface px-3 py-3">
       <dt className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">{label}</dt>
       <dd className="mt-1 flex items-start justify-between gap-2 text-sm text-[var(--foreground)]">
         <span className="min-w-0 break-words">{value}</span>
@@ -498,7 +498,7 @@ function CreatePlaceForm({
   }
 
   return (
-    <form action={submit} className="space-y-3 border border-[var(--line)] bg-[var(--surface-strong)] p-4">
+    <form action={submit} className="fill-group-surface space-y-3 p-4">
       <h2 className="text-base font-semibold">{learnedPlace ? "Save learned place" : "New place"}</h2>
       <TextInput name="name" label="Name" defaultValue={learnedPlace?.name} placeholder="Place name" required />
       <div className="grid grid-cols-2 gap-3">
@@ -550,7 +550,7 @@ function PlaceLoggingToggle({
   onChange: (value: boolean) => void;
 }) {
   return (
-    <label className="flex items-start justify-between gap-3 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] px-3 py-3 text-sm">
+    <label className="fill-toggle-row flex items-start justify-between gap-3 px-3 py-3 text-sm">
       <span className="min-w-0">
         <span className="block font-semibold">Log visits</span>
         <span className="mt-1 block text-xs leading-5 text-[var(--muted)]">
@@ -827,7 +827,7 @@ function EntityForm({
   }
 
   return (
-    <form action={submit} className="space-y-3 border border-[var(--line)] bg-[var(--surface-strong)] p-4">
+    <form action={submit} className="fill-group-surface space-y-3 p-4">
       <h2 className="text-base font-semibold">{title}</h2>
       {children}
       <button

@@ -155,7 +155,7 @@ export function EntriesTable({
 
   return (
     <section className="space-y-5">
-      <div className="grid gap-3 overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="fill-group-surface grid gap-3 overflow-hidden p-4 md:grid-cols-2 xl:grid-cols-4">
         <FilterSelect
           label="Category"
           value={filters.category}
@@ -194,7 +194,7 @@ export function EntriesTable({
       {showManualForm ? (
         <form
           onSubmit={submitManual}
-          className="grid gap-3 rounded-xl border border-[var(--line)] bg-[var(--surface-strong)] p-4 md:grid-cols-5"
+          className="fill-inset-surface grid gap-3 p-4 md:grid-cols-5"
         >
           <SelectField name="categoryId" label="Category" options={categories} />
           <SelectField name="placeId" label="Place" options={places} />
@@ -221,7 +221,7 @@ export function EntriesTable({
         </p>
       ) : null}
 
-      <div className="overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)]">
+      <div className="fill-group-surface overflow-hidden">
         <div className="overflow-x-auto">
         <table className="min-w-[980px] w-full border-collapse text-sm">
           <thead className="bg-[var(--surface-inset)] text-left text-xs text-[var(--muted)]">
@@ -278,7 +278,7 @@ export function EntriesTable({
                   <td className="px-3 py-3">
                     <div className="flex gap-2">
                       <button
-                        className="focus-ring min-h-11 min-w-11 rounded-xl border border-[var(--control-border)] bg-[var(--surface-inset)] p-2 hover:border-[var(--accent)] hover:text-[var(--accent-text)]"
+                        className="fill-icon-action focus-ring min-h-11 min-w-11 p-2 hover:text-[var(--accent-text)]"
                         type="button"
                         disabled={isPending || Boolean(continuingEntryId)}
                         aria-label={`Start ${timeEntryTitle(entry)} again`}
@@ -287,7 +287,7 @@ export function EntriesTable({
                         <Play size={15} fill="currentColor" strokeWidth={0} />
                       </button>
                       <button
-                        className="focus-ring min-h-11 min-w-11 rounded-xl border border-[var(--control-border)] bg-[var(--surface-inset)] p-2 hover:border-[var(--accent)] hover:text-[var(--accent-text)]"
+                        className="fill-icon-action focus-ring min-h-11 min-w-11 p-2 hover:text-[var(--accent-text)]"
                         type="button"
                         aria-label="Edit entry"
                         onClick={() => setEditingEntry(entry)}
@@ -295,7 +295,7 @@ export function EntriesTable({
                         <Pencil size={15} />
                       </button>
                       <button
-                        className="focus-ring min-h-11 min-w-11 rounded-xl border border-[var(--danger)] bg-[var(--surface-inset)] p-2 text-[var(--danger-text)] hover:bg-[color-mix(in_srgb,var(--danger)_10%,var(--surface-inset))]"
+                        className="fill-icon-action fill-icon-danger focus-ring min-h-11 min-w-11 p-2"
                         type="button"
                         aria-label="Delete entry"
                         onClick={() => remove(entry.id)}

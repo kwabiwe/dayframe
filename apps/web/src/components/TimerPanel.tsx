@@ -250,7 +250,7 @@ export function TimerPanel({
                 Stop
               </button>
               <button
-                className="industrial-button-danger focus-ring h-10 w-10 shrink-0 px-0 text-sm disabled:opacity-50"
+                className="industrial-button-danger focus-ring h-11 w-11 shrink-0 px-0 text-sm disabled:opacity-50"
                 type="button"
                 disabled={isBusy}
                 aria-label="Delete running timer"
@@ -286,7 +286,7 @@ export function TimerPanel({
           {recentEntries.slice(0, 4).map((entry) => (
             <button
               key={entry.id}
-              className="focus-ring motion-row flex w-full items-center justify-between rounded-lg border border-[var(--line)] bg-[var(--surface-inset)] px-3 py-2 text-left text-sm hover:border-[var(--accent)] hover:text-[var(--accent-text)]"
+              className="fill-list-action focus-ring motion-row flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:text-[var(--accent-text)]"
               style={{ borderLeftWidth: 4, borderLeftColor: timeEntryCategoryColor(entry) }}
               type="button"
               disabled={isBusy}
