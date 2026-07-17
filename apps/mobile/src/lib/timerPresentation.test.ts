@@ -7,6 +7,7 @@ import {
   displayTimerDescription,
   optimisticDeleteTimeEntry,
   optimisticPatchTimeEntry,
+  optimisticRestoreTimeEntries,
   optimisticStartTimer,
   optimisticStopActiveTimer,
   replaceOptimisticTimeEntryId,
@@ -113,6 +114,19 @@ describe("mobile timer presentation", () => {
     const deleted = optimisticDeleteTimeEntry(stopped, "entry-running");
     expect(deleted?.entries.some((entry) => entry.id === "entry-running")).toBe(false);
     expect(deleted?.historyEntries?.some((entry) => entry.id === "entry-running")).toBe(false);
+  });
+
+  it("restores an optimistically deleted entry without replacing newer dashboard state", () => {
+    const snapshot = bootstrapWithActiveEntry();
+    const deleted = optimisticDeleteTimeEntry(snapshot, "entry-running");
+    const withNewerState = deleted
+      ? { ...deleted, workspace: { ...deleted.workspace, name: "Newer workspace state" } }
+      : deleted;
+    const restored = optimisticRestoreTimeEntries(withNewerState, snapshot, ["entry-running"]);
+
+    expect(restored?.entries.some((entry) => entry.id === "entry-running")).toBe(true);
+    expect(restored?.historyEntries?.some((entry) => entry.id === "entry-running")).toBe(true);
+    expect(restored?.workspace.name).toBe("Newer workspace state");
   });
 
   it("starts one optimistic timer and replaces its local id after persistence", () => {

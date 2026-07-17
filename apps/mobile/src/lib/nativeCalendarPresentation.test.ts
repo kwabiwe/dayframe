@@ -72,6 +72,26 @@ describe("native Calendar presentation boundary", () => {
     expect(state.model.totalSeconds).toBe(2 * 60 * 60);
   });
 
+  it("keeps Calendar populated when a refresh returns today entries outside the legacy entries pool", () => {
+    const now = localTime(2026, 7, 10, 12, 0);
+    const dayEntry = entry({ id: "day-entry" });
+    const historyEntry = entry({
+      id: "history-entry",
+      startedAt: iso(localTime(2026, 7, 10, 10, 0)),
+      stoppedAt: iso(localTime(2026, 7, 10, 11, 0))
+    });
+    const data = bootstrap([], {
+      dayEntries: [dayEntry],
+      historyEntries: [historyEntry],
+      weekEntries: []
+    });
+
+    const state = build(now, data);
+
+    expect(state.model.entries.map((item) => item.entryId)).toEqual(["day-entry", "history-entry"]);
+    expect(state.model.totalSeconds).toBe(2 * 60 * 60);
+  });
+
   it("clips cross-midnight totals and serializes both continuation flags", () => {
     const now = localTime(2026, 7, 10, 12, 0);
     const state = build(now, bootstrap([

@@ -2531,6 +2531,48 @@ function createStyles(theme: MobileTheme) {
       fontSize: 12,
       fontWeight: "600"
     },
+    historyDeleteUndoToast: {
+      position: "absolute",
+      left: 20,
+      right: 20,
+      bottom: 92,
+      minHeight: 52,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 16,
+      backgroundColor: theme.surfaceRaised,
+      borderRadius: 14,
+      paddingLeft: 16,
+      paddingRight: 8,
+      paddingVertical: 8,
+      shadowColor: theme.shadow,
+      shadowOpacity: 1,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 5
+    },
+    historyDeleteUndoText: {
+      flex: 1,
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "600"
+    },
+    historyDeleteUndoButton: {
+      minWidth: 64,
+      minHeight: 40,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: 999,
+      paddingHorizontal: 10
+    },
+    historyDeleteUndoButtonText: {
+      color: theme.accentText,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "700"
+    },
     accountValue: {
       color: theme.textPrimary,
       fontFamily: monoFont,

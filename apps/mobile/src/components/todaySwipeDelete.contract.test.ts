@@ -51,11 +51,24 @@ describe("Today history swipe-to-delete contract", () => {
       dashboardSource.indexOf("ItemSeparatorComponent")
     );
 
-    expect(historyRenderSource).toContain("setHistoryDeleteEntry(entry)");
+    expect(historyRenderSource).toContain("setHistoryDeleteEntries(entries)");
     expect(historyRenderSource).not.toContain("Alert.alert");
     expect(dashboardSource).toContain('presentation="screen"');
     expect(deleteConfirmationSource).toContain("<Modal");
     expect(deleteConfirmationSource).toContain("accessibilityViewIsModal");
+  });
+
+  it("keeps replay functional as an explicit switch while another timer runs", () => {
+    expect(dashboardSource).toContain("Switch the running timer to ${title}");
+    expect(dashboardSource).toContain("const canReplay = Boolean(entry.categoryId || entry.description?.trim())");
+    expect(dashboardSource).toContain("latestData.current?.activeEntry && !categoryId && !description.trim()");
+  });
+
+  it("allows confirmed grouped deletion with a temporary undo action", () => {
+    expect(dashboardSource).toContain("onDeleteEntries(group.entries.map");
+    expect(dashboardSource).toContain("time entries deleted");
+    expect(dashboardSource).toContain("undoHistoryDeletion");
+    expect(dashboardSource).toContain("}, 5000)");
   });
 
   it("keeps the in-app confirmation card borderless", () => {

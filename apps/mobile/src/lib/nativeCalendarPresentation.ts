@@ -228,7 +228,12 @@ function serializeCalendarEntry(
 function buildCalendarEntries(data: MobileBootstrap | null, selectedDayKey: string, now: number) {
   if (!data) return [];
   const mergedEntries = mergeActiveEntry(
-    dedupeEntriesById([...(data.entries ?? []), ...(data.weekEntries ?? [])]),
+    dedupeEntriesById([
+      ...(data.historyEntries ?? []),
+      ...(data.entries ?? []),
+      ...(data.weekEntries ?? []),
+      ...(data.dayEntries ?? [])
+    ]),
     data.activeEntry
   );
   const timeEntries: NativeCalendarEntry[] = mergedEntries
