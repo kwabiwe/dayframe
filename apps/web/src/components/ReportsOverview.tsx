@@ -22,10 +22,14 @@ const donutInnerRadius = 24;
 
 export function ReportsOverview({
   categories,
-  weekSeries
+  weekSeries,
+  rangeLabel,
+  goalMinutes
 }: {
   categories: ReportRow[];
   weekSeries: ReportSeriesPoint[];
+  rangeLabel: string;
+  goalMinutes: number | null;
 }) {
   const categorySegments = categories
     .filter((row) => row.seconds > 0)
@@ -41,6 +45,7 @@ export function ReportsOverview({
   const weekMax = Math.max(...weekSeries.map((point) => point.seconds), 1);
   const donutSlices = buildDonutSlices(visibleSegments, totalSeconds);
   const topSegment = categorySegments[0];
+  const goalSeconds = goalMinutes === null ? null : goalMinutes * 60;
 
   return (
     <section className="industrial-panel reports-overview">
@@ -48,12 +53,13 @@ export function ReportsOverview({
         <div>
           <h2 className="text-base font-semibold">Category breakdown</h2>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            See where tracked time has gone by category, then compare this week by day.
+            See where tracked time went during {rangeLabel}, then compare each day.
           </p>
         </div>
         <div className="reports-total-pill">
-          <span>Total tracked</span>
+          <span>Selected range</span>
           <strong>{formatDuration(totalSeconds)}</strong>
+          {goalSeconds ? <small>{Math.round((totalSeconds / goalSeconds) * 100)}% of {formatDuration(goalSeconds)} goal</small> : null}
         </div>
       </div>
 
@@ -131,14 +137,14 @@ export function ReportsOverview({
         <div className="reports-week">
           <div className="reports-week-header">
             <div>
-              <h3>This week</h3>
+              <h3>{rangeLabel}</h3>
               <p>{formatDuration(weekTotal)} tracked</p>
             </div>
           </div>
           <div
             className="reports-week-bars"
             role="img"
-            aria-label={`Tracked time this week: ${weekSeries
+            aria-label={`Tracked time during ${rangeLabel}: ${weekSeries
               .map((point) => `${point.label} ${formatDuration(point.seconds)}`)
               .join(", ")}`}
           >

@@ -6,10 +6,14 @@ create table if not exists users (
   email text not null unique,
   name text not null,
   password_hash text,
+  daily_goal_minutes integer not null default 480 check (daily_goal_minutes between 1 and 1440),
+  weekly_goal_minutes integer not null default 2400 check (weekly_goal_minutes between 1 and 10080),
   created_at timestamptz not null default now()
 );
 
 alter table users add column if not exists password_hash text;
+alter table users add column if not exists daily_goal_minutes integer not null default 480;
+alter table users add column if not exists weekly_goal_minutes integer not null default 2400;
 
 create table if not exists workspaces (
   id uuid primary key default gen_random_uuid(),
