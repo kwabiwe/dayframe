@@ -112,6 +112,7 @@ describe("mobile timer presentation", () => {
 
     const deleted = optimisticDeleteTimeEntry(stopped, "entry-running");
     expect(deleted?.entries.some((entry) => entry.id === "entry-running")).toBe(false);
+    expect(deleted?.historyEntries?.some((entry) => entry.id === "entry-running")).toBe(false);
   });
 
   it("starts one optimistic timer and replaces its local id after persistence", () => {
@@ -212,6 +213,7 @@ function bootstrapWithActiveEntry(): MobileBootstrap {
   return {
     activeEntry,
     categories: [category({ id: "focus", name: "Focus" })],
-    entries: [activeEntry]
+    entries: [activeEntry],
+    historyEntries: [activeEntry]
   } as MobileBootstrap;
 }

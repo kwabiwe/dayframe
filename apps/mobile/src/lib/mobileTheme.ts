@@ -1285,6 +1285,11 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       justifyContent: "center"
     },
+    historySwipeDeleteAction: {
+      width: 64,
+      alignItems: "center",
+      justifyContent: "center"
+    },
     todayEmptyText: {
       color: theme.textSecondary,
       fontFamily: monoFont,
