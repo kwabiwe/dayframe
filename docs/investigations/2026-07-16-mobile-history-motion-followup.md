@@ -66,6 +66,8 @@ Branch: `codex/mobile-history-motion-followup`
 - `npm run testflight:preflight` ran and correctly blocked archive/export because this machine lacks the Apple Distribution identity, App Store provisioning profile, and local App Store Connect API environment file. This is release-environment state rather than an application regression.
 - The available simulator automation exposes no true two-finger gesture action. Calendar pinch performance is therefore closed by the removal of per-frame React updates, worklet/unit evidence, successful native rendering, and a documented physical-device acceptance check.
 
+Post-release grouping correction (2026-07-17): descriptionless entries still group when they have a category, but entries with neither a category nor a description now remain individual so edit and delete actions are directly available. See `docs/investigations/2026-07-17-today-swipe-delete-motion.md`.
+
 Post-merge release:
 
 - After PR #71 merged to `main` as `2c3173b`, the release machine reran `npm run test`, `npm run typecheck`, `npm run lint`, `npm run build`, `npm run check:brand-assets`, `git diff --check`, and `npm run testflight:preflight`.

@@ -1285,12 +1285,8 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       justifyContent: "center"
     },
-    historySwipeDeleteAction: {
-      width: 64
-    },
     historySwipeDeleteActionPressable: {
       flex: 1,
-      width: "100%",
       alignItems: "center",
       justifyContent: "center"
     },
