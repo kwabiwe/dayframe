@@ -3,6 +3,7 @@
 Date: 2026-07-16
 Baseline: `main` after PR #71, TestFlight `0.1.0 (46)`
 Branch: `codex/native-calendar-swiftui`
+Release: PR #72 merged to `main` as `3f9e97f`; TestFlight `0.1.0 (47)`
 
 ## Reported symptom
 
@@ -90,7 +91,17 @@ Recorded on 2026-07-16:
 - `npm run build`: passed; the Next.js production build completed.
 - `npm run check:brand-assets`: passed.
 - `git diff --check`: passed on the final working tree.
-- `npm run testflight:preflight`: blocked before archive/export. Xcode, bundle metadata, and CocoaPods sandbox checks pass, but this machine lacks the Apple Distribution identity, the Dayframe App Store provisioning profile, and `.codex-dayframe-qa/testflight/appstoreconnect/appstoreconnect.env`.
+- Early branch `npm run testflight:preflight`: blocked before archive/export on the development machine because local signing/profile/API credentials were missing.
+
+Post-merge release validation recorded on 2026-07-17:
+
+- After PR #72 merged to `main` as `3f9e97f`, the release machine reran `npm run test`, `npm run typecheck`, `npm run lint`, `npm run build`, `npm run check:brand-assets`, `git diff --check`, and `npm run testflight:preflight`.
+- `npm run test`: passed, 362 tests total: mobile 168, web 138, shared 56.
+- `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --package-path apps/mobile/modules/dayframe-calendar`: passed, 9 XCTest cases.
+- TestFlight preflight passed with full Xcode, matching CocoaPods sandbox, Apple Distribution identity, Dayframe App Store profile, and App Store Connect API-key config present.
+- Release archive/export/upload passed for `0.1.0 (47)` using API base `https://dayframe-web.vercel.app`; the exported IPA was 21,231,516 bytes.
+- App Store Connect verified delivery/build ID `7269d285-352c-41cf-84fd-e304aec94c6a`, `processingState=VALID`, `usesNonExemptEncryption=false`, en-GB notes set, `Internal Health Debug` all-build access, and `internalBuildState=IN_BETA_TESTING`.
+- A local generic simulator link check reached the native module compile path but then failed on React Native debug arm64 symbols. The release archive/export path passed, so this was not treated as a TestFlight blocker.
 
 ## Simulator evidence
 
@@ -104,5 +115,5 @@ Recorded on 2026-07-16:
 
 - No physical iPhone was available in this environment. Simulator screenshots and deterministic pinch math do not prove multi-touch feel, frame pacing, deceleration quality, moving-midpoint behaviour, or the absence of hitches under real touch input.
 - Repeated pinch-in/out at minimum/default/intermediate/maximum density, pinch near both day boundaries, active and review taps, one-second updates, Reduce Motion, Reduce Transparency, and Xcode Animation Hitches/Core Animation instrumentation remain physical-device acceptance work.
-- No archive, upload, or TestFlight build was attempted because preflight failed on local signing/profile/API credentials. TestFlight remains at `0.1.0 (46)` for this investigation.
-- Keep the implementation PR in draft until physical-iPhone Calendar parity and smoothness are genuinely accepted. Do not merge or mark the tracker item Done from simulator/build evidence alone.
+- PR #72 is merged and available in internal TestFlight build `0.1.0 (47)`.
+- Keep the tracker item on Watch until physical-iPhone Calendar parity and smoothness are genuinely accepted. Do not mark the Calendar correction Done from simulator/build/TestFlight delivery evidence alone.

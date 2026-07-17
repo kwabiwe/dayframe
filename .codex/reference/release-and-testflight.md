@@ -18,16 +18,16 @@ Do not conclude a fix failed until all relevant surfaces are checked.
 
 ## Current Internal TestFlight Lane
 
-As of 2026-07-16, Dayframe uses this internal release lane:
+As of 2026-07-17, Dayframe uses this internal release lane:
 
 - App: Dayframe Time Tracker
 - App Store Connect app id: `6787881096`
 - Bundle id: `com.layereight.dayframe`
 - Team: `65M773ZG6M`
 - Version: `0.1.0`
-- Latest verified build: `0.1.0 (46)`
+- Latest verified build: `0.1.0 (47)`
 - Group: `Internal Health Debug`
-- Latest delivery/build ID: `7c372c50-15f7-40c2-a67c-582220c41da0`
+- Latest delivery/build ID: `7269d285-352c-41cf-84fd-e304aec94c6a`
 - Current release rule: implementation PRs are not done until the merged code is in a verified internal TestFlight build.
 
 Docs-only or planning-only PRs do not require a TestFlight build unless they change build, release, signing, environment, or runtime configuration.
