@@ -2,6 +2,7 @@
 
 Date: 2026-07-17
 Branch: `agent/today-swipe-delete-motion`
+Pull request: #75
 
 ## Reported symptoms
 
