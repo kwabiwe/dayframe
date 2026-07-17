@@ -113,6 +113,7 @@ export function optimisticDeleteTimeEntry(data: MobileBootstrap | null, entryId:
     ...data,
     activeEntry: data.activeEntry?.id === entryId ? null : data.activeEntry,
     entries: data.entries.filter(keepOtherEntry),
+    historyEntries: data.historyEntries?.filter(keepOtherEntry),
     dayEntries: data.dayEntries?.filter(keepOtherEntry),
     weekEntries: data.weekEntries?.filter(keepOtherEntry)
   };

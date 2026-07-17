@@ -23,6 +23,7 @@ import {
   TextInput,
   View
 } from "react-native";
+import { Swipeable } from "react-native-gesture-handler";
 import Svg, { Circle, Defs, G, Path, Pattern, Rect } from "react-native-svg";
 import { router, useFocusEffect, useIsFocused } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -1231,6 +1232,22 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             <HistoryDayCard
               activeTimerRunning={Boolean(displayedActiveEntry)}
               now={now}
+              onDeleteEntry={(entry) => {
+                Alert.alert(
+                  "Delete entry?",
+                  "This tracked time will be permanently deleted.",
+                  [
+                    { text: "Cancel", style: "cancel" },
+                    {
+                      text: "Delete",
+                      style: "destructive",
+                      onPress: () => {
+                        void deleteTimeEntryOptimistically(entry.id, "Entry not deleted");
+                      }
+                    }
+                  ]
+                );
+              }}
               onOpenEntry={(entry) => {
                 if (!entry.stoppedAt) {
                   setActiveEditVisible(true);
@@ -1681,9 +1698,68 @@ function StopGlyph({ color }: { color: string }) {
   );
 }
 
+function TrashGlyph({ color }: { color: string }) {
+  return (
+    <Svg width={21} height={21} viewBox="0 0 24 24">
+      <Path d="M4 7h16M10 11v6M14 11v6M9 7l1-2h4l1 2M6 7l1 13h10l1-13" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
+    </Svg>
+  );
+}
+
+function SwipeableHistoryEntry({
+  accessibilityLabel,
+  children,
+  enabled = true,
+  entry,
+  minHeight,
+  onDelete,
+  styles,
+  theme
+}: {
+  accessibilityLabel: string;
+  children: ReactNode;
+  enabled?: boolean;
+  entry: TimeEntry;
+  minHeight: number;
+  onDelete: (entry: TimeEntry) => void;
+  styles: MobileStyles;
+  theme: MobileTheme;
+}) {
+  const swipeable = useRef<Swipeable>(null);
+
+  return (
+    <Swipeable
+      ref={swipeable}
+      enabled={enabled}
+      friction={2}
+      rightThreshold={40}
+      renderRightActions={() => enabled ? (
+        <Pressable
+          accessibilityLabel={`Delete ${accessibilityLabel}`}
+          accessibilityRole="button"
+          onPress={() => {
+            swipeable.current?.close();
+            onDelete(entry);
+          }}
+          style={({ pressed }) => [
+            styles.historySwipeDeleteAction,
+            { backgroundColor: theme.danger, minHeight },
+            pressed ? styles.buttonPressed : null
+          ]}
+        >
+          <TrashGlyph color={theme.onDanger} />
+        </Pressable>
+      ) : null}
+    >
+      {children}
+    </Swipeable>
+  );
+}
+
 function HistoryDayCard({
   activeTimerRunning,
   now,
+  onDeleteEntry,
   onOpenEntry,
   onOpenReview,
   onReplayEntry,
@@ -1694,6 +1770,7 @@ function HistoryDayCard({
 }: {
   activeTimerRunning: boolean;
   now: number;
+  onDeleteEntry: (entry: TimeEntry) => void;
   onOpenEntry: (entry: TimeEntry) => void;
   onOpenReview: () => void;
   onReplayEntry: (entry: TimeEntry) => void;
@@ -1730,13 +1807,22 @@ function HistoryDayCard({
           const title = displayEntryTitle(entry);
           return (
             <Fragment key={`${section.key}:${group.key}`}>
-              <View
-                style={[
-                  styles.todayEntryRow,
-                  index > 0 ? styles.todayEntryDivider : null
-                ]}
+              <SwipeableHistoryEntry
+                accessibilityLabel={title}
+                enabled={!grouped && Boolean(entry.stoppedAt)}
+                entry={entry}
+                minHeight={56}
+                onDelete={onDeleteEntry}
+                styles={styles}
+                theme={theme}
               >
-                <Pressable
+                <View
+                  style={[
+                    styles.todayEntryRow,
+                    index > 0 ? styles.todayEntryDivider : null
+                  ]}
+                >
+                  <Pressable
                   accessibilityLabel={grouped
                     ? `${expanded ? "Collapse" : "Expand"} ${group.entries.length} ${title} entries`
                     : `Edit ${title}`}
@@ -1762,41 +1848,52 @@ function HistoryDayCard({
                         : `${formatEntryTimeRange(entry, now)}${entry.categoryName ? ` · ${entry.categoryName}` : ""}`}
                     </Text>
                   </View>
-                </Pressable>
-                <View style={styles.historyEntryActions}>
-                  <Text style={styles.todayEntryDuration}>{formatDuration(group.totalSeconds)}</Text>
-                  {canReplay ? (
-                    <Pressable
-                      accessibilityLabel={`Start ${title} now`}
-                      accessibilityRole="button"
-                      onPress={() => onReplayEntry(entry)}
-                      style={pressable(styles.historyReplayButton, styles.buttonPressed)}
-                    >
-                      <PlayGlyph color={theme.accentText} size={14} />
-                    </Pressable>
-                  ) : null}
+                  </Pressable>
+                  <View style={styles.historyEntryActions}>
+                    <Text style={styles.todayEntryDuration}>{formatDuration(group.totalSeconds)}</Text>
+                    {canReplay ? (
+                      <Pressable
+                        accessibilityLabel={`Start ${title} now`}
+                        accessibilityRole="button"
+                        onPress={() => onReplayEntry(entry)}
+                        style={pressable(styles.historyReplayButton, styles.buttonPressed)}
+                      >
+                        <PlayGlyph color={theme.accentText} size={14} />
+                      </Pressable>
+                    ) : null}
+                  </View>
                 </View>
-              </View>
+              </SwipeableHistoryEntry>
               {expanded ? (
                 <View style={styles.historyGroupChildren}>
                   {group.entries.map(({ entry: childEntry, overlapSeconds }, childIndex) => (
-                    <Pressable
+                    <SwipeableHistoryEntry
                       key={childEntry.id}
-                      accessibilityLabel={`Edit ${displayEntryTitle(childEntry)} from ${formatEntryTimeRange(childEntry, now)}`}
-                      accessibilityRole="button"
-                      onPress={() => onOpenEntry(childEntry)}
-                      style={({ pressed }) => [
-                        styles.historyGroupChild,
-                        childIndex > 0 ? styles.historyGroupChildDivider : null,
-                        pressed ? styles.buttonPressed : null
-                      ]}
+                      accessibilityLabel={displayEntryTitle(childEntry)}
+                      enabled={Boolean(childEntry.stoppedAt)}
+                      entry={childEntry}
+                      minHeight={46}
+                      onDelete={onDeleteEntry}
+                      styles={styles}
+                      theme={theme}
                     >
-                      <View style={[styles.todayEntryDot, { backgroundColor: entryCategoryColor(childEntry, theme.mode) }]} />
-                      <Text style={styles.historyGroupChildTime} numberOfLines={1}>
-                        {formatEntryTimeRange(childEntry, now)}
-                      </Text>
-                      <Text style={styles.todayEntryDuration}>{formatDuration(overlapSeconds)}</Text>
-                    </Pressable>
+                      <Pressable
+                        accessibilityLabel={`Edit ${displayEntryTitle(childEntry)} from ${formatEntryTimeRange(childEntry, now)}`}
+                        accessibilityRole="button"
+                        onPress={() => onOpenEntry(childEntry)}
+                        style={({ pressed }) => [
+                          styles.historyGroupChild,
+                          childIndex > 0 ? styles.historyGroupChildDivider : null,
+                          pressed ? styles.buttonPressed : null
+                        ]}
+                      >
+                        <View style={[styles.todayEntryDot, { backgroundColor: entryCategoryColor(childEntry, theme.mode) }]} />
+                        <Text style={styles.historyGroupChildTime} numberOfLines={1}>
+                          {formatEntryTimeRange(childEntry, now)}
+                        </Text>
+                        <Text style={styles.todayEntryDuration}>{formatDuration(overlapSeconds)}</Text>
+                      </Pressable>
+                    </SwipeableHistoryEntry>
                   ))}
                 </View>
               ) : null}

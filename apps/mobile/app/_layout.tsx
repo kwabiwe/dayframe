@@ -1,6 +1,7 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
 import { useMemo } from "react";
 import { StatusBar } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { MobileThemeProvider, useMobileTheme } from "@/lib/mobileTheme";
 import { MOBILE_MOTION, useReduceMotionPreference } from "@/lib/motion";
@@ -8,11 +9,13 @@ import { createNavigationColors } from "@/lib/navigationTheme";
 
 export default function RootLayout() {
   return (
-    <SafeAreaProvider>
-      <MobileThemeProvider>
-        <ThemedStack />
-      </MobileThemeProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <MobileThemeProvider>
+          <ThemedStack />
+        </MobileThemeProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
