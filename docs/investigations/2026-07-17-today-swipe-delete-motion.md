@@ -3,6 +3,8 @@
 Date: 2026-07-17
 Branch: `agent/today-swipe-delete-motion`
 Pull request: #75
+Follow-up branch: `agent/uncategorized-swipe-delete`
+Follow-up pull request: #76
 
 ## Reported symptoms
 
