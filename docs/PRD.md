@@ -115,6 +115,9 @@ Deployment:
 8. As the product owner, I want anonymized automation accuracy metrics, so that I can improve rules without collecting unnecessary personal detail.
    - Example: Track accepted vs ignored suggestions by source type, not raw coordinates.
 
+9. As an iOS user, I want navigation, gestures, sheets, list changes, and action feedback to transition consistently, so that every state change feels connected and understandable rather than jumpy.
+   - Example: Swiping to delete an entry moves continuously into an animated list reflow and Undo state, including dismissal, restoration, failure, and Reduce Motion behaviour.
+
 ## 6. Core Architecture & Patterns
 
 High-level architecture:

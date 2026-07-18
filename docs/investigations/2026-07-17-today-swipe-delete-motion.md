@@ -1,10 +1,16 @@
-# Today swipe-to-delete motion and confirmation
+# Today swipe-to-delete motion and feedback
 
 Date: 2026-07-17
 Branch: `agent/today-swipe-delete-motion`
 Pull request: #75
 Follow-up branch: `agent/uncategorized-swipe-delete`
 Follow-up pull request: #76
+
+## Current product supersession
+
+Commit `455b488`, shipped in TestFlight build `0.1.0 (52)`, intentionally removed the Today confirmation surface. Today list and grouped deletions now begin immediately and provide a five-second inverse-colour Undo bean before persistence. Edit Timer continues to use the app-owned borderless confirmation. References below to a shared Today/Edit Timer confirmation describe the historical PR #75/#76 implementation and are superseded by the tracker and this section.
+
+The follow-on animation audit found a remaining gap: the swipe itself is continuous, but row/group removal, surrounding list reflow, Undo entrance/exit, expiry, restoration, and failure rollback had no complete presence/layout transition. The 18 July motion-consistency follow-up implements that local Reanimated owner and records its evidence and remaining device checks in `docs/investigations/2026-07-18-ios-motion-consistency.md`.
 
 ## Reported symptoms
 
@@ -56,8 +62,9 @@ Follow-up pull request: #76
 ## Closure criteria
 
 - On a physical iPhone, the red action and trash icon move continuously with the finger and row edge, settle without a pop, and do not interfere with vertical Today scrolling.
-- Today history and Edit Timer show the same borderless in-app confirmation; no system delete alert appears.
-- Cancel does not mutate the entry. Delete removes it immediately. A failed API deletion restores it and shows the existing friendly error.
+- Today deletion begins immediately without a system or app-owned confirmation. Edit Timer retains its borderless in-app confirmation.
+- Delete animates row/group removal and surrounding list reflow; the Undo bean enters and exits smoothly; expiry, rapid replacement, exact restoration, and failure rollback do not jump.
+- A failed API deletion restores the affected entries and shows the existing friendly error.
 - Grouped history retains collapsed aggregate safety and expanded children remain individually editable/deletable.
 - Light/dark, Dynamic Type, VoiceOver, Reduce Motion, mobile typecheck/tests, full repository validation, and an iOS native build are checked before release handoff.
 
