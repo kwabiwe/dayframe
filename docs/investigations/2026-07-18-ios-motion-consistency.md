@@ -112,7 +112,7 @@ The following evidence is still required and is not claimed as passed:
 - Today individual, grouped, expanded-child, and blank-row direct swipe deletion; Undo, five-second expiry, rapid consecutive deletion, offline rollback, and vertical-scroll arbitration. The computer-control drag did not produce a reliable swipe, and the Mac locked again before another capture could be inspected.
 - Date selection, Review Dismiss, Edit Timer successful delete, timer start/stop/edit/delete regressions, tab and push/back/swipe-back regressions, and native Calendar scroll/day/pinch regressions.
 - System/Light/Dark, Reduce Motion, Dynamic Type, VoiceOver, and Reduce Transparency passes. The completed post-change recordings are normal-motion Light only.
-- Physical-iPhone direct manipulation, native-transition, and frame-pacing validation. `simctl` discovery found only simulator devices; no physical iPhone was available. Xcode performance tooling was therefore not used.
+- Physical-iPhone direct manipulation, native-transition, and frame-pacing validation. `devicectl` found one paired physical iPad Pro 10.5-inch but no physical iPhone; the iPad does not satisfy the required iPhone check. Xcode performance tooling was therefore not used.
 
 Until the Mac is unlocked and a physical iPhone is available, this investigation remains a Watch item and the overall task must not be described as complete.
 
