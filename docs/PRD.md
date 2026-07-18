@@ -8,7 +8,7 @@ The core value proposition is to reduce manual time-tracking friction without lo
 
 The MVP goal is to make Dayframe reliable for personal use and a small friends beta: hosted on Vercel, backed by Supabase Postgres/Auth, iOS-only for mobile, offline-capable for hours or days, and privacy-conscious around health and precise location data.
 
-Current reality as of 2026-07-18: Dayframe is in an active internal TestFlight lane, with build `0.1.0 (52)` verified for KB testing. The native SwiftUI Calendar surface remains under physical-device Watch for pinch smoothness, taps, accessibility settings, and frame pacing; Today history deletion now happens immediately with a five-second inverse-colour Undo bean and remains under physical-device Watch. The tracker in `docs/feature-fix-tracker.md` is the source of truth for what is `Done`, still under `Watch`, or planned next.
+Current reality as of 2026-07-18: Dayframe is in an active internal TestFlight lane, with build `0.1.0 (53)` verified for KB testing after PR #80. The native SwiftUI Calendar surface remains under physical-device Watch for pinch smoothness, taps, accessibility settings, and frame pacing; Today, Review, Places, date-selection, and confirmation motion now share consistent local transition rules and remain under physical-device Watch. The tracker in `docs/feature-fix-tracker.md` is the source of truth for what is `Done`, still under `Watch`, or planned next.
 
 ## 2. Mission
 
