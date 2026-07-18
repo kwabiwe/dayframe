@@ -40,6 +40,18 @@ npm run test -w @dayframe/shared
 
 Do not claim a command passed if it was not run. If a command is skipped, state why.
 
+## Interaction Motion
+
+Required whenever a feature adds or changes navigation, presentation, gestures, list insertion/removal/reordering, expanding content, status feedback, Undo, or other visible movement:
+
+- Add the `.codex/reference/motion.md` motion contract to the investigation note or PR description: trigger, one owner, entrance/update/exit, surrounding reflow, interruption, async outcomes, and Reduce Motion.
+- Compare with the nearest existing Dayframe interaction and reuse the established owner and semantic duration where appropriate.
+- Check normal motion and Reduce Motion for entrance, update/reflow, exit, cancellation, rapid repeat, and timeout/Undo/failure rollback states that apply.
+- Verify stable keys and stale timer/callback handling so a prior transition cannot remove or restore newer state.
+- Check Dynamic Type and VoiceOver when content geometry, focus, or announcements change.
+- Record a simulator video for ordinary presence/layout motion. Use a physical iPhone for direct manipulation, native surfaces, frame pacing, background behaviour, or device-only APIs, and inspect frame pacing with Xcode tooling when the issue warrants it.
+- Do not claim smoothness from unit tests or still screenshots alone. Record any device or tooling limitation explicitly.
+
 ## Health And Review
 
 Required checks when touching Health import, Review, Confirm/Dismiss, or reprocess:
@@ -83,7 +95,7 @@ Required checks:
 - Normal mobile timer mutations show no spinner, progress bar, or layout-moving loading state. Start, stop, edit, delete, and suggestion-apply should update optimistically and reconcile silently; pull-to-refresh remains the explicit visible-refresh path.
 - Edit Timer delete confirmation does not unmount/collapse the suggestions area or reflow the sheet content underneath.
 - Today history left-swipe keeps one smooth horizontal gesture on the UI thread: the danger action and icon travel with the row edge, the row settles without a release-time pop, ordinary vertical scrolling does not open actions accidentally, and the duration retains a 14-point surface gap before the revealed action.
-- Today history delete uses the same app-owned borderless confirmation as Edit Timer, never the system alert. Verify Cancel, optimistic Delete, rollback on failure, individual rows, directly deletable blank uncategorized entries, expanded grouped children, and collapsed-group safety. Confirm the swipe fill and confirmation Delete pill use `danger`, with their icon/text using `onDanger`, in light and dark themes.
+- Today history delete begins immediately without a confirmation surface and opens the five-second inverse-colour Undo bean. Verify animated row/group removal and surrounding list reflow, Undo entrance/exit, expiry, rapid replacement, exact restoration, rollback on failure, individual rows, directly deletable blank uncategorized entries, expanded grouped children, and collapsed-group safety. Confirm the swipe fill uses `danger` with `onDanger` icon/text, and the bean uses the documented inverse surface with a coral action, in light and dark themes.
 
 ## Location Learning And Places
 

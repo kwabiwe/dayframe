@@ -74,6 +74,7 @@ npm run export:workspace -- ./dayframe-backup.json
 - Keep integration/ingest tokens separate from user app sessions.
 - Treat health and precise location data as sensitive. Avoid logging raw payloads, do not send them to analytics, and preserve export/delete paths.
 - Do not add legacy third-party timer-brand wording, imports, scripts, docs, env vars, or hidden integration hooks. Dayframe stands on its own.
+- Any user-facing feature with navigation, presentation, gestures, layout changes, feedback, Undo, or other visible movement must follow `.codex/reference/motion.md`. Motion is part of the feature contract, not optional polish.
 
 ## Web Patterns
 
@@ -101,6 +102,7 @@ npm run export:workspace -- ./dayframe-backup.json
 - Timer mutations on mobile should feel immediate. Do not show spinners or progress bars for normal start, stop, edit, delete, or suggestion-apply actions; update the UI optimistically and reconcile in the background. Keep visible spinners for deliberate pull-to-refresh only.
 - Mobile Play opens the running Edit Timer/suggestion flow consistently. Empty Play starts one bare timer then opens the sheet; Play while a timer is already running must not bypass suggestions or start a duplicate timer. Suggestions enrich the existing running entry.
 - iOS surfaces should follow the current fill-led design language: use canvas/surface/inset contrast, circular icon actions, pill text actions, compact divider-based lists, and avoid outline-heavy rounded rectangles unless the relevant reference doc says otherwise.
+- Before implementing any feature with navigation, presentation, gestures, list reflow, feedback, Undo, or other visible movement, read `.codex/reference/motion.md` and define its motion contract. The trigger, single animation owner, entrance/update/exit states, surrounding layout, interruption, async rollback, and Reduce Motion path must be explicit.
 - Targeted native iOS views must preserve the existing React Native ownership boundary: React owns authenticated bootstrap data, mutations, routing, and sheets; Swift receives a serializable presentation model and emits semantic user actions. Native views must not call Dayframe APIs or maintain a second timer/data store.
 - For Calendar zoom, use one native gesture/scroll owner for the whole timeline. A SwiftUI surface may wrap `UIScrollView` through `UIViewRepresentable` when that is required for continuous focal-point-preserving zoom; do not hand off from a temporary visual scale to a separately rebuilt React layout on gesture release.
 - Location and HealthKit permission flows belong in onboarding and Settings, not on the dashboard. Surface friendly, actionable permission states instead of raw native errors.
@@ -141,6 +143,7 @@ npm run build
 - For timer/auth/sync changes, add or run regression coverage for web start, web stop, mobile start, mobile stop, active timer refresh, completed entry persistence, and queued event sync.
 - For UI changes, validate in a browser at desktop and mobile widths and check for console/runtime overlays.
 - For mobile UI/timer changes, read `docs/feature-fix-tracker.md`, `docs/brand-style-guide.md`, `.codex/reference/components.md`, `.codex/reference/style.md`, and `.codex/reference/validation-matrix.md` before implementation. Record any conflict between old docs and current tracker state in the PR instead of silently choosing one.
+- For features that introduce or change movement, also read `.codex/reference/motion.md`. Validate the complete transition rather than only its trigger: entrance, state/layout update, exit, cancellation, rapid repeat, timeout/Undo/failure rollback where applicable, and the Reduce Motion path.
 - For app chrome, account, workspace, navigation, settings, or floating-surface changes, explicitly test mobile overlay behavior at phone widths. Do not treat a generic responsive pass as sufficient.
 - For auth/deployment changes, verify `DAYFRAME_AUTH_MODE=dev`, `local`, and `provider` code paths where practical.
 - For hosted deployment changes, verify the Supabase schema has all columns/indexes used by the deployed code before smoke-testing Vercel.
@@ -158,6 +161,7 @@ npm run build
 - `.codex/reference/mobile-permissions.md`: iOS permission state rules.
 - `.codex/reference/database.md`: schema, RLS, and hosted migration checks.
 - `.codex/reference/debugging-playbook.md`: screenshot/regression investigation workflow.
+- `.codex/reference/motion.md`: canonical motion ownership, continuity, accessibility, and PR evidence requirements.
 - `.codex/reference/health-review-pipeline.md`: HealthKit import, Review, auto-log, and diagnostics flow.
 - `.codex/reference/release-and-testflight.md`: TestFlight, Vercel, Supabase, and runtime version checks.
 - `.codex/reference/validation-matrix.md`: feature-specific validation commands and manual checks.

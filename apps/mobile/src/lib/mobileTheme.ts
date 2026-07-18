@@ -2531,6 +2531,14 @@ function createStyles(theme: MobileTheme) {
       fontSize: 12,
       fontWeight: "600"
     },
+    copyToastOverlay: {
+      position: "absolute",
+      left: 24,
+      right: 24,
+      bottom: 24,
+      alignItems: "center",
+      zIndex: 3
+    },
     historyDeleteUndoToast: {
       position: "absolute",
       left: 20,

@@ -29,8 +29,8 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Tapping an active entry, completed entry, or review candidate from the native Calendar opens the same existing React Native timer editor, entry editor, or Review flow. Native rendering must not create or mutate a second timer/data store.
 - Calendar edit sheets stay visible when the iOS keyboard opens, with the focused field scrolled above the keyboard/suggestion bar.
 - List view groups entries by date, shows friendly source labels, and includes edit, start-again, and delete actions.
-- Today history left-swipe uses a UI-thread gesture whose danger action and icon travel continuously with the row edge; it must not pop into place or compete with vertical scrolling. A collapsed aggregate group can be deleted as one explicit, confirmed action covering all underlying entries. The duration keeps the normal 14-point trailing inset as a surface-coloured gap before the revealed danger action.
-- Today history deletion uses the app-owned borderless confirmation surface rather than a system alert. Cancel leaves rows untouched; Delete updates immediately and shows a bottom Undo snackbar before persistence is committed. Undo restores the exact entries, while persistence failure also restores them with a friendly error. Blank uncategorized entries remain individual rows with direct edit/delete access instead of collapsing into a non-deletable aggregate.
+- Today history left-swipe uses a UI-thread gesture whose danger action and icon travel continuously with the row edge; it must not pop into place or compete with vertical scrolling. A collapsed aggregate group can be deleted as one explicit swipe action covering all underlying entries. The duration keeps the normal 14-point trailing inset as a surface-coloured gap before the revealed danger action.
+- Today history deletion begins immediately without a confirmation surface and shows the five-second inverse-colour Undo bean before persistence is committed. Row/group removal, surrounding list reflow, Undo entrance/exit, expiry, exact restoration, and persistence-failure rollback transition continuously rather than popping. A rapid second delete deterministically commits the older pending deletion, starts a fresh five-second window, and cannot be dismissed or restored by an older timer/callback. Blank uncategorized entries remain individual rows with direct edit/delete access instead of collapsing into a non-deletable aggregate.
 - Timesheet view groups work by category/activity, shows day totals and row totals, and remains readable.
 
 ## Data And Sync
@@ -68,6 +68,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - In System, Light and Dark, push, pop and interactive swipe-back transitions between Settings, Review and Places keep the whole viewport on the resolved theme canvas with no white corner leaks, rounded-card vignette or overlapping scene chrome.
 - Reduce Motion removes route and layout motion without hiding navigation state changes or loading feedback.
 - Native SwiftUI surfaces use the same semantic Midnight Core roles, system typography, Dynamic Type, VoiceOver labels, Reduce Motion, and Reduce Transparency behaviour as the surrounding React Native app.
+- Every feature that introduces movement follows `.codex/reference/motion.md`: it has one animation owner and consistent entrance, update/reflow, exit, interruption, timeout/Undo/failure, and Reduce Motion behaviour where those states apply.
 
 ## Validation Commands
 

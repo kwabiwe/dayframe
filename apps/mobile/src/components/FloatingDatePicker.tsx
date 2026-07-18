@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
+import Reanimated from "react-native-reanimated";
 import Svg, { Path } from "react-native-svg";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
+import {
+  localPresenceEntering,
+  localPresenceExiting,
+  useReduceMotionPreference
+} from "@/lib/motion";
 
 export function FloatingDatePicker({
   maxDate = new Date(),
@@ -20,6 +26,7 @@ export function FloatingDatePicker({
   theme: MobileTheme;
   visible: boolean;
 }) {
+  const reduceMotion = useReduceMotionPreference();
   const [month, setMonth] = useState(() => startOfMonth(selectedDate));
   const selectedDayKey = formatDateKey(selectedDate);
   const maxDay = startOfDay(maxDate);
@@ -35,14 +42,23 @@ export function FloatingDatePicker({
   if (!visible) return null;
 
   return (
-    <View accessibilityViewIsModal style={styles.datePickerOverlay}>
+    <Reanimated.View
+      accessibilityViewIsModal
+      entering={localPresenceEntering(reduceMotion)}
+      exiting={localPresenceExiting(reduceMotion)}
+      style={styles.datePickerOverlay}
+    >
       <Pressable
         accessibilityLabel="Close date picker"
         accessibilityRole="button"
         onPress={onClose}
         style={styles.sheetBackdrop}
       />
-      <View accessibilityLabel="Choose a date" style={styles.datePickerSheet}>
+      <Reanimated.View
+        accessibilityLabel="Choose a date"
+        entering={localPresenceEntering(reduceMotion, "rise")}
+        style={styles.datePickerSheet}
+      >
           <View style={styles.datePickerHeader}>
             <Pressable
               accessibilityLabel="Previous month"
@@ -75,7 +91,12 @@ export function FloatingDatePicker({
               <Text key={`${label}-${index}`} style={styles.datePickerWeekday}>{label}</Text>
             ))}
           </View>
-          <View style={styles.datePickerGrid}>
+          <Reanimated.View
+            key={formatDateKey(month)}
+            entering={localPresenceEntering(reduceMotion)}
+            exiting={localPresenceExiting(reduceMotion)}
+            style={styles.datePickerGrid}
+          >
             {days.map((date) => {
               const dayKey = formatDateKey(date);
               const selected = dayKey === selectedDayKey;
@@ -113,7 +134,7 @@ export function FloatingDatePicker({
                 </Pressable>
               );
             })}
-          </View>
+          </Reanimated.View>
           <View style={styles.datePickerActions}>
             <Pressable
               accessibilityLabel="Select today"
@@ -132,8 +153,8 @@ export function FloatingDatePicker({
               <Text style={styles.datePickerDoneText}>Done</Text>
             </Pressable>
           </View>
-      </View>
-    </View>
+      </Reanimated.View>
+    </Reanimated.View>
   );
 }
 

@@ -129,6 +129,34 @@ describe("mobile timer presentation", () => {
     expect(restored?.workspace.name).toBe("Newer workspace state");
   });
 
+  it("rolls back the exact grouped entries after persistence failure", () => {
+    const first = bootstrapWithActiveEntry();
+    const secondEntry = {
+      ...first.entries[0],
+      id: "entry-grouped-2",
+      startedAt: "2026-07-16T08:00:00.000Z",
+      stoppedAt: "2026-07-16T08:30:00.000Z"
+    };
+    const snapshot = {
+      ...first,
+      entries: [first.entries[0], secondEntry],
+      historyEntries: [first.entries[0], secondEntry]
+    };
+    const deleted = ["entry-running", "entry-grouped-2"].reduce(
+      optimisticDeleteTimeEntry,
+      snapshot
+    );
+    const restored = optimisticRestoreTimeEntries(
+      deleted ? { ...deleted, workspace: { ...deleted.workspace, name: "Newer workspace state" } } : deleted,
+      snapshot,
+      ["entry-running", "entry-grouped-2"]
+    );
+
+    expect(restored?.entries).toEqual(snapshot.entries);
+    expect(restored?.historyEntries).toEqual(snapshot.historyEntries);
+    expect(restored?.workspace.name).toBe("Newer workspace state");
+  });
+
   it("starts one optimistic timer and replaces its local id after persistence", () => {
     const original = bootstrapWithActiveEntry();
     const pending = {

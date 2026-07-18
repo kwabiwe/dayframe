@@ -55,6 +55,14 @@ Use this when implementing visual UI.
 - Touch targets should be at least 44px high/wide.
 - Account management and logout must remain reachable when desktop sidebars or footers collapse.
 
+## Interaction Motion
+
+- Read `.codex/reference/motion.md` before adding or changing navigation, sheets, overlays, gestures, list reflow, feedback, Undo, or other visible movement.
+- Match the nearest established Dayframe interaction and the semantic timing ranges in `docs/brand-style-guide.md`; do not invent a new motion language for one component.
+- Treat the whole state change as one experience. Entrance, surrounding layout, exit, rapid replacement, timeout, Undo, and failure rollback must not mix smooth and abrupt phases.
+- Use one animation owner. Keep native navigation and tabs native, use a UI-thread transition for local React Native presence/layout, and reserve Swift/SwiftUI for targeted interactions that genuinely require native ownership.
+- Reduce Motion may remove nonessential travel, scale, and springs, but it must preserve state, focus, feedback, and accessibility announcements.
+
 ## Review Checklist
 
 - [ ] The UI is usable as the first screen, not just a marketing shell.
@@ -69,3 +77,4 @@ Use this when implementing visual UI.
 - [ ] No legacy PNG banner or unintended white logo rectangle remains in primary branding.
 - [ ] Focus, text, icon, border and chart contrast remain legible in System, Light and Dark modes.
 - [ ] Mobile dashboard excludes sync/logout/permission clutter from primary chrome.
+- [ ] New or changed movement has a documented motion contract and consistent entrance/update/exit behaviour, including Reduce Motion.

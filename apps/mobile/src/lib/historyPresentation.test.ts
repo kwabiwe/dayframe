@@ -98,6 +98,26 @@ describe("mobile history presentation", () => {
     expect(grouped[0].entries).toHaveLength(2);
     expect(grouped[1].entries).toHaveLength(1);
   });
+
+  it("keeps stable group and child identity through removal and restoration", () => {
+    const entries = [
+      entry("study-newer", new Date(2026, 6, 16, 10, 0), new Date(2026, 6, 16, 10, 30)),
+      entry("study-older", new Date(2026, 6, 16, 9, 0), new Date(2026, 6, 16, 9, 30))
+    ].map((item) => ({
+      entry: { ...item, categoryId: "study", categoryName: "Study", description: null },
+      overlapSeconds: 1800
+    }));
+    const original = groupHistoryDayEntries(entries);
+    const afterChildRemoval = groupHistoryDayEntries(entries.slice(1));
+    const restored = groupHistoryDayEntries(entries);
+
+    expect(afterChildRemoval[0].key).toBe(original[0].key);
+    expect(restored[0].key).toBe(original[0].key);
+    expect(restored[0].entries.map(({ entry: item }) => item.id)).toEqual([
+      "study-newer",
+      "study-older"
+    ]);
+  });
 });
 
 function entry(id: string, startedAt: Date, stoppedAt: Date | null): MobileTimeEntry {

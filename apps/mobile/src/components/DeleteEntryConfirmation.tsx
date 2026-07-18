@@ -1,6 +1,11 @@
 import { Modal, Pressable, Text, View } from "react-native";
+import Reanimated from "react-native-reanimated";
 import { type MobileStyles } from "@/lib/mobileTheme";
-import { useReduceMotionPreference } from "@/lib/motion";
+import {
+  localPresenceEntering,
+  localPresenceExiting,
+  useReduceMotionPreference
+} from "@/lib/motion";
 
 type DeleteEntryConfirmationProps = {
   deleting?: boolean;
@@ -25,17 +30,8 @@ export function DeleteEntryConfirmation({
 
   if (!visible && presentation === "contained") return null;
 
-  const confirmation = visible ? (
-    <View
-      accessibilityLabel="Confirm delete entry"
-      accessibilityViewIsModal
-      onAccessibilityEscape={onCancel}
-      style={[
-        styles.sheetDeleteConfirmationOverlay,
-        presentation === "screen" ? styles.screenDeleteConfirmationOverlay : null
-      ]}
-    >
-      <View style={styles.sheetDeleteConfirmationCard}>
+  const card = (
+    <View style={styles.sheetDeleteConfirmationCard}>
         <Text style={styles.sheetDeleteConfirmationTitle}>Delete entry?</Text>
         <Text style={styles.sheetDeleteConfirmationText}>{message}</Text>
         <View style={styles.sheetDeleteConfirmationActions}>
@@ -66,11 +62,34 @@ export function DeleteEntryConfirmation({
             <Text style={styles.sheetDeleteConfirmationDeleteText}>Delete</Text>
           </Pressable>
         </View>
-      </View>
+    </View>
+  );
+
+  if (presentation === "contained") {
+    return (
+      <Reanimated.View
+        accessibilityLabel="Confirm delete entry"
+        accessibilityViewIsModal
+        entering={localPresenceEntering(reduceMotion, "scale")}
+        exiting={localPresenceExiting(reduceMotion)}
+        onAccessibilityEscape={onCancel}
+        style={styles.sheetDeleteConfirmationOverlay}
+      >
+        {card}
+      </Reanimated.View>
+    );
+  }
+
+  const confirmation = visible ? (
+    <View
+      accessibilityLabel="Confirm delete entry"
+      accessibilityViewIsModal
+      onAccessibilityEscape={onCancel}
+      style={[styles.sheetDeleteConfirmationOverlay, styles.screenDeleteConfirmationOverlay]}
+    >
+      {card}
     </View>
   ) : null;
-
-  if (presentation === "contained") return confirmation;
 
   return (
     <Modal

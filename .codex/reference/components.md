@@ -23,6 +23,14 @@ Use this when working on frontend components.
 - Surface friendly, actionable permission messages; never display raw native exception strings to users.
 - Treat route state as the source of truth for same-route mobile sub-settings. Do not mirror the active route section into local state or intercept native back gestures to repair duplicated navigation state.
 
+## Motion Ownership And State
+
+- Read `.codex/reference/motion.md` whenever a component introduces visible movement or changes layout over time.
+- A moving component must expose or own a complete state sequence: entrance, update/reflow, exit, cancellation, and async rollback where applicable. Do not leave a parent to animate one half while a child mounts or disappears abruptly.
+- Prefer an existing motion primitive and `MOBILE_MOTION` token over local duration constants. Local list, notice, picker, confirmation, and expansion motion should stay on the UI thread when possible.
+- Keep stable keys and deterministic replacement rules so rapid actions do not replay stale exits, dismiss newer feedback, or restore obsolete state.
+- Do not add a Swift component to repair ordinary React Native presence or layout motion. Choose native ownership only for a documented platform interaction need.
+
 ## Native iOS View Boundaries
 
 - Use a standard local Expo module for a targeted Swift/SwiftUI view that lives inside the existing Expo app. Export an `ExpoView`, retain one `UIHostingController` for its SwiftUI hierarchy, and update its observable model through typed Expo `Record` props/view events. Do not use the experimental inline-module path, create a second app target, or migrate unrelated screens in the same PR.
@@ -44,3 +52,4 @@ Use this when working on frontend components.
 - [ ] Dashboard changes preserve the core timer/start-task flow.
 - [ ] Permission controls are not placed on the dashboard.
 - [ ] Native iOS views preserve the React data/mutation boundary and do not reset interaction state during ordinary prop refreshes.
+- [ ] Moving components cover entrance, reflow, exit, interruption, async rollback, and Reduce Motion states that apply.
