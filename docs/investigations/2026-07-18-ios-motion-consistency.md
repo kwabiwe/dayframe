@@ -92,7 +92,7 @@ Run on 18 July 2026 from `agent/ios-motion-consistency`:
 - `npm run lint` — passed.
 - `npm run typecheck` — passed for mobile, web, and shared workspaces.
 - `npm run test` — passed: mobile 192, web 143, shared 56; 391 tests total.
-- `npm run build` — passed; the Next.js production build generated 20 routes.
+- `npm run build` — passed; the Next.js production build completed and generated 20 static pages.
 - `npm run check:brand-assets` — passed.
 - `git diff --check` — passed before the native build; it must be repeated after final documentation changes.
 - `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -workspace apps/mobile/ios/Dayframe.xcworkspace -scheme Dayframe -configuration Debug -destination 'platform=iOS Simulator,id=CF4A2B85-B714-4985-B9AA-8CE669BA78F6' build` — passed with `** BUILD SUCCEEDED **` on the iPhone 17 Pro iOS 26.5 simulator destination.
