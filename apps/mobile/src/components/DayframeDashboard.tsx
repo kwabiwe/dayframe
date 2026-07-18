@@ -38,7 +38,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { paletteColorFor, type RecentActivitySuggestion } from "@dayframe/shared";
 import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
-import { DeleteEntryConfirmation } from "@/components/DeleteEntryConfirmation";
 import { DayframeBrand } from "@/components/brand";
 import { useKeyboardAccessory, type KeyboardAccessoryField } from "@/components/KeyboardAccessory";
 import {
@@ -173,7 +172,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [manualEntrySaving, setManualEntrySaving] = useState(false);
   const [activeEditVisible, setActiveEditVisible] = useState(false);
   const [presentedActiveEntry, setPresentedActiveEntry] = useState<TimeEntry | null>(null);
-  const [historyDeleteEntries, setHistoryDeleteEntries] = useState<TimeEntry[]>([]);
   const [pendingHistoryDeletion, setPendingHistoryDeletion] = useState<{
     entries: TimeEntry[];
     snapshot: MobileBootstrap | null;
@@ -1308,9 +1306,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             <HistoryDayCard
               activeTimerRunning={Boolean(displayedActiveEntry)}
               now={now}
-              onDeleteEntries={(entries) => {
-                setHistoryDeleteEntries(entries);
-              }}
+              onDeleteEntries={scheduleHistoryDeletion}
               onOpenEntry={(entry) => {
                 if (!entry.stoppedAt) {
                   setActiveEditVisible(true);
@@ -1452,20 +1448,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   return (
     <DashboardContext.Provider value={{ renderTab: renderDashboardTab }}>
       {children}
-      <DeleteEntryConfirmation
-        message={historyDeleteEntries.length > 1
-          ? `${historyDeleteEntries.length} time entries will be removed. You can undo this for a few seconds.`
-          : "This time entry will be removed. You can undo this for a few seconds."}
-        onCancel={() => setHistoryDeleteEntries([])}
-        onConfirm={() => {
-          const entries = historyDeleteEntries;
-          setHistoryDeleteEntries([]);
-          if (entries.length > 0) scheduleHistoryDeletion(entries);
-        }}
-        presentation="screen"
-        styles={styles}
-        visible={historyDeleteEntries.length > 0}
-      />
       {pendingHistoryDeletion ? (
         <View accessibilityLiveRegion="polite" style={styles.historyDeleteUndoToast}>
           <Text style={styles.historyDeleteUndoText}>

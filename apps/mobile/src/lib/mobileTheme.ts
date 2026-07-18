@@ -2541,8 +2541,8 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       justifyContent: "space-between",
       gap: 16,
-      backgroundColor: theme.surfaceRaised,
-      borderRadius: 14,
+      backgroundColor: theme.textPrimary,
+      borderRadius: 999,
       paddingLeft: 16,
       paddingRight: 8,
       paddingVertical: 8,
@@ -2554,7 +2554,7 @@ function createStyles(theme: MobileTheme) {
     },
     historyDeleteUndoText: {
       flex: 1,
-      color: theme.textPrimary,
+      color: theme.background,
       fontFamily: monoFont,
       fontSize: 13,
       fontWeight: "600"
@@ -2564,11 +2564,12 @@ function createStyles(theme: MobileTheme) {
       minHeight: 40,
       alignItems: "center",
       justifyContent: "center",
+      backgroundColor: theme.accent,
       borderRadius: 999,
       paddingHorizontal: 10
     },
     historyDeleteUndoButtonText: {
-      color: theme.accentText,
+      color: theme.onAccent,
       fontFamily: monoFont,
       fontSize: 13,
       fontWeight: "700"

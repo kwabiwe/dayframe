@@ -8,10 +8,6 @@ const dashboardSource = readFileSync(
   fileURLToPath(new URL("./DayframeDashboard.tsx", import.meta.url)),
   "utf8"
 );
-const deleteConfirmationSource = readFileSync(
-  fileURLToPath(new URL("./DeleteEntryConfirmation.tsx", import.meta.url)),
-  "utf8"
-);
 const mobileThemeSource = readFileSync(
   fileURLToPath(new URL("../lib/mobileTheme.ts", import.meta.url)),
   "utf8"
@@ -36,26 +32,20 @@ describe("Today history swipe-to-delete contract", () => {
     expect(dashboardSource).toContain("width: HISTORY_DELETE_ACTION_BUTTON_WIDTH");
   });
 
-  it("uses the semantic brand danger colours for swipe and confirmation actions", () => {
+  it("uses the semantic brand danger colours for the swipe action", () => {
     expect(dashboardSource).toContain("backgroundColor: theme.danger");
     expect(dashboardSource).toContain("<TrashGlyph color={theme.onDanger}");
-    expect(mobileThemeSource).toContain("sheetDeleteConfirmationDelete:");
-    expect(mobileThemeSource).toContain("backgroundColor: theme.danger");
-    expect(mobileThemeSource).toContain("sheetDeleteConfirmationDeleteText:");
-    expect(mobileThemeSource).toContain("color: theme.onDanger");
   });
 
-  it("uses the app-owned confirmation instead of a system alert", () => {
+  it("deletes directly from the list without a confirmation step", () => {
     const historyRenderSource = dashboardSource.slice(
       dashboardSource.indexOf("renderItem={({ item }) =>"),
       dashboardSource.indexOf("ItemSeparatorComponent")
     );
 
-    expect(historyRenderSource).toContain("setHistoryDeleteEntries(entries)");
+    expect(historyRenderSource).toContain("onDeleteEntries={scheduleHistoryDeletion}");
     expect(historyRenderSource).not.toContain("Alert.alert");
-    expect(dashboardSource).toContain('presentation="screen"');
-    expect(deleteConfirmationSource).toContain("<Modal");
-    expect(deleteConfirmationSource).toContain("accessibilityViewIsModal");
+    expect(dashboardSource).not.toContain("historyDeleteEntries");
   });
 
   it("keeps replay functional as an explicit switch while another timer runs", () => {
@@ -64,20 +54,23 @@ describe("Today history swipe-to-delete contract", () => {
     expect(dashboardSource).toContain("latestData.current?.activeEntry && !categoryId && !description.trim()");
   });
 
-  it("allows confirmed grouped deletion with a temporary undo action", () => {
+  it("allows immediate grouped deletion with a temporary undo action", () => {
     expect(dashboardSource).toContain("onDeleteEntries(group.entries.map");
     expect(dashboardSource).toContain("time entries deleted");
     expect(dashboardSource).toContain("undoHistoryDeletion");
     expect(dashboardSource).toContain("}, 5000)");
   });
 
-  it("keeps the in-app confirmation card borderless", () => {
-    const cardStyle = mobileThemeSource.slice(
-      mobileThemeSource.indexOf("sheetDeleteConfirmationCard:"),
-      mobileThemeSource.indexOf("sheetDeleteConfirmationTitle:")
+  it("renders the undo notice as an inverse bean with a branded action", () => {
+    const toastStyle = mobileThemeSource.slice(
+      mobileThemeSource.indexOf("historyDeleteUndoToast:"),
+      mobileThemeSource.indexOf("accountValue:")
     );
 
-    expect(cardStyle).not.toContain("borderWidth");
-    expect(cardStyle).not.toContain("borderColor");
+    expect(toastStyle).toContain("backgroundColor: theme.textPrimary");
+    expect(toastStyle).toContain("borderRadius: 999");
+    expect(toastStyle).toContain("color: theme.background");
+    expect(toastStyle).toContain("backgroundColor: theme.accent");
+    expect(toastStyle).toContain("color: theme.onAccent");
   });
 });
