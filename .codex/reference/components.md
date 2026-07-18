@@ -22,6 +22,7 @@ Use this when working on frontend components.
 - Running-timer suggestions are metadata completion for the existing active timer. Empty Play starts one bare timer then opens the running edit sheet; Play while a timer is already running should open the same suggestion/edit flow. Applying a suggestion must update that active timer, not create a second timer.
 - Surface friendly, actionable permission messages; never display raw native exception strings to users.
 - Treat route state as the source of truth for same-route mobile sub-settings. Do not mirror the active route section into local state or intercept native back gestures to repair duplicated navigation state.
+- For inline iOS forms near the bottom of a scroll view, keep the focused input mounted, apply the native keyboard inset, and reveal the complete required control group—not only the text field—above the keyboard at normal and Dynamic Type sizes.
 
 ## Motion Ownership And State
 

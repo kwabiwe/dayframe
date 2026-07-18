@@ -48,12 +48,13 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Reports use one explicit Day, Week, Month or Custom date range for every total, chart and breakdown; historical navigation never leaves a chart anchored to the real current week.
 - Entries crossing a report boundary contribute only the time inside the selected range. Daily and weekly goal progress uses persisted user goals and appears only for matching Day/Week ranges.
 - Categories, Places, Automation, Review Inbox, Settings, Search, Notifications, Profile, and Help remain navigable.
+- On iOS Categories, focusing `New category` reveals one in-place creation editor above the keyboard with its name field, all 12 colour choices, pin state, Cancel and Create controls visible; creation uses the selected colour, while Cancel and failure preserve the documented state behavior.
 - Review Inbox actions remain normal sized, readable, and do not overlay item content.
 
 ## Visual System
 
 - Midnight Core is used consistently: midnight-navy dark canvas, designed neutral light canvas, layered surfaces and coral primary/active states.
-- Stable palette keys and legacy HEX compatibility are preserved while Midnight Core display colours are used consistently for category, calendar and report data.
+- Stable palette keys and legacy HEX compatibility are preserved while all 12 Midnight Core display colours remain perceptually distinct and are used consistently for category, calendar and report data.
 - Light and dark themes apply across backgrounds, text, borders, controls, icons, panels, and time blocks.
 - Outer and inner panels, popovers, tables, color swatches, and floating dialogs have consistent rounded corners.
 - Typography uses the current modern system font stack and stays compact in dense productivity surfaces.
