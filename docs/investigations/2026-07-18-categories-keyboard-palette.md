@@ -1,0 +1,71 @@
+# Categories keyboard and palette follow-up
+
+Date: 18 July 2026
+Branch: `agent/categories-keyboard-palette`
+Status: implementation and authenticated simulator validation complete; physical-iPhone confirmation remains Watch
+
+## Reported evidence
+
+Physical-iPhone screenshots from the current TestFlight lane show two related Categories problems:
+
+- focusing `New category` leaves the field behind the keyboard instead of revealing the complete creation flow above it;
+- new-category creation exposes no colour choice, while editing an existing category does;
+- the 12 shared swatches contain visually close pairs, particularly Mint/Teal, Sky/Blue, Amber/Orange/Coral, and Steel/Graphite.
+
+The repository baseline is `main`/`origin/main` at `9d07e9b`, after PR #80 merged as `04aa708`; the latest tracked TestFlight build is `0.1.0 (53)`. The screenshots are consistent with the source shipped in that lane. No API, database, or deployment state participates in this presentation defect.
+
+## Hypotheses checked
+
+1. The Settings list does not adjust or scroll for the iOS keyboard. Confirmed: its `ScrollView` has no automatic keyboard inset, interactive keyboard dismissal, focus reveal, or keyboard-frame response.
+2. A colour picker exists for creation but is only obscured. Disproved: the new-category row calls `nextCategoryColor` during submission and renders no creation palette at all; only the existing-category editor maps the shared palette.
+3. The similar swatches are local styling drift. Disproved: mobile and web both resolve the same shared `DAYFRAME_PALETTE`, whose current display values contain the close pairs seen in the screenshot.
+
+## Required outcome
+
+- Focusing `New category` expands one in-place creation editor without replacing the focused input.
+- The Settings scroll owner applies the native keyboard inset and reveals the complete editor above the keyboard, including all 12 swatches and create controls.
+- Creation saves the explicitly selected stable palette key; existing automatic unused-colour selection remains the initial default only.
+- Cancel returns to the compact row; API failure retains the draft and selected colour.
+- All 12 display colours are perceptually distinct in both Light and Dark while stable keys, deterministic order, stored values, and legacy HEX resolution remain compatible.
+
+## Motion contract
+
+- Trigger: focus on `New category`, Cancel, or successful creation.
+- Single owner: iOS owns keyboard movement; the Settings `ScrollView` owns focused-content reveal; one local Reanimated presence/layout transition owns compact-to-expanded creator geometry.
+- Entrance/update/exit: the existing input remains mounted while colour choices and actions appear below it; swatch selection updates only the colour cue; Cancel or successful creation removes the extra controls continuously.
+- Surrounding layout: the Categories panel reflows locally and the adjusted scroll viewport keeps the full creator above the keyboard.
+- Interruption: repeated focus does not reset a chosen colour; opening an existing category editor closes the creation expansion without creating data.
+- Async outcome: success clears the draft and collapses; failure preserves the entered name, pin choice, selected colour, and visible error alert.
+- Reduce Motion: keyboard/focus and state changes remain; local travel/layout animation becomes immediate or opacity-only through the shared motion helpers.
+
+## Validation required
+
+- Focused mobile tests and shared palette tests.
+- Mobile/shared typecheck plus full repository validation and native iOS simulator build.
+- Authenticated iPhone-size Categories checks for compact/expanded creation, keyboard reveal, all swatches, Cancel, Create, existing-category edit, light/dark, Dynamic Type, VoiceOver, and Reduce Motion.
+- Physical-iPhone confirmation before declaring the keyboard behavior settled.
+
+## Validation record
+
+Automated validation completed on 18 July 2026:
+
+- `npm run typecheck -w @dayframe/mobile` — passed.
+- `npm run test -w @dayframe/mobile` — passed, 25 files and 195 tests.
+- `npm run typecheck -w @dayframe/shared` — passed.
+- `npm run test -w @dayframe/shared` — passed, 3 files and 58 tests.
+- `npm run typecheck -w @dayframe/web` — passed.
+- `npm run test -w @dayframe/web -- --run src/app/theme-contract.test.ts` — passed, 1 file and 3 tests.
+- Full `npm run lint && npm run typecheck && npm run test && npm run build && npm run check:brand-assets && git diff --check` — passed; the workspace test run covered 396 tests and the Next production build generated 20 static pages.
+- `xcodebuild -workspace apps/mobile/ios/Dayframe.xcworkspace -scheme Dayframe -configuration Debug -destination 'platform=iOS Simulator,id=CF4A2B85-B714-4985-B9AA-8CE669BA78F6' build` — passed with `** BUILD SUCCEEDED **`. No CocoaPods install was required because native dependency and autolinking state did not change.
+
+Authenticated Computer Use validation resumed after the Mac was unlocked. On the iPhone 17 Pro simulator with the software keyboard visible:
+
+- System appearance (currently Light) and explicit Dark both kept the focused name field, all 12 swatches, pin state, Cancel, and Create entirely above the keyboard.
+- Entering `Keyboard QA`, selecting Teal, toggling to Unpinned, and cancelling updated the named selected states, then cleared the draft, restored Pinned, collapsed the editor, and dismissed the keyboard without creating data;
+- all swatches exposed colour-name button labels and selected state through the accessibility tree, so colour is not the only indication;
+- a long-list existing-category edit initially exposed insufficient keyboard clearance; increasing the focused editor clearance to 360 points kept its full picker and Cancel/Delete/Save controls above the keyboard, after which Cancel dismissed without mutation;
+- the app appearance preference was restored to System after the checks.
+
+With explicit action-time authorization, authenticated simulator checks also passed with VoiceOver, Reduce Motion, and Reduce Transparency enabled. The focused creator and its actions remained above the software keyboard; VoiceOver exposed the name field, all 12 named colour choices and their selected states, the pin state, Cancel, and the disabled Create state; selecting Teal updated the announced selection; and Cancel dismissed the draft without creating data. Reduce Motion removed unnecessary local travel while preserving the expanded state and keyboard reveal. Reduce Transparency kept the creator readable above the more opaque keyboard. The simulator's VoiceOver, Reduce Motion, Reduce Transparency, and Larger Accessibility Sizes settings were restored to their original off state after testing; the text-size slider was restored to its original 50% position.
+
+The simulator showed only the existing unrelated development warnings for ungranted HealthKit permission and `onAnimatedValueUpdate`; no Categories runtime error appeared. Maximum Dynamic Type remains unclaimed because the iOS 26 simulator text-size slider ignored Computer Use value changes, pointer drags, keyboard input, and VoiceOver adjustment, so enabling the extended range did not change the actual text size. No physical iPhone is connected (`devicectl` lists only a paired iPad), so maximum Dynamic Type, physical keyboard behaviour, and device frame-pacing confirmation remain Watch items.

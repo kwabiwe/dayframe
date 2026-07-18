@@ -2,18 +2,18 @@ import type { DayframeThemeMode } from "./theme";
 
 // Keep this order stable: it is part of the deterministic fallback mapping.
 export const DAYFRAME_PALETTE = [
-  { key: "lime", label: "Mint", hex: "#39D99A", lightHex: "#20B978", darkHex: "#39D99A" },
-  { key: "teal", label: "Teal", hex: "#24C7B1", lightHex: "#0FAF9B", darkHex: "#24C7B1" },
-  { key: "sky", label: "Sky", hex: "#63B3FF", lightHex: "#5AA7EE", darkHex: "#63B3FF" },
-  { key: "blue", label: "Blue", hex: "#4B93F5", lightHex: "#3B82F6", darkHex: "#4B93F5" },
-  { key: "violet", label: "Violet", hex: "#7D6EE6", lightHex: "#7564E8", darkHex: "#7D6EE6" },
-  { key: "rose", label: "Rose", hex: "#E87AAE", lightHex: "#D95F99", darkHex: "#E87AAE" },
-  { key: "amber", label: "Amber", hex: "#F2BA38", lightHex: "#E8A91E", darkHex: "#F2BA38" },
-  { key: "orange", label: "Orange", hex: "#FF934F", lightHex: "#E9792F", darkHex: "#FF934F" },
+  { key: "lime", label: "Mint", hex: "#3ED598", lightHex: "#23A65C", darkHex: "#3ED598" },
+  { key: "teal", label: "Teal", hex: "#12B8B0", lightHex: "#008A83", darkHex: "#12B8B0" },
+  { key: "sky", label: "Sky", hex: "#71C5F4", lightHex: "#269ED1", darkHex: "#71C5F4" },
+  { key: "blue", label: "Blue", hex: "#416FE3", lightHex: "#3154C8", darkHex: "#416FE3" },
+  { key: "violet", label: "Violet", hex: "#8D63E6", lightHex: "#7A45C7", darkHex: "#8D63E6" },
+  { key: "rose", label: "Rose", hex: "#DF5FA8", lightHex: "#C83C83", darkHex: "#DF5FA8" },
+  { key: "amber", label: "Amber", hex: "#F2C14E", lightHex: "#C89100", darkHex: "#F2C14E" },
+  { key: "orange", label: "Orange", hex: "#D98235", lightHex: "#C7651A", darkHex: "#D98235" },
   { key: "red", label: "Coral", hex: "#FF6248", lightHex: "#F45D43", darkHex: "#FF6248" },
-  { key: "steel", label: "Steel", hex: "#7F91AB", lightHex: "#65758B", darkHex: "#7F91AB" },
-  { key: "moss", label: "Moss", hex: "#7FB36A", lightHex: "#5F944D", darkHex: "#7FB36A" },
-  { key: "graphite", label: "Graphite", hex: "#566176", lightHex: "#475569", darkHex: "#566176" }
+  { key: "steel", label: "Steel", hex: "#9AA8BC", lightHex: "#738196", darkHex: "#9AA8BC" },
+  { key: "moss", label: "Moss", hex: "#8FA84A", lightHex: "#6F8425", darkHex: "#8FA84A" },
+  { key: "graphite", label: "Graphite", hex: "#4C586C", lightHex: "#3E4859", darkHex: "#4C586C" }
 ] as const;
 
 export type DayframePaletteKey = (typeof DAYFRAME_PALETTE)[number]["key"];
@@ -21,6 +21,28 @@ export type DayframePaletteKey = (typeof DAYFRAME_PALETTE)[number]["key"];
 export const DEFAULT_PALETTE_KEY: DayframePaletteKey = "lime";
 
 const legacyColorMap: Record<string, DayframePaletteKey> = {
+  // Earlier Midnight Core display values, retained across the distinctness adjustment.
+  "#39d99a": "lime",
+  "#20b978": "lime",
+  "#24c7b1": "teal",
+  "#0faf9b": "teal",
+  "#63b3ff": "sky",
+  "#5aa7ee": "sky",
+  "#4b93f5": "blue",
+  "#3b82f6": "blue",
+  "#7d6ee6": "violet",
+  "#7564e8": "violet",
+  "#e87aae": "rose",
+  "#d95f99": "rose",
+  "#f2ba38": "amber",
+  "#e8a91e": "amber",
+  "#ff934f": "orange",
+  "#e9792f": "orange",
+  "#7f91ab": "steel",
+  "#65758b": "steel",
+  "#7fb36a": "moss",
+  "#5f944d": "moss",
+  "#566176": "graphite",
   // Dayframe Soft Pop values, retained so stored legacy hex values keep their key.
   "#bfe8d9": "lime",
   "#84d8c9": "teal",

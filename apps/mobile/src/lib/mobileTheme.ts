@@ -1620,6 +1620,13 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       gap: 8
     },
+    categoryCreateDetails: {
+      gap: 10
+    },
+    categoryCreatePinButton: {
+      flexDirection: "row",
+      gap: 7
+    },
     categoryCreateInput: {
       flex: 1,
       minHeight: 44

@@ -74,6 +74,52 @@ describe("Midnight Core theme", () => {
     }
   });
 
+  it("keeps all 12 category colours perceptually distinct in both appearances", () => {
+    for (const mode of ["lightHex", "darkHex"] as const) {
+      for (let firstIndex = 0; firstIndex < DAYFRAME_PALETTE.length; firstIndex += 1) {
+        for (let secondIndex = firstIndex + 1; secondIndex < DAYFRAME_PALETTE.length; secondIndex += 1) {
+          const first = DAYFRAME_PALETTE[firstIndex];
+          const second = DAYFRAME_PALETTE[secondIndex];
+          expect(
+            oklabDistance(first[mode], second[mode]),
+            `${first.label} and ${second.label} are too similar in ${mode}`
+          ).toBeGreaterThanOrEqual(0.09);
+        }
+      }
+    }
+  });
+
+  it("recognizes the previous Midnight Core display hex values", () => {
+    const previousValues = {
+      "#39D99A": "lime",
+      "#20B978": "lime",
+      "#24C7B1": "teal",
+      "#0FAF9B": "teal",
+      "#63B3FF": "sky",
+      "#5AA7EE": "sky",
+      "#4B93F5": "blue",
+      "#3B82F6": "blue",
+      "#7D6EE6": "violet",
+      "#7564E8": "violet",
+      "#E87AAE": "rose",
+      "#D95F99": "rose",
+      "#F2BA38": "amber",
+      "#E8A91E": "amber",
+      "#FF934F": "orange",
+      "#E9792F": "orange",
+      "#7F91AB": "steel",
+      "#65758B": "steel",
+      "#7FB36A": "moss",
+      "#5F944D": "moss",
+      "#566176": "graphite",
+      "#475569": "graphite"
+    } as const;
+
+    for (const [hex, key] of Object.entries(previousValues)) {
+      expect(paletteKeyFor(hex)).toBe(key);
+    }
+  });
+
   it("recognizes every previous Soft Pop display hex", () => {
     const legacyValues = {
       "#BFE8D9": "lime",
@@ -109,4 +155,30 @@ function luminance(hex: string) {
     channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
   );
   return red * 0.2126 + green * 0.7152 + blue * 0.0722;
+}
+
+function oklabDistance(first: string, second: string) {
+  const firstLab = oklab(first);
+  const secondLab = oklab(second);
+  return Math.hypot(
+    firstLab[0] - secondLab[0],
+    firstLab[1] - secondLab[1],
+    firstLab[2] - secondLab[2]
+  );
+}
+
+function oklab(hex: string): [number, number, number] {
+  const [red, green, blue] = [1, 3, 5]
+    .map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16) / 255)
+    .map((channel) =>
+      channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+    );
+  const l = Math.cbrt(0.4122214708 * red + 0.5363325363 * green + 0.0514459929 * blue);
+  const m = Math.cbrt(0.2119034982 * red + 0.6806995451 * green + 0.1073969566 * blue);
+  const s = Math.cbrt(0.0883024619 * red + 0.2817188376 * green + 0.6299787005 * blue);
+  return [
+    0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+    1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s
+  ];
 }
