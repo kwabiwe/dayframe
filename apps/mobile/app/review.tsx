@@ -7,6 +7,7 @@ import {
   Text,
   View
 } from "react-native";
+import Reanimated from "react-native-reanimated";
 import Svg, { Path } from "react-native-svg";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -28,7 +29,14 @@ import {
 } from "@/lib/api";
 import { DAYFRAME_API_BASE } from "@/lib/config";
 import { reprocessExistingHealthReviewItems } from "@/lib/health";
+import { applyAfterSuccessfulMutation } from "@/lib/localMutation";
 import { pressable, useMobileTheme } from "@/lib/mobileTheme";
+import {
+  localLayoutTransition,
+  localPresenceEntering,
+  localPresenceExiting,
+  useReduceMotionPreference
+} from "@/lib/motion";
 import {
   REVIEW_COPY,
   buildReviewItemDraftEntry,
@@ -56,6 +64,7 @@ const HEALTH_REPROCESS_TIMEOUT_MS = 45_000;
 
 export default function ReviewScreen() {
   const { reloadThemePreference, styles, theme } = useMobileTheme();
+  const reduceMotion = useReduceMotionPreference();
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
@@ -168,14 +177,16 @@ export default function ReviewScreen() {
   async function resolveItem(item: MobileReviewItem, action: () => Promise<void>) {
     setResolvingId(item.id);
     try {
-      await action();
-      setData((current) =>
-        current
-          ? {
-            ...current,
-            reviewItems: current.reviewItems.filter((candidate) => candidate.id !== item.id)
-          }
-          : current
+      await applyAfterSuccessfulMutation(
+        action,
+        () => setData((current) =>
+          current
+            ? {
+              ...current,
+              reviewItems: current.reviewItems.filter((candidate) => candidate.id !== item.id)
+            }
+            : current
+        )
       );
       await load({ silent: true, skipReprocess: true });
     } catch (error) {
@@ -287,24 +298,28 @@ export default function ReviewScreen() {
             {totalNeedsReview === 0 ? (
               <Text style={styles.muted}>{REVIEW_COPY.emptyState}</Text>
             ) : null}
-            {openReviewItems.length > 0 ? (
-              <View style={styles.reviewList}>
-                {openReviewItems.map((item) => (
-                  <ReviewItemCard
+            <View style={styles.reviewList}>
+              {openReviewItems.map((item) => (
+                  <Reanimated.View
                     key={item.id}
-                    item={item}
-                    disabled={reprocessRunning}
-                    loading={resolvingId === item.id}
-                    now={now}
-                    onConfirm={() => confirmItem(item)}
-                    onDismiss={() => dismissItem(item)}
-                    onEdit={() => beginReviewItemEdit(item)}
-                    styles={styles}
-                    theme={theme}
-                  />
-                ))}
-              </View>
-            ) : null}
+                    entering={localPresenceEntering(reduceMotion)}
+                    exiting={localPresenceExiting(reduceMotion)}
+                    layout={localLayoutTransition(reduceMotion)}
+                  >
+                    <ReviewItemCard
+                      item={item}
+                      disabled={reprocessRunning}
+                      loading={resolvingId === item.id}
+                      now={now}
+                      onConfirm={() => confirmItem(item)}
+                      onDismiss={() => dismissItem(item)}
+                      onEdit={() => beginReviewItemEdit(item)}
+                      styles={styles}
+                      theme={theme}
+                    />
+                  </Reanimated.View>
+              ))}
+            </View>
             {reviewNeededEntries.length > 0 ? (
               <View style={styles.reviewList}>
                 {reviewNeededEntries.map((entry) => (

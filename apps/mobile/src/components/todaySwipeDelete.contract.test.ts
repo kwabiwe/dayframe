@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { HISTORY_DELETION_UNDO_MS } from "../lib/historyDeletion";
 
 const dashboardSource = readFileSync(
   fileURLToPath(new URL("./DayframeDashboard.tsx", import.meta.url)),
@@ -58,7 +59,14 @@ describe("Today history swipe-to-delete contract", () => {
     expect(dashboardSource).toContain("onDeleteEntries(group.entries.map");
     expect(dashboardSource).toContain("time entries deleted");
     expect(dashboardSource).toContain("undoHistoryDeletion");
-    expect(dashboardSource).toContain("}, 5000)");
+    expect(HISTORY_DELETION_UNDO_MS).toBe(5_000);
+    expect(dashboardSource).toContain("createHistoryDeletionCoordinator");
+  });
+
+  it("uses one local Reanimated owner for presence and surrounding reflow", () => {
+    expect(dashboardSource).toContain("itemLayoutAnimation={localLayoutTransition(reduceMotion)}");
+    expect(dashboardSource).toContain("exiting={localPresenceExiting(reduceMotion)}");
+    expect(dashboardSource).not.toContain("scheduleLayoutTransition(reduceMotion);\n    setExpandedGroups");
   });
 
   it("renders the undo notice as an inverse bean with a branded action", () => {

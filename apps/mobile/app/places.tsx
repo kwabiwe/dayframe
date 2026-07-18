@@ -14,6 +14,7 @@ import {
   useWindowDimensions,
   View
 } from "react-native";
+import Reanimated from "react-native-reanimated";
 import * as Location from "expo-location";
 import * as Clipboard from "expo-clipboard";
 import { router, useFocusEffect } from "expo-router";
@@ -35,6 +36,7 @@ import {
 } from "@/lib/api";
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
 import { backfillLearnedPlaceLocations } from "@/lib/locationGeocoding";
+import { applyAfterSuccessfulMutation } from "@/lib/localMutation";
 import {
   copyLearnedPlaceDetail,
   learnedPlaceDetailValues
@@ -48,7 +50,13 @@ import {
   validatePlaceForm
 } from "@/lib/places";
 import { pressable, useMobileTheme, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
-import { scheduleLayoutTransition, useReduceMotionPreference } from "@/lib/motion";
+import {
+  localLayoutTransition,
+  localPresenceEntering,
+  localPresenceExiting,
+  scheduleLayoutTransition,
+  useReduceMotionPreference
+} from "@/lib/motion";
 
 type Category = MobileBootstrap["categories"][number];
 
@@ -301,9 +309,13 @@ export default function PlacesScreen() {
   async function removePlace(place: MobilePlace) {
     setDeletingId(place.id);
     try {
-      await deletePlace(place.id);
-      if (formMode?.type === "edit" && formMode.place.id === place.id) cancelForm();
-      removeLocalPlace(place.id);
+      await applyAfterSuccessfulMutation(
+        () => deletePlace(place.id),
+        () => {
+          if (formMode?.type === "edit" && formMode.place.id === place.id) cancelForm();
+          removeLocalPlace(place.id);
+        }
+      );
       await refreshAfterPlaceChange({
         prefix: "Place deleted.",
         removePlaceId: place.id
@@ -338,8 +350,10 @@ export default function PlacesScreen() {
   async function ignoreLearnedCandidate(learnedPlace: MobileLearnedPlace) {
     setIgnoringLearnedId(learnedPlace.id);
     try {
-      await ignoreLearnedPlace(learnedPlace.id);
-      removeLocalLearnedPlace(learnedPlace.id);
+      await applyAfterSuccessfulMutation(
+        () => ignoreLearnedPlace(learnedPlace.id),
+        () => removeLocalLearnedPlace(learnedPlace.id)
+      );
       await refreshAfterPlaceChange({
         prefix: "Learned place ignored.",
         removeLearnedPlaceId: learnedPlace.id
@@ -375,8 +389,10 @@ export default function PlacesScreen() {
   async function forgetLearnedCandidate(learnedPlace: MobileLearnedPlace) {
     setForgettingLearnedId(learnedPlace.id);
     try {
-      await forgetLearnedPlace(learnedPlace.id);
-      removeLocalLearnedPlace(learnedPlace.id);
+      await applyAfterSuccessfulMutation(
+        () => forgetLearnedPlace(learnedPlace.id),
+        () => removeLocalLearnedPlace(learnedPlace.id)
+      );
       await refreshAfterPlaceChange({
         prefix: "Learned place forgotten.",
         removeLearnedPlaceId: learnedPlace.id
@@ -489,7 +505,16 @@ export default function PlacesScreen() {
                 <Text style={styles.primaryButtonText}>Add place</Text>
               </Pressable>
             </View>
-            {statusMessage ? <Text style={styles.statusText}>{statusMessage}</Text> : null}
+            {statusMessage ? (
+              <Reanimated.View
+                key={statusMessage}
+                entering={localPresenceEntering(reduceMotion)}
+                exiting={localPresenceExiting(reduceMotion)}
+                layout={localLayoutTransition(reduceMotion)}
+              >
+                <Text accessibilityLiveRegion="polite" style={styles.statusText}>{statusMessage}</Text>
+              </Reanimated.View>
+            ) : null}
           </View>
 
           {formMode ? (
@@ -658,45 +683,59 @@ export default function PlacesScreen() {
 
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Your places</Text>
-            {places.length > 0 ? (
-              <View style={styles.placeList}>
-                {places.map((place) => (
-                  <PlaceRow
+            <View style={styles.placeList}>
+              {places.map((place) => (
+                  <Reanimated.View
                     key={place.id}
-                    place={place}
-                    categories={categories}
-                    deleting={deletingId === place.id}
-                    onEdit={() => beginEditPlace(place)}
-                    onDelete={() => confirmDeletePlace(place)}
-                    theme={theme}
-                    styles={styles}
-                  />
-                ))}
-              </View>
-            ) : (
-              <Text style={styles.muted}>No places yet. Add a place with coordinates or use your current location.</Text>
-            )}
+                    entering={localPresenceEntering(reduceMotion)}
+                    exiting={localPresenceExiting(reduceMotion)}
+                    layout={localLayoutTransition(reduceMotion)}
+                  >
+                    <PlaceRow
+                      place={place}
+                      categories={categories}
+                      deleting={deletingId === place.id}
+                      onEdit={() => beginEditPlace(place)}
+                      onDelete={() => confirmDeletePlace(place)}
+                      theme={theme}
+                      styles={styles}
+                    />
+                  </Reanimated.View>
+              ))}
+            </View>
+            {places.length === 0 ? (
+              <Reanimated.View entering={localPresenceEntering(reduceMotion)}>
+                <Text style={styles.muted}>No places yet. Add a place with coordinates or use your current location.</Text>
+              </Reanimated.View>
+            ) : null}
             <View style={styles.settingsDivider} />
             <Text style={styles.sectionTitle}>Learned places</Text>
             <Text style={styles.muted}>Place suggestions require repeat visits on different days and stable location evidence.</Text>
-            {learnedPlaces.length > 0 ? (
-              <View style={styles.placeList}>
-                {learnedPlaces.map((learnedPlace) => (
-                  <LearnedPlaceRow
+            <View style={styles.placeList}>
+              {learnedPlaces.map((learnedPlace) => (
+                  <Reanimated.View
                     key={learnedPlace.id}
-                    learnedPlace={learnedPlace}
-                    ignoring={ignoringLearnedId === learnedPlace.id}
-                    onOpen={() => setSelectedLearnedPlace(learnedPlace)}
-                    onSave={() => beginSaveLearnedPlace(learnedPlace)}
-                    onIgnore={() => confirmIgnoreLearnedCandidate(learnedPlace)}
-                    theme={theme}
-                    styles={styles}
-                  />
-                ))}
-              </View>
-            ) : (
-              <Text style={styles.muted}>No learned candidates yet.</Text>
-            )}
+                    entering={localPresenceEntering(reduceMotion)}
+                    exiting={localPresenceExiting(reduceMotion)}
+                    layout={localLayoutTransition(reduceMotion)}
+                  >
+                    <LearnedPlaceRow
+                      learnedPlace={learnedPlace}
+                      ignoring={ignoringLearnedId === learnedPlace.id}
+                      onOpen={() => setSelectedLearnedPlace(learnedPlace)}
+                      onSave={() => beginSaveLearnedPlace(learnedPlace)}
+                      onIgnore={() => confirmIgnoreLearnedCandidate(learnedPlace)}
+                      theme={theme}
+                      styles={styles}
+                    />
+                  </Reanimated.View>
+              ))}
+            </View>
+            {learnedPlaces.length === 0 ? (
+              <Reanimated.View entering={localPresenceEntering(reduceMotion)}>
+                <Text style={styles.muted}>No learned candidates yet.</Text>
+              </Reanimated.View>
+            ) : null}
           </View>
         </View>
       </ScrollView>
@@ -870,10 +909,19 @@ function LearnedPlaceDetailSheet({
   const reduceMotion = useReduceMotionPreference();
   const windowDimensions = useWindowDimensions();
   const dismissDragY = useRef(new Animated.Value(0)).current;
+  const copyToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyToastToken = useRef(0);
 
   useEffect(() => {
+    copyToastToken.current += 1;
+    if (copyToastTimer.current) clearTimeout(copyToastTimer.current);
+    copyToastTimer.current = null;
     setCopyToast(null);
     dismissDragY.setValue(0);
+    return () => {
+      if (copyToastTimer.current) clearTimeout(copyToastTimer.current);
+      copyToastTimer.current = null;
+    };
   }, [dismissDragY, learnedPlace?.id]);
 
   if (!learnedPlace) return null;
@@ -934,8 +982,14 @@ function LearnedPlaceDetailSheet({
   async function copyDetail(label: string, value: string | null) {
     const copied = await copyLearnedPlaceDetail(value, Clipboard.setStringAsync);
     if (!copied) return;
+    const token = ++copyToastToken.current;
+    if (copyToastTimer.current) clearTimeout(copyToastTimer.current);
     setCopyToast(`${label} copied`);
-    setTimeout(() => setCopyToast(null), 2_000);
+    copyToastTimer.current = setTimeout(() => {
+      if (copyToastToken.current !== token) return;
+      setCopyToast(null);
+      copyToastTimer.current = null;
+    }, 2_000);
   }
 
   return (
@@ -1010,12 +1064,6 @@ function LearnedPlaceDetailSheet({
               <LearnedPlaceDetailRow label="Status" value="Place suggestion · Not saved" styles={styles} />
             </View>
 
-            {copyToast ? (
-              <View accessibilityLiveRegion="polite" style={styles.copyToast}>
-                <Text style={styles.copyToastText}>{copyToast}</Text>
-              </View>
-            ) : null}
-
             <View style={styles.buttonRow}>
               <Pressable
                 accessibilityRole="button"
@@ -1059,6 +1107,19 @@ function LearnedPlaceDetailSheet({
               </Pressable>
             </View>
           </ScrollView>
+          {copyToast ? (
+            <Reanimated.View
+              key={copyToast}
+              accessibilityLiveRegion="polite"
+              entering={localPresenceEntering(reduceMotion)}
+              exiting={localPresenceExiting(reduceMotion)}
+              style={styles.copyToastOverlay}
+            >
+              <View style={styles.copyToast}>
+                <Text style={styles.copyToastText}>{copyToast}</Text>
+              </View>
+            </Reanimated.View>
+          ) : null}
         </Animated.View>
       </View>
     </Modal>

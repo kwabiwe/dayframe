@@ -1,5 +1,4 @@
 import {
-  Fragment,
   createContext,
   useCallback,
   useContext,
@@ -10,11 +9,11 @@ import {
   type ReactNode
 } from "react";
 import {
+  AccessibilityInfo,
   Alert,
   Animated,
   AppState,
   Easing,
-  FlatList,
   Linking,
   Pressable,
   RefreshControl,
@@ -74,6 +73,9 @@ import {
 } from "@/lib/health";
 import { syncLiveActivityForEntry } from "@/lib/liveActivity";
 import {
+  createHistoryDeletionCoordinator
+} from "@/lib/historyDeletion";
+import {
   buildHistoryDaySections,
   groupHistoryDayEntries,
   historyDayLabel,
@@ -101,6 +103,9 @@ import {
 import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
 import {
   MOBILE_MOTION,
+  localLayoutTransition,
+  localPresenceEntering,
+  localPresenceExiting,
   scheduleLayoutTransition,
   useReduceMotionPreference,
   useReduceTransparencyPreference
@@ -175,6 +180,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [pendingHistoryDeletion, setPendingHistoryDeletion] = useState<{
     entries: TimeEntry[];
     snapshot: MobileBootstrap | null;
+    token: number;
   } | null>(null);
   const reduceMotion = useReduceMotionPreference();
   const reduceTransparency = useReduceTransparencyPreference();
@@ -189,7 +195,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const timerMutationChain = useRef<Promise<void>>(Promise.resolve());
   const timerMutationCount = useRef(0);
   const timerMutationVersions = useRef(new Map<string, number>());
-  const historyDeletionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const historyDeletionCoordinator = useRef<ReturnType<typeof createHistoryDeletionCoordinator<
+    TimeEntry,
+    MobileBootstrap | null
+  >> | null>(null);
   const activeEditorOpenFrame = useRef<number | null>(null);
   const entrance = useRef(new Animated.Value(0)).current;
   const activeTimerExpansion = useRef(new Animated.Value(0)).current;
@@ -373,6 +382,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   useEffect(() => () => {
     if (activeEditorOpenFrame.current !== null) cancelAnimationFrame(activeEditorOpenFrame.current);
+    historyDeletionCoordinator.current?.dispose();
   }, []);
 
   useEffect(() => {
@@ -949,37 +959,54 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           entries.length > 1 ? "Entries not deleted" : "Entry not deleted",
           error instanceof Error ? error.message : "Unable to delete the selected time entries."
         );
+        AccessibilityInfo.announceForAccessibility(
+          entries.length > 1 ? "Time entries restored because deletion failed." : "Time entry restored because deletion failed."
+        );
       }
     });
   }
 
-  function scheduleHistoryDeletion(entries: TimeEntry[]) {
-    if (historyDeletionTimer.current) clearTimeout(historyDeletionTimer.current);
-    if (pendingHistoryDeletion) {
-      commitHistoryDeletion(pendingHistoryDeletion.entries, pendingHistoryDeletion.snapshot);
+  function getHistoryDeletionCoordinator() {
+    if (!historyDeletionCoordinator.current) {
+      historyDeletionCoordinator.current = createHistoryDeletionCoordinator<
+        TimeEntry,
+        MobileBootstrap | null
+      >({
+        onCommit: ({ entries, snapshot }) => commitHistoryDeletion(entries, snapshot),
+        onPendingChange: setPendingHistoryDeletion,
+        onRestore: ({ entries, snapshot }) => {
+          updateDashboardData((current) => optimisticRestoreTimeEntries(
+            current,
+            snapshot,
+            entries.map((entry) => entry.id)
+          ));
+        }
+      });
     }
+    return historyDeletionCoordinator.current;
+  }
+
+  function scheduleHistoryDeletion(entries: TimeEntry[]) {
     const snapshot = latestData.current;
     const entryIds = entries.map((entry) => entry.id);
-    updateDashboardData((current) => entryIds.reduce(optimisticDeleteTimeEntry, current));
-    setPendingHistoryDeletion({ entries, snapshot });
-    historyDeletionTimer.current = setTimeout(() => {
-      commitHistoryDeletion(entries, snapshot);
-      setPendingHistoryDeletion(null);
-      historyDeletionTimer.current = null;
-    }, 5000);
+    const optimisticData = entryIds.reduce(optimisticDeleteTimeEntry, snapshot);
+    latestData.current = optimisticData;
+    setData(optimisticData);
+    getHistoryDeletionCoordinator().begin(entries, snapshot);
+    AccessibilityInfo.announceForAccessibility(
+      entries.length > 1
+        ? `${entries.length} time entries deleted. Undo available for five seconds.`
+        : "Time entry deleted. Undo available for five seconds."
+    );
   }
 
   function undoHistoryDeletion() {
-    const pending = pendingHistoryDeletion;
-    if (!pending) return;
-    if (historyDeletionTimer.current) clearTimeout(historyDeletionTimer.current);
-    historyDeletionTimer.current = null;
-    updateDashboardData((current) => optimisticRestoreTimeEntries(
-      current,
-      pending.snapshot,
-      pending.entries.map((entry) => entry.id)
-    ));
-    setPendingHistoryDeletion(null);
+    if (!pendingHistoryDeletion) return;
+    if (getHistoryDeletionCoordinator().undo(pendingHistoryDeletion.token)) {
+      AccessibilityInfo.announceForAccessibility(
+        pendingHistoryDeletion.entries.length > 1 ? "Time entries restored." : "Time entry restored."
+      );
+    }
   }
 
   async function submitAuth() {
@@ -1128,9 +1155,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     const currentDate = new Date(now);
     return (
       <SafeAreaView collapsable={false} edges={["top", "left", "right"]} style={styles.safeArea}>
-        <FlatList
+        <Reanimated.FlatList
           contentContainerStyle={[styles.container, styles.todayListContent]}
           data={historySections}
+          itemLayoutAnimation={localLayoutTransition(reduceMotion)}
           keyExtractor={(section) => section.key}
           refreshControl={
             <RefreshControl
@@ -1449,7 +1477,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     <DashboardContext.Provider value={{ renderTab: renderDashboardTab }}>
       {children}
       {pendingHistoryDeletion ? (
-        <View accessibilityLiveRegion="polite" style={styles.historyDeleteUndoToast}>
+        <Reanimated.View
+          key={pendingHistoryDeletion.token}
+          accessibilityLiveRegion="polite"
+          entering={localPresenceEntering(reduceMotion, "rise")}
+          exiting={localPresenceExiting(reduceMotion)}
+          layout={localLayoutTransition(reduceMotion)}
+          style={styles.historyDeleteUndoToast}
+        >
           <Text style={styles.historyDeleteUndoText}>
             {pendingHistoryDeletion.entries.length === 1
               ? "Time entry deleted"
@@ -1463,7 +1498,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           >
             <Text style={styles.historyDeleteUndoButtonText}>Undo</Text>
           </Pressable>
-        </View>
+        </Reanimated.View>
       ) : null}
       <ActiveTimerEditSheet
         categories={sortedCategories}
@@ -1913,7 +1948,6 @@ function HistoryDayCard({
   const entryGroups = useMemo(() => groupHistoryDayEntries(section.entries), [section.entries]);
 
   function toggleGroup(groupKey: string) {
-    scheduleLayoutTransition(reduceMotion);
     setExpandedGroups((current) => {
       const next = new Set(current);
       if (next.has(groupKey)) next.delete(groupKey);
@@ -1927,7 +1961,12 @@ function HistoryDayCard({
       <Text style={styles.historyDayTitle}>{historyDayLabel(section, now)}</Text>
       <View style={styles.todayEntryCard}>
         {section.entries.length === 0 ? (
-          <Text style={styles.todayEmptyText}>No tracked time for this day.</Text>
+          <Reanimated.View
+            entering={localPresenceEntering(reduceMotion)}
+            layout={localLayoutTransition(reduceMotion)}
+          >
+            <Text style={styles.todayEmptyText}>No tracked time for this day.</Text>
+          </Reanimated.View>
         ) : entryGroups.map((group, index) => {
           const { entry } = group.representative;
           const grouped = group.entries.length > 1;
@@ -1935,7 +1974,12 @@ function HistoryDayCard({
           const canReplay = Boolean(entry.categoryId || entry.description?.trim());
           const title = displayEntryTitle(entry);
           return (
-            <Fragment key={`${section.key}:${group.key}`}>
+            <Reanimated.View
+              key={`${section.key}:${group.key}`}
+              entering={localPresenceEntering(reduceMotion)}
+              exiting={localPresenceExiting(reduceMotion)}
+              layout={localLayoutTransition(reduceMotion)}
+            >
               <SwipeableHistoryEntry
                 accessibilityLabel={title}
                 enabled={group.entries.every(({ entry: groupedEntry }) => Boolean(groupedEntry.stoppedAt))}
@@ -2000,39 +2044,50 @@ function HistoryDayCard({
                 </View>
               </SwipeableHistoryEntry>
               {expanded ? (
-                <View style={styles.historyGroupChildren}>
+                <Reanimated.View
+                  entering={localPresenceEntering(reduceMotion)}
+                  exiting={localPresenceExiting(reduceMotion)}
+                  layout={localLayoutTransition(reduceMotion)}
+                  style={styles.historyGroupChildren}
+                >
                   {group.entries.map(({ entry: childEntry, overlapSeconds }, childIndex) => (
-                    <SwipeableHistoryEntry
+                    <Reanimated.View
                       key={childEntry.id}
-                      accessibilityLabel={displayEntryTitle(childEntry)}
-                      enabled={Boolean(childEntry.stoppedAt)}
-                      entry={childEntry}
-                      minHeight={46}
-                      onDelete={(deletedEntry) => onDeleteEntries([deletedEntry])}
-                      styles={styles}
-                      theme={theme}
+                      entering={localPresenceEntering(reduceMotion)}
+                      exiting={localPresenceExiting(reduceMotion)}
+                      layout={localLayoutTransition(reduceMotion)}
                     >
-                      <Pressable
-                        accessibilityLabel={`Edit ${displayEntryTitle(childEntry)} from ${formatEntryTimeRange(childEntry, now)}`}
-                        accessibilityRole="button"
-                        onPress={() => onOpenEntry(childEntry)}
-                        style={({ pressed }) => [
-                          styles.historyGroupChild,
-                          childIndex > 0 ? styles.historyGroupChildDivider : null,
-                          pressed ? styles.buttonPressed : null
-                        ]}
+                      <SwipeableHistoryEntry
+                        accessibilityLabel={displayEntryTitle(childEntry)}
+                        enabled={Boolean(childEntry.stoppedAt)}
+                        entry={childEntry}
+                        minHeight={46}
+                        onDelete={(deletedEntry) => onDeleteEntries([deletedEntry])}
+                        styles={styles}
+                        theme={theme}
                       >
-                        <View style={[styles.todayEntryDot, { backgroundColor: entryCategoryColor(childEntry, theme.mode) }]} />
-                        <Text style={styles.historyGroupChildTime} numberOfLines={1}>
-                          {formatEntryTimeRange(childEntry, now)}
-                        </Text>
-                        <Text style={styles.todayEntryDuration}>{formatDuration(overlapSeconds)}</Text>
-                      </Pressable>
-                    </SwipeableHistoryEntry>
+                        <Pressable
+                          accessibilityLabel={`Edit ${displayEntryTitle(childEntry)} from ${formatEntryTimeRange(childEntry, now)}`}
+                          accessibilityRole="button"
+                          onPress={() => onOpenEntry(childEntry)}
+                          style={({ pressed }) => [
+                            styles.historyGroupChild,
+                            childIndex > 0 ? styles.historyGroupChildDivider : null,
+                            pressed ? styles.buttonPressed : null
+                          ]}
+                        >
+                          <View style={[styles.todayEntryDot, { backgroundColor: entryCategoryColor(childEntry, theme.mode) }]} />
+                          <Text style={styles.historyGroupChildTime} numberOfLines={1}>
+                            {formatEntryTimeRange(childEntry, now)}
+                          </Text>
+                          <Text style={styles.todayEntryDuration}>{formatDuration(overlapSeconds)}</Text>
+                        </Pressable>
+                      </SwipeableHistoryEntry>
+                    </Reanimated.View>
                   ))}
-                </View>
+                </Reanimated.View>
               ) : null}
-            </Fragment>
+            </Reanimated.View>
           );
         })}
       </View>

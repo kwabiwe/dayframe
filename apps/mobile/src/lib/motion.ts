@@ -1,5 +1,11 @@
 import { AccessibilityInfo, LayoutAnimation } from "react-native";
 import { useEffect, useState } from "react";
+import {
+  FadeIn,
+  FadeOut,
+  LinearTransition,
+  ReduceMotion
+} from "react-native-reanimated";
 
 export const MOBILE_MOTION = {
   control: 140,
@@ -7,6 +13,31 @@ export const MOBILE_MOTION = {
   sheet: 260,
   screen: 280
 } as const;
+
+export type LocalMotionPresence = "fade" | "rise" | "scale";
+
+export function localPresenceEntering(
+  reduceMotion: boolean,
+  presence: LocalMotionPresence = "fade"
+) {
+  const builder = FadeIn.duration(reduceMotion ? 90 : MOBILE_MOTION.control)
+    .reduceMotion(ReduceMotion.Never);
+  if (reduceMotion || presence === "fade") return builder;
+  if (presence === "rise") {
+    return builder.withInitialValues({ opacity: 0, transform: [{ translateY: 12 }] });
+  }
+  return builder.withInitialValues({ opacity: 0, transform: [{ scale: 0.98 }] });
+}
+
+export function localPresenceExiting(reduceMotion: boolean) {
+  return FadeOut.duration(reduceMotion ? 70 : MOBILE_MOTION.control)
+    .reduceMotion(ReduceMotion.Never);
+}
+
+export function localLayoutTransition(reduceMotion: boolean) {
+  return LinearTransition.duration(MOBILE_MOTION.layout)
+    .reduceMotion(reduceMotion ? ReduceMotion.Always : ReduceMotion.System);
+}
 
 export function useReduceMotionPreference() {
   const [reduceMotion, setReduceMotion] = useState(true);
