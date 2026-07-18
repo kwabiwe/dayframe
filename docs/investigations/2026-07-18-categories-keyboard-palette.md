@@ -2,7 +2,7 @@
 
 Date: 18 July 2026
 Branch: `agent/categories-keyboard-palette`
-Status: implementation complete; authenticated UI validation blocked by the locked Mac
+Status: implementation and authenticated simulator validation complete; physical-iPhone confirmation remains Watch
 
 ## Reported evidence
 
@@ -58,4 +58,12 @@ Automated validation completed on 18 July 2026:
 - Full `npm run lint && npm run typecheck && npm run test && npm run build && npm run check:brand-assets && git diff --check` — passed; the workspace test run covered 396 tests and the Next production build generated 20 static pages.
 - `xcodebuild -workspace apps/mobile/ios/Dayframe.xcworkspace -scheme Dayframe -configuration Debug -destination 'platform=iOS Simulator,id=CF4A2B85-B714-4985-B9AA-8CE669BA78F6' build` — passed with `** BUILD SUCCEEDED **`. No CocoaPods install was required because native dependency and autolinking state did not change.
 
-The iPhone 17 Pro simulator is booted, but both Computer Use attempts returned: `The Mac is locked and automatic unlock could not unlock it.` Authenticated visual, keyboard, Dynamic Type, VoiceOver, Reduce Motion, appearance, recording, and physical-iPhone checks therefore remain unclaimed and blocking for settlement.
+Authenticated Computer Use validation resumed after the Mac was unlocked. On the iPhone 17 Pro simulator with the software keyboard visible:
+
+- System appearance (currently Light) and explicit Dark both kept the focused name field, all 12 swatches, pin state, Cancel, and Create entirely above the keyboard.
+- Entering `Keyboard QA`, selecting Teal, toggling to Unpinned, and cancelling updated the named selected states, then cleared the draft, restored Pinned, collapsed the editor, and dismissed the keyboard without creating data;
+- all swatches exposed colour-name button labels and selected state through the accessibility tree, so colour is not the only indication;
+- a long-list existing-category edit initially exposed insufficient keyboard clearance; increasing the focused editor clearance to 360 points kept its full picker and Cancel/Delete/Save controls above the keyboard, after which Cancel dismissed without mutation;
+- the app appearance preference was restored to System after the checks.
+
+The simulator showed only the existing unrelated development warnings for ungranted HealthKit permission and `onAnimatedValueUpdate`; no Categories runtime error appeared. No physical iPhone is connected (`devicectl` lists only a paired iPad), so physical keyboard/frame-pacing confirmation remains a Watch item. VoiceOver, Dynamic Type, Reduce Motion, and Reduce Transparency require changing simulated iOS system settings and remain unclaimed pending action-time authorization for those setting changes.

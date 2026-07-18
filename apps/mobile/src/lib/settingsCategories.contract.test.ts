@@ -16,6 +16,7 @@ describe("mobile Categories creation contract", () => {
     expect(settingsSource).toContain('Keyboard.addListener("keyboardDidShow", revealFocusedEditor)');
     expect(settingsSource).toContain("settingsScrollRef.current?.scrollToEnd");
     expect(settingsSource).toContain("scrollResponderScrollNativeHandleToKeyboard");
+    expect(settingsSource).toContain("CATEGORY_EDITOR_KEYBOARD_CLEARANCE = 360");
     expect(settingsSource.match(/placeholder="New category"/g)).toHaveLength(1);
   });
 

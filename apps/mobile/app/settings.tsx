@@ -109,6 +109,7 @@ type SettingsSnapshot = {
 };
 
 let cachedSettingsSnapshot: SettingsSnapshot | null = null;
+const CATEGORY_EDITOR_KEYBOARD_CLEARANCE = 360;
 
 function defaultSettingsSnapshot(): SettingsSnapshot {
   return {
@@ -390,7 +391,7 @@ export default function SettingsScreen() {
       if (inputHandle === null) return;
       settingsScrollRef.current?.scrollResponderScrollNativeHandleToKeyboard(
         inputHandle,
-        180,
+        CATEGORY_EDITOR_KEYBOARD_CLEARANCE,
         true
       );
     });
