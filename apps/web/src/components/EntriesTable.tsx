@@ -3,7 +3,6 @@
 import type { FormEvent } from "react";
 import { Fragment, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { tagNamesFromDescription } from "@dayframe/shared";
 import { Pencil, Play, Trash2 } from "lucide-react";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import { TagMetadata } from "@/components/TagMetadata";
@@ -48,6 +47,7 @@ export function EntriesTable({
   const [manualError, setManualError] = useState<string | null>(null);
   const [continuingEntryId, setContinuingEntryId] = useState<string | null>(null);
   const [manualDescription, setManualDescription] = useState("");
+  const [manualTagNames, setManualTagNames] = useState<string[]>([]);
 
   const filtered = useMemo(
     () =>
@@ -138,7 +138,7 @@ export function EntriesTable({
           categoryId: formData.get("categoryId") || undefined,
           placeId: formData.get("placeId") || undefined,
           description: formData.get("description") || undefined,
-          tagNames: tagNamesFromDescription(manualDescription, tags),
+          tagNames: manualTagNames,
           startedAt,
           stoppedAt
         })
@@ -155,6 +155,7 @@ export function EntriesTable({
       }
       form.reset();
       setManualDescription("");
+      setManualTagNames([]);
       await onChanged?.();
       startTransition(() => router.refresh());
     } catch (error) {
@@ -207,17 +208,20 @@ export function EntriesTable({
         >
           <SelectField name="categoryId" label="Category" options={categories} />
           <SelectField name="placeId" label="Place" options={places} />
-          <label className="text-sm">
-            <span className="industrial-field-label">Description</span>
+          <div className="text-sm">
+            <label className="industrial-field-label" htmlFor="entries-manual-description">Description</label>
             <InlineTagInput
               ariaLabel="Manual time entry description"
               inputClassName="industrial-field focus-ring"
+              inputId="entries-manual-description"
               name="manual-description"
               onChange={setManualDescription}
+              onSelectedTagNamesChange={setManualTagNames}
+              selectedTagNames={manualTagNames}
               tags={tags}
               value={manualDescription}
             />
-          </label>
+          </div>
           <DateField name="startedAt" label="Start" defaultValue={dateTimeLocal()} />
           <DateField name="stoppedAt" label="Finish" defaultValue={dateTimeLocal()} />
           {manualError ? (

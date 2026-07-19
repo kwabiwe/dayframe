@@ -10,10 +10,8 @@ import type {
 } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  descriptionWithTagTokens,
   normalizeTagName,
-  paletteCssColorFor,
-  tagNamesFromDescription
+  paletteCssColorFor
 } from "@dayframe/shared";
 import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
@@ -195,10 +193,8 @@ export function CurrentTimerPanel({
   const [timerError, setTimerError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [description, setDescription] = useState(() => descriptionWithTagTokens(
-    data.activeEntry?.description,
-    data.activeEntry?.tags ?? []
-  ));
+  const [description, setDescription] = useState(data.activeEntry?.description ?? "");
+  const [selectedTagNames, setSelectedTagNames] = useState(data.activeEntry?.tagNames ?? []);
   const [categoryId, setCategoryId] = useState(data.activeEntry?.categoryId ?? "");
   const [isEditingStartedAt, setIsEditingStartedAt] = useState(false);
   const [startedAtDraft, setStartedAtDraft] = useState(() => timeInputValue(data.activeEntry?.startedAt));
@@ -266,7 +262,8 @@ export function CurrentTimerPanel({
       setDraftEntryId(activeId);
 
       if (active) {
-        setDescription(descriptionWithTagTokens(active.description, active.tags));
+        setDescription(active.description ?? "");
+        setSelectedTagNames(active.tagNames);
         setCategoryId(active.categoryId ?? "");
         setStartedAtDraft(timeInputValue(active.startedAt));
         return;
@@ -274,6 +271,7 @@ export function CurrentTimerPanel({
 
       const emptyDraft = emptyTimerEntryDraft();
       setDescription(emptyDraft.description);
+      setSelectedTagNames([]);
       setCategoryId(emptyDraft.categoryId);
       setStartedAtDraft("");
     }, 0);
@@ -331,7 +329,7 @@ export function CurrentTimerPanel({
 
     const nextCategoryId = categoryId || null;
     const nextDescription = description.trim() || null;
-    const nextTagNames = tagNamesFromDescription(description, data.tags);
+    const nextTagNames = selectedTagNames;
     const nextNormalizedTagNames = nextTagNames
       .map((name) => normalizeTagName(name).normalizedName)
       .sort();
@@ -371,14 +369,15 @@ export function CurrentTimerPanel({
       });
       if (!response.ok) {
         activeDetailsSyncRef.current = "";
-        setDescription(descriptionWithTagTokens(active.description, active.tags));
+        setDescription(active.description ?? "");
+        setSelectedTagNames(active.tagNames);
         setCategoryId(active.categoryId ?? "");
         setTimerError("Timer details were not saved. Your previous values were restored.");
       }
     }, 650);
 
     return () => window.clearTimeout(syncHandle);
-  }, [active, categoryId, data.tags, description, draftEntryId]);
+  }, [active, categoryId, description, draftEntryId, selectedTagNames]);
 
   const refresh = useCallback(async () => {
     const response = await fetch(`/api/bootstrap?date=${data.dateRange.selectedDate}`, {
@@ -401,7 +400,7 @@ export function CurrentTimerPanel({
       override && "description" in override
         ? (override.description ?? undefined)
         : description.trim() || undefined;
-    const nextTagNames = tagNamesFromDescription(nextDescription ?? "", data.tags);
+    const nextTagNames = selectedTagNames;
 
     timerActionInFlightRef.current = true;
     setIsBusy(true);
@@ -455,7 +454,7 @@ export function CurrentTimerPanel({
       timerActionInFlightRef.current = false;
       setIsBusy(false);
     }
-  }, [active, categoryId, data.tags, description, refresh]);
+  }, [active, categoryId, description, refresh, selectedTagNames]);
 
   const deleteActiveTimer = useCallback(async () => {
     if (!active || timerActionInFlightRef.current) return;
@@ -572,7 +571,7 @@ export function CurrentTimerPanel({
 
     const nextCategoryId = categoryId || null;
     const nextDescription = description.trim() || null;
-    const nextTagNames = tagNamesFromDescription(description, data.tags);
+    const nextTagNames = selectedTagNames;
 
     setIsBusy(true);
     setTimerError(null);
@@ -646,7 +645,9 @@ export function CurrentTimerPanel({
                 setHashtagSuggestionsOpen(open);
                 if (open) setSuggestionsOpen(false);
               }}
+              onSelectedTagNamesChange={setSelectedTagNames}
               placeholder={active ? "Add a task description" : "What are you working on?"}
+              selectedTagNames={selectedTagNames}
               tags={data.tags}
               value={description}
             />
@@ -1797,6 +1798,7 @@ function ManualEntryDialog({
   const [isBusy, setIsBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [descriptionDraft, setDescriptionDraft] = useState("");
+  const [selectedTagNames, setSelectedTagNames] = useState<string[]>([]);
   const selectedDate = parseDateKey(data.dateRange.selectedDate);
   selectedDate.setHours(9, 0, 0, 0);
   const defaultStart = dateTimeLocal(selectedDate);
@@ -1830,7 +1832,7 @@ function ManualEntryDialog({
           categoryId: formData.get("categoryId") || undefined,
           placeId: formData.get("placeId") || undefined,
           description: formData.get("description") || undefined,
-          tagNames: tagNamesFromDescription(descriptionDraft, data.tags),
+          tagNames: selectedTagNames,
           startedAt,
           stoppedAt
         })
@@ -1888,17 +1890,20 @@ function ManualEntryDialog({
               ))}
             </select>
           </label>
-          <label className="swiss-form-wide">
-            Description
+          <div className="swiss-form-wide">
+            <label htmlFor="manual-entry-description">Description</label>
             <InlineTagInput
               ariaLabel="Manual time entry description"
+              inputId="manual-entry-description"
               name="manual-description"
               onChange={setDescriptionDraft}
+              onSelectedTagNamesChange={setSelectedTagNames}
               placeholder="What are you working on?"
+              selectedTagNames={selectedTagNames}
               tags={data.tags}
               value={descriptionDraft}
             />
-          </label>
+          </div>
           <label>
             Start
             <input type="datetime-local" name="startedAt" defaultValue={defaultStart} required />

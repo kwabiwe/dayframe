@@ -2,7 +2,6 @@
 
 import type { FormEvent } from "react";
 import { useState } from "react";
-import { descriptionWithTagTokens, tagNamesFromDescription } from "@dayframe/shared";
 import { InlineTagInput } from "@/components/InlineTagInput";
 import type { CategoryRow, PlaceRow, TagRow, TimeEntryRow } from "@/lib/queries";
 import {
@@ -42,9 +41,8 @@ export function EditTimeEntryDialog({
   const [durationDraft, setDurationDraft] = useState(() => durationInputValue(initialDurationSeconds));
   const [durationEdited, setDurationEdited] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [descriptionDraft, setDescriptionDraft] = useState(() =>
-    descriptionWithTagTokens(entry.description, entry.tags)
-  );
+  const [descriptionDraft, setDescriptionDraft] = useState(entry.description ?? "");
+  const [selectedTagNames, setSelectedTagNames] = useState(entry.tagNames);
 
   function syncDurationFromTimes(nextStartedAtDraft: string, nextStoppedAtDraft: string) {
     if (!isCompletedEntry) return;
@@ -137,7 +135,7 @@ export function EditTimeEntryDialog({
           categoryId: formData.get("categoryId") || null,
           placeId: formData.get("placeId") || null,
           description: formData.get("description") || null,
-          tagNames: tagNamesFromDescription(descriptionDraft, tags),
+          tagNames: selectedTagNames,
           startedAt,
           stoppedAt
         })
@@ -198,18 +196,21 @@ export function EditTimeEntryDialog({
               ))}
             </select>
           </label>
-          <label className="swiss-form-wide">
-            Description
+          <div className="swiss-form-wide">
+            <label htmlFor="edit-entry-description">Description</label>
             <InlineTagInput
               ariaLabel="Time entry description"
               inputClassName=""
+              inputId="edit-entry-description"
               name="description"
               onChange={setDescriptionDraft}
+              onSelectedTagNamesChange={setSelectedTagNames}
               placeholder="What are you working on?"
+              selectedTagNames={selectedTagNames}
               tags={tags}
               value={descriptionDraft}
             />
-          </label>
+          </div>
           <label>
             Start
             <input

@@ -15,10 +15,19 @@ describe("mobile tag interaction contract", () => {
   });
 
   it("distinguishes existing and create actions for VoiceOver and never persists from selection alone", () => {
-    expect(sheet).toContain("Existing tag,");
+    expect(sheet).toContain("Existing\"} tag,");
     expect(sheet).toContain("Create new tag,");
     expect(sheet).not.toContain("createTag(");
     expect(sheet).toContain("tagNames: appliedTagNames");
+  });
+
+  it("uses a compact shortcut and consumes selected hashtag commands into separate tag state", () => {
+    expect(sheet).toContain("accessibilityLabel=\"Add a tag\"");
+    expect(sheet).toContain("insertHashtagStarter");
+    expect(sheet).toContain("consumeActiveHashtag");
+    expect(sheet).toContain("setSelectedTagNames");
+    expect(sheet).not.toContain("descriptionWithTagTokens");
+    expect(sheet).not.toContain("Type # to add a tag");
   });
 
   it("rolls a failed optimistic save back to the exact pre-edit dashboard snapshot", () => {

@@ -37,8 +37,10 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 
 - Typing `#` at a valid task-description token boundary opens one anchored autocomplete without moving the input, caret, keyboard, or surrounding form.
 - Empty and filtered queries show case-insensitive existing results; a non-exact safe query offers Create. Email addresses and URLs do not trigger it.
-- Selecting an existing or Create result inserts the canonical token at the caret, retains input focus, and does not persist anything until the enclosing edit is saved.
-- Duplicate hashtags and repeated selection create one association. Removing a token before save detaches its association. Cancelling a draft does not create a tag.
+- Selecting an existing or Create result consumes the temporary token, retains input focus, adds the canonical tag to separate editor state, and does not persist anything until the enclosing edit is saved. Persisted tags never hydrate back into Description.
+- Duplicate hashtags and repeated selection create one association. The web picker can deselect an association without rewriting Description; mobile can select an already-applied autocomplete result to remove it. Cancelling a draft does not create a tag.
+- Mobile shows a compact borderless `Add a tag` shortcut below Description. It inserts `#` at the caret with a valid boundary, focuses Description, and preserves manual `#` entry.
+- Web shows a tag-icon action beside Description. It opens an anchored search/select/create picker at desktop widths and a viewport-safe fixed panel at phone widths; manual `#` entry remains available.
 - Tag identity is case-insensitive within a workspace. Rename updates in-use canonical tokens; delete detaches associations without deleting time entries; cross-workspace reads and writes are rejected.
 - Today, entry/task lists, and web/native Calendar blocks render tags as a small outline icon plus plain secondary middle-dot-separated text, never as pills or category-like colour states.
 - Mobile tag edits stay optimistic with no spinner/progress UI, restore the exact prior snapshot on failure, and retain desired tag names in offline queued timer starts for event-first reconciliation.

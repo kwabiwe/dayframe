@@ -2235,10 +2235,25 @@ function createStyles(theme: MobileTheme) {
       fontFamily: monoFont,
       fontSize: 12
     },
-    tagDescriptionHelper: {
-      color: theme.textSecondary,
+    tagEditorFooter: {
+      minHeight: 32,
+      flexDirection: "row",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: 10
+    },
+    tagAddButton: {
+      minHeight: 28,
+      justifyContent: "center",
+      paddingHorizontal: 10,
+      borderRadius: 8,
+      backgroundColor: theme.surfaceMuted
+    },
+    tagAddButtonText: {
+      color: theme.textPrimary,
       fontFamily: monoFont,
-      fontSize: 11
+      fontSize: 11,
+      fontWeight: "600"
     },
     tagMetadataRow: {
       minWidth: 0,
