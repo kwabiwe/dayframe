@@ -63,6 +63,21 @@ The regression is not one broken swipe recognizer. Weekday buttons, SwiftUI week
 
 The existing automated contract checks source strings, serialization helpers, and zoom math, but does not execute a native event round-trip or assert that a retained Expo view publishes later model revisions. That gap allowed a Calendar binary to archive successfully without proving the physical interaction/data contract.
 
+## Root cause confirmed during implementation
+
+Production Vercel logs around the report show repeated authenticated `/api/bootstrap` traffic and timer mutation traffic, including bootstrap requests at 11:21, 11:22, and 11:23 BST. The Calendar was therefore not empty because the mobile client had stopped requesting current data. The screenshot also proves that SwiftUI had decoded and rendered the initial date/theme model.
+
+The failing boundary was the later React-to-native presentation update. The complete Calendar presentation was passed through Expo Fabric as one nested `Record` object. The retained native view could render its initial empty presentation, but later nested-object revisions were not a reliable value boundary: bootstrap entries, the ticking `nowMs`, and selected-day changes could remain visually stuck at the initial presentation. That one stale presentation explains all reported symptoms without inventing three simultaneous gesture failures:
+
+- weekday buttons and both swipe recognizers still emit semantic actions;
+- React changes `selectedDayKey` in response;
+- the stale native presentation continues showing the old selected day/week;
+- later bootstrap data never replaces the initially empty entry array.
+
+The fix makes the presentation an explicitly serialized, versioned JSON string at the Expo prop boundary and decodes it with Swift `JSONDecoder`. Primitive string changes are compared and delivered reliably by Fabric, while React retains ownership of the model and Swift retains presentation/gesture ownership. The hosting controller and observable model are still retained, so zoom and scroll state are not reset.
+
+Executable Swift coverage now decodes both an initial empty model and a later model with a changed day, changed revision time, and active tagged entry. This closes the previous nested-record coverage gap; physical-device verification remains required to close the full interaction report.
+
 ## Documentation and Trello reconciliation completed before implementation
 
 - Updated the repo tracker/current-state documents to build 57 and added this regression as `In progress`.

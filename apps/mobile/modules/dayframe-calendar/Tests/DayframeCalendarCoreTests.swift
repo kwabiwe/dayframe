@@ -144,6 +144,57 @@ final class DayframeCalendarCoreTests: XCTestCase {
     )
   }
 
+  func testSerializedModelDecodesInitialAndLaterRevisions() throws {
+    let initial = try decodePresentation(
+      selectedDayKey: "2026-07-19",
+      nowMs: 1_000,
+      entriesJSON: "[]"
+    )
+    let later = try decodePresentation(
+      selectedDayKey: "2026-07-20",
+      nowMs: 2_000,
+      entriesJSON: """
+      [{
+        "actionId":"entry-1","actionKind":"active","accessibilityLabel":"Edit running timer: Planning",
+        "color":"#FF6248","continuesIntoNextDay":false,"entryId":"entry-1","isActive":true,
+        "isReview":false,"isUncategorized":false,"meta":"11:20 – Now","startedAtMs":1000,
+        "startsBeforeDay":false,"stoppedAtMs":null,"tagText":"Deep work","title":"Planning"
+      }]
+      """
+    )
+
+    XCTAssertEqual(initial.selectedDayKey, "2026-07-19")
+    XCTAssertTrue(initial.entries.isEmpty)
+    XCTAssertEqual(later.selectedDayKey, "2026-07-20")
+    XCTAssertEqual(later.nowMs, 2_000)
+    XCTAssertEqual(later.entries.first?.entryId, "entry-1")
+    XCTAssertEqual(later.entries.first?.tagText, "Deep work")
+  }
+
+  private func decodePresentation(
+    selectedDayKey: String,
+    nowMs: Double,
+    entriesJSON: String
+  ) throws -> DayframeCalendarPresentationRecord {
+    let json = """
+    {
+      "dayEndMs":86400000,"dayStartMs":0,"emptyState":"No tracked time for this day.",
+      "entries":\(entriesJSON),"modelVersion":2,"nowMs":\(nowMs),"reduceMotion":false,
+      "reduceTransparency":false,"refreshing":false,"selectedDayKey":"\(selectedDayKey)",
+      "selectedDayTitle":"Today","theme":{"accent":"#FF6248","accentSoft":"#33201E",
+      "accentText":"#FF8A76","background":"#050914","border":"#2A3345",
+      "borderStrong":"#3B465B","mode":"dark","shadow":"#000000","surface":"#151B27",
+      "surfaceMuted":"#202838","surfaceRaised":"#1B2230","textPrimary":"#F7F8FB",
+      "textSecondary":"#8993A7"},"todayKey":"2026-07-19","totalLabel":"0m",
+      "totalSeconds":0,"transitionDirection":1,"weekDays":[]
+    }
+    """
+    return try JSONDecoder().decode(
+      DayframeCalendarPresentationRecord.self,
+      from: try XCTUnwrap(json.data(using: .utf8))
+    )
+  }
+
   private func milliseconds(_ value: String) throws -> Double {
     let formatter = ISO8601DateFormatter()
     let date = try XCTUnwrap(formatter.date(from: value))
