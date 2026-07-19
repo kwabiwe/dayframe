@@ -871,7 +871,19 @@ export function ActiveTimerEditSheet({
                       <Text style={styles.tagAddButtonText}>Add a tag</Text>
                     </Pressable>
                     {appliedTagNames.length > 0 ? (
-                      <TagMetadata active styles={styles} tagNames={appliedTagNames} theme={theme} />
+                      <TagMetadata
+                        active
+                        onPressTag={(tagName) => {
+                          const normalizedName = normalizeTagName(tagName).normalizedName;
+                          setSelectedTagNames((current) => current.filter(
+                            (name) => normalizeTagName(name).normalizedName !== normalizedName
+                          ));
+                          setValidationError(null);
+                        }}
+                        styles={styles}
+                        tagNames={appliedTagNames}
+                        theme={theme}
+                      />
                     ) : null}
                   </View>
                 </View>

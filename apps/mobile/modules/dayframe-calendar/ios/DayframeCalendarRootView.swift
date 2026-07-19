@@ -392,7 +392,7 @@ private struct DayframeCalendarBlockView: View {
 
           if metrics.showMeta, let tagText = entry.tagText, !tagText.isEmpty {
             HStack(spacing: 4) {
-              Image(systemName: "tag")
+              Image(systemName: "tag.fill")
                 .font(.caption2)
                 .accessibilityHidden(true)
               Text(tagText)

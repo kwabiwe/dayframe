@@ -42,7 +42,9 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Mobile shows a compact borderless `Add a tag` shortcut below Description. It inserts `#` at the caret with a valid boundary, focuses Description, and preserves manual `#` entry.
 - Web shows a tag-icon action beside Description. It opens an anchored search/select/create picker at desktop widths and a viewport-safe fixed panel at phone widths; manual `#` entry remains available.
 - Tag identity is case-insensitive within a workspace. Rename updates in-use canonical tokens; delete detaches associations without deleting time entries; cross-workspace reads and writes are rejected.
-- Today, entry/task lists, and web/native Calendar blocks render tags as a small outline icon plus plain secondary middle-dot-separated text, never as pills or category-like colour states.
+- Today, entry/task lists, editors, and web/native Calendar blocks render tags as a small solid rounded tag icon with a punched hole plus plain secondary middle-dot-separated text, never as pills or category-like colour states.
+- In the mobile editor, each displayed tag is a remove action. Removal changes draft state only; the checkmark save persists it, while closing or dismissing the editor restores the entry's persisted tags.
+- The mobile autocomplete uses a visibly distinct raised surface in both themes: lighter than the editor in dark mode and darker than the field in light mode.
 - Mobile tag edits stay optimistic with no spinner/progress UI, restore the exact prior snapshot on failure, and retain desired tag names in offline queued timer starts for event-first reconciliation.
 - The native Calendar receives serialized tag text only; React remains the owner of authentication, bootstrap data, mutations, routing, sheets, and offline state.
 - Autocomplete rows meet 44pt/px targets, VoiceOver/ARIA distinguishes existing and Create actions, and Reduce Motion removes spatial panel travel.
