@@ -116,6 +116,24 @@ describe("mobile timer presentation", () => {
     expect(deleted?.historyEntries?.some((entry) => entry.id === "entry-running")).toBe(false);
   });
 
+  it("updates normalized tag metadata across every entry pool and leaves the exact snapshot available for rollback", () => {
+    const snapshot = bootstrapWithActiveEntry();
+    const patched = optimisticPatchTimeEntry(snapshot, "entry-running", {
+      description: "Architecture review #planning",
+      tagNames: ["Planning"]
+    });
+
+    expect(patched?.activeEntry?.tags).toEqual([
+      { id: "optimistic-tag:planning", name: "Planning", normalizedName: "planning" }
+    ]);
+    expect(patched?.historyEntries?.[0].tagNames).toEqual(["Planning"]);
+    expect(patched?.tags).toEqual([
+      { id: "optimistic-tag:planning", name: "Planning", normalizedName: "planning", usageCount: 0 }
+    ]);
+    expect(snapshot.activeEntry?.tagNames).toBeUndefined();
+    expect(snapshot.historyEntries?.[0].tags).toBeUndefined();
+  });
+
   it("restores an optimistically deleted entry without replacing newer dashboard state", () => {
     const snapshot = bootstrapWithActiveEntry();
     const deleted = optimisticDeleteTimeEntry(snapshot, "entry-running");

@@ -77,9 +77,12 @@ create table if not exists tags (
   id uuid primary key default gen_random_uuid(),
   workspace_id uuid not null references workspaces(id) on delete cascade,
   name text not null,
+  normalized_name text not null,
   color text not null default 'steel',
+  created_by_user_id uuid references users(id) on delete set null,
   created_at timestamptz not null default now(),
-  unique (workspace_id, name)
+  constraint tags_workspace_normalized_name_key unique (workspace_id, normalized_name),
+  constraint tags_id_workspace_key unique (id, workspace_id)
 );
 
 create table if not exists devices (
@@ -223,12 +226,20 @@ create table if not exists time_entries (
   created_from_event_id uuid references activity_events(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  constraint time_entries_stops_after_start check (stopped_at is null or stopped_at > started_at)
+  constraint time_entries_stops_after_start check (stopped_at is null or stopped_at > started_at),
+  constraint time_entries_id_workspace_key unique (id, workspace_id)
 );
 
 create table if not exists time_entry_tags (
-  time_entry_id uuid not null references time_entries(id) on delete cascade,
-  tag_id uuid not null references tags(id) on delete cascade,
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  time_entry_id uuid not null,
+  tag_id uuid not null,
+  created_by_user_id uuid references users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  constraint time_entry_tags_entry_workspace_fkey
+    foreign key (time_entry_id, workspace_id) references time_entries(id, workspace_id) on delete cascade,
+  constraint time_entry_tags_tag_workspace_fkey
+    foreign key (tag_id, workspace_id) references tags(id, workspace_id) on delete cascade,
   primary key (time_entry_id, tag_id)
 );
 

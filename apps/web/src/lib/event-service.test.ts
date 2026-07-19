@@ -35,6 +35,7 @@ const {
   TimeEntryNotFoundError,
   updateLearnedPlaceStatus,
   updateCategory,
+  updateTimeEntry,
   updatePlace
 } = await import("./event-service");
 
@@ -2562,6 +2563,51 @@ describe("time entry deletion", () => {
   });
 });
 
+describe("time entry tag transactions", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it("saves description, creates normalized tags, and replaces associations before commit", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        if (statement.includes("update time_entries")) return { rows: [{ id: "entry-1" }] };
+        if (statement.includes("insert into tags")) {
+          const normalizedName = String(values?.[2]);
+          return {
+            rows: [{
+              id: normalizedName === "planning" ? tagId() : secondTagId(),
+              name: values?.[1],
+              normalizedName
+            }]
+          };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(updateTimeEntry("entry-1", {
+      description: "Draft plan #Planning #deep-work",
+      tagNames: ["Planning", "Deep work", "planning"]
+    }, session)).resolves.toEqual({ id: "entry-1" });
+
+    expect(client.query.mock.calls[0][0]).toBe("begin");
+    const updateCall = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("update time_entries")
+    );
+    expect(updateCall?.[1]).toEqual(expect.arrayContaining([
+      "entry-1",
+      "Draft plan #Planning #deep-work",
+      session.workspaceId,
+      session.userId
+    ]));
+    expect(client.query.mock.calls.filter(([statement]) => String(statement).includes("insert into tags"))).toHaveLength(2);
+    expect(client.query.mock.calls.some(([statement]) => String(statement).includes("delete from time_entry_tags"))).toBe(true);
+    expect(client.query.mock.calls.filter(([statement]) => String(statement).includes("insert into time_entry_tags"))).toHaveLength(2);
+    expect(client.query.mock.calls.at(-1)?.[0]).toBe("commit");
+  });
+});
+
 function categoryId() {
   return "20000000-0000-4000-8000-000000000001";
 }
@@ -2576,6 +2622,14 @@ function sleepCategoryId() {
 
 function commuteCategoryId() {
   return "20000000-0000-4000-8000-000000000009";
+}
+
+function tagId() {
+  return "50000000-0000-4000-8000-000000000001";
+}
+
+function secondTagId() {
+  return "50000000-0000-4000-8000-000000000002";
 }
 
 function placeId(seed = "default") {

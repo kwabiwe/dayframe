@@ -389,6 +389,18 @@ private struct DayframeCalendarBlockView: View {
               .foregroundStyle(Color(dayframeCSS: theme.textPrimary))
               .lineLimit(metrics.height < DayframeCalendarConstants.metaMinimumHeight + 16 ? 1 : 2)
           }
+
+          if metrics.showMeta, let tagText = entry.tagText, !tagText.isEmpty {
+            HStack(spacing: 4) {
+              Image(systemName: "tag")
+                .font(.caption2)
+                .accessibilityHidden(true)
+              Text(tagText)
+                .font(.caption2)
+                .lineLimit(1)
+            }
+            .foregroundStyle(Color(dayframeCSS: theme.textSecondary))
+          }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, metrics.compact ? 4 : 7)

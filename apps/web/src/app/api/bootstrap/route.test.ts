@@ -27,6 +27,14 @@ describe("/api/bootstrap", () => {
     vi.resetAllMocks();
     mocks.resolveRequestSession.mockResolvedValue(session);
     mocks.getBootstrapData.mockResolvedValue({
+      tags: [
+        { id: "50000000-0000-4000-8000-000000000001", name: "Planning", normalizedName: "planning", usageCount: 1 }
+      ],
+      activeEntry: {
+        id: "80000000-0000-4000-8000-000000000001",
+        tagNames: ["Planning"],
+        tags: [{ id: "50000000-0000-4000-8000-000000000001", name: "Planning", normalizedName: "planning" }]
+      },
       places: [
         {
           id: "30000000-0000-4000-8000-000000000001",
@@ -53,5 +61,18 @@ describe("/api/bootstrap", () => {
     expect(response.status).toBe(200);
     expect(payload.places[0].defaultActivityDescription).toBe("School drop-off/pickup");
     expect(mocks.getBootstrapData).toHaveBeenCalledWith(session, { selectedDate: null });
+  });
+
+  it("serializes normalized tag records and active-entry associations without replacing legacy tagNames", async () => {
+    const response = await GET(new Request("https://dayframe.test/api/bootstrap"));
+    const payload = await response.json();
+
+    expect(payload.tags[0]).toEqual(expect.objectContaining({
+      name: "Planning",
+      normalizedName: "planning",
+      usageCount: 1
+    }));
+    expect(payload.activeEntry.tags[0].normalizedName).toBe("planning");
+    expect(payload.activeEntry.tagNames).toEqual(["Planning"]);
   });
 });

@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { ZodError } from "zod";
+import { z, ZodError } from "zod";
 import { createManualEntry, processActivityEvent, splitActiveEntry, TimerReplacementWindowError } from "@/lib/event-service";
 import { authErrorResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
+import { TagNameSchema } from "@dayframe/shared";
 
 export async function POST(request: Request) {
   try {
@@ -10,6 +11,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const eventSource = body.source === "mobile_app" ? "mobile_app" : "manual_app";
     const origin = eventSource === "mobile_app" ? "mobile_timer" : "web_timer";
+    const tagNames = optionalTagNames(body.tagNames);
 
     if (body.mode === "manual") {
       const startedAt = requiredString(body.startedAt, "startedAt");
@@ -21,7 +23,8 @@ export async function POST(request: Request) {
           placeId: optionalString(body.placeId),
           description: optionalString(body.description),
           startedAt,
-          stoppedAt
+          stoppedAt,
+          ...(tagNames ? { tagNames } : {})
         },
         session
       );
@@ -48,7 +51,10 @@ export async function POST(request: Request) {
 
     const startedAt = optionalTimestamp(body.startedAt, "startedAt");
     const occurredAt = startedAt ? new Date(startedAt) : new Date();
-    const rawPayload = startedAt ? { origin, startedAt } : { origin };
+    const rawPayload = {
+      ...(startedAt ? { origin, startedAt } : { origin }),
+      ...(tagNames ? { tagNames } : {})
+    };
 
     const result = await processActivityEvent(
       {
@@ -108,4 +114,9 @@ function optionalTimestamp(value: unknown, field: string) {
   if (Number.isNaN(parsed.getTime())) throw new BadRequestError(`${field} must be a valid date.`);
   if (parsed.getTime() > Date.now()) throw new BadRequestError(`${field} cannot be in the future.`);
   return parsed.toISOString();
+}
+
+function optionalTagNames(value: unknown) {
+  if (value === undefined) return undefined;
+  return z.array(TagNameSchema).max(24).parse(value);
 }

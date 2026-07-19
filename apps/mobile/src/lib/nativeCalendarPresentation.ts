@@ -48,6 +48,7 @@ export type NativeCalendarPresentationEntry = {
   startedAtMs: number;
   startsBeforeDay: boolean;
   stoppedAtMs: number | null;
+  tagText: string | null;
   title: string;
 };
 
@@ -56,7 +57,7 @@ export type NativeCalendarPresentation = {
   dayStartMs: number;
   emptyState: string;
   entries: NativeCalendarPresentationEntry[];
-  modelVersion: 1;
+  modelVersion: 2;
   nowMs: number;
   reduceMotion: boolean;
   reduceTransparency: boolean;
@@ -129,7 +130,7 @@ export function buildNativeCalendarBridgeState({
       dayStartMs: dayStart.getTime(),
       emptyState: "No tracked time for this day.",
       entries: entries.map((entry) => serializeCalendarEntry(entry, dayStart, dayEnd, now, theme)),
-      modelVersion: 1,
+      modelVersion: 2,
       nowMs: now,
       reduceMotion,
       reduceTransparency,
@@ -206,11 +207,14 @@ function serializeCalendarEntry(
     ? uncategorizedFillColor(theme.mode)
     : paletteColorFor(entry.categoryColor ?? entry.categoryId, entry.categoryName ?? "Uncategorized", theme.mode);
   const color = reviewNeeded ? theme.textSecondary : categoryColor;
+  const tagText = entry.tags?.map((tag) => tag.name).join(" · ")
+    || entry.tagNames?.join(" · ")
+    || null;
 
   return {
     actionId,
     actionKind,
-    accessibilityLabel: `${reviewNeeded ? REVIEW_COPY.needsReview : entry.isActive ? "Edit running timer" : "Open time block"}: ${title}`,
+    accessibilityLabel: `${reviewNeeded ? REVIEW_COPY.needsReview : entry.isActive ? "Edit running timer" : "Open time block"}: ${title}${tagText ? `. Tags: ${tagText}` : ""}`,
     color,
     continuesIntoNextDay: continuation.continuesIntoNextDay,
     entryId: entry.id,
@@ -221,6 +225,7 @@ function serializeCalendarEntry(
     startedAtMs: Number.isFinite(startedAtMs) ? startedAtMs : dayStart.getTime(),
     startsBeforeDay: continuation.startsBeforeDay,
     stoppedAtMs: stoppedAtMs !== null && Number.isFinite(stoppedAtMs) ? stoppedAtMs : null,
+    tagText,
     title
   };
 }

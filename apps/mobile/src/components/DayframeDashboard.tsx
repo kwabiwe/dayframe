@@ -37,6 +37,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { paletteColorFor, type RecentActivitySuggestion } from "@dayframe/shared";
 import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
+import { TagMetadata } from "@/components/TagMetadata";
 import { DayframeBrand } from "@/components/brand";
 import { useKeyboardAccessory, type KeyboardAccessoryField } from "@/components/KeyboardAccessory";
 import {
@@ -622,7 +623,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     void syncLiveActivityForEntry(data?.activeEntry ?? null);
   }, [data]);
 
-  async function startTask(categoryId?: string | null, description = "") {
+  async function startTask(categoryId?: string | null, description = "", tagNames: string[] = []) {
     if (latestData.current?.activeEntry && !categoryId && !description.trim()) {
       setActiveEditVisible(true);
       return false;
@@ -650,7 +651,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     return startTaskWith({
       categoryId: categoryId ?? null,
       description,
-      startedAt: null
+      startedAt: null,
+      tagNames
     });
   }
 
@@ -674,7 +676,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         categoryId: patch.categoryId ?? null,
         description: patch.description ?? null,
         startedAt: patch.startedAt,
-        stoppedAt: patch.stoppedAt
+        stoppedAt: patch.stoppedAt,
+        tagNames: patch.tagNames
       });
       await load({ silent: true });
       return true;
@@ -743,6 +746,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     categoryId?: string | null;
     description?: string | null;
     startedAt?: string | null;
+    tagNames?: string[];
   }, options: { animateLayout?: boolean } = {}) {
     const trimmedDescription = input.description?.trim() ?? "";
     const startedAt = input.startedAt ?? new Date().toISOString();
@@ -753,7 +757,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         categories: latestData.current?.categories ?? [],
         categoryId: input.categoryId ?? null,
         description: trimmedDescription || null,
-        startedAt
+        startedAt,
+        tagNames: input.tagNames ?? []
       }),
       id: optimisticId
     };
@@ -764,7 +769,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
     enqueueTimerMutation(async () => {
       try {
-        const result = await startTimer(input.categoryId ?? null, trimmedDescription, input.startedAt ?? undefined);
+        const result = await startTimer(
+          input.categoryId ?? null,
+          trimmedDescription,
+          input.startedAt ?? undefined,
+          input.tagNames
+        );
         if (result.timeEntryId) {
           optimisticTimerIds.current.set(optimisticId, result.timeEntryId);
           updateDashboardData((current) =>
@@ -794,7 +804,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           description: queuedEntry.description?.trim() || undefined,
           rawPayload: {
             origin: "mobile_custom_start_fallback",
-            startedAt: queuedEntry.startedAt
+            startedAt: queuedEntry.startedAt,
+            tagNames: queuedEntry.tagNames ?? queuedEntry.tags?.map((tag) => tag.name) ?? []
           }
         });
       }
@@ -1344,7 +1355,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               }}
               onOpenReview={() => router.push("/review")}
               onReplayEntry={(entry) => {
-                void startTask(entry.categoryId, entry.description ?? "");
+                void startTask(
+                  entry.categoryId,
+                  entry.description ?? "",
+                  entry.tagNames ?? entry.tags?.map((tag) => tag.name) ?? []
+                );
               }}
               reviewCount={item.isToday ? openReviewCount : 0}
               section={item}
@@ -1514,6 +1529,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         saving={manualEntrySaving}
         stopping={false}
         styles={styles}
+        tags={data?.tags ?? []}
         theme={theme}
         visible={Boolean(manualDraftEntry)}
       />
@@ -1534,6 +1550,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         stopping={false}
         styles={styles}
         suggestions={compactTaskSuggestions}
+        tags={data?.tags ?? []}
         theme={theme}
         visible={activeEditVisible}
       />
@@ -1550,6 +1567,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         saving={false}
         stopping={false}
         styles={styles}
+        tags={data?.tags ?? []}
         theme={theme}
         visible={Boolean(calendarEditEntry)}
       />
@@ -2020,6 +2038,11 @@ function HistoryDayCard({
                         ? historyGroupMeta(entry, group.entries.length)
                         : `${formatEntryTimeRange(entry, now)}${entry.categoryName ? ` · ${entry.categoryName}` : ""}`}
                     </Text>
+                    <TagMetadata
+                      styles={styles}
+                      tagNames={entry.tagNames ?? entry.tags?.map((tag) => tag.name) ?? []}
+                      theme={theme}
+                    />
                   </View>
                   </Pressable>
                   <View style={styles.historyEntryActions}>
@@ -2302,6 +2325,7 @@ function pendingEntryFromStartInput(input: {
   categoryId: string | null;
   description: string | null;
   startedAt?: string | null;
+  tagNames?: string[];
 }): TimeEntry {
   const category = input.categoryId
     ? input.categories.find((candidate) => candidate.id === input.categoryId)
@@ -2323,7 +2347,9 @@ function pendingEntryFromStartInput(input: {
     reviewStatus: "confirmed",
     source: "mobile_app",
     startedAt: input.startedAt ?? new Date().toISOString(),
-    stoppedAt: null
+    stoppedAt: null,
+    tagNames: input.tagNames ?? [],
+    tags: []
   };
 }
 
@@ -2348,7 +2374,9 @@ function createManualDraftEntry(lastStoppedAt: string | null, nowMs: number): Ti
     reviewStatus: "confirmed",
     source: "manual_app",
     startedAt: startedAt.toISOString(),
-    stoppedAt: stoppedAt.toISOString()
+    stoppedAt: stoppedAt.toISOString(),
+    tagNames: [],
+    tags: []
   };
 }
 

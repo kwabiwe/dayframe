@@ -3,10 +3,13 @@
 import type { FormEvent } from "react";
 import { Fragment, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { tagNamesFromDescription } from "@dayframe/shared";
 import { Pencil, Play, Trash2 } from "lucide-react";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
+import { TagMetadata } from "@/components/TagMetadata";
+import { InlineTagInput } from "@/components/InlineTagInput";
 import { timeEntryCategoryColor, timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
-import type { CategoryRow, PlaceRow, TimeEntryRow } from "@/lib/queries";
+import type { CategoryRow, PlaceRow, TagRow, TimeEntryRow } from "@/lib/queries";
 import {
   dateTimeLocal,
   dateTimeLocalInputToIso,
@@ -20,6 +23,7 @@ export function EntriesTable({
   entries,
   categories,
   places,
+  tags = [],
   showManualForm = true,
   groupByDay = false,
   onChanged
@@ -27,6 +31,7 @@ export function EntriesTable({
   entries: TimeEntryRow[];
   categories: CategoryRow[];
   places: PlaceRow[];
+  tags?: TagRow[];
   showManualForm?: boolean;
   groupByDay?: boolean;
   onChanged?: () => Promise<void>;
@@ -42,6 +47,7 @@ export function EntriesTable({
   const [editingEntry, setEditingEntry] = useState<TimeEntryRow | null>(null);
   const [manualError, setManualError] = useState<string | null>(null);
   const [continuingEntryId, setContinuingEntryId] = useState<string | null>(null);
+  const [manualDescription, setManualDescription] = useState("");
 
   const filtered = useMemo(
     () =>
@@ -81,7 +87,8 @@ export function EntriesTable({
         body: JSON.stringify({
           mode: "start",
           categoryId,
-          description
+          description,
+          tagNames: entry.tagNames
         })
       });
       if (!response.ok) {
@@ -131,6 +138,7 @@ export function EntriesTable({
           categoryId: formData.get("categoryId") || undefined,
           placeId: formData.get("placeId") || undefined,
           description: formData.get("description") || undefined,
+          tagNames: tagNamesFromDescription(manualDescription, tags),
           startedAt,
           stoppedAt
         })
@@ -146,6 +154,7 @@ export function EntriesTable({
         throw new Error(errorMessage);
       }
       form.reset();
+      setManualDescription("");
       await onChanged?.();
       startTransition(() => router.refresh());
     } catch (error) {
@@ -198,7 +207,17 @@ export function EntriesTable({
         >
           <SelectField name="categoryId" label="Category" options={categories} />
           <SelectField name="placeId" label="Place" options={places} />
-          <TextField name="description" label="Description" />
+          <label className="text-sm">
+            <span className="industrial-field-label">Description</span>
+            <InlineTagInput
+              ariaLabel="Manual time entry description"
+              inputClassName="industrial-field focus-ring"
+              name="manual-description"
+              onChange={setManualDescription}
+              tags={tags}
+              value={manualDescription}
+            />
+          </label>
           <DateField name="startedAt" label="Start" defaultValue={dateTimeLocal()} />
           <DateField name="stoppedAt" label="Finish" defaultValue={dateTimeLocal()} />
           {manualError ? (
@@ -256,7 +275,8 @@ export function EntriesTable({
                     {formatTime(entry.startedAt)} - {entry.stoppedAt ? formatTime(entry.stoppedAt) : "Running"}
                   </td>
                   <td className="px-3 py-3 font-medium">
-                    {timeEntryTitle(entry)}
+                    <span className="block">{timeEntryTitle(entry)}</span>
+                    <TagMetadata tagNames={entry.tagNames} />
                   </td>
                   <td className="px-3 py-3 text-[var(--muted)]">
                     <span className="flex items-center gap-2">
@@ -323,6 +343,7 @@ export function EntriesTable({
             startTransition(() => router.refresh());
           }}
           places={places}
+          tags={tags}
         />
       ) : null}
     </section>
@@ -388,27 +409,6 @@ function SelectField({
           </option>
         ))}
       </select>
-    </label>
-  );
-}
-
-function TextField({
-  name,
-  label,
-  defaultValue = ""
-}: {
-  name: string;
-  label: string;
-  defaultValue?: string;
-}) {
-  return (
-    <label className="text-sm">
-      <span className="industrial-field-label">{label}</span>
-      <input
-        name={name}
-        defaultValue={defaultValue}
-        className="industrial-field focus-ring"
-      />
     </label>
   );
 }

@@ -39,6 +39,7 @@ struct DayframeCalendarEntryRecord: Record {
   @Field var startedAtMs: Double = 0
   @Field var startsBeforeDay: Bool = false
   @Field var stoppedAtMs: Double?
+  @Field var tagText: String?
   @Field var title: String = ""
 }
 
@@ -47,7 +48,7 @@ struct DayframeCalendarPresentationRecord: Record {
   @Field var dayStartMs: Double = 0
   @Field var emptyState: String = "No tracked time for this day."
   @Field var entries: [DayframeCalendarEntryRecord] = []
-  @Field var modelVersion: Int = 1
+  @Field var modelVersion: Int = 2
   @Field var nowMs: Double = 0
   @Field var reduceMotion: Bool = false
   @Field var reduceTransparency: Bool = false

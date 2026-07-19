@@ -57,6 +57,7 @@ const {
   syncQueue,
   updateCategory,
   updatePlace,
+  updateQueuedTimerStart,
   updateTimeEntry,
   archiveCategory
 } = await import("./api");
@@ -287,6 +288,28 @@ describe("mobile API client", () => {
 
     expect(queue).toHaveLength(1);
     expect(queue[0].localId).toBe("location-visit-1");
+  });
+
+  it("keeps edited tag associations on an offline queued timer start", async () => {
+    await enqueueEvent({
+      localId: "offline-tagged-timer",
+      source: "mobile_app",
+      type: "timer_start",
+      description: "Plan #planning",
+      rawPayload: { origin: "mobile_home" }
+    });
+
+    await updateQueuedTimerStart("offline-tagged-timer", {
+      description: "Plan #planning #deep-work",
+      tagNames: ["Planning", "Deep work"]
+    });
+
+    const queue = await readQueue();
+    expect(queue[0].description).toBe("Plan #planning #deep-work");
+    expect(queue[0].rawPayload).toEqual({
+      origin: "mobile_home",
+      tagNames: ["Planning", "Deep work"]
+    });
   });
 
   it("queues Shortcut starts only with values supplied by the Shortcut", async () => {
@@ -1010,7 +1033,8 @@ describe("mobile API client", () => {
     await updateTimeEntry("entry-1", {
       categoryId: "20000000-0000-4000-8000-000000000001",
       description: "Write review notes",
-      startedAt: "2026-07-06T08:15:00.000Z"
+      startedAt: "2026-07-06T08:15:00.000Z",
+      tagNames: ["Planning"]
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -1024,7 +1048,8 @@ describe("mobile API client", () => {
         body: JSON.stringify({
           categoryId: "20000000-0000-4000-8000-000000000001",
           description: "Write review notes",
-          startedAt: "2026-07-06T08:15:00.000Z"
+          startedAt: "2026-07-06T08:15:00.000Z",
+          tagNames: ["Planning"]
         })
       })
     );

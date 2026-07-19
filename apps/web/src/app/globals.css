@@ -4968,3 +4968,126 @@ kbd {
     border-radius: var(--web-radius-floating);
   }
 }
+/* Tags stay intentionally quieter than categories. */
+.tag-metadata {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.2;
+}
+
+.tag-metadata > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-metadata.is-active {
+  color: var(--accent-text);
+}
+
+.inline-tag-editor,
+.inline-tag-input-anchor {
+  position: relative;
+  min-width: 0;
+}
+
+.inline-tag-editor {
+  display: grid;
+  gap: 0.4rem;
+  z-index: 20;
+}
+
+.inline-tag-suggestions {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  right: 0;
+  z-index: 60;
+  max-height: min(19rem, calc(100dvh - 10rem));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: 0.875rem;
+  background: var(--surface-raised);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 28%);
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity 140ms ease-out, transform 140ms ease-out, visibility 0s linear 140ms;
+}
+
+.inline-tag-suggestions.is-open {
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
+  transform: translateY(0);
+  transition-delay: 0s;
+}
+
+.inline-tag-suggestions-title {
+  display: block;
+  padding: 0.5rem 0.75rem;
+  color: var(--muted);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.inline-tag-suggestions > div {
+  border-top: 1px solid var(--line);
+}
+
+.inline-tag-suggestions button,
+.inline-tag-empty {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  padding: 0.55rem 0.75rem;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 0.8125rem;
+  text-align: left;
+}
+
+.inline-tag-suggestions button:first-child {
+  border-top: 0;
+}
+
+.inline-tag-suggestions button.is-highlighted {
+  background: var(--surface-muted);
+  transition: background-color 120ms ease-out;
+}
+
+.inline-tag-suggestions button.is-create {
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.inline-tag-empty,
+.inline-tag-help {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inline-tag-suggestions,
+  .inline-tag-suggestions.is-open {
+    transform: none;
+    transition: opacity 140ms linear;
+  }
+
+  .inline-tag-suggestions button.is-highlighted {
+    transition: none;
+  }
+}

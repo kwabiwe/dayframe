@@ -66,6 +66,7 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
   let startedAtMs: Double
   let startsBeforeDay: Bool
   let stoppedAtMs: Double?
+  let tagText: String?
   let title: String
 
   var id: String { entryId }
@@ -86,6 +87,7 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
     startedAtMs = record.startedAtMs
     startsBeforeDay = record.startsBeforeDay
     stoppedAtMs = record.stoppedAtMs
+    tagText = record.tagText
     title = record.title
   }
 }

@@ -33,6 +33,18 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Today history deletion begins immediately without a confirmation surface and shows the five-second inverse-colour Undo bean before persistence is committed. Row/group removal, surrounding list reflow, Undo entrance/exit, expiry, exact restoration, and persistence-failure rollback transition continuously rather than popping. A rapid second delete deterministically commits the older pending deletion, starts a fresh five-second window, and cannot be dismissed or restored by an older timer/callback. Blank uncategorized entries remain individual rows with direct edit/delete access instead of collapsing into a non-deletable aggregate.
 - Timesheet view groups work by category/activity, shows day totals and row totals, and remains readable.
 
+## Tags
+
+- Typing `#` at a valid task-description token boundary opens one anchored autocomplete without moving the input, caret, keyboard, or surrounding form.
+- Empty and filtered queries show case-insensitive existing results; a non-exact safe query offers Create. Email addresses and URLs do not trigger it.
+- Selecting an existing or Create result inserts the canonical token at the caret, retains input focus, and does not persist anything until the enclosing edit is saved.
+- Duplicate hashtags and repeated selection create one association. Removing a token before save detaches its association. Cancelling a draft does not create a tag.
+- Tag identity is case-insensitive within a workspace. Rename updates in-use canonical tokens; delete detaches associations without deleting time entries; cross-workspace reads and writes are rejected.
+- Today, entry/task lists, and web/native Calendar blocks render tags as a small outline icon plus plain secondary middle-dot-separated text, never as pills or category-like colour states.
+- Mobile tag edits stay optimistic with no spinner/progress UI, restore the exact prior snapshot on failure, and retain desired tag names in offline queued timer starts for event-first reconciliation.
+- The native Calendar receives serialized tag text only; React remains the owner of authentication, bootstrap data, mutations, routing, sheets, and offline state.
+- Autocomplete rows meet 44pt/px targets, VoiceOver/ARIA distinguishes existing and Create actions, and Reduce Motion removes spatial panel travel.
+
 ## Data And Sync
 
 - Web and mobile use authenticated workspace-scoped API calls.

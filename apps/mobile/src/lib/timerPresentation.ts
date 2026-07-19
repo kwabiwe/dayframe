@@ -1,4 +1,4 @@
-import type { RecentActivitySuggestion } from "@dayframe/shared";
+import { normalizeTagName, type RecentActivitySuggestion } from "@dayframe/shared";
 import type { MobileBootstrap, TimeEntryUpdatePatch } from "./api";
 
 type ActiveTimerEntry = MobileBootstrap["activeEntry"];
@@ -97,10 +97,15 @@ export function optimisticPatchTimeEntry(
   if (!data) return data;
   const patchEntry = (entry: MobileTimeEntry) =>
     entry.id === entryId ? patchedMobileTimeEntry(entry, patch, data.categories) : entry;
+  const optimisticTags = Object.prototype.hasOwnProperty.call(patch, "tagNames")
+    ? mergeOptimisticTags(data.tags ?? [], patch.tagNames ?? [])
+    : data.tags;
   return {
     ...data,
+    tags: optimisticTags,
     activeEntry: data.activeEntry ? patchEntry(data.activeEntry) : null,
     entries: data.entries.map(patchEntry),
+    historyEntries: data.historyEntries?.map(patchEntry),
     dayEntries: data.dayEntries?.map(patchEntry),
     weekEntries: data.weekEntries?.map(patchEntry)
   };
@@ -212,12 +217,43 @@ function patchedMobileTimeEntry(
     next.categoryName = category?.name ?? null;
     next.categoryColor = category?.color ?? null;
   }
+  if (Object.prototype.hasOwnProperty.call(patch, "tagNames")) {
+    const names = patch.tagNames ?? [];
+    next.tagNames = names;
+    next.tags = names.map((name) => {
+      const tag = normalizeTagName(name);
+      return {
+        id: `optimistic-tag:${tag.normalizedName}`,
+        name: tag.name,
+        normalizedName: tag.normalizedName
+      };
+    });
+  }
   const startedAtMs = Date.parse(next.startedAt);
   const stoppedAtMs = next.stoppedAt ? Date.parse(next.stoppedAt) : NaN;
   if (Number.isFinite(startedAtMs) && Number.isFinite(stoppedAtMs)) {
     next.durationSeconds = Math.max(0, Math.floor((stoppedAtMs - startedAtMs) / 1000));
   }
   return next;
+}
+
+function mergeOptimisticTags(
+  current: NonNullable<MobileBootstrap["tags"]>,
+  names: string[]
+) {
+  const byNormalizedName = new Map(current.map((tag) => [tag.normalizedName, tag]));
+  for (const name of names) {
+    const tag = normalizeTagName(name);
+    if (!byNormalizedName.has(tag.normalizedName)) {
+      byNormalizedName.set(tag.normalizedName, {
+        id: `optimistic-tag:${tag.normalizedName}`,
+        name: tag.name,
+        normalizedName: tag.normalizedName,
+        usageCount: 0
+      });
+    }
+  }
+  return [...byNormalizedName.values()].sort((left, right) => left.name.localeCompare(right.name));
 }
 
 function upsertMobileEntry(entries: MobileTimeEntry[], nextEntry: MobileTimeEntry) {

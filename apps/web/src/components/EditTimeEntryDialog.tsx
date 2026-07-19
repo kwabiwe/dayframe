@@ -2,7 +2,9 @@
 
 import type { FormEvent } from "react";
 import { useState } from "react";
-import type { CategoryRow, PlaceRow, TimeEntryRow } from "@/lib/queries";
+import { descriptionWithTagTokens, tagNamesFromDescription } from "@dayframe/shared";
+import { InlineTagInput } from "@/components/InlineTagInput";
+import type { CategoryRow, PlaceRow, TagRow, TimeEntryRow } from "@/lib/queries";
 import {
   dateTimeLocal,
   dateTimeLocalInputToIso,
@@ -15,13 +17,15 @@ export function EditTimeEntryDialog({
   entry,
   onClose,
   onSaved,
-  places
+  places,
+  tags
 }: {
   categories: CategoryRow[];
   entry: TimeEntryRow;
   onClose: () => void;
   onSaved: () => Promise<void> | void;
   places: PlaceRow[];
+  tags: TagRow[];
 }) {
   const [isBusy, setIsBusy] = useState(false);
   const isCompletedEntry = Boolean(entry.stoppedAt);
@@ -38,6 +42,9 @@ export function EditTimeEntryDialog({
   const [durationDraft, setDurationDraft] = useState(() => durationInputValue(initialDurationSeconds));
   const [durationEdited, setDurationEdited] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [descriptionDraft, setDescriptionDraft] = useState(() =>
+    descriptionWithTagTokens(entry.description, entry.tags)
+  );
 
   function syncDurationFromTimes(nextStartedAtDraft: string, nextStoppedAtDraft: string) {
     if (!isCompletedEntry) return;
@@ -130,6 +137,7 @@ export function EditTimeEntryDialog({
           categoryId: formData.get("categoryId") || null,
           placeId: formData.get("placeId") || null,
           description: formData.get("description") || null,
+          tagNames: tagNamesFromDescription(descriptionDraft, tags),
           startedAt,
           stoppedAt
         })
@@ -192,7 +200,15 @@ export function EditTimeEntryDialog({
           </label>
           <label className="swiss-form-wide">
             Description
-            <input name="description" defaultValue={entry.description ?? ""} placeholder="What are you working on?" />
+            <InlineTagInput
+              ariaLabel="Time entry description"
+              inputClassName=""
+              name="description"
+              onChange={setDescriptionDraft}
+              placeholder="What are you working on?"
+              tags={tags}
+              value={descriptionDraft}
+            />
           </label>
           <label>
             Start
