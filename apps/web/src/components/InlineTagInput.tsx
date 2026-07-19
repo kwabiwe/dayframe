@@ -1,12 +1,19 @@
 "use client";
 
 import {
+  consumeActiveHashtag,
   findActiveHashtag,
-  normalizeTagName,
-  replaceActiveHashtag,
-  tagNamesFromDescription
+  normalizeTagName
 } from "@dayframe/shared";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { Check, Tag, X } from "lucide-react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type RefObject
+} from "react";
 import type { TagRow } from "@/lib/queries";
 import { TagMetadata } from "@/components/TagMetadata";
 
@@ -22,7 +29,9 @@ export function InlineTagInput({
   onEnter,
   onFocus,
   onHashtagPanelChange,
+  onSelectedTagNamesChange,
   placeholder,
+  selectedTagNames,
   tags,
   value
 }: {
@@ -37,15 +46,25 @@ export function InlineTagInput({
   onEnter?: (event: KeyboardEvent<HTMLInputElement>) => void;
   onFocus?: () => void;
   onHashtagPanelChange?: (open: boolean) => void;
+  onSelectedTagNamesChange: (tagNames: string[]) => void;
   placeholder?: string;
+  selectedTagNames: string[];
   tags: TagRow[];
   value: string;
 }) {
+  const editorRef = useRef<HTMLDivElement | null>(null);
   const localInputRef = useRef<HTMLInputElement | null>(null);
+  const pickerInputRef = useRef<HTMLInputElement | null>(null);
   const [focused, setFocused] = useState(false);
   const [caret, setCaret] = useState(value.length);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
-  const active = focused ? findActiveHashtag(value, caret) : null;
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState("");
+  const active = focused && !pickerOpen ? findActiveHashtag(value, caret) : null;
+  const selectedNormalized = useMemo(
+    () => new Set(selectedTagNames.map((tagName) => normalizeTagName(tagName).normalizedName)),
+    [selectedTagNames]
+  );
   const matches = useMemo(() => {
     if (!active) return [];
     const query = active.query.toLowerCase();
@@ -71,21 +90,91 @@ export function InlineTagInput({
     ],
     [createName, matches]
   );
-  const shouldOpen = focused && Boolean(active);
-  const appliedTagNames = useMemo(() => tagNamesFromDescription(value, tags), [tags, value]);
+  const shouldOpen = focused && Boolean(active) && !pickerOpen;
+  const normalizedPickerQuery = pickerQuery.trim().toLowerCase();
+  const pickerOptions = useMemo(() => {
+    const byNormalized = new Map(tags.map((tag) => [tag.normalizedName, tag]));
+    for (const tagName of selectedTagNames) {
+      const normalized = normalizeTagName(tagName);
+      if (!byNormalized.has(normalized.normalizedName)) {
+        byNormalized.set(normalized.normalizedName, {
+          id: `draft:${normalized.normalizedName}`,
+          name: normalized.name,
+          normalizedName: normalized.normalizedName,
+          usageCount: 0
+        });
+      }
+    }
+    return [...byNormalized.values()];
+  }, [selectedTagNames, tags]);
+  const pickerMatches = useMemo(
+    () => pickerOptions.filter((tag) => (
+      !normalizedPickerQuery ||
+      tag.normalizedName.includes(normalizedPickerQuery) ||
+      tag.name.toLowerCase().includes(normalizedPickerQuery)
+    )),
+    [normalizedPickerQuery, pickerOptions]
+  );
+  const pickerExactMatch = pickerOptions.some((tag) => tag.normalizedName === normalizedPickerQuery);
+  const pickerCreateName = useMemo(() => {
+    if (!pickerQuery.trim() || pickerExactMatch) return null;
+    try {
+      return normalizeTagName(pickerQuery).name;
+    } catch {
+      return null;
+    }
+  }, [pickerExactMatch, pickerQuery]);
 
   useEffect(() => {
-    onHashtagPanelChange?.(shouldOpen);
-  }, [onHashtagPanelChange, shouldOpen]);
+    onHashtagPanelChange?.(shouldOpen || pickerOpen);
+  }, [onHashtagPanelChange, pickerOpen, shouldOpen]);
+
+  useEffect(() => {
+    if (!pickerOpen) return undefined;
+    function closeOnOutside(event: MouseEvent) {
+      if (!editorRef.current?.contains(event.target as Node)) setPickerOpen(false);
+    }
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        setPickerOpen(false);
+        localInputRef.current?.focus();
+      }
+    }
+    document.addEventListener("mousedown", closeOnOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [pickerOpen]);
 
   function updateCaret() {
     const input = localInputRef.current;
     if (input) setCaret(input.selectionStart ?? input.value.length);
   }
 
+  function addSelectedTag(tagName: string) {
+    const normalized = normalizeTagName(tagName);
+    if (selectedNormalized.has(normalized.normalizedName)) return;
+    const existing = tags.find((tag) => tag.normalizedName === normalized.normalizedName);
+    onSelectedTagNamesChange([...selectedTagNames, existing?.name ?? normalized.name]);
+  }
+
+  function toggleSelectedTag(tagName: string) {
+    const normalizedName = normalizeTagName(tagName).normalizedName;
+    if (selectedNormalized.has(normalizedName)) {
+      onSelectedTagNamesChange(selectedTagNames.filter(
+        (selected) => normalizeTagName(selected).normalizedName !== normalizedName
+      ));
+      return;
+    }
+    addSelectedTag(tagName);
+  }
+
   function selectAction(action: (typeof actions)[number]) {
     if (!active) return;
-    const replacement = replaceActiveHashtag(value, active, action.label);
+    addSelectedTag(action.label);
+    const replacement = consumeActiveHashtag(value, active);
     onChange(replacement.text);
     setCaret(replacement.caret);
     window.requestAnimationFrame(() => {
@@ -117,7 +206,7 @@ export function InlineTagInput({
   }
 
   return (
-    <div className={`inline-tag-editor ${className}`}>
+    <div className={`inline-tag-editor ${className}`} ref={editorRef}>
       <div className="inline-tag-input-anchor">
         <input
           aria-describedby={`${name}-tag-help`}
@@ -126,7 +215,7 @@ export function InlineTagInput({
           aria-controls={`${name}-tag-suggestions`}
           aria-expanded={shouldOpen}
           autoComplete="off"
-          className={inputClassName}
+          className={`${inputClassName} inline-tag-description-input`.trim()}
           id={inputId}
           name={name}
           onBlur={() => setFocused(false)}
@@ -154,38 +243,115 @@ export function InlineTagInput({
           role="combobox"
           value={value}
         />
+        <button
+          aria-expanded={pickerOpen}
+          aria-haspopup="dialog"
+          aria-label="Add or filter tags"
+          className={`inline-tag-picker-trigger${pickerOpen ? " is-open" : ""}`}
+          onClick={() => {
+            setPickerOpen((open) => {
+              const next = !open;
+              if (next) window.requestAnimationFrame(() => pickerInputRef.current?.focus());
+              return next;
+            });
+            setPickerQuery("");
+          }}
+          type="button"
+        >
+          <Tag aria-hidden="true" size={17} strokeWidth={1.8} />
+        </button>
         <div
           aria-hidden={!shouldOpen}
           className={`inline-tag-suggestions${shouldOpen ? " is-open" : ""}`}
           id={`${name}-tag-suggestions`}
           role="listbox"
         >
-            <span className="inline-tag-suggestions-title">TAGS</span>
-            <div>
-              {actions.map((action, index) => (
-                <button
-                  aria-label={action.create ? `Create new tag, ${action.label}` : `Existing tag, ${action.label}`}
-                  aria-selected={highlightedIndex === index}
-                  className={`${highlightedIndex === index ? "is-highlighted" : ""}${action.create ? " is-create" : ""}`}
-                  key={action.id}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onMouseEnter={() => setHighlightedIndex(index)}
-                  onClick={() => selectAction(action)}
-                  role="option"
-                  tabIndex={shouldOpen ? 0 : -1}
-                  type="button"
-                >
-                  {action.create ? "+ " : ""}{action.create ? `Create “${action.label}”` : action.label}
-                </button>
-              ))}
-              {actions.length === 0 ? <span className="inline-tag-empty">Type a name to search or create</span> : null}
-            </div>
+          <span className="inline-tag-suggestions-title">TAGS</span>
+          <div>
+            {actions.map((action, index) => (
+              <button
+                aria-label={action.create ? `Create new tag, ${action.label}` : `Existing tag, ${action.label}`}
+                aria-selected={highlightedIndex === index}
+                className={`${highlightedIndex === index ? "is-highlighted" : ""}${action.create ? " is-create" : ""}`}
+                key={action.id}
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => setHighlightedIndex(index)}
+                onClick={() => selectAction(action)}
+                role="option"
+                tabIndex={shouldOpen ? 0 : -1}
+                type="button"
+              >
+                {action.create ? "+ " : ""}{action.create ? `Create “${action.label}”` : action.label}
+              </button>
+            ))}
+            {actions.length === 0 ? <span className="inline-tag-empty">Type a name to search or create</span> : null}
+          </div>
         </div>
+        {pickerOpen ? (
+          <section aria-label="Add or filter tags" className="inline-tag-picker" role="dialog">
+            <div className="inline-tag-picker-header">
+              <strong>Tags</strong>
+              <button
+                aria-label="Close tag picker"
+                onClick={() => {
+                  setPickerOpen(false);
+                  localInputRef.current?.focus();
+                }}
+                type="button"
+              >
+                <X aria-hidden="true" size={17} strokeWidth={1.8} />
+              </button>
+            </div>
+            <div className="inline-tag-picker-search">
+              <Tag aria-hidden="true" size={15} strokeWidth={1.7} />
+              <input
+                aria-label="Add or filter tags"
+                autoComplete="off"
+                onChange={(event) => setPickerQuery(event.target.value)}
+                placeholder="Add/filter tags"
+                ref={pickerInputRef}
+                value={pickerQuery}
+              />
+            </div>
+            <div className="inline-tag-picker-list">
+              {pickerMatches.map((tag) => {
+                const selected = selectedNormalized.has(tag.normalizedName);
+                return (
+                  <button
+                    aria-pressed={selected}
+                    key={tag.id}
+                    onClick={() => toggleSelectedTag(tag.name)}
+                    type="button"
+                  >
+                    <span className={`inline-tag-check${selected ? " is-selected" : ""}`}>
+                      {selected ? <Check aria-hidden="true" size={13} strokeWidth={2.3} /> : null}
+                    </span>
+                    <span>{tag.name}</span>
+                  </button>
+                );
+              })}
+              {pickerMatches.length === 0 && !pickerCreateName ? (
+                <span className="inline-tag-empty">No matching tags</span>
+              ) : null}
+            </div>
+            {pickerCreateName ? (
+              <button
+                className="inline-tag-picker-create"
+                onClick={() => {
+                  addSelectedTag(pickerCreateName);
+                  setPickerQuery("");
+                  pickerInputRef.current?.focus();
+                }}
+                type="button"
+              >
+                + Create “{pickerCreateName}”
+              </button>
+            ) : null}
+          </section>
+        ) : null}
       </div>
       <span className="inline-tag-help" id={`${name}-tag-help`}>
-        {appliedTagNames.length > 0
-          ? <TagMetadata active tagNames={appliedTagNames} />
-          : "Type # to add a tag"}
+        <TagMetadata active tagNames={selectedTagNames} />
       </span>
     </div>
   );

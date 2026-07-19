@@ -25,12 +25,14 @@ describe("web task suggestion interaction", () => {
     expect(dashboardSource).toContain("taskSuggestions.slice(0, 6)");
   });
 
-  it("syncs tag-only changes and restores persisted tag tokens after a failed save", () => {
+  it("syncs tag-only changes and restores clean description plus persisted tag state after failure", () => {
     expect(dashboardSource).toContain(
       "JSON.stringify(nextNormalizedTagNames) === JSON.stringify(activeNormalizedTagNames)"
     );
     expect(dashboardSource).toContain(
-      "setDescription(descriptionWithTagTokens(active.description, active.tags))"
+      "setDescription(active.description ?? \"\")"
     );
+    expect(dashboardSource).toContain("setSelectedTagNames(active.tagNames)");
+    expect(dashboardSource).not.toContain("descriptionWithTagTokens");
   });
 });

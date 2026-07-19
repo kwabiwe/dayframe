@@ -18,12 +18,11 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import {
+  consumeActiveHashtag,
   findActiveHashtag,
-  descriptionWithTagTokens,
+  insertHashtagStarter,
   normalizeTagName,
   paletteColorFor,
-  replaceActiveHashtag,
-  tagNamesFromDescription,
   type RecentActivitySuggestion
 } from "@dayframe/shared";
 import { FloatingDatePicker } from "@/components/FloatingDatePicker";
@@ -105,6 +104,7 @@ export function ActiveTimerEditSheet({
   const [deleteConfirmationVisible, setDeleteConfirmationVisible] = useState(false);
   const [descriptionFocused, setDescriptionFocused] = useState(false);
   const [descriptionSelection, setDescriptionSelection] = useState({ start: 0, end: 0 });
+  const [selectedTagNames, setSelectedTagNames] = useState<string[]>([]);
   const [hashtagPanelMounted, setHashtagPanelMounted] = useState(false);
   const [highlightedTagAction, setHighlightedTagAction] = useState<string | null>(null);
   const reduceMotion = useReduceMotionPreference();
@@ -156,11 +156,9 @@ export function ActiveTimerEditSheet({
     if (!snapshot.startedAt) return;
     const startedAt = new Date(snapshot.startedAt);
     descriptionEntryStarted.current = false;
-    const hydratedDescription = descriptionWithTagTokens(
-      snapshot.description,
-      snapshot.tags
-    );
+    const hydratedDescription = snapshot.description ?? "";
     setDescription(hydratedDescription);
+    setSelectedTagNames(snapshot.tags.map((tag) => tag.name));
     setDescriptionSelection({
       start: hydratedDescription.length,
       end: hydratedDescription.length
@@ -305,10 +303,11 @@ export function ActiveTimerEditSheet({
     }
   }, [activeHashtag, exactTagMatch]);
   const hashtagPanelVisible = descriptionFocused && Boolean(activeHashtag);
-  const appliedTagNames = useMemo(
-    () => tagNamesFromDescription(description, tags),
-    [description, tags]
+  const selectedNormalizedTagNames = useMemo(
+    () => new Set(selectedTagNames.map((name) => normalizeTagName(name).normalizedName)),
+    [selectedTagNames]
   );
+  const appliedTagNames = selectedTagNames;
 
   useEffect(() => {
     if (hashtagPanelVisible) setHashtagPanelMounted(true);
@@ -577,9 +576,37 @@ export function ActiveTimerEditSheet({
 
   function selectHashtag(tagName: string) {
     if (!activeHashtag) return;
-    const replacement = replaceActiveHashtag(description, activeHashtag, tagName);
+    const normalized = normalizeTagName(tagName);
+    const existing = tags.find((tag) => tag.normalizedName === normalized.normalizedName);
+    if (selectedNormalizedTagNames.has(normalized.normalizedName)) {
+      setSelectedTagNames((current) => current.filter(
+        (name) => normalizeTagName(name).normalizedName !== normalized.normalizedName
+      ));
+    } else {
+      setSelectedTagNames((current) => [...current, existing?.name ?? normalized.name]);
+    }
+    const replacement = consumeActiveHashtag(description, activeHashtag);
     setDescription(replacement.text);
     setDescriptionSelection({ start: replacement.caret, end: replacement.caret });
+    setValidationError(null);
+    setTimeout(() => descriptionInputRef.current?.focus(), 0);
+  }
+
+  function startTagEntry() {
+    if (busy) return;
+    setDatePickerOpen(false);
+    descriptionEntryStarted.current = true;
+    hideSuggestionsForDescriptionEntry();
+    const currentActive = findActiveHashtag(description, descriptionSelection.end);
+    if (currentActive && descriptionSelection.start === descriptionSelection.end) {
+      setDescriptionFocused(true);
+      setTimeout(() => descriptionInputRef.current?.focus(), 0);
+      return;
+    }
+    const next = insertHashtagStarter(description, descriptionSelection);
+    setDescription(next.text);
+    setDescriptionSelection({ start: next.caret, end: next.caret });
+    setDescriptionFocused(true);
     setValidationError(null);
     setTimeout(() => descriptionInputRef.current?.focus(), 0);
   }
@@ -793,7 +820,7 @@ export function ActiveTimerEditSheet({
                           {matchingTags.map((tag, index) => (
                             <HashtagSuggestionRow
                               key={tag.id}
-                              accessibilityLabel={`Existing tag, ${tag.name}`}
+                              accessibilityLabel={`${selectedNormalizedTagNames.has(tag.normalizedName) ? "Remove selected" : "Existing"} tag, ${tag.name}`}
                               disabled={busy}
                               highlighted={highlightedTagAction === tag.id}
                               isFirst={index === 0}
@@ -827,11 +854,26 @@ export function ActiveTimerEditSheet({
                       </Animated.View>
                     ) : null}
                   </View>
-                  {appliedTagNames.length > 0 ? (
-                    <TagMetadata active styles={styles} tagNames={appliedTagNames} theme={theme} />
-                  ) : (
-                    <Text style={styles.tagDescriptionHelper}>Type # to add a tag</Text>
-                  )}
+                  <View style={styles.tagEditorFooter}>
+                    <Pressable
+                      accessibilityHint="Focuses Description and starts tag entry"
+                      accessibilityLabel="Add a tag"
+                      accessibilityRole="button"
+                      disabled={busy}
+                      hitSlop={8}
+                      onPress={startTagEntry}
+                      style={({ pressed }) => [
+                        styles.tagAddButton,
+                        pressed && !busy ? styles.buttonPressed : null,
+                        busy ? styles.buttonDisabled : null
+                      ]}
+                    >
+                      <Text style={styles.tagAddButtonText}>Add a tag</Text>
+                    </Pressable>
+                    {appliedTagNames.length > 0 ? (
+                      <TagMetadata active styles={styles} tagNames={appliedTagNames} theme={theme} />
+                    ) : null}
+                  </View>
                 </View>
 
                 <View style={styles.activeEditSection}>

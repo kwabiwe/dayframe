@@ -144,6 +144,44 @@ export function replaceActiveHashtag(
   };
 }
 
+/** Removes a temporary hashtag command while preserving readable surrounding text. */
+export function consumeActiveHashtag(text: string, active: ActiveHashtagQuery) {
+  const prefix = text.slice(0, active.start);
+  const suffix = text.slice(active.end);
+
+  if (!prefix) {
+    const next = suffix.replace(/^\s+/, "");
+    return { caret: 0, text: next };
+  }
+  if (!suffix) {
+    const next = prefix.replace(/\s+$/, "");
+    return { caret: next.length, text: next };
+  }
+  if (/\s$/.test(prefix) && /^\s/.test(suffix)) {
+    const nextSuffix = suffix.replace(/^\s+/, "");
+    return { caret: prefix.length, text: `${prefix}${nextSuffix}` };
+  }
+
+  return { caret: prefix.length, text: `${prefix}${suffix}` };
+}
+
+/** Inserts the mobile tag-entry shortcut at the caret without disturbing existing copy. */
+export function insertHashtagStarter(
+  text: string,
+  selection: { start: number; end: number }
+) {
+  const start = Math.max(0, Math.min(selection.start, text.length));
+  const end = Math.max(start, Math.min(selection.end, text.length));
+  const prefix = text.slice(0, start);
+  const suffix = text.slice(end);
+  const spacer = prefix && !isValidHashtagBoundary(`${prefix}#`, prefix.length) ? " " : "";
+  const inserted = `${spacer}#`;
+  return {
+    caret: prefix.length + inserted.length,
+    text: `${prefix}${inserted}${suffix}`
+  };
+}
+
 export function tagNamesFromDescription(
   description: string,
   availableTags: Array<{ name: string; normalizedName: string }>
@@ -158,23 +196,4 @@ export function tagNamesFromDescription(
       const normalizedName = normalizeTagName(name).normalizedName;
       return names.findIndex((candidate) => normalizeTagName(candidate).normalizedName === normalizedName) === index;
     });
-}
-
-/** Hydrates an editor from persisted associations without making description parsing the read source of truth. */
-export function descriptionWithTagTokens(
-  description: string | null | undefined,
-  tags: Array<{ normalizedName: string }>
-) {
-  const current = description ?? "";
-  const existing = new Set(parseHashtagTokens(current).map((token) => token.normalizedName));
-  const missing = tags
-    .map((tag) => tag.normalizedName.toLowerCase())
-    .filter((normalizedName, index, names) =>
-      TAG_TOKEN_PATTERN.test(normalizedName) &&
-      !existing.has(normalizedName) &&
-      names.indexOf(normalizedName) === index
-    );
-  if (missing.length === 0) return current;
-  const suffix = missing.map((normalizedName) => `#${normalizedName}`).join(" ");
-  return current.trimEnd() ? `${current.trimEnd()} ${suffix}` : suffix;
 }

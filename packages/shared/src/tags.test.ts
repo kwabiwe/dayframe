@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  consumeActiveHashtag,
   findActiveHashtag,
-  descriptionWithTagTokens,
+  insertHashtagStarter,
   normalizeTagName,
   parseHashtagTokens,
   replaceActiveHashtag,
@@ -60,6 +61,30 @@ describe("hashtag parsing", () => {
 });
 
 describe("hashtag insertion", () => {
+  it("consumes a selected temporary token without damaging description spacing", () => {
+    const middle = "Plan #dee then review";
+    expect(consumeActiveHashtag(middle, findActiveHashtag(middle, 9)!)).toEqual({
+      caret: 5,
+      text: "Plan then review"
+    });
+    const end = "Plan #dee";
+    expect(consumeActiveHashtag(end, findActiveHashtag(end, end.length)!)).toEqual({
+      caret: 4,
+      text: "Plan"
+    });
+  });
+
+  it("inserts a mobile hashtag starter at the caret with a safe boundary", () => {
+    expect(insertHashtagStarter("Plan", { start: 4, end: 4 })).toEqual({
+      caret: 6,
+      text: "Plan #"
+    });
+    expect(insertHashtagStarter("Plan later", { start: 5, end: 10 })).toEqual({
+      caret: 6,
+      text: "Plan #"
+    });
+  });
+
   it("replaces the whole token at the caret and preserves punctuation", () => {
     const text = "Plan #pl, then review";
     const active = findActiveHashtag(text, 8);
@@ -68,14 +93,6 @@ describe("hashtag insertion", () => {
       caret: 14,
       text: "Plan #planning, then review"
     });
-  });
-
-  it("hydrates editors from persisted associations without duplicating inline tokens", () => {
-    expect(descriptionWithTagTokens("Draft plan #planning", [
-      { normalizedName: "planning" },
-      { normalizedName: "deep-work" }
-    ])).toBe("Draft plan #planning #deep-work");
-    expect(descriptionWithTagTokens(null, [{ normalizedName: "planning" }])).toBe("#planning");
   });
 
   it("maps inline slugs back to canonical display names", () => {
