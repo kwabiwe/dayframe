@@ -6,8 +6,15 @@ const source = readFileSync(
   fileURLToPath(new URL("./InlineTagInput.tsx", import.meta.url)),
   "utf8"
 );
+const iconSource = readFileSync(fileURLToPath(new URL("./TagIcon.tsx", import.meta.url)), "utf8");
 
 describe("web tag editor interaction contract", () => {
+  it("uses the shared solid rounded tag silhouette", () => {
+    expect(source).toContain("<TagIcon size={17} />");
+    expect(iconSource).toContain('fill="currentColor"');
+    expect(iconSource).toContain('fillRule="evenodd"');
+  });
+
   it("opens an icon-triggered search/select/create picker with mobile-safe semantics", () => {
     expect(source).toContain('aria-label="Add or filter tags"');
     expect(source).toContain('placeholder="Add/filter tags"');

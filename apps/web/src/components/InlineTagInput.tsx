@@ -5,7 +5,7 @@ import {
   findActiveHashtag,
   normalizeTagName
 } from "@dayframe/shared";
-import { Check, Tag, X } from "lucide-react";
+import { Check, X } from "lucide-react";
 import {
   useEffect,
   useMemo,
@@ -16,6 +16,7 @@ import {
 } from "react";
 import type { TagRow } from "@/lib/queries";
 import { TagMetadata } from "@/components/TagMetadata";
+import { TagIcon } from "@/components/TagIcon";
 
 export function InlineTagInput({
   ariaLabel,
@@ -258,7 +259,7 @@ export function InlineTagInput({
           }}
           type="button"
         >
-          <Tag aria-hidden="true" size={17} strokeWidth={1.8} />
+          <TagIcon size={17} />
         </button>
         <div
           aria-hidden={!shouldOpen}
@@ -303,7 +304,7 @@ export function InlineTagInput({
               </button>
             </div>
             <div className="inline-tag-picker-search">
-              <Tag aria-hidden="true" size={15} strokeWidth={1.7} />
+              <TagIcon size={15} />
               <input
                 aria-label="Add or filter tags"
                 autoComplete="off"

@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 
 const sheet = readFileSync(fileURLToPath(new URL("./ActiveTimerEditSheet.tsx", import.meta.url)), "utf8");
 const dashboard = readFileSync(fileURLToPath(new URL("./DayframeDashboard.tsx", import.meta.url)), "utf8");
+const metadata = readFileSync(fileURLToPath(new URL("./TagMetadata.tsx", import.meta.url)), "utf8");
+const theme = readFileSync(fileURLToPath(new URL("../lib/mobileTheme.ts", import.meta.url)), "utf8");
 
 describe("mobile tag interaction contract", () => {
   it("keeps the autocomplete owned by the description field with bounded interruptible motion", () => {
@@ -28,6 +30,15 @@ describe("mobile tag interaction contract", () => {
     expect(sheet).toContain("setSelectedTagNames");
     expect(sheet).not.toContain("descriptionWithTagTokens");
     expect(sheet).not.toContain("Type # to add a tag");
+  });
+
+  it("uses a contrasting chooser, solid icon, and draft-only tag removal", () => {
+    expect(theme).toContain('backgroundColor: theme.mode === "dark" ? theme.borderStrong : theme.surfaceMuted');
+    expect(metadata).toContain('fill={color}');
+    expect(metadata).toContain('fillRule="evenodd"');
+    expect(metadata).toContain('accessibilityLabel={`Remove tag ${tagName}`}');
+    expect(sheet).toContain("onPressTag={(tagName) => {");
+    expect(sheet).toContain("tagNames: appliedTagNames");
   });
 
   it("rolls a failed optimistic save back to the exact pre-edit dashboard snapshot", () => {

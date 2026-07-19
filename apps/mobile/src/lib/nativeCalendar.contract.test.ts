@@ -62,7 +62,7 @@ describe("native Calendar production contract", () => {
 
     expect(records).toContain("@Field var tagText: String?");
     expect(model).toContain("tagText = record.tagText");
-    expect(rootView).toContain("Image(systemName: \"tag\")");
+    expect(rootView).toContain("Image(systemName: \"tag.fill\")");
     expect(rootView).toContain("theme.textSecondary");
     expect(rootView).not.toContain("URLSession");
   });

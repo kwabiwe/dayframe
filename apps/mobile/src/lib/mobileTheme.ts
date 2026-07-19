@@ -2180,7 +2180,7 @@ function createStyles(theme: MobileTheme) {
       left: 0,
       right: 0,
       zIndex: 30,
-      backgroundColor: theme.surfaceRaised,
+      backgroundColor: theme.mode === "dark" ? theme.borderStrong : theme.surfaceMuted,
       borderRadius: 14,
       overflow: "hidden",
       shadowColor: theme.shadow,
@@ -2260,6 +2260,23 @@ function createStyles(theme: MobileTheme) {
       flexDirection: "row",
       alignItems: "center",
       gap: 5
+    },
+    tagMetadataTagGroup: {
+      minWidth: 0,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5
+    },
+    tagMetadataTagButton: {
+      minWidth: 0,
+      minHeight: 28,
+      justifyContent: "center"
+    },
+    tagMetadataSeparator: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "400"
     },
     tagMetadataText: {
       minWidth: 0,
