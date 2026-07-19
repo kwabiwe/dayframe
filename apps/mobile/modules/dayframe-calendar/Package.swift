@@ -20,11 +20,10 @@ let package = Package(
         "DayframeCalendarExpoView.swift",
         "DayframeCalendarModel.swift",
         "DayframeCalendarModule.swift",
-        "DayframeCalendarRecords.swift",
         "DayframeCalendarRootView.swift",
         "DayframeCalendarScrollCoordinator.swift"
       ],
-      sources: ["DayframeCalendarCore.swift"]
+      sources: ["DayframeCalendarCore.swift", "DayframeCalendarRecords.swift"]
     ),
     .testTarget(
       name: "DayframeCalendarCoreTests",

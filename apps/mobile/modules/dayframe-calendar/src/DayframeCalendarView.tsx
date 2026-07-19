@@ -1,5 +1,5 @@
 import { requireNativeViewManager } from "expo-modules-core";
-import type { ComponentType } from "react";
+import { useMemo, type ComponentType } from "react";
 import type { NativeSyntheticEvent, ViewProps } from "react-native";
 import type { NativeCalendarPresentation } from "../../../src/lib/nativeCalendarPresentation";
 
@@ -20,9 +20,14 @@ export type DayframeCalendarViewProps = ViewProps & {
   onSelectDay?: (event: NativeSyntheticEvent<DayframeCalendarSelectDayEvent>) => void;
 };
 
-const NativeDayframeCalendarView: ComponentType<DayframeCalendarViewProps> =
+type NativeDayframeCalendarViewProps = Omit<DayframeCalendarViewProps, "model"> & {
+  modelJSON: string;
+};
+
+const NativeDayframeCalendarView: ComponentType<NativeDayframeCalendarViewProps> =
   requireNativeViewManager("DayframeCalendar");
 
-export function DayframeCalendarView(props: DayframeCalendarViewProps) {
-  return <NativeDayframeCalendarView {...props} />;
+export function DayframeCalendarView({ model, ...props }: DayframeCalendarViewProps) {
+  const modelJSON = useMemo(() => JSON.stringify(model), [model]);
+  return <NativeDayframeCalendarView {...props} modelJSON={modelJSON} />;
 }

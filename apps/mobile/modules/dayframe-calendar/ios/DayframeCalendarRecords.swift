@@ -1,64 +1,64 @@
-import ExpoModulesCore
+import Foundation
 
-struct DayframeCalendarThemeRecord: Record {
-  @Field var accent: String = "#FF6248"
-  @Field var accentSoft: String = "rgba(255, 98, 72, 0.12)"
-  @Field var accentText: String = "#FF6248"
-  @Field var background: String = "#050914"
-  @Field var border: String = "#2A3345"
-  @Field var borderStrong: String = "#3B465B"
-  @Field var mode: String = "dark"
-  @Field var shadow: String = "rgba(0, 0, 0, 0.32)"
-  @Field var surface: String = "#151B27"
-  @Field var surfaceMuted: String = "#202838"
-  @Field var surfaceRaised: String = "#1B2230"
-  @Field var textPrimary: String = "#F7F8FB"
-  @Field var textSecondary: String = "#8993A7"
+struct DayframeCalendarThemeRecord: Codable {
+  var accent = "#FF6248"
+  var accentSoft = "rgba(255, 98, 72, 0.12)"
+  var accentText = "#FF6248"
+  var background = "#050914"
+  var border = "#2A3345"
+  var borderStrong = "#3B465B"
+  var mode = "dark"
+  var shadow = "rgba(0, 0, 0, 0.32)"
+  var surface = "#151B27"
+  var surfaceMuted = "#202838"
+  var surfaceRaised = "#1B2230"
+  var textPrimary = "#F7F8FB"
+  var textSecondary = "#8993A7"
 }
 
-struct DayframeCalendarWeekDayRecord: Record {
-  @Field var accessibilityLabel: String = ""
-  @Field var dayKey: String = ""
-  @Field var dayNumber: String = ""
-  @Field var isSelected: Bool = false
-  @Field var isToday: Bool = false
-  @Field var weekdayLabel: String = ""
+struct DayframeCalendarWeekDayRecord: Codable {
+  var accessibilityLabel = ""
+  var dayKey = ""
+  var dayNumber = ""
+  var isSelected = false
+  var isToday = false
+  var weekdayLabel = ""
 }
 
-struct DayframeCalendarEntryRecord: Record {
-  @Field var actionId: String = ""
-  @Field var actionKind: String = "completed"
-  @Field var accessibilityLabel: String = ""
-  @Field var color: String = "#7F91AB"
-  @Field var continuesIntoNextDay: Bool = false
-  @Field var entryId: String = ""
-  @Field var isActive: Bool = false
-  @Field var isReview: Bool = false
-  @Field var isUncategorized: Bool = false
-  @Field var meta: String = ""
-  @Field var startedAtMs: Double = 0
-  @Field var startsBeforeDay: Bool = false
-  @Field var stoppedAtMs: Double?
-  @Field var tagText: String?
-  @Field var title: String = ""
+struct DayframeCalendarEntryRecord: Codable {
+  var actionId = ""
+  var actionKind = "completed"
+  var accessibilityLabel = ""
+  var color = "#7F91AB"
+  var continuesIntoNextDay = false
+  var entryId = ""
+  var isActive = false
+  var isReview = false
+  var isUncategorized = false
+  var meta = ""
+  var startedAtMs: Double = 0
+  var startsBeforeDay = false
+  var stoppedAtMs: Double?
+  var tagText: String?
+  var title = ""
 }
 
-struct DayframeCalendarPresentationRecord: Record {
-  @Field var dayEndMs: Double = 0
-  @Field var dayStartMs: Double = 0
-  @Field var emptyState: String = "No tracked time for this day."
-  @Field var entries: [DayframeCalendarEntryRecord] = []
-  @Field var modelVersion: Int = 2
-  @Field var nowMs: Double = 0
-  @Field var reduceMotion: Bool = false
-  @Field var reduceTransparency: Bool = false
-  @Field var refreshing: Bool = false
-  @Field var selectedDayKey: String = ""
-  @Field var selectedDayTitle: String = "Calendar"
-  @Field var theme: DayframeCalendarThemeRecord = DayframeCalendarThemeRecord()
-  @Field var todayKey: String = ""
-  @Field var totalLabel: String = "0m"
-  @Field var totalSeconds: Double = 0
-  @Field var transitionDirection: Int = 1
-  @Field var weekDays: [DayframeCalendarWeekDayRecord] = []
+struct DayframeCalendarPresentationRecord: Codable {
+  var dayEndMs: Double = 0
+  var dayStartMs: Double = 0
+  var emptyState = "No tracked time for this day."
+  var entries: [DayframeCalendarEntryRecord] = []
+  var modelVersion = 2
+  var nowMs: Double = 0
+  var reduceMotion = false
+  var reduceTransparency = false
+  var refreshing = false
+  var selectedDayKey = ""
+  var selectedDayTitle = "Calendar"
+  var theme = DayframeCalendarThemeRecord()
+  var todayKey = ""
+  var totalLabel = "0m"
+  var totalSeconds: Double = 0
+  var transitionDirection = 1
+  var weekDays: [DayframeCalendarWeekDayRecord] = []
 }

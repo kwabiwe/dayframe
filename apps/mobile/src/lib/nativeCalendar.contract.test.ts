@@ -27,6 +27,7 @@ describe("native Calendar production contract", () => {
 
     expect(expoView).toContain("private var hostingController: UIHostingController");
     expect(expoView.match(/hostingController = controller/g)).toHaveLength(1);
+    expect(expoView).toContain("JSONDecoder().decode(DayframeCalendarPresentationRecord.self");
     expect(expoView).toContain("model.update(record)");
     expect(model).toContain("@Published private(set) var hourHeight");
     expect(model).not.toContain("hourHeight = DayframeCalendarConstants.defaultHourHeight\n  }");
@@ -60,7 +61,7 @@ describe("native Calendar production contract", () => {
     const model = readFileSync(`${moduleRoot}ios/DayframeCalendarModel.swift`, "utf8");
     const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
 
-    expect(records).toContain("@Field var tagText: String?");
+    expect(records).toContain("var tagText: String?");
     expect(model).toContain("tagText = record.tagText");
     expect(rootView).toContain("Image(systemName: \"tag.fill\")");
     expect(rootView).toContain("theme.textSecondary");

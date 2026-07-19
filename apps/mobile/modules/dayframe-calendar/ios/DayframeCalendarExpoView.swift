@@ -58,9 +58,15 @@ final class DayframeCalendarExpoView: ExpoView {
     attachHostingControllerIfPossible()
   }
 
-  func update(model record: DayframeCalendarPresentationRecord) {
-    model.update(record)
-    backgroundColor = UIColor(dayframeCSS: record.theme.background)
+  func update(modelJSON: String) {
+    guard let data = modelJSON.data(using: .utf8) else { return }
+    do {
+      let record = try JSONDecoder().decode(DayframeCalendarPresentationRecord.self, from: data)
+      model.update(record)
+      backgroundColor = UIColor(dayframeCSS: record.theme.background)
+    } catch {
+      assertionFailure("Invalid Dayframe Calendar model: \(error)")
+    }
   }
 
   private func emitOpen(_ target: DayframeCalendarActionTarget) {

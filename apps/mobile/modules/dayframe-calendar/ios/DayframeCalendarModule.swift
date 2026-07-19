@@ -15,8 +15,8 @@ public final class DayframeCalendarModule: Module {
         "onSelectDay"
       )
 
-      Prop("model") { (view, model: DayframeCalendarPresentationRecord) in
-        view.update(model: model)
+      Prop("modelJSON") { (view, modelJSON: String) in
+        view.update(modelJSON: modelJSON)
       }
     }
   }
