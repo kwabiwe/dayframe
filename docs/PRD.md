@@ -8,7 +8,7 @@ The core value proposition is to reduce manual time-tracking friction without lo
 
 The MVP goal is to make Dayframe reliable for personal use and a small friends beta: hosted on Vercel, backed by Supabase Postgres/Auth, iOS-only for mobile, offline-capable for hours or days, and privacy-conscious around health and precise location data.
 
-Current reality as of 2026-07-19: Dayframe is in an active internal TestFlight lane, with build `0.1.0 (57)` verified for KB testing after PR #84. Reusable Tags now span hosted storage, web/API, offline-capable mobile entry, native Calendar presentation, clean Description/tag state separation, a mobile `Add a tag` shortcut, a web tag picker, higher-contrast mobile autocomplete, solid tag iconography, and draft-only tap-to-remove editing, and remain under physical-device/authenticated-browser Watch. The native SwiftUI Calendar surface also remains under physical-device Watch for pinch smoothness, taps, accessibility settings, and frame pacing. The tracker in `docs/feature-fix-tracker.md` is the source of truth for what is `Done`, still under `Watch`, or planned next.
+Current reality as of 2026-07-19: Dayframe is in an active internal TestFlight lane, with build `0.1.0 (57)` verified for KB testing after PR #84. Reusable Tags now span hosted storage, web/API, offline-capable mobile entry, native Calendar presentation, clean Description/tag state separation, a mobile `Add a tag` shortcut, a web tag picker, higher-contrast mobile autocomplete, solid tag iconography, and draft-only tap-to-remove editing. A physical-iPhone regression in build 57 has reopened native Calendar interaction/data integrity as active work: day taps, day/week swipes, and visible tracked-entry refresh are not accepted until the native event/model boundary is diagnosed and retested. The tracker in `docs/feature-fix-tracker.md` is the source of truth for what is `Done`, still under `Watch`, or actively `In progress`.
 
 ## 2. Mission
 
@@ -405,8 +405,8 @@ Deliverables:
 - ✅ Review inbox improvements.
 - ✅ Reports and automation accuracy metrics.
 - ⚠️ Settings for permissions and export exist; deletion/privacy controls still need the next-phase work tracked in `docs/feature-fix-tracker.md`.
-- ✅ Internal TestFlight build workflow is active and verified through `0.1.0 (48)`.
-- ⚠️ Native SwiftUI Calendar is in TestFlight build `0.1.0 (47)` and remains under physical-device Watch for pinch smoothness, entry/review taps, accessibility settings, and frame pacing.
+- ✅ Internal TestFlight build workflow is active and verified through `0.1.0 (57)`.
+- ❌ Native SwiftUI Calendar is actively regressed in TestFlight build `0.1.0 (57)`: physical-iPhone day taps/day swipes/week swipes and visible tracked-entry refresh are under investigation before further implementation.
 
 Validation:
 
