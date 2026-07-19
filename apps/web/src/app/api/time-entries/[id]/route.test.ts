@@ -80,6 +80,20 @@ describe("PATCH /api/time-entries/[id]", () => {
     expect(mocks.updateTimeEntry).not.toHaveBeenCalled();
   });
 
+  it("accepts an optional complete tag association set", async () => {
+    const response = await PATCH(
+      jsonRequest({ description: "Plan #planning", tagNames: ["Planning"] }),
+      routeContext()
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.updateTimeEntry).toHaveBeenCalledWith(
+      "entry-1",
+      { description: "Plan #planning", tagNames: ["Planning"] },
+      session
+    );
+  });
+
   it("rejects a start time after a completed entry finish time", async () => {
     const response = await PATCH(
       jsonRequest({

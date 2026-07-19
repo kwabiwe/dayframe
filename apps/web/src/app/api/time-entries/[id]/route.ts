@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { ZodError } from "zod";
+import { z, ZodError } from "zod";
 import { deleteTimeEntry, TimeEntryNotFoundError, updateTimeEntry } from "@/lib/event-service";
 import { authErrorResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
+import { TagNameSchema } from "@dayframe/shared";
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
@@ -16,6 +17,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (Object.prototype.hasOwnProperty.call(body, "description")) update.description = optionalStringOrNull(body.description);
     if (Object.prototype.hasOwnProperty.call(body, "startedAt")) update.startedAt = requiredString(body.startedAt, "startedAt");
     if (Object.prototype.hasOwnProperty.call(body, "stoppedAt")) update.stoppedAt = optionalStringOrNull(body.stoppedAt);
+    if (Object.prototype.hasOwnProperty.call(body, "tagNames")) {
+      update.tagNames = z.array(TagNameSchema).max(24).parse(body.tagNames);
+    }
     validateTimeWindow(update);
     await updateTimeEntry(id, update, session);
     return NextResponse.json({ ok: true });
@@ -24,6 +28,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (response) return response;
     if (error instanceof ZodError || error instanceof BadRequestError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    if (error instanceof TimeEntryNotFoundError) {
+      return NextResponse.json({ error: error.message }, { status: 404 });
     }
     throw error;
   }

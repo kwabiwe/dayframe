@@ -44,7 +44,8 @@ export type ProjectRow = {
 export type TagRow = {
   id: string;
   name: string;
-  color: string;
+  normalizedName: string;
+  usageCount: number;
 };
 
 export type PlaceRow = {
@@ -126,6 +127,7 @@ export type TimeEntryRow = {
   stoppedAt: string | null;
   durationSeconds: number;
   tagNames: string[];
+  tags: Array<Pick<TagRow, "id" | "name" | "normalizedName">>;
 };
 
 export type ReviewItemRow = {
@@ -439,12 +441,18 @@ async function getProjects(session: RequestSession) {
   return result.rows;
 }
 
-async function getTags(session: RequestSession) {
+export async function getTags(session: RequestSession) {
   const result = await query<TagRow>(
-    `select id, name, color
-     from tags
-     where workspace_id = $1
-     order by name`,
+    `select tag.id,
+            tag.name,
+            tag.normalized_name as "normalizedName",
+            count(tet.time_entry_id)::int as "usageCount"
+     from tags tag
+     left join time_entry_tags tet
+       on tet.tag_id = tag.id and tet.workspace_id = tag.workspace_id
+     where tag.workspace_id = $1
+     group by tag.id
+     order by tag.name`,
     [session.workspaceId]
   );
   return result.rows;
@@ -650,9 +658,24 @@ async function getTimeEntries(
             (
               select coalesce(array_agg(t.name order by t.name), '{}')
               from time_entry_tags tet
-              join tags t on t.id = tet.tag_id
-              where tet.time_entry_id = te.id
+              join tags t on t.id = tet.tag_id and t.workspace_id = te.workspace_id
+              where tet.time_entry_id = te.id and tet.workspace_id = te.workspace_id
             ) as "tagNames",
+            (
+              select coalesce(
+                json_agg(
+                  json_build_object(
+                    'id', t.id,
+                    'name', t.name,
+                    'normalizedName', t.normalized_name
+                  ) order by t.name
+                ),
+                '[]'::json
+              )
+              from time_entry_tags tet
+              join tags t on t.id = tet.tag_id and t.workspace_id = te.workspace_id
+              where tet.time_entry_id = te.id and tet.workspace_id = te.workspace_id
+            ) as tags,
             extract(epoch from (coalesce(te.stopped_at, now()) - te.started_at))::int as "durationSeconds"
      from time_entries te
      left join projects p on p.id = te.project_id and p.workspace_id = te.workspace_id
@@ -796,9 +819,24 @@ async function getActiveEntry(session: RequestSession) {
             (
               select coalesce(array_agg(t.name order by t.name), '{}')
               from time_entry_tags tet
-              join tags t on t.id = tet.tag_id
-              where tet.time_entry_id = te.id
+              join tags t on t.id = tet.tag_id and t.workspace_id = te.workspace_id
+              where tet.time_entry_id = te.id and tet.workspace_id = te.workspace_id
             ) as "tagNames",
+            (
+              select coalesce(
+                json_agg(
+                  json_build_object(
+                    'id', t.id,
+                    'name', t.name,
+                    'normalizedName', t.normalized_name
+                  ) order by t.name
+                ),
+                '[]'::json
+              )
+              from time_entry_tags tet
+              join tags t on t.id = tet.tag_id and t.workspace_id = te.workspace_id
+              where tet.time_entry_id = te.id and tet.workspace_id = te.workspace_id
+            ) as tags,
             extract(epoch from (now() - te.started_at))::int as "durationSeconds"
      from time_entries te
      left join projects p on p.id = te.project_id and p.workspace_id = te.workspace_id

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
@@ -13,7 +13,12 @@ async function run() {
   await client.connect();
 
   try {
-    for (const file of ["migrations/001_init.sql", "seed.sql"]) {
+    const migrations = readdirSync(resolve(root, "migrations"))
+      .filter((file) => file.endsWith(".sql"))
+      .sort()
+      .map((file) => `migrations/${file}`);
+
+    for (const file of [...migrations, "seed.sql"]) {
       const sql = readFileSync(resolve(root, file), "utf8");
       console.log(`Applying ${file}`);
       await client.query(sql);

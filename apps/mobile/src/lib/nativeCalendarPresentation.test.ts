@@ -31,7 +31,7 @@ describe("native Calendar presentation boundary", () => {
       transitionDirection: 1
     });
 
-    expect(state.model.modelVersion).toBe(1);
+    expect(state.model.modelVersion).toBe(2);
     expect(state.model.dayEndMs - state.model.dayStartMs).toBe(24 * 60 * 60 * 1000);
     expect(state.model.totalSeconds).toBe(90 * 60);
     expect(state.model.weekDays).toHaveLength(7);
@@ -178,6 +178,19 @@ describe("native Calendar presentation boundary", () => {
     expect(onRequestRefresh).toHaveBeenCalledOnce();
     expect(directTimerMutation).not.toHaveBeenCalled();
     expect(build(now, bootstrap([])).model.nowMs).toBe(now);
+  });
+
+  it("serializes quiet tag metadata for Swift without giving Swift a tag data store", () => {
+    const now = localTime(2026, 7, 10, 12, 0);
+    const state = build(now, bootstrap([entry({
+      tags: [
+        { id: "tag-1", name: "Planning", normalizedName: "planning" },
+        { id: "tag-2", name: "Deep work", normalizedName: "deep-work" }
+      ]
+    })]));
+
+    expect(state.model.entries[0].tagText).toBe("Planning · Deep work");
+    expect(state.model.entries[0].accessibilityLabel).toContain("Tags: Planning · Deep work");
   });
 });
 

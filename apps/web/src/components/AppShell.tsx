@@ -28,6 +28,7 @@ import {
   Search,
   Settings,
   Sun,
+  Tags,
   Workflow,
   X
 } from "lucide-react";
@@ -49,6 +50,7 @@ const navItems = [
   { href: "/timeline", label: "Timeline", icon: CalendarRange },
   { href: "/entries", label: "Entries", icon: ListFilter },
   { href: "/categories", label: "Categories", icon: FileText },
+  { href: "/tags", label: "Tags", icon: Tags },
   { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/places", label: "Places", icon: MapPin },
   { href: "/automation", label: "Automation", icon: Workflow },

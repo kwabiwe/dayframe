@@ -54,4 +54,16 @@ describe("native Calendar production contract", () => {
       expect(swiftSources).not.toContain(forbidden);
     }
   });
+
+  it("renders serialized tag metadata in Swift without moving data ownership out of React", () => {
+    const records = readFileSync(`${moduleRoot}ios/DayframeCalendarRecords.swift`, "utf8");
+    const model = readFileSync(`${moduleRoot}ios/DayframeCalendarModel.swift`, "utf8");
+    const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
+
+    expect(records).toContain("@Field var tagText: String?");
+    expect(model).toContain("tagText = record.tagText");
+    expect(rootView).toContain("Image(systemName: \"tag\")");
+    expect(rootView).toContain("theme.textSecondary");
+    expect(rootView).not.toContain("URLSession");
+  });
 });

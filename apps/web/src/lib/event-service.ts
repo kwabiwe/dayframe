@@ -12,6 +12,7 @@ import {
   locationLearningEvidenceFromPayload,
   shouldAutoConfirmHealthSleep,
   shouldAutoConfirmHealthWorkout,
+  TimeEntryTagsPatchSchema,
   readableLocationNameFromParts,
   type LocationDisplayAddress,
   type ActivityEventType,
@@ -40,6 +41,7 @@ import {
 } from "./db";
 import { getNormalizationContext } from "./queries";
 import { getDevSession, type RequestSession } from "./session";
+import { createTag, syncTimeEntryTags } from "./tag-service";
 import type pg from "pg";
 
 type CategoryRowLike = {
@@ -523,6 +525,9 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
         ]
       );
       timeEntryId = timeEntryResult.rows[0]?.id;
+      if (timeEntryId) {
+        await syncTimeEntryTags(client, timeEntryId, tagNamesFromRawPayload(parsed.rawPayload), session);
+      }
     } else if (candidate.action === "create_time_entry") {
       const startedAt = suggestedStartedAtForEvent(parsed);
       const stoppedAt = suggestedStoppedAtForEvent(parsed);
@@ -727,6 +732,7 @@ export async function createManualEntry(input: {
   description?: string | null;
   startedAt: string;
   stoppedAt: string;
+  tagNames?: string[];
 }, session: RequestSession = getDevSession()) {
   const client = await pool.connect();
   try {
@@ -751,14 +757,17 @@ export async function createManualEntry(input: {
         session.workspaceId,
         session.userId,
         input.startedAt,
-        JSON.stringify({ description: input.description ?? "Manual entry" }),
+        JSON.stringify({
+          description: input.description ?? "Manual entry",
+          tagNames: input.tagNames ?? []
+        }),
         nullableString(input.projectId),
         nullableString(input.categoryId),
         nullableString(input.placeId)
       ]
     );
 
-    await client.query(
+    const entryResult = await client.query<{ id: string }>(
       `insert into time_entries (
           workspace_id,
           user_id,
@@ -773,7 +782,8 @@ export async function createManualEntry(input: {
           stopped_at,
           created_from_event_id
        )
-       values ($1, $2, $3, $4, $5, 'manual_app', 'high', 'confirmed', $6, $7, $8, $9)`,
+       values ($1, $2, $3, $4, $5, 'manual_app', 'high', 'confirmed', $6, $7, $8, $9)
+       returning id`,
       [
         session.workspaceId,
         session.userId,
@@ -787,7 +797,11 @@ export async function createManualEntry(input: {
       ]
     );
 
+    const entryId = entryResult.rows[0].id;
+    await syncTimeEntryTags(client, entryId, input.tagNames ?? [], session);
+
     await client.query("commit");
+    return { id: entryId };
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -1282,6 +1296,7 @@ export async function updateTimeEntry(
     description?: string | null;
     startedAt?: string;
     stoppedAt?: string | null;
+    tagNames?: string[];
   },
   session: RequestSession = getDevSession()
 ) {
@@ -1291,9 +1306,13 @@ export async function updateTimeEntry(
   const hasDescription = Object.prototype.hasOwnProperty.call(input, "description");
   const hasStartedAt = Object.prototype.hasOwnProperty.call(input, "startedAt");
   const hasStoppedAt = Object.prototype.hasOwnProperty.call(input, "stoppedAt");
+  const hasTagNames = Object.prototype.hasOwnProperty.call(input, "tagNames");
+  const client = await pool.connect();
 
-  await query(
-    `update time_entries
+  try {
+    await client.query("begin");
+    const result = await client.query<{ id: string }>(
+      `update time_entries
      set project_id = case when $2 then $3 else project_id end,
          category_id = case when $4 then $5 else category_id end,
          place_id = case when $6 then $7 else place_id end,
@@ -1301,25 +1320,38 @@ export async function updateTimeEntry(
          started_at = case when $10 then $11 else started_at end,
          stopped_at = case when $12 then $13 else stopped_at end,
          updated_at = now()
-     where id = $1 and workspace_id = $14 and user_id = $15`,
-    [
-      id,
-      hasProjectId,
-      nullableString(input.projectId),
-      hasCategoryId,
-      nullableString(input.categoryId),
-      hasPlaceId,
-      nullableString(input.placeId),
-      hasDescription,
-      nullableString(input.description),
-      hasStartedAt,
-      input.startedAt ?? null,
-      hasStoppedAt,
-      input.stoppedAt ?? null,
-      session.workspaceId,
-      session.userId
-    ]
-  );
+     where id = $1 and workspace_id = $14 and user_id = $15
+     returning id`,
+      [
+        id,
+        hasProjectId,
+        nullableString(input.projectId),
+        hasCategoryId,
+        nullableString(input.categoryId),
+        hasPlaceId,
+        nullableString(input.placeId),
+        hasDescription,
+        nullableString(input.description),
+        hasStartedAt,
+        input.startedAt ?? null,
+        hasStoppedAt,
+        input.stoppedAt ?? null,
+        session.workspaceId,
+        session.userId
+      ]
+    );
+    if (!result.rows[0]) throw new TimeEntryNotFoundError();
+    if (hasTagNames) {
+      await syncTimeEntryTags(client, id, input.tagNames ?? [], session);
+    }
+    await client.query("commit");
+    return { id };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export class TimeEntryNotFoundError extends Error {
@@ -2380,11 +2412,7 @@ export async function createEntity(
         );
       }
     case "tag":
-      return query("insert into tags (workspace_id, name, color) values ($1, $2, $3)", [
-        session.workspaceId,
-        String(input.name ?? "new-tag"),
-        normalizePaletteKey(input.color, String(input.name ?? "new-tag"))
-      ]);
+      return createTag({ name: String(input.name ?? "new-tag") }, session);
     case "project":
       return query(
         `insert into projects (workspace_id, name, client_id, category_id, color, billable)
@@ -3316,6 +3344,11 @@ function numberOrNull(value: unknown) {
 function wholeSecondsOrNull(value: unknown) {
   const number = numberOrNull(value);
   return number === null ? null : Math.max(0, Math.round(number));
+}
+
+function tagNamesFromRawPayload(payload: Record<string, unknown>) {
+  if (payload.tagNames === undefined) return [];
+  return TimeEntryTagsPatchSchema.parse({ tagNames: payload.tagNames }).tagNames;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -118,6 +118,23 @@ describe("POST /api/time-entries", () => {
     );
   });
 
+  it("adds optional tag names to the event payload without changing older requests", async () => {
+    const response = await POST(jsonRequest({
+      mode: "start",
+      description: "Plan #planning",
+      tagNames: ["Planning"]
+    }));
+
+    expect(response.status).toBe(201);
+    expect(mocks.processActivityEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: "Plan #planning",
+        rawPayload: { origin: "web_timer", tagNames: ["Planning"] }
+      }),
+      session
+    );
+  });
+
   it("returns a client error when a replacement start time would corrupt the active timer", async () => {
     const replacementError = new Error("Start time must be after the currently running timer's start time.");
     replacementError.name = "TimerReplacementWindowError";

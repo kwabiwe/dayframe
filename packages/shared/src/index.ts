@@ -1,6 +1,25 @@
 import { z } from "zod";
 
 export {
+  TAG_DISPLAY_NAME_MAX_LENGTH,
+  TAG_TOKEN_PATTERN,
+  TagMutationSchema,
+  TagNameSchema,
+  TagRecordSchema,
+  TimeEntryTagsPatchSchema,
+  descriptionWithTagTokens,
+  findActiveHashtag,
+  isValidHashtagBoundary,
+  normalizeTagName,
+  parseHashtagTokens,
+  replaceActiveHashtag,
+  tagNamesFromDescription,
+  type ActiveHashtagQuery,
+  type NormalizedTagName,
+  type ParsedHashtagToken
+} from "./tags";
+
+export {
   DAYFRAME_PALETTE,
   DEFAULT_PALETTE_KEY,
   deterministicPaletteIndex,

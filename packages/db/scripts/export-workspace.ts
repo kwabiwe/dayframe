@@ -17,6 +17,7 @@ const tables = [
   "automation_rules",
   "activity_events",
   "time_entries",
+  "time_entry_tags",
   "review_items",
   "health_sleep_segments",
   "import_runs"

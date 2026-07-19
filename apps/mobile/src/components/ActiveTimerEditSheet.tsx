@@ -17,7 +17,15 @@ import {
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
-import { paletteColorFor, type RecentActivitySuggestion } from "@dayframe/shared";
+import {
+  findActiveHashtag,
+  descriptionWithTagTokens,
+  normalizeTagName,
+  paletteColorFor,
+  replaceActiveHashtag,
+  tagNamesFromDescription,
+  type RecentActivitySuggestion
+} from "@dayframe/shared";
 import { FloatingDatePicker } from "@/components/FloatingDatePicker";
 import { DeleteEntryConfirmation } from "@/components/DeleteEntryConfirmation";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
@@ -26,9 +34,10 @@ import {
   keyboardInsetFromScreenY,
   keyboardLiftAnimationDuration
 } from "@/lib/editSheetKeyboard";
-import type { MobileBootstrap, MobileTimeEntry, TimeEntryUpdatePatch } from "@/lib/api";
+import type { MobileBootstrap, MobileTag, MobileTimeEntry, TimeEntryUpdatePatch } from "@/lib/api";
 import { MOBILE_MOTION, useReduceMotionPreference } from "@/lib/motion";
 import { runningTimerSheetElapsedSeconds } from "@/lib/timerPresentation";
+import { TagMetadata } from "@/components/TagMetadata";
 
 const MAX_RUNNING_SUGGESTIONS = 6;
 
@@ -52,6 +61,7 @@ type ActiveTimerEditSheetProps = {
   stopping: boolean;
   styles: MobileStyles;
   suggestions?: RecentActivitySuggestion[];
+  tags?: MobileTag[];
   theme: MobileTheme;
   visible: boolean;
 };
@@ -73,6 +83,7 @@ export function ActiveTimerEditSheet({
   stopping,
   styles,
   suggestions = [],
+  tags = [],
   theme,
   visible
 }: ActiveTimerEditSheetProps) {
@@ -92,10 +103,15 @@ export function ActiveTimerEditSheet({
   const [suggestionsVisible, setSuggestionsVisible] = useState(false);
   const [suggestionsMounted, setSuggestionsMounted] = useState(false);
   const [deleteConfirmationVisible, setDeleteConfirmationVisible] = useState(false);
+  const [descriptionFocused, setDescriptionFocused] = useState(false);
+  const [descriptionSelection, setDescriptionSelection] = useState({ start: 0, end: 0 });
+  const [hashtagPanelMounted, setHashtagPanelMounted] = useState(false);
+  const [highlightedTagAction, setHighlightedTagAction] = useState<string | null>(null);
   const reduceMotion = useReduceMotionPreference();
   const dismissDragY = useRef(new Animated.Value(0)).current;
   const keyboardLift = useRef(new Animated.Value(0)).current;
   const suggestionsProgress = useRef(new Animated.Value(0)).current;
+  const hashtagPanelProgress = useRef(new Animated.Value(0)).current;
   const descriptionInputRef = useRef<TextInput>(null);
   const descriptionEntryStarted = useRef(false);
   const timeInputRef = useRef<TextInput>(null);
@@ -108,12 +124,18 @@ export function ActiveTimerEditSheet({
   const entryDescription = entry?.description ?? null;
   const entryStartedAt = entry?.startedAt ?? null;
   const entryStoppedAt = entry?.stoppedAt ?? null;
+  const entryTags = entry?.tags ?? (entry?.tagNames ?? []).map((name) => ({
+    id: `legacy-tag:${normalizeTagName(name).normalizedName}`,
+    name,
+    normalizedName: normalizeTagName(name).normalizedName
+  }));
   const editorSessionKey = entryStartedAt ? `${mode}:${entryStartedAt}` : null;
   const editorSnapshot = useRef({
     categoryId: entryCategoryId,
     description: entryDescription,
     startedAt: entryStartedAt,
     stoppedAt: entryStoppedAt,
+    tags: entryTags,
     suggestionsAvailable: suggestions.length > 0
   });
   editorSnapshot.current = {
@@ -121,6 +143,7 @@ export function ActiveTimerEditSheet({
     description: entryDescription,
     startedAt: entryStartedAt,
     stoppedAt: entryStoppedAt,
+    tags: entryTags,
     suggestionsAvailable: suggestions.length > 0
   };
 
@@ -133,7 +156,16 @@ export function ActiveTimerEditSheet({
     if (!snapshot.startedAt) return;
     const startedAt = new Date(snapshot.startedAt);
     descriptionEntryStarted.current = false;
-    setDescription(snapshot.description ?? "");
+    const hydratedDescription = descriptionWithTagTokens(
+      snapshot.description,
+      snapshot.tags
+    );
+    setDescription(hydratedDescription);
+    setDescriptionSelection({
+      start: hydratedDescription.length,
+      end: hydratedDescription.length
+    });
+    setDescriptionFocused(false);
     setSelectedCategoryId(snapshot.categoryId);
     setDateText(formatDateInput(startedAt));
     setTimeText(formatTimeInput(startedAt));
@@ -158,8 +190,11 @@ export function ActiveTimerEditSheet({
     suggestionsProgress.setValue(shouldShowSuggestions ? 1 : 0);
     setDeleteConfirmationVisible(false);
     setValidationError(null);
+    setHashtagPanelMounted(false);
+    hashtagPanelProgress.setValue(0);
   }, [
     editorSessionKey,
+    hashtagPanelProgress,
     isRunningMode,
     suggestionsProgress,
     visible
@@ -180,6 +215,8 @@ export function ActiveTimerEditSheet({
       keyboardLift.setValue(0);
       suggestionsProgress.setValue(0);
       setSuggestionsMounted(false);
+      hashtagPanelProgress.setValue(0);
+      setHashtagPanelMounted(false);
       return undefined;
     }
 
@@ -241,7 +278,61 @@ export function ActiveTimerEditSheet({
       changeSubscription.remove();
       hideSubscription.remove();
     };
-  }, [dismissDragY, insets.bottom, insets.top, keyboardLift, reduceMotion, suggestionsProgress, visible, windowDimensions.height]);
+  }, [dismissDragY, hashtagPanelProgress, insets.bottom, insets.top, keyboardLift, reduceMotion, suggestionsProgress, visible, windowDimensions.height]);
+
+  const activeHashtag = useMemo(
+    () => descriptionSelection.start === descriptionSelection.end
+      ? findActiveHashtag(description, descriptionSelection.end)
+      : null,
+    [description, descriptionSelection.end, descriptionSelection.start]
+  );
+  const matchingTags = useMemo(() => {
+    if (!activeHashtag) return [];
+    const query = activeHashtag.query.toLowerCase();
+    return tags
+      .filter((tag) => !query || tag.normalizedName.startsWith(query) || tag.name.toLowerCase().includes(query))
+      .slice(0, 5);
+  }, [activeHashtag, tags]);
+  const exactTagMatch = activeHashtag
+    ? tags.some((tag) => tag.normalizedName === activeHashtag.query.toLowerCase())
+    : false;
+  const createTagName = useMemo(() => {
+    if (!activeHashtag?.query || exactTagMatch) return null;
+    try {
+      return normalizeTagName(activeHashtag.query).name;
+    } catch {
+      return null;
+    }
+  }, [activeHashtag, exactTagMatch]);
+  const hashtagPanelVisible = descriptionFocused && Boolean(activeHashtag);
+  const appliedTagNames = useMemo(
+    () => tagNamesFromDescription(description, tags),
+    [description, tags]
+  );
+
+  useEffect(() => {
+    if (hashtagPanelVisible) setHashtagPanelMounted(true);
+    if (reduceMotion) {
+      hashtagPanelProgress.setValue(hashtagPanelVisible ? 1 : 0);
+      if (!hashtagPanelVisible) setHashtagPanelMounted(false);
+      return undefined;
+    }
+    hashtagPanelProgress.stopAnimation();
+    const animation = Animated.timing(hashtagPanelProgress, {
+      toValue: hashtagPanelVisible ? 1 : 0,
+      duration: 140,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true
+    });
+    animation.start(({ finished }) => {
+      if (finished && !hashtagPanelVisible) setHashtagPanelMounted(false);
+    });
+    return () => animation.stop();
+  }, [hashtagPanelProgress, hashtagPanelVisible, reduceMotion]);
+
+  useEffect(() => {
+    setHighlightedTagAction(matchingTags[0]?.id ?? (createTagName ? "create" : null));
+  }, [activeHashtag?.query, createTagName, matchingTags]);
 
   useEffect(() => {
     if (suggestionsVisible) setSuggestionsMounted(true);
@@ -391,7 +482,8 @@ export function ActiveTimerEditSheet({
 
     const patch: TimeEntryUpdatePatch = {
       categoryId: selectedCategoryId,
-      description: description.trim() || null
+      description: description.trim() || null,
+      tagNames: appliedTagNames
     };
 
     if (!isRunningMode || startTimeEdited) {
@@ -480,6 +572,16 @@ export function ActiveTimerEditSheet({
     setDatePickerOpen(false);
     descriptionEntryStarted.current = true;
     hideSuggestionsForDescriptionEntry();
+    setDescriptionFocused(true);
+  }
+
+  function selectHashtag(tagName: string) {
+    if (!activeHashtag) return;
+    const replacement = replaceActiveHashtag(description, activeHashtag, tagName);
+    setDescription(replacement.text);
+    setDescriptionSelection({ start: replacement.caret, end: replacement.caret });
+    setValidationError(null);
+    setTimeout(() => descriptionInputRef.current?.focus(), 0);
   }
 
   function updateStoppedDateText(value: string) {
@@ -520,6 +622,15 @@ export function ActiveTimerEditSheet({
   const displayedStartAt = previewStartAt ?? fallbackStartAt();
   const pickerDate = pickerStartAt ?? displayedStartAt;
   const showDoneButton = Boolean(onSave);
+  const hashtagPanelAnimatedStyle = {
+    opacity: hashtagPanelProgress,
+    transform: [{
+      translateY: hashtagPanelProgress.interpolate({
+        inputRange: [0, 1],
+        outputRange: reduceMotion ? [0, 0] : [-4, 0]
+      })
+    }]
+  };
 
   return (
     <>
@@ -636,26 +747,91 @@ export function ActiveTimerEditSheet({
                   </Animated.View>
                 ) : null}
 
-                <View style={styles.activeEditSection}>
+                <View style={[
+                  styles.activeEditSection,
+                  hashtagPanelMounted ? styles.activeEditTagSectionOpen : null
+                ]}>
                   <Text style={styles.activeEditSectionLabel}>Description</Text>
-                  <TextInput
-                    ref={descriptionInputRef}
-                    accessibilityLabel={isRunningMode ? "Timer description" : "Entry description"}
-                    blurOnSubmit
-                    editable={!busy}
-                    onFocus={focusDescriptionField}
-                    onPressIn={() => {
-                      if (!busy) descriptionInputRef.current?.focus();
-                    }}
-                    style={[styles.textInput, styles.activeEditDescriptionInput]}
-                    value={description}
-                    onChangeText={setDescription}
-                    onSubmitEditing={Keyboard.dismiss}
-                    placeholder={descriptionPlaceholder}
-                    placeholderTextColor={theme.textSecondary}
-                    returnKeyType="done"
-                    showSoftInputOnFocus
-                  />
+                  <View style={styles.activeEditDescriptionField}>
+                    <TextInput
+                      ref={descriptionInputRef}
+                      accessibilityHint="Type a hashtag to add optional tag context"
+                      accessibilityLabel={isRunningMode ? "Timer description" : "Entry description"}
+                      blurOnSubmit
+                      editable={!busy}
+                      onBlur={() => setDescriptionFocused(false)}
+                      onFocus={focusDescriptionField}
+                      onPressIn={() => {
+                        if (!busy) descriptionInputRef.current?.focus();
+                      }}
+                      onSelectionChange={(event) => setDescriptionSelection(event.nativeEvent.selection)}
+                      selection={descriptionSelection}
+                      style={[styles.textInput, styles.activeEditDescriptionInput]}
+                      value={description}
+                      onChangeText={(value) => {
+                        setDescription(value);
+                        setValidationError(null);
+                      }}
+                      onSubmitEditing={Keyboard.dismiss}
+                      placeholder={descriptionPlaceholder}
+                      placeholderTextColor={theme.textSecondary}
+                      returnKeyType="done"
+                      showSoftInputOnFocus
+                    />
+                    {hashtagPanelMounted ? (
+                      <Animated.View
+                        accessibilityLabel="Tag suggestions"
+                        style={[styles.tagAutocompletePanel, hashtagPanelAnimatedStyle]}
+                      >
+                        <Text style={styles.tagAutocompleteTitle}>TAGS</Text>
+                        <ScrollView
+                          keyboardShouldPersistTaps="always"
+                          nestedScrollEnabled
+                          showsVerticalScrollIndicator={false}
+                          style={styles.tagAutocompleteList}
+                        >
+                          {matchingTags.map((tag, index) => (
+                            <HashtagSuggestionRow
+                              key={tag.id}
+                              accessibilityLabel={`Existing tag, ${tag.name}`}
+                              disabled={busy}
+                              highlighted={highlightedTagAction === tag.id}
+                              isFirst={index === 0}
+                              label={tag.name}
+                              onHighlight={() => setHighlightedTagAction(tag.id)}
+                              onPress={() => selectHashtag(tag.name)}
+                              reduceMotion={reduceMotion}
+                              styles={styles}
+                              theme={theme}
+                            />
+                          ))}
+                          {createTagName ? (
+                            <HashtagSuggestionRow
+                              accessibilityLabel={`Create new tag, ${createTagName}`}
+                              create
+                              disabled={busy}
+                              highlighted={highlightedTagAction === "create"}
+                              isFirst={matchingTags.length === 0}
+                              label={`Create “${createTagName}”`}
+                              onHighlight={() => setHighlightedTagAction("create")}
+                              onPress={() => selectHashtag(createTagName)}
+                              reduceMotion={reduceMotion}
+                              styles={styles}
+                              theme={theme}
+                            />
+                          ) : null}
+                          {matchingTags.length === 0 && !createTagName ? (
+                            <Text style={styles.tagSuggestionEmptyText}>Type a name to search or create</Text>
+                          ) : null}
+                        </ScrollView>
+                      </Animated.View>
+                    ) : null}
+                  </View>
+                  {appliedTagNames.length > 0 ? (
+                    <TagMetadata active styles={styles} tagNames={appliedTagNames} theme={theme} />
+                  ) : (
+                    <Text style={styles.tagDescriptionHelper}>Type # to add a tag</Text>
+                  )}
                 </View>
 
                 <View style={styles.activeEditSection}>
@@ -824,6 +1000,74 @@ export function ActiveTimerEditSheet({
       </View>
       </Modal>
     </>
+  );
+}
+
+function HashtagSuggestionRow({
+  accessibilityLabel,
+  create = false,
+  disabled,
+  highlighted,
+  isFirst,
+  label,
+  onHighlight,
+  onPress,
+  reduceMotion,
+  styles,
+  theme
+}: {
+  accessibilityLabel: string;
+  create?: boolean;
+  disabled: boolean;
+  highlighted: boolean;
+  isFirst: boolean;
+  label: string;
+  onHighlight: () => void;
+  onPress: () => void;
+  reduceMotion: boolean;
+  styles: MobileStyles;
+  theme: MobileTheme;
+}) {
+  const highlightProgress = useRef(new Animated.Value(highlighted ? 1 : 0)).current;
+
+  useEffect(() => {
+    highlightProgress.stopAnimation();
+    if (reduceMotion) {
+      highlightProgress.setValue(highlighted ? 1 : 0);
+      return;
+    }
+    Animated.timing(highlightProgress, {
+      toValue: highlighted ? 1 : 0,
+      duration: 120,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false
+    }).start();
+  }, [highlightProgress, highlighted, reduceMotion]);
+
+  return (
+    <Animated.View style={{
+      backgroundColor: highlightProgress.interpolate({
+        inputRange: [0, 1],
+        outputRange: ["transparent", theme.surfaceMuted]
+      })
+    }}>
+      <Pressable
+        accessibilityLabel={accessibilityLabel}
+        accessibilityRole="button"
+        disabled={disabled}
+        onPress={onPress}
+        onPressIn={onHighlight}
+        style={[
+          styles.tagSuggestionRow,
+          !isFirst ? styles.tagSuggestionDivider : null,
+          disabled ? styles.buttonDisabled : null
+        ]}
+      >
+        <Text style={create ? styles.tagSuggestionCreateText : styles.tagSuggestionText} numberOfLines={1}>
+          {create ? "+ " : ""}{label}
+        </Text>
+      </Pressable>
+    </Animated.View>
   );
 }
 

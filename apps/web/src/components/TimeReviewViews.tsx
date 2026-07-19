@@ -7,6 +7,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, List, Table2 } from "lucide-re
 import { calendarBlockContinuationEdges } from "@dayframe/shared";
 import { CurrentTimerPanel } from "@/components/DashboardRealtime";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
+import { TagMetadata } from "@/components/TagMetadata";
 import { EntriesTable } from "@/components/EntriesTable";
 import {
   timeEntryAccentColor,
@@ -226,6 +227,7 @@ export function TimeReviewViews({
           entries={weekEntries}
           onSynced={refreshData}
           places={data.places}
+          tags={data.tags}
           setCalendarMode={updateCalendarMode}
           weekDays={weekDays}
         />
@@ -237,6 +239,7 @@ export function TimeReviewViews({
           places={data.places}
           groupByDay
           onChanged={refreshData}
+          tags={data.tags}
         />
       ) : null}
       {activeView === "timesheet" ? <TimesheetView entries={weekEntries} weekDays={weekDays} /> : null}
@@ -251,6 +254,7 @@ function CalendarReview({
   entries,
   onSynced,
   places,
+  tags,
   setCalendarMode,
   weekDays
 }: {
@@ -260,6 +264,7 @@ function CalendarReview({
   entries: TimeEntryRow[];
   onSynced: () => Promise<void>;
   places: PlaceRow[];
+  tags: BootstrapData["tags"];
   setCalendarMode: (mode: CalendarMode) => void;
   weekDays: Date[];
 }) {
@@ -602,6 +607,7 @@ function CalendarReview({
                               {timeEntryContextLabel(entry)}
                             </span>
                           ) : null}
+                          {density.showContext ? <TagMetadata tagNames={entry.tagNames} /> : null}
                         </>
                       ) : null}
                       {density.showDuration ? <span className="tabular block">{formatDuration(durationSeconds)}</span> : null}
@@ -624,6 +630,7 @@ function CalendarReview({
             startTransition(() => router.refresh());
           }}
           places={places}
+          tags={tags}
         />
       ) : null}
     </section>

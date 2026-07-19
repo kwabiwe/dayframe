@@ -20,6 +20,7 @@ export default async function EntriesPage() {
           entries={data.entries}
           categories={data.categories}
           places={data.places}
+          tags={data.tags}
         />
       </div>
     </>

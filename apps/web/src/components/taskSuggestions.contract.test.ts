@@ -10,8 +10,8 @@ const dashboardSource = readFileSync(
 describe("web task suggestion interaction", () => {
   it("opens compact suggestions from the task field, not the Play submission", () => {
     const descriptionInput = dashboardSource.slice(
-      dashboardSource.indexOf('id="timer-description-input"'),
-      dashboardSource.indexOf("{suggestionsOpen && !active")
+      dashboardSource.indexOf("<InlineTagInput"),
+      dashboardSource.indexOf("{suggestionsOpen && !hashtagSuggestionsOpen")
     );
     const submitHandler = dashboardSource.slice(
       dashboardSource.indexOf("async function submitTimerEntry("),
@@ -23,5 +23,14 @@ describe("web task suggestion interaction", () => {
     expect(descriptionInput).toContain("setSuggestionsOpen(true)");
     expect(submitHandler).not.toContain("setSuggestionsOpen(true)");
     expect(dashboardSource).toContain("taskSuggestions.slice(0, 6)");
+  });
+
+  it("syncs tag-only changes and restores persisted tag tokens after a failed save", () => {
+    expect(dashboardSource).toContain(
+      "JSON.stringify(nextNormalizedTagNames) === JSON.stringify(activeNormalizedTagNames)"
+    );
+    expect(dashboardSource).toContain(
+      "setDescription(descriptionWithTagTokens(active.description, active.tags))"
+    );
   });
 });

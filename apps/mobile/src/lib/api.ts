@@ -40,6 +40,13 @@ export type MobileStats = {
   reviewCount: number;
 };
 
+export type MobileTag = {
+  id: string;
+  name: string;
+  normalizedName: string;
+  usageCount?: number;
+};
+
 export type MobileTimeEntry = {
   id: string;
   projectId: string | null;
@@ -57,6 +64,8 @@ export type MobileTimeEntry = {
   startedAt: string;
   stoppedAt: string | null;
   durationSeconds: number;
+  tagNames?: string[];
+  tags?: MobileTag[];
 };
 
 export type MobileReviewItem = {
@@ -102,6 +111,7 @@ export type MobileBootstrap = {
     clientName: string | null;
   }>;
   categories: Array<{ id: string; name: string; color: string; isPinned: boolean }>;
+  tags?: MobileTag[];
   entries: MobileTimeEntry[];
   historyEntries?: MobileTimeEntry[];
   dayEntries?: MobileTimeEntry[];
@@ -182,6 +192,7 @@ export type TimeEntryUpdatePatch = {
   description?: string | null;
   startedAt?: string;
   stoppedAt?: string | null;
+  tagNames?: string[];
 };
 
 export type ManualTimeEntryInput = {
@@ -189,6 +200,7 @@ export type ManualTimeEntryInput = {
   description?: string | null;
   startedAt: string;
   stoppedAt: string;
+  tagNames?: string[];
 };
 
 export type TimerActionResult = {
@@ -432,7 +444,7 @@ export async function readQueue(): Promise<QueuedEvent[]> {
 
 export async function updateQueuedTimerStart(
   localId: string,
-  patch: Pick<TimeEntryUpdatePatch, "categoryId" | "description" | "startedAt">
+  patch: Pick<TimeEntryUpdatePatch, "categoryId" | "description" | "startedAt" | "tagNames">
 ) {
   const queue = await readQueue();
   let updated = false;
@@ -450,7 +462,10 @@ export async function updateQueuedTimerStart(
       occurredAt: patch.startedAt ? new Date(patch.startedAt) : item.occurredAt,
       rawPayload: {
         ...item.rawPayload,
-        ...(patch.startedAt ? { startedAt: patch.startedAt } : {})
+        ...(patch.startedAt ? { startedAt: patch.startedAt } : {}),
+        ...(Object.prototype.hasOwnProperty.call(patch, "tagNames")
+          ? { tagNames: patch.tagNames ?? [] }
+          : {})
       }
     };
   });
@@ -601,14 +616,20 @@ export async function syncQueue(options: SyncQueueOptions = {}): Promise<SyncQue
   return queueSyncResult(synced, remaining, firstError, stopped);
 }
 
-export async function startTimer(categoryId?: string | null, description?: string, startedAt?: string) {
+export async function startTimer(
+  categoryId?: string | null,
+  description?: string,
+  startedAt?: string,
+  tagNames?: string[]
+) {
   const trimmedDescription = description?.trim();
   return postTimerAction({
     mode: "start",
     source: "mobile_app",
     categoryId: categoryId ?? undefined,
     description: trimmedDescription || undefined,
-    startedAt
+    startedAt,
+    ...(tagNames ? { tagNames } : {})
   });
 }
 
@@ -660,6 +681,7 @@ export async function createManualTimeEntry(input: ManualTimeEntryInput) {
       mode: "manual",
       categoryId: input.categoryId ?? undefined,
       description: input.description?.trim() || undefined,
+      ...(input.tagNames ? { tagNames: input.tagNames } : {}),
       startedAt: input.startedAt,
       stoppedAt: input.stoppedAt
     })

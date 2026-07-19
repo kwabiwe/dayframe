@@ -9,9 +9,16 @@ import type {
   PointerEvent as ReactPointerEvent
 } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { paletteCssColorFor } from "@dayframe/shared";
+import {
+  descriptionWithTagTokens,
+  normalizeTagName,
+  paletteCssColorFor,
+  tagNamesFromDescription
+} from "@dayframe/shared";
 import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
+import { InlineTagInput } from "@/components/InlineTagInput";
+import { TagMetadata } from "@/components/TagMetadata";
 import {
   ArrowRight,
   BarChart3,
@@ -188,13 +195,17 @@ export function CurrentTimerPanel({
   const [timerError, setTimerError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [description, setDescription] = useState(data.activeEntry?.description ?? "");
+  const [description, setDescription] = useState(() => descriptionWithTagTokens(
+    data.activeEntry?.description,
+    data.activeEntry?.tags ?? []
+  ));
   const [categoryId, setCategoryId] = useState(data.activeEntry?.categoryId ?? "");
   const [isEditingStartedAt, setIsEditingStartedAt] = useState(false);
   const [startedAtDraft, setStartedAtDraft] = useState(() => timeInputValue(data.activeEntry?.startedAt));
   const [startEditError, setStartEditError] = useState<string | null>(null);
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [hashtagSuggestionsOpen, setHashtagSuggestionsOpen] = useState(false);
   const [draftEntryId, setDraftEntryId] = useState(data.activeEntry?.id ?? null);
   const activeDetailsSyncRef = useRef("");
   const timerActionInFlightRef = useRef(false);
@@ -255,7 +266,7 @@ export function CurrentTimerPanel({
       setDraftEntryId(activeId);
 
       if (active) {
-        setDescription(active.description ?? "");
+        setDescription(descriptionWithTagTokens(active.description, active.tags));
         setCategoryId(active.categoryId ?? "");
         setStartedAtDraft(timeInputValue(active.startedAt));
         return;
@@ -320,15 +331,25 @@ export function CurrentTimerPanel({
 
     const nextCategoryId = categoryId || null;
     const nextDescription = description.trim() || null;
+    const nextTagNames = tagNamesFromDescription(description, data.tags);
+    const nextNormalizedTagNames = nextTagNames
+      .map((name) => normalizeTagName(name).normalizedName)
+      .sort();
+    const activeNormalizedTagNames = (
+      active.tags?.map((tag) => tag.normalizedName)
+      ?? active.tagNames.map((name) => normalizeTagName(name).normalizedName)
+    ).sort();
     const nextSyncKey = JSON.stringify([
       active.id,
       nextCategoryId,
-      nextDescription
+      nextDescription,
+      nextTagNames
     ]);
 
     if (
       nextCategoryId === active.categoryId &&
-      nextDescription === (active.description ?? null)
+      nextDescription === (active.description ?? null) &&
+      JSON.stringify(nextNormalizedTagNames) === JSON.stringify(activeNormalizedTagNames)
     ) {
       activeDetailsSyncRef.current = nextSyncKey;
       return undefined;
@@ -338,19 +359,26 @@ export function CurrentTimerPanel({
 
     const syncHandle = window.setTimeout(async () => {
       activeDetailsSyncRef.current = nextSyncKey;
-      await fetch(`/api/time-entries/${active.id}`, {
+      const response = await fetch(`/api/time-entries/${active.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           categoryId: nextCategoryId,
           placeId: active.placeId,
-          description: nextDescription
+          description: nextDescription,
+          tagNames: nextTagNames
         })
       });
+      if (!response.ok) {
+        activeDetailsSyncRef.current = "";
+        setDescription(descriptionWithTagTokens(active.description, active.tags));
+        setCategoryId(active.categoryId ?? "");
+        setTimerError("Timer details were not saved. Your previous values were restored.");
+      }
     }, 650);
 
     return () => window.clearTimeout(syncHandle);
-  }, [active, categoryId, description, draftEntryId]);
+  }, [active, categoryId, data.tags, description, draftEntryId]);
 
   const refresh = useCallback(async () => {
     const response = await fetch(`/api/bootstrap?date=${data.dateRange.selectedDate}`, {
@@ -373,6 +401,7 @@ export function CurrentTimerPanel({
       override && "description" in override
         ? (override.description ?? undefined)
         : description.trim() || undefined;
+    const nextTagNames = tagNamesFromDescription(nextDescription ?? "", data.tags);
 
     timerActionInFlightRef.current = true;
     setIsBusy(true);
@@ -386,6 +415,7 @@ export function CurrentTimerPanel({
             categoryId: nextCategoryId ?? null,
             placeId: active.placeId,
             description: nextDescription ?? null,
+            tagNames: nextTagNames,
             startedAt: active.startedAt,
             stoppedAt: active.stoppedAt
           })
@@ -401,7 +431,8 @@ export function CurrentTimerPanel({
             ? {
                 mode,
                 categoryId: nextCategoryId,
-                description: nextDescription
+                description: nextDescription,
+                tagNames: nextTagNames
               }
             : { mode }
         )
@@ -424,7 +455,7 @@ export function CurrentTimerPanel({
       timerActionInFlightRef.current = false;
       setIsBusy(false);
     }
-  }, [active, categoryId, description, refresh]);
+  }, [active, categoryId, data.tags, description, refresh]);
 
   const deleteActiveTimer = useCallback(async () => {
     if (!active || timerActionInFlightRef.current) return;
@@ -541,6 +572,7 @@ export function CurrentTimerPanel({
 
     const nextCategoryId = categoryId || null;
     const nextDescription = description.trim() || null;
+    const nextTagNames = tagNamesFromDescription(description, data.tags);
 
     setIsBusy(true);
     setTimerError(null);
@@ -553,6 +585,7 @@ export function CurrentTimerPanel({
           categoryId: nextCategoryId,
           placeId: active.placeId,
           description: nextDescription,
+          tagNames: nextTagNames,
           startedAt: nextStart.toISOString(),
           stoppedAt: active.stoppedAt
         })
@@ -571,7 +604,8 @@ export function CurrentTimerPanel({
       activeDetailsSyncRef.current = JSON.stringify([
         active.id,
         nextCategoryId,
-        nextDescription
+        nextDescription,
+        nextTagNames
       ]);
       setNow(Date.now());
       setIsEditingStartedAt(false);
@@ -592,25 +626,31 @@ export function CurrentTimerPanel({
         <form className="swiss-timer-entry-form" onSubmit={submitTimerEntry}>
           <div className="swiss-work-input" ref={suggestionsRef}>
             <label htmlFor="timer-description-input">Task description</label>
-            <input
-              id="timer-description-input"
-              ref={descriptionInputRef}
-              value={description}
-              onChange={(event) => {
-                setDescription(event.target.value);
-                if (!active) setSuggestionsOpen(true);
-              }}
-              onFocus={() => {
+            <InlineTagInput
+              ariaLabel="Task description"
+              inputId="timer-description-input"
+              inputRef={descriptionInputRef}
+              name="timer-description"
+              onChange={(value) => {
+                setDescription(value);
                 if (!active) setSuggestionsOpen(true);
               }}
               onClick={() => {
                 if (!active) setSuggestionsOpen(true);
               }}
-              onKeyDown={startTimerFromDescriptionKey}
+              onEnter={startTimerFromDescriptionKey}
+              onFocus={() => {
+                if (!active) setSuggestionsOpen(true);
+              }}
+              onHashtagPanelChange={(open) => {
+                setHashtagSuggestionsOpen(open);
+                if (open) setSuggestionsOpen(false);
+              }}
               placeholder={active ? "Add a task description" : "What are you working on?"}
-              aria-label="Task description"
+              tags={data.tags}
+              value={description}
             />
-            {suggestionsOpen && !active && visibleTaskSuggestions.length > 0 ? (
+            {suggestionsOpen && !hashtagSuggestionsOpen && !active && visibleTaskSuggestions.length > 0 ? (
               <TaskSuggestionsPanel
                 isBusy={isBusy}
                 onSelect={(suggestion) => void startSuggestion(suggestion)}
@@ -1473,6 +1513,7 @@ function DayTimeline({
             await onEntryUpdated();
           }}
           places={data.places}
+          tags={data.tags}
         />
       ) : null}
       {resizeError ? <p className="swiss-resize-error">{resizeError}</p> : null}
@@ -1610,6 +1651,7 @@ function TimelineBlock({
         <div>
           <strong>{timeEntryTitle(entry)}</strong>
           {density.showContext ? <span>{timeEntryContextLabel(entry)}</span> : null}
+          {density.showContext ? <TagMetadata tagNames={entry.tagNames} /> : null}
         </div>
       ) : null}
       {density.showDuration ? (
@@ -1754,6 +1796,7 @@ function ManualEntryDialog({
 }) {
   const [isBusy, setIsBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [descriptionDraft, setDescriptionDraft] = useState("");
   const selectedDate = parseDateKey(data.dateRange.selectedDate);
   selectedDate.setHours(9, 0, 0, 0);
   const defaultStart = dateTimeLocal(selectedDate);
@@ -1787,6 +1830,7 @@ function ManualEntryDialog({
           categoryId: formData.get("categoryId") || undefined,
           placeId: formData.get("placeId") || undefined,
           description: formData.get("description") || undefined,
+          tagNames: tagNamesFromDescription(descriptionDraft, data.tags),
           startedAt,
           stoppedAt
         })
@@ -1846,7 +1890,14 @@ function ManualEntryDialog({
           </label>
           <label className="swiss-form-wide">
             Description
-            <input name="description" placeholder="What are you working on?" />
+            <InlineTagInput
+              ariaLabel="Manual time entry description"
+              name="manual-description"
+              onChange={setDescriptionDraft}
+              placeholder="What are you working on?"
+              tags={data.tags}
+              value={descriptionDraft}
+            />
           </label>
           <label>
             Start

@@ -2099,6 +2099,9 @@ function createStyles(theme: MobileTheme) {
     activeEditSection: {
       gap: 8
     },
+    activeEditTagSectionOpen: {
+      zIndex: 20
+    },
     activeEditSectionLabel: {
       color: theme.textSecondary,
       fontFamily: monoFont,
@@ -2166,6 +2169,90 @@ function createStyles(theme: MobileTheme) {
     },
     activeEditDescriptionInput: {
       minHeight: 48
+    },
+    activeEditDescriptionField: {
+      position: "relative",
+      zIndex: 20
+    },
+    tagAutocompletePanel: {
+      position: "absolute",
+      top: 54,
+      left: 0,
+      right: 0,
+      zIndex: 30,
+      backgroundColor: theme.surfaceRaised,
+      borderRadius: 14,
+      overflow: "hidden",
+      shadowColor: theme.shadow,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: theme.mode === "dark" ? 0.7 : 0.18,
+      shadowRadius: 12,
+      elevation: 8
+    },
+    tagAutocompleteTitle: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 11,
+      fontWeight: "600",
+      letterSpacing: 0.4,
+      paddingHorizontal: 12,
+      paddingVertical: 8
+    },
+    tagAutocompleteList: {
+      borderTopWidth: 1,
+      borderTopColor: theme.border,
+      maxHeight: 264
+    },
+    tagSuggestionRow: {
+      minHeight: 44,
+      paddingHorizontal: 12,
+      flexDirection: "row",
+      alignItems: "center"
+    },
+    tagSuggestionDivider: {
+      borderTopWidth: 1,
+      borderTopColor: theme.border
+    },
+    tagSuggestionText: {
+      flex: 1,
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "500"
+    },
+    tagSuggestionCreateText: {
+      flex: 1,
+      color: theme.accentText,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "600"
+    },
+    tagSuggestionEmptyText: {
+      minHeight: 44,
+      paddingHorizontal: 12,
+      textAlignVertical: "center",
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12
+    },
+    tagDescriptionHelper: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 11
+    },
+    tagMetadataRow: {
+      minWidth: 0,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5
+    },
+    tagMetadataText: {
+      minWidth: 0,
+      flexShrink: 1,
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "400"
     },
     activeEditCategoryScroller: {
       gap: 8,
