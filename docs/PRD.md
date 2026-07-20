@@ -71,6 +71,7 @@ Integration:
 
 - ✅ iOS HealthKit sleep and walking/workout summaries.
 - ✅ iOS geofence monitoring for known places.
+- 🚧 Location Intelligence V2 adds an ordered, temporary evidence journal; deterministic contiguous stay/commute segmentation; native iOS visit/significant-change anchors; private map review; and atomic correction actions. Its server-controlled rollout progresses from `v1` to the safe default `v2_shadow`, then `v2_review`, with `v2_enabled` reserved for separately approved high-confidence behaviour. It remains rollout-gated until migration, hosted deployment, TestFlight, and the physical-device matrix are verified.
 - ✅ Anonymized automation accuracy analytics.
 
 Deployment:
@@ -387,6 +388,9 @@ Deliverables:
 - ✅ Broad/unknown geofence review suggestions.
 - ✅ Learned-location evidence separates repeat place suggestions, significant one-off stays, and weak/pass-through noise.
 - ✅ Learned-place details cache readable address/POI resolution and keep coordinates secondary.
+- 🚧 `location-v2.0` fixes temporal continuity by closing stays on accepted intervening-place evidence, sustained exits, or explicit gaps; preserves short saved-place endpoints; derives journeys from movement evidence; and exposes uncertainty instead of fabricating exact boundaries.
+- 🚧 Mobile and web consume one user-scoped `LocationReviewEvidenceDto` for map plus textual review, with atomic confirm, split, merge, place correction, record-once, and save-place actions. Physical iPhone reliability and battery measurement are mandatory before the rollout is considered settled.
+- 🚧 V2 rollout is server-authoritative: `v2_shadow` captures and replays without user-visible V2 semantics, `v2_review` permits review items only after a same-mode client acknowledgement, and `v2_enabled` remains disabled until a narrower auto-confirm policy is approved. Shadow-era segments cannot be backfilled at cutover.
 - ⚠️ Export path exists; account/workspace deletion and raw sensitive payload hard-deletion are still future work.
 
 Validation:
@@ -395,6 +399,7 @@ Validation:
 - Walking/workout entries have correct duration.
 - Trusted place starts correctly.
 - Unknown/broad places do not create silent incorrect entries.
+- Two appearances at one venue separated by Home remain two stays; a 10–15 minute saved stop remains a journey endpoint; nearby saved places can remain explicitly ambiguous; and Europe/London local-day grouping remains correct across BST/DST.
 
 ### Phase 4: Product Polish And Beta Hardening
 

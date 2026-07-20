@@ -112,6 +112,10 @@ The selected review mode is stored locally in the browser. Calendar drag and res
 - `DELETE /api/time-entries/:id`: delete an entry.
 - `POST /api/entities`: create categories, tags, places, rules and legacy compatibility entities.
 - `POST /api/review/:id`: accept, ignore or create a rule from a review item.
+- `POST /api/location/evidence`: authenticated, bounded, idempotent upload of temporary ordered location evidence. The permanent activity event stores only a coordinate-free batch summary.
+- `DELETE /api/location/evidence`: delete the authenticated user's retained raw location evidence while preserving derived entries and segments.
+- `GET /api/review/:id/location-evidence`: private, `no-store` `LocationReviewEvidenceDto` used by both mobile and web maps.
+- `POST /api/review/:id` also accepts atomic location actions: `edit_and_confirm`, `change_place`, `record_once`, `save_place_and_confirm`, `split`, and `merge`.
 - `GET /api/export?kind=workspace_json`: workspace backup JSON.
 - `GET /api/export?kind=time_entries_csv`: time-entry CSV export.
 
@@ -131,13 +135,25 @@ npm run export:workspace -- ./dayframe-backup.json
 
 ## Privacy Model
 
-- Raw event payloads are stored in `activity_events.raw_payload`.
-- Known places and processed stays are modeled separately from raw samples.
-- Places include `raw_location_retention_days`, seeded to 7 days.
+- Ordinary event payloads are stored in `activity_events.raw_payload`; Location Intelligence V2 batch and segment events deliberately exclude coordinates and route traces.
+- Exact ordered evidence is user-owned in `location_evidence`, protected by explicit workspace/user filters and Supabase RLS, and removed after its seven-day retention window. Evidence-to-segment links cascade on deletion; derived stays, commutes, reviews, confirmed entries, saved places, and accepted learned places may remain.
+- Mobile persists evidence before networking in an account-isolated Expo SQLite WAL journal. A bounded outbox uploads at most 100 items per batch with idempotent acknowledgements and retry backoff.
+- Disabling location intelligence stops standard updates, geofences, native visit monitoring, and significant-change monitoring. The Settings deletion control removes retained evidence locally and on the server.
 - Home does not auto-start by default.
 - Broad places create review items unless the user defines a rule.
-- The schema is prepared for Supabase-style row-level security with workspace/user ownership columns, but RLS policies are not enabled in v1.
-- Account export and deletion are design notes for the next phase: export should include entries, events, review history, places, rules and integrations; deletion should hard-delete user/workspace data and clear raw payloads.
+- Export includes retained exact evidence as GeoJSON longitude/latitude coordinates plus derived location segments and correction feedback. Account/workspace deletion remains a broader product follow-up.
+
+## Location Intelligence V2
+
+The V2 engine (`location-v2.0`) consumes an ordered journal from Expo standard updates, geofence transitions, native `CLVisit`, significant-change, provider, pause, and resume signals. It deterministically builds contiguous stay and commute segments, represents uncertain boundaries explicitly, matches against the complete saved-place catalogue, and replays canonically on the server. It never treats recurrence at the same coordinate as proof of uninterrupted presence.
+
+Rollout is server-controlled by `DAYFRAME_LOCATION_ROLLOUT_MODE` and defaults to `v2_shadow`. The supported modes are `v1` (previous production behaviour), `v2_shadow` (capture/replay only while V1 remains active), `v2_review` (V2 review items with competing V1 location semantics suppressed), and the later high-confidence gate `v2_enabled`. A client must acknowledge the same semantic mode before the server records a cutover; segments that started in shadow cannot be backfilled into user-visible history. Return the server to `v2_shadow` or `v1` before rolling back code; user-confirmed V2 entries remain ordinary event-first time entries.
+
+Vercel Cron invokes `GET /api/cron/location-retention` daily at `03:17 UTC`. The production environment must provide `CRON_SECRET`; the route accepts only the matching bearer token, uses the database service role to run bounded cleanup, returns `no-store`, and reports a non-2xx result when cleanup fails. Verify the secret, function grant, schedule, and Vercel invocation logs after deployment. Do not expose the route without its secret or grant retention execution to authenticated users.
+
+Web evidence maps use MapLibre. Set `NEXT_PUBLIC_DAYFRAME_MAP_STYLE_URL` to a production style whose tile, glyph, sprite, and attribution terms you are authorised to use. With no value, Dayframe uses a private tile-free canvas that still renders the supplied evidence layers; no public demo tile service is hardcoded. If a CSP is introduced, allow only the selected provider's exact `connect-src`/`img-src` hosts plus the worker/blob requirements documented by that provider.
+
+iOS background delivery is opportunistic. Visits are retrospective and neither Dayframe nor Core Location guarantees continuous delivery after explicit force-quit, with Background App Refresh disabled, or after permission/service changes. See [.codex/reference/location-learning.md](.codex/reference/location-learning.md) and the [V2 investigation](docs/investigations/2026-07-20-location-intelligence-v2.md).
 
 ## Verification
 
@@ -145,6 +161,9 @@ npm run export:workspace -- ./dayframe-backup.json
 npm run typecheck
 npm test
 npm run build -w @dayframe/web
+npm run validate:location-v2-sqlite
+# DATABASE_URL must point to a disposable local database ending in _test
+DATABASE_URL=postgres://.../dayframe_v2_test npm run validate:location-v2-db
 cd apps/mobile && npx expo install --check
 ```
 
