@@ -9,7 +9,12 @@ const session = {
 
 const mocks = vi.hoisted(() => ({
   resolveRequestSession: vi.fn(),
-  resolveReviewItem: vi.fn()
+  resolveReviewItem: vi.fn(),
+  resolveLocationReviewAction: vi.fn()
+}));
+
+vi.mock("@/lib/location/location-review-service", () => ({
+  resolveLocationReviewAction: mocks.resolveLocationReviewAction
 }));
 
 vi.mock("@/lib/ingest-auth", () => ({
@@ -71,6 +76,29 @@ describe("POST /api/review/[id]", () => {
       code: "database_constraint",
       constraint: "time_entries_review_status_check"
     });
+  });
+
+  it("dispatches rich location actions through the atomic resolver", async () => {
+    const action = {
+      action: "edit_and_confirm" as const,
+      edit: {
+        description: "Sports practice",
+        startedAt: "2026-07-20T12:00:00.000Z",
+        stoppedAt: "2026-07-20T13:00:00.000Z"
+      }
+    };
+    mocks.resolveLocationReviewAction.mockResolvedValueOnce({
+      ok: true,
+      action: action.action,
+      status: "accepted",
+      entryId: "entry-location-1"
+    });
+
+    const response = await POST(jsonRequest(action), params("review-1"));
+
+    expect(response.status).toBe(200);
+    expect(mocks.resolveLocationReviewAction).toHaveBeenCalledWith("review-1", action, session);
+    expect(mocks.resolveReviewItem).not.toHaveBeenCalled();
   });
 });
 

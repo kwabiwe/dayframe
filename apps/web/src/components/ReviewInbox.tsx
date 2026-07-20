@@ -1,12 +1,19 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, CircleSlash, GitMerge, WandSparkles } from "lucide-react";
+import { Check, CircleSlash, GitMerge, Map, WandSparkles } from "lucide-react";
 import type { ReviewItemRow } from "@/lib/queries";
 import { formatDate, formatEventLabel, formatSourceLabel, formatTime } from "@/lib/format";
+import { LocationReviewPanel } from "@/components/location/LocationReviewPanel";
 
-export function ReviewInbox({ items }: { items: ReviewItemRow[] }) {
+export function ReviewInbox({
+  items,
+  categories
+}: {
+  items: ReviewItemRow[];
+  categories: Array<{ id: string; name: string }>;
+}) {
   const openItems = items.filter((item) => item.status === "open");
 
   return (
@@ -19,25 +26,59 @@ export function ReviewInbox({ items }: { items: ReviewItemRow[] }) {
           <p className="px-4 py-6 text-sm text-[var(--muted)]">No open review items.</p>
         ) : null}
         {openItems.map((item) => (
-          <ReviewItemCard key={item.id} item={item} />
+          <ReviewItemCard
+            key={item.id}
+            item={item}
+            adjacentReviewItemId={adjacentV2StayReviewId(item, openItems)}
+            categories={categories}
+          />
         ))}
       </div>
     </section>
   );
 }
 
-function ReviewItemCard({ item }: { item: ReviewItemRow }) {
+function ReviewItemCard({
+  item,
+  adjacentReviewItemId,
+  categories
+}: {
+  item: ReviewItemRow;
+  adjacentReviewItemId?: string;
+  categories: Array<{ id: string; name: string }>;
+}) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [showEvidence, setShowEvidence] = useState(false);
+  const [activeAction, setActiveAction] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const display = reviewItemDisplay(item);
 
   async function act(action: string) {
-    await fetch(`/api/review/${item.id}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action })
-    });
-    startTransition(() => router.refresh());
+    setActiveAction(action);
+    setActionError(null);
+    try {
+      const body = hasV2Evidence(item)
+        ? action === "accept"
+          ? { action: "confirm" }
+          : action === "ignore_once"
+            ? { action: "ignore_once_location" }
+            : { action }
+        : { action };
+      const response = await fetch(`/api/review/${item.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      if (!response.ok) {
+        const responseBody = await response.json().catch(() => ({})) as { error?: string; message?: string };
+        setActionError(responseBody.message ?? responseBody.error ?? "Unable to update this review item.");
+        return;
+      }
+      startTransition(() => router.refresh());
+    } finally {
+      setActiveAction(null);
+    }
   }
 
   return (
@@ -61,51 +102,99 @@ function ReviewItemCard({ item }: { item: ReviewItemRow }) {
           </span>
         </div>
 
-        {item.notes ? (
+        {item.notes && !hasV2Evidence(item) ? (
           <p className="mt-3 max-w-3xl text-sm leading-6 text-[var(--muted)]">{item.notes}</p>
         ) : null}
+        {actionError ? <p className="mt-3 text-sm text-[var(--danger)]" role="alert">{actionError}</p> : null}
 
         <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-[var(--line)] pt-3">
+          {hasV2Evidence(item) ? (
+            <button
+              className="industrial-button focus-ring min-h-11 whitespace-nowrap px-3 py-2 text-sm"
+              type="button"
+              aria-expanded={showEvidence}
+              onClick={() => setShowEvidence((visible) => !visible)}
+            >
+              <Map size={15} />
+              {showEvidence ? "Hide evidence" : "View evidence"}
+            </button>
+          ) : null}
           <button
-            className="industrial-button-primary focus-ring min-h-9 whitespace-nowrap px-3 py-2 text-sm disabled:opacity-50"
+            className="industrial-button-primary focus-ring min-h-11 whitespace-nowrap px-3 py-2 text-sm disabled:opacity-50"
             type="button"
-            disabled={isPending}
+            disabled={isPending || activeAction != null}
             onClick={() => act("accept")}
           >
             <Check size={15} />
             Accept
           </button>
           <button
-            className="industrial-button focus-ring min-h-9 whitespace-nowrap px-3 py-2 text-sm disabled:opacity-50"
+            className="industrial-button focus-ring min-h-11 whitespace-nowrap px-3 py-2 text-sm disabled:opacity-50"
             type="button"
-            disabled={isPending}
+            disabled={isPending || activeAction != null}
             onClick={() => act("ignore_once")}
           >
             <CircleSlash size={15} />
             Ignore
           </button>
-          <button
-            className="industrial-button focus-ring min-h-9 whitespace-nowrap px-3 py-2 text-sm disabled:opacity-50"
-            type="button"
-            disabled={isPending}
-            onClick={() => act("always_ignore_source")}
-          >
-            <GitMerge size={15} />
-            Always ignore
-          </button>
-          <button
-            className="industrial-button focus-ring min-h-9 whitespace-nowrap px-3 py-2 text-sm disabled:opacity-50"
-            type="button"
-            disabled={isPending}
-            onClick={() => act("create_rule")}
-          >
-            <WandSparkles size={15} />
-            Make rule
-          </button>
+          {!hasV2Evidence(item) ? (
+            <>
+              <button
+                className="industrial-button focus-ring min-h-11 whitespace-nowrap px-3 py-2 text-sm disabled:opacity-50"
+                type="button"
+                disabled={isPending || activeAction != null}
+                onClick={() => act("always_ignore_source")}
+              >
+                <GitMerge size={15} />
+                Always ignore
+              </button>
+              <button
+                className="industrial-button focus-ring min-h-11 whitespace-nowrap px-3 py-2 text-sm disabled:opacity-50"
+                type="button"
+                disabled={isPending || activeAction != null}
+                onClick={() => act("create_rule")}
+              >
+                <WandSparkles size={15} />
+                Make rule
+              </button>
+            </>
+          ) : null}
         </div>
+        {showEvidence ? (
+          <LocationReviewPanel
+            reviewItemId={item.id}
+            adjacentReviewItemId={adjacentReviewItemId}
+            categories={categories}
+            initialCategoryId={item.suggestedCategoryId}
+            onClose={() => setShowEvidence(false)}
+          />
+        ) : null}
       </div>
     </article>
   );
+}
+
+function hasV2Evidence(item: ReviewItemRow) {
+  return item.eventSource === "location_learning" &&
+    (item.rawPayload?.algorithmVersion === "location-v2.0" || typeof item.rawPayload?.clientSegmentId === "string");
+}
+
+function adjacentV2StayReviewId(item: ReviewItemRow, candidates: ReviewItemRow[]) {
+  if (!hasV2Evidence(item) || item.eventType === "commute_detected") return undefined;
+  const itemStart = Date.parse(String(item.suggestedStartedAt ?? ""));
+  const itemStop = Date.parse(String(item.suggestedStoppedAt ?? ""));
+  if (!Number.isFinite(itemStart) || !Number.isFinite(itemStop)) return undefined;
+  const maximumAdjacentGapMs = 15 * 60_000;
+  return candidates
+    .flatMap((candidate) => {
+      if (candidate.id === item.id || !hasV2Evidence(candidate) || candidate.eventType === "commute_detected") return [];
+      const candidateStart = Date.parse(String(candidate.suggestedStartedAt ?? ""));
+      const candidateStop = Date.parse(String(candidate.suggestedStoppedAt ?? ""));
+      if (!Number.isFinite(candidateStart) || !Number.isFinite(candidateStop)) return [];
+      const gap = Math.min(Math.abs(candidateStart - itemStop), Math.abs(itemStart - candidateStop));
+      return gap <= maximumAdjacentGapMs ? [{ id: candidate.id, gap }] : [];
+    })
+    .sort((a, b) => a.gap - b.gap || a.id.localeCompare(b.id))[0]?.id;
 }
 
 function reviewItemDisplay(item: ReviewItemRow) {
@@ -125,10 +214,20 @@ function reviewItemDisplay(item: ReviewItemRow) {
   const meta = [
     item.categoryName ?? "Needs category",
     item.placeName ?? "No place",
-    kind,
-    formatSourceLabel(item.eventSource ?? "review")
+    reviewTimeWindow(item),
+    kind
   ]
     .filter((part, index, parts) => part && parts.indexOf(part) === index)
     .join(" / ");
   return { kind, meta, title };
+}
+
+function reviewTimeWindow(item: ReviewItemRow) {
+  if (!item.suggestedStartedAt) return null;
+  const start = new Date(item.suggestedStartedAt);
+  const stop = item.suggestedStoppedAt ? new Date(item.suggestedStoppedAt) : null;
+  if (Number.isNaN(start.getTime())) return null;
+  if (!stop || Number.isNaN(stop.getTime())) return `${formatDate(start)} ${formatTime(start)}`;
+  const durationMinutes = Math.max(1, Math.round((stop.getTime() - start.getTime()) / 60_000));
+  return `${formatDate(start)} ${formatTime(start)}–${formatTime(stop)} · ${durationMinutes} min`;
 }

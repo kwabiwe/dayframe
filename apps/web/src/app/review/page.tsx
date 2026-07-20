@@ -16,12 +16,12 @@ export default async function ReviewPage() {
         description="Accept suggestions, ignore noisy signals, or create an automation rule from a correction."
       />
       <div className="space-y-6 px-5 py-6 md:px-8">
-        <ReviewInbox items={data.reviewItems} />
+        <ReviewInbox items={data.reviewItems} categories={data.categories} />
         <section className="industrial-panel-strong p-4">
           <h2 className="text-base font-semibold">Correction model</h2>
           <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
-            Accepted review items create confirmed time entries from the underlying activity event.
-            Split, merge and saved-place correction flows are documented for the next phase in the README.
+            Location evidence stays private to your account. Inspect boundaries, correct saved-place matches,
+            split or merge contiguous visits, and confirm the result in one atomic update.
           </p>
         </section>
       </div>

@@ -25,6 +25,7 @@ const { GET } = await import("./route");
 describe("/api/bootstrap", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_shadow";
     mocks.resolveRequestSession.mockResolvedValue(session);
     mocks.getBootstrapData.mockResolvedValue({
       tags: [
@@ -60,6 +61,7 @@ describe("/api/bootstrap", () => {
 
     expect(response.status).toBe(200);
     expect(payload.places[0].defaultActivityDescription).toBe("School drop-off/pickup");
+    expect(payload.locationRolloutMode).toBe("v2_shadow");
     expect(mocks.getBootstrapData).toHaveBeenCalledWith(session, { selectedDate: null });
   });
 

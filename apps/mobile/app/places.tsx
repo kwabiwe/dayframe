@@ -8,6 +8,7 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
+  StyleSheet,
   Switch,
   Text,
   TextInput,
@@ -20,6 +21,7 @@ import * as Clipboard from "expo-clipboard";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
+import MapView, { Circle, Marker, type MapPressEvent } from "react-native-maps";
 import { paletteColorFor } from "@dayframe/shared";
 import { SheetMutationProgress } from "@/components/SheetMutationProgress";
 import {
@@ -92,6 +94,7 @@ export default function PlacesScreen() {
   const [defaultActivityDescription, setDefaultActivityDescription] = useState("");
   const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
   const [locationPrecise, setLocationPrecise] = useState(true);
+  const [placeLabelSource, setPlaceLabelSource] = useState<"manual" | "current_location" | "learned" | "saved">("manual");
   const saveInFlight = useRef(false);
 
   const load = useCallback(async (options?: { refresh?: boolean; silent?: boolean }) => {
@@ -138,6 +141,7 @@ export default function PlacesScreen() {
     setDefaultActivityDescription("");
     setLocationAccuracy(null);
     setLocationPrecise(true);
+    setPlaceLabelSource("manual");
     setStatusMessage(null);
   }
 
@@ -154,6 +158,7 @@ export default function PlacesScreen() {
     setDefaultActivityDescription("");
     setLocationAccuracy(null);
     setLocationPrecise(true);
+    setPlaceLabelSource("learned");
     setStatusMessage("Review the learned place before saving it.");
   }
 
@@ -183,6 +188,7 @@ export default function PlacesScreen() {
       setLocationAccuracy(accuracy ?? null);
       setLocationPrecise(precise);
       if (!placeName.trim() && suggestedName) setPlaceName(suggestedName);
+      setPlaceLabelSource("current_location");
       setStatusMessage(formatLocationAccuracy(accuracy));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to read current location.";
@@ -205,6 +211,7 @@ export default function PlacesScreen() {
     setDefaultActivityDescription(place.defaultActivityDescription ?? "");
     setLocationAccuracy(null);
     setLocationPrecise(true);
+    setPlaceLabelSource("saved");
     setStatusMessage(null);
   }
 
@@ -220,6 +227,7 @@ export default function PlacesScreen() {
     setDefaultActivityDescription("");
     setLocationAccuracy(null);
     setLocationPrecise(true);
+    setPlaceLabelSource("manual");
   }
 
   async function savePlace() {
@@ -457,6 +465,19 @@ export default function PlacesScreen() {
   const createWarning = formMode?.type === "create"
     ? locationAccuracyWarning(locationAccuracy, locationPrecise)
     : null;
+  const formCoordinate = parseFormCoordinate(latitudeText, longitudeText);
+  const numericRadius = Number(radiusMeters);
+  const overlappingPlaces = formCoordinate && Number.isFinite(numericRadius)
+    ? places.filter((place) =>
+        place.id !== (formMode?.type === "edit" ? formMode.place.id : null) &&
+        place.latitude != null &&
+        place.longitude != null &&
+        distanceBetweenCoordinates(formCoordinate, {
+          latitude: place.latitude,
+          longitude: place.longitude
+        }) < numericRadius + place.radiusMeters
+      )
+    : [];
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -527,18 +548,66 @@ export default function PlacesScreen() {
               <TextInput
                 style={styles.textInput}
                 value={placeName}
-                onChangeText={setPlaceName}
+                onChangeText={(value) => {
+                  setPlaceName(value);
+                  setPlaceLabelSource("manual");
+                }}
                 placeholder="Place name"
                 placeholderTextColor={theme.textSecondary}
                 returnKeyType="done"
               />
+              {formCoordinate ? (
+                <View style={localStyles.mapPreviewSection}>
+                  <MapView
+                    accessibilityLabel={`Saved place centre and ${Number.isFinite(numericRadius) ? numericRadius : 0} metre radius preview`}
+                    onPress={(event: MapPressEvent) => {
+                      setLatitudeText(formatCoordinate(event.nativeEvent.coordinate.latitude));
+                      setLongitudeText(formatCoordinate(event.nativeEvent.coordinate.longitude));
+                      setPlaceLabelSource("manual");
+                    }}
+                    pitchEnabled={false}
+                    region={{ ...formCoordinate, latitudeDelta: 0.006, longitudeDelta: 0.006 }}
+                    rotateEnabled={false}
+                    style={localStyles.mapPreview}
+                  >
+                    {Number.isFinite(numericRadius) && numericRadius > 0 ? (
+                      <Circle
+                        center={formCoordinate}
+                        fillColor={`${theme.accent}24`}
+                        radius={numericRadius}
+                        strokeColor={theme.accent}
+                        strokeWidth={2}
+                      />
+                    ) : null}
+                    <Marker coordinate={formCoordinate} pinColor={theme.accent} title="Saved place centre" />
+                  </MapView>
+                  <Text style={styles.muted}>Tap the map to move the saved centre. The radius remains exactly the value below.</Text>
+                  <Text style={styles.diagnosticText}>
+                    {placeLabelSource === "current_location"
+                      ? "The name is a reverse-geocoded suggestion; the pin is the saved centre."
+                      : placeLabelSource === "learned"
+                        ? "The pin comes from reviewed learned evidence; the name remains editable."
+                        : "The pin is the saved centre; changing the name does not move it."}
+                  </Text>
+                  {overlappingPlaces.length ? (
+                    <Text accessibilityLiveRegion="polite" style={styles.statusText}>
+                      This radius materially overlaps {overlappingPlaces.map((place) => place.name).join(", ")}. Keep both centres and radii distinct if they represent different places.
+                    </Text>
+                  ) : null}
+                </View>
+              ) : (
+                <Text style={styles.muted}>Use current location or enter coordinates to preview the saved centre and radius.</Text>
+              )}
               <View style={styles.placeFormRow}>
                 <View style={styles.placeFormField}>
                   <Text style={styles.label}>Latitude</Text>
                   <TextInput
                     style={[styles.textInput, styles.coordinateInput]}
                     value={latitudeText}
-                    onChangeText={setLatitudeText}
+                    onChangeText={(value) => {
+                      setLatitudeText(value);
+                      setPlaceLabelSource("manual");
+                    }}
                     keyboardType="numbers-and-punctuation"
                     placeholder="51.5074"
                     placeholderTextColor={theme.textSecondary}
@@ -550,7 +619,10 @@ export default function PlacesScreen() {
                   <TextInput
                     style={[styles.textInput, styles.coordinateInput]}
                     value={longitudeText}
-                    onChangeText={setLongitudeText}
+                    onChangeText={(value) => {
+                      setLongitudeText(value);
+                      setPlaceLabelSource("manual");
+                    }}
                     keyboardType="numbers-and-punctuation"
                     placeholder="-0.1278"
                     placeholderTextColor={theme.textSecondary}
@@ -558,6 +630,7 @@ export default function PlacesScreen() {
                   />
                 </View>
               </View>
+              <Text style={styles.diagnosticText}>Advanced coordinate fallback</Text>
               <View style={styles.buttonRow}>
                 <Pressable
                   accessibilityRole="button"
@@ -1320,6 +1393,33 @@ function formatCoordinate(value: number) {
 function formatOptionalCoordinate(value?: number | null) {
   return typeof value === "number" ? formatCoordinate(value) : "";
 }
+
+function parseFormCoordinate(latitudeText: string, longitudeText: string) {
+  if (!latitudeText.trim() || !longitudeText.trim()) return null;
+  const latitude = Number(latitudeText);
+  const longitude = Number(longitudeText);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null;
+  return { latitude, longitude };
+}
+
+function distanceBetweenCoordinates(
+  left: { latitude: number; longitude: number },
+  right: { latitude: number; longitude: number }
+) {
+  const radians = (degrees: number) => degrees * Math.PI / 180;
+  const latitudeDelta = radians(right.latitude - left.latitude);
+  const longitudeDelta = radians(right.longitude - left.longitude);
+  const a = Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(radians(left.latitude)) * Math.cos(radians(right.latitude)) *
+    Math.sin(longitudeDelta / 2) ** 2;
+  return 6_371_000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+const localStyles = StyleSheet.create({
+  mapPreviewSection: { gap: 10 },
+  mapPreview: { borderRadius: 16, height: 240, width: "100%" }
+});
 
 function BackGlyph({ color }: { color: string }) {
   return (

@@ -9,6 +9,9 @@ import {
   type HealthAutoLogMappings,
   type HealthImportPreferences,
   type LocationDisplayAddress,
+  type LocationRolloutMode,
+  type LocationReviewAction,
+  type LocationReviewEvidenceDto,
   type RecentActivitySuggestion
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
@@ -97,6 +100,7 @@ export type MobileBootstrap = {
     weeklyGoalMinutes?: number;
   };
   workspace: { id: string; name: string };
+  locationRolloutMode?: LocationRolloutMode;
   dateRange?: MobileDateRange;
   activeEntry: MobileTimeEntry | null;
   stats?: MobileStats;
@@ -405,6 +409,15 @@ export async function logout() {
     method: "POST",
     headers: token ? { Authorization: `Bearer ${token}` } : {}
   }).catch(() => undefined);
+  await import("./location/runtime")
+    .then(async ({ clearNativeLocationSignals, stopNativeLocationIntelligence }) => {
+      await stopNativeLocationIntelligence();
+      await clearNativeLocationSignals();
+    })
+    .catch(() => undefined);
+  await import("./location/store")
+    .then(({ clearActiveLocationAccountData }) => clearActiveLocationAccountData())
+    .catch(() => undefined);
   await clearSessionToken();
 }
 
@@ -722,6 +735,53 @@ export async function resolveReviewItem(id: string, action: ReviewItemAction) {
   return readJsonResponse(response);
 }
 
+export async function resolveLocationReviewItem(id: string, action: LocationReviewAction) {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(id)}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify(action)
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to update location review"));
+  return readJsonResponse(response);
+}
+
+export async function fetchLocationReviewEvidence(id: string): Promise<LocationReviewEvidenceDto> {
+  const response = await fetch(
+    `${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(id)}/location-evidence`,
+    { headers: await authHeaders(), cache: "no-store" }
+  );
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to load location evidence"));
+  return readJsonResponse<LocationReviewEvidenceDto>(response);
+}
+
+export async function deleteRecentLocationEvidence() {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/location/evidence`, {
+    method: "DELETE",
+    headers: await authHeaders()
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to delete recent location evidence"));
+  const server = await readJsonResponse<{ ok: true; deletedEvidenceCount: number }>(response);
+  const local = await import("./location/store").then(({ deleteRetainedLocationEvidence }) =>
+    deleteRetainedLocationEvidence()
+  );
+  return { ...server, localDeletedEvidenceCount: local.deletedCount };
+}
+
 export function confirmReviewItem(id: string) {
   return resolveReviewItem(id, "accept");
 }
@@ -750,10 +810,41 @@ export async function reprocessHealthReviewItems(
   return readJsonResponse<HealthReviewReprocessResult>(response);
 }
 
-export async function saveEditedReviewItem(id: string, input: ManualTimeEntryInput) {
-  await createManualTimeEntry(input);
-  await dismissReviewItem(id);
-  return { ok: true };
+export async function saveEditedReviewItem(
+  id: string,
+  input: ManualTimeEntryInput,
+  options: { atomicLocation?: boolean } = {}
+) {
+  if (!options.atomicLocation) {
+    // Preserve the established non-location review workflow. V2 location
+    // reviews opt into the single server transaction below.
+    await createManualTimeEntry(input);
+    await dismissReviewItem(id);
+    return { ok: true };
+  }
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(id)}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify({
+      action: "edit_and_confirm",
+      edit: {
+        categoryId: input.categoryId ?? null,
+        description: input.description?.trim() || undefined,
+        startedAt: input.startedAt,
+        stoppedAt: input.stoppedAt,
+        tags: input.tagNames
+      }
+    })
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to save reviewed activity"));
+  return readJsonResponse(response);
 }
 
 export async function createCategory(

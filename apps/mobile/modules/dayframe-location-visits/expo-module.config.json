@@ -1,0 +1,8 @@
+{
+  "platforms": ["apple"],
+  "apple": {
+    "modules": ["DayframeLocationVisitsModule"],
+    "appDelegateSubscribers": ["DayframeLocationAppDelegateSubscriber"],
+    "podspecPath": "./ios/DayframeLocationVisits.podspec"
+  }
+}
