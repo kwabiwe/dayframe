@@ -3,6 +3,8 @@ PODS:
     - ExpoModulesCore
   - DayframeLocationVisits (0.1.0):
     - ExpoModulesCore
+  - DayframePlaceSearch (0.1.0):
+    - ExpoModulesCore
   - EXConstants (56.0.21):
     - ExpoModulesCore
   - Expo (56.0.16):
@@ -2364,6 +2366,7 @@ PODS:
 DEPENDENCIES:
   - DayframeCalendar (from `../modules/dayframe-calendar/ios`)
   - DayframeLocationVisits (from `../modules/dayframe-location-visits/ios`)
+  - DayframePlaceSearch (from `../modules/dayframe-place-search/ios`)
   - EXConstants (from `../../../node_modules/expo-constants/ios`)
   - Expo (from `../../../node_modules/expo`)
   - ExpoAsset (from `../../../node_modules/expo-asset/ios`)
@@ -2480,6 +2483,8 @@ EXTERNAL SOURCES:
     :path: "../modules/dayframe-calendar/ios"
   DayframeLocationVisits:
     :path: "../modules/dayframe-location-visits/ios"
+  DayframePlaceSearch:
+    :path: "../modules/dayframe-place-search/ios"
   EXConstants:
     :path: "../../../node_modules/expo-constants/ios"
   Expo:
@@ -2703,6 +2708,7 @@ EXTERNAL SOURCES:
 SPEC CHECKSUMS:
   DayframeCalendar: 105d3dd67c3a016050217d253a97bc81eeed0cbe
   DayframeLocationVisits: a92d96c395edf56959289c8e57ebb10ab4417884
+  DayframePlaceSearch: 0dca400edd668a45b1c00b986ecb147ada6bfea5
   EXConstants: b761e3534d6066412c7c3276dd4f104d2275e6d4
   Expo: db3a7098c5a6b97f1805a1c2c9394627caf8d29b
   ExpoAsset: d69e54981e14baa059c5d9cc9580d06fffc44644
