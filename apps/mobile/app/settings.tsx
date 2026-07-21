@@ -3,6 +3,7 @@ import {
   Alert,
   findNodeHandle,
   Keyboard,
+  Modal,
   Platform,
   Pressable,
   RefreshControl,
@@ -89,6 +90,7 @@ import {
   shouldRefreshSettingsSnapshot,
   shouldShowSettingsRefreshSpinner
 } from "@/lib/settingsRefresh";
+import { clampSettingsScrollOffset, settingsScrollNeedsClamp } from "@/lib/settingsScroll";
 import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
 import {
   configureLocationIntelligence,
@@ -183,6 +185,8 @@ export default function SettingsScreen() {
   const [syncingQueue, setSyncingQueue] = useState(false);
   const [syncStatusMessage, setSyncStatusMessage] = useState<string | null>(cachedSnapshot?.syncStatusMessage ?? null);
   const [showQueueDetails, setShowQueueDetails] = useState(false);
+  const [showLocationTroubleshooting, setShowLocationTroubleshooting] = useState(false);
+  const [locationInfoSheet, setLocationInfoSheet] = useState<"places" | "suggestions" | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [locationStatus, setLocationStatus] = useState(cachedSnapshot?.locationStatus ?? "Not requested");
   const [locationDiagnostics, setLocationDiagnostics] = useState<LocationVisitDiagnostics | null>(
@@ -220,6 +224,30 @@ export default function SettingsScreen() {
   const categoryEditRef = useRef<TextInput>(null);
   const newCategoryInputRef = useRef<TextInput>(null);
   const settingsScrollRef = useRef<ScrollView>(null);
+  const settingsScrollOffsetRef = useRef(0);
+  const settingsScrollContentHeightRef = useRef(0);
+  const settingsScrollViewportHeightRef = useRef(0);
+
+  const clampSettingsScroll = useCallback(() => {
+    const offset = settingsScrollOffsetRef.current;
+    const contentHeight = settingsScrollContentHeightRef.current;
+    const viewportHeight = settingsScrollViewportHeightRef.current;
+    if (!settingsScrollNeedsClamp(offset, contentHeight, viewportHeight)) return;
+    const nextOffset = clampSettingsScrollOffset(offset, contentHeight, viewportHeight);
+    settingsScrollOffsetRef.current = nextOffset;
+    settingsScrollRef.current?.scrollTo({ y: nextOffset, animated: false });
+  }, []);
+
+  useEffect(() => {
+    Keyboard.dismiss();
+    setShowLocationTroubleshooting(false);
+    setLocationInfoSheet(null);
+    settingsScrollOffsetRef.current = 0;
+    const frame = requestAnimationFrame(() => {
+      settingsScrollRef.current?.scrollTo({ y: 0, animated: false });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [settingsSection]);
 
   const setDataAndCache = useCallback((action: SetStateAction<MobileBootstrap | null>) => {
     setData((current) => {
@@ -393,7 +421,12 @@ export default function SettingsScreen() {
     queueDiagnostics
   });
   const locationMonitoringAllowed = locationDiagnostics?.backgroundPermission === "granted";
-  const locationActionLabel = locationMonitoringAllowed ? "Refresh monitoring" : "Enable";
+  const locationActionLabel = locationMonitoringAllowed
+    ? "Refresh"
+    : locationDiagnostics?.foregroundPermission === "denied"
+      ? "Review access"
+      : "Enable";
+  const backgroundAccessSummary = locationMonitoringAllowed ? "On" : "Needs attention";
   const settingsTitle = settingsSectionTitle(settingsSection);
   const categoryCount = data?.categories.length ?? 0;
   const workspaceLabel = data?.workspace?.name ?? "Default workspace";
@@ -728,7 +761,7 @@ export default function SettingsScreen() {
   function confirmDeleteLocationEvidence() {
     Alert.alert(
       "Delete recent location evidence",
-      "Delete raw map points from this device and the server? Confirmed entries, saved places and derived visit summaries remain.",
+      "Delete recent exact map evidence from this device and the server? Confirmed entries and saved places will remain.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -936,12 +969,25 @@ export default function SettingsScreen() {
         </View>
       </View>
       <ScrollView
+        key={settingsSection}
         ref={settingsScrollRef}
-        automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+        automaticallyAdjustKeyboardInsets={Platform.OS === "ios" && settingsSection === "categories"}
         style={styles.settingsScrollView}
         contentContainerStyle={styles.settingsScrollContent}
         keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-        keyboardShouldPersistTaps="always"
+        keyboardShouldPersistTaps={settingsSection === "categories" ? "always" : "handled"}
+        onContentSizeChange={(_width, height) => {
+          settingsScrollContentHeightRef.current = height;
+          requestAnimationFrame(clampSettingsScroll);
+        }}
+        onLayout={(event) => {
+          settingsScrollViewportHeightRef.current = event.nativeEvent.layout.height;
+          requestAnimationFrame(clampSettingsScroll);
+        }}
+        onScroll={(event) => {
+          settingsScrollOffsetRef.current = event.nativeEvent.contentOffset.y;
+        }}
+        scrollEventThrottle={16}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -1347,10 +1393,16 @@ export default function SettingsScreen() {
           {settingsSection === "automations" ? (
           <>
           <View style={styles.panel}>
-            <Text style={styles.sectionTitle}>Places</Text>
-            <Text style={styles.muted}>
-              Places help Dayframe recognise where time was spent. Completed visits are review-first, even for specific places, so you can confirm the time window before it becomes a time entry.
-            </Text>
+            <View style={styles.healthPreferenceHeader}>
+              <Text style={styles.sectionTitle}>Places</Text>
+              <InfoButton
+                accessibilityLabel="About saved places"
+                onPress={() => setLocationInfoSheet("places")}
+                styles={styles}
+                theme={theme}
+              />
+            </View>
+            <Text style={styles.muted}>Save locations Dayframe should recognise.</Text>
             <View style={styles.buttonRow}>
               <Pressable
                 accessibilityRole="button"
@@ -1457,20 +1509,23 @@ export default function SettingsScreen() {
 
           {settingsSection === "automations" ? (
           <View style={styles.panel}>
-            <Text style={styles.sectionTitle}>Location</Text>
-            <Text style={styles.muted}>
-              Dayframe uses background location to identify visits and journeys. Exact evidence is temporarily
-              synchronised for private map review and deterministic reprocessing, then deleted after seven days.
-              Derived entries and saved places remain until you delete them.
-            </Text>
+            <View style={styles.healthPreferenceHeader}>
+              <Text style={styles.sectionTitle}>Location suggestions</Text>
+              <InfoButton
+                accessibilityLabel="How location suggestions work"
+                onPress={() => setLocationInfoSheet("suggestions")}
+                styles={styles}
+                theme={theme}
+              />
+            </View>
             <View style={styles.healthPreferenceRow}>
               <View style={styles.healthPreferenceHeader}>
                 <View style={styles.healthPreferenceText}>
-                  <Text style={styles.categoryName}>Commute + place learning</Text>
+                  <Text style={styles.categoryName}>Suggest visits and journeys</Text>
                   <Text style={styles.categoryMeta}>
                     {locationDiagnostics?.locationLearningEnabled
-                      ? "Review-first suggestions from ordered background evidence"
-                      : "Paused until you turn it on"}
+                      ? "Background location can create suggestions in Review."
+                      : "Location suggestions are off."}
                   </Text>
                 </View>
                 <Switch
@@ -1482,124 +1537,55 @@ export default function SettingsScreen() {
                   ios_backgroundColor={theme.borderStrong}
                 />
               </View>
-              <Text style={styles.muted}>
-                Disabling this stops new standard, visit and significant-change capture. Precise Location,
-                Background App Refresh and iOS delivery affect accuracy; Dayframe does not promise continuous tracking.
-              </Text>
             </View>
-            {locationV2Diagnostics ? (
-              <View style={styles.healthPreferenceRow}>
-                <Text style={styles.categoryName}>Engine rollout</Text>
-                <Text style={styles.reviewMetaLine}>{locationRolloutLabel(locationV2Diagnostics.rolloutMode)}</Text>
-                <Text style={styles.muted}>
-                  This safety mode is controlled by the Dayframe server. Shadow keeps V1 suggestions while V2 compares derived segment counts.
-                </Text>
-              </View>
-            ) : null}
-            <Text style={styles.statusText}>{locationStatus}</Text>
-            {locationDiagnostics ? (
-              <>
-                <Text style={styles.muted}>
-                  Permission: {formatPermissionStatus(locationDiagnostics.foregroundPermission)} · Background:{" "}
-                  {formatPermissionStatus(locationDiagnostics.backgroundPermission)}
-                </Text>
-                <Text style={styles.muted}>{locationMonitorCountText(locationDiagnostics)}</Text>
-                {(locationDiagnostics.excludedMonitorCount ?? 0) > 0 ? (
-                  <Text style={styles.muted}>
-                    Not monitored because of the iOS region limit: {locationDiagnostics.excludedPlaceNames?.join(", ") ?? locationDiagnostics.excludedMonitorCount}
-                  </Text>
-                ) : null}
-                {locationDiagnostics.lastGeofenceEvent ? (
-                  <Text style={styles.muted}>
-                    Last geofence: {formatGeofenceTransition(locationDiagnostics.lastGeofenceEvent.transition)}{" "}
-                    {locationDiagnostics.lastGeofenceEvent.placeName} ·{" "}
-                    {formatQueueTime(locationDiagnostics.lastGeofenceEvent.occurredAt)}
-                  </Text>
-                ) : null}
-                {locationDiagnostics.lastTransitionEvidence?.outcome === "rejected_far_from_region" ? (
-                  <Text style={styles.muted}>
-                    Last enter was ignored: {locationDiagnostics.lastTransitionEvidence.placeName} was about{" "}
-                    {locationDiagnostics.lastTransitionEvidence.distanceMeters ?? "?"}m from its saved centre.
-                  </Text>
-                ) : null}
-                {locationDiagnostics.lastQueuedVisitCandidate ? (
-                  <Text style={styles.muted}>
-                    Last candidate: {locationDiagnostics.lastQueuedVisitCandidate.placeName} ·{" "}
-                    {formatDurationMinutes(locationDiagnostics.lastQueuedVisitCandidate.durationSeconds)} ·{" "}
-                    {formatQueueTime(locationDiagnostics.lastQueuedVisitCandidate.queuedAt)}
-                  </Text>
-                ) : null}
-                {locationDiagnostics.lastCommuteCandidate ? (
-                  <Text style={styles.muted}>
-                    Last commute: {locationDiagnostics.lastCommuteCandidate.fromPlaceName} →{" "}
-                    {locationDiagnostics.lastCommuteCandidate.toPlaceName} ·{" "}
-                    {formatDurationMinutes(locationDiagnostics.lastCommuteCandidate.durationSeconds)} ·{" "}
-                    {formatQueueTime(locationDiagnostics.lastCommuteCandidate.queuedAt)}
-                  </Text>
-                ) : null}
-                {locationDiagnostics.lastLearnedPlaceCandidate ? (
-                  <Text style={styles.muted}>
-                    Last learned place: {locationDiagnostics.lastLearnedPlaceCandidate.candidateName} ·{" "}
-                    {locationDiagnostics.lastLearnedPlaceCandidate.sampleCount} samples ·{" "}
-                    {formatQueueTime(locationDiagnostics.lastLearnedPlaceCandidate.queuedAt)}
-                  </Text>
-                ) : null}
-                {locationDiagnostics.lastStatus &&
-                locationDiagnostics.lastStatus !== locationMonitorCountText(locationDiagnostics) ? (
-                  <Text style={styles.muted}>{locationDiagnostics.lastStatus}</Text>
-                ) : null}
-                {locationDiagnostics.lastEventAt || locationDiagnostics.lastMonitorRefreshAt ? (
-                  <Text style={styles.muted}>
-                    Last update {formatQueueTime(locationDiagnostics.lastEventAt ?? locationDiagnostics.lastMonitorRefreshAt)}
-                  </Text>
-                ) : null}
-                {locationV2Diagnostics ? (
-                  <>
-                    <Text style={styles.muted}>
-                      {locationV2Diagnostics.engineVersion} · {locationV2Diagnostics.savedPlaceCatalogueCount} saved places in matcher · state {locationV2Diagnostics.lastEngineState ?? "not run"}
-                    </Text>
-                    <Text style={styles.muted}>
-                      Evidence: {locationV2Diagnostics.pendingEvidenceCount} pending · {locationV2Diagnostics.acknowledgedEvidenceCount} acknowledged · {locationV2Diagnostics.outboxCount} batches queued
-                    </Text>
-                    <Text style={styles.muted}>
-                      Derived segments: {locationV2Diagnostics.segmentCount} · dropped by emergency cap: {locationV2Diagnostics.droppedEvidenceCount}
-                    </Text>
-                    <Text style={styles.muted}>
-                      Native visits: {nativeLocationStatus?.monitoringVisits ? "active" : "inactive"} · significant changes: {nativeLocationStatus?.monitoringSignificantChanges ? "active" : "inactive"} · native queue: {nativeLocationStatus?.pendingSignalCount ?? "unavailable"}
-                    </Text>
-                    <Text style={styles.muted}>
-                      Services: {nativeLocationStatus?.locationServicesEnabled ? "on" : "off/unavailable"} · accuracy: {nativeLocationStatus?.accuracyAuthorization ?? "unknown"} · Background App Refresh: {nativeLocationStatus?.backgroundRefreshStatus ?? "unknown"}
-                    </Text>
-                    {locationV2Diagnostics.oldestUnsynchronisedAt ? (
-                      <Text style={styles.muted}>Oldest unsynchronised evidence {formatQueueTime(locationV2Diagnostics.oldestUnsynchronisedAt)}</Text>
-                    ) : null}
-                    {locationV2Diagnostics.lastGapDurationSeconds ? (
-                      <Text style={styles.muted}>Last uncertain gap {formatDurationMinutes(locationV2Diagnostics.lastGapDurationSeconds)}</Text>
-                    ) : null}
-                    {locationV2Diagnostics.retentionCleanupAt ? (
-                      <Text style={styles.muted}>Retention cleanup removed {locationV2Diagnostics.retentionCleanupDeletedCount} rows · {formatQueueTime(locationV2Diagnostics.retentionCleanupAt)}</Text>
-                    ) : null}
-                    {locationV2Diagnostics.lastUploadAt ? (
-                      <Text style={styles.muted}>Last evidence sync {formatQueueTime(locationV2Diagnostics.lastUploadAt)}</Text>
-                    ) : null}
-                    {locationV2Diagnostics.lastUploadError ? (
-                      <Text style={styles.muted}>Last non-sensitive error: {locationV2Diagnostics.lastUploadError}</Text>
-                    ) : null}
-                  </>
-                ) : null}
-              </>
-            ) : null}
+            <Text style={styles.statusText}>Background access: {backgroundAccessSummary}</Text>
             <View style={styles.buttonRow}>
               <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={enableLocation}>
                 <Text style={styles.secondaryButtonText}>{locationActionLabel}</Text>
               </Pressable>
-              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={() => void shareLocationDiagnostics()}>
-                <Text style={styles.secondaryButtonText}>Copy diagnostics</Text>
-              </Pressable>
-              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={confirmDeleteLocationEvidence}>
-                <Text style={styles.secondaryButtonText}>Delete recent evidence</Text>
-              </Pressable>
             </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ expanded: showLocationTroubleshooting }}
+              style={pressable(styles.detailsToggle, styles.buttonPressed)}
+              onPress={() => {
+                scheduleLayoutTransition(reduceMotion);
+                setShowLocationTroubleshooting((current) => !current);
+              }}
+            >
+              <Text style={styles.detailsToggleText}>Privacy & troubleshooting</Text>
+              <DisclosureChevronGlyph color={theme.textSecondary} expanded={showLocationTroubleshooting} />
+            </Pressable>
+            {showLocationTroubleshooting ? (
+              <Reanimated.View
+                entering={localPresenceEntering(reduceMotion)}
+                exiting={localPresenceExiting(reduceMotion)}
+                layout={localLayoutTransition(reduceMotion)}
+                style={styles.healthPreferenceRow}
+              >
+                <Text style={styles.muted}>
+                  Exact map evidence is private and deleted after seven days. Confirmed entries and saved places remain until you delete them.
+                </Text>
+                {locationV2Diagnostics?.lastUploadAt ? (
+                  <Text style={styles.muted}>Last evidence sync {formatQueueTime(locationV2Diagnostics.lastUploadAt)}</Text>
+                ) : null}
+                <Text style={styles.muted}>
+                  Foreground access: {formatPermissionStatus(locationDiagnostics?.foregroundPermission ?? "unknown")} · Background access: {backgroundAccessSummary}
+                </Text>
+                {locationDiagnostics ? <Text style={styles.muted}>{locationMonitorCountText(locationDiagnostics)}</Text> : null}
+                <View style={styles.buttonRow}>
+                  <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={enableLocation}>
+                    <Text style={styles.secondaryButtonText}>Refresh monitoring</Text>
+                  </Pressable>
+                  <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={() => void shareLocationDiagnostics()}>
+                    <Text style={styles.secondaryButtonText}>Share diagnostics</Text>
+                  </Pressable>
+                  <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={confirmDeleteLocationEvidence}>
+                    <Text style={styles.secondaryButtonText}>Delete recent evidence</Text>
+                  </Pressable>
+                </View>
+              </Reanimated.View>
+            ) : null}
           </View>
           ) : null}
 
@@ -1759,7 +1745,106 @@ export default function SettingsScreen() {
           ) : null}
         </View>
       </ScrollView>
+      <LocationInformationSheet
+        kind={locationInfoSheet}
+        onClose={() => setLocationInfoSheet(null)}
+        reduceMotion={reduceMotion}
+        styles={styles}
+        theme={theme}
+      />
     </SafeAreaView>
+  );
+}
+
+function InfoButton({
+  accessibilityLabel,
+  onPress,
+  styles,
+  theme
+}: {
+  accessibilityLabel: string;
+  onPress: () => void;
+  styles: MobileStyles;
+  theme: MobileTheme;
+}) {
+  return (
+    <Pressable
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="button"
+      style={pressable(styles.iconButton, styles.buttonPressed)}
+      onPress={onPress}
+    >
+      <InfoGlyph color={theme.accent} />
+    </Pressable>
+  );
+}
+
+function LocationInformationSheet({
+  kind,
+  onClose,
+  reduceMotion,
+  styles,
+  theme
+}: {
+  kind: "places" | "suggestions" | null;
+  onClose: () => void;
+  reduceMotion: boolean;
+  styles: MobileStyles;
+  theme: MobileTheme;
+}) {
+  if (!kind) return null;
+  const isPlaces = kind === "places";
+  return (
+    <Modal
+      animationType={reduceMotion ? "none" : "fade"}
+      onRequestClose={onClose}
+      presentationStyle="overFullScreen"
+      transparent
+      visible
+    >
+      <View accessibilityViewIsModal style={styles.sheetOverlay}>
+        <Pressable accessibilityLabel="Close information" style={styles.sheetBackdrop} onPress={onClose} />
+        <View style={styles.activeEditSheet}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>{isPlaces ? "About saved places" : "About location suggestions"}</Text>
+            <Pressable
+              accessibilityLabel="Close information"
+              accessibilityRole="button"
+              style={pressable(styles.iconButton, styles.buttonPressed)}
+              onPress={onClose}
+            >
+              <CloseGlyph color={theme.accent} />
+            </Pressable>
+          </View>
+          <ScrollView
+            contentContainerStyle={styles.activeEditContent}
+            style={styles.activeEditScroller}
+          >
+            {isPlaces ? (
+              <>
+                <Text style={styles.muted}>
+                  Saved places help Dayframe recognise where you spent time. Detected visits appear in Review before they become time entries.
+                </Text>
+                <Text style={styles.muted}>You can edit a saved name and radius at any time.</Text>
+              </>
+            ) : (
+              <>
+                <Text style={styles.muted}>
+                  Dayframe uses background location to suggest visits and journeys. Suggestions go to Review before becoming time entries.
+                </Text>
+                <Text style={styles.muted}>
+                  Exact map evidence is private and deleted after seven days. Confirmed entries and saved places remain until you delete them.
+                </Text>
+                <Text style={styles.muted}>
+                  iOS can pause or limit background updates, so Dayframe may not capture every movement.
+                </Text>
+              </>
+            )}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -1952,6 +2037,39 @@ function ChevronGlyph({ color }: { color: string }) {
   );
 }
 
+function DisclosureChevronGlyph({ color, expanded }: { color: string; expanded: boolean }) {
+  return (
+    <Svg width={18} height={18} viewBox="0 0 24 24">
+      <Path
+        d={expanded ? "m6 15 6-6 6 6" : "m6 9 6 6 6-6"}
+        fill="none"
+        stroke={color}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+      />
+    </Svg>
+  );
+}
+
+function InfoGlyph({ color }: { color: string }) {
+  return (
+    <Svg width={19} height={19} viewBox="0 0 24 24">
+      <Path d="M12 11v6" stroke={color} strokeLinecap="round" strokeWidth={2} />
+      <Path d="M12 7h.01" stroke={color} strokeLinecap="round" strokeWidth={2.8} />
+      <Path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z" fill="none" stroke={color} strokeWidth={2} />
+    </Svg>
+  );
+}
+
+function CloseGlyph({ color }: { color: string }) {
+  return (
+    <Svg width={18} height={18} viewBox="0 0 24 24">
+      <Path d="m7 7 10 10M17 7 7 17" stroke={color} strokeLinecap="round" strokeWidth={2} />
+    </Svg>
+  );
+}
+
 function settingsSectionTitle(section: SettingsSection) {
   switch (section) {
     case "profile":
@@ -2067,22 +2185,6 @@ function formatPermissionStatus(value: LocationVisitDiagnostics["foregroundPermi
     case "unknown":
       return "Unknown";
   }
-}
-
-function formatGeofenceTransition(value: NonNullable<LocationVisitDiagnostics["lastGeofenceEvent"]>["transition"]) {
-  return value === "enter" ? "Entered" : "Exited";
-}
-
-function formatDurationMinutes(seconds: number) {
-  const minutes = Math.max(1, Math.round(seconds / 60));
-  return `${minutes} min`;
-}
-
-function locationRolloutLabel(mode: LocationStoreDiagnostics["rolloutMode"]) {
-  if (mode === "v1") return "V1 production behaviour";
-  if (mode === "v2_review") return "V2 review-only";
-  if (mode === "v2_enabled") return "V2 enabled (review-safe)";
-  return "V2 shadow";
 }
 
 function defaultHealthCategoryLabel(type: HealthImportPreferenceKey) {
