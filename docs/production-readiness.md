@@ -105,7 +105,7 @@ Deletion/privacy groundwork remains: implement safe user/workspace deletion with
 
 ## Current Internal Beta State
 
-As of 2026-07-19, the active internal TestFlight lane has verified build `0.1.0 (58)` in `Internal Health Debug`. The native Calendar touch/data recovery is shipped and under physical-iPhone `Watch`; the tracker records that acceptance work alongside the remaining `Planned` and `Future` items.
+As of 2026-07-21, the active internal TestFlight lane has verified build `0.1.0 (61)` in `Internal Health Debug`. PR #88's App Review UI and contextual task-suggestion fixes are shipped and under physical-iPhone/authenticated-web `Watch`; the tracker records that acceptance work alongside the remaining `Planned` and `Future` items.
 
 ## Remaining Before Wider Daily Beta Use
 

@@ -8,7 +8,7 @@ The core value proposition is to reduce manual time-tracking friction without lo
 
 The MVP goal is to make Dayframe reliable for personal use and a small friends beta: hosted on Vercel, backed by Supabase Postgres/Auth, iOS-only for mobile, offline-capable for hours or days, and privacy-conscious around health and precise location data.
 
-Current reality as of 2026-07-19: Dayframe is in an active internal TestFlight lane, with build `0.1.0 (58)` verified for KB testing after PR #85. Reusable Tags span hosted storage, web/API, offline-capable mobile entry, native Calendar presentation, clean Description/tag state separation, a mobile `Add a tag` shortcut, a web tag picker, higher-contrast mobile autocomplete, solid tag iconography, and draft-only tap-to-remove editing. Build 58 replaces the stale nested native Calendar model boundary identified in build 57; day taps, day/week swipes, and visible tracked-entry refresh are now under physical-iPhone `Watch` verification. The tracker in `docs/feature-fix-tracker.md` is the source of truth for what is `Done`, still under `Watch`, or actively `In progress`.
+Current reality as of 2026-07-21: Dayframe is in an active internal TestFlight lane, with build `0.1.0 (61)` verified for KB testing after PR #88. Reusable Tags span hosted storage, web/API, offline-capable mobile entry, native Calendar presentation, clean Description/tag state separation, and contextual task suggestions that retain category/tag combinations. Build 61 also refines learned-place details, place editing, Review and Sync disclosures, and compact native Calendar titles. Physical-iPhone and authenticated-web checks remain under `Watch`; the tracker in `docs/feature-fix-tracker.md` is the source of truth for shipped and outstanding work.
 
 ## 2. Mission
 
@@ -410,8 +410,8 @@ Deliverables:
 - ✅ Review inbox improvements.
 - ✅ Reports and automation accuracy metrics.
 - ⚠️ Settings for permissions and export exist; deletion/privacy controls still need the next-phase work tracked in `docs/feature-fix-tracker.md`.
-- ✅ Internal TestFlight build workflow is active and verified through `0.1.0 (58)`.
-- ⚠️ Native SwiftUI Calendar touch/data recovery is shipped in TestFlight build `0.1.0 (58)` and remains under physical-iPhone Watch for day taps/day swipes/week swipes, visible tracked-entry refresh, pinch/vertical pan, and accessibility settings.
+- ✅ Internal TestFlight build workflow is active and verified through `0.1.0 (61)`.
+- ⚠️ Native SwiftUI Calendar touch/data recovery first shipped in TestFlight build `0.1.0 (58)`; build `0.1.0 (61)` adds compact-title visibility refinements. Both remain under physical-iPhone Watch for day taps/day swipes/week swipes, visible tracked-entry refresh, pinch/vertical pan, block readability, and accessibility settings.
 
 Validation:
 

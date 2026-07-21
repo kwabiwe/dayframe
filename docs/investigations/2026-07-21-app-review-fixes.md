@@ -25,6 +25,19 @@ The Trello descriptions and screenshots are the primary user evidence. Before ch
 
 Saved-place/learned-review reconciliation remains a separate event-first transaction. It will not be guessed into this visual/data-suggestion patch without a proven review-to-cluster identity and explicit confidence outcome.
 
+## Release evidence
+
+- PR: #88
+- Merge commit: `eb688c5`
+- TestFlight: `0.1.0 (61)`
+- Delivery/build ID: `66577a40-9279-4fd0-add8-8849964871e7`
+- App Store Connect: `VALID`, `usesNonExemptEncryption=false`, en-GB notes set
+- Internal group/state: `Internal Health Debug` / `IN_BETA_TESTING`
+- Runtime API: `https://dayframe-web.vercel.app`
+- Trello: shipped cards moved from `Inbox - App Review` to `Watch / Verify`; the unshipped saved-place/pending-review reconciliation card moved to `Planned` with the identity constraint documented.
+
+Physical-iPhone, accessibility, and authenticated web journey verification remain open; release evidence does not imply those checks passed.
+
 ## Motion contract
 
 - Trigger: opening/closing learned-place details and expanding/collapsing informational or troubleshooting disclosure content.
