@@ -51,6 +51,10 @@ describe("mobile place helpers", () => {
       ok: false,
       message: "Radius must be 2000m or less."
     });
+    expect(validatePlaceForm({ name: "Gym", latitude: "", longitude: "", radiusMeters: "100" })).toEqual({
+      ok: false,
+      message: "Latitude is required."
+    });
   });
 
   it("returns calm foreground permission guidance", () => {
