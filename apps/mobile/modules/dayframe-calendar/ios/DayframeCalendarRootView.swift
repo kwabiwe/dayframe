@@ -371,13 +371,13 @@ private struct DayframeCalendarBlockView: View {
 
       if metrics.showTitle {
         VStack(alignment: .leading, spacing: metrics.compact ? 1 : 4) {
-          HStack(spacing: 7) {
+          HStack(spacing: 5) {
             Circle()
               .fill(Color(dayframeCSS: entry.color))
-              .frame(width: 7, height: 7)
+              .frame(width: 6, height: 6)
               .accessibilityHidden(true)
             Text(entry.title)
-              .font(.subheadline.weight(.semibold))
+              .font(.caption.weight(.medium))
               .foregroundStyle(Color(dayframeCSS: theme.textPrimary))
               .lineLimit(1)
           }
@@ -402,8 +402,8 @@ private struct DayframeCalendarBlockView: View {
             .foregroundStyle(Color(dayframeCSS: theme.textSecondary))
           }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, metrics.compact ? 4 : 7)
+        .padding(.horizontal, 8)
+        .padding(.vertical, metrics.compact ? 3 : 7)
       }
     }
   }

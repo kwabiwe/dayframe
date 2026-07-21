@@ -704,6 +704,7 @@ export async function getTaskSuggestions(session: RequestSession) {
     startedAt: string;
     stoppedAt: string | null;
     userConfirmed: boolean;
+    tagNames: string[];
   }>(
     `select te.id,
             cat.id as "categoryId",
@@ -716,6 +717,7 @@ export async function getTaskSuggestions(session: RequestSession) {
             te.source,
             te.started_at as "startedAt",
             te.stopped_at as "stoppedAt",
+            coalesce((select array_agg(t.name order by lower(t.name)) from time_entry_tags tet join tags t on t.id = tet.tag_id and t.workspace_id = te.workspace_id where tet.time_entry_id = te.id and tet.workspace_id = te.workspace_id), array[]::text[]) as "tagNames",
             exists (
               select 1
               from review_items accepted_review

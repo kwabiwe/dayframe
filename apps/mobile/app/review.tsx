@@ -36,6 +36,7 @@ import {
   localLayoutTransition,
   localPresenceEntering,
   localPresenceExiting,
+  scheduleLayoutTransition,
   useReduceMotionPreference
 } from "@/lib/motion";
 import {
@@ -71,6 +72,7 @@ export default function ReviewScreen() {
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<ReviewEditTarget | null>(null);
   const [editSaving, setEditSaving] = useState(false);
+  const [showReviewInfo, setShowReviewInfo] = useState(false);
   const [reprocessDiagnostics, setReprocessDiagnostics] = useState<ReviewReprocessDiagnostics>({
     apiBaseUrl: DAYFRAME_API_BASE,
     startedAt: null,
@@ -290,12 +292,29 @@ export default function ReviewScreen() {
               <Text style={styles.summaryTotal}>{totalNeedsReview}</Text>
             </View>
             <Text style={styles.muted}>Detected visits and suggested time entries stay here until you confirm, edit or ignore them.</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ expanded: showReviewInfo }}
+              style={pressable(styles.detailsToggle, styles.buttonPressed)}
+              onPress={() => {
+                scheduleLayoutTransition(reduceMotion);
+                setShowReviewInfo((current) => !current);
+              }}
+            >
+              <Text style={styles.detailsToggleText}>About Review</Text>
+              <ReviewChevronGlyph color={theme.textSecondary} expanded={showReviewInfo} />
+            </Pressable>
+            {showReviewInfo ? (
+              <Reanimated.View
+                entering={localPresenceEntering(reduceMotion)}
+                exiting={localPresenceExiting(reduceMotion)}
+                layout={localLayoutTransition(reduceMotion)}
+              >
+                <Text style={styles.muted}>Dayframe keeps uncertain Health and location activity here so you can confirm the time, edit its details, or dismiss it without silently changing your timeline.</Text>
+                <ReviewDiagnosticsPanel diagnostics={reprocessDiagnostics} styles={styles} />
+              </Reanimated.View>
+            ) : null}
           </View>
-
-          <ReviewDiagnosticsPanel
-            diagnostics={reprocessDiagnostics}
-            styles={styles}
-          />
 
           <View style={styles.lifecyclePanel}>
             <Text style={styles.sectionTitle}>Review items</Text>
@@ -797,6 +816,21 @@ function BackGlyph({ color }: { color: string }) {
   return (
     <Svg width={20} height={20} viewBox="0 0 24 24">
       <Path d="M15 5 8 12l7 7" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.3} />
+    </Svg>
+  );
+}
+
+function ReviewChevronGlyph({ color, expanded }: { color: string; expanded: boolean }) {
+  return (
+    <Svg accessibilityElementsHidden width={18} height={18} viewBox="0 0 24 24">
+      <Path
+        d={expanded ? "m6 15 6-6 6 6" : "m6 9 6 6 6-6"}
+        fill="none"
+        stroke={color}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+      />
     </Svg>
   );
 }

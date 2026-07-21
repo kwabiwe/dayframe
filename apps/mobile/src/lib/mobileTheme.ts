@@ -2638,6 +2638,16 @@ function createStyles(theme: MobileTheme) {
       justifyContent: "space-between",
       gap: 8
     },
+    learnedPlaceMetricGrid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8
+    },
+    learnedPlaceMetricCell: {
+      flexBasis: "47%",
+      flexGrow: 1,
+      minWidth: 112
+    },
     learnedPlaceCopyButton: {
       minHeight: 44,
       minWidth: 72,
