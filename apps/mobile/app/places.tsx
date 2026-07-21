@@ -8,30 +8,22 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
-  StyleSheet,
-  Switch,
   Text,
-  TextInput,
   useWindowDimensions,
   View
 } from "react-native";
 import Reanimated from "react-native-reanimated";
-import * as Location from "expo-location";
 import * as Clipboard from "expo-clipboard";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
-import MapView, { Circle, Marker, type MapPressEvent } from "react-native-maps";
-import { paletteColorFor } from "@dayframe/shared";
 import { SheetMutationProgress } from "@/components/SheetMutationProgress";
 import {
   AuthRequiredError,
-  createPlace,
   deletePlace,
   fetchBootstrap,
   forgetLearnedPlace,
   ignoreLearnedPlace,
-  updatePlace,
   type MobileBootstrap,
   type MobileLearnedPlace,
   type MobilePlace
@@ -43,59 +35,26 @@ import {
   copyLearnedPlaceDetail,
   learnedPlaceDetailValues
 } from "@/lib/learnedPlaces";
-import {
-  DEFAULT_PLACE_RADIUS_METERS,
-  foregroundLocationPermissionGuidance,
-  formatLocationAccuracy,
-  locationAccuracyWarning,
-  suggestedPlaceNameFromGeocode,
-  validatePlaceForm
-} from "@/lib/places";
 import { pressable, useMobileTheme, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
 import {
   localLayoutTransition,
   localPresenceEntering,
   localPresenceExiting,
-  scheduleLayoutTransition,
   useReduceMotionPreference
 } from "@/lib/motion";
 
 type Category = MobileBootstrap["categories"][number];
-
-type PlaceFormMode =
-  | {
-      type: "create";
-      learnedPlace?: MobileLearnedPlace;
-    }
-  | {
-      type: "edit";
-      place: MobilePlace;
-    };
 
 export default function PlacesScreen() {
   const reduceMotion = useReduceMotionPreference();
   const { styles, theme } = useMobileTheme();
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [locating, setLocating] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [ignoringLearnedId, setIgnoringLearnedId] = useState<string | null>(null);
   const [forgettingLearnedId, setForgettingLearnedId] = useState<string | null>(null);
   const [selectedLearnedPlace, setSelectedLearnedPlace] = useState<MobileLearnedPlace | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [formMode, setFormMode] = useState<PlaceFormMode | null>(null);
-  const [placeName, setPlaceName] = useState("");
-  const [latitudeText, setLatitudeText] = useState("");
-  const [longitudeText, setLongitudeText] = useState("");
-  const [radiusMeters, setRadiusMeters] = useState(String(DEFAULT_PLACE_RADIUS_METERS));
-  const [loggingEnabled, setLoggingEnabled] = useState(true);
-  const [defaultCategoryId, setDefaultCategoryId] = useState("");
-  const [defaultActivityDescription, setDefaultActivityDescription] = useState("");
-  const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
-  const [locationPrecise, setLocationPrecise] = useState(true);
-  const [placeLabelSource, setPlaceLabelSource] = useState<"manual" | "current_location" | "learned" | "saved">("manual");
-  const saveInFlight = useRef(false);
 
   const load = useCallback(async (options?: { refresh?: boolean; silent?: boolean }) => {
     if (options?.refresh) setRefreshing(true);
@@ -130,171 +89,21 @@ export default function PlacesScreen() {
   );
 
   function beginAddPlace() {
-    scheduleLayoutTransition(reduceMotion);
-    setFormMode({ type: "create" });
-    setPlaceName("");
-    setLatitudeText("");
-    setLongitudeText("");
-    setRadiusMeters(String(DEFAULT_PLACE_RADIUS_METERS));
-    setLoggingEnabled(true);
-    setDefaultCategoryId("");
-    setDefaultActivityDescription("");
-    setLocationAccuracy(null);
-    setLocationPrecise(true);
-    setPlaceLabelSource("manual");
     setStatusMessage(null);
+    router.push({ pathname: "/place-editor", params: { mode: "create" } } as never);
   }
 
   function beginSaveLearnedPlace(learnedPlace: MobileLearnedPlace) {
-    scheduleLayoutTransition(reduceMotion);
     setSelectedLearnedPlace(null);
-    setFormMode({ type: "create", learnedPlace });
-    setPlaceName(learnedPlace.name);
-    setLatitudeText(formatCoordinate(learnedPlace.latitude));
-    setLongitudeText(formatCoordinate(learnedPlace.longitude));
-    setRadiusMeters(String(learnedPlace.radiusMeters));
-    setLoggingEnabled(true);
-    setDefaultCategoryId("");
-    setDefaultActivityDescription("");
-    setLocationAccuracy(null);
-    setLocationPrecise(true);
-    setPlaceLabelSource("learned");
-    setStatusMessage("Review the learned place before saving it.");
-  }
-
-  async function useCurrentLocation() {
-    if (locating) return;
-    setLocating(true);
-    setStatusMessage("Checking current location...");
-    try {
-      const permission = await Location.requestForegroundPermissionsAsync();
-      const guidance = foregroundLocationPermissionGuidance(permission);
-      if (guidance) {
-        setStatusMessage(guidance);
-        Alert.alert("Use current location", guidance);
-        return;
-      }
-
-      const position = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High
-      });
-      const { latitude, longitude, accuracy } = position.coords;
-      const precise = permission.ios?.accuracy !== "reduced";
-      const suggestedName = await suggestCurrentPlaceName(latitude, longitude);
-
-      if (!formMode) setFormMode({ type: "create" });
-      setLatitudeText(formatCoordinate(latitude));
-      setLongitudeText(formatCoordinate(longitude));
-      setLocationAccuracy(accuracy ?? null);
-      setLocationPrecise(precise);
-      if (!placeName.trim() && suggestedName) setPlaceName(suggestedName);
-      setPlaceLabelSource("current_location");
-      setStatusMessage(formatLocationAccuracy(accuracy));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unable to read current location.";
-      setStatusMessage(message);
-      Alert.alert("Use current location", message);
-    } finally {
-      setLocating(false);
-    }
+    router.push({
+      pathname: "/place-editor",
+      params: { mode: "learned", learnedPlaceId: learnedPlace.id }
+    } as never);
   }
 
   function beginEditPlace(place: MobilePlace) {
-    scheduleLayoutTransition(reduceMotion);
-    setFormMode({ type: "edit", place });
-    setPlaceName(place.name);
-    setLatitudeText(formatOptionalCoordinate(place.latitude));
-    setLongitudeText(formatOptionalCoordinate(place.longitude));
-    setRadiusMeters(String(place.radiusMeters));
-    setLoggingEnabled(place.loggingEnabled !== false);
-    setDefaultCategoryId(place.defaultCategoryId ?? "");
-    setDefaultActivityDescription(place.defaultActivityDescription ?? "");
-    setLocationAccuracy(null);
-    setLocationPrecise(true);
-    setPlaceLabelSource("saved");
     setStatusMessage(null);
-  }
-
-  function cancelForm() {
-    scheduleLayoutTransition(reduceMotion);
-    setFormMode(null);
-    setPlaceName("");
-    setLatitudeText("");
-    setLongitudeText("");
-    setRadiusMeters(String(DEFAULT_PLACE_RADIUS_METERS));
-    setLoggingEnabled(true);
-    setDefaultCategoryId("");
-    setDefaultActivityDescription("");
-    setLocationAccuracy(null);
-    setLocationPrecise(true);
-    setPlaceLabelSource("manual");
-  }
-
-  async function savePlace() {
-    if (!formMode || saveInFlight.current) return;
-    const validation = validatePlaceForm({
-      name: placeName,
-      latitude: latitudeText,
-      longitude: longitudeText,
-      radiusMeters,
-      defaultCategoryId: loggingEnabled ? defaultCategoryId : "",
-      defaultActivityDescription: loggingEnabled ? defaultActivityDescription : ""
-    });
-    if (!validation.ok) {
-      Alert.alert("Places", validation.message);
-      return;
-    }
-
-    saveInFlight.current = true;
-    setSaving(true);
-    try {
-      if (formMode.type === "create") {
-        const learnedPlaceId = formMode.learnedPlace?.id;
-        const response = await createPlace({
-          learnedPlaceId,
-          name: validation.value.name,
-          latitude: validation.value.latitude,
-          longitude: validation.value.longitude,
-          radiusMeters: validation.value.radiusMeters,
-          priority: 5,
-          loggingEnabled,
-          defaultCategoryId: loggingEnabled ? validation.value.defaultCategoryId : null,
-          defaultActivityDescription: loggingEnabled ? validation.value.defaultActivityDescription : null
-        });
-        upsertLocalPlace(response.place);
-        cancelForm();
-        await refreshAfterPlaceChange({
-          prefix: "Place saved.",
-          upsertPlace: response.place,
-          removeLearnedPlaceId: learnedPlaceId
-        });
-      } else {
-        const response = await updatePlace(formMode.place.id, {
-          name: validation.value.name,
-          latitude: validation.value.latitude,
-          longitude: validation.value.longitude,
-          radiusMeters: validation.value.radiusMeters,
-          loggingEnabled,
-          defaultCategoryId: loggingEnabled ? validation.value.defaultCategoryId : null,
-          defaultActivityDescription: loggingEnabled ? validation.value.defaultActivityDescription : null
-        });
-        upsertLocalPlace(response.place);
-        cancelForm();
-        await refreshAfterPlaceChange({
-          prefix: "Place saved.",
-          upsertPlace: response.place
-        });
-      }
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        router.replace("/");
-        return;
-      }
-      Alert.alert("Places", error instanceof Error ? error.message : "Unable to save place.");
-    } finally {
-      saveInFlight.current = false;
-      setSaving(false);
-    }
+    router.push({ pathname: "/place-editor", params: { mode: "edit", placeId: place.id } } as never);
   }
 
   function confirmDeletePlace(place: MobilePlace) {
@@ -319,10 +128,7 @@ export default function PlacesScreen() {
     try {
       await applyAfterSuccessfulMutation(
         () => deletePlace(place.id),
-        () => {
-          if (formMode?.type === "edit" && formMode.place.id === place.id) cancelForm();
-          removeLocalPlace(place.id);
-        }
+        () => removeLocalPlace(place.id)
       );
       await refreshAfterPlaceChange({
         prefix: "Place deleted.",
@@ -416,10 +222,6 @@ export default function PlacesScreen() {
     }
   }
 
-  function upsertLocalPlace(place: MobilePlace) {
-    setData((current) => current ? reconcileBootstrapPlaces(current, { upsertPlace: place }) : current);
-  }
-
   function removeLocalPlace(id: string) {
     setData((current) => current ? reconcileBootstrapPlaces(current, { removePlaceId: id }) : current);
   }
@@ -462,22 +264,6 @@ export default function PlacesScreen() {
     (learnedPlace) => learnedPlace.classification === "place_candidate"
   );
   const categories = data?.categories ?? [];
-  const createWarning = formMode?.type === "create"
-    ? locationAccuracyWarning(locationAccuracy, locationPrecise)
-    : null;
-  const formCoordinate = parseFormCoordinate(latitudeText, longitudeText);
-  const numericRadius = Number(radiusMeters);
-  const overlappingPlaces = formCoordinate && Number.isFinite(numericRadius)
-    ? places.filter((place) =>
-        place.id !== (formMode?.type === "edit" ? formMode.place.id : null) &&
-        place.latitude != null &&
-        place.longitude != null &&
-        distanceBetweenCoordinates(formCoordinate, {
-          latitude: place.latitude,
-          longitude: place.longitude
-        }) < numericRadius + place.radiusMeters
-      )
-    : [];
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -509,18 +295,11 @@ export default function PlacesScreen() {
       >
         <View style={styles.contentStack}>
           <View style={styles.panel}>
-            <Text style={styles.sectionTitle}>Places</Text>
-            <Text style={styles.muted}>Places help Dayframe recognise where time was spent.</Text>
-            <Text style={styles.muted}>Visits are reviewed before becoming time entries.</Text>
+            <Text style={styles.muted}>Save locations Dayframe should recognise.</Text>
             <View style={styles.buttonRow}>
               <Pressable
                 accessibilityRole="button"
-                disabled={locating}
-                style={({ pressed }) => [
-                  styles.primaryInlineButton,
-                  locating ? styles.buttonDisabled : null,
-                  pressed ? styles.buttonPressed : null
-                ]}
+                style={pressable(styles.primaryInlineButton, styles.buttonPressed)}
                 onPress={beginAddPlace}
               >
                 <Text style={styles.primaryButtonText}>Add place</Text>
@@ -537,222 +316,6 @@ export default function PlacesScreen() {
               </Reanimated.View>
             ) : null}
           </View>
-
-          {formMode ? (
-            <View style={styles.placeForm}>
-              <Text style={styles.label}>
-                {formMode.type === "create"
-                  ? formMode.learnedPlace ? "Save learned place" : "New place"
-                  : "Edit place"}
-              </Text>
-              <TextInput
-                style={styles.textInput}
-                value={placeName}
-                onChangeText={(value) => {
-                  setPlaceName(value);
-                  setPlaceLabelSource("manual");
-                }}
-                placeholder="Place name"
-                placeholderTextColor={theme.textSecondary}
-                returnKeyType="done"
-              />
-              {formCoordinate ? (
-                <View style={localStyles.mapPreviewSection}>
-                  <MapView
-                    accessibilityLabel={`Saved place centre and ${Number.isFinite(numericRadius) ? numericRadius : 0} metre radius preview`}
-                    onPress={(event: MapPressEvent) => {
-                      setLatitudeText(formatCoordinate(event.nativeEvent.coordinate.latitude));
-                      setLongitudeText(formatCoordinate(event.nativeEvent.coordinate.longitude));
-                      setPlaceLabelSource("manual");
-                    }}
-                    pitchEnabled={false}
-                    region={{ ...formCoordinate, latitudeDelta: 0.006, longitudeDelta: 0.006 }}
-                    rotateEnabled={false}
-                    style={localStyles.mapPreview}
-                  >
-                    {Number.isFinite(numericRadius) && numericRadius > 0 ? (
-                      <Circle
-                        center={formCoordinate}
-                        fillColor={`${theme.accent}24`}
-                        radius={numericRadius}
-                        strokeColor={theme.accent}
-                        strokeWidth={2}
-                      />
-                    ) : null}
-                    <Marker coordinate={formCoordinate} pinColor={theme.accent} title="Saved place centre" />
-                  </MapView>
-                  <Text style={styles.muted}>Tap the map to move the saved centre. The radius remains exactly the value below.</Text>
-                  <Text style={styles.diagnosticText}>
-                    {placeLabelSource === "current_location"
-                      ? "The name is a reverse-geocoded suggestion; the pin is the saved centre."
-                      : placeLabelSource === "learned"
-                        ? "The pin comes from reviewed learned evidence; the name remains editable."
-                        : "The pin is the saved centre; changing the name does not move it."}
-                  </Text>
-                  {overlappingPlaces.length ? (
-                    <Text accessibilityLiveRegion="polite" style={styles.statusText}>
-                      This radius materially overlaps {overlappingPlaces.map((place) => place.name).join(", ")}. Keep both centres and radii distinct if they represent different places.
-                    </Text>
-                  ) : null}
-                </View>
-              ) : (
-                <Text style={styles.muted}>Use current location or enter coordinates to preview the saved centre and radius.</Text>
-              )}
-              <View style={styles.placeFormRow}>
-                <View style={styles.placeFormField}>
-                  <Text style={styles.label}>Latitude</Text>
-                  <TextInput
-                    style={[styles.textInput, styles.coordinateInput]}
-                    value={latitudeText}
-                    onChangeText={(value) => {
-                      setLatitudeText(value);
-                      setPlaceLabelSource("manual");
-                    }}
-                    keyboardType="numbers-and-punctuation"
-                    placeholder="51.5074"
-                    placeholderTextColor={theme.textSecondary}
-                    returnKeyType="done"
-                  />
-                </View>
-                <View style={styles.placeFormField}>
-                  <Text style={styles.label}>Longitude</Text>
-                  <TextInput
-                    style={[styles.textInput, styles.coordinateInput]}
-                    value={longitudeText}
-                    onChangeText={(value) => {
-                      setLongitudeText(value);
-                      setPlaceLabelSource("manual");
-                    }}
-                    keyboardType="numbers-and-punctuation"
-                    placeholder="-0.1278"
-                    placeholderTextColor={theme.textSecondary}
-                    returnKeyType="done"
-                  />
-                </View>
-              </View>
-              <Text style={styles.diagnosticText}>Advanced coordinate fallback</Text>
-              <View style={styles.buttonRow}>
-                <Pressable
-                  accessibilityRole="button"
-                  disabled={locating}
-                  style={({ pressed }) => [
-                    styles.secondaryButton,
-                    locating ? styles.buttonDisabled : null,
-                    pressed ? styles.buttonPressed : null
-                  ]}
-                  onPress={useCurrentLocation}
-                >
-                  <Text style={styles.secondaryButtonText}>
-                    {locating ? "Finding location..." : "Use current location"}
-                  </Text>
-                </Pressable>
-              </View>
-              <View style={styles.placeFormRow}>
-                <TextInput
-                  style={[styles.textInput, styles.radiusInput]}
-                  value={radiusMeters}
-                  onChangeText={setRadiusMeters}
-                  keyboardType="number-pad"
-                  placeholder="100"
-                  placeholderTextColor={theme.textSecondary}
-                  returnKeyType="done"
-                />
-                <View style={styles.categoryTextStack}>
-                  <Text style={styles.label}>Radius</Text>
-                  <Text style={styles.diagnosticText}>Meters from this place.</Text>
-                </View>
-              </View>
-              <View style={styles.healthPreferenceRow}>
-                <View style={styles.healthPreferenceHeader}>
-                  <View style={styles.healthPreferenceText}>
-                    <Text style={styles.categoryName}>Log visits</Text>
-                    <Text style={styles.categoryMeta}>
-                      {loggingEnabled
-                        ? "Detected visits can become review items."
-                        : "Visits here are kept as location evidence only."}
-                    </Text>
-                  </View>
-                  <Switch
-                    accessibilityLabel={`${placeName || "Place"} visit logging`}
-                    value={loggingEnabled}
-                    onValueChange={(enabled) => {
-                      setLoggingEnabled(enabled);
-                      if (!enabled) {
-                        setDefaultCategoryId("");
-                        setDefaultActivityDescription("");
-                      }
-                    }}
-                    trackColor={{ false: theme.borderStrong, true: theme.accent }}
-                    thumbColor={loggingEnabled ? theme.onAccent : theme.surfaceRaised}
-                    ios_backgroundColor={theme.borderStrong}
-                  />
-                </View>
-              </View>
-              {loggingEnabled ? (
-                <>
-                  <View style={styles.activeEditSection}>
-                    <Text style={styles.label}>Default category</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryChoiceScroller}>
-                      <CategoryChoice
-                        label="No default"
-                        selected={!defaultCategoryId}
-                        onPress={() => setDefaultCategoryId("")}
-                        theme={theme}
-                        styles={styles}
-                      />
-                      {categories.map((category) => (
-                        <CategoryChoice
-                          key={category.id}
-                          category={category}
-                          label={category.name}
-                          selected={defaultCategoryId === category.id}
-                          onPress={() => setDefaultCategoryId(category.id)}
-                          theme={theme}
-                          styles={styles}
-                        />
-                      ))}
-                    </ScrollView>
-                  </View>
-                  <View style={styles.activeEditSection}>
-                    <Text style={styles.label}>Default activity description</Text>
-                    <TextInput
-                      style={styles.textInput}
-                      value={defaultActivityDescription}
-                      onChangeText={setDefaultActivityDescription}
-                      placeholder="School drop-off/pickup"
-                      placeholderTextColor={theme.textSecondary}
-                      returnKeyType="done"
-                    />
-                  </View>
-                </>
-              ) : null}
-              {locationAccuracy !== null ? (
-                <Text style={styles.diagnosticText}>{formatLocationAccuracy(locationAccuracy)}</Text>
-              ) : null}
-              {createWarning ? <Text style={styles.warningText}>{createWarning}</Text> : null}
-              <View style={styles.buttonRow}>
-                <Pressable
-                  accessibilityRole="button"
-                  style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                  onPress={cancelForm}
-                >
-                  <Text style={styles.secondaryButtonText}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  disabled={saving}
-                  style={({ pressed }) => [
-                    styles.primaryInlineButton,
-                    saving ? styles.buttonDisabled : null,
-                    pressed ? styles.buttonPressed : null
-                  ]}
-                  onPress={savePlace}
-                >
-                  <Text style={styles.primaryButtonText}>{saving ? "Saving..." : "Save"}</Text>
-                </Pressable>
-              </View>
-            </View>
-          ) : null}
 
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Your places</Text>
@@ -778,7 +341,7 @@ export default function PlacesScreen() {
             </View>
             {places.length === 0 ? (
               <Reanimated.View entering={localPresenceEntering(reduceMotion)}>
-                <Text style={styles.muted}>No places yet. Add a place with coordinates or use your current location.</Text>
+                <Text style={styles.muted}>No places yet. Search for an address or use your current location.</Text>
               </Reanimated.View>
             ) : null}
             <View style={styles.settingsDivider} />
@@ -1236,70 +799,6 @@ function LearnedPlaceDetailRow({
   );
 }
 
-function CategoryChoice({
-  category,
-  label,
-  selected,
-  onPress,
-  theme,
-  styles
-}: {
-  category?: Category;
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-  theme: MobileTheme;
-  styles: MobileStyles;
-}) {
-  const chipColor = category
-    ? paletteColorFor(category.color, category.name, theme.mode)
-    : theme.accent;
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-      style={pressable(
-        [
-          styles.categoryChoice,
-          category ? { borderColor: chipColor } : null,
-          selected ? styles.categoryChoiceSelected : null,
-          selected ? { borderColor: chipColor } : null
-        ],
-        styles.buttonPressed
-      )}
-      onPress={onPress}
-    >
-      {category ? (
-        <View
-          style={[
-            styles.colorDot,
-            { backgroundColor: chipColor, borderColor: chipColor }
-          ]}
-        />
-      ) : null}
-      <Text
-        style={[
-          styles.categoryChoiceText,
-          selected ? styles.categoryChoiceTextSelected : null,
-          selected ? { color: chipColor } : null
-        ]}
-      >
-        {label}
-      </Text>
-      {selected ? <CheckGlyph color={chipColor} /> : null}
-    </Pressable>
-  );
-}
-
-async function suggestCurrentPlaceName(latitude: number, longitude: number) {
-  try {
-    const [firstResult] = await Location.reverseGeocodeAsync({ latitude, longitude });
-    return suggestedPlaceNameFromGeocode(firstResult);
-  } catch {
-    return "";
-  }
-}
-
 function reconcileBootstrapPlaces(
   data: MobileBootstrap,
   options: { upsertPlace?: MobilePlace; removePlaceId?: string; removeLearnedPlaceId?: string }
@@ -1385,42 +884,6 @@ function formatShortDateTime(value: string) {
   });
 }
 
-function formatCoordinate(value: number) {
-  if (!Number.isFinite(value)) return "";
-  return value.toFixed(6).replace(/\.?0+$/, "");
-}
-
-function formatOptionalCoordinate(value?: number | null) {
-  return typeof value === "number" ? formatCoordinate(value) : "";
-}
-
-function parseFormCoordinate(latitudeText: string, longitudeText: string) {
-  if (!latitudeText.trim() || !longitudeText.trim()) return null;
-  const latitude = Number(latitudeText);
-  const longitude = Number(longitudeText);
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
-  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null;
-  return { latitude, longitude };
-}
-
-function distanceBetweenCoordinates(
-  left: { latitude: number; longitude: number },
-  right: { latitude: number; longitude: number }
-) {
-  const radians = (degrees: number) => degrees * Math.PI / 180;
-  const latitudeDelta = radians(right.latitude - left.latitude);
-  const longitudeDelta = radians(right.longitude - left.longitude);
-  const a = Math.sin(latitudeDelta / 2) ** 2 +
-    Math.cos(radians(left.latitude)) * Math.cos(radians(right.latitude)) *
-    Math.sin(longitudeDelta / 2) ** 2;
-  return 6_371_000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-const localStyles = StyleSheet.create({
-  mapPreviewSection: { gap: 10 },
-  mapPreview: { borderRadius: 16, height: 240, width: "100%" }
-});
-
 function BackGlyph({ color }: { color: string }) {
   return (
     <Svg width={20} height={20} viewBox="0 0 24 24">
@@ -1462,14 +925,6 @@ function ArchiveGlyph({ color }: { color: string }) {
       <Path d="M5 7h14" stroke={color} strokeLinecap="round" strokeWidth={2} />
       <Path d="M9 7V5h6v2" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
       <Path d="M8 10v9h8v-9" fill="none" stroke={color} strokeLinejoin="round" strokeWidth={2} />
-    </Svg>
-  );
-}
-
-function CheckGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={15} height={15} viewBox="0 0 24 24">
-      <Path d="m5 12 4 4 10-10" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.4} />
     </Svg>
   );
 }

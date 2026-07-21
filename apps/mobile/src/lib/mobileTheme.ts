@@ -2286,12 +2286,22 @@ function createStyles(theme: MobileTheme) {
       fontSize: 12,
       fontWeight: "400"
     },
+    activeEditCategoryViewport: {
+      height: 48,
+      overflow: "hidden"
+    },
+    activeEditCategoryScroll: {
+      height: 48,
+      flexGrow: 0
+    },
     activeEditCategoryScroller: {
+      minHeight: 48,
+      alignItems: "center",
       gap: 8,
       paddingRight: 4
     },
     activeEditCategoryChip: {
-      minHeight: 32,
+      minHeight: 44,
       backgroundColor: theme.surfaceMuted,
       borderRadius: 999,
       paddingHorizontal: 11,
@@ -2729,6 +2739,9 @@ function createStyles(theme: MobileTheme) {
     detailsToggle: {
       alignSelf: "flex-start",
       minHeight: 44,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
       justifyContent: "center",
       paddingVertical: 4
     },

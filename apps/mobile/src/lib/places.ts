@@ -42,16 +42,19 @@ export function validatePlaceForm(input: PlaceFormInput): PlaceFormValidation {
   const name = input.name.trim();
   if (!name) return { ok: false, message: "Place name is required." };
 
+  if (!input.latitude.trim()) return { ok: false, message: "Latitude is required." };
   const latitude = Number(input.latitude);
   if (!Number.isFinite(latitude)) return { ok: false, message: "Latitude must be a number." };
   if (latitude < -90 || latitude > 90) return { ok: false, message: "Latitude must be between -90 and 90." };
 
+  if (!input.longitude.trim()) return { ok: false, message: "Longitude is required." };
   const longitude = Number(input.longitude);
   if (!Number.isFinite(longitude)) return { ok: false, message: "Longitude must be a number." };
   if (longitude < -180 || longitude > 180) {
     return { ok: false, message: "Longitude must be between -180 and 180." };
   }
 
+  if (!input.radiusMeters.trim()) return { ok: false, message: "Radius is required." };
   const radius = Number(input.radiusMeters);
   if (!Number.isFinite(radius)) return { ok: false, message: "Radius must be a number." };
 

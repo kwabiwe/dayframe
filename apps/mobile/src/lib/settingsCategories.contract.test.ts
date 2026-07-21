@@ -11,7 +11,7 @@ const settingsSource = readFileSync(
 
 describe("mobile Categories creation contract", () => {
   it("keeps the focused creator in a keyboard-adjusted scroll viewport", () => {
-    expect(settingsSource).toContain('automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}');
+    expect(settingsSource).toContain('automaticallyAdjustKeyboardInsets={Platform.OS === "ios" && settingsSection === "categories"}');
     expect(settingsSource).toContain('keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}');
     expect(settingsSource).toContain('Keyboard.addListener("keyboardDidShow", revealFocusedEditor)');
     expect(settingsSource).toContain("settingsScrollRef.current?.scrollToEnd");

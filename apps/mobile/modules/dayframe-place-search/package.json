@@ -1,0 +1,12 @@
+{
+  "name": "dayframe-place-search",
+  "version": "0.1.0",
+  "description": "Dayframe's private iOS Apple MapKit place-search service",
+  "main": "index.ts",
+  "private": true,
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

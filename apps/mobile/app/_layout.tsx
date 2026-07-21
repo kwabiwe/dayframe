@@ -54,6 +54,7 @@ function ThemedStack() {
         <Stack.Screen name="(tabs)" options={{ title: "Dayframe", gestureEnabled: false }} />
         <Stack.Screen name="settings" options={{ title: "Settings" }} />
         <Stack.Screen name="places" options={{ title: "Places" }} />
+        <Stack.Screen name="place-editor" options={{ title: "Place" }} />
         <Stack.Screen name="review" options={{ title: "Review" }} />
         <Stack.Screen
           name="action/[verb]"
