@@ -890,34 +890,42 @@ export function ActiveTimerEditSheet({
 
                 <View style={styles.activeEditSection}>
                   <Text style={styles.activeEditSectionLabel}>Category</Text>
-                  <ScrollView
-                    horizontal
-                    keyboardShouldPersistTaps="always"
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.activeEditCategoryScroller}
-                  >
-                    <CategoryChip
-                      category={null}
-                      selected={selectedCategoryId === null}
-                      styles={styles}
-                      theme={theme}
-                      onPress={() => {
-                        setSelectedCategoryId(null);
-                      }}
-                    />
-                    {categories.map((category) => (
+                  <View style={styles.activeEditCategoryViewport}>
+                    <ScrollView
+                      alwaysBounceVertical={false}
+                      bounces={false}
+                      contentContainerStyle={styles.activeEditCategoryScroller}
+                      directionalLockEnabled
+                      horizontal
+                      keyboardShouldPersistTaps="always"
+                      nestedScrollEnabled
+                      showsHorizontalScrollIndicator={false}
+                      showsVerticalScrollIndicator={false}
+                      style={styles.activeEditCategoryScroll}
+                    >
                       <CategoryChip
-                        key={category.id}
-                        category={category}
-                        selected={selectedCategoryId === category.id}
+                        category={null}
+                        selected={selectedCategoryId === null}
                         styles={styles}
                         theme={theme}
                         onPress={() => {
-                          setSelectedCategoryId(category.id);
+                          setSelectedCategoryId(null);
                         }}
                       />
-                    ))}
-                  </ScrollView>
+                      {categories.map((category) => (
+                        <CategoryChip
+                          key={category.id}
+                          category={category}
+                          selected={selectedCategoryId === category.id}
+                          styles={styles}
+                          theme={theme}
+                          onPress={() => {
+                            setSelectedCategoryId(category.id);
+                          }}
+                        />
+                      ))}
+                    </ScrollView>
+                  </View>
                 </View>
 
                 <View style={styles.activeEditSection}>
@@ -1198,6 +1206,7 @@ function CategoryChip({
       accessibilityLabel={category ? `Set category to ${category.name}` : "Clear category"}
       accessibilityRole="button"
       accessibilityState={{ selected }}
+      hitSlop={{ top: 2, bottom: 2 }}
       onPress={onPress}
       style={pressable(
         [
@@ -1212,7 +1221,7 @@ function CategoryChip({
       <Text style={[
         styles.activeEditCategoryChipText,
         selected ? styles.activeEditCategoryChipTextSelected : null
-      ]}>
+      ]} maxFontSizeMultiplier={1.5}>
         {label}
       </Text>
     </Pressable>
