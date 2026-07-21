@@ -569,6 +569,7 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
       await client.query(
         `insert into review_items (
             workspace_id,
+            user_id,
             event_id,
             type,
             title,
@@ -581,9 +582,10 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
             status,
             notes
          )
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'open', $11)`,
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'open', $12)`,
         [
           parsed.workspaceId,
+          parsed.userId,
           eventId,
           `${parsed.type}_suggestion`,
           candidate.title,
@@ -1536,9 +1538,9 @@ export async function resolveReviewItem(
          on c.id = ri.suggested_category_id
         and c.workspace_id = ri.workspace_id
         and c.is_archived = false
-       where ri.id = $1 and ri.workspace_id = $2
+       where ri.id = $1 and ri.workspace_id = $2 and ri.user_id = $3
        for update of ri nowait`,
-      [id, session.workspaceId]
+      [id, session.workspaceId, session.userId]
     );
     const item = review.rows[0];
     if (!item) {
@@ -1685,12 +1687,13 @@ export async function resolveReviewItem(
        set status = $3,
            ignored_scope = $4,
            resolved_at = now()
-       where id = $1 and workspace_id = $2`,
+       where id = $1 and workspace_id = $2 and user_id = $5`,
       [
         id,
         session.workspaceId,
         resolvedStatus,
-        action === "always_ignore_source" ? "source" : action === "ignore_once" ? "once" : null
+        action === "always_ignore_source" ? "source" : action === "ignore_once" ? "once" : null,
+        session.userId
       ]
     );
     if (item.eventId) {
@@ -1878,6 +1881,7 @@ export async function reprocessHealthReviewItems(
        from review_items ri
        join activity_events ae on ae.id = ri.event_id
        where ri.workspace_id = $1
+         and ri.user_id = $2
          and ri.status = 'open'
          and ae.workspace_id = $1
          and ae.user_id = $2
@@ -2139,6 +2143,7 @@ async function refreshHealthReviewRemainingCount(
        from review_items ri
        join activity_events ae on ae.id = ri.event_id
        where ri.workspace_id = $1
+         and ri.user_id = $2
          and ri.status = 'open'
          and ae.workspace_id = $1
          and ae.user_id = $2
@@ -2185,6 +2190,7 @@ async function loadLegacySleepReviewItemsForConsolidation(
      from review_items ri
      join activity_events ae on ae.id = ri.event_id
      where ri.workspace_id = $1
+       and ri.user_id = $2
        and ri.status = 'open'
        and ae.workspace_id = $1
        and ae.user_id = $2

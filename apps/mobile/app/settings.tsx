@@ -39,6 +39,7 @@ import {
   buildQueueDiagnosticsSnapshot,
   clearFailedQueuedEvents,
   createCategory,
+  deleteRecentLocationEvidence,
   fetchBootstrap,
   getQueueDiagnostics,
   logout,
@@ -89,6 +90,15 @@ import {
   shouldShowSettingsRefreshSpinner
 } from "@/lib/settingsRefresh";
 import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
+import {
+  configureLocationIntelligence,
+  getNativeLocationIntelligenceStatus
+} from "@/lib/location/runtime";
+import {
+  getLocationStoreDiagnostics,
+  recordLocationStoreError,
+  type LocationStoreDiagnostics
+} from "@/lib/location/store";
 
 type Category = MobileBootstrap["categories"][number];
 type SettingsSection = "index" | "profile" | "categories" | "automations" | "health" | "sync" | "appearance";
@@ -178,6 +188,18 @@ export default function SettingsScreen() {
   const [locationDiagnostics, setLocationDiagnostics] = useState<LocationVisitDiagnostics | null>(
     cachedSnapshot?.locationDiagnostics ?? null
   );
+  const [locationV2Diagnostics, setLocationV2Diagnostics] = useState<LocationStoreDiagnostics | null>(null);
+  const [nativeLocationStatus, setNativeLocationStatus] = useState<{
+    authorizationStatus: string;
+    accuracyAuthorization: string;
+    locationServicesEnabled: boolean;
+    backgroundRefreshStatus: string;
+    pendingSignalCount: number;
+    monitoringVisits: boolean;
+    monitoringSignificantChanges: boolean;
+    restoredForLocationRelaunch: boolean;
+    nativeStoreErrorCode?: string | null;
+  } | null>(null);
   const [healthStatus, setHealthStatus] = useState<HealthImportStatus[]>(cachedSnapshot?.healthStatus ?? []);
   const [healthImportPreferences, setHealthImportPreferences] = useState<HealthImportPreferences | null>(
     cachedSnapshot?.healthImportPreferences ?? null
@@ -276,10 +298,12 @@ export default function SettingsScreen() {
         updatedAt: Date.now()
       });
       setData(bootstrap);
+      await configureLocationIntelligence(bootstrap);
       syncShortcutCatalog(bootstrap);
       setQueue(queued);
       setLocationDiagnostics(location);
       setLocationStatus(nextLocationStatus);
+      await refreshLocationV2Diagnostics();
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         router.replace("/");
@@ -338,7 +362,10 @@ export default function SettingsScreen() {
       .then((count) => {
         void refreshLocationDiagnostics(count > 0 ? `Monitoring ${count} saved ${count === 1 ? "place" : "places"}.` : undefined);
       })
-      .catch(() => undefined);
+      .catch(async (error) => {
+        await recordLocationStoreError(error);
+        await refreshLocationDiagnostics("Location monitoring could not be refreshed. Open diagnostics for details.");
+      });
   }, [data?.places, settingsSection]);
 
   const healthAvailability =
@@ -682,6 +709,96 @@ export default function SettingsScreen() {
     });
     setLocationDiagnostics(diagnostics);
     setLocationStatus(nextLocationStatus);
+    await refreshLocationV2Diagnostics();
+  }
+
+  async function refreshLocationV2Diagnostics() {
+    try {
+      const [local, native] = await Promise.all([
+        getLocationStoreDiagnostics(),
+        getNativeLocationIntelligenceStatus().catch(() => null)
+      ]);
+      setLocationV2Diagnostics(local);
+      setNativeLocationStatus(native);
+    } catch (error) {
+      await recordLocationStoreError(error);
+    }
+  }
+
+  function confirmDeleteLocationEvidence() {
+    Alert.alert(
+      "Delete recent location evidence",
+      "Delete raw map points from this device and the server? Confirmed entries, saved places and derived visit summaries remain.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete evidence",
+          style: "destructive",
+          onPress: () => { void removeLocationEvidence(); }
+        }
+      ]
+    );
+  }
+
+  async function removeLocationEvidence() {
+    try {
+      const result = await deleteRecentLocationEvidence();
+      await refreshLocationV2Diagnostics();
+      Alert.alert(
+        "Location evidence deleted",
+        `Removed ${result.localDeletedEvidenceCount} local and ${result.deletedEvidenceCount} server evidence items. Derived entries were kept.`
+      );
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        router.replace("/");
+        return;
+      }
+      Alert.alert("Location evidence", error instanceof Error ? error.message : "Unable to delete evidence.");
+    }
+  }
+
+  async function shareLocationDiagnostics() {
+    const local = locationV2Diagnostics ?? await getLocationStoreDiagnostics();
+    const native = nativeLocationStatus ?? await getNativeLocationIntelligenceStatus().catch(() => null);
+    await Share.share({
+      title: "Dayframe location diagnostics",
+      message: JSON.stringify({
+        exportedAt: new Date().toISOString(),
+        rolloutMode: local.rolloutMode,
+        engineVersion: local.engineVersion,
+        accountConfigured: local.accountConfigured,
+        savedPlaceCatalogueCount: local.savedPlaceCatalogueCount,
+        pendingEvidenceCount: local.pendingEvidenceCount,
+        acknowledgedEvidenceCount: local.acknowledgedEvidenceCount,
+        outboxCount: local.outboxCount,
+        segmentCount: local.segmentCount,
+        oldestEvidenceAt: local.oldestEvidenceAt,
+        oldestUnsynchronisedAt: local.oldestUnsynchronisedAt,
+        lastAcceptedEvidenceAt: local.lastAcceptedEvidenceAt,
+        lastEngineState: local.lastEngineState,
+        activeProvisionalSegmentKind: local.activeProvisionalSegmentKind,
+        lastGapDurationSeconds: local.lastGapDurationSeconds,
+        rejectedEvidenceCounts: local.rejectedEvidenceCounts,
+        lastUploadAt: local.lastUploadAt,
+        lastServerReplayVersion: local.lastServerReplayVersion,
+        lastUploadError: local.lastUploadError,
+        droppedEvidenceCount: local.droppedEvidenceCount,
+        retentionCleanupDeletedCount: local.retentionCleanupDeletedCount,
+        retentionCleanupAt: local.retentionCleanupAt,
+        foregroundPermission: locationDiagnostics?.foregroundPermission,
+        backgroundPermission: locationDiagnostics?.backgroundPermission,
+        registeredGeofenceCount: locationDiagnostics?.activeMonitorCount,
+        excludedGeofenceCount: locationDiagnostics?.excludedMonitorCount,
+        nativePendingSignalCount: native?.pendingSignalCount ?? null,
+        locationServicesEnabled: native?.locationServicesEnabled ?? null,
+        accuracyAuthorization: native?.accuracyAuthorization ?? null,
+        backgroundRefreshStatus: native?.backgroundRefreshStatus ?? null,
+        nativeVisitMonitoring: native?.monitoringVisits ?? false,
+        nativeSignificantChangeMonitoring: native?.monitoringSignificantChanges ?? false,
+        restoredForLocationRelaunch: native?.restoredForLocationRelaunch ?? false,
+        nativeStoreErrorCode: native?.nativeStoreErrorCode ?? null
+      }, null, 2)
+    });
   }
 
   async function connectAppleHealth() {
@@ -1342,8 +1459,9 @@ export default function SettingsScreen() {
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Location</Text>
             <Text style={styles.muted}>
-              Dayframe can recognise visits to saved places. Visits are reviewed before becoming time entries.
-              Place visits do not start live timers.
+              Dayframe uses background location to identify visits and journeys. Exact evidence is temporarily
+              synchronised for private map review and deterministic reprocessing, then deleted after seven days.
+              Derived entries and saved places remain until you delete them.
             </Text>
             <View style={styles.healthPreferenceRow}>
               <View style={styles.healthPreferenceHeader}>
@@ -1351,7 +1469,7 @@ export default function SettingsScreen() {
                   <Text style={styles.categoryName}>Commute + place learning</Text>
                   <Text style={styles.categoryMeta}>
                     {locationDiagnostics?.locationLearningEnabled
-                      ? "Review-first suggestions from coarse background location"
+                      ? "Review-first suggestions from ordered background evidence"
                       : "Paused until you turn it on"}
                   </Text>
                 </View>
@@ -1365,9 +1483,19 @@ export default function SettingsScreen() {
                 />
               </View>
               <Text style={styles.muted}>
-                Learns repeated unsaved places and commutes between visits. Suggestions stay in Review and can be paused here.
+                Disabling this stops new standard, visit and significant-change capture. Precise Location,
+                Background App Refresh and iOS delivery affect accuracy; Dayframe does not promise continuous tracking.
               </Text>
             </View>
+            {locationV2Diagnostics ? (
+              <View style={styles.healthPreferenceRow}>
+                <Text style={styles.categoryName}>Engine rollout</Text>
+                <Text style={styles.reviewMetaLine}>{locationRolloutLabel(locationV2Diagnostics.rolloutMode)}</Text>
+                <Text style={styles.muted}>
+                  This safety mode is controlled by the Dayframe server. Shadow keeps V1 suggestions while V2 compares derived segment counts.
+                </Text>
+              </View>
+            ) : null}
             <Text style={styles.statusText}>{locationStatus}</Text>
             {locationDiagnostics ? (
               <>
@@ -1425,11 +1553,51 @@ export default function SettingsScreen() {
                     Last update {formatQueueTime(locationDiagnostics.lastEventAt ?? locationDiagnostics.lastMonitorRefreshAt)}
                   </Text>
                 ) : null}
+                {locationV2Diagnostics ? (
+                  <>
+                    <Text style={styles.muted}>
+                      {locationV2Diagnostics.engineVersion} · {locationV2Diagnostics.savedPlaceCatalogueCount} saved places in matcher · state {locationV2Diagnostics.lastEngineState ?? "not run"}
+                    </Text>
+                    <Text style={styles.muted}>
+                      Evidence: {locationV2Diagnostics.pendingEvidenceCount} pending · {locationV2Diagnostics.acknowledgedEvidenceCount} acknowledged · {locationV2Diagnostics.outboxCount} batches queued
+                    </Text>
+                    <Text style={styles.muted}>
+                      Derived segments: {locationV2Diagnostics.segmentCount} · dropped by emergency cap: {locationV2Diagnostics.droppedEvidenceCount}
+                    </Text>
+                    <Text style={styles.muted}>
+                      Native visits: {nativeLocationStatus?.monitoringVisits ? "active" : "inactive"} · significant changes: {nativeLocationStatus?.monitoringSignificantChanges ? "active" : "inactive"} · native queue: {nativeLocationStatus?.pendingSignalCount ?? "unavailable"}
+                    </Text>
+                    <Text style={styles.muted}>
+                      Services: {nativeLocationStatus?.locationServicesEnabled ? "on" : "off/unavailable"} · accuracy: {nativeLocationStatus?.accuracyAuthorization ?? "unknown"} · Background App Refresh: {nativeLocationStatus?.backgroundRefreshStatus ?? "unknown"}
+                    </Text>
+                    {locationV2Diagnostics.oldestUnsynchronisedAt ? (
+                      <Text style={styles.muted}>Oldest unsynchronised evidence {formatQueueTime(locationV2Diagnostics.oldestUnsynchronisedAt)}</Text>
+                    ) : null}
+                    {locationV2Diagnostics.lastGapDurationSeconds ? (
+                      <Text style={styles.muted}>Last uncertain gap {formatDurationMinutes(locationV2Diagnostics.lastGapDurationSeconds)}</Text>
+                    ) : null}
+                    {locationV2Diagnostics.retentionCleanupAt ? (
+                      <Text style={styles.muted}>Retention cleanup removed {locationV2Diagnostics.retentionCleanupDeletedCount} rows · {formatQueueTime(locationV2Diagnostics.retentionCleanupAt)}</Text>
+                    ) : null}
+                    {locationV2Diagnostics.lastUploadAt ? (
+                      <Text style={styles.muted}>Last evidence sync {formatQueueTime(locationV2Diagnostics.lastUploadAt)}</Text>
+                    ) : null}
+                    {locationV2Diagnostics.lastUploadError ? (
+                      <Text style={styles.muted}>Last non-sensitive error: {locationV2Diagnostics.lastUploadError}</Text>
+                    ) : null}
+                  </>
+                ) : null}
               </>
             ) : null}
             <View style={styles.buttonRow}>
               <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={enableLocation}>
                 <Text style={styles.secondaryButtonText}>{locationActionLabel}</Text>
+              </Pressable>
+              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={() => void shareLocationDiagnostics()}>
+                <Text style={styles.secondaryButtonText}>Copy diagnostics</Text>
+              </Pressable>
+              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={confirmDeleteLocationEvidence}>
+                <Text style={styles.secondaryButtonText}>Delete recent evidence</Text>
               </Pressable>
             </View>
           </View>
@@ -1908,6 +2076,13 @@ function formatGeofenceTransition(value: NonNullable<LocationVisitDiagnostics["l
 function formatDurationMinutes(seconds: number) {
   const minutes = Math.max(1, Math.round(seconds / 60));
   return `${minutes} min`;
+}
+
+function locationRolloutLabel(mode: LocationStoreDiagnostics["rolloutMode"]) {
+  if (mode === "v1") return "V1 production behaviour";
+  if (mode === "v2_review") return "V2 review-only";
+  if (mode === "v2_enabled") return "V2 enabled (review-safe)";
+  return "V2 shadow";
 }
 
 function defaultHealthCategoryLabel(type: HealthImportPreferenceKey) {

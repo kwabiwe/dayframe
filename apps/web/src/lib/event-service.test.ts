@@ -203,6 +203,7 @@ describe("category persistence", () => {
     const reviewInsert = client.query.mock.calls.find(([statement]) => String(statement).includes("insert into review_items"));
     expect(reviewInsert?.[1]).toEqual([
       session.workspaceId,
+      session.userId,
       "event-commute",
       "commute_detected_suggestion",
       "Possible commute from Home to Gym",
@@ -885,6 +886,7 @@ describe("health event persistence", () => {
     expect(String(reviewInsert?.[0])).toContain("suggested_stopped_at");
     expect(reviewInsert?.[1]).toEqual([
       session.workspaceId,
+      session.userId,
       "event-1",
       "health_sleep_import_suggestion",
       "Sleep",
@@ -1018,6 +1020,7 @@ describe("health event persistence", () => {
     );
     expect(reviewInsert?.[1]).toEqual([
       session.workspaceId,
+      session.userId,
       "event-1",
       "health_workout_import_suggestion",
       "Walk",
@@ -2463,7 +2466,7 @@ describe("review item resolution", () => {
     ).toBeUndefined();
     expect(client.query).toHaveBeenCalledWith(
       expect.stringContaining("set status = $3"),
-      ["review-duplicate", session.workspaceId, "accepted", null]
+      ["review-duplicate", session.workspaceId, "accepted", null, session.userId]
     );
     expect(client.query).toHaveBeenCalledWith("commit");
   });

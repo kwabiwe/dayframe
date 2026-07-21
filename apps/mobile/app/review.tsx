@@ -19,6 +19,7 @@ import {
   confirmReviewItem,
   dismissReviewItem,
   fetchBootstrap,
+  resolveLocationReviewItem,
   saveEditedReviewItem,
   updateTimeEntry,
   type HealthReviewReprocessResult,
@@ -164,13 +165,16 @@ export default function ReviewScreen() {
 
   async function confirmItem(item: MobileReviewItem) {
     await resolveItem(item, async () => {
-      await confirmReviewItem(item.id);
+      if (hasV2LocationEvidence(item)) await resolveLocationReviewItem(item.id, { action: "confirm" });
+      else await confirmReviewItem(item.id);
     });
   }
 
   async function dismissItem(item: MobileReviewItem) {
     await resolveItem(item, async () => {
-      await dismissReviewItem(item.id);
+      if (hasV2LocationEvidence(item)) {
+        await resolveLocationReviewItem(item.id, { action: "ignore_once_location" });
+      } else await dismissReviewItem(item.id);
     });
   }
 
@@ -227,7 +231,7 @@ export default function ReviewScreen() {
           description: patch.description,
           startedAt: patch.startedAt,
           stoppedAt: patch.stoppedAt
-        });
+        }, { atomicLocation: hasV2LocationEvidence(editTarget.item) });
       } else {
         await updateTimeEntry(entryId, patch);
       }
@@ -314,6 +318,7 @@ export default function ReviewScreen() {
                       onConfirm={() => confirmItem(item)}
                       onDismiss={() => dismissItem(item)}
                       onEdit={() => beginReviewItemEdit(item)}
+                      onViewEvidence={() => router.push({ pathname: "/review/[id]", params: { id: item.id } } as never)}
                       styles={styles}
                       theme={theme}
                     />
@@ -364,6 +369,7 @@ function ReviewItemCard({
   onConfirm,
   onDismiss,
   onEdit,
+  onViewEvidence,
   styles,
   theme
 }: {
@@ -374,6 +380,7 @@ function ReviewItemCard({
   onConfirm: () => void;
   onDismiss: () => void;
   onEdit: () => void;
+  onViewEvidence: () => void;
   styles: ReturnType<typeof useMobileTheme>["styles"];
   theme: ReturnType<typeof useMobileTheme>["theme"];
 }) {
@@ -409,7 +416,7 @@ function ReviewItemCard({
           {item.placeName ? ` · ${item.placeName}` : ""}
         </Text>
       </View>
-      {item.notes ? (
+      {item.notes && !hasV2LocationEvidence(item) ? (
         <Text style={styles.reviewMetaLine}>{item.notes}</Text>
       ) : null}
       {contextLines.map((line) => (
@@ -417,6 +424,20 @@ function ReviewItemCard({
       ))}
 
       <View style={styles.reviewActions}>
+        {hasV2LocationEvidence(item) ? (
+          <Pressable
+            accessibilityRole="button"
+            disabled={controlsDisabled}
+            style={({ pressed }) => [
+              styles.reviewSecondaryButton,
+              pressed && !controlsDisabled ? styles.buttonPressed : null,
+              controlsDisabled ? styles.buttonDisabled : null
+            ]}
+            onPress={onViewEvidence}
+          >
+            <Text style={styles.reviewSecondaryButtonText}>View evidence</Text>
+          </Pressable>
+        ) : null}
         <Pressable
           accessibilityRole="button"
           disabled={controlsDisabled}
@@ -591,6 +612,11 @@ function reviewItemKindLabel(item: MobileReviewItem) {
 }
 
 function reviewItemContextLines(item: MobileReviewItem, categoryName: string) {
+  if (hasV2LocationEvidence(item)) {
+    return item.rawPayload?.continuityStatus === "uncertain_gap"
+      ? ["Uncertain boundary · inspect evidence before confirming."]
+      : [];
+  }
   if (item.eventType === "commute_detected") {
     return [
       "Dayframe detected travel between places.",
@@ -668,6 +694,11 @@ function isLocationReviewItem(item: Pick<MobileReviewItem, "eventSource" | "even
     item.eventSource === "geofence_broad" ||
     item.eventSource === "ha_geofence"
   );
+}
+
+function hasV2LocationEvidence(item: MobileReviewItem) {
+  return isLocationReviewItem(item) &&
+    (item.rawPayload?.algorithmVersion === "location-v2.0" || typeof item.rawPayload?.clientSegmentId === "string");
 }
 
 function formatReviewItemTimeWindow(item: MobileReviewItem) {

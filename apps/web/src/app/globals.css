@@ -5252,3 +5252,13 @@ kbd {
     max-height: min(26rem, calc(100dvh - 24px));
   }
 }
+
+.location-evidence-map .maplibregl-ctrl-group button {
+  width: 44px;
+  height: 44px;
+}
+
+.location-evidence-map .maplibregl-ctrl-attrib-button {
+  min-width: 44px;
+  min-height: 44px;
+}

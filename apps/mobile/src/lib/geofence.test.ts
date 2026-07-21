@@ -151,6 +151,40 @@ describe("mobile geofence visit candidates", () => {
     });
   });
 
+  it("still matches place 21 from the full catalogue instead of relearning it", async () => {
+    const places = Array.from({ length: 21 }, (_, index) => ({
+      ...place,
+      id: `30000000-0000-4000-8000-${String(index + 100).padStart(12, "0")}`,
+      name: `Place ${index + 1}`,
+      latitude: 51.2 + index * 0.01,
+      longitude: -0.3,
+      priority: 100 - index
+    }));
+    const place21 = places[20];
+
+    await startGeofences(places);
+    await setLocationLearningEnabled(true, places);
+    const result = await recordLocationLearningSample({
+      coords: {
+        latitude: place21.latitude,
+        longitude: place21.longitude,
+        altitude: null,
+        accuracy: 15,
+        altitudeAccuracy: null,
+        heading: null,
+        speed: null
+      },
+      timestamp: Date.parse("2026-07-20T12:00:00.000Z")
+    }, places);
+
+    expect(result).toMatchObject({ status: "saved_place", queued: false });
+    await expect(getLocationVisitDiagnostics()).resolves.toMatchObject({
+      excludedPlaceNames: ["Place 21"],
+      lastStatus: "Location learning matched Place 21; noisy samples stay attached to saved places."
+    });
+    expect((await readQueue()).some((item) => item.type === "unknown_stay")).toBe(false);
+  });
+
   it("rejects a false enter when a fresh accurate fix is clearly outside the saved radius", async () => {
     await startGeofences([place]);
     const occurredAt = new Date("2026-07-06T08:00:00.000Z");

@@ -3,6 +3,7 @@ import { authErrorResponse } from "@/lib/api-errors";
 import { isMissingRequiredColumnError } from "@/lib/db";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import { getBootstrapData } from "@/lib/queries";
+import { getServerLocationRolloutMode } from "@/lib/location/location-rollout";
 
 export async function GET(request: Request) {
   try {
@@ -11,7 +12,10 @@ export async function GET(request: Request) {
     const data = await getBootstrapData(session, {
       selectedDate: url.searchParams.get("date")
     });
-    return NextResponse.json(data);
+    return NextResponse.json({
+      ...data,
+      locationRolloutMode: getServerLocationRolloutMode()
+    });
   } catch (error) {
     const response = authErrorResponse(error);
     if (response) return response;

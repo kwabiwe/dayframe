@@ -3,8 +3,11 @@ import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import {
   classifyLocationLearningEvidence,
+  LOCATION_ENGINE_V2_CONFIG,
   LOCATION_LEARNING_THRESHOLDS,
+  LocationEvidenceSchema,
   readableLocationNameFromParts,
+  type LocationEvidence,
   type LocationLearningEvidence
 } from "@dayframe/shared";
 import { enqueueEvent } from "./api";
@@ -149,6 +152,7 @@ export type GeofenceTransitionEvidence = {
 
 const IOS_GEOFENCE_LIMIT = 20;
 const MONITORED_PLACES_KEY = "dayframe.location.monitoredPlaces.v1";
+const SAVED_PLACE_CATALOGUE_KEY = "dayframe.location.savedPlaceCatalogue.v2";
 const GEOFENCE_REGISTRATION_KEY = "dayframe.location.geofenceRegistration.v1";
 const OPEN_VISITS_KEY = "dayframe.location.openVisits.v1";
 const SEEN_VISIT_IDS_KEY = "dayframe.location.seenVisits.v1";
@@ -199,6 +203,13 @@ TaskManager.defineTask(DAYFRAME_GEOFENCE_TASK, async ({ data, error }) => {
         : null;
   if (!transition) return;
 
+  const persisted = await persistV2GeofenceEvidence(transition, payload.region).catch(async (persistError) => {
+    await recordV2LocationFailure(persistError);
+    return null;
+  });
+  if (!persisted) return;
+  if (persisted.rolloutMode === "v2_review" || persisted.rolloutMode === "v2_enabled") return;
+
   await recordGeofenceTransition(transition, payload.region);
 });
 
@@ -213,8 +224,15 @@ TaskManager.defineTask(DAYFRAME_LOCATION_LEARNING_TASK, async ({ data, error }) 
   const enabled = await getLocationLearningEnabled();
   if (!enabled) return;
   const payload = data as { locations?: Location.LocationObject[] };
-  const places = await readMonitoredPlaces();
-  for (const location of payload.locations ?? []) {
+  const locations = [...(payload.locations ?? [])].sort((left, right) => left.timestamp - right.timestamp);
+  const persisted = await persistV2LocationBatch(locations).catch(async (persistError) => {
+    await recordV2LocationFailure(persistError);
+    return null;
+  });
+  if (!persisted) return;
+  if (persisted.rolloutMode === "v2_review" || persisted.rolloutMode === "v2_enabled") return;
+  const places = await readSavedPlaceCatalogue();
+  for (const location of locations) {
     await recordLocationLearningSample(location, Object.values(places));
   }
 });
@@ -272,6 +290,9 @@ export async function setLocationLearningEnabled(
   if (!enabled) {
     await AsyncStorage.setItem(LOCATION_LEARNING_ENABLED_KEY, "false");
     await stopLocationLearningIfStarted();
+    await import("./location/runtime").then(({ stopNativeLocationIntelligence }) =>
+      stopNativeLocationIntelligence()
+    ).catch(recordV2LocationFailure);
     await updateLocationDiagnostics({
       locationLearningEnabled: false,
       locationLearningActive: false,
@@ -298,6 +319,9 @@ export async function setLocationLearningEnabled(
 
   await AsyncStorage.setItem(LOCATION_LEARNING_ENABLED_KEY, "true");
   await startLocationLearning(places);
+  await import("./location/runtime").then(({ startNativeLocationIntelligence }) =>
+    startNativeLocationIntelligence()
+  ).catch(recordV2LocationFailure);
   return "Commute and regular-place learning is on. Suggestions stay in Review.";
 }
 
@@ -395,18 +419,21 @@ export async function startLocationLearning(
     return false;
   }
 
-  if (places.length > 0) await writeMonitoredPlaces(places.map(monitoredPlaceFromInput));
+  if (places.length > 0) await writeSavedPlaceCatalogue(places.map(monitoredPlaceFromInput));
   await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, {
-    accuracy: Location.Accuracy.Balanced,
-    timeInterval: LOCATION_LEARNING_SAMPLE_INTERVAL_MS,
-    distanceInterval: LOCATION_LEARNING_DISTANCE_INTERVAL_METERS,
-    pausesUpdatesAutomatically: true,
+    accuracy: Location.Accuracy.High ?? Location.Accuracy.Balanced,
+    distanceInterval: LOCATION_ENGINE_V2_CONFIG.distanceIntervalMeters,
+    deferredUpdatesDistance: LOCATION_ENGINE_V2_CONFIG.deferredUpdatesDistanceMeters,
+    deferredUpdatesInterval: LOCATION_ENGINE_V2_CONFIG.deferredUpdatesIntervalMs,
+    deferredUpdatesTimeout: LOCATION_ENGINE_V2_CONFIG.deferredTimeoutMs,
+    pausesUpdatesAutomatically: LOCATION_ENGINE_V2_CONFIG.pausesUpdatesAutomatically,
+    activityType: 1 as Location.LocationActivityType,
     showsBackgroundLocationIndicator: false
   });
   await updateLocationDiagnostics({
     locationLearningEnabled: true,
     locationLearningActive: true,
-    lastStatus: "Commute and regular-place learning is on. Suggestions stay in Review.",
+    lastStatus: "Location Intelligence V2 is collecting ordered evidence. Suggestions stay in Review.",
     lastMonitorRefreshAt: new Date().toISOString()
   });
   return true;
@@ -1479,6 +1506,69 @@ async function readMonitoredPlaces() {
 
 async function writeMonitoredPlaces(places: MonitoredPlace[]) {
   await AsyncStorage.setItem(MONITORED_PLACES_KEY, JSON.stringify(places));
+}
+
+async function readSavedPlaceCatalogue() {
+  const raw = await AsyncStorage.getItem(SAVED_PLACE_CATALOGUE_KEY);
+  const places = parseJson<MonitoredPlace[]>(raw, []);
+  return places.reduce<Record<string, MonitoredPlace>>((map, place) => {
+    if (place.id) map[place.id] = place;
+    return map;
+  }, {});
+}
+
+async function writeSavedPlaceCatalogue(places: MonitoredPlace[]) {
+  await AsyncStorage.setItem(SAVED_PLACE_CATALOGUE_KEY, JSON.stringify(places));
+}
+
+async function persistV2LocationBatch(locations: Location.LocationObject[]) {
+  const store = await import("./location/store");
+  const rolloutMode = await store.getLocationRolloutMode();
+  if (rolloutMode === "v1") return { rolloutMode };
+  const context = await store.activeLocationCaptureContext();
+  const captureContext = {
+    deviceId: context.deviceId ?? "unbound-device",
+    timeZone: context.timeZone ?? "Europe/London"
+  };
+  const evidence = locations.map((location) => store.evidenceFromExpoLocation(location, captureContext));
+  await store.persistLocationEvidence(evidence);
+  void store.syncLocationEvidence();
+  return { rolloutMode };
+}
+
+async function persistV2GeofenceEvidence(transition: GeofenceTransition, region: DayframeRegion) {
+  const store = await import("./location/store");
+  const rolloutMode = await store.getLocationRolloutMode();
+  if (rolloutMode === "v1") return { rolloutMode };
+  const context = await store.activeLocationCaptureContext();
+  const occurredAt = new Date().toISOString();
+  const identifier = region.identifier?.slice(0, 160) || "unknown-region";
+  const evidence = LocationEvidenceSchema.parse({
+    clientEvidenceId: `geofence-${transition}-${identifier}-${Date.parse(occurredAt)}`,
+    deviceId: context.deviceId ?? "unbound-device",
+    algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+    kind: transition === "enter" ? "geofence_enter" : "geofence_exit",
+    occurredAt,
+    savedPlaceId: UUID_RE.test(identifier) ? identifier : null,
+    geofenceIdentifier: identifier,
+    receivedAt: occurredAt,
+    timeZone: context.timeZone ?? "Europe/London",
+    metadata: {}
+  } satisfies LocationEvidence);
+  await store.persistLocationEvidence([evidence]);
+  void store.syncLocationEvidence();
+  return { rolloutMode };
+}
+
+async function recordV2LocationFailure(error: unknown) {
+  const message = error instanceof Error ? error.message : "Location Intelligence V2 could not persist evidence.";
+  await updateLocationDiagnostics({
+    lastStatus: message.slice(0, 180),
+    lastEventAt: new Date().toISOString()
+  });
+  await import("./location/store")
+    .then(({ recordLocationStoreError }) => recordLocationStoreError(error))
+    .catch(() => undefined);
 }
 
 async function readOpenVisits() {

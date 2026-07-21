@@ -37,6 +37,8 @@ export {
   type DayframeThemeMode
 } from "./theme";
 
+export * from "./location";
+
 export const DEMO_USER_ID = "00000000-0000-4000-8000-000000000001";
 export const DEMO_WORKSPACE_ID = "00000000-0000-4000-8000-000000000010";
 export const DEFAULT_UNKNOWN_STAY_THRESHOLD_MINUTES = 20;
@@ -325,7 +327,8 @@ export const ActivityEventTypeSchema = z.enum([
   "shortcut_action",
   "calendar_hint",
   "health_sleep_import",
-  "health_workout_import"
+  "health_workout_import",
+  "location_evidence_batch"
 ]);
 
 export const AutomationActionSchema = z.enum([
@@ -1328,6 +1331,17 @@ export function normalizeActivityEvent(
       reviewStatus: "confirmed",
       title: "Stop current timer",
       reason: "Explicit stop actions close the active primary timer.",
+      shouldClosePrevious: false
+    };
+  }
+
+  if (event.type === "location_evidence_batch") {
+    return {
+      action: "record_only",
+      confidence: sourceConfidence,
+      reviewStatus: "confirmed",
+      title: "Location evidence batch",
+      reason: "Raw location evidence is replayed into semantic stay and journey events before review.",
       shouldClosePrevious: false
     };
   }

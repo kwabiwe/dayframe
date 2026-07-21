@@ -62,6 +62,8 @@ import {
 } from "@/lib/api";
 import { handleDayframeUrl } from "@/lib/deepLinks";
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
+import { configureLocationIntelligence } from "@/lib/location/runtime";
+import { recordLocationStoreError } from "@/lib/location/store";
 import {
   configureHealthKitAutomaticSync,
   friendlyHealthKitError,
@@ -272,7 +274,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       setData(bootstrap);
       syncShortcutCatalog(bootstrap);
       setAuthState("authenticated");
-      void refreshGeofencesForPlaces(bootstrap.places).catch(() => undefined);
+      void refreshLocationServices(bootstrap);
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         setData(null);
@@ -1573,6 +1575,15 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       />
     </DashboardContext.Provider>
   );
+}
+
+async function refreshLocationServices(bootstrap: MobileBootstrap) {
+  try {
+    await configureLocationIntelligence(bootstrap);
+    await refreshGeofencesForPlaces(bootstrap.places);
+  } catch (error) {
+    await recordLocationStoreError(error);
+  }
 }
 
 export function DayframeDashboardScreen({ tab }: { tab: DayframeDashboardTab }) {

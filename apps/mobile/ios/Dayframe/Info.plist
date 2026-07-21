@@ -50,11 +50,11 @@
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>Dayframe does not write health data, but iOS requires this description when health data access is enabled.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Dayframe can monitor geofences in the background so place visits become activity events before they become time entries.</string>
+	<string>Dayframe records visits and significant location changes in the background so journeys become private, reviewable activity suggestions before they become time entries.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
-	<string>Allow $(PRODUCT_NAME) to access your location</string>
+	<string>Dayframe records background visits so journeys can be reviewed before they become time entries.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Dayframe uses location to detect known places and create reviewable activity suggestions.</string>
+	<string>Dayframe uses precise location to distinguish nearby saved places and show reviewable visit evidence.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>Allow $(PRODUCT_NAME) to detect your current motion activity</string>
 	<key>NSUserActivityTypes</key>

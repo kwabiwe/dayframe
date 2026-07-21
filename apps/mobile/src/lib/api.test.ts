@@ -1300,7 +1300,7 @@ describe("mobile API client", () => {
     );
   });
 
-  it("saves edited review items by creating confirmed time then dismissing the suggestion", async () => {
+  it("saves edited review items with one atomic review transaction", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));
     vi.stubGlobal("fetch", fetchMock);
@@ -1310,29 +1310,48 @@ describe("mobile API client", () => {
       description: "Adjusted suggestion",
       startedAt: "2026-07-07T09:15:00.000Z",
       stoppedAt: "2026-07-07T10:10:00.000Z"
-    });
+    }, { atomicLocation: true });
 
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      "https://dayframe.test/api/time-entries",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          mode: "manual",
-          categoryId: undefined,
-          description: "Adjusted suggestion",
-          startedAt: "2026-07-07T09:15:00.000Z",
-          stoppedAt: "2026-07-07T10:10:00.000Z"
-        })
-      })
-    );
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
       "https://dayframe.test/api/review/review-1",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ action: "ignore_once" })
+        body: JSON.stringify({
+          action: "edit_and_confirm",
+          edit: {
+            categoryId: null,
+            description: "Adjusted suggestion",
+            startedAt: "2026-07-07T09:15:00.000Z",
+            stoppedAt: "2026-07-07T10:10:00.000Z"
+          }
+        })
       })
+    );
+  });
+
+  it("preserves the existing legacy review edit workflow outside Location V2", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await saveEditedReviewItem("legacy-review", {
+      categoryId: null,
+      description: "Legacy suggestion",
+      startedAt: "2026-07-07T09:15:00.000Z",
+      stoppedAt: "2026-07-07T10:10:00.000Z"
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://dayframe.test/api/time-entries",
+      expect.anything()
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://dayframe.test/api/review/legacy-review",
+      expect.anything()
     );
   });
 

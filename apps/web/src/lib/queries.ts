@@ -721,6 +721,7 @@ export async function getTaskSuggestions(session: RequestSession) {
               from review_items accepted_review
               where accepted_review.event_id = te.created_from_event_id
                 and accepted_review.workspace_id = te.workspace_id
+                and accepted_review.user_id = te.user_id
                 and accepted_review.status = 'accepted'
             ) and coalesce(ae.event_type, '') not in ('health_sleep_import', 'health_workout_import') as "userConfirmed"
      from time_entries te
@@ -739,6 +740,7 @@ export async function getTaskSuggestions(session: RequestSession) {
              from review_items accepted_review
              where accepted_review.event_id = te.created_from_event_id
                and accepted_review.workspace_id = te.workspace_id
+               and accepted_review.user_id = te.user_id
                and accepted_review.status = 'accepted'
            )
          )
@@ -882,15 +884,17 @@ async function getReviewItems(session: RequestSession) {
             ae.raw_payload as "rawPayload",
             ri.created_at as "createdAt"
      from review_items ri
-     left join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id
+     left join activity_events ae
+       on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
      left join projects p on p.id = ri.suggested_project_id and p.workspace_id = ri.workspace_id
      left join categories c on c.id = ri.suggested_category_id and c.workspace_id = ri.workspace_id
      left join places pl on pl.id = ri.suggested_place_id and pl.workspace_id = ri.workspace_id
      where ri.workspace_id = $1
+       and ri.user_id = $2
        and ri.status = 'open'
      order by ri.created_at desc
      limit 100`,
-    [session.workspaceId]
+    [session.workspaceId, session.userId]
   );
   return result.rows;
 }
@@ -910,10 +914,10 @@ async function getActivityEvents(session: RequestSession) {
      left join projects p on p.id = ae.suggested_project_id and p.workspace_id = ae.workspace_id
      left join categories c on c.id = ae.suggested_category_id and c.workspace_id = ae.workspace_id
      left join places pl on pl.id = ae.suggested_place_id and pl.workspace_id = ae.workspace_id
-     where ae.workspace_id = $1
+     where ae.workspace_id = $1 and ae.user_id = $2
      order by ae.occurred_at desc
      limit 24`,
-    [session.workspaceId]
+    [session.workspaceId, session.userId]
   );
   return result.rows;
 }
@@ -927,15 +931,16 @@ async function getDashboardStats(session: RequestSession, dateRange: DashboardDa
         coalesce(sum(
           extract(epoch from (coalesce(stopped_at, now()) - started_at))
         ) filter (where started_at >= $4::timestamptz and started_at < $5::timestamptz), 0)::int as "weekSeconds",
-        (select count(*)::int from review_items where workspace_id = $1 and status = 'open') as "reviewCount"
+        (select count(*)::int from review_items where workspace_id = $1 and user_id = $6 and status = 'open') as "reviewCount"
      from time_entries
-     where workspace_id = $1`,
+     where workspace_id = $1 and user_id = $6`,
     [
       session.workspaceId,
       dateRange.dayStart,
       dateRange.dayEnd,
       dateRange.weekStart,
-      dateRange.weekEnd
+      dateRange.weekEnd,
+      session.userId
     ]
   );
   return result.rows[0] ?? { todaySeconds: 0, weekSeconds: 0, reviewCount: 0 };

@@ -15,6 +15,10 @@ export async function buildWorkspaceExport(session: RequestSession) {
     timeEntries,
     reviewItems,
     healthSleepSegments,
+    staySegments,
+    commuteSegments,
+    locationEvidence,
+    placeMatchFeedback,
     importRuns
   ] = await Promise.all([
     table("clients", session),
@@ -27,6 +31,10 @@ export async function buildWorkspaceExport(session: RequestSession) {
     table("time_entries", session),
     table("review_items", session),
     table("health_sleep_segments", session),
+    table("stay_segments", session),
+    table("commute_segments", session),
+    locationEvidenceTable(session),
+    table("place_match_feedback", session),
     table("import_runs", session)
   ]);
 
@@ -43,6 +51,10 @@ export async function buildWorkspaceExport(session: RequestSession) {
     timeEntries,
     reviewItems,
     healthSleepSegments,
+    staySegments,
+    commuteSegments,
+    locationEvidence,
+    placeMatchFeedback,
     importRuns
   };
 }
@@ -81,16 +93,48 @@ export async function buildTimeEntriesCsv(session: RequestSession) {
      left join clients cl on cl.id = p.client_id
      left join categories c on c.id = te.category_id
      left join places pl on pl.id = te.place_id
-     where te.workspace_id = $1
+     where te.workspace_id = $1 and te.user_id = $2
      order by te.started_at desc`,
-    [session.workspaceId]
+    [session.workspaceId, session.userId]
   );
 
   return toCsv(result.rows);
 }
 
 async function table(tableName: string, session: RequestSession) {
-  const result = await query(`select * from ${tableName} where workspace_id = $1`, [session.workspaceId]);
+  const userScoped = new Set([
+    "activity_events",
+    "time_entries",
+    "review_items",
+    "health_sleep_segments",
+    "stay_segments",
+    "commute_segments",
+    "location_evidence",
+    "place_match_feedback"
+  ]);
+  const result = userScoped.has(tableName)
+    ? await query(`select * from ${tableName} where workspace_id = $1 and user_id = $2`, [session.workspaceId, session.userId])
+    : await query(`select * from ${tableName} where workspace_id = $1`, [session.workspaceId]);
+  return result.rows;
+}
+
+async function locationEvidenceTable(session: RequestSession) {
+  const result = await query(
+    `select id, workspace_id, user_id, device_id, client_evidence_id, client_batch_id,
+            evidence_type, occurred_at, ended_at,
+            case when coordinate is null then null else jsonb_build_object(
+              'type', 'Point',
+              'coordinates', jsonb_build_array(ST_X(coordinate::geometry), ST_Y(coordinate::geometry))
+            ) end as coordinate,
+            horizontal_accuracy_m, altitude_m, speed_mps, course_degrees,
+            saved_place_id, geofence_identifier, accepted, rejection_reason,
+            algorithm_version, time_zone, is_simulated, metadata,
+            received_at, expires_at, created_at
+     from location_evidence
+     where workspace_id = $1 and user_id = $2 and expires_at > now()
+     order by occurred_at, client_evidence_id`,
+    [session.workspaceId, session.userId]
+  );
   return result.rows;
 }
 

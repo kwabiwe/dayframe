@@ -1,0 +1,12 @@
+{
+  "name": "dayframe-location-visits",
+  "version": "0.1.0",
+  "description": "Dayframe's durable iOS visit and significant-change evidence collector",
+  "main": "index.ts",
+  "private": true,
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}
