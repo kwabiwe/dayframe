@@ -858,7 +858,7 @@ function createEditorStyles(theme: MobileTheme) {
     changeButtonText: { color: theme.accentText, fontSize: 12, fontWeight: "700" },
     mapSection: { gap: 7 },
     mapPreview: { width: "100%", height: 180, borderRadius: 16 },
-    locationRadiusRow: { flexDirection: "row", alignItems: "center", gap: 16 },
+    locationRadiusRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 28 },
     currentLocationAction: { minHeight: 64, minWidth: 118, flexDirection: "row", alignItems: "center", gap: 8 },
     currentLocationIcon: {
       width: 44,
@@ -869,7 +869,7 @@ function createEditorStyles(theme: MobileTheme) {
       backgroundColor: theme.accentSoft
     },
     currentLocationLabel: { color: theme.textPrimary, fontSize: 12, fontWeight: "700", flexShrink: 1 },
-    radiusGroup: { flex: 1, minWidth: 0, gap: 5 },
+    radiusGroup: { flex: 1, minWidth: 0, gap: 5, alignSelf: "center", alignItems: "center" },
     radiusInputRow: { flexDirection: "row", alignItems: "center", gap: 7 },
     radiusInput: { width: 90, textAlign: "center" },
     disclosureButton: {

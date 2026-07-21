@@ -610,6 +610,7 @@ export type RecentActivityEntry = {
   stoppedAt?: string | null;
   durationSeconds?: number | null;
   userConfirmed?: boolean;
+  tagNames?: string[];
 };
 
 export type RecentActivitySuggestionSection = "recent" | "often_used" | "suggested_now";
@@ -625,6 +626,7 @@ export type RecentActivitySuggestion = {
   section: RecentActivitySuggestionSection;
   useCount: number;
   totalSeconds: number;
+  tagNames: string[];
 };
 
 export type CategoryUsageRank = {
@@ -662,7 +664,9 @@ export function buildRecentActivitySuggestions(
     const matchesDayKind = Number.isFinite(startedAt.getTime()) && dayKind(startedAt) === contextDayKind;
 
     const categoryId = entry.categoryId ?? null;
-    const key = `${categoryId ?? "uncategorized"}:${description.toLocaleLowerCase()}`;
+    const tagNames = [...new Set((entry.tagNames ?? []).map((name) => name.trim()).filter(Boolean))]
+      .sort((left, right) => left.localeCompare(right));
+    const key = `${categoryId ?? "uncategorized"}:${description.toLocaleLowerCase()}:${tagNames.join("|").toLocaleLowerCase()}`;
     const current = suggestions.get(key);
     if (!current) {
       suggestions.set(key, {
@@ -676,6 +680,7 @@ export function buildRecentActivitySuggestions(
         section: "recent",
         useCount: 1,
         totalSeconds: Math.max(0, entry.durationSeconds ?? 0),
+        tagNames,
         recentWindowCount: contextMs - lastSeenMs <= 14 * 86_400_000 ? 1 : 0,
         timeBucketMatches: matchesTimeBucket ? 1 : 0,
         dayMatches: matchesDay ? 1 : 0,
@@ -863,6 +868,7 @@ function scoreRecentActivitySuggestion(
     score,
     section,
     totalSeconds: suggestion.totalSeconds,
+    tagNames: suggestion.tagNames,
     useCount: suggestion.useCount
   };
 }

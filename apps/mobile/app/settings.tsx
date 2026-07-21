@@ -1425,15 +1425,15 @@ export default function SettingsScreen() {
             ) : null}
             <Pressable
               accessibilityRole="button"
+              accessibilityState={{ expanded: showQueueDetails }}
               style={pressable(styles.detailsToggle, styles.buttonPressed)}
               onPress={() => {
                 scheduleLayoutTransition(reduceMotion);
                 setShowQueueDetails((current) => !current);
               }}
             >
-              <Text style={styles.detailsToggleText}>
-                {showQueueDetails ? "Hide troubleshooting details" : "Troubleshooting details..."}
-              </Text>
+              <Text style={styles.detailsToggleText}>Troubleshooting details</Text>
+              <DisclosureChevronGlyph color={theme.textSecondary} expanded={showQueueDetails} />
             </Pressable>
             {showQueueDetails ? (
               <View style={styles.queueDiagnosticCard}>

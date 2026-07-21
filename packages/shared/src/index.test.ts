@@ -77,6 +77,15 @@ describe("location learning classification", () => {
 });
 
 describe("recent activity suggestions", () => {
+  it("learns tags as part of a recurring task combination", () => {
+    const suggestions = buildRecentActivitySuggestions([
+      { startedAt: "2026-07-20T08:00:00.000Z", stoppedAt: "2026-07-20T09:00:00.000Z", durationSeconds: 3600, description: "Planning", categoryId: "work", tagNames: ["A24"], reviewStatus: "confirmed", source: "manual_app" },
+      { startedAt: "2026-07-19T08:00:00.000Z", stoppedAt: "2026-07-19T09:00:00.000Z", durationSeconds: 3600, description: "Planning", categoryId: "work", tagNames: ["Personal"], reviewStatus: "confirmed", source: "manual_app" }
+    ], { contextDate: "2026-07-21T08:00:00.000Z" });
+
+    expect(suggestions).toHaveLength(2);
+    expect(suggestions.map((suggestion) => suggestion.tagNames)).toEqual([["A24"], ["Personal"]]);
+  });
   it("deduplicates nonblank completed entries by category and description", () => {
     expect(buildRecentActivitySuggestions([
       {

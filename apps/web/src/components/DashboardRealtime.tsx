@@ -388,7 +388,7 @@ export function CurrentTimerPanel({
 
   const timerAction = useCallback(async (
     mode: "start" | "stop",
-    override?: { categoryId?: string | null; description?: string | null }
+    override?: { categoryId?: string | null; description?: string | null; tagNames?: string[] }
   ) => {
     if (timerActionInFlightRef.current) return;
 
@@ -400,7 +400,7 @@ export function CurrentTimerPanel({
       override && "description" in override
         ? (override.description ?? undefined)
         : description.trim() || undefined;
-    const nextTagNames = selectedTagNames;
+    const nextTagNames = override && "tagNames" in override ? (override.tagNames ?? []) : selectedTagNames;
 
     timerActionInFlightRef.current = true;
     setIsBusy(true);
@@ -501,10 +501,12 @@ export function CurrentTimerPanel({
     setDescription(suggestion.description);
     setCategoryId(suggestion.categoryId ?? "");
     setCategoryMenuOpen(false);
+    setSelectedTagNames(suggestion.tagNames);
     setSuggestionsOpen(false);
     await timerAction("start", {
       categoryId: suggestion.categoryId,
-      description: suggestion.description
+      description: suggestion.description,
+      tagNames: suggestion.tagNames
     });
   }
 
@@ -943,7 +945,7 @@ function TaskSuggestionsPanel({
                       backgroundColor: paletteCssColorFor(suggestion.categoryColor ?? "slate", suggestion.categoryName ?? "Category")
                     }}
                   />
-                  {suggestion.categoryName ?? "Uncategorized"}
+                  {suggestion.categoryName ?? "Uncategorized"}{suggestion.tagNames.length ? ` · ${suggestion.tagNames.map((tag) => `#${tag}`).join(" ")}` : ""}
                 </small>
               </span>
               <Play size={14} fill="currentColor" strokeWidth={0} aria-hidden="true" />

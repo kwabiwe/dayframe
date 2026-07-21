@@ -642,6 +642,15 @@ function LearnedPlaceDetailSheet({
             <View style={styles.sheetHandle} />
             <View style={[styles.sheetHeader, styles.sheetHeaderCentered]}>
               <Text style={[styles.sheetTitle, styles.sheetTitleCentered]} numberOfLines={2}>Place suggestion</Text>
+              <Pressable
+                accessibilityLabel="Close place suggestion"
+                accessibilityRole="button"
+                hitSlop={8}
+                style={pressable(styles.iconButton, styles.buttonPressed)}
+                onPress={onClose}
+              >
+                <CloseGlyph color={theme.textPrimary} />
+              </Pressable>
             </View>
             <SheetMutationProgress
               accessibilityLabel={forgetting ? "Forgetting place suggestion" : ignoring ? "Ignoring place suggestion" : "Working"}
@@ -674,28 +683,18 @@ function LearnedPlaceDetailSheet({
                 styles={styles}
                 theme={theme}
               />
-              <LearnedPlaceDetailRow
-                label="Detected visits"
-                value={`${learnedPlace.visitCount} ${learnedPlace.visitCount === 1 ? "visit" : "visits"}`}
-                styles={styles}
-              />
-              <LearnedPlaceDetailRow
-                label="Samples"
-                value={`${learnedPlace.sampleCount} ${learnedPlace.sampleCount === 1 ? "sample" : "samples"}`}
-                styles={styles}
-              />
-              <LearnedPlaceDetailRow
-                label="Distinct days"
-                value={`${learnedPlace.distinctDayCount} ${learnedPlace.distinctDayCount === 1 ? "day" : "days"}`}
-                styles={styles}
-              />
+              <View style={styles.learnedPlaceMetricGrid}>
+                <LearnedPlaceDetailRow compact label="Visits" value={`${learnedPlace.visitCount}`} styles={styles} />
+                <LearnedPlaceDetailRow compact label="Samples" value={`${learnedPlace.sampleCount}`} styles={styles} />
+                <LearnedPlaceDetailRow compact label="Days" value={`${learnedPlace.distinctDayCount}`} styles={styles} />
+                <LearnedPlaceDetailRow compact label="Radius" value={`${learnedPlace.radiusMeters}m`} styles={styles} />
+              </View>
               <LearnedPlaceDetailRow
                 label="Dwell evidence"
                 value={`${formatDwell(learnedPlace.totalDwellSeconds)} total · ${formatDwell(learnedPlace.longestDwellSeconds)} longest stay`}
                 styles={styles}
               />
               <LearnedPlaceDetailRow label="Last seen" value={formatShortDateTime(learnedPlace.lastSeenAt)} styles={styles} />
-              <LearnedPlaceDetailRow label="Learned radius" value={`${learnedPlace.radiusMeters}m`} styles={styles} />
               <LearnedPlaceDetailRow label="Category/activity" value={associatedCategory} styles={styles} />
               <LearnedPlaceDetailRow label="Status" value="Place suggestion · Not saved" styles={styles} />
             </View>
@@ -763,6 +762,7 @@ function LearnedPlaceDetailSheet({
 }
 
 function LearnedPlaceDetailRow({
+  compact,
   copyLabel,
   label,
   onCopy,
@@ -770,6 +770,7 @@ function LearnedPlaceDetailRow({
   styles,
   theme
 }: {
+  compact?: boolean;
   copyLabel?: string;
   label: string;
   onCopy?: () => void;
@@ -778,7 +779,7 @@ function LearnedPlaceDetailRow({
   theme?: MobileTheme;
 }) {
   return (
-    <View style={styles.accountRow}>
+    <View style={[styles.accountRow, compact ? styles.learnedPlaceMetricCell : null]}>
       <View style={styles.learnedPlaceDetailHeader}>
         <Text style={styles.label}>{label}</Text>
         {onCopy && theme ? (
@@ -906,6 +907,14 @@ function CopyGlyph({ color }: { color: string }) {
     <Svg width={15} height={15} viewBox="0 0 24 24">
       <Path d="M9 9h10v10H9z" fill="none" stroke={color} strokeLinejoin="round" strokeWidth={2} />
       <Path d="M15 9V5H5v10h4" fill="none" stroke={color} strokeLinejoin="round" strokeWidth={2} />
+    </Svg>
+  );
+}
+
+function CloseGlyph({ color }: { color: string }) {
+  return (
+    <Svg accessibilityElementsHidden width={20} height={20} viewBox="0 0 24 24">
+      <Path d="m6 6 12 12M18 6 6 18" fill="none" stroke={color} strokeLinecap="round" strokeWidth={2.2} />
     </Svg>
   );
 }

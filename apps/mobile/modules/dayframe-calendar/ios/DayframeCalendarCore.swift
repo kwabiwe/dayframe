@@ -6,7 +6,7 @@ public enum DayframeCalendarConstants {
   public static let maximumHourHeight = 128.0
   public static let minutesPerDay = 24.0 * 60.0
   public static let minimumVisibleBlockHeight = 4.0
-  public static let titleMinimumHeight = 38.0
+  public static let titleMinimumHeight = 24.0
   public static let metaMinimumHeight = 58.0
 }
 
