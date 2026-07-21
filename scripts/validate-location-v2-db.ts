@@ -303,6 +303,76 @@ async function validateShadowToReviewCutover() {
   );
 }
 
+async function validateEnabledTrustedPlaceAutomation() {
+  await clearDerivedLocationState();
+  const fixture = locationAcceptanceFixture();
+  process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_enabled";
+  const enabledBatch = batch(
+    "db-enabled-trusted-place",
+    fixture.evidence,
+    "v2_enabled",
+    fixture.evidence[0].occurredAt
+  );
+  await ingestLocationEvidence(enabledBatch, session, PROCESSING_AT);
+
+  const automaticEntries = await pool.query<{
+    placeId: string | null;
+    confidence: string;
+    source: string;
+    reviewStatus: string;
+    eventId: string;
+    startedAt: string;
+    stoppedAt: string;
+  }>(
+    `select place_id as "placeId", confidence, source, review_status as "reviewStatus",
+            created_from_event_id as "eventId", started_at as "startedAt", stopped_at as "stoppedAt"
+     from time_entries where workspace_id = $1 and user_id = $2`,
+    [WORKSPACE_ID, USER_ID]
+  );
+  assert(automaticEntries.rows.length > 0, "Enabled mode created no trusted-place automatic entries.");
+  assert(
+    automaticEntries.rows.every((entry) =>
+      entry.placeId && entry.confidence === "medium_high" &&
+      entry.source === "location_learning" && entry.reviewStatus === "confirmed"
+    ),
+    "Enabled mode automatically wrote an untrusted or insufficient-confidence entry."
+  );
+  assert(await count("review_items") > 0, "Enabled mode did not keep uncertain stays or commutes in Review.");
+  const automaticReview = await pool.query(
+    `select 1 from review_items
+     where workspace_id = $1 and user_id = $2 and event_id = any($3::uuid[])`,
+    [WORKSPACE_ID, USER_ID, automaticEntries.rows.map((entry) => entry.eventId)]
+  );
+  assert.equal(automaticReview.rowCount, 0, "An automatically confirmed event also created a Review item.");
+
+  const entryCount = await count("time_entries");
+  const reviewCount = await count("review_items");
+  await ingestLocationEvidence(enabledBatch, session, PROCESSING_AT);
+  assert.equal(await count("time_entries"), entryCount, "Enabled-mode retry duplicated automatic entries.");
+  assert.equal(await count("review_items"), reviewCount, "Enabled-mode retry duplicated Review items.");
+
+  const blocked = automaticEntries.rows[0];
+  await clearDerivedLocationState();
+  await pool.query(
+    `insert into time_entries (
+       workspace_id, user_id, place_id, source, confidence, review_status,
+       description, started_at, stopped_at
+     ) values ($1, $2, $3, 'manual_app', 'high', 'confirmed', 'Existing tracked time', $4, $5)`,
+    [WORKSPACE_ID, USER_ID, blocked.placeId, blocked.startedAt, blocked.stoppedAt]
+  );
+  await ingestLocationEvidence(enabledBatch, session, PROCESSING_AT);
+  const overlapReview = await pool.query(
+    `select 1 from review_items
+     where workspace_id = $1 and user_id = $2
+       and suggested_place_id = $3
+       and suggested_started_at = $4
+       and suggested_stopped_at = $5
+       and notes like 'This detected visit overlaps existing tracked time%'`,
+    [WORKSPACE_ID, USER_ID, blocked.placeId, blocked.startedAt, blocked.stoppedAt]
+  );
+  assert.equal(overlapReview.rowCount, 1, "An overlapping trusted stay did not fall back to Review.");
+}
+
 async function validateV1Compatibility() {
   process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_shadow";
   const placeId = LOCATION_ACCEPTANCE_PLACES[0].id;
@@ -330,8 +400,9 @@ async function main() {
     await validateOutOfOrderAndIdempotency();
     await validateShadowToReviewCutover();
     await validateSemanticIdempotencyAndRollback();
+    await validateEnabledTrustedPlaceAutomation();
     await validateV1Compatibility();
-    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, shadow cutover, semantic idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, and V1 compatibility.");
+    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, shadow cutover, semantic idempotency, trusted-place automation, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, and V1 compatibility.");
   } finally {
     if (process.env.KEEP_LOCATION_V2_DB_FIXTURE !== "1") {
       await pool.query("delete from workspaces where id = $1", [WORKSPACE_ID]).catch(() => undefined);

@@ -57,6 +57,8 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Offline queue sync preserves shortcut, NFC, geofence, Apple Health, and other background event paths, respects retry backoff for automatic retries, and exposes retry/export diagnostics in Settings.
 - Bootstrap data remains backward compatible for web and mobile consumers.
 - No duplicate React keys, hydration errors, or framework runtime overlays appear during normal use.
+- In Location V2 `v2_enabled`, only completed strong stays at logging-enabled saved or accepted-and-linked learned places create automatic confirmed entries. The entry inherits the saved place/default category and description, remains editable/deletable, and retains its source event.
+- Location V2 commutes, unknown/ambiguous places, lower-confidence stays, uncertain gaps, missing approved-place links, and overlaps with confirmed/accepted time remain in Review. Retrying the same batch creates neither a duplicate entry nor a Review item for an already automatic entry.
 
 ## Productivity Views
 
