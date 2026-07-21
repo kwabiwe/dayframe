@@ -17,6 +17,7 @@ import {
   getServerLocationRolloutMode,
   segmentStartedAfterSemanticCutover
 } from "./location-rollout";
+import { locationSemanticDisposition } from "./location-semantic-policy";
 
 export const LOCATION_EVIDENCE_BODY_LIMIT_BYTES = 512 * 1024;
 
@@ -149,7 +150,14 @@ export async function ingestLocationEvidence(
         item.status === "finalised" &&
         segmentStartedAfterSemanticCutover(item.startedAt, rollout.semanticCutoverAt!)
       )) {
-        await emitSemanticSegment(client, session, segment, replay.stayIds, replay.commuteIds);
+        await emitSemanticSegment(
+          client,
+          session,
+          rollout.effectiveMode,
+          segment,
+          replay.stayIds,
+          replay.commuteIds
+        );
       }
     }
     await client.query("commit");
@@ -255,6 +263,7 @@ function evidenceBatchSummary(
 async function emitSemanticSegment(
   client: import("pg").PoolClient,
   session: RequestSession,
+  rolloutMode: LocationRolloutMode,
   segment: LocationSegment,
   stayIds: Map<string, string>,
   commuteIds: Map<string, string>
@@ -270,19 +279,29 @@ async function emitSemanticSegment(
       : segment.placeMatchKind === "saved"
         ? "geofence_exit"
         : "unknown_stay";
-  const placeId = segment.kind === "stay" ? segment.placeId ?? null : null;
+  const trustedPlace = segment.kind === "stay"
+    ? await trustedPlaceContext(client, session, segment)
+    : null;
+  const placeId = trustedPlace?.placeId ?? (segment.kind === "stay" ? segment.placeId ?? null : null);
   if (segment.kind === "stay" && segment.placeMatchKind === "unknown") {
     const duration = Date.parse(segment.stoppedAt ?? segment.startedAt) - Date.parse(segment.startedAt);
     if (duration < LOCATION_ENGINE_V2_CONFIG.unknownStayReviewDwellMs) return;
   }
-  if (segment.kind === "stay" && placeId) {
-    const place = await client.query<{ name: string; loggingEnabled: boolean }>(
-      `select name, logging_enabled as "loggingEnabled" from places
-       where id = $1 and workspace_id = $2`,
-      [placeId, session.workspaceId]
-    );
-    if (place.rows[0] && !place.rows[0].loggingEnabled) return;
+  if (trustedPlace && !trustedPlace.loggingEnabled) return;
+  let disposition = locationSemanticDisposition(rolloutMode, segment);
+  if (disposition.action === "auto_confirm" && !trustedPlace) {
+    disposition = { action: "review", reason: "untrusted_place" };
   }
+  const overlapsConfirmedTime = disposition.action === "auto_confirm"
+    ? await hasConfirmedTimeOverlap(
+        client,
+        session,
+        segment.startedAt,
+        segment.stoppedAt!,
+        segmentEventClientId(segment)
+      )
+    : false;
+  const autoConfirm = disposition.action === "auto_confirm" && !overlapsConfirmedTime;
   const rawPayload = segment.kind === "stay"
     ? {
         clientSegmentId: segment.clientSegmentId,
@@ -291,7 +310,9 @@ async function emitSemanticSegment(
         evidenceCount: segment.evidenceIds.length,
         continuityStatus: segment.continuityStatus,
         startedAt: segment.startedAt,
-        stoppedAt: segment.stoppedAt
+        stoppedAt: segment.stoppedAt,
+        semanticDisposition: autoConfirm ? "auto_confirmed" : "needs_review",
+        semanticReason: overlapsConfirmedTime ? "confirmed_time_overlap" : disposition.reason
       }
     : {
         clientSegmentId: segment.clientSegmentId,
@@ -301,60 +322,193 @@ async function emitSemanticSegment(
         routeSampleCount: segment.routeSampleCount,
         continuityStatus: segment.continuityStatus,
         startedAt: segment.startedAt,
-        stoppedAt: segment.stoppedAt
+        stoppedAt: segment.stoppedAt,
+        semanticDisposition: "needs_review",
+        semanticReason: disposition.reason
       };
   const event = await client.query<{ id: string }>(
-    `insert into activity_events (
+     `insert into activity_events (
        workspace_id, user_id, client_event_id, source, event_type, occurred_at,
-       confidence, raw_payload, suggested_place_id, review_status
-     ) values ($1, $2, $3, 'location_learning', $4, $5, $6, $7::jsonb, $8, 'needs_review')
+       confidence, raw_payload, suggested_category_id, suggested_place_id, review_status
+     ) values ($1, $2, $3, 'location_learning', $4, $5, $6, $7::jsonb, $8, $9, $10)
      on conflict (workspace_id, user_id, client_event_id) where client_event_id is not null
      do update set client_event_id = excluded.client_event_id
      returning id`,
     [
       session.workspaceId,
       session.userId,
-      `location-segment:${segment.clientSegmentId}`.slice(0, 160),
+      segmentEventClientId(segment),
       eventType,
       segment.startedAt,
       segment.confidence,
       JSON.stringify(rawPayload),
-      placeId
-    ]
-  );
-  const title = await segmentTitle(client, session, segment);
-  await client.query(
-    `insert into review_items (
-       workspace_id, user_id, event_id, location_segment_id, type, title,
-       suggested_place_id, suggested_started_at, suggested_stopped_at,
-       confidence, status, notes
-     )
-     select $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'open', $11
-     where not exists (
-       select 1 from review_items where workspace_id = $1 and user_id = $2 and event_id = $3
-     )`,
-    [
-      session.workspaceId,
-      session.userId,
-      event.rows[0].id,
-      databaseSegmentId,
-      `${eventType}_suggestion`,
-      title,
+      trustedPlace?.categoryId ?? null,
       placeId,
-      segment.startedAt,
-      segment.stoppedAt,
-      segment.confidence,
-      segment.continuityStatus === "uncertain_gap"
-        ? "The boundary includes an evidence gap; inspect the timeline before confirming."
-        : "Ordered location evidence supports this suggestion."
+      autoConfirm ? "confirmed" : "needs_review"
     ]
   );
-  await client.query(
-    `update ${segment.kind === "stay" ? "stay_segments" : "commute_segments"}
-     set created_from_event_id = $1, updated_at = now()
-     where id = $2 and workspace_id = $3 and user_id = $4`,
-    [event.rows[0].id, databaseSegmentId, session.workspaceId, session.userId]
+  const title = trustedPlace?.description ?? await segmentTitle(client, session, segment);
+  if (autoConfirm) {
+    await client.query(
+      `insert into time_entries (
+         workspace_id, user_id, category_id, place_id, source, confidence, review_status,
+         description, started_at, stopped_at, created_from_event_id
+       )
+       select $1, $2, $3, $4, 'location_learning', $5, 'confirmed', $6, $7, $8, $9
+       where not exists (
+         select 1 from time_entries
+         where workspace_id = $1 and user_id = $2 and created_from_event_id = $9
+       )`,
+      [
+        session.workspaceId,
+        session.userId,
+        trustedPlace!.categoryId,
+        trustedPlace!.placeId,
+        segment.confidence,
+        title,
+        segment.startedAt,
+        segment.stoppedAt,
+        event.rows[0].id
+      ]
+    );
+  } else {
+    await client.query(
+      `insert into review_items (
+         workspace_id, user_id, event_id, location_segment_id, type, title,
+         suggested_category_id, suggested_place_id, suggested_started_at, suggested_stopped_at,
+         confidence, status, notes
+       )
+       select $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'open', $12
+       where not exists (
+         select 1 from review_items where workspace_id = $1 and user_id = $2 and event_id = $3
+       )`,
+      [
+        session.workspaceId,
+        session.userId,
+        event.rows[0].id,
+        databaseSegmentId,
+        `${eventType}_suggestion`,
+        title,
+        trustedPlace?.categoryId ?? null,
+        placeId,
+        segment.startedAt,
+        segment.stoppedAt,
+        segment.confidence,
+        overlapsConfirmedTime
+          ? "This detected visit overlaps existing tracked time and needs review."
+          : segment.continuityStatus === "uncertain_gap"
+            ? "The boundary includes an evidence gap; inspect the timeline before confirming."
+            : "Ordered location evidence supports this suggestion."
+      ]
+    );
+  }
+  if (segment.kind === "stay") {
+    await client.query(
+      `update stay_segments
+       set created_from_event_id = $1, review_status = $2, updated_at = now()
+       where id = $3 and workspace_id = $4 and user_id = $5`,
+      [
+        event.rows[0].id,
+        autoConfirm ? "confirmed" : "needs_review",
+        databaseSegmentId,
+        session.workspaceId,
+        session.userId
+      ]
+    );
+  } else {
+    await client.query(
+      `update commute_segments set created_from_event_id = $1, updated_at = now()
+       where id = $2 and workspace_id = $3 and user_id = $4`,
+      [event.rows[0].id, databaseSegmentId, session.workspaceId, session.userId]
+    );
+  }
+}
+
+type TrustedPlaceContext = {
+  placeId: string;
+  categoryId: string | null;
+  description: string;
+  loggingEnabled: boolean;
+};
+
+async function trustedPlaceContext(
+  client: import("pg").PoolClient,
+  session: RequestSession,
+  segment: StaySegment
+): Promise<TrustedPlaceContext | null> {
+  if (segment.placeMatchKind === "saved" && segment.placeId) {
+    const result = await client.query<{
+      placeId: string;
+      name: string;
+      categoryId: string | null;
+      description: string | null;
+      loggingEnabled: boolean;
+    }>(
+      `select id as "placeId", name, default_category_id as "categoryId",
+              default_activity_description as description, logging_enabled as "loggingEnabled"
+       from places where id = $1 and workspace_id = $2`,
+      [segment.placeId, session.workspaceId]
+    );
+    const place = result.rows[0];
+    return place ? {
+      placeId: place.placeId,
+      categoryId: place.categoryId,
+      description: place.description?.trim() || `Visit ${place.name}`,
+      loggingEnabled: place.loggingEnabled
+    } : null;
+  }
+  if (segment.placeMatchKind === "learned" && segment.learnedPlaceId) {
+    const result = await client.query<{
+      placeId: string;
+      name: string;
+      categoryId: string | null;
+      description: string | null;
+      loggingEnabled: boolean;
+    }>(
+      `select p.id as "placeId", coalesce(p.name, lp.name) as name,
+              p.default_category_id as "categoryId", p.default_activity_description as description,
+              p.logging_enabled as "loggingEnabled"
+       from learned_places lp
+       join places p on p.id = lp.place_id and p.workspace_id = lp.workspace_id
+       where lp.id = $1 and lp.workspace_id = $2 and lp.user_id = $3 and lp.status = 'accepted'`,
+      [segment.learnedPlaceId, session.workspaceId, session.userId]
+    );
+    const place = result.rows[0];
+    return place ? {
+      placeId: place.placeId,
+      categoryId: place.categoryId,
+      description: place.description?.trim() || `Visit ${place.name}`,
+      loggingEnabled: place.loggingEnabled
+    } : null;
+  }
+  return null;
+}
+
+async function hasConfirmedTimeOverlap(
+  client: import("pg").PoolClient,
+  session: RequestSession,
+  startedAt: string,
+  stoppedAt: string,
+  clientEventId: string
+) {
+  const overlap = await client.query(
+    `select 1 from time_entries
+     where workspace_id = $1 and user_id = $2
+       and review_status in ('confirmed', 'accepted')
+       and started_at < $4 and coalesce(stopped_at, 'infinity'::timestamptz) > $3
+       and not exists (
+         select 1 from activity_events ae
+         where ae.id = time_entries.created_from_event_id
+           and ae.workspace_id = $1 and ae.user_id = $2 and ae.client_event_id = $5
+       )
+     limit 1`,
+    [session.workspaceId, session.userId, startedAt, stoppedAt, clientEventId]
   );
+  return Boolean(overlap.rows[0]);
+}
+
+function segmentEventClientId(segment: LocationSegment) {
+  return `location-segment:${segment.clientSegmentId}`.slice(0, 160);
 }
 
 async function segmentTitle(
@@ -363,6 +517,13 @@ async function segmentTitle(
   segment: StaySegment | CommuteSegment
 ) {
   if (segment.kind === "commute") return "Possible journey";
+  if (segment.learnedPlaceId) {
+    const learned = await client.query<{ name: string }>(
+      "select name from learned_places where id = $1 and workspace_id = $2 and user_id = $3",
+      [segment.learnedPlaceId, session.workspaceId, session.userId]
+    );
+    if (learned.rows[0]) return `Visit ${learned.rows[0].name}`;
+  }
   if (!segment.placeId) return segment.placeMatchKind === "ambiguous" ? "Visit near saved places" : "Visit at an unknown place";
   const place = await client.query<{ name: string }>(
     "select name from places where id = $1 and workspace_id = $2",

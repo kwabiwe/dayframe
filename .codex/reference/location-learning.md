@@ -41,7 +41,7 @@ Rollout has four server-authoritative modes, returned by bootstrap and acknowled
 - `v1`: stop and clear V2 capture; keep the previous geofence semantics.
 - `v2_shadow`: capture/replay V2 but emit no V2 review item or time-entry semantics; V1 remains active.
 - `v2_review`: suppress competing V1 location semantics and permit V2 stays/commutes that begin after the same-mode acknowledgement cutover to become review items only.
-- `v2_enabled`: the same duplicate-suppressed V2 path, reserved for a later narrow high-confidence policy. Unknown or ambiguous evidence remains review-first.
+- `v2_enabled`: the duplicate-suppressed V2 path plus a narrow automatic-write policy. A finalised stay may auto-confirm only when it matches a logging-enabled saved place or an accepted learned place linked to one, has `medium_high`/`high` confidence, has `continuous`, `supported_by_visit`, or `broken_by_other_place` continuity, and does not overlap confirmed/accepted time. It inherits the saved place's default category and activity description. Commutes, unknown/ambiguous matches, weak evidence, uncertain gaps, missing linkage, disabled logging, and overlaps remain review-first.
 
 The server default is `v2_shadow` through `DAYFRAME_LOCATION_ROLLOUT_MODE`. A legacy client request for `v2` maps to `v2_review`, but new code and operational documentation must use the four canonical names. The server records a semantic cutover only after a client has acknowledged the same server mode; final segments that began before that cutover cannot backfill user-visible semantics. This acknowledgement barrier is the protection against shadow-era history suddenly producing duplicate suggestions.
 
@@ -51,7 +51,7 @@ Reverse geocoding is display-only: use saved/learned identity first, invoke a pr
 
 Postgres retention is operational through Vercel Cron calling `GET /api/cron/location-retention` daily at `03:17 UTC`. The route fails closed unless its bearer token matches `CRON_SECRET`, returns `no-store`, calls the bounded service-role cleanup function under an advisory lock, and warns if a 50,000-row run limit leaves a backlog. Vercel Cron runs on production deployments only, so hosted verification must confirm the environment secret, database role/function grant, invocation logs, and next-day schedule. A failed invocation leaves evidence for the next run and is visible through the non-2xx route result and Vercel logs; it must never fall back to an unauthenticated deletion path.
 
-Default rollout is `v2_shadow`. Deploy the additive migration, then API/web, then the native TestFlight build; validate shadow counts and privacy; activate `v2_review` only after the physical matrix. Keep `v2_enabled` disabled until its high-confidence policy has separate approval. Rollback by changing the server-controlled mode to `v2_shadow` or `v1` before reverting runtime code. Additive tables may remain and confirmed V2 entries must not be deleted.
+The checked-in/default rollout remains `v2_shadow` as a fail-closed fallback. Deploy the additive migration, then API/web, then the native TestFlight build. Production may activate `v2_review` or the owner-approved narrow `v2_enabled` policy through the server environment only after the corresponding code is deployed. A client must acknowledge the same mode before new segments can emit semantics. Roll back by changing the server mode to `v2_shadow` or `v1` before reverting runtime code. Additive tables may remain and confirmed V2 entries must not be deleted.
 
 ## Classification invariant
 
