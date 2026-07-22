@@ -86,4 +86,4 @@ Revert this focused branch. No database rollback is required because no migratio
 
 ## PR
 
-Draft PR from `codex/web-auth-report-safety` to `main`; link assigned after validation, commit and push.
+Draft PR [#92](https://github.com/kwabiwe/dayframe/pull/92) from `codex/web-auth-report-safety` to `main`.
