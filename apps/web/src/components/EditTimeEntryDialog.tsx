@@ -3,6 +3,7 @@
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { InlineTagInput } from "@/components/InlineTagInput";
+import { Button, Field, ModalDialog, SelectField } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import type { CategoryRow, PlaceRow, TagRow, TimeEntryRow } from "@/lib/queries";
 import {
@@ -44,6 +45,7 @@ export function EditTimeEntryDialog({
   const [formError, setFormError] = useState<string | null>(null);
   const [descriptionDraft, setDescriptionDraft] = useState(entry.description ?? "");
   const [selectedTagNames, setSelectedTagNames] = useState(entry.tagNames);
+  const formId = `edit-time-entry-${entry.id}`;
 
   function syncDurationFromTimes(nextStartedAtDraft: string, nextStoppedAtDraft: string) {
     if (!isCompletedEntry) return;
@@ -160,48 +162,42 @@ export function EditTimeEntryDialog({
   }
 
   return (
-    <div className="swiss-dialog-backdrop" role="presentation" onMouseDown={onClose}>
-      <section
-        className="swiss-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="edit-entry-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="swiss-dialog-header">
-          <h2 id="edit-entry-title">Edit time block</h2>
-          <button type="button" onClick={onClose} aria-label="Close edit time block">
-            x
-          </button>
-        </div>
-        <form className="swiss-form-grid" onSubmit={submit}>
-          <label>
-            Category
-            <select name="categoryId" defaultValue={entry.categoryId ?? ""}>
-              <option value="">Uncategorized</option>
-              {categories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Place
-            <select name="placeId" defaultValue={entry.placeId ?? ""}>
-              <option value="">No place</option>
-              {places.map((place) => (
-                <option key={place.id} value={place.id}>
-                  {place.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="swiss-form-wide">
-            <label htmlFor="edit-entry-description">Description</label>
+    <ModalDialog
+      busy={isBusy}
+      onClose={onClose}
+      title="Edit time block"
+      footer={(
+        <>
+          <Button onClick={onClose} disabled={isBusy}>Cancel</Button>
+          <Button variant="primary" type="submit" form={formId} disabled={isBusy}>Save</Button>
+        </>
+      )}
+    >
+      <form id={formId} className="swiss-form-grid" onSubmit={submit}>
+          <SelectField
+            id={`${formId}-category`}
+            name="categoryId"
+            label="Category"
+            defaultValue={entry.categoryId ?? ""}
+            options={[
+              { value: "", label: "Uncategorized" },
+              ...categories.map((category) => ({ value: category.id, label: category.name }))
+            ]}
+          />
+          <SelectField
+            id={`${formId}-place`}
+            name="placeId"
+            label="Place"
+            defaultValue={entry.placeId ?? ""}
+            options={[
+              { value: "", label: "No place" },
+              ...places.map((place) => ({ value: place.id, label: place.name }))
+            ]}
+          />
+          <Field className="swiss-form-wide" htmlFor="edit-entry-description" label="Description">
             <InlineTagInput
               ariaLabel="Time entry description"
-              inputClassName=""
+              inputClassName="ui-control"
               inputId="edit-entry-description"
               name="description"
               onChange={setDescriptionDraft}
@@ -211,10 +207,11 @@ export function EditTimeEntryDialog({
               tags={tags}
               value={descriptionDraft}
             />
-          </div>
-          <label>
-            Start
+          </Field>
+          <Field htmlFor={`${formId}-start`} label="Start">
             <input
+              id={`${formId}-start`}
+              className="ui-control"
               type="datetime-local"
               name="startedAt"
               value={startedAtDraft}
@@ -225,12 +222,13 @@ export function EditTimeEntryDialog({
               }}
               required
             />
-          </label>
+          </Field>
           {isCompletedEntry ? (
             <>
-              <label>
-                Finish
+              <Field htmlFor={`${formId}-finish`} label="Finish">
                 <input
+                  id={`${formId}-finish`}
+                  className="ui-control"
                   type="datetime-local"
                   name="stoppedAt"
                   value={stoppedAtDraft}
@@ -238,10 +236,11 @@ export function EditTimeEntryDialog({
                   onInput={(event) => updateStoppedAtDraft(event.currentTarget.value)}
                   required
                 />
-              </label>
-              <label>
-                Duration
+              </Field>
+              <Field htmlFor={`${formId}-duration`} label="Duration">
                 <input
+                  id={`${formId}-duration`}
+                  className="ui-control is-compact"
                   name="duration"
                   value={durationDraft}
                   onChange={(event) => updateDurationDraft(event.target.value, event.currentTarget.form)}
@@ -249,7 +248,7 @@ export function EditTimeEntryDialog({
                   onBlur={() => syncStoppedAtFromDuration()}
                   placeholder="1:15"
                 />
-              </label>
+              </Field>
             </>
           ) : null}
           {formError ? (
@@ -257,16 +256,7 @@ export function EditTimeEntryDialog({
               {formError}
             </p>
           ) : null}
-          <div className="swiss-dialog-actions">
-            <button type="button" onClick={onClose}>
-              Cancel
-            </button>
-            <button className="swiss-primary-action" type="submit" disabled={isBusy}>
-              Save
-            </button>
-          </div>
-        </form>
-      </section>
-    </div>
+      </form>
+    </ModalDialog>
   );
 }

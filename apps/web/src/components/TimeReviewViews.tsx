@@ -9,6 +9,7 @@ import { CurrentTimerPanel } from "@/components/DashboardRealtime";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import { TagMetadata } from "@/components/TagMetadata";
 import { EntriesTable } from "@/components/EntriesTable";
+import { IconButton, SegmentedControl } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import {
   timeEntryAccentColor,
@@ -167,56 +168,36 @@ export function TimeReviewViews({
       <div className="industrial-panel fill-review-toolbar p-4">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex flex-wrap items-center gap-3">
-            <button
-              className="fill-icon-action focus-ring grid h-11 w-11 place-items-center"
-              type="button"
-              aria-label="Previous week"
+            <IconButton
+              label="Previous week"
               onClick={() => setWeekAnchor(addDays(weekAnchor, -7))}
             >
               <ChevronLeft size={16} />
-            </button>
+            </IconButton>
             <div className="fill-date-pill min-w-[220px] px-3 py-2">
               <div className="text-sm font-semibold">This week</div>
               <div className="tabular mt-1 text-xs text-[var(--muted)]">
                 {formatDate(weekDays[0])} - {formatDate(weekDays[6])}
               </div>
             </div>
-            <button
-              className="fill-icon-action focus-ring grid h-11 w-11 place-items-center"
-              type="button"
-              aria-label="Next week"
+            <IconButton
+              label="Next week"
               onClick={() => setWeekAnchor(addDays(weekAnchor, 7))}
             >
               <ChevronRight size={16} />
-            </button>
+            </IconButton>
             <div className="fill-metric-pill px-3 py-2 text-sm">
               <span className="text-[var(--muted)]">Week total </span>
               <span className="tabular font-semibold">{formatDuration(weekTotal)}</span>
             </div>
           </div>
 
-          <div className="fill-segmented grid grid-cols-1 sm:grid-cols-3">
-            {viewItems.map((item) => {
-              const selected = item.id === activeView;
-              return (
-                <button
-                  key={item.id}
-                  className={[
-                    "fill-segmented-option focus-ring flex min-h-11 min-w-0 items-center justify-center gap-2 px-3 text-sm",
-                    selected
-                      ? "bg-[var(--accent)] text-[var(--on-accent)]"
-                      : "text-[var(--foreground)] hover:text-[var(--accent-text)]"
-                  ].join(" ")}
-                  type="button"
-                  aria-pressed={selected}
-                  onClick={() => updateView(item.id)}
-                >
-                  {item.icon}
-                  {item.label}
-                </button>
-              );
-            })}
-          </div>
+          <SegmentedControl
+            ariaLabel="Timeline view"
+            onChange={updateView}
+            options={viewItems.map((item) => ({ value: item.id, label: item.label, icon: item.icon }))}
+            value={activeView}
+          />
         </div>
       </div>
 
