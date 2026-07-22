@@ -36,6 +36,7 @@ import {
   Utensils
 } from "lucide-react";
 import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
+import { clientFetch } from "@/lib/client-auth-fetch";
 import {
   timeEntryAccentColor,
   timeEntryContextLabel,
@@ -86,7 +87,7 @@ export function DashboardRealtime({ initialData }: { initialData: BootstrapData 
 
   const refreshData = useCallback(async () => {
     try {
-      const response = await fetch(`/api/bootstrap?date=${data.dateRange.selectedDate}`, {
+      const response = await clientFetch(`/api/bootstrap?date=${data.dateRange.selectedDate}`, {
         cache: "no-store"
       });
       if (!response.ok) return;
@@ -357,7 +358,7 @@ export function CurrentTimerPanel({
 
     const syncHandle = window.setTimeout(async () => {
       activeDetailsSyncRef.current = nextSyncKey;
-      const response = await fetch(`/api/time-entries/${active.id}`, {
+      const response = await clientFetch(`/api/time-entries/${active.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -380,7 +381,7 @@ export function CurrentTimerPanel({
   }, [active, categoryId, description, draftEntryId, selectedTagNames]);
 
   const refresh = useCallback(async () => {
-    const response = await fetch(`/api/bootstrap?date=${data.dateRange.selectedDate}`, {
+    const response = await clientFetch(`/api/bootstrap?date=${data.dateRange.selectedDate}`, {
       cache: "no-store"
     });
     if (response.ok) onSynced((await response.json()) as BootstrapData);
@@ -407,7 +408,7 @@ export function CurrentTimerPanel({
     setTimerError(null);
     try {
       if (mode === "stop" && active) {
-        const updateResponse = await fetch(`/api/time-entries/${active.id}`, {
+        const updateResponse = await clientFetch(`/api/time-entries/${active.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -422,7 +423,7 @@ export function CurrentTimerPanel({
         if (!updateResponse.ok) throw new Error(`Unable to save timer details: ${updateResponse.status}`);
       }
 
-      const response = await fetch("/api/time-entries", {
+      const response = await clientFetch("/api/time-entries", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
@@ -464,7 +465,7 @@ export function CurrentTimerPanel({
     setTimerError(null);
     setDeleteError(null);
     try {
-      const response = await fetch(`/api/time-entries/${active.id}`, {
+      const response = await clientFetch(`/api/time-entries/${active.id}`, {
         method: "DELETE"
       });
       if (!response.ok) {
@@ -579,7 +580,7 @@ export function CurrentTimerPanel({
     setTimerError(null);
     setStartEditError(null);
     try {
-      const response = await fetch(`/api/time-entries/${active.id}`, {
+      const response = await clientFetch(`/api/time-entries/${active.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1121,7 +1122,7 @@ function DayTimeline({
   const deleteEntry = useCallback(
     async (entryId: string) => {
       setResizeError(null);
-      const response = await fetch(`/api/time-entries/${entryId}`, {
+      const response = await clientFetch(`/api/time-entries/${entryId}`, {
         method: "DELETE"
       });
       if (!response.ok) {
@@ -1159,7 +1160,7 @@ function DayTimeline({
   }, [contextMenu]);
 
   async function saveResize(entry: TimeEntryRow, draft: ResizeDraft) {
-    const response = await fetch(`/api/time-entries/${entry.id}`, {
+    const response = await clientFetch(`/api/time-entries/${entry.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1826,7 +1827,7 @@ function ManualEntryDialog({
 
     setIsBusy(true);
     try {
-      const response = await fetch("/api/time-entries", {
+      const response = await clientFetch("/api/time-entries", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1849,7 +1850,7 @@ function ManualEntryDialog({
         }
         throw new Error(errorMessage);
       }
-      const refresh = await fetch(`/api/bootstrap?date=${data.dateRange.selectedDate}`, {
+      const refresh = await clientFetch(`/api/bootstrap?date=${data.dateRange.selectedDate}`, {
         cache: "no-store"
       });
       if (refresh.ok) onSynced((await refresh.json()) as BootstrapData);

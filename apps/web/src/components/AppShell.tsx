@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { DayframeBrand } from "@/components/brand/DayframeBrand";
+import { clientFetch } from "@/lib/client-auth-fetch";
 import { timeEntryTitle } from "@/lib/display";
 import type { BootstrapData } from "@/lib/queries";
 import { formatDuration, formatEventLabel, formatSourceLabel, formatTime } from "@/lib/format";
@@ -81,7 +82,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const refreshShellData = useCallback(async () => {
     if (authScreen) return;
-    const response = await fetch(`/api/bootstrap?date=${selectedDate}`, { cache: "no-store" });
+    const response = await clientFetch(`/api/bootstrap?date=${selectedDate}`, { cache: "no-store" });
     if (response.ok) setData((await response.json()) as BootstrapData);
   }, [authScreen, selectedDate]);
 
@@ -89,7 +90,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (authScreen) return undefined;
     let cancelled = false;
 
-    fetch(`/api/bootstrap?date=${selectedDate}`, { cache: "no-store" })
+    clientFetch(`/api/bootstrap?date=${selectedDate}`, { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : null))
       .then((payload: BootstrapData | null) => {
         if (!cancelled && payload) setData(payload);
@@ -382,7 +383,7 @@ function WorkspacePopover({
     setIsBusy(true);
     setError(null);
     try {
-      const response = await fetch("/api/workspace/switch", {
+      const response = await clientFetch("/api/workspace/switch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ workspaceId })
@@ -404,7 +405,7 @@ function WorkspacePopover({
     setIsBusy(true);
     setError(null);
     try {
-      const response = await fetch("/api/workspaces", {
+      const response = await clientFetch("/api/workspaces", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name })
@@ -495,7 +496,7 @@ function ProfilePopover({
     }
     setIsBusy(true);
     try {
-      const response = await fetch("/api/profile", {
+      const response = await clientFetch("/api/profile", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

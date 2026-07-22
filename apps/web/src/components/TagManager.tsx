@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Plus, Save, Tag, Trash2, X } from "lucide-react";
 import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
+import { clientFetch } from "@/lib/client-auth-fetch";
 import type { TagRow } from "@/lib/queries";
 
 export function TagManager({ tags }: { tags: TagRow[] }) {
@@ -20,7 +21,7 @@ export function TagManager({ tags }: { tags: TagRow[] }) {
 
   async function mutate(url: string, method: "POST" | "PATCH", name: string) {
     setError(null);
-    const response = await fetch(url, {
+    const response = await clientFetch(url, {
       method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name })
@@ -58,7 +59,7 @@ export function TagManager({ tags }: { tags: TagRow[] }) {
     setDeleting(true);
     setError(null);
     try {
-      const response = await fetch(`/api/tags/${encodeURIComponent(tag.id)}`, { method: "DELETE" });
+      const response = await clientFetch(`/api/tags/${encodeURIComponent(tag.id)}`, { method: "DELETE" });
       if (!response.ok) {
         const payload = await response.json().catch(() => null) as { error?: string } | null;
         throw new Error(payload?.error ?? `Unable to delete tag: ${response.status}`);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { clientFetch } from "@/lib/client-auth-fetch";
 
 export function GoalSettings({ dailyGoalMinutes, weeklyGoalMinutes }: { dailyGoalMinutes: number; weeklyGoalMinutes: number }) {
   const [daily, setDaily] = useState(String(dailyGoalMinutes / 60));
@@ -18,7 +19,7 @@ export function GoalSettings({ dailyGoalMinutes, weeklyGoalMinutes }: { dailyGoa
     }
     setSaving(true);
     setMessage(null);
-    const response = await fetch("/api/profile", {
+    const response = await clientFetch("/api/profile", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ dailyGoalMinutes: dailyMinutes, weeklyGoalMinutes: weeklyMinutes })

@@ -8,6 +8,7 @@ import { AuthError, type RequestSession } from "@/lib/session";
 
 export const APP_SESSION_COOKIE = "dayframe_session";
 export const APP_SESSION_TTL_SECONDS = Number(process.env.DAYFRAME_SESSION_TTL_SECONDS ?? 60 * 60 * 24 * 30);
+export const SESSION_LAST_USED_TOUCH_INTERVAL_SECONDS = 10 * 60;
 
 export const SignupInputSchema = z.object({
   email: z.string().trim().email().max(320),
@@ -170,15 +171,31 @@ export async function resolveLocalSession(
 ): Promise<RequestSession> {
   if (!token) throw new AuthError("Login required.");
   const tokenHash = hashSessionToken(token);
-  const session = await query<{ userId: string; workspaceId: string }>(
-    `update auth_sessions
-     set last_used_at = now()
-     where token_hash = $1 and revoked_at is null and expires_at > now()
-     returning user_id as "userId", workspace_id as "workspaceId"`,
+  const session = await query<{ userId: string; workspaceId: string; lastUsedAt: Date | null }>(
+    `select user_id as "userId",
+            workspace_id as "workspaceId",
+            last_used_at as "lastUsedAt"
+     from auth_sessions
+     where token_hash = $1 and revoked_at is null and expires_at > now()`,
     [tokenHash]
   );
   const row = session.rows[0];
   if (!row) throw new AuthError("Login required.");
+
+  if (
+    !row.lastUsedAt ||
+    row.lastUsedAt.getTime() <= Date.now() - SESSION_LAST_USED_TOUCH_INTERVAL_SECONDS * 1000
+  ) {
+    await query(
+      `update auth_sessions
+       set last_used_at = now()
+       where token_hash = $1
+         and revoked_at is null
+         and expires_at > now()
+         and (last_used_at is null or last_used_at < now() - ($2 * interval '1 second'))`,
+      [tokenHash, SESSION_LAST_USED_TOUCH_INTERVAL_SECONDS]
+    );
+  }
 
   return {
     userId: row.userId,

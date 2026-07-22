@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import "./globals.css";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { AppShell } from "@/components/AppShell";
-import { getOptionalPageSession } from "@/lib/auth/server";
+import { getOptionalPageSession, isAuthenticatedPageSession } from "@/lib/auth/server";
 
 export const metadata: Metadata = {
   title: "Dayframe",
@@ -29,7 +29,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           }}
         />
         <Suspense fallback={<>{children}</>}>
-          {session ? <AppShell>{children}</AppShell> : children}
+          {isAuthenticatedPageSession(session) ? <AppShell>{children}</AppShell> : children}
         </Suspense>
       </body>
     </html>
