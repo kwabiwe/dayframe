@@ -107,9 +107,10 @@ describe("dashboard category allocation", () => {
   });
 
   it("creates future-compatible report links that preserve date and category intent", () => {
-    const allocation = calculateCategoryAllocation([entry("work", "work-id", "Work", 9, 10)], day, { now });
+    const workCategoryId = "20000000-0000-4000-8000-000000000001";
+    const allocation = calculateCategoryAllocation([entry("work", workCategoryId, "Work", 9, 10)], day, { now });
     expect(buildDashboardReportsUrl("day", day, allocation.categories[0])).toBe(
-      "/reports?period=day&start=2026-07-22&categories=work-id"
+      `/reports?range=custom&from=2026-07-22&to=2026-07-22&categories=${workCategoryId}`
     );
 
     const uncategorized = calculateCategoryAllocation([
