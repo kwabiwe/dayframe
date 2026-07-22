@@ -32,4 +32,8 @@ The sheet correctly measures and lifts itself above the keyboard, but the form S
 - Unit regression: overlapping idle/optimistic/persisted Live Activity requests.
 - Existing Live Activity retry and deduplication coverage.
 - Mobile TypeScript check.
-- Native iOS build and physical-iPhone verification remain required before closure.
+- Signed physical-iPhone development build and launch succeeded on KB's iPhone 17 Pro.
+- PR #91 merged to `main` as `84a0bfc` after GitHub checks passed.
+- TestFlight build `0.1.0 (63)` was archived from merged `main` with production API `https://dayframe-web.vercel.app`, exported, and uploaded with delivery/build ID `f0f3683b-c37c-4b2e-b457-906f129712cf`.
+- App Store Connect reports `VALID`, export compliance false, en-GB notes set, all-build access through `Internal Health Debug`, and `IN_BETA_TESTING`.
+- KB explicitly skipped the pre-release physical interaction check. Dynamic Island, Lock Screen, and exact keyboard placement remain `Watch` items for build 63.
