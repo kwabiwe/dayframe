@@ -113,8 +113,10 @@ export function ActiveTimerEditSheet({
   const suggestionsProgress = useRef(new Animated.Value(0)).current;
   const hashtagPanelProgress = useRef(new Animated.Value(0)).current;
   const descriptionInputRef = useRef<TextInput>(null);
+  const contentScrollRef = useRef<ScrollView>(null);
   const descriptionEntryStarted = useRef(false);
   const timeInputRef = useRef<TextInput>(null);
+  const startTimeFocused = useRef(false);
 
   const isRunningMode = mode === "running";
   const isEntryMode = mode === "entry";
@@ -257,6 +259,11 @@ export function ActiveTimerEditSheet({
       });
       setKeyboardInset(nextInset);
       animateKeyboardLift(nextLayout.bottomLift, event);
+      if (startTimeFocused.current) {
+        requestAnimationFrame(() => {
+          contentScrollRef.current?.scrollToEnd({ animated: !reduceMotion });
+        });
+      }
     }
 
     const changeSubscription = Keyboard.addListener(
@@ -716,6 +723,7 @@ export function ActiveTimerEditSheet({
               </View>
 
               <ScrollView
+                ref={contentScrollRef}
                 contentContainerStyle={[
                   styles.activeEditContent,
                   keyboardLayout.keyboardOpen ? { paddingBottom: keyboardLayout.contentPaddingBottom } : null
@@ -952,7 +960,14 @@ export function ActiveTimerEditSheet({
                       maxLength={5}
                       onChangeText={updateTimeText}
                       onFocus={() => {
+                        startTimeFocused.current = true;
                         setDatePickerOpen(false);
+                        requestAnimationFrame(() => {
+                          contentScrollRef.current?.scrollToEnd({ animated: !reduceMotion });
+                        });
+                      }}
+                      onBlur={() => {
+                        startTimeFocused.current = false;
                       }}
                       onPressIn={() => {
                         if (!busy) timeInputRef.current?.focus();

@@ -23,6 +23,7 @@ Use this when working on frontend components.
 - Surface friendly, actionable permission messages; never display raw native exception strings to users.
 - Treat route state as the source of truth for same-route mobile sub-settings. Do not mirror the active route section into local state or intercept native back gestures to repair duplicated navigation state.
 - For inline iOS forms near the bottom of a scroll view, keep the focused input mounted, apply the native keyboard inset, and reveal the complete required control group—not only the text field—above the keyboard at normal and Dynamic Type sizes.
+- When timer state is mirrored to a native system surface, serialize reconciliation and make the latest requested state win; optimistic and persisted entry updates must not race separate native lifecycle calls.
 
 ## Motion Ownership And State
 
