@@ -87,4 +87,4 @@ No merge, deployment, hosted database operation or Phase 4 work is authorised. R
 
 ## PR
 
-Draft PR pending from `codex/web-dashboard-intelligence`; review only.
+Draft PR [#95](https://github.com/kwabiwe/dayframe/pull/95) from `codex/web-dashboard-intelligence`; review only.
