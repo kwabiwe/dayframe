@@ -622,8 +622,8 @@ async function getTimeEntries(
   session: RequestSession,
   options: { overlappingFrom?: string; startedFrom?: string; startedBefore?: string; limit?: number } = {}
 ) {
-  const where = ["te.workspace_id = $1"];
-  const values: Array<string | number> = [session.workspaceId];
+  const where = ["te.workspace_id = $1", "te.user_id = $2"];
+  const values: Array<string | number> = [session.workspaceId, session.userId];
   if (options.overlappingFrom) {
     values.push(options.overlappingFrom);
     where.push(`coalesce(te.stopped_at, now()) > $${values.length}`);
