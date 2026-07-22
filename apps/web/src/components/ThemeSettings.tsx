@@ -41,7 +41,7 @@ export function ThemeSettings() {
   }
 
   return (
-    <section className="industrial-panel">
+    <section className="industrial-panel" id="appearance">
       <div className="border-b border-[var(--line)] px-4 py-3">
         <h2 className="text-lg font-semibold">Theme</h2>
       </div>

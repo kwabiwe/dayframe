@@ -9,6 +9,7 @@ Use this when working on frontend components.
 - Keep data fetching, mutations, and presentation responsibilities clearly separated.
 - Use accessible labels, semantic HTML, and keyboard-friendly controls.
 - Keep Dayframe timer surfaces category/task-first. Avoid exposing projects/clients in primary timer UI.
+- On web, Dashboard and Timeline must consume the one timer runtime mounted by `AppShell`. Route components must not mount an independent active-timer poll, store, API client, mutation queue, shortcut handler or manual-entry owner; navigation between those routes must preserve the same optimistic state and active-entry identity.
 - Keep the iOS dashboard focused on logo/header, active timer, start task, quick category actions, and Today summary.
 - Move location and HealthKit permission controls to onboarding and Settings.
 

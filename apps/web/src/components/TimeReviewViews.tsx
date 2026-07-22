@@ -1,15 +1,15 @@
 "use client";
 
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useMemo, useState, useSyncExternalStore, useTransition } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { CalendarDays, ChevronLeft, ChevronRight, List, Table2 } from "lucide-react";
 import { calendarBlockContinuationEdges } from "@dayframe/shared";
-import { CurrentTimerPanel } from "@/components/DashboardRealtime";
+import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import { TagMetadata } from "@/components/TagMetadata";
 import { EntriesTable } from "@/components/EntriesTable";
-import { IconButton, SegmentedControl } from "@/components/ui/Primitives";
+import { Disclosure, IconButton, SegmentedControl } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import {
   timeEntryAccentColor,
@@ -31,12 +31,12 @@ import {
   resizeDragThresholdPx,
   timeBlockDensityClassNames
 } from "@/lib/time-block-display";
+import { timelineSearchWithView, timelineViewFromSearchParams, type TimelineView } from "@/lib/timeline-view";
 
-type TimeView = "calendar" | "list" | "timesheet";
 type CalendarMode = "week" | "day";
 type CalendarHoursMode = "fullDay";
 
-const viewItems: Array<{ id: TimeView; label: string; icon: ReactNode }> = [
+const viewItems: Array<{ id: TimelineView; label: string; icon: ReactNode }> = [
   { id: "calendar", label: "Calendar", icon: <CalendarDays size={16} /> },
   { id: "list", label: "List", icon: <List size={16} /> },
   { id: "timesheet", label: "Timesheet", icon: <Table2 size={16} /> }
@@ -63,10 +63,6 @@ type CalendarResizeDraft = {
 };
 
 const timelinePreferenceEvent = "dayframe:timeline-preference";
-
-function isTimeView(value: string | null): value is TimeView {
-  return value === "calendar" || value === "list" || value === "timesheet";
-}
 
 function isCalendarMode(value: string | null): value is CalendarMode {
   return value === "week" || value === "day";
@@ -112,41 +108,25 @@ export function TimeReviewViews({
 }: {
   initialData: BootstrapData;
 }) {
-  const [data, setData] = useState(initialData);
-  const [activeViewOverride, setActiveViewOverride] = useState<TimeView | null>(null);
+  const data = useRuntimePageData(initialData);
+  const { refresh } = useAppShellRuntime();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [calendarModeOverride, setCalendarModeOverride] = useState<CalendarMode | null>(null);
   const [weekAnchor, setWeekAnchor] = useState(() => startOfWeek(new Date(initialData.dateRange.selectedDate)));
-  const timelineViewStorageKey = `dayframe.timeline.${data.workspace.id}.view`;
   const calendarModeStorageKey = `dayframe.timeline.${data.workspace.id}.calendarMode`;
-  const storedView = useTimelinePreference(timelineViewStorageKey);
   const storedCalendarMode = useTimelinePreference(calendarModeStorageKey);
-  const activeView = activeViewOverride ?? (isTimeView(storedView) ? storedView : "calendar");
+  const activeView = timelineViewFromSearchParams(searchParams);
   const calendarMode =
     calendarModeOverride ?? (isCalendarMode(storedCalendarMode) ? storedCalendarMode : "week");
   const calendarHoursMode: CalendarHoursMode = "fullDay";
 
   const refreshData = useCallback(async () => {
-    try {
-      const response = await clientFetch(`/api/bootstrap?date=${data.dateRange.selectedDate}`, {
-        cache: "no-store"
-      });
-      if (response.ok) setData((await response.json()) as BootstrapData);
-    } catch {
-      // Navigation can interrupt polling; the next visible tick will retry.
-    }
-  }, [data.dateRange.selectedDate]);
+    await refresh();
+  }, [refresh]);
 
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return;
-      void refreshData();
-    }, 1000);
-    return () => window.clearInterval(interval);
-  }, [refreshData]);
-
-  function updateView(view: TimeView) {
-    setActiveViewOverride(view);
-    writeTimelinePreference(timelineViewStorageKey, view);
+  function updateView(view: TimelineView) {
+    router.replace(timelineSearchWithView(searchParams.toString(), view), { scroll: false });
   }
 
   function updateCalendarMode(mode: CalendarMode) {
@@ -163,8 +143,6 @@ export function TimeReviewViews({
 
   return (
     <section className="space-y-5">
-      <CurrentTimerPanel data={data} onSynced={setData} />
-
       <div className="industrial-panel fill-review-toolbar p-4">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex flex-wrap items-center gap-3">
@@ -174,7 +152,7 @@ export function TimeReviewViews({
             >
               <ChevronLeft size={16} />
             </IconButton>
-            <div className="fill-date-pill min-w-[220px] px-3 py-2">
+            <div className="fill-date-pill min-w-[220px] px-3 py-2.5">
               <div className="text-sm font-semibold">This week</div>
               <div className="tabular mt-1 text-xs text-[var(--muted)]">
                 {formatDate(weekDays[0])} - {formatDate(weekDays[6])}
@@ -186,7 +164,7 @@ export function TimeReviewViews({
             >
               <ChevronRight size={16} />
             </IconButton>
-            <div className="fill-metric-pill px-3 py-2 text-sm">
+            <div className="fill-metric-pill min-h-[59px] px-3 py-2.5 text-sm">
               <span className="text-[var(--muted)]">Week total </span>
               <span className="tabular font-semibold">{formatDuration(weekTotal)}</span>
             </div>
@@ -413,40 +391,42 @@ function CalendarReview({
           <h2 className="text-lg font-semibold">Calendar</h2>
           <p className="mt-1 text-sm text-[var(--muted)]">Double click a block to edit it. Drag the top or bottom edge to resize.</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="swiss-view-switch" role="group" aria-label="Calendar view">
-            {(["week", "day"] as CalendarMode[]).map((mode) => (
+        <Disclosure className="swiss-view-options" summary="View options">
+          <div className="swiss-view-options-controls">
+            <span className="swiss-view-switch" role="group" aria-label="Calendar view">
+              {(["week", "day"] as CalendarMode[]).map((mode) => (
+                <button
+                  key={mode}
+                  className={calendarMode === mode ? "is-selected" : ""}
+                  type="button"
+                  aria-pressed={calendarMode === mode}
+                  onClick={() => setCalendarMode(mode)}
+                >
+                  {mode === "week" ? "Week" : "Day"}
+                </button>
+              ))}
+            </span>
+            <span className="swiss-zoom-control" role="group" aria-label="Calendar zoom">
               <button
-                key={mode}
-                className={calendarMode === mode ? "is-selected" : ""}
                 type="button"
-                aria-pressed={calendarMode === mode}
-                onClick={() => setCalendarMode(mode)}
+                disabled={zoomIndex === 0}
+                aria-label="Zoom calendar out"
+                onClick={() => setZoomLevel(zoomKeys[Math.max(0, zoomIndex - 1)])}
               >
-                {mode === "week" ? "Week" : "Day"}
+                -
               </button>
-            ))}
-          </span>
-          <span className="swiss-zoom-control" role="group" aria-label="Calendar zoom">
-            <button
-              type="button"
-              disabled={zoomIndex === 0}
-              aria-label="Zoom calendar out"
-              onClick={() => setZoomLevel(zoomKeys[Math.max(0, zoomIndex - 1)])}
-            >
-              -
-            </button>
-            <b>{zoom.label}</b>
-            <button
-              type="button"
-              disabled={zoomIndex === zoomKeys.length - 1}
-              aria-label="Zoom calendar in"
-              onClick={() => setZoomLevel(zoomKeys[Math.min(zoomKeys.length - 1, zoomIndex + 1)])}
-            >
-              +
-            </button>
-          </span>
-        </div>
+              <b>{zoom.label}</b>
+              <button
+                type="button"
+                disabled={zoomIndex === zoomKeys.length - 1}
+                aria-label="Zoom calendar in"
+                onClick={() => setZoomLevel(zoomKeys[Math.min(zoomKeys.length - 1, zoomIndex + 1)])}
+              >
+                +
+              </button>
+            </span>
+          </div>
+        </Disclosure>
       </div>
       <div className="overflow-x-auto">
         <div

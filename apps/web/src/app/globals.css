@@ -841,6 +841,15 @@ dialog.ui-popover-panel.bottom-left {
   background: var(--background);
 }
 
+.swiss-app-loading {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  background: var(--background);
+  color: var(--muted);
+  font-size: 14px;
+}
+
 .swiss-sidebar {
   position: sticky;
   top: 0;
@@ -981,83 +990,11 @@ dialog.ui-popover-panel.bottom-left {
   min-width: 0;
 }
 
-.swiss-topbar {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  display: grid;
-  min-height: 70px;
-  grid-template-columns: 260px minmax(280px, 1fr) 230px;
-  align-items: center;
-  gap: 20px;
-  border-bottom: 1px solid var(--line);
-  background: var(--topbar-surface);
-  padding: 0 24px;
-  backdrop-filter: blur(12px);
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--border) 72%, transparent);
-}
-
-.swiss-workspace-button {
-  display: inline-flex;
-  width: max-content;
-  max-width: 230px;
-  align-items: center;
-  gap: 11px;
-  min-height: 44px;
-  border: 1px solid var(--control-border);
-  border-radius: 14px;
-  background: var(--surface-raised);
-  padding: 10px 13px;
-  color: var(--foreground);
-  font-weight: 500;
-}
-
-.swiss-workspace-button span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.swiss-date-switcher,
-.swiss-top-actions {
-  display: flex;
-  align-items: center;
-}
-
-.swiss-date-switcher {
-  justify-content: center;
-  gap: 24px;
-  font-size: 15px;
-  font-weight: 500;
-}
-
-.swiss-date-switcher button,
-.swiss-top-actions button,
-.swiss-top-actions a {
-  display: grid;
-  width: 44px;
-  height: 44px;
-  place-items: center;
-  border: 0;
-  background: transparent;
-  color: var(--foreground);
-  border-radius: 12px;
-}
-
-.swiss-date-switcher button:hover,
-.swiss-top-actions button:hover,
-.swiss-top-actions a:hover {
-  background: var(--surface-muted);
-}
-
-.swiss-top-actions {
-  justify-content: flex-end;
-  gap: 9px;
-}
-
-.swiss-mobile-help-button,
 .swiss-mobile-account-button {
   display: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
 }
 
 .swiss-mobile-account-button span {
@@ -1070,57 +1007,6 @@ dialog.ui-popover-panel.bottom-left {
   color: var(--accent-text);
   font-size: 11px;
   font-weight: 800;
-}
-
-.swiss-theme-toggle {
-  border-radius: 999px;
-  color: var(--accent-text);
-}
-
-.swiss-theme-icon {
-  grid-area: 1 / 1;
-  place-items: center;
-}
-
-.swiss-theme-icon-on-light {
-  display: grid;
-}
-
-.swiss-theme-icon-on-dark {
-  display: none;
-}
-
-html[data-theme="dark"] .swiss-theme-icon-on-light {
-  display: none;
-}
-
-html[data-theme="dark"] .swiss-theme-icon-on-dark {
-  display: grid;
-}
-
-@media (prefers-color-scheme: dark) {
-  html:not([data-theme]) .swiss-theme-icon-on-light {
-    display: none;
-  }
-
-  html:not([data-theme]) .swiss-theme-icon-on-dark {
-    display: grid;
-  }
-}
-
-.swiss-top-actions .has-unread {
-  position: relative;
-}
-
-.swiss-top-actions .has-unread::after {
-  position: absolute;
-  right: 7px;
-  top: 8px;
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--accent);
-  content: "";
 }
 
 .swiss-dashboard {
@@ -3772,10 +3658,16 @@ kbd {
   }
 
   .swiss-nav a,
+  .swiss-nav-search,
   .swiss-help-link {
     justify-content: center;
     padding: 0;
     font-size: 0;
+  }
+
+  .swiss-nav-search span,
+  .swiss-nav-search kbd {
+    display: none;
   }
 
   .swiss-nav a.is-active::before {
@@ -3983,33 +3875,7 @@ kbd {
     display: none;
   }
 
-  .swiss-topbar {
-    position: relative;
-    grid-template-columns: 1fr;
-    gap: 10px;
-    padding: 12px;
-  }
-
-  .swiss-date-switcher {
-    order: -1;
-  }
-
-  .swiss-top-actions {
-    justify-content: flex-start;
-    gap: 6px;
-  }
-
-  .swiss-top-actions button,
-  .swiss-top-actions a {
-    width: 44px;
-    height: 44px;
-  }
-
   .swiss-mobile-account-button {
-    display: grid;
-  }
-
-  .swiss-mobile-help-button {
     display: grid;
   }
 
@@ -4273,6 +4139,7 @@ kbd {
 .fill-metric-pill {
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   border-radius: 999px;
 }
 
@@ -4307,6 +4174,17 @@ kbd {
   border-bottom: 1px solid var(--line);
 }
 
+.swiss-view-options {
+  min-width: min(100%, 250px);
+}
+
+.swiss-view-options-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 .swiss-app-shell {
   grid-template-columns: 232px minmax(0, 1fr);
 }
@@ -4314,6 +4192,19 @@ kbd {
 .swiss-sidebar {
   border-right: 0;
   background: var(--surface);
+}
+
+.swiss-sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.swiss-mobile-shell-actions {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding-right: 12px;
 }
 
 .swiss-brand {
@@ -4328,7 +4219,8 @@ kbd {
   padding: 4px 16px 20px;
 }
 
-.swiss-nav a {
+.swiss-nav a,
+.swiss-nav-search {
   gap: 12px;
   min-height: var(--web-touch-size);
   border-radius: var(--web-radius-control);
@@ -4338,7 +4230,23 @@ kbd {
   font-weight: 500;
 }
 
-.swiss-nav a:hover {
+.swiss-nav-search {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.swiss-nav-search kbd {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.swiss-nav a:hover,
+.swiss-nav-search:hover {
   background: var(--surface-muted);
   color: var(--foreground);
 }
@@ -4382,61 +4290,34 @@ kbd {
   border-radius: 999px;
 }
 
-.swiss-topbar {
-  min-height: 86px;
-  grid-template-columns: minmax(180px, 240px) minmax(300px, 1fr) minmax(260px, 320px);
-  border: 0;
-  background: color-mix(in srgb, var(--background) 92%, transparent);
-  padding: 0 32px;
-  box-shadow: none;
-}
-
-.swiss-workspace-button {
-  min-height: var(--web-text-action-height);
-  border: 0;
-  border-radius: 999px;
-  background: var(--surface-inset);
-  padding: 0 16px;
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.swiss-workspace-button:hover {
-  background: var(--surface-muted);
-}
-
-.swiss-date-switcher {
-  width: max-content;
-  justify-self: center;
-  gap: 4px;
-  min-height: var(--web-text-action-height);
-  border-radius: 999px;
-  background: var(--surface-inset);
-  padding: 4px;
-  font-size: 13px;
-}
-
-.swiss-date-switcher button,
-.swiss-top-actions button,
-.swiss-top-actions a {
-  width: var(--web-touch-size);
-  height: var(--web-touch-size);
-  border-radius: 999px;
-}
-
-.swiss-date-switcher button:hover,
-.swiss-top-actions button:hover,
-.swiss-top-actions a:hover {
-  background: var(--surface-muted);
-}
-
-.swiss-top-actions {
+.swiss-persistent-timer-shell {
+  position: sticky;
+  top: 0;
+  z-index: 25;
+  display: grid;
   gap: 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--background);
+  padding: 16px 32px 0;
 }
 
-.swiss-top-actions button,
-.swiss-top-actions a {
-  background: var(--surface-inset);
+.swiss-date-context-row {
+  display: flex;
+  min-width: 0;
+  min-height: 52px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.swiss-date-context-row strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .swiss-dashboard {
@@ -4460,6 +4341,102 @@ kbd {
   background: var(--surface);
   padding: 24px;
   box-shadow: none;
+}
+
+.swiss-persistent-timer {
+  gap: 12px;
+  margin: 0;
+  padding: 16px 20px;
+}
+
+.swiss-persistent-timer-form {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(170px, 230px) 44px minmax(128px, 160px) 56px;
+  align-items: end;
+  gap: 12px;
+}
+
+.swiss-persistent-timer .swiss-work-input,
+.swiss-persistent-timer .swiss-category-field {
+  min-width: 0;
+}
+
+.swiss-persistent-timer .swiss-command-play {
+  width: 56px;
+  min-width: 56px;
+  height: 56px;
+  margin: 0;
+  border-radius: 999px;
+  padding: 0;
+}
+
+.swiss-persistent-time-button,
+.swiss-persistent-time-placeholder {
+  display: flex;
+  min-width: 0;
+  min-height: 56px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--web-radius-control);
+  background: var(--surface-inset);
+  padding: 0 14px;
+  color: var(--foreground);
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+.swiss-persistent-time-button:hover {
+  background: var(--surface-muted);
+}
+
+.swiss-persistent-time-button small {
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.swiss-compact-time-editor,
+.swiss-profile-section {
+  display: grid;
+  gap: 12px;
+}
+
+.swiss-compact-time-editor {
+  min-width: min(300px, calc(100vw - 56px));
+}
+
+.swiss-profile-section {
+  border-top: 1px solid var(--line);
+  padding: 16px;
+}
+
+.swiss-profile-section h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.swiss-profile-section .swiss-popover-form {
+  border: 0;
+  padding: 0;
+}
+
+.swiss-profile-links {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding: 16px;
+}
+
+.swiss-profile-links .swiss-menu-action {
+  width: 100%;
+  margin: 0;
 }
 
 .swiss-timer-entrybar,
@@ -4545,10 +4522,12 @@ kbd {
 }
 
 .swiss-command-play.is-active {
-  min-width: 92px;
-  height: var(--web-text-action-height);
+  display: grid;
+  min-width: 56px;
+  height: 56px;
   border: 0;
-  padding: 0 18px;
+  border-radius: 999px;
+  padding: 0;
   box-shadow: none;
   font-weight: 600;
 }
@@ -4912,6 +4891,14 @@ kbd {
     background: var(--surface);
   }
 
+  .swiss-sidebar-head {
+    min-height: 64px;
+  }
+
+  .swiss-mobile-shell-actions {
+    display: flex;
+  }
+
   .swiss-brand {
     min-height: 64px;
     padding: 0 16px;
@@ -4930,26 +4917,8 @@ kbd {
     font-size: 0;
   }
 
-  .swiss-topbar {
-    min-height: auto;
-    grid-template-columns: 1fr;
-    gap: 10px;
-    background: var(--background);
-    padding: 12px;
-  }
-
-  .swiss-date-switcher {
-    order: -1;
-    width: min(100%, 330px);
-    justify-self: center;
-  }
-
-  .swiss-workspace-button {
-    max-width: min(100%, 280px);
-  }
-
-  .swiss-top-actions {
-    justify-content: flex-start;
+  .swiss-nav-search {
+    display: none;
   }
 
   .swiss-dashboard {
@@ -4963,9 +4932,66 @@ kbd {
     border-radius: 20px;
   }
 
-  .swiss-current-timer {
-    margin-bottom: 16px;
-    padding: 16px;
+  .swiss-persistent-timer-shell {
+    gap: 6px;
+    padding: 10px 12px 0;
+  }
+
+  .swiss-persistent-timer {
+    margin: 0;
+    padding: 14px;
+  }
+
+  .swiss-persistent-timer-form {
+    grid-template-columns: minmax(0, 1fr) 44px 56px;
+    gap: 10px;
+  }
+
+  .swiss-persistent-timer-form .swiss-work-input {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .swiss-persistent-timer-form .swiss-category-field {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .swiss-persistent-timer-form .swiss-manual-entry-action {
+    grid-column: 2;
+    grid-row: 2;
+    align-self: end;
+  }
+
+  .swiss-persistent-time-button,
+  .swiss-persistent-time-placeholder {
+    grid-column: 1 / 3;
+    grid-row: 3;
+  }
+
+  .swiss-persistent-timer-form .swiss-command-play {
+    grid-column: 3;
+    grid-row: 3;
+  }
+
+  .swiss-date-context-row {
+    min-height: 50px;
+    padding: 0;
+  }
+
+  .swiss-date-context-row strong {
+    flex: 1 1 auto;
+    text-align: center;
+  }
+
+  .swiss-persistent-timer .swiss-quick-actions-strip > div {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+  }
+
+  .swiss-persistent-timer .swiss-quick-actions-strip button {
+    flex: 0 0 auto;
   }
 
   .swiss-top-grid {
@@ -5011,6 +5037,10 @@ kbd {
 
   .fill-metric-pill {
     flex: 1 1 100%;
+  }
+
+  .swiss-view-options {
+    width: 100%;
   }
 
   .reports-overview-grid {
