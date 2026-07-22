@@ -5,10 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Activity,
   BarChart3,
-  Bell,
-  Building2,
   CalendarRange,
   CheckCircle2,
   ChevronDown,
@@ -20,48 +17,33 @@ import {
   HelpCircle,
   Inbox,
   LayoutDashboard,
-  ListFilter,
   LogOut,
   MapPin,
-  Moon,
   Plus,
   Search,
   Settings,
-  Sun,
   Tags,
-  Workflow,
   X
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { AppShellRuntimeProvider, useAppShellRuntime } from "@/components/AppShellRuntime";
 import { DayframeBrand } from "@/components/brand/DayframeBrand";
-import {
-  Button,
-  IconButton,
-  ModalDialog,
-  PopoverPanel,
-  TextField
-} from "@/components/ui/Primitives";
+import { PersistentTimerBar } from "@/components/PersistentTimerBar";
+import { Button, IconButton, ModalDialog, PopoverPanel, TextField } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { timeEntryTitle } from "@/lib/display";
+import { formatDuration, formatTime } from "@/lib/format";
 import type { BootstrapData } from "@/lib/queries";
-import { formatDuration, formatEventLabel, formatSourceLabel, formatTime } from "@/lib/format";
-import {
-  TIMER_SHORTCUT_EVENT,
-  toggleTimerFromFreshBootstrap,
-  type TimerShortcutEventDetail
-} from "@/lib/timer-shortcut";
 
-type Overlay = "search" | "notifications" | "profile" | "help" | "workspace" | null;
+type Overlay = "search" | "profile" | "help" | null;
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/timeline", label: "Timeline", icon: CalendarRange },
-  { href: "/entries", label: "Entries", icon: ListFilter },
   { href: "/categories", label: "Categories", icon: FileText },
   { href: "/tags", label: "Tags", icon: Tags },
   { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/places", label: "Places", icon: MapPin },
-  { href: "/automation", label: "Automation", icon: Workflow },
   { href: "/review", label: "Review", icon: Inbox },
   { href: "/settings", label: "Settings", icon: Settings }
 ];
@@ -78,50 +60,33 @@ const shortcuts = [
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
+  if (pathname === "/login" || pathname === "/signup") return <>{children}</>;
+
+  return (
+    <AppShellRuntimeProvider>
+      <AppShellContent>{children}</AppShellContent>
+    </AppShellRuntimeProvider>
+  );
+}
+
+function AppShellContent({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
   const router = useRouter();
-  const [data, setData] = useState<BootstrapData | null>(null);
+  const searchParams = useSearchParams();
+  const {
+    data,
+    openManualEntry,
+    refresh,
+    selectedDate,
+    toggleTimer
+  } = useAppShellRuntime();
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [query, setQuery] = useState("");
-  const [readNotifications, setReadNotifications] = useState<string[]>([]);
-  const authScreen = pathname === "/login" || pathname === "/signup";
-  const selectedDate = searchParams.get("date") ?? dateKey(new Date());
-
-  const refreshShellData = useCallback(async () => {
-    if (authScreen) return;
-    const response = await clientFetch(`/api/bootstrap?date=${selectedDate}`, { cache: "no-store" });
-    if (response.ok) setData((await response.json()) as BootstrapData);
-  }, [authScreen, selectedDate]);
-
-  useEffect(() => {
-    if (authScreen) return undefined;
-    let cancelled = false;
-
-    clientFetch(`/api/bootstrap?date=${selectedDate}`, { cache: "no-store" })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((payload: BootstrapData | null) => {
-        if (!cancelled && payload) setData(payload);
-      })
-      .catch(() => undefined);
-
-    return () => {
-      cancelled = true;
-    };
-  }, [authScreen, selectedDate]);
-
-  useEffect(() => {
-    const handle = window.setTimeout(() => {
-      const stored = window.localStorage.getItem("dayframe.readNotifications");
-      setReadNotifications(stored ? JSON.parse(stored) : []);
-    }, 0);
-
-    return () => window.clearTimeout(handle);
-  }, []);
+  const showTimerShell = pathname === "/" || pathname === "/timeline";
+  const searchResults = useMemo(() => buildSearchResults(data, query), [data, query]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
-    applyTheme();
-
     function applyTheme() {
       const storedTheme = window.localStorage.getItem("dayframe.theme");
       if (storedTheme === "light" || storedTheme === "dark") {
@@ -130,11 +95,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         document.documentElement.removeAttribute("data-theme");
       }
     }
-
+    applyTheme();
     window.addEventListener("storage", applyTheme);
     window.addEventListener("dayframe-theme-change", applyTheme);
     media.addEventListener("change", applyTheme);
-
     return () => {
       window.removeEventListener("storage", applyTheme);
       window.removeEventListener("dayframe-theme-change", applyTheme);
@@ -142,18 +106,12 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const notifications = useMemo(() => buildNotifications(data), [data]);
-  const unreadCount = notifications.filter((item) => !readNotifications.includes(item.id)).length;
-  const searchResults = useMemo(() => buildSearchResults(data, query), [data, query]);
-
-  const navigateDate = useCallback(
-    (date: string) => {
-      const params = new URLSearchParams(searchParams.toString());
-      params.set("date", date);
-      router.push(`${pathname}?${params.toString()}`);
-    },
-    [pathname, router, searchParams]
-  );
+  const navigateDate = useCallback((date: string) => {
+    if (!showTimerShell) return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("date", date);
+    router.push(`${pathname}?${params.toString()}`);
+  }, [pathname, router, searchParams, showTimerShell]);
 
   const previousDate = addDaysKey(selectedDate, -1);
   const nextDate = addDaysKey(selectedDate, 1);
@@ -177,68 +135,50 @@ export function AppShell({ children }: { children: ReactNode }) {
       }
       if (event.shiftKey && event.code === "Space") {
         event.preventDefault();
-        const detail: TimerShortcutEventDetail = { handled: false };
-        window.dispatchEvent(new CustomEvent<TimerShortcutEventDetail>(TIMER_SHORTCUT_EVENT, { detail }));
-        if (detail.handled) {
-          void detail.action?.then(refreshShellData).catch(() => refreshShellData());
-        } else {
-          void toggleTimerFromFreshBootstrap({
-            fallbackData: data,
-            refresh: refreshShellData,
-            selectedDate,
-            setData
-          }).catch(() => refreshShellData());
-        }
+        void toggleTimer();
         return;
       }
       if (event.key.toLowerCase() === "n") {
         event.preventDefault();
-        window.dispatchEvent(new Event("dayframe-add-time-block"));
-        if (pathname !== "/") router.push(`/?date=${selectedDate}`);
+        openManualEntry();
+        if (!showTimerShell) router.push(`/?date=${selectedDate}`);
         return;
       }
-      if (event.altKey && event.key === "ArrowLeft") {
+      if (showTimerShell && event.altKey && event.key === "ArrowLeft") {
         event.preventDefault();
         navigateDate(previousDate);
         return;
       }
-      if (event.altKey && event.key === "ArrowRight") {
+      if (showTimerShell && event.altKey && event.key === "ArrowRight") {
         event.preventDefault();
         navigateDate(nextDate);
-        return;
       }
     }
-
     window.addEventListener("keydown", handleKeydown);
     return () => window.removeEventListener("keydown", handleKeydown);
-  }, [data, navigateDate, nextDate, pathname, previousDate, refreshShellData, router, selectedDate]);
-
-  function toggleTheme() {
-    const appliedTheme = document.documentElement.getAttribute("data-theme");
-    const currentTheme = appliedTheme === "light" || appliedTheme === "dark"
-      ? appliedTheme
-      : window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-    const nextTheme = currentTheme === "dark" ? "light" : "dark";
-    window.localStorage.setItem("dayframe.theme", nextTheme);
-    document.documentElement.setAttribute("data-theme", nextTheme);
-    window.dispatchEvent(new Event("dayframe-theme-change"));
-  }
-
-  function markNotificationsRead() {
-    const ids = notifications.map((item) => item.id);
-    window.localStorage.setItem("dayframe.readNotifications", JSON.stringify(ids));
-    setReadNotifications(ids);
-  }
-
-  if (authScreen) return <>{children}</>;
+  }, [navigateDate, nextDate, openManualEntry, previousDate, router, selectedDate, showTimerShell, toggleTimer]);
 
   return (
     <div className="swiss-app-shell">
       <aside className="swiss-sidebar">
-        <Link href="/" className="swiss-brand" aria-label="Dayframe dashboard">
-          <DayframeBrand decorative size="md" />
-        </Link>
+        <div className="swiss-sidebar-head">
+          <Link href="/" className="swiss-brand" aria-label="Dayframe dashboard">
+            <DayframeBrand decorative size="md" />
+          </Link>
+          <div className="swiss-mobile-shell-actions">
+            <IconButton label="Search" onClick={() => setOverlay("search")}><Search size={19} /></IconButton>
+            <IconButton label="Help and shortcuts" onClick={() => setOverlay("help")}><HelpCircle size={19} /></IconButton>
+            <button type="button" aria-label="Profile and workspace" className="swiss-mobile-account-button" onClick={() => setOverlay("profile")}>
+              <span>{initials(data?.user.name ?? "Dayframe User")}</span>
+            </button>
+          </div>
+        </div>
         <nav className="swiss-nav" aria-label="Main navigation">
+          <button type="button" className="swiss-nav-search" onClick={() => setOverlay("search")}>
+            <Search size={19} />
+            <span>Search</span>
+            <kbd>⌘K</kbd>
+          </button>
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
@@ -259,7 +199,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <span>{initials(data?.user.name ?? "Dayframe User")}</span>
             <span>
               <strong>{data?.user.name ?? "Local User"}</strong>
-              <small>{data?.user.email ?? "Workspace account"}</small>
+              <small>{data?.workspace.name ?? "Workspace"}</small>
             </span>
             <ChevronDown size={15} />
           </button>
@@ -267,202 +207,197 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
 
       <div className="swiss-main-frame">
-        <header className="swiss-topbar">
-          <button type="button" className="swiss-workspace-button" onClick={() => setOverlay("workspace")}>
-            <Building2 size={18} />
-            <span>{data?.workspace.name ?? "Workspace"}</span>
-            <ChevronDown size={15} />
-          </button>
-          <div className="swiss-date-switcher">
-            <button type="button" aria-label="Previous day" onClick={() => navigateDate(previousDate)}>
-              <ChevronLeft size={20} />
-            </button>
-            <span>{formatLongDate(selectedDate)}</span>
-            <button type="button" aria-label="Next day" onClick={() => navigateDate(nextDate)}>
-              <ChevronRight size={20} />
-            </button>
+        {showTimerShell ? (
+          <div className="swiss-persistent-timer-shell">
+            <PersistentTimerBar />
+            <DateContextRow
+              selectedDate={selectedDate}
+              onPrevious={() => navigateDate(previousDate)}
+              onNext={() => navigateDate(nextDate)}
+              onToday={() => navigateDate(dateKey(new Date()))}
+            />
           </div>
-          <div className="swiss-top-actions">
-            <button type="button" aria-label="Search" onClick={() => setOverlay("search")}>
-              <Search size={22} />
-            </button>
-            <button
-              type="button"
-              aria-label="Toggle colour theme"
-              className="swiss-theme-toggle"
-              onClick={toggleTheme}
-            >
-              <span className="swiss-theme-icon swiss-theme-icon-on-light"><Moon size={21} /></span>
-              <span className="swiss-theme-icon swiss-theme-icon-on-dark"><Sun size={21} /></span>
-            </button>
-            <button
-              type="button"
-              aria-label="Notifications"
-              className={unreadCount > 0 ? "has-unread" : ""}
-              onClick={() => {
-                setOverlay("notifications");
-                markNotificationsRead();
-              }}
-            >
-              <Bell size={22} />
-            </button>
-            <Link href="/reports" aria-label="Reports">
-              <BarChart3 size={22} />
-            </Link>
-            <button
-              type="button"
-              aria-label="Help and shortcuts"
-              className="swiss-mobile-help-button"
-              onClick={() => setOverlay("help")}
-            >
-              <HelpCircle size={21} />
-            </button>
-            <button
-              type="button"
-              aria-label="Profile and account"
-              className="swiss-mobile-account-button"
-              onClick={() => setOverlay("profile")}
-            >
-              <span>{initials(data?.user.name ?? "Dayframe User")}</span>
-            </button>
-          </div>
-        </header>
+        ) : null}
         <main>{children}</main>
       </div>
 
-      {overlay === "workspace" && data ? (
-        <WorkspacePopover
-          data={data}
-          onClose={() => setOverlay(null)}
-          onSwitched={async () => {
-            setOverlay(null);
-            await refreshShellData();
-            router.refresh();
-          }}
-        />
-      ) : null}
       {overlay === "profile" && data ? (
-        <ProfilePopover
+        <ProfileWorkspacePopover
           data={data}
           onClose={() => setOverlay(null)}
-          onThemeToggle={toggleTheme}
-          onUpdated={async () => {
-            await refreshShellData();
+          onUpdated={async (close = false) => {
+            if (close) setOverlay(null);
+            await refresh({ force: true });
             router.refresh();
           }}
         />
       ) : null}
       {overlay === "search" ? (
-        <SearchPalette
-          query={query}
-          setQuery={setQuery}
-          results={searchResults}
-          onClose={() => setOverlay(null)}
-        />
-      ) : null}
-      {overlay === "notifications" ? (
-        <NotificationsPopover notifications={notifications} onClose={() => setOverlay(null)} />
+        <SearchPalette query={query} setQuery={setQuery} results={searchResults} onClose={() => setOverlay(null)} />
       ) : null}
       {overlay === "help" ? <HelpDialog onClose={() => setOverlay(null)} /> : null}
     </div>
   );
 }
 
-function WorkspacePopover({
+function DateContextRow({
+  onNext,
+  onPrevious,
+  onToday,
+  selectedDate
+}: {
+  onNext: () => void;
+  onPrevious: () => void;
+  onToday: () => void;
+  selectedDate: string;
+}) {
+  const today = dateKey(new Date());
+  return (
+    <div className="swiss-date-context-row" aria-label="Date navigation">
+      <IconButton label="Previous day" onClick={onPrevious}><ChevronLeft size={19} /></IconButton>
+      <strong>{formatLongDate(selectedDate)}</strong>
+      <IconButton label="Next day" onClick={onNext}><ChevronRight size={19} /></IconButton>
+      {selectedDate !== today ? <Button onClick={onToday}>Today</Button> : null}
+    </div>
+  );
+}
+
+function ProfileWorkspacePopover({
   data,
   onClose,
-  onSwitched
+  onUpdated
 }: {
   data: BootstrapData;
   onClose: () => void;
-  onSwitched: () => Promise<void>;
+  onUpdated: (close?: boolean) => Promise<void>;
 }) {
-  const [isBusy, setIsBusy] = useState(false);
-  const [name, setName] = useState("");
+  const [name, setName] = useState(data.user.name);
+  const [workspaceName, setWorkspaceName] = useState(data.workspace.name);
+  const [newWorkspaceName, setNewWorkspaceName] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isBusy, setIsBusy] = useState(false);
 
   async function switchWorkspace(workspaceId: string) {
-    if (workspaceId === data.workspace.id) {
-      onClose();
-      return;
-    }
-
-    setIsBusy(true);
-    setError(null);
-    try {
+    if (workspaceId === data.workspace.id) return;
+    await run(async () => {
       const response = await clientFetch("/api/workspace/switch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ workspaceId })
       });
-      if (!response.ok) {
-        throw new Error(await responseError(response, `Unable to switch workspace: ${response.status}`));
-      }
-      await onSwitched();
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "Unable to switch workspace.");
-    } finally {
-      setIsBusy(false);
-    }
+      if (!response.ok) throw new Error(await responseError(response, `Unable to switch workspace: ${response.status}`));
+      await onUpdated(true);
+    });
   }
 
   async function createWorkspace(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!name.trim()) return;
-    setIsBusy(true);
-    setError(null);
-    try {
+    if (!newWorkspaceName.trim()) return;
+    await run(async () => {
       const response = await clientFetch("/api/workspaces", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name })
+        body: JSON.stringify({ name: newWorkspaceName })
       });
-      if (!response.ok) {
-        throw new Error(await responseError(response, `Unable to create workspace: ${response.status}`));
-      }
-      await onSwitched();
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "Unable to create workspace.");
+      if (!response.ok) throw new Error(await responseError(response, `Unable to create workspace: ${response.status}`));
+      await onUpdated(true);
+    });
+  }
+
+  async function saveProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (newPassword && newPassword !== confirmPassword) {
+      setError("The new passwords do not match.");
+      return;
+    }
+    await run(async () => {
+      const response = await clientFetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          workspaceName,
+          currentPassword: currentPassword || undefined,
+          newPassword: newPassword || undefined
+        })
+      });
+      if (!response.ok) throw new Error(await responseError(response, "Unable to update profile."));
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setMessage(newPassword ? "Profile and password updated." : "Profile updated.");
+      await onUpdated();
+    });
+  }
+
+  async function run(action: () => Promise<void>) {
+    setIsBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      await action();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to update your account.");
     } finally {
       setIsBusy(false);
     }
   }
 
   return (
-    <PopoverPanel title="Workspace" onClose={onClose} align="top-left" busy={isBusy}>
-      <div className="swiss-menu-list">
-        {data.workspaces.map((workspace) => (
-          <button
-            key={workspace.id}
-            type="button"
-            disabled={isBusy}
-            className={workspace.id === data.workspace.id ? "is-selected" : ""}
-            onClick={() => switchWorkspace(workspace.id)}
-          >
-            <Folder size={18} />
-            <span>{workspace.name}</span>
-            {workspace.id === data.workspace.id ? <CheckCircle2 size={16} /> : null}
-          </button>
-        ))}
+    <PopoverPanel title="Profile & workspace" onClose={onClose} align="bottom-left" busy={isBusy}>
+      <div className="swiss-profile-summary">
+        <span>{initials(data.user.name)}</span>
+        <div><strong>{data.user.name}</strong><small>{data.user.email}</small></div>
       </div>
-      {error ? (
-        <p className="swiss-inline-error" role="alert">
-          {error}
-        </p>
-      ) : null}
-      <form className="swiss-popover-form" onSubmit={createWorkspace}>
-        <TextField
-          id="new-workspace-name"
-          label="New workspace"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder="Workspace name"
-        />
-        <Button variant="primary" type="submit" disabled={isBusy || !name.trim()}>
-          <Plus size={15} />
-          Create workspace
-        </Button>
-      </form>
+
+      <section className="swiss-profile-section" aria-labelledby="workspace-switcher-heading">
+        <h3 id="workspace-switcher-heading">Workspaces</h3>
+        <div className="swiss-menu-list">
+          {data.workspaces.map((workspace) => (
+            <button
+              key={workspace.id}
+              type="button"
+              disabled={isBusy}
+              className={workspace.id === data.workspace.id ? "is-selected" : ""}
+              onClick={() => void switchWorkspace(workspace.id)}
+            >
+              <Folder size={18} />
+              <span>{workspace.name}</span>
+              {workspace.id === data.workspace.id ? <CheckCircle2 size={16} /> : null}
+            </button>
+          ))}
+        </div>
+        <form className="swiss-popover-form swiss-create-workspace-form" onSubmit={createWorkspace}>
+          <TextField id="new-workspace-name" label="New workspace" value={newWorkspaceName} onChange={(event) => setNewWorkspaceName(event.target.value)} placeholder="Workspace name" />
+          <Button variant="primary" type="submit" disabled={isBusy || !newWorkspaceName.trim()}><Plus size={15} />Create workspace</Button>
+        </form>
+      </section>
+
+      <section className="swiss-profile-section" aria-labelledby="profile-details-heading">
+        <h3 id="profile-details-heading">Profile</h3>
+        <form className="swiss-popover-form" onSubmit={saveProfile}>
+          <TextField id="profile-name" label="Name" value={name} onChange={(event) => setName(event.target.value)} />
+          <TextField id="profile-workspace-name" label="Current workspace name" value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} />
+          <fieldset className="swiss-password-fields">
+            <legend>Security</legend>
+            <TextField id="profile-current-password" label="Current password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} type="password" autoComplete="current-password" placeholder="Required to change password" />
+            <TextField id="profile-new-password" label="New password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" autoComplete="new-password" minLength={8} placeholder="At least 8 characters" />
+            <TextField id="profile-confirm-password" label="Confirm new password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} type="password" autoComplete="new-password" minLength={8} />
+          </fieldset>
+          {error ? <p className="swiss-form-message is-error" role="alert">{error}</p> : null}
+          {message ? <p className="swiss-form-message">{message}</p> : null}
+          <Button variant="primary" type="submit" disabled={isBusy}>Save profile</Button>
+        </form>
+      </section>
+
+      <div className="swiss-profile-links">
+        <Link href="/settings#appearance" className="swiss-menu-action" onClick={onClose}><Settings size={17} />Appearance & settings</Link>
+        <Link href="/logout" className="swiss-menu-action"><LogOut size={17} />Log out</Link>
+      </div>
     </PopoverPanel>
   );
 }
@@ -474,122 +409,6 @@ async function responseError(response: Response, fallback: string) {
   } catch {
     return fallback;
   }
-}
-
-function ProfilePopover({
-  data,
-  onClose,
-  onThemeToggle,
-  onUpdated
-}: {
-  data: BootstrapData;
-  onClose: () => void;
-  onThemeToggle: () => void;
-  onUpdated: () => Promise<void>;
-}) {
-  const [name, setName] = useState(data.user.name);
-  const [workspaceName, setWorkspaceName] = useState(data.workspace.name);
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isBusy, setIsBusy] = useState(false);
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setMessage(null);
-    setError(null);
-    if (newPassword && newPassword !== confirmPassword) {
-      setError("The new passwords do not match.");
-      return;
-    }
-    setIsBusy(true);
-    try {
-      const response = await clientFetch("/api/profile", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name,
-          workspaceName,
-          currentPassword: currentPassword || undefined,
-          newPassword: newPassword || undefined
-        })
-      });
-      const payload = (await response.json()) as { error?: string };
-      if (!response.ok) {
-        setError(payload.error ?? "Unable to update profile.");
-        return;
-      }
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-      setMessage(newPassword ? "Profile and password updated." : "Profile updated.");
-      await onUpdated();
-    } finally {
-      setIsBusy(false);
-    }
-  }
-
-  return (
-    <PopoverPanel title="Profile" onClose={onClose} align="bottom-left" busy={isBusy}>
-      <div className="swiss-profile-summary">
-        <span>{initials(data.user.name)}</span>
-        <div>
-          <strong>{data.user.name}</strong>
-          <small>{data.user.email}</small>
-        </div>
-      </div>
-      <form className="swiss-popover-form" onSubmit={submit}>
-        <TextField id="profile-name" label="Name" value={name} onChange={(event) => setName(event.target.value)} />
-        <TextField id="profile-workspace-name" label="Workspace name" value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} />
-        <fieldset className="swiss-password-fields">
-          <legend>Security</legend>
-          <TextField
-            id="profile-current-password"
-            label="Current password"
-            value={currentPassword}
-            onChange={(event) => setCurrentPassword(event.target.value)}
-            type="password"
-            autoComplete="current-password"
-            placeholder="Required to change password"
-          />
-          <TextField
-            id="profile-new-password"
-            label="New password"
-            value={newPassword}
-            onChange={(event) => setNewPassword(event.target.value)}
-            type="password"
-            autoComplete="new-password"
-            minLength={8}
-            placeholder="At least 8 characters"
-          />
-          <TextField
-            id="profile-confirm-password"
-            label="Confirm new password"
-            value={confirmPassword}
-            onChange={(event) => setConfirmPassword(event.target.value)}
-            type="password"
-            autoComplete="new-password"
-            minLength={8}
-          />
-        </fieldset>
-        {error ? <p className="swiss-form-message is-error">{error}</p> : null}
-        {message ? <p className="swiss-form-message">{message}</p> : null}
-        <Button variant="primary" type="submit" disabled={isBusy}>
-          Save profile
-        </Button>
-      </form>
-      <Button className="swiss-menu-action" onClick={onThemeToggle}>
-        <Settings size={17} />
-        Toggle colour theme
-      </Button>
-      <Link href="/logout" className="swiss-menu-action">
-        <LogOut size={17} />
-        Log out
-      </Link>
-    </PopoverPanel>
-  );
 }
 
 function SearchPalette({
@@ -607,16 +426,9 @@ function SearchPalette({
     <ModalDialog ariaLabel="Search Dayframe" onClose={onClose} showClose={false}>
       <div className="swiss-search-input">
         <Search size={21} />
-        <input
-          autoFocus
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search categories, entries, places, review items"
-        />
+        <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search categories, entries, places, review items" />
         <kbd>Esc</kbd>
-        <IconButton label="Close search" onClick={onClose}>
-          <X size={18} />
-        </IconButton>
+        <IconButton label="Close search" onClick={onClose}><X size={18} /></IconButton>
       </div>
       <div className="swiss-search-results">
         {results.map((result) => {
@@ -624,10 +436,7 @@ function SearchPalette({
           return (
             <Link key={result.id} href={result.href} onClick={onClose}>
               <Icon size={19} />
-              <span>
-                <strong>{result.label}</strong>
-                <small>{result.detail}</small>
-              </span>
+              <span><strong>{result.label}</strong><small>{result.detail}</small></span>
               <em>{result.group}</em>
             </Link>
           );
@@ -638,48 +447,11 @@ function SearchPalette({
   );
 }
 
-function NotificationsPopover({
-  notifications,
-  onClose
-}: {
-  notifications: NotificationItem[];
-  onClose: () => void;
-}) {
-  return (
-    <PopoverPanel title="Notifications" onClose={onClose} align="top-right">
-      <div className="swiss-notification-list">
-        {notifications.map((item) => {
-          const Icon = item.icon;
-          return (
-            <Link key={item.id} href={item.href} onClick={onClose}>
-              <Icon size={18} />
-              <span>
-                <strong>{item.title}</strong>
-                <small>{item.detail}</small>
-              </span>
-            </Link>
-          );
-        })}
-        {notifications.length === 0 ? <p>No notifications.</p> : null}
-      </div>
-    </PopoverPanel>
-  );
-}
-
 function HelpDialog({ onClose }: { onClose: () => void }) {
   return (
-    <ModalDialog
-      description="Use these shortcuts from Dayframe screens when you are not typing in a field."
-      onClose={onClose}
-      title="Help & Shortcuts"
-    >
+    <ModalDialog description="Use these shortcuts from Dayframe screens when you are not typing in a field." onClose={onClose} title="Help & Shortcuts">
       <div className="swiss-shortcut-list">
-        {shortcuts.map(([keys, action]) => (
-          <div key={keys}>
-            <kbd>{keys}</kbd>
-            <span>{action}</span>
-          </div>
-        ))}
+        {shortcuts.map(([keys, action]) => <div key={keys}><kbd>{keys}</kbd><span>{action}</span></div>)}
       </div>
     </ModalDialog>
   );
@@ -690,14 +462,6 @@ type SearchResult = {
   label: string;
   detail: string;
   group: string;
-  href: string;
-  icon: LucideIcon;
-};
-
-type NotificationItem = {
-  id: string;
-  title: string;
-  detail: string;
   href: string;
   icon: LucideIcon;
 };
@@ -722,20 +486,12 @@ function buildSearchResults(data: BootstrapData | null, query: string): SearchRe
       href: "/places",
       icon: MapPin
     })),
-    ...data.automationRules.map((rule) => ({
-      id: `automation:${rule.id}`,
-      label: rule.name,
-      detail: `${rule.triggerSource} -> ${rule.action}`,
-      group: "Automation",
-      href: "/automation",
-      icon: Workflow
-    })),
     ...data.entries.slice(0, 40).map((entry) => ({
       id: `entry:${entry.id}`,
       label: timeEntryTitle(entry),
       detail: `${formatTime(entry.startedAt)} · ${formatDuration(entry.durationSeconds)}`,
       group: "Entry",
-      href: "/entries",
+      href: "/timeline?view=list",
       icon: Clock3
     })),
     ...data.reviewItems.map((item) => ({
@@ -747,44 +503,8 @@ function buildSearchResults(data: BootstrapData | null, query: string): SearchRe
       icon: Inbox
     }))
   ];
-
   if (!needle) return results.slice(0, 8);
-  return results
-    .filter((result) => `${result.label} ${result.detail} ${result.group}`.toLowerCase().includes(needle))
-    .slice(0, 12);
-}
-
-function buildNotifications(data: BootstrapData | null): NotificationItem[] {
-  if (!data) return [];
-  const items: NotificationItem[] = [];
-  if (data.activeEntry) {
-    items.push({
-      id: `active:${data.activeEntry.id}`,
-      title: timeEntryTitle(data.activeEntry),
-      detail: `Started ${formatTime(data.activeEntry.startedAt)}`,
-      href: "/",
-      icon: Clock3
-    });
-  }
-  for (const item of data.reviewItems.filter((review) => review.status === "open").slice(0, 5)) {
-    items.push({
-      id: `review:${item.id}`,
-      title: item.title,
-      detail: item.confidence,
-      href: "/review",
-      icon: Inbox
-    });
-  }
-  for (const event of data.activityEvents.slice(0, 3)) {
-    items.push({
-      id: `event:${event.id}`,
-      title: formatEventLabel(event.eventType),
-      detail: `${formatSourceLabel(event.source)} · ${formatTime(event.occurredAt)}`,
-      href: "/entries",
-      icon: Activity
-    });
-  }
-  return items;
+  return results.filter((result) => `${result.label} ${result.detail} ${result.group}`.toLowerCase().includes(needle)).slice(0, 12);
 }
 
 function initials(name: string) {
@@ -802,12 +522,8 @@ function isTypingTarget(target: EventTarget | null) {
 
 function formatLongDate(date: string) {
   const [year, month, day] = date.split("-").map(Number);
-  return new Intl.DateTimeFormat("en-GB", {
-    weekday: "long",
-    day: "2-digit",
-    month: "long",
-    year: "numeric"
-  }).format(new Date(year, month - 1, day));
+  return new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "2-digit", month: "long", year: "numeric" })
+    .format(new Date(year, month - 1, day));
 }
 
 function addDaysKey(date: string, days: number) {

@@ -66,7 +66,9 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Reports show category, source and place breakdowns as the normal user-facing views.
 - Reports use one explicit Day, Week, Month or Custom date range for every total, chart and breakdown; historical navigation never leaves a chart anchored to the real current week.
 - Entries crossing a report boundary contribute only the time inside the selected range. Daily and weekly goal progress uses persisted user goals and appears only for matching Day/Week ranges.
-- Categories, Places, Automation, Review Inbox, Settings, Search, Notifications, Profile, and Help remain navigable.
+- Categories, Tags, Reports, Places, Review Inbox, Settings, Search, Profile, workspace switching, Appearance, and Help remain navigable on desktop and mobile web.
+- Dashboard and Timeline share one shell-owned timer. Timer state, details and start-time edits survive navigation in both directions; one user action emits one mutation and failed optimistic mutations roll back.
+- Legacy `/entries` redirects to Timeline List and `/automation` redirects to Places. The normal Timeline List omits Source, Confidence and Review diagnostics.
 - On iOS Categories, focusing `New category` reveals one in-place creation editor above the keyboard with its name field, all 12 colour choices, pin state, Cancel and Create controls visible; creation uses the selected colour, while Cancel and failure preserve the documented state behavior.
 - Review Inbox actions remain normal sized, readable, and do not overlay item content.
 

@@ -1,28 +1,5 @@
-import { PageHeader } from "@/components/PageHeader";
-import { EntriesTable } from "@/components/EntriesTable";
-import { resolvePageSession } from "@/lib/auth/server";
-import { getBootstrapData } from "@/lib/queries";
+import { redirect } from "next/navigation";
 
-export const dynamic = "force-dynamic";
-
-export default async function EntriesPage() {
-  const session = await resolvePageSession();
-  const data = await getBootstrapData(session);
-
-  return (
-    <>
-      <PageHeader
-        title="Time entries"
-        description="Filter, create, edit and delete time entries while keeping source confidence and review status visible."
-      />
-      <div className="px-5 py-6 md:px-8">
-        <EntriesTable
-          entries={data.entries}
-          categories={data.categories}
-          places={data.places}
-          tags={data.tags}
-        />
-      </div>
-    </>
-  );
+export default function EntriesPage() {
+  redirect("/timeline?view=list");
 }

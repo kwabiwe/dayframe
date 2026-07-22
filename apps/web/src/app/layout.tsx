@@ -28,7 +28,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
               "try{var t=localStorage.getItem('dayframe.theme');if(t==='light'||t==='dark'){document.documentElement.setAttribute('data-theme',t)}}catch(e){}"
           }}
         />
-        <Suspense fallback={<>{children}</>}>
+        <Suspense fallback={<div className="swiss-app-loading" role="status">Loading Dayframe…</div>}>
           {isAuthenticatedPageSession(session) ? <AppShell>{children}</AppShell> : children}
         </Suspense>
       </body>
