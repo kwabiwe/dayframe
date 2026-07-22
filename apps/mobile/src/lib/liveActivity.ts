@@ -20,31 +20,57 @@ type DayframeLiveActivityModule = {
 const nativeLiveActivity = NativeModules.DayframeLiveActivityModule as DayframeLiveActivityModule | undefined;
 
 let lastSyncedLiveActivityKey: string | null = null;
+let requestedEntry: LiveActivityEntry | null = null;
+let reconciliation: Promise<void> | null = null;
 
 export async function syncLiveActivityForEntry(entry: LiveActivityEntry | null | undefined) {
   if (Platform.OS !== "ios" || !nativeLiveActivity) return;
 
-  if (!entry) {
-    if (lastSyncedLiveActivityKey === "idle") return;
-    const didStop = await nativeLiveActivity.stop().catch(() => false);
-    if (didStop) lastSyncedLiveActivityKey = "idle";
+  requestedEntry = entry ?? null;
+  if (!reconciliation) {
+    reconciliation = reconcileLatestEntry().finally(() => {
+      reconciliation = null;
+    });
+  }
+  await reconciliation;
+}
+
+async function reconcileLatestEntry() {
+  while (true) {
+    const entry = requestedEntry;
+    const requestedKey = liveActivityKey(entry);
+    if (lastSyncedLiveActivityKey === requestedKey) return;
+
+    if (!entry) {
+      const didStop = await nativeLiveActivity!.stop().catch(() => false);
+      if (requestedEntry !== entry) continue;
+      if (didStop) lastSyncedLiveActivityKey = requestedKey;
+      return;
+    }
+
+    const title = displayLiveActivityTitle(entry);
+    const categoryColor = entry.categoryName
+      ? paletteColorFor(entry.categoryColor ?? entry.categoryName, entry.categoryName, "dark")
+      : null;
+    const didStart = await nativeLiveActivity!.start(
+      title,
+      entry.categoryName,
+      categoryColor,
+      entry.startedAt
+    ).catch(() => false);
+    if (requestedEntry !== entry) continue;
+    if (didStart) lastSyncedLiveActivityKey = requestedKey;
     return;
   }
+}
 
+function liveActivityKey(entry: LiveActivityEntry | null) {
+  if (!entry) return "idle";
   const title = displayLiveActivityTitle(entry);
   const categoryColor = entry.categoryName
     ? paletteColorFor(entry.categoryColor ?? entry.categoryName, entry.categoryName, "dark")
     : null;
-  const key = [entry.id, entry.startedAt, title, entry.categoryName ?? "", categoryColor ?? ""].join("|");
-  if (lastSyncedLiveActivityKey === key) return;
-
-  const didStart = await nativeLiveActivity.start(
-    title,
-    entry.categoryName,
-    categoryColor,
-    entry.startedAt
-  ).catch(() => false);
-  if (didStart) lastSyncedLiveActivityKey = key;
+  return [entry.id, entry.startedAt, title, entry.categoryName ?? "", categoryColor ?? ""].join("|");
 }
 
 function displayLiveActivityTitle(entry: LiveActivityEntry) {

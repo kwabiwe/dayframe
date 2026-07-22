@@ -93,4 +93,54 @@ describe("Live Activity sync", () => {
 
     expect(mocks.stop).toHaveBeenCalledTimes(2);
   });
+
+  it("serializes rapid idle and optimistic active-entry reconciliation", async () => {
+    let finishStop: ((value: boolean) => void) | undefined;
+    mocks.stop.mockImplementationOnce(() => new Promise<boolean>((resolve) => {
+      finishStop = resolve;
+    }));
+    const { syncLiveActivityForEntry } = await loadModule();
+    const idleSync = syncLiveActivityForEntry(null);
+    const activeSync = syncLiveActivityForEntry({
+      id: "optimistic:entry-1",
+      startedAt: "2026-07-22T06:05:00.000Z",
+      description: "School run",
+      categoryName: "Family",
+      categoryColor: "violet"
+    });
+
+    expect(mocks.start).not.toHaveBeenCalled();
+    finishStop?.(true);
+    await Promise.all([idleSync, activeSync]);
+
+    expect(mocks.stop).toHaveBeenCalledTimes(1);
+    expect(mocks.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("reconciles the latest persisted entry after an optimistic id changes", async () => {
+    let finishStart: ((value: boolean) => void) | undefined;
+    mocks.start.mockImplementationOnce(() => new Promise<boolean>((resolve) => {
+      finishStart = resolve;
+    }));
+    const { syncLiveActivityForEntry } = await loadModule();
+    const optimisticSync = syncLiveActivityForEntry({
+      id: "optimistic:entry-1",
+      startedAt: "2026-07-22T06:05:00.000Z",
+      description: "School run",
+      categoryName: "Family",
+      categoryColor: "violet"
+    });
+    const persistedSync = syncLiveActivityForEntry({
+      id: "entry-1",
+      startedAt: "2026-07-22T06:05:00.000Z",
+      description: "School run",
+      categoryName: "Family",
+      categoryColor: "violet"
+    });
+
+    finishStart?.(true);
+    await Promise.all([optimisticSync, persistedSync]);
+
+    expect(mocks.start).toHaveBeenCalledTimes(2);
+  });
 });
