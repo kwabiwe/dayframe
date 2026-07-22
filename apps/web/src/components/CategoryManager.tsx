@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { DAYFRAME_PALETTE, paletteCssColorFor, paletteKeyFor } from "@dayframe/shared";
 import { Check, Pin, PinOff, Plus, Save, Trash2 } from "lucide-react";
 import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
+import { clientFetch } from "@/lib/client-auth-fetch";
 import type { CategoryRow } from "@/lib/queries";
 
 export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
@@ -24,7 +25,7 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
   async function createCategory(formData: FormData) {
     const name = String(formData.get("name") ?? "").trim();
     if (!name) return;
-    await fetch("/api/categories", {
+    await clientFetch("/api/categories", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -37,7 +38,7 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
   }
 
   async function updateCategory(category: CategoryRow, formData: FormData) {
-    await fetch("/api/categories", {
+    await clientFetch("/api/categories", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -52,7 +53,7 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
   }
 
   async function togglePin(category: CategoryRow) {
-    await fetch("/api/categories", {
+    await clientFetch("/api/categories", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -67,7 +68,7 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
     setIsDeleting(true);
     setDeleteError(null);
     try {
-      const response = await fetch(`/api/categories?id=${category.id}`, { method: "DELETE" });
+      const response = await clientFetch(`/api/categories?id=${category.id}`, { method: "DELETE" });
       if (!response.ok) {
         let errorMessage = `Unable to delete category: ${response.status}`;
         try {

@@ -1,5 +1,6 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { cache } from "react";
 import { APP_SESSION_COOKIE, resolveLocalSession } from "@/lib/auth/local";
 import { AuthError, DEV_WORKSPACE_COOKIE, getAuthMode, getDevSession, type RequestSession } from "@/lib/session";
 
@@ -21,7 +22,7 @@ export async function resolvePageSession(): Promise<RequestSession> {
   );
 }
 
-export async function getOptionalPageSession(): Promise<RequestSession | null> {
+export async function resolveOptionalPageSessionUncached(): Promise<RequestSession | null> {
   const mode = getAuthMode();
   if (mode === "dev") {
     const cookieStore = await cookies();
@@ -35,9 +36,22 @@ export async function getOptionalPageSession(): Promise<RequestSession | null> {
 
   try {
     return await resolveLocalSession(token, mode);
-  } catch {
-    return null;
+  } catch (error) {
+    if (isExpectedAnonymousPageSessionError(error)) return null;
+    throw error;
   }
+}
+
+export const getOptionalPageSession = cache(resolveOptionalPageSessionUncached);
+
+export function isExpectedAnonymousPageSessionError(error: unknown): error is AuthError {
+  return error instanceof AuthError && error.status === 401;
+}
+
+export function isAuthenticatedPageSession(
+  session: RequestSession | null
+): session is RequestSession {
+  return session !== null;
 }
 
 export async function currentUserAgent() {

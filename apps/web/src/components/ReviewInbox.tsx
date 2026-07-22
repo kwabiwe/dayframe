@@ -6,6 +6,7 @@ import { Check, CircleSlash, GitMerge, Map, WandSparkles } from "lucide-react";
 import type { ReviewItemRow } from "@/lib/queries";
 import { formatDate, formatEventLabel, formatSourceLabel, formatTime } from "@/lib/format";
 import { LocationReviewPanel } from "@/components/location/LocationReviewPanel";
+import { clientFetch } from "@/lib/client-auth-fetch";
 
 export function ReviewInbox({
   items,
@@ -65,7 +66,7 @@ function ReviewItemCard({
             ? { action: "ignore_once_location" }
             : { action }
         : { action };
-      const response = await fetch(`/api/review/${item.id}`, {
+      const response = await clientFetch(`/api/review/${item.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)

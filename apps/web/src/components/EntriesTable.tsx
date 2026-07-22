@@ -7,6 +7,7 @@ import { Pencil, Play, Trash2 } from "lucide-react";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import { TagMetadata } from "@/components/TagMetadata";
 import { InlineTagInput } from "@/components/InlineTagInput";
+import { clientFetch } from "@/lib/client-auth-fetch";
 import { timeEntryCategoryColor, timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
 import type { CategoryRow, PlaceRow, TagRow, TimeEntryRow } from "@/lib/queries";
 import {
@@ -62,7 +63,7 @@ export function EntriesTable({
   );
 
   async function remove(id: string) {
-    await fetch(`/api/time-entries/${id}`, { method: "DELETE" });
+    await clientFetch(`/api/time-entries/${id}`, { method: "DELETE" });
     await onChanged?.();
     startTransition(() => router.refresh());
   }
@@ -81,7 +82,7 @@ export function EntriesTable({
     setContinuingEntryId(entry.id);
     setManualError(null);
     try {
-      const response = await fetch("/api/time-entries", {
+      const response = await clientFetch("/api/time-entries", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -130,7 +131,7 @@ export function EntriesTable({
     }
 
     try {
-      const response = await fetch("/api/time-entries", {
+      const response = await clientFetch("/api/time-entries", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

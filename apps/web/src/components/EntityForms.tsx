@@ -18,6 +18,7 @@ import type {
   LearnedPlaceRow,
   PlaceRow
 } from "@/lib/queries";
+import { clientFetch } from "@/lib/client-auth-fetch";
 
 type EntityListRow = {
   id: string;
@@ -92,7 +93,7 @@ function PlacesManager({
   async function ignoreLearnedPlace(learnedPlace: LearnedPlaceRow) {
     setIgnoringId(learnedPlace.id);
     try {
-      await fetch("/api/learned-places", {
+      await clientFetch("/api/learned-places", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: learnedPlace.id, status: "ignored" })
@@ -108,7 +109,7 @@ function PlacesManager({
   async function forgetLearnedPlace(learnedPlace: LearnedPlaceRow) {
     setForgettingId(learnedPlace.id);
     try {
-      await fetch(`/api/learned-places?id=${encodeURIComponent(learnedPlace.id)}`, { method: "DELETE" });
+      await clientFetch(`/api/learned-places?id=${encodeURIComponent(learnedPlace.id)}`, { method: "DELETE" });
       if (promoting?.id === learnedPlace.id) setPromoting(null);
       if (selectedLearnedPlace?.id === learnedPlace.id) setSelectedLearnedPlace(null);
       refresh();
@@ -118,7 +119,7 @@ function PlacesManager({
   }
 
   async function updatePlace(place: PlaceRow, formData: FormData, loggingEnabled: boolean) {
-    await fetch("/api/places", {
+    await clientFetch("/api/places", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -476,7 +477,7 @@ function CreatePlaceForm({
   const [loggingEnabled, setLoggingEnabled] = useState(true);
 
   async function submit(formData: FormData) {
-    await fetch("/api/places", {
+    await clientFetch("/api/places", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -647,7 +648,7 @@ function RuleDraftAssistant({
     setIsSaving(true);
 
     try {
-      const response = await fetch("/api/entities", {
+      const response = await clientFetch("/api/entities", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ entity: "automation_rule", values: savePlan.values })
@@ -818,7 +819,7 @@ function EntityForm({
 
   async function submit(formData: FormData) {
     const values = Object.fromEntries(formData.entries());
-    await fetch("/api/entities", {
+    await clientFetch("/api/entities", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ entity, values })

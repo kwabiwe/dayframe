@@ -5,6 +5,7 @@ import { Check, GitMerge, MapPin, Scissors, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import type { LocationReviewAction, LocationReviewEvidenceDto } from "@dayframe/shared";
+import { clientFetch } from "@/lib/client-auth-fetch";
 
 const LocationEvidenceMap = dynamic(
   () => import("./LocationEvidenceMap").then((module) => module.LocationEvidenceMap),
@@ -41,7 +42,7 @@ export function LocationReviewPanel({
 
   useEffect(() => {
     let cancelled = false;
-    void fetch(`/api/review/${reviewItemId}/location-evidence`, { cache: "no-store" })
+    void clientFetch(`/api/review/${reviewItemId}/location-evidence`, { cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) {
           const body = await response.json().catch(() => ({})) as { error?: string };
@@ -71,7 +72,7 @@ export function LocationReviewPanel({
     setError(null);
     setIsSubmitting(true);
     try {
-      const response = await fetch(`/api/review/${reviewItemId}`, {
+      const response = await clientFetch(`/api/review/${reviewItemId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(action)

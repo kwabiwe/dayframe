@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { paletteCssColorFor } from "@dayframe/shared";
 import { Play, Square, Trash2 } from "lucide-react";
 import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
+import { clientFetch } from "@/lib/client-auth-fetch";
 import { timeEntryCategoryColor, timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
 import type { BootstrapData, CategoryRow, PlaceRow, TimeEntryRow } from "@/lib/queries";
 import { formatClockDuration, formatTime } from "@/lib/format";
@@ -67,7 +68,7 @@ export function TimerPanel({
   }
 
   async function refreshClientData() {
-    const response = await fetch("/api/bootstrap", { cache: "no-store" });
+    const response = await clientFetch("/api/bootstrap", { cache: "no-store" });
     if (!response.ok) throw new Error(`Unable to refresh timer state: ${response.status}`);
     const data = (await response.json()) as BootstrapData;
     onSynced?.(data);
@@ -77,7 +78,7 @@ export function TimerPanel({
     setIsSubmitting(true);
     try {
       if (mode === "stop" && activeEntry) {
-        const updateResponse = await fetch(`/api/time-entries/${activeEntry.id}`, {
+        const updateResponse = await clientFetch(`/api/time-entries/${activeEntry.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -91,7 +92,7 @@ export function TimerPanel({
         if (!updateResponse.ok) throw new Error(`Unable to save timer details: ${updateResponse.status}`);
       }
 
-      const response = await fetch("/api/time-entries", {
+      const response = await clientFetch("/api/time-entries", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
@@ -121,7 +122,7 @@ export function TimerPanel({
     setIsSubmitting(true);
     setDeleteError(null);
     try {
-      const response = await fetch(`/api/time-entries/${activeEntry.id}`, {
+      const response = await clientFetch(`/api/time-entries/${activeEntry.id}`, {
         method: "DELETE"
       });
       if (!response.ok) {
@@ -150,7 +151,7 @@ export function TimerPanel({
     updateDraft({ categoryId: entry.categoryId ?? "", description: entry.description ?? "" });
     setIsSubmitting(true);
     try {
-      const response = await fetch("/api/time-entries", {
+      const response = await clientFetch("/api/time-entries", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

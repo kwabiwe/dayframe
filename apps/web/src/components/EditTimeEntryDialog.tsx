@@ -3,6 +3,7 @@
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { InlineTagInput } from "@/components/InlineTagInput";
+import { clientFetch } from "@/lib/client-auth-fetch";
 import type { CategoryRow, PlaceRow, TagRow, TimeEntryRow } from "@/lib/queries";
 import {
   dateTimeLocal,
@@ -128,7 +129,7 @@ export function EditTimeEntryDialog({
 
     setIsBusy(true);
     try {
-      const response = await fetch(`/api/time-entries/${entry.id}`, {
+      const response = await clientFetch(`/api/time-entries/${entry.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

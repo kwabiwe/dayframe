@@ -1040,49 +1040,52 @@ export async function getReports(
       `select coalesce(c.id::text, 'unassigned') as id,
               coalesce(c.name, 'Uncategorized') as name,
               c.color,
-              sum(extract(epoch from (least(coalesce(te.stopped_at, now()), $3::timestamptz) - greatest(te.started_at, $2::timestamptz))))::int as seconds
+              sum(extract(epoch from (least(coalesce(te.stopped_at, now()), $4::timestamptz) - greatest(te.started_at, $3::timestamptz))))::int as seconds
        from time_entries te
-       left join categories c on c.id = te.category_id
+       left join categories c on c.id = te.category_id and c.workspace_id = te.workspace_id
        where te.workspace_id = $1
-         and te.started_at < $3::timestamptz
-         and coalesce(te.stopped_at, now()) > $2::timestamptz
+         and te.user_id = $2
+         and te.started_at < $4::timestamptz
+         and coalesce(te.stopped_at, now()) > $3::timestamptz
        group by coalesce(c.id::text, 'unassigned'), coalesce(c.name, 'Uncategorized'), c.color
        order by seconds desc`,
-      [session.workspaceId, rangeStart, rangeEnd]
+      [session.workspaceId, session.userId, rangeStart, rangeEnd]
     ),
     query<ReportRow>(
       `select source as id,
               source as name,
               null::text as color,
-              sum(extract(epoch from (least(coalesce(stopped_at, now()), $3::timestamptz) - greatest(started_at, $2::timestamptz))))::int as seconds
+              sum(extract(epoch from (least(coalesce(stopped_at, now()), $4::timestamptz) - greatest(started_at, $3::timestamptz))))::int as seconds
        from time_entries
        where workspace_id = $1
-         and started_at < $3::timestamptz
-         and coalesce(stopped_at, now()) > $2::timestamptz
+         and user_id = $2
+         and started_at < $4::timestamptz
+         and coalesce(stopped_at, now()) > $3::timestamptz
        group by source
        order by seconds desc`,
-      [session.workspaceId, rangeStart, rangeEnd]
+      [session.workspaceId, session.userId, rangeStart, rangeEnd]
     ),
     query<ReportRow>(
       `select coalesce(pl.id::text, 'no-place') as id,
               coalesce(pl.name, 'No place') as name,
               null::text as color,
-              sum(extract(epoch from (least(coalesce(te.stopped_at, now()), $3::timestamptz) - greatest(te.started_at, $2::timestamptz))))::int as seconds
+              sum(extract(epoch from (least(coalesce(te.stopped_at, now()), $4::timestamptz) - greatest(te.started_at, $3::timestamptz))))::int as seconds
        from time_entries te
-       left join places pl on pl.id = te.place_id
+       left join places pl on pl.id = te.place_id and pl.workspace_id = te.workspace_id
        where te.workspace_id = $1
-         and te.started_at < $3::timestamptz
-         and coalesce(te.stopped_at, now()) > $2::timestamptz
+         and te.user_id = $2
+         and te.started_at < $4::timestamptz
+         and coalesce(te.stopped_at, now()) > $3::timestamptz
        group by coalesce(pl.id::text, 'no-place'), coalesce(pl.name, 'No place')
        order by seconds desc`,
-      [session.workspaceId, rangeStart, rangeEnd]
+      [session.workspaceId, session.userId, rangeStart, rangeEnd]
     ),
     query<{ index: number; seconds: number }>(
       `with days as (
          select day_start, index
          from generate_series(
-           $2::timestamptz,
-           $3::timestamptz - interval '1 day',
+           $3::timestamptz,
+           $4::timestamptz - interval '1 day',
            interval '1 day'
          ) with ordinality as series(day_start, index)
        )
@@ -1093,11 +1096,12 @@ export async function getReports(
        from days
        left join time_entries te
          on te.workspace_id = $1
+        and te.user_id = $2
         and te.started_at < days.day_start + interval '1 day'
         and coalesce(te.stopped_at, now()) > days.day_start
        group by days.index
        order by days.index`,
-      [session.workspaceId, rangeStart, rangeEnd]
+      [session.workspaceId, session.userId, rangeStart, rangeEnd]
     )
   ]);
 

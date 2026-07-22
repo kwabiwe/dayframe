@@ -1,4 +1,5 @@
 import type { BootstrapData } from "@/lib/queries";
+import { clientFetch } from "@/lib/client-auth-fetch";
 
 export const TIMER_SHORTCUT_EVENT = "dayframe-toggle-timer-shortcut";
 export const TIMER_FOCUS_EVENT = "dayframe-focus-timer-input";
@@ -12,7 +13,7 @@ type ShortcutFetch = (input: string, init?: RequestInit) => Promise<Response>;
 
 export async function toggleTimerFromFreshBootstrap({
   fallbackData,
-  fetcher = fetch,
+  fetcher = clientFetch,
   focusTimerInput = dispatchTimerFocus,
   refresh,
   selectedDate,

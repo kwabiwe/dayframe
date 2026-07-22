@@ -9,6 +9,7 @@ import { CurrentTimerPanel } from "@/components/DashboardRealtime";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import { TagMetadata } from "@/components/TagMetadata";
 import { EntriesTable } from "@/components/EntriesTable";
+import { clientFetch } from "@/lib/client-auth-fetch";
 import {
   timeEntryAccentColor,
   timeEntryCategoryColor,
@@ -125,7 +126,7 @@ export function TimeReviewViews({
 
   const refreshData = useCallback(async () => {
     try {
-      const response = await fetch(`/api/bootstrap?date=${data.dateRange.selectedDate}`, {
+      const response = await clientFetch(`/api/bootstrap?date=${data.dateRange.selectedDate}`, {
         cache: "no-store"
       });
       if (response.ok) setData((await response.json()) as BootstrapData);
@@ -306,7 +307,7 @@ function CalendarReview({
   }, [calendarHeight, calendarHours.endHour, calendarHours.startHour, rowHeight, zoom.intervalMinutes]);
 
   async function saveCalendarResize(entry: TimeEntryRow, draft: CalendarResizeDraft) {
-    const response = await fetch(`/api/time-entries/${entry.id}`, {
+    const response = await clientFetch(`/api/time-entries/${entry.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
