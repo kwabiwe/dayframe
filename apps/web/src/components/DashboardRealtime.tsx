@@ -17,6 +17,7 @@ import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmat
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import { InlineTagInput } from "@/components/InlineTagInput";
 import { TagMetadata } from "@/components/TagMetadata";
+import { Button, Field, ModalDialog, SelectField } from "@/components/ui/Primitives";
 import {
   ArrowRight,
   BarChart3,
@@ -791,17 +792,17 @@ export function CurrentTimerPanel({
                     />
                     <small id="active-start-time-hint">24-hour time (HH:MM)</small>
                   </label>
-                  <button
-                    className="swiss-start-time-save"
+                  <Button
+                    compact
+                    variant="primary"
                     type="submit"
                     disabled={isBusy}
                     aria-label="Save active timer start time"
                   >
-                    <CheckCircle2 size={13} />
                     Save
-                  </button>
-                  <button
-                    className="swiss-start-time-cancel"
+                  </Button>
+                  <Button
+                    compact
                     type="button"
                     disabled={isBusy}
                     aria-label="Cancel editing active timer start time"
@@ -812,7 +813,7 @@ export function CurrentTimerPanel({
                     }}
                   >
                     Cancel
-                  </button>
+                  </Button>
                 </form>
               ) : (
                 <button
@@ -1807,6 +1808,7 @@ function ManualEntryDialog({
   const defaultStart = dateTimeLocal(selectedDate);
   selectedDate.setHours(10, 0, 0, 0);
   const defaultStop = dateTimeLocal(selectedDate);
+  const formId = "manual-entry-form";
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1862,75 +1864,65 @@ function ManualEntryDialog({
   }
 
   return (
-    <div className="swiss-dialog-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="swiss-dialog" role="dialog" aria-modal="true" aria-labelledby="manual-entry-title" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="swiss-dialog-header">
-          <h2 id="manual-entry-title">Add time block</h2>
-          <button type="button" onClick={onClose} aria-label="Close add time block">
-            x
-          </button>
-        </div>
-        <form className="swiss-form-grid" onSubmit={submit}>
-          <label>
-            Category
-            <select name="categoryId" defaultValue="">
-              <option value="">Uncategorized</option>
-              {data.categories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Place
-            <select name="placeId" defaultValue="">
-              <option value="">No place</option>
-              {data.places.map((place) => (
-                <option key={place.id} value={place.id}>
-                  {place.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="swiss-form-wide">
-            <label htmlFor="manual-entry-description">Description</label>
-            <InlineTagInput
-              ariaLabel="Manual time entry description"
-              inputId="manual-entry-description"
-              name="manual-description"
-              onChange={setDescriptionDraft}
-              onSelectedTagNamesChange={setSelectedTagNames}
-              placeholder="What are you working on?"
-              selectedTagNames={selectedTagNames}
-              tags={data.tags}
-              value={descriptionDraft}
-            />
-          </div>
-          <label>
-            Start
-            <input type="datetime-local" name="startedAt" defaultValue={defaultStart} required />
-          </label>
-          <label>
-            Finish
-            <input type="datetime-local" name="stoppedAt" defaultValue={defaultStop} required />
-          </label>
-          {formError ? (
-            <p className="swiss-inline-error swiss-form-wide" role="alert">
-              {formError}
-            </p>
-          ) : null}
-          <div className="swiss-dialog-actions">
-            <button type="button" onClick={onClose}>
-              Cancel
-            </button>
-            <button className="swiss-primary-action" disabled={isBusy}>
-              Add time block
-            </button>
-          </div>
-        </form>
-      </section>
-    </div>
+    <ModalDialog
+      busy={isBusy}
+      onClose={onClose}
+      title="Add time block"
+      footer={(
+        <>
+          <Button onClick={onClose} disabled={isBusy}>Cancel</Button>
+          <Button variant="primary" type="submit" form={formId} disabled={isBusy}>Add time block</Button>
+        </>
+      )}
+    >
+      <form id={formId} className="swiss-form-grid" onSubmit={submit}>
+        <SelectField
+          id="manual-entry-category"
+          name="categoryId"
+          label="Category"
+          defaultValue=""
+          options={[
+            { value: "", label: "Uncategorized" },
+            ...data.categories.map((category) => ({ value: category.id, label: category.name }))
+          ]}
+        />
+        <SelectField
+          id="manual-entry-place"
+          name="placeId"
+          label="Place"
+          defaultValue=""
+          options={[
+            { value: "", label: "No place" },
+            ...data.places.map((place) => ({ value: place.id, label: place.name }))
+          ]}
+        />
+        <Field className="swiss-form-wide" htmlFor="manual-entry-description" label="Description">
+          <InlineTagInput
+            ariaLabel="Manual time entry description"
+            inputClassName="ui-control"
+            inputId="manual-entry-description"
+            name="manual-description"
+            onChange={setDescriptionDraft}
+            onSelectedTagNamesChange={setSelectedTagNames}
+            placeholder="What are you working on?"
+            selectedTagNames={selectedTagNames}
+            tags={data.tags}
+            value={descriptionDraft}
+          />
+        </Field>
+        <Field htmlFor="manual-entry-start" label="Start">
+          <input className="ui-control" id="manual-entry-start" type="datetime-local" name="startedAt" defaultValue={defaultStart} required />
+        </Field>
+        <Field htmlFor="manual-entry-finish" label="Finish">
+          <input className="ui-control" id="manual-entry-finish" type="datetime-local" name="stoppedAt" defaultValue={defaultStop} required />
+        </Field>
+        {formError ? (
+          <p className="swiss-inline-error swiss-form-wide" role="alert">
+            {formError}
+          </p>
+        ) : null}
+      </form>
+    </ModalDialog>
   );
 }
 

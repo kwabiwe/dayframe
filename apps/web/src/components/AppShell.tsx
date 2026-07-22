@@ -34,6 +34,13 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { DayframeBrand } from "@/components/brand/DayframeBrand";
+import {
+  Button,
+  IconButton,
+  ModalDialog,
+  PopoverPanel,
+  TextField
+} from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { timeEntryTitle } from "@/lib/display";
 import type { BootstrapData } from "@/lib/queries";
@@ -422,7 +429,7 @@ function WorkspacePopover({
   }
 
   return (
-    <FloatingPanel title="Workspace" onClose={onClose} align="top-left">
+    <PopoverPanel title="Workspace" onClose={onClose} align="top-left" busy={isBusy}>
       <div className="swiss-menu-list">
         {data.workspaces.map((workspace) => (
           <button
@@ -444,16 +451,19 @@ function WorkspacePopover({
         </p>
       ) : null}
       <form className="swiss-popover-form" onSubmit={createWorkspace}>
-        <label>
-          New workspace
-          <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Workspace name" />
-        </label>
-        <button className="swiss-primary-action" disabled={isBusy || !name.trim()}>
+        <TextField
+          id="new-workspace-name"
+          label="New workspace"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="Workspace name"
+        />
+        <Button variant="primary" type="submit" disabled={isBusy || !name.trim()}>
           <Plus size={15} />
           Create workspace
-        </button>
+        </Button>
       </form>
-    </FloatingPanel>
+    </PopoverPanel>
   );
 }
 
@@ -522,7 +532,7 @@ function ProfilePopover({
   }
 
   return (
-    <FloatingPanel title="Profile" onClose={onClose} align="bottom-left">
+    <PopoverPanel title="Profile" onClose={onClose} align="bottom-left" busy={isBusy}>
       <div className="swiss-profile-summary">
         <span>{initials(data.user.name)}</span>
         <div>
@@ -531,63 +541,54 @@ function ProfilePopover({
         </div>
       </div>
       <form className="swiss-popover-form" onSubmit={submit}>
-        <label>
-          Name
-          <input value={name} onChange={(event) => setName(event.target.value)} />
-        </label>
-        <label>
-          Workspace name
-          <input value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} />
-        </label>
+        <TextField id="profile-name" label="Name" value={name} onChange={(event) => setName(event.target.value)} />
+        <TextField id="profile-workspace-name" label="Workspace name" value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} />
         <fieldset className="swiss-password-fields">
           <legend>Security</legend>
-          <label>
-            Current password
-            <input
-              value={currentPassword}
-              onChange={(event) => setCurrentPassword(event.target.value)}
-              type="password"
-              autoComplete="current-password"
-              placeholder="Required to change password"
-            />
-          </label>
-          <label>
-            New password
-            <input
-              value={newPassword}
-              onChange={(event) => setNewPassword(event.target.value)}
-              type="password"
-              autoComplete="new-password"
-              minLength={8}
-              placeholder="At least 8 characters"
-            />
-          </label>
-          <label>
-            Confirm new password
-            <input
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-              type="password"
-              autoComplete="new-password"
-              minLength={8}
-            />
-          </label>
+          <TextField
+            id="profile-current-password"
+            label="Current password"
+            value={currentPassword}
+            onChange={(event) => setCurrentPassword(event.target.value)}
+            type="password"
+            autoComplete="current-password"
+            placeholder="Required to change password"
+          />
+          <TextField
+            id="profile-new-password"
+            label="New password"
+            value={newPassword}
+            onChange={(event) => setNewPassword(event.target.value)}
+            type="password"
+            autoComplete="new-password"
+            minLength={8}
+            placeholder="At least 8 characters"
+          />
+          <TextField
+            id="profile-confirm-password"
+            label="Confirm new password"
+            value={confirmPassword}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+            type="password"
+            autoComplete="new-password"
+            minLength={8}
+          />
         </fieldset>
         {error ? <p className="swiss-form-message is-error">{error}</p> : null}
         {message ? <p className="swiss-form-message">{message}</p> : null}
-        <button className="swiss-primary-action" disabled={isBusy}>
+        <Button variant="primary" type="submit" disabled={isBusy}>
           Save profile
-        </button>
+        </Button>
       </form>
-      <button type="button" className="swiss-menu-action" onClick={onThemeToggle}>
+      <Button className="swiss-menu-action" onClick={onThemeToggle}>
         <Settings size={17} />
         Toggle colour theme
-      </button>
+      </Button>
       <Link href="/logout" className="swiss-menu-action">
         <LogOut size={17} />
         Log out
       </Link>
-    </FloatingPanel>
+    </PopoverPanel>
   );
 }
 
@@ -603,39 +604,37 @@ function SearchPalette({
   onClose: () => void;
 }) {
   return (
-    <div className="swiss-modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="swiss-command-palette" role="dialog" aria-modal="true" aria-label="Search Dayframe" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="swiss-search-input">
-          <Search size={21} />
-          <input
-            autoFocus
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search categories, entries, places, review items"
-          />
-          <kbd>Esc</kbd>
-          <button type="button" className="swiss-command-close" aria-label="Close search" onClick={onClose}>
-            <X size={18} />
-          </button>
-        </div>
-        <div className="swiss-search-results">
-          {results.map((result) => {
-            const Icon = result.icon;
-            return (
-              <Link key={result.id} href={result.href} onClick={onClose}>
-                <Icon size={19} />
-                <span>
-                  <strong>{result.label}</strong>
-                  <small>{result.detail}</small>
-                </span>
-                <em>{result.group}</em>
-              </Link>
-            );
-          })}
-          {results.length === 0 ? <p>No matching results.</p> : null}
-        </div>
-      </section>
-    </div>
+    <ModalDialog ariaLabel="Search Dayframe" onClose={onClose} showClose={false}>
+      <div className="swiss-search-input">
+        <Search size={21} />
+        <input
+          autoFocus
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search categories, entries, places, review items"
+        />
+        <kbd>Esc</kbd>
+        <IconButton label="Close search" onClick={onClose}>
+          <X size={18} />
+        </IconButton>
+      </div>
+      <div className="swiss-search-results">
+        {results.map((result) => {
+          const Icon = result.icon;
+          return (
+            <Link key={result.id} href={result.href} onClick={onClose}>
+              <Icon size={19} />
+              <span>
+                <strong>{result.label}</strong>
+                <small>{result.detail}</small>
+              </span>
+              <em>{result.group}</em>
+            </Link>
+          );
+        })}
+        {results.length === 0 ? <p>No matching results.</p> : null}
+      </div>
+    </ModalDialog>
   );
 }
 
@@ -647,7 +646,7 @@ function NotificationsPopover({
   onClose: () => void;
 }) {
   return (
-    <FloatingPanel title="Notifications" onClose={onClose} align="top-right">
+    <PopoverPanel title="Notifications" onClose={onClose} align="top-right">
       <div className="swiss-notification-list">
         {notifications.map((item) => {
           const Icon = item.icon;
@@ -663,71 +662,26 @@ function NotificationsPopover({
         })}
         {notifications.length === 0 ? <p>No notifications.</p> : null}
       </div>
-    </FloatingPanel>
+    </PopoverPanel>
   );
 }
 
 function HelpDialog({ onClose }: { onClose: () => void }) {
   return (
-    <div className="swiss-modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="swiss-help-dialog" role="dialog" aria-modal="true" aria-labelledby="help-title" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="swiss-dialog-title">
-          <div>
-            <h2 id="help-title">Help & Shortcuts</h2>
-            <p>Use these shortcuts from Dayframe screens when you are not typing in a field.</p>
+    <ModalDialog
+      description="Use these shortcuts from Dayframe screens when you are not typing in a field."
+      onClose={onClose}
+      title="Help & Shortcuts"
+    >
+      <div className="swiss-shortcut-list">
+        {shortcuts.map(([keys, action]) => (
+          <div key={keys}>
+            <kbd>{keys}</kbd>
+            <span>{action}</span>
           </div>
-          <button type="button" aria-label="Close help" onClick={onClose}>
-            <X size={20} />
-          </button>
-        </div>
-        <div className="swiss-shortcut-list">
-          {shortcuts.map(([keys, action]) => (
-            <div key={keys}>
-              <kbd>{keys}</kbd>
-              <span>{action}</span>
-            </div>
-          ))}
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function FloatingPanel({
-  title,
-  align,
-  onClose,
-  children
-}: {
-  title: string;
-  align: "top-left" | "top-right" | "bottom-left";
-  onClose: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <div className="swiss-floating-layer" role="presentation" onMouseDown={onClose}>
-      <section
-        className={`swiss-floating-panel ${align}`}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        style={{
-          maxHeight: "calc(100dvh - 36px)",
-          overflowX: "hidden",
-          overflowY: "auto",
-          overscrollBehavior: "contain"
-        }}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="swiss-floating-header">
-          <h2>{title}</h2>
-          <button type="button" onClick={onClose} aria-label={`Close ${title}`}>
-            <X size={18} />
-          </button>
-        </div>
-        {children}
-      </section>
-    </div>
+        ))}
+      </div>
+    </ModalDialog>
   );
 }
 

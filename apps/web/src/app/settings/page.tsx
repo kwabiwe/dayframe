@@ -1,6 +1,7 @@
 import { PageHeader } from "@/components/PageHeader";
 import { ThemeSettings } from "@/components/ThemeSettings";
 import { GoalSettings } from "@/components/GoalSettings";
+import { SettingsRow } from "@/components/ui/Primitives";
 import { resolvePageSession } from "@/lib/auth/server";
 import { getBootstrapData } from "@/lib/queries";
 
@@ -68,12 +69,9 @@ function SettingsPanel({ title, rows }: { title: string; rows: string[][] }) {
       <div className="border-b border-[var(--line)] px-4 py-3">
         <h2 className="text-lg font-semibold">{title}</h2>
       </div>
-      <div className="divide-y divide-[var(--line)]">
+      <div>
         {rows.map(([label, value], index) => (
-          <div key={`${title}-${index}-${label}`} className="grid gap-2 px-4 py-3 text-sm md:grid-cols-[220px_1fr]">
-            <span className="font-medium">{label}</span>
-            <span className="text-[var(--muted)]">{value}</span>
-          </div>
+          <SettingsRow key={`${title}-${index}-${label}`} label={label} detail={value} />
         ))}
       </div>
     </section>

@@ -1,7 +1,8 @@
 "use client";
 
 import type { FormEvent } from "react";
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
+import { Button, ModalDialog } from "@/components/ui/Primitives";
 
 export function DestructiveConfirmationDialog({
   body,
@@ -25,28 +26,6 @@ export function DestructiveConfirmationDialog({
   title: string;
 }) {
   const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
-  const onCancelRef = useRef(onCancel);
-  const titleId = `${dialogId}-title`;
-  const descriptionId = `${dialogId}-description`;
-
-  useEffect(() => {
-    onCancelRef.current = onCancel;
-  }, [onCancel]);
-
-  useEffect(() => {
-    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    cancelButtonRef.current?.focus();
-
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape" && !isBusy) onCancelRef.current();
-    }
-
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("keydown", closeOnEscape);
-      previouslyFocused?.focus();
-    };
-  }, [isBusy]);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -58,35 +37,33 @@ export function DestructiveConfirmationDialog({
   }
 
   return (
-    <div className="swiss-dialog-backdrop" role="presentation" onMouseDown={cancel}>
-      <section
-        className="swiss-dialog swiss-confirm-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={descriptionId}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="swiss-dialog-header">
-          <h2 id={titleId}>{title}</h2>
-        </div>
-        <form className="swiss-confirm-body" onSubmit={submit}>
-          <p id={descriptionId}>{body}</p>
-          {error ? (
-            <p className="swiss-inline-error" role="alert">
-              {error}
-            </p>
-          ) : null}
-          <div className="swiss-dialog-actions">
-            <button type="button" ref={cancelButtonRef} disabled={isBusy} onClick={cancel}>
-              Cancel
-            </button>
-            <button className="swiss-destructive-action" type="submit" disabled={isBusy}>
-              {isBusy ? busyLabel : confirmLabel}
-            </button>
-          </div>
-        </form>
-      </section>
-    </div>
+    <ModalDialog
+      busy={isBusy}
+      className="ui-confirm-dialog"
+      description={body}
+      initialFocusRef={cancelButtonRef}
+      onClose={cancel}
+      role="alertdialog"
+      showClose={false}
+      title={title}
+      footer={(
+        <>
+          <Button ref={cancelButtonRef} disabled={isBusy} onClick={cancel}>
+            Cancel
+          </Button>
+          <Button variant="danger" type="submit" form={`${dialogId}-form`} disabled={isBusy}>
+            {isBusy ? busyLabel : confirmLabel}
+          </Button>
+        </>
+      )}
+    >
+      <form id={`${dialogId}-form`} className="swiss-confirm-body" onSubmit={submit}>
+        {error ? (
+          <p className="swiss-inline-error" role="alert">
+            {error}
+          </p>
+        ) : null}
+      </form>
+    </ModalDialog>
   );
 }

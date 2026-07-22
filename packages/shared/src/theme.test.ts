@@ -15,7 +15,7 @@ describe("Midnight Core theme", () => {
       surfaceRaised: "#1B2230",
       accent: "#FF6248",
       onAccent: "#050914",
-      focus: "#7D6EE6",
+      focus: "#71C5F4",
       chartTrack: "#252E40"
     });
     expect(DAYFRAME_THEME.light).toMatchObject({
@@ -24,7 +24,7 @@ describe("Midnight Core theme", () => {
       surfaceRaised: "#FFFFFF",
       accent: "#F45D43",
       onAccent: "#111827",
-      focus: "#7564E8",
+      focus: "#2563EB",
       chartTrack: "#E5E9F0"
     });
   });
@@ -36,6 +36,8 @@ describe("Midnight Core theme", () => {
       expect(contrast(theme.dangerText, theme.surfaceInset)).toBeGreaterThanOrEqual(4.5);
       expect(contrast(theme.controlBorder, theme.surface)).toBeGreaterThanOrEqual(3);
       expect(contrast(theme.controlBorder, theme.surfaceInset)).toBeGreaterThanOrEqual(3);
+      expect(contrast(theme.focus, theme.surface)).toBeGreaterThanOrEqual(3);
+      expect(contrast(theme.focus, theme.surfaceInset)).toBeGreaterThanOrEqual(3);
       expect(contrast(theme.onAccent, theme.accent)).toBeGreaterThanOrEqual(4.5);
       expect(contrast(theme.onAccent, theme.accentHover)).toBeGreaterThanOrEqual(4.5);
       expect(contrast(theme.onAccent, theme.accentPressed)).toBeGreaterThanOrEqual(4.5);

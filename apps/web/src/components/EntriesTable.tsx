@@ -5,8 +5,10 @@ import { Fragment, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Play, Trash2 } from "lucide-react";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
+import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
 import { TagMetadata } from "@/components/TagMetadata";
 import { InlineTagInput } from "@/components/InlineTagInput";
+import { IconButton } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { timeEntryCategoryColor, timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
 import type { CategoryRow, PlaceRow, TagRow, TimeEntryRow } from "@/lib/queries";
@@ -45,6 +47,9 @@ export function EntriesTable({
     reviewStatus: ""
   });
   const [editingEntry, setEditingEntry] = useState<TimeEntryRow | null>(null);
+  const [pendingDeleteEntry, setPendingDeleteEntry] = useState<TimeEntryRow | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isDeletingEntry, setIsDeletingEntry] = useState(false);
   const [manualError, setManualError] = useState<string | null>(null);
   const [continuingEntryId, setContinuingEntryId] = useState<string | null>(null);
   const [manualDescription, setManualDescription] = useState("");
@@ -63,9 +68,29 @@ export function EntriesTable({
   );
 
   async function remove(id: string) {
-    await clientFetch(`/api/time-entries/${id}`, { method: "DELETE" });
-    await onChanged?.();
-    startTransition(() => router.refresh());
+    if (isDeletingEntry) return;
+    setIsDeletingEntry(true);
+    setDeleteError(null);
+    try {
+      const response = await clientFetch(`/api/time-entries/${id}`, { method: "DELETE" });
+      if (!response.ok) {
+        let errorMessage = `Unable to delete this entry: ${response.status}`;
+        try {
+          const payload = (await response.json()) as { error?: string };
+          errorMessage = payload.error ?? errorMessage;
+        } catch {
+          // Runtime failures may not return JSON.
+        }
+        throw new Error(errorMessage);
+      }
+      setPendingDeleteEntry(null);
+      await onChanged?.();
+      startTransition(() => router.refresh());
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "Unable to delete this entry.");
+    } finally {
+      setIsDeletingEntry(false);
+    }
   }
 
   async function continueEntry(entry: TimeEntryRow) {
@@ -302,31 +327,29 @@ export function EntriesTable({
                   </td>
                   <td className="px-3 py-3">
                     <div className="flex gap-2">
-                      <button
-                        className="fill-icon-action focus-ring min-h-11 min-w-11 p-2 hover:text-[var(--accent-text)]"
-                        type="button"
+                      <IconButton
                         disabled={isPending || Boolean(continuingEntryId)}
-                        aria-label={`Start ${timeEntryTitle(entry)} again`}
+                        label={`Start ${timeEntryTitle(entry)} again`}
                         onClick={() => continueEntry(entry)}
                       >
                         <Play size={15} fill="currentColor" strokeWidth={0} />
-                      </button>
-                      <button
-                        className="fill-icon-action focus-ring min-h-11 min-w-11 p-2 hover:text-[var(--accent-text)]"
-                        type="button"
-                        aria-label="Edit entry"
+                      </IconButton>
+                      <IconButton
+                        label="Edit entry"
                         onClick={() => setEditingEntry(entry)}
                       >
                         <Pencil size={15} />
-                      </button>
-                      <button
-                        className="fill-icon-action fill-icon-danger focus-ring min-h-11 min-w-11 p-2"
-                        type="button"
-                        aria-label="Delete entry"
-                        onClick={() => remove(entry.id)}
+                      </IconButton>
+                      <IconButton
+                        label="Delete entry"
+                        variant="danger"
+                        onClick={() => {
+                          setDeleteError(null);
+                          setPendingDeleteEntry(entry);
+                        }}
                       >
                         <Trash2 size={15} />
-                      </button>
+                      </IconButton>
                     </div>
                   </td>
                 </tr>
@@ -349,6 +372,17 @@ export function EntriesTable({
           }}
           places={places}
           tags={tags}
+        />
+      ) : null}
+      {pendingDeleteEntry ? (
+        <DestructiveConfirmationDialog
+          body={`“${timeEntryTitle(pendingDeleteEntry)}” will be permanently removed.`}
+          dialogId="delete-time-entry"
+          error={deleteError}
+          isBusy={isDeletingEntry || isPending}
+          onCancel={() => setPendingDeleteEntry(null)}
+          onConfirm={() => void remove(pendingDeleteEntry.id)}
+          title="Delete time entry?"
         />
       ) : null}
     </section>

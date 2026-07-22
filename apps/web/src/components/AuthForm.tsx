@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
+import { Button, Field, IconButton, TextField } from "@/components/ui/Primitives";
 
 type AuthMode = "login" | "signup";
 
@@ -58,57 +59,38 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
       <form action={submit} className="grid gap-4 p-5">
         {isSignup ? (
           <>
-            <label className="grid gap-2 text-sm font-medium">
-              Name
-              <input
-                className="industrial-field"
-                name="name"
-                autoComplete="name"
-                placeholder="Your name"
-              />
-            </label>
-            <label className="grid gap-2 text-sm font-medium">
-              Workspace
-              <input
-                className="industrial-field"
-                name="workspaceName"
-                autoComplete="organization"
-                placeholder="Personal workspace"
-              />
-            </label>
+            <TextField id="auth-name" label="Name" name="name" autoComplete="name" placeholder="Your name" />
+            <TextField id="auth-workspace" label="Workspace" name="workspaceName" autoComplete="organization" placeholder="Personal workspace" />
           </>
         ) : null}
-        <label className="grid gap-2 text-sm font-medium">
-          Email
-          <input
-            className="industrial-field"
-            name="email"
-            type="email"
-            autoComplete="email"
-            placeholder="you@example.com"
-            required
-          />
-        </label>
-        <label className="grid gap-2 text-sm font-medium">
-          Password
+        <TextField
+          id="auth-email"
+          label="Email"
+          name="email"
+          type="email"
+          autoComplete="email"
+          placeholder="you@example.com"
+          required
+        />
+        <Field htmlFor="auth-password" label="Password">
           <span className="auth-password-field">
             <input
-              className="industrial-field"
+              className="ui-control"
+              id="auth-password"
               name="password"
               type={showPassword ? "text" : "password"}
               autoComplete={isSignup ? "new-password" : "current-password"}
               minLength={8}
               required
             />
-            <button
-              type="button"
-              aria-label={showPassword ? "Hide password" : "Show password"}
+            <IconButton
+              label={showPassword ? "Hide password" : "Show password"}
               onClick={() => setShowPassword((value) => !value)}
             >
               {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-            </button>
+            </IconButton>
           </span>
-        </label>
+        </Field>
 
         {error ? (
           <p className="border border-[var(--danger)] bg-[var(--surface-inset)] px-3 py-2 text-sm text-[var(--danger-text)]">
@@ -122,13 +104,14 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
           </p>
         ) : null}
 
-        <button
-          className="focus-ring min-h-11 border border-[var(--accent)] bg-[var(--accent)] px-4 py-2 font-semibold text-[var(--on-accent)] disabled:opacity-60"
+        <Button
+          className="w-full"
+          variant="primary"
           type="submit"
           disabled={isSubmitting}
         >
           {isSubmitting ? "Working..." : isSignup ? "Create account" : "Log in"}
-        </button>
+        </Button>
 
         <p className="text-sm text-[var(--muted)]">
           {isSignup ? "Already have an account?" : "New to Dayframe?"}{" "}
