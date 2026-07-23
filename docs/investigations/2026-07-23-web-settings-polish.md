@@ -232,3 +232,8 @@ Places, the timer architecture, and mobile code were not redesigned.
 
 Revert the Phase 6 commits. There is no schema, migration, deployment, or
 production-data rollback.
+
+## Review status
+
+Draft PR #98: <https://github.com/kwabiwe/dayframe/pull/98>. It is intentionally
+unmerged and undeployed.
