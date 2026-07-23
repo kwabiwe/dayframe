@@ -32,6 +32,7 @@ import { Button, IconButton, ModalDialog, PopoverPanel } from "@/components/ui/P
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { timeEntryTitle } from "@/lib/display";
 import { formatDuration, formatTime } from "@/lib/format";
+import { isSearchShortcut, SEARCH_SHORTCUT_LABEL } from "@/lib/keyboard-shortcuts";
 import type { BootstrapData } from "@/lib/queries";
 
 type Overlay = "search" | "profile" | "help" | null;
@@ -48,7 +49,7 @@ const navItems = [
 ];
 
 const shortcuts = [
-  ["Cmd/Ctrl+K", "Open search"],
+  [SEARCH_SHORTCUT_LABEL, "Open search"],
   ["?", "Open Help & Shortcuts"],
   ["Shift+Space", "Start or stop timer"],
   ["N", "Add time block"],
@@ -122,7 +123,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
         return;
       }
       if (isTypingTarget(event.target)) return;
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+      if (isSearchShortcut(event)) {
         event.preventDefault();
         setOverlay("search");
         return;
@@ -176,7 +177,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
           <button type="button" className="swiss-nav-search" onClick={() => setOverlay("search")}>
             <Search size={19} />
             <span>Search</span>
-            <kbd>⌘K</kbd>
+            <kbd>{SEARCH_SHORTCUT_LABEL}</kbd>
           </button>
           {navItems.map((item) => {
             const Icon = item.icon;

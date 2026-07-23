@@ -208,7 +208,7 @@ export function InlineTagInput({
 
   return (
     <div className={`inline-tag-editor ${className}`} ref={editorRef}>
-      <div className="inline-tag-input-anchor">
+      <div className="ui-compound-control inline-tag-input-anchor">
         <input
           aria-describedby={`${name}-tag-help`}
           aria-label={ariaLabel}
@@ -303,7 +303,7 @@ export function InlineTagInput({
                 <X aria-hidden="true" size={17} strokeWidth={1.8} />
               </button>
             </div>
-            <div className="inline-tag-picker-search">
+            <div className="ui-compound-control inline-tag-picker-search">
               <TagIcon size={15} />
               <input
                 aria-label="Add or filter tags"

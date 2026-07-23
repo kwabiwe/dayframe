@@ -87,6 +87,13 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 ## Visual System
 
 - Midnight Core is used consistently: midnight-navy dark canvas, designed neutral light canvas, layered surfaces and coral primary/active states.
+- Field-like web controls reserve one stable two-pixel perimeter and change that perimeter colour on keyboard focus; they do not add a second offset outline or shift layout.
+- Compound web fields with nested actions have one wrapper focus owner via `focus-within`. The nested text input has no competing border/outline, while the nested action remains independently keyboard-visible.
+- Standalone buttons, links, icon actions and disclosures retain one visible external focus ring. Focus remains visually distinct from selected, invalid and disabled states; an invalid focused field preserves a non-colour error cue and error copy.
+- Shared web control height, icon target, radius, inline padding, field gap, layout gap, panel/dialog padding and table-cell padding come from the existing web foundation tokens rather than route-local near-duplicates.
+- Web shortcut copy is platform-neutral (`Ctrl/⌘ K`) and both Control-K and Command-K open Search only when the user is not typing in an input, textarea, select or editable surface.
+- A shared web visual-foundation change receives a route-by-route desktop and phone audit across both themes, including text containment, padding alignment, focus clipping, horizontal overflow and runtime overlays.
+- Source/contract tests guard ownership and tokens but do not replace actual-browser alignment, padding, keyboard and responsive validation.
 - Stable palette keys and legacy HEX compatibility are preserved while all 12 Midnight Core display colours remain perceptually distinct and are used consistently for category, calendar and report data.
 - Light and dark themes apply across backgrounds, text, borders, controls, icons, panels, and time blocks.
 - Outer and inner panels, popovers, tables, color swatches, and floating dialogs have consistent rounded corners.

@@ -35,6 +35,8 @@ Use this when implementing visual UI.
 - Use coral for primary action and active state, `danger` for destructive action and category colours for data identity.
 - Pair category colours with labels, dots, rails or borders. Never rely on colour alone or assume a palette colour is accessible body text.
 - Use a 44 px/pt minimum interactive target and visible focus/selected states. Both platforms should prefer fill, spacing, and hairline dividers over default outlines; retain lines for focus, validation, essential control boundaries, calendar grids and semantic data structure.
+- On web, field-like controls reserve one stable 2 px perimeter and change its colour in place for `:focus-visible`; standalone actions keep one external 2 px focus ring. A field must never show both.
+- A compound web field owns its perimeter on the wrapper with `:focus-within`. Nested inputs suppress their own border/outline, and nested actions keep a separate inset keyboard indicator.
 - Use `surfaceInset` for inputs, `surfaceRaised` for floating surfaces and `chartTrack` behind chart data.
 - Calendar grid lines use hairline dividers; category colour remains a data cue on softly filled blocks, while readable labels use semantic text roles. Zoom must not change the visual design language or introduce a second native-only palette.
 - Disabled controls retain readable labels and an obvious unavailable state; do not fade the whole control to near invisibility.
@@ -76,5 +78,6 @@ Use this when implementing visual UI.
 - [ ] Brand artwork has one accessible name or is fully decorative.
 - [ ] No legacy PNG banner or unintended white logo rectangle remains in primary branding.
 - [ ] Focus, text, icon, border and chart contrast remain legible in System, Light and Dark modes.
+- [ ] Field focus has one owner, does not shift layout or clip at container edges, and remains distinct from selected, invalid and disabled states.
 - [ ] Mobile dashboard excludes sync/logout/permission clutter from primary chrome.
 - [ ] New or changed movement has a documented motion contract and consistent entrance/update/exit behaviour, including Reduce Motion.

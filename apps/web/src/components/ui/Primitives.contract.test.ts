@@ -26,10 +26,11 @@ describe("web UI foundation contracts", () => {
     expect(primitiveSource).toContain('aria-modal="true"');
   });
 
-  it("keeps icon actions centred in an accessible 44-pixel target", () => {
+  it("keeps icon actions centred in the shared accessible target", () => {
     expect(primitiveSource).toContain("label: string");
     expect(primitiveSource).toContain("aria-label={label}");
-    expect(globalStyles).toMatch(/\.ui-icon-button \{[^}]*display: inline-grid;[^}]*width: 44px;[^}]*height: 44px;[^}]*place-items: center;[^}]*padding: 0;[^}]*line-height: 0;/s);
+    expect(globalStyles).toMatch(/--web-icon-button-size: 44px;/);
+    expect(globalStyles).toMatch(/\.ui-icon-button \{[^}]*display: inline-grid;[^}]*width: var\(--web-icon-button-size\);[^}]*height: var\(--web-icon-button-size\);[^}]*place-items: center;[^}]*padding: 0;[^}]*line-height: 0;/s);
   });
 
   it("exposes disclosure state and supports explicit keyboard activation", () => {
@@ -38,10 +39,13 @@ describe("web UI foundation contracts", () => {
     expect(primitiveSource).toContain("setOpen((current) => !current)");
   });
 
-  it("uses a single visible focus ring and a blur-free native backdrop", () => {
+  it("gives fields one in-perimeter focus owner and standalone actions one external ring", () => {
+    expect(globalStyles).toContain("--web-control-border-width: 2px;");
+    expect(globalStyles).toContain("border-color: var(--web-focus-border);");
+    expect(globalStyles).toMatch(/\.ui-compound-control:focus-within \{[^}]*border-color: var\(--web-focus-border\);/s);
+    expect(globalStyles).toMatch(/\.ui-compound-control > input \{[^}]*border: 0;[^}]*outline: 0;/s);
     expect(globalStyles).toContain("outline: 2px solid var(--focus);");
     expect(globalStyles).toContain("outline-offset: 2px;");
-    expect(globalStyles).toContain("box-shadow: none;");
     expect(globalStyles).toMatch(/dialog\.ui-dialog::backdrop \{[^}]*backdrop-filter: none;/s);
     expect(globalStyles).not.toContain("swiss-modal-backdrop");
     expect(globalStyles).not.toContain("swiss-dialog-backdrop");

@@ -128,7 +128,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
           onChange={(event) => setEmail(event.target.value)}
         />
         <Field htmlFor="auth-password" label="Password">
-          <span className="auth-password-field">
+          <span className="ui-compound-control auth-password-field">
             <input
               className="ui-control"
               id="auth-password"

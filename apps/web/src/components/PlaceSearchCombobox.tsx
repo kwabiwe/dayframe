@@ -86,7 +86,7 @@ export function PlaceSearchCombobox({
   return (
     <div className="place-search">
       <label className="place-search-label" htmlFor={`${listboxId}-input`}>Address or place</label>
-      <div className="place-search-control">
+      <div className="ui-compound-control place-search-control">
         <Search aria-hidden="true" size={18} />
         <input
           ref={inputRef}
