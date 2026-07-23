@@ -11,6 +11,8 @@ Provide these values from Supabase and Vercel when you want the hosted deploymen
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`: legacy Supabase anon JWT fallback if your project still uses legacy API keys.
 - `DATABASE_URL`: Supabase Postgres pooled connection string. Use the pooler URL as provided by Supabase; do not add an SSL-mode query parameter if that prevents the Vercel deployment from connecting.
 - `DAYFRAME_ALLOWED_SIGNUP_EMAILS`: comma-separated emails allowed to create accounts.
+- `GEOAPIFY_API_KEY`: server-only Geoapify key used by the authenticated web
+  place-search route. Never expose it through a `NEXT_PUBLIC_` variable.
 - `EXPO_PUBLIC_DAYFRAME_API_BASE`: hosted Vercel URL for mobile builds.
 
 Do not paste the Supabase service-role key into chat unless an admin-only backend task explicitly needs it. The current app does not need it for login/signup.
@@ -37,6 +39,7 @@ NEXT_PUBLIC_SUPABASE_URL=...
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
 DAYFRAME_ALLOWED_SIGNUP_EMAILS=you@example.com,friend@example.com
 DAYFRAME_SIGNUPS_ENABLED=false
+GEOAPIFY_API_KEY=...
 ```
 
 If your Supabase project still uses legacy API keys, `NEXT_PUBLIC_SUPABASE_ANON_KEY` also works. Prefer the publishable key for new Supabase projects.
@@ -48,6 +51,25 @@ Optional integration tokens:
 ```bash
 DAYFRAME_INGEST_TOKEN=...
 ```
+
+## Web Place Search
+
+For local development, create a Geoapify project/key and set
+`GEOAPIFY_API_KEY` in the repository `.env`. The browser calls Dayframe's
+authenticated `/api/place-search` route; only that server route calls
+Geoapify. Do not add `NEXT_PUBLIC_GEOAPIFY_API_KEY`, print the key, include it
+in screenshots, or send it in a response payload.
+
+Add `GEOAPIFY_API_KEY` separately to both Vercel Preview and Production
+environments. Adding or changing an environment variable only affects new
+deployments, so redeploy the relevant Preview or Production deployment
+afterwards. A preview without the key remains usable: search reports a
+friendly unavailable state and the editor still supports Current location and
+Advanced coordinates.
+
+Geoapify search results must retain visible Geoapify and OpenStreetMap
+attribution. If a MapLibre style is configured, its tile/provider attribution
+must also remain visible.
 
 ## Auth Model
 

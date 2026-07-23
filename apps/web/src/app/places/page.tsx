@@ -1,5 +1,7 @@
+import Link from "next/link";
+import { Plus } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
-import { EntityForms } from "@/components/EntityForms";
+import { PlacesManager } from "@/components/PlacesManager";
 import { resolvePageSession } from "@/lib/auth/server";
 import { getBootstrapData } from "@/lib/queries";
 
@@ -13,16 +15,16 @@ export default async function PlacesPage() {
     <>
       <PageHeader
         title="Places"
-        description="Create known places, tune radius and priority, and set default category and activity suggestions."
+        description="Save locations and choose whether detected visits should appear in Review."
+        action={(
+          <Link className="ui-button ui-button-primary" href="/places/new">
+            <Plus aria-hidden="true" size={17} />
+            Add place
+          </Link>
+        )}
       />
-      <div className="px-5 py-6 md:px-8">
-        <EntityForms
-          mode="places"
-          categories={data.categories}
-          learnedPlaces={data.learnedPlaces}
-          places={data.places}
-          automationRules={data.automationRules}
-        />
+      <div className="px-5 pb-8 md:px-8">
+        <PlacesManager learnedPlaces={data.learnedPlaces} places={data.places} />
       </div>
     </>
   );
