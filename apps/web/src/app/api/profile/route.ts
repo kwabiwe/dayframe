@@ -22,6 +22,14 @@ export async function PATCH(request: Request) {
     const dailyGoalMinutes = body.dailyGoalMinutes;
     const weeklyGoalMinutes = body.weeklyGoalMinutes;
 
+    if (body.name !== undefined && !name) {
+      return NextResponse.json({ error: "Enter your name." }, { status: 400 });
+    }
+
+    if (body.workspaceName !== undefined && !workspaceName) {
+      return NextResponse.json({ error: "Enter a workspace name." }, { status: 400 });
+    }
+
     if (
       (dailyGoalMinutes !== undefined && (!Number.isInteger(dailyGoalMinutes) || dailyGoalMinutes < 1 || dailyGoalMinutes > 1440)) ||
       (weeklyGoalMinutes !== undefined && (!Number.isInteger(weeklyGoalMinutes) || weeklyGoalMinutes < 1 || weeklyGoalMinutes > 10080))
@@ -30,6 +38,12 @@ export async function PATCH(request: Request) {
     }
 
     if (newPassword) {
+      if (session.authMode !== "local") {
+        return NextResponse.json(
+          { error: "Password changes are available only for local sign-in." },
+          { status: 400 }
+        );
+      }
       if (newPassword.length < 8) {
         return NextResponse.json(
           { error: "New password must be at least 8 characters." },

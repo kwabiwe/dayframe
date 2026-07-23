@@ -1,54 +1,145 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { Button, SettingsRow } from "@/components/ui/Primitives";
+import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { clientFetch } from "@/lib/client-auth-fetch";
+import { durationPartsToMinutes, durationToParts } from "@/lib/goal-duration";
 
 export function GoalSettings({ dailyGoalMinutes, weeklyGoalMinutes }: { dailyGoalMinutes: number; weeklyGoalMinutes: number }) {
-  const [daily, setDaily] = useState(String(dailyGoalMinutes / 60));
-  const [weekly, setWeekly] = useState(String(weeklyGoalMinutes / 60));
+  const router = useRouter();
+  const { refresh } = useAppShellRuntime();
+  const dailyInitial = durationToParts(dailyGoalMinutes);
+  const weeklyInitial = durationToParts(weeklyGoalMinutes);
+  const [dailyHours, setDailyHours] = useState(String(dailyInitial.hours));
+  const [dailyMinutes, setDailyMinutes] = useState(String(dailyInitial.minutes));
+  const [weeklyHours, setWeeklyHours] = useState(String(weeklyInitial.hours));
+  const [weeklyMinutes, setWeeklyMinutes] = useState(String(weeklyInitial.minutes));
   const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
-    const dailyMinutes = Math.round(Number(daily) * 60);
-    const weeklyMinutes = Math.round(Number(weekly) * 60);
-    if (!Number.isFinite(dailyMinutes) || !Number.isFinite(weeklyMinutes)) {
-      setMessage("Enter valid goal hours.");
+    const nextDaily = durationPartsToMinutes(dailyHours, dailyMinutes, 1440);
+    const nextWeekly = durationPartsToMinutes(weeklyHours, weeklyMinutes, 10080);
+    if (nextDaily === null || nextWeekly === null) {
+      setError("Enter whole hours and minutes. Daily goals can be up to 24 hours and weekly goals up to 168 hours.");
+      setMessage(null);
       return;
     }
     setSaving(true);
     setMessage(null);
-    const response = await clientFetch("/api/profile", {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ dailyGoalMinutes: dailyMinutes, weeklyGoalMinutes: weeklyMinutes })
-    });
-    const payload = (await response.json()) as { error?: string };
-    setSaving(false);
-    setMessage(response.ok ? "Goals saved." : payload.error ?? "Unable to save goals.");
+    setError(null);
+    try {
+      const response = await clientFetch("/api/profile", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dailyGoalMinutes: nextDaily, weeklyGoalMinutes: nextWeekly })
+      });
+      if (!response.ok) {
+        setError("Unable to save your time goals. Check the values and try again.");
+        return;
+      }
+      setMessage("Time goals saved.");
+      await refresh({ force: true });
+      router.refresh();
+    } catch {
+      setError("Unable to save your time goals. Check your connection and try again.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
-    <section className="industrial-panel">
-      <div className="border-b border-[var(--line)] px-4 py-3">
-        <h2 className="text-lg font-semibold">Time goals</h2>
-        <p className="mt-1 text-sm text-[var(--muted)]">Used for daily and weekly progress across Dayframe.</p>
-      </div>
-      <form className="grid gap-4 p-4 md:grid-cols-2" onSubmit={save}>
-        <label className="industrial-field grid gap-2 p-3 text-sm">
-          <span className="font-medium">Daily goal (hours)</span>
-          <input type="number" min="0.25" max="24" step="0.25" value={daily} onChange={(event) => setDaily(event.target.value)} />
-        </label>
-        <label className="industrial-field grid gap-2 p-3 text-sm">
-          <span className="font-medium">Weekly goal (hours)</span>
-          <input type="number" min="0.25" max="168" step="0.25" value={weekly} onChange={(event) => setWeekly(event.target.value)} />
-        </label>
-        <div className="flex items-center gap-3 md:col-span-2">
-          <button className="industrial-button-primary" disabled={saving} type="submit">{saving ? "Saving…" : "Save goals"}</button>
-          {message ? <p className="text-sm text-[var(--muted)]" role="status">{message}</p> : null}
-        </div>
-      </form>
-    </section>
+    <SettingsRow
+      className="settings-goals-row"
+      label="Time goals"
+      detail="Used for daily and weekly progress."
+      action={
+        <form className="settings-goal-control" noValidate onSubmit={save}>
+          <DurationControl
+            id="daily-goal"
+            label="Daily goal"
+            hours={dailyHours}
+            minutes={dailyMinutes}
+            maxHours={24}
+            onHoursChange={setDailyHours}
+            onMinutesChange={setDailyMinutes}
+          />
+          <DurationControl
+            id="weekly-goal"
+            label="Weekly goal"
+            hours={weeklyHours}
+            minutes={weeklyMinutes}
+            maxHours={168}
+            onHoursChange={setWeeklyHours}
+            onMinutesChange={setWeeklyMinutes}
+          />
+          <div className="settings-save-row">
+            <Button variant="primary" compact disabled={saving} type="submit">
+              {saving ? "Saving…" : "Save goals"}
+            </Button>
+            {message ? <p className="settings-feedback" role="status">{message}</p> : null}
+            {error ? <p className="settings-feedback is-error" role="alert">{error}</p> : null}
+          </div>
+        </form>
+      }
+    />
+  );
+}
+
+function DurationControl({
+  hours,
+  id,
+  label,
+  maxHours,
+  minutes,
+  onHoursChange,
+  onMinutesChange
+}: {
+  hours: string;
+  id: string;
+  label: string;
+  maxHours: number;
+  minutes: string;
+  onHoursChange: (value: string) => void;
+  onMinutesChange: (value: string) => void;
+}) {
+  return (
+    <fieldset className="settings-duration-control">
+      <legend>{label}</legend>
+      <label htmlFor={`${id}-hours`}>
+        <input
+          id={`${id}-hours`}
+          aria-label={`${label} hours`}
+          className="ui-control tabular"
+          inputMode="numeric"
+          max={maxHours}
+          min={0}
+          step={1}
+          type="number"
+          value={hours}
+          onChange={(event) => onHoursChange(event.target.value)}
+        />
+        <span>h</span>
+      </label>
+      <label htmlFor={`${id}-minutes`}>
+        <input
+          id={`${id}-minutes`}
+          aria-label={`${label} minutes`}
+          className="ui-control tabular"
+          inputMode="numeric"
+          max={59}
+          min={0}
+          step={1}
+          type="number"
+          value={minutes}
+          onChange={(event) => onMinutesChange(event.target.value)}
+        />
+        <span>min</span>
+      </label>
+    </fieldset>
   );
 }

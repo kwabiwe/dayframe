@@ -2,26 +2,24 @@
 
 import { useSyncExternalStore } from "react";
 import { Monitor, Moon, Sun } from "lucide-react";
+import { SegmentedControl, SettingsRow } from "@/components/ui/Primitives";
 
 type ThemeChoice = "system" | "light" | "dark";
 
-const choices: Array<{ value: ThemeChoice; label: string; description: string; icon: React.ReactNode }> = [
+const choices: Array<{ value: ThemeChoice; label: string; icon: React.ReactNode }> = [
   {
     value: "system",
     label: "System",
-    description: "Follow the browser and operating system setting.",
     icon: <Monitor size={16} />
   },
   {
     value: "light",
     label: "Light",
-    description: "Use the light workspace theme on this browser.",
     icon: <Sun size={16} />
   },
   {
     value: "dark",
     label: "Dark",
-    description: "Use the dark workspace theme on this browser.",
     icon: <Moon size={16} />
   }
 ];
@@ -41,36 +39,21 @@ export function ThemeSettings() {
   }
 
   return (
-    <section className="industrial-panel" id="appearance">
-      <div className="border-b border-[var(--line)] px-4 py-3">
-        <h2 className="text-lg font-semibold">Theme</h2>
-      </div>
-      <div className="grid gap-3 p-4 md:grid-cols-3">
-        {choices.map((item) => {
-          const selected = item.value === choice;
-          return (
-            <button
-              key={item.value}
-              type="button"
-              className={[
-                "theme-choice-card focus-ring flex min-h-[104px] flex-col items-start gap-3 p-4 text-left",
-                selected
-                  ? "is-selected text-[var(--accent-text)]"
-                  : "text-[var(--foreground)]"
-              ].join(" ")}
-              aria-pressed={selected}
-              onClick={() => updateTheme(item.value)}
-            >
-              <span className="flex items-center gap-2 font-semibold">
-                {item.icon}
-                {item.label}
-              </span>
-              <span className="text-xs leading-5 text-[var(--muted)]">{item.description}</span>
-            </button>
-          );
-        })}
-      </div>
-    </section>
+    <SettingsRow
+      className="settings-appearance-row"
+      label="Appearance"
+      detail={choice === "system"
+        ? "Follows your browser and operating system."
+        : `Uses Dayframe’s ${choice} appearance on this browser.`}
+      action={(
+        <SegmentedControl
+          ariaLabel="Appearance"
+          options={choices}
+          value={choice}
+          onChange={updateTheme}
+        />
+      )}
+    />
   );
 }
 

@@ -593,6 +593,337 @@ textarea.ui-control {
   font-size: 12px;
 }
 
+.ui-settings-row-action {
+  min-width: 0;
+  justify-self: end;
+}
+
+.settings-page {
+  display: grid;
+  width: min(100%, 1040px);
+  gap: 28px;
+  padding: 4px 32px 48px;
+}
+
+.settings-section {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+}
+
+.settings-section-header {
+  display: grid;
+  gap: 3px;
+  padding: 0 4px;
+}
+
+.settings-section-header h2,
+.settings-section-header p {
+  margin: 0;
+}
+
+.settings-section-header h2 {
+  color: var(--foreground);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.settings-section-header p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.settings-group {
+  min-width: 0;
+  border-radius: var(--web-radius-group);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.settings-group .ui-settings-row {
+  min-height: 72px;
+  grid-template-columns: 22px minmax(0, 1fr) minmax(260px, auto);
+  padding: 12px 18px;
+}
+
+.settings-group .ui-settings-row:not(.has-icon) {
+  grid-template-columns: minmax(0, 1fr) minmax(260px, auto);
+}
+
+.settings-group .ui-settings-row + .ui-settings-row::before {
+  left: 52px;
+  right: 18px;
+}
+
+.settings-group .ui-settings-row:not(.has-icon) + .ui-settings-row:not(.has-icon)::before {
+  left: 18px;
+}
+
+.settings-group .ui-settings-row > svg {
+  align-self: start;
+  margin-top: 3px;
+  color: var(--accent-text);
+}
+
+.settings-group .ui-settings-row > div:nth-of-type(1) > strong {
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.settings-group .ui-settings-row > div:nth-of-type(1) > span {
+  max-width: 42rem;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.settings-appearance-row .ui-settings-row-action {
+  width: min(100%, 370px);
+}
+
+.settings-appearance-row .ui-segmented-control {
+  width: 100%;
+}
+
+.settings-goal-control {
+  display: grid;
+  min-width: min(100%, 440px);
+  grid-template-columns: repeat(2, minmax(172px, 1fr));
+  gap: 10px 14px;
+}
+
+.settings-duration-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.settings-duration-control legend {
+  grid-column: 1 / -1;
+  margin-bottom: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.settings-duration-control label {
+  display: grid;
+  grid-template-columns: 58px auto;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.settings-duration-control .ui-control {
+  width: 58px;
+  padding: 0 8px;
+  text-align: center;
+}
+
+.settings-save-row {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.settings-feedback,
+.settings-section-feedback {
+  margin: 0;
+  color: var(--success);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.settings-feedback.is-error,
+.settings-section-feedback.is-error {
+  color: var(--danger-text);
+}
+
+.settings-section-feedback {
+  border-top: 1px solid var(--line);
+  padding: 10px 18px;
+}
+
+.settings-inline-form,
+.settings-security-form {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.settings-inline-form .ui-control.is-compact {
+  width: min(240px, 100%);
+  max-width: none;
+}
+
+.settings-workspace-actions {
+  display: grid;
+  min-width: min(100%, 520px);
+  justify-items: end;
+  gap: 12px;
+}
+
+.settings-workspace-switcher,
+.settings-export-actions,
+.settings-troubleshooting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.settings-workspace-switcher button {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-inset);
+  padding: 0 14px;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-workspace-switcher button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.settings-security-form {
+  max-width: 600px;
+}
+
+.settings-security-form .ui-field {
+  flex: 1 1 140px;
+}
+
+.settings-security-form .ui-control.is-compact {
+  width: 100%;
+  max-width: none;
+}
+
+.settings-export-actions .ui-button {
+  min-width: 0;
+}
+
+.settings-confirm-copy,
+.settings-troubleshooting-copy {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+}
+
+.settings-confirm-copy p,
+.settings-troubleshooting-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.settings-troubleshooting-actions {
+  justify-content: flex-start;
+}
+
+.settings-section > .ui-disclosure {
+  border-radius: var(--web-radius-group);
+  background: var(--surface);
+}
+
+.settings-section > .ui-disclosure summary {
+  min-height: 64px;
+  border-radius: var(--web-radius-group);
+  padding-inline: 18px;
+}
+
+@media (max-width: 760px) {
+  .settings-page {
+    gap: 22px;
+    padding: 4px 12px 36px;
+  }
+
+  .settings-group .ui-settings-row,
+  .settings-group .ui-settings-row:not(.has-icon) {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    padding: 14px 16px;
+  }
+
+  .settings-group .ui-settings-row.has-icon {
+    grid-template-columns: 22px minmax(0, 1fr);
+  }
+
+  .settings-group .ui-settings-row.has-icon > .ui-settings-row-action {
+    grid-column: 1 / -1;
+  }
+
+  .settings-group .ui-settings-row + .ui-settings-row::before,
+  .settings-group .ui-settings-row:not(.has-icon) + .ui-settings-row:not(.has-icon)::before {
+    left: 16px;
+    right: 16px;
+  }
+
+  .settings-group .ui-settings-row-action {
+    width: 100%;
+    justify-self: stretch;
+  }
+
+  .settings-goal-control {
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-save-row {
+    grid-column: 1;
+  }
+
+  .settings-inline-form,
+  .settings-security-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    justify-content: stretch;
+  }
+
+  .settings-inline-form .ui-control.is-compact {
+    width: 100%;
+  }
+
+  .settings-inline-form .ui-button,
+  .settings-security-form .ui-button {
+    width: 100%;
+  }
+
+  .settings-workspace-actions {
+    min-width: 0;
+    justify-items: stretch;
+  }
+
+  .settings-workspace-switcher,
+  .settings-export-actions {
+    justify-content: flex-start;
+  }
+
+  .settings-export-actions .ui-button {
+    flex: 1 1 140px;
+  }
+}
+
 .ui-icon-label {
   display: inline-flex;
   align-items: center;
@@ -992,7 +1323,11 @@ dialog.ui-popover-panel.bottom-left {
 
 .swiss-mobile-account-button {
   display: none;
+  width: 44px;
+  height: 44px;
+  place-items: center;
   border: 0;
+  border-radius: 999px;
   background: transparent;
   padding: 0;
 }
@@ -2806,23 +3141,6 @@ dialog.ui-popover-panel.bottom-left {
 .swiss-profile-summary small {
   color: var(--muted);
   font-size: 12px;
-}
-
-.swiss-password-fields {
-  display: grid;
-  gap: 12px;
-  margin: 4px 0 0;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--surface-inset);
-  padding: 12px;
-}
-
-.swiss-password-fields legend {
-  padding: 0 6px;
-  color: var(--foreground);
-  font-size: 12px;
-  font-weight: 800;
 }
 
 .swiss-form-message {
@@ -6086,25 +6404,10 @@ kbd {
   border-radius: 5px;
 }
 
-.theme-choice-card {
-  border: 0;
-  border-radius: var(--web-radius-control);
-  background: var(--surface-inset);
-}
-
-.theme-choice-card:hover {
-  background: var(--surface-muted);
-}
-
-.theme-choice-card.is-selected {
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface-inset));
-}
-
 .swiss-menu-action {
   min-height: var(--web-text-action-height);
 }
 
-.swiss-password-fields,
 .swiss-form-message {
   border: 0;
   border-radius: var(--web-radius-control);
