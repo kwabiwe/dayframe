@@ -1,9 +1,10 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import type { BootstrapData } from "@/lib/queries";
+import { timelineStateFromSearchParams } from "@/lib/timeline-view";
 import {
   applyOptimisticActiveEntryPatch,
   applyOptimisticTimerStart,
@@ -15,6 +16,7 @@ import {
 } from "@/lib/timer-runtime";
 
 type MutationOutcome = { ok: true } | { ok: false; error: string };
+type DateLoadOutcome = { ok: true } | { ok: false; error: string };
 
 type ManualEntryInput = {
   categoryId?: string;
@@ -25,13 +27,17 @@ type ManualEntryInput = {
 };
 
 type RuntimeContext = {
+  clearDateLoadError: () => void;
   clearTimerError: () => void;
   closeManualEntry: () => void;
   createManualEntry: (input: ManualEntryInput) => Promise<MutationOutcome>;
   data: BootstrapData | null;
+  dateLoadError: string | null;
   hydrate: (data: BootstrapData) => void;
+  isDateLoading: boolean;
   isManualEntryOpen: boolean;
   isTimerBusy: boolean;
+  loadDate: (date: string) => Promise<DateLoadOutcome>;
   openManualEntry: () => void;
   refresh: (options?: { force?: boolean }) => Promise<BootstrapData | null>;
   selectedDate: string;
@@ -47,24 +53,42 @@ type RuntimeContext = {
 
 const AppShellRuntimeContext = createContext<RuntimeContext | null>(null);
 export const BOOTSTRAP_RECONCILE_INTERVAL_MS = 30_000;
+export const BOOTSTRAP_FOCUS_RECONCILE_MIN_AGE_MS = 10_000;
+export const DATE_DATA_CACHE_LIMIT = 8;
 
 export function AppShellRuntimeProvider({ children }: { children: React.ReactNode }) {
   const searchParams = useSearchParams();
-  const selectedDate = searchParams.get("date") ?? dateKey(new Date());
+  const selectedDate = timelineStateFromSearchParams(searchParams).date;
   const [data, setData] = useState<BootstrapData | null>(null);
   const [timerDraft, setTimerDraftState] = useState<TimerDraft>(() => timerDraftForEntry(null));
   const [isTimerBusy, setIsTimerBusy] = useState(false);
   const [timerError, setTimerError] = useState<string | null>(null);
+  const [isDateLoading, setIsDateLoading] = useState(false);
+  const [dateLoadError, setDateLoadError] = useState<string | null>(null);
   const [isManualEntryOpen, setIsManualEntryOpen] = useState(false);
   const dataRef = useRef<BootstrapData | null>(null);
+  const dateDataCacheRef = useRef(new Map<string, BootstrapData>());
   const draftRef = useRef(timerDraft);
   const activeEntryIdRef = useRef<string | null>(null);
   const refreshRequestRef = useRef(0);
+  const dateLoadRequestRef = useRef(0);
+  const isDateLoadingRef = useRef(false);
   const optimisticIdRef = useRef(0);
+  const lastCommitAtRef = useRef(0);
   const mutationGateRef = useRef(createTimerMutationGate());
 
   const commitData = useCallback((nextData: BootstrapData | null) => {
     dataRef.current = nextData;
+    lastCommitAtRef.current = nextData ? Date.now() : 0;
+    if (nextData) {
+      dateDataCacheRef.current.delete(nextData.dateRange.selectedDate);
+      dateDataCacheRef.current.set(nextData.dateRange.selectedDate, nextData);
+      while (dateDataCacheRef.current.size > DATE_DATA_CACHE_LIMIT) {
+        const oldestDate = dateDataCacheRef.current.keys().next().value as string | undefined;
+        if (!oldestDate) break;
+        dateDataCacheRef.current.delete(oldestDate);
+      }
+    }
     setData(nextData);
   }, []);
 
@@ -97,13 +121,68 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     }
   }, [commitData, selectedDate]);
 
+  const loadDate = useCallback(async (date: string): Promise<DateLoadOutcome> => {
+    const cached = dateDataCacheRef.current.get(date);
+    if (cached) {
+      setDateLoadError(null);
+      commitData(withCurrentSharedBootstrap(cached, dataRef.current));
+      return { ok: true };
+    }
+    if (isDateLoadingRef.current) {
+      return { ok: false, error: "A period is already loading." };
+    }
+
+    refreshRequestRef.current += 1;
+    const requestId = ++dateLoadRequestRef.current;
+    isDateLoadingRef.current = true;
+    setIsDateLoading(true);
+    setDateLoadError(null);
+    try {
+      const response = await clientFetch(`/api/bootstrap?date=${date}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`Unable to load period: ${response.status}`);
+      const payload = (await response.json()) as BootstrapData;
+      if (requestId !== dateLoadRequestRef.current || payload.dateRange.selectedDate !== date) {
+        throw new Error("The period response did not match the requested date.");
+      }
+      commitData(payload);
+      return { ok: true };
+    } catch {
+      const error = "Couldn’t load that period. Your current view is unchanged.";
+      setDateLoadError(error);
+      return { ok: false, error };
+    } finally {
+      if (requestId === dateLoadRequestRef.current) {
+        isDateLoadingRef.current = false;
+        setIsDateLoading(false);
+      }
+    }
+  }, [commitData]);
+
+  useLayoutEffect(() => {
+    const cached = dateDataCacheRef.current.get(selectedDate);
+    if (!cached) return;
+    setDateLoadError(null);
+    if (dataRef.current?.dateRange.selectedDate !== selectedDate) {
+      commitData(withCurrentSharedBootstrap(cached, dataRef.current));
+    }
+  }, [commitData, selectedDate]);
+
   useEffect(() => {
-    const initialRefresh = window.setTimeout(() => void refresh(), 0);
+    const initialRefresh = window.setTimeout(() => {
+      if (
+        !dateDataCacheRef.current.has(selectedDate) &&
+        dataRef.current?.dateRange.selectedDate !== selectedDate
+      ) {
+        void refresh();
+      }
+    }, 0);
     const reconcileIfVisible = () => {
       if (document.visibilityState === "visible") void refresh();
     };
     const interval = window.setInterval(reconcileIfVisible, BOOTSTRAP_RECONCILE_INTERVAL_MS);
-    const handleFocus = () => void refresh();
+    const handleFocus = () => {
+      if (Date.now() - lastCommitAtRef.current >= BOOTSTRAP_FOCUS_RECONCILE_MIN_AGE_MS) void refresh();
+    };
     const handleVisibilityChange = () => reconcileIfVisible();
     window.addEventListener("focus", handleFocus);
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -113,7 +192,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       window.removeEventListener("focus", handleFocus);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [refresh]);
+  }, [commitData, refresh, selectedDate]);
 
   const hydrate = useCallback((nextData: BootstrapData) => {
     if (mutationGateRef.current.isActive()) return;
@@ -306,14 +385,20 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     dataRef.current?.activeEntry ? stopTimer() : startTimer()
   ), [startTimer, stopTimer]);
 
+  const selectedData = data?.dateRange.selectedDate === selectedDate ? data : null;
+
   const value = useMemo<RuntimeContext>(() => ({
+    clearDateLoadError: () => setDateLoadError(null),
     clearTimerError: () => setTimerError(null),
     closeManualEntry: () => setIsManualEntryOpen(false),
     createManualEntry,
-    data,
+    data: selectedData,
+    dateLoadError,
     hydrate,
+    isDateLoading,
     isManualEntryOpen,
     isTimerBusy,
+    loadDate,
     openManualEntry: () => setIsManualEntryOpen(true),
     refresh,
     selectedDate,
@@ -327,11 +412,14 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     updateActiveStartTime
   }), [
     createManualEntry,
-    data,
+    dateLoadError,
     hydrate,
+    isDateLoading,
     isManualEntryOpen,
     isTimerBusy,
+    loadDate,
     refresh,
+    selectedData,
     selectedDate,
     setTimerDraft,
     startTimer,
@@ -355,17 +443,44 @@ export function useAppShellRuntime() {
 export function useRuntimePageData(initialData: BootstrapData) {
   const runtime = useAppShellRuntime();
   const { hydrate } = runtime;
-  useEffect(() => {
+  useLayoutEffect(() => {
     hydrate(initialData);
   }, [hydrate, initialData]);
 
   if (
     runtime.data?.workspace.id === initialData.workspace.id &&
-    runtime.data.dateRange.selectedDate === initialData.dateRange.selectedDate
+    runtime.data.dateRange.selectedDate === runtime.selectedDate
   ) {
     return runtime.data;
   }
-  return initialData;
+  if (initialData.dateRange.selectedDate === runtime.selectedDate) return initialData;
+  return runtime.data ?? initialData;
+}
+
+function withCurrentSharedBootstrap(
+  cached: BootstrapData,
+  current: BootstrapData | null
+): BootstrapData {
+  if (!current || current.workspace.id !== cached.workspace.id) return cached;
+  return {
+    ...cached,
+    user: current.user,
+    workspace: current.workspace,
+    workspaces: current.workspaces,
+    clients: current.clients,
+    categories: current.categories,
+    projects: current.projects,
+    tags: current.tags,
+    places: current.places,
+    learnedPlaces: current.learnedPlaces,
+    automationRules: current.automationRules,
+    entries: current.entries,
+    activeEntry: current.activeEntry,
+    reviewItems: current.reviewItems,
+    activityEvents: current.activityEvents,
+    categoryUsage: current.categoryUsage,
+    taskSuggestions: current.taskSuggestions
+  };
 }
 
 function mergeDraft(current: TimerDraft, input: TimerDraftInput): TimerDraft {
@@ -387,12 +502,4 @@ async function responseError(response: Response, fallback: string) {
 
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
-}
-
-function dateKey(date: Date) {
-  return [
-    date.getFullYear(),
-    `${date.getMonth() + 1}`.padStart(2, "0"),
-    `${date.getDate()}`.padStart(2, "0")
-  ].join("-");
 }

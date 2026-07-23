@@ -1,7 +1,13 @@
+import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
 import { TimeReviewViews } from "@/components/TimeReviewViews";
 import { resolvePageSession } from "@/lib/auth/server";
 import { getBootstrapData } from "@/lib/queries";
+import {
+  timelineHref,
+  timelineSearchString,
+  timelineStateFromSearchParams
+} from "@/lib/timeline-view";
 
 export const dynamic = "force-dynamic";
 
@@ -12,8 +18,12 @@ export default async function TimelinePage({
 }) {
   const session = await resolvePageSession();
   const params = searchParams ? await searchParams : {};
-  const date = Array.isArray(params.date) ? params.date[0] : params.date;
-  const data = await getBootstrapData(session, { selectedDate: date });
+  const state = timelineStateFromSearchParams(params);
+  const currentSearch = timelineSearchString(params);
+  const currentHref = currentSearch ? `/timeline?${currentSearch}` : "/timeline";
+  const canonicalHref = timelineHref(params, state);
+  if (currentHref !== canonicalHref) redirect(canonicalHref);
+  const data = await getBootstrapData(session, { selectedDate: state.date });
 
   return (
     <>
@@ -22,7 +32,7 @@ export default async function TimelinePage({
         description="Review time as calendar blocks, grouped entries and a weekly timesheet."
       />
       <div className="space-y-6 px-5 py-6 md:px-8">
-        <TimeReviewViews key={`${data.workspace.id}:${data.dateRange.selectedDate}`} initialData={data} />
+        <TimeReviewViews initialData={data} />
       </div>
     </>
   );

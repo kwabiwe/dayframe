@@ -1,7 +1,7 @@
 "use client";
 
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
-import { useCallback, useMemo, useState, useSyncExternalStore, useTransition } from "react";
+import { useCallback, useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CalendarDays, ChevronLeft, ChevronRight, List, Table2 } from "lucide-react";
 import { calendarBlockContinuationEdges } from "@dayframe/shared";
@@ -9,7 +9,7 @@ import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRun
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import { TagMetadata } from "@/components/TagMetadata";
 import { EntriesTable } from "@/components/EntriesTable";
-import { Disclosure, IconButton, SegmentedControl } from "@/components/ui/Primitives";
+import { Button, Disclosure, IconButton, SegmentedControl } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import {
   timeEntryAccentColor,
@@ -31,15 +31,35 @@ import {
   resizeDragThresholdPx,
   timeBlockDensityClassNames
 } from "@/lib/time-block-display";
-import { timelineSearchWithView, timelineViewFromSearchParams, type TimelineView } from "@/lib/timeline-view";
+import {
+  buildTimelineTimesheetRows,
+  clipTimelineEntries,
+  mergeTimelineEntries,
+  timelineDailyTotals
+} from "@/lib/timeline-calculations";
+import { entryOverlapSeconds } from "@/lib/time-entry-overlap";
+import {
+  resetTimelineState,
+  resolveTimelineRanges,
+  shiftTimelineState,
+  timelineHref,
+  timelineStateFromSearchParams,
+  toTimelineDateKey,
+  type TimelineScope,
+  type TimelineView
+} from "@/lib/timeline-view";
 
-type CalendarMode = "week" | "day";
 type CalendarHoursMode = "fullDay";
 
 const viewItems: Array<{ id: TimelineView; label: string; icon: ReactNode }> = [
   { id: "calendar", label: "Calendar", icon: <CalendarDays size={16} /> },
   { id: "list", label: "List", icon: <List size={16} /> },
   { id: "timesheet", label: "Timesheet", icon: <Table2 size={16} /> }
+];
+
+const scopeItems: Array<{ id: TimelineScope; label: string }> = [
+  { id: "day", label: "Day" },
+  { id: "week", label: "Week" }
 ];
 
 const calendarHourModes: Record<CalendarHoursMode, { label: string; startHour: number; endHour: number }> = {
@@ -62,171 +82,219 @@ type CalendarResizeDraft = {
   stoppedAt: string;
 };
 
-const timelinePreferenceEvent = "dayframe:timeline-preference";
-
-function isCalendarMode(value: string | null): value is CalendarMode {
-  return value === "week" || value === "day";
-}
-
-function readTimelinePreference(key: string) {
-  try {
-    return window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeTimelinePreference(key: string, value: string) {
-  try {
-    window.localStorage.setItem(key, value);
-    window.dispatchEvent(new Event(timelinePreferenceEvent));
-  } catch {
-    // Preference persistence is best-effort; tab switching should still work.
-  }
-}
-
-function subscribeTimelinePreference(callback: () => void) {
-  if (typeof window === "undefined") return () => undefined;
-  window.addEventListener("storage", callback);
-  window.addEventListener(timelinePreferenceEvent, callback);
-  return () => {
-    window.removeEventListener("storage", callback);
-    window.removeEventListener(timelinePreferenceEvent, callback);
-  };
-}
-
-function useTimelinePreference(key: string) {
-  return useSyncExternalStore(
-    subscribeTimelinePreference,
-    () => readTimelinePreference(key),
-    () => null
-  );
-}
-
 export function TimeReviewViews({
   initialData
 }: {
   initialData: BootstrapData;
 }) {
   const data = useRuntimePageData(initialData);
-  const { refresh } = useAppShellRuntime();
-  const router = useRouter();
+  const {
+    clearDateLoadError,
+    dateLoadError,
+    isDateLoading,
+    loadDate,
+    refresh
+  } = useAppShellRuntime();
   const searchParams = useSearchParams();
-  const [calendarModeOverride, setCalendarModeOverride] = useState<CalendarMode | null>(null);
-  const [weekAnchor, setWeekAnchor] = useState(() => startOfWeek(new Date(initialData.dateRange.selectedDate)));
-  const calendarModeStorageKey = `dayframe.timeline.${data.workspace.id}.calendarMode`;
-  const storedCalendarMode = useTimelinePreference(calendarModeStorageKey);
-  const activeView = timelineViewFromSearchParams(searchParams);
-  const calendarMode =
-    calendarModeOverride ?? (isCalendarMode(storedCalendarMode) ? storedCalendarMode : "week");
+  const state = timelineStateFromSearchParams(searchParams);
+  const ranges = resolveTimelineRanges(state);
+  const capturedNow = new Date();
   const calendarHoursMode: CalendarHoursMode = "fullDay";
 
   const refreshData = useCallback(async () => {
     await refresh();
   }, [refresh]);
 
+  async function navigate(overrides: Partial<typeof state>) {
+    const nextState = { ...state, ...overrides };
+    const href = timelineHref(searchParams.toString(), state, nextState);
+    const originSearch = searchParams.toString();
+
+    if (
+      nextState.date === state.date &&
+      nextState.scope === state.scope &&
+      nextState.view === state.view
+    ) {
+      clearDateLoadError();
+      return;
+    }
+
+    if (nextState.date === state.date) {
+      clearDateLoadError();
+      window.history.pushState(null, "", href);
+      return;
+    }
+
+    const outcome = await loadDate(nextState.date);
+    if (!outcome.ok) return;
+    if (window.location.search.slice(1) !== originSearch) return;
+    window.history.pushState(null, "", href);
+  }
+
   function updateView(view: TimelineView) {
-    router.replace(timelineSearchWithView(searchParams.toString(), view), { scroll: false });
+    if (isDateLoading) return;
+    navigate({
+      view,
+      scope: view === "timesheet" ? "week" : state.scope
+    });
   }
 
-  function updateCalendarMode(mode: CalendarMode) {
-    setCalendarModeOverride(mode);
-    writeTimelinePreference(calendarModeStorageKey, mode);
+  function updateScope(scope: TimelineScope) {
+    if (isDateLoading) return;
+    if (state.view === "timesheet" && scope === "day") return;
+    navigate({ scope });
   }
 
-  const weekDays = useMemo(() => getWeekDays(weekAnchor), [weekAnchor]);
-  const weekEntries = useMemo(
-    () => data.entries.filter((entry) => entryOverlapsRange(entry, weekAnchor, addDays(weekAnchor, 7))),
-    [data.entries, weekAnchor]
-  );
-  const weekTotal = weekEntries.reduce((sum, entry) => sum + entryOverlapSeconds(entry, weekAnchor, addDays(weekAnchor, 7)), 0);
+  const dayEntries = clipTimelineEntries(mergeTimelineEntries(
+    data.dayEntries,
+    data.entries,
+    data.activeEntry ? [data.activeEntry] : []
+  ), ranges.day, capturedNow);
+  const weekEntries = clipTimelineEntries(mergeTimelineEntries(
+    data.weekEntries,
+    data.entries,
+    data.activeEntry ? [data.activeEntry] : []
+  ), ranges.week, capturedNow);
+  const activeEntries = state.scope === "day" ? dayEntries : weekEntries;
+  const dayTotal = dayEntries.reduce((sum, entry) => sum + entry.durationSeconds, 0);
+  const weekTotal = weekEntries.reduce((sum, entry) => sum + entry.durationSeconds, 0);
+  const periodLabel = formatTimelinePeriodLabel(state.scope, ranges);
+  const resetLabel = state.scope === "day" ? "Today" : "This week";
+  const todayKey = toTimelineDateKey(new Date());
+  const isCurrentPeriod = state.scope === "day"
+    ? state.date === todayKey
+    : ranges.weekDays.some((day) => toTimelineDateKey(day) === todayKey);
 
   return (
     <section className="space-y-5">
-      <div className="industrial-panel fill-review-toolbar p-4">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex flex-wrap items-center gap-3">
-            <IconButton
-              label="Previous week"
-              onClick={() => setWeekAnchor(addDays(weekAnchor, -7))}
-            >
-              <ChevronLeft size={16} />
-            </IconButton>
-            <div className="fill-date-pill min-w-[220px] px-3 py-2.5">
-              <div className="text-sm font-semibold">This week</div>
-              <div className="tabular mt-1 text-xs text-[var(--muted)]">
-                {formatDate(weekDays[0])} - {formatDate(weekDays[6])}
-              </div>
-            </div>
-            <IconButton
-              label="Next week"
-              onClick={() => setWeekAnchor(addDays(weekAnchor, 7))}
-            >
-              <ChevronRight size={16} />
-            </IconButton>
-            <div className="fill-metric-pill min-h-[59px] px-3 py-2.5 text-sm">
-              <span className="text-[var(--muted)]">Week total </span>
-              <span className="tabular font-semibold">{formatDuration(weekTotal)}</span>
-            </div>
+      <section
+        className="timeline-range-toolbar"
+        aria-busy={isDateLoading}
+        aria-label="Timeline period and view controls"
+      >
+        <div className="timeline-range-navigation">
+          <IconButton
+            disabled={isDateLoading}
+            label={`Previous ${state.scope}`}
+            onClick={() => navigate(shiftTimelineState(state, "previous"))}
+          >
+            <ChevronLeft size={18} />
+          </IconButton>
+          <div className="timeline-period-label" aria-live="polite" aria-atomic="true">
+            <strong>{periodLabel}</strong>
+            <span>{state.scope === "day" ? "Selected day" : "Selected week"}</span>
           </div>
+          <IconButton
+            disabled={isDateLoading}
+            label={`Next ${state.scope}`}
+            onClick={() => navigate(shiftTimelineState(state, "next"))}
+          >
+            <ChevronRight size={18} />
+          </IconButton>
+          {!isCurrentPeriod ? (
+            <Button compact disabled={isDateLoading} onClick={() => navigate(resetTimelineState(state))}>
+              {resetLabel}
+            </Button>
+          ) : null}
+        </div>
 
+        <dl className="timeline-range-totals">
+          <div>
+            <dt>Day total</dt>
+            <dd className="tabular">{formatDuration(dayTotal)}</dd>
+          </div>
+          <div>
+            <dt>Week total</dt>
+            <dd className="tabular">{formatDuration(weekTotal)}</dd>
+          </div>
+        </dl>
+
+        <div className="timeline-range-controls">
           <SegmentedControl
             ariaLabel="Timeline view"
             onChange={updateView}
-            options={viewItems.map((item) => ({ value: item.id, label: item.label, icon: item.icon }))}
-            value={activeView}
+            options={viewItems.map((item) => ({
+              value: item.id,
+              label: item.label,
+              icon: item.icon,
+              disabled: isDateLoading
+            }))}
+            value={state.view}
+          />
+          <SegmentedControl
+            ariaLabel="Timeline scope"
+            onChange={updateScope}
+            options={scopeItems.map((item) => ({
+              value: item.id,
+              label: item.label,
+              disabled: isDateLoading || (state.view === "timesheet" && item.id === "day")
+            }))}
+            value={state.scope}
           />
         </div>
-      </div>
+      </section>
+      <p
+        aria-atomic="true"
+        aria-live={dateLoadError ? "assertive" : "polite"}
+        className={[
+          "timeline-range-feedback",
+          dateLoadError ? "is-error" : "",
+          !dateLoadError && !isDateLoading ? "is-idle" : ""
+        ].join(" ")}
+        role={dateLoadError ? "alert" : "status"}
+      >
+        {dateLoadError ?? (isDateLoading ? "Loading period…" : "\u00a0")}
+      </p>
 
-      {activeView === "calendar" ? (
+      {state.view === "calendar" ? (
         <CalendarReview
           calendarHoursMode={calendarHoursMode}
-          calendarMode={calendarMode}
+          capturedNow={capturedNow}
           categories={data.categories}
-          entries={weekEntries}
+          entries={activeEntries}
           onSynced={refreshData}
           places={data.places}
           tags={data.tags}
-          setCalendarMode={updateCalendarMode}
-          weekDays={weekDays}
+          visibleDays={state.scope === "day" ? [ranges.day.start] : ranges.weekDays}
         />
       ) : null}
-      {activeView === "list" ? (
+      {state.view === "list" ? (
         <EntriesTable
-          entries={data.entries}
+          capturedNow={capturedNow}
+          entries={activeEntries}
           categories={data.categories}
+          displayRange={ranges.active}
           places={data.places}
           groupByDay
           onChanged={refreshData}
           tags={data.tags}
         />
       ) : null}
-      {activeView === "timesheet" ? <TimesheetView entries={weekEntries} weekDays={weekDays} /> : null}
+      {state.view === "timesheet" ? (
+        <TimesheetView capturedNow={capturedNow} entries={weekEntries} weekDays={ranges.weekDays} />
+      ) : null}
     </section>
   );
 }
 
 function CalendarReview({
   calendarHoursMode,
-  calendarMode,
+  capturedNow,
   categories,
   entries,
   onSynced,
   places,
   tags,
-  setCalendarMode,
-  weekDays
+  visibleDays
 }: {
   calendarHoursMode: CalendarHoursMode;
-  calendarMode: CalendarMode;
+  capturedNow: Date;
   categories: CategoryRow[];
   entries: TimeEntryRow[];
   onSynced: () => Promise<void>;
   places: PlaceRow[];
   tags: BootstrapData["tags"];
-  setCalendarMode: (mode: CalendarMode) => void;
-  weekDays: Date[];
+  visibleDays: Date[];
 }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -236,7 +304,7 @@ function CalendarReview({
   const [resizingId, setResizingId] = useState<string | null>(null);
   const [resizeError, setResizeError] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState<CalendarZoom>("hour");
-  const today = new Date();
+  const today = capturedNow;
   const zoom = calendarZooms[zoomLevel];
   const calendarHours = calendarHourModes[calendarHoursMode];
   const zoomKeys = Object.keys(calendarZooms) as CalendarZoom[];
@@ -244,10 +312,6 @@ function CalendarReview({
   const rowHeight = zoom.pixelsPerHour;
   const gridLineSpacing = (zoom.intervalMinutes / 60) * rowHeight;
   const calendarHeight = (calendarHours.endHour - calendarHours.startHour) * rowHeight;
-  const visibleDays =
-    calendarMode === "day"
-      ? [weekDays.find((day) => sameDay(day, today)) ?? today]
-      : weekDays;
   const axisMarks = useMemo(() => {
     const startMinutes = calendarHours.startHour * 60;
     const totalMinutes = (calendarHours.endHour - calendarHours.startHour) * 60;
@@ -297,17 +361,29 @@ function CalendarReview({
     event.stopPropagation();
 
     const columnRect = dayColumn.getBoundingClientRect();
-    const originalStart = minutesFromDate(new Date(entry.startedAt));
-    const originalEnd = minutesFromDate(new Date(entry.stoppedAt));
-    const ranges = entries
-      .filter((candidate) => candidate.id !== entry.id && candidate.stoppedAt && sameDay(new Date(candidate.startedAt), day))
-      .map((candidate) => ({
-        start: minutesFromDate(new Date(candidate.startedAt)),
-        end: minutesFromDate(new Date(candidate.stoppedAt as string))
-      }))
-      .sort((a, b) => a.start - b.start);
+    const dayStart = startOfDay(day);
+    const dayEnd = addDays(dayStart, 1);
     const timelineStart = calendarHours.startHour * 60;
     const timelineEnd = calendarHours.endHour * 60;
+    const entryStart = new Date(entry.startedAt);
+    const entryEnd = new Date(entry.stoppedAt);
+    const originalStart = entryStart < dayStart ? timelineStart : minutesFromDate(entryStart);
+    const originalEnd = entryEnd > dayEnd ? timelineEnd : minutesFromDate(entryEnd);
+    const ranges = entries
+      .filter((candidate) => (
+        candidate.id !== entry.id &&
+        candidate.stoppedAt &&
+        entryOverlapsDay(candidate, day, capturedNow)
+      ))
+      .map((candidate) => {
+        const candidateStart = new Date(candidate.startedAt);
+        const candidateEnd = new Date(candidate.stoppedAt as string);
+        return {
+          start: candidateStart < dayStart ? timelineStart : minutesFromDate(candidateStart),
+          end: candidateEnd > dayEnd ? timelineEnd : minutesFromDate(candidateEnd)
+        };
+      })
+      .sort((a, b) => a.start - b.start);
     const previousEnd = Math.max(
       timelineStart,
       ...ranges.filter((range) => range.end <= originalStart).map((range) => range.end)
@@ -332,8 +408,8 @@ function CalendarReview({
         edge === "end" ? clampMinutes(snappedMinutes, originalStart + 15, nextStart) : originalEnd;
       finalDraft = {
         entryId: entry.id,
-        startedAt: isoForDateMinutes(day, nextStartMinutes),
-        stoppedAt: isoForDateMinutes(day, nextEndMinutes)
+        startedAt: edge === "start" ? isoForDateMinutes(day, nextStartMinutes) : entry.startedAt,
+        stoppedAt: edge === "end" ? isoForDateMinutes(day, nextEndMinutes) : entry.stoppedAt as string
       };
       setResizeDraft(finalDraft);
     };
@@ -393,19 +469,6 @@ function CalendarReview({
         </div>
         <Disclosure className="swiss-view-options" summary="View options">
           <div className="swiss-view-options-controls">
-            <span className="swiss-view-switch" role="group" aria-label="Calendar view">
-              {(["week", "day"] as CalendarMode[]).map((mode) => (
-                <button
-                  key={mode}
-                  className={calendarMode === mode ? "is-selected" : ""}
-                  type="button"
-                  aria-pressed={calendarMode === mode}
-                  onClick={() => setCalendarMode(mode)}
-                >
-                  {mode === "week" ? "Week" : "Day"}
-                </button>
-              ))}
-            </span>
             <span className="swiss-zoom-control" role="group" aria-label="Calendar zoom">
               <button
                 type="button"
@@ -438,8 +501,14 @@ function CalendarReview({
           </div>
           {visibleDays.map((day) => {
             const total = entries
-              .filter((entry) => entryOverlapsDay(entry, day))
-              .reduce((sum, entry) => sum + entryOverlapSeconds(entry, day, addDays(day, 1)), 0);
+              .reduce(
+                (sum, entry) => sum + entryOverlapSeconds(
+                  entry,
+                  { start: startOfDay(day), end: addDays(startOfDay(day), 1) },
+                  capturedNow
+                ),
+                0
+              );
             return (
               <div
                 key={day.toISOString()}
@@ -485,19 +554,33 @@ function CalendarReview({
               }}
             >
               {entries
-                .filter((entry) => entryOverlapsDay(entry, day))
+                .filter((entry) => entryOverlapsDay(entry, day, capturedNow))
                 .map((entry) => {
                   const activeDraft = resizeDraft?.entryId === entry.id ? resizeDraft : null;
-                  const blockStyle = calendarBlockStyle(entry, activeDraft, day, rowHeight, calendarHeight, calendarHours);
+                  const blockStyle = calendarBlockStyle(
+                    entry,
+                    activeDraft,
+                    day,
+                    rowHeight,
+                    calendarHeight,
+                    calendarHours,
+                    capturedNow
+                  );
                   if (!blockStyle) return null;
                   const { startsBeforeDay, continuesIntoNextDay, ...blockPositionStyle } = blockStyle;
-                  const durationSeconds = calendarDurationSeconds(entry, activeDraft);
+                  const durationSeconds = calendarDurationSeconds(entry, activeDraft, day, capturedNow);
                   const accent = timeEntryAccentColor(entry);
                   const density = getTimeBlockDensity({
                     durationSeconds,
                     height: blockPositionStyle.height
                   });
-                  const detailsLabel = calendarBlockDetailsLabel(entry, activeDraft, durationSeconds);
+                  const detailsLabel = calendarBlockDetailsLabel(
+                    entry,
+                    activeDraft,
+                    durationSeconds,
+                    day,
+                    capturedNow
+                  );
                   return (
                     <article
                       key={entry.id}
@@ -539,8 +622,7 @@ function CalendarReview({
                         if (event.detail > 1) event.preventDefault();
                       }}
                     >
-                      {entry.stoppedAt ? (
-                        <>
+                      {entry.stoppedAt && !startsBeforeDay ? (
                           <button
                             type="button"
                             className="swiss-resize-handle top"
@@ -550,6 +632,8 @@ function CalendarReview({
                             }}
                             onPointerDown={(event) => startCalendarResize(entry, day, "start", event)}
                           />
+                      ) : null}
+                      {entry.stoppedAt && !continuesIntoNextDay ? (
                           <button
                             type="button"
                             className="swiss-resize-handle bottom"
@@ -559,7 +643,6 @@ function CalendarReview({
                             }}
                             onPointerDown={(event) => startCalendarResize(entry, day, "end", event)}
                           />
-                        </>
                       ) : null}
                       {density.showTitle ? (
                         <>
@@ -599,31 +682,17 @@ function CalendarReview({
   );
 }
 
-function TimesheetView({ entries, weekDays }: { entries: TimeEntryRow[]; weekDays: Date[] }) {
-  const rows = Array.from(
-    entries.reduce((totals, entry) => {
-      const key = entry.categoryId ?? `uncategorized:${entry.categoryName ?? "time"}`;
-      const current = totals.get(key) ?? {
-        id: key,
-        name: key,
-        label: timeEntryCategoryLabel(entry),
-        categoryName: entry.categoryName,
-        color: timeEntryCategoryColor(entry),
-        days: Array(7).fill(0) as number[],
-        total: 0
-      };
-      const dayIndex = weekDays.findIndex((day) => sameDay(day, new Date(entry.startedAt)));
-      if (dayIndex >= 0) current.days[dayIndex] += entry.durationSeconds;
-      current.total += entry.durationSeconds;
-      totals.set(key, current);
-      return totals;
-    }, new Map<string, { id: string; name: string; label: string; categoryName: string | null; color: string; days: number[]; total: number }>())
-  )
-    .map(([, row]) => row)
-    .sort((a, b) => b.total - a.total);
-  const dailyTotals = weekDays.map((_, dayIndex) =>
-    rows.reduce((sum, row) => sum + row.days[dayIndex], 0)
-  );
+function TimesheetView({
+  capturedNow,
+  entries,
+  weekDays
+}: {
+  capturedNow: Date;
+  entries: TimeEntryRow[];
+  weekDays: Date[];
+}) {
+  const rows = buildTimelineTimesheetRows(entries, weekDays, capturedNow);
+  const dailyTotals = timelineDailyTotals(rows, weekDays.length);
 
   return (
     <section className="industrial-panel overflow-x-auto">
@@ -652,8 +721,11 @@ function TimesheetView({ entries, weekDays }: { entries: TimeEntryRow[]; weekDay
             <tr key={row.id} className="border-b border-[var(--line)] last:border-b-0">
               <td className="border-r border-[var(--line)] px-3 py-3">
                 <span className="flex items-center gap-2 font-semibold">
-                  <span className={`h-3 w-3 border border-[var(--line-strong)]${row.categoryName ? "" : " is-uncategorized"}`} style={{ backgroundColor: row.color }} />
-                  {row.label}
+                  <span
+                    className={`h-3 w-3 border border-[var(--line-strong)]${row.categoryName ? "" : " is-uncategorized"}`}
+                    style={{ backgroundColor: timeEntryCategoryColor(row) }}
+                  />
+                  {timeEntryCategoryLabel(row)}
                 </span>
                 <span className="mt-1 block text-xs text-[var(--muted)]">
                   {row.categoryName ? "Category total" : "Uncategorized time"}
@@ -690,14 +762,15 @@ function calendarBlockStyle(
   day: Date,
   rowHeight: number,
   calendarHeight: number,
-  calendarHours: { startHour: number; endHour: number }
+  calendarHours: { startHour: number; endHour: number },
+  capturedNow: Date
 ) {
   const start = new Date(draft?.startedAt ?? entry.startedAt);
   const stoppedAt = draft?.stoppedAt
     ? new Date(draft.stoppedAt)
     : entry.stoppedAt
       ? new Date(entry.stoppedAt)
-      : projectedEntryEnd(entry);
+      : capturedNow;
   if (Number.isNaN(start.getTime()) || Number.isNaN(stoppedAt.getTime())) return null;
   const dayStart = new Date(day);
   dayStart.setHours(0, 0, 0, 0);
@@ -709,8 +782,13 @@ function calendarBlockStyle(
   const visibleStart = new Date(Math.max(start.getTime(), axisStart.getTime()));
   const visibleEnd = new Date(Math.min(stoppedAt.getTime(), axisEnd.getTime()));
   if (visibleEnd <= axisStart || visibleStart >= axisEnd || visibleEnd <= visibleStart) return null;
-  const startMinutes = (visibleStart.getTime() - axisStart.getTime()) / 60_000;
-  const durationMinutes = Math.max(1, (visibleEnd.getTime() - visibleStart.getTime()) / 60_000);
+  const startMinutes = visibleStart <= axisStart
+    ? 0
+    : minutesFromDate(visibleStart) - calendarHours.startHour * 60;
+  const endMinutes = visibleEnd >= axisEnd
+    ? (calendarHours.endHour - calendarHours.startHour) * 60
+    : minutesFromDate(visibleEnd) - calendarHours.startHour * 60;
+  const durationMinutes = Math.max(1, endMinutes - startMinutes);
   const minimumHeight = minimumTimeBlockHeight(rowHeight);
   const top = Math.min(calendarHeight - minimumHeight, Math.max(0, (startMinutes / 60) * rowHeight));
   const height = Math.min(calendarHeight - top, Math.max(minimumHeight, (durationMinutes / 60) * rowHeight));
@@ -731,27 +809,51 @@ function calendarBlockStyle(
 function calendarBlockDetailsLabel(
   entry: TimeEntryRow,
   draft: CalendarResizeDraft | null,
-  durationSeconds: number
+  durationSeconds: number,
+  day: Date,
+  capturedNow: Date
 ) {
-  const start = draft?.startedAt ?? entry.startedAt;
-  const stoppedAt = draft?.stoppedAt ?? entry.stoppedAt;
-  const timeRange = `${formatTime(start)} - ${stoppedAt ? formatTime(stoppedAt) : "now"}`;
-  const durationLabel = stoppedAt ? formatDuration(durationSeconds) : `Running, ${formatDuration(durationSeconds)}`;
-  return `${timeEntryTitle(entry)}. ${timeEntryContextLabel(entry)}. ${timeRange}. ${durationLabel}`;
+  const entryStart = new Date(draft?.startedAt ?? entry.startedAt);
+  const entryEnd = draft?.stoppedAt
+    ? new Date(draft.stoppedAt)
+    : entry.stoppedAt
+      ? new Date(entry.stoppedAt)
+      : capturedNow;
+  const dayStart = startOfDay(day);
+  const dayEnd = addDays(dayStart, 1);
+  const visibleStart = new Date(Math.max(entryStart.getTime(), dayStart.getTime()));
+  const visibleEnd = new Date(Math.min(entryEnd.getTime(), dayEnd.getTime()));
+  const isLiveSlice = !entry.stoppedAt && visibleEnd.getTime() >= capturedNow.getTime();
+  const timeRange = `${formatTime(visibleStart)} - ${isLiveSlice ? "now" : formatTime(visibleEnd)}`;
+  const durationLabel = isLiveSlice
+    ? `Running, ${formatDuration(durationSeconds)}`
+    : formatDuration(durationSeconds);
+  const continuation = [
+    entryStart < dayStart ? "Continues from the previous day." : "",
+    entryEnd > dayEnd ? "Continues into the next day." : ""
+  ].filter(Boolean).join(" ");
+  return `${timeEntryTitle(entry)}. ${timeEntryContextLabel(entry)}. ${timeRange}. ${durationLabel}.${continuation ? ` ${continuation}` : ""}`;
 }
 
-function calendarDurationSeconds(entry: TimeEntryRow, draft: CalendarResizeDraft | null = null) {
+function calendarDurationSeconds(
+  entry: TimeEntryRow,
+  draft: CalendarResizeDraft | null,
+  day: Date,
+  capturedNow: Date
+) {
   const start = new Date(draft?.startedAt ?? entry.startedAt);
   const stoppedAt = draft?.stoppedAt
     ? new Date(draft.stoppedAt)
     : entry.stoppedAt
       ? new Date(entry.stoppedAt)
-      : projectedEntryEnd(entry);
-  return Math.max(0, Math.round((stoppedAt.getTime() - start.getTime()) / 1000));
-}
-
-function projectedEntryEnd(entry: TimeEntryRow) {
-  return new Date(new Date(entry.startedAt).getTime() + entry.durationSeconds * 1000);
+      : capturedNow;
+  return entryOverlapSeconds({
+    startedAt: start.toISOString(),
+    stoppedAt: stoppedAt.toISOString()
+  }, {
+    start: startOfDay(day),
+    end: addDays(startOfDay(day), 1)
+  }, capturedNow);
 }
 
 function minutesFromDate(date: Date) {
@@ -794,23 +896,14 @@ function isoForDateMinutes(day: Date, minutes: number) {
   return iso;
 }
 
-function startOfWeek(input: Date) {
-  const date = new Date(input);
-  const day = date.getDay();
-  const offset = day === 0 ? 6 : day - 1;
-  date.setHours(0, 0, 0, 0);
-  date.setDate(date.getDate() - offset);
-  return date;
-}
-
-function getWeekDays(weekStart: Date) {
-  return Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
-}
-
 function addDays(input: Date, days: number) {
   const date = new Date(input);
   date.setDate(date.getDate() + days);
   return date;
+}
+
+function startOfDay(input: Date) {
+  return new Date(input.getFullYear(), input.getMonth(), input.getDate());
 }
 
 function sameDay(left: Date, right: Date) {
@@ -821,25 +914,33 @@ function sameDay(left: Date, right: Date) {
   );
 }
 
-function entryOverlapsDay(entry: TimeEntryRow, day: Date) {
-  const start = new Date(day);
-  start.setHours(0, 0, 0, 0);
-  return entryOverlapsRange(entry, start, addDays(start, 1));
+function entryOverlapsDay(entry: TimeEntryRow, day: Date, capturedNow: Date) {
+  const start = startOfDay(day);
+  return entryOverlapSeconds(entry, { start, end: addDays(start, 1) }, capturedNow) > 0;
 }
 
-function entryOverlapsRange(entry: TimeEntryRow, rangeStart: Date, rangeEnd: Date) {
-  const startedAt = new Date(entry.startedAt);
-  const stoppedAt = entry.stoppedAt ? new Date(entry.stoppedAt) : projectedEntryEnd(entry);
-  if (Number.isNaN(startedAt.getTime()) || Number.isNaN(stoppedAt.getTime())) return false;
-  return startedAt < rangeEnd && stoppedAt > rangeStart;
-}
+function formatTimelinePeriodLabel(
+  scope: TimelineScope,
+  ranges: ReturnType<typeof resolveTimelineRanges>
+) {
+  if (scope === "day") {
+    return new Intl.DateTimeFormat("en-GB", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric"
+    }).format(ranges.day.start);
+  }
 
-function entryOverlapSeconds(entry: TimeEntryRow, rangeStart: Date, rangeEnd: Date) {
-  const startedAt = new Date(entry.startedAt);
-  const stoppedAt = entry.stoppedAt ? new Date(entry.stoppedAt) : projectedEntryEnd(entry);
-  if (Number.isNaN(startedAt.getTime()) || Number.isNaN(stoppedAt.getTime())) return 0;
-  const overlapStart = Math.max(startedAt.getTime(), rangeStart.getTime());
-  const overlapEnd = Math.min(stoppedAt.getTime(), rangeEnd.getTime());
-  if (overlapEnd <= overlapStart) return 0;
-  return Math.round((overlapEnd - overlapStart) / 1000);
+  const start = ranges.weekDays[0];
+  const end = ranges.weekDays[6];
+  const full = new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric"
+  });
+  if (start.getFullYear() === end.getFullYear() && start.getMonth() === end.getMonth()) {
+    return `${start.getDate()}–${full.format(end)}`;
+  }
+  return `${full.format(start)} – ${full.format(end)}`;
 }

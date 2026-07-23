@@ -1,5 +1,8 @@
 import type { TimeEntryRow } from "@/lib/queries";
 import { defaultReportFilters, reportsHref } from "@/lib/report-filters";
+import { entryOverlapSeconds as clippedEntryOverlapSeconds } from "@/lib/time-entry-overlap";
+
+export { entryOverlapSeconds } from "@/lib/time-entry-overlap";
 
 export type DashboardMode = "day" | "week";
 
@@ -60,20 +63,6 @@ export function dedupeDashboardEntries(
   return [...entries.values()];
 }
 
-export function entryOverlapSeconds(
-  entry: DashboardEntry,
-  range: { start: Date; end: Date },
-  now: Date = new Date()
-) {
-  const startedAt = new Date(entry.startedAt).getTime();
-  const stoppedAt = entry.stoppedAt ? new Date(entry.stoppedAt).getTime() : now.getTime();
-  if (!Number.isFinite(startedAt) || !Number.isFinite(stoppedAt)) return 0;
-
-  const overlapStart = Math.max(startedAt, range.start.getTime());
-  const overlapEnd = Math.min(stoppedAt, range.end.getTime());
-  return Math.max(0, Math.round((overlapEnd - overlapStart) / 1000));
-}
-
 export function calculateCategoryAllocation(
   entries: ReadonlyArray<DashboardEntry>,
   range: { start: Date; end: Date },
@@ -83,7 +72,7 @@ export function calculateCategoryAllocation(
   const grouped = new Map<string, Omit<CategoryAllocation, "percentage" | "isOther">>();
 
   for (const entry of entries) {
-    const seconds = entryOverlapSeconds(entry, range, now);
+    const seconds = clippedEntryOverlapSeconds(entry, range, now);
     if (seconds <= 0) continue;
 
     const id = entry.categoryId ?? "uncategorized";

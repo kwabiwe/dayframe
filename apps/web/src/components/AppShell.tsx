@@ -34,6 +34,11 @@ import { timeEntryTitle } from "@/lib/display";
 import { formatDuration, formatTime } from "@/lib/format";
 import { isSearchShortcut, SEARCH_SHORTCUT_LABEL } from "@/lib/keyboard-shortcuts";
 import type { BootstrapData } from "@/lib/queries";
+import {
+  shiftTimelineState,
+  timelineHref,
+  timelineStateFromSearchParams
+} from "@/lib/timeline-view";
 
 type Overlay = "search" | "profile" | "help" | null;
 
@@ -53,8 +58,8 @@ const shortcuts = [
   ["?", "Open Help & Shortcuts"],
   ["Shift+Space", "Start or stop timer"],
   ["N", "Add time block"],
-  ["Alt+Left", "Previous day"],
-  ["Alt+Right", "Next day"],
+  ["Alt+Left", "Previous day or week"],
+  ["Alt+Right", "Next day or week"],
   ["Esc", "Close menus"]
 ];
 
@@ -75,6 +80,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
   const searchParams = useSearchParams();
   const {
     data,
+    loadDate,
     openManualEntry,
     refresh,
     selectedDate,
@@ -83,6 +89,11 @@ function AppShellContent({ children }: { children: ReactNode }) {
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [query, setQuery] = useState("");
   const showTimerShell = pathname === "/" || pathname === "/timeline";
+  const showShellDateContext = pathname === "/";
+  const timelineState = useMemo(
+    () => timelineStateFromSearchParams(searchParams),
+    [searchParams]
+  );
   const searchResults = useMemo(() => buildSearchResults(data, query), [data, query]);
 
   useEffect(() => {
@@ -115,6 +126,22 @@ function AppShellContent({ children }: { children: ReactNode }) {
 
   const previousDate = addDaysKey(selectedDate, -1);
   const nextDate = addDaysKey(selectedDate, 1);
+  const navigatePeriod = useCallback(async (direction: "previous" | "next") => {
+    if (pathname === "/timeline") {
+      const nextState = shiftTimelineState(timelineState, direction);
+      const originSearch = searchParams.toString();
+      const outcome = await loadDate(nextState.date);
+      if (outcome.ok && window.location.search.slice(1) === originSearch) {
+        window.history.pushState(
+          null,
+          "",
+          timelineHref(searchParams.toString(), nextState)
+        );
+      }
+      return;
+    }
+    navigateDate(direction === "previous" ? previousDate : nextDate);
+  }, [loadDate, navigateDate, nextDate, pathname, previousDate, searchParams, timelineState]);
 
   useEffect(() => {
     function handleKeydown(event: KeyboardEvent) {
@@ -146,17 +173,17 @@ function AppShellContent({ children }: { children: ReactNode }) {
       }
       if (showTimerShell && event.altKey && event.key === "ArrowLeft") {
         event.preventDefault();
-        navigateDate(previousDate);
+        void navigatePeriod("previous");
         return;
       }
       if (showTimerShell && event.altKey && event.key === "ArrowRight") {
         event.preventDefault();
-        navigateDate(nextDate);
+        void navigatePeriod("next");
       }
     }
     window.addEventListener("keydown", handleKeydown);
     return () => window.removeEventListener("keydown", handleKeydown);
-  }, [navigateDate, nextDate, openManualEntry, previousDate, router, selectedDate, showTimerShell, toggleTimer]);
+  }, [navigatePeriod, openManualEntry, router, selectedDate, showTimerShell, toggleTimer]);
 
   return (
     <div className="swiss-app-shell">
@@ -210,12 +237,14 @@ function AppShellContent({ children }: { children: ReactNode }) {
         {showTimerShell ? (
           <div className="swiss-persistent-timer-shell">
             <PersistentTimerBar />
-            <DateContextRow
-              selectedDate={selectedDate}
-              onPrevious={() => navigateDate(previousDate)}
-              onNext={() => navigateDate(nextDate)}
-              onToday={() => navigateDate(dateKey(new Date()))}
-            />
+            {showShellDateContext ? (
+              <DateContextRow
+                selectedDate={selectedDate}
+                onPrevious={() => navigateDate(previousDate)}
+                onNext={() => navigateDate(nextDate)}
+                onToday={() => navigateDate(dateKey(new Date()))}
+              />
+            ) : null}
           </div>
         ) : null}
         <main>{children}</main>
