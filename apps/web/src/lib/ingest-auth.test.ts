@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEV_WORKSPACE_COOKIE } from "@/lib/session";
 import { resolveRequestSession } from "./ingest-auth";
 
@@ -40,6 +40,42 @@ describe("resolveRequestSession", () => {
 
     expect(session.authMode).toBe("token");
     expect(session.scopes).toContain("time:read");
+  });
+
+  it("returns a typed 403 when a valid session lacks a required scope", async () => {
+    await expect(
+      resolveRequestSession(new Request("https://dayframe.test/api/export"), {
+        requiredScopes: ["scope:not-present"]
+      })
+    ).rejects.toMatchObject({
+      status: 403,
+      code: "insufficient_scope"
+    });
+  });
+
+  it("returns a typed missing-session reason without exposing identifiers", async () => {
+    process.env.DAYFRAME_AUTH_MODE = "local";
+    const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    await expect(
+      resolveRequestSession(new Request("https://dayframe.test/api/bootstrap"))
+    ).rejects.toMatchObject({
+      status: 401,
+      code: "session_cookie_missing"
+    });
+    expect(log).toHaveBeenCalledWith(
+      "Dayframe auth session",
+      expect.objectContaining({
+        reason: "session_cookie_missing",
+        pathname: "/api/bootstrap",
+        method: "GET",
+        cookiePresent: false
+      })
+    );
+    expect(JSON.stringify(log.mock.calls)).not.toMatch(
+      /userId|workspaceId|email|tokenHash|cookie:/
+    );
+    log.mockRestore();
   });
 });
 

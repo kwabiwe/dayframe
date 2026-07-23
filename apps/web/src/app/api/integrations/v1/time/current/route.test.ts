@@ -75,13 +75,20 @@ describe("/api/integrations/v1/time/current", () => {
   });
 
   it("rejects tokens without read scope before loading timer data", async () => {
-    mocks.resolveRequestSession.mockRejectedValue(new AuthError("Session is missing the required scope.", 401));
+    mocks.resolveRequestSession.mockRejectedValue(
+      new AuthError(
+        "Session is missing the required scope.",
+        403,
+        "insufficient_scope"
+      )
+    );
 
     const response = await GET(new Request("https://dayframe.test/api/integrations/v1/time/current"));
     const payload = await response.json();
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(403);
     expect(payload.error).toBe("Session is missing the required scope.");
+    expect(payload.code).toBe("insufficient_scope");
     expect(mocks.getIntegrationTimeCurrentSnapshot).not.toHaveBeenCalled();
   });
 });

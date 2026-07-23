@@ -3,19 +3,28 @@ type ClientAuthEnvironment = {
   redirect: (href: string) => void;
 };
 
+const LOGIN_REDIRECT_CODES = new Set([
+  "session_cookie_missing",
+  "session_invalid",
+  "session_expired",
+  "session_revoked"
+]);
+
 let loginRedirectStarted = false;
 
 export async function clientFetch(input: RequestInfo | URL, init?: RequestInit) {
   const response = await fetch(input, init);
-  handleClientAuthResponse(response);
+  await handleClientAuthResponse(response);
   return response;
 }
 
-export function handleClientAuthResponse(
-  response: Pick<Response, "status">,
+export async function handleClientAuthResponse(
+  response: Pick<Response, "status" | "clone">,
   environment: ClientAuthEnvironment | null = browserAuthEnvironment()
 ) {
   if (response.status !== 401) return false;
+  const code = await publicAuthErrorCode(response);
+  if (!code || !LOGIN_REDIRECT_CODES.has(code)) return false;
   if (!environment || environment.pathname === "/login" || environment.pathname === "/signup") {
     return true;
   }
@@ -37,4 +46,13 @@ function browserAuthEnvironment(): ClientAuthEnvironment | null {
     pathname: window.location.pathname,
     redirect: (href) => window.location.replace(href)
   };
+}
+
+async function publicAuthErrorCode(response: Pick<Response, "clone">) {
+  try {
+    const payload = (await response.clone().json()) as { code?: unknown };
+    return typeof payload.code === "string" ? payload.code : null;
+  } catch {
+    return null;
+  }
 }

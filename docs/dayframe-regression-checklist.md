@@ -60,6 +60,18 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - In Location V2 `v2_enabled`, only completed strong stays at logging-enabled saved or accepted-and-linked learned places create automatic confirmed entries. The entry inherits the saved place/default category and description, remains editable/deletable, and retains its source event.
 - Location V2 commutes, unknown/ambiguous places, lower-confidence stays, uncertain gaps, missing approved-place links, and overlaps with confirmed/accepted time remain in Review. Retrying the same batch creates neither a duplicate entry nor a Review item for an already automatic entry.
 
+## Authentication And Sessions
+
+- Authentication, logout, and every other state-changing action must never be exposed as a prefetchable GET link. Logout requires one explicit POST; `GET /logout` has no session or cookie side effect.
+- Profile, Settings, and troubleshooting use the shared sign-out button/form. Rendering, opening, scrolling to, or discovering those surfaces never revokes a session.
+- Explicit logout prevents duplicate submission, shows a pending state, revokes only the current session idempotently, clears `dayframe_session`, and returns a host-preserving 303 to `/login?signedOut=1`.
+- Missing, invalid, expired, revoked, and valid sessions remain typed and distinguishable without logging tokens, hashes, cookies, email, user/workspace IDs, or provider access tokens.
+- Only a structured session-related `401` starts one login replacement. Missing scope is `403`; an unstructured credential `401`, `403`, transient network failure, SQL/configuration error, or `500` does not masquerade as logout.
+- The app-session TTL is finite, integer, bounded, and shared by the cookie and database expiry. Changing absolute expiry or introducing sliding renewal requires a separate security design.
+- Login uses one controlled `onSubmit` path for Enter and click, rejects duplicate submission, retains useful input on failure, stays in a branded Opening state after success, and replaces `/login` in history.
+- Visible bootstrap reconciliation occurs initially, after mutations, on focus/visibility, and on a conservative interval. The elapsed timer still ticks locally every second and no one-second authenticated request storm returns.
+- Hosted auth changes require an optimized production-build browser pass and a provider-auth Vercel Preview pass. Preserve Network logs, test two tabs/expiry/revocation/slow network/Back-Forward, inspect safe server logs, and verify authentication does not move between host-scoped aliases.
+
 ## Productivity Views
 
 - Dashboard shows Today and This Week totals, review count, streak/summary, day timeline, review inbox, and recent activity.

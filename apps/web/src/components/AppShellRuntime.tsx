@@ -46,6 +46,7 @@ type RuntimeContext = {
 };
 
 const AppShellRuntimeContext = createContext<RuntimeContext | null>(null);
+export const BOOTSTRAP_RECONCILE_INTERVAL_MS = 30_000;
 
 export function AppShellRuntimeProvider({ children }: { children: React.ReactNode }) {
   const searchParams = useSearchParams();
@@ -98,12 +99,19 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
 
   useEffect(() => {
     const initialRefresh = window.setTimeout(() => void refresh(), 0);
-    const interval = window.setInterval(() => {
+    const reconcileIfVisible = () => {
       if (document.visibilityState === "visible") void refresh();
-    }, 1000);
+    };
+    const interval = window.setInterval(reconcileIfVisible, BOOTSTRAP_RECONCILE_INTERVAL_MS);
+    const handleFocus = () => void refresh();
+    const handleVisibilityChange = () => reconcileIfVisible();
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       window.clearTimeout(initialRefresh);
       window.clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [refresh]);
 

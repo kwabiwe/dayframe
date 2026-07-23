@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RequestSession } from "@/lib/session";
-import { AuthError } from "@/lib/session";
+import { sessionAuthError } from "@/lib/session";
 
 const mocks = vi.hoisted(() => {
   let requestId = 0;
@@ -98,8 +98,11 @@ describe("optional page session resolution", () => {
     expect(mocks.resolveLocalSession).not.toHaveBeenCalled();
   });
 
-  it.each(["expired", "revoked"])("returns null for an expected %s session error", async () => {
-    mocks.resolveLocalSession.mockRejectedValue(new AuthError("Login required.", 401));
+  it.each([
+    ["expired", "session_expired"],
+    ["revoked", "session_revoked"]
+  ] as const)("returns null for an expected %s session error", async (_label, reason) => {
+    mocks.resolveLocalSession.mockRejectedValue(sessionAuthError(reason));
 
     await expect(resolveOptionalPageSessionUncached()).resolves.toBeNull();
   });

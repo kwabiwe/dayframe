@@ -17,7 +17,6 @@ import {
   HelpCircle,
   Inbox,
   LayoutDashboard,
-  LogOut,
   MapPin,
   Search,
   Settings,
@@ -28,6 +27,7 @@ import type { LucideIcon } from "lucide-react";
 import { AppShellRuntimeProvider, useAppShellRuntime } from "@/components/AppShellRuntime";
 import { DayframeBrand } from "@/components/brand/DayframeBrand";
 import { PersistentTimerBar } from "@/components/PersistentTimerBar";
+import { SignOutControl } from "@/components/SignOutControl";
 import { Button, IconButton, ModalDialog, PopoverPanel } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { timeEntryTitle } from "@/lib/display";
@@ -327,7 +327,7 @@ function ProfileWorkspacePopover({
 
       <div className="swiss-profile-links">
         <Link href="/settings#account" className="swiss-menu-action" onClick={onClose}><Settings size={17} />Settings</Link>
-        <Link href="/logout" className="swiss-menu-action"><LogOut size={17} />Log out</Link>
+        <SignOutControl className="swiss-menu-action" showIcon />
       </div>
     </PopoverPanel>
   );
