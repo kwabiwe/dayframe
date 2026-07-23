@@ -4,6 +4,8 @@ Date: 2026-07-23
 
 Branch: `codex/web-focus-spacing-foundation`
 
+Draft PR: [#100](https://github.com/kwabiwe/dayframe/pull/100)
+
 Baseline: `origin/main` at `85e513a49524238a73cee965c3e191d76112fadb` (merged PR #99)
 
 ## Scope
