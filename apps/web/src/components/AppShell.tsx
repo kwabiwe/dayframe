@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import type { FormEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
@@ -19,7 +19,6 @@ import {
   LayoutDashboard,
   LogOut,
   MapPin,
-  Plus,
   Search,
   Settings,
   Tags,
@@ -29,7 +28,7 @@ import type { LucideIcon } from "lucide-react";
 import { AppShellRuntimeProvider, useAppShellRuntime } from "@/components/AppShellRuntime";
 import { DayframeBrand } from "@/components/brand/DayframeBrand";
 import { PersistentTimerBar } from "@/components/PersistentTimerBar";
-import { Button, IconButton, ModalDialog, PopoverPanel, TextField } from "@/components/ui/Primitives";
+import { Button, IconButton, ModalDialog, PopoverPanel } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { timeEntryTitle } from "@/lib/display";
 import { formatDuration, formatTime } from "@/lib/format";
@@ -271,13 +270,6 @@ function ProfileWorkspacePopover({
   onClose: () => void;
   onUpdated: (close?: boolean) => Promise<void>;
 }) {
-  const [name, setName] = useState(data.user.name);
-  const [workspaceName, setWorkspaceName] = useState(data.workspace.name);
-  const [newWorkspaceName, setNewWorkspaceName] = useState("");
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
 
@@ -289,55 +281,14 @@ function ProfileWorkspacePopover({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ workspaceId })
       });
-      if (!response.ok) throw new Error(await responseError(response, `Unable to switch workspace: ${response.status}`));
+      if (!response.ok) throw new Error("Unable to switch workspace. Try again.");
       await onUpdated(true);
-    });
-  }
-
-  async function createWorkspace(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!newWorkspaceName.trim()) return;
-    await run(async () => {
-      const response = await clientFetch("/api/workspaces", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newWorkspaceName })
-      });
-      if (!response.ok) throw new Error(await responseError(response, `Unable to create workspace: ${response.status}`));
-      await onUpdated(true);
-    });
-  }
-
-  async function saveProfile(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (newPassword && newPassword !== confirmPassword) {
-      setError("The new passwords do not match.");
-      return;
-    }
-    await run(async () => {
-      const response = await clientFetch("/api/profile", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name,
-          workspaceName,
-          currentPassword: currentPassword || undefined,
-          newPassword: newPassword || undefined
-        })
-      });
-      if (!response.ok) throw new Error(await responseError(response, "Unable to update profile."));
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-      setMessage(newPassword ? "Profile and password updated." : "Profile updated.");
-      await onUpdated();
     });
   }
 
   async function run(action: () => Promise<void>) {
     setIsBusy(true);
     setError(null);
-    setMessage(null);
     try {
       await action();
     } catch (caught) {
@@ -371,44 +322,15 @@ function ProfileWorkspacePopover({
             </button>
           ))}
         </div>
-        <form className="swiss-popover-form swiss-create-workspace-form" onSubmit={createWorkspace}>
-          <TextField id="new-workspace-name" label="New workspace" value={newWorkspaceName} onChange={(event) => setNewWorkspaceName(event.target.value)} placeholder="Workspace name" />
-          <Button variant="primary" type="submit" disabled={isBusy || !newWorkspaceName.trim()}><Plus size={15} />Create workspace</Button>
-        </form>
-      </section>
-
-      <section className="swiss-profile-section" aria-labelledby="profile-details-heading">
-        <h3 id="profile-details-heading">Profile</h3>
-        <form className="swiss-popover-form" onSubmit={saveProfile}>
-          <TextField id="profile-name" label="Name" value={name} onChange={(event) => setName(event.target.value)} />
-          <TextField id="profile-workspace-name" label="Current workspace name" value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} />
-          <fieldset className="swiss-password-fields">
-            <legend>Security</legend>
-            <TextField id="profile-current-password" label="Current password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} type="password" autoComplete="current-password" placeholder="Required to change password" />
-            <TextField id="profile-new-password" label="New password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" autoComplete="new-password" minLength={8} placeholder="At least 8 characters" />
-            <TextField id="profile-confirm-password" label="Confirm new password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} type="password" autoComplete="new-password" minLength={8} />
-          </fieldset>
-          {error ? <p className="swiss-form-message is-error" role="alert">{error}</p> : null}
-          {message ? <p className="swiss-form-message">{message}</p> : null}
-          <Button variant="primary" type="submit" disabled={isBusy}>Save profile</Button>
-        </form>
+        {error ? <p className="swiss-inline-error" role="alert">{error}</p> : null}
       </section>
 
       <div className="swiss-profile-links">
-        <Link href="/settings#appearance" className="swiss-menu-action" onClick={onClose}><Settings size={17} />Appearance & settings</Link>
+        <Link href="/settings#account" className="swiss-menu-action" onClick={onClose}><Settings size={17} />Settings</Link>
         <Link href="/logout" className="swiss-menu-action"><LogOut size={17} />Log out</Link>
       </div>
     </PopoverPanel>
   );
-}
-
-async function responseError(response: Response, fallback: string) {
-  try {
-    const payload = (await response.json()) as { error?: string };
-    return payload.error ?? fallback;
-  } catch {
-    return fallback;
-  }
 }
 
 function SearchPalette({

@@ -10,6 +10,7 @@ import {
   useEffect,
   useId,
   useRef,
+  useState,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
   type ReactNode,
@@ -181,9 +182,22 @@ export function Disclosure({
   defaultOpen?: boolean;
   summary: string;
 }) {
+  const [open, setOpen] = useState(defaultOpen);
+
   return (
-    <details className={classNames("ui-disclosure", className)} open={defaultOpen || undefined}>
-      <summary>
+    <details className={classNames("ui-disclosure", className)} open={open || undefined}>
+      <summary
+        aria-expanded={open}
+        onClick={(event) => {
+          event.preventDefault();
+          setOpen((current) => !current);
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          setOpen((current) => !current);
+        }}
+      >
         <span>{summary}</span>
         <ChevronDown size={17} aria-hidden="true" />
       </summary>

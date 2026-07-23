@@ -32,6 +32,12 @@ describe("web UI foundation contracts", () => {
     expect(globalStyles).toMatch(/\.ui-icon-button \{[^}]*display: inline-grid;[^}]*width: 44px;[^}]*height: 44px;[^}]*place-items: center;[^}]*padding: 0;[^}]*line-height: 0;/s);
   });
 
+  it("exposes disclosure state and supports explicit keyboard activation", () => {
+    expect(primitiveSource).toContain("aria-expanded={open}");
+    expect(primitiveSource).toContain('event.key !== "Enter" && event.key !== " "');
+    expect(primitiveSource).toContain("setOpen((current) => !current)");
+  });
+
   it("uses a single visible focus ring and a blur-free native backdrop", () => {
     expect(globalStyles).toContain("outline: 2px solid var(--focus);");
     expect(globalStyles).toContain("outline-offset: 2px;");
