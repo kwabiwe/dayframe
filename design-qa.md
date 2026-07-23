@@ -147,3 +147,52 @@ final result: passed
 - Automated simulator tooling cannot synthesize a genuine two-finger pinch, so the structural performance correction, native runtime render, and focal-point unit tests are the automated evidence; a physical-device feel check remains appropriate during TestFlight acceptance.
 
 final result: passed
+
+---
+
+# Design QA: Persistent Web Timer Strip
+
+Date: 2026-07-23
+
+Reference: `DF web 2.pdf`, focused on the annotated persistent timer composition.
+
+Implementation: optimized production build at 1440 x 900, with the running timer, `Vibe coding` description, `Work` category, Quick actions, and no selected-tag metadata line.
+
+## Final Comparison
+
+The reference and implementation were cropped to the timer surface and combined into one local review image:
+
+`/tmp/dayframe-pdf-review.lajnIz/final-reference-comparison-neutral.png`
+
+The reference is the upper light surface; the implementation is the lower Midnight Core surface.
+
+## Review Result
+
+- Task description remains the flexible majority track and reaches the Category track with one 12 px gap.
+- The tag action is inside the task compound control.
+- Category, Plus, elapsed/start time, and Play/Stop share the same 44 px control height and vertical centre.
+- Plus and Play/Stop use identical 44 x 44 circular footprints.
+- The elapsed/start track is stable at 144 px on wide screens and 118 px in the compact layout.
+- Quick actions remain beneath the form and wrap without horizontal scrolling.
+- Idle and running states keep identical outer geometry.
+- At 840 px and below the task field takes a dedicated full-width row; Category, Plus, time, and Play/Stop remain one measured row.
+- Long phone-width Category labels truncate inside their own track and cannot cover the adjacent Plus action.
+
+## Independent Pass Classification
+
+### Blockers
+
+None remain.
+
+### Bugs
+
+None remain.
+
+### Polish
+
+None required for this focused PR.
+
+### Deferred
+
+- The reference uses a different light-theme density and example category set. Dayframe keeps its existing Midnight Core tokens, real seeded categories, and compact productivity density.
+- Timeline range architecture, Calendar blocks/actions, grouped lists, Reports filters, Search, and unrelated route surfaces remain out of scope.
