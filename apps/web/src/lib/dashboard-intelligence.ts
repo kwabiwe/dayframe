@@ -1,4 +1,5 @@
 import type { TimeEntryRow } from "@/lib/queries";
+import { defaultReportFilters, reportsHref } from "@/lib/report-filters";
 
 export type DashboardMode = "day" | "week";
 
@@ -187,12 +188,14 @@ export function buildDashboardReportsUrl(
   period: DashboardPeriod,
   category: Pick<CategoryAllocation, "categoryIds">
 ) {
-  const params = new URLSearchParams({
-    period: mode,
-    start: toDateKey(period.start),
-    categories: category.categoryIds.join(",")
+  const filters = defaultReportFilters(period.start);
+  return reportsHref({
+    ...filters,
+    range: "custom",
+    from: toDateKey(period.start),
+    to: toDateKey(addDays(period.end, -1)),
+    categories: category.categoryIds
   });
-  return `/reports?${params.toString()}`;
 }
 
 export function buildCategoryAllocationSummary(

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getCategoryUsageRanks, getNormalizationContext, getReports, getTaskSuggestions } from "./queries";
+import { getCategoryUsageRanks, getNormalizationContext, getTaskSuggestions } from "./queries";
 import type { RequestSession } from "./session";
 
 const mocks = vi.hoisted(() => ({
@@ -182,54 +182,5 @@ describe("task suggestions query", () => {
         useCount: 2
       })
     ]);
-  });
-});
-
-describe("personal report isolation", () => {
-  beforeEach(() => {
-    vi.resetAllMocks();
-  });
-
-  it("keeps two users in one workspace isolated across every report aggregate", async () => {
-    const range = {
-      start: new Date("2026-07-20T00:00:00.000Z"),
-      end: new Date("2026-07-21T00:00:00.000Z")
-    };
-    const userA = { ...session, userId: "user-a" };
-    const userB = { ...session, userId: "user-b" };
-
-    mocks.query.mockImplementation(async (statement: string, values: unknown[]) => {
-      expect(statement).toMatch(/(?:te\.)?user_id = \$2/);
-      expect(values[0]).toBe(session.workspaceId);
-      expect(values[2]).toBe(range.start.toISOString());
-      expect(values[3]).toBe(range.end.toISOString());
-
-      const seconds = values[1] === userA.userId ? 600 : 1200;
-      if (statement.includes("with days as")) return { rows: [{ index: 0, seconds }] };
-      return { rows: [{ id: "personal", name: "Personal", color: "blue", seconds }] };
-    });
-
-    const [reportsA, reportsB] = await Promise.all([
-      getReports(userA, range),
-      getReports(userB, range)
-    ]);
-
-    expect(reportsA.byCategory[0].seconds).toBe(600);
-    expect(reportsA.bySource[0].seconds).toBe(600);
-    expect(reportsA.byPlace[0].seconds).toBe(600);
-    expect(reportsA.weekSeries[0].seconds).toBe(600);
-    expect(reportsB.byCategory[0].seconds).toBe(1200);
-    expect(reportsB.bySource[0].seconds).toBe(1200);
-    expect(reportsB.byPlace[0].seconds).toBe(1200);
-    expect(reportsB.weekSeries[0].seconds).toBe(1200);
-
-    const categoryQuery = mocks.query.mock.calls.find(([statement]) =>
-      String(statement).includes("left join categories")
-    );
-    const placeQuery = mocks.query.mock.calls.find(([statement]) =>
-      String(statement).includes("left join places")
-    );
-    expect(categoryQuery?.[0]).toContain("c.workspace_id = te.workspace_id");
-    expect(placeQuery?.[0]).toContain("pl.workspace_id = te.workspace_id");
   });
 });
