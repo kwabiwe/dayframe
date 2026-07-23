@@ -268,7 +268,11 @@ The public production alias `https://dayframe-web.vercel.app` currently serves t
 
 No repository or HTTP evidence identified a second custom production hostname. Unique Vercel deployment URLs may also exist, but they are deployment/preview addresses and cookies remain host-scoped. Provider login must be exercised on one canonical Preview hostname without switching to another alias mid-session.
 
-Vercel Preview/provider-auth validation: **NOT RUN before the initial draft-PR commit**. A Preview does not exist until the branch is pushed and the draft PR/check creates one. Provider credentials and Vercel log access are not stored in the repository. Any unauthenticated Preview/hostname evidence available after PR creation will be added to the PR report; the provider-auth matrix below remains mandatory before merge.
+Draft PR [#99](https://github.com/kwabiwe/dayframe/pull/99) created Vercel Preview `https://dayframe-f39s9xdr3-dayframeworkshop.vercel.app` for commit `8f0a3a0`. GitHub reports the Vercel check as successful.
+
+The Preview is protected by Vercel SSO: both `/login` and `/logout` return `302` to `vercel.com/sso-api` before a request reaches Dayframe. The in-app browser had no Vercel session, and the available Chrome control connection could not be established. Provider credentials and Vercel application-log access are not stored in the repository.
+
+Vercel Preview/provider-auth validation: **NOT RUN**. The successful deployment is build evidence, not provider-auth journey evidence. The matrix below remains mandatory before merge.
 
 ## Remaining Limitations And Required Checks Before Merge
 
