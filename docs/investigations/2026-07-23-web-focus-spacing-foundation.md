@@ -28,6 +28,14 @@ The optimized PR #99 production build reproduced the supplied review evidence:
 
 The root cause was the broad `input:focus-visible`, `select:focus-visible` and `textarea:focus-visible` selector combined with separate route-owned borders and late component overrides. Compound controls did not share a single reusable owner.
 
+## Before And After Evidence
+
+Before the change, the reproduced login and Reports fields showed a grey control border plus a separate blue outline and offset. The task description highlighted only the nested input portion of a wider task/tag control, and place search stacked its `focus-within` outline outside the existing border.
+
+After the change, measured focused fields had one two-pixel blue perimeter and no outline. The password, task and place wrappers retained their 44 px, 56 px and 48 px outer heights. The Reports multi-select initially measured four pixels taller when its reserved border was added; its existing vertical padding was reduced by the same amount and the second build restored the 54 px baseline.
+
+Screenshots and rendered PDF pages were used as local QA evidence, visually inspected, and then moved to Trash. They were not staged because generated review artifacts do not belong in the repository.
+
 ## Implemented Contract
 
 ### Focus ownership
@@ -48,6 +56,8 @@ All reserved borders use border-box geometry or compensate their existing paddin
 ### Shared geometry
 
 The existing fill-led web token block now owns the ordinary control height, compact height, inline padding, border width, focus border, icon target, field gap, small/medium/large layout gaps, panel padding, dialog inline padding and table-cell padding. Existing primitives, dashboard segmented controls, Reports panels/tables and dialog chrome consume those tokens. This extends the current system rather than creating a second primitive layer.
+
+The broad external field-focus selector was split at its original definition rather than shadowed by a new override block. Existing `.ui-control`, `.industrial-field`, Reports, place-search, timer-category and inline-tag rules were edited at their owning locations. The previous place-search external outline was removed, Reports padding was compensated for its reserved border, segmented-control overflow was made focus-safe, and the Dashboard Day/Week control now consumes the shared 44 px height. Dialog header/action gaps and padding, Reports panel/table padding, Settings text wrapping and action containment now reuse the shared values.
 
 ### Shortcut safety
 
@@ -76,6 +86,28 @@ The compensated Reports selector was rebuilt and remeasured at 54 px, matching t
 
 The complete route matrix was repeated at 390 × 844 in the light theme. Every audited route again had zero document-level horizontal overflow, no runtime overlay and no undersized ordinary control after excluding the intentionally deferred Calendar resize edges. The phone manual-entry dialog stayed at 12 px viewport margins, its compound description wrapper remained 44 px, and its focus indicator was fully visible without clipping.
 
+## Files Changed
+
+- `apps/web/src/app/globals.css`: shared tokens, focus ownership, control geometry, padding and text containment.
+- `apps/web/src/components/AppShell.tsx` and `apps/web/src/lib/keyboard-shortcuts.ts`: shared platform-neutral Search shortcut copy and executable modifier detection.
+- `apps/web/src/components/AuthForm.tsx`, `InlineTagInput.tsx` and `PlaceSearchCombobox.tsx`: compound wrapper ownership.
+- `apps/web/src/components/ui/Primitives.contract.test.ts`, `focusSpacing.contract.test.ts` and `keyboard-shortcuts.test.ts`: focused contracts and executable shortcut cases.
+- `docs/brand-style-guide.md`, `docs/dayframe-regression-checklist.md`, `docs/feature-fix-tracker.md`, `.codex/reference/style.md` and `.codex/reference/components.md`: durable focus/geometry guardrails and current evidence.
+
+## Padding And Alignment Audit
+
+- Shared ordinary fields and icon actions align to a 44 px minimum.
+- Dashboard Day/Week moved from 40 px to the shared 44 px target.
+- Password, task, place and Reports compound/field-like controls retain their reproduced outer geometry when focused.
+- Dialog headers/actions reuse the same small, medium and large gaps and inline padding.
+- Reports range/filter panels, analysis panels and data-table cells consume the shared panel/table padding.
+- Settings labels/details can wrap unbroken text without forcing action columns or the document wider.
+- Synthetic long Reports filter copy remained contained at 390 px with zero page overflow.
+
+## Database, API And Mobile Impact
+
+No database or Supabase migration is required. No query, session, route-handler, API schema, shared package or mobile source changed. Existing web/mobile timer, bootstrap, time-entry, event and bearer-session contracts are unchanged.
+
 ## Validation
 
 Completed:
@@ -89,6 +121,18 @@ Completed:
 - `git diff --check`.
 
 The supplied PDF was rendered and inspected locally. Generated review renders and browser screenshots remain local QA artifacts and are not part of the change set.
+
+## Limitations And Manual Checks Before Merge
+
+- Local optimized-build browser QA is not hosted Vercel Preview evidence, a screen-reader audit, or a second browser-engine check.
+- Vercel started automatically after the draft PR opened; its pending result was observed but no hosted deployment action was taken.
+- Before merge, review PR #100's final checks, then keyboard-tab through Login/Signup, the shell timer, manual entry, Reports filters, Places search, Categories, Tags and Settings in current Chrome plus Safari/WebKit.
+- In both themes, confirm focused fields have one perimeter, standalone actions retain one unclipped ring, selected/error/disabled states remain distinct, long labels do not overflow, and Search opens with both Control-K and Command-K but not while typing.
+- Recheck Search, Help and Profile dialogs at a phone width, including close controls, internal scrolling, Settings and logout reachability.
+
+## Rollback
+
+There is no data rollback. Before merge, close the draft PR or revert its commits. After merge, revert the PR normally; the focus, token and documentation changes are self-contained and require no migration reversal, feature flag, cache flush or mobile release.
 
 ## Deferred Review Findings
 
