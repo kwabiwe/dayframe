@@ -6,7 +6,7 @@ Branch: `codex/web-timeline-range-toolbar`
 
 Base: `c850c9664bd92aad84207bdd27facc3d5b0ae140` (`origin/main`, merged PR #101)
 
-Status: Implementation, two review passes, broad validation, and local production validation complete; draft PR pending
+Status: Draft PR [#102](https://github.com/kwabiwe/dayframe/pull/102) open; implementation, two review passes, broad validation, and local production validation complete
 
 ## Scope
 
