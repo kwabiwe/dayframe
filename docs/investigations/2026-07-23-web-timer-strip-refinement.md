@@ -6,6 +6,8 @@ Branch: `codex/web-timer-strip-refinement`
 
 Base: `be97f1fc7aff0e681525556dcc2119119980826f` (`origin/main`, merged PR #100)
 
+Pull request: [#101](https://github.com/kwabiwe/dayframe/pull/101) (draft)
+
 Status: Ready for review
 
 ## Scope
