@@ -2,7 +2,14 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
 import { APP_SESSION_COOKIE, resolveLocalSession } from "@/lib/auth/local";
-import { AuthError, DEV_WORKSPACE_COOKIE, getAuthMode, getDevSession, type RequestSession } from "@/lib/session";
+import {
+  AuthError,
+  DEV_WORKSPACE_COOKIE,
+  getAuthMode,
+  getDevSession,
+  isSessionAuthError,
+  type RequestSession
+} from "@/lib/session";
 
 export async function resolvePageSession(): Promise<RequestSession> {
   const mode = getAuthMode();
@@ -45,7 +52,7 @@ export async function resolveOptionalPageSessionUncached(): Promise<RequestSessi
 export const getOptionalPageSession = cache(resolveOptionalPageSessionUncached);
 
 export function isExpectedAnonymousPageSessionError(error: unknown): error is AuthError {
-  return error instanceof AuthError && error.status === 401;
+  return isSessionAuthError(error);
 }
 
 export function isAuthenticatedPageSession(

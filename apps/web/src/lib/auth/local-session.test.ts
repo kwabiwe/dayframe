@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AuthError } from "@/lib/session";
 
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
@@ -13,6 +12,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import {
+  revokeLocalSession,
   resolveLocalSession,
   SESSION_LAST_USED_TOUCH_INTERVAL_SECONDS
 } from "./local";
@@ -22,7 +22,7 @@ describe("local session resolution", () => {
 
   it("validates a current session without touching its timestamp", async () => {
     mocks.query.mockResolvedValue({
-      rows: [{ userId: "user-1", workspaceId: "workspace-1", lastUsedAt: new Date() }]
+      rows: [currentSessionRow()]
     });
 
     await expect(resolveLocalSession("valid-token")).resolves.toMatchObject({
@@ -41,8 +41,7 @@ describe("local session resolution", () => {
         selectCount += 1;
         return {
           rows: [{
-            userId: "user-1",
-            workspaceId: "workspace-1",
+            ...currentSessionRow(),
             lastUsedAt:
               selectCount === 1
                 ? new Date(Date.now() - (SESSION_LAST_USED_TOUCH_INTERVAL_SECONDS + 60) * 1000)
@@ -65,19 +64,89 @@ describe("local session resolution", () => {
     expect(updateCalls[0][1][1]).toBe(600);
   });
 
-  it.each(["expired", "revoked"])("rejects an %s or unavailable session", async () => {
+  it("distinguishes a missing session cookie without querying the database", async () => {
+    await expect(resolveLocalSession(null)).rejects.toMatchObject({
+      status: 401,
+      code: "session_cookie_missing"
+    });
+    expect(mocks.query).not.toHaveBeenCalled();
+  });
+
+  it("distinguishes an invalid session token", async () => {
     mocks.query.mockResolvedValue({ rows: [] });
 
-    await expect(resolveLocalSession("invalid-token")).rejects.toBeInstanceOf(AuthError);
+    await expect(resolveLocalSession("invalid-token")).rejects.toMatchObject({
+      status: 401,
+      code: "session_invalid"
+    });
+  });
+
+  it("distinguishes an expired session", async () => {
+    mocks.query.mockResolvedValue({
+      rows: [currentSessionRow({ expiresAt: new Date(Date.now() - 1_000) })]
+    });
+
+    await expect(resolveLocalSession("expired-token")).rejects.toMatchObject({
+      status: 401,
+      code: "session_expired"
+    });
+  });
+
+  it("distinguishes a revoked session", async () => {
+    mocks.query.mockResolvedValue({
+      rows: [currentSessionRow({ revokedAt: new Date() })]
+    });
+
+    await expect(resolveLocalSession("revoked-token")).rejects.toMatchObject({
+      status: 401,
+      code: "session_revoked"
+    });
+  });
+
+  it("propagates database failures instead of converting them into authentication state", async () => {
+    const failure = new Error("database unavailable");
+    mocks.query.mockRejectedValue(failure);
+
+    await expect(resolveLocalSession("valid-token")).rejects.toBe(failure);
   });
 
   it("preserves provider mode for a valid app session", async () => {
     mocks.query.mockResolvedValue({
-      rows: [{ userId: "user-1", workspaceId: "workspace-1", lastUsedAt: new Date() }]
+      rows: [currentSessionRow()]
     });
 
     await expect(resolveLocalSession("valid-token", "provider")).resolves.toMatchObject({
       authMode: "provider"
     });
   });
+
+  it("revokes one current session once and treats repetition as a safe no-op", async () => {
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{ id: "session-1" }] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    await expect(revokeLocalSession("valid-token")).resolves.toBe(true);
+    await expect(revokeLocalSession("valid-token")).resolves.toBe(false);
+
+    expect(mocks.query).toHaveBeenCalledTimes(2);
+    expect(mocks.query.mock.calls[0][0]).toContain("revoked_at is null");
+    expect(mocks.query.mock.calls[0][0]).toContain("returning id");
+  });
 });
+
+function currentSessionRow(
+  overrides: Partial<{
+    expiresAt: Date;
+    lastUsedAt: Date | null;
+    revokedAt: Date | null;
+  }> = {}
+) {
+  return {
+    userId: "user-1",
+    workspaceId: "workspace-1",
+    lastUsedAt: new Date(),
+    expiresAt: new Date(Date.now() + 60_000),
+    revokedAt: null,
+    ...overrides
+  };
+}

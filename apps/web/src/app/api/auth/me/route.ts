@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { resolveRequestSession } from "@/lib/ingest-auth";
-import { AuthError } from "@/lib/session";
+import { authErrorResponse } from "@/lib/api-errors";
 import { query } from "@/lib/db";
 
 export async function GET(request: Request) {
@@ -30,9 +30,8 @@ export async function GET(request: Request) {
       authMode: session.authMode
     });
   } catch (error) {
-    if (error instanceof AuthError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
-    }
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
     throw error;
   }
 }

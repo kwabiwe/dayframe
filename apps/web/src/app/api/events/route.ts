@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
-import { AuthError } from "@/lib/session";
+import { authErrorResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import { processActivityEvent } from "@/lib/event-service";
 import { isDatabasePayloadError, isDatabaseReadinessError, isMissingRequiredColumnError } from "@/lib/db";
@@ -15,9 +15,8 @@ export async function POST(request: Request) {
     const result = await processActivityEvent(body, session);
     return NextResponse.json(result, { status: result.duplicate ? 200 : 201 });
   } catch (error) {
-    if (error instanceof AuthError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
-    }
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
     if (error instanceof ZodError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }

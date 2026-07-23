@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { APP_SESSION_COOKIE, resolveLocalSession } from "./auth/local";
+import { APP_SESSION_COOKIE, inspectLocalSession } from "./auth/local";
 import { query } from "./db";
 import {
   AuthError,
@@ -8,7 +8,9 @@ import {
   getDevSession,
   hasScopes,
   resolveAppSession,
-  type RequestSession
+  sessionAuthError,
+  type RequestSession,
+  type SessionReasonCode
 } from "./session";
 
 export type ResolveSessionOptions = {
@@ -50,11 +52,11 @@ export async function resolveRequestSession(
 
   if (authMode === "local") {
     if (options.allowIngestToken && options.allowBearerIntegrationToken && bearer) {
-      return resolveBearerIntegrationOrAppSession(bearer, requiredScopes, "local");
+      return resolveBearerIntegrationOrAppSession(request, bearer, requiredScopes, "local");
     }
 
     if (appToken) {
-      const session = await resolveLocalSession(appToken);
+      const session = await resolveAppTokenSession(request, appToken, "local");
       return scopedSession(session, requiredScopes);
     }
 
@@ -63,16 +65,17 @@ export async function resolveRequestSession(
       return scopedSession(tokenSession, requiredScopes);
     }
 
-    throw new AuthError("Login required.");
+    logSessionDiagnostic(request, "session_cookie_missing");
+    throw sessionAuthError("session_cookie_missing");
   }
 
   if (authMode === "provider") {
     if (options.allowIngestToken && options.allowBearerIntegrationToken && bearer) {
-      return resolveBearerIntegrationOrAppSession(bearer, requiredScopes, "provider");
+      return resolveBearerIntegrationOrAppSession(request, bearer, requiredScopes, "provider");
     }
 
     if (appToken) {
-      const session = await resolveLocalSession(appToken, "provider");
+      const session = await resolveAppTokenSession(request, appToken, "provider");
       return scopedSession(session, requiredScopes);
     }
 
@@ -81,7 +84,8 @@ export async function resolveRequestSession(
       return scopedSession(tokenSession, requiredScopes);
     }
 
-    throw new AuthError("Login required.");
+    logSessionDiagnostic(request, "session_cookie_missing");
+    throw sessionAuthError("session_cookie_missing");
   }
 
   const session = resolveAppSession();
@@ -89,6 +93,7 @@ export async function resolveRequestSession(
 }
 
 async function resolveBearerIntegrationOrAppSession(
+  request: Request,
   bearer: string,
   requiredScopes: string[],
   authMode: "local" | "provider"
@@ -97,13 +102,24 @@ async function resolveBearerIntegrationOrAppSession(
     const tokenSession = await resolveTokenSession(bearer);
     return scopedSession(tokenSession, requiredScopes);
   } catch (error) {
-    if (!(error instanceof AuthError) || error.message !== "Invalid integration token.") {
+    if (!(error instanceof AuthError) || error.code !== "integration_token_invalid") {
       throw error;
     }
   }
 
-  const session = await resolveLocalSession(bearer, authMode);
+  const session = await resolveAppTokenSession(request, bearer, authMode);
   return scopedSession(session, requiredScopes);
+}
+
+async function resolveAppTokenSession(
+  request: Request,
+  token: string,
+  authMode: "local" | "provider"
+) {
+  const resolution = await inspectLocalSession(token, authMode);
+  logSessionDiagnostic(request, resolution.reason);
+  if (resolution.reason !== "session_valid") throw sessionAuthError(resolution.reason);
+  return resolution.session;
 }
 
 export function hashIntegrationToken(token: string) {
@@ -143,7 +159,13 @@ async function resolveTokenSession(token: string): Promise<RequestSession> {
     [tokenHash]
   );
   const row = result.rows[0];
-  if (!row) throw new AuthError("Invalid integration token.");
+  if (!row) {
+    throw new AuthError(
+      "Invalid integration token.",
+      401,
+      "integration_token_invalid"
+    );
+  }
 
   return {
     userId: row.userId,
@@ -180,11 +202,30 @@ function scopedSession(session: RequestSession, requiredScopes: string[]) {
 }
 
 function assertScopes(session: RequestSession, requiredScopes: string[]) {
-  if (!hasScopes(session, requiredScopes)) throw new AuthError("Session is missing the required scope.");
+  if (!hasScopes(session, requiredScopes)) {
+    throw new AuthError(
+      "Session is missing the required scope.",
+      403,
+      "insufficient_scope"
+    );
+  }
 }
 
 function timingSafeEqual(left: string, right: string) {
   const leftBuffer = Buffer.from(left);
   const rightBuffer = Buffer.from(right);
   return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function logSessionDiagnostic(request: Request, reason: SessionReasonCode) {
+  const url = new URL(request.url);
+  console.info("Dayframe auth session", {
+    reason,
+    pathname: url.pathname,
+    method: request.method,
+    deploymentEnvironment: process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? "unknown",
+    cookiePresent: Boolean(cookieToken(request)),
+    timestamp: new Date().toISOString(),
+    requestCorrelationId: crypto.randomUUID()
+  });
 }

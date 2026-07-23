@@ -3,6 +3,7 @@ import Script from "next/script";
 import { Suspense } from "react";
 import "./globals.css";
 import "maplibre-gl/dist/maplibre-gl.css";
+import { AppLoadingState } from "@/components/AppLoadingState";
 import { AppShell } from "@/components/AppShell";
 import { getOptionalPageSession, isAuthenticatedPageSession } from "@/lib/auth/server";
 
@@ -28,7 +29,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
               "try{var t=localStorage.getItem('dayframe.theme');if(t==='light'||t==='dark'){document.documentElement.setAttribute('data-theme',t)}}catch(e){}"
           }}
         />
-        <Suspense fallback={<div className="swiss-app-loading" role="status">Loading Dayframe…</div>}>
+        <Suspense fallback={<AppLoadingState />}>
           {isAuthenticatedPageSession(session) ? <AppShell>{children}</AppShell> : children}
         </Suspense>
       </body>

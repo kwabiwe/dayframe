@@ -785,6 +785,20 @@ textarea.ui-control {
   gap: 8px;
 }
 
+.sign-out-form {
+  display: inline-flex;
+  margin: 0;
+}
+
+.sign-out-form button {
+  font: inherit;
+}
+
+.sign-out-form button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
 .settings-workspace-switcher button {
   display: inline-flex;
   min-height: 44px;
@@ -1175,10 +1189,24 @@ dialog.ui-popover-panel.bottom-left {
 .swiss-app-loading {
   display: grid;
   min-height: 100vh;
+  grid-template-rows: auto auto;
+  gap: 14px;
   place-items: center;
+  align-content: center;
   background: var(--background);
   color: var(--muted);
   font-size: 14px;
+  text-align: center;
+}
+
+.swiss-app-loading.is-embedded {
+  min-height: 312px;
+  border-radius: inherit;
+  background: transparent;
+}
+
+.swiss-app-loading p {
+  margin: 0;
 }
 
 .swiss-sidebar {
@@ -6160,6 +6188,10 @@ kbd {
 .swiss-profile-links .swiss-menu-action {
   width: 100%;
   margin: 0;
+}
+
+.swiss-profile-links .sign-out-form {
+  width: 100%;
 }
 
 .swiss-timer-entrybar,

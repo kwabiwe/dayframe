@@ -14,6 +14,7 @@ import {
   UserRound
 } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
+import { SignOutControl } from "@/components/SignOutControl";
 import {
   Button,
   Disclosure,
@@ -291,7 +292,7 @@ export function AccountSettings({
         icon={LogOut}
         label="Sign out"
         detail="End this Dayframe session on this browser."
-        action={<Link className="ui-button ui-button-secondary" href="/logout">Log out</Link>}
+        action={<SignOutControl className="ui-button ui-button-secondary" />}
       />
       {message ? <p className="settings-section-feedback" role="status">{message}</p> : null}
       {error ? <p className="settings-section-feedback is-error" role="alert">{error}</p> : null}
@@ -447,7 +448,7 @@ export function TroubleshootingSettings({ authMode }: { authMode: SettingsAuthMo
         <p>Recent raw location evidence is private and normally deleted after seven days.</p>
         <p>If Dayframe looks out of date, refresh this page. If that does not help, log out and sign in again.</p>
         <div className="settings-troubleshooting-actions">
-          <Link className="ui-button ui-button-secondary" href="/logout">Log out</Link>
+          <SignOutControl className="ui-button ui-button-secondary" />
           <Link className="ui-button ui-button-ghost" href="/review">Open Review</Link>
         </div>
       </div>

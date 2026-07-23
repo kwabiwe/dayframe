@@ -58,7 +58,8 @@ describe("web Settings contracts", () => {
     );
     expect(profilePopover).toContain("switchWorkspace");
     expect(profilePopover).toContain('href="/settings#account"');
-    expect(profilePopover).toContain('href="/logout"');
+    expect(profilePopover).toContain("<SignOutControl");
+    expect(profilePopover).not.toContain('href="/logout"');
     expect(profilePopover).not.toContain("TextField");
     expect(profilePopover).not.toContain("newPassword");
     expect(profilePopover).not.toContain("createWorkspace");

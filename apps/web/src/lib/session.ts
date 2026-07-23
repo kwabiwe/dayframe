@@ -7,14 +7,58 @@ export type RequestSession = {
   scopes: string[];
 };
 
+export const SESSION_REASON_CODES = [
+  "session_cookie_missing",
+  "session_invalid",
+  "session_expired",
+  "session_revoked",
+  "session_valid"
+] as const;
+
+export type SessionReasonCode = (typeof SESSION_REASON_CODES)[number];
+export const SESSION_ERROR_CODES = SESSION_REASON_CODES.filter(
+  (code): code is Exclude<SessionReasonCode, "session_valid"> => code !== "session_valid"
+);
+export type PublicAuthErrorCode =
+  | Exclude<SessionReasonCode, "session_valid">
+  | "insufficient_scope"
+  | "integration_token_invalid";
+
 export class AuthError extends Error {
   status: number;
+  code?: PublicAuthErrorCode;
 
-  constructor(message = "Unauthorized", status = 401) {
+  constructor(message = "Unauthorized", status = 401, code?: PublicAuthErrorCode) {
     super(message);
     this.name = "AuthError";
     this.status = status;
+    this.code = code;
   }
+}
+
+export function sessionAuthError(
+  reason: Exclude<SessionReasonCode, "session_valid">
+) {
+  const message =
+    reason === "session_expired"
+      ? "Your Dayframe session has expired."
+      : reason === "session_revoked"
+        ? "Your Dayframe session has ended."
+        : "Login required.";
+  return new AuthError(message, 401, reason);
+}
+
+export function isSessionAuthError(
+  error: unknown
+): error is AuthError & { code: Exclude<SessionReasonCode, "session_valid"> } {
+  return (
+    error instanceof AuthError &&
+    error.status === 401 &&
+    error.code !== undefined &&
+    SESSION_ERROR_CODES.includes(
+      error.code as Exclude<SessionReasonCode, "session_valid">
+    )
+  );
 }
 
 export const DEV_USER_ID = process.env.DAYFRAME_DEV_USER_ID ?? DEMO_USER_ID;

@@ -4,10 +4,20 @@ import type pg from "pg";
 import { z } from "zod";
 import { normalizePaletteKey } from "@dayframe/shared";
 import { hasTableColumn, pool, query } from "@/lib/db";
-import { AuthError, type RequestSession } from "@/lib/session";
+import {
+  AuthError,
+  sessionAuthError,
+  type RequestSession,
+  type SessionReasonCode
+} from "@/lib/session";
 
 export const APP_SESSION_COOKIE = "dayframe_session";
-export const APP_SESSION_TTL_SECONDS = Number(process.env.DAYFRAME_SESSION_TTL_SECONDS ?? 60 * 60 * 24 * 30);
+export const DEFAULT_APP_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
+export const MIN_APP_SESSION_TTL_SECONDS = 60;
+export const MAX_APP_SESSION_TTL_SECONDS = 60 * 60 * 24 * 365;
+export const APP_SESSION_TTL_SECONDS = resolveSessionTtlSeconds(
+  process.env.DAYFRAME_SESSION_TTL_SECONDS
+);
 export const SESSION_LAST_USED_TOUCH_INTERVAL_SECONDS = 10 * 60;
 
 export const SignupInputSchema = z.object({
@@ -40,6 +50,38 @@ export type WorkspaceRow = {
   id: string;
   name: string;
 };
+
+type LocalSessionRow = {
+  userId: string;
+  workspaceId: string;
+  lastUsedAt: Date | null;
+  expiresAt: Date;
+  revokedAt: Date | null;
+};
+
+export type LocalSessionResolution =
+  | { reason: "session_valid"; session: RequestSession }
+  | { reason: Exclude<SessionReasonCode, "session_valid"> };
+
+export function resolveSessionTtlSeconds(value: string | undefined) {
+  if (value === undefined) return DEFAULT_APP_SESSION_TTL_SECONDS;
+  if (!value.trim()) {
+    throw new Error("DAYFRAME_SESSION_TTL_SECONDS must be a whole number of seconds.");
+  }
+
+  const seconds = Number(value);
+  if (
+    !Number.isFinite(seconds) ||
+    !Number.isInteger(seconds) ||
+    seconds < MIN_APP_SESSION_TTL_SECONDS ||
+    seconds > MAX_APP_SESSION_TTL_SECONDS
+  ) {
+    throw new Error(
+      `DAYFRAME_SESSION_TTL_SECONDS must be a whole number between ${MIN_APP_SESSION_TTL_SECONDS} and ${MAX_APP_SESSION_TTL_SECONDS}.`
+    );
+  }
+  return seconds;
+}
 
 export function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
@@ -169,18 +211,31 @@ export async function resolveLocalSession(
   token: string | null | undefined,
   authMode: "local" | "provider" = "local"
 ): Promise<RequestSession> {
-  if (!token) throw new AuthError("Login required.");
+  const result = await inspectLocalSession(token, authMode);
+  if (result.reason === "session_valid") return result.session;
+  throw sessionAuthError(result.reason);
+}
+
+export async function inspectLocalSession(
+  token: string | null | undefined,
+  authMode: "local" | "provider" = "local"
+): Promise<LocalSessionResolution> {
+  if (!token) return { reason: "session_cookie_missing" };
   const tokenHash = hashSessionToken(token);
-  const session = await query<{ userId: string; workspaceId: string; lastUsedAt: Date | null }>(
+  const session = await query<LocalSessionRow>(
     `select user_id as "userId",
             workspace_id as "workspaceId",
-            last_used_at as "lastUsedAt"
+            last_used_at as "lastUsedAt",
+            expires_at as "expiresAt",
+            revoked_at as "revokedAt"
      from auth_sessions
-     where token_hash = $1 and revoked_at is null and expires_at > now()`,
+     where token_hash = $1`,
     [tokenHash]
   );
   const row = session.rows[0];
-  if (!row) throw new AuthError("Login required.");
+  if (!row) return { reason: "session_invalid" };
+  if (row.revokedAt) return { reason: "session_revoked" };
+  if (row.expiresAt.getTime() <= Date.now()) return { reason: "session_expired" };
 
   if (
     !row.lastUsedAt ||
@@ -198,18 +253,26 @@ export async function resolveLocalSession(
   }
 
   return {
-    userId: row.userId,
-    workspaceId: row.workspaceId,
-    authMode,
-    scopes: ["app:read", "app:write", "events:write", "time:read", "exports:read"]
+    reason: "session_valid",
+    session: {
+      userId: row.userId,
+      workspaceId: row.workspaceId,
+      authMode,
+      scopes: ["app:read", "app:write", "events:write", "time:read", "exports:read"]
+    }
   };
 }
 
 export async function revokeLocalSession(token: string | null | undefined) {
-  if (!token) return;
-  await query("update auth_sessions set revoked_at = now() where token_hash = $1", [
-    hashSessionToken(token)
-  ]);
+  if (!token) return false;
+  const result = await query<{ id: string }>(
+    `update auth_sessions
+     set revoked_at = now()
+     where token_hash = $1 and revoked_at is null
+     returning id`,
+    [hashSessionToken(token)]
+  );
+  return Boolean(result.rows[0]);
 }
 
 export async function switchLocalSessionWorkspace(token: string | null | undefined, workspaceId: string) {

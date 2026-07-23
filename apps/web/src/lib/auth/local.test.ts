@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   APP_SESSION_COOKIE,
+  APP_SESSION_TTL_SECONDS,
+  DEFAULT_APP_SESSION_TTL_SECONDS,
+  MAX_APP_SESSION_TTL_SECONDS,
+  MIN_APP_SESSION_TTL_SECONDS,
   generateSessionToken,
   hashPassword,
   hashSessionToken,
   normalizeEmail,
+  resolveSessionTtlSeconds,
   sessionCookieOptions,
   sessionTokenFromRequest,
   verifyPassword
@@ -52,7 +57,41 @@ describe("local auth primitives", () => {
     expect(sessionCookieOptions()).toMatchObject({
       httpOnly: true,
       sameSite: "lax",
-      path: "/"
+      path: "/",
+      maxAge: APP_SESSION_TTL_SECONDS
     });
+  });
+
+  it("uses the documented 30-day session lifetime when the setting is absent", () => {
+    expect(resolveSessionTtlSeconds(undefined)).toBe(DEFAULT_APP_SESSION_TTL_SECONDS);
+    expect(DEFAULT_APP_SESSION_TTL_SECONDS).toBe(2_592_000);
+  });
+
+  it.each(["", " ", "0", "-1", "NaN", "Infinity", "60.5"])(
+    "rejects invalid session TTL value %j",
+    (value) => {
+      expect(() => resolveSessionTtlSeconds(value)).toThrow(
+        "DAYFRAME_SESSION_TTL_SECONDS"
+      );
+    }
+  );
+
+  it("accepts finite positive whole-second TTLs inside the supported range", () => {
+    expect(resolveSessionTtlSeconds(String(MIN_APP_SESSION_TTL_SECONDS))).toBe(
+      MIN_APP_SESSION_TTL_SECONDS
+    );
+    expect(resolveSessionTtlSeconds("86400")).toBe(86_400);
+    expect(resolveSessionTtlSeconds(String(MAX_APP_SESSION_TTL_SECONDS))).toBe(
+      MAX_APP_SESSION_TTL_SECONDS
+    );
+  });
+
+  it("rejects session TTLs outside the supported range", () => {
+    expect(() =>
+      resolveSessionTtlSeconds(String(MIN_APP_SESSION_TTL_SECONDS - 1))
+    ).toThrow("DAYFRAME_SESSION_TTL_SECONDS");
+    expect(() =>
+      resolveSessionTtlSeconds(String(MAX_APP_SESSION_TTL_SECONDS + 1))
+    ).toThrow("DAYFRAME_SESSION_TTL_SECONDS");
   });
 });
