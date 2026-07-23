@@ -297,7 +297,7 @@ input,
 select,
 textarea {
   min-height: 38px;
-  border: 1px solid var(--control-border);
+  border: var(--web-control-border-width) solid var(--control-border);
   background: var(--surface-inset);
   color: var(--foreground);
 }
@@ -325,16 +325,35 @@ a {
   font-variant-numeric: tabular-nums;
 }
 
-.focus-ring:focus-visible,
 button:focus-visible,
 a:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible,
-summary:focus-visible {
+summary:focus-visible,
+input:is([type="checkbox"], [type="radio"], [type="range"], [type="color"]):focus-visible,
+.focus-ring:not(input, select, textarea):focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
   box-shadow: none;
+}
+
+input:not(:is([type="checkbox"], [type="radio"], [type="range"], [type="color"])):focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  border-color: var(--web-focus-border);
+  outline: 0;
+  box-shadow: none;
+}
+
+input[aria-invalid="true"],
+select[aria-invalid="true"],
+textarea[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+input[aria-invalid="true"]:focus-visible,
+select[aria-invalid="true"]:focus-visible,
+textarea[aria-invalid="true"]:focus-visible {
+  border-color: var(--web-focus-border);
+  box-shadow: inset 0 -2px 0 var(--danger);
 }
 
 html.ui-dialog-open {
@@ -351,7 +370,7 @@ html.ui-dialog-open {
 
 .ui-button {
   display: inline-flex;
-  min-height: 44px;
+  min-height: var(--web-control-height);
   align-items: center;
   justify-content: center;
   gap: 8px;
@@ -406,10 +425,10 @@ html.ui-dialog-open {
 
 .ui-icon-button {
   display: inline-grid;
-  width: 44px;
-  height: 44px;
-  min-width: 44px;
-  min-height: 44px;
+  width: var(--web-icon-button-size);
+  height: var(--web-icon-button-size);
+  min-width: var(--web-icon-button-size);
+  min-height: var(--web-icon-button-size);
   place-items: center;
   border: 0;
   border-radius: 999px;
@@ -442,7 +461,7 @@ html.ui-dialog-open {
 .ui-field {
   display: grid;
   min-width: 0;
-  gap: 6px;
+  gap: var(--web-field-gap);
 }
 
 .ui-field > label {
@@ -453,13 +472,38 @@ html.ui-dialog-open {
 
 .ui-control {
   width: 100%;
-  min-height: 44px;
-  border: 1px solid var(--control-border);
-  border-radius: 12px;
+  min-height: var(--web-control-height);
+  border: var(--web-control-border-width) solid var(--control-border);
+  border-radius: var(--web-radius-control);
   background: var(--surface-inset);
-  padding: 0 12px;
+  padding: 0 var(--web-control-padding-inline);
   color: var(--foreground);
   line-height: 1.4;
+}
+
+.ui-compound-control {
+  min-width: 0;
+  border: var(--web-control-border-width) solid var(--control-border);
+  border-radius: var(--web-radius-control);
+  background: var(--surface-inset);
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease;
+}
+
+.ui-compound-control:focus-within {
+  border-color: var(--web-focus-border);
+}
+
+.ui-compound-control > input {
+  border: 0;
+  outline: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.ui-compound-control > button:focus-visible {
+  outline-offset: -4px;
 }
 
 textarea.ui-control {
@@ -502,8 +546,8 @@ textarea.ui-control {
 
 .ui-segmented-control button {
   display: inline-flex;
-  min-width: 44px;
-  min-height: 44px;
+  min-width: var(--web-control-height);
+  min-height: var(--web-control-height);
   align-items: center;
   justify-content: center;
   gap: 8px;
@@ -585,6 +629,7 @@ textarea.ui-control {
 .ui-settings-row strong,
 .ui-settings-row span {
   display: block;
+  overflow-wrap: anywhere;
 }
 
 .ui-settings-row span {
@@ -596,6 +641,10 @@ textarea.ui-control {
 .ui-settings-row-action {
   min-width: 0;
   justify-self: end;
+}
+
+.ui-settings-row-action > * {
+  max-width: 100%;
 }
 
 .settings-page {
@@ -976,14 +1025,15 @@ dialog.ui-dialog::backdrop {
   min-height: 68px;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--web-gap-lg);
   border-bottom: 1px solid var(--line);
-  padding: 12px 16px;
+  padding: var(--web-gap-md) var(--web-dialog-padding-inline);
 }
 
 .ui-dialog-header h2,
 .ui-dialog-header p {
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .ui-dialog-header h2 {
@@ -1013,9 +1063,9 @@ dialog.ui-dialog::backdrop {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 10px;
+  gap: var(--web-gap-sm);
   border-top: 1px solid var(--line);
-  padding: 12px 16px;
+  padding: var(--web-gap-md) var(--web-dialog-padding-inline);
 }
 
 dialog.ui-dialog.ui-confirm-dialog {
@@ -2087,7 +2137,7 @@ dialog.ui-popover-panel.bottom-left {
 
 .dashboard-allocation {
   min-width: 0;
-  padding: 20px;
+  padding: var(--web-panel-padding);
 }
 
 .dashboard-panel-header {
@@ -2111,7 +2161,7 @@ dialog.ui-popover-panel.bottom-left {
 }
 
 .dashboard-mode-control button {
-  min-height: 40px;
+  min-height: var(--web-control-height);
 }
 
 .dashboard-allocation-layout {
@@ -3213,14 +3263,19 @@ dialog.ui-popover-panel.bottom-left {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 10px;
-  border-bottom: 1px solid var(--line);
-  padding: 14px 16px;
+  gap: var(--web-gap-sm);
+  border-bottom: var(--web-control-border-width) solid var(--line);
+  padding: 14px var(--web-dialog-padding-inline);
 }
 
 .swiss-search-input input {
   border: 0;
   font-size: 17px;
+  outline: 0;
+}
+
+.swiss-search-input:focus-within {
+  border-bottom-color: var(--web-focus-border);
 }
 
 kbd {
@@ -3326,12 +3381,12 @@ kbd {
 
 .industrial-field {
   width: 100%;
-  border: 1px solid var(--control-border);
-  min-height: 44px;
-  border-radius: 14px;
+  border: var(--web-control-border-width) solid var(--control-border);
+  min-height: var(--web-control-height);
+  border-radius: var(--web-radius-control);
   background: var(--surface-inset);
   color: var(--foreground);
-  padding: 0.625rem 0.75rem;
+  padding: 0.625rem var(--web-control-padding-inline);
 }
 
 .industrial-field-label {
@@ -3384,9 +3439,11 @@ kbd {
 .auth-password-field {
   position: relative;
   display: block;
+  min-height: var(--web-control-height);
 }
 
 .auth-password-field input {
+  min-height: calc(var(--web-control-height) - (2 * var(--web-control-border-width)));
   padding-right: 3.25rem;
 }
 
@@ -3822,7 +3879,7 @@ kbd {
 
 .report-range-controls,
 .report-filter-panel {
-  padding: 16px 18px;
+  padding: var(--web-gap-lg) var(--web-panel-padding);
 }
 
 .report-range-primary {
@@ -3962,7 +4019,14 @@ kbd {
 }
 
 .report-multi-select > summary {
-  padding: 8px 14px;
+  border: var(--web-control-border-width) solid transparent;
+  border-radius: inherit;
+  padding: calc(var(--web-gap-sm) - var(--web-control-border-width)) 14px;
+}
+
+.report-multi-select > summary:focus-visible {
+  border-color: var(--web-focus-border);
+  outline: 0;
 }
 
 .report-multi-select > summary::-webkit-details-marker,
@@ -4156,7 +4220,7 @@ kbd {
 .report-allocation,
 .report-ranked-card,
 .report-details {
-  padding: 20px;
+  padding: var(--web-panel-padding);
 }
 
 .report-trend-scroll {
@@ -4459,7 +4523,7 @@ kbd {
 .report-detail-table th,
 .report-detail-table td {
   border-bottom: 1px solid var(--line);
-  padding: 10px 12px;
+  padding: var(--web-table-cell-padding-block) var(--web-table-cell-padding-inline);
   text-align: left;
 }
 
@@ -5239,7 +5303,21 @@ kbd {
   --web-radius-control: 16px;
   --web-radius-group: 24px;
   --web-radius-floating: 24px;
-  --web-touch-size: 44px;
+  --web-control-height: 44px;
+  --web-control-height-compact: 44px;
+  --web-control-padding-inline: 12px;
+  --web-control-border-width: 2px;
+  --web-focus-border: var(--focus);
+  --web-icon-button-size: 44px;
+  --web-field-gap: 6px;
+  --web-gap-sm: 8px;
+  --web-gap-md: 12px;
+  --web-gap-lg: 16px;
+  --web-panel-padding: 20px;
+  --web-dialog-padding-inline: 16px;
+  --web-table-cell-padding-block: 12px;
+  --web-table-cell-padding-inline: 14px;
+  --web-touch-size: var(--web-control-height);
   --web-text-action-height: 52px;
 }
 
@@ -5527,21 +5605,21 @@ kbd {
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
-  border: 1px solid var(--control-border);
-  border-radius: 14px;
+  border: var(--web-control-border-width) solid var(--control-border);
+  border-radius: var(--web-radius-control);
   background: var(--surface-inset);
   padding: 0 4px 0 13px;
   color: var(--muted);
 }
 
 .place-search-control:focus-within {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
+  border-color: var(--web-focus-border);
+  outline: 0;
 }
 
 .place-search-input {
   min-width: 0;
-  min-height: 46px;
+  min-height: calc(48px - (2 * var(--web-control-border-width)));
   border: 0;
   outline: 0;
   background: transparent;
@@ -5907,7 +5985,7 @@ kbd {
   background: var(--surface-inset);
   padding: 4px;
   box-shadow: none;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .fill-segmented-option,
@@ -6224,7 +6302,7 @@ kbd {
 
 .swiss-category-trigger {
   min-height: var(--web-text-action-height);
-  border: 0;
+  border: var(--web-control-border-width) solid transparent;
   border-radius: var(--web-radius-control);
   background: var(--surface-inset);
   padding: 0 16px;
@@ -6235,8 +6313,13 @@ kbd {
 
 .swiss-category-trigger:hover,
 .swiss-category-trigger[aria-expanded="true"] {
-  border: 0;
+  border-color: transparent;
   background: var(--surface-muted);
+}
+
+.swiss-category-trigger:focus-visible {
+  border-color: var(--web-focus-border);
+  outline: 0;
 }
 
 .swiss-category-menu,
@@ -6650,6 +6733,29 @@ kbd {
   min-width: 0;
 }
 
+.inline-tag-input-anchor {
+  min-height: var(--web-control-height);
+  background: var(--surface-inset);
+}
+
+.inline-tag-input-anchor .inline-tag-description-input {
+  width: 100%;
+  min-width: 0;
+  min-height: calc(var(--web-control-height) - (2 * var(--web-control-border-width)));
+  border: 0;
+  background: transparent;
+  outline: 0;
+  box-shadow: none;
+}
+
+.swiss-work-input .inline-tag-input-anchor {
+  min-height: 56px;
+}
+
+.swiss-work-input .inline-tag-input-anchor .inline-tag-description-input {
+  min-height: calc(56px - (2 * var(--web-control-border-width)));
+}
+
 .inline-tag-editor {
   display: grid;
   gap: 0.4rem;
@@ -6729,7 +6835,7 @@ kbd {
   align-items: center;
   gap: 0.5rem;
   margin: 0.7rem;
-  border-radius: 0.65rem;
+  border-radius: var(--web-radius-control);
   background: var(--surface-inset);
   padding: 0 0.65rem;
   color: var(--muted);
@@ -6742,6 +6848,7 @@ kbd {
   border: 0;
   background: transparent;
   padding: 0;
+  outline: 0;
   color: var(--foreground);
   font: inherit;
   font-size: 0.8125rem;

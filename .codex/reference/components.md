@@ -16,6 +16,7 @@ Use this when working on frontend components.
 ## State And Forms
 
 - Prefer controlled form state only where it adds clarity.
+- On web, use the shared field/control classes before adding route-local geometry. Inputs with nested reveal, clear, tag or search actions must use one compound wrapper focus owner; do not stack wrapper and input perimeters.
 - Validate at the boundary before persistence.
 - Show loading, empty, success, and error states for user-facing actions where they help the user understand the state.
 - For normal mobile timer mutations, loading UI should be invisible: start, stop, edit, delete, and suggestion-apply actions should update optimistically, then reconcile silently. Do not add spinners, progress bars, or layout-moving loading rows for these paths. Keep visible spinners for deliberate pull-to-refresh only.
@@ -51,6 +52,7 @@ Use this when working on frontend components.
 - [ ] Error and loading states are handled.
 - [ ] Mobile and desktop layouts are checked.
 - [ ] No text overflow or overlapping UI.
+- [ ] Web fields have one focus owner and shared geometry; compound nested actions remain independently keyboard-visible.
 - [ ] Timer mutations feel immediate and do not show non-refresh loading indicators.
 - [ ] Dashboard changes preserve the core timer/start-task flow.
 - [ ] Permission controls are not placed on the dashboard.
