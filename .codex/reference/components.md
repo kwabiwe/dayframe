@@ -10,6 +10,7 @@ Use this when working on frontend components.
 - Use accessible labels, semantic HTML, and keyboard-friendly controls.
 - Keep Dayframe timer surfaces category/task-first. Avoid exposing projects/clients in primary timer UI.
 - On web, Dashboard and Timeline must consume the one timer runtime mounted by `AppShell`. Route components must not mount an independent active-timer poll, store, API client, mutation queue, shortcut handler or manual-entry owner; navigation between those routes must preserve the same optimistic state and active-entry identity.
+- Keep the persistent web timer on one explicit measured track: a flexible `minmax(0, 1fr)` task compound control, bounded Category and time tracks, and shared icon-action footprints for Plus and Play/Stop. Idle/running swaps must preserve outer geometry; compact layouts may reflow the task field to its own row but must not shrink or overlap the remaining actions.
 - Keep the iOS dashboard focused on logo/header, active timer, start task, quick category actions, and Today summary.
 - Move location and HealthKit permission controls to onboarding and Settings.
 
@@ -53,6 +54,7 @@ Use this when working on frontend components.
 - [ ] Mobile and desktop layouts are checked.
 - [ ] No text overflow or overlapping UI.
 - [ ] Web fields have one focus owner and shared geometry; compound nested actions remain independently keyboard-visible.
+- [ ] The persistent web timer keeps equal control heights, identical Plus/Play/Stop footprints, stable idle/running geometry, truncating Category text, and no horizontal overflow at desktop, compact, phone, or 200%-zoom-equivalent widths.
 - [ ] Timer mutations feel immediate and do not show non-refresh loading indicators.
 - [ ] Dashboard changes preserve the core timer/start-task flow.
 - [ ] Permission controls are not placed on the dashboard.

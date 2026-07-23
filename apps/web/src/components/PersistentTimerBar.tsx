@@ -38,6 +38,7 @@ export function PersistentTimerBar() {
   const [startEditError, setStartEditError] = useState<string | null>(null);
   const [now, setNow] = useState(0);
   const categoryMenuRef = useRef<HTMLDivElement | null>(null);
+  const categoryTriggerRef = useRef<HTMLButtonElement | null>(null);
   const descriptionInputRef = useRef<HTMLInputElement | null>(null);
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
 
@@ -102,8 +103,13 @@ export function PersistentTimerBar() {
     }
     function closeWithKeyboard(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
-      setCategoryMenuOpen(false);
-      setSuggestionsOpen(false);
+      if (categoryMenuOpen) {
+        event.preventDefault();
+        setCategoryMenuOpen(false);
+        categoryTriggerRef.current?.focus();
+        return;
+      }
+      if (suggestionsOpen) setSuggestionsOpen(false);
     }
     document.addEventListener("mousedown", close);
     document.addEventListener("keydown", closeWithKeyboard);
@@ -119,11 +125,41 @@ export function PersistentTimerBar() {
     setTimerDraft((current) => ({ ...current, categoryId }));
     setCategoryMenuOpen(false);
     setSuggestionsOpen(false);
+    window.requestAnimationFrame(() => categoryTriggerRef.current?.focus());
+  }
+
+  function focusCategoryOption(position: "first" | "last" | "selected") {
+    window.requestAnimationFrame(() => {
+      const options = [...(categoryMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [])];
+      if (!options.length) return;
+      const target = position === "selected"
+        ? options.find((option) => option.getAttribute("aria-selected") === "true") ?? options[0]
+        : position === "last"
+          ? options.at(-1)
+          : options[0];
+      target?.focus();
+    });
+  }
+
+  function moveCategoryFocus(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const options = [...(categoryMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [])];
+    if (!options.length) return;
+    const currentIndex = options.indexOf(document.activeElement as HTMLButtonElement);
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowDown") nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % options.length;
+    if (event.key === "ArrowUp") nextIndex = currentIndex < 0 ? options.length - 1 : (currentIndex - 1 + options.length) % options.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = options.length - 1;
+    if (nextIndex !== null) {
+      event.preventDefault();
+      options[nextIndex]?.focus();
+    }
   }
 
   async function submitTimer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!shouldStartTimerFromEntrySubmit({ hasActiveTimer: Boolean(active), isBusy: isTimerBusy })) return;
+    setSuggestionsOpen(false);
     await startTimer();
   }
 
@@ -131,6 +167,7 @@ export function PersistentTimerBar() {
     if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
     event.preventDefault();
     if (!shouldStartTimerFromEntrySubmit({ hasActiveTimer: Boolean(active), isBusy: isTimerBusy })) return;
+    setSuggestionsOpen(false);
     void startTimer();
   }
 
@@ -180,10 +217,17 @@ export function PersistentTimerBar() {
       style={activeAccent ? ({ "--timer-accent": activeAccent } as CSSProperties) : undefined}
     >
       <form className="swiss-persistent-timer-form" onSubmit={submitTimer}>
-        <div className="swiss-work-input" ref={suggestionsRef}>
-          <label htmlFor="persistent-timer-description">Task description</label>
+        <label className="swiss-timer-field-label swiss-timer-description-label" htmlFor="persistent-timer-description">
+          Task description
+        </label>
+        <span className="swiss-timer-field-label swiss-timer-category-label" id="persistent-timer-category-label">
+          Category
+        </span>
+
+        <div className="swiss-work-input swiss-timer-description-control" ref={suggestionsRef}>
           <InlineTagInput
             ariaLabel="Task description"
+            className="swiss-timer-inline-tags"
             inputId="persistent-timer-description"
             inputRef={descriptionInputRef}
             name="timer-description"
@@ -217,15 +261,32 @@ export function PersistentTimerBar() {
           ) : null}
         </div>
 
-        <div className="swiss-category-field" ref={categoryMenuRef}>
-          <span>Category</span>
+        <div
+          className="swiss-category-field swiss-timer-category-control"
+          ref={categoryMenuRef}
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setCategoryMenuOpen(false);
+          }}
+        >
           <button
             className="swiss-category-trigger"
             type="button"
             aria-haspopup="listbox"
             aria-expanded={categoryMenuOpen}
-            aria-label="Choose category"
-            onClick={() => setCategoryMenuOpen((current) => !current)}
+            aria-controls="persistent-timer-category-menu"
+            aria-labelledby="persistent-timer-category-label persistent-timer-category-value"
+            ref={categoryTriggerRef}
+            onClick={() => {
+              setSuggestionsOpen(false);
+              setCategoryMenuOpen((current) => !current);
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+              event.preventDefault();
+              setSuggestionsOpen(false);
+              setCategoryMenuOpen(true);
+              focusCategoryOption(event.key === "ArrowUp" ? "last" : "selected");
+            }}
           >
             <span className="swiss-category-trigger-value">
               <span
@@ -236,12 +297,18 @@ export function PersistentTimerBar() {
                     : "transparent"
                 }}
               />
-              <span>{selectedCategoryName}</span>
+              <span id="persistent-timer-category-value">{selectedCategoryName}</span>
             </span>
             <ChevronDown size={16} aria-hidden="true" />
           </button>
           {categoryMenuOpen ? (
-            <div className="swiss-category-menu" role="listbox" aria-label="Categories">
+            <div
+              className="swiss-category-menu"
+              id="persistent-timer-category-menu"
+              role="listbox"
+              aria-label="Categories"
+              onKeyDown={moveCategoryFocus}
+            >
               <CategoryOption
                 categoryId=""
                 color={null}
@@ -263,8 +330,13 @@ export function PersistentTimerBar() {
           ) : null}
         </div>
 
-        <IconButton className="swiss-manual-entry-action" label="Add time manually" onClick={openManualEntry}>
-          <Plus size={19} />
+        <IconButton
+          className="swiss-manual-entry-action"
+          disabled={isTimerBusy}
+          label="Add time manually"
+          onClick={openManualEntry}
+        >
+          <Plus size={18} />
         </IconButton>
 
         {active ? (
@@ -278,7 +350,7 @@ export function PersistentTimerBar() {
             <small>Started {formatTime(active.startedAt)}</small>
           </button>
         ) : (
-          <span className="swiss-persistent-time-placeholder" aria-label="Elapsed time 0 hours">
+          <span className="swiss-persistent-time-placeholder" aria-label="Timer is idle. Elapsed time 00:00.">
             {formatClockDuration(0)}
           </span>
         )}
@@ -287,12 +359,13 @@ export function PersistentTimerBar() {
           className={["swiss-command-play", active ? "is-active" : ""].filter(Boolean).join(" ")}
           type={active ? "button" : "submit"}
           disabled={isTimerBusy}
+          aria-busy={isTimerBusy || undefined}
           aria-label={active ? "Stop timer" : "Start timer"}
           onClick={() => {
             if (active) void stopTimer();
           }}
         >
-          {active ? <Square size={16} fill="currentColor" /> : <Play size={22} fill="currentColor" strokeWidth={0} />}
+          {active ? <Square size={14} fill="currentColor" /> : <Play size={18} fill="currentColor" strokeWidth={0} />}
         </button>
       </form>
 
@@ -313,6 +386,8 @@ export function PersistentTimerBar() {
                 type="button"
                 disabled={isTimerBusy}
                 onClick={() => {
+                  setCategoryMenuOpen(false);
+                  setSuggestionsOpen(false);
                   setTimerDraft((current) => ({ ...current, categoryId: action.categoryId ?? "" }));
                   void startTimer({ categoryId: action.categoryId ?? "" });
                 }}

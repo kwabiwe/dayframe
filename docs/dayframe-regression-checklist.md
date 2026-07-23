@@ -5,12 +5,15 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 ## Core Timer
 
 - Web dashboard and timeline both show the "What are you working on?" timer strip.
+- The persistent web timer has one shell-owned measured control track: Description is the flexible majority field, its tag action stays inside the compound control, Category and time are bounded, Plus and Play/Stop use the same circular footprint, and Quick actions remain beneath the row.
+- Idle and running states keep the same timer-control geometry. At compact/phone/200%-zoom-equivalent widths, Description may take its own row while Category, Plus, time, and Play/Stop remain aligned, at least 44 px, text-safe, and free of horizontal overflow.
 - Users can type a long task description, optionally choose a category, and start a timer without a project.
 - If a timer is already running, starting a new timer closes the previous active entry first.
 - The active timer ticks every second on web and mobile.
 - Stopping a timer on web or mobile stops the same active timer for the signed-in workspace.
 - Edits typed into the active timer description/category are saved before the entry is stopped.
 - Pinned and recent/frequent quick actions can start category-based tasks.
+- Play, Enter, task suggestions, Quick actions, Shift+Space, and Stop each produce one gated mutation; Dashboard/Timeline navigation preserves the same active entry and failed optimistic mutations return to the prior stable state.
 - Continue/start-again actions use a play affordance and start the task.
 - On mobile, empty Play starts immediately and opens the running Edit Timer sheet. A history replay action remains available while another timer runs and atomically switches to the selected task; suggestions in the active editor still enrich that same timer rather than starting a duplicate.
 - Edit Timer delete confirmation appears without unmounting or collapsing the suggestions/edit content underneath.
