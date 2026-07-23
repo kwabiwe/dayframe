@@ -331,4 +331,6 @@ rollback or rollout-flag change.
 
 ## PR
 
-Draft PR pending.
+Draft PR [#97](https://github.com/kwabiwe/dayframe/pull/97). It targets
+`main`; merge, Production deployment, secret changes and Phase 6 remain
+separately authorised.
