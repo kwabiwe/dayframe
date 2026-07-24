@@ -469,7 +469,12 @@ export async function refreshGeofencesForPlaces(
     return 0;
   }
   await updateLocationDiagnostics({ foregroundPermission, backgroundPermission });
-  if (await getLocationLearningEnabled()) await startLocationLearning(places);
+  if (await getLocationLearningEnabled()) {
+    await startLocationLearning(places);
+    await import("./location/runtime").then(({ startNativeLocationIntelligence }) =>
+      startNativeLocationIntelligence()
+    ).catch(recordV2LocationFailure);
+  }
   return startGeofences(places);
 }
 

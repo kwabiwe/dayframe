@@ -2,6 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const asyncStore = vi.hoisted(() => new Map<string, string>());
 const secureStore = vi.hoisted(() => new Map<string, string>());
+const runtimeMocks = vi.hoisted(() => ({
+  startNativeLocationIntelligence: vi.fn(() => Promise.resolve({ enabled: true })),
+  stopNativeLocationIntelligence: vi.fn(() => Promise.resolve({ enabled: false }))
+}));
 const locationMocks = vi.hoisted(() => ({
   startGeofencingAsync: vi.fn(() => Promise.resolve()),
   startLocationUpdatesAsync: vi.fn(() => Promise.resolve()),
@@ -61,12 +65,15 @@ vi.mock("./config", () => ({
   DAYFRAME_API_BASE: "https://dayframe.test"
 }));
 
+vi.mock("./location/runtime", () => runtimeMocks);
+
 const {
   LOCATION_VISIT_DWELL_THRESHOLD_MINUTES,
   evaluateGeofenceTransitionEvidence,
   getLocationVisitDiagnostics,
   recordLocationLearningSample,
   recordGeofenceTransition,
+  refreshGeofencesForPlaces,
   setLocationLearningEnabled,
   startGeofences
 } = await import("./geofence");
@@ -131,6 +138,15 @@ describe("mobile geofence visit candidates", () => {
       "DAYFRAME_GEOFENCE_TASK",
       [expect.objectContaining({ identifier: place.id, radius: place.radiusMeters })]
     );
+  });
+
+  it("restarts native visit monitoring when enabled location learning rehydrates", async () => {
+    asyncStore.set("dayframe.location.learning.enabled.v1", "true");
+
+    await refreshGeofencesForPlaces([place]);
+
+    expect(locationMocks.startLocationUpdatesAsync).toHaveBeenCalledOnce();
+    expect(runtimeMocks.startNativeLocationIntelligence).toHaveBeenCalledOnce();
   });
 
   it("reports saved places excluded by the iOS twenty-region limit", async () => {
