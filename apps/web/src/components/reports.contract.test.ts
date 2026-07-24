@@ -21,6 +21,15 @@ describe("Reports accessibility and responsive contracts", () => {
     expect(filtersSource).toContain("aria-expanded={moreOpen}");
   });
 
+  it("keeps every filter surface out of report layout flow", () => {
+    expect(filtersSource).toContain("ui-floating-surface report-multi-select-list");
+    expect(filtersSource).toContain("ui-floating-surface report-more-filter-grid");
+    expect(filtersSource).toContain("closeOutside");
+    expect(filtersSource).toContain('event.key !== "Escape"');
+    expect(styles).toMatch(/\.report-multi-select-list \{[^}]*position: absolute;/s);
+    expect(styles).toMatch(/\.report-more-filter-grid \{[^}]*position: absolute;/s);
+  });
+
   it("provides exact table alternatives and keyboard actions for every visual chart", () => {
     expect(overviewSource).toContain('tabIndex={0}');
     expect(overviewSource).toContain("View exact trend data");

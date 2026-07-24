@@ -3888,13 +3888,14 @@ kbd {
 }
 
 .report-multi-select {
+  position: relative;
   min-width: 0;
   border-radius: var(--web-radius-control);
   background: var(--surface-inset);
 }
 
-.report-multi-select > summary,
-.report-more-filters > summary,
+.report-multi-select-trigger,
+.report-more-filters-trigger,
 .report-secondary-insights > summary {
   display: flex;
   min-height: 52px;
@@ -3905,15 +3906,20 @@ kbd {
   list-style: none;
 }
 
-.report-multi-select > summary {
-  border: var(--web-control-border-width) solid transparent;
+.report-multi-select-trigger {
+  width: 100%;
+  border: 0;
   border-radius: inherit;
-  padding: calc(var(--web-gap-sm) - var(--web-control-border-width)) 14px;
+  background: transparent;
+  color: var(--foreground);
+  padding: var(--web-gap-sm) 14px;
+  text-align: left;
 }
 
-.report-multi-select > summary:focus-visible {
-  border-color: var(--web-focus-border);
-  outline: 0;
+.report-multi-select-trigger:focus-visible,
+.report-more-filters-trigger:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
 }
 
 .report-multi-select > summary::-webkit-details-marker,
@@ -3922,43 +3928,52 @@ kbd {
   display: none;
 }
 
-.report-multi-select > summary > span,
+.report-multi-select-trigger > span,
 .report-secondary-insights > summary > span {
   display: grid;
   min-width: 0;
   gap: 2px;
 }
 
-.report-multi-select summary strong,
+.report-multi-select-trigger strong,
 .report-secondary-insights summary strong {
   font-size: 13px;
   font-weight: 650;
 }
 
-.report-multi-select summary small,
+.report-multi-select-trigger small,
 .report-secondary-insights summary small {
   color: var(--muted);
   font-size: 11px;
 }
 
-.report-multi-select summary svg,
-.report-more-filters summary svg,
+.report-multi-select-trigger svg,
+.report-more-filters-trigger svg,
 .report-secondary-insights .report-chevron {
   transition: transform 160ms ease-out;
 }
 
-.report-multi-select[open] summary svg,
-.report-more-filters[open] summary svg,
+.report-multi-select.is-open .report-multi-select-trigger svg,
+.report-more-filters.is-open .report-more-filters-trigger svg,
 .report-secondary-insights[open] .report-chevron {
   transform: rotate(180deg);
 }
 
 .report-multi-select-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  z-index: 80;
   display: grid;
   max-height: 260px;
   overflow-y: auto;
-  border-top: 1px solid var(--line);
   padding: 6px;
+}
+
+.report-multi-select-list[hidden],
+.report-more-filter-grid[hidden] {
+  display: none;
 }
 
 .report-multi-select-list > p {
@@ -4045,19 +4060,34 @@ kbd {
 }
 
 .report-more-filters {
+  position: relative;
   margin-top: 14px;
   border-top: 1px solid var(--line);
 }
 
-.report-more-filters > summary {
+.report-more-filters-trigger {
+  display: flex;
+  min-height: 52px;
+  align-items: center;
   justify-content: flex-start;
+  gap: 12px;
+  border: 0;
+  background: transparent;
   color: var(--foreground);
+  cursor: pointer;
   font-size: 13px;
   font-weight: 650;
 }
 
 .report-more-filter-grid {
-  margin: 0 0 2px;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  z-index: 75;
+  margin: 0;
+  padding: var(--web-panel-padding);
+  background: var(--surface-raised);
 }
 
 .report-description-filter {
@@ -7451,18 +7481,18 @@ dialog.ui-dialog.manual-entry-dialog {
   padding: 12px;
 }
 
-.dayframe-date-time-panel header,
+.dayframe-calendar header,
 .dayframe-time-row {
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr) 44px;
   align-items: center;
 }
 
-.dayframe-date-time-panel header strong {
+.dayframe-calendar header strong {
   text-align: center;
 }
 
-.dayframe-date-time-panel header button,
+.dayframe-calendar header button,
 .dayframe-calendar-grid button {
   display: grid;
   min-width: 44px;
@@ -7474,7 +7504,7 @@ dialog.ui-dialog.manual-entry-dialog {
   color: var(--foreground);
 }
 
-.dayframe-date-time-panel header button:hover,
+.dayframe-calendar header button:hover,
 .dayframe-calendar-grid button:hover {
   background: var(--surface-muted);
 }
@@ -7493,7 +7523,17 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .dayframe-calendar-grid {
-  row-gap: 2px;
+  row-gap: 0;
+}
+
+.dayframe-calendar-grid button {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+}
+
+.dayframe-calendar-grid button.is-adjacent-month {
+  color: var(--muted);
 }
 
 .dayframe-calendar-grid button[aria-pressed="true"] {
@@ -7510,23 +7550,23 @@ dialog.ui-dialog.manual-entry-dialog {
   font-weight: 650;
 }
 
-.dayframe-time-row > div {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  gap: 4px;
-}
-
-.dayframe-time-row select {
+.dayframe-time-row input {
   width: 100%;
   min-height: var(--web-control-height);
   border: 0;
   border-radius: var(--web-radius-control);
   background: var(--surface-inset);
-  padding: 0 8px;
+  padding: 0 12px;
   color: var(--foreground);
+  font: inherit;
   font-variant-numeric: tabular-nums;
   text-align: center;
+}
+
+.dayframe-time-error {
+  margin: -4px 0 0 32px;
+  color: var(--danger);
+  font-size: 11px;
 }
 
 .dayframe-date-time-done {

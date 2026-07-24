@@ -25,7 +25,7 @@ describe("web focus and control contracts", () => {
   it("reserves field border width and preserves invalid state while focused", () => {
     expect(styles).toContain("--web-control-border-width: 2px;");
     expect(styles).toMatch(/input\[aria-invalid="true"\]:focus-visible,[\s\S]*box-shadow: inset 0 -2px 0 var\(--danger\);/);
-    expect(styles).toMatch(/\.report-multi-select > summary:focus-visible \{[^}]*border-color: var\(--web-focus-border\);[^}]*outline: 0;/s);
+    expect(styles).toMatch(/\.report-multi-select-trigger:focus-visible,[^{]*\{[^}]*outline: 2px solid currentColor;[^}]*outline-offset: 2px;/s);
     expect(reports).toContain('className="ui-control"');
   });
 
