@@ -27,8 +27,9 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Calendar, List, Timesheet, Day total, and Week total use the same half-open overlap rule and one captured current time. Entries crossing midnight or a range edge appear in every intersected period with only the in-range duration; Timesheet splits them across the affected day columns.
 - The generic shell date row is absent on Timeline but remains on Dashboard. The persistent timer remains shell-owned and unchanged; Calendar keeps only zoom under View options.
 - The Timeline toolbar remains one coherent surface at 1440, 1280, 1024, 768 and 390 px plus a 200%-zoom equivalent, with no page overflow, 44 px controls, distinct focus/selected/disabled states, and usable System/Light/Dark themes.
-- Web Calendar blocks degrade metadata by rendered-height priority: title, duration, category/place context, then tags. Minimum-height blocks keep a readable title where it fits, expose full details through pointer/keyboard/touch, and use visual lanes rather than covering nearby blocks.
+- Web Calendar blocks degrade metadata by rendered-height priority: title, duration, category/place context, then tags. Minimum-height blocks keep a readable title where it fits and use visual lanes rather than covering nearby blocks.
 - Web Calendar blocks use a non-interactive positioned container with one primary action plus separate sibling restart and pointer-resize affordances. There is no interactive wrapper containing buttons; hover actions have equivalent keyboard and touch routes.
+- Web Calendar hover/focus reveals only the inline Play action; it does not mount a floating details card. Double-click and keyboard Enter open Edit.
 - Web running blocks keep normal text opacity and use an explicit Running label plus a non-colour boundary treatment. Completed Calendar/List restart actions share the one shell timer runtime, copy only category/description/tags, gate duplicates, refuse to replace an active timer, and roll back on failure.
 - Calendar/time blocks at least 48px high can be resized from safe top/bottom pointer handles, snap to configured intervals, and save on release. Smaller blocks use Edit instead of overlapping resize targets.
 - Selected time blocks can be deleted from edit controls, context actions, or keyboard delete/backspace where supported.
@@ -69,6 +70,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - No duplicate React keys, hydration errors, or framework runtime overlays appear during normal use.
 - In Location V2 `v2_enabled`, only completed strong stays at logging-enabled saved or accepted-and-linked learned places create automatic confirmed entries. The entry inherits the saved place/default category and description, remains editable/deletable, and retains its source event.
 - Location V2 commutes, unknown/ambiguous places, lower-confidence stays, uncertain gaps, missing approved-place links, and overlaps with confirmed/accepted time remain in Review. Retrying the same batch creates neither a duplicate entry nor a Review item for an already automatic entry.
+- Rehydrating an account with commute learning already enabled restarts Expo location updates and native iOS visit/significant-change monitoring without requiring the Settings toggle to be cycled.
 
 ## Authentication And Sessions
 

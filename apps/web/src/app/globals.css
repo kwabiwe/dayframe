@@ -7241,3 +7241,103 @@ kbd {
   min-width: 44px;
   min-height: 44px;
 }
+
+/* Compact desktop density
+ *
+ * The application uses one restrained type scale and smaller layout tokens on
+ * pointer-sized screens. Phone controls retain their 44px touch contract.
+ */
+@media (min-width: 761px) {
+  html {
+    font-size: 14px;
+  }
+
+  :root {
+    --web-radius-control: 12px;
+    --web-radius-group: 18px;
+    --web-radius-floating: 18px;
+    --web-control-height: 38px;
+    --web-control-height-compact: 34px;
+    --web-control-padding-inline: 10px;
+    --web-icon-button-size: 38px;
+    --web-gap-sm: 6px;
+    --web-gap-md: 10px;
+    --web-gap-lg: 14px;
+    --web-panel-padding: 16px;
+    --web-table-cell-padding-block: 9px;
+    --web-table-cell-padding-inline: 12px;
+    --web-touch-size: 38px;
+    --web-text-action-height: 44px;
+  }
+
+  .swiss-app-shell {
+    grid-template-columns: 208px minmax(0, 1fr);
+  }
+
+  .swiss-brand {
+    min-height: 70px;
+    padding-inline: 16px;
+  }
+
+  .swiss-nav {
+    padding: 2px 12px 16px;
+  }
+
+  .swiss-nav a,
+  .swiss-nav-search {
+    gap: 10px;
+    padding-inline: 12px;
+    font-size: 12px;
+  }
+
+  .swiss-sidebar-bottom {
+    padding: 10px 12px 12px;
+  }
+
+  .swiss-help-link,
+  .swiss-profile-button strong {
+    font-size: 12px;
+  }
+
+  .swiss-profile-button small {
+    font-size: 11px;
+  }
+
+  .swiss-persistent-timer-shell {
+    padding: 12px 24px 0;
+  }
+
+  .swiss-persistent-timer {
+    padding: 12px 16px;
+  }
+
+  .swiss-dashboard {
+    padding: 18px 24px 24px;
+  }
+
+  .fill-page-header {
+    padding-top: 20px;
+    padding-bottom: 12px;
+  }
+
+  .fill-page-header h1 {
+    font-size: 1.75rem;
+  }
+
+  .fill-panel-header {
+    min-height: 58px;
+  }
+}
+
+.calendar-entry-title,
+.calendar-entry-duration,
+.calendar-entry-context,
+.calendar-entry-running-status {
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.calendar-time-block.is-short .calendar-entry-title,
+.calendar-time-block.is-tiny .calendar-entry-title {
+  font-size: 11px;
+}

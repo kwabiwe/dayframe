@@ -15,7 +15,7 @@ describe("Calendar readability and restart contract", () => {
   it("keeps one semantic primary action per block and pointer-only resize handles", () => {
     expect(timeline).toContain("<article");
     expect(timeline).toContain('className="calendar-entry-primary"');
-    expect(timeline).toContain('aria-haspopup="dialog"');
+    expect(timeline).not.toContain('aria-haspopup="dialog"');
     expect(timeline).not.toContain('role="button"');
     expect(timeline).toMatch(/<span[\s\S]*className="swiss-resize-handle top"[\s\S]*aria-hidden="true"/);
     expect(timeline).toMatch(/<span[\s\S]*className="swiss-resize-handle bottom"[\s\S]*aria-hidden="true"/);
@@ -31,22 +31,19 @@ describe("Calendar readability and restart contract", () => {
     expect(entries).not.toContain('mode: "start"');
   });
 
-  it("keeps tiny blocks readable while moving complete details into one anchored surface", () => {
+  it("keeps tiny blocks readable without mounting a floating details surface", () => {
     expect(timeline).toContain("layoutTimeBlockLanes");
-    expect(timeline).toContain("<CalendarEntryDetails");
-    expect(timeline).toContain("createPortal(");
-    expect(timeline).toContain("layoutKey={`${detailsTarget.blockKey}:${zoomLevel}`}");
-    expect(timeline).toContain('role="dialog"');
-    expect(timeline).toContain("details.continuation");
+    expect(timeline).not.toContain("<CalendarEntryDetails");
+    expect(timeline).not.toContain("createPortal(");
+    expect(timeline).toContain("onDoubleClick={(event) =>");
     expect(timeline).toContain('className="calendar-entry-title"');
   });
 
-  it("preserves a distinct running state and a phone-safe action surface", () => {
+  it("preserves a distinct running state and compact hover action", () => {
     const calendarRunningRule = styles.match(/\.calendar-time-block\.is-running \{([^}]*)\}/)?.[1] ?? "";
     expect(calendarRunningRule).toContain("outline:");
     expect(calendarRunningRule).not.toContain("opacity");
-    expect(styles).toMatch(/@media \(max-width: 640px\)[\s\S]*\.calendar-entry-details \{[^}]*right: 12px;[^}]*bottom: 12px;[^}]*left: 12px !important;[^}]*max-height: calc\(100dvh - 24px\);/);
+    expect(styles).toContain(".calendar-start-again");
     expect(styles).toMatch(/@media \(hover: none\)[\s\S]*\.calendar-start-again \{[^}]*display: none;/);
-    expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*\.calendar-entry-details,[\s\S]*transform: none;/);
   });
 });
