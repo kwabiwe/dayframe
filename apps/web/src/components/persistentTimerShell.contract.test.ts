@@ -26,7 +26,8 @@ describe("persistent timer shell contract", () => {
 
   it("routes Shift+Space and list Continue through the shared owner", () => {
     expect(shell).toContain("void toggleTimer()");
-    expect(entries).toContain("await startTimer({ categoryId, description, tagNames: entry.tagNames })");
+    expect(entries).toContain("await startEntryAgain(entry)");
+    expect(entries).not.toContain("await startTimer(");
     expect(entries).not.toContain('mode: "start"');
   });
 

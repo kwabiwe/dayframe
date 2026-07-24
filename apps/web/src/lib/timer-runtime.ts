@@ -11,6 +11,10 @@ export type TimerDraftInput = Partial<TimerDraft>;
 
 export type TimerMutationGate = ReturnType<typeof createTimerMutationGate>;
 
+export type EntryContinuationDecision =
+  | { ok: true; draft: TimerDraft }
+  | { ok: false; error: string };
+
 export function createTimerMutationGate() {
   let active = false;
 
@@ -36,6 +40,43 @@ export function timerDraftForEntry(entry: TimeEntryRow | null | undefined): Time
     description: entry?.description ?? "",
     tagNames: entry?.tagNames ?? []
   };
+}
+
+export function entryContinuationDecision(
+  entry: TimeEntryRow,
+  activeEntry: TimeEntryRow | null | undefined
+): EntryContinuationDecision {
+  if (activeEntry) {
+    return {
+      ok: false,
+      error: "A timer is already running. Stop it before starting another task."
+    };
+  }
+
+  const description = entry.description?.trim() ?? "";
+  if (!entry.categoryId && !description) {
+    return {
+      ok: false,
+      error: "This entry does not have a task or category to start."
+    };
+  }
+
+  return {
+    ok: true,
+    draft: {
+      categoryId: entry.categoryId ?? "",
+      description,
+      tagNames: [...entry.tagNames]
+    }
+  };
+}
+
+export function timerStartErrorMessage(error: unknown) {
+  if (error instanceof TypeError && /fetch|network/i.test(error.message)) {
+    return "Unable to start right now. Check your connection and try again.";
+  }
+  if (error instanceof Error && error.message.trim()) return error.message;
+  return "Unable to start the timer.";
 }
 
 export function applyOptimisticTimerStart(

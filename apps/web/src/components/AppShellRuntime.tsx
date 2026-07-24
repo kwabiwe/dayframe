@@ -3,13 +3,15 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { clientFetch } from "@/lib/client-auth-fetch";
-import type { BootstrapData } from "@/lib/queries";
+import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
 import { timelineStateFromSearchParams } from "@/lib/timeline-view";
 import {
   applyOptimisticActiveEntryPatch,
   applyOptimisticTimerStart,
   applyOptimisticTimerStop,
   createTimerMutationGate,
+  entryContinuationDecision,
+  timerStartErrorMessage,
   timerDraftForEntry,
   type TimerDraft,
   type TimerDraftInput
@@ -42,6 +44,7 @@ type RuntimeContext = {
   refresh: (options?: { force?: boolean }) => Promise<BootstrapData | null>;
   selectedDate: string;
   setTimerDraft: (draft: TimerDraft | ((current: TimerDraft) => TimerDraft)) => void;
+  startEntryAgain: (entry: TimeEntryRow) => Promise<MutationOutcome>;
   startTimer: (input?: TimerDraftInput) => Promise<MutationOutcome>;
   stopTimer: (input?: TimerDraftInput) => Promise<MutationOutcome>;
   timerDraft: TimerDraft;
@@ -230,7 +233,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       } catch (error) {
         commitData(snapshot);
         setTimerDraft(timerDraftForEntry(snapshot.activeEntry));
-        const message = errorMessage(error, "Unable to start the timer.");
+        const message = timerStartErrorMessage(error);
         setTimerError(message);
         return { ok: false, error: message } as const;
       } finally {
@@ -239,6 +242,12 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     });
     return result.ran ? result.value : { ok: false, error: "A timer update is already in progress." };
   }, [commitData, refresh, setTimerDraft]);
+
+  const startEntryAgain = useCallback(async (entry: TimeEntryRow): Promise<MutationOutcome> => {
+    const decision = entryContinuationDecision(entry, dataRef.current?.activeEntry);
+    if (!decision.ok) return decision;
+    return startTimer(decision.draft);
+  }, [startTimer]);
 
   const stopTimer = useCallback(async (input: TimerDraftInput = {}): Promise<MutationOutcome> => {
     const snapshot = dataRef.current;
@@ -403,6 +412,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     refresh,
     selectedDate,
     setTimerDraft,
+    startEntryAgain,
     startTimer,
     stopTimer,
     timerDraft,
@@ -422,6 +432,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     selectedData,
     selectedDate,
     setTimerDraft,
+    startEntryAgain,
     startTimer,
     stopTimer,
     timerDraft,

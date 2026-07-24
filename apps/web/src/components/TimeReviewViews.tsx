@@ -1,9 +1,10 @@
 "use client";
 
-import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
-import { useCallback, useMemo, useState, useTransition } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CalendarDays, ChevronLeft, ChevronRight, List, Table2 } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, CircleDot, List, Pencil, Play, Table2, X } from "lucide-react";
 import { calendarBlockContinuationEdges } from "@dayframe/shared";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
@@ -27,9 +28,11 @@ import {
 } from "@/lib/format";
 import {
   getTimeBlockDensity,
+  layoutTimeBlockLanes,
   minimumTimeBlockHeight,
   resizeDragThresholdPx,
-  timeBlockDensityClassNames
+  timeBlockDensityClassNames,
+  type TimeBlockLane
 } from "@/lib/time-block-display";
 import {
   buildTimelineTimesheetRows,
@@ -80,6 +83,17 @@ type CalendarResizeDraft = {
   entryId: string;
   startedAt: string;
   stoppedAt: string;
+};
+
+type CalendarDetailsTarget = {
+  blockKey: string;
+  day: Date;
+  entry: TimeEntryRow;
+};
+
+type CalendarDetailsPosition = {
+  left: number;
+  top: number;
 };
 
 export function TimeReviewViews({
@@ -297,13 +311,24 @@ function CalendarReview({
   visibleDays: Date[];
 }) {
   const router = useRouter();
+  const { isTimerBusy, startEntryAgain } = useAppShellRuntime();
   const [, startTransition] = useTransition();
   const [editingEntry, setEditingEntry] = useState<TimeEntryRow | null>(null);
-  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
+  const [selectedTarget, setSelectedTarget] = useState<CalendarDetailsTarget | null>(null);
+  const [detailsTarget, setDetailsTarget] = useState<CalendarDetailsTarget | null>(null);
+  const [detailsAnchor, setDetailsAnchor] = useState<HTMLElement | null>(null);
+  const [detailsVisible, setDetailsVisible] = useState(false);
   const [resizeDraft, setResizeDraft] = useState<CalendarResizeDraft | null>(null);
   const [resizingId, setResizingId] = useState<string | null>(null);
   const [resizeError, setResizeError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [continuingEntryId, setContinuingEntryId] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState<CalendarZoom>("hour");
+  const blockRefs = useRef(new Map<string, HTMLElement>());
+  const detailsFirstActionRef = useRef<HTMLButtonElement | null>(null);
+  const detailsCloseTimerRef = useRef<number | null>(null);
+  const detailsExitTimerRef = useRef<number | null>(null);
+  const suppressFocusDetailsRef = useRef(false);
   const today = capturedNow;
   const zoom = calendarZooms[zoomLevel];
   const calendarHours = calendarHourModes[calendarHoursMode];
@@ -329,6 +354,108 @@ function CalendarReview({
     });
   }, [calendarHeight, calendarHours.endHour, calendarHours.startHour, rowHeight, zoom.intervalMinutes]);
 
+  useEffect(() => () => {
+    if (detailsCloseTimerRef.current !== null) window.clearTimeout(detailsCloseTimerRef.current);
+    if (detailsExitTimerRef.current !== null) window.clearTimeout(detailsExitTimerRef.current);
+  }, []);
+
+  function clearDetailsTimers() {
+    if (detailsCloseTimerRef.current !== null) {
+      window.clearTimeout(detailsCloseTimerRef.current);
+      detailsCloseTimerRef.current = null;
+    }
+    if (detailsExitTimerRef.current !== null) {
+      window.clearTimeout(detailsExitTimerRef.current);
+      detailsExitTimerRef.current = null;
+    }
+  }
+
+  function showDetails(target: CalendarDetailsTarget, anchor?: HTMLElement | null) {
+    clearDetailsTimers();
+    setDetailsTarget(target);
+    setDetailsAnchor(anchor ?? blockRefs.current.get(target.blockKey) ?? null);
+    window.requestAnimationFrame(() => setDetailsVisible(true));
+  }
+
+  function hideDetails({ restoreFocus = false }: { restoreFocus?: boolean } = {}) {
+    clearDetailsTimers();
+    const target = detailsTarget;
+    setDetailsVisible(false);
+    const finish = () => {
+      setDetailsTarget(null);
+      setDetailsAnchor(null);
+      detailsExitTimerRef.current = null;
+      if (!restoreFocus || !target) return;
+      const primaryAction = blockRefs.current
+        .get(target.blockKey)
+        ?.querySelector<HTMLButtonElement>(".calendar-entry-primary");
+      suppressFocusDetailsRef.current = true;
+      primaryAction?.focus();
+      window.requestAnimationFrame(() => {
+        suppressFocusDetailsRef.current = false;
+      });
+    };
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      finish();
+      return;
+    }
+    detailsExitTimerRef.current = window.setTimeout(finish, 140);
+  }
+
+  function scheduleDetailsClose() {
+    if (detailsCloseTimerRef.current !== null) window.clearTimeout(detailsCloseTimerRef.current);
+    detailsCloseTimerRef.current = window.setTimeout(() => {
+      detailsCloseTimerRef.current = null;
+      if (selectedTarget) {
+        showDetails(selectedTarget);
+      } else {
+        hideDetails();
+      }
+    }, 120);
+  }
+
+  function selectCalendarEntry(target: CalendarDetailsTarget) {
+    setSelectedTarget(target);
+    setActionError(null);
+    showDetails(target);
+  }
+
+  function openCalendarEntryActions(target: CalendarDetailsTarget) {
+    selectCalendarEntry(target);
+    window.requestAnimationFrame(() => detailsFirstActionRef.current?.focus());
+  }
+
+  function closeCalendarEntryDetails({ restoreFocus = true } = {}) {
+    setSelectedTarget(null);
+    setActionError(null);
+    hideDetails({ restoreFocus });
+  }
+
+  function editCalendarEntry(entry: TimeEntryRow) {
+    setSelectedTarget(null);
+    setActionError(null);
+    hideDetails();
+    setEditingEntry(entry);
+  }
+
+  async function continueCalendarEntry(target: CalendarDetailsTarget) {
+    if (continuingEntryId || isTimerBusy || !target.entry.stoppedAt) return;
+    selectCalendarEntry(target);
+    setContinuingEntryId(target.entry.id);
+    setActionError(null);
+    try {
+      const outcome = await startEntryAgain(target.entry);
+      if (!outcome.ok) {
+        setActionError(outcome.error);
+        return;
+      }
+      setSelectedTarget(null);
+      hideDetails();
+    } finally {
+      setContinuingEntryId(null);
+    }
+  }
+
   async function saveCalendarResize(entry: TimeEntryRow, draft: CalendarResizeDraft) {
     const response = await clientFetch(`/api/time-entries/${entry.id}`, {
       method: "PATCH",
@@ -351,7 +478,7 @@ function CalendarReview({
     entry: TimeEntryRow,
     day: Date,
     edge: CalendarResizeEdge,
-    event: ReactPointerEvent<HTMLButtonElement>
+    event: ReactPointerEvent<HTMLElement>
   ) {
     if (!entry.stoppedAt) return;
     const dayColumn = event.currentTarget.closest("[data-calendar-day-body]") as HTMLElement | null;
@@ -417,6 +544,9 @@ function CalendarReview({
     const beginResize = () => {
       if (hasStartedResize) return;
       hasStartedResize = true;
+      setSelectedTarget(null);
+      setActionError(null);
+      hideDetails();
       setResizingId(entry.id);
       setResizeError(null);
     };
@@ -465,7 +595,9 @@ function CalendarReview({
       <div className="fill-panel-header flex flex-col gap-3 px-4 py-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="text-lg font-semibold">Calendar</h2>
-          <p className="mt-1 text-sm text-[var(--muted)]">Double click a block to edit it. Drag the top or bottom edge to resize.</p>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            Select a block for details and actions. Roomy completed blocks can be resized from their edges.
+          </p>
         </div>
         <Disclosure className="swiss-view-options" summary="View options">
           <div className="swiss-view-options-controls">
@@ -553,42 +685,76 @@ function CalendarReview({
                 backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${Math.max(0, gridLineSpacing - 1)}px, var(--line) ${gridLineSpacing}px)`
               }}
             >
-              {entries
-                .filter((entry) => entryOverlapsDay(entry, day, capturedNow))
-                .map((entry) => {
-                  const activeDraft = resizeDraft?.entryId === entry.id ? resizeDraft : null;
-                  const blockStyle = calendarBlockStyle(
-                    entry,
+              {(() => {
+                const blocks = entries
+                  .filter((entry) => entryOverlapsDay(entry, day, capturedNow))
+                  .map((entry) => {
+                    const activeDraft = resizeDraft?.entryId === entry.id ? resizeDraft : null;
+                    const blockStyle = calendarBlockStyle(
+                      entry,
+                      activeDraft,
+                      day,
+                      rowHeight,
+                      calendarHeight,
+                      calendarHours,
+                      capturedNow
+                    );
+                    if (!blockStyle) return null;
+                    const { startsBeforeDay, continuesIntoNextDay, ...blockPositionStyle } = blockStyle;
+                    const durationSeconds = calendarDurationSeconds(entry, activeDraft, day, capturedNow);
+                    const density = getTimeBlockDensity({
+                      durationSeconds,
+                      height: blockPositionStyle.height
+                    });
+                    const blockKey = calendarBlockKey(entry.id, day);
+                    return {
+                      activeDraft,
+                      blockKey,
+                      blockPositionStyle,
+                      continuesIntoNextDay,
+                      density,
+                      durationSeconds,
+                      entry,
+                      startsBeforeDay
+                    };
+                  })
+                  .filter((block): block is NonNullable<typeof block> => Boolean(block));
+                const lanes = layoutTimeBlockLanes(blocks.map((block) => ({
+                  key: block.blockKey,
+                  top: block.blockPositionStyle.top,
+                  height: block.blockPositionStyle.height
+                })));
+
+                return blocks.map((block) => {
+                  const {
                     activeDraft,
-                    day,
-                    rowHeight,
-                    calendarHeight,
-                    calendarHours,
-                    capturedNow
-                  );
-                  if (!blockStyle) return null;
-                  const { startsBeforeDay, continuesIntoNextDay, ...blockPositionStyle } = blockStyle;
-                  const durationSeconds = calendarDurationSeconds(entry, activeDraft, day, capturedNow);
+                    blockKey,
+                    blockPositionStyle,
+                    continuesIntoNextDay,
+                    density,
+                    durationSeconds,
+                    entry,
+                    startsBeforeDay
+                  } = block;
+                  const detailsLabel = calendarBlockDetailsLabel(entry, activeDraft, durationSeconds, day, capturedNow);
+                  const target = { blockKey, day, entry };
+                  const lane = lanes.get(blockKey) ?? { laneCount: 1, laneIndex: 0 };
+                  const selected = selectedTarget?.blockKey === blockKey;
+                  const detailsOpen = detailsTarget?.blockKey === blockKey;
+                  const isResizing = resizingId === entry.id;
+                  const isContinuing = continuingEntryId === entry.id;
                   const accent = timeEntryAccentColor(entry);
-                  const density = getTimeBlockDensity({
-                    durationSeconds,
-                    height: blockPositionStyle.height
-                  });
-                  const detailsLabel = calendarBlockDetailsLabel(
-                    entry,
-                    activeDraft,
-                    durationSeconds,
-                    day,
-                    capturedNow
-                  );
                   return (
                     <article
-                      key={entry.id}
+                      key={blockKey}
+                      ref={(node) => {
+                        if (node) blockRefs.current.set(blockKey, node);
+                        else blockRefs.current.delete(blockKey);
+                      }}
                       className={[
-                        "focus-ring absolute left-2 right-2 overflow-hidden border p-2 text-left text-xs",
                         "calendar-time-block",
-                        selectedEntryId === entry.id ? "outline outline-2 outline-offset-1 outline-[var(--foreground)]" : "",
-                        resizingId === entry.id ? "is-resizing" : "",
+                        selected ? "is-selected" : "",
+                        isResizing ? "is-resizing" : "",
                         entry.stoppedAt ? "" : "is-running",
                         startsBeforeDay ? "is-continuation-from-previous" : "",
                         continuesIntoNextDay ? "is-continuation-to-next" : "",
@@ -596,74 +762,139 @@ function CalendarReview({
                       ].join(" ")}
                       style={{
                         ...blockPositionStyle,
+                        ...calendarBlockLaneStyle(lane),
+                        "--calendar-block-accent": accent,
                         backgroundColor: `color-mix(in srgb, ${accent} 18%, var(--surface))`,
                         borderColor: `color-mix(in srgb, ${accent} 72%, var(--line))`,
-                        boxShadow: `inset 3px 0 0 ${accent}`,
                         color: "var(--foreground)"
-                      }}
-                      role="button"
-                      aria-pressed={selectedEntryId === entry.id}
-                      tabIndex={0}
+                      } as CSSProperties}
                       data-entry-id={entry.id}
-                      title={detailsLabel}
-                      aria-label={detailsLabel}
-                      onClick={() => setSelectedEntryId(entry.id)}
-                      onDoubleClick={(event) => {
-                        event.preventDefault();
-                        setEditingEntry(entry);
+                      data-calendar-block-key={blockKey}
+                      onPointerEnter={() => {
+                        if (!isResizing) showDetails(target);
                       }}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          setEditingEntry(entry);
-                        }
-                      }}
-                      onMouseDown={(event) => {
-                        if (event.detail > 1) event.preventDefault();
-                      }}
+                      onPointerLeave={scheduleDetailsClose}
                     >
-                      {entry.stoppedAt && !startsBeforeDay ? (
-                          <button
-                            type="button"
-                            className="swiss-resize-handle top"
-                            aria-label={`Resize start of ${timeEntryTitle(entry)}`}
-                            onDoubleClick={(event) => {
-                              event.stopPropagation();
-                            }}
-                            onPointerDown={(event) => startCalendarResize(entry, day, "start", event)}
-                          />
-                      ) : null}
-                      {entry.stoppedAt && !continuesIntoNextDay ? (
-                          <button
-                            type="button"
-                            className="swiss-resize-handle bottom"
-                            aria-label={`Resize end of ${timeEntryTitle(entry)}`}
-                            onDoubleClick={(event) => {
-                              event.stopPropagation();
-                            }}
-                            onPointerDown={(event) => startCalendarResize(entry, day, "end", event)}
-                          />
-                      ) : null}
-                      {density.showTitle ? (
-                        <>
-                          <span className="block truncate font-semibold">{timeEntryTitle(entry)}</span>
-                          {density.showContext ? (
-                            <span className="block truncate opacity-80">
-                              {timeEntryContextLabel(entry)}
+                      <button
+                        type="button"
+                        className="calendar-entry-primary"
+                        aria-controls={detailsOpen ? "calendar-entry-details" : undefined}
+                        aria-expanded={detailsOpen}
+                        aria-haspopup="dialog"
+                        aria-label={detailsLabel}
+                        aria-pressed={selected}
+                        title={detailsLabel}
+                        onBlur={(event) => {
+                          if (event.currentTarget.parentElement?.contains(event.relatedTarget as Node | null)) return;
+                          scheduleDetailsClose();
+                        }}
+                        onClick={() => selectCalendarEntry(target)}
+                        onDoubleClick={(event) => {
+                          event.preventDefault();
+                          editCalendarEntry(entry);
+                        }}
+                        onFocus={() => {
+                          if (!isResizing && !suppressFocusDetailsRef.current) showDetails(target);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            openCalendarEntryActions(target);
+                          }
+                          if (event.key === "Escape" && detailsOpen) {
+                            event.preventDefault();
+                            closeCalendarEntryDetails();
+                          }
+                        }}
+                        onMouseDown={(event) => {
+                          if (event.detail > 1) event.preventDefault();
+                        }}
+                      >
+                        {density.showTitle ? (
+                          <span className="calendar-entry-title">{timeEntryTitle(entry)}</span>
+                        ) : null}
+                        {density.showDuration ? (
+                          entry.stoppedAt ? (
+                            <span className="calendar-entry-duration tabular">{formatDuration(durationSeconds)}</span>
+                          ) : (
+                            <span className="calendar-entry-running-row">
+                              <span className="calendar-entry-running-status">
+                                <CircleDot size={11} aria-hidden="true" />
+                                Running
+                              </span>
+                              <span className="calendar-entry-duration tabular">{formatDuration(durationSeconds)}</span>
                             </span>
-                          ) : null}
-                          {density.showContext ? <TagMetadata tagNames={entry.tagNames} /> : null}
-                        </>
+                          )
+                        ) : null}
+                        {density.showContext ? (
+                          <span className="calendar-entry-context">{timeEntryContextLabel(entry)}</span>
+                        ) : null}
+                        {density.showTags ? <TagMetadata tagNames={entry.tagNames} /> : null}
+                      </button>
+                      {entry.stoppedAt && density.canShowInlineAction && !isResizing ? (
+                        <button
+                          type="button"
+                          className="calendar-start-again"
+                          aria-busy={isContinuing}
+                          aria-label={`Start ${timeEntryTitle(entry)} again`}
+                          disabled={isTimerBusy || Boolean(continuingEntryId)}
+                          onBlur={scheduleDetailsClose}
+                          onClick={() => void continueCalendarEntry(target)}
+                          onDoubleClick={(event) => event.stopPropagation()}
+                          onFocus={() => showDetails(target)}
+                        >
+                          <Play size={13} fill="currentColor" strokeWidth={0} aria-hidden="true" />
+                        </button>
                       ) : null}
-                      {density.showDuration ? <span className="tabular block">{formatDuration(durationSeconds)}</span> : null}
+                      {entry.stoppedAt && density.canDirectResize && !startsBeforeDay ? (
+                        <span
+                          className="swiss-resize-handle top"
+                          aria-hidden="true"
+                          title={`Drag to resize the start of ${timeEntryTitle(entry)}`}
+                          onDoubleClick={(event) => {
+                            event.stopPropagation();
+                          }}
+                          onPointerDown={(event) => startCalendarResize(entry, day, "start", event)}
+                        />
+                      ) : null}
+                      {entry.stoppedAt && density.canDirectResize && !continuesIntoNextDay ? (
+                        <span
+                          className="swiss-resize-handle bottom"
+                          aria-hidden="true"
+                          title={`Drag to resize the end of ${timeEntryTitle(entry)}`}
+                          onDoubleClick={(event) => {
+                            event.stopPropagation();
+                          }}
+                          onPointerDown={(event) => startCalendarResize(entry, day, "end", event)}
+                        />
+                      ) : null}
                     </article>
                   );
-                })}
+                });
+              })()}
             </div>
           ))}
         </div>
       </div>
       {resizeError ? <p className="border-t border-[var(--line)] px-4 py-2 text-sm text-[var(--danger-text)]">{resizeError}</p> : null}
+      {detailsTarget && typeof document !== "undefined" ? createPortal(
+        <CalendarEntryDetails
+          actionError={actionError}
+          anchor={detailsAnchor}
+          busy={isTimerBusy || continuingEntryId === detailsTarget.entry.id}
+          firstActionRef={detailsFirstActionRef}
+          layoutKey={`${detailsTarget.blockKey}:${zoomLevel}`}
+          onClose={() => closeCalendarEntryDetails()}
+          onEdit={() => editCalendarEntry(detailsTarget.entry)}
+          onFocusSurface={clearDetailsTimers}
+          onLeaveSurface={scheduleDetailsClose}
+          onStartAgain={() => void continueCalendarEntry(detailsTarget)}
+          target={detailsTarget}
+          visible={detailsVisible}
+          capturedNow={capturedNow}
+        />,
+        document.body
+      ) : null}
       {editingEntry ? (
         <EditTimeEntryDialog
           categories={categories}
@@ -679,6 +910,161 @@ function CalendarReview({
         />
       ) : null}
     </section>
+  );
+}
+
+function CalendarEntryDetails({
+  actionError,
+  anchor,
+  busy,
+  capturedNow,
+  firstActionRef,
+  layoutKey,
+  onClose,
+  onEdit,
+  onFocusSurface,
+  onLeaveSurface,
+  onStartAgain,
+  target,
+  visible
+}: {
+  actionError: string | null;
+  anchor: HTMLElement | null;
+  busy: boolean;
+  capturedNow: Date;
+  firstActionRef: RefObject<HTMLButtonElement | null>;
+  layoutKey: string;
+  onClose: () => void;
+  onEdit: () => void;
+  onFocusSurface: () => void;
+  onLeaveSurface: () => void;
+  onStartAgain: () => void;
+  target: CalendarDetailsTarget;
+  visible: boolean;
+}) {
+  const panelRef = useRef<HTMLElement | null>(null);
+  const [position, setPosition] = useState<CalendarDetailsPosition>({ left: 12, top: 12 });
+  const titleId = `calendar-entry-details-title-${target.entry.id}`;
+  const details = calendarEntrySliceDetails(target.entry, null, target.day, capturedNow);
+
+  useLayoutEffect(() => {
+    function updatePosition() {
+      const panel = panelRef.current;
+      if (!anchor || !panel || window.innerWidth <= 640) return;
+      const anchorRect = anchor.getBoundingClientRect();
+      const panelRect = panel.getBoundingClientRect();
+      const viewportPadding = 12;
+      const gap = 8;
+      const left = Math.min(
+        Math.max(viewportPadding, anchorRect.left),
+        Math.max(viewportPadding, window.innerWidth - panelRect.width - viewportPadding)
+      );
+      const below = anchorRect.bottom + gap;
+      const top = below + panelRect.height <= window.innerHeight - viewportPadding
+        ? below
+        : Math.max(viewportPadding, anchorRect.top - panelRect.height - gap);
+      setPosition({ left: Math.round(left), top: Math.round(top) });
+    }
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [anchor, layoutKey]);
+
+  return (
+    <aside
+      ref={panelRef}
+      id="calendar-entry-details"
+      role="dialog"
+      aria-labelledby={titleId}
+      aria-modal={false}
+      className={`calendar-entry-details${visible ? " is-visible" : ""}`}
+      style={{ left: position.left, top: position.top } as CSSProperties}
+      onBlurCapture={(event) => {
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+        onLeaveSurface();
+      }}
+      onFocusCapture={onFocusSurface}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        onClose();
+      }}
+      onPointerEnter={onFocusSurface}
+      onPointerLeave={onLeaveSurface}
+    >
+      <header className="calendar-entry-details-header">
+        <div>
+          <span className="calendar-entry-details-kicker">
+            {target.entry.stoppedAt ? formatDate(target.day) : (
+              <>
+                <CircleDot size={13} aria-hidden="true" />
+                Running
+              </>
+            )}
+          </span>
+          <h3 id={titleId}>{timeEntryTitle(target.entry)}</h3>
+        </div>
+        <IconButton label="Close entry details" onClick={onClose}>
+          <X size={17} aria-hidden="true" />
+        </IconButton>
+      </header>
+
+      <dl className="calendar-entry-details-list">
+        <div>
+          <dt>Time</dt>
+          <dd className="tabular">{details.timeRange}</dd>
+        </div>
+        <div>
+          <dt>Duration</dt>
+          <dd className="tabular">{formatDuration(details.durationSeconds)}</dd>
+        </div>
+        <div>
+          <dt>Category</dt>
+          <dd>{timeEntryCategoryLabel(target.entry)}</dd>
+        </div>
+        {target.entry.placeName ? (
+          <div>
+            <dt>Place</dt>
+            <dd>{target.entry.placeName}</dd>
+          </div>
+        ) : null}
+        {target.entry.tagNames.length > 0 ? (
+          <div className="calendar-entry-details-wide">
+            <dt>Tags</dt>
+            <dd>{target.entry.tagNames.join(" · ")}</dd>
+          </div>
+        ) : null}
+      </dl>
+      {details.continuation ? <p className="calendar-entry-continuation">{details.continuation}</p> : null}
+      {actionError ? <p className="calendar-entry-details-error" role="alert">{actionError}</p> : null}
+
+      <footer className="calendar-entry-details-actions">
+        {target.entry.stoppedAt ? (
+          <Button
+            ref={firstActionRef}
+            aria-busy={busy}
+            aria-label={`Start ${timeEntryTitle(target.entry)} again`}
+            disabled={busy}
+            onClick={onStartAgain}
+          >
+            <Play size={15} fill="currentColor" strokeWidth={0} aria-hidden="true" />
+            <span>Start again</span>
+          </Button>
+        ) : null}
+        <Button
+          ref={target.entry.stoppedAt ? undefined : firstActionRef}
+          onClick={onEdit}
+        >
+          <Pencil size={15} aria-hidden="true" />
+          <span>Edit</span>
+        </Button>
+      </footer>
+    </aside>
   );
 }
 
@@ -806,10 +1192,38 @@ function calendarBlockStyle(
   };
 }
 
+function calendarBlockKey(entryId: string, day: Date) {
+  return `${entryId}:${formatCalendarDateKey(day)}`;
+}
+
+function calendarBlockLaneStyle({ laneCount, laneIndex }: TimeBlockLane): CSSProperties {
+  if (laneCount <= 1) return { left: 8, right: 8 };
+  const laneWidth = 100 / laneCount;
+  const before = laneWidth * laneIndex;
+  const after = laneWidth * (laneCount - laneIndex - 1);
+  return {
+    left: laneIndex === 0 ? 8 : `calc(${before}% + 2px)`,
+    right: laneIndex === laneCount - 1 ? 8 : `calc(${after}% + 2px)`
+  };
+}
+
 function calendarBlockDetailsLabel(
   entry: TimeEntryRow,
   draft: CalendarResizeDraft | null,
   durationSeconds: number,
+  day: Date,
+  capturedNow: Date
+) {
+  const details = calendarEntrySliceDetails(entry, draft, day, capturedNow);
+  const durationLabel = details.isLiveSlice
+    ? `Running, ${formatDuration(durationSeconds)}`
+    : formatDuration(durationSeconds);
+  return `${timeEntryTitle(entry)}. ${timeEntryContextLabel(entry)}. ${details.timeRange}. ${durationLabel}.${details.continuation ? ` ${details.continuation}` : ""}`;
+}
+
+function calendarEntrySliceDetails(
+  entry: TimeEntryRow,
+  draft: CalendarResizeDraft | null,
   day: Date,
   capturedNow: Date
 ) {
@@ -824,15 +1238,18 @@ function calendarBlockDetailsLabel(
   const visibleStart = new Date(Math.max(entryStart.getTime(), dayStart.getTime()));
   const visibleEnd = new Date(Math.min(entryEnd.getTime(), dayEnd.getTime()));
   const isLiveSlice = !entry.stoppedAt && visibleEnd.getTime() >= capturedNow.getTime();
-  const timeRange = `${formatTime(visibleStart)} - ${isLiveSlice ? "now" : formatTime(visibleEnd)}`;
-  const durationLabel = isLiveSlice
-    ? `Running, ${formatDuration(durationSeconds)}`
-    : formatDuration(durationSeconds);
-  const continuation = [
-    entryStart < dayStart ? "Continues from the previous day." : "",
-    entryEnd > dayEnd ? "Continues into the next day." : ""
-  ].filter(Boolean).join(" ");
-  return `${timeEntryTitle(entry)}. ${timeEntryContextLabel(entry)}. ${timeRange}. ${durationLabel}.${continuation ? ` ${continuation}` : ""}`;
+  return {
+    continuation: [
+      entryStart < dayStart ? "Continues from the previous day." : "",
+      entryEnd > dayEnd ? "Continues into the next day." : ""
+    ].filter(Boolean).join(" "),
+    durationSeconds: entryOverlapSeconds({
+      startedAt: entryStart.toISOString(),
+      stoppedAt: entryEnd.toISOString()
+    }, { start: dayStart, end: dayEnd }, capturedNow),
+    isLiveSlice,
+    timeRange: `${formatTime(visibleStart)} - ${isLiveSlice ? "now" : formatTime(visibleEnd)}`
+  };
 }
 
 function calendarDurationSeconds(
@@ -841,19 +1258,7 @@ function calendarDurationSeconds(
   day: Date,
   capturedNow: Date
 ) {
-  const start = new Date(draft?.startedAt ?? entry.startedAt);
-  const stoppedAt = draft?.stoppedAt
-    ? new Date(draft.stoppedAt)
-    : entry.stoppedAt
-      ? new Date(entry.stoppedAt)
-      : capturedNow;
-  return entryOverlapSeconds({
-    startedAt: start.toISOString(),
-    stoppedAt: stoppedAt.toISOString()
-  }, {
-    start: startOfDay(day),
-    end: addDays(startOfDay(day), 1)
-  }, capturedNow);
+  return calendarEntrySliceDetails(entry, draft, day, capturedNow).durationSeconds;
 }
 
 function minutesFromDate(date: Date) {

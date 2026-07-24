@@ -4,7 +4,9 @@ import {
   applyOptimisticActiveEntryPatch,
   applyOptimisticTimerStart,
   applyOptimisticTimerStop,
-  createTimerMutationGate
+  createTimerMutationGate,
+  entryContinuationDecision,
+  timerStartErrorMessage
 } from "./timer-runtime";
 
 describe("shell timer runtime", () => {
@@ -56,6 +58,53 @@ describe("shell timer runtime", () => {
     expect(patched.activeEntry?.description).toBe("Final draft");
     expect(patched.entries.filter((item) => item.id === active.id)).toHaveLength(1);
     expect(patched.entries[0].tagNames).toEqual(["writing"]);
+  });
+
+  it("builds a category, description, and tags-only continuation draft", () => {
+    const source = entry({
+      categoryId: "focus",
+      description: "  Write release notes  ",
+      placeId: "place-1",
+      projectId: "legacy-project",
+      clientName: "Legacy client",
+      tagNames: ["ship", "writing"]
+    });
+    const decision = entryContinuationDecision(source, null);
+
+    expect(decision).toEqual({
+      ok: true,
+      draft: {
+        categoryId: "focus",
+        description: "Write release notes",
+        tagNames: ["ship", "writing"]
+      }
+    });
+    expect(decision.ok && Object.keys(decision.draft)).not.toContain("placeId");
+    expect(decision.ok && Object.keys(decision.draft)).not.toContain("projectId");
+    expect(decision.ok && Object.keys(decision.draft)).not.toContain("clientName");
+  });
+
+  it("refuses to replace an active timer or start a meaningless blank entry", () => {
+    expect(entryContinuationDecision(entry(), entry({ id: "active" }))).toEqual({
+      ok: false,
+      error: "A timer is already running. Stop it before starting another task."
+    });
+    expect(entryContinuationDecision(entry({
+      categoryId: null,
+      categoryName: null,
+      description: null,
+      tagNames: ["tag-only"]
+    }), null)).toEqual({
+      ok: false,
+      error: "This entry does not have a task or category to start."
+    });
+  });
+
+  it("turns an offline fetch failure into calm restart feedback", () => {
+    expect(timerStartErrorMessage(new TypeError("Failed to fetch"))).toBe(
+      "Unable to start right now. Check your connection and try again."
+    );
+    expect(timerStartErrorMessage(new Error("Timer conflict"))).toBe("Timer conflict");
   });
 });
 
