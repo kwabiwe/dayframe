@@ -4,7 +4,9 @@ Date: 2026-07-24
 
 Branch: `codex/web-density-ios-commute-fix`
 
-Status: PR [#104](https://github.com/kwabiwe/dayframe/pull/104) open for review
+Status: PR [#104](https://github.com/kwabiwe/dayframe/pull/104) merged at
+`25d2c06300d8739d3c261edc53b7d4f2389a5c37`; iOS fix shipped in internal
+TestFlight build `0.1.0 (64)`
 
 ## Report
 
@@ -59,4 +61,10 @@ source remained off after an upgrade or lifecycle reset.
 - Local browser automation could not navigate to the localhost/LAN target because
   the browser policy blocked local navigation. The Ready Vercel preview was then
   checked but redirected the isolated browser to Vercel Authentication. Rendered
-  checks therefore remain required before merge.
+  checks therefore remain required on the authenticated production web app.
+- TestFlight preflight, signed Release archive, App Store export and upload passed
+  from merged `main`, with production API base `https://dayframe-web.vercel.app`.
+- App Store Connect delivery/build ID
+  `ee8a2a5f-f6b8-42fe-a9a9-f376fb83ea75` is `VALID`, export compliance is false,
+  en-GB notes are set, and the build is `IN_BETA_TESTING` through the all-build
+  `Internal Health Debug` group.
