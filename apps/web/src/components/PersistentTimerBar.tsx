@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties, FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { CSSProperties, FormEvent, KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { normalizeTagName, paletteCssColorFor } from "@dayframe/shared";
 import { CheckCircle2, ChevronDown, Ellipsis, Play, Plus, Square, Trash2 } from "lucide-react";
@@ -380,15 +380,6 @@ export function PersistentTimerBar() {
           </div>
         </div>
 
-        <IconButton
-          className="swiss-manual-entry-action"
-          disabled={isTimerBusy}
-          label="Add time manually"
-          onClick={openManualEntry}
-        >
-          <Plus size={18} />
-        </IconButton>
-
         <div className="swiss-timer-time-control" ref={startEditorRef}>
           {active ? (
             <button
@@ -472,7 +463,7 @@ export function PersistentTimerBar() {
           ) : null}
         </div>
 
-        <div className="swiss-timer-actions" ref={timerActionsRef}>
+        <div className="swiss-timer-actions">
           <button
             className={["swiss-command-play", active ? "is-active" : ""].filter(Boolean).join(" ")}
             type={active ? "button" : "submit"}
@@ -485,6 +476,9 @@ export function PersistentTimerBar() {
           >
             {active ? <Square size={14} fill="currentColor" /> : <Play size={18} fill="currentColor" strokeWidth={0} />}
           </button>
+        </div>
+
+        <div className="swiss-timer-secondary-actions" ref={timerActionsRef}>
           {active ? (
             <>
               <IconButton
@@ -518,7 +512,16 @@ export function PersistentTimerBar() {
                 </button>
               </div>
             </>
-          ) : null}
+          ) : (
+            <IconButton
+              className="swiss-manual-entry-action"
+              disabled={isTimerBusy}
+              label="Add time manually"
+              onClick={openManualEntry}
+            >
+              <Plus size={18} />
+            </IconButton>
+          )}
         </div>
       </form>
 
@@ -600,11 +603,13 @@ function TaskSuggestionsPanel({
   isBusy,
   isOpen,
   onSelect,
+  panelRef,
   suggestions
 }: {
   isBusy: boolean;
   isOpen: boolean;
   onSelect: (suggestion: BootstrapData["taskSuggestions"][number]) => void;
+  panelRef?: RefObject<HTMLDivElement | null>;
   suggestions: BootstrapData["taskSuggestions"];
 }) {
   return (
@@ -613,6 +618,7 @@ function TaskSuggestionsPanel({
       aria-label="Suggestions"
       className={`ui-floating-surface swiss-task-suggestions${isOpen ? " is-open" : ""}`}
       inert={!isOpen}
+      ref={panelRef}
       role="listbox"
     >
       <div className="swiss-task-suggestions-header"><span>Suggestions</span></div>
@@ -660,10 +666,41 @@ function ManualEntryDialog({
   }) => Promise<{ ok: true } | { ok: false; error: string }>;
 }) {
   const [formError, setFormError] = useState<string | null>(null);
+  const [categoryId, setCategoryId] = useState("");
   const [description, setDescription] = useState("");
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [tagPanelOpen, setTagPanelOpen] = useState(false);
   const [tagNames, setTagNames] = useState<string[]>([]);
+  const descriptionInputRef = useRef<HTMLInputElement | null>(null);
+  const descriptionRootRef = useRef<HTMLDivElement | null>(null);
+  const suggestionsRef = useRef<HTMLDivElement | null>(null);
   const defaults = useMemo(() => manualEntryDefaults(data.dateRange.selectedDate), [data.dateRange.selectedDate]);
+  const visibleTaskSuggestions = useMemo(() => {
+    const query = description.trim().toLocaleLowerCase();
+    if (!query) return data.taskSuggestions.slice(0, 6);
+    return data.taskSuggestions
+      .filter((suggestion) => [suggestion.description, suggestion.categoryName ?? ""]
+        .some((value) => value.toLocaleLowerCase().includes(query)))
+      .slice(0, 6);
+  }, [data.taskSuggestions, description]);
   const formId = "persistent-manual-entry-form";
+
+  useEffect(() => {
+    if (!suggestionsOpen) return undefined;
+    function closeOnOutside(event: MouseEvent) {
+      if (!descriptionRootRef.current?.contains(event.target as Node)) setSuggestionsOpen(false);
+    }
+    document.addEventListener("mousedown", closeOnOutside);
+    return () => document.removeEventListener("mousedown", closeOnOutside);
+  }, [suggestionsOpen]);
+
+  function chooseSuggestion(suggestion: BootstrapData["taskSuggestions"][number]) {
+    setDescription(suggestion.description);
+    setCategoryId(suggestion.categoryId ?? "");
+    setTagNames(suggestion.tagNames);
+    setSuggestionsOpen(false);
+    window.requestAnimationFrame(() => descriptionInputRef.current?.focus());
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -680,7 +717,7 @@ function ManualEntryDialog({
       return;
     }
     const outcome = await onCreate({
-      categoryId: String(formData.get("categoryId") || "") || undefined,
+      categoryId: categoryId || undefined,
       description: description.trim() || undefined,
       tagNames,
       startedAt,
@@ -693,6 +730,8 @@ function ManualEntryDialog({
   return (
     <ModalDialog
       busy={isBusy}
+      className="manual-entry-dialog"
+      contentClassName="manual-entry-dialog-content"
       onClose={onClose}
       title="Add time"
       footer={(
@@ -707,25 +746,61 @@ function ManualEntryDialog({
           id="manual-entry-category"
           name="categoryId"
           label="Category"
-          defaultValue=""
+          value={categoryId}
+          onChange={(event) => setCategoryId(event.target.value)}
           options={[
             { value: "", label: "Uncategorized" },
             ...data.categories.map((category) => ({ value: category.id, label: category.name }))
           ]}
         />
         <Field className="swiss-form-wide" htmlFor="manual-entry-description" label="Description">
-          <InlineTagInput
-            ariaLabel="Manual time entry description"
-            inputClassName="ui-control"
-            inputId="manual-entry-description"
-            name="manual-description"
-            onChange={setDescription}
-            onSelectedTagNamesChange={setTagNames}
-            placeholder="What did you work on?"
-            selectedTagNames={tagNames}
-            tags={data.tags}
-            value={description}
-          />
+          <div className="manual-entry-description" ref={descriptionRootRef}>
+            <InlineTagInput
+              ariaLabel="Manual time entry description"
+              className="manual-entry-inline-tags"
+              inputClassName="ui-control"
+              inputId="manual-entry-description"
+              inputRef={descriptionInputRef}
+              name="manual-description"
+              onChange={(value) => {
+                setDescription(value);
+                setSuggestionsOpen(true);
+              }}
+              onClick={() => setSuggestionsOpen(true)}
+              onFocus={() => setSuggestionsOpen(true)}
+              onHashtagPanelChange={(open) => {
+                setTagPanelOpen(open);
+                if (open) setSuggestionsOpen(false);
+              }}
+              onInputKeyDown={(event) => {
+                if (!suggestionsOpen || tagPanelOpen || !visibleTaskSuggestions.length) return;
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setSuggestionsOpen(false);
+                } else if (event.key === "Enter") {
+                  event.preventDefault();
+                  chooseSuggestion(visibleTaskSuggestions[0]);
+                } else if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  suggestionsRef.current?.querySelector<HTMLButtonElement>('[role="option"]')?.focus();
+                }
+              }}
+              onSelectedTagNamesChange={setTagNames}
+              placeholder="What did you work on?"
+              selectedTagNames={tagNames}
+              tags={data.tags}
+              value={description}
+            />
+            {visibleTaskSuggestions.length ? (
+              <TaskSuggestionsPanel
+                isBusy={isBusy}
+                isOpen={suggestionsOpen && !tagPanelOpen}
+                onSelect={chooseSuggestion}
+                panelRef={suggestionsRef}
+                suggestions={visibleTaskSuggestions}
+              />
+            ) : null}
+          </div>
         </Field>
         <Field htmlFor="manual-entry-start" label="Start">
           <input className="ui-control" id="manual-entry-start" type="datetime-local" name="startedAt" defaultValue={defaults.start} required />

@@ -25,10 +25,11 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AppShellRuntimeProvider, useAppShellRuntime } from "@/components/AppShellRuntime";
+import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { DayframeBrand } from "@/components/brand/DayframeBrand";
 import { PersistentTimerBar } from "@/components/PersistentTimerBar";
 import { SignOutControl } from "@/components/SignOutControl";
-import { Button, IconButton, ModalDialog, PopoverPanel } from "@/components/ui/Primitives";
+import { IconButton, ModalDialog, PopoverPanel } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { timeEntryTitle } from "@/lib/display";
 import { formatDuration, formatTime } from "@/lib/format";
@@ -242,7 +243,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
                 selectedDate={selectedDate}
                 onPrevious={() => navigateDate(previousDate)}
                 onNext={() => navigateDate(nextDate)}
-                onToday={() => navigateDate(dateKey(new Date()))}
+                onSelect={navigateDate}
               />
             ) : null}
           </div>
@@ -272,21 +273,25 @@ function AppShellContent({ children }: { children: ReactNode }) {
 function DateContextRow({
   onNext,
   onPrevious,
-  onToday,
+  onSelect,
   selectedDate
 }: {
   onNext: () => void;
   onPrevious: () => void;
-  onToday: () => void;
+  onSelect: (date: string) => void;
   selectedDate: string;
 }) {
   const today = dateKey(new Date());
   return (
     <div className="swiss-date-context-row" aria-label="Date navigation">
       <IconButton label="Previous day" onClick={onPrevious}><ChevronLeft size={19} /></IconButton>
-      <strong>{formatLongDate(selectedDate)}</strong>
+      <DatePickerPopover
+        label={formatLongDate(selectedDate)}
+        onChange={onSelect}
+        today={today}
+        value={selectedDate}
+      />
       <IconButton label="Next day" onClick={onNext}><ChevronRight size={19} /></IconButton>
-      {selectedDate !== today ? <Button onClick={onToday}>Today</Button> : null}
     </div>
   );
 }

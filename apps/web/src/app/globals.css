@@ -5824,35 +5824,71 @@ kbd {
 .timeline-range-navigation {
   display: grid;
   min-width: 0;
-  grid-template-columns: var(--web-icon-button-size) minmax(160px, 1fr) var(--web-icon-button-size) auto;
+  grid-template-columns: var(--web-icon-button-size) minmax(160px, 1fr) var(--web-icon-button-size);
   align-items: center;
   gap: var(--web-gap-sm);
 }
 
-.timeline-period-label {
+.timeline-date-picker {
+  position: relative;
   display: grid;
   min-width: 0;
-  gap: 3px;
-  padding-inline: 4px;
 }
 
-.timeline-period-label strong,
-.timeline-period-label span {
+.timeline-period-trigger {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--web-control-height);
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: var(--web-control-border-width) solid transparent;
+  border-radius: var(--web-radius-control);
+  background: transparent;
+  padding: 0 var(--web-control-padding-inline);
+  color: var(--foreground);
+}
+
+.timeline-period-trigger:hover,
+.timeline-period-trigger[aria-expanded="true"] {
+  background: var(--surface-muted);
+}
+
+.timeline-period-trigger:focus-visible {
+  border-color: var(--web-focus-border);
+  outline: 0;
+}
+
+.timeline-period-trigger strong {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.timeline-period-label strong {
-  color: var(--foreground);
   font-size: 14px;
   font-weight: 650;
 }
 
-.timeline-period-label span {
+.timeline-date-picker-panel {
+  position: absolute;
+  top: calc(100% + var(--web-field-gap));
+  left: 50%;
+  z-index: 90;
+  display: grid;
+  width: min(280px, calc(100vw - 24px));
+  gap: var(--web-gap-sm);
+  padding: var(--web-panel-padding);
+  translate: -50% 0;
+}
+
+.timeline-date-picker-panel > .ui-button {
+  justify-self: start;
+}
+
+.timeline-date-picker-panel > label {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .timeline-range-totals {
@@ -6106,13 +6142,13 @@ kbd {
   display: grid;
   grid-template-areas:
     "description-label category-label . . ."
-    "description category manual time action";
+    "description category time action secondary";
   grid-template-columns:
     minmax(0, 1fr)
     minmax(160px, 220px)
-    var(--web-icon-button-size)
     minmax(132px, 144px)
-    max-content;
+    var(--web-icon-button-size)
+    var(--web-icon-button-size);
   align-items: start;
   column-gap: var(--web-gap-md);
   row-gap: var(--web-field-gap);
@@ -6149,11 +6185,8 @@ kbd {
   min-width: 0;
 }
 
-.swiss-persistent-timer .swiss-manual-entry-action {
-  grid-area: manual;
-}
-
 .swiss-persistent-timer .swiss-manual-entry-action,
+.swiss-persistent-timer .swiss-timer-more,
 .swiss-persistent-timer .swiss-command-play {
   width: var(--web-icon-button-size);
   min-width: var(--web-icon-button-size);
@@ -6166,9 +6199,13 @@ kbd {
 
 .swiss-timer-actions {
   grid-area: action;
+  display: flex;
+}
+
+.swiss-timer-secondary-actions {
+  grid-area: secondary;
   position: relative;
   display: flex;
-  gap: var(--web-gap-sm);
 }
 
 .swiss-timer-actions-menu {
@@ -6439,7 +6476,7 @@ kbd {
   display: grid;
   width: 100%;
   max-width: 100%;
-  max-height: min(272px, calc(100dvh - 96px));
+  max-height: min(316px, calc(100dvh - 96px));
   overflow: hidden;
 }
 
@@ -6461,6 +6498,7 @@ kbd {
   display: grid;
   overflow-y: auto;
   overscroll-behavior: contain;
+  padding-block: 2px;
 }
 
 .swiss-task-suggestions-list button {
@@ -6470,16 +6508,11 @@ kbd {
   align-items: center;
   gap: var(--web-gap-sm);
   border: 0;
-  border-top: 1px solid var(--line);
   border-radius: 0;
   background: transparent;
   padding: 6px var(--web-control-padding-inline);
   color: var(--foreground);
   text-align: left;
-}
-
-.swiss-task-suggestions-list button:first-child {
-  border-top: 0;
 }
 
 .swiss-task-suggestions-list button:hover,
@@ -6857,12 +6890,12 @@ kbd {
       "description-label description-label description-label description-label"
       "description description description description"
       "category-label category-label category-label category-label"
-      "category manual time action";
+      "category time action secondary";
     grid-template-columns:
       minmax(0, 1fr)
-      var(--web-icon-button-size)
       minmax(104px, 118px)
-      max-content;
+      var(--web-icon-button-size)
+      var(--web-icon-button-size);
     column-gap: var(--web-gap-sm);
     row-gap: var(--web-field-gap);
   }
@@ -6963,13 +6996,8 @@ kbd {
     justify-self: center;
   }
 
-  .timeline-period-label {
-    text-align: center;
-  }
-
-  .timeline-period-label strong,
-  .timeline-period-label span {
-    white-space: normal;
+  .timeline-period-trigger strong {
+    white-space: nowrap;
   }
 
   .timeline-range-totals {
@@ -7000,10 +7028,10 @@ kbd {
       "description description description"
       "category-label category-label category-label"
       "category category category"
-      "manual time action";
+      "time action secondary";
     grid-template-columns:
-      var(--web-icon-button-size)
       minmax(0, 1fr)
+      var(--web-icon-button-size)
       max-content;
   }
 }
@@ -7140,6 +7168,7 @@ kbd {
 
 .inline-tag-picker-search {
   display: flex;
+  height: var(--web-control-height);
   align-items: center;
   gap: 0.5rem;
   margin: 0.7rem;
@@ -7151,7 +7180,8 @@ kbd {
 
 .inline-tag-picker-search input {
   min-width: 0;
-  min-height: 44px;
+  height: 100%;
+  min-height: 0;
   flex: 1;
   border: 0;
   background: transparent;
@@ -7166,7 +7196,6 @@ kbd {
   min-height: 2.75rem;
   overflow-y: auto;
   overscroll-behavior: contain;
-  border-top: 1px solid var(--line);
 }
 
 .inline-tag-picker-list button,
@@ -7177,7 +7206,7 @@ kbd {
   align-items: center;
   gap: 0.65rem;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--web-radius-control);
   background: transparent;
   padding: 0.55rem 0.75rem;
   color: var(--foreground);
@@ -7249,7 +7278,7 @@ kbd {
 }
 
 .inline-tag-suggestions > div {
-  border-top: 1px solid var(--line);
+  padding-block: 2px;
 }
 
 .inline-tag-suggestions button,
@@ -7259,18 +7288,13 @@ kbd {
   min-height: 44px;
   align-items: center;
   border: 0;
-  border-top: 1px solid var(--line);
-  border-radius: 0;
+  border-radius: var(--web-radius-control);
   background: transparent;
   padding: 0.55rem 0.75rem;
   color: var(--foreground);
   font: inherit;
   font-size: 0.8125rem;
   text-align: left;
-}
-
-.inline-tag-suggestions button:first-child {
-  border-top: 0;
 }
 
 .inline-tag-suggestions button.is-highlighted {
@@ -7315,6 +7339,44 @@ kbd {
   color: var(--danger);
 }
 
+dialog.ui-dialog.manual-entry-dialog {
+  overflow: visible;
+}
+
+.manual-entry-dialog .ui-dialog-header,
+.manual-entry-dialog .ui-dialog-actions {
+  background: var(--surface-raised);
+}
+
+.manual-entry-dialog-content {
+  overflow: visible;
+}
+
+.manual-entry-description {
+  position: relative;
+  min-width: 0;
+}
+
+.manual-entry-description .swiss-task-suggestions,
+.manual-entry-inline-tags .inline-tag-picker {
+  top: auto;
+  right: 0;
+  bottom: calc(100% + var(--web-field-gap));
+  left: 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+.manual-entry-description .swiss-task-suggestions {
+  z-index: 75;
+  max-height: min(260px, calc(100dvh - 180px));
+}
+
+.manual-entry-inline-tags .inline-tag-picker {
+  z-index: 80;
+  max-height: min(240px, calc(100dvh - 180px));
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ui-floating-surface,
   .ui-floating-surface.is-open,
@@ -7331,7 +7393,8 @@ kbd {
 
 @media (max-width: 560px) {
   .inline-tag-picker,
-  .swiss-start-time-popover {
+  .swiss-start-time-popover,
+  .timeline-date-picker-panel {
     position: fixed;
     top: auto;
     right: 12px;
@@ -7339,6 +7402,17 @@ kbd {
     left: 12px;
     width: auto;
     max-height: min(26rem, calc(100dvh - 24px));
+    translate: none;
+  }
+
+  .manual-entry-description .swiss-task-suggestions,
+  .manual-entry-inline-tags .inline-tag-picker {
+    top: auto;
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    width: auto;
+    max-width: none;
   }
 }
 

@@ -6,10 +6,11 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { CalendarDays, ChevronLeft, ChevronRight, CircleDot, List, Play, Table2 } from "lucide-react";
 import { calendarBlockContinuationEdges } from "@dayframe/shared";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
+import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import { TagMetadata } from "@/components/TagMetadata";
 import { EntriesTable } from "@/components/EntriesTable";
-import { Button, Disclosure, IconButton, SegmentedControl } from "@/components/ui/Primitives";
+import { IconButton, SegmentedControl } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import {
   timeEntryAccentColor,
@@ -41,7 +42,6 @@ import {
 } from "@/lib/timeline-calculations";
 import { entryOverlapSeconds } from "@/lib/time-entry-overlap";
 import {
-  resetTimelineState,
   resolveTimelineRanges,
   shiftTimelineState,
   timelineHref,
@@ -167,11 +167,7 @@ export function TimeReviewViews({
   const dayTotal = dayEntries.reduce((sum, entry) => sum + entry.durationSeconds, 0);
   const weekTotal = weekEntries.reduce((sum, entry) => sum + entry.durationSeconds, 0);
   const periodLabel = formatTimelinePeriodLabel(state.scope, ranges);
-  const resetLabel = state.scope === "day" ? "Today" : "This week";
   const todayKey = toTimelineDateKey(new Date());
-  const isCurrentPeriod = state.scope === "day"
-    ? state.date === todayKey
-    : ranges.weekDays.some((day) => toTimelineDateKey(day) === todayKey);
 
   return (
     <section className="space-y-5">
@@ -188,10 +184,13 @@ export function TimeReviewViews({
           >
             <ChevronLeft size={18} />
           </IconButton>
-          <div className="timeline-period-label" aria-live="polite" aria-atomic="true">
-            <strong>{periodLabel}</strong>
-            <span>{state.scope === "day" ? "Selected day" : "Selected week"}</span>
-          </div>
+          <DatePickerPopover
+            disabled={isDateLoading}
+            label={periodLabel}
+            onChange={(date) => void navigate({ date })}
+            today={todayKey}
+            value={state.date}
+          />
           <IconButton
             disabled={isDateLoading}
             label={`Next ${state.scope}`}
@@ -199,11 +198,6 @@ export function TimeReviewViews({
           >
             <ChevronRight size={18} />
           </IconButton>
-          {!isCurrentPeriod ? (
-            <Button compact disabled={isDateLoading} onClick={() => navigate(resetTimelineState(state))}>
-              {resetLabel}
-            </Button>
-          ) : null}
         </div>
 
         <dl className="timeline-range-totals">
@@ -503,35 +497,26 @@ function CalendarReview({
   return (
     <section className="industrial-panel fill-calendar-panel">
       <div className="fill-panel-header flex flex-col gap-3 px-4 py-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">Calendar</h2>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            Hover for Play. Double-click a block to edit it. Roomy completed blocks can be resized from their edges.
-          </p>
-        </div>
-        <Disclosure className="swiss-view-options" summary="View options">
-          <div className="swiss-view-options-controls">
-            <span className="swiss-zoom-control" role="group" aria-label="Calendar zoom">
-              <button
-                type="button"
-                disabled={zoomIndex === 0}
-                aria-label="Zoom calendar out"
-                onClick={() => setZoomLevel(zoomKeys[Math.max(0, zoomIndex - 1)])}
-              >
-                -
-              </button>
-              <b>{zoom.label}</b>
-              <button
-                type="button"
-                disabled={zoomIndex === zoomKeys.length - 1}
-                aria-label="Zoom calendar in"
-                onClick={() => setZoomLevel(zoomKeys[Math.min(zoomKeys.length - 1, zoomIndex + 1)])}
-              >
-                +
-              </button>
-            </span>
-          </div>
-        </Disclosure>
+        <h2 className="text-lg font-semibold">Calendar</h2>
+        <span className="swiss-zoom-control" role="group" aria-label="Calendar zoom">
+          <button
+            type="button"
+            disabled={zoomIndex === 0}
+            aria-label="Zoom calendar out"
+            onClick={() => setZoomLevel(zoomKeys[Math.max(0, zoomIndex - 1)])}
+          >
+            -
+          </button>
+          <b>{zoom.label}</b>
+          <button
+            type="button"
+            disabled={zoomIndex === zoomKeys.length - 1}
+            aria-label="Zoom calendar in"
+            onClick={() => setZoomLevel(zoomKeys[Math.min(zoomKeys.length - 1, zoomIndex + 1)])}
+          >
+            +
+          </button>
+        </span>
       </div>
       <div className="overflow-x-auto">
         <div

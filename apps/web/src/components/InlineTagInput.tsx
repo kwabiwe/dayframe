@@ -29,6 +29,7 @@ export function InlineTagInput({
   onEnter,
   onFocus,
   onHashtagPanelChange,
+  onInputKeyDown,
   onSelectedTagNamesChange,
   placeholder,
   selectedTagNames,
@@ -46,6 +47,7 @@ export function InlineTagInput({
   onEnter?: (event: KeyboardEvent<HTMLInputElement>) => void;
   onFocus?: () => void;
   onHashtagPanelChange?: (open: boolean) => void;
+  onInputKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
   onSelectedTagNamesChange: (tagNames: string[]) => void;
   placeholder?: string;
   selectedTagNames: string[];
@@ -188,6 +190,8 @@ export function InlineTagInput({
 
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (!shouldOpen) {
+      onInputKeyDown?.(event);
+      if (event.defaultPrevented) return;
       if (event.key === "Enter") onEnter?.(event);
       return;
     }
