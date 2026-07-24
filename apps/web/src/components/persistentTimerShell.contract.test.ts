@@ -31,10 +31,11 @@ describe("persistent timer shell contract", () => {
     expect(entries).not.toContain('mode: "start"');
   });
 
-  it("keeps the timer strip on one measured five-part control track", () => {
-    expect(styles).toMatch(/\.swiss-persistent-timer-form \{[^}]*"description category manual time action";[^}]*minmax\(0, 1fr\)[^}]*var\(--web-icon-button-size\)[^}]*minmax\(132px, 144px\)[^}]*max-content;/s);
-    expect(styles).toMatch(/\.swiss-persistent-timer \.swiss-manual-entry-action,[\s\S]*\.swiss-persistent-timer \.swiss-command-play \{[^}]*width: var\(--web-icon-button-size\);[^}]*height: var\(--web-icon-button-size\);/s);
+  it("keeps the timer strip on one measured five-part control track plus a stable secondary action", () => {
+    expect(styles).toMatch(/\.swiss-persistent-timer-form \{[^}]*"description category time action secondary";[^}]*minmax\(0, 1fr\)[^}]*minmax\(132px, 144px\)[^}]*var\(--web-icon-button-size\)[^}]*var\(--web-icon-button-size\);/s);
+    expect(styles).toMatch(/\.swiss-persistent-timer \.swiss-manual-entry-action,[\s\S]*\.swiss-persistent-timer \.swiss-timer-more,[\s\S]*\.swiss-persistent-timer \.swiss-command-play \{[^}]*width: var\(--web-icon-button-size\);[^}]*height: var\(--web-icon-button-size\);/s);
     expect(styles).toMatch(/\.swiss-timer-time-control \{[^}]*grid-area: time;/s);
+    expect(styles).toMatch(/\.swiss-timer-secondary-actions \{[^}]*grid-area: secondary;/s);
     expect(styles).toMatch(/\.swiss-persistent-time-button,[\s\S]*\.swiss-persistent-time-placeholder \{[^}]*height: var\(--web-control-height\);/s);
     expect(styles).not.toMatch(/\.swiss-command-play\.is-active \{[^}]*min-width:\s*92px/s);
     expect(styles).not.toContain(".swiss-entrybar-actions");
@@ -60,8 +61,8 @@ describe("persistent timer shell contract", () => {
   });
 
   it("keeps compact overlays and the timer row usable at phone widths", () => {
-    expect(styles).toMatch(/@media \(max-width: 840px\)[\s\S]*"category manual time action";[\s\S]*minmax\(104px, 118px\)/);
-    expect(styles).toMatch(/@media \(max-width: 350px\)[\s\S]*"category category category"[\s\S]*"manual time action";/);
+    expect(styles).toMatch(/@media \(max-width: 840px\)[\s\S]*"category time action secondary";[\s\S]*minmax\(104px, 118px\)/);
+    expect(styles).toMatch(/@media \(max-width: 350px\)[\s\S]*"category category category"[\s\S]*"time action secondary";/);
     expect(styles).toMatch(/\.swiss-category-menu \{[^}]*max-width: calc\(100vw - 24px\);[^}]*max-height: min\(232px, calc\(100dvh - 96px\)\);/s);
     expect(styles).toMatch(/\.swiss-category-trigger \{[^}]*width: 100%;[^}]*min-width: 0;/s);
     expect(styles).toMatch(/\.swiss-category-trigger-value \{[^}]*flex: 1 1 auto;[^}]*min-width: 0;[^}]*overflow: hidden;/s);
