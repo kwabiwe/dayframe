@@ -39,7 +39,7 @@ export function EntriesTable({
   capturedNow?: Date;
 }) {
   const router = useRouter();
-  const { startTimer } = useAppShellRuntime();
+  const { startEntryAgain } = useAppShellRuntime();
   const [isPending, startTransition] = useTransition();
   const [categoryFilter, setCategoryFilter] = useState("");
   const [editingEntry, setEditingEntry] = useState<TimeEntryRow | null>(null);
@@ -83,18 +83,10 @@ export function EntriesTable({
   async function continueEntry(entry: TimeEntryRow) {
     if (continuingEntryId) return;
 
-    const categoryId = entry.categoryId ?? undefined;
-    const description = entry.description?.trim() || undefined;
-
-    if (!categoryId && !description) {
-      setActionError("This row does not have a task or category to start.");
-      return;
-    }
-
     setContinuingEntryId(entry.id);
     setActionError(null);
     try {
-      const outcome = await startTimer({ categoryId, description, tagNames: entry.tagNames });
+      const outcome = await startEntryAgain(entry);
       if (!outcome.ok) throw new Error(outcome.error);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Unable to start this task.");

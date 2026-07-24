@@ -11,6 +11,9 @@ Use this when working on frontend components.
 - Keep Dayframe timer surfaces category/task-first. Avoid exposing projects/clients in primary timer UI.
 - On web, Dashboard and Timeline must consume the one timer runtime mounted by `AppShell`. Route components must not mount an independent active-timer poll, store, API client, mutation queue, shortcut handler or manual-entry owner; navigation between those routes must preserve the same optimistic state and active-entry identity.
 - Keep the persistent web timer on one explicit measured track: a flexible `minmax(0, 1fr)` task compound control, bounded Category and time tracks, and shared icon-action footprints for Plus and Play/Stop. Idle/running swaps must preserve outer geometry; compact layouts may reflow the task field to its own row but must not shrink or overlap the remaining actions.
+- For positioned web Calendar blocks, degrade content by rendered-height priority: title, duration, category/place context, then tags. Running state must not reduce whole-block text opacity.
+- A positioned Calendar container must not itself be an interactive wrapper around actions. Give selection/details one primary action, keep restart and pointer-resize as siblings, provide keyboard and touch equivalents for hover actions, and define a minimum rendered height before mounting direct resize handles.
+- Calendar and List restart actions must reuse the shell-owned timer runtime and its mutation gate. Copy only category, description, and tags unless the timer contract is deliberately expanded in a separate change.
 - Keep the iOS dashboard focused on logo/header, active timer, start task, quick category actions, and Today summary.
 - Move location and HealthKit permission controls to onboarding and Settings.
 
@@ -55,6 +58,7 @@ Use this when working on frontend components.
 - [ ] No text overflow or overlapping UI.
 - [ ] Web fields have one focus owner and shared geometry; compound nested actions remain independently keyboard-visible.
 - [ ] The persistent web timer keeps equal control heights, identical Plus/Play/Stop footprints, stable idle/running geometry, truncating Category text, and no horizontal overflow at desktop, compact, phone, or 200%-zoom-equivalent widths.
+- [ ] Positioned Calendar blocks preserve title-first density, normal-opacity Running text, valid sibling interaction semantics, keyboard/touch action parity, and the documented direct-resize height policy at every zoom.
 - [ ] Timer mutations feel immediate and do not show non-refresh loading indicators.
 - [ ] Dashboard changes preserve the core timer/start-task flow.
 - [ ] Permission controls are not placed on the dashboard.
