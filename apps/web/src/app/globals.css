@@ -481,6 +481,26 @@ html.ui-dialog-open {
   line-height: 1.4;
 }
 
+.ui-control:is([type="date"], [type="time"], [type="datetime-local"]) {
+  appearance: auto;
+  background: var(--surface-inset);
+  color: var(--foreground);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.ui-control:is([type="date"], [type="time"], [type="datetime-local"])::-webkit-calendar-picker-indicator {
+  border-radius: 999px;
+  background-color: var(--surface-muted);
+  padding: 6px;
+  cursor: pointer;
+  opacity: 0.82;
+}
+
+.ui-control:is([type="date"], [type="time"], [type="datetime-local"]):hover {
+  background: var(--surface-muted);
+}
+
 .ui-compound-control {
   min-width: 0;
   border: var(--web-control-border-width) solid var(--control-border);
@@ -1019,6 +1039,10 @@ dialog.ui-dialog {
 dialog.ui-dialog[open] {
   display: flex;
   flex-direction: column;
+}
+
+dialog.ui-dialog:focus {
+  outline: 0;
 }
 
 dialog.ui-dialog::backdrop {
@@ -6209,10 +6233,13 @@ kbd {
 }
 
 .swiss-timer-actions-menu {
+  position: absolute;
   top: calc(100% + 8px);
   right: 0;
+  z-index: 90;
   width: max-content;
   min-width: 180px;
+  max-width: min(240px, calc(100vw - 24px));
   padding: 6px;
 }
 
@@ -6469,6 +6496,9 @@ kbd {
 }
 
 .swiss-task-suggestions {
+  --task-suggestion-count: 5;
+  --task-suggestion-header-height: 36px;
+  --task-suggestion-row-height: var(--web-touch-size);
   position: absolute;
   top: calc(100% + var(--web-field-gap));
   left: 0;
@@ -6476,7 +6506,14 @@ kbd {
   display: grid;
   width: 100%;
   max-width: 100%;
-  max-height: min(316px, calc(100dvh - 96px));
+  max-height: min(
+    calc(
+      var(--task-suggestion-header-height) +
+      (var(--task-suggestion-count) * var(--task-suggestion-row-height)) +
+      6px
+    ),
+    calc(100dvh - 96px)
+  );
   overflow: hidden;
 }
 
@@ -6496,6 +6533,8 @@ kbd {
 
 .swiss-task-suggestions-list {
   display: grid;
+  grid-auto-rows: var(--task-suggestion-row-height);
+  max-height: calc(var(--task-suggestion-count) * var(--task-suggestion-row-height));
   overflow-y: auto;
   overscroll-behavior: contain;
   padding-block: 2px;
@@ -6504,7 +6543,8 @@ kbd {
 .swiss-task-suggestions-list button {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  min-height: var(--web-touch-size);
+  min-height: var(--task-suggestion-row-height);
+  height: var(--task-suggestion-row-height);
   align-items: center;
   gap: var(--web-gap-sm);
   border: 0;
@@ -7341,6 +7381,7 @@ kbd {
 
 dialog.ui-dialog.manual-entry-dialog {
   overflow: visible;
+  border-radius: 24px;
 }
 
 .manual-entry-dialog .ui-dialog-header,
@@ -7348,8 +7389,34 @@ dialog.ui-dialog.manual-entry-dialog {
   background: var(--surface-raised);
 }
 
+.manual-entry-dialog .ui-dialog-header {
+  border-radius: 24px 24px 0 0;
+}
+
+.manual-entry-dialog .ui-dialog-actions {
+  border-radius: 0 0 24px 24px;
+}
+
 .manual-entry-dialog-content {
   overflow: visible;
+}
+
+.manual-entry-dialog .swiss-form-grid {
+  border-radius: 0;
+  background: var(--surface-raised);
+}
+
+.manual-entry-category .swiss-category-trigger,
+.manual-entry-date-time-control {
+  border-color: transparent;
+}
+
+.manual-entry-category .swiss-category-menu {
+  z-index: 85;
+}
+
+.manual-entry-date-time-control {
+  box-shadow: none;
 }
 
 .manual-entry-description {
@@ -7357,23 +7424,21 @@ dialog.ui-dialog.manual-entry-dialog {
   min-width: 0;
 }
 
-.manual-entry-description .swiss-task-suggestions,
-.manual-entry-inline-tags .inline-tag-picker {
-  top: auto;
-  right: 0;
-  bottom: calc(100% + var(--web-field-gap));
-  left: 0;
-  width: 100%;
-  max-width: 100%;
-}
-
 .manual-entry-description .swiss-task-suggestions {
+  top: calc(100% + var(--web-field-gap));
+  right: 0;
+  bottom: auto;
+  left: 0;
   z-index: 75;
-  max-height: min(260px, calc(100dvh - 180px));
 }
 
 .manual-entry-inline-tags .inline-tag-picker {
+  top: calc(100% + var(--web-field-gap));
+  right: 0;
+  bottom: auto;
+  left: auto;
   z-index: 80;
+  width: min(17rem, calc(100vw - 24px));
   max-height: min(240px, calc(100dvh - 180px));
 }
 

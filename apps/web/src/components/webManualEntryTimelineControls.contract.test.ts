@@ -23,11 +23,34 @@ describe("web manual entry and Timeline control refinement", () => {
     expect(manual).not.toContain("startTimer(");
   });
 
-  it("keeps manual Tags and Suggestions above the form with internal bounds", () => {
+  it("anchors manual Tags and Suggestions below their triggers with internal bounds", () => {
     expect(timer).toContain('className="manual-entry-dialog"');
     expect(timer).toContain('className="manual-entry-inline-tags"');
-    expect(styles).toMatch(/\.manual-entry-description \.swiss-task-suggestions,[\s\S]*\.manual-entry-inline-tags \.inline-tag-picker \{[^}]*bottom: calc\(100% \+ var\(--web-field-gap\)\);/s);
+    expect(styles).toMatch(/\.manual-entry-description \.swiss-task-suggestions \{[^}]*top: calc\(100% \+ var\(--web-field-gap\)\);[^}]*bottom: auto;/s);
+    expect(styles).toMatch(/\.manual-entry-inline-tags \.inline-tag-picker \{[^}]*top: calc\(100% \+ var\(--web-field-gap\)\);[^}]*right: 0;[^}]*bottom: auto;[^}]*left: auto;/s);
     expect(styles).toMatch(/\.manual-entry-inline-tags \.inline-tag-picker \{[^}]*max-height: min\(240px, calc\(100dvh - 180px\)\);/s);
+  });
+
+  it("hard-limits suggestions to five complete rows", () => {
+    expect(timer).toContain("const TASK_SUGGESTION_LIMIT = 5");
+    expect(timer).toContain(".slice(0, TASK_SUGGESTION_LIMIT)");
+    expect(styles).toMatch(/\.swiss-task-suggestions \{[^}]*--task-suggestion-count: 5;/s);
+    expect(styles).toMatch(/\.swiss-task-suggestions-list \{[^}]*grid-auto-rows: var\(--task-suggestion-row-height\);[^}]*max-height: calc\(var\(--task-suggestion-count\) \* var\(--task-suggestion-row-height\)\);/s);
+    expect(styles).toMatch(/\.swiss-task-suggestions-list button \{[^}]*height: var\(--task-suggestion-row-height\);/s);
+  });
+
+  it("reuses the timer Category treatment and borderless date-time controls", () => {
+    const manual = timer.slice(timer.indexOf("function ManualEntryDialog"));
+    expect(manual).toContain('className="swiss-category-field manual-entry-category"');
+    expect(manual).toContain("<CategoryOption");
+    expect(manual).not.toContain("<SelectField");
+    expect(manual).toContain("manual-entry-date-time-control");
+    expect(styles).toMatch(/\.manual-entry-category \.swiss-category-trigger,[\s\S]*\.manual-entry-date-time-control \{[^}]*border-color: transparent;/s);
+    expect(styles).toMatch(/dialog\.ui-dialog:focus \{[^}]*outline: 0;/s);
+  });
+
+  it("keeps the running-task menu below the More button and inside the viewport", () => {
+    expect(styles).toMatch(/\.swiss-timer-actions-menu \{[^}]*position: absolute;[^}]*top: calc\(100% \+ 8px\);[^}]*right: 0;[^}]*max-width: min\(240px, calc\(100vw - 24px\)\);/s);
   });
 
   it("uses divider-free compact suggestion and tag rows", () => {
