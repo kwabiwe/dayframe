@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getCategoryUsageRanks, getNormalizationContext, getTaskSuggestions } from "./queries";
+import {
+  buildTimeEntriesQuery,
+  getCategoryUsageRanks,
+  getNormalizationContext,
+  getTaskSuggestions
+} from "./queries";
 import type { RequestSession } from "./session";
 
 const mocks = vi.hoisted(() => ({
@@ -181,6 +186,29 @@ describe("task suggestions query", () => {
         categoryId: "coding",
         useCount: 2
       })
+    ]);
+  });
+});
+
+describe("time-entry range query", () => {
+  it("selects entries overlapping a bounded range through one captured current time", () => {
+    const statement = buildTimeEntriesQuery(session, {
+      overlappingFrom: "2026-07-20T00:00:00.000Z",
+      startedBefore: "2026-07-27T00:00:00.000Z",
+      capturedNow: "2026-07-23T12:00:00.000Z",
+      limit: 300
+    });
+
+    expect(statement.text).toContain("te.started_at < $5::timestamptz");
+    expect(statement.text).toContain("coalesce(te.stopped_at, $3::timestamptz) > $4::timestamptz");
+    expect(statement.text).toContain("coalesce(te.stopped_at, $3::timestamptz) - te.started_at");
+    expect(statement.values).toEqual([
+      session.workspaceId,
+      session.userId,
+      "2026-07-23T12:00:00.000Z",
+      "2026-07-20T00:00:00.000Z",
+      "2026-07-27T00:00:00.000Z",
+      300
     ]);
   });
 });

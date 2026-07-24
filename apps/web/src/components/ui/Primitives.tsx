@@ -148,7 +148,7 @@ export function SegmentedControl<T extends string>({
   ariaLabel: string;
   className?: string;
   onChange: (value: T) => void;
-  options: Array<{ value: T; label: string; icon?: ReactNode }>;
+  options: Array<{ value: T; label: string; icon?: ReactNode; disabled?: boolean }>;
   value: T;
 }) {
   return (
@@ -160,6 +160,7 @@ export function SegmentedControl<T extends string>({
             key={option.value}
             type="button"
             aria-pressed={selected}
+            disabled={option.disabled}
             onClick={() => onChange(option.value)}
           >
             {option.icon}

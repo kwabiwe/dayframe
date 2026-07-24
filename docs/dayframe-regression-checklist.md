@@ -22,6 +22,11 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 ## Time Review
 
 - Timeline includes Calendar, List, and Timesheet views with a clear selected state.
+- Timeline has one route-owned period toolbar. Canonical `date`, `scope`, and `view` URL parameters reconstruct the same selected state on refresh, direct load, and Back/Forward; invalid values fall back safely, and Timesheet always normalizes to Week.
+- Previous/Next and Today/This week preserve view and scope, while Alt+Left/Right move one day in Day scope or one Monday-Sunday week in Week scope. View/scope-only changes reuse loaded data; an uncached period change performs one read, keeps the last valid view while pending, and retains it with calm feedback if the read fails.
+- Calendar, List, Timesheet, Day total, and Week total use the same half-open overlap rule and one captured current time. Entries crossing midnight or a range edge appear in every intersected period with only the in-range duration; Timesheet splits them across the affected day columns.
+- The generic shell date row is absent on Timeline but remains on Dashboard. The persistent timer remains shell-owned and unchanged; Calendar keeps only zoom under View options.
+- The Timeline toolbar remains one coherent surface at 1440, 1280, 1024, 768 and 390 px plus a 200%-zoom equivalent, with no page overflow, 44 px controls, distinct focus/selected/disabled states, and usable System/Light/Dark themes.
 - Calendar blocks are positioned by time, use category colors, and can be clicked or double-clicked to edit.
 - Calendar/time blocks can be resized from the top or bottom edge, snap to configured intervals, and save on release.
 - Selected time blocks can be deleted from edit controls, context actions, or keyboard delete/backspace where supported.

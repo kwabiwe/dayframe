@@ -16,6 +16,7 @@ import {
   query
 } from "./db";
 import { getDevSession, type RequestSession } from "./session";
+import { entryOverlapSeconds } from "./time-entry-overlap";
 
 export type ClientRow = {
   id: string;
@@ -217,6 +218,7 @@ export async function getBootstrapData(
   options: { selectedDate?: string | Date | null } = {}
 ): Promise<BootstrapData> {
   const dateRange = buildDashboardDateRange(options.selectedDate);
+  const capturedNow = new Date().toISOString();
   const historyStart = addDays(new Date(dateRange.dayStart), -59).toISOString();
   const [
     user,
@@ -248,28 +250,31 @@ export async function getBootstrapData(
     getPlaces(session),
     getLearnedPlaces(session),
     getAutomationRules(session),
-    getTimeEntries(session),
+    getTimeEntries(session, { capturedNow }),
     getTimeEntries(session, {
       overlappingFrom: historyStart,
       startedBefore: dateRange.dayEnd,
-      limit: 2000
+      limit: 2000,
+      capturedNow
     }),
     getTimeEntries(session, {
-      startedFrom: dateRange.dayStart,
+      overlappingFrom: dateRange.dayStart,
       startedBefore: dateRange.dayEnd,
-      limit: 100
+      limit: 100,
+      capturedNow
     }),
     getTimeEntries(session, {
-      startedFrom: dateRange.weekStart,
+      overlappingFrom: dateRange.weekStart,
       startedBefore: dateRange.weekEnd,
-      limit: 300
+      limit: 300,
+      capturedNow
     }),
     getActiveEntry(session),
     getReviewItems(session),
     getActivityEvents(session),
     getCategoryUsageRanks(session),
     getTaskSuggestions(session),
-    getDashboardStats(session, dateRange)
+    getDashboardStats(session, dateRange, capturedNow)
   ]);
 
   return {
@@ -294,8 +299,8 @@ export async function getBootstrapData(
     categoryUsage,
     taskSuggestions,
     stats,
-    todaySeries: buildHourlySeries(dayEntries),
-    weekSeries: buildWeekSeries(weekEntries, dateRange)
+    todaySeries: buildHourlySeries(dayEntries, dateRange, new Date(capturedNow)),
+    weekSeries: buildWeekSeries(weekEntries, dateRange, new Date(capturedNow))
   };
 }
 
@@ -609,28 +614,38 @@ async function getAutomationRules(session: RequestSession) {
   }
 }
 
-async function getTimeEntries(
+export type TimeEntryQueryOptions = {
+  capturedNow?: string;
+  overlappingFrom?: string;
+  startedFrom?: string;
+  startedBefore?: string;
+  limit?: number;
+};
+
+export function buildTimeEntriesQuery(
   session: RequestSession,
-  options: { overlappingFrom?: string; startedFrom?: string; startedBefore?: string; limit?: number } = {}
+  options: TimeEntryQueryOptions = {}
 ) {
   const where = ["te.workspace_id = $1", "te.user_id = $2"];
-  const values: Array<string | number> = [session.workspaceId, session.userId];
+  const capturedNow = options.capturedNow ?? new Date().toISOString();
+  const values: Array<string | number> = [session.workspaceId, session.userId, capturedNow];
+  const capturedNowParam = "$3";
   if (options.overlappingFrom) {
     values.push(options.overlappingFrom);
-    where.push(`coalesce(te.stopped_at, now()) > $${values.length}`);
+    where.push(`coalesce(te.stopped_at, ${capturedNowParam}::timestamptz) > $${values.length}::timestamptz`);
   }
   if (options.startedFrom) {
     values.push(options.startedFrom);
-    where.push(`te.started_at >= $${values.length}`);
+    where.push(`te.started_at >= $${values.length}::timestamptz`);
   }
   if (options.startedBefore) {
     values.push(options.startedBefore);
-    where.push(`te.started_at < $${values.length}`);
+    where.push(`te.started_at < $${values.length}::timestamptz`);
   }
   values.push(options.limit ?? 100);
 
-  const result = await query<TimeEntryRow>(
-    `select te.id,
+  return {
+    text: `select te.id,
             p.id as "projectId",
             p.name as "projectName",
             p.color as "projectColor",
@@ -667,7 +682,10 @@ async function getTimeEntries(
               join tags t on t.id = tet.tag_id and t.workspace_id = te.workspace_id
               where tet.time_entry_id = te.id and tet.workspace_id = te.workspace_id
             ) as tags,
-            extract(epoch from (coalesce(te.stopped_at, now()) - te.started_at))::int as "durationSeconds"
+            greatest(
+              0,
+              extract(epoch from (coalesce(te.stopped_at, ${capturedNowParam}::timestamptz) - te.started_at))
+            )::int as "durationSeconds"
      from time_entries te
      left join projects p on p.id = te.project_id and p.workspace_id = te.workspace_id
      left join clients cl on cl.id = p.client_id and cl.workspace_id = te.workspace_id
@@ -677,7 +695,15 @@ async function getTimeEntries(
      order by te.started_at desc
      limit $${values.length}`,
     values
-  );
+  };
+}
+
+async function getTimeEntries(
+  session: RequestSession,
+  options: TimeEntryQueryOptions = {}
+) {
+  const statement = buildTimeEntriesQuery(session, options);
+  const result = await query<TimeEntryRow>(statement.text, statement.values);
   return result.rows;
 }
 
@@ -915,25 +941,51 @@ async function getActivityEvents(session: RequestSession) {
   return result.rows;
 }
 
-async function getDashboardStats(session: RequestSession, dateRange: DashboardDateRange) {
+async function getDashboardStats(
+  session: RequestSession,
+  dateRange: DashboardDateRange,
+  capturedNow: string
+) {
   const result = await query<DashboardStats>(
     `select
         coalesce(sum(
-          extract(epoch from (coalesce(stopped_at, now()) - started_at))
-        ) filter (where started_at >= $2::timestamptz and started_at < $3::timestamptz), 0)::int as "todaySeconds",
+          greatest(
+            0,
+            extract(epoch from (
+              least(coalesce(stopped_at, $7::timestamptz), $3::timestamptz)
+              - greatest(started_at, $2::timestamptz)
+            ))
+          )
+        ) filter (
+          where started_at < $3::timestamptz
+            and coalesce(stopped_at, $7::timestamptz) > $2::timestamptz
+        ), 0)::int as "todaySeconds",
         coalesce(sum(
-          extract(epoch from (coalesce(stopped_at, now()) - started_at))
-        ) filter (where started_at >= $4::timestamptz and started_at < $5::timestamptz), 0)::int as "weekSeconds",
+          greatest(
+            0,
+            extract(epoch from (
+              least(coalesce(stopped_at, $7::timestamptz), $5::timestamptz)
+              - greatest(started_at, $4::timestamptz)
+            ))
+          )
+        ) filter (
+          where started_at < $5::timestamptz
+            and coalesce(stopped_at, $7::timestamptz) > $4::timestamptz
+        ), 0)::int as "weekSeconds",
         (select count(*)::int from review_items where workspace_id = $1 and user_id = $6 and status = 'open') as "reviewCount"
      from time_entries
-     where workspace_id = $1 and user_id = $6`,
+      where workspace_id = $1
+        and user_id = $6
+        and started_at < $5::timestamptz
+        and coalesce(stopped_at, $7::timestamptz) > $4::timestamptz`,
     [
       session.workspaceId,
       dateRange.dayStart,
       dateRange.dayEnd,
       dateRange.weekStart,
       dateRange.weekEnd,
-      session.userId
+      session.userId,
+      capturedNow
     ]
   );
   return result.rows[0] ?? { todaySeconds: 0, weekSeconds: 0, reviewCount: 0 };
@@ -994,28 +1046,43 @@ function toDateKey(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
-function buildHourlySeries(entries: TimeEntryRow[]): DashboardSeriesPoint[] {
+function buildHourlySeries(
+  entries: TimeEntryRow[],
+  dateRange: DashboardDateRange,
+  capturedNow: Date
+): DashboardSeriesPoint[] {
   const hours = Array.from({ length: 8 }, (_, index) => 8 + index * 2);
+  const dayStart = new Date(dateRange.dayStart);
   return hours.map((hour) => ({
     key: `${hour}`,
     label: `${hour.toString().padStart(2, "0")}:00`,
-    seconds: entries
-      .filter((entry) => new Date(entry.startedAt).getHours() >= hour && new Date(entry.startedAt).getHours() < hour + 2)
-      .reduce((sum, entry) => sum + entry.durationSeconds, 0)
+    seconds: entries.reduce((sum, entry) => {
+      const start = new Date(dayStart);
+      start.setHours(hour, 0, 0, 0);
+      const end = new Date(dayStart);
+      end.setHours(hour + 2, 0, 0, 0);
+      return sum + entryOverlapSeconds(entry, { start, end }, capturedNow);
+    }, 0)
   }));
 }
 
-function buildWeekSeries(entries: TimeEntryRow[], dateRange: DashboardDateRange): DashboardSeriesPoint[] {
+function buildWeekSeries(
+  entries: TimeEntryRow[],
+  dateRange: DashboardDateRange,
+  capturedNow: Date
+): DashboardSeriesPoint[] {
   const start = new Date(dateRange.weekStart);
   return Array.from({ length: 7 }, (_, index) => {
     const day = addDays(start, index);
+    const nextDay = addDays(day, 1);
     const key = toDateKey(day);
     return {
       key,
       label: new Intl.DateTimeFormat("en-GB", { weekday: "short" }).format(day),
-      seconds: entries
-        .filter((entry) => toDateKey(new Date(entry.startedAt)) === key)
-        .reduce((sum, entry) => sum + entry.durationSeconds, 0)
+      seconds: entries.reduce(
+        (sum, entry) => sum + entryOverlapSeconds(entry, { start: day, end: nextDay }, capturedNow),
+        0
+      )
     };
   });
 }

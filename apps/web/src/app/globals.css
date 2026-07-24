@@ -565,6 +565,12 @@ textarea.ui-control {
   color: var(--on-accent);
 }
 
+.ui-segmented-control button:disabled {
+  background: transparent;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
 .ui-disclosure {
   border-radius: 16px;
   background: var(--surface-inset);
@@ -2020,7 +2026,6 @@ dialog.ui-popover-panel.bottom-left {
   padding: 28px 0;
 }
 
-.swiss-view-switch,
 .swiss-zoom-control {
   display: inline-grid;
   align-items: center;
@@ -2030,11 +2035,6 @@ dialog.ui-popover-panel.bottom-left {
   overflow: visible;
 }
 
-.swiss-view-switch {
-  grid-template-columns: repeat(2, auto);
-}
-
-.swiss-view-switch button,
 .swiss-zoom-control button {
   width: auto;
   min-width: 44px;
@@ -2047,14 +2047,8 @@ dialog.ui-popover-panel.bottom-left {
   font-weight: 700;
 }
 
-.swiss-view-switch button:last-child,
 .swiss-zoom-control button:last-child {
   border-right: 0;
-}
-
-.swiss-view-switch button.is-selected {
-  background: var(--accent);
-  color: var(--on-accent);
 }
 
 .swiss-zoom-control {
@@ -4693,7 +4687,6 @@ kbd {
   }
 
   .swiss-day-header button,
-  .swiss-view-switch button,
   .swiss-zoom-control button {
     min-width: 44px;
     min-height: 44px;
@@ -4865,9 +4858,7 @@ kbd {
 .fill-group-surface,
 .fill-inset-surface,
 .fill-toggle-row,
-.fill-list-action,
-.fill-date-pill,
-.fill-metric-pill {
+.fill-list-action {
   border: 0;
   box-shadow: none;
 }
@@ -4879,9 +4870,7 @@ kbd {
 
 .fill-inset-surface,
 .fill-toggle-row,
-.fill-list-action,
-.fill-date-pill,
-.fill-metric-pill {
+.fill-list-action {
   border-radius: var(--web-radius-control);
   background: var(--surface-inset);
 }
@@ -5468,24 +5457,6 @@ kbd {
   }
 }
 
-.fill-date-pill,
-.fill-metric-pill {
-  min-height: var(--web-text-action-height);
-}
-
-.fill-date-pill {
-  border-radius: 999px;
-}
-
-.fill-metric-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border-radius: 999px;
-}
-
-.fill-segmented,
-.swiss-view-switch,
 .swiss-zoom-control {
   gap: 4px;
   border: 0;
@@ -5496,18 +5467,122 @@ kbd {
   overflow: visible;
 }
 
-.fill-segmented-option,
-.swiss-view-switch button,
 .swiss-zoom-control button {
   border: 0;
   border-radius: 999px;
   background: transparent;
 }
 
-.fill-segmented-option[aria-pressed="true"],
-.swiss-view-switch button.is-selected {
-  background: var(--surface-muted);
+.timeline-range-toolbar {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(300px, 1fr) auto minmax(390px, auto);
+  align-items: center;
+  gap: var(--web-gap-lg);
+  border-radius: var(--web-radius-group);
+  background: var(--surface);
+  padding: var(--web-gap-lg);
+}
+
+.timeline-range-navigation {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: var(--web-icon-button-size) minmax(160px, 1fr) var(--web-icon-button-size) auto;
+  align-items: center;
+  gap: var(--web-gap-sm);
+}
+
+.timeline-period-label {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding-inline: 4px;
+}
+
+.timeline-period-label strong,
+.timeline-period-label span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-period-label strong {
   color: var(--foreground);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.timeline-period-label span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.timeline-range-totals {
+  display: grid;
+  min-width: 200px;
+  grid-template-columns: repeat(2, minmax(92px, 1fr));
+  gap: var(--web-gap-sm);
+  margin: 0;
+}
+
+.timeline-range-totals > div {
+  display: grid;
+  min-height: var(--web-control-height);
+  align-content: center;
+  gap: 2px;
+  border-radius: var(--web-radius-control);
+  background: var(--surface-inset);
+  padding: 7px var(--web-control-padding-inline);
+}
+
+.timeline-range-totals dt,
+.timeline-range-totals dd {
+  margin: 0;
+}
+
+.timeline-range-totals dt {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.timeline-range-totals dd {
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.timeline-range-controls {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--web-gap-sm);
+}
+
+.timeline-range-controls .ui-segmented-control {
+  min-width: 0;
+}
+
+.timeline-range-controls .ui-segmented-control button {
+  min-width: 0;
+  padding-inline: 12px;
+}
+
+.timeline-range-feedback {
+  min-height: 18px;
+  margin: -8px 4px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.timeline-range-feedback.is-idle {
+  visibility: hidden;
+}
+
+.timeline-range-feedback.is-error {
+  color: var(--danger-text);
 }
 
 .fill-panel-header {
@@ -6241,7 +6316,6 @@ kbd {
   border-radius: 999px;
 }
 
-.swiss-view-switch button,
 .swiss-zoom-control button {
   min-width: var(--web-touch-size);
   height: var(--web-touch-size);
@@ -6327,6 +6401,15 @@ kbd {
 @media (max-width: 1180px) {
   .swiss-app-shell {
     grid-template-columns: 84px minmax(0, 1fr);
+  }
+
+  .timeline-range-toolbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .timeline-range-controls {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
   }
 
   .swiss-nav a,
@@ -6440,22 +6523,43 @@ kbd {
     text-align: center;
   }
 
-  .fill-segmented {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .timeline-range-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--web-gap-md);
+    padding: 14px;
+  }
+
+  .timeline-range-navigation {
+    grid-template-columns: var(--web-icon-button-size) minmax(0, 1fr) var(--web-icon-button-size);
+  }
+
+  .timeline-range-navigation > .ui-button {
+    grid-column: 1 / -1;
+    justify-self: center;
+  }
+
+  .timeline-period-label {
+    text-align: center;
+  }
+
+  .timeline-period-label strong,
+  .timeline-period-label span {
+    white-space: normal;
+  }
+
+  .timeline-range-totals {
     width: 100%;
-  }
-
-  .fill-review-toolbar > div > div:first-child {
-    gap: 8px;
-  }
-
-  .fill-date-pill {
     min-width: 0;
-    flex: 1 1 180px;
   }
 
-  .fill-metric-pill {
-    flex: 1 1 100%;
+  .timeline-range-controls {
+    grid-column: auto;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .timeline-range-controls .ui-segmented-control {
+    width: 100%;
   }
 
   .swiss-view-options {

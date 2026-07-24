@@ -16,6 +16,8 @@ import {
   formatDuration,
   formatTime
 } from "@/lib/format";
+import { timelineEntryDisplayInterval } from "@/lib/timeline-calculations";
+import type { DateRange } from "@/lib/time-entry-overlap";
 
 export function EntriesTable({
   entries,
@@ -23,7 +25,9 @@ export function EntriesTable({
   places,
   tags = [],
   groupByDay = false,
-  onChanged
+  onChanged,
+  displayRange,
+  capturedNow = new Date()
 }: {
   entries: TimeEntryRow[];
   categories: CategoryRow[];
@@ -31,6 +35,8 @@ export function EntriesTable({
   tags?: TagRow[];
   groupByDay?: boolean;
   onChanged?: () => Promise<void>;
+  displayRange?: DateRange;
+  capturedNow?: Date;
 }) {
   const router = useRouter();
   const { startTimer } = useAppShellRuntime();
@@ -127,8 +133,12 @@ export function EntriesTable({
           </thead>
           <tbody>
             {filtered.map((entry, index) => {
-              const currentDate = formatDate(entry.startedAt);
-              const previousDate = index > 0 ? formatDate(filtered[index - 1].startedAt) : null;
+              const displayInterval = timelineEntryDisplayInterval(entry, displayRange, capturedNow);
+              const previousInterval = index > 0
+                ? timelineEntryDisplayInterval(filtered[index - 1], displayRange, capturedNow)
+                : null;
+              const currentDate = formatDate(displayInterval.startedAt);
+              const previousDate = previousInterval ? formatDate(previousInterval.startedAt) : null;
               const shouldShowDate = groupByDay && currentDate !== previousDate;
 
               return (
@@ -142,7 +152,7 @@ export function EntriesTable({
                   ) : null}
                 <tr className="motion-row border-b border-[var(--line)] align-top last:border-b-0 hover:bg-[var(--surface-strong)]">
                   <td className="tabular px-3 py-3">
-                    {formatTime(entry.startedAt)} - {entry.stoppedAt ? formatTime(entry.stoppedAt) : "Running"}
+                    {formatTime(displayInterval.startedAt)} - {displayInterval.stoppedAt ? formatTime(displayInterval.stoppedAt) : "Running"}
                   </td>
                   <td className="px-3 py-3 font-medium">
                     <span className="block">{timeEntryTitle(entry)}</span>
