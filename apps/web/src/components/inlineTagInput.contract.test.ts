@@ -31,4 +31,11 @@ describe("web tag editor interaction contract", () => {
     expect(source).not.toContain("tagNamesFromDescription");
     expect(source).not.toContain("Type # to add a tag");
   });
+
+  it("makes every selected tag directly removable", () => {
+    expect(source).toContain("selectedTagNames.map");
+    expect(source).toContain("Remove tag ${tagName}");
+    expect(source).toContain("onClick={() => toggleSelectedTag(tagName)}");
+    expect(source).toContain('className="inline-selected-tag"');
+  });
 });

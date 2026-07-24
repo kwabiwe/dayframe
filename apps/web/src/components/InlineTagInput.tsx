@@ -15,7 +15,6 @@ import {
   type RefObject
 } from "react";
 import type { TagRow } from "@/lib/queries";
-import { TagMetadata } from "@/components/TagMetadata";
 import { TagIcon } from "@/components/TagIcon";
 
 export function InlineTagInput({
@@ -360,7 +359,19 @@ export function InlineTagInput({
         </section>
       </div>
       <span className="inline-tag-help" id={`${name}-tag-help`}>
-        <TagMetadata active tagNames={selectedTagNames} />
+        {selectedTagNames.map((tagName) => (
+          <button
+            aria-label={`Remove tag ${tagName}`}
+            className="inline-selected-tag"
+            key={normalizeTagName(tagName).normalizedName}
+            onClick={() => toggleSelectedTag(tagName)}
+            type="button"
+          >
+            <TagIcon aria-hidden="true" size={12} />
+            <span>{tagName}</span>
+            <X aria-hidden="true" size={12} />
+          </button>
+        ))}
       </span>
     </div>
   );

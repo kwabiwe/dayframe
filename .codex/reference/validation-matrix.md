@@ -90,6 +90,8 @@ Required checks:
 - Delay a Timeline period response through the fetched-data/URL hand-off and verify the persistent timer retains stable shell data while period content stays URL-matched; it must never disappear.
 - Measure browser requests for one explicit start and one explicit stop. Each action, including `Shift+Space`, must emit exactly one timer mutation through the shell owner.
 - With a timer already active, use Start Again/Continue on a previous entry. Verify one replacement start closes the old entry and starts the selected task at the same boundary timestamp; failure restores the original timer without a duplicate or idle flash.
+- Remove each selected tag directly from the timer strip and verify the active entry persists the reduced tag set with keyboard and pointer input.
+- Open the running timer's three-dot menu and delete it without a second confirmation. Verify optimistic removal from every collection, exact rollback on failure, Escape/outside-click dismissal, focus return, and no duplicate mutation.
 - Exercise web optimistic success and network-failure rollback, then refresh and confirm bootstrap reconciliation restores the persisted active state.
 - The shell Plus action opens the shared manual-entry dialog; one submission creates exactly one entry. `/entries` redirects to `/timeline?view=list` and `/automation` redirects to the approved Places destination.
 - Browser-check the shared web timer and account access at 1440x900, 1280x720, 1024x768 and 390x844 in System, Light and Dark, with keyboard-only navigation and Reduced Motion. Record horizontal overflow and console/runtime errors.

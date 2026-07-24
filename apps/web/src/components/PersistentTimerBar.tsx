@@ -3,7 +3,7 @@
 import type { CSSProperties, FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { normalizeTagName, paletteCssColorFor } from "@dayframe/shared";
-import { CheckCircle2, ChevronDown, Play, Plus, Square } from "lucide-react";
+import { CheckCircle2, ChevronDown, Ellipsis, Play, Plus, Square, Trash2 } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { InlineTagInput } from "@/components/InlineTagInput";
 import { Button, Field, IconButton, ModalDialog, SelectField } from "@/components/ui/Primitives";
@@ -17,6 +17,7 @@ export function PersistentTimerBar() {
     clearTimerError,
     closeManualEntry,
     createManualEntry,
+    deleteActiveTimer,
     isManualEntryOpen,
     isTimerBusy,
     openManualEntry,
@@ -33,6 +34,7 @@ export function PersistentTimerBar() {
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [hashtagSuggestionsOpen, setHashtagSuggestionsOpen] = useState(false);
   const [startEditorOpen, setStartEditorOpen] = useState(false);
+  const [timerActionsOpen, setTimerActionsOpen] = useState(false);
   const [startDateDraft, setStartDateDraft] = useState("");
   const [startTimeDraft, setStartTimeDraft] = useState("");
   const [startEditError, setStartEditError] = useState<string | null>(null);
@@ -44,6 +46,8 @@ export function PersistentTimerBar() {
   const startDateInputRef = useRef<HTMLInputElement | null>(null);
   const startEditorRef = useRef<HTMLDivElement | null>(null);
   const startEditorTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const timerActionsRef = useRef<HTMLDivElement | null>(null);
+  const timerActionsTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const active = data?.activeEntry ?? null;
   const selectedCategory = data?.categories.find((category) => category.id === timerDraft.categoryId) ?? null;
@@ -142,6 +146,25 @@ export function PersistentTimerBar() {
       document.removeEventListener("keydown", closeOnEscape);
     };
   }, [startEditorOpen]);
+
+  useEffect(() => {
+    if (!timerActionsOpen) return undefined;
+    function closeOnOutside(event: MouseEvent) {
+      if (!timerActionsRef.current?.contains(event.target as Node)) setTimerActionsOpen(false);
+    }
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setTimerActionsOpen(false);
+      timerActionsTriggerRef.current?.focus();
+    }
+    document.addEventListener("mousedown", closeOnOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [timerActionsOpen]);
 
   if (!data) return null;
 
@@ -449,18 +472,54 @@ export function PersistentTimerBar() {
           ) : null}
         </div>
 
-        <button
-          className={["swiss-command-play", active ? "is-active" : ""].filter(Boolean).join(" ")}
-          type={active ? "button" : "submit"}
-          disabled={isTimerBusy}
-          aria-busy={isTimerBusy || undefined}
-          aria-label={active ? "Stop timer" : "Start timer"}
-          onClick={() => {
-            if (active) void stopTimer();
-          }}
-        >
-          {active ? <Square size={14} fill="currentColor" /> : <Play size={18} fill="currentColor" strokeWidth={0} />}
-        </button>
+        <div className="swiss-timer-actions" ref={timerActionsRef}>
+          <button
+            className={["swiss-command-play", active ? "is-active" : ""].filter(Boolean).join(" ")}
+            type={active ? "button" : "submit"}
+            disabled={isTimerBusy}
+            aria-busy={isTimerBusy || undefined}
+            aria-label={active ? "Stop timer" : "Start timer"}
+            onClick={() => {
+              if (active) void stopTimer();
+            }}
+          >
+            {active ? <Square size={14} fill="currentColor" /> : <Play size={18} fill="currentColor" strokeWidth={0} />}
+          </button>
+          {active ? (
+            <>
+              <IconButton
+                aria-expanded={timerActionsOpen}
+                aria-haspopup="menu"
+                className="swiss-timer-more"
+                disabled={isTimerBusy}
+                label="More timer actions"
+                onClick={() => setTimerActionsOpen((open) => !open)}
+                ref={timerActionsTriggerRef}
+              >
+                <Ellipsis size={18} />
+              </IconButton>
+              <div
+                aria-hidden={!timerActionsOpen}
+                className={`ui-floating-surface swiss-timer-actions-menu${timerActionsOpen ? " is-open" : ""}`}
+                inert={!timerActionsOpen}
+                role="menu"
+              >
+                <button
+                  className="is-danger"
+                  onClick={() => {
+                    setTimerActionsOpen(false);
+                    void deleteActiveTimer();
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <Trash2 aria-hidden="true" size={16} />
+                  Delete running task
+                </button>
+              </div>
+            </>
+          ) : null}
+        </div>
       </form>
 
       {timerError ? (

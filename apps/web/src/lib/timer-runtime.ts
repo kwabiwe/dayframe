@@ -125,6 +125,19 @@ export function applyOptimisticTimerStop(data: BootstrapData, stoppedAt: string)
   return replaceEntryCollections({ ...data, activeEntry: null }, entry);
 }
 
+export function applyOptimisticTimerDelete(data: BootstrapData) {
+  if (!data.activeEntry) return data;
+  const activeId = data.activeEntry.id;
+  return {
+    ...data,
+    activeEntry: null,
+    entries: data.entries.filter((entry) => entry.id !== activeId),
+    historyEntries: data.historyEntries.filter((entry) => entry.id !== activeId),
+    dayEntries: data.dayEntries.filter((entry) => entry.id !== activeId),
+    weekEntries: data.weekEntries.filter((entry) => entry.id !== activeId)
+  };
+}
+
 export function applyOptimisticActiveEntryPatch(
   data: BootstrapData,
   draft: TimerDraft,

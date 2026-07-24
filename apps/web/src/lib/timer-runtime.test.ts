@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
 import {
   applyOptimisticActiveEntryPatch,
+  applyOptimisticTimerDelete,
   applyOptimisticTimerStart,
   applyOptimisticTimerStop,
   createTimerMutationGate,
@@ -134,6 +135,17 @@ describe("shell timer runtime", () => {
       stoppedAt: switchedAt,
       durationSeconds: 1800
     }));
+  });
+
+  it("optimistically removes a deleted active timer from every collection", () => {
+    const active = entry({ id: "active", stoppedAt: null });
+    const next = applyOptimisticTimerDelete(bootstrapData(active));
+
+    expect(next.activeEntry).toBeNull();
+    expect(next.entries).not.toContainEqual(expect.objectContaining({ id: "active" }));
+    expect(next.historyEntries).not.toContainEqual(expect.objectContaining({ id: "active" }));
+    expect(next.dayEntries).not.toContainEqual(expect.objectContaining({ id: "active" }));
+    expect(next.weekEntries).not.toContainEqual(expect.objectContaining({ id: "active" }));
   });
 
   it("turns an offline fetch failure into calm restart feedback", () => {

@@ -15,7 +15,8 @@ PR: [#106](https://github.com/kwabiwe/dayframe/pull/106)
 This focused PR owns the shared floating-surface treatment and the persistent
 timer's Suggestions, Tags, Categories, running start-date/time editor, and the
 two timer-shell regressions found during review: date navigation temporarily
-blanking the timer and Start Again refusing to replace an active timer.
+blanking the timer, Start Again refusing to replace an active timer, direct
+selected-tag removal, and deletion of an unwanted running task.
 Manual-entry suggestions/date styling and Timeline date navigation are reserved
 for the follow-up PR.
 
@@ -40,6 +41,10 @@ used by the web Start Again path.
   until the period URL and fetched data reconcile.
 - Starting a previous task while another timer is active reports a conflict
   even though explicit timer starts already replace the active timer atomically.
+- Selected tags are displayed as passive metadata, so removing a tag from a
+  running task requires reopening the picker.
+- A running task can only be stopped; deleting it requires a second journey
+  through the Timeline list.
 
 ## Evidence and hypotheses
 
@@ -96,6 +101,11 @@ Alternative hypotheses checked for the timer disappearance:
    optimistic start mirror the server's atomic replacement: close the previous
    entry and start the selected task at the same timestamp, with full rollback
    on failure.
+9. Render selected tags as directly removable pills while retaining accessible
+   names and the existing debounced active-entry persistence.
+10. Add a three-dot timer action menu beside Stop. Its Delete action removes the
+    active entry immediately without a second confirmation, using the shared
+    mutation gate, optimistic removal, refresh reconciliation, and rollback.
 
 ## Motion contract
 
@@ -139,6 +149,11 @@ Alternative hypotheses checked for the timer disappearance:
 - Start Again on a previous task atomically stops the current timer and starts
   the selected task without a conflict prompt, duplicate running entry, or
   intermediate idle state; failure restores the previous active timer.
+- Clicking a selected tag removes it from the running draft and persists the
+  updated tag set; keyboard users receive the same labelled control.
+- A running timer exposes a three-dot menu beside Stop. Delete requires the
+  explicit menu journey but no additional confirmation, removes the entry from
+  every local collection immediately, and restores it if deletion fails.
 - Focused tests, web typecheck/test/build, full lint/typecheck/test/build,
   brand check, `git diff --check`, and the required browser matrix pass.
 
@@ -161,6 +176,14 @@ Alternative hypotheses checked for the timer disappearance:
 - Full workspace lint: passed without warnings.
 - Full workspace TypeScript checks: passed.
 - Full workspace tests: 756 passed (245 mobile, 417 web, 94 shared).
+- Optimized Next.js production build: passed.
+- Brand asset contract and `git diff --check`: passed.
+
+### Final timer-action follow-up
+
+- Focused tag, popup, persistent-shell, and timer-runtime contracts: 26 passed.
+- Full workspace lint and TypeScript checks: passed.
+- Full workspace tests: 758 passed (245 mobile, 419 web, 94 shared).
 - Optimized Next.js production build: passed.
 - Brand asset contract and `git diff --check`: passed.
 

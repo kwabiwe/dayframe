@@ -7,6 +7,7 @@ import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
 import { timelineStateFromSearchParams } from "@/lib/timeline-view";
 import {
   applyOptimisticActiveEntryPatch,
+  applyOptimisticTimerDelete,
   applyOptimisticTimerStart,
   applyOptimisticTimerStop,
   createTimerMutationGate,
@@ -33,6 +34,7 @@ type RuntimeContext = {
   clearTimerError: () => void;
   closeManualEntry: () => void;
   createManualEntry: (input: ManualEntryInput) => Promise<MutationOutcome>;
+  deleteActiveTimer: () => Promise<MutationOutcome>;
   data: BootstrapData | null;
   dateLoadError: string | null;
   hydrate: (data: BootstrapData) => void;
@@ -298,6 +300,36 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     return result.ran ? result.value : { ok: false, error: "A timer update is already in progress." };
   }, [commitData, refresh, setTimerDraft]);
 
+  const deleteActiveTimer = useCallback(async (): Promise<MutationOutcome> => {
+    const snapshot = dataRef.current;
+    if (!snapshot?.activeEntry) return { ok: false, error: "There is no running timer to delete." };
+    const draftSnapshot = draftRef.current;
+    const result = await mutationGateRef.current.run(async () => {
+      setIsTimerBusy(true);
+      setTimerError(null);
+      refreshRequestRef.current += 1;
+      commitData(applyOptimisticTimerDelete(snapshot));
+      setTimerDraft(timerDraftForEntry(null));
+      try {
+        const response = await clientFetch(`/api/time-entries/${snapshot.activeEntry!.id}`, {
+          method: "DELETE"
+        });
+        if (!response.ok) throw new Error(await responseError(response, `Unable to delete timer: ${response.status}`));
+        await refresh({ force: true });
+        return { ok: true } as const;
+      } catch (error) {
+        commitData(snapshot);
+        setTimerDraft(draftSnapshot);
+        const message = errorMessage(error, "Unable to delete the running timer.");
+        setTimerError(message);
+        return { ok: false, error: message } as const;
+      } finally {
+        setIsTimerBusy(false);
+      }
+    });
+    return result.ran ? result.value : { ok: false, error: "A timer update is already in progress." };
+  }, [commitData, refresh, setTimerDraft]);
+
   const updateActiveDetails = useCallback(async (draft: TimerDraft): Promise<MutationOutcome> => {
     const snapshot = dataRef.current;
     if (!snapshot?.activeEntry) return { ok: false, error: "There is no running timer to edit." };
@@ -402,6 +434,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     clearTimerError: () => setTimerError(null),
     closeManualEntry: () => setIsManualEntryOpen(false),
     createManualEntry,
+    deleteActiveTimer,
     data: selectedData,
     dateLoadError,
     hydrate,
@@ -424,6 +457,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     updateActiveStartTime
   }), [
     createManualEntry,
+    deleteActiveTimer,
     data,
     dateLoadError,
     hydrate,

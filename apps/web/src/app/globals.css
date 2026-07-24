@@ -6112,7 +6112,7 @@ kbd {
     minmax(160px, 220px)
     var(--web-icon-button-size)
     minmax(132px, 144px)
-    var(--web-icon-button-size);
+    max-content;
   align-items: start;
   column-gap: var(--web-gap-md);
   row-gap: var(--web-field-gap);
@@ -6164,8 +6164,40 @@ kbd {
   padding: 0;
 }
 
-.swiss-persistent-timer .swiss-command-play {
+.swiss-timer-actions {
   grid-area: action;
+  position: relative;
+  display: flex;
+  gap: var(--web-gap-sm);
+}
+
+.swiss-timer-actions-menu {
+  top: calc(100% + 8px);
+  right: 0;
+  width: max-content;
+  min-width: 180px;
+  padding: 6px;
+}
+
+.swiss-timer-actions-menu button {
+  display: flex;
+  width: 100%;
+  min-height: 40px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: var(--web-radius-control);
+  background: transparent;
+  padding: 8px 10px;
+  color: var(--danger);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+}
+
+.swiss-timer-actions-menu button:hover,
+.swiss-timer-actions-menu button:focus-visible {
+  background: var(--surface-muted);
 }
 
 .swiss-persistent-timer .swiss-command-play:not(.is-active) svg {
@@ -6830,7 +6862,7 @@ kbd {
       minmax(0, 1fr)
       var(--web-icon-button-size)
       minmax(104px, 118px)
-      var(--web-icon-button-size);
+      max-content;
     column-gap: var(--web-gap-sm);
     row-gap: var(--web-field-gap);
   }
@@ -6972,7 +7004,7 @@ kbd {
     grid-template-columns:
       var(--web-icon-button-size)
       minmax(0, 1fr)
-      var(--web-icon-button-size);
+      max-content;
   }
 }
 /* Tags stay intentionally quieter than categories. */
@@ -7255,6 +7287,32 @@ kbd {
 .inline-tag-help {
   color: var(--muted);
   font-size: 0.75rem;
+}
+
+.inline-tag-help {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.inline-selected-tag {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  padding: 3px 7px;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+}
+
+.inline-selected-tag:hover,
+.inline-selected-tag:focus-visible {
+  background: var(--surface-inset);
+  color: var(--danger);
 }
 
 @media (prefers-reduced-motion: reduce) {
