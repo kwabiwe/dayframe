@@ -57,5 +57,6 @@ source remained off after an upgrade or lifecycle reset.
 - All 19 mobile geofence tests pass, including enabled-learning rehydration
   restarting native monitoring.
 - Local browser automation could not navigate to the localhost/LAN target because
-  the browser policy blocked local navigation; rendered checks remain required
-  before merge.
+  the browser policy blocked local navigation. The Ready Vercel preview was then
+  checked but redirected the isolated browser to Vercel Authentication. Rendered
+  checks therefore remain required before merge.
