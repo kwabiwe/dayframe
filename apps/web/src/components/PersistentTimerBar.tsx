@@ -6,7 +6,7 @@ import { normalizeTagName, paletteCssColorFor } from "@dayframe/shared";
 import { CheckCircle2, ChevronDown, Play, Plus, Square } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { InlineTagInput } from "@/components/InlineTagInput";
-import { Button, Field, IconButton, ModalDialog, PopoverPanel, SelectField } from "@/components/ui/Primitives";
+import { Button, Field, IconButton, ModalDialog, SelectField } from "@/components/ui/Primitives";
 import { timeEntryAccentColor } from "@/lib/display";
 import { dateTimeLocalInputToIso, formatClockDuration, formatTime } from "@/lib/format";
 import type { BootstrapData } from "@/lib/queries";
@@ -41,6 +41,9 @@ export function PersistentTimerBar() {
   const categoryTriggerRef = useRef<HTMLButtonElement | null>(null);
   const descriptionInputRef = useRef<HTMLInputElement | null>(null);
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
+  const startDateInputRef = useRef<HTMLInputElement | null>(null);
+  const startEditorRef = useRef<HTMLDivElement | null>(null);
+  const startEditorTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const active = data?.activeEntry ?? null;
   const selectedCategory = data?.categories.find((category) => category.id === timerDraft.categoryId) ?? null;
@@ -118,6 +121,27 @@ export function PersistentTimerBar() {
       document.removeEventListener("keydown", closeWithKeyboard);
     };
   }, [categoryMenuOpen, suggestionsOpen]);
+
+  useEffect(() => {
+    if (!startEditorOpen) return undefined;
+    const focusHandle = window.requestAnimationFrame(() => startDateInputRef.current?.focus());
+    function closeOnOutside(event: MouseEvent) {
+      if (!startEditorRef.current?.contains(event.target as Node)) setStartEditorOpen(false);
+    }
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setStartEditorOpen(false);
+      startEditorTriggerRef.current?.focus();
+    }
+    document.addEventListener("mousedown", closeOnOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.cancelAnimationFrame(focusHandle);
+      document.removeEventListener("mousedown", closeOnOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [startEditorOpen]);
 
   if (!data) return null;
 
@@ -206,8 +230,10 @@ export function PersistentTimerBar() {
       return;
     }
     const outcome = await updateActiveStartTime(startedAt);
-    if (outcome.ok) setStartEditorOpen(false);
-    else setStartEditError(outcome.error);
+    if (outcome.ok) {
+      setStartEditorOpen(false);
+      window.requestAnimationFrame(() => startEditorTriggerRef.current?.focus());
+    } else setStartEditError(outcome.error);
   }
 
   return (
@@ -252,9 +278,10 @@ export function PersistentTimerBar() {
             tags={data.tags}
             value={timerDraft.description}
           />
-          {suggestionsOpen && !hashtagSuggestionsOpen && !active && visibleTaskSuggestions.length ? (
+          {!active && visibleTaskSuggestions.length ? (
             <TaskSuggestionsPanel
               isBusy={isTimerBusy}
+              isOpen={suggestionsOpen && !hashtagSuggestionsOpen}
               onSelect={(suggestion) => void startSuggestion(suggestion)}
               suggestions={visibleTaskSuggestions}
             />
@@ -301,14 +328,15 @@ export function PersistentTimerBar() {
             </span>
             <ChevronDown size={16} aria-hidden="true" />
           </button>
-          {categoryMenuOpen ? (
-            <div
-              className="swiss-category-menu"
-              id="persistent-timer-category-menu"
-              role="listbox"
-              aria-label="Categories"
-              onKeyDown={moveCategoryFocus}
-            >
+          <div
+            aria-hidden={!categoryMenuOpen}
+            aria-label="Categories"
+            className={`ui-floating-surface swiss-category-menu${categoryMenuOpen ? " is-open" : ""}`}
+            id="persistent-timer-category-menu"
+            inert={!categoryMenuOpen}
+            onKeyDown={moveCategoryFocus}
+            role="listbox"
+          >
               <CategoryOption
                 categoryId=""
                 color={null}
@@ -326,8 +354,7 @@ export function PersistentTimerBar() {
                   onSelect={chooseCategory}
                 />
               ))}
-            </div>
-          ) : null}
+          </div>
         </div>
 
         <IconButton
@@ -339,21 +366,88 @@ export function PersistentTimerBar() {
           <Plus size={18} />
         </IconButton>
 
-        {active ? (
-          <button
-            className="swiss-persistent-time-button"
-            type="button"
-            aria-label={`Edit start date and time. Started ${formatTime(active.startedAt)}. Elapsed ${formatClockDuration(durationSeconds)}`}
-            onClick={openStartEditor}
-          >
-            <span>{formatClockDuration(durationSeconds)}</span>
-            <small>Started {formatTime(active.startedAt)}</small>
-          </button>
-        ) : (
-          <span className="swiss-persistent-time-placeholder" aria-label="Timer is idle. Elapsed time 00:00.">
-            {formatClockDuration(0)}
-          </span>
-        )}
+        <div className="swiss-timer-time-control" ref={startEditorRef}>
+          {active ? (
+            <button
+              aria-controls="persistent-timer-start-editor"
+              aria-expanded={startEditorOpen}
+              aria-haspopup="dialog"
+              className="swiss-persistent-time-button"
+              type="button"
+              aria-label={`Edit start date and time. Started ${formatTime(active.startedAt)}. Elapsed ${formatClockDuration(durationSeconds)}`}
+              onClick={() => {
+                if (startEditorOpen) setStartEditorOpen(false);
+                else openStartEditor();
+              }}
+              ref={startEditorTriggerRef}
+            >
+              <span>{formatClockDuration(durationSeconds)}</span>
+              <small>Started {formatTime(active.startedAt)}</small>
+            </button>
+          ) : (
+            <span className="swiss-persistent-time-placeholder" aria-label="Timer is idle. Elapsed time 00:00.">
+              {formatClockDuration(0)}
+            </span>
+          )}
+
+          {active ? (
+            <section
+              aria-hidden={!startEditorOpen}
+              aria-label="Start date and time"
+              className={`ui-floating-surface swiss-start-time-popover${startEditorOpen ? " is-open" : ""}`}
+              id="persistent-timer-start-editor"
+              inert={!startEditorOpen}
+              role="dialog"
+            >
+              <header className="swiss-start-time-popover-header">
+                <strong>Start date and time</strong>
+              </header>
+              <form className="swiss-compact-time-editor" onSubmit={saveStartTime}>
+                <Field htmlFor="active-start-date" label="Start date">
+                  <input
+                    className="ui-control"
+                    id="active-start-date"
+                    type="date"
+                    value={startDateDraft}
+                    onChange={(event) => {
+                      setStartDateDraft(event.target.value);
+                      setStartEditError(null);
+                    }}
+                    ref={startDateInputRef}
+                    required
+                  />
+                </Field>
+                <Field htmlFor="active-start-time" label="Start time">
+                  <input
+                    className="ui-control"
+                    id="active-start-time"
+                    type="time"
+                    value={startTimeDraft}
+                    onChange={(event) => {
+                      setStartTimeDraft(event.target.value);
+                      setStartEditError(null);
+                    }}
+                    required
+                  />
+                </Field>
+                {startEditError ? <p className="swiss-inline-error" role="alert">{startEditError}</p> : null}
+                <div className="ui-dialog-actions">
+                  <Button
+                    type="button"
+                    disabled={isTimerBusy}
+                    onClick={() => {
+                      setStartEditorOpen(false);
+                      startEditorTriggerRef.current?.focus();
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button type="submit" variant="primary" disabled={isTimerBusy}>Save</Button>
+                </div>
+              </form>
+            </section>
+          ) : null}
+        </div>
 
         <button
           className={["swiss-command-play", active ? "is-active" : ""].filter(Boolean).join(" ")}
@@ -401,44 +495,6 @@ export function PersistentTimerBar() {
         </div>
       ) : null}
 
-      {startEditorOpen && active ? (
-        <PopoverPanel title="Start date and time" onClose={() => setStartEditorOpen(false)} align="top-right" busy={isTimerBusy}>
-          <form className="swiss-compact-time-editor" onSubmit={saveStartTime}>
-            <Field htmlFor="active-start-date" label="Start date">
-              <input
-                className="ui-control"
-                id="active-start-date"
-                type="date"
-                value={startDateDraft}
-                onChange={(event) => {
-                  setStartDateDraft(event.target.value);
-                  setStartEditError(null);
-                }}
-                required
-              />
-            </Field>
-            <Field htmlFor="active-start-time" label="Start time">
-              <input
-                className="ui-control"
-                id="active-start-time"
-                type="time"
-                value={startTimeDraft}
-                onChange={(event) => {
-                  setStartTimeDraft(event.target.value);
-                  setStartEditError(null);
-                }}
-                required
-              />
-            </Field>
-            {startEditError ? <p className="swiss-inline-error" role="alert">{startEditError}</p> : null}
-            <div className="ui-dialog-actions">
-              <Button type="button" disabled={isTimerBusy} onClick={() => setStartEditorOpen(false)}>Cancel</Button>
-              <Button type="submit" variant="primary" disabled={isTimerBusy}>Save</Button>
-            </div>
-          </form>
-        </PopoverPanel>
-      ) : null}
-
       {isManualEntryOpen ? (
         <ManualEntryDialog
           data={data}
@@ -483,15 +539,23 @@ function CategoryOption({
 
 function TaskSuggestionsPanel({
   isBusy,
+  isOpen,
   onSelect,
   suggestions
 }: {
   isBusy: boolean;
+  isOpen: boolean;
   onSelect: (suggestion: BootstrapData["taskSuggestions"][number]) => void;
   suggestions: BootstrapData["taskSuggestions"];
 }) {
   return (
-    <div className="swiss-task-suggestions" role="listbox" aria-label="Suggestions">
+    <div
+      aria-hidden={!isOpen}
+      aria-label="Suggestions"
+      className={`ui-floating-surface swiss-task-suggestions${isOpen ? " is-open" : ""}`}
+      inert={!isOpen}
+      role="listbox"
+    >
       <div className="swiss-task-suggestions-header"><span>Suggestions</span></div>
       <div className="swiss-task-suggestions-list">
         {suggestions.map((suggestion) => (

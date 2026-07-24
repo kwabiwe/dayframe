@@ -6095,8 +6095,10 @@ kbd {
 }
 
 .swiss-persistent-timer {
+  position: relative;
   gap: var(--web-gap-md);
   margin: 0;
+  overflow: visible;
   padding: 16px 20px;
 }
 
@@ -6170,10 +6172,16 @@ kbd {
   transform: translateX(1px);
 }
 
+.swiss-timer-time-control {
+  position: relative;
+  display: grid;
+  grid-area: time;
+  min-width: 0;
+}
+
 .swiss-persistent-time-button,
 .swiss-persistent-time-placeholder {
   display: flex;
-  grid-area: time;
   width: 100%;
   min-width: 0;
   height: var(--web-control-height);
@@ -6231,6 +6239,60 @@ kbd {
 
 .swiss-compact-time-editor {
   min-width: min(300px, calc(100vw - 56px));
+}
+
+.ui-floating-surface {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-floating);
+  color: var(--foreground);
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition:
+    opacity 140ms ease-out,
+    transform 140ms ease-out,
+    visibility 0s linear 140ms;
+}
+
+.ui-floating-surface.is-open {
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
+  transform: translateY(0);
+  transition-delay: 0s;
+}
+
+.swiss-start-time-popover {
+  position: absolute;
+  top: calc(100% + var(--web-field-gap));
+  right: 0;
+  z-index: 80;
+  display: grid;
+  width: min(340px, calc(100vw - 24px));
+  max-height: min(360px, calc(100dvh - 96px));
+  overflow: hidden;
+}
+
+.swiss-start-time-popover-header {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding: 0 var(--web-panel-padding);
+  font-size: 13px;
+}
+
+.swiss-start-time-popover .swiss-compact-time-editor {
+  min-width: 0;
+  overflow-y: auto;
+  padding: var(--web-panel-padding);
+}
+
+.swiss-start-time-popover .ui-dialog-actions {
+  margin: 2px calc(-1 * var(--web-panel-padding)) calc(-1 * var(--web-panel-padding));
 }
 
 .swiss-profile-section {
@@ -6322,14 +6384,6 @@ kbd {
   outline: 0;
 }
 
-.swiss-category-menu,
-.swiss-task-suggestions {
-  border: 0;
-  border-radius: 20px;
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-floating);
-}
-
 .swiss-category-menu {
   position: absolute;
   top: calc(100% + var(--web-field-gap));
@@ -6339,7 +6393,7 @@ kbd {
   width: min(260px, calc(100vw - 24px));
   min-width: min(220px, calc(100vw - 24px));
   max-width: calc(100vw - 24px);
-  max-height: min(280px, calc(100dvh - 96px));
+  max-height: min(232px, calc(100dvh - 96px));
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 6px;
@@ -6353,7 +6407,7 @@ kbd {
   display: grid;
   width: 100%;
   max-width: 100%;
-  max-height: min(308px, calc(100dvh - 96px));
+  max-height: min(272px, calc(100dvh - 96px));
   overflow: hidden;
 }
 
@@ -7008,7 +7062,7 @@ kbd {
 
 .inline-tag-picker-trigger:hover,
 .inline-tag-picker-trigger.is-open {
-  background: var(--surface-muted);
+  background: transparent;
   color: var(--accent-text);
 }
 
@@ -7018,12 +7072,10 @@ kbd {
   right: 0;
   z-index: 70;
   display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   width: min(17rem, calc(100vw - 24px));
-  max-height: min(22rem, calc(100dvh - 8rem));
+  max-height: min(17rem, calc(100dvh - 8rem));
   overflow: hidden;
-  border-radius: 0.875rem;
-  background: var(--surface-raised);
-  box-shadow: 0 12px 30px rgb(0 0 0 / 28%);
 }
 
 .inline-tag-picker-header {
@@ -7140,9 +7192,6 @@ kbd {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  border-radius: 0.875rem;
-  background: var(--surface-raised);
-  box-shadow: 0 12px 30px rgb(0 0 0 / 28%);
   opacity: 0;
   pointer-events: none;
   visibility: hidden;
@@ -7209,6 +7258,8 @@ kbd {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .ui-floating-surface,
+  .ui-floating-surface.is-open,
   .inline-tag-suggestions,
   .inline-tag-suggestions.is-open {
     transform: none;
@@ -7221,7 +7272,8 @@ kbd {
 }
 
 @media (max-width: 560px) {
-  .inline-tag-picker {
+  .inline-tag-picker,
+  .swiss-start-time-popover {
     position: fixed;
     top: auto;
     right: 12px;
@@ -7229,6 +7281,22 @@ kbd {
     left: 12px;
     width: auto;
     max-height: min(26rem, calc(100dvh - 24px));
+  }
+}
+
+@media (min-width: 561px) and (max-width: 840px) and (max-height: 560px) {
+  .inline-tag-picker {
+    max-height: min(13rem, calc(100dvh - 240px));
+  }
+
+  .swiss-category-menu {
+    max-height: min(180px, calc(100dvh - 308px));
+  }
+
+  .swiss-start-time-popover {
+    top: auto;
+    bottom: calc(100% + var(--web-field-gap));
+    max-height: calc(100dvh - 224px);
   }
 }
 

@@ -91,6 +91,7 @@ Required checks:
 - Exercise web optimistic success and network-failure rollback, then refresh and confirm bootstrap reconciliation restores the persisted active state.
 - The shell Plus action opens the shared manual-entry dialog; one submission creates exactly one entry. `/entries` redirects to `/timeline?view=list` and `/automation` redirects to the approved Places destination.
 - Browser-check the shared web timer and account access at 1440x900, 1280x720, 1024x768 and 390x844 in System, Light and Dark, with keyboard-only navigation and Reduced Motion. Record horizontal overflow and console/runtime errors.
+- Open timer Suggestions, Tags, Categories, and the running start-time editor at each timer breakpoint. Verify no panel clipping, clear surface contrast, bounded internal scrolling, outside-click/Escape dismissal, trigger focus return, and no page scrim for the anchored start editor.
 - Active timer card and running edit sheet use the same exact active-entry timestamp and display the same elapsed seconds.
 - Empty mobile Play creates one timer, then opens the running edit sheet without showing start-state controls.
 - Pressing mobile Play while a timer is already running opens the same running edit sheet/suggestion flow instead of bypassing suggestions or starting a duplicate.

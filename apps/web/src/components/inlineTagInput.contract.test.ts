@@ -10,7 +10,7 @@ const iconSource = readFileSync(fileURLToPath(new URL("./TagIcon.tsx", import.me
 
 describe("web tag editor interaction contract", () => {
   it("uses the shared solid rounded tag silhouette", () => {
-    expect(source).toContain("<TagIcon size={17} />");
+    expect(source).toContain("<TagIcon size={15} />");
     expect(iconSource).toContain('fill="currentColor"');
     expect(iconSource).toContain('fillRule="evenodd"');
   });

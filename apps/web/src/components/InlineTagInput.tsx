@@ -56,6 +56,7 @@ export function InlineTagInput({
   const editorRef = useRef<HTMLDivElement | null>(null);
   const localInputRef = useRef<HTMLInputElement | null>(null);
   const pickerInputRef = useRef<HTMLInputElement | null>(null);
+  const pickerTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [focused, setFocused] = useState(false);
   const [caret, setCaret] = useState(value.length);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
@@ -137,8 +138,9 @@ export function InlineTagInput({
     }
     function closeOnEscape(event: globalThis.KeyboardEvent) {
       if (event.key === "Escape") {
+        event.preventDefault();
         setPickerOpen(false);
-        localInputRef.current?.focus();
+        pickerTriggerRef.current?.focus();
       }
     }
     document.addEventListener("mousedown", closeOnOutside);
@@ -257,14 +259,16 @@ export function InlineTagInput({
             });
             setPickerQuery("");
           }}
+          ref={pickerTriggerRef}
           type="button"
         >
-          <TagIcon size={17} />
+          <TagIcon size={15} />
         </button>
         <div
           aria-hidden={!shouldOpen}
-          className={`inline-tag-suggestions${shouldOpen ? " is-open" : ""}`}
+          className={`ui-floating-surface inline-tag-suggestions${shouldOpen ? " is-open" : ""}`}
           id={`${name}-tag-suggestions`}
+          inert={!shouldOpen}
           role="listbox"
         >
           <span className="inline-tag-suggestions-title">TAGS</span>
@@ -288,15 +292,20 @@ export function InlineTagInput({
             {actions.length === 0 ? <span className="inline-tag-empty">Type a name to search or create</span> : null}
           </div>
         </div>
-        {pickerOpen ? (
-          <section aria-label="Add or filter tags" className="inline-tag-picker" role="dialog">
+        <section
+          aria-hidden={!pickerOpen}
+          aria-label="Add or filter tags"
+          className={`ui-floating-surface inline-tag-picker${pickerOpen ? " is-open" : ""}`}
+          inert={!pickerOpen}
+          role="dialog"
+        >
             <div className="inline-tag-picker-header">
               <strong>Tags</strong>
               <button
                 aria-label="Close tag picker"
                 onClick={() => {
                   setPickerOpen(false);
-                  localInputRef.current?.focus();
+                  pickerTriggerRef.current?.focus();
                 }}
                 type="button"
               >
@@ -348,8 +357,7 @@ export function InlineTagInput({
                 + Create “{pickerCreateName}”
               </button>
             ) : null}
-          </section>
-        ) : null}
+        </section>
       </div>
       <span className="inline-tag-help" id={`${name}-tag-help`}>
         <TagMetadata active tagNames={selectedTagNames} />
