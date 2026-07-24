@@ -205,6 +205,10 @@ Required checks:
 - Measure authenticated reconciliation traffic. Keep elapsed display ticking locally while bootstrap uses initial/mutation/focus/visibility plus a conservative foreground interval.
 - Hosted auth changes require a provider-auth Vercel Preview pass before merge, including a 10-minute visible-tab observation, tab switching, safe Vercel reason logs, explicit logout/login, Safari/WebKit where available, and canonical/custom hostname checks for host-scoped cookies.
 - Mobile bearer session still works.
+- On iOS, gate the initial bearer-token read on active app state; test transient
+  `errSecInteractionNotAllowed` recovery, legacy-token migration, explicit
+  background-safe device-only Keychain accessibility, and logout/`401` clearing
+  without exposing a raw SecureStore exception.
 - Workspace/user scoping is preserved.
 - Hosted Supabase schema has all columns/indexes used by deployed code.
 

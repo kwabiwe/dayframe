@@ -1,5 +1,4 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as SecureStore from "expo-secure-store";
 import {
   ActivityEventInputSchema,
   type ActivityEventInput,
@@ -15,9 +14,13 @@ import {
   type RecentActivitySuggestion
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
+import {
+  clearSessionToken,
+  getSessionToken,
+  setSessionToken
+} from "./secure-session";
 
 const QUEUE_KEY = "dayframe.offlineQueue.v1";
-const SESSION_TOKEN_KEY = "dayframe.localSessionToken.v1";
 const DEFAULT_PLACE_RADIUS_METERS = 100;
 const DEFAULT_PLACE_PRIORITY = 5;
 
@@ -421,13 +424,7 @@ export async function logout() {
   await clearSessionToken();
 }
 
-export async function getSessionToken() {
-  return SecureStore.getItemAsync(SESSION_TOKEN_KEY);
-}
-
-export async function clearSessionToken() {
-  await SecureStore.deleteItemAsync(SESSION_TOKEN_KEY);
-}
+export { clearSessionToken, getSessionToken };
 
 export async function enqueueEvent(input: ActivityEventDraft) {
   const { localId, ...eventInput } = input;
@@ -1300,7 +1297,7 @@ async function authenticate(path: string, body: Record<string, unknown>): Promis
   const payload = await readJsonResponse<MobileAuthResult & { error?: string }>(response);
   if (!response.ok) throw new Error(payload.error ?? `Authentication failed: ${response.status}`);
   if ("requiresEmailConfirmation" in payload) return payload;
-  await SecureStore.setItemAsync(SESSION_TOKEN_KEY, payload.token);
+  await setSessionToken(payload.token);
   return payload;
 }
 

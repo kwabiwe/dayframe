@@ -389,7 +389,16 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }, []);
 
   useEffect(() => {
-    void load();
+    if (AppState.currentState === "active") {
+      void load();
+      return undefined;
+    }
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state !== "active") return;
+      subscription.remove();
+      void load();
+    });
+    return () => subscription.remove();
   }, [load]);
 
   useEffect(() => {
@@ -422,6 +431,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   useFocusEffect(
     useCallback(() => {
       void reloadThemePreference();
+      if (AppState.currentState !== "active") return;
       if (authState === "authenticated") {
         void syncQueuedEventsAndReload();
       } else {
