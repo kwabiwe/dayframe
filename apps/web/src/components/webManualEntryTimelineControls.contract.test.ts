@@ -35,8 +35,8 @@ describe("web manual entry and Timeline control refinement", () => {
     expect(timer).toContain("const TASK_SUGGESTION_LIMIT = 5");
     expect(timer).toContain(".slice(0, TASK_SUGGESTION_LIMIT)");
     expect(styles).toMatch(/\.swiss-task-suggestions \{[^}]*--task-suggestion-count: 5;/s);
-    expect(styles).toMatch(/\.swiss-task-suggestions-list \{[^}]*grid-auto-rows: var\(--task-suggestion-row-height\);[^}]*max-height: calc\(var\(--task-suggestion-count\) \* var\(--task-suggestion-row-height\)\);/s);
-    expect(styles).toMatch(/\.swiss-task-suggestions-list button \{[^}]*height: var\(--task-suggestion-row-height\);/s);
+    expect(styles).toMatch(/\.swiss-task-suggestions-list \{[^}]*grid-auto-rows: minmax\(var\(--task-suggestion-row-height\), auto\);[^}]*max-height: calc\(var\(--task-suggestion-count\) \* var\(--task-suggestion-row-height\)\);/s);
+    expect(styles).toMatch(/\.swiss-task-suggestions-list button \{[^}]*min-height: var\(--task-suggestion-row-height\);/s);
   });
 
   it("reuses the timer Category treatment and borderless date-time controls", () => {
@@ -44,8 +44,9 @@ describe("web manual entry and Timeline control refinement", () => {
     expect(manual).toContain('className="swiss-category-field manual-entry-category"');
     expect(manual).toContain("<CategoryOption");
     expect(manual).not.toContain("<SelectField");
-    expect(manual).toContain("manual-entry-date-time-control");
-    expect(styles).toMatch(/\.manual-entry-category \.swiss-category-trigger,[\s\S]*\.manual-entry-date-time-control \{[^}]*border-color: transparent;/s);
+    expect(manual).toContain("<DayframeDateTimePicker");
+    expect(timer).not.toContain('type="datetime-local"');
+    expect(styles).toMatch(/\.manual-entry-category \.swiss-category-trigger,[\s\S]*\.dayframe-date-time-trigger \{[^}]*border-color: transparent;/s);
     expect(styles).toMatch(/dialog\.ui-dialog:focus \{[^}]*outline: 0;/s);
   });
 

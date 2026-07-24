@@ -28,6 +28,9 @@ describe("web task suggestion interaction", () => {
     expect(submitHandler).not.toContain("setSuggestionsOpen(true)");
     expect(timerSource).toContain("const TASK_SUGGESTION_LIMIT = 5");
     expect(timerSource).toContain("taskSuggestions.slice(0, TASK_SUGGESTION_LIMIT)");
+    expect(descriptionInput).toContain("onInputKeyDown");
+    expect(descriptionInput).toContain('event.key === "ArrowDown"');
+    expect(descriptionInput).toContain('event.key === "Escape"');
   });
 
   it("syncs tag-only changes and restores clean description plus persisted tag state after failure", () => {
