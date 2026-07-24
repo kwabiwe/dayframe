@@ -3,6 +3,7 @@
 import { CalendarDays } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/Primitives";
+import { DayframeCalendar } from "@/components/DayframeCalendar";
 
 export function DatePickerPopover({
   disabled = false,
@@ -18,15 +19,14 @@ export function DatePickerPopover({
   value: string;
 }) {
   const [open, setOpen] = useState(false);
-  const inputId = useId();
   const panelId = useId();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const selected = new Date(`${value}T12:00:00`);
+  const [view, setView] = useState({ year: selected.getFullYear(), month: selected.getMonth() + 1 });
 
   useEffect(() => {
     if (!open) return undefined;
-    const focusHandle = window.requestAnimationFrame(() => inputRef.current?.focus());
     function closeOnOutside(event: MouseEvent) {
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
     }
@@ -39,7 +39,6 @@ export function DatePickerPopover({
     document.addEventListener("mousedown", closeOnOutside);
     document.addEventListener("keydown", closeOnEscape);
     return () => {
-      window.cancelAnimationFrame(focusHandle);
       document.removeEventListener("mousedown", closeOnOutside);
       document.removeEventListener("keydown", closeOnEscape);
     };
@@ -78,15 +77,7 @@ export function DatePickerPopover({
         <Button compact onClick={() => choose(today)} disabled={disabled}>
           Today
         </Button>
-        <label htmlFor={inputId}>Date</label>
-        <input
-          className="ui-control"
-          id={inputId}
-          onChange={(event) => choose(event.target.value)}
-          ref={inputRef}
-          type="date"
-          value={value}
-        />
+        <DayframeCalendar onChange={choose} onViewChange={setView} value={value} view={view} />
       </section>
     </div>
   );

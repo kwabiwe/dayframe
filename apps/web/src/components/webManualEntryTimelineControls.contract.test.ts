@@ -74,7 +74,8 @@ describe("web manual entry and Timeline control refinement", () => {
     expect(timeline).not.toContain("Selected day");
     expect(timeline).not.toContain("Selected week");
     expect(datePicker).toMatch(/>\s*Today\s*</);
-    expect(datePicker).toContain('type="date"');
+    expect(datePicker).toContain("<DayframeCalendar");
+    expect(datePicker).not.toContain('type="date"');
     expect(datePicker).toContain("onChange(date)");
     expect(styles).toMatch(/\.timeline-range-navigation \{[^}]*grid-template-columns: var\(--web-icon-button-size\) minmax\(160px, 1fr\) var\(--web-icon-button-size\);/s);
   });

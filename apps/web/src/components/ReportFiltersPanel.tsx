@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Check, ChevronDown, X } from "lucide-react";
@@ -22,9 +22,9 @@ export function ReportFiltersPanel({
 }) {
   const router = useRouter();
   const [descriptionDraft, setDescriptionDraft] = useState(filters.description);
-  const [moreOpen, setMoreOpen] = useState(
-    filters.places.length > 0 || filters.sources.length > 0 || Boolean(filters.description)
-  );
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement | null>(null);
+  const moreTriggerRef = useRef<HTMLButtonElement | null>(null);
   const categories = useMemo<FilterOption[]>(() => [
     { id: "uncategorized", name: "Uncategorized", color: null },
     ...options.categories
@@ -47,6 +47,24 @@ export function ReportFiltersPanel({
   const summary = chips.length > 0
     ? `${rangeLabel}. Applied filters: ${chips.map((chip) => chip.label).join(", ")}.`
     : `${rangeLabel}. No additional filters applied.`;
+
+  useEffect(() => {
+    if (!moreOpen) return undefined;
+    function closeOutside(event: MouseEvent) {
+      if (!moreRef.current?.contains(event.target as Node)) setMoreOpen(false);
+    }
+    function closeEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setMoreOpen(false);
+      moreTriggerRef.current?.focus();
+    }
+    document.addEventListener("mousedown", closeOutside);
+    document.addEventListener("keydown", closeEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOutside);
+      document.removeEventListener("keydown", closeEscape);
+    };
+  }, [moreOpen]);
 
   return (
     <section className="fill-group-surface report-filter-panel" aria-labelledby="report-filters-title">
@@ -95,16 +113,18 @@ export function ReportFiltersPanel({
         </div>
       ) : null}
 
-      <details
-        className="report-more-filters"
-        open={moreOpen}
-        onToggle={(event) => setMoreOpen(event.currentTarget.open)}
-      >
-        <summary aria-expanded={moreOpen}>
+      <div className={`report-more-filters${moreOpen ? " is-open" : ""}`} ref={moreRef}>
+        <button
+          aria-expanded={moreOpen}
+          className="report-more-filters-trigger"
+          onClick={() => setMoreOpen((current) => !current)}
+          ref={moreTriggerRef}
+          type="button"
+        >
           <span>More filters</span>
           <ChevronDown aria-hidden="true" size={18} />
-        </summary>
-        <div className="report-more-filter-grid">
+        </button>
+        <div className={`ui-floating-surface report-more-filter-grid${moreOpen ? " is-open" : ""}`} hidden={!moreOpen}>
           <ReportMultiSelect
             label="Place"
             options={places}
@@ -131,7 +151,7 @@ export function ReportFiltersPanel({
             <Button type="submit">Apply search</Button>
           </form>
         </div>
-      </details>
+      </div>
     </section>
   );
 }
@@ -150,17 +170,44 @@ function ReportMultiSelect({
   selected: string[];
 }) {
   const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    function closeOutside(event: MouseEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    function closeEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      triggerRef.current?.focus();
+    }
+    document.addEventListener("mousedown", closeOutside);
+    document.addEventListener("keydown", closeEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOutside);
+      document.removeEventListener("keydown", closeEscape);
+    };
+  }, [open]);
   return (
-    <details className="report-multi-select" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
-      <summary aria-expanded={open}>
+    <div className={`report-multi-select${open ? " is-open" : ""}`} ref={rootRef}>
+      <button
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        className="report-multi-select-trigger"
+        onClick={() => setOpen((current) => !current)}
+        ref={triggerRef}
+        type="button"
+      >
         <span>
           <strong>{label}</strong>
           <small>{selected.length > 0 ? `${selected.length} selected` : "All"}</small>
         </span>
         <ChevronDown aria-hidden="true" size={18} />
-      </summary>
+      </button>
       <div
-        className="report-multi-select-list"
+        className={`ui-floating-surface report-multi-select-list${open ? " is-open" : ""}`}
+        hidden={!open}
         role="listbox"
         aria-label={`Select ${label.toLocaleLowerCase()}`}
         aria-multiselectable="true"
@@ -197,7 +244,7 @@ function ReportMultiSelect({
           );
         })}
       </div>
-    </details>
+    </div>
   );
 }
 

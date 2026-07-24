@@ -1,21 +1,14 @@
 "use client";
 
-import { CalendarDays, ChevronLeft, ChevronRight, Clock3 } from "lucide-react";
+import { CalendarDays, Clock3 } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { DayframeCalendar } from "@/components/DayframeCalendar";
+import { maskTimeInput, parseTimeInput } from "@/lib/calendar-grid";
 
 function parseLocal(value: string) {
   const [date = "", time = "09:00"] = value.split("T");
   const [year, month] = date.split("-").map(Number);
   return { date, time: time.slice(0, 5), year, month };
-}
-
-function monthDays(year: number, month: number) {
-  const firstWeekday = new Date(year, month - 1, 1).getDay();
-  const count = new Date(year, month, 0).getDate();
-  return [
-    ...Array.from({ length: firstWeekday }, () => null),
-    ...Array.from({ length: count }, (_, index) => index + 1)
-  ];
 }
 
 export function DayframeDateTimePicker({
@@ -33,13 +26,12 @@ export function DayframeDateTimePicker({
   const [value, setValue] = useState(defaultValue);
   const [open, setOpen] = useState(false);
   const [view, setView] = useState({ year: initial.year, month: initial.month });
+  const [timeDraft, setTimeDraft] = useState(initial.time);
+  const [timeError, setTimeError] = useState("");
   const panelId = useId();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const current = parseLocal(value);
-  const days = monthDays(view.year, view.month);
-  const monthLabel = new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric" })
-    .format(new Date(view.year, view.month - 1, 1));
   const displayLabel = new Intl.DateTimeFormat("en-GB", {
     day: "2-digit",
     month: "short",
@@ -67,14 +59,20 @@ export function DayframeDateTimePicker({
     };
   }, [open]);
 
-  function chooseDay(day: number) {
-    const date = `${view.year}-${String(view.month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  function chooseDay(date: string) {
     setValue(`${date}T${current.time}`);
   }
 
-  function changeMonth(delta: number) {
-    const next = new Date(view.year, view.month - 1 + delta, 1);
-    setView({ year: next.getFullYear(), month: next.getMonth() + 1 });
+  function commitTime() {
+    const normalized = parseTimeInput(timeDraft);
+    if (!normalized) {
+      setTimeError("Enter a valid time from 00:00 to 23:59.");
+      return false;
+    }
+    setValue(`${current.date}T${normalized}`);
+    setTimeDraft(normalized);
+    setTimeError("");
+    return true;
   }
 
   return (
@@ -102,54 +100,33 @@ export function DayframeDateTimePicker({
         inert={!open}
         role="dialog"
       >
-        <header>
-          <button aria-label="Previous month" onClick={() => changeMonth(-1)} type="button">
-            <ChevronLeft aria-hidden="true" size={17} />
-          </button>
-          <strong>{monthLabel}</strong>
-          <button aria-label="Next month" onClick={() => changeMonth(1)} type="button">
-            <ChevronRight aria-hidden="true" size={17} />
-          </button>
-        </header>
-        <div className="dayframe-calendar-weekdays" aria-hidden="true">
-          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => <span key={day}>{day.slice(0, 1)}</span>)}
-        </div>
-        <div className="dayframe-calendar-grid">
-          {days.map((day, index) => day ? (
-            <button
-              aria-pressed={current.date === `${view.year}-${String(view.month).padStart(2, "0")}-${String(day).padStart(2, "0")}`}
-              key={day}
-              onClick={() => chooseDay(day)}
-              type="button"
-            >
-              {day}
-            </button>
-          ) : <span key={`blank-${index}`} />)}
-        </div>
+        <DayframeCalendar onChange={chooseDay} onViewChange={setView} value={current.date} view={view} />
         <div className="dayframe-time-row">
           <Clock3 aria-hidden="true" size={17} />
-          <span>Time</span>
-          <div>
-            <select
-              aria-label="Hour"
-              onChange={(event) => setValue(`${current.date}T${event.target.value}:${current.time.slice(3, 5)}`)}
-              value={current.time.slice(0, 2)}
-            >
-              {Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, "0"))
-                .map((hour) => <option key={hour} value={hour}>{hour}</option>)}
-            </select>
-            <span aria-hidden="true">:</span>
-            <select
-              aria-label="Minute"
-              onChange={(event) => setValue(`${current.date}T${current.time.slice(0, 2)}:${event.target.value}`)}
-              value={current.time.slice(3, 5)}
-            >
-              {Array.from({ length: 60 }, (_, minute) => String(minute).padStart(2, "0"))
-                .map((minute) => <option key={minute} value={minute}>{minute}</option>)}
-            </select>
-          </div>
+          <label htmlFor={`${id}-time`}>Time</label>
+          <input
+            aria-describedby={timeError ? `${id}-time-error` : undefined}
+            aria-invalid={Boolean(timeError)}
+            id={`${id}-time`}
+            inputMode="numeric"
+            onBlur={commitTime}
+            onChange={(event) => {
+              setTimeDraft(maskTimeInput(event.target.value));
+              setTimeError("");
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                commitTime();
+              }
+            }}
+            placeholder="HH:MM"
+            value={timeDraft}
+          />
         </div>
+        {timeError ? <p className="dayframe-time-error" id={`${id}-time-error`} role="alert">{timeError}</p> : null}
         <button className="dayframe-date-time-done" onClick={() => {
+          if (!commitTime()) return;
           setOpen(false);
           triggerRef.current?.focus();
         }} type="button">Done</button>
