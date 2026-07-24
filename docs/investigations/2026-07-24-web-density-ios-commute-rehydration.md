@@ -4,6 +4,8 @@ Date: 2026-07-24
 
 Branch: `codex/web-density-ios-commute-fix`
 
+Status: PR [#104](https://github.com/kwabiwe/dayframe/pull/104) open for review
+
 ## Report
 
 - At 100% browser zoom, the web app felt oversized compared with 80% zoom and
