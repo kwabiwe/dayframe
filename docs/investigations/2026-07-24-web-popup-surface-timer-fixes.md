@@ -8,6 +8,8 @@ Base: `origin/main` at `5dee5df`
 
 Status: Implemented; PR validation in progress
 
+PR: [#106](https://github.com/kwabiwe/dayframe/pull/106)
+
 ## Scope
 
 This focused PR owns the shared floating-surface treatment and the persistent
