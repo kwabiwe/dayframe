@@ -7,6 +7,7 @@ import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
 import { timelineStateFromSearchParams } from "@/lib/timeline-view";
 import {
   applyOptimisticActiveEntryPatch,
+  applyOptimisticTimerDelete,
   applyOptimisticTimerStart,
   applyOptimisticTimerStop,
   createTimerMutationGate,
@@ -33,6 +34,7 @@ type RuntimeContext = {
   clearTimerError: () => void;
   closeManualEntry: () => void;
   createManualEntry: (input: ManualEntryInput) => Promise<MutationOutcome>;
+  deleteActiveTimer: () => Promise<MutationOutcome>;
   data: BootstrapData | null;
   dateLoadError: string | null;
   hydrate: (data: BootstrapData) => void;
@@ -44,6 +46,7 @@ type RuntimeContext = {
   refresh: (options?: { force?: boolean }) => Promise<BootstrapData | null>;
   selectedDate: string;
   setTimerDraft: (draft: TimerDraft | ((current: TimerDraft) => TimerDraft)) => void;
+  shellData: BootstrapData | null;
   startEntryAgain: (entry: TimeEntryRow) => Promise<MutationOutcome>;
   startTimer: (input?: TimerDraftInput) => Promise<MutationOutcome>;
   stopTimer: (input?: TimerDraftInput) => Promise<MutationOutcome>;
@@ -244,7 +247,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   }, [commitData, refresh, setTimerDraft]);
 
   const startEntryAgain = useCallback(async (entry: TimeEntryRow): Promise<MutationOutcome> => {
-    const decision = entryContinuationDecision(entry, dataRef.current?.activeEntry);
+    const decision = entryContinuationDecision(entry);
     if (!decision.ok) return decision;
     return startTimer(decision.draft);
   }, [startTimer]);
@@ -288,6 +291,36 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         commitData(snapshot);
         setTimerDraft(draftSnapshot);
         const message = errorMessage(error, "Unable to stop the timer.");
+        setTimerError(message);
+        return { ok: false, error: message } as const;
+      } finally {
+        setIsTimerBusy(false);
+      }
+    });
+    return result.ran ? result.value : { ok: false, error: "A timer update is already in progress." };
+  }, [commitData, refresh, setTimerDraft]);
+
+  const deleteActiveTimer = useCallback(async (): Promise<MutationOutcome> => {
+    const snapshot = dataRef.current;
+    if (!snapshot?.activeEntry) return { ok: false, error: "There is no running timer to delete." };
+    const draftSnapshot = draftRef.current;
+    const result = await mutationGateRef.current.run(async () => {
+      setIsTimerBusy(true);
+      setTimerError(null);
+      refreshRequestRef.current += 1;
+      commitData(applyOptimisticTimerDelete(snapshot));
+      setTimerDraft(timerDraftForEntry(null));
+      try {
+        const response = await clientFetch(`/api/time-entries/${snapshot.activeEntry!.id}`, {
+          method: "DELETE"
+        });
+        if (!response.ok) throw new Error(await responseError(response, `Unable to delete timer: ${response.status}`));
+        await refresh({ force: true });
+        return { ok: true } as const;
+      } catch (error) {
+        commitData(snapshot);
+        setTimerDraft(draftSnapshot);
+        const message = errorMessage(error, "Unable to delete the running timer.");
         setTimerError(message);
         return { ok: false, error: message } as const;
       } finally {
@@ -401,6 +434,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     clearTimerError: () => setTimerError(null),
     closeManualEntry: () => setIsManualEntryOpen(false),
     createManualEntry,
+    deleteActiveTimer,
     data: selectedData,
     dateLoadError,
     hydrate,
@@ -412,6 +446,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     refresh,
     selectedDate,
     setTimerDraft,
+    shellData: data,
     startEntryAgain,
     startTimer,
     stopTimer,
@@ -422,6 +457,8 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     updateActiveStartTime
   }), [
     createManualEntry,
+    deleteActiveTimer,
+    data,
     dateLoadError,
     hydrate,
     isDateLoading,

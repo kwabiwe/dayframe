@@ -10,7 +10,7 @@ const iconSource = readFileSync(fileURLToPath(new URL("./TagIcon.tsx", import.me
 
 describe("web tag editor interaction contract", () => {
   it("uses the shared solid rounded tag silhouette", () => {
-    expect(source).toContain("<TagIcon size={17} />");
+    expect(source).toContain("<TagIcon size={15} />");
     expect(iconSource).toContain('fill="currentColor"');
     expect(iconSource).toContain('fillRule="evenodd"');
   });
@@ -30,5 +30,12 @@ describe("web tag editor interaction contract", () => {
     expect(source).not.toContain("replaceActiveHashtag");
     expect(source).not.toContain("tagNamesFromDescription");
     expect(source).not.toContain("Type # to add a tag");
+  });
+
+  it("makes every selected tag directly removable", () => {
+    expect(source).toContain("selectedTagNames.map");
+    expect(source).toContain("Remove tag ${tagName}");
+    expect(source).toContain("onClick={() => toggleSelectedTag(tagName)}");
+    expect(source).toContain('className="inline-selected-tag"');
   });
 });

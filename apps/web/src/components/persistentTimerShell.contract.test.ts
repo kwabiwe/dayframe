@@ -32,11 +32,15 @@ describe("persistent timer shell contract", () => {
   });
 
   it("keeps the timer strip on one measured five-part control track", () => {
-    expect(styles).toMatch(/\.swiss-persistent-timer-form \{[^}]*"description category manual time action";[^}]*minmax\(0, 1fr\)[^}]*var\(--web-icon-button-size\)[^}]*minmax\(132px, 144px\)[^}]*var\(--web-icon-button-size\);/s);
+    expect(styles).toMatch(/\.swiss-persistent-timer-form \{[^}]*"description category manual time action";[^}]*minmax\(0, 1fr\)[^}]*var\(--web-icon-button-size\)[^}]*minmax\(132px, 144px\)[^}]*max-content;/s);
     expect(styles).toMatch(/\.swiss-persistent-timer \.swiss-manual-entry-action,[\s\S]*\.swiss-persistent-timer \.swiss-command-play \{[^}]*width: var\(--web-icon-button-size\);[^}]*height: var\(--web-icon-button-size\);/s);
-    expect(styles).toMatch(/\.swiss-persistent-time-button,[\s\S]*\.swiss-persistent-time-placeholder \{[^}]*grid-area: time;[^}]*height: var\(--web-control-height\);/s);
+    expect(styles).toMatch(/\.swiss-timer-time-control \{[^}]*grid-area: time;/s);
+    expect(styles).toMatch(/\.swiss-persistent-time-button,[\s\S]*\.swiss-persistent-time-placeholder \{[^}]*height: var\(--web-control-height\);/s);
     expect(styles).not.toMatch(/\.swiss-command-play\.is-active \{[^}]*min-width:\s*92px/s);
     expect(styles).not.toContain(".swiss-entrybar-actions");
+    expect(timer).toContain('label="More timer actions"');
+    expect(timer).toContain("Delete running task");
+    expect(timer).toContain("void deleteActiveTimer()");
   });
 
   it("keeps tags inside the task compound control and exposes the row to assistive technology", () => {
@@ -51,12 +55,14 @@ describe("persistent timer shell contract", () => {
     expect(timer).toContain('aria-label="Timer is idle. Elapsed time 00:00."');
     expect(timer).toContain('aria-label={active ? "Stop timer" : "Start timer"}');
     expect(timer).toContain("disabled={isTimerBusy}");
+    expect(inlineTags).toContain("selectedTagNames.map");
+    expect(inlineTags).toContain("Remove tag ${tagName}");
   });
 
   it("keeps compact overlays and the timer row usable at phone widths", () => {
     expect(styles).toMatch(/@media \(max-width: 840px\)[\s\S]*"category manual time action";[\s\S]*minmax\(104px, 118px\)/);
     expect(styles).toMatch(/@media \(max-width: 350px\)[\s\S]*"category category category"[\s\S]*"manual time action";/);
-    expect(styles).toMatch(/\.swiss-category-menu \{[^}]*max-width: calc\(100vw - 24px\);[^}]*max-height: min\(280px, calc\(100dvh - 96px\)\);/s);
+    expect(styles).toMatch(/\.swiss-category-menu \{[^}]*max-width: calc\(100vw - 24px\);[^}]*max-height: min\(232px, calc\(100dvh - 96px\)\);/s);
     expect(styles).toMatch(/\.swiss-category-trigger \{[^}]*width: 100%;[^}]*min-width: 0;/s);
     expect(styles).toMatch(/\.swiss-category-trigger-value \{[^}]*flex: 1 1 auto;[^}]*min-width: 0;[^}]*overflow: hidden;/s);
     expect(styles).toMatch(/\.swiss-category-trigger-value span:last-child \{[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/s);
