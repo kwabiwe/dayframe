@@ -241,7 +241,7 @@ mobile typecheck and its full test suite remain green.
 
 - `npm run lint`: passed.
 - `npm run typecheck`: passed for mobile, web, and shared.
-- `npm run test`: 105 files and 741 tests passed:
+- `npm run test`: 104 files and 741 tests passed:
   - mobile: 33 files, 237 tests;
   - web: 66 files, 410 tests;
   - shared: 5 files, 94 tests.
