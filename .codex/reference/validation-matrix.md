@@ -100,6 +100,8 @@ Required checks:
 - In Calendar, verify zoom is always visible, its controls still change density, and no instruction/disclosure copy occupies the header.
 - Browser-check the shared web timer and account access at 1440x900, 1280x720, 1024x768 and 390x844 in System, Light and Dark, with keyboard-only navigation and Reduced Motion. Record horizontal overflow and console/runtime errors.
 - Open timer Suggestions, Tags, Categories, and the running start-time editor at each timer breakpoint. Verify no panel clipping, clear surface contrast, bounded internal scrolling, outside-click/Escape dismissal, trigger focus return, and no page scrim for the anchored start editor.
+- In Add time, verify the hard-limited Suggestions panel contains only complete rows, manual Tags opens directly beneath the tag icon on desktop, Category matches the timer picker, native Start/Finish selection still works, the dialog has no browser-default focus outline, and rounded corners/menu bounds hold in Light, Dark, System, phone, compact-height and 200%-zoom-equivalent layouts.
+- With a running timer, open More at the right edge and verify Delete is directly below the trigger, remains inside the viewport, dismisses on outside click/Escape, and returns focus to More.
 - Active timer card and running edit sheet use the same exact active-entry timestamp and display the same elapsed seconds.
 - Empty mobile Play creates one timer, then opens the running edit sheet without showing start-state controls.
 - Pressing mobile Play while a timer is already running opens the same running edit sheet/suggestion flow instead of bypassing suggestions or starting a duplicate.

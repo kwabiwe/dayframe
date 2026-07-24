@@ -6,11 +6,13 @@ import { normalizeTagName, paletteCssColorFor } from "@dayframe/shared";
 import { CheckCircle2, ChevronDown, Ellipsis, Play, Plus, Square, Trash2 } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { InlineTagInput } from "@/components/InlineTagInput";
-import { Button, Field, IconButton, ModalDialog, SelectField } from "@/components/ui/Primitives";
+import { Button, Field, IconButton, ModalDialog } from "@/components/ui/Primitives";
 import { timeEntryAccentColor } from "@/lib/display";
 import { dateTimeLocalInputToIso, formatClockDuration, formatTime } from "@/lib/format";
 import type { BootstrapData } from "@/lib/queries";
 import { shouldStartTimerFromEntrySubmit } from "@/lib/timer-entry-draft";
+
+const TASK_SUGGESTION_LIMIT = 5;
 
 export function PersistentTimerBar() {
   const {
@@ -61,11 +63,11 @@ export function PersistentTimerBar() {
   const taskSuggestions = useMemo(() => data?.taskSuggestions ?? [], [data?.taskSuggestions]);
   const visibleTaskSuggestions = useMemo(() => {
     const query = timerDraft.description.trim().toLocaleLowerCase();
-    if (!query) return taskSuggestions.slice(0, 6);
+    if (!query) return taskSuggestions.slice(0, TASK_SUGGESTION_LIMIT);
     return taskSuggestions
       .filter((suggestion) => [suggestion.description, suggestion.categoryName ?? ""]
         .some((value) => value.toLocaleLowerCase().includes(query)))
-      .slice(0, 6);
+      .slice(0, TASK_SUGGESTION_LIMIT);
   }, [taskSuggestions, timerDraft.description]);
   const quickActions = useMemo(() => data ? buildLearnedQuickActions(data) : [], [data]);
   const activeAccent = active
@@ -667,6 +669,7 @@ function ManualEntryDialog({
 }) {
   const [formError, setFormError] = useState<string | null>(null);
   const [categoryId, setCategoryId] = useState("");
+  const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const [description, setDescription] = useState("");
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [tagPanelOpen, setTagPanelOpen] = useState(false);
@@ -674,14 +677,17 @@ function ManualEntryDialog({
   const descriptionInputRef = useRef<HTMLInputElement | null>(null);
   const descriptionRootRef = useRef<HTMLDivElement | null>(null);
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
+  const categoryMenuRef = useRef<HTMLDivElement | null>(null);
+  const categoryTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const selectedCategory = data.categories.find((category) => category.id === categoryId) ?? null;
   const defaults = useMemo(() => manualEntryDefaults(data.dateRange.selectedDate), [data.dateRange.selectedDate]);
   const visibleTaskSuggestions = useMemo(() => {
     const query = description.trim().toLocaleLowerCase();
-    if (!query) return data.taskSuggestions.slice(0, 6);
+    if (!query) return data.taskSuggestions.slice(0, TASK_SUGGESTION_LIMIT);
     return data.taskSuggestions
       .filter((suggestion) => [suggestion.description, suggestion.categoryName ?? ""]
         .some((value) => value.toLocaleLowerCase().includes(query)))
-      .slice(0, 6);
+      .slice(0, TASK_SUGGESTION_LIMIT);
   }, [data.taskSuggestions, description]);
   const formId = "persistent-manual-entry-form";
 
@@ -693,6 +699,38 @@ function ManualEntryDialog({
     document.addEventListener("mousedown", closeOnOutside);
     return () => document.removeEventListener("mousedown", closeOnOutside);
   }, [suggestionsOpen]);
+
+  useEffect(() => {
+    if (!categoryMenuOpen) return undefined;
+    function closeOnOutside(event: MouseEvent) {
+      if (!categoryMenuRef.current?.contains(event.target as Node)) setCategoryMenuOpen(false);
+    }
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setCategoryMenuOpen(false);
+      categoryTriggerRef.current?.focus();
+    }
+    document.addEventListener("mousedown", closeOnOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [categoryMenuOpen]);
+
+  function chooseManualCategory(nextCategoryId: string) {
+    setCategoryId(nextCategoryId);
+    setCategoryMenuOpen(false);
+    window.requestAnimationFrame(() => categoryTriggerRef.current?.focus());
+  }
+
+  function focusManualCategoryOption(direction: "first" | "last") {
+    window.requestAnimationFrame(() => {
+      const options = [...(categoryMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [])];
+      (direction === "last" ? options.at(-1) : options[0])?.focus();
+    });
+  }
 
   function chooseSuggestion(suggestion: BootstrapData["taskSuggestions"][number]) {
     setDescription(suggestion.description);
@@ -742,17 +780,85 @@ function ManualEntryDialog({
       )}
     >
       <form id={formId} className="swiss-form-grid" onSubmit={submit}>
-        <SelectField
-          id="manual-entry-category"
-          name="categoryId"
-          label="Category"
-          value={categoryId}
-          onChange={(event) => setCategoryId(event.target.value)}
-          options={[
-            { value: "", label: "Uncategorized" },
-            ...data.categories.map((category) => ({ value: category.id, label: category.name }))
-          ]}
-        />
+        <Field htmlFor="manual-entry-category" label="Category">
+          <div className="swiss-category-field manual-entry-category" ref={categoryMenuRef}>
+            <button
+              aria-controls="manual-entry-category-menu"
+              aria-expanded={categoryMenuOpen}
+              aria-haspopup="listbox"
+              className="swiss-category-trigger"
+              id="manual-entry-category"
+              onClick={() => {
+                setSuggestionsOpen(false);
+                setCategoryMenuOpen((open) => !open);
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+                event.preventDefault();
+                setSuggestionsOpen(false);
+                setCategoryMenuOpen(true);
+                focusManualCategoryOption(event.key === "ArrowUp" ? "last" : "first");
+              }}
+              ref={categoryTriggerRef}
+              type="button"
+            >
+              <span className="swiss-category-trigger-value">
+                <span
+                  className={`swiss-focus-dot${selectedCategory ? "" : " is-muted"}`}
+                  style={{
+                    backgroundColor: selectedCategory
+                      ? paletteCssColorFor(selectedCategory.color, selectedCategory.name)
+                      : "transparent"
+                  }}
+                />
+                <span>{selectedCategory?.name ?? "Uncategorized"}</span>
+              </span>
+              <ChevronDown aria-hidden="true" size={16} />
+            </button>
+            <div
+              aria-hidden={!categoryMenuOpen}
+              aria-label="Categories"
+              className={`ui-floating-surface swiss-category-menu${categoryMenuOpen ? " is-open" : ""}`}
+              id="manual-entry-category-menu"
+              inert={!categoryMenuOpen}
+              onKeyDown={(event) => {
+                const options = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="option"]')];
+                const index = options.indexOf(document.activeElement as HTMLButtonElement);
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setCategoryMenuOpen(false);
+                  categoryTriggerRef.current?.focus();
+                } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                  event.preventDefault();
+                  const delta = event.key === "ArrowDown" ? 1 : -1;
+                  options[(index + delta + options.length) % options.length]?.focus();
+                } else if (event.key === "Home" || event.key === "End") {
+                  event.preventDefault();
+                  (event.key === "Home" ? options[0] : options.at(-1))?.focus();
+                }
+              }}
+              role="listbox"
+            >
+              <CategoryOption
+                categoryId=""
+                color={null}
+                isSelected={!categoryId}
+                label="Uncategorized"
+                onSelect={chooseManualCategory}
+              />
+              {data.categories.map((category) => (
+                <CategoryOption
+                  categoryId={category.id}
+                  color={paletteCssColorFor(category.color, category.name)}
+                  isSelected={category.id === categoryId}
+                  key={category.id}
+                  label={category.name}
+                  onSelect={chooseManualCategory}
+                />
+              ))}
+            </div>
+          </div>
+        </Field>
         <Field className="swiss-form-wide" htmlFor="manual-entry-description" label="Description">
           <div className="manual-entry-description" ref={descriptionRootRef}>
             <InlineTagInput
@@ -803,10 +909,10 @@ function ManualEntryDialog({
           </div>
         </Field>
         <Field htmlFor="manual-entry-start" label="Start">
-          <input className="ui-control" id="manual-entry-start" type="datetime-local" name="startedAt" defaultValue={defaults.start} required />
+          <input className="ui-control manual-entry-date-time-control" id="manual-entry-start" type="datetime-local" name="startedAt" defaultValue={defaults.start} required />
         </Field>
         <Field htmlFor="manual-entry-finish" label="Finish">
-          <input className="ui-control" id="manual-entry-finish" type="datetime-local" name="stoppedAt" defaultValue={defaults.finish} required />
+          <input className="ui-control manual-entry-date-time-control" id="manual-entry-finish" type="datetime-local" name="stoppedAt" defaultValue={defaults.finish} required />
         </Field>
         {formError ? <p className="swiss-inline-error swiss-form-wide" role="alert">{formError}</p> : null}
       </form>
