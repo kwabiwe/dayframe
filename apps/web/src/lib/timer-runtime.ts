@@ -43,16 +43,8 @@ export function timerDraftForEntry(entry: TimeEntryRow | null | undefined): Time
 }
 
 export function entryContinuationDecision(
-  entry: TimeEntryRow,
-  activeEntry: TimeEntryRow | null | undefined
+  entry: TimeEntryRow
 ): EntryContinuationDecision {
-  if (activeEntry) {
-    return {
-      ok: false,
-      error: "A timer is already running. Stop it before starting another task."
-    };
-  }
-
   const description = entry.description?.trim() ?? "";
   if (!entry.categoryId && !description) {
     return {
@@ -85,10 +77,13 @@ export function applyOptimisticTimerStart(
   startedAt: string,
   id: string
 ) {
-  const category = data.categories.find((item) => item.id === draft.categoryId) ?? null;
+  const replacementBase = data.activeEntry
+    ? applyOptimisticTimerStop(data, startedAt)
+    : data;
+  const category = replacementBase.categories.find((item) => item.id === draft.categoryId) ?? null;
   const tags = draft.tagNames.map((name) => {
     const normalizedName = normalizeTagName(name).normalizedName;
-    const existing = data.tags.find((tag) => tag.normalizedName === normalizedName);
+    const existing = replacementBase.tags.find((tag) => tag.normalizedName === normalizedName);
     return {
       id: existing?.id ?? `optimistic-tag:${normalizedName}`,
       name: existing?.name ?? name,
@@ -117,7 +112,7 @@ export function applyOptimisticTimerStart(
     tags
   };
 
-  return replaceEntryCollections({ ...data, activeEntry: entry }, entry);
+  return replaceEntryCollections({ ...replacementBase, activeEntry: entry }, entry);
 }
 
 export function applyOptimisticTimerStop(data: BootstrapData, stoppedAt: string) {

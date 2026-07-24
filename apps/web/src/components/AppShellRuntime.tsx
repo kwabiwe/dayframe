@@ -44,6 +44,7 @@ type RuntimeContext = {
   refresh: (options?: { force?: boolean }) => Promise<BootstrapData | null>;
   selectedDate: string;
   setTimerDraft: (draft: TimerDraft | ((current: TimerDraft) => TimerDraft)) => void;
+  shellData: BootstrapData | null;
   startEntryAgain: (entry: TimeEntryRow) => Promise<MutationOutcome>;
   startTimer: (input?: TimerDraftInput) => Promise<MutationOutcome>;
   stopTimer: (input?: TimerDraftInput) => Promise<MutationOutcome>;
@@ -244,7 +245,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   }, [commitData, refresh, setTimerDraft]);
 
   const startEntryAgain = useCallback(async (entry: TimeEntryRow): Promise<MutationOutcome> => {
-    const decision = entryContinuationDecision(entry, dataRef.current?.activeEntry);
+    const decision = entryContinuationDecision(entry);
     if (!decision.ok) return decision;
     return startTimer(decision.draft);
   }, [startTimer]);
@@ -412,6 +413,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     refresh,
     selectedDate,
     setTimerDraft,
+    shellData: data,
     startEntryAgain,
     startTimer,
     stopTimer,
@@ -422,6 +424,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     updateActiveStartTime
   }), [
     createManualEntry,
+    data,
     dateLoadError,
     hydrate,
     isDateLoading,

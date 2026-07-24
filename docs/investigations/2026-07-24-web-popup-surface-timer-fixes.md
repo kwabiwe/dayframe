@@ -6,19 +6,22 @@ Branch: `codex/web-popup-surface-timer-fixes`
 
 Base: `origin/main` at `5dee5df`
 
-Status: Implemented; PR validation in progress
+Status: Follow-up regressions implemented; validation in progress
 
 PR: [#106](https://github.com/kwabiwe/dayframe/pull/106)
 
 ## Scope
 
 This focused PR owns the shared floating-surface treatment and the persistent
-timer's Suggestions, Tags, Categories, and running start-date/time editor.
+timer's Suggestions, Tags, Categories, running start-date/time editor, and the
+two timer-shell regressions found during review: date navigation temporarily
+blanking the timer and Start Again refusing to replace an active timer.
 Manual-entry suggestions/date styling and Timeline date navigation are reserved
 for the follow-up PR.
 
-No API, database, mobile, timer-runtime, entry-persistence, or authentication
-contract changes are included.
+No API, database, mobile, entry-persistence, or authentication contract changes
+are included. The existing server-side atomic timer-replacement contract is now
+used by the web Start Again path.
 
 ## Reported symptoms
 
@@ -33,6 +36,10 @@ contract changes are included.
 - The running start-date/time editor opens as a detached modal with a page
   scrim, lacks internal padding, and does not resemble the timer's anchored
   menus.
+- Navigating between Timeline dates can make the persistent timer disappear
+  until the period URL and fetched data reconcile.
+- Starting a previous task while another timer is active reports a conflict
+  even though explicit timer starts already replace the active timer atomically.
 
 ## Evidence and hypotheses
 
@@ -51,6 +58,23 @@ contract changes are included.
    enters the top layer with a scrim and viewport-relative margins. That
    primitive is correct for profile/dialog use but not for a timer-anchored
    editor.
+5. `loadDate()` commits the fetched period before `history.pushState()` changes
+   the selected URL date. The runtime hides mismatched period data during that
+   hand-off, and `PersistentTimerBar` consumed that period projection. It
+   therefore received `null` and lost its data-dependent content. Slow
+   navigation made the blank interval conspicuous.
+6. `entryContinuationDecision()` blocked whenever an active timer existed. That
+   client-only guard contradicted the event service, API route, and shared event
+   reducer, all of which close the current timer at the replacement start time
+   before creating the new active entry in one transaction.
+
+Alternative hypotheses checked for the timer disappearance:
+
+- The timer was conditionally removed by route ownership. Disproved: both the
+  source and screenshot remain on `/timeline`, where `showTimerShell` is true.
+- A slow bootstrap request cleared the runtime wholesale. Disproved:
+  `loadDate()` retains the previous state and only the selected-period
+  projection becomes `null` during the fetched-data/URL mismatch.
 
 ## Implementation plan
 
@@ -66,6 +90,12 @@ contract changes are included.
    the visible glyph footprint.
 6. Add focused contract tests for the regression and update the durable
    floating-surface guardrails.
+7. Give the persistent shell a stable shared-data projection while keeping
+   Timeline period content strictly matched to the selected URL date.
+8. Remove the contradictory active-timer continuation guard and make the
+   optimistic start mirror the server's atomic replacement: close the previous
+   entry and start the selected task at the same timestamp, with full rollback
+   on failure.
 
 ## Motion contract
 
@@ -104,12 +134,17 @@ contract changes are included.
   page.
 - Timer start/stop, optimistic rollback, route continuity, manual entry, and
   active-detail persistence remain unchanged.
+- Date navigation never blanks or remounts the persistent timer, even while a
+  period request or URL hand-off is pending.
+- Start Again on a previous task atomically stops the current timer and starts
+  the selected task without a conflict prompt, duplicate running entry, or
+  intermediate idle state; failure restores the previous active timer.
 - Focused tests, web typecheck/test/build, full lint/typecheck/test/build,
   brand check, `git diff --check`, and the required browser matrix pass.
 
 ## Validation
 
-### Automated
+### Automated (original popup implementation)
 
 - Focused floating-surface, timer-shell, and tag-editor contract tests: 17
   passed.
@@ -118,6 +153,16 @@ contract changes are included.
 - Optimized Next.js production build: passed.
 - Brand asset contract: passed.
 - `git diff --check`: passed.
+
+### Follow-up automated validation
+
+- Focused timer-runtime, date-navigation, restart-action, and persistent-shell
+  regression tests: 26 passed.
+- Full workspace lint: passed without warnings.
+- Full workspace TypeScript checks: passed.
+- Full workspace tests: 756 passed (245 mobile, 417 web, 94 shared).
+- Optimized Next.js production build: passed.
+- Brand asset contract and `git diff --check`: passed.
 
 ### Browser evidence
 
@@ -151,4 +196,7 @@ upward; the final 720x450 pass kept all four surfaces inside the viewport.
 
 ### Remaining gate
 
-- GitHub/Vercel checks and an authenticated Preview review.
+- Re-run the relevant browser journeys, including delayed date navigation and
+  active-timer Start Again.
+- Push the follow-up commit, wait for GitHub/Vercel checks, and complete an
+  authenticated Preview review.

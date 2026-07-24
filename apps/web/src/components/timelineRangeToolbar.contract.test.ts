@@ -35,6 +35,9 @@ describe("Timeline range and toolbar contract", () => {
     expect(runtime).toContain("dateDataCacheRef.current.get(date)");
     expect(runtime).toContain("DATE_DATA_CACHE_LIMIT = 8");
     expect(runtime).toContain("withCurrentSharedBootstrap(cached, dataRef.current)");
+    expect(runtime).toContain("shellData: data");
+    expect(runtime).toContain("data: selectedData");
+    expect(source("./PersistentTimerBar.tsx")).toContain("shellData: data");
     expect(timeline).toContain('view === "timesheet" ? "week" : state.scope');
     expect(timeline).toContain('isDateLoading || (state.view === "timesheet" && item.id === "day")');
     expect(runtime).toContain("Couldn’t load that period. Your current view is unchanged.");

@@ -25,7 +25,8 @@ describe("Calendar readability and restart contract", () => {
   it("routes list and calendar continuations through the same guarded timer owner", () => {
     expect(timeline).toContain("await startEntryAgain(target.entry)");
     expect(entries).toContain("await startEntryAgain(entry)");
-    expect(runtime).toContain("entryContinuationDecision(entry, dataRef.current?.activeEntry)");
+    expect(runtime).toContain("entryContinuationDecision(entry)");
+    expect(runtime).not.toContain("Stop it before starting another task.");
     expect(runtime).toContain("return startTimer(decision.draft)");
     expect(timeline).not.toContain('mode: "start"');
     expect(entries).not.toContain('mode: "start"');

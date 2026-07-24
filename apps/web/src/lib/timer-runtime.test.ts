@@ -69,7 +69,7 @@ describe("shell timer runtime", () => {
       clientName: "Legacy client",
       tagNames: ["ship", "writing"]
     });
-    const decision = entryContinuationDecision(source, null);
+    const decision = entryContinuationDecision(source);
 
     expect(decision).toEqual({
       ok: true,
@@ -84,20 +84,56 @@ describe("shell timer runtime", () => {
     expect(decision.ok && Object.keys(decision.draft)).not.toContain("clientName");
   });
 
-  it("refuses to replace an active timer or start a meaningless blank entry", () => {
-    expect(entryContinuationDecision(entry(), entry({ id: "active" }))).toEqual({
-      ok: false,
-      error: "A timer is already running. Stop it before starting another task."
+  it("allows an active timer replacement but refuses a meaningless blank entry", () => {
+    expect(entryContinuationDecision(entry())).toEqual({
+      ok: true,
+      draft: {
+        categoryId: "focus",
+        description: "Work",
+        tagNames: []
+      }
     });
     expect(entryContinuationDecision(entry({
       categoryId: null,
       categoryName: null,
       description: null,
       tagNames: ["tag-only"]
-    }), null)).toEqual({
+    }))).toEqual({
       ok: false,
       error: "This entry does not have a task or category to start."
     });
+  });
+
+  it("optimistically closes the running timer when a continuation replaces it", () => {
+    const active = entry({
+      id: "active",
+      description: "Existing task",
+      startedAt: "2026-07-24T12:00:00.000Z",
+      stoppedAt: null
+    });
+    const switchedAt = "2026-07-24T12:30:00.000Z";
+    const next = applyOptimisticTimerStart(
+      bootstrapData(active),
+      {
+        categoryId: "focus",
+        description: "Replacement task",
+        tagNames: ["writing"]
+      },
+      switchedAt,
+      "optimistic-replacement"
+    );
+
+    expect(next.activeEntry).toEqual(expect.objectContaining({
+      id: "optimistic-replacement",
+      description: "Replacement task",
+      startedAt: switchedAt,
+      stoppedAt: null
+    }));
+    expect(next.entries).toContainEqual(expect.objectContaining({
+      id: "active",
+      stoppedAt: switchedAt,
+      durationSeconds: 1800
+    }));
   });
 
   it("turns an offline fetch failure into calm restart feedback", () => {
