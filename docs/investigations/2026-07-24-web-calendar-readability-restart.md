@@ -6,7 +6,7 @@ Branch: `codex/web-calendar-readability-restart`
 
 Base: `a7e8ba81a638ca4aa68d8a6c27dde5a2aabc56e3` (`origin/main`, merged PR #102)
 
-Status: Ready for draft review
+Status: Draft PR [#103](https://github.com/kwabiwe/dayframe/pull/103) open for review
 
 ## Scope
 
