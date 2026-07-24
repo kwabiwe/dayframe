@@ -29,6 +29,7 @@ import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { DayframeBrand } from "@/components/brand/DayframeBrand";
 import { PersistentTimerBar } from "@/components/PersistentTimerBar";
 import { SignOutControl } from "@/components/SignOutControl";
+import { ThemeToggleButton } from "@/components/ThemeToggleButton";
 import { IconButton, ModalDialog, PopoverPanel } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { timeEntryTitle } from "@/lib/display";
@@ -219,6 +220,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
           })}
         </nav>
         <div className="swiss-sidebar-bottom">
+          <ThemeToggleButton />
           <button type="button" className="swiss-help-link" onClick={() => setOverlay("help")}>
             <HelpCircle size={20} />
             Help & Shortcuts

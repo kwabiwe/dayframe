@@ -4,11 +4,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 import {
-  CheckCircle2,
+  ChevronDown,
   Download,
   Folder,
   LogOut,
   MapPin,
+  Pencil,
+  Plus,
   ShieldCheck,
   Trash2,
   UserRound
@@ -44,6 +46,7 @@ export function AccountSettings({
   const [name, setName] = useState(user.name);
   const [workspaceName, setWorkspaceName] = useState(workspace.name);
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
+  const [workspaceAction, setWorkspaceAction] = useState<"create" | "rename" | null>(null);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -104,6 +107,7 @@ export function AccountSettings({
       });
       if (!response.ok) throw new Error(await safeResponseMessage(response, "Unable to rename this workspace."));
       setMessage("Workspace name saved.");
+      setWorkspaceAction(null);
       await refreshAccount();
     });
   }
@@ -124,6 +128,7 @@ export function AccountSettings({
       if (!response.ok) throw new Error(await safeResponseMessage(response, "Unable to create a workspace."));
       setNewWorkspaceName("");
       setMessage("Workspace created and selected.");
+      setWorkspaceAction(null);
       await refreshAccount();
     });
   }
@@ -195,24 +200,45 @@ export function AccountSettings({
         detail={`Currently using ${workspace.name}`}
         action={(
           <div className="settings-workspace-actions">
-            <div className="settings-workspace-switcher" aria-label="Available workspaces">
-              {workspaces.map((item) => {
-                const selected = item.id === workspace.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    aria-pressed={selected}
-                    disabled={Boolean(busyAction) || selected}
-                    onClick={() => switchWorkspace(item.id, item.name)}
-                  >
-                    <span>{item.name}</span>
-                    {selected ? <CheckCircle2 size={15} aria-hidden="true" /> : null}
-                  </button>
-                );
-              })}
+            <div className="settings-workspace-toolbar">
+              <label className="settings-workspace-select">
+                <span className="sr-only">Active workspace</span>
+                <select
+                  aria-label="Active workspace"
+                  className="ui-control"
+                  disabled={Boolean(busyAction)}
+                  value={workspace.id}
+                  onChange={(event) => {
+                    const nextWorkspace = workspaces.find((item) => item.id === event.target.value);
+                    if (nextWorkspace) switchWorkspace(nextWorkspace.id, nextWorkspace.name);
+                  }}
+                >
+                  {workspaces.map((item) => (
+                    <option key={item.id} value={item.id}>{item.name}</option>
+                  ))}
+                </select>
+                <ChevronDown aria-hidden="true" size={16} />
+              </label>
+              <Button
+                aria-expanded={workspaceAction === "rename"}
+                compact
+                onClick={() => setWorkspaceAction((current) => current === "rename" ? null : "rename")}
+                type="button"
+              >
+                <Pencil aria-hidden="true" size={15} />
+                Rename
+              </Button>
+              <Button
+                aria-expanded={workspaceAction === "create"}
+                compact
+                onClick={() => setWorkspaceAction((current) => current === "create" ? null : "create")}
+                type="button"
+              >
+                <Plus aria-hidden="true" size={15} />
+                New workspace
+              </Button>
             </div>
-            <form className="settings-inline-form" onSubmit={renameWorkspace}>
+            {workspaceAction === "rename" ? <form className="settings-inline-form settings-workspace-detail-form" onSubmit={renameWorkspace}>
               <TextField
                 compact
                 id="settings-workspace-name"
@@ -223,10 +249,11 @@ export function AccountSettings({
                 onChange={(event) => setWorkspaceName(event.target.value)}
               />
               <Button compact type="submit" disabled={Boolean(busyAction)}>
-                {busyAction === "rename-workspace" ? "Saving…" : "Rename"}
+                {busyAction === "rename-workspace" ? "Saving…" : "Save name"}
               </Button>
-            </form>
-            <form className="settings-inline-form" onSubmit={createWorkspace}>
+              <Button compact type="button" onClick={() => setWorkspaceAction(null)}>Cancel</Button>
+            </form> : null}
+            {workspaceAction === "create" ? <form className="settings-inline-form settings-workspace-detail-form" onSubmit={createWorkspace}>
               <TextField
                 compact
                 id="settings-new-workspace-name"
@@ -240,7 +267,8 @@ export function AccountSettings({
               <Button compact type="submit" disabled={Boolean(busyAction)}>
                 {busyAction === "create-workspace" ? "Creating…" : "Create"}
               </Button>
-            </form>
+              <Button compact type="button" onClick={() => setWorkspaceAction(null)}>Cancel</Button>
+            </form> : null}
           </div>
         )}
       />

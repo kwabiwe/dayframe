@@ -1,9 +1,16 @@
 "use client";
 
-import type { CSSProperties, FormEvent, KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
+import type {
+  CSSProperties,
+  FormEvent,
+  InputHTMLAttributes,
+  KeyboardEvent as ReactKeyboardEvent,
+  ReactNode,
+  RefObject
+} from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { normalizeTagName, paletteCssColorFor } from "@dayframe/shared";
-import { CheckCircle2, ChevronDown, Ellipsis, Play, Plus, Square, Trash2 } from "lucide-react";
+import { CalendarDays, CheckCircle2, ChevronDown, Clock3, Ellipsis, Play, Plus, Square, Trash2 } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { InlineTagInput } from "@/components/InlineTagInput";
 import { DayframeDateTimePicker } from "@/components/DayframeDateTimePicker";
@@ -47,6 +54,7 @@ export function PersistentTimerBar() {
   const descriptionInputRef = useRef<HTMLInputElement | null>(null);
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
   const startDateInputRef = useRef<HTMLInputElement | null>(null);
+  const startTimeInputRef = useRef<HTMLInputElement | null>(null);
   const startEditorRef = useRef<HTMLDivElement | null>(null);
   const startEditorTriggerRef = useRef<HTMLButtonElement | null>(null);
   const timerActionsRef = useRef<HTMLDivElement | null>(null);
@@ -244,8 +252,7 @@ export function PersistentTimerBar() {
     setStartEditorOpen(true);
   }
 
-  async function saveStartTime(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function saveStartTime() {
     const startedAt = dateTimeLocalInputToIso(`${startDateDraft}T${startTimeDraft}`);
     if (!startedAt) {
       setStartEditError("Use a valid start date and time.");
@@ -429,32 +436,48 @@ export function PersistentTimerBar() {
               <header className="swiss-start-time-popover-header">
                 <strong>Start date and time</strong>
               </header>
-              <form className="swiss-compact-time-editor" onSubmit={saveStartTime}>
+              <div
+                className="swiss-compact-time-editor"
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+                  if (!(event.target instanceof HTMLInputElement)) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void saveStartTime();
+                }}
+              >
                 <Field htmlFor="active-start-date" label="Start date">
-                  <input
-                    className="ui-control"
-                    id="active-start-date"
-                    type="date"
-                    value={startDateDraft}
-                    onChange={(event) => {
-                      setStartDateDraft(event.target.value);
-                      setStartEditError(null);
+                  <NativePickerControl
+                    icon={<CalendarDays size={16} aria-hidden="true" />}
+                    inputRef={startDateInputRef}
+                    inputProps={{
+                      id: "active-start-date",
+                      type: "date",
+                      value: startDateDraft,
+                      onChange: (event) => {
+                        setStartDateDraft(event.target.value);
+                        setStartEditError(null);
+                      },
+                      required: true
                     }}
-                    ref={startDateInputRef}
-                    required
+                    label="Open start date picker"
                   />
                 </Field>
                 <Field htmlFor="active-start-time" label="Start time">
-                  <input
-                    className="ui-control"
-                    id="active-start-time"
-                    type="time"
-                    value={startTimeDraft}
-                    onChange={(event) => {
-                      setStartTimeDraft(event.target.value);
-                      setStartEditError(null);
+                  <NativePickerControl
+                    icon={<Clock3 size={16} aria-hidden="true" />}
+                    inputRef={startTimeInputRef}
+                    inputProps={{
+                      id: "active-start-time",
+                      type: "time",
+                      value: startTimeDraft,
+                      onChange: (event) => {
+                        setStartTimeDraft(event.target.value);
+                        setStartEditError(null);
+                      },
+                      required: true
                     }}
-                    required
+                    label="Open start time picker"
                   />
                 </Field>
                 {startEditError ? <p className="swiss-inline-error" role="alert">{startEditError}</p> : null}
@@ -469,9 +492,9 @@ export function PersistentTimerBar() {
                   >
                     Cancel
                   </Button>
-                  <Button type="submit" variant="primary" disabled={isTimerBusy}>Save</Button>
+                  <Button type="button" variant="primary" disabled={isTimerBusy} onClick={() => void saveStartTime()}>Save</Button>
                 </div>
-              </form>
+              </div>
             </section>
           ) : null}
         </div>
@@ -937,6 +960,39 @@ type QuickAction = {
   key: string;
   label: string;
 };
+
+function NativePickerControl({
+  icon,
+  inputProps,
+  inputRef,
+  label
+}: {
+  icon: ReactNode;
+  inputProps: InputHTMLAttributes<HTMLInputElement>;
+  inputRef: RefObject<HTMLInputElement | null>;
+  label: string;
+}) {
+  return (
+    <span className="swiss-native-picker-control">
+      <input {...inputProps} className="ui-control" ref={inputRef} />
+      <button
+        aria-label={label}
+        className="swiss-native-picker-button"
+        onClick={() => {
+          try {
+            inputRef.current?.showPicker();
+          } catch {
+            inputRef.current?.focus();
+          }
+        }}
+        tabIndex={-1}
+        type="button"
+      >
+        {icon}
+      </button>
+    </span>
+  );
+}
 
 function buildLearnedQuickActions(data: BootstrapData): QuickAction[] {
   const usageByCategory = new Map((data.categoryUsage ?? []).map((rank) => [rank.categoryId, rank]));

@@ -4,7 +4,7 @@ import { useSyncExternalStore } from "react";
 import { Monitor, Moon, Sun } from "lucide-react";
 import { SegmentedControl, SettingsRow } from "@/components/ui/Primitives";
 
-type ThemeChoice = "system" | "light" | "dark";
+export type ThemeChoice = "system" | "light" | "dark";
 
 const choices: Array<{ value: ThemeChoice; label: string; icon: React.ReactNode }> = [
   {
@@ -28,14 +28,7 @@ export function ThemeSettings() {
   const choice = useSyncExternalStore(subscribeToThemeChoice, getThemeChoice, getServerThemeChoice);
 
   function updateTheme(nextChoice: ThemeChoice) {
-    if (nextChoice === "system") {
-      window.localStorage.removeItem("dayframe.theme");
-      document.documentElement.removeAttribute("data-theme");
-    } else {
-      window.localStorage.setItem("dayframe.theme", nextChoice);
-      document.documentElement.setAttribute("data-theme", nextChoice);
-    }
-    window.dispatchEvent(new Event("dayframe-theme-change"));
+    setThemeChoice(nextChoice);
   }
 
   return (
@@ -57,21 +50,41 @@ export function ThemeSettings() {
   );
 }
 
-function subscribeToThemeChoice(callback: () => void) {
+export function setThemeChoice(nextChoice: ThemeChoice) {
+  if (nextChoice === "system") {
+    window.localStorage.removeItem("dayframe.theme");
+    document.documentElement.removeAttribute("data-theme");
+  } else {
+    window.localStorage.setItem("dayframe.theme", nextChoice);
+    document.documentElement.setAttribute("data-theme", nextChoice);
+  }
+  window.dispatchEvent(new Event("dayframe-theme-change"));
+}
+
+export function subscribeToThemeChoice(callback: () => void) {
+  const media = window.matchMedia("(prefers-color-scheme: dark)");
   window.addEventListener("storage", callback);
   window.addEventListener("dayframe-theme-change", callback);
+  media.addEventListener("change", callback);
 
   return () => {
     window.removeEventListener("storage", callback);
     window.removeEventListener("dayframe-theme-change", callback);
+    media.removeEventListener("change", callback);
   };
 }
 
-function getThemeChoice(): ThemeChoice {
+export function getThemeChoice(): ThemeChoice {
   const storedTheme = window.localStorage.getItem("dayframe.theme");
   return storedTheme === "light" || storedTheme === "dark" ? storedTheme : "system";
 }
 
-function getServerThemeChoice(): ThemeChoice {
+export function getResolvedThemeChoice(): Exclude<ThemeChoice, "system"> {
+  const choice = getThemeChoice();
+  if (choice !== "system") return choice;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+export function getServerThemeChoice(): ThemeChoice {
   return "system";
 }

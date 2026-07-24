@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { DAYFRAME_PALETTE, paletteCssColorFor, paletteKeyFor } from "@dayframe/shared";
-import { Check, Pin, PinOff, Plus, Save, Trash2 } from "lucide-react";
+import { Pencil, Pin, PinOff, Plus, Trash2 } from "lucide-react";
 import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import type { CategoryRow } from "@/lib/queries";
@@ -208,7 +208,6 @@ function CategorySection({
               <PalettePicker name="color" defaultValue={category.color} />
               <div className="flex items-end gap-2">
                 <button className="industrial-button-primary focus-ring text-sm" disabled={isPending}>
-                  <Save size={15} />
                   Save
                 </button>
                 <button
@@ -224,7 +223,7 @@ function CategorySection({
             <div key={category.id} className="motion-row flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between">
               <div className="flex min-w-0 items-center gap-3">
                 <span
-                  className="h-8 w-8 shrink-0 rounded-lg border border-[var(--line-strong)]"
+                  className="h-8 w-8 shrink-0 rounded-full"
                   style={{ backgroundColor: paletteCssColorFor(category.color, category.name) }}
                 />
                 <div className="min-w-0">
@@ -246,7 +245,7 @@ function CategorySection({
                   {category.isPinned ? "Pinned" : "Pin"}
                 </button>
                 <button type="button" className="industrial-button focus-ring text-sm" onClick={() => onEdit(category.id)}>
-                  <Check size={15} />
+                  <Pencil size={15} />
                   Edit
                 </button>
                 <button type="button" className="industrial-button-danger focus-ring text-sm" onClick={() => onArchive(category)}>
@@ -268,12 +267,12 @@ function PalettePicker({ name, defaultValue }: { name: string; defaultValue: str
   return (
     <fieldset className="text-sm">
       <legend className="industrial-field-label">Colour</legend>
-      <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
+      <div className="grid grid-cols-6 gap-2">
         {DAYFRAME_PALETTE.map((color) => (
           <label
             key={color.key}
             aria-label={`Use ${color.label} colour`}
-            className="min-h-11 rounded-xl focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--focus)]"
+            className="grid h-11 w-11 place-items-center rounded-full focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--focus)]"
             title={color.label}
           >
             <input
@@ -285,7 +284,7 @@ function PalettePicker({ name, defaultValue }: { name: string; defaultValue: str
             />
             <span
               data-color={color.key}
-              className="block h-11 rounded-xl border border-[var(--line-strong)] shadow-sm peer-checked:border-[var(--foreground)] peer-checked:outline peer-checked:outline-2 peer-checked:outline-[var(--focus)]"
+              className="block h-8 w-8 rounded-full peer-checked:outline peer-checked:outline-2 peer-checked:outline-offset-2 peer-checked:outline-[var(--foreground)]"
               style={{ backgroundColor: paletteCssColorFor(color.key) }}
             />
           </label>

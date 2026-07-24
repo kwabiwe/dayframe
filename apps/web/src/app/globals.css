@@ -762,6 +762,12 @@ textarea.ui-control {
   width: 100%;
 }
 
+.settings-appearance-row .ui-segmented-control button[aria-pressed="true"],
+.settings-appearance-row .ui-segmented-control button[aria-pressed="true"] span,
+.settings-appearance-row .ui-segmented-control button[aria-pressed="true"] svg {
+  color: var(--on-accent);
+}
+
 .settings-goal-control {
   display: grid;
   min-width: min(100%, 440px);
@@ -846,18 +852,45 @@ textarea.ui-control {
 
 .settings-workspace-actions {
   display: grid;
-  min-width: min(100%, 520px);
+  min-width: min(100%, 560px);
   justify-items: end;
-  gap: 12px;
+  gap: 10px;
 }
 
-.settings-workspace-switcher,
+.settings-workspace-toolbar,
 .settings-export-actions,
 .settings-troubleshooting-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.settings-workspace-select {
+  position: relative;
+  display: block;
+  min-width: min(240px, 100%);
+}
+
+.settings-workspace-select .ui-control {
+  min-width: 240px;
+  appearance: none;
+  border-color: transparent;
+  padding-right: 38px;
+}
+
+.settings-workspace-select > svg {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.settings-workspace-detail-form {
+  border-radius: var(--web-radius-control);
+  background: var(--surface-inset);
+  padding: 10px;
 }
 
 .sign-out-form {
@@ -1003,9 +1036,16 @@ textarea.ui-control {
     justify-items: stretch;
   }
 
-  .settings-workspace-switcher,
+  .settings-workspace-toolbar,
   .settings-export-actions {
     justify-content: flex-start;
+  }
+
+  .settings-workspace-toolbar,
+  .settings-workspace-toolbar .ui-button,
+  .settings-workspace-select,
+  .settings-workspace-select .ui-control {
+    width: 100%;
   }
 
   .settings-export-actions .ui-button {
@@ -6109,6 +6149,23 @@ kbd {
   padding: 12px 16px 16px;
 }
 
+.swiss-theme-toggle {
+  display: grid;
+  width: var(--web-touch-size);
+  height: var(--web-touch-size);
+  margin-left: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.swiss-theme-toggle:hover {
+  background: var(--surface-muted);
+  color: var(--foreground);
+}
+
 .swiss-help-link {
   min-height: var(--web-touch-size);
   padding: 0 12px;
@@ -6421,6 +6478,43 @@ kbd {
   margin: 2px calc(-1 * var(--web-panel-padding)) calc(-1 * var(--web-panel-padding));
 }
 
+.swiss-native-picker-control {
+  position: relative;
+  display: block;
+}
+
+.swiss-native-picker-control .ui-control {
+  padding-right: 42px;
+}
+
+.swiss-native-picker-control .ui-control::-webkit-calendar-picker-indicator {
+  width: 0;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.swiss-native-picker-button {
+  position: absolute;
+  top: 50%;
+  right: 3px;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  transform: translateY(-50%);
+}
+
+.swiss-native-picker-button:hover {
+  background: var(--surface-muted);
+  color: var(--foreground);
+}
+
 .swiss-profile-section {
   border-top: 1px solid var(--line);
   padding: 16px;
@@ -6451,6 +6545,23 @@ kbd {
 
 .swiss-profile-links .sign-out-form {
   width: 100%;
+}
+
+.swiss-profile-section .swiss-menu-list button {
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  box-shadow: none;
+}
+
+.swiss-profile-section .swiss-menu-list {
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.swiss-profile-section .swiss-menu-list button.is-selected {
+  background: var(--accent-soft);
+  color: var(--foreground);
 }
 
 .swiss-work-input,
