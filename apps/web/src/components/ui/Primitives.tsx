@@ -310,7 +310,7 @@ export function ModalDialog({
         requestClose();
       }}
       onKeyDown={(event) => {
-        if (event.key !== "Escape") return;
+        if (event.key !== "Escape" || event.defaultPrevented) return;
         event.preventDefault();
         requestClose();
       }}

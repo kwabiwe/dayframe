@@ -6,6 +6,7 @@ import { normalizeTagName, paletteCssColorFor } from "@dayframe/shared";
 import { CheckCircle2, ChevronDown, Ellipsis, Play, Plus, Square, Trash2 } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { InlineTagInput } from "@/components/InlineTagInput";
+import { DayframeDateTimePicker } from "@/components/DayframeDateTimePicker";
 import { Button, Field, IconButton, ModalDialog } from "@/components/ui/Primitives";
 import { timeEntryAccentColor } from "@/lib/display";
 import { dateTimeLocalInputToIso, formatClockDuration, formatTime } from "@/lib/format";
@@ -296,6 +297,16 @@ export function PersistentTimerBar() {
             onHashtagPanelChange={(open) => {
               setHashtagSuggestionsOpen(open);
               if (open) setSuggestionsOpen(false);
+            }}
+            onInputKeyDown={(event) => {
+              if (!suggestionsOpen || hashtagSuggestionsOpen || !visibleTaskSuggestions.length) return;
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setSuggestionsOpen(false);
+              } else if (event.key === "ArrowDown") {
+                event.preventDefault();
+                suggestionsRef.current?.querySelector<HTMLButtonElement>('[role="option"]')?.focus();
+              }
             }}
             onSelectedTagNamesChange={(tagNames) => setTimerDraft((current) => ({ ...current, tagNames }))}
             placeholder={active ? "Add a task description" : "What are you working on?"}
@@ -909,10 +920,10 @@ function ManualEntryDialog({
           </div>
         </Field>
         <Field htmlFor="manual-entry-start" label="Start">
-          <input className="ui-control manual-entry-date-time-control" id="manual-entry-start" type="datetime-local" name="startedAt" defaultValue={defaults.start} required />
+          <DayframeDateTimePicker id="manual-entry-start" name="startedAt" defaultValue={defaults.start} required />
         </Field>
         <Field htmlFor="manual-entry-finish" label="Finish">
-          <input className="ui-control manual-entry-date-time-control" id="manual-entry-finish" type="datetime-local" name="stoppedAt" defaultValue={defaults.finish} required />
+          <DayframeDateTimePicker id="manual-entry-finish" name="stoppedAt" defaultValue={defaults.finish} required />
         </Field>
         {formError ? <p className="swiss-inline-error swiss-form-wide" role="alert">{formError}</p> : null}
       </form>
