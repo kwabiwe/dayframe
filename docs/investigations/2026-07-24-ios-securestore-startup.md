@@ -6,7 +6,7 @@ Reported build: internal TestFlight `0.1.0 (64)`
 
 Branch: `agent/ios-securestore-startup-recovery`
 
-Status: implementation and local validation complete; PR pending
+Status: merged through PR #105 and shipped in internal TestFlight build `0.1.0 (65)`; physical-device verification pending
 
 ## Report
 
@@ -79,6 +79,15 @@ authorised background capture and sync paths.
 - Brand asset contract and `git diff --check` passed.
 - Full Xcode Debug simulator build passed for iPhone 17 Pro Max on iOS 26.5.
 - Native build warnings are confined to existing Expo/React Native dependencies.
+- PR #105 merged to `main` at
+  `0ba4a1d3bad981c8c8de106bb3a13edabf3dcc1a`.
+- Signed Release archive and IPA export passed with both the app and Live
+  Activity extension stamped `0.1.0 (65)`.
+- App Store Connect accepted delivery/build ID
+  `208601ee-b584-4c3b-91d7-876636600d1b` with no upload errors.
+- Build 65 is `VALID`, export compliance is false, en-GB release notes are set,
+  and `internalBuildState=IN_BETA_TESTING` through the all-build
+  `Internal Health Debug` group.
 
 ## Residual risk
 
