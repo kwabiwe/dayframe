@@ -14,6 +14,7 @@ const themeToggle = source("./ThemeToggleButton.tsx");
 const shell = source("./AppShell.tsx");
 const categories = source("./CategoryManager.tsx");
 const styles = source("../app/globals.css");
+const settingsPage = source("../app/settings/page.tsx");
 
 describe("web Settings and running-timer follow-up", () => {
   it("keeps running start-time submission inside one form owner", () => {
@@ -64,5 +65,18 @@ describe("web Settings and running-timer follow-up", () => {
     expect(categories).not.toContain("<Save");
     expect(categories).toContain("<Pencil size={15} />");
     expect(categories).not.toContain("<Check size={15} />");
+  });
+
+  it("keeps cached Settings data visible while refreshing quietly", () => {
+    expect(settingsPage).toContain("useAppShellRuntime()");
+    expect(settingsPage).toContain("void refresh()");
+    expect(settingsPage).toContain("if (!data) return <SettingsInitialLoading />");
+    expect(settingsPage).not.toContain("getBootstrapData");
+    expect(settingsPage).not.toContain("resolvePageSession");
+  });
+
+  it("locks the Places suggestion switch to a pill track on touch browsers", () => {
+    expect(styles).toMatch(/\.place-suggestion-toggle input \{[^}]*min-width: 52px;[^}]*max-width: 52px;[^}]*min-height: 30px;[^}]*max-height: 30px;[^}]*-webkit-appearance: none;/s);
+    expect(styles).toMatch(/\.place-suggestion-toggle input::before \{[^}]*width: 24px;[^}]*height: 24px;[^}]*border-radius: 999px;/s);
   });
 });

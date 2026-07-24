@@ -1,4 +1,7 @@
-import type { ReactNode } from "react";
+"use client";
+
+import { useEffect, type ReactNode } from "react";
+import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { GoalSettings } from "@/components/GoalSettings";
 import { PageHeader } from "@/components/PageHeader";
 import {
@@ -8,14 +11,16 @@ import {
   TroubleshootingSettings
 } from "@/components/SettingsForms";
 import { ThemeSettings } from "@/components/ThemeSettings";
-import { resolvePageSession } from "@/lib/auth/server";
-import { getBootstrapData } from "@/lib/queries";
 
-export const dynamic = "force-dynamic";
+export default function SettingsPage() {
+  const { data, refresh } = useAppShellRuntime();
 
-export default async function SettingsPage() {
-  const session = await resolvePageSession();
-  const data = await getBootstrapData(session);
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  if (!data) return <SettingsInitialLoading />;
+  const authMode = data.authMode ?? "provider";
 
   return (
     <>
@@ -50,7 +55,8 @@ export default async function SettingsPage() {
           description="Your profile, current workspace and sign-in security."
         >
           <AccountSettings
-            authMode={session.authMode}
+            key={`${data.user.id}:${data.workspace.id}`}
+            authMode={authMode}
             user={data.user}
             workspace={data.workspace}
             workspaces={data.workspaces}
@@ -67,7 +73,34 @@ export default async function SettingsPage() {
 
         <section className="settings-section" aria-labelledby="privacy-troubleshooting-title">
           <h2 className="sr-only" id="privacy-troubleshooting-title">Privacy and troubleshooting</h2>
-          <TroubleshootingSettings authMode={session.authMode} />
+          <TroubleshootingSettings authMode={authMode} />
+        </section>
+      </div>
+    </>
+  );
+}
+
+function SettingsInitialLoading() {
+  return (
+    <>
+      <PageHeader
+        title="Settings"
+        description="Manage how Dayframe looks, tracks goals, uses location and protects your account."
+      />
+      <div className="settings-page" aria-busy="true" aria-live="polite">
+        <section className="settings-section" aria-labelledby="settings-loading-title">
+          <header className="settings-section-header">
+            <h2 id="settings-loading-title">Loading settings</h2>
+            <p>Your preferences and account details will appear here.</p>
+          </header>
+          <div className="settings-group">
+            <div className="ui-settings-row">
+              <div>
+                <strong>Just a moment</strong>
+                <span>Dayframe is loading your settings.</span>
+              </div>
+            </div>
+          </div>
         </section>
       </div>
     </>

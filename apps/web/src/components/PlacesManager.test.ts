@@ -19,6 +19,10 @@ describe("web Places list and editor contracts", () => {
     fileURLToPath(new URL("./PlaceMapPreview.tsx", import.meta.url)),
     "utf8"
   );
+  const styles = readFileSync(
+    fileURLToPath(new URL("../app/globals.css", import.meta.url)),
+    "utf8"
+  );
 
   it("routes create, edit and learned-place promotion through one editor", () => {
     expect(manager).toContain('href="/places/new"');
@@ -57,5 +61,11 @@ describe("web Places list and editor contracts", () => {
     expect(mapPreview).toContain('attributionControl: { compact: false }');
     expect(combobox).toContain("Geoapify");
     expect(combobox).toContain("OpenStreetMap");
+  });
+
+  it("keeps the suggestion switch pill-shaped on touch browsers", () => {
+    expect(styles).toMatch(/\.place-suggestion-toggle input \{[^}]*min-width: 52px;[^}]*min-height: 30px;[^}]*border-radius: 999px;/s);
+    expect(styles).toContain("-webkit-appearance: none;");
+    expect(styles).toMatch(/\.place-suggestion-toggle input::before \{[^}]*width: 24px;[^}]*height: 24px;/s);
   });
 });
