@@ -850,38 +850,65 @@ textarea.ui-control {
   text-decoration: underline;
 }
 
-.timeline-group-toggle {
-  display: inline-flex;
-  min-height: 32px;
-  align-items: center;
-  gap: 7px;
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: var(--foreground);
-  font: inherit;
-  font-weight: 650;
+.timeline-task-cell {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
 }
 
-.timeline-group-toggle svg {
-  color: var(--muted);
-  transition: transform 180ms ease-out;
-}
-
-.timeline-group-toggle svg.is-expanded {
-  transform: rotate(180deg);
+.timeline-task-cell.is-single {
+  grid-template-columns: auto minmax(0, 1fr);
 }
 
 .timeline-group-count {
   display: inline-grid;
-  min-width: 24px;
-  height: 24px;
+  min-width: 28px;
+  height: 28px;
   place-items: center;
+  border: 0;
   border-radius: 999px;
   background: var(--accent-soft);
   color: var(--accent-text);
   font-size: 12px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.timeline-group-count:hover {
+  background: color-mix(in srgb, var(--accent) 20%, var(--surface));
+}
+
+.timeline-group-count:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.timeline-task-category-dot {
+  width: 12px;
+  height: 12px;
+  margin-top: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+}
+
+.timeline-task-details {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.timeline-task-title {
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+  font-weight: 650;
+}
+
+.timeline-task-meta {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 450;
 }
 
 .timeline-occurrence-row {
@@ -889,8 +916,9 @@ textarea.ui-control {
   animation: timeline-occurrence-enter 180ms ease-out both;
 }
 
-.timeline-occurrence-row > td:first-child {
-  padding-left: 52px;
+.timeline-occurrence-task {
+  padding-left: 36px;
+  grid-template-columns: auto minmax(0, 1fr);
 }
 
 .timeline-entry-highlight {
@@ -912,10 +940,6 @@ textarea.ui-control {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .timeline-group-toggle svg {
-    transition: none;
-  }
-
   .timeline-occurrence-row {
     animation: none;
   }
