@@ -98,6 +98,7 @@ export function ActiveTimerEditSheet({
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [startTimeEdited, setStartTimeEdited] = useState(false);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const [datePickerTarget, setDatePickerTarget] = useState<"start" | "end">("start");
   const [pickerStartAt, setPickerStartAt] = useState<Date | null>(null);
   const [suggestionsVisible, setSuggestionsVisible] = useState(false);
   const [suggestionsMounted, setSuggestionsMounted] = useState(false);
@@ -178,6 +179,7 @@ export function ActiveTimerEditSheet({
       setStoppedTimeText("");
     }
     setPickerStartAt(startedAt);
+    setDatePickerTarget("start");
     setStartTimeEdited(false);
     setDatePickerOpen(false);
     const shouldShowSuggestions = (
@@ -618,11 +620,6 @@ export function ActiveTimerEditSheet({
     setTimeout(() => descriptionInputRef.current?.focus(), 0);
   }
 
-  function updateStoppedDateText(value: string) {
-    setStoppedDateText(formatEditableDate(value));
-    setValidationError(null);
-  }
-
   function updateStoppedTimeText(value: string) {
     setStoppedTimeText(formatEditableTime(value));
     setValidationError(null);
@@ -631,12 +628,39 @@ export function ActiveTimerEditSheet({
   function openStartPicker() {
     Keyboard.dismiss();
     const currentStart = parsedStart.date ?? fallbackStartAt();
+    setDatePickerTarget("start");
     setPickerStartAt(currentStart);
     setDatePickerOpen(true);
     setValidationError(null);
   }
 
-  function selectStartDate(date: Date) {
+  function openEndPicker() {
+    Keyboard.dismiss();
+    const currentEnd = parsedStop.date ?? parsedStart.date ?? fallbackStartAt();
+    setDatePickerTarget("end");
+    setPickerStartAt(currentEnd);
+    setDatePickerOpen(true);
+    setValidationError(null);
+  }
+
+  function selectDate(date: Date) {
+    if (datePickerTarget === "end") {
+      const parsed = parseLocalDateTime(formatDateInput(date), stoppedTimeText);
+      if (parsed.error || !parsed.date) {
+        setValidationError(parsed.error ?? "Choose a valid end date and time.");
+        return;
+      }
+      if (parsed.date.getTime() > Date.now()) {
+        setValidationError("End time cannot be in the future.");
+        return;
+      }
+      setPickerStartAt(parsed.date);
+      setStoppedDateText(formatDateInput(parsed.date));
+      setDatePickerOpen(false);
+      setValidationError(null);
+      return;
+    }
+
     const parsed = parseLocalDateTime(formatDateInput(date), timeText);
     if (parsed.error || !parsed.date) {
       setValidationError(parsed.error ?? "Choose a valid start date and time.");
@@ -654,7 +678,10 @@ export function ActiveTimerEditSheet({
   }
 
   const displayedStartAt = previewStartAt ?? fallbackStartAt();
-  const pickerDate = pickerStartAt ?? displayedStartAt;
+  const displayedEndAt = parsedStop.date ?? displayedStartAt;
+  const pickerDate = pickerStartAt ?? (
+    datePickerTarget === "end" ? displayedEndAt : displayedStartAt
+  );
   const showDoneButton = Boolean(onSave);
   const hashtagPanelAnimatedStyle = {
     opacity: hashtagPanelProgress,
@@ -1000,22 +1027,23 @@ export function ActiveTimerEditSheet({
                   <View style={styles.activeEditSection}>
                     <Text style={styles.activeEditSectionLabel}>End time</Text>
                     <View style={styles.activeEditTimeRow}>
-                      <TextInput
+                      <Pressable
                         accessibilityLabel="End date"
-                        blurOnSubmit
-                        editable={!busy}
-                        keyboardType={Platform.OS === "ios" ? "numbers-and-punctuation" : "numeric"}
-                        maxLength={10}
-                        onChangeText={updateStoppedDateText}
-                        onFocus={() => setDatePickerOpen(false)}
-                        onSubmitEditing={Keyboard.dismiss}
-                        placeholder="YYYY-MM-DD"
-                        placeholderTextColor={theme.textSecondary}
-                        returnKeyType="done"
-                        showSoftInputOnFocus
-                        style={[styles.textInput, styles.activeEditDateInput]}
-                        value={stoppedDateText}
-                      />
+                        accessibilityRole="button"
+                        disabled={busy}
+                        onPress={openEndPicker}
+                        style={({ pressed }) => [
+                          styles.activeEditStartSummary,
+                          pressed && !busy ? styles.buttonPressed : null,
+                          busy ? styles.buttonDisabled : null
+                        ]}
+                      >
+                        <View style={styles.activeEditStartSummaryText}>
+                          <Text style={styles.activeEditStartDate} numberOfLines={1}>
+                            {formatPickerDate(displayedEndAt)}
+                          </Text>
+                        </View>
+                      </Pressable>
                       <TextInput
                         accessibilityLabel="End time"
                         blurOnSubmit
@@ -1068,7 +1096,7 @@ export function ActiveTimerEditSheet({
         <FloatingDatePicker
           maxDate={new Date()}
           onClose={() => setDatePickerOpen(false)}
-          onSelect={selectStartDate}
+          onSelect={selectDate}
           selectedDate={pickerDate}
           styles={styles}
           theme={theme}
