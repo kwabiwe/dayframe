@@ -19,6 +19,12 @@ describe("grouped Timeline and Settings follow-up contracts", () => {
     expect(entries).toContain("timeline-group-count");
     expect(entries).toContain("startEntryAgain(entry)");
     expect(entries).toContain("timeline-entry-highlight");
+    expect(entries).toContain(">Task / tags<");
+    expect(entries.indexOf(">Task / tags<")).toBeLessThan(entries.indexOf(">Category<"));
+    expect(entries.indexOf(">Category<")).toBeLessThan(entries.indexOf(">Time<"));
+    expect(entries).toContain("EntryActionsMenu");
+    expect(entries).toContain("Delete whole group");
+    expect(entries).toContain("/api/time-entries/batch-delete");
   });
 
   it("offers the previous stop in the running start editor", () => {

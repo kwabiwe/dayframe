@@ -52,9 +52,11 @@ describe("web UI foundation contracts", () => {
   });
 
   it("keeps entry deletion confirmed, busy-safe and recoverable on failure", () => {
-    expect(entriesSource).toContain("setPendingDeleteEntry(entry)");
+    expect(entriesSource).toContain("setPendingDelete({");
+    expect(entriesSource).toContain("<DestructiveConfirmationDialog");
     expect(entriesSource).toContain("isBusy={isDeletingEntry || isPending}");
     expect(entriesSource).toContain("error={deleteError}");
     expect(entriesSource).toContain("if (!response.ok)");
+    expect(entriesSource).toContain("/api/time-entries/batch-delete");
   });
 });

@@ -898,6 +898,19 @@ textarea.ui-control {
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
+.timeline-entry-actions-popover {
+  position: fixed;
+  z-index: 120;
+}
+
+.timeline-entry-actions-popover button {
+  color: var(--foreground);
+}
+
+.timeline-entry-actions-popover button.is-danger {
+  color: var(--danger);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .timeline-group-toggle svg {
     transition: none;

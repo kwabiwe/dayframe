@@ -1372,6 +1372,35 @@ export async function deleteTimeEntry(id: string, session: RequestSession = getD
   return { id, deleted: true };
 }
 
+export async function deleteTimeEntries(ids: string[], session: RequestSession = getDevSession()) {
+  const uniqueIds = [...new Set(ids)];
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const existing = await client.query<{ id: string }>(
+      `select id
+       from time_entries
+       where id = any($1::uuid[]) and workspace_id = $2 and user_id = $3
+       for update`,
+      [uniqueIds, session.workspaceId, session.userId]
+    );
+    if (existing.rows.length !== uniqueIds.length) throw new TimeEntryNotFoundError();
+    const deleted = await client.query<{ id: string }>(
+      `delete from time_entries
+       where id = any($1::uuid[]) and workspace_id = $2 and user_id = $3
+       returning id`,
+      [uniqueIds, session.workspaceId, session.userId]
+    );
+    await client.query("commit");
+    return { ids: deleted.rows.map((row) => row.id), deletedCount: deleted.rows.length };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function splitActiveEntry(session: RequestSession = getDevSession()) {
   const client = await pool.connect();
   try {
