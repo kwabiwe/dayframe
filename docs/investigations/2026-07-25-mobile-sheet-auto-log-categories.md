@@ -65,11 +65,22 @@ Still required:
 - form scrolling, text fields, keyboard, date picker, backdrop, VoiceOver,
   Dynamic Type, Reduce Motion and rapid-repeat checks
 - provider-auth Preview/production endpoint verification
-- post-merge TestFlight archive, processing and internal-testing evidence
 
-The iOS Simulator build was attempted with the full Xcode toolchain, including
-an arm64-only retry after `pod install`. Both attempts stop in the existing
-ExpoSQLite pod because its generated Swift module cannot resolve
-`exsqlite3_*` symbols. The changed TypeScript sources complete typechecking;
-this native dependency/toolchain failure must be resolved or reproduced in CI
-before TestFlight release.
+The initial iOS Simulator attempts stopped in ExpoSQLite with unresolved
+`exsqlite3_*` symbols. The checked-in Podfile lock and installed CocoaPods
+sandbox were out of sync, and the earlier DerivedData cache retained that
+inconsistent native module state. Running `pod install`, then rebuilding with
+isolated DerivedData, resolved the failure without an ExpoSQLite source change.
+The full arm64 iOS Simulator build and signed Release archive both passed.
+
+## TestFlight evidence
+
+- PR #118 merged to `main` as `cb43983`.
+- TestFlight `0.1.0 (67)` was archived from merged `main` with production API
+  base `https://dayframe-web.vercel.app`.
+- Delivery/build ID: `cc8acc89-0580-483e-978a-8e4aaec00ba7`.
+- App Store Connect reports `processingState=VALID`,
+  `usesNonExemptEncryption=false`, en-GB notes set, and
+  `internalBuildState=IN_BETA_TESTING`.
+- Internal group: `Internal Health Debug` with all-build access.
+- Physical-iPhone acceptance remains open, so the feature stays on Watch.
