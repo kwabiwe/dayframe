@@ -23,10 +23,6 @@ const globalStyles = readFileSync(
   fileURLToPath(new URL("../app/globals.css", import.meta.url)),
   "utf8"
 );
-const loadingSource = readFileSync(
-  fileURLToPath(new URL("../app/settings/loading.tsx", import.meta.url)),
-  "utf8"
-);
 const errorSource = readFileSync(
   fileURLToPath(new URL("../app/settings/error.tsx", import.meta.url)),
   "utf8"
@@ -85,9 +81,11 @@ describe("web Settings contracts", () => {
     expect(globalStyles).toMatch(/\.swiss-mobile-account-button \{[^}]*width: 44px;[^}]*height: 44px;[^}]*place-items: center;/s);
   });
 
-  it("provides calm route-level loading and recoverable error states", () => {
-    expect(loadingSource).toContain('aria-busy="true"');
-    expect(loadingSource).toContain('aria-live="polite"');
+  it("uses cached shell data with a first-load-only state and recoverable errors", () => {
+    expect(settingsPageSource).toContain("useAppShellRuntime()");
+    expect(settingsPageSource).toContain("if (!data) return <SettingsInitialLoading />");
+    expect(settingsPageSource).toContain('aria-busy="true"');
+    expect(settingsPageSource).toContain('aria-live="polite"');
     expect(errorSource).toContain("Your saved preferences have not changed.");
     expect(errorSource).toContain("<Button variant=\"primary\" onClick={reset}>Retry</Button>");
     expect(errorSource).not.toMatch(/stack|sql|api route/i);

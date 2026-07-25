@@ -188,6 +188,7 @@ export type DashboardSeriesPoint = {
 };
 
 export type BootstrapData = {
+  authMode?: RequestSession["authMode"];
   user: { id: string; email: string; name: string; dailyGoalMinutes: number; weeklyGoalMinutes: number };
   workspace: { id: string; name: string };
   workspaces: Array<{ id: string; name: string }>;
@@ -278,6 +279,7 @@ export async function getBootstrapData(
   ]);
 
   return {
+    authMode: session.authMode,
     user,
     workspace: workspaces.find((workspace) => workspace.id === session.workspaceId) ?? workspaces[0],
     workspaces,
