@@ -276,7 +276,7 @@ export function AccountSettings({
         icon={ShieldCheck}
         label="Security"
         detail={securitySummary(authMode)}
-        action={authMode === "local" ? (
+        action={authMode === "local" || authMode === "provider" ? (
           <form className="settings-security-form" onSubmit={changePassword}>
             <TextField
               compact
@@ -500,7 +500,7 @@ function securitySummary(authMode: SettingsAuthMode) {
     case "local":
       return "Email and password are managed by this Dayframe server.";
     case "provider":
-      return "Password and sign-in are managed by your secure sign-in provider.";
+      return "Change the password used to sign in to Dayframe.";
     case "token":
       return "This session uses a scoped Dayframe app connection.";
     case "dev":

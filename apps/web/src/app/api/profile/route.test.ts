@@ -8,10 +8,15 @@ const baseSession = {
 };
 
 const mocks = vi.hoisted(() => ({
+  changeSupabasePassword: vi.fn(),
   hashPassword: vi.fn(),
   query: vi.fn(),
   resolveRequestSession: vi.fn(),
   verifyPassword: vi.fn()
+}));
+
+vi.mock("@/lib/auth/supabase", () => ({
+  changeSupabasePassword: mocks.changeSupabasePassword
 }));
 
 vi.mock("@/lib/auth/local", () => ({
@@ -58,18 +63,22 @@ describe("PATCH /api/profile", () => {
     expect(mocks.query).not.toHaveBeenCalled();
   });
 
-  it("does not expose a broken local-password flow to provider sessions", async () => {
+  it("reauthenticates provider sessions before changing their Supabase password", async () => {
+    mocks.query.mockResolvedValueOnce({
+      rows: [{ email: "kb@example.com", passwordHash: null }]
+    });
     const response = await PATCH(jsonRequest({
       currentPassword: "current-password",
       newPassword: "new-password"
     }));
 
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({
-      error: "Password changes are available only for local sign-in."
-    });
+    expect(response.status).toBe(200);
+    expect(mocks.changeSupabasePassword).toHaveBeenCalledWith(
+      "kb@example.com",
+      "current-password",
+      "new-password"
+    );
     expect(mocks.verifyPassword).not.toHaveBeenCalled();
-    expect(mocks.query).not.toHaveBeenCalled();
   });
 
   it("changes a password only for a verified local session", async () => {

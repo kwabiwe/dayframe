@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { authErrorResponse } from "@/lib/api-errors";
 import { hashPassword, verifyPassword } from "@/lib/auth/local";
+import { changeSupabasePassword } from "@/lib/auth/supabase";
 import { query } from "@/lib/db";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 
@@ -38,7 +39,7 @@ export async function PATCH(request: Request) {
     }
 
     if (newPassword) {
-      if (session.authMode !== "local") {
+      if (session.authMode !== "local" && session.authMode !== "provider") {
         return NextResponse.json(
           { error: "Password changes are available only for local sign-in." },
           { status: 400 }
@@ -56,18 +57,24 @@ export async function PATCH(request: Request) {
           { status: 400 }
         );
       }
-      const user = await query<{ passwordHash: string | null }>(
-        `select password_hash as "passwordHash" from users where id = $1`,
+      const user = await query<{ email: string; passwordHash: string | null }>(
+        `select email, password_hash as "passwordHash" from users where id = $1`,
         [session.userId]
       );
-      const passwordHash = user.rows[0]?.passwordHash;
-      if (!passwordHash || !(await verifyPassword(currentPassword, passwordHash))) {
-        return NextResponse.json({ error: "Current password is incorrect." }, { status: 400 });
+      if (session.authMode === "provider") {
+        const email = user.rows[0]?.email;
+        if (!email) return NextResponse.json({ error: "Unable to find this account." }, { status: 404 });
+        await changeSupabasePassword(email, currentPassword, newPassword);
+      } else {
+        const passwordHash = user.rows[0]?.passwordHash;
+        if (!passwordHash || !(await verifyPassword(currentPassword, passwordHash))) {
+          return NextResponse.json({ error: "Current password is incorrect." }, { status: 400 });
+        }
+        await query("update users set password_hash = $1 where id = $2", [
+          await hashPassword(newPassword),
+          session.userId
+        ]);
       }
-      await query("update users set password_hash = $1 where id = $2", [
-        await hashPassword(newPassword),
-        session.userId
-      ]);
     }
 
     if (name) {

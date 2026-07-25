@@ -1,8 +1,8 @@
 "use client";
 
-import { Fragment, useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
-import { Pencil, Play, Trash2 } from "lucide-react";
+import { Fragment, useEffect, useMemo, useState, useTransition } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { ChevronDown, Pencil, Play, Trash2 } from "lucide-react";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
@@ -17,6 +17,7 @@ import {
   formatTime
 } from "@/lib/format";
 import { timelineEntryDisplayInterval } from "@/lib/timeline-calculations";
+import { groupTimelineEntries } from "@/lib/timeline-entry-groups";
 import type { DateRange } from "@/lib/time-entry-overlap";
 
 export function EntriesTable({
@@ -39,6 +40,7 @@ export function EntriesTable({
   capturedNow?: Date;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { startEntryAgain } = useAppShellRuntime();
   const [isPending, startTransition] = useTransition();
   const [categoryFilter, setCategoryFilter] = useState("");
@@ -48,11 +50,45 @@ export function EntriesTable({
   const [isDeletingEntry, setIsDeletingEntry] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [continuingEntryId, setContinuingEntryId] = useState<string | null>(null);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
+  const highlightedEntryId = searchParams.get("entry");
 
   const filtered = useMemo(
     () => entries.filter((entry) => !categoryFilter || entry.categoryId === categoryFilter),
     [categoryFilter, entries]
   );
+  const grouped = useMemo(() => {
+    const byDay = new Map<string, TimeEntryRow[]>();
+    for (const entry of filtered) {
+      const interval = timelineEntryDisplayInterval(entry, displayRange, capturedNow);
+      const day = formatDate(interval.startedAt);
+      const dayEntries = byDay.get(day) ?? [];
+      dayEntries.push(entry);
+      byDay.set(day, dayEntries);
+    }
+    return [...byDay].flatMap(([day, entriesForDay]) =>
+      groupTimelineEntries(entriesForDay).map((group) => ({
+        ...group,
+        day,
+        key: `${day}:${group.key}`,
+        totalSeconds: group.entries.reduce(
+          (sum, entry) => sum + intervalSeconds(timelineEntryDisplayInterval(entry, displayRange, capturedNow), capturedNow),
+          0
+        )
+      }))
+    );
+  }, [capturedNow, displayRange, filtered]);
+
+  useEffect(() => {
+    if (!highlightedEntryId) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(`timeline-entry-${highlightedEntryId}`)?.scrollIntoView({
+        block: "center",
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [grouped, highlightedEntryId]);
 
   async function remove(id: string) {
     if (isDeletingEntry) return;
@@ -124,27 +160,53 @@ export function EntriesTable({
             </tr>
           </thead>
           <tbody>
-            {filtered.map((entry, index) => {
+            {grouped.map((group, index) => {
+              const entry = group.representative;
               const displayInterval = timelineEntryDisplayInterval(entry, displayRange, capturedNow);
-              const previousInterval = index > 0
-                ? timelineEntryDisplayInterval(filtered[index - 1], displayRange, capturedNow)
-                : null;
-              const currentDate = formatDate(displayInterval.startedAt);
-              const previousDate = previousInterval ? formatDate(previousInterval.startedAt) : null;
-              const shouldShowDate = groupByDay && currentDate !== previousDate;
+              const previousDate = index > 0 ? grouped[index - 1].day : null;
+              const shouldShowDate = groupByDay && group.day !== previousDate;
+              const isGrouped = group.entries.length > 1;
+              const isExpanded = isGrouped && (
+                expandedGroups.has(group.key) ||
+                group.entries.some((occurrence) => occurrence.id === highlightedEntryId)
+              );
 
               return (
-                <Fragment key={entry.id}>
+                <Fragment key={group.key}>
                   {shouldShowDate ? (
-                    <tr key={`${currentDate}-${entry.id}-group`} className="bg-[var(--surface-inset)]">
+                    <tr key={`${group.day}-${entry.id}-group`} className="bg-[var(--surface-inset)]">
                       <td colSpan={5} className="border-b border-[var(--line)] px-3 py-2 text-xs font-semibold text-[var(--muted)]">
-                        {currentDate}
+                        {group.day}
                       </td>
                     </tr>
                   ) : null}
-                <tr className="motion-row border-b border-[var(--line)] align-top last:border-b-0 hover:bg-[var(--surface-strong)]">
+                <tr
+                  className={[
+                    "motion-row border-b border-[var(--line)] align-top last:border-b-0 hover:bg-[var(--surface-strong)]",
+                    highlightedEntryId === entry.id && !isGrouped ? "timeline-entry-highlight" : ""
+                  ].join(" ")}
+                  id={!isGrouped ? `timeline-entry-${entry.id}` : undefined}
+                >
                   <td className="tabular px-3 py-3">
-                    {formatTime(displayInterval.startedAt)} - {displayInterval.stoppedAt ? formatTime(displayInterval.stoppedAt) : "Running"}
+                    {isGrouped ? (
+                      <button
+                        aria-expanded={isExpanded}
+                        className="timeline-group-toggle"
+                        onClick={() => setExpandedGroups((current) => {
+                          const next = new Set(current);
+                          if (next.has(group.key)) next.delete(group.key);
+                          else next.add(group.key);
+                          return next;
+                        })}
+                        type="button"
+                      >
+                        <ChevronDown className={isExpanded ? "is-expanded" : ""} size={16} />
+                        <span className="timeline-group-count">{group.entries.length}</span>
+                        <span>occurrences</span>
+                      </button>
+                    ) : (
+                      <>{formatTime(displayInterval.startedAt)} - {displayInterval.stoppedAt ? formatTime(displayInterval.stoppedAt) : "Running"}</>
+                    )}
                   </td>
                   <td className="px-3 py-3 font-medium">
                     <span className="block">{timeEntryTitle(entry)}</span>
@@ -163,36 +225,79 @@ export function EntriesTable({
                     </span>
                   </td>
                   <td className="tabular px-3 py-3 font-semibold text-[var(--accent-text)]">
-                    {formatDuration(entry.durationSeconds)}
+                    {formatDuration(group.totalSeconds)}
                   </td>
                   <td className="px-3 py-3">
                     <div className="flex gap-2">
                       <IconButton
                         disabled={isPending || Boolean(continuingEntryId)}
-                        label={`Start ${timeEntryTitle(entry)} again`}
+                        label={isGrouped
+                          ? `Start ${timeEntryTitle(entry)} from this group again`
+                          : `Start ${timeEntryTitle(entry)} again`}
                         onClick={() => continueEntry(entry)}
                       >
                         <Play size={15} fill="currentColor" strokeWidth={0} />
                       </IconButton>
-                      <IconButton
-                        label="Edit entry"
-                        onClick={() => setEditingEntry(entry)}
-                      >
-                        <Pencil size={15} />
-                      </IconButton>
-                      <IconButton
-                        label="Delete entry"
-                        variant="danger"
-                        onClick={() => {
-                          setDeleteError(null);
-                          setPendingDeleteEntry(entry);
-                        }}
-                      >
-                        <Trash2 size={15} />
-                      </IconButton>
+                      {!isGrouped ? (
+                        <>
+                          <IconButton
+                            label="Edit entry"
+                            onClick={() => setEditingEntry(entry)}
+                          >
+                            <Pencil size={15} />
+                          </IconButton>
+                          <IconButton
+                            label="Delete entry"
+                            variant="danger"
+                            onClick={() => {
+                              setDeleteError(null);
+                              setPendingDeleteEntry(entry);
+                            }}
+                          >
+                            <Trash2 size={15} />
+                          </IconButton>
+                        </>
+                      ) : null}
                     </div>
                   </td>
                 </tr>
+                {isExpanded ? group.entries.map((occurrence) => {
+                  const occurrenceInterval = timelineEntryDisplayInterval(occurrence, displayRange, capturedNow);
+                  const highlighted = highlightedEntryId === occurrence.id;
+                  return (
+                    <tr
+                      className={`timeline-occurrence-row motion-row border-b border-[var(--line)] align-top${highlighted ? " timeline-entry-highlight" : ""}`}
+                      id={`timeline-entry-${occurrence.id}`}
+                      key={occurrence.id}
+                    >
+                      <td className="tabular px-3 py-3">
+                        {formatTime(occurrenceInterval.startedAt)} - {occurrenceInterval.stoppedAt ? formatTime(occurrenceInterval.stoppedAt) : "Running"}
+                      </td>
+                      <td className="px-3 py-3 text-[var(--muted)]">Occurrence</td>
+                      <td className="px-3 py-3 text-[var(--muted)]">{timeEntryCategoryLabel(occurrence)}</td>
+                      <td className="tabular px-3 py-3 font-semibold text-[var(--accent-text)]">
+                        {formatDuration(intervalSeconds(occurrenceInterval, capturedNow))}
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="flex gap-2">
+                          <IconButton label="Edit occurrence" onClick={() => setEditingEntry(occurrence)}>
+                            <Pencil size={15} />
+                          </IconButton>
+                          <IconButton
+                            label="Delete occurrence"
+                            variant="danger"
+                            onClick={() => {
+                              setDeleteError(null);
+                              setPendingDeleteEntry(occurrence);
+                            }}
+                          >
+                            <Trash2 size={15} />
+                          </IconButton>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }) : null}
                 </Fragment>
               );
             })}
@@ -226,6 +331,18 @@ export function EntriesTable({
         />
       ) : null}
     </section>
+  );
+}
+
+function intervalSeconds(
+  interval: { startedAt: string; stoppedAt: string | null },
+  capturedNow: Date
+) {
+  return Math.max(
+    0,
+    Math.round(
+      ((interval.stoppedAt ? Date.parse(interval.stoppedAt) : capturedNow.getTime()) - Date.parse(interval.startedAt)) / 1000
+    )
   );
 }
 

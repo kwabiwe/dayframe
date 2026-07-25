@@ -61,8 +61,8 @@ describe("web Settings contracts", () => {
     expect(profilePopover).not.toContain("createWorkspace");
   });
 
-  it("shows password controls only for local sign-in and reads browser permission without prompting", () => {
-    expect(settingsFormsSource).toContain('authMode === "local"');
+  it("shows password controls for Dayframe email/password modes and reads browser permission without prompting", () => {
+    expect(settingsFormsSource).toContain('authMode === "local" || authMode === "provider"');
     expect(settingsFormsSource).toContain('navigator.permissions.query({ name: "geolocation" })');
     expect(settingsFormsSource).not.toContain("navigator.geolocation.getCurrentPosition");
   });

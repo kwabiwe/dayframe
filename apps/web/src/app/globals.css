@@ -816,6 +816,109 @@ textarea.ui-control {
   gap: 8px 12px;
 }
 
+.settings-save-row-goals {
+  justify-content: flex-end;
+}
+
+.settings-save-row-goals .ui-button {
+  min-width: 104px;
+}
+
+.settings-inline-form > .ui-button {
+  min-width: 104px;
+}
+
+.edit-entry-start-control {
+  display: grid;
+  gap: 6px;
+}
+
+.edit-entry-last-stop {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  gap: 12px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--accent-text);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.edit-entry-last-stop:hover {
+  text-decoration: underline;
+}
+
+.timeline-group-toggle {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  font-weight: 650;
+}
+
+.timeline-group-toggle svg {
+  color: var(--muted);
+  transition: transform 180ms ease-out;
+}
+
+.timeline-group-toggle svg.is-expanded {
+  transform: rotate(180deg);
+}
+
+.timeline-group-count {
+  display: inline-grid;
+  min-width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.timeline-occurrence-row {
+  background: var(--surface-inset);
+  animation: timeline-occurrence-enter 180ms ease-out both;
+}
+
+.timeline-occurrence-row > td:first-child {
+  padding-left: 52px;
+}
+
+.timeline-entry-highlight {
+  background: var(--accent-soft) !important;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .timeline-group-toggle svg {
+    transition: none;
+  }
+
+  .timeline-occurrence-row {
+    animation: none;
+  }
+}
+
+@keyframes timeline-occurrence-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .settings-feedback,
 .settings-section-feedback {
   margin: 0;
@@ -1383,6 +1486,11 @@ dialog.ui-popover-panel.bottom-left {
   color: var(--accent-text);
   background: var(--accent-soft);
   font-weight: 700;
+}
+
+.swiss-nav a:focus-visible {
+  outline: 0;
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
 
 .swiss-nav a.is-active::before {
@@ -6148,6 +6256,7 @@ kbd {
   background: var(--accent-soft);
   color: var(--foreground);
   font-weight: 600;
+  outline: 0;
 }
 
 .swiss-nav a.is-active::before {

@@ -22,6 +22,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 ## Time Review
 
 - Timeline includes Calendar, List, and Timesheet views with a clear selected state.
+- Timeline List groups repeated entries by normalized description and category within each day. Count badges and total duration remain exact; expanded occurrences retain individual edit/delete actions; group restart uses the representative occurrence; `entry=` expands and highlights only the requested occurrence.
 - Timeline has one route-owned period toolbar. Canonical `date`, `scope`, and `view` URL parameters reconstruct the same selected state on refresh, direct load, and Back/Forward; invalid values fall back safely, and Timesheet always normalizes to Week.
 - Previous/Next and Today/This week preserve view and scope, while Alt+Left/Right move one day in Day scope or one Monday-Sunday week in Week scope. View/scope-only changes reuse loaded data; an uncached period change performs one read, keeps the last valid view while pending, and retains it with calm feedback if the read fails.
 - Calendar, List, Timesheet, Day total, and Week total use the same half-open overlap rule and one captured current time. Entries crossing midnight or a range edge appear in every intersected period with only the in-range duration; Timesheet splits them across the affected day columns.
