@@ -77,7 +77,7 @@ export function GoalSettings({ dailyGoalMinutes, weeklyGoalMinutes }: { dailyGoa
             onHoursChange={setWeeklyHours}
             onMinutesChange={setWeeklyMinutes}
           />
-          <div className="settings-save-row">
+          <div className="settings-save-row settings-save-row-goals">
             <Button variant="primary" compact disabled={saving} type="submit">
               {saving ? "Saving…" : "Save goals"}
             </Button>

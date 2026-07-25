@@ -92,6 +92,22 @@ export async function loginSupabaseAccount(input: unknown, userAgent?: string | 
   return createProviderAppSession(account.user, account.workspace, userAgent);
 }
 
+export async function changeSupabasePassword(
+  email: string,
+  currentPassword: string,
+  newPassword: string
+) {
+  const supabase = createSupabaseAuthClient();
+  const { error: signInError } = await supabase.auth.signInWithPassword({
+    email: normalizeEmail(email),
+    password: currentPassword
+  });
+  if (signInError) throw new AuthError("Current password is incorrect.", 400);
+
+  const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+  if (updateError) throw new AuthError(updateError.message, authStatus(updateError.status));
+}
+
 export function getSupabaseProviderEnvStatus() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
   const publicKey = getSupabasePublicApiKey();

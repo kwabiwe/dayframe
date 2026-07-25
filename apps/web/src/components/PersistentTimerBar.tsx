@@ -66,6 +66,13 @@ export function PersistentTimerBar() {
     ? selectedCategory?.name ?? active?.categoryName ?? "Category"
     : "Uncategorized";
   const activeStartedAtMs = active ? new Date(active.startedAt).getTime() : 0;
+  const lastStoppedAt = useMemo(() => {
+    if (!data) return null;
+    return data.entries
+      .filter((entry) => entry.id !== active?.id && entry.stoppedAt)
+      .map((entry) => entry.stoppedAt as string)
+      .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? null;
+  }, [active?.id, data]);
   const durationSeconds = active
     ? Math.max(active.durationSeconds, Math.floor((now - activeStartedAtMs) / 1000))
     : 0;
@@ -479,6 +486,28 @@ export function PersistentTimerBar() {
                     }}
                     label="Open start time picker"
                   />
+                  {lastStoppedAt ? (
+                    <button
+                      className="edit-entry-last-stop"
+                      type="button"
+                      onClick={() => {
+                        const stopped = new Date(lastStoppedAt);
+                        setStartDateDraft([
+                          stopped.getFullYear(),
+                          String(stopped.getMonth() + 1).padStart(2, "0"),
+                          String(stopped.getDate()).padStart(2, "0")
+                        ].join("-"));
+                        setStartTimeDraft([
+                          String(stopped.getHours()).padStart(2, "0"),
+                          String(stopped.getMinutes()).padStart(2, "0")
+                        ].join(":"));
+                        setStartEditError(null);
+                      }}
+                    >
+                      Set to last stop time
+                      <span className="tabular">{formatTime(lastStoppedAt)}</span>
+                    </button>
+                  ) : null}
                 </Field>
                 {startEditError ? <p className="swiss-inline-error" role="alert">{startEditError}</p> : null}
                 <div className="ui-dialog-actions">
