@@ -28,6 +28,7 @@ const {
   deleteLearnedPlace,
   deletePlace,
   deleteTimeEntry,
+  deleteTimeEntries,
   processActivityEvent,
   reprocessHealthReviewItems,
   resolveLearnedPlaceLocation,
@@ -2563,6 +2564,41 @@ describe("time entry deletion", () => {
       expect.any(String),
       ["other-entry", session.workspaceId, session.userId]
     );
+  });
+
+  it("deletes a complete scoped group in one transaction", async () => {
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{ id: "entry-1" }, { id: "entry-2" }] })
+        .mockResolvedValueOnce({ rows: [{ id: "entry-1" }, { id: "entry-2" }] })
+        .mockResolvedValueOnce({ rows: [] }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(deleteTimeEntries(["entry-1", "entry-2"], session)).resolves.toEqual({
+      ids: ["entry-1", "entry-2"],
+      deletedCount: 2
+    });
+    expect(client.query).toHaveBeenCalledWith("commit");
+    expect(client.release).toHaveBeenCalled();
+  });
+
+  it("rolls back rather than partially deleting an incomplete group", async () => {
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{ id: "entry-1" }] })
+        .mockResolvedValueOnce({ rows: [] }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(deleteTimeEntries(["entry-1", "entry-2"], session))
+      .rejects.toBeInstanceOf(TimeEntryNotFoundError);
+    expect(client.query).toHaveBeenCalledWith("rollback");
+    expect(client.query.mock.calls.some(([statement]) => String(statement).startsWith("delete from"))).toBe(false);
   });
 });
 

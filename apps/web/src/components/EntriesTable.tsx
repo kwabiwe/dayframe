@@ -1,8 +1,9 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState, useTransition } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, Pencil, Play, Trash2 } from "lucide-react";
+import { ChevronDown, Ellipsis, Pencil, Play, Trash2 } from "lucide-react";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
@@ -45,7 +46,10 @@ export function EntriesTable({
   const [isPending, startTransition] = useTransition();
   const [categoryFilter, setCategoryFilter] = useState("");
   const [editingEntry, setEditingEntry] = useState<TimeEntryRow | null>(null);
-  const [pendingDeleteEntry, setPendingDeleteEntry] = useState<TimeEntryRow | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{
+    entries: TimeEntryRow[];
+    title: string;
+  } | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeletingEntry, setIsDeletingEntry] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -90,12 +94,18 @@ export function EntriesTable({
     return () => window.cancelAnimationFrame(frame);
   }, [grouped, highlightedEntryId]);
 
-  async function remove(id: string) {
+  async function remove(entriesToDelete: TimeEntryRow[]) {
     if (isDeletingEntry) return;
     setIsDeletingEntry(true);
     setDeleteError(null);
     try {
-      const response = await clientFetch(`/api/time-entries/${id}`, { method: "DELETE" });
+      const response = entriesToDelete.length === 1
+        ? await clientFetch(`/api/time-entries/${entriesToDelete[0].id}`, { method: "DELETE" })
+        : await clientFetch("/api/time-entries/batch-delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: entriesToDelete.map((entry) => entry.id) })
+          });
       if (!response.ok) {
         let errorMessage = `Unable to delete this entry: ${response.status}`;
         try {
@@ -106,7 +116,7 @@ export function EntriesTable({
         }
         throw new Error(errorMessage);
       }
-      setPendingDeleteEntry(null);
+      setPendingDelete(null);
       await onChanged?.();
       startTransition(() => router.refresh());
     } catch (error) {
@@ -152,9 +162,9 @@ export function EntriesTable({
         <table className="min-w-[720px] w-full border-collapse text-sm">
           <thead className="bg-[var(--surface-inset)] text-left text-xs text-[var(--muted)]">
             <tr>
-              <th className="border-b border-[var(--line)] px-3 py-3">Time</th>
               <th className="border-b border-[var(--line)] px-3 py-3">Task / tags</th>
               <th className="border-b border-[var(--line)] px-3 py-3">Category</th>
+              <th className="border-b border-[var(--line)] px-3 py-3">Time</th>
               <th className="border-b border-[var(--line)] px-3 py-3">Duration</th>
               <th className="border-b border-[var(--line)] px-3 py-3">Actions</th>
             </tr>
@@ -187,7 +197,7 @@ export function EntriesTable({
                   ].join(" ")}
                   id={!isGrouped ? `timeline-entry-${entry.id}` : undefined}
                 >
-                  <td className="tabular px-3 py-3">
+                  <td className="px-3 py-3 font-medium">
                     {isGrouped ? (
                       <button
                         aria-expanded={isExpanded}
@@ -202,16 +212,15 @@ export function EntriesTable({
                       >
                         <ChevronDown className={isExpanded ? "is-expanded" : ""} size={16} />
                         <span className="timeline-group-count">{group.entries.length}</span>
-                        <span>occurrences</span>
+                        <span>{timeEntryTitle(entry)}</span>
                       </button>
                     ) : (
-                      <>{formatTime(displayInterval.startedAt)} - {displayInterval.stoppedAt ? formatTime(displayInterval.stoppedAt) : "Running"}</>
+                      <>
+                        <span className="block">{timeEntryTitle(entry)}</span>
+                        <TagMetadata tagNames={entry.tagNames} />
+                        {entry.placeName ? <small className="mt-1 block font-normal text-[var(--muted)]">{entry.placeName}</small> : null}
+                      </>
                     )}
-                  </td>
-                  <td className="px-3 py-3 font-medium">
-                    <span className="block">{timeEntryTitle(entry)}</span>
-                    <TagMetadata tagNames={entry.tagNames} />
-                    {entry.placeName ? <small className="mt-1 block font-normal text-[var(--muted)]">{entry.placeName}</small> : null}
                   </td>
                   <td className="px-3 py-3 text-[var(--muted)]">
                     <span className="flex items-center gap-2">
@@ -223,6 +232,11 @@ export function EntriesTable({
                       />
                       {timeEntryCategoryLabel(entry)}
                     </span>
+                  </td>
+                  <td className="tabular px-3 py-3">
+                    {isGrouped
+                      ? `${group.entries.length} occurrences`
+                      : <>{formatTime(displayInterval.startedAt)} - {displayInterval.stoppedAt ? formatTime(displayInterval.stoppedAt) : "Running"}</>}
                   </td>
                   <td className="tabular px-3 py-3 font-semibold text-[var(--accent-text)]">
                     {formatDuration(group.totalSeconds)}
@@ -238,26 +252,19 @@ export function EntriesTable({
                       >
                         <Play size={15} fill="currentColor" strokeWidth={0} />
                       </IconButton>
-                      {!isGrouped ? (
-                        <>
-                          <IconButton
-                            label="Edit entry"
-                            onClick={() => setEditingEntry(entry)}
-                          >
-                            <Pencil size={15} />
-                          </IconButton>
-                          <IconButton
-                            label="Delete entry"
-                            variant="danger"
-                            onClick={() => {
-                              setDeleteError(null);
-                              setPendingDeleteEntry(entry);
-                            }}
-                          >
-                            <Trash2 size={15} />
-                          </IconButton>
-                        </>
-                      ) : null}
+                      <EntryActionsMenu
+                        deleteLabel={isGrouped ? "Delete whole group" : "Delete"}
+                        editLabel={isGrouped ? "Edit latest occurrence" : "Edit"}
+                        label={`More actions for ${timeEntryTitle(entry)}`}
+                        onDelete={() => {
+                          setDeleteError(null);
+                          setPendingDelete({
+                            entries: isGrouped ? group.entries : [entry],
+                            title: isGrouped ? `Delete all ${group.entries.length} occurrences?` : "Delete time entry?"
+                          });
+                        }}
+                        onEdit={() => setEditingEntry(entry)}
+                      />
                     </div>
                   </td>
                 </tr>
@@ -270,30 +277,25 @@ export function EntriesTable({
                       id={`timeline-entry-${occurrence.id}`}
                       key={occurrence.id}
                     >
+                      <td className="px-3 py-3 text-[var(--muted)]">Occurrence</td>
+                      <td className="px-3 py-3 text-[var(--muted)]">{timeEntryCategoryLabel(occurrence)}</td>
                       <td className="tabular px-3 py-3">
                         {formatTime(occurrenceInterval.startedAt)} - {occurrenceInterval.stoppedAt ? formatTime(occurrenceInterval.stoppedAt) : "Running"}
                       </td>
-                      <td className="px-3 py-3 text-[var(--muted)]">Occurrence</td>
-                      <td className="px-3 py-3 text-[var(--muted)]">{timeEntryCategoryLabel(occurrence)}</td>
                       <td className="tabular px-3 py-3 font-semibold text-[var(--accent-text)]">
                         {formatDuration(intervalSeconds(occurrenceInterval, capturedNow))}
                       </td>
                       <td className="px-3 py-3">
-                        <div className="flex gap-2">
-                          <IconButton label="Edit occurrence" onClick={() => setEditingEntry(occurrence)}>
-                            <Pencil size={15} />
-                          </IconButton>
-                          <IconButton
-                            label="Delete occurrence"
-                            variant="danger"
-                            onClick={() => {
-                              setDeleteError(null);
-                              setPendingDeleteEntry(occurrence);
-                            }}
-                          >
-                            <Trash2 size={15} />
-                          </IconButton>
-                        </div>
+                        <EntryActionsMenu
+                          deleteLabel="Delete"
+                          editLabel="Edit"
+                          label={`More actions for ${timeEntryTitle(occurrence)} occurrence`}
+                          onDelete={() => {
+                            setDeleteError(null);
+                            setPendingDelete({ entries: [occurrence], title: "Delete time entry?" });
+                          }}
+                          onEdit={() => setEditingEntry(occurrence)}
+                        />
                       </td>
                     </tr>
                   );
@@ -319,18 +321,131 @@ export function EntriesTable({
           tags={tags}
         />
       ) : null}
-      {pendingDeleteEntry ? (
+      {pendingDelete ? (
         <DestructiveConfirmationDialog
-          body={`“${timeEntryTitle(pendingDeleteEntry)}” will be permanently removed.`}
+          body={pendingDelete.entries.length > 1
+            ? `All ${pendingDelete.entries.length} “${timeEntryTitle(pendingDelete.entries[0])}” occurrences will be permanently removed.`
+            : `“${timeEntryTitle(pendingDelete.entries[0])}” will be permanently removed.`}
           dialogId="delete-time-entry"
           error={deleteError}
           isBusy={isDeletingEntry || isPending}
-          onCancel={() => setPendingDeleteEntry(null)}
-          onConfirm={() => void remove(pendingDeleteEntry.id)}
-          title="Delete time entry?"
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => void remove(pendingDelete.entries)}
+          title={pendingDelete.title}
         />
       ) : null}
     </section>
+  );
+}
+
+function EntryActionsMenu({
+  deleteLabel,
+  editLabel,
+  label,
+  onDelete,
+  onEdit
+}: {
+  deleteLabel: string;
+  editLabel: string;
+  label: string;
+  onDelete: () => void;
+  onEdit: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState({ right: 12, top: 0 });
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+    });
+    function closeOnOutside(event: MouseEvent) {
+      const target = event.target as Node;
+      if (!triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setOpen(false);
+      triggerRef.current?.focus();
+    }
+    document.addEventListener("mousedown", closeOnOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener("mousedown", closeOnOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  return (
+    <>
+      <IconButton
+        aria-expanded={open}
+        aria-haspopup="menu"
+        label={label}
+        onClick={() => {
+          const rect = triggerRef.current?.getBoundingClientRect();
+          if (rect) {
+            const opensBelow = window.innerHeight - rect.bottom >= 124;
+            setPosition({
+              right: Math.max(12, window.innerWidth - rect.right),
+              top: opensBelow ? rect.bottom + 8 : Math.max(12, rect.top - 108)
+            });
+          }
+          setOpen((current) => !current);
+        }}
+        ref={triggerRef}
+      >
+        <Ellipsis size={18} />
+      </IconButton>
+      {open && typeof document !== "undefined" ? createPortal(
+        <div
+          className="ui-floating-surface swiss-timer-actions-menu timeline-entry-actions-popover is-open"
+          ref={menuRef}
+          role="menu"
+          style={{ right: position.right, top: position.top }}
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+            event.preventDefault();
+            const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+            const index = items.indexOf(document.activeElement as HTMLButtonElement);
+            const delta = event.key === "ArrowDown" ? 1 : -1;
+            items[(index + delta + items.length) % items.length]?.focus();
+          }}
+        >
+          <button
+            onClick={() => {
+              setOpen(false);
+              onEdit();
+            }}
+            role="menuitem"
+            type="button"
+          >
+            <Pencil aria-hidden="true" size={16} />
+            {editLabel}
+          </button>
+          <button
+            className="is-danger"
+            onClick={() => {
+              setOpen(false);
+              onDelete();
+            }}
+            role="menuitem"
+            type="button"
+          >
+            <Trash2 aria-hidden="true" size={16} />
+            {deleteLabel}
+          </button>
+        </div>,
+        document.body
+      ) : null}
+    </>
   );
 }
 
