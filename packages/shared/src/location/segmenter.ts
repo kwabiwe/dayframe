@@ -107,6 +107,20 @@ function sameUnknownCluster(active: WorkingStay, item: ClassifiedEvidence, radiu
   return Boolean(centre && point && distanceMeters(centre, point) <= radius);
 }
 
+function hasPairedGeofenceEnter(
+  items: ClassifiedEvidence[],
+  exit: LocationEvidence,
+  toleranceMs = 5_000
+) {
+  if (!exit.savedPlaceId) return false;
+  const exitAt = Date.parse(exit.occurredAt);
+  return items.some(({ evidence }) =>
+    evidence.kind === "geofence_enter" &&
+    evidence.savedPlaceId === exit.savedPlaceId &&
+    Math.abs(Date.parse(evidence.occurredAt) - exitAt) <= toleranceMs
+  );
+}
+
 function closeAtTransition(
   active: WorkingStay,
   nextAt: string,
@@ -347,6 +361,9 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
       evidence.savedPlaceId &&
       evidence.savedPlaceId === active.placeId
     ) {
+      // Core Location can emit a same-place exit/enter pair while monitored
+      // regions are being restored. That is a state snapshot, not a departure.
+      if (hasPairedGeofenceEnter(accepted, evidence)) continue;
       const lastInsideAt = active.evidence.at(-1)?.evidence.endedAt ??
         active.evidence.at(-1)?.evidence.occurredAt ??
         active.startedAt;
