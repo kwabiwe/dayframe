@@ -868,6 +868,28 @@ export async function createCategory(
   return readJsonResponse(response);
 }
 
+export async function ensureAutomaticLoggingCategories(
+  kinds: Array<"sleep" | "health" | "commute">
+): Promise<MobileCategoryResponse[]> {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/categories/automatic`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify({ kinds })
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) {
+    throw new Error(await errorMessage(response, "Unable to prepare automatic logging categories"));
+  }
+  const payload = await readJsonResponse<{ categories: MobileCategoryResponse[] }>(response);
+  return payload.categories;
+}
+
 export async function updateCategory(
   id: string,
   options: { name?: string; color?: string; isPinned?: boolean }
