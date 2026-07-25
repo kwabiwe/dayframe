@@ -51,6 +51,8 @@ type CategoryRowLike = {
   isPinned: boolean;
 };
 
+export type AutomaticLoggingCategoryKind = "sleep" | "health" | "commute";
+
 type PlaceRowLike = {
   id: string;
   name: string;
@@ -845,6 +847,30 @@ export async function createCategory(
   } catch (error) {
     if (isUndefinedColumnError(error, "is_pinned")) throw missingCategoryPinColumnError(error);
     throw error;
+  }
+}
+
+export async function ensureAutomaticLoggingCategories(
+  kinds: AutomaticLoggingCategoryKind[],
+  session: RequestSession = getDevSession()
+) {
+  const uniqueKinds = [...new Set(kinds)];
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const categories = [];
+    for (const kind of uniqueKinds) {
+      const spec = automaticLoggingCategorySpec(kind);
+      const id = await ensureAutomaticCategoryId(client, session, spec);
+      categories.push({ id, ...spec });
+    }
+    await client.query("commit");
+    return categories;
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
   }
 }
 
@@ -2650,6 +2676,12 @@ function commuteCategorySpec() {
   return { name: "Commute", color: "sky" };
 }
 
+function automaticLoggingCategorySpec(kind: AutomaticLoggingCategoryKind) {
+  if (kind === "sleep") return healthCategorySpecForEventType("health_sleep_import");
+  if (kind === "health") return healthCategorySpecForEventType("health_workout_import");
+  return commuteCategorySpec();
+}
+
 function reviewItemDescriptionForConfirmedEntry(
   item: Pick<HealthReviewItemRow, "eventType" | "title"> & { rawPayload?: Record<string, unknown> | null }
 ) {
@@ -2674,30 +2706,22 @@ async function ensureHealthEventCategoryId(
   session: RequestSession,
   eventType: string | null | undefined
 ) {
-  const spec = healthCategorySpecForEventType(eventType);
-  const existing = await client.query<{ id: string }>(
-    `select id
-     from categories
-     where workspace_id = $1
-       and lower(name) = lower($2)
-       and coalesce(is_archived, false) = false
-     order by created_at asc
-     limit 1`,
-    [session.workspaceId, spec.name]
-  );
-  if (existing.rows[0]) return existing.rows[0].id;
-
-  const created = await client.query<{ id: string }>(
-    `insert into categories (workspace_id, name, color, is_pinned)
-     values ($1, $2, $3, false)
-     returning id`,
-    [session.workspaceId, spec.name, spec.color]
-  );
-  return created.rows[0].id;
+  return ensureAutomaticCategoryId(client, session, healthCategorySpecForEventType(eventType));
 }
 
 async function ensureCommuteCategoryId(client: pg.PoolClient, session: RequestSession) {
-  const spec = commuteCategorySpec();
+  return ensureAutomaticCategoryId(client, session, commuteCategorySpec());
+}
+
+async function ensureAutomaticCategoryId(
+  client: pg.PoolClient,
+  session: RequestSession,
+  spec: { name: string; color: string }
+) {
+  await client.query(
+    "select pg_advisory_xact_lock(hashtextextended($1, 0))",
+    [`dayframe:auto-category:${session.workspaceId}:${spec.name.toLowerCase()}`]
+  );
   const existing = await client.query<{ id: string }>(
     `select id
      from categories

@@ -29,6 +29,7 @@ const {
   deletePlace,
   deleteTimeEntry,
   deleteTimeEntries,
+  ensureAutomaticLoggingCategories,
   processActivityEvent,
   reprocessHealthReviewItems,
   resolveLearnedPlaceLocation,
@@ -79,6 +80,44 @@ describe("category persistence", () => {
         true
       ]
     );
+  });
+
+  it("creates missing automatic logging categories and reuses existing names case-insensitively", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        if (statement.includes("from categories")) {
+          const name = values?.[1];
+          if (name === "Health") return { rows: [{ id: healthCategoryId() }] };
+          return { rows: [] };
+        }
+        if (statement.includes("insert into categories")) {
+          const name = values?.[1];
+          if (name === "Sleep") return { rows: [{ id: sleepCategoryId() }] };
+          if (name === "Commute") return { rows: [{ id: commuteCategoryId() }] };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const categories = await ensureAutomaticLoggingCategories(
+      ["sleep", "health", "commute", "commute"],
+      session
+    );
+
+    expect(categories).toEqual([
+      { id: sleepCategoryId(), name: "Sleep", color: "lime" },
+      { id: healthCategoryId(), name: "Health", color: "moss" },
+      { id: commuteCategoryId(), name: "Commute", color: "sky" }
+    ]);
+    expect(
+      client.query.mock.calls.filter(([statement]) =>
+        String(statement).includes("insert into categories")
+      )
+    ).toHaveLength(2);
+    expect(client.query).toHaveBeenCalledWith("commit");
+    expect(client.release).toHaveBeenCalled();
   });
 
   it("persists unpin state to the categories.is_pinned column", async () => {

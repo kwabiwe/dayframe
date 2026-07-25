@@ -6,7 +6,6 @@ import {
   Keyboard,
   type KeyboardEvent,
   Modal,
-  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -34,9 +33,10 @@ import {
   keyboardLiftAnimationDuration
 } from "@/lib/editSheetKeyboard";
 import type { MobileBootstrap, MobileTag, MobileTimeEntry, TimeEntryUpdatePatch } from "@/lib/api";
-import { MOBILE_MOTION, useReduceMotionPreference } from "@/lib/motion";
+import { useReduceMotionPreference } from "@/lib/motion";
 import { runningTimerSheetElapsedSeconds } from "@/lib/timerPresentation";
 import { TagMetadata } from "@/components/TagMetadata";
+import { SwipeDismissSheet } from "@/components/SwipeDismissSheet";
 
 const MAX_RUNNING_SUGGESTIONS = 6;
 
@@ -109,7 +109,6 @@ export function ActiveTimerEditSheet({
   const [hashtagPanelMounted, setHashtagPanelMounted] = useState(false);
   const [highlightedTagAction, setHighlightedTagAction] = useState<string | null>(null);
   const reduceMotion = useReduceMotionPreference();
-  const dismissDragY = useRef(new Animated.Value(0)).current;
   const keyboardLift = useRef(new Animated.Value(0)).current;
   const suggestionsProgress = useRef(new Animated.Value(0)).current;
   const hashtagPanelProgress = useRef(new Animated.Value(0)).current;
@@ -213,7 +212,6 @@ export function ActiveTimerEditSheet({
   useEffect(() => {
     if (!visible) {
       setKeyboardInset(0);
-      dismissDragY.setValue(0);
       keyboardLift.setValue(0);
       suggestionsProgress.setValue(0);
       setSuggestionsMounted(false);
@@ -285,7 +283,7 @@ export function ActiveTimerEditSheet({
       changeSubscription.remove();
       hideSubscription.remove();
     };
-  }, [dismissDragY, hashtagPanelProgress, insets.bottom, insets.top, keyboardLift, reduceMotion, suggestionsProgress, visible, windowDimensions.height]);
+  }, [hashtagPanelProgress, insets.bottom, insets.top, keyboardLift, reduceMotion, suggestionsProgress, visible, windowDimensions.height]);
 
   const activeHashtag = useMemo(
     () => descriptionSelection.start === descriptionSelection.end
@@ -402,55 +400,6 @@ export function ActiveTimerEditSheet({
         maxHeight: keyboardLayout.sheetHeight ?? keyboardLayout.sheetMaxHeight
       }
     : { maxHeight: keyboardLayout.sheetMaxHeight };
-  const sheetTranslateY = Animated.add(dismissDragY, Animated.multiply(keyboardLift, -1));
-  const dismissResponder = useMemo(() => PanResponder.create({
-    onMoveShouldSetPanResponder: (_event, gesture) =>
-      !busy && gesture.dy > 8 && Math.abs(gesture.dy) > Math.abs(gesture.dx) * 1.2,
-    onPanResponderMove: (_event, gesture) => {
-      dismissDragY.setValue(Math.max(0, gesture.dy));
-    },
-    onPanResponderRelease: (_event, gesture) => {
-      const shouldDismiss = gesture.dy > 96 || gesture.vy > 0.85;
-      if (shouldDismiss) {
-        if (reduceMotion) {
-          dismissDragY.setValue(0);
-          onCancel();
-          return;
-        }
-        Animated.timing(dismissDragY, {
-          toValue: windowDimensions.height,
-          duration: MOBILE_MOTION.sheet,
-          useNativeDriver: true
-        }).start(({ finished }) => {
-          dismissDragY.setValue(0);
-          if (finished) onCancel();
-        });
-        return;
-      }
-      if (reduceMotion) {
-        dismissDragY.setValue(0);
-        return;
-      }
-      Animated.spring(dismissDragY, {
-        toValue: 0,
-        damping: 20,
-        stiffness: 220,
-        useNativeDriver: true
-      }).start();
-    },
-    onPanResponderTerminate: () => {
-      if (reduceMotion) {
-        dismissDragY.setValue(0);
-        return;
-      }
-      Animated.spring(dismissDragY, {
-        toValue: 0,
-        damping: 20,
-        stiffness: 220,
-        useNativeDriver: true
-      }).start();
-    }
-  }), [busy, dismissDragY, onCancel, reduceMotion, windowDimensions.height]);
   const suggestionsAnimatedStyle = {
     maxHeight: suggestionsProgress.interpolate({
       inputRange: [0, 1],
@@ -717,19 +666,20 @@ export function ActiveTimerEditSheet({
         />
         <View pointerEvents="box-none" style={styles.sheetKeyboardAvoidingView}>
           <SafeAreaView edges={[]} pointerEvents="box-none" style={styles.sheetSafeArea}>
-            <Animated.View
+            <SwipeDismissSheet
               accessibilityLabel={isRunningMode ? "Edit timer" : sheetTitle}
-              accessibilityViewIsModal
+              disabled={busy || deleteConfirmationVisible || datePickerOpen}
+              handleStyle={styles.sheetHandle}
+              onDismiss={onCancel}
+              reduceMotion={reduceMotion}
               style={[
                 styles.activeEditSheet,
                 keyboardAwareSheetStyle,
-                { paddingBottom: Math.max(10, Math.min(16, insets.bottom)) },
-                { transform: [{ translateY: sheetTranslateY }] }
+                { paddingBottom: Math.max(10, Math.min(16, insets.bottom)) }
               ]}
+              translateYOffset={Animated.multiply(keyboardLift, -1)}
             >
-              <View {...dismissResponder.panHandlers}>
-                <View style={styles.sheetHandle} />
-                <View style={[styles.sheetHeader, isRunningMode ? styles.sheetHeaderRunning : null]}>
+              <View style={[styles.sheetHeader, isRunningMode ? styles.sheetHeaderRunning : null]}>
                   {!isRunningMode ? <Text style={styles.sheetTitle}>{sheetTitle}</Text> : null}
                   {showDoneButton ? (
                     <Pressable
@@ -746,7 +696,6 @@ export function ActiveTimerEditSheet({
                       <Text style={styles.sheetDoneText}>Done</Text>
                     </Pressable>
                   ) : null}
-                </View>
               </View>
 
               <ScrollView
@@ -1090,7 +1039,7 @@ export function ActiveTimerEditSheet({
                 styles={styles}
                 visible={deleteConfirmationVisible}
               />
-            </Animated.View>
+            </SwipeDismissSheet>
           </SafeAreaView>
         </View>
         <FloatingDatePicker

@@ -18,6 +18,7 @@ import Reanimated from "react-native-reanimated";
 import Svg, { Path } from "react-native-svg";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { SwipeDismissSheet } from "@/components/SwipeDismissSheet";
 import {
   localLayoutTransition,
   localPresenceEntering,
@@ -41,6 +42,7 @@ import {
   clearFailedQueuedEvents,
   createCategory,
   deleteRecentLocationEvidence,
+  ensureAutomaticLoggingCategories,
   fetchBootstrap,
   getQueueDiagnostics,
   logout,
@@ -105,6 +107,15 @@ import {
 type Category = MobileBootstrap["categories"][number];
 type SettingsSection = "index" | "profile" | "categories" | "automations" | "health" | "sync" | "appearance";
 type SettingsIcon = "profile" | "categories" | "automations" | "health" | "sync" | "appearance" | "review";
+
+function healthAutomaticCategoryKinds(preferences: HealthImportPreferences) {
+  const kinds: Array<"sleep" | "health"> = [];
+  if (preferences.sleep) kinds.push("sleep");
+  if (Object.entries(preferences).some(([type, enabled]) => type !== "sleep" && enabled)) {
+    kinds.push("health");
+  }
+  return kinds;
+}
 
 type SettingsSnapshot = {
   data: MobileBootstrap | null;
@@ -729,8 +740,17 @@ export default function SettingsScreen() {
       }
     }
 
-    const status = await setLocationLearningEnabled(enabled, data?.places ?? []);
-    await refreshLocationDiagnostics(status);
+    try {
+      if (enabled) await ensureAutomaticLoggingCategories(["commute"]);
+      const status = await setLocationLearningEnabled(enabled, data?.places ?? []);
+      await refreshLocationDiagnostics(status);
+      if (enabled) await load({ silent: true });
+    } catch (error) {
+      Alert.alert(
+        "Location suggestions",
+        error instanceof Error ? error.message : "Unable to enable commute logging."
+      );
+    }
   }
 
   async function refreshLocationDiagnostics(fallbackStatus?: string) {
@@ -838,7 +858,12 @@ export default function SettingsScreen() {
     try {
       const permissions = await requestHealthKitPermissions();
       updateHealthStatus(permissions);
-      if (permissions.status === "available") await syncAppleHealth({ silent: true });
+      if (permissions.status === "available") {
+        const preferences = healthImportPreferences ?? await getHealthImportPreferences();
+        const kinds = healthAutomaticCategoryKinds(preferences);
+        if (kinds.length > 0) await ensureAutomaticLoggingCategories(kinds);
+        await syncAppleHealth({ silent: true });
+      }
     } catch (error) {
       Alert.alert("Apple Health", friendlyHealthKitError(error, "request Apple Health permission"));
     }
@@ -869,6 +894,11 @@ export default function SettingsScreen() {
     const optimistic = { ...current, [type]: enabled };
     setHealthImportPreferencesAndCache(optimistic);
     try {
+      if (enabled) {
+        await ensureAutomaticLoggingCategories([
+          type === "sleep" ? "sleep" : "health"
+        ]);
+      }
       const saved = await setHealthImportPreference(type, enabled);
       setHealthImportPreferencesAndCache(saved);
       await reprocessExistingHealthReviewItems(saved, { force: true, mappings: healthAutoLogMappings });
@@ -1804,8 +1834,13 @@ function LocationInformationSheet({
     >
       <View accessibilityViewIsModal style={styles.sheetOverlay}>
         <Pressable accessibilityLabel="Close information" style={styles.sheetBackdrop} onPress={onClose} />
-        <View style={styles.activeEditSheet}>
-          <View style={styles.sheetHandle} />
+        <SwipeDismissSheet
+          accessibilityLabel={isPlaces ? "About saved places" : "About location suggestions"}
+          handleStyle={styles.sheetHandle}
+          onDismiss={onClose}
+          reduceMotion={reduceMotion}
+          style={styles.activeEditSheet}
+        >
           <View style={styles.sheetHeader}>
             <Text style={styles.sheetTitle}>{isPlaces ? "About saved places" : "About location suggestions"}</Text>
             <Pressable
@@ -1842,7 +1877,7 @@ function LocationInformationSheet({
               </>
             )}
           </ScrollView>
-        </View>
+        </SwipeDismissSheet>
       </View>
     </Modal>
   );

@@ -1,15 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
-  Animated,
-  Easing,
   Modal,
-  PanResponder,
   Pressable,
   RefreshControl,
   ScrollView,
   Text,
-  useWindowDimensions,
   View
 } from "react-native";
 import Reanimated from "react-native-reanimated";
@@ -18,6 +14,7 @@ import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import { SheetMutationProgress } from "@/components/SheetMutationProgress";
+import { SwipeDismissSheet } from "@/components/SwipeDismissSheet";
 import {
   AuthRequiredError,
   deletePlace,
@@ -543,8 +540,6 @@ function LearnedPlaceDetailSheet({
 }) {
   const [copyToast, setCopyToast] = useState<string | null>(null);
   const reduceMotion = useReduceMotionPreference();
-  const windowDimensions = useWindowDimensions();
-  const dismissDragY = useRef(new Animated.Value(0)).current;
   const copyToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyToastToken = useRef(0);
 
@@ -553,68 +548,17 @@ function LearnedPlaceDetailSheet({
     if (copyToastTimer.current) clearTimeout(copyToastTimer.current);
     copyToastTimer.current = null;
     setCopyToast(null);
-    dismissDragY.setValue(0);
     return () => {
       if (copyToastTimer.current) clearTimeout(copyToastTimer.current);
       copyToastTimer.current = null;
     };
-  }, [dismissDragY, learnedPlace?.id]);
+  }, [learnedPlace?.id]);
 
   if (!learnedPlace) return null;
 
   const details = learnedPlaceDetailValues(learnedPlace);
   const associatedCategory = learnedPlaceCategoryLabel(learnedPlace, categories);
   const disabled = ignoring || forgetting;
-  const dismissResponder = PanResponder.create({
-    onMoveShouldSetPanResponder: (_event, gesture) =>
-      !disabled && gesture.dy > 8 && Math.abs(gesture.dy) > Math.abs(gesture.dx) * 1.2,
-    onPanResponderMove: (_event, gesture) => {
-      dismissDragY.setValue(Math.max(0, gesture.dy));
-    },
-    onPanResponderRelease: (_event, gesture) => {
-      const shouldDismiss = gesture.dy > 96 || gesture.vy > 0.85;
-      if (shouldDismiss) {
-        if (reduceMotion) {
-          dismissDragY.setValue(0);
-          onClose();
-          return;
-        }
-        Animated.timing(dismissDragY, {
-          toValue: windowDimensions.height,
-          duration: 180,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true
-        }).start(({ finished }) => {
-          dismissDragY.setValue(0);
-          if (finished) onClose();
-        });
-        return;
-      }
-      if (reduceMotion) {
-        dismissDragY.setValue(0);
-        return;
-      }
-      Animated.spring(dismissDragY, {
-        toValue: 0,
-        damping: 20,
-        stiffness: 220,
-        useNativeDriver: true
-      }).start();
-    },
-    onPanResponderTerminate: () => {
-      if (reduceMotion) {
-        dismissDragY.setValue(0);
-        return;
-      }
-      Animated.spring(dismissDragY, {
-        toValue: 0,
-        damping: 20,
-        stiffness: 220,
-        useNativeDriver: true
-      }).start();
-    }
-  });
-
   async function copyDetail(label: string, value: string | null) {
     const copied = await copyLearnedPlaceDetail(value, Clipboard.setStringAsync);
     if (!copied) return;
@@ -632,14 +576,15 @@ function LearnedPlaceDetailSheet({
     <Modal animationType="slide" onRequestClose={onClose} transparent visible>
       <View style={styles.sheetOverlay}>
         <Pressable accessibilityLabel="Close learned place details" style={styles.sheetBackdrop} onPress={onClose} />
-        <Animated.View
-          style={[
-            styles.activeEditSheet,
-            { transform: [{ translateY: dismissDragY }] }
-          ]}
+        <SwipeDismissSheet
+          accessibilityLabel="Place suggestion"
+          disabled={disabled}
+          handleStyle={styles.sheetHandle}
+          onDismiss={onClose}
+          reduceMotion={reduceMotion}
+          style={styles.activeEditSheet}
         >
-          <View {...dismissResponder.panHandlers}>
-            <View style={styles.sheetHandle} />
+          <View>
             <View style={[styles.sheetHeader, styles.sheetHeaderCentered]}>
               <Text style={[styles.sheetTitle, styles.sheetTitleCentered]} numberOfLines={2}>Place suggestion</Text>
               <Pressable
@@ -755,7 +700,7 @@ function LearnedPlaceDetailSheet({
               </View>
             </Reanimated.View>
           ) : null}
-        </Animated.View>
+        </SwipeDismissSheet>
       </View>
     </Modal>
   );
