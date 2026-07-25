@@ -332,7 +332,27 @@ async function emitSemanticSegment(
        confidence, raw_payload, suggested_category_id, suggested_place_id, review_status
      ) values ($1, $2, $3, 'location_learning', $4, $5, $6, $7::jsonb, $8, $9, $10)
      on conflict (workspace_id, user_id, client_event_id) where client_event_id is not null
-     do update set client_event_id = excluded.client_event_id
+     do update set
+       occurred_at = case
+         when activity_events.review_status = 'needs_review' then excluded.occurred_at
+         else activity_events.occurred_at
+       end,
+       confidence = case
+         when activity_events.review_status = 'needs_review' then excluded.confidence
+         else activity_events.confidence
+       end,
+       raw_payload = case
+         when activity_events.review_status = 'needs_review' then excluded.raw_payload
+         else activity_events.raw_payload
+       end,
+       suggested_category_id = case
+         when activity_events.review_status = 'needs_review' then excluded.suggested_category_id
+         else activity_events.suggested_category_id
+       end,
+       suggested_place_id = case
+         when activity_events.review_status = 'needs_review' then excluded.suggested_place_id
+         else activity_events.suggested_place_id
+       end
      returning id`,
     [
       session.workspaceId,
@@ -399,6 +419,35 @@ async function emitSemanticSegment(
           : segment.continuityStatus === "uncertain_gap"
             ? "The boundary includes an evidence gap; inspect the timeline before confirming."
             : "Ordered location evidence supports this suggestion."
+      ]
+    );
+    await client.query(
+      `update review_items
+       set location_segment_id = $1,
+           title = $2,
+           suggested_category_id = $3,
+           suggested_place_id = $4,
+           suggested_started_at = $5,
+           suggested_stopped_at = $6,
+           confidence = $7,
+           notes = $8
+       where workspace_id = $9 and user_id = $10 and event_id = $11 and status = 'open'`,
+      [
+        databaseSegmentId,
+        title,
+        trustedPlace?.categoryId ?? null,
+        placeId,
+        segment.startedAt,
+        segment.stoppedAt,
+        segment.confidence,
+        overlapsConfirmedTime
+          ? "This detected visit overlaps existing tracked time and needs review."
+          : segment.continuityStatus === "uncertain_gap"
+            ? "The boundary includes an evidence gap; inspect the timeline before confirming."
+            : "Ordered location evidence supports this suggestion.",
+        session.workspaceId,
+        session.userId,
+        event.rows[0].id
       ]
     );
   }

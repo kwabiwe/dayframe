@@ -181,6 +181,13 @@ async function supersedeMissingSegments(
   stayClientIds: string[],
   commuteClientIds: string[]
 ) {
+  await retireOpenReviewsForMissingSegments(
+    client,
+    session,
+    options,
+    stayClientIds,
+    commuteClientIds
+  );
   await client.query(
     `update stay_segments set status = 'superseded', updated_at = now()
      where workspace_id = $1 and user_id = $2 and device_id = $3 and algorithm_version = $4
@@ -197,6 +204,68 @@ async function supersedeMissingSegments(
   );
 }
 
+async function retireOpenReviewsForMissingSegments(
+  client: pg.PoolClient,
+  session: RequestSession,
+  options: { deviceId: string; algorithmVersion: string },
+  stayClientIds: string[],
+  commuteClientIds: string[]
+) {
+  const stale = await client.query<{ reviewId: string; eventId: string }>(
+    `select ri.id as "reviewId", ri.event_id as "eventId"
+     from review_items ri
+     left join stay_segments st
+       on st.id = ri.location_segment_id
+      and st.workspace_id = ri.workspace_id and st.user_id = ri.user_id
+     left join commute_segments cs
+       on cs.id = ri.location_segment_id
+      and cs.workspace_id = ri.workspace_id and cs.user_id = ri.user_id
+     where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open'
+       and coalesce(st.device_id, cs.device_id) = $3
+       and coalesce(st.algorithm_version, cs.algorithm_version) = $4
+       and (
+         (st.id is not null and not (st.client_segment_id = any($5::text[])))
+         or
+         (cs.id is not null and not (cs.client_segment_id = any($6::text[])))
+       )
+       and exists (
+         select 1
+         from location_segment_evidence lse
+         join location_evidence le
+           on le.id = lse.evidence_id
+          and le.workspace_id = lse.workspace_id and le.user_id = lse.user_id
+         where lse.workspace_id = ri.workspace_id and lse.user_id = ri.user_id
+           and (lse.stay_segment_id = st.id or lse.commute_segment_id = cs.id)
+           and le.expires_at > now()
+       )
+     for update of ri`,
+    [
+      session.workspaceId,
+      session.userId,
+      options.deviceId,
+      options.algorithmVersion,
+      stayClientIds,
+      commuteClientIds
+    ]
+  );
+  if (stale.rows.length === 0) return;
+  const reviewIds = stale.rows.map((row) => row.reviewId);
+  const eventIds = stale.rows.map((row) => row.eventId);
+  await client.query(
+    `update review_items
+     set status = 'ignored', resolved_at = now(),
+         notes = concat_ws(' ', nullif(notes, ''), 'Superseded by corrected location evidence replay.')
+     where workspace_id = $1 and user_id = $2 and id = any($3::uuid[]) and status = 'open'`,
+    [session.workspaceId, session.userId, reviewIds]
+  );
+  await client.query(
+    `update activity_events set review_status = 'ignored'
+     where workspace_id = $1 and user_id = $2 and id = any($3::uuid[])
+       and review_status = 'needs_review'`,
+    [session.workspaceId, session.userId, eventIds]
+  );
+}
+
 async function upsertStay(
   client: pg.PoolClient,
   session: RequestSession,
@@ -206,15 +275,20 @@ async function upsertStay(
   const existing = await client.query<{
     id: string;
     continuityStatus: string;
-    createdFromEventId: string | null;
+    preservesManualCorrection: boolean;
   }>(
-    `select id, continuity_status as "continuityStatus", created_from_event_id as "createdFromEventId"
+    `select id, continuity_status as "continuityStatus",
+            created_from_event_id is not null and not exists (
+              select 1 from review_items
+              where workspace_id = $1 and user_id = $2
+                and location_segment_id = stay_segments.id and status = 'open'
+            ) as "preservesManualCorrection"
      from stay_segments
      where workspace_id = $1 and user_id = $2 and device_id = $3 and client_segment_id = $4
      for update`,
     [session.workspaceId, session.userId, deviceId, segment.clientSegmentId]
   );
-  if (existing.rows[0]?.continuityStatus === "manual" || existing.rows[0]?.createdFromEventId) {
+  if (existing.rows[0]?.continuityStatus === "manual" || existing.rows[0]?.preservesManualCorrection) {
     return { id: existing.rows[0].id, preservesManualCorrection: true };
   }
   const result = await client.query<{ id: string }>(
@@ -293,15 +367,20 @@ async function upsertCommute(
   const existing = await client.query<{
     id: string;
     continuityStatus: string;
-    createdFromEventId: string | null;
+    preservesManualCorrection: boolean;
   }>(
-    `select id, continuity_status as "continuityStatus", created_from_event_id as "createdFromEventId"
+    `select id, continuity_status as "continuityStatus",
+            created_from_event_id is not null and not exists (
+              select 1 from review_items
+              where workspace_id = $1 and user_id = $2
+                and location_segment_id = commute_segments.id and status = 'open'
+            ) as "preservesManualCorrection"
      from commute_segments
      where workspace_id = $1 and user_id = $2 and device_id = $3 and client_segment_id = $4
      for update`,
     [session.workspaceId, session.userId, deviceId, segment.clientSegmentId]
   );
-  if (existing.rows[0]?.continuityStatus === "manual" || existing.rows[0]?.createdFromEventId) {
+  if (existing.rows[0]?.continuityStatus === "manual" || existing.rows[0]?.preservesManualCorrection) {
     return { id: existing.rows[0].id, preservesManualCorrection: true };
   }
   const result = await client.query<{ id: string }>(
