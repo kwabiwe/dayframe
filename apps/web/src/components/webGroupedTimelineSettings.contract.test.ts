@@ -19,9 +19,14 @@ describe("grouped Timeline and Settings follow-up contracts", () => {
     expect(entries).toContain("timeline-group-count");
     expect(entries).toContain("startEntryAgain(entry)");
     expect(entries).toContain("timeline-entry-highlight");
-    expect(entries).toContain(">Task / tags<");
-    expect(entries.indexOf(">Task / tags<")).toBeLessThan(entries.indexOf(">Category<"));
-    expect(entries.indexOf(">Category<")).toBeLessThan(entries.indexOf(">Time<"));
+    expect(entries).toContain(">Task<");
+    expect(entries.indexOf(">Task<")).toBeLessThan(entries.indexOf(">Time<"));
+    expect(entries).not.toContain(">Category<");
+    expect(entries).toContain("timeline-task-category-dot");
+    expect(entries).toContain("{timeEntryTitle(entry)}");
+    expect(entries).toContain("{timeEntryCategoryLabel(entry)}");
+    expect(entries).not.toContain("ChevronDown");
+    expect(entries).toContain('colSpan={4}');
     expect(entries).toContain("EntryActionsMenu");
     expect(entries).toContain("Delete whole group");
     expect(entries).toContain("/api/time-entries/batch-delete");

@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, Ellipsis, Pencil, Play, Trash2 } from "lucide-react";
+import { Ellipsis, Pencil, Play, Trash2 } from "lucide-react";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
@@ -159,11 +159,10 @@ export function EntriesTable({
 
       <div className="fill-group-surface overflow-hidden">
         <div className="overflow-x-auto">
-        <table className="min-w-[720px] w-full border-collapse text-sm">
+        <table className="min-w-[640px] w-full border-collapse text-sm">
           <thead className="bg-[var(--surface-inset)] text-left text-xs text-[var(--muted)]">
             <tr>
-              <th className="border-b border-[var(--line)] px-3 py-3">Task / tags</th>
-              <th className="border-b border-[var(--line)] px-3 py-3">Category</th>
+              <th className="border-b border-[var(--line)] px-3 py-3">Task</th>
               <th className="border-b border-[var(--line)] px-3 py-3">Time</th>
               <th className="border-b border-[var(--line)] px-3 py-3">Duration</th>
               <th className="border-b border-[var(--line)] px-3 py-3">Actions</th>
@@ -185,7 +184,7 @@ export function EntriesTable({
                 <Fragment key={group.key}>
                   {shouldShowDate ? (
                     <tr key={`${group.day}-${entry.id}-group`} className="bg-[var(--surface-inset)]">
-                      <td colSpan={5} className="border-b border-[var(--line)] px-3 py-2 text-xs font-semibold text-[var(--muted)]">
+                      <td colSpan={4} className="border-b border-[var(--line)] px-3 py-2 text-xs font-semibold text-[var(--muted)]">
                         {group.day}
                       </td>
                     </tr>
@@ -198,40 +197,35 @@ export function EntriesTable({
                   id={!isGrouped ? `timeline-entry-${entry.id}` : undefined}
                 >
                   <td className="px-3 py-3 font-medium">
-                    {isGrouped ? (
-                      <button
-                        aria-expanded={isExpanded}
-                        className="timeline-group-toggle"
-                        onClick={() => setExpandedGroups((current) => {
-                          const next = new Set(current);
-                          if (next.has(group.key)) next.delete(group.key);
-                          else next.add(group.key);
-                          return next;
-                        })}
-                        type="button"
-                      >
-                        <ChevronDown className={isExpanded ? "is-expanded" : ""} size={16} />
-                        <span className="timeline-group-count">{group.entries.length}</span>
-                        <span>{timeEntryTitle(entry)}</span>
-                      </button>
-                    ) : (
-                      <>
-                        <span className="block">{timeEntryTitle(entry)}</span>
+                    <div className={`timeline-task-cell${isGrouped ? "" : " is-single"}`}>
+                      {isGrouped ? (
+                        <button
+                          aria-expanded={isExpanded}
+                          aria-label={`${isExpanded ? "Collapse" : "Expand"} ${group.entries.length} ${timeEntryTitle(entry)} entries`}
+                          className="timeline-group-count"
+                          onClick={() => setExpandedGroups((current) => {
+                            const next = new Set(current);
+                            if (next.has(group.key)) next.delete(group.key);
+                            else next.add(group.key);
+                            return next;
+                          })}
+                          type="button"
+                        >
+                          {group.entries.length}
+                        </button>
+                      ) : null}
+                      <span
+                        aria-hidden="true"
+                        className={`timeline-task-category-dot${entry.categoryName ? "" : " is-uncategorized"}`}
+                        style={{ backgroundColor: timeEntryCategoryColor(entry) }}
+                      />
+                      <span className="timeline-task-details">
+                        <span className="timeline-task-title">{timeEntryTitle(entry)}</span>
+                        <span className="timeline-task-meta">{timeEntryCategoryLabel(entry)}</span>
                         <TagMetadata tagNames={entry.tagNames} />
                         {entry.placeName ? <small className="mt-1 block font-normal text-[var(--muted)]">{entry.placeName}</small> : null}
-                      </>
-                    )}
-                  </td>
-                  <td className="px-3 py-3 text-[var(--muted)]">
-                    <span className="flex items-center gap-2">
-                      <span
-                        className={`h-3 w-3 shrink-0 rounded-full border border-[var(--line-strong)]${entry.categoryName ? "" : " is-uncategorized"}`}
-                        style={{
-                          backgroundColor: timeEntryCategoryColor(entry)
-                        }}
-                      />
-                      {timeEntryCategoryLabel(entry)}
-                    </span>
+                      </span>
+                    </div>
                   </td>
                   <td className="tabular px-3 py-3">
                     {isGrouped
@@ -277,8 +271,20 @@ export function EntriesTable({
                       id={`timeline-entry-${occurrence.id}`}
                       key={occurrence.id}
                     >
-                      <td className="px-3 py-3 text-[var(--muted)]">Occurrence</td>
-                      <td className="px-3 py-3 text-[var(--muted)]">{timeEntryCategoryLabel(occurrence)}</td>
+                      <td className="px-3 py-3">
+                        <div className="timeline-task-cell timeline-occurrence-task">
+                          <span
+                            aria-hidden="true"
+                            className={`timeline-task-category-dot${occurrence.categoryName ? "" : " is-uncategorized"}`}
+                            style={{ backgroundColor: timeEntryCategoryColor(occurrence) }}
+                          />
+                          <span className="timeline-task-details">
+                            <span className="timeline-task-title">{timeEntryTitle(occurrence)}</span>
+                            <span className="timeline-task-meta">{timeEntryCategoryLabel(occurrence)}</span>
+                            <TagMetadata tagNames={occurrence.tagNames} />
+                          </span>
+                        </div>
+                      </td>
                       <td className="tabular px-3 py-3">
                         {formatTime(occurrenceInterval.startedAt)} - {occurrenceInterval.stoppedAt ? formatTime(occurrenceInterval.stoppedAt) : "Running"}
                       </td>
