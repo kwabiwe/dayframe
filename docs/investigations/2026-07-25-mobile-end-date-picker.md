@@ -27,3 +27,15 @@ but exposed the end date as a raw `YYYY-MM-DD` keyboard field.
   cancel, and reopening the entry remain correct.
 - Repository validation, iOS build, merged-main archive, TestFlight processing,
   export compliance, notes, and internal beta assignment all pass.
+
+## Closure Evidence
+
+- PR #113 merged to `main` at `436068e`.
+- Validation passed: 788 tests, all workspace typechecks, lint, optimized web
+  build, brand contract, `git diff --check`, and a full iOS Simulator build.
+- TestFlight `0.1.0 (66)` was archived from merged `main` with production API
+  base `https://dayframe-web.vercel.app`.
+- Delivery/build ID: `2f33c236-5530-4a5f-a205-ddc353130ee1`.
+- App Store Connect: `VALID`, `usesNonExemptEncryption=false`, en-GB notes set,
+  and `IN_BETA_TESTING` through `Internal Health Debug`.
+- Remaining acceptance is the physical-iPhone interaction matrix above.
