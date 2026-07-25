@@ -7,6 +7,17 @@ function segmentPoint(segment: StaySegment) {
   return { latitude: segment.centreLatitude, longitude: segment.centreLongitude };
 }
 
+function evidenceMatchesStay(item: ClassifiedEvidence, stay: StaySegment) {
+  if (stay.placeId) {
+    return item.evidence.savedPlaceId === stay.placeId ||
+      item.match?.kind === "saved" && item.match.placeId === stay.placeId;
+  }
+  if (stay.learnedPlaceId) {
+    return item.match?.kind === "learned" && item.match.placeId === stay.learnedPlaceId;
+  }
+  return false;
+}
+
 export function deriveCommutes(
   stays: StaySegment[],
   acceptedEvidence: ClassifiedEvidence[],
@@ -18,15 +29,38 @@ export function deriveCommutes(
     const from = stays[index - 1];
     const to = stays[index];
     if (!from.stoppedAt) continue;
-    const startedAtMs = Date.parse(from.stoppedAt);
+    const originalStartedAtMs = Date.parse(from.stoppedAt);
     const stoppedAtMs = Date.parse(to.startedAt);
+    const boundaryEvidence = acceptedEvidence.filter(({ evidence }) => {
+      const at = Date.parse(evidence.occurredAt);
+      return at > originalStartedAtMs && at < stoppedAtMs;
+    });
+    const latestFromSupport = boundaryEvidence
+      .filter((item) => evidenceMatchesStay(item, from))
+      .at(-1);
+    const startedAtMs = latestFromSupport
+      ? Date.parse(latestFromSupport.evidence.occurredAt)
+      : originalStartedAtMs;
     const duration = stoppedAtMs - startedAtMs;
     if (duration < config.commuteMinimumDurationMs || duration > config.commuteMaximumDurationMs) continue;
 
-    const routeEvidence = acceptedEvidence.filter(({ evidence }) => {
+    const routeEvidence = acceptedEvidence.filter((item) => {
+      const { evidence } = item;
       const at = Date.parse(evidence.occurredAt);
-      return at > startedAtMs && at < stoppedAtMs && evidence.latitude != null && evidence.longitude != null;
+      if (at <= startedAtMs || at >= stoppedAtMs || evidence.latitude == null || evidence.longitude == null) {
+        return false;
+      }
+      return !evidenceMatchesStay(item, from) && !evidenceMatchesStay(item, to);
     });
+    const sameKnownPlace = Boolean(
+      from.placeMatchKind !== "unknown" &&
+      to.placeMatchKind !== "unknown" &&
+      (
+        from.placeId && from.placeId === to.placeId ||
+        from.learnedPlaceId && from.learnedPlaceId === to.learnedPlaceId
+      )
+    );
+    if (sameKnownPlace && routeEvidence.length < 2) continue;
     const fromPoint = segmentPoint(from);
     const toPoint = segmentPoint(to);
     const routePoints = routeEvidence.length >= 2
@@ -53,7 +87,7 @@ export function deriveCommutes(
       algorithmVersion: config.algorithmVersion,
       status:
         Date.parse(processingAt) - stoppedAtMs >= config.segmentFinalisationLagMs ? "finalised" : "closed",
-      startedAt: from.stoppedAt,
+      startedAt: new Date(startedAtMs).toISOString(),
       stoppedAt: to.startedAt,
       fromStaySegmentId: from.clientSegmentId,
       toStaySegmentId: to.clientSegmentId,

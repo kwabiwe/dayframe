@@ -350,6 +350,51 @@ describe("Location Intelligence V2", () => {
     }
   });
 
+  it("uses later same-place evidence as the commute boundary and drops stale same-place gaps", () => {
+    const result = runLocationEngine(engineInput([
+      evidence("home-before-gap-1", 0, TEST_PLACE_A),
+      evidence("home-before-gap-2", 6, TEST_PLACE_A),
+      evidence("home-after-gap", 58, TEST_PLACE_A),
+      evidence("home-at-real-departure", 77, TEST_PLACE_A),
+      evidence("home-exit", 77.01, TEST_PLACE_A, {
+        kind: "geofence_exit",
+        savedPlaceId: TEST_PLACE_A.id
+      }),
+      evidence("outbound-route-1", 82, { latitude: 51.505, longitude: -0.095 }, {
+        speedMetersPerSecond: 8
+      }),
+      evidence("outbound-route-2", 87, { latitude: 51.504, longitude: -0.096 }, {
+        speedMetersPerSecond: 8
+      }),
+      evidence("home-return", 89, TEST_PLACE_A, {
+        kind: "geofence_enter",
+        savedPlaceId: TEST_PLACE_A.id
+      }),
+      evidence("home-return-support", 94, TEST_PLACE_A),
+      evidence("late-provider-exit", 335, TEST_PLACE_A, {
+        kind: "geofence_exit",
+        savedPlaceId: TEST_PLACE_A.id
+      }),
+      evidence("late-provider-enter", 335, TEST_PLACE_A, {
+        kind: "geofence_enter",
+        savedPlaceId: TEST_PLACE_A.id
+      }),
+      evidence("late-provider-support", 340, TEST_PLACE_A)
+    ], [TEST_PLACE_A]));
+    const stays = result.segmentUpserts.filter((segment): segment is StaySegment => segment.kind === "stay");
+    const commutes = result.segmentUpserts.filter((segment) => segment.kind === "commute");
+
+    expect(stays).toHaveLength(3);
+    expect(stays[1].stoppedAt).toBe(evidence("expected-return-support", 94, TEST_PLACE_A).occurredAt);
+    expect(commutes).toHaveLength(1);
+    expect(commutes[0]).toMatchObject({
+      startedAt: evidence("expected-start", 77.01, TEST_PLACE_A).occurredAt,
+      stoppedAt: evidence("expected-stop", 89, TEST_PLACE_A).occurredAt,
+      routeSampleCount: 2,
+      gapDurationSeconds: 719
+    });
+  });
+
   it("rejects a teleporting standard sample", () => {
     const result = runLocationEngine(engineInput([
       evidence("teleport-start", 0, TEST_PLACE_A),
