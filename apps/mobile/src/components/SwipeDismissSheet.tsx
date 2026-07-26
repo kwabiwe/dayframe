@@ -1,122 +1,363 @@
-import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import {
-  Animated,
-  Easing,
-  PanResponder,
+  forwardRef,
+  useCallback,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  type ReactNode
+} from "react";
+import {
+  Animated as ReactNativeAnimated,
+  Pressable,
   type StyleProp,
   type ViewStyle,
   useWindowDimensions,
   View
 } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Reanimated, {
+  cancelAnimation,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming
+} from "react-native-reanimated";
 import { MOBILE_MOTION } from "@/lib/motion";
+import {
+  backdropProgressForTranslation,
+  createSwipeDismissCoordinator,
+  shouldDismissSwipe,
+  swipeSheetExitPlan,
+  swipeSheetPresentationPlan,
+  SWIPE_DISMISS_MOTION
+} from "@/lib/swipeDismissMotion";
 
-const DISMISS_DISTANCE = 96;
-const DISMISS_VELOCITY = 0.85;
+const REDUCE_MOTION_FADE_MS = 70;
+const OFFSCREEN_PADDING = 32;
+const RETURN_SPRING = {
+  damping: 36,
+  mass: 1,
+  overshootClamping: true,
+  stiffness: 320
+} as const;
+const EXIT_SPRING = {
+  damping: 34,
+  mass: 1,
+  overshootClamping: true,
+  stiffness: 290
+} as const;
+
+export type SwipeDismissSheetHandle = {
+  dismiss: () => void;
+};
 
 type SwipeDismissSheetProps = {
   accessibilityLabel?: string;
+  backdropAccessibilityLabel: string;
+  backdropStyle: StyleProp<ViewStyle>;
   children: ReactNode;
   disabled?: boolean;
   handleStyle: StyleProp<ViewStyle>;
   onDismiss: () => void;
+  onDismissStart?: () => void;
+  onGestureSettled?: () => void;
+  onGestureStart?: () => void;
   reduceMotion: boolean;
   style: StyleProp<ViewStyle>;
-  translateYOffset?: Animated.Value | Animated.AnimatedInterpolation<number> | number;
+  translateYOffset?: ReactNativeAnimated.Value | ReactNativeAnimated.AnimatedInterpolation<number> | number;
+  visible: boolean;
 };
 
-export function SwipeDismissSheet({
+export const SwipeDismissSheet = forwardRef<SwipeDismissSheetHandle, SwipeDismissSheetProps>(
+function SwipeDismissSheet({
   accessibilityLabel,
+  backdropAccessibilityLabel,
+  backdropStyle,
   children,
   disabled = false,
   handleStyle,
   onDismiss,
+  onDismissStart,
+  onGestureSettled,
+  onGestureStart,
   reduceMotion,
   style,
-  translateYOffset = 0
-}: SwipeDismissSheetProps) {
+  translateYOffset = 0,
+  visible
+}, ref) {
   const { height: windowHeight } = useWindowDimensions();
-  const dragY = useRef(new Animated.Value(0)).current;
+  const initialExitTarget = windowHeight + OFFSCREEN_PADDING;
+  const translationY = useSharedValue(initialExitTarget);
+  const exitTarget = useSharedValue(initialExitTarget);
+  const measuredSheetHeight = useSharedValue(windowHeight);
+  const gestureOriginY = useSharedValue(0);
+  const presence = useSharedValue(0);
+  const gestureState = useSharedValue<"idle" | "dragging" | "settling" | "dismissing">("idle");
+  const dismissCommitted = useSharedValue(false);
+  const onDismissRef = useRef(onDismiss);
+  const onDismissStartRef = useRef(onDismissStart);
+  const onGestureSettledRef = useRef(onGestureSettled);
+  const onGestureStartRef = useRef(onGestureStart);
+  const wasVisibleRef = useRef(false);
+  const coordinatorRef = useRef(createSwipeDismissCoordinator(() => onDismissRef.current()));
+  onDismissRef.current = onDismiss;
+  onDismissStartRef.current = onDismissStart;
+  onGestureSettledRef.current = onGestureSettled;
+  onGestureStartRef.current = onGestureStart;
 
-  useEffect(() => {
-    dragY.setValue(0);
-    return () => dragY.stopAnimation();
-  }, [dragY]);
+  const notifyGestureStart = useCallback(() => {
+    onGestureStartRef.current?.();
+  }, []);
 
-  const responder = useMemo(() => {
-    function settle() {
-      dragY.stopAnimation();
-      if (reduceMotion) {
-        dragY.setValue(0);
+  const notifyGestureSettled = useCallback(() => {
+    onGestureSettledRef.current?.();
+  }, []);
+
+  const notifyDismissStart = useCallback(() => {
+    onDismissStartRef.current?.();
+  }, []);
+
+  const beginGestureDismiss = useCallback(() => {
+    if (!coordinatorRef.current.commit()) return;
+    onDismissStartRef.current?.();
+  }, []);
+
+  const finishDismiss = useCallback(() => {
+    coordinatorRef.current.finish();
+  }, []);
+
+  const requestDismiss = useCallback(() => {
+    if (!visible || dismissCommitted.value || !coordinatorRef.current.commit()) return;
+    dismissCommitted.value = true;
+    gestureState.value = "dismissing";
+    notifyDismissStart();
+    cancelAnimation(translationY);
+    const exitPlan = swipeSheetExitPlan({
+      currentTranslation: translationY.value,
+      exitTarget: exitTarget.value,
+      reduceMotion
+    });
+    if (exitPlan.fadeOnly) {
+      presence.value = withTiming(0, { duration: REDUCE_MOTION_FADE_MS }, (finished) => {
+        if (finished) runOnJS(finishDismiss)();
+      });
+      return;
+    }
+    translationY.value = withSpring(exitPlan.translationTarget, EXIT_SPRING, (finished) => {
+      if (finished) runOnJS(finishDismiss)();
+    });
+  }, [
+    dismissCommitted,
+    exitTarget,
+    finishDismiss,
+    gestureState,
+    notifyDismissStart,
+    presence,
+    reduceMotion,
+    translationY,
+    visible
+  ]);
+
+  useImperativeHandle(ref, () => ({ dismiss: requestDismiss }), [requestDismiss]);
+
+  useLayoutEffect(() => {
+    const plan = swipeSheetPresentationPlan({
+      exitTarget: exitTarget.value,
+      reduceMotion,
+      visible
+    });
+    if (!visible) {
+      cancelAnimation(translationY);
+      cancelAnimation(presence);
+      wasVisibleRef.current = false;
+      coordinatorRef.current.hide();
+      dismissCommitted.value = false;
+      gestureState.value = "idle";
+      presence.value = plan.initialPresence;
+      translationY.value = plan.initialTranslation;
+      return;
+    }
+    if (wasVisibleRef.current) return;
+    wasVisibleRef.current = true;
+    cancelAnimation(translationY);
+    cancelAnimation(presence);
+
+    coordinatorRef.current.hide();
+    dismissCommitted.value = false;
+    gestureState.value = "idle";
+    if (reduceMotion) {
+      translationY.value = plan.initialTranslation;
+      presence.value = plan.initialPresence;
+      presence.value = withTiming(plan.animatePresenceTo, { duration: REDUCE_MOTION_FADE_MS });
+      return;
+    }
+    presence.value = plan.initialPresence;
+    translationY.value = plan.initialTranslation;
+    translationY.value = withTiming(plan.animateTranslationTo, { duration: MOBILE_MOTION.sheet });
+  }, [
+    dismissCommitted,
+    exitTarget,
+    gestureState,
+    presence,
+    reduceMotion,
+    translationY,
+    visible
+  ]);
+
+  const gesture = useMemo(() => Gesture.Pan()
+    .enabled(!disabled && visible)
+    .activeOffsetY(SWIPE_DISMISS_MOTION.activeOffsetY)
+    .failOffsetX([
+      -SWIPE_DISMISS_MOTION.horizontalFailureOffset,
+      SWIPE_DISMISS_MOTION.horizontalFailureOffset
+    ])
+    .onBegin(() => {
+      if (dismissCommitted.value) return;
+      cancelAnimation(translationY);
+      gestureOriginY.value = translationY.value;
+      gestureState.value = "dragging";
+      runOnJS(notifyGestureStart)();
+    })
+    .onUpdate((event) => {
+      if (gestureState.value !== "dragging" || dismissCommitted.value) return;
+      translationY.value = Math.max(0, gestureOriginY.value + event.translationY);
+    })
+    .onEnd((event) => {
+      if (gestureState.value !== "dragging" || dismissCommitted.value) return;
+      const dismiss = shouldDismissSwipe({
+        disabled,
+        sheetHeight: measuredSheetHeight.value,
+        translationX: event.translationX,
+        translationY: translationY.value,
+        velocityY: event.velocityY
+      });
+      if (!dismiss) {
+        gestureState.value = "settling";
+        if (reduceMotion) {
+          translationY.value = 0;
+          gestureState.value = "idle";
+          runOnJS(notifyGestureSettled)();
+          return;
+        }
+        translationY.value = withSpring(0, {
+          ...RETURN_SPRING,
+          velocity: event.velocityY
+        }, (finished) => {
+          if (!finished || dismissCommitted.value) return;
+          gestureState.value = "idle";
+          runOnJS(notifyGestureSettled)();
+        });
         return;
       }
-      Animated.timing(dragY, {
-        toValue: 0,
-        duration: MOBILE_MOTION.sheet,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true
-      }).start();
-    }
 
-    return PanResponder.create({
-      // The dedicated 44-point handle owns the gesture from touch-down. Keeping
-      // the responder off the scrolling form prevents conflicts with controls.
-      onStartShouldSetPanResponder: () => !disabled,
-      onMoveShouldSetPanResponder: (_event, gesture) =>
-        !disabled && gesture.dy > 2 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
-      onPanResponderGrant: () => {
-        dragY.stopAnimation();
-      },
-      onPanResponderMove: (_event, gesture) => {
-        dragY.setValue(Math.max(0, gesture.dy));
-      },
-      onPanResponderRelease: (_event, gesture) => {
-        const shouldDismiss =
-          gesture.dy >= DISMISS_DISTANCE ||
-          (gesture.dy > 12 && gesture.vy >= DISMISS_VELOCITY);
-        if (!shouldDismiss) {
-          settle();
-          return;
-        }
-        if (reduceMotion) {
-          dragY.setValue(0);
-          onDismiss();
-          return;
-        }
-        Animated.timing(dragY, {
-          toValue: windowHeight,
-          duration: MOBILE_MOTION.sheet,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true
-        }).start(({ finished }) => {
-          dragY.setValue(0);
-          if (finished) onDismiss();
+      dismissCommitted.value = true;
+      gestureState.value = "dismissing";
+      runOnJS(beginGestureDismiss)();
+      const exitPlan = swipeSheetExitPlan({
+        currentTranslation: translationY.value,
+        exitTarget: exitTarget.value,
+        reduceMotion
+      });
+      if (exitPlan.fadeOnly) {
+        presence.value = withTiming(0, { duration: REDUCE_MOTION_FADE_MS }, (finished) => {
+          if (finished) runOnJS(finishDismiss)();
         });
-      },
-      onPanResponderTerminate: settle,
-      onPanResponderTerminationRequest: () => false
-    });
-  }, [disabled, dragY, onDismiss, reduceMotion, windowHeight]);
+        return;
+      }
+      translationY.value = withSpring(exitPlan.translationTarget, {
+        ...EXIT_SPRING,
+        velocity: Math.max(0, event.velocityY)
+      }, (finished) => {
+        if (finished) runOnJS(finishDismiss)();
+      });
+    })
+    .onFinalize((_event, succeeded) => {
+      if (succeeded || gestureState.value !== "dragging" || dismissCommitted.value) return;
+      gestureState.value = "settling";
+      if (reduceMotion) {
+        translationY.value = 0;
+        gestureState.value = "idle";
+        runOnJS(notifyGestureSettled)();
+        return;
+      }
+      translationY.value = withSpring(0, RETURN_SPRING, (finished) => {
+        if (!finished || dismissCommitted.value) return;
+        gestureState.value = "idle";
+        runOnJS(notifyGestureSettled)();
+      });
+    }), [
+    disabled,
+    dismissCommitted,
+    exitTarget,
+    finishDismiss,
+    gestureOriginY,
+    gestureState,
+    measuredSheetHeight,
+    beginGestureDismiss,
+    notifyGestureSettled,
+    notifyGestureStart,
+    presence,
+    reduceMotion,
+    translationY,
+    visible
+  ]);
 
-  const translateY = Animated.add(dragY, translateYOffset);
+  const sheetAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translationY.value }]
+  }));
+  const backdropAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: presence.value *
+      backdropProgressForTranslation(translationY.value, exitTarget.value)
+  }));
 
   return (
-    <Animated.View
-      accessibilityLabel={accessibilityLabel}
-      accessibilityViewIsModal
-      style={[style, { transform: [{ translateY }] }]}
-    >
-      <View
-        accessibilityLabel="Dismiss sheet"
-        accessibilityRole="adjustable"
-        style={HANDLE_TOUCH_STYLE}
-        {...responder.panHandlers}
-      >
-        <View pointerEvents="none" style={handleStyle} />
-      </View>
-      {children}
-    </Animated.View>
+    <>
+      <Reanimated.View pointerEvents={visible ? "auto" : "none"} style={[backdropStyle, backdropAnimatedStyle]}>
+        <Pressable
+          accessibilityLabel={backdropAccessibilityLabel}
+          accessibilityRole="button"
+          onPress={requestDismiss}
+          style={BACKDROP_PRESSABLE_STYLE}
+        />
+      </Reanimated.View>
+      <ReactNativeAnimated.View style={{ transform: [{ translateY: translateYOffset }] }}>
+        <Reanimated.View
+          accessibilityLabel={accessibilityLabel}
+          accessibilityViewIsModal
+          onLayout={(event) => {
+            const measuredTarget = Math.max(
+              event.nativeEvent.layout.height + OFFSCREEN_PADDING,
+              windowHeight + OFFSCREEN_PADDING
+            );
+            measuredSheetHeight.value = event.nativeEvent.layout.height;
+            exitTarget.value = measuredTarget;
+          }}
+          style={[style, sheetAnimatedStyle]}
+        >
+          <GestureDetector gesture={gesture}>
+            <View
+              accessibilityHint="Swipe down or double tap to close"
+              accessibilityLabel="Dismiss sheet"
+              accessibilityRole="button"
+              accessibilityState={{ disabled }}
+              onAccessibilityTap={disabled ? undefined : requestDismiss}
+              style={HANDLE_TOUCH_STYLE}
+            >
+              <View pointerEvents="none" style={handleStyle} />
+            </View>
+          </GestureDetector>
+          {children}
+        </Reanimated.View>
+      </ReactNativeAnimated.View>
+    </>
   );
-}
+});
+
+const BACKDROP_PRESSABLE_STYLE: ViewStyle = {
+  flex: 1
+};
 
 const HANDLE_TOUCH_STYLE: ViewStyle = {
   alignItems: "center",

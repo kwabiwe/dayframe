@@ -14,7 +14,10 @@ import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import { SheetMutationProgress } from "@/components/SheetMutationProgress";
-import { SwipeDismissSheet } from "@/components/SwipeDismissSheet";
+import {
+  SwipeDismissSheet,
+  type SwipeDismissSheetHandle
+} from "@/components/SwipeDismissSheet";
 import {
   AuthRequiredError,
   deletePlace,
@@ -142,7 +145,10 @@ export default function PlacesScreen() {
     }
   }
 
-  function confirmIgnoreLearnedCandidate(learnedPlace: MobileLearnedPlace) {
+  function confirmIgnoreLearnedCandidate(
+    learnedPlace: MobileLearnedPlace,
+    onSuccess?: () => void
+  ) {
     Alert.alert(
       "Ignore learned place",
       "Ignore hides this learned location from save suggestions. It will not create or confirm any time entries.",
@@ -151,7 +157,9 @@ export default function PlacesScreen() {
         {
           text: "Ignore",
           onPress: () => {
-            void ignoreLearnedCandidate(learnedPlace);
+            void ignoreLearnedCandidate(learnedPlace).then((succeeded) => {
+              if (succeeded) onSuccess?.();
+            });
           }
         }
       ]
@@ -169,18 +177,23 @@ export default function PlacesScreen() {
         prefix: "Learned place ignored.",
         removeLearnedPlaceId: learnedPlace.id
       });
+      return true;
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         router.replace("/");
         return;
       }
       Alert.alert("Places", error instanceof Error ? error.message : "Unable to ignore learned place.");
+      return false;
     } finally {
       setIgnoringLearnedId(null);
     }
   }
 
-  function confirmForgetLearnedCandidate(learnedPlace: MobileLearnedPlace) {
+  function confirmForgetLearnedCandidate(
+    learnedPlace: MobileLearnedPlace,
+    onSuccess?: () => void
+  ) {
     Alert.alert(
       "Forget learned place",
       "Forget deletes this learned candidate. Dayframe may learn it again later if future visits provide enough evidence.",
@@ -190,7 +203,9 @@ export default function PlacesScreen() {
           text: "Forget",
           style: "destructive",
           onPress: () => {
-            void forgetLearnedCandidate(learnedPlace);
+            void forgetLearnedCandidate(learnedPlace).then((succeeded) => {
+              if (succeeded) onSuccess?.();
+            });
           }
         }
       ]
@@ -208,12 +223,14 @@ export default function PlacesScreen() {
         prefix: "Learned place forgotten.",
         removeLearnedPlaceId: learnedPlace.id
       });
+      return true;
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         router.replace("/");
         return;
       }
       Alert.alert("Places", error instanceof Error ? error.message : "Unable to forget learned place.");
+      return false;
     } finally {
       setForgettingLearnedId(null);
     }
@@ -224,7 +241,6 @@ export default function PlacesScreen() {
   }
 
   function removeLocalLearnedPlace(id: string) {
-    setSelectedLearnedPlace((current) => current?.id === id ? null : current);
     setData((current) => current ? reconcileBootstrapPlaces(current, { removeLearnedPlaceId: id }) : current);
   }
 
@@ -379,8 +395,8 @@ export default function PlacesScreen() {
         learnedPlace={selectedLearnedPlace}
         onClose={() => setSelectedLearnedPlace(null)}
         onEdit={(learnedPlace) => beginSaveLearnedPlace(learnedPlace)}
-        onForget={(learnedPlace) => confirmForgetLearnedCandidate(learnedPlace)}
-        onIgnore={(learnedPlace) => confirmIgnoreLearnedCandidate(learnedPlace)}
+        onForget={(learnedPlace, onSuccess) => confirmForgetLearnedCandidate(learnedPlace, onSuccess)}
+        onIgnore={(learnedPlace, onSuccess) => confirmIgnoreLearnedCandidate(learnedPlace, onSuccess)}
         onSave={(learnedPlace) => beginSaveLearnedPlace(learnedPlace)}
         styles={styles}
         theme={theme}
@@ -532,18 +548,21 @@ function LearnedPlaceDetailSheet({
   learnedPlace: MobileLearnedPlace | null;
   onClose: () => void;
   onEdit: (learnedPlace: MobileLearnedPlace) => void;
-  onForget: (learnedPlace: MobileLearnedPlace) => void;
-  onIgnore: (learnedPlace: MobileLearnedPlace) => void;
+  onForget: (learnedPlace: MobileLearnedPlace, onSuccess: () => void) => void;
+  onIgnore: (learnedPlace: MobileLearnedPlace, onSuccess: () => void) => void;
   onSave: (learnedPlace: MobileLearnedPlace) => void;
   styles: MobileStyles;
   theme: MobileTheme;
 }) {
   const [copyToast, setCopyToast] = useState<string | null>(null);
   const reduceMotion = useReduceMotionPreference();
+  const sheetRef = useRef<SwipeDismissSheetHandle>(null);
+  const dismissalActionRef = useRef<() => void>(onClose);
   const copyToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyToastToken = useRef(0);
 
   useEffect(() => {
+    dismissalActionRef.current = onClose;
     copyToastToken.current += 1;
     if (copyToastTimer.current) clearTimeout(copyToastTimer.current);
     copyToastTimer.current = null;
@@ -559,6 +578,15 @@ function LearnedPlaceDetailSheet({
   const details = learnedPlaceDetailValues(learnedPlace);
   const associatedCategory = learnedPlaceCategoryLabel(learnedPlace, categories);
   const disabled = ignoring || forgetting;
+  function dismissWith(action: () => void = onClose) {
+    dismissalActionRef.current = action;
+    sheetRef.current?.dismiss();
+  }
+  function finishDismissal() {
+    const action = dismissalActionRef.current;
+    dismissalActionRef.current = onClose;
+    action();
+  }
   async function copyDetail(label: string, value: string | null) {
     const copied = await copyLearnedPlaceDetail(value, Clipboard.setStringAsync);
     if (!copied) return;
@@ -573,16 +601,19 @@ function LearnedPlaceDetailSheet({
   }
 
   return (
-    <Modal animationType="slide" onRequestClose={onClose} transparent visible>
+    <Modal animationType="none" onRequestClose={() => dismissWith()} transparent visible>
       <View style={styles.sheetOverlay}>
-        <Pressable accessibilityLabel="Close learned place details" style={styles.sheetBackdrop} onPress={onClose} />
         <SwipeDismissSheet
+          ref={sheetRef}
           accessibilityLabel="Place suggestion"
+          backdropAccessibilityLabel="Close learned place details"
+          backdropStyle={styles.sheetBackdrop}
           disabled={disabled}
           handleStyle={styles.sheetHandle}
-          onDismiss={onClose}
+          onDismiss={finishDismissal}
           reduceMotion={reduceMotion}
           style={styles.activeEditSheet}
+          visible
         >
           <View>
             <View style={[styles.sheetHeader, styles.sheetHeaderCentered]}>
@@ -592,7 +623,7 @@ function LearnedPlaceDetailSheet({
                 accessibilityRole="button"
                 hitSlop={8}
                 style={pressable(styles.iconButton, styles.buttonPressed)}
-                onPress={onClose}
+                onPress={() => dismissWith()}
               >
                 <CloseGlyph color={theme.textPrimary} />
               </Pressable>
@@ -648,14 +679,14 @@ function LearnedPlaceDetailSheet({
               <Pressable
                 accessibilityRole="button"
                 style={pressable(styles.primaryInlineButton, styles.buttonPressed)}
-                onPress={() => onSave(learnedPlace)}
+                onPress={() => dismissWith(() => onSave(learnedPlace))}
               >
                 <Text style={styles.primaryButtonText}>Save place</Text>
               </Pressable>
               <Pressable
                 accessibilityRole="button"
                 style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                onPress={() => onEdit(learnedPlace)}
+                onPress={() => dismissWith(() => onEdit(learnedPlace))}
               >
                 <Text style={styles.secondaryButtonText}>Edit before saving</Text>
               </Pressable>
@@ -669,7 +700,7 @@ function LearnedPlaceDetailSheet({
                   disabled ? styles.buttonDisabled : null,
                   pressed && !disabled ? styles.buttonPressed : null
                 ]}
-                onPress={() => onIgnore(learnedPlace)}
+                onPress={() => onIgnore(learnedPlace, () => dismissWith())}
               >
                 <Text style={styles.secondaryButtonText}>{ignoring ? "Ignoring..." : "Ignore"}</Text>
               </Pressable>
@@ -681,7 +712,7 @@ function LearnedPlaceDetailSheet({
                   disabled ? styles.buttonDisabled : null,
                   pressed && !disabled ? styles.buttonPressed : null
                 ]}
-                onPress={() => onForget(learnedPlace)}
+                onPress={() => onForget(learnedPlace, () => dismissWith())}
               >
                 <Text style={styles.activeEditDeleteText}>{forgetting ? "Forgetting..." : "Forget"}</Text>
               </Pressable>

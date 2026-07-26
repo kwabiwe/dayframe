@@ -18,7 +18,10 @@ import Reanimated from "react-native-reanimated";
 import Svg, { Path } from "react-native-svg";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { SwipeDismissSheet } from "@/components/SwipeDismissSheet";
+import {
+  SwipeDismissSheet,
+  type SwipeDismissSheetHandle
+} from "@/components/SwipeDismissSheet";
 import {
   localLayoutTransition,
   localPresenceEntering,
@@ -1822,24 +1825,28 @@ function LocationInformationSheet({
   styles: MobileStyles;
   theme: MobileTheme;
 }) {
+  const sheetRef = useRef<SwipeDismissSheetHandle>(null);
   if (!kind) return null;
   const isPlaces = kind === "places";
   return (
     <Modal
-      animationType={reduceMotion ? "none" : "fade"}
-      onRequestClose={onClose}
+      animationType="none"
+      onRequestClose={() => sheetRef.current?.dismiss()}
       presentationStyle="overFullScreen"
       transparent
       visible
     >
       <View accessibilityViewIsModal style={styles.sheetOverlay}>
-        <Pressable accessibilityLabel="Close information" style={styles.sheetBackdrop} onPress={onClose} />
         <SwipeDismissSheet
+          ref={sheetRef}
           accessibilityLabel={isPlaces ? "About saved places" : "About location suggestions"}
+          backdropAccessibilityLabel="Close information"
+          backdropStyle={styles.sheetBackdrop}
           handleStyle={styles.sheetHandle}
           onDismiss={onClose}
           reduceMotion={reduceMotion}
           style={styles.activeEditSheet}
+          visible
         >
           <View style={styles.sheetHeader}>
             <Text style={styles.sheetTitle}>{isPlaces ? "About saved places" : "About location suggestions"}</Text>
@@ -1847,7 +1854,7 @@ function LocationInformationSheet({
               accessibilityLabel="Close information"
               accessibilityRole="button"
               style={pressable(styles.iconButton, styles.buttonPressed)}
-              onPress={onClose}
+              onPress={() => sheetRef.current?.dismiss()}
             >
               <CloseGlyph color={theme.accent} />
             </Pressable>
