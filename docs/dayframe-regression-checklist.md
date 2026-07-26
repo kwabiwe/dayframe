@@ -46,6 +46,19 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Today history deletion begins immediately without a confirmation surface and shows the five-second inverse-colour Undo bean before persistence is committed. Row/group removal, surrounding list reflow, Undo entrance/exit, expiry, exact restoration, and persistence-failure rollback transition continuously rather than popping. A rapid second delete deterministically commits the older pending deletion, starts a fresh five-second window, and cannot be dismissed or restored by an older timer/callback. Blank uncategorized entries remain individual rows with direct edit/delete access instead of collapsing into a non-deletable aggregate.
 - Timesheet view groups work by category/activity, shows day totals and row totals, and remains readable.
 
+## Mobile Sheets And Direct Manipulation
+
+- Edit entry, Edit running timer, learned-place details, saved-place information, and location-suggestions information use the shared handle-owned sheet; no consumer restores a local swipe implementation.
+- A sheet transition has one animation owner. Never combine a native React Native Modal slide with a custom translation entrance or exit.
+- Never reset an animated sheet to its resting position before its visible dismissal completes. Invoke the parent close callback after the coordinated off-screen/opacity exit, then reset only while hidden or before the next hidden-to-visible presentation.
+- A draggable sheet and its backdrop share one dismissal-progress owner. The backdrop lightens continuously during drag, restores with a rejected release, reaches zero with the off-screen sheet, and cannot remain mounted alone.
+- Rejected releases settle from the exact release point with a critically damped, non-overshooting return. A committed dismissal cannot later settle to rest, and rapid swipe/backdrop/Done/native-close requests invoke the parent callback once.
+- Direct manipulation stays on the UI thread and begins only on the dedicated 44-point handle. The form ScrollView, text inputs, category scroller, date picker, and delete confirmation keep their existing owners.
+- Keyboard lift and swipe translation use separate nested layers. Keyboard frame changes are frozen during handle manipulation and committed exit so they cannot pull the sheet upward or change the dismissal decision.
+- Reduce Motion removes sheet travel and uses only a brief coordinated opacity transition. VoiceOver retains the labelled handle plus the existing Done/close alternative; Dynamic Type may change the measured exit boundary without clipping or snapping.
+- Direct-manipulation changes require physical-device, frame-by-frame validation. A simulator build and source-string tests do not validate animation ordering, finger tracking, frame pacing, rejected-release feel, or ghost-frame absence.
+- Source-string ownership checks may supplement behavioral state-ordering tests, but never constitute the sole animation evidence.
+
 ## Tags
 
 - Typing `#` at a valid task-description token boundary opens one anchored autocomplete without moving the input, caret, keyboard, or surrounding form.

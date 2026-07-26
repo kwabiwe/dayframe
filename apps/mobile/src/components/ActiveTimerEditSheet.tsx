@@ -36,7 +36,10 @@ import type { MobileBootstrap, MobileTag, MobileTimeEntry, TimeEntryUpdatePatch 
 import { useReduceMotionPreference } from "@/lib/motion";
 import { runningTimerSheetElapsedSeconds } from "@/lib/timerPresentation";
 import { TagMetadata } from "@/components/TagMetadata";
-import { SwipeDismissSheet } from "@/components/SwipeDismissSheet";
+import {
+  SwipeDismissSheet,
+  type SwipeDismissSheetHandle
+} from "@/components/SwipeDismissSheet";
 
 const MAX_RUNNING_SUGGESTIONS = 6;
 
@@ -69,7 +72,7 @@ export function ActiveTimerEditSheet({
   categories,
   descriptionPlaceholder = "What are you working on?",
   elapsedSeconds,
-  entry,
+  entry: currentEntry,
   lastStoppedAt,
   mode = "running",
   onCancel,
@@ -110,6 +113,11 @@ export function ActiveTimerEditSheet({
   const [highlightedTagAction, setHighlightedTagAction] = useState<string | null>(null);
   const reduceMotion = useReduceMotionPreference();
   const keyboardLift = useRef(new Animated.Value(0)).current;
+  const sheetRef = useRef<SwipeDismissSheetHandle>(null);
+  const presentedEntryRef = useRef<MobileTimeEntry | null>(currentEntry);
+  const keyboardMotionFrozen = useRef(false);
+  const pendingKeyboardUpdate = useRef<{ event?: KeyboardEvent; inset: number } | null>(null);
+  const applyKeyboardUpdateRef = useRef<(inset: number, event?: KeyboardEvent) => void>(() => undefined);
   const suggestionsProgress = useRef(new Animated.Value(0)).current;
   const hashtagPanelProgress = useRef(new Animated.Value(0)).current;
   const descriptionInputRef = useRef<TextInput>(null);
@@ -117,6 +125,12 @@ export function ActiveTimerEditSheet({
   const descriptionEntryStarted = useRef(false);
   const timeInputRef = useRef<TextInput>(null);
   const startTimeFocused = useRef(false);
+  if (currentEntry) {
+    presentedEntryRef.current = currentEntry;
+  } else if (!visible) {
+    presentedEntryRef.current = null;
+  }
+  const entry = currentEntry ?? (visible ? presentedEntryRef.current : null);
 
   const isRunningMode = mode === "running";
   const isEntryMode = mode === "entry";
@@ -211,6 +225,8 @@ export function ActiveTimerEditSheet({
 
   useEffect(() => {
     if (!visible) {
+      keyboardMotionFrozen.current = false;
+      pendingKeyboardUpdate.current = null;
       setKeyboardInset(0);
       keyboardLift.setValue(0);
       suggestionsProgress.setValue(0);
@@ -242,15 +258,7 @@ export function ActiveTimerEditSheet({
       }).start();
     }
 
-    function updateKeyboardInset(event: KeyboardEvent) {
-      Keyboard.scheduleLayoutAnimation(event);
-      const windowHeight = Dimensions.get("window").height;
-      const screenHeight = Dimensions.get("screen").height;
-      const nextInset = keyboardInsetFromScreenY({
-        keyboardScreenY: event.endCoordinates.screenY,
-        screenHeight,
-        windowHeight
-      });
+    function applyKeyboardUpdate(nextInset: number, event?: KeyboardEvent) {
       const nextLayout = editSheetKeyboardLayout({
         bottomInset: insets.bottom,
         keyboardInset: nextInset,
@@ -265,6 +273,27 @@ export function ActiveTimerEditSheet({
         });
       }
     }
+    applyKeyboardUpdateRef.current = applyKeyboardUpdate;
+
+    function queueOrApplyKeyboardUpdate(nextInset: number, event?: KeyboardEvent) {
+      if (keyboardMotionFrozen.current) {
+        pendingKeyboardUpdate.current = { event, inset: nextInset };
+        return;
+      }
+      applyKeyboardUpdate(nextInset, event);
+    }
+
+    function updateKeyboardInset(event: KeyboardEvent) {
+      Keyboard.scheduleLayoutAnimation(event);
+      const windowHeight = Dimensions.get("window").height;
+      const screenHeight = Dimensions.get("screen").height;
+      const nextInset = keyboardInsetFromScreenY({
+        keyboardScreenY: event.endCoordinates.screenY,
+        screenHeight,
+        windowHeight
+      });
+      queueOrApplyKeyboardUpdate(nextInset, event);
+    }
 
     const changeSubscription = Keyboard.addListener(
       Platform.OS === "ios" ? "keyboardWillChangeFrame" : "keyboardDidShow",
@@ -274,8 +303,7 @@ export function ActiveTimerEditSheet({
       Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
       (event) => {
         Keyboard.scheduleLayoutAnimation(event);
-        setKeyboardInset(0);
-        animateKeyboardLift(0, event);
+        queueOrApplyKeyboardUpdate(0, event);
       }
     );
 
@@ -284,6 +312,24 @@ export function ActiveTimerEditSheet({
       hideSubscription.remove();
     };
   }, [hashtagPanelProgress, insets.bottom, insets.top, keyboardLift, reduceMotion, suggestionsProgress, visible, windowDimensions.height]);
+
+  function freezeKeyboardMotion() {
+    keyboardMotionFrozen.current = true;
+    keyboardLift.stopAnimation();
+  }
+
+  function releaseKeyboardMotion() {
+    if (!keyboardMotionFrozen.current) return;
+    keyboardMotionFrozen.current = false;
+    const pending = pendingKeyboardUpdate.current;
+    pendingKeyboardUpdate.current = null;
+    if (pending) applyKeyboardUpdateRef.current(pending.inset, pending.event);
+  }
+
+  function commitSheetDismissal() {
+    freezeKeyboardMotion();
+    Keyboard.dismiss();
+  }
 
   const activeHashtag = useMemo(
     () => descriptionSelection.start === descriptionSelection.end
@@ -466,13 +512,13 @@ export function ActiveTimerEditSheet({
 
     setValidationError(null);
     const ok = await onSave(entry.id, patch);
-    if (ok) onCancel();
+    if (ok) sheetRef.current?.dismiss();
   }
 
   async function stopFromSheet() {
     if (busy || !onStop) return;
     const ok = await onStop();
-    if (ok) onCancel();
+    if (ok) sheetRef.current?.dismiss();
   }
 
   async function applyRunningSuggestion(suggestion: RecentActivitySuggestion) {
@@ -501,7 +547,7 @@ export function ActiveTimerEditSheet({
     if (busy || !entry || !onDelete) return;
     setDeleteConfirmationVisible(false);
     const ok = await onDelete(entry.id);
-    if (ok) onCancel();
+    if (ok) sheetRef.current?.dismiss();
   }
 
   function useLastStopTime() {
@@ -645,32 +691,32 @@ export function ActiveTimerEditSheet({
   return (
     <>
       <Modal
-      animationType={reduceMotion ? "none" : "slide"}
+      animationType="none"
       onRequestClose={() => {
         if (deleteConfirmationVisible) {
           setDeleteConfirmationVisible(false);
           return;
         }
-        onCancel();
+        sheetRef.current?.dismiss();
       }}
       presentationStyle="overFullScreen"
       transparent
       visible={visible}
     >
       <View style={styles.sheetOverlay}>
-        <Pressable
-          accessibilityLabel={cancelLabel}
-          accessibilityRole="button"
-          onPress={onCancel}
-          style={styles.sheetBackdrop}
-        />
         <View pointerEvents="box-none" style={styles.sheetKeyboardAvoidingView}>
           <SafeAreaView edges={[]} pointerEvents="box-none" style={styles.sheetSafeArea}>
             <SwipeDismissSheet
+              ref={sheetRef}
               accessibilityLabel={isRunningMode ? "Edit timer" : sheetTitle}
+              backdropAccessibilityLabel={cancelLabel}
+              backdropStyle={styles.sheetBackdrop}
               disabled={busy || deleteConfirmationVisible || datePickerOpen}
               handleStyle={styles.sheetHandle}
               onDismiss={onCancel}
+              onDismissStart={commitSheetDismissal}
+              onGestureSettled={releaseKeyboardMotion}
+              onGestureStart={freezeKeyboardMotion}
               reduceMotion={reduceMotion}
               style={[
                 styles.activeEditSheet,
@@ -678,6 +724,7 @@ export function ActiveTimerEditSheet({
                 { paddingBottom: Math.max(10, Math.min(16, insets.bottom)) }
               ]}
               translateYOffset={Animated.multiply(keyboardLift, -1)}
+              visible={visible}
             >
               <View style={[styles.sheetHeader, isRunningMode ? styles.sheetHeaderRunning : null]}>
                   {!isRunningMode ? <Text style={styles.sheetTitle}>{sheetTitle}</Text> : null}

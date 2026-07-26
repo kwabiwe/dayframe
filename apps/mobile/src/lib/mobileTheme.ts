@@ -1729,8 +1729,7 @@ function createStyles(theme: MobileTheme) {
     },
     sheetOverlay: {
       flex: 1,
-      justifyContent: "flex-end",
-      backgroundColor: theme.overlay
+      justifyContent: "flex-end"
     },
     datePickerOverlay: {
       position: "absolute",
@@ -1862,7 +1861,8 @@ function createStyles(theme: MobileTheme) {
       top: 0,
       right: 0,
       bottom: 0,
-      left: 0
+      left: 0,
+      backgroundColor: theme.overlay
     },
     sheetKeyboardAvoidingView: {
       flex: 1,
