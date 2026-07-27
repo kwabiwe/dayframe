@@ -662,6 +662,7 @@ function CalendarReview({
                         entry.stoppedAt ? "" : "is-running",
                         startsBeforeDay ? "is-continuation-from-previous" : "",
                         continuesIntoNextDay ? "is-continuation-to-next" : "",
+                        entry.categoryId ? "" : "is-uncategorized",
                         lane.textDensity === "none" ? "has-no-text is-compact-overlap" : "",
                         ...timeBlockDensityClassNames(density)
                       ].join(" ")}
@@ -856,7 +857,7 @@ function TimesheetView({
               <td className="border-r border-[var(--line)] px-3 py-3">
                 <span className="flex items-center gap-2 font-semibold">
                   <span
-                    className={`h-3 w-3 border border-[var(--line-strong)]${row.categoryName ? "" : " is-uncategorized"}`}
+                    className={`category-data-marker${row.categoryName ? "" : " is-uncategorized"}`}
                     style={{ backgroundColor: timeEntryCategoryColor(row) }}
                   />
                   {timeEntryCategoryLabel(row)}

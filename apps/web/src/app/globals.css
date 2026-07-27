@@ -889,8 +889,21 @@ textarea.ui-control {
   width: 12px;
   height: 12px;
   margin-top: 4px;
-  border: 1px solid var(--line-strong);
+  border: 0;
   border-radius: 999px;
+}
+
+.category-data-marker {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 999px;
+}
+
+.timeline-task-category-dot.is-uncategorized,
+.category-data-marker.is-uncategorized {
+  border: 1px solid var(--text-secondary);
 }
 
 .timeline-task-details {
@@ -2010,12 +2023,7 @@ dialog.ui-popover-panel.bottom-left {
 
 .dashboard-category-marker.is-uncategorized {
   border: 1px solid var(--text-secondary);
-  border-radius: 2px;
-  background: repeating-linear-gradient(
-    45deg,
-    var(--surface-muted) 0 2px,
-    var(--text-secondary) 2px 3px
-  );
+  border-radius: 999px;
 }
 
 .dashboard-allocation-name {
@@ -5489,6 +5497,16 @@ kbd {
     135deg,
     transparent 0 3px,
     color-mix(in srgb, var(--muted) 42%, transparent) 3px 5px
+  ) !important;
+}
+
+.calendar-time-block.is-uncategorized {
+  --calendar-block-accent: var(--muted) !important;
+  background-color: var(--surface-inset) !important;
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent 0 7px,
+    color-mix(in srgb, var(--muted) 26%, transparent) 7px 10px
   ) !important;
 }
 
