@@ -62,9 +62,14 @@ final class DayframeCalendarExpoView: ExpoView {
     guard let data = modelJSON.data(using: .utf8) else { return }
     do {
       let record = try JSONDecoder().decode(DayframeCalendarPresentationRecord.self, from: data)
+      guard record.modelVersion == 3 else {
+        model.reset()
+        return
+      }
       model.update(record)
       backgroundColor = UIColor(dayframeCSS: record.theme.background)
     } catch {
+      model.reset()
       assertionFailure("Invalid Dayframe Calendar model: \(error)")
     }
   }

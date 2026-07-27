@@ -32,7 +32,9 @@ describe("report calculations", () => {
     const daily = Array.from({ length: 63 }, (_, index) => ({
       key: `2026-01-${`${index + 1}`.padStart(2, "0")}`,
       label: `Day ${index + 1}`,
-      seconds: index === 1 ? 3_600 : 0
+      seconds: index === 1 ? 4_200 : 0,
+      coveredSeconds: index === 1 ? 3_600 : 0,
+      additionalOverlappingActivitySeconds: index === 1 ? 600 : 0
     }));
     expect(buildReportTrendSeries(daily.slice(0, 7))).toEqual(expect.objectContaining({
       granularity: "day",
@@ -41,7 +43,12 @@ describe("report calculations", () => {
     const aggregated = buildReportTrendSeries(daily);
     expect(aggregated.granularity).toBe("week");
     expect(aggregated.points).toHaveLength(9);
-    expect(aggregated.points.reduce((sum, point) => sum + point.seconds, 0)).toBe(3_600);
+    expect(aggregated.points.reduce((sum, point) => sum + point.seconds, 0)).toBe(4_200);
+    expect(aggregated.points.reduce((sum, point) => sum + point.coveredSeconds, 0)).toBe(3_600);
+    expect(aggregated.points.reduce(
+      (sum, point) => sum + point.additionalOverlappingActivitySeconds,
+      0
+    )).toBe(600);
   });
 
   it("produces factual, finite comparison copy for zero and non-zero periods", () => {

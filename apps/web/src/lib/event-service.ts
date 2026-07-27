@@ -442,7 +442,7 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
           ...candidate,
           action: "create_review_item",
           reviewStatus: "needs_review",
-          reason: "This Health activity overlaps existing time and needs review before becoming confirmed time."
+          reason: "Automatic logging paused because this Health activity overlaps existing time. You can still confirm it from Review."
         };
       }
     }
@@ -454,7 +454,7 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
           ...candidate,
           action: "create_review_item",
           reviewStatus: "needs_review",
-          reason: "This commute overlaps existing time and needs review before becoming confirmed time."
+          reason: "Automatic logging paused because this commute overlaps existing time. You can still confirm it from Review."
         };
       }
     }
@@ -2946,9 +2946,9 @@ function addHealthReviewReason(reasons: HealthReviewReason[], reason: HealthRevi
 function overlapReviewNote(blockingEntry: OverlapBlockingEntry) {
   const title = blockingEntry.description?.trim() || blockingEntry.categoryName || blockingEntry.source;
   if (blockingEntry.stoppedAtIsNull) {
-    return `Left in Review: overlaps stale open timer "${title}" with no stop time.`;
+    return `Left in Review: automatic logging paused because this overlaps stale open timer "${title}" with no stop time. You can still confirm it.`;
   }
-  return `Left in Review: overlaps existing timer "${title}".`;
+  return `Left in Review: automatic logging paused because this overlaps existing timer "${title}". You can still confirm it.`;
 }
 
 async function updateHealthReviewCategory(

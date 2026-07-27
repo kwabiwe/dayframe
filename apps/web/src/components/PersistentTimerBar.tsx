@@ -14,6 +14,7 @@ import { CalendarDays, CheckCircle2, ChevronDown, Clock3, Ellipsis, Play, Plus, 
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { InlineTagInput } from "@/components/InlineTagInput";
 import { DayframeDateTimePicker } from "@/components/DayframeDateTimePicker";
+import { OverlapNotice } from "@/components/OverlapNotice";
 import { Button, Field, IconButton, ModalDialog } from "@/components/ui/Primitives";
 import { timeEntryAccentColor } from "@/lib/display";
 import { dateTimeLocalInputToIso, formatClockDuration, formatTime } from "@/lib/format";
@@ -744,6 +745,8 @@ function ManualEntryDialog({
   const categoryTriggerRef = useRef<HTMLButtonElement | null>(null);
   const selectedCategory = data.categories.find((category) => category.id === categoryId) ?? null;
   const defaults = useMemo(() => manualEntryDefaults(data.dateRange.selectedDate), [data.dateRange.selectedDate]);
+  const [startedAtDraft, setStartedAtDraft] = useState(defaults.start);
+  const [stoppedAtDraft, setStoppedAtDraft] = useState(defaults.finish);
   const visibleTaskSuggestions = useMemo(() => {
     const query = description.trim().toLocaleLowerCase();
     if (!query) return data.taskSuggestions.slice(0, TASK_SUGGESTION_LIMIT);
@@ -972,11 +975,30 @@ function ManualEntryDialog({
           </div>
         </Field>
         <Field htmlFor="manual-entry-start" label="Start">
-          <DayframeDateTimePicker id="manual-entry-start" name="startedAt" defaultValue={defaults.start} required />
+          <DayframeDateTimePicker
+            id="manual-entry-start"
+            name="startedAt"
+            defaultValue={defaults.start}
+            onChange={setStartedAtDraft}
+            required
+          />
         </Field>
         <Field htmlFor="manual-entry-finish" label="Finish">
-          <DayframeDateTimePicker id="manual-entry-finish" name="stoppedAt" defaultValue={defaults.finish} required />
+          <DayframeDateTimePicker
+            id="manual-entry-finish"
+            name="stoppedAt"
+            defaultValue={defaults.finish}
+            onChange={setStoppedAtDraft}
+            required
+          />
         </Field>
+        <OverlapNotice
+          candidate={{
+            startedAt: dateTimeLocalInputToIso(startedAtDraft) ?? "invalid",
+            stoppedAt: dateTimeLocalInputToIso(stoppedAtDraft)
+          }}
+          entries={data.entries}
+        />
         {formError ? <p className="swiss-inline-error swiss-form-wide" role="alert">{formError}</p> : null}
       </form>
     </ModalDialog>

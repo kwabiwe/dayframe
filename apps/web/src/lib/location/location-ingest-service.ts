@@ -420,7 +420,7 @@ async function emitSemanticSegment(
         segment.stoppedAt,
         segment.confidence,
         overlapsConfirmedTime
-          ? "This detected visit overlaps existing tracked time and needs review."
+          ? "Automatic logging paused because this visit overlaps existing tracked time. You can still confirm it from Review."
           : segment.continuityStatus === "uncertain_gap"
             ? "The boundary includes an evidence gap; inspect the timeline before confirming."
             : "Ordered location evidence supports this suggestion."
@@ -446,7 +446,7 @@ async function emitSemanticSegment(
         segment.stoppedAt,
         segment.confidence,
         overlapsConfirmedTime
-          ? "This detected visit overlaps existing tracked time and needs review."
+          ? "Automatic logging paused because this visit overlaps existing tracked time. You can still confirm it from Review."
           : segment.continuityStatus === "uncertain_gap"
             ? "The boundary includes an evidence gap; inspect the timeline before confirming."
             : "Ordered location evidence supports this suggestion.",

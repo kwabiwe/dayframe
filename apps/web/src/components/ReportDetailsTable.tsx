@@ -62,6 +62,15 @@ export function ReportDetailsTable({ report }: { report: ReportResult }) {
                     <strong>{timeEntryTitle(entry)}</strong>
                     <TagMetadata tagNames={entry.tagNames} />
                     {entry.isRunning ? <span className="report-running-pill">Running</span> : null}
+                    {entry.overlapCount > 0 ? (
+                      <span
+                        className="overlap-marker"
+                        title={`${formatDuration(entry.overlapSeconds)} overlaps ${entry.overlapCount} other ${entry.overlapCount === 1 ? "entry" : "entries"}`}
+                        aria-label={`Overlap: ${formatDuration(entry.overlapSeconds)} shared with ${entry.overlapCount} other ${entry.overlapCount === 1 ? "entry" : "entries"}`}
+                      >
+                        Overlap · {formatDuration(entry.overlapSeconds)}
+                      </span>
+                    ) : null}
                   </td>
                   <td data-label="Category">
                     <span className="report-entry-category">
@@ -114,6 +123,7 @@ export function ReportDetailsTable({ report }: { report: ReportResult }) {
             startTransition(() => router.refresh());
           }}
           places={report.filterOptions.places}
+          peerEntries={report.overlapCandidates}
           tags={report.filterOptions.tags}
         />
       ) : null}

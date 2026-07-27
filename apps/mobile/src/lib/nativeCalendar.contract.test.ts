@@ -67,4 +67,23 @@ describe("native Calendar production contract", () => {
     expect(rootView).toContain("theme.textSecondary");
     expect(rootView).not.toContain("URLSession");
   });
+
+  it("animates only horizontal collision reflow and disables it for Reduce Motion", () => {
+    const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
+
+    expect(rootView).toContain("private struct DayframeCalendarHorizontalGeometry: AnimatableModifier");
+    expect(rootView).toContain("var animatableData: AnimatablePair<CGFloat, CGFloat>");
+    expect(rootView).toContain("presentation.reduceMotion ? nil : .easeOut(duration: 0.21)");
+    expect(rootView).not.toContain("value: presentation.entries");
+  });
+
+  it("passes semantic warning colours across the React-to-Swift boundary", () => {
+    const records = readFileSync(`${moduleRoot}ios/DayframeCalendarRecords.swift`, "utf8");
+    const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
+
+    expect(records).toContain("var warning =");
+    expect(records).toContain("var warningText =");
+    expect(rootView).toContain("theme.warning");
+    expect(rootView).not.toContain("#F0AA55");
+  });
 });

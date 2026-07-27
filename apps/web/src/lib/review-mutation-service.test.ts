@@ -148,6 +148,42 @@ describe("idempotent Review mutations", () => {
       envelope.clientMutationId
     ]);
   });
+
+  it("persists an overlapping generic edit-and-confirm while keeping mutation receipts", async () => {
+    const reviewItemId = "30000000-0000-4000-8000-000000000002";
+    const client = clientForOverlappingGenericEdit(reviewItemId);
+    mocks.connect.mockResolvedValue(client);
+
+    await expect(resolveIdempotentReviewMutation(
+      reviewItemId,
+      {
+        clientMutationId: "d87c35ce-2a63-4e44-a8fc-4370f2a5cda5",
+        mutation: {
+          action: "edit_and_confirm",
+          edit: {
+            categoryId: null,
+            placeId: null,
+            description: "Walk and call",
+            startedAt: "2026-07-27T10:00:00.000Z",
+            stoppedAt: "2026-07-27T11:00:00.000Z",
+            tags: []
+          }
+        }
+      },
+      session
+    )).resolves.toMatchObject({
+      action: "edit_and_confirm",
+      entryId: "overlapping-entry",
+      status: "accepted"
+    });
+
+    const statements = client.query.mock.calls.map(([statement]) => String(statement));
+    expect(statements.some((statement) => statement.includes("insert into time_entries"))).toBe(true);
+    expect(statements.some((statement) => statement.includes("insert into review_mutation_receipts"))).toBe(true);
+    expect(statements.some((statement) => (
+      statement.includes("started_at <") && statement.includes("coalesce(stopped_at")
+    ))).toBe(false);
+  });
 });
 
 function clientForReceipt(receipt: {
@@ -176,4 +212,41 @@ function clientForReceipt(receipt: {
 
 function clientForNewLocation() {
   return clientForReceipt(null);
+}
+
+function clientForOverlappingGenericEdit(reviewItemId: string) {
+  const query = vi.fn(async (statement: string) => {
+    if (statement.includes("from review_mutation_receipts")) return { rows: [] };
+    if (statement.includes("for update of ri nowait")) {
+      return {
+        rows: [{
+          id: reviewItemId,
+          eventId: "40000000-0000-4000-8000-000000000002",
+          title: "Walk",
+          status: "open",
+          suggestedCategoryId: null,
+          suggestedPlaceId: null,
+          suggestedStartedAt: "2026-07-27T10:00:00.000Z",
+          suggestedStoppedAt: "2026-07-27T11:00:00.000Z",
+          confidence: "medium",
+          eventSource: "health_workout",
+          locationSegmentId: null
+        }]
+      };
+    }
+    if (statement.includes("location_segment_id") && statement.includes("from review_items")) {
+      return { rows: [{ locationSegmentId: null }] };
+    }
+    if (statement.includes("from time_entries") && statement.includes("created_from_event_id")) {
+      return { rows: [] };
+    }
+    if (statement.includes("insert into time_entries")) {
+      return { rows: [{ id: "overlapping-entry" }] };
+    }
+    return { rows: [] };
+  });
+  return {
+    query,
+    release: vi.fn()
+  } as unknown as import("pg").PoolClient & { query: typeof query };
 }

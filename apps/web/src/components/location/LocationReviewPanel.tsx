@@ -6,6 +6,9 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import type { LocationReviewAction, LocationReviewEvidenceDto } from "@dayframe/shared";
 import { clientFetch } from "@/lib/client-auth-fetch";
+import { OverlapNotice } from "@/components/OverlapNotice";
+import { dateTimeLocalInputToIso } from "@/lib/format";
+import type { TimeEntryRow } from "@/lib/queries";
 
 const LocationEvidenceMap = dynamic(
   () => import("./LocationEvidenceMap").then((module) => module.LocationEvidenceMap),
@@ -19,12 +22,14 @@ export function LocationReviewPanel({
   reviewItemId,
   adjacentReviewItemId,
   categories,
+  entries,
   initialCategoryId,
   onClose
 }: {
   reviewItemId: string;
   adjacentReviewItemId?: string;
   categories: Array<{ id: string; name: string }>;
+  entries: TimeEntryRow[];
   initialCategoryId: string | null;
   onClose: () => void;
 }) {
@@ -214,6 +219,15 @@ export function LocationReviewPanel({
                   onChange={(event) => setStoppedAt(event.target.value)}
                 />
               </label>
+            </div>
+            <div className="mt-3">
+              <OverlapNotice
+                candidate={{
+                  startedAt: dateTimeLocalInputToIso(startedAt) ?? "invalid",
+                  stoppedAt: dateTimeLocalInputToIso(stoppedAt)
+                }}
+                entries={entries}
+              />
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
               <button

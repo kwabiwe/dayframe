@@ -187,6 +187,11 @@ Required checks:
 - Review action buttons remain tappable and readable on phone width.
 - No duplicate React keys or runtime overlays.
 - Light and dark theme remain legible.
+- For intentional-overlap changes, cover boundary-touch, containment, partial overlap, chains, three-plus concurrency, cross-midnight/DST clipping, running entries with one captured `now`, input-order stability, and invalid/reversed intervals.
+- Verify manual Add/Edit, Calendar resize, direct Review confirm, edit-and-confirm, record-once, split-and-confirm, merge-and-confirm, offline enqueue/retry/replay, and web/mobile bootstrap reconciliation all preserve an intentional overlap.
+- Re-run source idempotency and one-active-timer cases so overlap permission cannot weaken technical duplicate prevention.
+- Verify hybrid Calendar geometry: full-width isolated blocks, inset overlays only for substantially shorter contained pairs, lanes for partial/similar pairs, compact lanes for dense collisions, width-aware text suppression, deterministic z-order, and taps reaching the intended visible block.
+- Verify `Total logged`, `Time covered`, overlap markers, and goal-covered semantics across Dashboard, Timeline/History, Reports, and Settings copy.
 
 Native Calendar evidence:
 

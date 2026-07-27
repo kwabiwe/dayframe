@@ -6,14 +6,18 @@ import { Check, CircleSlash, GitMerge, Map, WandSparkles } from "lucide-react";
 import type { ReviewItemRow } from "@/lib/queries";
 import { formatDate, formatEventLabel, formatSourceLabel, formatTime } from "@/lib/format";
 import { LocationReviewPanel } from "@/components/location/LocationReviewPanel";
+import { OverlapNotice } from "@/components/OverlapNotice";
 import { clientFetch } from "@/lib/client-auth-fetch";
+import type { TimeEntryRow } from "@/lib/queries";
 
 export function ReviewInbox({
   items,
-  categories
+  categories,
+  entries
 }: {
   items: ReviewItemRow[];
   categories: Array<{ id: string; name: string }>;
+  entries: TimeEntryRow[];
 }) {
   const openItems = items.filter((item) => item.status === "open");
 
@@ -32,6 +36,7 @@ export function ReviewInbox({
             item={item}
             adjacentReviewItemId={adjacentV2StayReviewId(item, openItems)}
             categories={categories}
+            entries={entries}
           />
         ))}
       </div>
@@ -42,11 +47,13 @@ export function ReviewInbox({
 function ReviewItemCard({
   item,
   adjacentReviewItemId,
-  categories
+  categories,
+  entries
 }: {
   item: ReviewItemRow;
   adjacentReviewItemId?: string;
   categories: Array<{ id: string; name: string }>;
+  entries: TimeEntryRow[];
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -105,6 +112,17 @@ function ReviewItemCard({
 
         {item.notes && !hasV2Evidence(item) ? (
           <p className="mt-3 max-w-3xl text-sm leading-6 text-[var(--muted)]">{item.notes}</p>
+        ) : null}
+        {item.suggestedStartedAt && item.suggestedStoppedAt ? (
+          <div className="mt-3">
+            <OverlapNotice
+              candidate={{
+                startedAt: item.suggestedStartedAt,
+                stoppedAt: item.suggestedStoppedAt
+              }}
+              entries={entries}
+            />
+          </div>
         ) : null}
         {actionError ? <p className="mt-3 text-sm text-[var(--danger)]" role="alert">{actionError}</p> : null}
 
@@ -166,6 +184,7 @@ function ReviewItemCard({
             reviewItemId={item.id}
             adjacentReviewItemId={adjacentReviewItemId}
             categories={categories}
+            entries={entries}
             initialCategoryId={item.suggestedCategoryId}
             onClose={() => setShowEvidence(false)}
           />

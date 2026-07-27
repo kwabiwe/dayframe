@@ -2470,6 +2470,8 @@ dialog.ui-popover-panel.bottom-left {
   border-radius: 10px;
   padding: 7px 10px;
   transition:
+    left 210ms ease-out,
+    right 210ms ease-out,
     border-color 140ms ease,
     box-shadow 140ms ease,
     transform 140ms ease;
@@ -3008,6 +3010,12 @@ dialog.ui-popover-panel.bottom-left {
   .calendar-start-again,
   .calendar-time-block:hover {
     transform: none;
+  }
+
+  .calendar-time-block {
+    transition:
+      border-color 140ms ease,
+      box-shadow 140ms ease;
   }
 }
 
@@ -4289,6 +4297,12 @@ kbd {
   gap: 12px;
 }
 
+.report-metric-explainer {
+  margin: -4px 2px 18px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .report-summary-card {
   display: grid;
   min-height: 132px;
@@ -4704,6 +4718,77 @@ kbd {
   color: var(--accent-text);
   font-variant-numeric: tabular-nums;
   font-weight: 650;
+}
+
+.overlap-marker {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 22px;
+  margin-top: 4px;
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: color-mix(in srgb, var(--warning) 16%, var(--surface));
+  color: var(--warning-text);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.overlap-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--warning) 13%, var(--surface-raised));
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.overlap-notice > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--warning-text);
+}
+
+.overlap-notice p,
+.overlap-notice ul {
+  margin: 0;
+}
+
+.overlap-notice > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.overlap-notice ul {
+  display: grid;
+  gap: 2px;
+  padding: 0;
+  color: var(--foreground);
+  list-style: none;
+}
+
+.overlap-notice li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overlap-notice-badge {
+  width: fit-content;
+  color: var(--warning-text);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.overlap-notice strong {
+  color: var(--foreground);
 }
 
 .report-pagination {

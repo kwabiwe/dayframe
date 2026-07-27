@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { CSSProperties } from "react";
 import { useMemo, useState } from "react";
 import { ArrowRight, CheckCircle2, Clock3, Inbox } from "lucide-react";
+import { analyzeTimeIntervals } from "@dayframe/shared";
 import { categoryDisplay } from "@/lib/display";
 import {
   buildCategoryAllocationSummary,
@@ -47,12 +48,20 @@ export function DashboardRealtime({ initialData }: { initialData: BootstrapData 
     [data.activeEntry, data.dayEntries, data.entries, data.historyEntries, data.weekEntries]
   );
   const allocation = calculateCategoryAllocation(entries, period, { now });
+  const coverage = analyzeTimeIntervals(
+    entries.map((entry) => ({
+      id: entry.id,
+      startedAt: entry.startedAt,
+      stoppedAt: entry.stoppedAt
+    })),
+    { range: { start: period.start, end: period.end }, now }
+  );
   const previousAllocation = calculateCategoryAllocation(entries, {
     start: period.previousStart,
     end: period.previousEnd
   }, { now });
   const goal = calculateGoalProgress(
-    allocation.totalSeconds,
+    coverage.coveredSeconds,
     mode === "day" ? data.user.dailyGoalMinutes : data.user.weeklyGoalMinutes
   );
   const comparison = calculatePreviousPeriodComparison(
@@ -67,7 +76,8 @@ export function DashboardRealtime({ initialData }: { initialData: BootstrapData 
       <h1 className="sr-only">Dashboard</h1>
 
       <section className="dashboard-summary" aria-label={`${mode === "day" ? "Day" : "Week"} summary`}>
-        <SummaryMetric label="Tracked" value={formatDuration(allocation.totalSeconds)} />
+        <SummaryMetric label="Logged" value={formatDuration(coverage.loggedSeconds)} />
+        <SummaryMetric label="Covered" value={formatDuration(coverage.coveredSeconds)} />
         <SummaryMetric label="Entries" value={`${entryCount}`} />
         <SummaryMetric label="Categories" value={`${allocation.categories.length}`} />
       </section>
@@ -121,7 +131,7 @@ export function DashboardRealtime({ initialData }: { initialData: BootstrapData 
         <GoalProgressCard
           goal={goal}
           mode={mode}
-          totalSeconds={allocation.totalSeconds}
+          totalSeconds={coverage.coveredSeconds}
         />
         <PreviousPeriodCard
           comparison={comparison}
@@ -294,7 +304,7 @@ function GoalProgressCard({
       {goal.goalSeconds > 0 ? (
         <>
           <p className="dashboard-insight-value">
-            {formatDuration(totalSeconds)} of {formatDuration(goal.goalSeconds)}
+            {formatDuration(totalSeconds)} covered of {formatDuration(goal.goalSeconds)}
           </p>
           <div
             className="dashboard-goal-track"
@@ -303,7 +313,7 @@ function GoalProgressCard({
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={goal.clampedPercentage}
-            aria-valuetext={`${goal.percentage}% of ${formatDuration(goal.goalSeconds)}`}
+            aria-valuetext={`${goal.percentage}% of ${formatDuration(goal.goalSeconds)} covered time`}
           >
             <span style={{ width: `${goal.clampedPercentage}%` }} />
           </div>

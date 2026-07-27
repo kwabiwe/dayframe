@@ -14,6 +14,8 @@ struct DayframeCalendarThemeRecord: Codable {
   var surfaceRaised = "#1B2230"
   var textPrimary = "#F7F8FB"
   var textSecondary = "#8993A7"
+  var warning = "#F2BA38"
+  var warningText = "#F2BA38"
 }
 
 struct DayframeCalendarWeekDayRecord: Codable {
@@ -35,12 +37,21 @@ struct DayframeCalendarEntryRecord: Codable {
   var isActive = false
   var isReview = false
   var isUncategorized = false
+  var laneCount = 1
+  var laneIndex = 0
+  var layoutMode = "full"
   var meta = ""
+  var offsetFraction: Double = 0
+  var overlapCount = 0
+  var overlapSeconds: Double = 0
   var startedAtMs: Double = 0
   var startsBeforeDay = false
   var stoppedAtMs: Double?
   var tagText: String?
+  var textDensity = "full"
   var title = ""
+  var widthFraction: Double = 1
+  var zIndex = 0
 }
 
 struct DayframeCalendarPresentationRecord: Codable {
@@ -48,7 +59,7 @@ struct DayframeCalendarPresentationRecord: Codable {
   var dayStartMs: Double = 0
   var emptyState = "No tracked time for this day."
   var entries: [DayframeCalendarEntryRecord] = []
-  var modelVersion = 2
+  var modelVersion = 3
   var nowMs: Double = 0
   var reduceMotion = false
   var reduceTransparency = false
@@ -57,6 +68,11 @@ struct DayframeCalendarPresentationRecord: Codable {
   var selectedDayTitle = "Calendar"
   var theme = DayframeCalendarThemeRecord()
   var todayKey = ""
+  var additionalOverlapSeconds: Double = 0
+  var coveredLabel = "0m"
+  var coveredSeconds: Double = 0
+  var loggedLabel = "0m"
+  var loggedSeconds: Double = 0
   var totalLabel = "0m"
   var totalSeconds: Double = 0
   var transitionDirection = 1

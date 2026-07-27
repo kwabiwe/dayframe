@@ -1,13 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   confirmedLocationCategoryId,
-  confirmedLocationDescription
+  confirmedLocationDescription,
+  resolveLocationReviewActionWithClient
 } from "./location-review-service";
 import type { RequestSession } from "../session";
 
 vi.mock("../db", () => ({
   pool: { connect: vi.fn() },
   isLockNotAvailableError: vi.fn(() => false)
+}));
+vi.mock("../tag-service", () => ({
+  syncTimeEntryTags: vi.fn()
 }));
 
 const session: RequestSession = {
@@ -71,5 +75,56 @@ describe("location review confirmation semantics", () => {
       confirmedLocationCategoryId(client, session, "commute", null, { categoryId: null })
     ).resolves.toBeNull();
     expect(vi.mocked(client.query)).not.toHaveBeenCalled();
+  });
+
+  it("confirms a location Review item without querying for an overlap conflict", async () => {
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes("for update of ri, ae nowait")) {
+          return {
+            rows: [{
+              id: "review-1",
+              eventId: "event-1",
+              status: "open",
+              title: "Visit library",
+              confidence: "high",
+              suggestedCategoryId: null,
+              suggestedPlaceId: null,
+              suggestedStartedAt: "2026-07-27T10:00:00.000Z",
+              suggestedStoppedAt: "2026-07-27T11:00:00.000Z",
+              segmentId: "segment-1",
+              segmentKind: "stay",
+              segmentStatus: "review",
+              deviceId: "device-1",
+              algorithmVersion: "location-v2.0",
+              learnedPlaceId: null,
+              placeMatchKind: null,
+              centreLatitude: null,
+              centreLongitude: null
+            }]
+          };
+        }
+        if (statement.includes("insert into time_entries")) {
+          return { rows: [{ id: "overlapping-location-entry" }] };
+        }
+        return { rows: [] };
+      })
+    } as unknown as import("pg").PoolClient & { query: ReturnType<typeof vi.fn> };
+
+    await expect(resolveLocationReviewActionWithClient(
+      client,
+      "review-1",
+      { action: "confirm" },
+      session
+    )).resolves.toMatchObject({
+      entryId: "overlapping-location-entry",
+      status: "accepted"
+    });
+
+    const statements = client.query.mock.calls.map(([statement]) => String(statement));
+    expect(statements.some((statement) => statement.includes("insert into time_entries"))).toBe(true);
+    expect(statements.some((statement) => (
+      statement.includes("started_at <") && statement.includes("coalesce(stopped_at")
+    ))).toBe(false);
   });
 });

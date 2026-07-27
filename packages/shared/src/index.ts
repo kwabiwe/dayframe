@@ -39,6 +39,7 @@ export {
 
 export * from "./location";
 export * from "./reviewMutations";
+export * from "./timeIntervals";
 
 export const DEMO_USER_ID = "00000000-0000-4000-8000-000000000001";
 export const DEMO_WORKSPACE_ID = "00000000-0000-4000-8000-000000000010";

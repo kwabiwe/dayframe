@@ -388,7 +388,6 @@ async function editAndConfirmGenericReview(
   session: RequestSession
 ) {
   await validateEditReferences(client, edit, session, item.id);
-  await validateNoOverlap(client, edit, session, item);
   const existing = item.eventId
     ? await entryCreatedFromEvent(client, item.eventId, session)
     : null;
@@ -593,44 +592,6 @@ async function validateEditReferences(
         }
       );
     }
-  }
-}
-
-async function validateNoOverlap(
-  client: pg.PoolClient,
-  edit: ReviewMutationEdit,
-  session: RequestSession,
-  item: GenericReviewRow
-) {
-  const overlap = await client.query<{ id: string }>(
-    `select id
-     from time_entries
-     where workspace_id = $1
-       and user_id = $2
-       and started_at < $4::timestamptz
-       and coalesce(stopped_at, 'infinity'::timestamptz) > $3::timestamptz
-       and ($5::uuid is null or created_from_event_id is distinct from $5::uuid)
-     limit 1`,
-    [
-      session.workspaceId,
-      session.userId,
-      edit.startedAt,
-      edit.stoppedAt,
-      item.eventId
-    ]
-  );
-  if (overlap.rows[0]) {
-    throw new ReviewResolutionError(
-      "overlap",
-      "The corrected time overlaps an existing confirmed entry.",
-      {
-        status: 409,
-        details: {
-          reviewItemId: item.id,
-          canonicalStatus: "open"
-        }
-      }
-    );
   }
 }
 

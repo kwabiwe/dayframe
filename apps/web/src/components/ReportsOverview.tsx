@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import Link from "next/link";
-import { ArrowRight, CalendarDays, ChevronDown, Clock3, Tags } from "lucide-react";
+import { ArrowRight, CalendarDays, ChevronDown, Clock3, Layers3, Tags } from "lucide-react";
 import { ReportDonutSegment } from "@/components/ReportDonutSegment";
 import { categoryDisplay } from "@/lib/display";
 import { formatDuration, formatSourceLabel } from "@/lib/format";
@@ -23,11 +23,22 @@ export function ReportsOverview({ report }: { report: ReportResult }) {
   return (
     <>
       <section className="report-summary-grid" aria-label="Report summary">
-        <SummaryMetric label="Total tracked" value={formatDuration(report.totalSeconds)} detail={`Across ${report.range.dayCount} calendar day${report.range.dayCount === 1 ? "" : "s"}`} icon={Clock3} />
+        <SummaryMetric label="Total logged" value={formatDuration(report.totalLoggedSeconds)} detail={`The sum of every entry across ${report.range.dayCount} calendar day${report.range.dayCount === 1 ? "" : "s"}`} icon={Clock3} />
+        <SummaryMetric
+          label="Time covered"
+          value={formatDuration(report.timeCoveredSeconds)}
+          detail={report.additionalOverlappingActivitySeconds > 0
+            ? `${formatDuration(report.timeCoveredSeconds)} distinct clock time · ${formatDuration(report.additionalOverlappingActivitySeconds)} additional overlapping activity`
+            : `${formatDuration(report.timeCoveredSeconds)} distinct clock time · no overlapping entries`}
+          icon={Layers3}
+        />
         <SummaryMetric label="Daily average" value={formatDuration(report.dailyAverageSeconds)} detail="Across the selected calendar range" icon={CalendarDays} />
         <SummaryMetric label="Active days" value={`${report.activeDayCount}`} detail={`${report.range.dayCount - report.activeDayCount} day${report.range.dayCount - report.activeDayCount === 1 ? "" : "s"} with no tracked time`} icon={CalendarDays} />
         <SummaryMetric label="Previous period" value={comparison.value} detail={comparison.detail} icon={ArrowRight} />
       </section>
+      <p className="report-metric-explainer">
+        Each entry counts in full towards Total logged. Time covered counts concurrent entries once.
+      </p>
 
       <DailyTrend report={report} />
 
@@ -84,7 +95,7 @@ function DailyTrend({ report }: { report: ReportResult }) {
               : "Ranges longer than 62 days are grouped into seven-day bars for readability."}
           </p>
         </div>
-        <strong>{formatDuration(report.totalSeconds)}</strong>
+        <strong>{formatDuration(report.totalLoggedSeconds)} logged</strong>
       </header>
 
       <div className={`report-trend-scroll${scrollable ? " is-scrollable" : ""}`}>
@@ -96,14 +107,19 @@ function DailyTrend({ report }: { report: ReportResult }) {
                 className="report-trend-column"
                 key={point.key}
                 tabIndex={0}
-                aria-label={`${point.label}: ${formatDuration(point.seconds)}`}
-                title={`${point.label}: ${formatDuration(point.seconds)}`}
+                aria-label={`${point.label}: ${formatDuration(point.seconds)} logged, ${formatDuration(point.coveredSeconds)} covered`}
+                title={`${point.label}: ${formatDuration(point.seconds)} logged, ${formatDuration(point.coveredSeconds)} covered`}
               >
                 <div className="report-trend-track">
                   <span style={{ height: `${height}%` }} />
                 </div>
                 <strong>{point.label}</strong>
-                <em>{formatDuration(point.seconds)}</em>
+                <em>
+                  {formatDuration(point.seconds)} logged
+                  {point.additionalOverlappingActivitySeconds > 0
+                    ? ` · ${formatDuration(point.coveredSeconds)} covered`
+                    : ""}
+                </em>
               </div>
             );
           })}
@@ -114,11 +130,16 @@ function DailyTrend({ report }: { report: ReportResult }) {
         <summary>View exact trend data</summary>
         <div className="report-data-table-scroll">
           <table>
-            <caption>Exact tracked time for each {trend.granularity}</caption>
-            <thead><tr><th>Period</th><th>Tracked time</th></tr></thead>
+            <caption>Exact logged and covered time for each {trend.granularity}</caption>
+            <thead><tr><th>Period</th><th>Total logged</th><th>Time covered</th><th>Additional overlap</th></tr></thead>
             <tbody>
               {trend.points.map((point) => (
-                <tr key={point.key}><td>{point.label}</td><td>{formatDuration(point.seconds)}</td></tr>
+                <tr key={point.key}>
+                  <td>{point.label}</td>
+                  <td>{formatDuration(point.seconds)}</td>
+                  <td>{formatDuration(point.coveredSeconds)}</td>
+                  <td>{formatDuration(point.additionalOverlappingActivitySeconds)}</td>
+                </tr>
               ))}
             </tbody>
           </table>
@@ -154,7 +175,7 @@ function CategoryAllocation({
       <header className="report-section-header">
         <div>
           <h2 id="report-allocation-title">Category allocation</h2>
-          <p>Category totals partition all tracked time.</p>
+          <p>Category totals divide Total logged. Overlapping entries count in each activity.</p>
         </div>
       </header>
 
@@ -180,7 +201,7 @@ function CategoryAllocation({
               ))}
             </svg>
             <figcaption>
-              <span>Total</span>
+              <span>Total logged</span>
               <strong>{formatDuration(report.totalSeconds)}</strong>
             </figcaption>
           </figure>

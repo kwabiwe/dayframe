@@ -16,7 +16,16 @@ export default async function ReviewPage() {
         description="Accept suggestions, ignore noisy signals, or create an automation rule from a correction."
       />
       <div className="space-y-6 px-5 py-6 md:px-8">
-        <ReviewInbox items={data.reviewItems} categories={data.categories} />
+        <ReviewInbox
+          items={data.reviewItems}
+          categories={data.categories}
+          entries={Array.from(
+            new Map(
+              [...data.historyEntries, ...data.weekEntries, ...data.entries]
+                .map((entry) => [entry.id, entry])
+            ).values()
+          )}
+        />
         <section className="industrial-panel-strong p-4">
           <h2 className="text-base font-semibold">Correction model</h2>
           <p className="mt-2 text-sm leading-6 text-[var(--muted)]">

@@ -1156,7 +1156,7 @@ export function reviewSyncDisposition(
   }
   if (
     isRetryableStatus(status) ||
-    (status === 409 && code === "review_item_locked")
+    (status === 409 && (code === "review_item_locked" || code === "overlap"))
   ) {
     return "retry" as const;
   }

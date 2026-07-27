@@ -3,6 +3,7 @@
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { InlineTagInput } from "@/components/InlineTagInput";
+import { OverlapNotice, type OverlapPeerEntry } from "@/components/OverlapNotice";
 import { Button, Field, ModalDialog, SelectField } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import type { CategoryRow, PlaceRow, TagRow, TimeEntryRow } from "@/lib/queries";
@@ -18,6 +19,7 @@ export function EditTimeEntryDialog({
   entry,
   onClose,
   onSaved,
+  peerEntries = [],
   places,
   tags
 }: {
@@ -25,6 +27,7 @@ export function EditTimeEntryDialog({
   entry: TimeEntryRow;
   onClose: () => void;
   onSaved: () => Promise<void> | void;
+  peerEntries?: OverlapPeerEntry[];
   places: PlaceRow[];
   tags: TagRow[];
 }) {
@@ -250,6 +253,16 @@ export function EditTimeEntryDialog({
                 />
               </Field>
             </>
+          ) : null}
+          {isCompletedEntry ? (
+            <OverlapNotice
+              candidate={{
+                startedAt: dateTimeLocalInputToIso(startedAtDraft) ?? "invalid",
+                stoppedAt: dateTimeLocalInputToIso(stoppedAtDraft)
+              }}
+              entries={peerEntries}
+              excludeEntryId={entry.id}
+            />
           ) : null}
           {formError ? (
             <p className="swiss-inline-error swiss-form-wide" role="alert">

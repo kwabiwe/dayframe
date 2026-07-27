@@ -4,6 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, useTransition } from "r
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Ellipsis, Pencil, Play, Trash2 } from "lucide-react";
+import { analyzeTimeIntervals, type TimeIntervalAnalysisEntry } from "@dayframe/shared";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
@@ -60,6 +61,24 @@ export function EntriesTable({
   const filtered = useMemo(
     () => entries.filter((entry) => !categoryFilter || entry.categoryId === categoryFilter),
     [categoryFilter, entries]
+  );
+  const overlapAnalysis = useMemo(
+    () => analyzeTimeIntervals(
+      entries.map((entry) => ({
+        id: entry.id,
+        startedAt: entry.startedAt,
+        stoppedAt: entry.stoppedAt
+      })),
+      {
+        ...(displayRange ? { range: displayRange } : {}),
+        now: capturedNow
+      }
+    ),
+    [capturedNow, displayRange, entries]
+  );
+  const overlapById = useMemo(
+    () => new Map(overlapAnalysis.entries.map((entry) => [entry.id, entry])),
+    [overlapAnalysis.entries]
   );
   const grouped = useMemo(() => {
     const byDay = new Map<string, TimeEntryRow[]>();
@@ -179,6 +198,9 @@ export function EntriesTable({
                 expandedGroups.has(group.key) ||
                 group.entries.some((occurrence) => occurrence.id === highlightedEntryId)
               );
+              const overlappingOccurrences = group.entries.filter(
+                (occurrence) => (overlapById.get(occurrence.id)?.overlapCount ?? 0) > 0
+              );
 
               return (
                 <Fragment key={group.key}>
@@ -223,6 +245,21 @@ export function EntriesTable({
                         <span className="timeline-task-title">{timeEntryTitle(entry)}</span>
                         <span className="timeline-task-meta">{timeEntryCategoryLabel(entry)}</span>
                         <TagMetadata tagNames={entry.tagNames} />
+                        {overlappingOccurrences.length > 0 ? (
+                          <span
+                            className="overlap-marker"
+                            aria-label={isGrouped
+                              ? `${overlappingOccurrences.length} entries in this group overlap other entries`
+                              : overlapMarkerDescription(entry, overlapById.get(entry.id), entries)}
+                            title={isGrouped
+                              ? `${overlappingOccurrences.length} entries in this group overlap other entries`
+                              : overlapMarkerDescription(entry, overlapById.get(entry.id), entries)}
+                          >
+                            {isGrouped
+                              ? `${overlappingOccurrences.length} overlapping`
+                              : `Overlap · ${formatDuration(overlapById.get(entry.id)?.overlapSeconds ?? 0)}`}
+                          </span>
+                        ) : null}
                         {entry.placeName ? <small className="mt-1 block font-normal text-[var(--muted)]">{entry.placeName}</small> : null}
                       </span>
                     </div>
@@ -282,6 +319,23 @@ export function EntriesTable({
                             <span className="timeline-task-title">{timeEntryTitle(occurrence)}</span>
                             <span className="timeline-task-meta">{timeEntryCategoryLabel(occurrence)}</span>
                             <TagMetadata tagNames={occurrence.tagNames} />
+                            {(overlapById.get(occurrence.id)?.overlapCount ?? 0) > 0 ? (
+                              <span
+                                className="overlap-marker"
+                                aria-label={overlapMarkerDescription(
+                                  occurrence,
+                                  overlapById.get(occurrence.id),
+                                  entries
+                                )}
+                                title={overlapMarkerDescription(
+                                  occurrence,
+                                  overlapById.get(occurrence.id),
+                                  entries
+                                )}
+                              >
+                                Overlap · {formatDuration(overlapById.get(occurrence.id)?.overlapSeconds ?? 0)}
+                              </span>
+                            ) : null}
                           </span>
                         </div>
                       </td>
@@ -323,6 +377,7 @@ export function EntriesTable({
             await onChanged?.();
             startTransition(() => router.refresh());
           }}
+          peerEntries={entries}
           places={places}
           tags={tags}
         />
@@ -342,6 +397,23 @@ export function EntriesTable({
       ) : null}
     </section>
   );
+}
+
+function overlapMarkerDescription(
+  entry: TimeEntryRow,
+  overlap: TimeIntervalAnalysisEntry | undefined,
+  entries: ReadonlyArray<TimeEntryRow>
+) {
+  if (!overlap?.overlapCount) return "No overlap";
+  const firstPeer = entries.find((candidate) => overlap.overlappingEntryIds.includes(candidate.id));
+  const peerDetail = firstPeer
+    ? `, including ${timeEntryTitle(firstPeer)} from ${formatTime(firstPeer.startedAt)} to ${
+        firstPeer.stoppedAt ? formatTime(firstPeer.stoppedAt) : "now"
+      }`
+    : "";
+  return `Overlap: ${formatDuration(overlap.uniqueOverlapSeconds)} shared with ${overlap.overlapCount} other ${
+    overlap.overlapCount === 1 ? "entry" : "entries"
+  }${peerDetail}. ${timeEntryTitle(entry)} still counts in full towards Total logged.`;
 }
 
 function EntryActionsMenu({

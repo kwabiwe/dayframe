@@ -180,7 +180,8 @@ continues.
 | temporary Review row lock | `retry_wait` | same bounded retry |
 | 401/403 or no token | `auth_required` | preserve and pause until same-account login |
 | invalid payload/category/time | `needs_attention` | stop unchanged retries |
-| semantic resolution/overlap conflict | `needs_attention` | expose safe issue and canonical state |
+| semantic resolution conflict | `needs_attention` | expose safe issue and canonical state |
+| legacy overlap response from an older API | `retry_wait` | retry after the intentional-overlap API is available |
 
 Backoff bases are 30 seconds, 2 minutes, 5 minutes, 15 minutes, 30 minutes, and
 1 hour, capped at 1 hour before jitter. Manual Retry overrides `retry_wait`
@@ -218,7 +219,7 @@ One Postgres transaction:
 6. inserts the receipt;
 7. commits both together.
 
-A generic Edit-and-confirm now validates category/place/time and overlap,
+A generic Edit-and-confirm now validates category/place/time,
 creates one confirmed entry, writes tags, resolves the Review item and source
 event, and stores the receipt in the same transaction. Any failure rolls back
 the entry, tags, resolution, and receipt.
@@ -238,7 +239,7 @@ equivalent final state or become a semantic conflict.
 | Confirm | ignored | `resolution_conflict` |
 | Edit-and-confirm | accepted with different details | `resolution_conflict` |
 | Edit category archived/deleted | open | `invalid_category`, restore cached card |
-| Edited time overlaps an entry | open | `overlap`, restore cached card |
+| Edited time overlaps an entry | accepted | preserve both entries; overlap is intentional |
 | Item missing/superseded without provable equivalence | unknown/resolved | needs attention; do not fabricate an open item |
 | Receipt ID reused with different content | unchanged | `mutation_id_conflict` |
 

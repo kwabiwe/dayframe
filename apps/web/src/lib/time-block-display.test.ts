@@ -76,9 +76,9 @@ describe("time block display helpers", () => {
       { key: "later", top: 96, height: 18 }
     ]);
 
-    expect(lanes.get("five")).toEqual({ laneCount: 2, laneIndex: 0 });
-    expect(lanes.get("eight")).toEqual({ laneCount: 2, laneIndex: 1 });
-    expect(lanes.get("later")).toEqual({ laneCount: 1, laneIndex: 0 });
+    expect(lanes.get("five")).toMatchObject({ laneCount: 2, laneIndex: 0, mode: "lane" });
+    expect(lanes.get("eight")).toMatchObject({ laneCount: 2, laneIndex: 1, mode: "lane" });
+    expect(lanes.get("later")).toMatchObject({ laneCount: 1, laneIndex: 0, mode: "full" });
   });
 
   it("requires deliberate resize movement", () => {

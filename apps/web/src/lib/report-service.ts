@@ -1,3 +1,4 @@
+import { analyzeTimeIntervals } from "@dayframe/shared";
 import type { CategoryRow, PlaceRow, TagRow, TimeEntryRow } from "@/lib/queries";
 import { query } from "@/lib/db";
 import { formatSourceLabel } from "@/lib/format";
@@ -23,10 +24,14 @@ export type ReportSeriesPoint = {
   key: string;
   label: string;
   seconds: number;
+  coveredSeconds: number;
+  additionalOverlappingActivitySeconds: number;
 };
 
 export type ReportEntryRow = TimeEntryRow & {
   isRunning: boolean;
+  overlapCount: number;
+  overlapSeconds: number;
 };
 
 export type ReportFilterOptions = {
@@ -40,8 +45,15 @@ export type ReportResult = {
   range: ReportRangeMetadata;
   appliedFilters: ReportFilters;
   filterOptions: ReportFilterOptions;
+  totalLoggedSeconds: number;
+  timeCoveredSeconds: number;
+  additionalOverlappingActivitySeconds: number;
+  additionalOverlapSeconds: number;
+  concurrentCoverageSeconds: number;
+  maxConcurrency: number;
   totalSeconds: number;
   previousPeriodSeconds: number;
+  previousPeriodCoveredSeconds: number;
   comparison: ReturnType<typeof calculatePreviousPeriodComparison>;
   dailyAverageSeconds: number;
   activeDayCount: number;
@@ -51,6 +63,13 @@ export type ReportResult = {
   bySource: ReportBreakdownRow[];
   dailySeries: ReportSeriesPoint[];
   entries: ReportEntryRow[];
+  overlapCandidates: Array<{
+    id: string;
+    startedAt: string;
+    stoppedAt: string | null;
+    description: string | null;
+    categoryName: string | null;
+  }>;
   pagination: {
     page: number;
     pageSize: number;
@@ -75,13 +94,25 @@ export type ReportExportRow = {
 
 type ReportDataRow = {
   totalSeconds: number;
+  coveredSeconds: number;
+  additionalOverlapSeconds: number;
+  concurrentCoverageSeconds: number;
+  maxConcurrency: number;
   previousPeriodSeconds: number;
+  previousPeriodCoveredSeconds: number;
   byCategory: ReportBreakdownRow[];
   byTag: ReportBreakdownRow[];
   byPlace: ReportBreakdownRow[];
   bySource: ReportBreakdownRow[];
   dailySeries: ReportSeriesPoint[];
   entries: ReportEntryRow[];
+  analysisEntries: Array<{
+    id: string;
+    startedAt: string;
+    stoppedAt: string;
+    description: string | null;
+    categoryName: string | null;
+  }>;
   totalEntries: number;
 };
 
@@ -93,11 +124,24 @@ export async function getReports(session: RequestSession, input: ReportQueryInpu
   const result = await query<ReportDataRow>(statement.text, statement.values);
   const row = result.rows[0] ?? emptyReportData(input);
   const totalSeconds = numberValue(row.totalSeconds);
+  const timeCoveredSeconds = numberValue(row.coveredSeconds);
   const previousPeriodSeconds = numberValue(row.previousPeriodSeconds);
+  const previousPeriodCoveredSeconds = numberValue(row.previousPeriodCoveredSeconds);
   const dailySeries = arrayValue(row.dailySeries).map((point) => ({
     ...point,
-    seconds: numberValue(point.seconds)
+    seconds: numberValue(point.seconds),
+    coveredSeconds: numberValue(point.coveredSeconds),
+    additionalOverlappingActivitySeconds: numberValue(point.additionalOverlappingActivitySeconds)
   }));
+  const analysis = analyzeTimeIntervals(
+    arrayValue(row.analysisEntries).map((entry) => ({
+      id: entry.id,
+      startedAt: entry.startedAt,
+      stoppedAt: entry.stoppedAt
+    })),
+    { now: capturedNow }
+  );
+  const analysisById = new Map(analysis.entries.map((entry) => [entry.id, entry]));
   const totalEntries = numberValue(row.totalEntries);
   const totalPages = Math.max(1, Math.ceil(totalEntries / input.pageSize));
 
@@ -105,21 +149,40 @@ export async function getReports(session: RequestSession, input: ReportQueryInpu
     range: input.range,
     appliedFilters,
     filterOptions,
+    totalLoggedSeconds: totalSeconds,
+    timeCoveredSeconds,
+    additionalOverlappingActivitySeconds: numberValue(row.additionalOverlapSeconds),
+    additionalOverlapSeconds: numberValue(row.additionalOverlapSeconds),
+    concurrentCoverageSeconds: numberValue(row.concurrentCoverageSeconds),
+    maxConcurrency: numberValue(row.maxConcurrency),
     totalSeconds,
     previousPeriodSeconds,
+    previousPeriodCoveredSeconds,
     comparison: calculatePreviousPeriodComparison(totalSeconds, previousPeriodSeconds),
     dailyAverageSeconds: input.range.dayCount > 0 ? Math.round(totalSeconds / input.range.dayCount) : 0,
-    activeDayCount: dailySeries.filter((point) => point.seconds > 0).length,
+    activeDayCount: dailySeries.filter((point) => point.coveredSeconds > 0).length,
     byCategory: normalizeBreakdown(row.byCategory),
     byTag: normalizeBreakdown(row.byTag),
     byPlace: normalizeBreakdown(row.byPlace),
     bySource: normalizeBreakdown(row.bySource),
     dailySeries,
-    entries: arrayValue(row.entries).map((entry) => ({
-      ...entry,
-      durationSeconds: numberValue(entry.durationSeconds),
-      tagNames: arrayValue(entry.tagNames),
-      tags: arrayValue(entry.tags)
+    entries: arrayValue(row.entries).map((entry) => {
+      const entryAnalysis = analysisById.get(entry.id);
+      return {
+        ...entry,
+        durationSeconds: numberValue(entry.durationSeconds),
+        tagNames: arrayValue(entry.tagNames),
+        tags: arrayValue(entry.tags),
+        overlapCount: entryAnalysis?.overlapCount ?? 0,
+        overlapSeconds: entryAnalysis?.overlapSeconds ?? 0
+      };
+    }),
+    overlapCandidates: arrayValue(row.analysisEntries).map((entry) => ({
+      id: entry.id,
+      startedAt: entry.startedAt,
+      stoppedAt: entry.stoppedAt,
+      description: entry.description,
+      categoryName: entry.categoryName
     })),
     pagination: {
       page: input.filters.page,
@@ -238,6 +301,89 @@ export function buildReportDataQuery(
 
   return {
     text: `${sql.filteredEntriesCte()},
+      current_intervals as (
+        select fe.id,
+               greatest(fe.started_at, ${sql.param(input.range.start)}::timestamptz) as interval_start,
+               least(fe.effective_stopped_at, ${sql.param(input.range.end)}::timestamptz) as interval_end
+        from filtered_entries fe
+      ),
+      current_ordered_intervals as (
+        select ci.*,
+               max(ci.interval_end) over (
+                 order by ci.interval_start, ci.interval_end, ci.id
+                 rows between unbounded preceding and 1 preceding
+               ) as prior_max_end
+        from current_intervals ci
+      ),
+      current_grouped_intervals as (
+        select coi.*,
+               sum(
+                 case when coi.prior_max_end is null or coi.interval_start > coi.prior_max_end then 1 else 0 end
+               ) over (order by coi.interval_start, coi.interval_end, coi.id) as island_id
+        from current_ordered_intervals coi
+      ),
+      current_islands as (
+        select island_id, min(interval_start) as island_start, max(interval_end) as island_end
+        from current_grouped_intervals
+        group by island_id
+      ),
+      current_coverage as (
+        select coalesce(sum(extract(epoch from (island_end - island_start))), 0)::int as seconds
+        from current_islands
+      ),
+      current_event_points as (
+        select point_at, sum(delta)::int as delta
+        from (
+          select interval_start as point_at, 1 as delta from current_intervals
+          union all
+          select interval_end as point_at, -1 as delta from current_intervals
+        ) points
+        group by point_at
+      ),
+      current_concurrency_segments as (
+        select point_at,
+               lead(point_at) over (order by point_at) as next_at,
+               sum(delta) over (order by point_at) as concurrency
+        from current_event_points
+      ),
+      current_concurrency as (
+        select coalesce(
+                 sum(extract(epoch from (next_at - point_at))) filter (where concurrency > 1),
+                 0
+               )::int as concurrent_seconds,
+               coalesce(max(concurrency), 0)::int as max_concurrency
+        from current_concurrency_segments
+      ),
+      previous_intervals as (
+        select pfe.id,
+               greatest(pfe.started_at, ${sql.param(input.previousRange.start)}::timestamptz) as interval_start,
+               least(pfe.effective_stopped_at, ${sql.param(input.previousRange.end)}::timestamptz) as interval_end
+        from previous_filtered_entries pfe
+      ),
+      previous_ordered_intervals as (
+        select pi.*,
+               max(pi.interval_end) over (
+                 order by pi.interval_start, pi.interval_end, pi.id
+                 rows between unbounded preceding and 1 preceding
+               ) as prior_max_end
+        from previous_intervals pi
+      ),
+      previous_grouped_intervals as (
+        select poi.*,
+               sum(
+                 case when poi.prior_max_end is null or poi.interval_start > poi.prior_max_end then 1 else 0 end
+               ) over (order by poi.interval_start, poi.interval_end, poi.id) as island_id
+        from previous_ordered_intervals poi
+      ),
+      previous_islands as (
+        select island_id, min(interval_start) as island_start, max(interval_end) as island_end
+        from previous_grouped_intervals
+        group by island_id
+      ),
+      previous_coverage as (
+        select coalesce(sum(extract(epoch from (island_end - island_start))), 0)::int as seconds
+        from previous_islands
+      ),
       category_totals as (
         select coalesce(fe.category_id::text, 'uncategorized') as id,
                coalesce(fe.category_name, 'Uncategorized') as name,
@@ -287,6 +433,47 @@ export function buildReportDataQuery(
         from jsonb_to_recordset(${dayBoundsParam}::jsonb)
           as day(key text, label text, start_at timestamptz, end_at timestamptz, ordinal int)
       ),
+      daily_intervals as (
+        select day.key,
+               day.ordinal,
+               fe.id,
+               greatest(fe.started_at, day.start_at) as interval_start,
+               least(fe.effective_stopped_at, day.end_at) as interval_end
+        from day_bounds day
+        join filtered_entries fe
+          on fe.started_at < day.end_at
+         and fe.effective_stopped_at > day.start_at
+      ),
+      daily_ordered_intervals as (
+        select di.*,
+               max(di.interval_end) over (
+                 partition by di.key
+                 order by di.interval_start, di.interval_end, di.id
+                 rows between unbounded preceding and 1 preceding
+               ) as prior_max_end
+        from daily_intervals di
+      ),
+      daily_grouped_intervals as (
+        select doi.*,
+               sum(
+                 case when doi.prior_max_end is null or doi.interval_start > doi.prior_max_end then 1 else 0 end
+               ) over (
+                 partition by doi.key
+                 order by doi.interval_start, doi.interval_end, doi.id
+               ) as island_id
+        from daily_ordered_intervals doi
+      ),
+      daily_islands as (
+        select key, island_id, min(interval_start) as island_start, max(interval_end) as island_end
+        from daily_grouped_intervals
+        group by key, island_id
+      ),
+      daily_coverage as (
+        select key,
+               sum(extract(epoch from (island_end - island_start)))::int as covered_seconds
+        from daily_islands
+        group by key
+      ),
       daily_totals as (
         select day.key,
                day.label,
@@ -299,11 +486,25 @@ export function buildReportDataQuery(
                    )
                  ) filter (where fe.id is not null),
                  0
-               )::int as seconds
+               )::int as seconds,
+               coalesce(max(dc.covered_seconds), 0)::int as covered_seconds,
+               greatest(
+                 0,
+                 coalesce(
+                   sum(
+                     greatest(
+                       0,
+                       extract(epoch from (least(fe.effective_stopped_at, day.end_at) - greatest(fe.started_at, day.start_at)))
+                     )
+                   ) filter (where fe.id is not null),
+                   0
+                 ) - coalesce(max(dc.covered_seconds), 0)
+               )::int as additional_overlapping_activity_seconds
         from day_bounds day
         left join filtered_entries fe
           on fe.started_at < day.end_at
          and fe.effective_stopped_at > day.start_at
+        left join daily_coverage dc on dc.key = day.key
         group by day.key, day.label, day.ordinal
       ),
       paged_entries as (
@@ -315,7 +516,15 @@ export function buildReportDataQuery(
       )
       select
         coalesce((select sum(clipped_seconds) from filtered_entries), 0)::int as "totalSeconds",
+        (select seconds from current_coverage) as "coveredSeconds",
+        (
+          coalesce((select sum(clipped_seconds) from filtered_entries), 0)
+          - (select seconds from current_coverage)
+        )::int as "additionalOverlapSeconds",
+        (select concurrent_seconds from current_concurrency) as "concurrentCoverageSeconds",
+        (select max_concurrency from current_concurrency) as "maxConcurrency",
         coalesce((select sum(clipped_seconds) from previous_filtered_entries), 0)::int as "previousPeriodSeconds",
+        (select seconds from previous_coverage) as "previousPeriodCoveredSeconds",
         coalesce((
           select jsonb_agg(
             jsonb_build_object('id', id, 'name', name, 'color', color, 'seconds', seconds, 'entryCount', entry_count)
@@ -342,10 +551,30 @@ export function buildReportDataQuery(
         ), '[]'::jsonb) as "bySource",
         coalesce((
           select jsonb_agg(
-            jsonb_build_object('key', key, 'label', label, 'seconds', seconds)
+            jsonb_build_object(
+              'key', key,
+              'label', label,
+              'seconds', seconds,
+              'coveredSeconds', covered_seconds,
+              'additionalOverlappingActivitySeconds', additional_overlapping_activity_seconds
+            )
             order by ordinal
           ) from daily_totals
         ), '[]'::jsonb) as "dailySeries",
+        coalesce((
+          select jsonb_agg(
+            jsonb_build_object(
+              'id', ci.id,
+              'startedAt', ci.interval_start,
+              'stoppedAt', ci.interval_end,
+              'description', fe.description,
+              'categoryName', fe.category_name
+            )
+            order by ci.interval_start, ci.interval_end, ci.id
+          )
+          from current_intervals ci
+          join filtered_entries fe on fe.id = ci.id
+        ), '[]'::jsonb) as "analysisEntries",
         coalesce((
           select jsonb_agg(
             jsonb_build_object(
@@ -549,13 +778,25 @@ function normalizeBreakdown(value: ReportBreakdownRow[] | null | undefined) {
 function emptyReportData(input: ReportQueryInput): ReportDataRow {
   return {
     totalSeconds: 0,
+    coveredSeconds: 0,
+    additionalOverlapSeconds: 0,
+    concurrentCoverageSeconds: 0,
+    maxConcurrency: 0,
     previousPeriodSeconds: 0,
+    previousPeriodCoveredSeconds: 0,
     byCategory: [],
     byTag: [],
     byPlace: [],
     bySource: [],
-    dailySeries: input.dayBoundaries.map(({ key, label }) => ({ key, label, seconds: 0 })),
+    dailySeries: input.dayBoundaries.map(({ key, label }) => ({
+      key,
+      label,
+      seconds: 0,
+      coveredSeconds: 0,
+      additionalOverlappingActivitySeconds: 0
+    })),
     entries: [],
+    analysisEntries: [],
     totalEntries: 0
   };
 }

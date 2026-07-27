@@ -20,6 +20,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import Svg, { Path } from "react-native-svg";
 import {
   consumeActiveHashtag,
+  analyzeTimeIntervals,
   findActiveHashtag,
   insertHashtagStarter,
   normalizeTagName,
@@ -61,6 +62,7 @@ type ActiveTimerEditSheetProps = {
   onApplySuggestion?: (entryId: string, suggestion: RecentActivitySuggestion) => Promise<boolean>;
   onSave?: (entryId: string, patch: TimeEntryUpdatePatch) => Promise<boolean>;
   onStop?: () => Promise<boolean>;
+  peerEntries?: MobileTimeEntry[];
   mode?: EditSheetMode;
   deleting?: boolean;
   saving: boolean;
@@ -86,6 +88,7 @@ export function ActiveTimerEditSheet({
   onApplySuggestion,
   onSave,
   onStop,
+  peerEntries = [],
   deleting = false,
   saving,
   stopping,
@@ -431,6 +434,35 @@ export function ActiveTimerEditSheet({
           previewStartAt,
           startTimeEdited
         });
+  const overlapWarning = useMemo(() => {
+    if (!entry || !parsedStart.date || (hasStoppedTime && !parsedStop.date)) return null;
+    const candidateId = "__mobile_overlap_candidate__";
+    return analyzeTimeIntervals(
+      [
+        ...peerEntries
+          .filter((candidate) => candidate.id !== entry.id)
+          .map((candidate) => ({
+            id: candidate.id,
+            startedAt: candidate.startedAt,
+            stoppedAt: candidate.stoppedAt
+          })),
+        {
+          id: candidateId,
+          startedAt: parsedStart.date,
+          stoppedAt: hasStoppedTime ? parsedStop.date : null
+        }
+      ],
+      { now: new Date() }
+    ).entries.find((candidate) => candidate.id === candidateId) ?? null;
+  }, [entry, hasStoppedTime, parsedStart.date, parsedStop.date, peerEntries]);
+  const overlapPeers = useMemo(() => {
+    if (!overlapWarning) return [];
+    const peerById = new Map(peerEntries.map((candidate) => [candidate.id, candidate]));
+    return overlapWarning.overlappingEntryIds
+      .map((id) => peerById.get(id))
+      .filter((candidate): candidate is MobileTimeEntry => Boolean(candidate))
+      .slice(0, 2);
+  }, [overlapWarning, peerEntries]);
 
   const busy = saving || stopping || deleting;
   const canStop = isRunningMode && Boolean(onStop);
@@ -1072,6 +1104,34 @@ export function ActiveTimerEditSheet({
                         value={stoppedTimeText}
                       />
                     </View>
+                  </View>
+                ) : null}
+
+                {overlapWarning?.overlapCount ? (
+                  <View
+                    accessibilityLiveRegion="polite"
+                    style={{
+                      backgroundColor: colorWithAlpha(theme.warning, theme.mode === "dark" ? 0.14 : 0.11),
+                      borderRadius: 12,
+                      gap: 3,
+                      paddingHorizontal: 12,
+                      paddingVertical: 10
+                    }}
+                  >
+                    <Text style={[styles.activeEditSectionLabel, { color: theme.warningText }]}>
+                      Overlap · {formatClockDuration(overlapWarning.uniqueOverlapSeconds)}
+                    </Text>
+                    <Text style={[styles.muted, { color: theme.textSecondary }]}>
+                      Overlaps {overlapWarning.overlapCount} other {overlapWarning.overlapCount === 1 ? "entry" : "entries"}.
+                      You can still save it; reports show both Total logged and Time covered.
+                    </Text>
+                    {overlapPeers.map((candidate) => (
+                      <Text key={candidate.id} style={[styles.muted, { color: theme.textPrimary }]} numberOfLines={1}>
+                        {candidate.description?.trim() || candidate.categoryName?.trim() || "Untitled entry"}
+                        {" · "}{formatTimeInput(new Date(candidate.startedAt))}–
+                        {candidate.stoppedAt ? formatTimeInput(new Date(candidate.stoppedAt)) : "now"}
+                      </Text>
+                    ))}
                   </View>
                 ) : null}
 
