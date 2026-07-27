@@ -70,7 +70,9 @@ export default function LocationReviewDetailScreen() {
         router.replace("/");
         return;
       }
-      setError(loadError instanceof Error ? loadError.message : "Unable to load location evidence.");
+      setError(
+        "Detailed location evidence needs a connection. Go back to confirm, dismiss or edit the saved Review suggestion."
+      );
     } finally {
       setLoading(false);
     }

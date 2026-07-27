@@ -106,6 +106,14 @@ import {
   recordLocationStoreError,
   type LocationStoreDiagnostics
 } from "@/lib/location/store";
+import {
+  discardReviewSyncIssue,
+  getReviewSyncDiagnostics,
+  listReviewSyncIssues,
+  subscribeReviewSync,
+  synchroniseReviewMutations,
+  type ReviewSyncDiagnostics
+} from "@/lib/reviewSyncStore";
 
 type Category = MobileBootstrap["categories"][number];
 type SettingsSection = "index" | "profile" | "categories" | "automations" | "health" | "sync" | "appearance";
@@ -199,6 +207,11 @@ export default function SettingsScreen() {
   const [syncingQueue, setSyncingQueue] = useState(false);
   const [syncStatusMessage, setSyncStatusMessage] = useState<string | null>(cachedSnapshot?.syncStatusMessage ?? null);
   const [showQueueDetails, setShowQueueDetails] = useState(false);
+  const [reviewSyncDiagnostics, setReviewSyncDiagnostics] =
+    useState<ReviewSyncDiagnostics | null>(null);
+  const [reviewSyncIssues, setReviewSyncIssues] = useState<
+    Awaited<ReturnType<typeof listReviewSyncIssues>>
+  >([]);
   const [showLocationTroubleshooting, setShowLocationTroubleshooting] = useState(false);
   const [locationInfoSheet, setLocationInfoSheet] = useState<"places" | "suggestions" | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -319,6 +332,15 @@ export default function SettingsScreen() {
     });
   }, []);
 
+  const refreshReviewDiagnostics = useCallback(async () => {
+    const [diagnostics, issues] = await Promise.all([
+      getReviewSyncDiagnostics(),
+      listReviewSyncIssues()
+    ]);
+    setReviewSyncDiagnostics(diagnostics);
+    setReviewSyncIssues(issues);
+  }, []);
+
   const load = useCallback(async (options?: { silent?: boolean; trigger?: "navigation" | "focus" | "pull" }) => {
     if (refreshInFlight.current) return;
     refreshInFlight.current = true;
@@ -346,6 +368,7 @@ export default function SettingsScreen() {
       setLocationDiagnostics(location);
       setLocationStatus(nextLocationStatus);
       await refreshLocationV2Diagnostics();
+      await refreshReviewDiagnostics();
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         router.replace("/");
@@ -358,11 +381,18 @@ export default function SettingsScreen() {
       refreshInFlight.current = false;
       if (showRefreshIndicator) setRefreshing(false);
     }
-  }, []);
+  }, [refreshReviewDiagnostics]);
 
   useEffect(() => {
     if (!isSettingsSnapshotFresh()) void load({ silent: true });
   }, [load]);
+
+  useEffect(() => {
+    void refreshReviewDiagnostics();
+    return subscribeReviewSync(() => {
+      void refreshReviewDiagnostics();
+    });
+  }, [refreshReviewDiagnostics]);
 
   useFocusEffect(
     useCallback(() => {
@@ -428,12 +458,21 @@ export default function SettingsScreen() {
   const firstFailedEvent = queueDiagnostics.firstFailed;
   const canRetryFailed = queueDiagnostics.failedCount > 0;
   const canClearFailed = queueDiagnostics.clearableFailedCount > 0;
-  const deviceSyncStatus = deviceSyncStatusText({
+  const eventSyncStatus = deviceSyncStatusText({
     syncingQueue,
     syncStatusMessage,
     lastSyncResult,
     queueDiagnostics
   });
+  const deviceSyncStatus = reviewSyncDiagnostics?.needsAttentionCount
+    ? `${reviewSyncDiagnostics.needsAttentionCount} Review ${
+        reviewSyncDiagnostics.needsAttentionCount === 1 ? "issue" : "issues"
+      }`
+    : reviewSyncDiagnostics?.waitingCount
+      ? `${reviewSyncDiagnostics.waitingCount} Review ${
+          reviewSyncDiagnostics.waitingCount === 1 ? "change" : "changes"
+        } waiting`
+      : eventSyncStatus;
   const locationMonitoringAllowed = locationDiagnostics?.backgroundPermission === "granted";
   const locationActionLabel = locationMonitoringAllowed
     ? "Refresh"
@@ -631,10 +670,14 @@ export default function SettingsScreen() {
     setSyncingQueue(true);
     setSyncStatusMessageAndCache(options?.syncingMessage ?? "Syncing device data...");
     try {
-      const result = await syncQueue({ forceRetry: true });
+      const [result] = await Promise.all([
+        syncQueue({ forceRetry: true }),
+        synchroniseReviewMutations({ force: true })
+      ]);
       setQueueAndCache(result.remaining);
       setLastSyncResultAndCache(result);
       setSyncStatusMessageAndCache(null);
+      await refreshReviewDiagnostics();
       await load();
       return result;
     } catch (error) {
@@ -647,6 +690,42 @@ export default function SettingsScreen() {
     } finally {
       setSyncingQueue(false);
     }
+  }
+
+  async function retryReviewChanges() {
+    setSyncingQueue(true);
+    setSyncStatusMessageAndCache("Retrying saved Review changes...");
+    try {
+      await synchroniseReviewMutations({ force: true });
+      await refreshReviewDiagnostics();
+      setSyncStatusMessageAndCache(null);
+      await load({ silent: true });
+    } catch {
+      setSyncStatusMessageAndCache(
+        "Saved Review changes remain on this iPhone and will retry later."
+      );
+    } finally {
+      setSyncingQueue(false);
+    }
+  }
+
+  function confirmDiscardReviewIssue(clientMutationId: string) {
+    Alert.alert(
+      "Discard saved Review change?",
+      "This removes only the permanently failed local Review change. Pending changes are not affected.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Discard",
+          style: "destructive",
+          onPress: () => {
+            void discardReviewSyncIssue(clientMutationId).then(() =>
+              refreshReviewDiagnostics()
+            );
+          }
+        }
+      ]
+    );
   }
 
   async function retryFailedAndReload() {
@@ -980,6 +1059,32 @@ export default function SettingsScreen() {
   }
 
   async function signOut() {
+    const diagnostics = await getReviewSyncDiagnostics();
+    const unsynchronisedCount =
+      diagnostics.waitingCount + diagnostics.needsAttentionCount;
+    if (unsynchronisedCount > 0) {
+      Alert.alert(
+        "Log out and remove saved changes?",
+        `${unsynchronisedCount} unsynchronised Review ${
+          unsynchronisedCount === 1 ? "change" : "changes"
+        } will be removed from this iPhone.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Log out",
+            style: "destructive",
+            onPress: () => {
+              void completeSignOut();
+            }
+          }
+        ]
+      );
+      return;
+    }
+    await completeSignOut();
+  }
+
+  async function completeSignOut() {
     await logout();
     setDataAndCache(null);
     setQueueAndCache(await readQueue());
@@ -1507,6 +1612,71 @@ export default function SettingsScreen() {
                 )}
               </View>
             ) : null}
+            <View style={styles.queueDiagnosticCard}>
+              <Text style={styles.label}>Review changes</Text>
+              <Text style={styles.accountMeta}>
+                Pending {reviewSyncDiagnostics?.pendingCount ?? 0} · Retry wait{" "}
+                {reviewSyncDiagnostics?.retryWaitCount ?? 0} · Sign-in required{" "}
+                {reviewSyncDiagnostics?.authenticationRequiredCount ?? 0} · Needs attention{" "}
+                {reviewSyncDiagnostics?.needsAttentionCount ?? 0}
+              </Text>
+              {reviewSyncDiagnostics?.oldestQueuedAt ? (
+                <Text style={styles.accountMeta}>
+                  Oldest saved {formatQueueTime(reviewSyncDiagnostics.oldestQueuedAt)}
+                </Text>
+              ) : null}
+              {reviewSyncDiagnostics?.lastSuccessfulSyncAt ? (
+                <Text style={styles.accountMeta}>
+                  Last successful Review sync{" "}
+                  {formatQueueTime(reviewSyncDiagnostics.lastSuccessfulSyncAt)}
+                </Text>
+              ) : null}
+              {reviewSyncDiagnostics?.nextRetryAt ? (
+                <Text style={styles.accountMeta}>
+                  Next retry {formatQueueTime(reviewSyncDiagnostics.nextRetryAt)}
+                </Text>
+              ) : null}
+              {reviewSyncDiagnostics?.lastError ? (
+                <Text style={styles.accountMeta}>
+                  Last error {reviewSyncDiagnostics.lastError}
+                </Text>
+              ) : null}
+              {reviewSyncIssues.map((issue) => (
+                <View key={issue.clientMutationId} style={styles.accountRow}>
+                  <Text style={styles.accountValue}>
+                    {formatReviewMutationAction(issue.action)} ·{" "}
+                    {formatQueueTime(issue.createdAt)}
+                  </Text>
+                  <Text style={styles.accountMeta}>
+                    Item {issue.reviewItemId.slice(0, 8)} · Mutation{" "}
+                    {issue.clientMutationId.slice(0, 8)}
+                    {issue.lastHttpStatus ? ` · HTTP ${issue.lastHttpStatus}` : ""}
+                  </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    style={pressable(styles.secondaryButton, styles.buttonPressed)}
+                    onPress={() =>
+                      confirmDiscardReviewIssue(issue.clientMutationId)
+                    }
+                  >
+                    <Text style={styles.secondaryButtonText}>
+                      Discard failed change
+                    </Text>
+                  </Pressable>
+                </View>
+              ))}
+              <View style={styles.buttonRow}>
+                <Pressable
+                  accessibilityRole="button"
+                  style={pressable(styles.secondaryButton, styles.buttonPressed)}
+                  onPress={() => void retryReviewChanges()}
+                >
+                  <Text style={styles.secondaryButtonText}>
+                    Retry Review changes
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
             <View style={styles.buttonRow}>
               <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={() => void syncAndReload()}>
                 <Text style={styles.secondaryButtonText}>Sync now</Text>
@@ -2314,6 +2484,21 @@ function formatSourceLabel(value?: string | null) {
 function formatEventLabel(value?: string | null) {
   if (!value) return "Activity";
   return eventLabels[value] ?? formatMachineLabel(value);
+}
+
+function formatReviewMutationAction(value: string) {
+  switch (value) {
+    case "accept":
+    case "confirm":
+      return "Confirm";
+    case "ignore_once":
+    case "ignore_once_location":
+      return "Dismiss";
+    case "edit_and_confirm":
+      return "Edit and confirm";
+    default:
+      return "Review change";
+  }
 }
 
 function formatMachineLabel(value: string) {

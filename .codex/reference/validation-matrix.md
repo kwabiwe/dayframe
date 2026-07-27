@@ -74,6 +74,24 @@ Manual evidence:
 - Reprocess diagnostics.
 - Reason shown for Health items left in Review.
 
+Offline Review mutation changes additionally require:
+
+- `npm run validate:review-sync-sqlite` against a temporary SQLite database.
+- `DATABASE_URL=..._test npm run validate:review-mutation-db` against a
+  disposable local Postgres database.
+- Confirm, Dismiss, and Edit-and-confirm after local SQLite acknowledgement,
+  with a local-write failure proving that the card/form stays actionable.
+- Restart-persistent cache/tombstones, account switching/logout isolation,
+  bounded retry, session-expiry preservation, same-account reauthentication,
+  conflict/Discard diagnostics, and lost-response receipt replay without a
+  duplicate entry.
+- A clean iOS native build and the physical-iPhone Airplane Mode,
+  force-quit/reopen, reconnect, conflict, System/Light/Dark, Dynamic Type,
+  VoiceOver, and Reduce Motion matrices.
+- Explicit limitations: timers and non-terminal location operations are outside
+  this outbox; detailed Location Evidence may require a connection; force-quit
+  does not guarantee background synchronisation.
+
 ## Timer And Sync
 
 Required checks:

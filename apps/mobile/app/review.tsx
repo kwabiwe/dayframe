@@ -13,7 +13,11 @@ import Reanimated from "react-native-reanimated";
 import Svg, { Circle, Path } from "react-native-svg";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { paletteColorFor, readableLocationNameFromParts } from "@dayframe/shared";
+import {
+  paletteColorFor,
+  readableLocationNameFromParts,
+  type ReviewMutation
+} from "@dayframe/shared";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { DayframeBrand } from "@/components/brand";
 import { MobileBackButton } from "@/components/MobileBackButton";
@@ -23,11 +27,7 @@ import {
 } from "@/components/OverflowMenu";
 import {
   AuthRequiredError,
-  confirmReviewItem,
-  dismissReviewItem,
   fetchBootstrap,
-  resolveLocationReviewItem,
-  saveEditedReviewItem,
   updateTimeEntry,
   type HealthReviewReprocessResult,
   type MobileBootstrap,
@@ -37,7 +37,6 @@ import {
 } from "@/lib/api";
 import { DAYFRAME_API_BASE } from "@/lib/config";
 import { reprocessExistingHealthReviewItems } from "@/lib/health";
-import { applyOptimisticMutation } from "@/lib/localMutation";
 import { pressable, useMobileTheme } from "@/lib/mobileTheme";
 import {
   localLayoutTransition,
@@ -53,20 +52,26 @@ import {
   canRunReviewMenuAction,
   hasSuggestedTimeWindow,
   hasV2LocationEvidence,
-  hideTombstonedReviewItems,
   isOneOffLocationReviewItem,
   isOpenReviewItem,
   isReviewNeededEntry,
   isLocationReviewItem,
   removeReviewItemOptimistically,
   reduceReviewMenuState,
-  restoreReviewItemOptimistically,
   reviewConfirmLabel,
   reviewItemCategoryLabel,
   reviewItemDurationSeconds,
-  type OptimisticReviewRemoval,
   type ReviewMenuEvent
 } from "@/lib/review";
+import {
+  createReviewClientMutationId,
+  enqueueReviewMutation,
+  getReviewSyncDiagnostics,
+  loadCachedReviewBootstrap,
+  subscribeReviewSync,
+  synchroniseReviewMutations,
+  type ReviewSyncDiagnostics
+} from "@/lib/reviewSyncStore";
 
 type ReviewEditTarget =
   | {
@@ -76,11 +81,6 @@ type ReviewEditTarget =
     handoverToken: number;
   }
   | { kind: "entry"; entry: MobileTimeEntry };
-
-type ReviewTombstone = {
-  status: "pending" | "succeeded";
-  version: number;
-};
 
 type ReviewLoadOptions = {
   forceReprocess?: boolean;
@@ -111,6 +111,10 @@ export default function ReviewScreen() {
   const [editSaving, setEditSaving] = useState(false);
   const [showReviewInfo, setShowReviewInfo] = useState(false);
   const [reviewMenuState, setReviewMenuState] = useState(CLOSED_REVIEW_MENU_STATE);
+  const [reviewAvailabilityMessage, setReviewAvailabilityMessage] = useState<string | null>(null);
+  const [reviewSyncDiagnostics, setReviewSyncDiagnostics] = useState<ReviewSyncDiagnostics | null>(
+    null
+  );
   const [reprocessDiagnostics, setReprocessDiagnostics] = useState<ReviewReprocessDiagnostics>({
     apiBaseUrl: DAYFRAME_API_BASE,
     startedAt: null,
@@ -128,9 +132,7 @@ export default function ReviewScreen() {
   const forcedReprocessComplete = useRef(false);
   const reviewMenuStateRef = useRef(CLOSED_REVIEW_MENU_STATE);
   const reviewMenuActionSequence = useRef(0);
-  const reviewMutationSequence = useRef(0);
   const reviewMutations = useRef(new Map<string, number>());
-  const reviewTombstones = useRef(new Map<string, ReviewTombstone>());
   const loadRef = useRef<(options?: ReviewLoadOptions) => Promise<void>>(
     async () => undefined
   );
@@ -167,18 +169,12 @@ export default function ReviewScreen() {
   }, [applyReviewMenuEvent, commitEditTarget]);
 
   const commitBootstrap = useCallback((bootstrap: MobileBootstrap) => {
-    const serverOpenItemIds = new Set(
-      bootstrap.reviewItems.filter(isOpenReviewItem).map((item) => item.id)
-    );
-    for (const [itemId, tombstone] of reviewTombstones.current) {
-      if (tombstone.status === "succeeded" && !serverOpenItemIds.has(itemId)) {
-        reviewTombstones.current.delete(itemId);
-      }
-    }
-    commitData(
-      hideTombstonedReviewItems(bootstrap, reviewTombstones.current.keys())
-    );
+    commitData(bootstrap);
   }, [commitData]);
+
+  const refreshReviewSyncDiagnostics = useCallback(async () => {
+    setReviewSyncDiagnostics(await getReviewSyncDiagnostics());
+  }, []);
 
   const cancelPendingReviewHandover = useCallback(() => {
     const pendingAction = reviewMenuStateRef.current.pendingAction;
@@ -202,7 +198,12 @@ export default function ReviewScreen() {
     if (!options?.preserveMenu) applyReviewMenuEvent({ type: "close" });
     if (options?.refresh) setRefreshing(true);
     try {
+      if (options?.refresh) {
+        await synchroniseReviewMutations({ force: true });
+      }
       commitBootstrap(await fetchBootstrap());
+      setReviewAvailabilityMessage(null);
+      await refreshReviewSyncDiagnostics();
       if (options?.skipReprocess) return;
       const forceReprocess = options?.forceReprocess ?? !forcedReprocessComplete.current;
       if (forceReprocess) forcedReprocessComplete.current = true;
@@ -245,7 +246,21 @@ export default function ReviewScreen() {
         router.replace("/");
         return;
       }
-      if (!options?.silent && !timedOut) {
+      const cached = await loadCachedReviewBootstrap().catch(() => null);
+      if (cached) {
+        commitBootstrap(cached.bootstrap);
+        setReviewAvailabilityMessage(
+          cached.cachedAt
+            ? `Offline · showing Review data saved ${formatCachedAt(cached.cachedAt)}`
+            : "Offline · showing Review data saved on this iPhone"
+        );
+        await refreshReviewSyncDiagnostics();
+      } else {
+        setReviewAvailabilityMessage(
+          "Review is unavailable offline because no recent Review data is stored on this iPhone."
+        );
+      }
+      if (!cached && !options?.silent && !timedOut) {
         Alert.alert("Review", error instanceof Error ? error.message : "Unable to load review items.");
       }
     } finally {
@@ -261,12 +276,23 @@ export default function ReviewScreen() {
         });
       }
     }
-  }, [applyReviewMenuEvent, commitBootstrap]);
+  }, [
+    applyReviewMenuEvent,
+    commitBootstrap,
+    refreshReviewSyncDiagnostics
+  ]);
   loadRef.current = load;
 
   useEffect(() => {
     void load({ forceReprocess: true });
   }, [load]);
+
+  useEffect(() => {
+    void refreshReviewSyncDiagnostics();
+    return subscribeReviewSync(() => {
+      void refreshReviewSyncDiagnostics();
+    });
+  }, [refreshReviewSyncDiagnostics]);
 
   useFocusEffect(
     useCallback(() => {
@@ -294,6 +320,7 @@ export default function ReviewScreen() {
         return;
       }
       if (screenFocusedRef.current) {
+        void synchroniseReviewMutations().catch(() => undefined);
         void load({
           preserveMenu: true,
           queueIfBusy: true,
@@ -335,18 +362,23 @@ export default function ReviewScreen() {
 
   function confirmItem(item: MobileReviewItem) {
     applyReviewMenuEvent({ type: "close" });
-    resolveItem(item, async () => {
-      if (hasV2LocationEvidence(item)) await resolveLocationReviewItem(item.id, { action: "confirm" });
-      else await confirmReviewItem(item.id);
-    }, "Suggestion confirmed.");
+    resolveItem(
+      item,
+      hasV2LocationEvidence(item)
+        ? { action: "confirm" }
+        : { action: "accept" },
+      "Saved on this iPhone. Waiting to sync."
+    );
   }
 
   function dismissItem(item: MobileReviewItem) {
-    resolveItem(item, async () => {
-      if (hasV2LocationEvidence(item)) {
-        await resolveLocationReviewItem(item.id, { action: "ignore_once_location" });
-      } else await dismissReviewItem(item.id);
-    }, "Suggestion dismissed.");
+    resolveItem(
+      item,
+      hasV2LocationEvidence(item)
+        ? { action: "ignore_once_location" }
+        : { action: "ignore_once" },
+      "Saved on this iPhone. Waiting to sync."
+    );
   }
 
   function toggleReviewMenu(item: MobileReviewItem) {
@@ -406,7 +438,7 @@ export default function ReviewScreen() {
 
   function resolveItem(
     item: MobileReviewItem,
-    action: () => Promise<void>,
+    mutation: ReviewMutation,
     successAnnouncement: string
   ) {
     if (reviewMutations.current.has(item.id)) return;
@@ -415,57 +447,42 @@ export default function ReviewScreen() {
     const optimistic = removeReviewItemOptimistically(currentData, item.id);
     if (!optimistic) return;
 
-    reviewMutationSequence.current += 1;
-    const version = reviewMutationSequence.current;
-    reviewMutations.current.set(item.id, version);
-    reviewTombstones.current.set(item.id, { status: "pending", version });
-
-    void applyOptimisticMutation<OptimisticReviewRemoval, void>(
-      () => {
+    reviewMutations.current.set(item.id, 1);
+    const clientMutationId = createReviewClientMutationId();
+    void enqueueReviewMutation({
+      bootstrap: currentData,
+      item,
+      mutation,
+      clientMutationId
+    }).then(() => {
+        if (!reviewMutations.current.has(item.id)) return;
         commitData(optimistic.data);
         AccessibilityInfo.announceForAccessibility(successAnnouncement);
-        return optimistic.removal;
-      },
-      action,
-      (removal) => {
-        if (reviewMutations.current.get(item.id) !== version) return;
-        const tombstone = reviewTombstones.current.get(item.id);
-        if (!tombstone || tombstone.version !== version) return;
         reviewMutations.current.delete(item.id);
-        reviewTombstones.current.delete(item.id);
-        const latestData = dataRef.current;
-        if (latestData) {
-          commitData(restoreReviewItemOptimistically(latestData, removal));
-        }
+        void synchroniseReviewMutations()
+          .then(() => {
+            void load({
+              preserveMenu: true,
+              queueIfBusy: true,
+              silent: true,
+              skipReprocess: true
+            });
+          })
+          .catch(() => {
+            void refreshReviewSyncDiagnostics();
+          });
+      }).catch((error) => {
+        reviewMutations.current.delete(item.id);
         AccessibilityInfo.announceForAccessibility(
-          "Suggestion restored because the action failed."
+          "The Review change was not saved. The suggestion is still available."
         );
-      }
-    ).then(() => {
-      if (reviewMutations.current.get(item.id) !== version) return;
-      const tombstone = reviewTombstones.current.get(item.id);
-      if (!tombstone || tombstone.version !== version) return;
-      reviewMutations.current.delete(item.id);
-      reviewTombstones.current.set(item.id, {
-        status: "succeeded",
-        version
+        Alert.alert(
+          "Review",
+          error instanceof Error
+            ? error.message
+            : "Unable to save this Review change on this iPhone."
+        );
       });
-      void load({
-        preserveMenu: true,
-        queueIfBusy: true,
-        silent: true,
-        skipReprocess: true
-      });
-    }).catch((error) => {
-      if (error instanceof AuthRequiredError) {
-        router.replace("/");
-        return;
-      }
-      Alert.alert(
-        "Review",
-        error instanceof Error ? error.message : "Unable to update this suggestion."
-      );
-    });
   }
 
   function beginReviewItemEdit(item: MobileReviewItem, handoverToken: number) {
@@ -522,16 +539,48 @@ export default function ReviewScreen() {
           Alert.alert("Edit", "Choose a start and end time before saving this suggestion.");
           return false;
         }
-        await saveEditedReviewItem(editTarget.item.id, {
-          categoryId: patch.categoryId,
-          description: patch.description,
-          startedAt: patch.startedAt,
-          stoppedAt: patch.stoppedAt
-        }, { atomicLocation: hasV2LocationEvidence(editTarget.item) });
+        const currentData = dataRef.current;
+        if (!currentData) return false;
+        const optimistic = removeReviewItemOptimistically(
+          currentData,
+          editTarget.item.id
+        );
+        if (!optimistic) return false;
+        await enqueueReviewMutation({
+          bootstrap: currentData,
+          item: editTarget.item,
+          clientMutationId: createReviewClientMutationId(),
+          mutation: {
+            action: "edit_and_confirm",
+            edit: {
+              categoryId: patch.categoryId ?? null,
+              description: patch.description?.trim() || undefined,
+              startedAt: patch.startedAt,
+              stoppedAt: patch.stoppedAt,
+              tags: patch.tagNames
+            }
+          }
+        });
+        commitData(optimistic.data);
+        AccessibilityInfo.announceForAccessibility(
+          "Changes saved on this iPhone. Waiting to sync."
+        );
+        void synchroniseReviewMutations()
+          .then(() => {
+            void load({
+              preserveMenu: true,
+              queueIfBusy: true,
+              silent: true,
+              skipReprocess: true
+            });
+          })
+          .catch(() => {
+            void refreshReviewSyncDiagnostics();
+          });
       } else {
         await updateTimeEntry(entryId, patch);
+        await load({ silent: true, skipReprocess: true });
       }
-      await load({ silent: true, skipReprocess: true });
       return true;
     } catch (error) {
       if (error instanceof AuthRequiredError) {
@@ -602,6 +651,34 @@ export default function ReviewScreen() {
               </Reanimated.View>
             ) : null}
           </View>
+
+          {reviewAvailabilityMessage ? (
+            <View style={styles.queueDiagnosticCard}>
+              <Text accessibilityLiveRegion="polite" style={styles.muted}>
+                {reviewAvailabilityMessage}
+              </Text>
+            </View>
+          ) : null}
+
+          <ReviewSyncStatus
+            diagnostics={reviewSyncDiagnostics}
+            onReviewIssue={() =>
+              router.push({ pathname: "/settings", params: { section: "sync" } })
+            }
+            onRetry={() => {
+              void synchroniseReviewMutations({ force: true })
+                .then(() =>
+                  load({
+                    preserveMenu: true,
+                    queueIfBusy: true,
+                    silent: true,
+                    skipReprocess: true
+                  })
+                )
+                .catch(() => refreshReviewSyncDiagnostics());
+            }}
+            styles={styles}
+          />
 
           <View style={styles.lifecyclePanel}>
             <Text style={styles.sectionTitle}>Review items</Text>
@@ -682,6 +759,50 @@ export default function ReviewScreen() {
         visible={Boolean(editingEntry)}
       />
     </SafeAreaView>
+  );
+}
+
+function ReviewSyncStatus({
+  diagnostics,
+  onRetry,
+  onReviewIssue,
+  styles
+}: {
+  diagnostics: ReviewSyncDiagnostics | null;
+  onRetry: () => void;
+  onReviewIssue: () => void;
+  styles: ReturnType<typeof useMobileTheme>["styles"];
+}) {
+  if (!diagnostics) return null;
+  const copy = reviewSyncStatusCopy(diagnostics);
+  if (!copy) return null;
+  return (
+    <Reanimated.View
+      accessibilityLiveRegion={diagnostics.needsAttentionCount > 0 ? "assertive" : "polite"}
+      style={styles.queueDiagnosticCard}
+    >
+      <Text style={styles.reviewMetaLine}>{copy}</Text>
+      <View style={styles.buttonRow}>
+        {diagnostics.waitingCount > 0 ? (
+          <Pressable
+            accessibilityRole="button"
+            style={pressable(styles.secondaryButton, styles.buttonPressed)}
+            onPress={onRetry}
+          >
+            <Text style={styles.secondaryButtonText}>Retry now</Text>
+          </Pressable>
+        ) : null}
+        {diagnostics.needsAttentionCount > 0 ? (
+          <Pressable
+            accessibilityRole="button"
+            style={pressable(styles.secondaryButton, styles.buttonPressed)}
+            onPress={onReviewIssue}
+          >
+            <Text style={styles.secondaryButtonText}>Review issue</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    </Reanimated.View>
   );
 }
 
@@ -1063,6 +1184,40 @@ function formatDiagnosticsTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "--:--";
   return formatTimeOfDay(date);
+}
+
+function formatCachedAt(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "earlier";
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function reviewSyncStatusCopy(diagnostics: ReviewSyncDiagnostics) {
+  if (diagnostics.needsAttentionCount > 0) {
+    const issueCopy = `${diagnostics.needsAttentionCount} Review ${
+      diagnostics.needsAttentionCount === 1 ? "change needs" : "changes need"
+    } attention`;
+    return diagnostics.waitingCount > 0
+      ? `${issueCopy} · ${diagnostics.waitingCount} waiting to sync`
+      : issueCopy;
+  }
+  if (diagnostics.authenticationRequiredCount > 0) {
+    const count = diagnostics.authenticationRequiredCount;
+    return `${count} ${
+      count === 1 ? "change" : "changes"
+    } saved on this iPhone · sign in to sync`;
+  }
+  if (diagnostics.waitingCount > 0) {
+    return `${diagnostics.waitingCount} Review ${
+      diagnostics.waitingCount === 1 ? "change" : "changes"
+    } waiting to sync`;
+  }
+  return null;
 }
 
 function formatTimeOfDay(date: Date) {

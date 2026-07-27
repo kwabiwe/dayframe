@@ -23,6 +23,8 @@
     "check:brand-assets": "node scripts/check-brand-assets.mjs",
     "validate:location-v2-db": "tsx scripts/validate-location-v2-db.ts",
     "validate:location-v2-sqlite": "bash scripts/validate-location-v2-sqlite.sh",
+    "validate:review-sync-sqlite": "bash scripts/validate-review-sync-sqlite.sh",
+    "validate:review-mutation-db": "tsx scripts/validate-review-mutation-db.ts",
     "testflight:preflight": "node scripts/dayframe-testflight-preflight.mjs"
   },
   "devDependencies": {

@@ -24,7 +24,7 @@ describe("local motion ownership contracts", () => {
   });
 
   it("gives Review and Places one local presence/layout owner around mutations", () => {
-    expect(reviewSource).toContain("applyOptimisticMutation");
+    expect(reviewSource).toContain("enqueueReviewMutation");
     expect(placesSource).toContain("applyAfterSuccessfulMutation");
     for (const screenSource of [reviewSource, placesSource]) {
       expect(screenSource).toContain("localLayoutTransition(reduceMotion)");

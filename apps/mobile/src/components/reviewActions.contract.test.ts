@@ -44,15 +44,15 @@ describe("mobile Review action contracts", () => {
     expect(editSheetSource).toContain("AccessibilityInfo.setAccessibilityFocus");
   });
 
-  it("removes Review cards optimistically and reconciles stale bootstrap data", () => {
-    expect(reviewSource).toContain("applyOptimisticMutation");
+  it("removes Review cards only after durable enqueue and reconciles stale bootstrap data", () => {
+    expect(reviewSource).toContain("enqueueReviewMutation");
     expect(reviewSource).toContain("removeReviewItemOptimistically");
-    expect(reviewSource).toContain("restoreReviewItemOptimistically");
-    expect(reviewSource).toContain("hideTombstonedReviewItems");
+    expect(reviewSource).toContain("synchroniseReviewMutations");
+    expect(reviewSource).toContain("loadCachedReviewBootstrap");
     expect(reviewSource).toContain("new Map<string, number>()");
     expect(reviewSource).toContain('AppState.addEventListener("change"');
-    expect(reviewSource).toContain('status: "succeeded"');
     expect(reviewSource).not.toContain("applyAfterSuccessfulMutation");
+    expect(reviewSource).not.toContain("applyOptimisticMutation");
     expect(reviewSource).not.toContain("resolvingId");
   });
 });

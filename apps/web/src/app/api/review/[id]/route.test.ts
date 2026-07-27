@@ -10,7 +10,8 @@ const session = {
 const mocks = vi.hoisted(() => ({
   resolveRequestSession: vi.fn(),
   resolveReviewItem: vi.fn(),
-  resolveLocationReviewAction: vi.fn()
+  resolveLocationReviewAction: vi.fn(),
+  resolveIdempotentReviewMutation: vi.fn()
 }));
 
 vi.mock("@/lib/location/location-review-service", () => ({
@@ -19,6 +20,10 @@ vi.mock("@/lib/location/location-review-service", () => ({
 
 vi.mock("@/lib/ingest-auth", () => ({
   resolveRequestSession: mocks.resolveRequestSession
+}));
+
+vi.mock("@/lib/review-mutation-service", () => ({
+  resolveIdempotentReviewMutation: mocks.resolveIdempotentReviewMutation
 }));
 
 vi.mock("@/lib/event-service", async () => {
@@ -37,6 +42,12 @@ describe("POST /api/review/[id]", () => {
     vi.resetAllMocks();
     mocks.resolveRequestSession.mockResolvedValue(session);
     mocks.resolveReviewItem.mockResolvedValue({
+      ok: true,
+      action: "accept",
+      status: "accepted",
+      entryId: "entry-1"
+    });
+    mocks.resolveIdempotentReviewMutation.mockResolvedValue({
       ok: true,
       action: "accept",
       status: "accepted",
@@ -99,6 +110,43 @@ describe("POST /api/review/[id]", () => {
     expect(response.status).toBe(200);
     expect(mocks.resolveLocationReviewAction).toHaveBeenCalledWith("review-1", action, session);
     expect(mocks.resolveReviewItem).not.toHaveBeenCalled();
+  });
+
+  it("dispatches strict idempotent mobile mutations through one transaction owner", async () => {
+    const envelope = {
+      clientMutationId: "d87c35ce-2a63-4e44-a8fc-4370f2a5cda4",
+      mutation: { action: "accept" as const }
+    };
+    const response = await POST(jsonRequest(envelope), params("review-1"));
+
+    expect(response.status).toBe(200);
+    expect(mocks.resolveIdempotentReviewMutation).toHaveBeenCalledWith(
+      "review-1",
+      envelope,
+      session
+    );
+    expect(mocks.resolveReviewItem).not.toHaveBeenCalled();
+    expect(mocks.resolveLocationReviewAction).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed idempotent envelopes instead of falling through to legacy resolution", async () => {
+    const response = await POST(
+      jsonRequest({
+        clientMutationId: "not-a-uuid",
+        mutation: { action: "accept", unexpected: true }
+      }),
+      params("review-1")
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      code: "invalid_action",
+      message: "Invalid Review mutation envelope."
+    });
+    expect(mocks.resolveIdempotentReviewMutation).not.toHaveBeenCalled();
+    expect(mocks.resolveReviewItem).not.toHaveBeenCalled();
+    expect(mocks.resolveLocationReviewAction).not.toHaveBeenCalled();
   });
 });
 
