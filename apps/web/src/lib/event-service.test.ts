@@ -24,6 +24,7 @@ vi.mock("./queries", () => ({
 const {
   createPlace,
   createPlaceFromLearnedPlace,
+  createManualEntry,
   createEntity,
   deleteLearnedPlace,
   deletePlace,
@@ -1186,7 +1187,9 @@ describe("health event persistence", () => {
     const reviewInsert = client.query.mock.calls.find(([statement]) =>
       String(statement).includes("insert into review_items")
     );
-    expect(reviewInsert?.[1]).toContain("This Health activity overlaps existing time and needs review before becoming confirmed time.");
+    expect(reviewInsert?.[1]).toEqual(expect.arrayContaining([
+      expect.stringContaining("Automatic logging paused because this Health activity overlaps existing time")
+    ]));
     expect(
       client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"))
     ).toBeUndefined();
@@ -1482,7 +1485,7 @@ describe("health event persistence", () => {
     ).toBeUndefined();
     expect(client.query).toHaveBeenCalledWith(
       expect.stringContaining("set notes = $2"),
-      ["review-overlap", "Left in Review: overlaps stale open timer \"BAU\" with no stop time."]
+      ["review-overlap", "Left in Review: automatic logging paused because this overlaps stale open timer \"BAU\" with no stop time. You can still confirm it."]
     );
   });
 
@@ -2644,7 +2647,7 @@ describe("time entry deletion", () => {
 describe("time entry tag transactions", () => {
   beforeEach(() => vi.resetAllMocks());
 
-  it("saves description, creates normalized tags, and replaces associations before commit", async () => {
+  it("saves an overlapping manual edit without querying for a time conflict", async () => {
     const client = {
       query: vi.fn(async (statement: string, values?: unknown[]) => {
         if (statement.includes("update time_entries")) return { rows: [{ id: "entry-1" }] };
@@ -2666,6 +2669,8 @@ describe("time entry tag transactions", () => {
 
     await expect(updateTimeEntry("entry-1", {
       description: "Draft plan #Planning #deep-work",
+      startedAt: "2026-07-27T10:00:00.000Z",
+      stoppedAt: "2026-07-27T11:00:00.000Z",
       tagNames: ["Planning", "Deep work", "planning"]
     }, session)).resolves.toEqual({ id: "entry-1" });
 
@@ -2682,6 +2687,35 @@ describe("time entry tag transactions", () => {
     expect(client.query.mock.calls.filter(([statement]) => String(statement).includes("insert into tags"))).toHaveLength(2);
     expect(client.query.mock.calls.some(([statement]) => String(statement).includes("delete from time_entry_tags"))).toBe(true);
     expect(client.query.mock.calls.filter(([statement]) => String(statement).includes("insert into time_entry_tags"))).toHaveLength(2);
+    expect(client.query.mock.calls.some(([statement]) => (
+      String(statement).includes("started_at <") && String(statement).includes("coalesce(stopped_at")
+    ))).toBe(false);
+    expect(client.query.mock.calls.at(-1)?.[0]).toBe("commit");
+  });
+
+  it("creates an overlapping manual entry without querying for a time conflict", async () => {
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes("insert into activity_events")) return { rows: [{ id: "event-1" }] };
+        if (statement.includes("insert into time_entries")) return { rows: [{ id: "entry-1" }] };
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(createManualEntry({
+      description: "Call during a walk",
+      startedAt: "2026-07-27T10:00:00.000Z",
+      stoppedAt: "2026-07-27T11:00:00.000Z"
+    }, session)).resolves.toEqual({ id: "entry-1" });
+
+    const statements = client.query.mock.calls.map(([statement]) => String(statement));
+    expect(statements.some((statement) => statement.includes("insert into activity_events"))).toBe(true);
+    expect(statements.some((statement) => statement.includes("insert into time_entries"))).toBe(true);
+    expect(statements.some((statement) => (
+      statement.includes("started_at <") && statement.includes("coalesce(stopped_at")
+    ))).toBe(false);
     expect(client.query.mock.calls.at(-1)?.[0]).toBe("commit");
   });
 });

@@ -33,6 +33,11 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Web Calendar hover/focus reveals only the inline Play action; it does not mount a floating details card. Double-click and keyboard Enter open Edit.
 - Web running blocks keep normal text opacity and use an explicit Running label plus a non-colour boundary treatment. Completed Calendar/List restart actions share the one shell timer runtime, copy only category/description/tags, gate duplicates, refuse to replace an active timer, and roll back on failure.
 - Calendar/time blocks at least 48px high can be resized from safe top/bottom pointer handles, snap to configured intervals, and save on release. Smaller blocks use Edit instead of overlapping resize targets.
+- Intentional overlaps save from web/mobile Add and Edit, Calendar resize, every explicit Review confirmation path, and offline Review replay. Warnings explain the overlap without disabling the primary action.
+- Boundary-touching entries have no overlap marker. Contained, partial, chained, cross-midnight, running, and dense overlaps show deterministic markers and Calendar geometry.
+- Calendar taps open the visible intended block in contained and dense collisions; enlarged hidden hit targets do not cover neighbouring blocks.
+- Timeline/History and Reports distinguish Total logged from Time covered. Category allocation and timesheets remain logged-time views, while daily/weekly goals advance on covered time.
+- Automatic Health and location overlap decisions remain Review-first and explicitly say the user can still confirm.
 - Selected time blocks can be deleted from edit controls, context actions, or keyboard delete/backspace where supported.
 - Calendar zoom controls change time granularity without breaking layout.
 - Mobile Calendar uses one native scroll/zoom owner for the timeline. Pinch remains continuous under the fingers, keeps the gesture midpoint anchored, and has no release-time snap, rubber-band handoff, blank frame, or obvious dropped-frame feel.
@@ -91,10 +96,10 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
   sign-in-required; confirmed logout warns with the exact unsynchronised count
   and clears only that active account's Review cache/outbox.
 - Review retry coverage includes network/DNS failure, timeout, 408, 429, 5xx,
-  temporary lock contention, and a lost success response. Permanent category,
-  overlap, supersession, and cross-device resolution conflicts stop retrying,
-  surface safe Settings diagnostics, and restore a card only when canonical
-  server state remains open.
+  temporary lock contention, legacy overlap responses, and a lost success
+  response. Permanent category, technical duplicate, supersession, and
+  cross-device resolution conflicts stop retrying, surface safe Settings
+  diagnostics, and restore a card only when canonical server state remains open.
 - Run `npm run validate:review-sync-sqlite` and
   `DATABASE_URL=..._test npm run validate:review-mutation-db` for Review outbox
   changes. The Postgres URL must name a disposable local `_test` database.

@@ -53,6 +53,7 @@ describe("Review sync store contracts", () => {
     expect(reviewSyncDisposition(429)).toBe("retry");
     expect(reviewSyncDisposition(503)).toBe("retry");
     expect(reviewSyncDisposition(409, "review_item_locked")).toBe("retry");
+    expect(reviewSyncDisposition(409, "overlap")).toBe("retry");
     expect(reviewSyncDisposition(409, "resolution_conflict")).toBe(
       "needs_attention"
     );

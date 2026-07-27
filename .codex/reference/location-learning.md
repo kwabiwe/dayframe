@@ -64,6 +64,13 @@ The server default is `v2_shadow` through `DAYFRAME_LOCATION_ROLLOUT_MODE`. A le
 
 Location review mutations lock the review/event and affected segment rows in one transaction. Edit-and-confirm, record-once, save-place-and-confirm, split, and merge either commit fully or roll back. Change-place feedback is a small bounded anchor and never expands a saved geofence from one noisy sample.
 
+An overlap with confirmed/accepted time blocks automatic location entry creation
+and leaves the signal in Review. Once the user explicitly confirms, edits and
+confirms, records once, saves a place and confirms, splits and confirms, or
+merges and confirms, that overlap is intentional and must not block the
+transaction. Source event/segment identifiers and Review mutation receipts
+still provide idempotency.
+
 Reverse geocoding is display-only: use saved/learned identity first, invoke a provider only for actionable/visible unknowns, cache a bounded provider/version/locale result, and never put the provider's raw object in an event. V2 segmentation must not call reverse geocoding.
 
 Postgres retention is operational through Vercel Cron calling `GET /api/cron/location-retention` daily at `03:17 UTC`. The route fails closed unless its bearer token matches `CRON_SECRET`, returns `no-store`, calls the bounded service-role cleanup function under an advisory lock, and warns if a 50,000-row run limit leaves a backlog. Vercel Cron runs on production deployments only, so hosted verification must confirm the environment secret, database role/function grant, invocation logs, and next-day schedule. A failed invocation leaves evidence for the next run and is visible through the non-2xx route result and Vercel logs; it must never fall back to an unauthenticated deletion path.

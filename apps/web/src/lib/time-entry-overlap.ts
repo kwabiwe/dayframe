@@ -1,3 +1,5 @@
+import { analyzeTimeIntervals } from "@dayframe/shared";
+
 export type TimeEntryInterval = {
   startedAt: string;
   stoppedAt: string | null;
@@ -21,25 +23,11 @@ export function entryOverlapSeconds(
   range: DateRange,
   capturedNow = new Date()
 ) {
-  const startedAt = new Date(entry.startedAt).getTime();
-  const stoppedAt = entry.stoppedAt
-    ? new Date(entry.stoppedAt).getTime()
-    : capturedNow.getTime();
-  const rangeStart = range.start.getTime();
-  const rangeEnd = range.end.getTime();
-
-  if (
-    !Number.isFinite(startedAt) ||
-    !Number.isFinite(stoppedAt) ||
-    !Number.isFinite(rangeStart) ||
-    !Number.isFinite(rangeEnd) ||
-    rangeEnd <= rangeStart
-  ) {
-    return 0;
-  }
-
-  const overlapStart = Math.max(startedAt, rangeStart);
-  const overlapEnd = Math.min(stoppedAt, rangeEnd);
-  if (overlapEnd <= overlapStart) return 0;
-  return Math.max(0, Math.round((overlapEnd - overlapStart) / 1000));
+  return analyzeTimeIntervals(
+    [{ id: "entry", ...entry }],
+    {
+      range: { start: range.start, end: range.end },
+      now: capturedNow
+    }
+  ).loggedSeconds;
 }

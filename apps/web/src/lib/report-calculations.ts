@@ -49,6 +49,11 @@ export function buildReportTrendSeries(
       key: `${first.key}/${last.key}`,
       label: formatWeekLabel(first.key, last.key),
       seconds: group.reduce((sum, point) => sum + point.seconds, 0),
+      coveredSeconds: group.reduce((sum, point) => sum + point.coveredSeconds, 0),
+      additionalOverlappingActivitySeconds: group.reduce(
+        (sum, point) => sum + point.additionalOverlappingActivitySeconds,
+        0
+      ),
       dayCount: group.length
     });
   }

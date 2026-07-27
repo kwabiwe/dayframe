@@ -1,4 +1,10 @@
-import { calendarBlockContinuationEdges, paletteColorFor } from "@dayframe/shared";
+import {
+  analyzeTimeIntervals,
+  calendarBlockContinuationEdges,
+  layoutTimeIntervals,
+  paletteColorFor,
+  type TimeIntervalLayout
+} from "@dayframe/shared";
 import type { MobileBootstrap, MobileTimeEntry } from "./api";
 import type { MobileTheme } from "./mobileTheme";
 import {
@@ -32,6 +38,8 @@ export type NativeCalendarTheme = Pick<
   | "surfaceRaised"
   | "textPrimary"
   | "textSecondary"
+  | "warning"
+  | "warningText"
 > & { mode: MobileTheme["mode"] };
 
 export type NativeCalendarPresentationEntry = {
@@ -44,12 +52,21 @@ export type NativeCalendarPresentationEntry = {
   isActive: boolean;
   isReview: boolean;
   isUncategorized: boolean;
+  laneCount: number;
+  laneIndex: number;
+  layoutMode: TimeIntervalLayout["mode"];
   meta: string;
+  offsetFraction: number;
+  overlapCount: number;
+  overlapSeconds: number;
   startedAtMs: number;
   startsBeforeDay: boolean;
   stoppedAtMs: number | null;
   tagText: string | null;
+  textDensity: TimeIntervalLayout["textDensity"];
   title: string;
+  widthFraction: number;
+  zIndex: number;
 };
 
 export type NativeCalendarPresentation = {
@@ -57,7 +74,7 @@ export type NativeCalendarPresentation = {
   dayStartMs: number;
   emptyState: string;
   entries: NativeCalendarPresentationEntry[];
-  modelVersion: 2;
+  modelVersion: 3;
   nowMs: number;
   reduceMotion: boolean;
   reduceTransparency: boolean;
@@ -66,6 +83,11 @@ export type NativeCalendarPresentation = {
   selectedDayTitle: string;
   theme: NativeCalendarTheme;
   todayKey: string;
+  additionalOverlapSeconds: number;
+  coveredLabel: string;
+  coveredSeconds: number;
+  loggedLabel: string;
+  loggedSeconds: number;
   totalLabel: string;
   totalSeconds: number;
   transitionDirection: -1 | 1;
@@ -119,9 +141,37 @@ export function buildNativeCalendarBridgeState({
   const dayEnd = addDays(dayStart, 1);
   const todayKey = formatDateKey(new Date(now));
   const entries = buildCalendarEntries(data, selectedDayKey, now);
-  const totalSeconds = entries
-    .filter((entry) => !isCalendarReviewNeeded(entry))
-    .reduce((sum, entry) => sum + overlapSeconds(entry, dayStart, dayEnd, now), 0);
+  const confirmedEntries = entries.filter((entry) => !isCalendarReviewNeeded(entry));
+  const confirmedAnalysis = analyzeTimeIntervals(
+    confirmedEntries.map((entry) => ({
+      id: entry.id,
+      startedAt: entry.startedAt,
+      stoppedAt: entry.stoppedAt
+    })),
+    { range: { start: dayStart, end: dayEnd }, now }
+  );
+  const allEntryAnalysis = analyzeTimeIntervals(
+    entries.map((entry) => ({
+      id: entry.id,
+      startedAt: entry.startedAt,
+      stoppedAt: entry.stoppedAt
+    })),
+    { range: { start: dayStart, end: dayEnd }, now }
+  );
+  const analysisById = new Map(allEntryAnalysis.entries.map((entry) => [entry.id, entry]));
+  const layoutById = new Map(
+    layoutTimeIntervals(
+      entries.map((entry) => ({
+        id: entry.id,
+        startedAt: Math.max(dayStart.getTime(), Date.parse(entry.startedAt)),
+        stoppedAt: Math.min(
+          dayEnd.getTime(),
+          entry.stoppedAt ? Date.parse(entry.stoppedAt) : now
+        )
+      })),
+      now
+    ).map((layout) => [layout.id, layout])
+  );
 
   return {
     actionEntries: entries,
@@ -129,8 +179,16 @@ export function buildNativeCalendarBridgeState({
       dayEndMs: dayEnd.getTime(),
       dayStartMs: dayStart.getTime(),
       emptyState: "No tracked time for this day.",
-      entries: entries.map((entry) => serializeCalendarEntry(entry, dayStart, dayEnd, now, theme)),
-      modelVersion: 2,
+      entries: entries.map((entry) => serializeCalendarEntry(
+        entry,
+        dayStart,
+        dayEnd,
+        now,
+        theme,
+        layoutById.get(entry.id),
+        analysisById.get(entry.id)
+      )),
+      modelVersion: 3,
       nowMs: now,
       reduceMotion,
       reduceTransparency,
@@ -139,8 +197,13 @@ export function buildNativeCalendarBridgeState({
       selectedDayTitle: formatSelectedDayTitle(selectedDate, todayKey),
       theme: nativeCalendarTheme(theme),
       todayKey,
-      totalLabel: formatDuration(totalSeconds),
-      totalSeconds,
+      additionalOverlapSeconds: confirmedAnalysis.additionalOverlapSeconds,
+      coveredLabel: formatDuration(confirmedAnalysis.coveredSeconds),
+      coveredSeconds: confirmedAnalysis.coveredSeconds,
+      loggedLabel: formatDuration(confirmedAnalysis.loggedSeconds),
+      loggedSeconds: confirmedAnalysis.loggedSeconds,
+      totalLabel: formatDuration(confirmedAnalysis.loggedSeconds),
+      totalSeconds: confirmedAnalysis.loggedSeconds,
       transitionDirection: transitionDirection < 0 ? -1 : 1,
       weekDays: buildWeekStripDays(selectedDayKey).map(({ date, key }) => ({
         accessibilityLabel: `Show ${formatSelectedDayTitle(date, todayKey)}`,
@@ -185,7 +248,9 @@ function serializeCalendarEntry(
   dayStart: Date,
   dayEnd: Date,
   now: number,
-  theme: MobileTheme
+  theme: MobileTheme,
+  layout?: TimeIntervalLayout,
+  analysis?: { overlapCount: number; overlapSeconds: number }
 ): NativeCalendarPresentationEntry {
   const reviewNeeded = isCalendarReviewNeeded(entry);
   const startedAtMs = Date.parse(entry.startedAt);
@@ -214,19 +279,28 @@ function serializeCalendarEntry(
   return {
     actionId,
     actionKind,
-    accessibilityLabel: `${reviewNeeded ? REVIEW_COPY.needsReview : entry.isActive ? "Edit running timer" : "Open time block"}: ${title}${tagText ? `. Tags: ${tagText}` : ""}`,
+    accessibilityLabel: `${reviewNeeded ? REVIEW_COPY.needsReview : entry.isActive ? "Edit running timer" : "Open time block"}: ${title}${tagText ? `. Tags: ${tagText}` : ""}${analysis?.overlapCount ? `. Overlaps ${analysis.overlapCount} other ${analysis.overlapCount === 1 ? "entry" : "entries"}.` : ""}`,
     color,
     continuesIntoNextDay: continuation.continuesIntoNextDay,
     entryId: entry.id,
     isActive: entry.isActive,
     isReview: reviewNeeded,
     isUncategorized,
+    laneCount: layout?.laneCount ?? 1,
+    laneIndex: layout?.laneIndex ?? 0,
+    layoutMode: layout?.mode ?? "full",
     meta: calendarBlockMeta(entry, now, reviewNeeded, continuation.continuesIntoNextDay),
+    offsetFraction: layout?.offsetFraction ?? 0,
+    overlapCount: analysis?.overlapCount ?? 0,
+    overlapSeconds: analysis?.overlapSeconds ?? 0,
     startedAtMs: Number.isFinite(startedAtMs) ? startedAtMs : dayStart.getTime(),
     startsBeforeDay: continuation.startsBeforeDay,
     stoppedAtMs: stoppedAtMs !== null && Number.isFinite(stoppedAtMs) ? stoppedAtMs : null,
     tagText,
-    title
+    textDensity: layout?.textDensity ?? "full",
+    title,
+    widthFraction: layout?.widthFraction ?? 1,
+    zIndex: layout?.zIndex ?? 0
   };
 }
 
@@ -299,15 +373,6 @@ function entryOverlapsDay(entry: MobileTimeEntry, dayKey: string, now: number) {
   return Number.isFinite(startedAt) && Number.isFinite(stoppedAt) && startedAt < dayEnd.getTime() && stoppedAt > dayStart.getTime();
 }
 
-function overlapSeconds(entry: MobileTimeEntry, rangeStart: Date, rangeEnd: Date, now: number) {
-  const startedAt = Date.parse(entry.startedAt);
-  const stoppedAt = entry.stoppedAt ? Date.parse(entry.stoppedAt) : now;
-  if (!Number.isFinite(startedAt) || !Number.isFinite(stoppedAt)) return 0;
-  const overlapStart = Math.max(startedAt, rangeStart.getTime());
-  const overlapEnd = Math.min(stoppedAt, rangeEnd.getTime());
-  return overlapEnd > overlapStart ? Math.floor((overlapEnd - overlapStart) / 1000) : 0;
-}
-
 function calendarBlockMeta(
   entry: NativeCalendarEntry,
   now: number,
@@ -354,7 +419,9 @@ function nativeCalendarTheme(theme: MobileTheme): NativeCalendarTheme {
     surfaceMuted: theme.surfaceMuted,
     surfaceRaised: theme.surfaceRaised,
     textPrimary: theme.textPrimary,
-    textSecondary: theme.textSecondary
+    textSecondary: theme.textSecondary,
+    warning: theme.warning,
+    warningText: theme.warningText
   };
 }
 

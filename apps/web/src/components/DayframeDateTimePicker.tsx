@@ -15,11 +15,13 @@ export function DayframeDateTimePicker({
   defaultValue,
   id,
   name,
+  onChange,
   required
 }: {
   defaultValue: string;
   id: string;
   name: string;
+  onChange?: (value: string) => void;
   required?: boolean;
 }) {
   const initial = useMemo(() => parseLocal(defaultValue), [defaultValue]);
@@ -60,7 +62,9 @@ export function DayframeDateTimePicker({
   }, [open]);
 
   function chooseDay(date: string) {
-    setValue(`${date}T${current.time}`);
+    const nextValue = `${date}T${current.time}`;
+    setValue(nextValue);
+    onChange?.(nextValue);
   }
 
   function commitTime() {
@@ -69,7 +73,9 @@ export function DayframeDateTimePicker({
       setTimeError("Enter a valid time from 00:00 to 23:59.");
       return false;
     }
-    setValue(`${current.date}T${normalized}`);
+    const nextValue = `${current.date}T${normalized}`;
+    setValue(nextValue);
+    onChange?.(nextValue);
     setTimeDraft(normalized);
     setTimeError("");
     return true;

@@ -24,6 +24,8 @@ Before declaring hosted auth/timer/event changes ready, verify:
 - Timer writes must scope by both `workspace_id` and `user_id` where active user state matters.
 - Category-only and uncategorized entries are valid if approved by product rules; do not reintroduce project requirements in service logic.
 - Add regression coverage for start, stop, manual entry, duplicate `clientEventId`, and cross-workspace isolation.
+- Intentional overlaps require no exclusion constraint or overlap-uniqueness index on `time_entries`. Technical uniqueness belongs to source identifiers such as client event IDs, external Health samples, location segments, and Review mutation receipts.
+- Reporting coverage must clip intervals to the requested range and use a gaps-and-islands union. Do not infer covered time by subtracting pairwise intersections.
 
 ## Session And Personal-Report Reads
 

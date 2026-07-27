@@ -8,6 +8,52 @@ public enum DayframeCalendarConstants {
   public static let minimumVisibleBlockHeight = 4.0
   public static let titleMinimumHeight = 24.0
   public static let metaMinimumHeight = 58.0
+  public static let titleMinimumWidth = 64.0
+  public static let metaMinimumWidth = 150.0
+}
+
+public struct DayframeCalendarHorizontalMetrics: Equatable {
+  public let offset: Double
+  public let width: Double
+  public let hitHeight: Double
+  public let showMeta: Bool
+  public let showTitle: Bool
+
+  public init(offset: Double, width: Double, hitHeight: Double, showMeta: Bool, showTitle: Bool) {
+    self.offset = offset
+    self.width = width
+    self.hitHeight = hitHeight
+    self.showMeta = showMeta
+    self.showTitle = showTitle
+  }
+}
+
+public enum DayframeCalendarHorizontalMath {
+  public static func metrics(
+    availableWidth: Double,
+    offsetFraction: Double,
+    widthFraction: Double,
+    visualHeight: Double,
+    overlapCount: Int,
+    textDensity: String
+  ) -> DayframeCalendarHorizontalMetrics {
+    let safeAvailableWidth = max(0, availableWidth.isFinite ? availableWidth : 0)
+    let safeOffsetFraction = min(1, max(0, offsetFraction.isFinite ? offsetFraction : 0))
+    let safeWidthFraction = min(
+      1 - safeOffsetFraction,
+      max(0, widthFraction.isFinite ? widthFraction : 1)
+    )
+    let width = safeAvailableWidth * safeWidthFraction
+    let densityAllowsTitle = textDensity != "none"
+    let densityAllowsMeta = textDensity == "full"
+    return DayframeCalendarHorizontalMetrics(
+      offset: safeAvailableWidth * safeOffsetFraction,
+      width: width,
+      hitHeight: overlapCount > 0 ? max(0, visualHeight) : max(44, visualHeight),
+      showMeta: densityAllowsMeta && width >= DayframeCalendarConstants.metaMinimumWidth,
+      showTitle: densityAllowsTitle && width >= DayframeCalendarConstants.titleMinimumWidth
+    )
+  }
 }
 
 public struct DayframeCalendarZoomState: Equatable {

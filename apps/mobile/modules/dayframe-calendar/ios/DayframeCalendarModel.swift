@@ -15,6 +15,8 @@ struct DayframeCalendarTheme: Equatable {
   let surfaceRaised: String
   let textPrimary: String
   let textSecondary: String
+  let warning: String
+  let warningText: String
 
   init(_ record: DayframeCalendarThemeRecord) {
     accent = record.accent
@@ -30,6 +32,8 @@ struct DayframeCalendarTheme: Equatable {
     surfaceRaised = record.surfaceRaised
     textPrimary = record.textPrimary
     textSecondary = record.textSecondary
+    warning = record.warning
+    warningText = record.warningText
   }
 }
 
@@ -62,12 +66,21 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
   let isActive: Bool
   let isReview: Bool
   let isUncategorized: Bool
+  let laneCount: Int
+  let laneIndex: Int
+  let layoutMode: String
   let meta: String
+  let offsetFraction: Double
+  let overlapCount: Int
+  let overlapSeconds: Double
   let startedAtMs: Double
   let startsBeforeDay: Bool
   let stoppedAtMs: Double?
   let tagText: String?
+  let textDensity: String
   let title: String
+  let widthFraction: Double
+  let zIndex: Int
 
   var id: String { entryId }
 
@@ -83,12 +96,21 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
     isActive = record.isActive
     isReview = record.isReview
     isUncategorized = record.isUncategorized
+    laneCount = max(1, record.laneCount)
+    laneIndex = max(0, record.laneIndex)
+    layoutMode = record.layoutMode
     meta = record.meta
+    offsetFraction = record.offsetFraction
+    overlapCount = max(0, record.overlapCount)
+    overlapSeconds = max(0, record.overlapSeconds)
     startedAtMs = record.startedAtMs
     startsBeforeDay = record.startsBeforeDay
     stoppedAtMs = record.stoppedAtMs
     tagText = record.tagText
+    textDensity = record.textDensity
     title = record.title
+    widthFraction = record.widthFraction
+    zIndex = record.zIndex
   }
 }
 
@@ -106,6 +128,11 @@ struct DayframeCalendarPresentation: Equatable {
   let selectedDayTitle: String
   let theme: DayframeCalendarTheme
   let todayKey: String
+  let additionalOverlapSeconds: Double
+  let coveredLabel: String
+  let coveredSeconds: Double
+  let loggedLabel: String
+  let loggedSeconds: Double
   let totalLabel: String
   let totalSeconds: Double
   let transitionDirection: Int
@@ -125,6 +152,11 @@ struct DayframeCalendarPresentation: Equatable {
     selectedDayTitle = record.selectedDayTitle
     theme = DayframeCalendarTheme(record.theme)
     todayKey = record.todayKey
+    additionalOverlapSeconds = max(0, record.additionalOverlapSeconds)
+    coveredLabel = record.coveredLabel
+    coveredSeconds = max(0, record.coveredSeconds)
+    loggedLabel = record.loggedLabel
+    loggedSeconds = max(0, record.loggedSeconds)
     totalLabel = record.totalLabel
     totalSeconds = record.totalSeconds
     transitionDirection = record.transitionDirection < 0 ? -1 : 1
@@ -140,10 +172,20 @@ final class DayframeCalendarViewModel: ObservableObject {
   @Published private(set) var hourHeight = CGFloat(DayframeCalendarConstants.defaultHourHeight)
 
   func update(_ record: DayframeCalendarPresentationRecord) {
+    guard record.modelVersion == 3 else {
+      reset()
+      return
+    }
     let next = DayframeCalendarPresentation(record)
     guard next != presentation else { return }
     withTransaction(Transaction(animation: nil)) {
       presentation = next
+    }
+  }
+
+  func reset() {
+    withTransaction(Transaction(animation: nil)) {
+      presentation = .empty
     }
   }
 

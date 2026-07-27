@@ -144,6 +144,61 @@ final class DayframeCalendarCoreTests: XCTestCase {
     )
   }
 
+  func testHorizontalLayoutPreservesContainedOverlayGeometryAndHitTesting() {
+    let base = DayframeCalendarHorizontalMath.metrics(
+      availableWidth: 300,
+      offsetFraction: 0,
+      widthFraction: 1,
+      visualHeight: 120,
+      overlapCount: 1,
+      textDensity: "full"
+    )
+    let overlay = DayframeCalendarHorizontalMath.metrics(
+      availableWidth: 300,
+      offsetFraction: 0.14,
+      widthFraction: 0.86,
+      visualHeight: 24,
+      overlapCount: 1,
+      textDensity: "title"
+    )
+
+    XCTAssertEqual(base.offset, 0)
+    XCTAssertEqual(base.width, 300)
+    XCTAssertEqual(overlay.offset, 42, accuracy: 0.001)
+    XCTAssertEqual(overlay.width, 258, accuracy: 0.001)
+    XCTAssertEqual(overlay.hitHeight, 24)
+    XCTAssertTrue(overlay.showTitle)
+    XCTAssertFalse(overlay.showMeta)
+  }
+
+  func testDenseNarrowLanesHideTextAndDoNotStealAdjacentTaps() {
+    let dense = DayframeCalendarHorizontalMath.metrics(
+      availableWidth: 180,
+      offsetFraction: 2.0 / 3.0,
+      widthFraction: 1.0 / 3.0,
+      visualHeight: 12,
+      overlapCount: 2,
+      textDensity: "none"
+    )
+    XCTAssertEqual(dense.offset, 120, accuracy: 0.001)
+    XCTAssertEqual(dense.width, 60, accuracy: 0.001)
+    XCTAssertEqual(dense.hitHeight, 12)
+    XCTAssertFalse(dense.showTitle)
+    XCTAssertFalse(dense.showMeta)
+  }
+
+  func testIsolatedShortBlocksRetainMinimumTouchHeight() {
+    let isolated = DayframeCalendarHorizontalMath.metrics(
+      availableWidth: 180,
+      offsetFraction: 0,
+      widthFraction: 1,
+      visualHeight: 8,
+      overlapCount: 0,
+      textDensity: "full"
+    )
+    XCTAssertEqual(isolated.hitHeight, 44)
+  }
+
   func testSerializedModelDecodesInitialAndLaterRevisions() throws {
     let initial = try decodePresentation(
       selectedDayKey: "2026-07-19",
@@ -157,8 +212,11 @@ final class DayframeCalendarCoreTests: XCTestCase {
       [{
         "actionId":"entry-1","actionKind":"active","accessibilityLabel":"Edit running timer: Planning",
         "color":"#FF6248","continuesIntoNextDay":false,"entryId":"entry-1","isActive":true,
-        "isReview":false,"isUncategorized":false,"meta":"11:20 – Now","startedAtMs":1000,
-        "startsBeforeDay":false,"stoppedAtMs":null,"tagText":"Deep work","title":"Planning"
+        "isReview":false,"isUncategorized":false,"laneCount":2,"laneIndex":1,
+        "layoutMode":"insetOverlay","meta":"11:20 – Now","offsetFraction":0.14,
+        "overlapCount":1,"overlapSeconds":1800,"startedAtMs":1000,
+        "startsBeforeDay":false,"stoppedAtMs":null,"tagText":"Deep work","textDensity":"title",
+        "title":"Planning","widthFraction":0.86,"zIndex":2
       }]
       """
     )
@@ -169,6 +227,8 @@ final class DayframeCalendarCoreTests: XCTestCase {
     XCTAssertEqual(later.nowMs, 2_000)
     XCTAssertEqual(later.entries.first?.entryId, "entry-1")
     XCTAssertEqual(later.entries.first?.tagText, "Deep work")
+    XCTAssertEqual(later.entries.first?.layoutMode, "insetOverlay")
+    XCTAssertEqual(later.entries.first?.overlapCount, 1)
   }
 
   private func decodePresentation(
@@ -179,13 +239,15 @@ final class DayframeCalendarCoreTests: XCTestCase {
     let json = """
     {
       "dayEndMs":86400000,"dayStartMs":0,"emptyState":"No tracked time for this day.",
-      "entries":\(entriesJSON),"modelVersion":2,"nowMs":\(nowMs),"reduceMotion":false,
+      "entries":\(entriesJSON),"modelVersion":3,"nowMs":\(nowMs),"reduceMotion":false,
       "reduceTransparency":false,"refreshing":false,"selectedDayKey":"\(selectedDayKey)",
       "selectedDayTitle":"Today","theme":{"accent":"#FF6248","accentSoft":"#33201E",
       "accentText":"#FF8A76","background":"#050914","border":"#2A3345",
       "borderStrong":"#3B465B","mode":"dark","shadow":"#000000","surface":"#151B27",
       "surfaceMuted":"#202838","surfaceRaised":"#1B2230","textPrimary":"#F7F8FB",
-      "textSecondary":"#8993A7"},"todayKey":"2026-07-19","totalLabel":"0m",
+      "textSecondary":"#8993A7","warning":"#F2BA38","warningText":"#F2BA38"},"todayKey":"2026-07-19",
+      "additionalOverlapSeconds":0,"coveredLabel":"0m","coveredSeconds":0,
+      "loggedLabel":"0m","loggedSeconds":0,"totalLabel":"0m",
       "totalSeconds":0,"transitionDirection":1,"weekDays":[]
     }
     """

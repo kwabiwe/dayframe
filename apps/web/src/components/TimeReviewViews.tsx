@@ -4,10 +4,11 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from
 import { useCallback, useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CalendarDays, ChevronLeft, ChevronRight, CircleDot, List, Play, Table2 } from "lucide-react";
-import { calendarBlockContinuationEdges } from "@dayframe/shared";
+import { analyzeTimeIntervals, calendarBlockContinuationEdges } from "@dayframe/shared";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
+import { OverlapNotice } from "@/components/OverlapNotice";
 import { TagMetadata } from "@/components/TagMetadata";
 import { EntriesTable } from "@/components/EntriesTable";
 import { IconButton, SegmentedControl } from "@/components/ui/Primitives";
@@ -164,8 +165,22 @@ export function TimeReviewViews({
     data.activeEntry ? [data.activeEntry] : []
   ), ranges.week, capturedNow);
   const activeEntries = state.scope === "day" ? dayEntries : weekEntries;
-  const dayTotal = dayEntries.reduce((sum, entry) => sum + entry.durationSeconds, 0);
-  const weekTotal = weekEntries.reduce((sum, entry) => sum + entry.durationSeconds, 0);
+  const dayAnalysis = analyzeTimeIntervals(
+    dayEntries.map((entry) => ({
+      id: entry.id,
+      startedAt: entry.startedAt,
+      stoppedAt: entry.stoppedAt
+    })),
+    { range: ranges.day, now: capturedNow }
+  );
+  const weekAnalysis = analyzeTimeIntervals(
+    weekEntries.map((entry) => ({
+      id: entry.id,
+      startedAt: entry.startedAt,
+      stoppedAt: entry.stoppedAt
+    })),
+    { range: ranges.week, now: capturedNow }
+  );
   const periodLabel = formatTimelinePeriodLabel(state.scope, ranges);
   const todayKey = toTimelineDateKey(new Date());
 
@@ -202,12 +217,18 @@ export function TimeReviewViews({
 
         <dl className="timeline-range-totals">
           <div>
-            <dt>Day total</dt>
-            <dd className="tabular">{formatDuration(dayTotal)}</dd>
+            <dt>Day</dt>
+            <dd className="tabular">{formatDuration(dayAnalysis.totalLoggedSeconds)} logged</dd>
+            {dayAnalysis.hasOverlap ? (
+              <small className="tabular">{formatDuration(dayAnalysis.timeCoveredSeconds)} covered</small>
+            ) : null}
           </div>
           <div>
-            <dt>Week total</dt>
-            <dd className="tabular">{formatDuration(weekTotal)}</dd>
+            <dt>Week</dt>
+            <dd className="tabular">{formatDuration(weekAnalysis.totalLoggedSeconds)} logged</dd>
+            {weekAnalysis.hasOverlap ? (
+              <small className="tabular">{formatDuration(weekAnalysis.timeCoveredSeconds)} covered</small>
+            ) : null}
           </div>
         </dl>
 
@@ -401,29 +422,6 @@ function CalendarReview({
     const entryEnd = new Date(entry.stoppedAt);
     const originalStart = entryStart < dayStart ? timelineStart : minutesFromDate(entryStart);
     const originalEnd = entryEnd > dayEnd ? timelineEnd : minutesFromDate(entryEnd);
-    const ranges = entries
-      .filter((candidate) => (
-        candidate.id !== entry.id &&
-        candidate.stoppedAt &&
-        entryOverlapsDay(candidate, day, capturedNow)
-      ))
-      .map((candidate) => {
-        const candidateStart = new Date(candidate.startedAt);
-        const candidateEnd = new Date(candidate.stoppedAt as string);
-        return {
-          start: candidateStart < dayStart ? timelineStart : minutesFromDate(candidateStart),
-          end: candidateEnd > dayEnd ? timelineEnd : minutesFromDate(candidateEnd)
-        };
-      })
-      .sort((a, b) => a.start - b.start);
-    const previousEnd = Math.max(
-      timelineStart,
-      ...ranges.filter((range) => range.end <= originalStart).map((range) => range.end)
-    );
-    const nextStart = Math.min(
-      timelineEnd,
-      ...ranges.filter((range) => range.start >= originalEnd).map((range) => range.start)
-    );
     const startClientY = event.clientY;
     let finalDraft: CalendarResizeDraft | null = null;
     let hasStartedResize = false;
@@ -435,9 +433,9 @@ function CalendarReview({
       const rawMinutes = timelineStart + (relativeY / rowHeight) * 60;
       const snappedMinutes = clampMinutes(snapCalendarMinutes(rawMinutes), timelineStart, timelineEnd);
       const nextStartMinutes =
-        edge === "start" ? clampMinutes(snappedMinutes, previousEnd, originalEnd - 15) : originalStart;
+        edge === "start" ? clampMinutes(snappedMinutes, timelineStart, originalEnd - 15) : originalStart;
       const nextEndMinutes =
-        edge === "end" ? clampMinutes(snappedMinutes, originalStart + 15, nextStart) : originalEnd;
+        edge === "end" ? clampMinutes(snappedMinutes, originalStart + 15, timelineEnd) : originalEnd;
       finalDraft = {
         entryId: entry.id,
         startedAt: edge === "start" ? isoForDateMinutes(day, nextStartMinutes) : entry.startedAt,
@@ -527,15 +525,18 @@ function CalendarReview({
             Time
           </div>
           {visibleDays.map((day) => {
-            const total = entries
-              .reduce(
-                (sum, entry) => sum + entryOverlapSeconds(
-                  entry,
-                  { start: startOfDay(day), end: addDays(startOfDay(day), 1) },
-                  capturedNow
-                ),
-                0
-              );
+            const dayStart = startOfDay(day);
+            const total = analyzeTimeIntervals(
+              entries.map((entry) => ({
+                id: entry.id,
+                startedAt: entry.startedAt,
+                stoppedAt: entry.stoppedAt
+              })),
+              {
+                range: { start: dayStart, end: addDays(dayStart, 1) },
+                now: capturedNow
+              }
+            );
             return (
               <div
                 key={day.toISOString()}
@@ -545,7 +546,12 @@ function CalendarReview({
                 ].join(" ")}
               >
                 <div className="text-sm font-semibold">{formatDate(day)}</div>
-                <div className="tabular mt-1 text-xs text-[var(--muted)]">{formatDuration(total)}</div>
+                <div className="tabular mt-1 text-xs text-[var(--muted)]">
+                  {formatDuration(total.loggedSeconds)} logged
+                  {total.additionalOverlapSeconds > 0
+                    ? ` · ${formatDuration(total.coveredSeconds)} covered`
+                    : ""}
+                </div>
               </div>
             );
           })}
@@ -633,7 +639,15 @@ function CalendarReview({
                   } = block;
                   const detailsLabel = calendarBlockDetailsLabel(entry, activeDraft, durationSeconds, day, capturedNow);
                   const target = { blockKey, day, entry };
-                  const lane = lanes.get(blockKey) ?? { laneCount: 1, laneIndex: 0 };
+                  const lane = lanes.get(blockKey) ?? {
+                    laneCount: 1,
+                    laneIndex: 0,
+                    mode: "full",
+                    offsetFraction: 0,
+                    widthFraction: 1,
+                    zIndex: 0,
+                    textDensity: "full"
+                  } satisfies TimeBlockLane;
                   const selected = selectedTarget?.blockKey === blockKey;
                   const isResizing = resizingId === entry.id;
                   const isContinuing = continuingEntryId === entry.id;
@@ -648,6 +662,7 @@ function CalendarReview({
                         entry.stoppedAt ? "" : "is-running",
                         startsBeforeDay ? "is-continuation-from-previous" : "",
                         continuesIntoNextDay ? "is-continuation-to-next" : "",
+                        lane.textDensity === "none" ? "has-no-text is-compact-overlap" : "",
                         ...timeBlockDensityClassNames(density)
                       ].join(" ")}
                       style={{
@@ -660,6 +675,7 @@ function CalendarReview({
                       } as CSSProperties}
                       data-entry-id={entry.id}
                       data-calendar-block-key={blockKey}
+                      data-overlap-layout={lane.mode}
                     >
                       <button
                         type="button"
@@ -682,10 +698,10 @@ function CalendarReview({
                           if (event.detail > 1) event.preventDefault();
                         }}
                       >
-                        {density.showTitle ? (
+                        {density.showTitle && lane.textDensity !== "none" ? (
                           <span className="calendar-entry-title">{timeEntryTitle(entry)}</span>
                         ) : null}
-                        {density.showDuration ? (
+                        {density.showDuration && lane.textDensity === "full" ? (
                           entry.stoppedAt ? (
                             <span className="calendar-entry-duration tabular">{formatDuration(durationSeconds)}</span>
                           ) : (
@@ -698,12 +714,12 @@ function CalendarReview({
                             </span>
                           )
                         ) : null}
-                        {density.showContext ? (
+                        {density.showContext && lane.textDensity === "full" ? (
                           <span className="calendar-entry-context">{timeEntryContextLabel(entry)}</span>
                         ) : null}
-                        {density.showTags ? <TagMetadata tagNames={entry.tagNames} /> : null}
+                        {density.showTags && lane.textDensity === "full" ? <TagMetadata tagNames={entry.tagNames} /> : null}
                       </button>
-                      {entry.stoppedAt && density.canShowInlineAction && !isResizing ? (
+                      {entry.stoppedAt && density.canShowInlineAction && lane.textDensity === "full" && !isResizing ? (
                         <button
                           type="button"
                           className="calendar-start-again"
@@ -746,6 +762,18 @@ function CalendarReview({
           ))}
         </div>
       </div>
+      {resizeDraft ? (
+        <div className="border-t border-[var(--line)] px-4 py-2">
+          <OverlapNotice
+            candidate={{
+              startedAt: resizeDraft.startedAt,
+              stoppedAt: resizeDraft.stoppedAt
+            }}
+            entries={entries}
+            excludeEntryId={resizeDraft.entryId}
+          />
+        </div>
+      ) : null}
       {resizeError || actionError ? (
         <p className="border-t border-[var(--line)] px-4 py-2 text-sm text-[var(--danger-text)]" role="alert">
           {resizeError ?? actionError}
@@ -761,6 +789,7 @@ function CalendarReview({
             await onSynced();
             startTransition(() => router.refresh());
           }}
+          peerEntries={entries}
           places={places}
           tags={tags}
         />
@@ -780,11 +809,29 @@ function TimesheetView({
 }) {
   const rows = buildTimelineTimesheetRows(entries, weekDays, capturedNow);
   const dailyTotals = timelineDailyTotals(rows, weekDays.length);
+  const dailyCoverage = weekDays.map((day) => analyzeTimeIntervals(
+    entries.map((entry) => ({
+      id: entry.id,
+      startedAt: entry.startedAt,
+      stoppedAt: entry.stoppedAt
+    })),
+    {
+      range: { start: day, end: addDays(day, 1) },
+      now: capturedNow
+    }
+  ));
+  const overlappingDays = dailyCoverage.filter((day) => day.hasOverlap).length;
 
   return (
     <section className="industrial-panel overflow-x-auto">
       <div className="border-b border-[var(--line)] px-4 py-3">
         <h2 className="text-lg font-semibold">Timesheet</h2>
+        {overlappingDays > 0 ? (
+          <p className="mt-1 text-xs text-[var(--muted)]">
+            {overlappingDays} {overlappingDays === 1 ? "day contains" : "days contain"} concurrent entries.
+            Timesheet totals count every entry in full.
+          </p>
+        ) : null}
       </div>
       <table className="min-w-[980px] w-full border-collapse text-sm">
         <thead className="bg-[var(--surface-inset)] text-left text-xs text-[var(--muted)]">
@@ -831,6 +878,11 @@ function TimesheetView({
             {dailyTotals.map((seconds, index) => (
               <td key={weekDays[index].toISOString()} className="tabular border-r border-[var(--line)] px-3 py-3">
                 {formatDuration(seconds)}
+                {dailyCoverage[index]?.hasOverlap ? (
+                  <span className="mt-1 block text-xs font-normal text-[var(--warning-text)]">
+                    {formatDuration(dailyCoverage[index].timeCoveredSeconds)} covered
+                  </span>
+                ) : null}
               </td>
             ))}
             <td className="tabular px-3 py-3 text-[var(--accent-text)]">
@@ -897,14 +949,17 @@ function calendarBlockKey(entryId: string, day: Date) {
   return `${entryId}:${formatCalendarDateKey(day)}`;
 }
 
-function calendarBlockLaneStyle({ laneCount, laneIndex }: TimeBlockLane): CSSProperties {
-  if (laneCount <= 1) return { left: 8, right: 8 };
-  const laneWidth = 100 / laneCount;
-  const before = laneWidth * laneIndex;
-  const after = laneWidth * (laneCount - laneIndex - 1);
+function calendarBlockLaneStyle({
+  offsetFraction,
+  widthFraction,
+  zIndex
+}: TimeBlockLane): CSSProperties {
+  const before = offsetFraction * 100;
+  const after = Math.max(0, (1 - offsetFraction - widthFraction) * 100);
   return {
-    left: laneIndex === 0 ? 8 : `calc(${before}% + 2px)`,
-    right: laneIndex === laneCount - 1 ? 8 : `calc(${after}% + 2px)`
+    left: before === 0 ? 8 : `calc(${before}% + 2px)`,
+    right: after === 0 ? 8 : `calc(${after}% + 2px)`,
+    zIndex: 2 + zIndex
   };
 }
 

@@ -43,6 +43,10 @@ export type MobileSeriesPoint = {
 export type MobileStats = {
   todaySeconds: number;
   weekSeconds: number;
+  todayCoveredSeconds?: number;
+  weekCoveredSeconds?: number;
+  todayAdditionalOverlapSeconds?: number;
+  weekAdditionalOverlapSeconds?: number;
   reviewCount: number;
 };
 

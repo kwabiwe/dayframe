@@ -31,9 +31,11 @@ describe("native Calendar presentation boundary", () => {
       transitionDirection: 1
     });
 
-    expect(state.model.modelVersion).toBe(2);
+    expect(state.model.modelVersion).toBe(3);
     expect(state.model.dayEndMs - state.model.dayStartMs).toBe(24 * 60 * 60 * 1000);
     expect(state.model.totalSeconds).toBe(90 * 60);
+    expect(state.model.loggedSeconds).toBe(90 * 60);
+    expect(state.model.coveredSeconds).toBe(90 * 60);
     expect(state.model.weekDays).toHaveLength(7);
     expect(state.model.weekDays.filter((day) => day.isSelected)).toEqual([
       expect.objectContaining({ dayKey: "2026-07-10" })
@@ -191,6 +193,42 @@ describe("native Calendar presentation boundary", () => {
 
     expect(state.model.entries[0].tagText).toBe("Planning · Deep work");
     expect(state.model.entries[0].accessibilityLabel).toContain("Tags: Planning · Deep work");
+  });
+
+  it("serializes deterministic contained, partial, and dense overlap layout intent", () => {
+    const now = localTime(2026, 7, 10, 14, 0);
+    const contained = build(now, bootstrap([
+      entry({
+        id: "base",
+        startedAt: iso(localTime(2026, 7, 10, 9, 0)),
+        stoppedAt: iso(localTime(2026, 7, 10, 12, 0))
+      }),
+      entry({
+        id: "short",
+        startedAt: iso(localTime(2026, 7, 10, 10, 0)),
+        stoppedAt: iso(localTime(2026, 7, 10, 10, 30))
+      })
+    ]));
+    expect(contained.model.entries.find((item) => item.entryId === "short")).toMatchObject({
+      layoutMode: "insetOverlay",
+      offsetFraction: 0.18,
+      widthFraction: 0.8200000000000001,
+      overlapCount: 1,
+      overlapSeconds: 1_800
+    });
+    expect(contained.model).toMatchObject({
+      loggedSeconds: 12_600,
+      coveredSeconds: 10_800,
+      additionalOverlapSeconds: 1_800
+    });
+
+    const dense = build(now, bootstrap([
+      entry({ id: "a", startedAt: iso(localTime(2026, 7, 10, 9, 0)), stoppedAt: iso(localTime(2026, 7, 10, 12, 0)) }),
+      entry({ id: "b", startedAt: iso(localTime(2026, 7, 10, 10, 0)), stoppedAt: iso(localTime(2026, 7, 10, 13, 0)) }),
+      entry({ id: "c", startedAt: iso(localTime(2026, 7, 10, 11, 0)), stoppedAt: iso(localTime(2026, 7, 10, 14, 0)) })
+    ]));
+    expect(dense.model.entries.every((item) => item.layoutMode === "compactLane")).toBe(true);
+    expect(dense.model.entries.every((item) => item.textDensity === "none")).toBe(true);
   });
 });
 

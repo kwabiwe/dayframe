@@ -621,7 +621,7 @@ async function validateEnabledTrustedPlaceAutomation() {
        and suggested_place_id = $3
        and suggested_started_at = $4
        and suggested_stopped_at = $5
-       and notes like 'This detected visit overlaps existing tracked time%'`,
+       and notes like 'Automatic logging paused because this visit overlaps existing tracked time%'`,
     [WORKSPACE_ID, USER_ID, blocked.placeId, blocked.startedAt, blocked.stoppedAt]
   );
   assert.equal(overlapReview.rowCount, 1, "An overlapping trusted stay did not fall back to Review.");

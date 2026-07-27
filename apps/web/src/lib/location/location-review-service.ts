@@ -289,7 +289,6 @@ async function confirmReview(
     edit
   );
   await validateReferences(client, session, categoryId, placeIdOverride ?? edit?.placeId);
-  await validateNoConfirmedOverlap(client, session, window.startedAt, window.stoppedAt, item.eventId);
   const entry = await client.query<{ id: string }>(
     `insert into time_entries (
        workspace_id, user_id, category_id, place_id, source, confidence, review_status,
@@ -734,26 +733,6 @@ async function validateReferences(
   }
 }
 
-async function validateNoConfirmedOverlap(
-  client: pg.PoolClient,
-  session: RequestSession,
-  startedAt: string,
-  stoppedAt: string,
-  eventId: string
-) {
-  const overlap = await client.query(
-    `select 1 from time_entries
-     where workspace_id = $1 and user_id = $2 and review_status = 'confirmed'
-       and created_from_event_id is distinct from $5
-       and started_at < $4 and coalesce(stopped_at, 'infinity'::timestamptz) > $3
-     limit 1`,
-    [session.workspaceId, session.userId, startedAt, stoppedAt, eventId]
-  );
-  if (overlap.rows[0]) {
-    throw new ReviewResolutionError("duplicate_entry", "This time overlaps an existing confirmed entry.", { status: 409 });
-  }
-}
-
 async function resolveReviewAndEvent(
   client: pg.PoolClient,
   item: Pick<LockedReview, "id" | "eventId">,
@@ -782,7 +761,6 @@ async function createChildEntry(
   edit?: ReviewEntryEdit
 ) {
   await validateReferences(client, session, edit?.categoryId, edit?.placeId);
-  await validateNoConfirmedOverlap(client, session, startedAt, stoppedAt, item.eventId);
   const event = await createChildEvent(client, session, item, segmentId, startedAt, stoppedAt, edit);
   const entry = await client.query<{ id: string }>(
     `insert into time_entries (

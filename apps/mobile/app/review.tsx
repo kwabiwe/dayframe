@@ -14,6 +14,7 @@ import Svg, { Circle, Path } from "react-native-svg";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
+  analyzeTimeIntervals,
   paletteColorFor,
   readableLocationNameFromParts,
   type ReviewMutation
@@ -695,6 +696,7 @@ export default function ReviewScreen() {
                   >
                     <ReviewItemCard
                       item={item}
+                      peerEntries={reviewPeerEntries(data)}
                       disabled={reprocessRunning}
                       menuOpen={reviewMenuState.openItemId === item.id}
                       now={now}
@@ -752,6 +754,7 @@ export default function ReviewScreen() {
         onCancel={cancelEdit}
         onPresented={finishEditHandover}
         onSave={saveEdit}
+        peerEntries={reviewPeerEntries(data)}
         saving={editSaving}
         stopping={false}
         styles={styles}
@@ -814,6 +817,7 @@ function ReviewItemCard({
   onConfirm,
   onToggleMenu,
   onViewEvidence,
+  peerEntries,
   styles,
   theme
 }: {
@@ -824,6 +828,7 @@ function ReviewItemCard({
   onConfirm: () => void;
   onToggleMenu: () => void;
   onViewEvidence: () => void;
+  peerEntries: MobileTimeEntry[];
   styles: ReturnType<typeof useMobileTheme>["styles"];
   theme: ReturnType<typeof useMobileTheme>["theme"];
 }) {
@@ -838,6 +843,7 @@ function ReviewItemCard({
   );
   const controlsDisabled = disabled;
   const contextLines = reviewItemContextLines(item, categoryName);
+  const overlapWarning = reviewItemOverlapWarning(item, peerEntries, now);
 
   return (
     <View style={styles.reviewCard}>
@@ -865,6 +871,26 @@ function ReviewItemCard({
       {contextLines.map((line) => (
         <Text key={line} style={styles.reviewMetaLine}>{line}</Text>
       ))}
+      {overlapWarning?.overlapCount ? (
+        <View
+          accessibilityLiveRegion="polite"
+          style={{
+            backgroundColor: theme.mode === "dark" ? "rgba(240, 170, 85, 0.14)" : "rgba(179, 109, 27, 0.10)",
+            borderRadius: 12,
+            gap: 3,
+            marginTop: 8,
+            paddingHorizontal: 12,
+            paddingVertical: 10
+          }}
+        >
+          <Text style={[styles.reviewMetaLine, { color: theme.textPrimary, fontWeight: "700" }]}>
+            Overlaps {overlapWarning.overlapCount} other {overlapWarning.overlapCount === 1 ? "entry" : "entries"}
+          </Text>
+          <Text style={styles.reviewMetaLine}>
+            You can still confirm it. Reports will show logged and covered time separately.
+          </Text>
+        </View>
+      ) : null}
 
       <View style={styles.reviewActionStack}>
         {hasV2LocationEvidence(item) ? (
@@ -1174,6 +1200,44 @@ function formatEntryTimeRange(entry: MobileTimeEntry, now: number) {
   const startedAt = new Date(entry.startedAt);
   const stoppedAt = entry.stoppedAt ? new Date(entry.stoppedAt) : new Date(now);
   return `${formatTimeOfDay(startedAt)}-${entry.stoppedAt ? formatTimeOfDay(stoppedAt) : "now"}`;
+}
+
+function reviewPeerEntries(data: MobileBootstrap | null) {
+  if (!data) return [];
+  return Array.from(
+    new Map(
+      [
+        ...(data.historyEntries ?? []),
+        ...(data.weekEntries ?? []),
+        ...(data.dayEntries ?? []),
+        ...(data.entries ?? [])
+      ].map((entry) => [entry.id, entry])
+    ).values()
+  );
+}
+
+function reviewItemOverlapWarning(
+  item: MobileReviewItem,
+  peerEntries: MobileTimeEntry[],
+  now: number
+) {
+  if (!item.suggestedStartedAt || !item.suggestedStoppedAt) return null;
+  const candidateId = "__review_overlap_candidate__";
+  return analyzeTimeIntervals(
+    [
+      ...peerEntries.map((entry) => ({
+        id: entry.id,
+        startedAt: entry.startedAt,
+        stoppedAt: entry.stoppedAt
+      })),
+      {
+        id: candidateId,
+        startedAt: item.suggestedStartedAt,
+        stoppedAt: item.suggestedStoppedAt
+      }
+    ],
+    { now }
+  ).entries.find((entry) => entry.id === candidateId) ?? null;
 }
 
 function formatDateTime(date: Date) {

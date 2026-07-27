@@ -1180,7 +1180,7 @@ describe("mobile API client", () => {
           {
             reviewItemId: "review-overlap",
             code: "overlap",
-            message: "Left in Review: overlaps stale open timer \"BAU\" with no stop time."
+            message: "Left in Review: automatic logging paused because this overlaps stale open timer \"BAU\" with no stop time. You can still confirm it."
           }
         ]
       }, 200))

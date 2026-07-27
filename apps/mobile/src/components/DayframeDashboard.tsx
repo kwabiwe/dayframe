@@ -34,7 +34,11 @@ import Reanimated, {
 import Svg, { Circle, Defs, G, Path, Pattern, Rect } from "react-native-svg";
 import { router, useFocusEffect, useIsFocused } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { paletteColorFor, type RecentActivitySuggestion } from "@dayframe/shared";
+import {
+  analyzeTimeIntervals,
+  paletteColorFor,
+  type RecentActivitySuggestion
+} from "@dayframe/shared";
 import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { TagMetadata } from "@/components/TagMetadata";
@@ -1490,8 +1494,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             onChartViewChange={changeReportChart}
             styles={styles}
             theme={theme}
-            todayTotal={reports.todayTotal}
-            weekTotal={reports.weekTotal}
+            coveredTotal={reports.coveredTotal}
+            additionalOverlapTotal={reports.additionalOverlapTotal}
+            loggedTotal={reports.loggedTotal}
             onRangeChange={changeReportRange}
           />
           </Animated.View>
@@ -1538,6 +1543,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           setManualDraftEntry(null);
         }}
         onSave={saveManualEntry}
+        peerEntries={historySourceEntries}
         saving={manualEntrySaving}
         stopping={false}
         styles={styles}
@@ -1557,6 +1563,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         onDelete={deleteActiveTimer}
         onSave={saveActiveTimerEdit}
         onStop={stopActiveTimer}
+        peerEntries={historySourceEntries}
         deleting={false}
         saving={false}
         stopping={false}
@@ -1575,6 +1582,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         onCancel={() => setCalendarEditEntry(null)}
         onDelete={deleteCalendarEntry}
         onSave={saveCalendarEntryEdit}
+        peerEntries={historySourceEntries}
         deleting={false}
         saving={false}
         stopping={false}
@@ -1604,6 +1612,7 @@ export function DayframeDashboardScreen({ tab }: { tab: DayframeDashboardTab }) 
 }
 
 function ReportsTab({
+  additionalOverlapTotal,
   chartView,
   dailyBars,
   hasSuggestedActivity,
@@ -1613,9 +1622,10 @@ function ReportsTab({
   segments,
   styles,
   theme,
-  todayTotal,
-  weekTotal
+  coveredTotal,
+  loggedTotal
 }: {
+  additionalOverlapTotal: number;
   chartView: ReportChartView;
   dailyBars: Array<{ key: string; label: string; seconds: number }>;
   hasSuggestedActivity: boolean;
@@ -1625,8 +1635,8 @@ function ReportsTab({
   segments: SummarySegment[];
   styles: MobileStyles;
   theme: MobileTheme;
-  todayTotal: number;
-  weekTotal: number;
+  coveredTotal: number;
+  loggedTotal: number;
 }) {
   const maxSegmentSeconds = Math.max(1, ...segments.map((segment) => segment.seconds));
   const maxDailySeconds = Math.max(1, ...dailyBars.map((bar) => bar.seconds));
@@ -1664,14 +1674,19 @@ function ReportsTab({
 
         <View style={styles.reportTotalsRow}>
           <View style={styles.reportTotalCard}>
-            <Text style={styles.label}>Today total</Text>
-            <Text style={styles.reportTotalValue}>{formatDuration(todayTotal)}</Text>
+            <Text style={styles.label}>Total logged</Text>
+            <Text style={styles.reportTotalValue}>{formatDuration(loggedTotal)}</Text>
           </View>
           <View style={styles.reportTotalCard}>
-            <Text style={styles.label}>This week</Text>
-            <Text style={styles.reportTotalValue}>{formatDuration(weekTotal)}</Text>
+            <Text style={styles.label}>Time covered</Text>
+            <Text style={styles.reportTotalValue}>{formatDuration(coveredTotal)}</Text>
           </View>
         </View>
+        <Text style={styles.muted}>
+          {additionalOverlapTotal > 0
+            ? `${formatDuration(additionalOverlapTotal)} additional overlapping activity. Each entry counts in full; covered time counts concurrent entries once.`
+            : "Each entry counts in full. Covered time counts concurrent entries once; there are no overlaps in this range."}
+        </Text>
       </View>
 
       <View style={styles.lifecyclePanel}>
@@ -1985,6 +2000,23 @@ function HistoryDayCard({
   const reduceMotion = useReduceMotionPreference();
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
   const entryGroups = useMemo(() => groupHistoryDayEntries(section.entries), [section.entries]);
+  const historyAnalysis = useMemo(() => {
+    const rangeStart = new Date(section.date);
+    rangeStart.setHours(0, 0, 0, 0);
+    const rangeEnd = addDaysToDate(rangeStart, 1);
+    return analyzeTimeIntervals(
+      section.entries.map(({ entry }) => ({
+        id: entry.id,
+        startedAt: entry.startedAt,
+        stoppedAt: entry.stoppedAt
+      })),
+      { range: { start: rangeStart, end: rangeEnd }, now }
+    );
+  }, [now, section.date, section.entries]);
+  const historyOverlapById = useMemo(
+    () => new Map(historyAnalysis.entries.map((entry) => [entry.id, entry])),
+    [historyAnalysis.entries]
+  );
 
   function toggleGroup(groupKey: string) {
     setExpandedGroups((current) => {
@@ -2064,6 +2096,16 @@ function HistoryDayCard({
                       tagNames={entry.tagNames ?? entry.tags?.map((tag) => tag.name) ?? []}
                       theme={theme}
                     />
+                    {group.entries.some(({ entry: groupedEntry }) =>
+                      (historyOverlapById.get(groupedEntry.id)?.overlapCount ?? 0) > 0
+                    ) ? (
+                      <Text
+                        accessibilityLabel="Intentional overlap"
+                        style={[styles.reviewMetaLine, { color: theme.warningText }]}
+                      >
+                        Intentional overlap
+                      </Text>
+                    ) : null}
                   </View>
                   </Pressable>
                   <View style={styles.historyEntryActions}>
@@ -2125,6 +2167,16 @@ function HistoryDayCard({
                             {formatEntryTimeRange(childEntry, now)}
                           </Text>
                           <Text style={styles.todayEntryDuration}>{formatDuration(overlapSeconds)}</Text>
+                          {(historyOverlapById.get(childEntry.id)?.overlapCount ?? 0) > 0 ? (
+                            <Text
+                              accessibilityLabel={`Overlap: ${formatDuration(
+                                historyOverlapById.get(childEntry.id)?.uniqueOverlapSeconds ?? 0
+                              )} shared with other entries`}
+                              style={[styles.reviewMetaLine, { color: theme.warningText }]}
+                            >
+                              Overlap
+                            </Text>
+                          ) : null}
                         </Pressable>
                       </SwipeableHistoryEntry>
                     </Reanimated.View>
@@ -2152,8 +2204,15 @@ function HistoryDayCard({
         </Pressable>
       ) : null}
       <View style={styles.todayTrackedRow}>
-        <Text style={styles.todayTrackedLabel}>Tracked</Text>
-        <Text style={styles.todayTrackedValue}>{formatDuration(section.totalSeconds)}</Text>
+        <Text style={styles.todayTrackedLabel}>Logged</Text>
+        <View>
+          <Text style={styles.todayTrackedValue}>{formatDuration(historyAnalysis.loggedSeconds)}</Text>
+          {historyAnalysis.additionalOverlapSeconds > 0 ? (
+            <Text style={[styles.reviewMetaLine, { textAlign: "right" }]}>
+              {formatDuration(historyAnalysis.coveredSeconds)} covered
+            </Text>
+          ) : null}
+        </View>
       </View>
     </View>
   );
@@ -2310,10 +2369,21 @@ function buildReports(
   const confirmedSelectedEntries = selectedEntries.filter((entry) => !isReviewNeededEntry(entry));
   const todayTotal = sumRangeSeconds(confirmedDayEntries, todayStart, todayEnd, now);
   const weekTotal = sumRangeSeconds(confirmedWeekEntries, weekStart, weekEnd, now);
+  const selectedAnalysis = analyzeTimeIntervals(
+    confirmedSelectedEntries.map((entry) => ({
+      id: entry.id,
+      startedAt: entry.startedAt,
+      stoppedAt: entry.stoppedAt
+    })),
+    { range: { start: rangeStart, end: rangeEnd }, now }
+  );
 
   return {
     todayTotal,
     weekTotal,
+    loggedTotal: selectedAnalysis.loggedSeconds,
+    coveredTotal: selectedAnalysis.coveredSeconds,
+    additionalOverlapTotal: selectedAnalysis.additionalOverlappingActivitySeconds,
     segments: buildCategorySegments(confirmedSelectedEntries, rangeStart, rangeEnd, now, mode),
     dailyBars: buildDailyBars(confirmedWeekEntries, weekStart, now),
     hasSuggestedActivity: hasReviewNeededActivityForRange({

@@ -49,6 +49,10 @@ describe("report query architecture", () => {
     expect(statement.text).not.toContain("from projects");
     expect(statement.text).not.toContain("join clients");
     expect(statement.text).not.toContain("now()");
+    expect(statement.text).toContain("current_islands as");
+    expect(statement.text).toContain("previous_islands as");
+    expect(statement.text).toContain("daily_islands as");
+    expect(statement.text).toContain('as "coveredSeconds"');
     expect(statement.values).toContain(workspaceId);
     expect(statement.values).toContain(userAId);
     expect(statement.values).toContain("2026-07-22T12:00:00.000Z");
@@ -143,6 +147,9 @@ describe("report scope and response", () => {
     ]);
 
     expect(reportA.totalSeconds).toBe(600);
+    expect(reportA.totalLoggedSeconds).toBe(600);
+    expect(reportA.timeCoveredSeconds).toBe(600);
+    expect(reportA.additionalOverlappingActivitySeconds).toBe(0);
     expect(reportA.byCategory[0].seconds).toBe(600);
     expect(reportA.byTag[0].seconds).toBe(600);
     expect(reportA.byPlace[0].seconds).toBe(600);
@@ -227,15 +234,38 @@ function reportData(seconds: number) {
   const breakdown = [{ id: categoryId, name: "Work", color: "blue", seconds, entryCount: 1 }];
   return {
     totalSeconds: seconds,
+    coveredSeconds: seconds,
+    additionalOverlapSeconds: 0,
+    concurrentCoverageSeconds: 0,
+    maxConcurrency: 1,
     previousPeriodSeconds: 0,
+    previousPeriodCoveredSeconds: 0,
     byCategory: breakdown,
     byTag: [{ id: tagAId, name: "Focus", color: "steel", seconds, entryCount: 1 }],
     byPlace: [{ id: placeId, name: "Office", color: null, seconds, entryCount: 1 }],
     bySource: [{ id: "manual_app", name: "manual_app", color: null, seconds, entryCount: 1 }],
     dailySeries: [
-      { key: "2026-07-20", label: "Mon 20 Jul", seconds },
-      { key: "2026-07-21", label: "Tue 21 Jul", seconds: 0 },
-      { key: "2026-07-22", label: "Wed 22 Jul", seconds: 0 }
+      {
+        key: "2026-07-20",
+        label: "Mon 20 Jul",
+        seconds,
+        coveredSeconds: seconds,
+        additionalOverlappingActivitySeconds: 0
+      },
+      {
+        key: "2026-07-21",
+        label: "Tue 21 Jul",
+        seconds: 0,
+        coveredSeconds: 0,
+        additionalOverlappingActivitySeconds: 0
+      },
+      {
+        key: "2026-07-22",
+        label: "Wed 22 Jul",
+        seconds: 0,
+        coveredSeconds: 0,
+        additionalOverlappingActivitySeconds: 0
+      }
     ],
     entries: [{
       id: `entry-${seconds}`,
@@ -258,6 +288,13 @@ function reportData(seconds: number) {
       isRunning: true,
       tagNames: ["Focus"],
       tags: [{ id: tagAId, name: "Focus", normalizedName: "focus" }]
+    }],
+    analysisEntries: [{
+      id: `entry-${seconds}`,
+      startedAt: "2026-07-20T09:00:00.000Z",
+      stoppedAt: new Date(Date.parse("2026-07-20T09:00:00.000Z") + seconds * 1000).toISOString(),
+      description: "Focus",
+      categoryName: "Work"
     }],
     totalEntries: 1
   };

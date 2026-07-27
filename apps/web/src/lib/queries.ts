@@ -7,7 +7,11 @@ import type {
   ProjectSummary,
   RecentActivitySuggestion
 } from "@dayframe/shared";
-import { buildCategoryUsageRanks, buildRecentActivitySuggestions } from "@dayframe/shared";
+import {
+  analyzeTimeIntervals,
+  buildCategoryUsageRanks,
+  buildRecentActivitySuggestions
+} from "@dayframe/shared";
 import {
   databaseReadinessError,
   isUndefinedColumnError,
@@ -168,6 +172,10 @@ export type ActivityRow = {
 export type DashboardStats = {
   todaySeconds: number;
   weekSeconds: number;
+  todayCoveredSeconds: number;
+  weekCoveredSeconds: number;
+  todayAdditionalOverlapSeconds: number;
+  weekAdditionalOverlapSeconds: number;
   reviewCount: number;
 };
 
@@ -278,6 +286,30 @@ export async function getBootstrapData(
     getDashboardStats(session, dateRange, capturedNow)
   ]);
 
+  const capturedAt = new Date(capturedNow);
+  const todayCoverage = analyzeTimeIntervals(
+    dayEntries.map((entry) => ({
+      id: entry.id,
+      startedAt: entry.startedAt,
+      stoppedAt: entry.stoppedAt
+    })),
+    {
+      range: { start: dateRange.dayStart, end: dateRange.dayEnd },
+      now: capturedAt
+    }
+  );
+  const weekCoverage = analyzeTimeIntervals(
+    weekEntries.map((entry) => ({
+      id: entry.id,
+      startedAt: entry.startedAt,
+      stoppedAt: entry.stoppedAt
+    })),
+    {
+      range: { start: dateRange.weekStart, end: dateRange.weekEnd },
+      now: capturedAt
+    }
+  );
+
   return {
     authMode: session.authMode,
     user,
@@ -300,7 +332,13 @@ export async function getBootstrapData(
     activityEvents,
     categoryUsage,
     taskSuggestions,
-    stats,
+    stats: {
+      ...stats,
+      todayCoveredSeconds: todayCoverage.coveredSeconds,
+      weekCoveredSeconds: weekCoverage.coveredSeconds,
+      todayAdditionalOverlapSeconds: todayCoverage.additionalOverlapSeconds,
+      weekAdditionalOverlapSeconds: weekCoverage.additionalOverlapSeconds
+    },
     todaySeries: buildHourlySeries(dayEntries, dateRange, new Date(capturedNow)),
     weekSeries: buildWeekSeries(weekEntries, dateRange, new Date(capturedNow))
   };
@@ -990,7 +1028,15 @@ async function getDashboardStats(
       capturedNow
     ]
   );
-  return result.rows[0] ?? { todaySeconds: 0, weekSeconds: 0, reviewCount: 0 };
+  return result.rows[0] ?? {
+    todaySeconds: 0,
+    weekSeconds: 0,
+    todayCoveredSeconds: 0,
+    weekCoveredSeconds: 0,
+    todayAdditionalOverlapSeconds: 0,
+    weekAdditionalOverlapSeconds: 0,
+    reviewCount: 0
+  };
 }
 
 function buildDashboardDateRange(input?: string | Date | null): DashboardDateRange {

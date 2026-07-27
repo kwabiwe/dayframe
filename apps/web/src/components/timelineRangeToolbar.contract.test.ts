@@ -49,8 +49,10 @@ describe("Timeline range and toolbar contract", () => {
     expect(timeline).toContain("data.weekEntries");
     expect(timeline).toContain("data.entries");
     expect(timeline).toContain('state.scope === "day" ? dayEntries : weekEntries');
-    expect(timeline).toContain("<dt>Day total</dt>");
-    expect(timeline).toContain("<dt>Week total</dt>");
+    expect(timeline).toContain("<dt>Day</dt>");
+    expect(timeline).toContain("<dt>Week</dt>");
+    expect(timeline).toContain("dayAnalysis.totalLoggedSeconds");
+    expect(timeline).toContain("dayAnalysis.timeCoveredSeconds");
     expect(timeline).toContain('aria-label="Timeline period and view controls"');
     expect(timeline).toContain('ariaLabel="Timeline view"');
     expect(timeline).toContain('ariaLabel="Timeline scope"');

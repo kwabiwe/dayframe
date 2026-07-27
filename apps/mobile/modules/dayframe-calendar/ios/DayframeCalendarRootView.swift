@@ -162,13 +162,22 @@ struct DayframeCalendarRootView: View {
     presentation: DayframeCalendarPresentation,
     theme: DayframeCalendarTheme
   ) -> some View {
-    Text(presentation.totalLabel)
-      .font(.title3.weight(.semibold))
-      .monospacedDigit()
-      .foregroundStyle(Color(dayframeCSS: theme.accentText))
-      .lineLimit(1)
-      .minimumScaleFactor(0.75)
-      .accessibilityLabel("Selected day total, \(presentation.totalLabel)")
+    VStack(alignment: .trailing, spacing: 2) {
+      Text("\(presentation.loggedLabel) logged")
+        .font(.title3.weight(.semibold))
+        .foregroundStyle(Color(dayframeCSS: theme.accentText))
+      if presentation.additionalOverlapSeconds > 0 {
+        Text("\(presentation.coveredLabel) covered")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(Color(dayframeCSS: theme.textSecondary))
+      }
+    }
+    .monospacedDigit()
+    .lineLimit(1)
+    .minimumScaleFactor(0.75)
+    .accessibilityLabel(
+      "Selected day, \(presentation.loggedLabel) logged, \(presentation.coveredLabel) covered"
+    )
   }
 }
 
@@ -304,26 +313,43 @@ private struct DayframeCalendarEntriesLayer: View {
         ) {
           let blockWidth = max(0, availableWidth - hourLabelWidth - 18)
           let visualHeight = CGFloat(metrics.height)
-          let hitHeight = max(44, visualHeight)
+          let horizontal = DayframeCalendarHorizontalMath.metrics(
+            availableWidth: Double(blockWidth),
+            offsetFraction: entry.offsetFraction,
+            widthFraction: entry.widthFraction,
+            visualHeight: Double(visualHeight),
+            overlapCount: entry.overlapCount,
+            textDensity: entry.textDensity
+          )
+          let resolvedWidth = CGFloat(horizontal.width)
+          let hitHeight = CGFloat(horizontal.hitHeight)
 
           Button {
             actions.open(entry.actionTarget)
           } label: {
             DayframeCalendarBlockView(
               entry: entry,
+              horizontal: horizontal,
               metrics: metrics,
               reduceTransparency: presentation.reduceTransparency,
               theme: presentation.theme
             )
-            .frame(width: blockWidth, height: visualHeight)
+            .frame(maxWidth: .infinity)
+            .frame(height: visualHeight)
           }
           .buttonStyle(.plain)
-          .frame(width: blockWidth, height: hitHeight)
           .contentShape(Rectangle())
-          .position(
-            x: hourLabelWidth + 8 + blockWidth / 2,
+          .modifier(DayframeCalendarHorizontalGeometry(
+            hitHeight: hitHeight,
+            width: resolvedWidth,
+            x: hourLabelWidth + 8 + CGFloat(horizontal.offset) + resolvedWidth / 2,
             y: CGFloat(metrics.top + metrics.height / 2)
+          ))
+          .animation(
+            presentation.reduceMotion ? nil : .easeOut(duration: 0.21),
+            value: "\(entry.offsetFraction):\(entry.widthFraction)"
           )
+          .zIndex(Double(entry.zIndex))
           .accessibilityLabel(entry.accessibilityLabel)
           .accessibilityHint(entry.isReview ? "Opens Review" : entry.isActive ? "Opens Edit Timer" : "Opens entry editor")
           .accessibilityAddTraits(entry.isActive ? .isSelected : [])
@@ -336,6 +362,7 @@ private struct DayframeCalendarEntriesLayer: View {
 
 private struct DayframeCalendarBlockView: View {
   let entry: DayframeCalendarEntry
+  let horizontal: DayframeCalendarHorizontalMetrics
   let metrics: DayframeCalendarBlockMetrics
   let reduceTransparency: Bool
   let theme: DayframeCalendarTheme
@@ -369,7 +396,7 @@ private struct DayframeCalendarBlockView: View {
         )
       )
 
-      if metrics.showTitle {
+      if metrics.showTitle && horizontal.showTitle {
         VStack(alignment: .leading, spacing: metrics.compact ? 1 : 4) {
           HStack(spacing: 5) {
             Circle()
@@ -382,7 +409,7 @@ private struct DayframeCalendarBlockView: View {
               .lineLimit(1)
           }
 
-          if metrics.showMeta {
+          if metrics.showMeta && horizontal.showMeta {
             Text(entry.meta)
               .font(.caption2.weight(.semibold))
               .monospacedDigit()
@@ -390,7 +417,7 @@ private struct DayframeCalendarBlockView: View {
               .lineLimit(metrics.height < DayframeCalendarConstants.metaMinimumHeight + 16 ? 1 : 2)
           }
 
-          if metrics.showMeta, let tagText = entry.tagText, !tagText.isEmpty {
+          if metrics.showMeta, horizontal.showMeta, let tagText = entry.tagText, !tagText.isEmpty {
             HStack(spacing: 4) {
               Image(systemName: "tag.fill")
                 .font(.caption2)
@@ -406,6 +433,36 @@ private struct DayframeCalendarBlockView: View {
         .padding(.vertical, metrics.compact ? 3 : 7)
       }
     }
+    .overlay(alignment: .topTrailing) {
+      if entry.overlapCount > 0 && horizontal.width >= 22 {
+        Circle()
+          .fill(Color(dayframeCSS: theme.warning))
+          .frame(width: 7, height: 7)
+          .padding(5)
+          .accessibilityHidden(true)
+      }
+    }
+  }
+}
+
+private struct DayframeCalendarHorizontalGeometry: AnimatableModifier {
+  let hitHeight: CGFloat
+  var width: CGFloat
+  var x: CGFloat
+  let y: CGFloat
+
+  var animatableData: AnimatablePair<CGFloat, CGFloat> {
+    get { AnimatablePair(width, x) }
+    set {
+      width = newValue.first
+      x = newValue.second
+    }
+  }
+
+  func body(content: Content) -> some View {
+    content
+      .frame(width: width, height: hitHeight)
+      .position(x: x, y: y)
   }
 }
 

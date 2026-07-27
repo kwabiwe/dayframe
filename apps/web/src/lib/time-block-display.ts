@@ -17,6 +17,11 @@ export type TimeBlockDensity = {
 export type TimeBlockLane = {
   laneCount: number;
   laneIndex: number;
+  mode: TimeIntervalLayoutMode;
+  offsetFraction: number;
+  widthFraction: number;
+  zIndex: number;
+  textDensity: TimeIntervalTextDensity;
 };
 
 export function minimumTimeBlockHeight(pixelsPerHour: number) {
@@ -59,41 +64,28 @@ export function layoutTimeBlockLanes(
   blocks: ReadonlyArray<{ key: string; top: number; height: number }>
 ) {
   const lanes = new Map<string, TimeBlockLane>();
-  const sorted = [...blocks].sort(
-    (left, right) =>
-      left.top - right.top ||
-      left.top + left.height - (right.top + right.height) ||
-      left.key.localeCompare(right.key)
-  );
-  let group: Array<{ key: string; laneIndex: number }> = [];
-  let groupBottom = Number.NEGATIVE_INFINITY;
-  let laneEnds: number[] = [];
-
-  function finishGroup() {
-    const laneCount = Math.max(1, laneEnds.length);
-    for (const item of group) {
-      lanes.set(item.key, { laneCount, laneIndex: item.laneIndex });
-    }
-    group = [];
-    groupBottom = Number.NEGATIVE_INFINITY;
-    laneEnds = [];
+  for (const layout of layoutTimeIntervals(
+    blocks.map((block) => ({
+      id: block.key,
+      startedAt: block.top,
+      stoppedAt: block.top + block.height
+    })),
+    0
+  )) {
+    lanes.set(layout.id, {
+      laneCount: layout.laneCount,
+      laneIndex: layout.laneIndex,
+      mode: layout.mode,
+      offsetFraction: layout.offsetFraction,
+      widthFraction: layout.widthFraction,
+      zIndex: layout.zIndex,
+      textDensity: layout.textDensity
+    });
   }
-
-  for (const block of sorted) {
-    if (group.length > 0 && block.top >= groupBottom) finishGroup();
-
-    const bottom = block.top + block.height;
-    let laneIndex = laneEnds.findIndex((laneEnd) => laneEnd <= block.top);
-    if (laneIndex < 0) {
-      laneIndex = laneEnds.length;
-      laneEnds.push(bottom);
-    } else {
-      laneEnds[laneIndex] = bottom;
-    }
-    group.push({ key: block.key, laneIndex });
-    groupBottom = Math.max(groupBottom, bottom);
-  }
-
-  finishGroup();
   return lanes;
 }
+import {
+  layoutTimeIntervals,
+  type TimeIntervalLayoutMode,
+  type TimeIntervalTextDensity
+} from "@dayframe/shared";

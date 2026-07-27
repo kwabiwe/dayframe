@@ -85,6 +85,11 @@ Strength training, swimming, and unknown/other workouts should remain review-fir
 
 Manual Confirm is a user decision. It should be more permissive than auto-log and must not silently fail.
 
+An overlap may keep an automatic Health signal in Review, but it must not block
+the user's later explicit Confirm or Edit-and-confirm. The confirmed activity
+counts in full towards Total logged while concurrent clock time counts once
+towards Time covered. Health sample/event idempotency remains independent.
+
 Expected Confirm behaviour:
 
 - create or reuse a completed time entry
