@@ -11,6 +11,7 @@ const evidenceSource = source("../../app/review/[id].tsx");
 const themeSource = source("../lib/mobileTheme.ts");
 const helperSource = source("../lib/review.ts");
 const menuSource = source("./OverflowMenu.tsx");
+const editSheetSource = source("./ActiveTimerEditSheet.tsx");
 
 describe("mobile Review action contracts", () => {
   it("uses a vertical evidence, semantic confirm, and overflow hierarchy", () => {
@@ -28,5 +29,30 @@ describe("mobile Review action contracts", () => {
   it("uses the shared mobile back affordance on Location Evidence", () => {
     expect(evidenceSource).toContain("<MobileBackButton");
     expect(evidenceSource).not.toContain(">‹</Text>");
+  });
+
+  it("hands Edit to the sheet only after the overflow modal has unmounted", () => {
+    expect(reviewSource).toContain("onClosed={handleOverflowClosed}");
+    expect(reviewSource).toContain("pendingAction");
+    expect(reviewSource).not.toContain("requestAnimationFrame");
+    expect(menuSource).toContain("onShow={handleModalShow}");
+    expect(menuSource).toContain("onDismiss={handleModalDismiss}");
+    expect(menuSource).toContain("useLayoutEffect");
+    expect(menuSource).toContain("onClosed(completed.id)");
+    expect(menuSource).not.toContain("setTimeout");
+    expect(editSheetSource).toContain("onShow={handleModalShow}");
+    expect(editSheetSource).toContain("AccessibilityInfo.setAccessibilityFocus");
+  });
+
+  it("removes Review cards optimistically and reconciles stale bootstrap data", () => {
+    expect(reviewSource).toContain("applyOptimisticMutation");
+    expect(reviewSource).toContain("removeReviewItemOptimistically");
+    expect(reviewSource).toContain("restoreReviewItemOptimistically");
+    expect(reviewSource).toContain("hideTombstonedReviewItems");
+    expect(reviewSource).toContain("new Map<string, number>()");
+    expect(reviewSource).toContain('AppState.addEventListener("change"');
+    expect(reviewSource).toContain('status: "succeeded"');
+    expect(reviewSource).not.toContain("applyAfterSuccessfulMutation");
+    expect(reviewSource).not.toContain("resolvingId");
   });
 });

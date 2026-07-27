@@ -12,21 +12,40 @@ export const REVIEW_COPY = {
 
 type MobileCategory = MobileBootstrap["categories"][number];
 
+export type ReviewMenuAction = "edit" | "dismiss";
+
+export type PendingReviewMenuAction = {
+  action: ReviewMenuAction;
+  itemId: string;
+  token: number;
+};
+
 export type ReviewMenuState = {
   openItemId: string | null;
-  actionItemId: string | null;
+  closingItemId: string | null;
+  pendingAction: PendingReviewMenuAction | null;
 };
 
 export type ReviewMenuEvent =
   | { type: "toggle"; itemId: string; disabled: boolean }
   | { type: "close" }
-  | { type: "begin_action"; itemId: string }
-  | { type: "finish_action"; itemId: string }
-  | { type: "reconcile"; openItemIds: string[] };
+  | { type: "begin_action"; action: ReviewMenuAction; itemId: string; token: number }
+  | { type: "menu_closed"; itemId: string }
+  | { type: "finish_action"; itemId: string; token: number }
+  | { type: "reconcile"; openItemIds: string[] }
+  | { type: "reset" };
 
 export const CLOSED_REVIEW_MENU_STATE: ReviewMenuState = {
   openItemId: null,
-  actionItemId: null
+  closingItemId: null,
+  pendingAction: null
+};
+
+export type OptimisticReviewRemoval = {
+  index: number;
+  item: MobileReviewItem;
+  precedingItemIds: string[];
+  followingItemIds: string[];
 };
 
 export function isReviewNeededEntry(entry: Pick<MobileTimeEntry, "reviewStatus">) {
@@ -223,29 +242,129 @@ export function reduceReviewMenuState(
 ): ReviewMenuState {
   switch (event.type) {
     case "toggle":
-      if (event.disabled || state.actionItemId) return state;
-      return {
-        ...state,
-        openItemId: state.openItemId === event.itemId ? null : event.itemId
-      };
+      if (event.disabled || state.pendingAction || state.closingItemId) return state;
+      if (state.openItemId === event.itemId) {
+        return { ...state, openItemId: null, closingItemId: event.itemId };
+      }
+      if (state.openItemId) return state;
+      return { ...state, openItemId: event.itemId };
     case "close":
-      return state.openItemId == null ? state : { ...state, openItemId: null };
+      return state.openItemId == null
+        ? state
+        : { ...state, openItemId: null, closingItemId: state.openItemId };
     case "begin_action":
       if (!canRunReviewMenuAction(state, event.itemId)) return state;
-      return { openItemId: null, actionItemId: event.itemId };
+      return {
+        openItemId: null,
+        closingItemId: event.itemId,
+        pendingAction: {
+          action: event.action,
+          itemId: event.itemId,
+          token: event.token
+        }
+      };
+    case "menu_closed":
+      return state.closingItemId === event.itemId
+        ? { ...state, closingItemId: null }
+        : state;
     case "finish_action":
-      return state.actionItemId === event.itemId
-        ? { ...state, actionItemId: null }
+      return (
+        state.pendingAction?.itemId === event.itemId &&
+        state.pendingAction.token === event.token
+      )
+        ? { ...state, pendingAction: null }
         : state;
-    case "reconcile":
-      return state.openItemId && !event.openItemIds.includes(state.openItemId)
-        ? { ...state, openItemId: null }
-        : state;
+    case "reconcile": {
+      const openItemIds = new Set(event.openItemIds);
+      const openItemRemoved = Boolean(
+        state.openItemId && !openItemIds.has(state.openItemId)
+      );
+      const pendingItemRemoved = Boolean(
+        state.pendingAction && !openItemIds.has(state.pendingAction.itemId)
+      );
+      if (!openItemRemoved && !pendingItemRemoved) return state;
+      return {
+        ...state,
+        openItemId: openItemRemoved ? null : state.openItemId,
+        closingItemId: openItemRemoved
+          ? state.closingItemId ?? state.openItemId
+          : state.closingItemId,
+        pendingAction: pendingItemRemoved ? null : state.pendingAction
+      };
+    }
+    case "reset":
+      if (!state.openItemId && !state.pendingAction) return state;
+      return {
+        openItemId: null,
+        closingItemId: state.closingItemId ?? state.openItemId,
+        pendingAction: null
+      };
   }
 }
 
 export function canRunReviewMenuAction(state: ReviewMenuState, itemId: string) {
-  return state.openItemId === itemId && state.actionItemId == null;
+  return (
+    state.openItemId === itemId &&
+    state.closingItemId == null &&
+    state.pendingAction == null
+  );
+}
+
+export function removeReviewItemOptimistically(
+  data: MobileBootstrap,
+  itemId: string
+): { data: MobileBootstrap; removal: OptimisticReviewRemoval } | null {
+  const index = data.reviewItems.findIndex((item) => item.id === itemId);
+  if (index < 0) return null;
+  return {
+    data: {
+      ...data,
+      reviewItems: data.reviewItems.filter((item) => item.id !== itemId)
+    },
+    removal: {
+      index,
+      item: data.reviewItems[index],
+      precedingItemIds: data.reviewItems
+        .slice(0, index)
+        .map((item) => item.id),
+      followingItemIds: data.reviewItems
+        .slice(index + 1)
+        .map((item) => item.id)
+    }
+  };
+}
+
+export function restoreReviewItemOptimistically(
+  data: MobileBootstrap,
+  removal: OptimisticReviewRemoval
+) {
+  if (data.reviewItems.some((item) => item.id === removal.item.id)) return data;
+  const reviewItems = [...data.reviewItems];
+  const followingIndex = removal.followingItemIds
+    .map((itemId) => reviewItems.findIndex((item) => item.id === itemId))
+    .find((index) => index >= 0);
+  const precedingIndex = [...removal.precedingItemIds]
+    .reverse()
+    .map((itemId) => reviewItems.findIndex((item) => item.id === itemId))
+    .find((index) => index >= 0);
+  const insertionIndex = followingIndex
+    ?? (precedingIndex == null
+      ? Math.min(removal.index, reviewItems.length)
+      : precedingIndex + 1);
+  reviewItems.splice(insertionIndex, 0, removal.item);
+  return { ...data, reviewItems };
+}
+
+export function hideTombstonedReviewItems(
+  data: MobileBootstrap,
+  tombstonedItemIds: Iterable<string>
+) {
+  const tombstones = new Set(tombstonedItemIds);
+  if (tombstones.size === 0) return data;
+  const reviewItems = data.reviewItems.filter((item) => !tombstones.has(item.id));
+  return reviewItems.length === data.reviewItems.length
+    ? data
+    : { ...data, reviewItems };
 }
 
 function reviewItemDraftDescription(item: MobileReviewItem) {

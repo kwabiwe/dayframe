@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AccessibilityInfo,
   Alert,
+  AppState,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -35,7 +37,7 @@ import {
 } from "@/lib/api";
 import { DAYFRAME_API_BASE } from "@/lib/config";
 import { reprocessExistingHealthReviewItems } from "@/lib/health";
-import { applyAfterSuccessfulMutation } from "@/lib/localMutation";
+import { applyOptimisticMutation } from "@/lib/localMutation";
 import { pressable, useMobileTheme } from "@/lib/mobileTheme";
 import {
   localLayoutTransition,
@@ -51,20 +53,43 @@ import {
   canRunReviewMenuAction,
   hasSuggestedTimeWindow,
   hasV2LocationEvidence,
+  hideTombstonedReviewItems,
   isOneOffLocationReviewItem,
   isOpenReviewItem,
   isReviewNeededEntry,
   isLocationReviewItem,
+  removeReviewItemOptimistically,
   reduceReviewMenuState,
+  restoreReviewItemOptimistically,
   reviewConfirmLabel,
   reviewItemCategoryLabel,
   reviewItemDurationSeconds,
+  type OptimisticReviewRemoval,
   type ReviewMenuEvent
 } from "@/lib/review";
 
 type ReviewEditTarget =
-  | { kind: "reviewItem"; item: MobileReviewItem; entry: MobileTimeEntry }
+  | {
+    kind: "reviewItem";
+    item: MobileReviewItem;
+    entry: MobileTimeEntry;
+    handoverToken: number;
+  }
   | { kind: "entry"; entry: MobileTimeEntry };
+
+type ReviewTombstone = {
+  status: "pending" | "succeeded";
+  version: number;
+};
+
+type ReviewLoadOptions = {
+  forceReprocess?: boolean;
+  preserveMenu?: boolean;
+  queueIfBusy?: boolean;
+  refresh?: boolean;
+  silent?: boolean;
+  skipReprocess?: boolean;
+};
 
 type ReviewReprocessDiagnostics = {
   apiBaseUrl: string;
@@ -82,7 +107,6 @@ export default function ReviewScreen() {
   const reduceMotion = useReduceMotionPreference();
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<ReviewEditTarget | null>(null);
   const [editSaving, setEditSaving] = useState(false);
   const [showReviewInfo, setShowReviewInfo] = useState(false);
@@ -95,9 +119,21 @@ export default function ReviewScreen() {
     result: null,
     error: null
   });
+  const dataRef = useRef<MobileBootstrap | null>(null);
+  const editTargetRef = useRef<ReviewEditTarget | null>(null);
+  const appStateRef = useRef(AppState.currentState);
+  const screenFocusedRef = useRef(false);
   const refreshInFlight = useRef(false);
+  const bootstrapRefreshQueued = useRef(false);
   const forcedReprocessComplete = useRef(false);
   const reviewMenuStateRef = useRef(CLOSED_REVIEW_MENU_STATE);
+  const reviewMenuActionSequence = useRef(0);
+  const reviewMutationSequence = useRef(0);
+  const reviewMutations = useRef(new Map<string, number>());
+  const reviewTombstones = useRef(new Map<string, ReviewTombstone>());
+  const loadRef = useRef<(options?: ReviewLoadOptions) => Promise<void>>(
+    async () => undefined
+  );
   const now = Date.now();
 
   const applyReviewMenuEvent = useCallback((event: ReviewMenuEvent) => {
@@ -106,13 +142,67 @@ export default function ReviewScreen() {
     setReviewMenuState(nextState);
   }, []);
 
-  const load = useCallback(async (options?: { forceReprocess?: boolean; refresh?: boolean; silent?: boolean; skipReprocess?: boolean }) => {
-    if (refreshInFlight.current) return;
+  const commitEditTarget = useCallback((nextTarget: ReviewEditTarget | null) => {
+    editTargetRef.current = nextTarget;
+    setEditTarget(nextTarget);
+  }, []);
+
+  const commitData = useCallback((nextData: MobileBootstrap | null) => {
+    const openItemIds = (nextData?.reviewItems ?? [])
+      .filter(isOpenReviewItem)
+      .map((item) => item.id);
+    dataRef.current = nextData;
+    setData(nextData);
+    applyReviewMenuEvent({
+      type: "reconcile",
+      openItemIds
+    });
+    const currentEditTarget = editTargetRef.current;
+    if (
+      currentEditTarget?.kind === "reviewItem" &&
+      !openItemIds.includes(currentEditTarget.item.id)
+    ) {
+      commitEditTarget(null);
+    }
+  }, [applyReviewMenuEvent, commitEditTarget]);
+
+  const commitBootstrap = useCallback((bootstrap: MobileBootstrap) => {
+    const serverOpenItemIds = new Set(
+      bootstrap.reviewItems.filter(isOpenReviewItem).map((item) => item.id)
+    );
+    for (const [itemId, tombstone] of reviewTombstones.current) {
+      if (tombstone.status === "succeeded" && !serverOpenItemIds.has(itemId)) {
+        reviewTombstones.current.delete(itemId);
+      }
+    }
+    commitData(
+      hideTombstonedReviewItems(bootstrap, reviewTombstones.current.keys())
+    );
+  }, [commitData]);
+
+  const cancelPendingReviewHandover = useCallback(() => {
+    const pendingAction = reviewMenuStateRef.current.pendingAction;
+    applyReviewMenuEvent({ type: "reset" });
+    if (!pendingAction) return;
+    const currentEditTarget = editTargetRef.current;
+    if (
+      currentEditTarget?.kind === "reviewItem" &&
+      currentEditTarget.handoverToken === pendingAction.token
+    ) {
+      commitEditTarget(null);
+    }
+  }, [applyReviewMenuEvent, commitEditTarget]);
+
+  const load = useCallback(async (options?: ReviewLoadOptions) => {
+    if (refreshInFlight.current) {
+      if (options?.queueIfBusy) bootstrapRefreshQueued.current = true;
+      return;
+    }
     refreshInFlight.current = true;
-    applyReviewMenuEvent({ type: "close" });
+    if (!options?.preserveMenu) applyReviewMenuEvent({ type: "close" });
     if (options?.refresh) setRefreshing(true);
     try {
-      setData(await fetchBootstrap());
+      commitBootstrap(await fetchBootstrap());
       if (options?.skipReprocess) return;
       const forceReprocess = options?.forceReprocess ?? !forcedReprocessComplete.current;
       if (forceReprocess) forcedReprocessComplete.current = true;
@@ -141,7 +231,7 @@ export default function ReviewScreen() {
         reprocess.updatedCategoryCount > 0 ||
         reprocess.repairedSleepEntryCount > 0
       ) {
-        setData(await fetchBootstrap());
+        commitBootstrap(await fetchBootstrap());
       }
     } catch (error) {
       const timedOut = error instanceof Error && error.message === "Health reprocess timed out.";
@@ -161,8 +251,18 @@ export default function ReviewScreen() {
     } finally {
       refreshInFlight.current = false;
       if (options?.refresh) setRefreshing(false);
+      if (bootstrapRefreshQueued.current) {
+        bootstrapRefreshQueued.current = false;
+        void loadRef.current({
+          preserveMenu: true,
+          queueIfBusy: true,
+          silent: true,
+          skipReprocess: true
+        });
+      }
     }
-  }, [applyReviewMenuEvent]);
+  }, [applyReviewMenuEvent, commitBootstrap]);
+  loadRef.current = load;
 
   useEffect(() => {
     void load({ forceReprocess: true });
@@ -170,12 +270,40 @@ export default function ReviewScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      screenFocusedRef.current = true;
       applyReviewMenuEvent({ type: "close" });
       void reloadThemePreference();
       void load({ silent: true, skipReprocess: true });
-      return () => applyReviewMenuEvent({ type: "close" });
-    }, [applyReviewMenuEvent, load, reloadThemePreference])
+      return () => {
+        screenFocusedRef.current = false;
+        cancelPendingReviewHandover();
+      };
+    }, [
+      applyReviewMenuEvent,
+      cancelPendingReviewHandover,
+      load,
+      reloadThemePreference
+    ])
   );
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      appStateRef.current = nextState;
+      if (nextState !== "active") {
+        cancelPendingReviewHandover();
+        return;
+      }
+      if (screenFocusedRef.current) {
+        void load({
+          preserveMenu: true,
+          queueIfBusy: true,
+          silent: true,
+          skipReprocess: true
+        });
+      }
+    });
+    return () => subscription.remove();
+  }, [cancelPendingReviewHandover, load]);
 
   const openReviewItems = useMemo(
     () => (data?.reviewItems ?? []).filter(isOpenReviewItem),
@@ -188,8 +316,10 @@ export default function ReviewScreen() {
   const totalNeedsReview = openReviewItems.length + reviewNeededEntries.length;
   const editingEntry = editTarget?.entry ?? null;
   const reprocessRunning = reprocessDiagnostics.status === "running";
-  const overflowTarget = openReviewItems.find(
-    (item) => item.id === reviewMenuState.openItemId
+  const overflowItemId =
+    reviewMenuState.openItemId ?? reviewMenuState.closingItemId;
+  const overflowTarget = (data?.reviewItems ?? []).find(
+    (item) => item.id === overflowItemId
   ) ?? null;
 
   useEffect(() => {
@@ -200,86 +330,187 @@ export default function ReviewScreen() {
   }, [applyReviewMenuEvent, openReviewItems]);
 
   useEffect(() => {
-    if (reprocessRunning || resolvingId) applyReviewMenuEvent({ type: "close" });
-  }, [applyReviewMenuEvent, reprocessRunning, resolvingId]);
+    if (reprocessRunning) cancelPendingReviewHandover();
+  }, [cancelPendingReviewHandover, reprocessRunning]);
 
-  async function confirmItem(item: MobileReviewItem) {
+  function confirmItem(item: MobileReviewItem) {
     applyReviewMenuEvent({ type: "close" });
-    await resolveItem(item, async () => {
+    resolveItem(item, async () => {
       if (hasV2LocationEvidence(item)) await resolveLocationReviewItem(item.id, { action: "confirm" });
       else await confirmReviewItem(item.id);
-    });
+    }, "Suggestion confirmed.");
   }
 
-  async function dismissItem(item: MobileReviewItem) {
-    await resolveItem(item, async () => {
+  function dismissItem(item: MobileReviewItem) {
+    resolveItem(item, async () => {
       if (hasV2LocationEvidence(item)) {
         await resolveLocationReviewItem(item.id, { action: "ignore_once_location" });
       } else await dismissReviewItem(item.id);
-    });
+    }, "Suggestion dismissed.");
   }
 
   function toggleReviewMenu(item: MobileReviewItem) {
     applyReviewMenuEvent({
       type: "toggle",
       itemId: item.id,
-      disabled: reprocessRunning || resolvingId === item.id
+      disabled: reprocessRunning || reviewMutations.current.has(item.id)
     });
   }
 
-  function selectOverflowAction(item: MobileReviewItem, action: OverflowMenuAction) {
+  function selectOverflowAction(action: OverflowMenuAction, itemId: string) {
     const currentState = reviewMenuStateRef.current;
-    if (!canRunReviewMenuAction(currentState, item.id)) return;
-    applyReviewMenuEvent({ type: "begin_action", itemId: item.id });
-    requestAnimationFrame(() => {
-      if (action === "edit") {
-        beginReviewItemEdit(item);
-        applyReviewMenuEvent({ type: "finish_action", itemId: item.id });
-        return;
-      }
-      void dismissItem(item).finally(() => {
-        applyReviewMenuEvent({ type: "finish_action", itemId: item.id });
-      });
+    const item = dataRef.current?.reviewItems.find(
+      (candidate) => candidate.id === itemId && isOpenReviewItem(candidate)
+    );
+    if (!item || !canRunReviewMenuAction(currentState, itemId)) return;
+    reviewMenuActionSequence.current += 1;
+    applyReviewMenuEvent({
+      type: "begin_action",
+      action,
+      itemId,
+      token: reviewMenuActionSequence.current
     });
   }
 
-  async function resolveItem(item: MobileReviewItem, action: () => Promise<void>) {
-    setResolvingId(item.id);
-    try {
-      await applyAfterSuccessfulMutation(
-        action,
-        () => setData((current) =>
-          current
-            ? {
-              ...current,
-              reviewItems: current.reviewItems.filter((candidate) => candidate.id !== item.id)
-            }
-            : current
-        )
-      );
-      await load({ silent: true, skipReprocess: true });
-    } catch (error) {
+  function handleOverflowClosed(itemId: string) {
+    const pendingAction = reviewMenuStateRef.current.pendingAction;
+    applyReviewMenuEvent({ type: "menu_closed", itemId });
+    if (!pendingAction || pendingAction.itemId !== itemId) return;
+
+    const finishAction = () => applyReviewMenuEvent({
+      type: "finish_action",
+      itemId,
+      token: pendingAction.token
+    });
+    if (!screenFocusedRef.current || appStateRef.current !== "active") {
+      finishAction();
+      return;
+    }
+
+    const item = dataRef.current?.reviewItems.find(
+      (candidate) => candidate.id === itemId && isOpenReviewItem(candidate)
+    );
+    if (!item) {
+      finishAction();
+      return;
+    }
+
+    if (pendingAction.action === "dismiss") {
+      finishAction();
+      dismissItem(item);
+      return;
+    }
+
+    if (!beginReviewItemEdit(item, pendingAction.token)) finishAction();
+  }
+
+  function resolveItem(
+    item: MobileReviewItem,
+    action: () => Promise<void>,
+    successAnnouncement: string
+  ) {
+    if (reviewMutations.current.has(item.id)) return;
+    const currentData = dataRef.current;
+    if (!currentData) return;
+    const optimistic = removeReviewItemOptimistically(currentData, item.id);
+    if (!optimistic) return;
+
+    reviewMutationSequence.current += 1;
+    const version = reviewMutationSequence.current;
+    reviewMutations.current.set(item.id, version);
+    reviewTombstones.current.set(item.id, { status: "pending", version });
+
+    void applyOptimisticMutation<OptimisticReviewRemoval, void>(
+      () => {
+        commitData(optimistic.data);
+        AccessibilityInfo.announceForAccessibility(successAnnouncement);
+        return optimistic.removal;
+      },
+      action,
+      (removal) => {
+        if (reviewMutations.current.get(item.id) !== version) return;
+        const tombstone = reviewTombstones.current.get(item.id);
+        if (!tombstone || tombstone.version !== version) return;
+        reviewMutations.current.delete(item.id);
+        reviewTombstones.current.delete(item.id);
+        const latestData = dataRef.current;
+        if (latestData) {
+          commitData(restoreReviewItemOptimistically(latestData, removal));
+        }
+        AccessibilityInfo.announceForAccessibility(
+          "Suggestion restored because the action failed."
+        );
+      }
+    ).then(() => {
+      if (reviewMutations.current.get(item.id) !== version) return;
+      const tombstone = reviewTombstones.current.get(item.id);
+      if (!tombstone || tombstone.version !== version) return;
+      reviewMutations.current.delete(item.id);
+      reviewTombstones.current.set(item.id, {
+        status: "succeeded",
+        version
+      });
+      void load({
+        preserveMenu: true,
+        queueIfBusy: true,
+        silent: true,
+        skipReprocess: true
+      });
+    }).catch((error) => {
       if (error instanceof AuthRequiredError) {
         router.replace("/");
         return;
       }
-      Alert.alert("Review", error instanceof Error ? error.message : "Unable to update this suggestion.");
-    } finally {
-      setResolvingId(null);
-    }
+      Alert.alert(
+        "Review",
+        error instanceof Error ? error.message : "Unable to update this suggestion."
+      );
+    });
   }
 
-  function beginReviewItemEdit(item: MobileReviewItem) {
-    const draftEntry = buildReviewItemDraftEntry(item, data?.categories ?? [], now);
+  function beginReviewItemEdit(item: MobileReviewItem, handoverToken: number) {
+    const draftEntry = buildReviewItemDraftEntry(
+      item,
+      dataRef.current?.categories ?? [],
+      Date.now()
+    );
     if (!draftEntry || !hasSuggestedTimeWindow(item)) {
       Alert.alert("Edit", "This suggested time entry does not include a start and end time yet.");
-      return;
+      return false;
     }
-    setEditTarget({ kind: "reviewItem", item, entry: draftEntry });
+    commitEditTarget({
+      kind: "reviewItem",
+      item,
+      entry: draftEntry,
+      handoverToken
+    });
+    return true;
+  }
+
+  function finishEditHandover() {
+    const currentEditTarget = editTargetRef.current;
+    if (currentEditTarget?.kind !== "reviewItem") return;
+    applyReviewMenuEvent({
+      type: "finish_action",
+      itemId: currentEditTarget.item.id,
+      token: currentEditTarget.handoverToken
+    });
+  }
+
+  function cancelEdit() {
+    const currentEditTarget = editTargetRef.current;
+    if (currentEditTarget?.kind === "reviewItem") {
+      applyReviewMenuEvent({
+        type: "finish_action",
+        itemId: currentEditTarget.item.id,
+        token: currentEditTarget.handoverToken
+      });
+    }
+    commitEditTarget(null);
   }
 
   function beginReviewNeededEntryEdit(entry: MobileTimeEntry) {
-    setEditTarget({ kind: "entry", entry });
+    commitEditTarget({ kind: "entry", entry });
   }
 
   async function saveEdit(entryId: string, patch: TimeEntryUpdatePatch) {
@@ -388,7 +619,6 @@ export default function ReviewScreen() {
                     <ReviewItemCard
                       item={item}
                       disabled={reprocessRunning}
-                      loading={resolvingId === item.id}
                       menuOpen={reviewMenuState.openItemId === item.id}
                       now={now}
                       onConfirm={() => confirmItem(item)}
@@ -423,26 +653,27 @@ export default function ReviewScreen() {
 
       <OverflowMenu
         disabled={
-          !overflowTarget ||
+          !overflowItemId ||
           reprocessRunning ||
-          resolvingId === overflowTarget.id ||
-          reviewMenuState.actionItemId != null
+          reviewMenuState.pendingAction != null
         }
         onClose={() => applyReviewMenuEvent({ type: "close" })}
-        onSelect={(action) => {
-          if (overflowTarget) selectOverflowAction(overflowTarget, action);
-        }}
+        onClosed={handleOverflowClosed}
+        onSelect={selectOverflowAction}
+        instanceId={overflowItemId}
         title={overflowTarget ? reviewItemTitle(overflowTarget) : "review suggestion"}
-        visible={Boolean(overflowTarget)}
+        visible={reviewMenuState.openItemId != null}
       />
 
       <ActiveTimerEditSheet
         categories={data?.categories ?? []}
         elapsedSeconds={editingEntry ? entryDurationSeconds(editingEntry, now) : 0}
         entry={editingEntry}
+        focusDescriptionOnShow={editTarget?.kind === "reviewItem"}
         lastStoppedAt={null}
         mode="entry"
-        onCancel={() => setEditTarget(null)}
+        onCancel={cancelEdit}
+        onPresented={finishEditHandover}
         onSave={saveEdit}
         saving={editSaving}
         stopping={false}
@@ -457,7 +688,6 @@ export default function ReviewScreen() {
 function ReviewItemCard({
   disabled,
   item,
-  loading,
   menuOpen,
   now,
   onConfirm,
@@ -468,7 +698,6 @@ function ReviewItemCard({
 }: {
   disabled: boolean;
   item: MobileReviewItem;
-  loading: boolean;
   menuOpen: boolean;
   now: number;
   onConfirm: () => void;
@@ -486,7 +715,7 @@ function ReviewItemCard({
     theme.textSecondary,
     theme.mode
   );
-  const controlsDisabled = loading || disabled;
+  const controlsDisabled = disabled;
   const contextLines = reviewItemContextLines(item, categoryName);
 
   return (
