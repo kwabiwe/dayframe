@@ -35,4 +35,4 @@ No motion changes. Rendering, grouping, focus, selection, resize, overlap, and r
 - Timeline grouping tests for different, reordered, duplicated, tagged, and untagged sets
 - source/CSS category identity contract
 - web typecheck, full workspace tests, lint, production build, brand checks, and diff check
-- authenticated browser review of Dashboard and Timeline in light and dark modes
+- deployed Preview and production browser smoke checks; local navigation was blocked by the browser controller's loopback/LAN policy
