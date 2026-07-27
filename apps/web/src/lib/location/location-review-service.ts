@@ -45,12 +45,12 @@ export async function resolveLocationReviewAction(
       "select pg_advisory_xact_lock(hashtext($1), hashtext($2))",
       [session.workspaceId, session.userId]
     );
-    const item = await lockLocationReview(client, reviewItemId, session);
-    if (item.status !== "open") {
-      await client.query("commit");
-      return { ok: true, action: action.action, status: item.status, alreadyResolved: true };
-    }
-    const result = await performAction(client, item, action, session);
+    const result = await resolveLocationReviewActionWithClient(
+      client,
+      reviewItemId,
+      action,
+      session
+    );
     await client.query("commit");
     return result;
   } catch (error) {
@@ -66,6 +66,20 @@ export async function resolveLocationReviewAction(
   } finally {
     client.release();
   }
+}
+
+export async function resolveLocationReviewActionWithClient(
+  client: pg.PoolClient,
+  reviewItemId: string,
+  input: unknown,
+  session: RequestSession
+) {
+  const action = LocationReviewActionSchema.parse(input);
+  const item = await lockLocationReview(client, reviewItemId, session);
+  if (item.status !== "open") {
+    return resolveClosedLocationReview(client, item, action, session);
+  }
+  return performAction(client, item, action, session);
 }
 
 async function lockLocationReview(client: pg.PoolClient, id: string, session: RequestSession) {
@@ -104,6 +118,111 @@ async function lockLocationReview(client: pg.PoolClient, id: string, session: Re
     throw new ReviewResolutionError("review_item_not_found", "Location review item not found.", { status: 404 });
   }
   return result.rows[0];
+}
+
+async function resolveClosedLocationReview(
+  client: pg.PoolClient,
+  item: LockedReview,
+  action: LocationReviewAction,
+  session: RequestSession
+) {
+  const equivalent =
+    (action.action === "ignore_once_location" && item.status === "ignored") ||
+    (
+      action.action === "confirm" &&
+      item.status === "accepted" &&
+      await locationEditMatchesExisting(client, item, {}, session)
+    ) ||
+    (
+      action.action === "edit_and_confirm" &&
+      item.status === "accepted" &&
+      await locationEditMatchesExisting(client, item, action.edit, session)
+    );
+  if (equivalent) {
+    return {
+      ok: true,
+      action: action.action,
+      status: item.status,
+      alreadyResolved: true,
+      equivalent: true
+    };
+  }
+  throw new ReviewResolutionError(
+    "resolution_conflict",
+    "This Review item was resolved differently on another device.",
+    {
+      status: 409,
+      details: {
+        canonicalStatus: item.status,
+        requestedAction: action.action,
+        reviewItemId: item.id
+      }
+    }
+  );
+}
+
+async function locationEditMatchesExisting(
+  client: pg.PoolClient,
+  item: LockedReview,
+  edit: ReviewEntryEdit,
+  session: RequestSession
+) {
+  const result = await client.query<{
+    id: string;
+    categoryId: string | null;
+    placeId: string | null;
+    description: string | null;
+    startedAt: Date | string;
+    stoppedAt: Date | string;
+  }>(
+    `select id,
+            category_id as "categoryId",
+            place_id as "placeId",
+            description,
+            started_at as "startedAt",
+            stopped_at as "stoppedAt"
+     from time_entries
+     where workspace_id = $1 and user_id = $2 and created_from_event_id = $3
+     limit 1`,
+    [session.workspaceId, session.userId, item.eventId]
+  );
+  const entry = result.rows[0];
+  if (!entry) return false;
+  const expectedCategory = await confirmedLocationCategoryId(
+    client,
+    session,
+    item.segmentKind,
+    item.suggestedCategoryId,
+    edit
+  );
+  const expectedPlace = Object.prototype.hasOwnProperty.call(edit, "placeId")
+    ? edit.placeId ?? null
+    : item.suggestedPlaceId;
+  if (
+    entry.categoryId !== expectedCategory ||
+    entry.placeId !== expectedPlace ||
+    (entry.description ?? "") !== (confirmedLocationDescription(item.segmentKind, item.title, edit) ?? "") ||
+    new Date(entry.startedAt).toISOString() !== new Date(edit.startedAt ?? item.suggestedStartedAt).toISOString() ||
+    new Date(entry.stoppedAt).toISOString() !== new Date(edit.stoppedAt ?? item.suggestedStoppedAt).toISOString()
+  ) {
+    return false;
+  }
+  const tags = await client.query<{ name: string }>(
+    `select tag.name
+     from time_entry_tags link
+     join tags tag on tag.id = link.tag_id and tag.workspace_id = link.workspace_id
+     where link.workspace_id = $1 and link.time_entry_id = $2
+     order by tag.normalized_name`,
+    [session.workspaceId, entry.id]
+  );
+  const actualTags = normalisedTags(tags.rows.map((tag) => tag.name));
+  const expectedTags = normalisedTags(edit.tags ?? []);
+  return actualTags.length === expectedTags.length &&
+    actualTags.every((tag, index) => tag === expectedTags[index]);
+}
+
+function normalisedTags(tags: string[]) {
+  return tags.map((tag) => tag.trim().toLowerCase()).sort();
 }
 
 async function performAction(

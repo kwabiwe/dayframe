@@ -94,8 +94,12 @@ type QueryRunner = <T extends pg.QueryResultRow>(statement: string, values?: unk
 export type ReviewResolutionCode =
   | "review_item_not_found"
   | "already_resolved"
+  | "mutation_id_conflict"
+  | "resolution_conflict"
   | "invalid_action"
+  | "invalid_category"
   | "invalid_time_window"
+  | "overlap"
   | "duplicate_entry"
   | "database_constraint"
   | "review_item_locked";

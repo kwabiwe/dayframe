@@ -390,12 +390,19 @@ export async function fetchBootstrap(options: { date?: string } = {}): Promise<M
   });
   if (response.status === 401) {
     await clearSessionToken();
+    const reviewStore = await reviewSyncStore();
+    if (reviewStore) await reviewStore.synchroniseReviewMutations();
     throw new AuthRequiredError();
   }
   if (!response.ok) {
     throw new Error(await errorMessage(response, "Unable to load Dayframe API"));
   }
-  return readJsonResponse<MobileBootstrap>(response);
+  const bootstrap = await readJsonResponse<MobileBootstrap>(response);
+  const reviewStore = await reviewSyncStore();
+  if (!reviewStore) return bootstrap;
+  const projected = await reviewStore.processReviewBootstrap(bootstrap);
+  void reviewStore.synchroniseReviewMutations().catch(() => undefined);
+  return projected;
 }
 
 export async function login(email: string, password: string) {
@@ -420,6 +427,9 @@ export async function logout() {
     .catch(() => undefined);
   await import("./location/store")
     .then(({ clearActiveLocationAccountData }) => clearActiveLocationAccountData())
+    .catch(() => undefined);
+  await import("./reviewSyncStore")
+    .then(({ clearActiveReviewAccountData }) => clearActiveReviewAccountData())
     .catch(() => undefined);
   await clearSessionToken();
 }
@@ -810,15 +820,9 @@ export async function reprocessHealthReviewItems(
 export async function saveEditedReviewItem(
   id: string,
   input: ManualTimeEntryInput,
-  options: { atomicLocation?: boolean } = {}
+  options: { atomicLocation?: boolean; clientMutationId?: string } = {}
 ) {
-  if (!options.atomicLocation) {
-    // Preserve the established non-location review workflow. V2 location
-    // reviews opt into the single server transaction below.
-    await createManualTimeEntry(input);
-    await dismissReviewItem(id);
-    return { ok: true };
-  }
+  void options.atomicLocation;
   const response = await fetch(`${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(id)}`, {
     method: "POST",
     headers: {
@@ -826,13 +830,16 @@ export async function saveEditedReviewItem(
       ...(await authHeaders())
     },
     body: JSON.stringify({
-      action: "edit_and_confirm",
-      edit: {
-        categoryId: input.categoryId ?? null,
-        description: input.description?.trim() || undefined,
-        startedAt: input.startedAt,
-        stoppedAt: input.stoppedAt,
-        tags: input.tagNames
+      clientMutationId: options.clientMutationId ?? generatedUuid(),
+      mutation: {
+        action: "edit_and_confirm",
+        edit: {
+          categoryId: input.categoryId ?? null,
+          description: input.description?.trim() || undefined,
+          startedAt: input.startedAt,
+          stoppedAt: input.stoppedAt,
+          tags: input.tagNames
+        }
       }
     })
   });
@@ -1281,6 +1288,20 @@ function generatedLocalId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+function generatedUuid() {
+  const bytes = Array.from({ length: 16 }, () => Math.floor(Math.random() * 256));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20)
+  ].join("-");
+}
+
 async function writeQueue(queue: QueuedEvent[]) {
   await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
 }
@@ -1320,7 +1341,23 @@ async function authenticate(path: string, body: Record<string, unknown>): Promis
   if (!response.ok) throw new Error(payload.error ?? `Authentication failed: ${response.status}`);
   if ("requiresEmailConfirmation" in payload) return payload;
   await setSessionToken(payload.token);
+  const reviewStore = await reviewSyncStore();
+  if (reviewStore) {
+    await reviewStore.activateReviewAccount({
+      userId: payload.user.id,
+      workspaceId: payload.workspace.id,
+      workspaceName: payload.workspace.name
+    });
+    void reviewStore.synchroniseReviewMutations().catch(() => undefined);
+  }
   return payload;
+}
+
+async function reviewSyncStore() {
+  // Expo SQLite loads native React Native modules that are intentionally absent
+  // from the Node-only API-client unit-test runtime.
+  if (typeof process !== "undefined" && process.env.VITEST) return null;
+  return import("./reviewSyncStore");
 }
 
 async function postTimerAction(body: Record<string, unknown>) {

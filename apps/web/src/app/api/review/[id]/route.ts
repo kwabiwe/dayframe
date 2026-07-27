@@ -2,14 +2,44 @@ import { NextResponse } from "next/server";
 import { resolveReviewItem, ReviewResolutionError } from "@/lib/event-service";
 import { authErrorResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
-import { LocationReviewActionSchema } from "@dayframe/shared";
+import {
+  LocationReviewActionSchema,
+  ReviewMutationEnvelopeSchema
+} from "@dayframe/shared";
 import { resolveLocationReviewAction } from "@/lib/location/location-review-service";
+import { resolveIdempotentReviewMutation } from "@/lib/review-mutation-service";
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const session = await resolveRequestSession(request);
     const { id } = await context.params;
     const body = await request.json().catch(() => ({}));
+    const reviewMutation = ReviewMutationEnvelopeSchema.safeParse(body);
+    if (reviewMutation.success) {
+      const result = await resolveIdempotentReviewMutation(
+        id,
+        reviewMutation.data,
+        session
+      );
+      return NextResponse.json(result);
+    }
+    if (
+      isRecord(body) &&
+      (
+        Object.prototype.hasOwnProperty.call(body, "clientMutationId") ||
+        Object.prototype.hasOwnProperty.call(body, "mutation")
+      )
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          code: "invalid_action",
+          message: "Invalid Review mutation envelope.",
+          issues: reviewMutation.error.issues
+        },
+        { status: 400 }
+      );
+    }
     const action = isRecord(body) ? body.action : undefined;
     const locationAction = LocationReviewActionSchema.safeParse(body);
     if (

@@ -1311,7 +1311,10 @@ describe("mobile API client", () => {
       description: "Adjusted suggestion",
       startedAt: "2026-07-07T09:15:00.000Z",
       stoppedAt: "2026-07-07T10:10:00.000Z"
-    }, { atomicLocation: true });
+    }, {
+      atomicLocation: true,
+      clientMutationId: "d87c35ce-2a63-4e44-a8fc-4370f2a5cda4"
+    });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
@@ -1319,19 +1322,22 @@ describe("mobile API client", () => {
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
-          action: "edit_and_confirm",
-          edit: {
-            categoryId: null,
-            description: "Adjusted suggestion",
-            startedAt: "2026-07-07T09:15:00.000Z",
-            stoppedAt: "2026-07-07T10:10:00.000Z"
+          clientMutationId: "d87c35ce-2a63-4e44-a8fc-4370f2a5cda4",
+          mutation: {
+            action: "edit_and_confirm",
+            edit: {
+              categoryId: null,
+              description: "Adjusted suggestion",
+              startedAt: "2026-07-07T09:15:00.000Z",
+              stoppedAt: "2026-07-07T10:10:00.000Z"
+            }
           }
         })
       })
     );
   });
 
-  it("preserves the existing legacy review edit workflow outside Location V2", async () => {
+  it("uses the same atomic review operation outside Location V2", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));
     vi.stubGlobal("fetch", fetchMock);
@@ -1341,18 +1347,16 @@ describe("mobile API client", () => {
       description: "Legacy suggestion",
       startedAt: "2026-07-07T09:15:00.000Z",
       stoppedAt: "2026-07-07T10:10:00.000Z"
+    }, {
+      clientMutationId: "e87c35ce-2a63-4e44-a8fc-4370f2a5cda4"
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      "https://dayframe.test/api/time-entries",
-      expect.anything()
-    );
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
       "https://dayframe.test/api/review/legacy-review",
-      expect.anything()
+      expect.objectContaining({
+        body: expect.stringContaining('"action":"edit_and_confirm"')
+      })
     );
   });
 

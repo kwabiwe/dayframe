@@ -299,6 +299,19 @@ create table if not exists review_items (
   resolved_at timestamptz
 );
 
+create table if not exists review_mutation_receipts (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  user_id uuid not null references users(id) on delete cascade,
+  client_mutation_id uuid not null,
+  review_item_id uuid not null,
+  action_key text not null,
+  request_hash text not null,
+  result_json jsonb not null,
+  created_at timestamptz not null default now(),
+  unique(workspace_id, user_id, client_mutation_id)
+);
+
 create table if not exists calendar_events (
   id uuid primary key default gen_random_uuid(),
   workspace_id uuid not null references workspaces(id) on delete cascade,
@@ -719,6 +732,8 @@ create index if not exists idx_learned_places_workspace_status on learned_places
 create index if not exists idx_review_items_workspace_status on review_items(workspace_id, status, created_at desc);
 create index if not exists idx_review_items_user_status on review_items(workspace_id, user_id, status, created_at desc);
 create index if not exists idx_review_items_open_health_event on review_items(workspace_id, event_id, suggested_started_at desc, created_at desc) where status = 'open';
+create index if not exists idx_review_mutation_receipts_item
+  on review_mutation_receipts(workspace_id, user_id, review_item_id, created_at desc);
 create index if not exists idx_activity_events_health_review_lookup on activity_events(workspace_id, user_id, event_type, occurred_at desc, id) where event_type in ('health_sleep_import', 'health_workout_import');
 create index if not exists idx_time_entries_confirmed_overlap_lookup on time_entries(workspace_id, user_id, started_at, stopped_at) where review_status = 'confirmed';
 create index if not exists idx_time_entries_completed_health_overlap_lookup on time_entries(workspace_id, user_id, started_at, stopped_at) where review_status in ('confirmed', 'accepted');

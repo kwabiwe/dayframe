@@ -80,6 +80,32 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Web and mobile use authenticated workspace-scoped API calls.
 - Mobile foreground start/stop actions attempt immediate API sync and only fall back to the offline queue for genuine network/offline failure.
 - Offline queue sync preserves shortcut, NFC, geofence, Apple Health, and other background event paths, respects retry backoff for automatic retries, and exposes retry/export diagnostics in Settings.
+- Offline Review decisions use their dedicated account-scoped SQLite owner, not
+  the activity-event queue or location-evidence database. With Review data
+  already downloaded, Confirm, Dismiss, and Edit-and-confirm must commit the
+  request plus tombstone locally before the card exits, survive navigation,
+  background/foreground, force-quit, and restart, then synchronise exactly once
+  when Dayframe is active and authenticated again.
+- Cached Review data must never cross accounts or reinsert a pending local
+  tombstone. Session expiry preserves the same account's mutations as
+  sign-in-required; confirmed logout warns with the exact unsynchronised count
+  and clears only that active account's Review cache/outbox.
+- Review retry coverage includes network/DNS failure, timeout, 408, 429, 5xx,
+  temporary lock contention, and a lost success response. Permanent category,
+  overlap, supersession, and cross-device resolution conflicts stop retrying,
+  surface safe Settings diagnostics, and restore a card only when canonical
+  server state remains open.
+- Run `npm run validate:review-sync-sqlite` and
+  `DATABASE_URL=..._test npm run validate:review-mutation-db` for Review outbox
+  changes. The Postgres URL must name a disposable local `_test` database.
+- On a physical iPhone, repeat offline Confirm, Dismiss, and Edit-and-confirm
+  across System/Light/Dark, Reduce Motion, large Dynamic Type, VoiceOver,
+  foreground/background, force-quit/reopen, session expiry, same-account login,
+  web conflicts, category removal, overlap, reconnect, and explicit logout.
+  Record each result; tests and screenshots are not device durability evidence.
+- Save/change place, split, merge, record-once, and detailed Location Evidence
+  remain connectivity-dependent. iOS does not guarantee a drain while
+  force-quit; the contract is durable now and automatic retry when active again.
 - Bootstrap data remains backward compatible for web and mobile consumers.
 - No duplicate React keys, hydration errors, or framework runtime overlays appear during normal use.
 - In Location V2 `v2_enabled`, only completed strong stays at logging-enabled saved or accepted-and-linked learned places create automatic confirmed entries. The entry inherits the saved place/default category and description, remains editable/deletable, and retains its source event.

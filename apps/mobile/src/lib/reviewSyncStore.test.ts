@@ -1,0 +1,137 @@
+import { describe, expect, it, vi } from "vitest";
+import type { MobileBootstrap, MobileReviewItem } from "./api";
+
+vi.mock("expo-sqlite", () => ({
+  openDatabaseAsync: vi.fn()
+}));
+
+vi.mock("./secure-session", () => ({
+  clearSessionToken: vi.fn(),
+  getSessionToken: vi.fn()
+}));
+
+vi.mock("./config", () => ({
+  DAYFRAME_API_BASE: "https://dayframe.test"
+}));
+
+const {
+  createReviewClientMutationId,
+  nextReviewRetryAt,
+  projectReviewBootstrap,
+  reviewSyncDisposition,
+  sanitiseReviewItemForCache
+} = await import("./reviewSyncStore");
+
+describe("Review sync store contracts", () => {
+  it("generates valid distinct stable mutation IDs before local enqueue", () => {
+    const first = createReviewClientMutationId();
+    const second = createReviewClientMutationId();
+    expect(first).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+    );
+    expect(second).not.toBe(first);
+  });
+
+  it("bounds exponential retry jitter", () => {
+    const attemptedAt = new Date("2026-07-27T10:00:00.000Z");
+    expect(nextReviewRetryAt(attemptedAt, 1, () => 0)).toBe(
+      "2026-07-27T10:00:24.000Z"
+    );
+    expect(nextReviewRetryAt(attemptedAt, 1, () => 1)).toBe(
+      "2026-07-27T10:00:36.000Z"
+    );
+    expect(nextReviewRetryAt(attemptedAt, 99, () => 0.5)).toBe(
+      "2026-07-27T11:00:00.000Z"
+    );
+  });
+
+  it("classifies retry, authentication and permanent conflict outcomes", () => {
+    expect(reviewSyncDisposition(200)).toBe("acknowledge");
+    expect(reviewSyncDisposition(401)).toBe("authentication_required");
+    expect(reviewSyncDisposition(403)).toBe("authentication_required");
+    expect(reviewSyncDisposition(408)).toBe("retry");
+    expect(reviewSyncDisposition(429)).toBe("retry");
+    expect(reviewSyncDisposition(503)).toBe("retry");
+    expect(reviewSyncDisposition(409, "review_item_locked")).toBe("retry");
+    expect(reviewSyncDisposition(409, "resolution_conflict")).toBe(
+      "needs_attention"
+    );
+    expect(reviewSyncDisposition(422, "invalid_category")).toBe(
+      "needs_attention"
+    );
+  });
+
+  it("filters durable tombstones from bootstrap and updates the Review count", () => {
+    const data = bootstrap([reviewItem({ id: "review-1" }), reviewItem({ id: "review-2" })]);
+    const projected = projectReviewBootstrap(data, new Set(["review-1"]));
+    expect(projected.reviewItems.map((item) => item.id)).toEqual(["review-2"]);
+    expect(projected.stats?.reviewCount).toBe(1);
+  });
+
+  it("does not cache coordinates, raw Health payloads or secrets", () => {
+    const safe = sanitiseReviewItemForCache(reviewItem({
+      rawPayload: {
+        algorithmVersion: "location-v2.0",
+        clientSegmentId: "segment-1",
+        continuityStatus: "uncertain_gap",
+        latitude: 51.5,
+        longitude: -0.1,
+        samples: [{ sleepStage: "deep" }],
+        token: "secret"
+      }
+    }));
+    expect(safe.rawPayload).toEqual({
+      algorithmVersion: "location-v2.0",
+      clientSegmentId: "segment-1",
+      continuityStatus: "uncertain_gap"
+    });
+  });
+});
+
+function reviewItem(
+  overrides: Partial<MobileReviewItem> = {}
+): MobileReviewItem {
+  return {
+    id: "review-1",
+    title: "Walk",
+    eventSource: "health_workout",
+    eventType: "health_workout_import",
+    categoryName: "Health",
+    placeName: null,
+    suggestedCategoryId: null,
+    suggestedPlaceId: null,
+    suggestedStartedAt: "2026-07-27T08:00:00.000Z",
+    suggestedStoppedAt: "2026-07-27T09:00:00.000Z",
+    confidence: "high",
+    status: "open",
+    notes: null,
+    rawPayload: null,
+    createdAt: "2026-07-27T09:01:00.000Z",
+    ...overrides
+  };
+}
+
+function bootstrap(reviewItems: MobileReviewItem[]): MobileBootstrap {
+  return {
+    user: {
+      id: "user-1",
+      email: "review@example.com",
+      name: "Review Tester"
+    },
+    workspace: {
+      id: "workspace-1",
+      name: "Personal"
+    },
+    activeEntry: null,
+    stats: {
+      todaySeconds: 0,
+      weekSeconds: 0,
+      reviewCount: reviewItems.length
+    },
+    projects: [],
+    categories: [],
+    entries: [],
+    places: [],
+    reviewItems
+  };
+}

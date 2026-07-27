@@ -1,0 +1,179 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  connect: vi.fn(),
+  resolveLocation: vi.fn()
+}));
+
+vi.mock("./db", () => ({
+  pool: { connect: mocks.connect },
+  isLockNotAvailableError: vi.fn(() => false),
+  query: vi.fn()
+}));
+
+vi.mock("./location/location-review-service", () => ({
+  resolveLocationReviewActionWithClient: mocks.resolveLocation
+}));
+
+vi.mock("./tag-service", () => ({
+  syncTimeEntryTags: vi.fn()
+}));
+
+const { resolveIdempotentReviewMutation } = await import(
+  "./review-mutation-service"
+);
+
+const session = {
+  workspaceId: "10000000-0000-4000-8000-000000000001",
+  userId: "20000000-0000-4000-8000-000000000001",
+  authMode: "provider" as const,
+  scopes: ["app:write"]
+};
+
+const envelope = {
+  clientMutationId: "d87c35ce-2a63-4e44-a8fc-4370f2a5cda4",
+  mutation: { action: "confirm" as const }
+};
+
+describe("idempotent Review mutations", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("returns the stored result after a lost response without applying twice", async () => {
+    const stored = {
+      ok: true,
+      action: "confirm",
+      status: "accepted",
+      entryId: "entry-1"
+    };
+    const client = clientForReceipt({
+      reviewItemId: "30000000-0000-4000-8000-000000000001",
+      actionKey: "confirm",
+      requestHash:
+        "129dbf398adfb18a4046d2368a27529739dd522d07b3b2c65bd4dee800b8aeee",
+      resultJson: stored
+    });
+    mocks.connect.mockResolvedValue(client);
+
+    await expect(
+      resolveIdempotentReviewMutation(
+        "30000000-0000-4000-8000-000000000001",
+        envelope,
+        session
+      )
+    ).resolves.toEqual(stored);
+    expect(mocks.resolveLocation).not.toHaveBeenCalled();
+    expect(client.query).toHaveBeenCalledWith("commit");
+  });
+
+  it("rejects reuse of one mutation ID with different data", async () => {
+    const client = clientForReceipt({
+      reviewItemId: "30000000-0000-4000-8000-000000000001",
+      actionKey: "ignore_once_location",
+      requestHash: "0".repeat(64),
+      resultJson: { ok: true }
+    });
+    mocks.connect.mockResolvedValue(client);
+
+    await expect(
+      resolveIdempotentReviewMutation(
+        "30000000-0000-4000-8000-000000000001",
+        envelope,
+        session
+      )
+    ).rejects.toMatchObject({
+      code: "mutation_id_conflict",
+      status: 409
+    });
+    expect(client.query).toHaveBeenCalledWith("rollback");
+  });
+
+  it("stores a new location result and receipt in the same transaction", async () => {
+    const result = {
+      ok: true,
+      action: "confirm",
+      status: "accepted",
+      entryId: "entry-1"
+    };
+    const client = clientForNewLocation();
+    mocks.connect.mockResolvedValue(client);
+    mocks.resolveLocation.mockResolvedValue(result);
+
+    await expect(
+      resolveIdempotentReviewMutation(
+        "30000000-0000-4000-8000-000000000001",
+        envelope,
+        session
+      )
+    ).resolves.toEqual(result);
+
+    expect(mocks.resolveLocation).toHaveBeenCalledOnce();
+    const receiptCall = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into review_mutation_receipts")
+    );
+    expect(receiptCall).toBeTruthy();
+    expect(client.query).toHaveBeenCalledWith("commit");
+    const receiptIndex = receiptCall
+      ? client.query.mock.calls.indexOf(receiptCall)
+      : -1;
+    const commitIndex = client.query.mock.calls.findIndex(
+      ([statement]) => statement === "commit"
+    );
+    expect(receiptIndex).toBeGreaterThan(-1);
+    expect(commitIndex).toBeGreaterThan(receiptIndex);
+  });
+
+  it("scopes receipt lookup by workspace and user", async () => {
+    const client = clientForReceipt(null);
+    mocks.connect.mockResolvedValue(client);
+    mocks.resolveLocation.mockResolvedValue({
+      ok: true,
+      action: "confirm",
+      status: "accepted"
+    });
+
+    await resolveIdempotentReviewMutation(
+      "30000000-0000-4000-8000-000000000001",
+      envelope,
+      session
+    );
+
+    const receiptLookup = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("from review_mutation_receipts")
+    );
+    expect(receiptLookup?.[1]).toEqual([
+      session.workspaceId,
+      session.userId,
+      envelope.clientMutationId
+    ]);
+  });
+});
+
+function clientForReceipt(receipt: {
+  reviewItemId: string;
+  actionKey: string;
+  requestHash: string;
+  resultJson: unknown;
+} | null) {
+  const query = vi.fn(async (statement: string, values?: unknown[]) => {
+    void values;
+    if (statement.includes("from review_mutation_receipts")) {
+      return { rows: receipt ? [receipt] : [] };
+    }
+    if (statement.includes("location_segment_id")) {
+      return {
+        rows: [{ locationSegmentId: "40000000-0000-4000-8000-000000000001" }]
+      };
+    }
+    return { rows: [] };
+  });
+  return {
+    query,
+    release: vi.fn()
+  } as unknown as import("pg").PoolClient & { query: typeof query };
+}
+
+function clientForNewLocation() {
+  return clientForReceipt(null);
+}
