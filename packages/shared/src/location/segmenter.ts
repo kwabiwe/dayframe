@@ -315,6 +315,205 @@ function preprocess(input: LocationEngineInput) {
   return { accepted, rejectedEvidence };
 }
 
+function minimumConfidence(
+  left: StaySegment["confidence"],
+  right: StaySegment["confidence"]
+): StaySegment["confidence"] {
+  const order: StaySegment["confidence"][] = ["low", "medium", "medium_high", "high"];
+  return order[Math.min(order.indexOf(left), order.indexOf(right))];
+}
+
+function coalescedContinuity(left: StaySegment, right: StaySegment): ContinuityStatus {
+  if (left.continuityStatus === "uncertain_gap" || right.continuityStatus === "uncertain_gap") {
+    return "uncertain_gap";
+  }
+  return "supported_by_visit";
+}
+
+function weightedStayCentre(left: StaySegment, right: StaySegment) {
+  if (
+    left.centreLatitude == null ||
+    left.centreLongitude == null ||
+    right.centreLatitude == null ||
+    right.centreLongitude == null
+  ) {
+    return null;
+  }
+  const leftWeight = Math.max(1, left.sampleCount);
+  const rightWeight = Math.max(1, right.sampleCount);
+  const totalWeight = leftWeight + rightWeight;
+  return {
+    latitude:
+      (left.centreLatitude * leftWeight + right.centreLatitude * rightWeight) / totalWeight,
+    longitude:
+      (left.centreLongitude * leftWeight + right.centreLongitude * rightWeight) / totalWeight
+  };
+}
+
+function transitionRouteDistance(
+  left: StaySegment,
+  routeEvidence: ClassifiedEvidence[],
+  right: StaySegment
+) {
+  const points = [
+    left.centreLatitude != null && left.centreLongitude != null
+      ? { latitude: left.centreLatitude, longitude: left.centreLongitude }
+      : null,
+    ...routeEvidence.map(({ evidence }) =>
+      evidence.latitude != null && evidence.longitude != null
+        ? { latitude: evidence.latitude, longitude: evidence.longitude }
+        : null
+    ),
+    right.centreLatitude != null && right.centreLongitude != null
+      ? { latitude: right.centreLatitude, longitude: right.centreLongitude }
+      : null
+  ].filter((point): point is { latitude: number; longitude: number } => point != null);
+  if (points.length < 2) return null;
+  let total = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    total += distanceMeters(points[index - 1], points[index]);
+  }
+  return total;
+}
+
+function upperQuartile(values: number[]) {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.75) - 1)];
+}
+
+/**
+ * Joins only evidence-backed unknown stays that look like two parts of one
+ * large-site visit. It intentionally does not infer site identity for saved or
+ * learned places and requires an actual visit observation on one side.
+ */
+export function coalesceCompatibleUnknownStays(
+  stays: StaySegment[],
+  acceptedEvidence: ClassifiedEvidence[],
+  input: LocationEngineInput
+) {
+  const evidenceById = new Map(
+    acceptedEvidence.map((item) => [item.evidence.clientEvidenceId, item])
+  );
+  const evidenceOrder = new Map(
+    acceptedEvidence.map((item, index) => [item.evidence.clientEvidenceId, index])
+  );
+  const result: StaySegment[] = [];
+
+  for (const nextStay of stays) {
+    const previousStay = result.at(-1);
+    if (
+      !previousStay ||
+      previousStay.placeMatchKind !== "unknown" ||
+      nextStay.placeMatchKind !== "unknown" ||
+      previousStay.stoppedAt == null ||
+      previousStay.centreLatitude == null ||
+      previousStay.centreLongitude == null ||
+      nextStay.centreLatitude == null ||
+      nextStay.centreLongitude == null
+    ) {
+      result.push(nextStay);
+      continue;
+    }
+
+    const transitionMs = Date.parse(nextStay.startedAt) - Date.parse(previousStay.stoppedAt);
+    const endpointDistance = distanceMeters(
+      {
+        latitude: previousStay.centreLatitude,
+        longitude: previousStay.centreLongitude
+      },
+      {
+        latitude: nextStay.centreLatitude,
+        longitude: nextStay.centreLongitude
+      }
+    );
+    const hasVisitSupport = [...previousStay.evidenceIds, ...nextStay.evidenceIds].some(
+      (evidenceId) => evidenceById.get(evidenceId)?.evidence.kind === "visit"
+    );
+    const occupiedEvidence = new Set([
+      ...previousStay.evidenceIds,
+      ...nextStay.evidenceIds
+    ]);
+    const routeEvidence = acceptedEvidence.filter((item) => {
+      if (occupiedEvidence.has(item.evidence.clientEvidenceId)) return false;
+      const at = Date.parse(item.evidence.occurredAt);
+      return (
+        at > Date.parse(previousStay.stoppedAt!) &&
+        at < Date.parse(nextStay.startedAt) &&
+        item.evidence.latitude != null &&
+        item.evidence.longitude != null
+      );
+    });
+    const credibleTransitionSpeeds = routeEvidence.flatMap((item) => {
+      if (
+        item.evidence.horizontalAccuracyMeters != null &&
+        item.evidence.horizontalAccuracyMeters > input.config.commuteMaximumSpeedAccuracyMeters
+      ) {
+        return [];
+      }
+      const speed = item.evidence.speedMetersPerSecond ?? item.impliedSpeedMetersPerSecond;
+      return speed != null && Number.isFinite(speed) && speed >= 0 ? [speed] : [];
+    });
+    const routeDistance = transitionRouteDistance(previousStay, routeEvidence, nextStay);
+    const pedestrianTransition =
+      routeEvidence.length >= 2 &&
+      credibleTransitionSpeeds.length >= 2 &&
+      (upperQuartile(credibleTransitionSpeeds) ?? Number.POSITIVE_INFINITY) <=
+        input.config.visitContinuityPedestrianSpeedThresholdMps;
+    const compatible =
+      hasVisitSupport &&
+      transitionMs >= 0 &&
+      transitionMs <= input.config.visitContinuityMaximumTransitionMs &&
+      endpointDistance <= input.config.visitContinuityMaximumEndpointDistanceMeters &&
+      routeDistance != null &&
+      routeDistance <= input.config.visitContinuityMaximumRouteDistanceMeters &&
+      pedestrianTransition;
+
+    if (!compatible) {
+      result.push(nextStay);
+      continue;
+    }
+
+    const centre = weightedStayCentre(previousStay, nextStay);
+    const evidenceIds = [
+      ...new Set([
+        ...previousStay.evidenceIds,
+        ...routeEvidence.map(({ evidence }) => evidence.clientEvidenceId),
+        ...nextStay.evidenceIds
+      ])
+    ].sort(
+      (left, right) =>
+        (evidenceOrder.get(left) ?? Number.MAX_SAFE_INTEGER) -
+        (evidenceOrder.get(right) ?? Number.MAX_SAFE_INTEGER)
+    );
+    const radiusMeters =
+      Math.ceil(
+        endpointDistance / 2 +
+        Math.max(previousStay.radiusMeters ?? 0, nextStay.radiusMeters ?? 0)
+      );
+    result[result.length - 1] = {
+      ...previousStay,
+      // Preserve the earliest stay identity so PR #115 can update an open
+      // semantic row in place and replay cannot create a competing identity
+      // for a manually resolved/corrected segment.
+      clientSegmentId: previousStay.clientSegmentId,
+      status: nextStay.status,
+      stoppedAt: nextStay.stoppedAt,
+      stopLowerBoundAt: nextStay.stopLowerBoundAt,
+      stopUpperBoundAt: nextStay.stopUpperBoundAt,
+      centreLatitude: centre?.latitude ?? previousStay.centreLatitude,
+      centreLongitude: centre?.longitude ?? previousStay.centreLongitude,
+      radiusMeters,
+      sampleCount: previousStay.sampleCount + nextStay.sampleCount,
+      continuityStatus: coalescedContinuity(previousStay, nextStay),
+      confidence: minimumConfidence(previousStay.confidence, nextStay.confidence),
+      evidenceIds
+    };
+  }
+
+  return result;
+}
+
 export function runLocationEngine(input: LocationEngineInput): LocationEngineOutput {
   if (input.config.algorithmVersion !== input.priorState.algorithmVersion && input.priorState.processedEvidenceIds.length > 0) {
     throw new Error("Location engine state version does not match the requested configuration.");
@@ -445,10 +644,11 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
   }
 
   if (active) completed.push(active);
-  const stays = completed
+  const rawStays = completed
     .map((working) => stayFromWorking(working, input.processingAt, input))
     .filter((segment): segment is StaySegment => Boolean(segment))
     .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
+  const stays = coalesceCompatibleUnknownStays(rawStays, accepted, input);
   const commutes = deriveCommutes(stays, accepted, input.config, input.processingAt);
   const segments = [...stays, ...commutes].sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt) || a.kind.localeCompare(b.kind));
   const finalisedSegments = segments.filter((segment) => segment.status === "finalised");

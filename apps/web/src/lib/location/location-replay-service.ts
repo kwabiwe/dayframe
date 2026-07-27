@@ -386,15 +386,24 @@ async function upsertCommute(
   const result = await client.query<{ id: string }>(
     `insert into commute_segments (
        workspace_id, user_id, device_id, client_segment_id, algorithm_version, status,
-       started_at, stopped_at, from_stay_segment_id, to_stay_segment_id,
+       started_at, stopped_at,
+       start_lower_bound_at, start_upper_bound_at, stop_lower_bound_at, stop_upper_bound_at,
+       from_stay_segment_id, to_stay_segment_id,
        from_place_id, to_place_id, route_distance_m, straight_line_distance_m,
        route_sample_count, max_gap_seconds, continuity_status, confidence, metadata, updated_at
-     ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, '{}'::jsonb, now())
+     ) values (
+       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+       $17, $18, $19, $20, $21, $22, $23::jsonb, now()
+     )
      on conflict (workspace_id, user_id, device_id, client_segment_id)
      do update set
        status = excluded.status,
        started_at = excluded.started_at,
        stopped_at = excluded.stopped_at,
+       start_lower_bound_at = excluded.start_lower_bound_at,
+       start_upper_bound_at = excluded.start_upper_bound_at,
+       stop_lower_bound_at = excluded.stop_lower_bound_at,
+       stop_upper_bound_at = excluded.stop_upper_bound_at,
        from_stay_segment_id = excluded.from_stay_segment_id,
        to_stay_segment_id = excluded.to_stay_segment_id,
        from_place_id = excluded.from_place_id,
@@ -405,6 +414,7 @@ async function upsertCommute(
        max_gap_seconds = excluded.max_gap_seconds,
        continuity_status = excluded.continuity_status,
        confidence = excluded.confidence,
+       metadata = excluded.metadata,
        updated_at = now()
      returning id`,
     [
@@ -416,6 +426,10 @@ async function upsertCommute(
       segment.status,
       segment.startedAt,
       segment.stoppedAt,
+      segment.startLowerBoundAt ?? null,
+      segment.startUpperBoundAt ?? null,
+      segment.stopLowerBoundAt ?? null,
+      segment.stopUpperBoundAt ?? null,
       fromStayId,
       toStayId,
       segment.fromPlaceId ?? null,
@@ -425,7 +439,10 @@ async function upsertCommute(
       segment.routeSampleCount,
       segment.gapDurationSeconds,
       segment.continuityStatus,
-      segment.confidence
+      segment.confidence,
+      JSON.stringify({
+        qualificationReason: segment.qualificationReason ?? null
+      })
     ]
   );
   return { id: result.rows[0].id, preservesManualCorrection: false };

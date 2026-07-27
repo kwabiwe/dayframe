@@ -13,6 +13,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import type { LocationReviewEvidenceDto } from "@dayframe/shared";
 import { DayframeBrand } from "@/components/brand";
 import { LocationEvidenceMap } from "@/components/location/LocationEvidenceMap";
+import { MobileBackButton } from "@/components/MobileBackButton";
 import {
   AuthRequiredError,
   fetchBootstrap,
@@ -110,14 +111,10 @@ export default function LocationReviewDetailScreen() {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.settingsFloatingHeader}>
         <View style={styles.settingsHeader}>
-          <Pressable
+          <MobileBackButton
             accessibilityLabel="Back to Review"
-            accessibilityRole="button"
-            style={pressable(styles.iconButton, styles.buttonPressed)}
             onPress={() => router.back()}
-          >
-            <Text style={{ color: theme.accent, fontSize: 24 }}>‹</Text>
-          </Pressable>
+          />
           <DayframeBrand layout="compact" size="sm" tone={theme.mode === "dark" ? "light" : "dark"} />
         </View>
       </View>

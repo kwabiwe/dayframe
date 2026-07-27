@@ -20,6 +20,20 @@ export type LocationEngineConfig = {
   movementDisplacementThresholdMeters: number;
   commuteMinimumDurationMs: number;
   commuteMaximumDurationMs: number;
+  commuteMinimumEndpointDistanceMeters: number;
+  commuteLocalMovementMaximumEndpointDistanceMeters: number;
+  commuteMinimumRouteDistanceMeters: number;
+  commuteMinimumRouteEfficiency: number;
+  commuteFasterMovementThresholdMps: number;
+  commuteMinimumReliableSpeedSamples: number;
+  commuteMaximumSpeedAccuracyMeters: number;
+  commuteSamePlaceMinimumRouteDistanceMeters: number;
+  commuteSamePlaceMinimumExcursionMeters: number;
+  commuteSamePlaceMinimumRouteSamples: number;
+  visitContinuityMaximumEndpointDistanceMeters: number;
+  visitContinuityMaximumTransitionMs: number;
+  visitContinuityMaximumRouteDistanceMeters: number;
+  visitContinuityPedestrianSpeedThresholdMps: number;
   rawEvidenceRetentionDays: number;
   maxEvidenceItemsPerUpload: number;
 };
@@ -52,6 +66,20 @@ export const LOCATION_ENGINE_V2_CONFIG: LocationEngineConfig = {
   movementDisplacementThresholdMeters: 150,
   commuteMinimumDurationMs: 180_000,
   commuteMaximumDurationMs: 21_600_000,
+  commuteMinimumEndpointDistanceMeters: 800,
+  commuteLocalMovementMaximumEndpointDistanceMeters: 450,
+  commuteMinimumRouteDistanceMeters: 1_200,
+  commuteMinimumRouteEfficiency: 0.25,
+  commuteFasterMovementThresholdMps: 2.8,
+  commuteMinimumReliableSpeedSamples: 3,
+  commuteMaximumSpeedAccuracyMeters: 65,
+  commuteSamePlaceMinimumRouteDistanceMeters: 1_800,
+  commuteSamePlaceMinimumExcursionMeters: 650,
+  commuteSamePlaceMinimumRouteSamples: 3,
+  visitContinuityMaximumEndpointDistanceMeters: 450,
+  visitContinuityMaximumTransitionMs: 2_700_000,
+  visitContinuityMaximumRouteDistanceMeters: 1_200,
+  visitContinuityPedestrianSpeedThresholdMps: 2.5,
   rawEvidenceRetentionDays: 7,
   maxEvidenceItemsPerUpload: 100
 };

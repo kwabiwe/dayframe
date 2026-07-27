@@ -6,6 +6,7 @@ import {
   type LocationEvidenceBatchRequest
 } from "@dayframe/shared";
 import { pool } from "../apps/web/src/lib/db";
+import { ensureCommuteCategoryId } from "../apps/web/src/lib/automatic-category-service";
 import { processActivityEvent } from "../apps/web/src/lib/event-service";
 import { ingestLocationEvidence } from "../apps/web/src/lib/location/location-ingest-service";
 import { resolveLocationReviewAction } from "../apps/web/src/lib/location/location-review-service";
@@ -100,6 +101,44 @@ async function count(table: string) {
     [WORKSPACE_ID, USER_ID]
   );
   return result.rows[0].count;
+}
+
+async function validateCommuteCategoryConcurrency() {
+  await pool.query(
+    "delete from categories where workspace_id = $1 and lower(name) = 'commute'",
+    [WORKSPACE_ID]
+  );
+  const ensureInTransaction = async () => {
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      const id = await ensureCommuteCategoryId(client, session);
+      await client.query("commit");
+      return id;
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
+  };
+  const categoryIds = await Promise.all([
+    ensureInTransaction(),
+    ensureInTransaction(),
+    ensureInTransaction()
+  ]);
+  assert.equal(new Set(categoryIds).size, 1, "Concurrent Commute ensures returned different categories.");
+  const categories = await pool.query<{ id: string; name: string; color: string }>(
+    `select id, name, color from categories
+     where workspace_id = $1 and lower(name) = 'commute' and coalesce(is_archived, false) = false`,
+    [WORKSPACE_ID]
+  );
+  assert.equal(categories.rows.length, 1, "Concurrent Commute ensures created duplicates.");
+  assert.deepEqual(
+    categories.rows[0],
+    { id: categoryIds[0], name: "Commute", color: "sky" },
+    "Commute automatic category used the wrong semantic palette."
+  );
 }
 
 async function validateOutOfOrderAndIdempotency() {
@@ -264,6 +303,221 @@ async function validateSemanticIdempotencyAndRollback() {
   assert(incompatibleStatuses.rows.every((row) => row.status === "open"), "Rejected merge changed source review state.");
 }
 
+async function validateCommuteReviewCategoryAndDescription() {
+  await clearDerivedLocationState();
+  process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
+  const existingCategory = await pool.query<{ id: string }>(
+    `update categories
+     set name = 'cOmMuTe'
+     where workspace_id = $1 and lower(name) = 'commute'
+     returning id`,
+    [WORKSPACE_ID]
+  );
+  assert(existingCategory.rows[0], "Commute category concurrency fixture is missing.");
+  const commuteCategoryId = existingCategory.rows[0].id;
+  const fixture = locationAcceptanceFixture();
+  const commuteBatch = batch(
+    "db-commute-review-quality",
+    fixture.evidence,
+    "v2_review",
+    fixture.evidence[0].occurredAt
+  );
+  await ingestLocationEvidence(commuteBatch, session, PROCESSING_AT);
+
+  const categories = await pool.query<{ id: string; name: string; color: string }>(
+    `select id, name, color from categories
+     where workspace_id = $1 and lower(name) = 'commute' and coalesce(is_archived, false) = false`,
+    [WORKSPACE_ID]
+  );
+  assert.deepEqual(
+    categories.rows,
+    [{ id: commuteCategoryId, name: "cOmMuTe", color: "sky" }],
+    "Semantic emission did not reuse the existing Commute category case-insensitively."
+  );
+
+  const commuteReviews = await pool.query<{
+    id: string;
+    eventId: string;
+    eventCategoryId: string | null;
+    reviewCategoryId: string | null;
+  }>(
+    `select ri.id, ri.event_id as "eventId",
+            ae.suggested_category_id as "eventCategoryId",
+            ri.suggested_category_id as "reviewCategoryId"
+     from review_items ri
+     join activity_events ae
+       on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
+     where ri.workspace_id = $1 and ri.user_id = $2
+       and ri.status = 'open' and ae.event_type = 'commute_detected'
+     order by ri.created_at, ri.id`,
+    [WORKSPACE_ID, USER_ID]
+  );
+  assert(commuteReviews.rows.length >= 6, "Commute review quality fixture needs six commute rows.");
+  assert(
+    commuteReviews.rows.every(
+      (row) =>
+        row.eventCategoryId === commuteCategoryId &&
+        row.reviewCategoryId === commuteCategoryId
+    ),
+    "A commute activity event or Review item was emitted without Commute."
+  );
+  const visitWithCommute = await pool.query(
+    `select 1
+     from review_items ri
+     join activity_events ae
+       on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
+     where ri.workspace_id = $1 and ri.user_id = $2
+       and ae.event_type <> 'commute_detected'
+       and ri.suggested_category_id = $3
+     limit 1`,
+    [WORKSPACE_ID, USER_ID, commuteCategoryId]
+  );
+  assert.equal(visitWithCommute.rowCount, 0, "A non-commute review inherited Commute.");
+
+  const persistedBounds = await pool.query<{
+    lower: string | null;
+    upper: string | null;
+    reason: string | null;
+  }>(
+    `select start_lower_bound_at as lower, start_upper_bound_at as upper,
+            metadata ->> 'qualificationReason' as reason
+     from commute_segments
+     where workspace_id = $1 and user_id = $2 and status <> 'superseded'
+     order by started_at
+     limit 1`,
+    [WORKSPACE_ID, USER_ID]
+  );
+  assert(persistedBounds.rows[0]?.lower, "Recovered commute lost its lower start bound.");
+  assert(persistedBounds.rows[0]?.upper, "Recovered commute lost its upper start bound.");
+  assert(persistedBounds.rows[0]?.reason, "Commute qualification reason was not persisted.");
+  assert(
+    Date.parse(persistedBounds.rows[0].lower!) <= Date.parse(persistedBounds.rows[0].upper!),
+    "Commute uncertainty bounds are inverted."
+  );
+
+  const repair = commuteReviews.rows[0];
+  await pool.query(
+    "update review_items set suggested_category_id = null where id = $1",
+    [repair.id]
+  );
+  await pool.query(
+    "update activity_events set suggested_category_id = null where id = $1",
+    [repair.eventId]
+  );
+  await ingestLocationEvidence(commuteBatch, session, PROCESSING_AT);
+  const repaired = await pool.query<{
+    eventCategoryId: string | null;
+    reviewCategoryId: string | null;
+  }>(
+    `select ae.suggested_category_id as "eventCategoryId",
+            ri.suggested_category_id as "reviewCategoryId"
+     from review_items ri
+     join activity_events ae on ae.id = ri.event_id
+     where ri.id = $1 and ri.workspace_id = $2 and ri.user_id = $3`,
+    [repair.id, WORKSPACE_ID, USER_ID]
+  );
+  assert.deepEqual(
+    repaired.rows[0],
+    { eventCategoryId: commuteCategoryId, reviewCategoryId: commuteCategoryId },
+    "Replay did not repair a still-open commute category."
+  );
+
+  const ignored = commuteReviews.rows[1];
+  await pool.query(
+    "update review_items set status = 'ignored', suggested_category_id = null where id = $1",
+    [ignored.id]
+  );
+  await pool.query(
+    "update activity_events set review_status = 'ignored', suggested_category_id = null where id = $1",
+    [ignored.eventId]
+  );
+  await ingestLocationEvidence(commuteBatch, session, PROCESSING_AT);
+  const ignoredAfterReplay = await pool.query<{
+    eventCategoryId: string | null;
+    reviewCategoryId: string | null;
+    status: string;
+  }>(
+    `select ae.suggested_category_id as "eventCategoryId",
+            ri.suggested_category_id as "reviewCategoryId", ri.status
+     from review_items ri
+     join activity_events ae on ae.id = ri.event_id
+     where ri.id = $1`,
+    [ignored.id]
+  );
+  assert.deepEqual(
+    ignoredAfterReplay.rows[0],
+    { eventCategoryId: null, reviewCategoryId: null, status: "ignored" },
+    "Replay overwrote an ignored commute review."
+  );
+
+  const legacy = commuteReviews.rows[2];
+  await pool.query(
+    "update review_items set suggested_category_id = null where id = $1",
+    [legacy.id]
+  );
+  const confirmed = await resolveLocationReviewAction(
+    legacy.id,
+    { action: "confirm" },
+    session
+  );
+  assert("entryId" in confirmed && confirmed.entryId, "Legacy commute confirmation created no entry.");
+  const confirmedEntry = await pool.query<{
+    categoryId: string | null;
+    description: string | null;
+  }>(
+    `select category_id as "categoryId", description
+     from time_entries
+     where id = $1 and workspace_id = $2 and user_id = $3`,
+    [confirmed.entryId, WORKSPACE_ID, USER_ID]
+  );
+  assert.deepEqual(
+    confirmedEntry.rows[0],
+    { categoryId: commuteCategoryId, description: null },
+    "Legacy commute confirmation did not self-heal category-only semantics."
+  );
+  const timeEntryCount = await count("time_entries");
+  const repeated = await resolveLocationReviewAction(
+    legacy.id,
+    { action: "confirm" },
+    session
+  );
+  assert(repeated.alreadyResolved, "Repeated commute confirmation was not idempotent.");
+  assert.equal(await count("time_entries"), timeEntryCount, "Repeated commute confirmation duplicated an entry.");
+
+  const explicit = await resolveLocationReviewAction(
+    commuteReviews.rows[3].id,
+    { action: "edit_and_confirm", edit: { description: "  Train home  " } },
+    session
+  );
+  assert("entryId" in explicit && explicit.entryId);
+  const explicitEntry = await pool.query<{ description: string | null }>(
+    "select description from time_entries where id = $1",
+    [explicit.entryId]
+  );
+  assert.equal(explicitEntry.rows[0].description, "Train home", "Explicit commute description was lost.");
+
+  const blank = await resolveLocationReviewAction(
+    commuteReviews.rows[4].id,
+    { action: "edit_and_confirm", edit: { description: "   " } },
+    session
+  );
+  assert("entryId" in blank && blank.entryId);
+  const blankEntry = await pool.query<{ description: string | null }>(
+    "select description from time_entries where id = $1",
+    [blank.entryId]
+  );
+  assert.equal(blankEntry.rows[0].description, null, "Blank commute description was not null.");
+
+  await assert.rejects(
+    () => resolveLocationReviewAction(
+      commuteReviews.rows[5].id,
+      { action: "confirm" },
+      { ...session, workspaceId: "30000000-0000-4000-8000-000000000099" }
+    ),
+    /not found/i
+  );
+}
+
 async function validateShadowToReviewCutover() {
   await clearDerivedLocationState();
   const fixture = locationAcceptanceFixture();
@@ -397,12 +651,14 @@ async function validateV1Compatibility() {
 async function main() {
   try {
     await seedOwner();
+    await validateCommuteCategoryConcurrency();
     await validateOutOfOrderAndIdempotency();
     await validateShadowToReviewCutover();
     await validateSemanticIdempotencyAndRollback();
+    await validateCommuteReviewCategoryAndDescription();
     await validateEnabledTrustedPlaceAutomation();
     await validateV1Compatibility();
-    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, shadow cutover, semantic idempotency, trusted-place automation, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, and V1 compatibility.");
+    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, shadow cutover, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place automation, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, and V1 compatibility.");
   } finally {
     if (process.env.KEEP_LOCATION_V2_DB_FIXTURE !== "1") {
       await pool.query("delete from workspaces where id = $1", [WORKSPACE_ID]).catch(() => undefined);

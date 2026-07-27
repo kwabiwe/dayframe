@@ -123,6 +123,10 @@ export type CommuteSegment = {
   status: LocationSegmentStatus;
   startedAt: string;
   stoppedAt: string;
+  startLowerBoundAt?: string | null;
+  startUpperBoundAt?: string | null;
+  stopLowerBoundAt?: string | null;
+  stopUpperBoundAt?: string | null;
   fromStaySegmentId: string;
   toStaySegmentId: string;
   fromPlaceId?: string | null;
@@ -133,7 +137,49 @@ export type CommuteSegment = {
   gapDurationSeconds: number;
   continuityStatus: ContinuityStatus;
   confidence: "low" | "medium" | "medium_high" | "high";
+  qualificationReason?: CommuteQualificationReason;
   evidenceIds: string[];
+};
+
+export type CommuteQualificationReason =
+  | "significant_endpoint_displacement"
+  | "significant_route_distance"
+  | "endpoint_only_significant_distance"
+  | "same_place_meaningful_round_trip";
+
+export type CommuteRejectionReason =
+  | "local_pedestrian_movement"
+  | "insufficient_displacement"
+  | "looping_local_movement"
+  | "insufficient_evidence"
+  | "same_place_insufficient_route";
+
+export type CommuteQualification =
+  | {
+      qualifies: true;
+      reason: CommuteQualificationReason;
+      confidence: CommuteSegment["confidence"];
+    }
+  | {
+      qualifies: false;
+      reason: CommuteRejectionReason;
+    };
+
+export type CommuteEvidenceSummary = {
+  routeSampleCount: number;
+  speedBearingSampleCount: number;
+  credibleSpeedSampleCount: number;
+  credibleFasterSampleCount: number;
+  medianSpeedMetersPerSecond: number | null;
+  upperQuartileSpeedMetersPerSecond: number | null;
+  routeDistanceMeters: number | null;
+  straightLineDistanceMeters: number | null;
+  routeEfficiency: number | null;
+  maximumDisplacementFromOriginMeters: number | null;
+  maximumObservationGapSeconds: number;
+  sameKnownPlace: boolean;
+  strongEndpoints: boolean;
+  hasCredibleFasterMovement: boolean;
 };
 
 export type LocationSegment = StaySegment | CommuteSegment;

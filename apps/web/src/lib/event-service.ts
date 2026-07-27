@@ -43,6 +43,16 @@ import { getNormalizationContext } from "./queries";
 import { getDevSession, type RequestSession } from "./session";
 import { createTag, syncTimeEntryTags } from "./tag-service";
 import type pg from "pg";
+import {
+  automaticLoggingCategorySpec,
+  ensureAutomaticCategoryId,
+  ensureCommuteCategoryId,
+  ensureHealthEventCategoryId,
+  healthCategorySpecForEventType,
+  type AutomaticLoggingCategoryKind
+} from "./automatic-category-service";
+
+export type { AutomaticLoggingCategoryKind } from "./automatic-category-service";
 
 type CategoryRowLike = {
   id: string;
@@ -50,8 +60,6 @@ type CategoryRowLike = {
   color: string;
   isPinned: boolean;
 };
-
-export type AutomaticLoggingCategoryKind = "sleep" | "health" | "commute";
 
 type PlaceRowLike = {
   id: string;
@@ -2665,23 +2673,6 @@ function shouldIgnoreHealthSleepStage(
   return sleepStage === "awake" || sleepStage === "in_bed";
 }
 
-function healthCategorySpecForEventType(eventType: string | null | undefined) {
-  if (eventType === "health_sleep_import") {
-    return { name: "Sleep", color: "lime" };
-  }
-  return { name: "Health", color: "moss" };
-}
-
-function commuteCategorySpec() {
-  return { name: "Commute", color: "sky" };
-}
-
-function automaticLoggingCategorySpec(kind: AutomaticLoggingCategoryKind) {
-  if (kind === "sleep") return healthCategorySpecForEventType("health_sleep_import");
-  if (kind === "health") return healthCategorySpecForEventType("health_workout_import");
-  return commuteCategorySpec();
-}
-
 function reviewItemDescriptionForConfirmedEntry(
   item: Pick<HealthReviewItemRow, "eventType" | "title"> & { rawPayload?: Record<string, unknown> | null }
 ) {
@@ -2699,48 +2690,6 @@ function descriptionForCreatedTimeEntry(
 ) {
   if (event.type === "commute_detected") return null;
   return event.description ?? candidate.description ?? candidate.title;
-}
-
-async function ensureHealthEventCategoryId(
-  client: pg.PoolClient,
-  session: RequestSession,
-  eventType: string | null | undefined
-) {
-  return ensureAutomaticCategoryId(client, session, healthCategorySpecForEventType(eventType));
-}
-
-async function ensureCommuteCategoryId(client: pg.PoolClient, session: RequestSession) {
-  return ensureAutomaticCategoryId(client, session, commuteCategorySpec());
-}
-
-async function ensureAutomaticCategoryId(
-  client: pg.PoolClient,
-  session: RequestSession,
-  spec: { name: string; color: string }
-) {
-  await client.query(
-    "select pg_advisory_xact_lock(hashtextextended($1, 0))",
-    [`dayframe:auto-category:${session.workspaceId}:${spec.name.toLowerCase()}`]
-  );
-  const existing = await client.query<{ id: string }>(
-    `select id
-     from categories
-     where workspace_id = $1
-       and lower(name) = lower($2)
-       and coalesce(is_archived, false) = false
-     order by created_at asc
-     limit 1`,
-    [session.workspaceId, spec.name]
-  );
-  if (existing.rows[0]) return existing.rows[0].id;
-
-  const created = await client.query<{ id: string }>(
-    `insert into categories (workspace_id, name, color, is_pinned)
-     values ($1, $2, $3, false)
-     returning id`,
-    [session.workspaceId, spec.name, spec.color]
-  );
-  return created.rows[0].id;
 }
 
 async function hasOverlappingTimeEntry(

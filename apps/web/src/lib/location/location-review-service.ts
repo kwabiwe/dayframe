@@ -9,6 +9,7 @@ import { isLockNotAvailableError, pool } from "../db";
 import { ReviewResolutionError } from "../event-service";
 import type { RequestSession } from "../session";
 import { syncTimeEntryTags } from "../tag-service";
+import { ensureCommuteCategoryId } from "../automatic-category-service";
 
 type LockedReview = {
   id: string;
@@ -161,7 +162,14 @@ async function confirmReview(
   placeIdOverride?: string | null
 ) {
   const window = editedWindow(item, edit);
-  await validateReferences(client, session, edit?.categoryId, placeIdOverride ?? edit?.placeId);
+  const categoryId = await confirmedLocationCategoryId(
+    client,
+    session,
+    item.segmentKind,
+    item.suggestedCategoryId,
+    edit
+  );
+  await validateReferences(client, session, categoryId, placeIdOverride ?? edit?.placeId);
   await validateNoConfirmedOverlap(client, session, window.startedAt, window.stoppedAt, item.eventId);
   const entry = await client.query<{ id: string }>(
     `insert into time_entries (
@@ -173,10 +181,10 @@ async function confirmReview(
     [
       session.workspaceId,
       session.userId,
-      edit?.categoryId ?? item.suggestedCategoryId,
+      categoryId,
       placeIdOverride ?? edit?.placeId ?? item.suggestedPlaceId,
       item.confidence,
-      edit?.description?.trim() || item.title,
+      confirmedLocationDescription(item.segmentKind, item.title, edit),
       window.startedAt,
       window.stoppedAt,
       item.eventId
@@ -204,6 +212,30 @@ async function confirmReview(
   );
   await auditCorrection(client, session, action, item.segmentId, { entryId });
   return { ok: true, action, status: "accepted", entryId };
+}
+
+export function confirmedLocationDescription(
+  segmentKind: LockedReview["segmentKind"],
+  title: string,
+  edit: ReviewEntryEdit | undefined
+) {
+  if (segmentKind === "commute") return edit?.description?.trim() || null;
+  return edit?.description?.trim() || title;
+}
+
+export async function confirmedLocationCategoryId(
+  client: pg.PoolClient,
+  session: RequestSession,
+  segmentKind: LockedReview["segmentKind"],
+  suggestedCategoryId: string | null,
+  edit: ReviewEntryEdit | undefined
+) {
+  if (edit && Object.prototype.hasOwnProperty.call(edit, "categoryId")) {
+    return edit.categoryId ?? null;
+  }
+  if (suggestedCategoryId) return suggestedCategoryId;
+  if (segmentKind === "commute") return ensureCommuteCategoryId(client, session);
+  return null;
 }
 
 async function changePlace(

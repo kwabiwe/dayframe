@@ -952,11 +952,13 @@ function createStyles(theme: MobileTheme) {
       lineHeight: 17
     },
     reviewActions: {
-      flexDirection: "row",
-      flexWrap: "wrap",
+      gap: 8
+    },
+    reviewActionStack: {
       gap: 8
     },
     reviewPrimaryButton: {
+      width: "100%",
       minHeight: 44,
       backgroundColor: theme.accent,
       borderRadius: 999,
@@ -965,6 +967,7 @@ function createStyles(theme: MobileTheme) {
       justifyContent: "center"
     },
     reviewSecondaryButton: {
+      width: "100%",
       minHeight: 44,
       backgroundColor: theme.surfaceMuted,
       borderRadius: 999,
@@ -976,6 +979,77 @@ function createStyles(theme: MobileTheme) {
       color: theme.accentText,
       fontFamily: monoFont,
       fontWeight: "600"
+    },
+    reviewOverflowRow: {
+      minHeight: 44,
+      flexDirection: "row",
+      justifyContent: "flex-end",
+      alignItems: "center"
+    },
+    reviewOverflowButton: {
+      width: 44,
+      height: 44,
+      borderRadius: 999,
+      backgroundColor: theme.surfaceMuted,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    overflowMenuOverlay: {
+      flex: 1,
+      justifyContent: "flex-end",
+      alignItems: "center",
+      paddingHorizontal: 12
+    },
+    overflowMenuBackdrop: {
+      position: "absolute",
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      backgroundColor: theme.overlay
+    },
+    overflowMenuDismissLayer: {
+      position: "absolute",
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0
+    },
+    overflowMenuSurface: {
+      width: "100%",
+      maxWidth: 360,
+      borderRadius: 20,
+      backgroundColor: theme.surfaceRaised,
+      paddingVertical: 6,
+      overflow: "hidden",
+      shadowColor: theme.shadow,
+      shadowOpacity: 1,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 10
+    },
+    overflowMenuRow: {
+      minHeight: 48,
+      paddingHorizontal: 18,
+      paddingVertical: 12,
+      justifyContent: "center"
+    },
+    overflowMenuRowText: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 15,
+      fontWeight: "600"
+    },
+    overflowMenuDangerText: {
+      color: theme.danger,
+      fontFamily: monoFont,
+      fontSize: 15,
+      fontWeight: "600"
+    },
+    overflowMenuDivider: {
+      height: StyleSheet.hairlineWidth,
+      marginHorizontal: 18,
+      backgroundColor: theme.border
     },
     reviewNote: {
       backgroundColor: theme.surfaceMuted,

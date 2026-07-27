@@ -3,11 +3,13 @@ import {
   accuracyWeightedCentre,
   LOCATION_ACCEPTANCE_PLACE_IDS,
   LOCATION_ENGINE_V2_CONFIG,
+  coalesceCompatibleUnknownStays,
   locationAcceptanceFixture,
   localDateKey,
   matchLocationToPlaces,
   nearbySavedPlaceFixture,
   runLocationEngine,
+  type ClassifiedEvidence,
   type LocationEngineInput,
   type LocationEvidence,
   type SavedPlaceForMatching,
@@ -26,6 +28,13 @@ const TEST_PLACE_B: SavedPlaceForMatching = {
   id: "10000000-0000-4000-8000-000000000092",
   name: "B",
   latitude: 51.503,
+  longitude: -0.1,
+  radiusMeters: 90
+};
+const TEST_PLACE_FAR: SavedPlaceForMatching = {
+  id: "10000000-0000-4000-8000-000000000093",
+  name: "Far destination",
+  latitude: 51.54,
   longitude: -0.1,
   radiusMeters: 90
 };
@@ -65,6 +74,14 @@ function engineInput(items: LocationEvidence[], places = [TEST_PLACE_A, TEST_PLA
     acceptedLearnedPlaces: [],
     config: LOCATION_ENGINE_V2_CONFIG,
     processingAt: "2026-07-20T20:00:00.000Z"
+  };
+}
+
+function classified(item: LocationEvidence): ClassifiedEvidence {
+  return {
+    evidence: item,
+    match: null,
+    impliedSpeedMetersPerSecond: item.speedMetersPerSecond ?? null
   };
 }
 
@@ -316,7 +333,7 @@ describe("Location Intelligence V2", () => {
     expect(stays[0].placeId).toBe(TEST_PLACE_A.id);
   });
 
-  it("labels an endpoint-only commute as uncertain", () => {
+  it("rejects endpoint-only movement between nearby places", () => {
     const result = runLocationEngine(engineInput([
       evidence("endpoint-a-1", 0, TEST_PLACE_A),
       evidence("endpoint-a-2", 6, TEST_PLACE_A),
@@ -324,24 +341,349 @@ describe("Location Intelligence V2", () => {
       evidence("endpoint-b-2", 30, TEST_PLACE_B)
     ]));
     const commute = result.segmentUpserts.find((segment) => segment.kind === "commute");
+    expect(commute).toBeUndefined();
+  });
+
+  it("rejects a pedestrian retail-site loop even with one speed outlier", () => {
+    const retailCarPark = {
+      ...TEST_PLACE_B,
+      latitude: 51.5018
+    };
+    const result = runLocationEngine(engineInput([
+      evidence("retail-a-1", 0, TEST_PLACE_A),
+      evidence("retail-a-2", 6, TEST_PLACE_A),
+      evidence("retail-walk-1", 10, { latitude: 51.5007, longitude: -0.0998 }, {
+        speedMetersPerSecond: 1.2
+      }),
+      evidence("retail-outlier", 14, { latitude: 51.5012, longitude: -0.0996 }, {
+        speedMetersPerSecond: 12
+      }),
+      evidence("retail-walk-2", 18, { latitude: 51.5015, longitude: -0.0998 }, {
+        speedMetersPerSecond: 1.1
+      }),
+      evidence("retail-b-1", 24, retailCarPark),
+      evidence("retail-b-2", 32, retailCarPark)
+    ], [TEST_PLACE_A, retailCarPark]));
+
+    expect(result.segmentUpserts.some((segment) => segment.kind === "commute")).toBe(false);
+  });
+
+  it("keeps a meaningful slow journey possible without using speed as a transport gate", () => {
+    const result = runLocationEngine(engineInput([
+      evidence("slow-a-1", 0, TEST_PLACE_A),
+      evidence("slow-a-2", 6, TEST_PLACE_A),
+      evidence("slow-route-1", 18, { latitude: 51.512, longitude: -0.1 }, {
+        speedMetersPerSecond: 1.8
+      }),
+      evidence("slow-route-2", 34, { latitude: 51.526, longitude: -0.1 }, {
+        speedMetersPerSecond: 2
+      }),
+      evidence("slow-route-3", 50, { latitude: 51.536, longitude: -0.1 }, {
+        speedMetersPerSecond: 1.6
+      }),
+      evidence("slow-far-1", 60, TEST_PLACE_FAR),
+      evidence("slow-far-2", 66, TEST_PLACE_FAR)
+    ], [TEST_PLACE_A, TEST_PLACE_FAR]));
+
+    expect(result.segmentUpserts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "commute",
+        qualificationReason: "significant_endpoint_displacement"
+      })
+    ]));
+  });
+
+  it("recovers one uncertain commute after a car-park GPS blackout", () => {
+    const carPark = { latitude: 51.503, longitude: -0.1 };
+    const result = runLocationEngine(engineInput([
+      evidence("car-park-origin-1", 0, TEST_PLACE_A),
+      evidence("car-park-origin-2", 6, TEST_PLACE_A),
+      evidence("car-park-walk-1", 10, { latitude: 51.5013, longitude: -0.1 }, {
+        speedMetersPerSecond: 1.2
+      }),
+      evidence("car-park-walk-2", 14, { latitude: 51.5025, longitude: -0.1 }, {
+        speedMetersPerSecond: 1.1
+      }),
+      evidence("car-park-wait-1", 18, carPark),
+      evidence("car-park-wait-2", 28, carPark),
+      evidence("car-park-wait-3", 38, carPark),
+      evidence("car-park-pause", 40, carPark, {
+        kind: "location_paused",
+        latitude: null,
+        longitude: null
+      }),
+      evidence("car-park-resume", 55, carPark, {
+        kind: "location_resumed",
+        latitude: null,
+        longitude: null
+      }),
+      evidence("car-park-route-1", 58, { latitude: 51.512, longitude: -0.1 }, {
+        speedMetersPerSecond: 10
+      }),
+      evidence("car-park-route-2", 63, { latitude: 51.526, longitude: -0.1 }, {
+        speedMetersPerSecond: 10
+      }),
+      evidence("car-park-home-1", 70, TEST_PLACE_FAR),
+      evidence("car-park-home-2", 76, TEST_PLACE_FAR)
+    ], [TEST_PLACE_A, TEST_PLACE_FAR]));
+    const commutes = result.segmentUpserts.filter((segment) => segment.kind === "commute");
+
+    expect(commutes).toHaveLength(1);
+    expect(commutes[0]).toMatchObject({
+      continuityStatus: "uncertain_gap",
+      startLowerBoundAt: evidence("lower", 38, carPark).occurredAt,
+      startUpperBoundAt: evidence("upper", 58, carPark).occurredAt,
+      qualificationReason: "significant_endpoint_displacement"
+    });
+    expect(Date.parse(commutes[0].startedAt)).toBeGreaterThan(
+      Date.parse(evidence("not-stale", 30, carPark).occurredAt)
+    );
+  });
+
+  it("does not infer travel when coordinates return at the same place after GPS loss", () => {
+    const result = runLocationEngine(engineInput([
+      evidence("no-move-a-1", 0, TEST_PLACE_A),
+      evidence("no-move-a-2", 6, TEST_PLACE_A),
+      evidence("no-move-pause", 8, TEST_PLACE_A, {
+        kind: "location_paused",
+        latitude: null,
+        longitude: null
+      }),
+      evidence("no-move-resume", 30, TEST_PLACE_A, {
+        kind: "location_resumed",
+        latitude: null,
+        longitude: null
+      }),
+      evidence("no-move-a-3", 31, TEST_PLACE_A),
+      evidence("no-move-a-4", 37, TEST_PLACE_A)
+    ], [TEST_PLACE_A]));
+
+    expect(result.segmentUpserts.some((segment) => segment.kind === "commute")).toBe(false);
+  });
+
+  it("keeps a sparse well-separated endpoint journey low-confidence and uncertain", () => {
+    const result = runLocationEngine(engineInput([
+      evidence("sparse-a-1", 0, TEST_PLACE_A),
+      evidence("sparse-a-2", 6, TEST_PLACE_A),
+      evidence("sparse-far-1", 60, TEST_PLACE_FAR),
+      evidence("sparse-far-2", 66, TEST_PLACE_FAR)
+    ], [TEST_PLACE_A, TEST_PLACE_FAR]));
+    const commute = result.segmentUpserts.find((segment) => segment.kind === "commute");
+
     expect(commute).toMatchObject({
       kind: "commute",
       routeSampleCount: 0,
-      routeDistanceMeters: null,
       continuityStatus: "uncertain_gap",
-      confidence: "low"
+      confidence: "low",
+      qualificationReason: "endpoint_only_significant_distance"
     });
   });
 
+  it("waits for the existing finalisation lag before emitting a recovered journey", () => {
+    const items = [
+      evidence("lifecycle-a-1", 0, TEST_PLACE_A),
+      evidence("lifecycle-a-2", 6, TEST_PLACE_A),
+      evidence("lifecycle-far-1", 60, TEST_PLACE_FAR),
+      evidence("lifecycle-far-2", 66, TEST_PLACE_FAR)
+    ];
+    const beforeLag = runLocationEngine({
+      ...engineInput(items, [TEST_PLACE_A, TEST_PLACE_FAR]),
+      processingAt: evidence("lifecycle-before", 69, TEST_PLACE_FAR).occurredAt
+    });
+    const afterLag = runLocationEngine({
+      ...engineInput(items, [TEST_PLACE_A, TEST_PLACE_FAR]),
+      processingAt: evidence("lifecycle-after", 71, TEST_PLACE_FAR).occurredAt
+    });
+
+    expect(beforeLag.segmentUpserts.find((segment) => segment.kind === "commute")).toMatchObject({
+      kind: "commute",
+      status: "closed"
+    });
+    expect(beforeLag.finalisedSegments.some((segment) => segment.kind === "commute")).toBe(false);
+    expect(afterLag.finalisedSegments).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "commute", status: "finalised" })
+    ]));
+  });
+
+  it("rejects a short same-place pedestrian loop with one fast outlier", () => {
+    const result = runLocationEngine(engineInput([
+      evidence("same-walk-a-1", 0, TEST_PLACE_A),
+      evidence("same-walk-a-2", 6, TEST_PLACE_A),
+      evidence("same-walk-exit", 8, TEST_PLACE_A, {
+        kind: "geofence_exit",
+        savedPlaceId: TEST_PLACE_A.id
+      }),
+      evidence("same-walk-route-1", 12, { latitude: 51.5015, longitude: -0.1 }, {
+        speedMetersPerSecond: 1.1
+      }),
+      evidence("same-walk-route-2", 16, { latitude: 51.5025, longitude: -0.1 }, {
+        speedMetersPerSecond: 9
+      }),
+      evidence("same-walk-route-3", 20, { latitude: 51.5015, longitude: -0.1 }, {
+        speedMetersPerSecond: 1.2
+      }),
+      evidence("same-walk-return", 24, TEST_PLACE_A, {
+        kind: "geofence_enter",
+        savedPlaceId: TEST_PLACE_A.id
+      }),
+      evidence("same-walk-return-support", 30, TEST_PLACE_A)
+    ], [TEST_PLACE_A]));
+
+    expect(result.segmentUpserts.some((segment) => segment.kind === "commute")).toBe(false);
+  });
+
+  it("coalesces a visit-supported shopping-centre stay and nearby car-park dwell", () => {
+    const firstCentre = { latitude: 51.5, longitude: -0.1 };
+    const secondCentre = { latitude: 51.5036, longitude: -0.1 };
+    const visit = classified(evidence("site-visit", 0, firstCentre, {
+      kind: "visit",
+      endedAt: evidence("site-visit-end", 120, firstCentre).occurredAt
+    }));
+    const walkOne = classified(evidence(
+      "site-walk-1",
+      123,
+      { latitude: 51.5013, longitude: -0.1 },
+      { speedMetersPerSecond: 1.1 }
+    ));
+    const walkTwo = classified(evidence(
+      "site-walk-2",
+      126,
+      { latitude: 51.5024, longitude: -0.1 },
+      { speedMetersPerSecond: 1.2 }
+    ));
+    const laterOne = classified(evidence("site-car-park-1", 130, secondCentre));
+    const laterTwo = classified(evidence("site-car-park-2", 150, secondCentre));
+    const laterThree = classified(evidence("site-car-park-3", 160, secondCentre));
+    const firstStay: StaySegment = {
+      kind: "stay",
+      clientSegmentId: "first-site-stay",
+      algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+      status: "finalised",
+      startedAt: visit.evidence.occurredAt,
+      stoppedAt: evidence("site-first-stop", 120, firstCentre).occurredAt,
+      startLowerBoundAt: visit.evidence.occurredAt,
+      startUpperBoundAt: visit.evidence.occurredAt,
+      stopLowerBoundAt: evidence("site-first-lower", 118, firstCentre).occurredAt,
+      stopUpperBoundAt: evidence("site-first-upper", 123, firstCentre).occurredAt,
+      placeId: null,
+      learnedPlaceId: null,
+      placeMatchKind: "unknown",
+      candidatePlaceIds: [],
+      centreLatitude: firstCentre.latitude,
+      centreLongitude: firstCentre.longitude,
+      radiusMeters: 120,
+      sampleCount: 3,
+      continuityStatus: "broken_by_other_place",
+      confidence: "medium",
+      evidenceIds: [visit.evidence.clientEvidenceId]
+    };
+    const laterStay: StaySegment = {
+      ...firstStay,
+      clientSegmentId: "second-site-stay",
+      status: "open",
+      startedAt: laterOne.evidence.occurredAt,
+      stoppedAt: null,
+      startLowerBoundAt: laterOne.evidence.occurredAt,
+      startUpperBoundAt: laterOne.evidence.occurredAt,
+      stopLowerBoundAt: null,
+      stopUpperBoundAt: null,
+      centreLatitude: secondCentre.latitude,
+      centreLongitude: secondCentre.longitude,
+      evidenceIds: [
+        laterOne.evidence.clientEvidenceId,
+        laterTwo.evidence.clientEvidenceId,
+        laterThree.evidence.clientEvidenceId
+      ]
+    };
+    const accepted = [visit, walkOne, walkTwo, laterOne, laterTwo, laterThree];
+    const coalesced = coalesceCompatibleUnknownStays(
+      [firstStay, laterStay],
+      accepted,
+      engineInput([])
+    );
+    const replayed = coalesceCompatibleUnknownStays(
+      [firstStay, laterStay],
+      [...accepted].reverse(),
+      engineInput([])
+    );
+
+    expect(coalesced).toHaveLength(1);
+    expect(coalesced[0]).toMatchObject({
+      clientSegmentId: firstStay.clientSegmentId,
+      startedAt: firstStay.startedAt,
+      stoppedAt: null,
+      status: "open",
+      continuityStatus: "supported_by_visit",
+      sampleCount: 6
+    });
+    expect(new Set(coalesced[0].evidenceIds).size).toBe(coalesced[0].evidenceIds.length);
+    expect(replayed[0].clientSegmentId).toBe(coalesced[0].clientSegmentId);
+  });
+
+  it("does not coalesce nearby unknown stays across credible vehicle movement", () => {
+    const firstCentre = { latitude: 51.5, longitude: -0.1 };
+    const secondCentre = { latitude: 51.5036, longitude: -0.1 };
+    const visit = classified(evidence("vehicle-site-visit", 0, firstCentre, { kind: "visit" }));
+    const route = [
+      classified(evidence("vehicle-site-route-1", 12, { latitude: 51.5013, longitude: -0.1 }, {
+        speedMetersPerSecond: 8
+      })),
+      classified(evidence("vehicle-site-route-2", 14, { latitude: 51.5024, longitude: -0.1 }, {
+        speedMetersPerSecond: 9
+      }))
+    ];
+    const baseStay: StaySegment = {
+      kind: "stay",
+      clientSegmentId: "vehicle-site-first",
+      algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+      status: "finalised",
+      startedAt: visit.evidence.occurredAt,
+      stoppedAt: evidence("vehicle-site-stop", 10, firstCentre).occurredAt,
+      placeId: null,
+      learnedPlaceId: null,
+      placeMatchKind: "unknown",
+      candidatePlaceIds: [],
+      centreLatitude: firstCentre.latitude,
+      centreLongitude: firstCentre.longitude,
+      radiusMeters: 120,
+      sampleCount: 3,
+      continuityStatus: "broken_by_other_place",
+      confidence: "medium",
+      evidenceIds: [visit.evidence.clientEvidenceId]
+    };
+    const nextEvidence = classified(evidence("vehicle-site-next", 18, secondCentre));
+    const nextStay: StaySegment = {
+      ...baseStay,
+      clientSegmentId: "vehicle-site-second",
+      startedAt: nextEvidence.evidence.occurredAt,
+      stoppedAt: null,
+      centreLatitude: secondCentre.latitude,
+      centreLongitude: secondCentre.longitude,
+      evidenceIds: [nextEvidence.evidence.clientEvidenceId]
+    };
+
+    expect(
+      coalesceCompatibleUnknownStays(
+        [baseStay, nextStay],
+        [visit, ...route, nextEvidence],
+        engineInput([])
+      )
+    ).toHaveLength(2);
+  });
+
   it("calculates route distance separately from endpoint straight-line distance", () => {
+    const distantDestination = {
+      ...TEST_PLACE_B,
+      latitude: 51.509
+    };
     const result = runLocationEngine(engineInput([
       evidence("route-a-1", 0, TEST_PLACE_A),
       evidence("route-a-2", 6, TEST_PLACE_A),
-      evidence("route-bend-1", 12, { latitude: 51.502, longitude: -0.097 }, { speedMetersPerSecond: 5 }),
-      evidence("route-bend-2", 18, { latitude: 51.505, longitude: -0.097 }, { speedMetersPerSecond: 5 }),
-      evidence("route-b-1", 24, TEST_PLACE_B),
-      evidence("route-b-2", 30, TEST_PLACE_B)
-    ]));
+      evidence("route-bend-1", 12, { latitude: 51.504, longitude: -0.094 }, { speedMetersPerSecond: 5 }),
+      evidence("route-bend-2", 18, { latitude: 51.507, longitude: -0.094 }, { speedMetersPerSecond: 5 }),
+      evidence("route-b-1", 24, distantDestination),
+      evidence("route-b-2", 30, distantDestination)
+    ], [TEST_PLACE_A, distantDestination]));
     const commute = result.segmentUpserts.find((segment) => segment.kind === "commute");
     expect(commute?.kind).toBe("commute");
     if (commute?.kind === "commute") {
@@ -363,7 +705,10 @@ describe("Location Intelligence V2", () => {
       evidence("outbound-route-1", 82, { latitude: 51.505, longitude: -0.095 }, {
         speedMetersPerSecond: 8
       }),
-      evidence("outbound-route-2", 87, { latitude: 51.504, longitude: -0.096 }, {
+      evidence("outbound-route-2", 84.5, { latitude: 51.51, longitude: -0.09 }, {
+        speedMetersPerSecond: 8
+      }),
+      evidence("outbound-route-3", 87, { latitude: 51.506, longitude: -0.094 }, {
         speedMetersPerSecond: 8
       }),
       evidence("home-return", 89, TEST_PLACE_A, {
@@ -390,7 +735,7 @@ describe("Location Intelligence V2", () => {
     expect(commutes[0]).toMatchObject({
       startedAt: evidence("expected-start", 77.01, TEST_PLACE_A).occurredAt,
       stoppedAt: evidence("expected-stop", 89, TEST_PLACE_A).occurredAt,
-      routeSampleCount: 2,
+      routeSampleCount: 3,
       gapDurationSeconds: 719
     });
   });
