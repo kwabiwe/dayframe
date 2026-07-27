@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   REVIEW_COPY,
+  CLOSED_REVIEW_MENU_STATE,
   buildReviewItemDraftEntry,
+  canRunReviewMenuAction,
   countReviewNeededActivityForRange,
   hasReviewNeededActivityForRange,
   hasSuggestedTimeWindow,
@@ -9,6 +11,10 @@ import {
   isOneOffLocationReviewItem,
   isOpenReviewItem,
   isReviewNeededEntry,
+  reduceReviewMenuState,
+  reviewActionOrder,
+  reviewConfirmLabel,
+  reviewItemCategoryLabel,
   reviewItemDurationSeconds
 } from "./review";
 import type { MobileBootstrap, MobileReviewItem, MobileTimeEntry } from "./api";
@@ -123,6 +129,126 @@ describe("mobile review helpers", () => {
     );
   });
 
+  it("defaults a legacy no-category commute draft to the existing Commute category", () => {
+    expect(
+      buildReviewItemDraftEntry(
+        reviewItem({
+          categoryName: null,
+          eventSource: "location_learning",
+          eventType: "commute_detected",
+          suggestedCategoryId: null,
+          title: "Possible journey"
+        }),
+        [{ id: "cat-commute", name: "cOmMuTe", color: "sky", isPinned: false }],
+        Date.now()
+      )
+    ).toEqual(
+      expect.objectContaining({
+        categoryId: "cat-commute",
+        categoryName: "cOmMuTe",
+        categoryColor: "sky",
+        description: null
+      })
+    );
+  });
+
+  it("does not overwrite an explicit non-Commute category in a commute draft", () => {
+    expect(
+      buildReviewItemDraftEntry(
+        reviewItem({
+          categoryName: "Travel",
+          eventSource: "location_learning",
+          eventType: "commute_detected",
+          suggestedCategoryId: null
+        }),
+        [
+          { id: "cat-commute", name: "Commute", color: "sky", isPinned: false },
+          { id: "cat-travel", name: "travel", color: "teal", isPinned: false }
+        ],
+        Date.now()
+      )
+    ).toEqual(
+      expect.objectContaining({
+        categoryId: "cat-travel",
+        categoryName: "Travel",
+        categoryColor: "teal"
+      })
+    );
+  });
+
+  it("uses semantic category and confirmation labels", () => {
+    const commute = reviewItem({
+      categoryName: null,
+      eventSource: "location_learning",
+      eventType: "commute_detected"
+    });
+    const visit = reviewItem({
+      eventSource: "location_learning",
+      eventType: "unknown_stay"
+    });
+
+    expect(reviewItemCategoryLabel(commute)).toBe("Commute");
+    expect(reviewConfirmLabel(commute)).toBe("Confirm commute");
+    expect(reviewConfirmLabel(visit)).toBe("Confirm visit");
+    expect(reviewConfirmLabel(reviewItem())).toBe("Confirm activity");
+  });
+
+  it("orders evidence, confirm and overflow without peer edit/dismiss actions", () => {
+    const commute = reviewItem({
+      eventSource: "location_learning",
+      eventType: "commute_detected",
+      rawPayload: {
+        algorithmVersion: "location-v2.0",
+        clientSegmentId: "segment-1"
+      }
+    });
+
+    expect(reviewActionOrder(commute)).toEqual(["view_evidence", "confirm", "overflow"]);
+    expect(reviewActionOrder(reviewItem())).toEqual(["confirm", "overflow"]);
+  });
+
+  it("keeps one menu active, blocks disabled and duplicate actions, and closes stale state", () => {
+    const firstOpen = reduceReviewMenuState(CLOSED_REVIEW_MENU_STATE, {
+      type: "toggle",
+      itemId: "review-1",
+      disabled: false
+    });
+    expect(firstOpen.openItemId).toBe("review-1");
+    expect(
+      reduceReviewMenuState(firstOpen, {
+        type: "toggle",
+        itemId: "review-2",
+        disabled: false
+      }).openItemId
+    ).toBe("review-2");
+    expect(
+      reduceReviewMenuState(firstOpen, {
+        type: "toggle",
+        itemId: "review-2",
+        disabled: true
+      })
+    ).toBe(firstOpen);
+
+    const resolving = reduceReviewMenuState(firstOpen, {
+      type: "begin_action",
+      itemId: "review-1"
+    });
+    expect(resolving).toEqual({ openItemId: null, actionItemId: "review-1" });
+    expect(canRunReviewMenuAction(resolving, "review-1")).toBe(false);
+    expect(
+      reduceReviewMenuState(resolving, {
+        type: "begin_action",
+        itemId: "review-1"
+      })
+    ).toBe(resolving);
+    expect(
+      reduceReviewMenuState(firstOpen, {
+        type: "reconcile",
+        openItemIds: ["review-2"]
+      }).openItemId
+    ).toBeNull();
+  });
+
   it("does not turn detected visit titles into draft descriptions", () => {
     expect(
       buildReviewItemDraftEntry(
@@ -227,9 +353,8 @@ describe("mobile review helpers", () => {
       "Needs review",
       "Suggested time entry",
       "Detected visit",
-      "Confirm",
-      "Edit",
-      "Ignore"
+      "Edit details",
+      "Dismiss suggestion"
     ]));
     expect(copy.join(" ")).not.toMatch(/\b(projects?|clients?|tags?)\b/i);
   });

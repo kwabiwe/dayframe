@@ -27,7 +27,24 @@ Temporal invariants:
 - A completed `CLVisit` can support a gap, but accepted intervening-place evidence breaks that support.
 - Initial geofence state is not an arrival. A bare geofence exit yields bounded uncertainty rather than a fabricated precise departure.
 - Boundaries retain lower/upper evidence bounds. Manual corrections use `continuity_status = manual` and canonical replay must not overwrite them.
-- Commutes connect distinct contiguous stay endpoints and use ordered route evidence. Route distance and straight-line distance remain separate.
+- Commutes represent meaningful travel between contiguous stays, not every
+  movement between stationary clusters. Distinct endpoints normally need at
+  least `800m` separation, or at least `1200m` of efficient route evidence
+  outside the `450m` local-movement band. Speed is corroboration only: at least
+  three accurate samples at or above `2.8m/s` are needed before faster movement
+  is considered robust, and one spike never qualifies a local transition.
+- Evidence-backed same-known-place round trips remain valid when they contain
+  at least three route samples, `1800m` of route, `650m` excursion from the
+  origin, and robust faster movement. This is the narrow exception to
+  distinct endpoints established by PR #114; short same-site loops are not
+  commutes. Route distance and straight-line distance remain separate.
+- Large-site continuity may coalesce only unknown-to-unknown stays with an
+  actual visit signal, a credible later dwell, no more than `450m` endpoint
+  separation, no more than `45m` transition time, no more than `1200m` local
+  route distance, and at least two credible pedestrian-speed route samples.
+  Never use this rule for distinct saved/learned places or vehicle evidence,
+  and never enlarge the global unknown or saved-place matching radii to infer
+  site identity.
 - All local-day keys use the user's IANA zone, never UTC string slicing.
 
 ## Storage, privacy, and rollout

@@ -8,12 +8,17 @@ import {
   View
 } from "react-native";
 import Reanimated from "react-native-reanimated";
-import Svg, { Path } from "react-native-svg";
+import Svg, { Circle, Path } from "react-native-svg";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { paletteColorFor, readableLocationNameFromParts } from "@dayframe/shared";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { DayframeBrand } from "@/components/brand";
+import { MobileBackButton } from "@/components/MobileBackButton";
+import {
+  OverflowMenu,
+  type OverflowMenuAction
+} from "@/components/OverflowMenu";
 import {
   AuthRequiredError,
   confirmReviewItem,
@@ -41,12 +46,20 @@ import {
 } from "@/lib/motion";
 import {
   REVIEW_COPY,
+  CLOSED_REVIEW_MENU_STATE,
   buildReviewItemDraftEntry,
+  canRunReviewMenuAction,
   hasSuggestedTimeWindow,
+  hasV2LocationEvidence,
   isOneOffLocationReviewItem,
   isOpenReviewItem,
   isReviewNeededEntry,
-  reviewItemDurationSeconds
+  isLocationReviewItem,
+  reduceReviewMenuState,
+  reviewConfirmLabel,
+  reviewItemCategoryLabel,
+  reviewItemDurationSeconds,
+  type ReviewMenuEvent
 } from "@/lib/review";
 
 type ReviewEditTarget =
@@ -73,6 +86,7 @@ export default function ReviewScreen() {
   const [editTarget, setEditTarget] = useState<ReviewEditTarget | null>(null);
   const [editSaving, setEditSaving] = useState(false);
   const [showReviewInfo, setShowReviewInfo] = useState(false);
+  const [reviewMenuState, setReviewMenuState] = useState(CLOSED_REVIEW_MENU_STATE);
   const [reprocessDiagnostics, setReprocessDiagnostics] = useState<ReviewReprocessDiagnostics>({
     apiBaseUrl: DAYFRAME_API_BASE,
     startedAt: null,
@@ -83,11 +97,19 @@ export default function ReviewScreen() {
   });
   const refreshInFlight = useRef(false);
   const forcedReprocessComplete = useRef(false);
+  const reviewMenuStateRef = useRef(CLOSED_REVIEW_MENU_STATE);
   const now = Date.now();
+
+  const applyReviewMenuEvent = useCallback((event: ReviewMenuEvent) => {
+    const nextState = reduceReviewMenuState(reviewMenuStateRef.current, event);
+    reviewMenuStateRef.current = nextState;
+    setReviewMenuState(nextState);
+  }, []);
 
   const load = useCallback(async (options?: { forceReprocess?: boolean; refresh?: boolean; silent?: boolean; skipReprocess?: boolean }) => {
     if (refreshInFlight.current) return;
     refreshInFlight.current = true;
+    applyReviewMenuEvent({ type: "close" });
     if (options?.refresh) setRefreshing(true);
     try {
       setData(await fetchBootstrap());
@@ -140,7 +162,7 @@ export default function ReviewScreen() {
       refreshInFlight.current = false;
       if (options?.refresh) setRefreshing(false);
     }
-  }, []);
+  }, [applyReviewMenuEvent]);
 
   useEffect(() => {
     void load({ forceReprocess: true });
@@ -148,9 +170,11 @@ export default function ReviewScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      applyReviewMenuEvent({ type: "close" });
       void reloadThemePreference();
       void load({ silent: true, skipReprocess: true });
-    }, [load, reloadThemePreference])
+      return () => applyReviewMenuEvent({ type: "close" });
+    }, [applyReviewMenuEvent, load, reloadThemePreference])
   );
 
   const openReviewItems = useMemo(
@@ -164,8 +188,23 @@ export default function ReviewScreen() {
   const totalNeedsReview = openReviewItems.length + reviewNeededEntries.length;
   const editingEntry = editTarget?.entry ?? null;
   const reprocessRunning = reprocessDiagnostics.status === "running";
+  const overflowTarget = openReviewItems.find(
+    (item) => item.id === reviewMenuState.openItemId
+  ) ?? null;
+
+  useEffect(() => {
+    applyReviewMenuEvent({
+      type: "reconcile",
+      openItemIds: openReviewItems.map((item) => item.id)
+    });
+  }, [applyReviewMenuEvent, openReviewItems]);
+
+  useEffect(() => {
+    if (reprocessRunning || resolvingId) applyReviewMenuEvent({ type: "close" });
+  }, [applyReviewMenuEvent, reprocessRunning, resolvingId]);
 
   async function confirmItem(item: MobileReviewItem) {
+    applyReviewMenuEvent({ type: "close" });
     await resolveItem(item, async () => {
       if (hasV2LocationEvidence(item)) await resolveLocationReviewItem(item.id, { action: "confirm" });
       else await confirmReviewItem(item.id);
@@ -177,6 +216,30 @@ export default function ReviewScreen() {
       if (hasV2LocationEvidence(item)) {
         await resolveLocationReviewItem(item.id, { action: "ignore_once_location" });
       } else await dismissReviewItem(item.id);
+    });
+  }
+
+  function toggleReviewMenu(item: MobileReviewItem) {
+    applyReviewMenuEvent({
+      type: "toggle",
+      itemId: item.id,
+      disabled: reprocessRunning || resolvingId === item.id
+    });
+  }
+
+  function selectOverflowAction(item: MobileReviewItem, action: OverflowMenuAction) {
+    const currentState = reviewMenuStateRef.current;
+    if (!canRunReviewMenuAction(currentState, item.id)) return;
+    applyReviewMenuEvent({ type: "begin_action", itemId: item.id });
+    requestAnimationFrame(() => {
+      if (action === "edit") {
+        beginReviewItemEdit(item);
+        applyReviewMenuEvent({ type: "finish_action", itemId: item.id });
+        return;
+      }
+      void dismissItem(item).finally(() => {
+        applyReviewMenuEvent({ type: "finish_action", itemId: item.id });
+      });
     });
   }
 
@@ -255,14 +318,7 @@ export default function ReviewScreen() {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.settingsFloatingHeader}>
         <View style={styles.settingsHeader}>
-          <Pressable
-            accessibilityLabel="Back"
-            accessibilityRole="button"
-            style={pressable(styles.iconButton, styles.buttonPressed)}
-            onPress={() => router.back()}
-          >
-            <BackGlyph color={theme.accent} />
-          </Pressable>
+          <MobileBackButton accessibilityLabel="Back" onPress={() => router.back()} />
           <DayframeBrand
             layout="compact"
             size="sm"
@@ -333,11 +389,14 @@ export default function ReviewScreen() {
                       item={item}
                       disabled={reprocessRunning}
                       loading={resolvingId === item.id}
+                      menuOpen={reviewMenuState.openItemId === item.id}
                       now={now}
                       onConfirm={() => confirmItem(item)}
-                      onDismiss={() => dismissItem(item)}
-                      onEdit={() => beginReviewItemEdit(item)}
-                      onViewEvidence={() => router.push({ pathname: "/review/[id]", params: { id: item.id } } as never)}
+                      onToggleMenu={() => toggleReviewMenu(item)}
+                      onViewEvidence={() => {
+                        applyReviewMenuEvent({ type: "close" });
+                        router.push({ pathname: "/review/[id]", params: { id: item.id } } as never);
+                      }}
                       styles={styles}
                       theme={theme}
                     />
@@ -362,6 +421,21 @@ export default function ReviewScreen() {
         </View>
       </ScrollView>
 
+      <OverflowMenu
+        disabled={
+          !overflowTarget ||
+          reprocessRunning ||
+          resolvingId === overflowTarget.id ||
+          reviewMenuState.actionItemId != null
+        }
+        onClose={() => applyReviewMenuEvent({ type: "close" })}
+        onSelect={(action) => {
+          if (overflowTarget) selectOverflowAction(overflowTarget, action);
+        }}
+        title={overflowTarget ? reviewItemTitle(overflowTarget) : "review suggestion"}
+        visible={Boolean(overflowTarget)}
+      />
+
       <ActiveTimerEditSheet
         categories={data?.categories ?? []}
         elapsedSeconds={editingEntry ? entryDurationSeconds(editingEntry, now) : 0}
@@ -384,10 +458,10 @@ function ReviewItemCard({
   disabled,
   item,
   loading,
+  menuOpen,
   now,
   onConfirm,
-  onDismiss,
-  onEdit,
+  onToggleMenu,
   onViewEvidence,
   styles,
   theme
@@ -395,10 +469,10 @@ function ReviewItemCard({
   disabled: boolean;
   item: MobileReviewItem;
   loading: boolean;
+  menuOpen: boolean;
   now: number;
   onConfirm: () => void;
-  onDismiss: () => void;
-  onEdit: () => void;
+  onToggleMenu: () => void;
   onViewEvidence: () => void;
   styles: ReturnType<typeof useMobileTheme>["styles"];
   theme: ReturnType<typeof useMobileTheme>["theme"];
@@ -442,7 +516,7 @@ function ReviewItemCard({
         <Text key={line} style={styles.reviewMetaLine}>{line}</Text>
       ))}
 
-      <View style={styles.reviewActions}>
+      <View style={styles.reviewActionStack}>
         {hasV2LocationEvidence(item) ? (
           <Pressable
             accessibilityRole="button"
@@ -467,32 +541,24 @@ function ReviewItemCard({
           ]}
           onPress={onConfirm}
         >
-          <Text style={styles.primaryButtonText}>{REVIEW_COPY.confirm}</Text>
+          <Text style={styles.primaryButtonText}>{reviewConfirmLabel(item)}</Text>
         </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          disabled={controlsDisabled}
-          style={({ pressed }) => [
-            styles.reviewSecondaryButton,
-            pressed && !controlsDisabled ? styles.buttonPressed : null,
-            controlsDisabled ? styles.buttonDisabled : null
-          ]}
-          onPress={onEdit}
-        >
-          <Text style={styles.reviewSecondaryButtonText}>{REVIEW_COPY.edit}</Text>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          disabled={controlsDisabled}
-          style={({ pressed }) => [
-            styles.reviewSecondaryButton,
-            pressed && !controlsDisabled ? styles.buttonPressed : null,
-            controlsDisabled ? styles.buttonDisabled : null
-          ]}
-          onPress={onDismiss}
-        >
-          <Text style={styles.reviewSecondaryButtonText}>{REVIEW_COPY.dismiss}</Text>
-        </Pressable>
+        <View style={styles.reviewOverflowRow}>
+          <Pressable
+            accessibilityLabel={`More actions for ${title}`}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: menuOpen, disabled: controlsDisabled }}
+            disabled={controlsDisabled}
+            style={({ pressed }) => [
+              styles.reviewOverflowButton,
+              pressed && !controlsDisabled ? styles.buttonPressed : null,
+              controlsDisabled ? styles.buttonDisabled : null
+            ]}
+            onPress={onToggleMenu}
+          >
+            <MoreActionsGlyph color={theme.accent} />
+          </Pressable>
+        </View>
       </View>
     </View>
   );
@@ -579,7 +645,7 @@ function ReviewNeededEntryCard({
           style={pressable(styles.reviewSecondaryButton, styles.buttonPressed)}
           onPress={onEdit}
         >
-          <Text style={styles.reviewSecondaryButtonText}>{REVIEW_COPY.edit}</Text>
+          <Text style={styles.reviewSecondaryButtonText}>{REVIEW_COPY.editDetails}</Text>
         </Pressable>
       </View>
       <Text style={styles.reviewMetaLine}>Confirm and ignore are available for suggested time entries.</Text>
@@ -676,7 +742,7 @@ function formatReviewItemSource(item: MobileReviewItem) {
 }
 
 function reviewItemCategoryName(item: MobileReviewItem) {
-  return item.categoryName ?? (isHealthReviewItem(item) ? "Health" : "No category");
+  return reviewItemCategoryLabel(item);
 }
 
 function reviewItemCategoryColor(
@@ -685,9 +751,21 @@ function reviewItemCategoryColor(
   fallbackColor: string,
   mode: ReturnType<typeof useMobileTheme>["theme"]["mode"]
 ) {
-  if (item.categoryColor || item.suggestedCategoryId || isHealthReviewItem(item)) {
+  if (
+    item.categoryColor ||
+    item.suggestedCategoryId ||
+    isHealthReviewItem(item) ||
+    item.eventType === "commute_detected"
+  ) {
     return paletteColorFor(
-      item.categoryColor ?? (isHealthReviewItem(item) ? "moss" : item.suggestedCategoryId),
+      item.categoryColor ??
+        (
+          item.eventType === "commute_detected"
+            ? "sky"
+            : isHealthReviewItem(item)
+              ? "moss"
+              : item.suggestedCategoryId
+        ),
       categoryName,
       mode
     );
@@ -701,23 +779,6 @@ function isHealthReviewItem(item: Pick<MobileReviewItem, "eventSource" | "eventT
 
 function isHealthSource(source: string | null | undefined) {
   return source?.startsWith("health_") ?? false;
-}
-
-function isLocationReviewItem(item: Pick<MobileReviewItem, "eventSource" | "eventType">) {
-  return (
-    item.eventType === "learned_place_visit" ||
-    item.eventType === "geofence_exit" ||
-    item.eventType === "unknown_stay" ||
-    item.eventSource === "location_learning" ||
-    item.eventSource === "geofence_specific" ||
-    item.eventSource === "geofence_broad" ||
-    item.eventSource === "ha_geofence"
-  );
-}
-
-function hasV2LocationEvidence(item: MobileReviewItem) {
-  return isLocationReviewItem(item) &&
-    (item.rawPayload?.algorithmVersion === "location-v2.0" || typeof item.rawPayload?.clientSegmentId === "string");
 }
 
 function formatReviewItemTimeWindow(item: MobileReviewItem) {
@@ -812,14 +873,6 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
   }
 }
 
-function BackGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={20} height={20} viewBox="0 0 24 24">
-      <Path d="M15 5 8 12l7 7" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.3} />
-    </Svg>
-  );
-}
-
 function ReviewChevronGlyph({ color, expanded }: { color: string; expanded: boolean }) {
   return (
     <Svg accessibilityElementsHidden width={18} height={18} viewBox="0 0 24 24">
@@ -831,6 +884,16 @@ function ReviewChevronGlyph({ color, expanded }: { color: string; expanded: bool
         strokeLinejoin="round"
         strokeWidth={2}
       />
+    </Svg>
+  );
+}
+
+function MoreActionsGlyph({ color }: { color: string }) {
+  return (
+    <Svg accessibilityElementsHidden width={22} height={22} viewBox="0 0 24 24">
+      <Circle cx={5} cy={12} r={1.7} fill={color} />
+      <Circle cx={12} cy={12} r={1.7} fill={color} />
+      <Circle cx={19} cy={12} r={1.7} fill={color} />
     </Svg>
   );
 }

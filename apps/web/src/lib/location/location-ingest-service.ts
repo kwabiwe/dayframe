@@ -11,6 +11,7 @@ import {
 } from "@dayframe/shared";
 import { pool } from "../db";
 import type { RequestSession } from "../session";
+import { ensureCommuteCategoryId } from "../automatic-category-service";
 import { replayLocationEvidence } from "./location-replay-service";
 import {
   decideLocationRollout,
@@ -282,6 +283,9 @@ async function emitSemanticSegment(
   const trustedPlace = segment.kind === "stay"
     ? await trustedPlaceContext(client, session, segment)
     : null;
+  const suggestedCategoryId = segment.kind === "commute"
+    ? await ensureCommuteCategoryId(client, session)
+    : trustedPlace?.categoryId ?? null;
   const placeId = trustedPlace?.placeId ?? (segment.kind === "stay" ? segment.placeId ?? null : null);
   if (segment.kind === "stay" && segment.placeMatchKind === "unknown") {
     const duration = Date.parse(segment.stoppedAt ?? segment.startedAt) - Date.parse(segment.startedAt);
@@ -320,6 +324,7 @@ async function emitSemanticSegment(
         fromStaySegmentId: segment.fromStaySegmentId,
         toStaySegmentId: segment.toStaySegmentId,
         routeSampleCount: segment.routeSampleCount,
+        qualificationReason: segment.qualificationReason ?? null,
         continuityStatus: segment.continuityStatus,
         startedAt: segment.startedAt,
         stoppedAt: segment.stoppedAt,
@@ -362,7 +367,7 @@ async function emitSemanticSegment(
       segment.startedAt,
       segment.confidence,
       JSON.stringify(rawPayload),
-      trustedPlace?.categoryId ?? null,
+      suggestedCategoryId,
       placeId,
       autoConfirm ? "confirmed" : "needs_review"
     ]
@@ -409,7 +414,7 @@ async function emitSemanticSegment(
         databaseSegmentId,
         `${eventType}_suggestion`,
         title,
-        trustedPlace?.categoryId ?? null,
+        suggestedCategoryId,
         placeId,
         segment.startedAt,
         segment.stoppedAt,
@@ -435,7 +440,7 @@ async function emitSemanticSegment(
       [
         databaseSegmentId,
         title,
-        trustedPlace?.categoryId ?? null,
+        suggestedCategoryId,
         placeId,
         segment.startedAt,
         segment.stoppedAt,
