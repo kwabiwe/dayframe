@@ -77,7 +77,7 @@ export function TimeAllocationPie({ entries }: { entries: TimeEntryRow[] }) {
                 title={`${segment.name}: ${formatDuration(segment.seconds)} / ${share}%`}
               >
                 <span
-                  className={`h-3 w-3 border border-[var(--line-strong)]${segment.id === "uncategorized" ? " is-uncategorized" : ""}`}
+                  className={`category-data-marker${segment.id === "uncategorized" ? " is-uncategorized" : ""}`}
                   style={{ backgroundColor: segment.color }}
                 />
                 <span className="min-w-0 truncate font-medium">{segment.name}</span>

@@ -28,6 +28,10 @@ describe("time entry display helpers", () => {
     expect(timeEntryContextLabel(entry)).toBe("Web app");
   });
 
+  it("names a blank uncategorized entry explicitly", () => {
+    expect(timeEntryTitle({ description: " ", categoryName: null })).toBe("Uncategorized");
+  });
+
   it("keeps uncategorized wording quiet for category columns", () => {
     expect(timeEntryCategoryLabel({ categoryName: null })).toBe("Uncategorized");
     expect(categoryDisplay(null, null)).toEqual({

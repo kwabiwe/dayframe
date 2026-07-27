@@ -13,7 +13,7 @@ type TimeEntryDisplayFields = {
 };
 
 export function timeEntryTitle(entry: TimeEntryDisplayFields) {
-  return cleanLabel(entry.description) ?? cleanLabel(entry.categoryName) ?? "Time entry";
+  return cleanLabel(entry.description) ?? timeEntryCategoryLabel(entry);
 }
 
 export function timeEntryContextLabel(entry: TimeEntryDisplayFields) {

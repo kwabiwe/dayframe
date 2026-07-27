@@ -37,7 +37,10 @@ export function timelineEntryGroupKey(entry: TimeEntryRow) {
   const categoryKey = entry.categoryId
     ? `id:${entry.categoryId}`
     : `name:${categoryNameKey || "uncategorized"}`;
-  return `${categoryKey}|description:${descriptionKey || "no-description"}`;
+  const tagKey = [...new Set(entry.tagNames.map(normalizeGroupText).filter(Boolean))]
+    .sort()
+    .join(",");
+  return `${categoryKey}|description:${descriptionKey || "no-description"}|tags:${tagKey || "no-tags"}`;
 }
 
 function normalizeGroupText(value: string | null | undefined) {

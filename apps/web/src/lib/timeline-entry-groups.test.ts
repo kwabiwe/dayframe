@@ -56,4 +56,32 @@ describe("groupTimelineEntries", () => {
     expect(groups).toHaveLength(1);
     expect(groups[0].entries).toHaveLength(2);
   });
+
+  it("keeps otherwise identical entries separate when their tags differ", () => {
+    const groups = groupTimelineEntries([
+      entry({ id: "a24", tagNames: ["A24"] }),
+      entry({ id: "cubic", tagNames: ["Cubic"] })
+    ]);
+
+    expect(groups).toHaveLength(2);
+  });
+
+  it("groups identical canonical tag sets regardless of order, case, or duplicates", () => {
+    const groups = groupTimelineEntries([
+      entry({ id: "newest", tagNames: [" Cubic ", "A24", "a24"] }),
+      entry({ id: "older", tagNames: ["a24", "cubic"] })
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].entries.map((item) => item.id)).toEqual(["newest", "older"]);
+  });
+
+  it("keeps tagged and untagged entries in separate groups", () => {
+    const groups = groupTimelineEntries([
+      entry({ id: "tagged", tagNames: ["A24"] }),
+      entry({ id: "untagged", tagNames: [] })
+    ]);
+
+    expect(groups).toHaveLength(2);
+  });
 });
