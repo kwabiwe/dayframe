@@ -7,11 +7,14 @@ import {
   countReviewNeededActivityForRange,
   hasReviewNeededActivityForRange,
   hasSuggestedTimeWindow,
+  hideTombstonedReviewItems,
   isCalendarPreviewReviewItem,
   isOneOffLocationReviewItem,
   isOpenReviewItem,
   isReviewNeededEntry,
+  removeReviewItemOptimistically,
   reduceReviewMenuState,
+  restoreReviewItemOptimistically,
   reviewActionOrder,
   reviewConfirmLabel,
   reviewItemCategoryLabel,
@@ -219,8 +222,8 @@ describe("mobile review helpers", () => {
         type: "toggle",
         itemId: "review-2",
         disabled: false
-      }).openItemId
-    ).toBe("review-2");
+      })
+    ).toBe(firstOpen);
     expect(
       reduceReviewMenuState(firstOpen, {
         type: "toggle",
@@ -231,22 +234,175 @@ describe("mobile review helpers", () => {
 
     const resolving = reduceReviewMenuState(firstOpen, {
       type: "begin_action",
-      itemId: "review-1"
+      action: "edit",
+      itemId: "review-1",
+      token: 1
     });
-    expect(resolving).toEqual({ openItemId: null, actionItemId: "review-1" });
+    expect(resolving).toEqual({
+      openItemId: null,
+      closingItemId: "review-1",
+      pendingAction: {
+        action: "edit",
+        itemId: "review-1",
+        token: 1
+      }
+    });
     expect(canRunReviewMenuAction(resolving, "review-1")).toBe(false);
     expect(
       reduceReviewMenuState(resolving, {
         type: "begin_action",
-        itemId: "review-1"
+        action: "dismiss",
+        itemId: "review-1",
+        token: 2
       })
     ).toBe(resolving);
     expect(
-      reduceReviewMenuState(firstOpen, {
+      reduceReviewMenuState(resolving, {
+        type: "toggle",
+        itemId: "review-2",
+        disabled: false
+      })
+    ).toBe(resolving);
+
+    const modalClosed = reduceReviewMenuState(resolving, {
+      type: "menu_closed",
+      itemId: "review-1"
+    });
+    expect(modalClosed.closingItemId).toBeNull();
+    expect(modalClosed.pendingAction).toEqual(resolving.pendingAction);
+    expect(
+      reduceReviewMenuState(modalClosed, {
+        type: "finish_action",
+        itemId: "review-1",
+        token: 2
+      })
+    ).toBe(modalClosed);
+    expect(
+      reduceReviewMenuState(modalClosed, {
+        type: "finish_action",
+        itemId: "review-1",
+        token: 1
+      }).pendingAction
+    ).toBeNull();
+    expect(
+      reduceReviewMenuState(resolving, {
         type: "reconcile",
         openItemIds: ["review-2"]
-      }).openItemId
+      }).pendingAction
     ).toBeNull();
+    expect(
+      reduceReviewMenuState(resolving, { type: "reset" })
+    ).toEqual({
+      openItemId: null,
+      closingItemId: "review-1",
+      pendingAction: null
+    });
+  });
+
+  it("closes before replacement and keeps a closing modal owned until completion", () => {
+    const firstOpen = reduceReviewMenuState(CLOSED_REVIEW_MENU_STATE, {
+      type: "toggle",
+      itemId: "review-1",
+      disabled: false
+    });
+    const closing = reduceReviewMenuState(firstOpen, { type: "close" });
+    expect(closing).toEqual({
+      openItemId: null,
+      closingItemId: "review-1",
+      pendingAction: null
+    });
+    expect(
+      reduceReviewMenuState(closing, {
+        type: "toggle",
+        itemId: "review-2",
+        disabled: false
+      })
+    ).toBe(closing);
+    const closed = reduceReviewMenuState(closing, {
+      type: "menu_closed",
+      itemId: "review-1"
+    });
+    expect(
+      reduceReviewMenuState(closed, {
+        type: "toggle",
+        itemId: "review-2",
+        disabled: false
+      }).openItemId
+    ).toBe("review-2");
+  });
+
+  it("removes, tombstones and restores Review items at their captured position", () => {
+    const first = reviewItem({ id: "review-1" });
+    const second = reviewItem({ id: "review-2" });
+    const third = reviewItem({ id: "review-3" });
+    const fourth = reviewItem({ id: "review-4" });
+    const original = bootstrap([first, second, third]);
+    const optimistic = removeReviewItemOptimistically(original, second.id);
+
+    expect(optimistic?.data.reviewItems.map((item) => item.id)).toEqual([
+      "review-1",
+      "review-3"
+    ]);
+    expect(
+      hideTombstonedReviewItems(original, ["review-2"]).reviewItems.map(
+        (item) => item.id
+      )
+    ).toEqual(["review-1", "review-3"]);
+
+    const newerState = bootstrap([first, third, fourth]);
+    expect(
+      restoreReviewItemOptimistically(
+        newerState,
+        optimistic!.removal
+      ).reviewItems.map((item) => item.id)
+    ).toEqual(["review-1", "review-2", "review-3", "review-4"]);
+    expect(
+      restoreReviewItemOptimistically(
+        original,
+        optimistic!.removal
+      )
+    ).toBe(original);
+  });
+
+  it("restores concurrent removals in original order regardless of failure order", () => {
+    const first = reviewItem({ id: "review-1" });
+    const second = reviewItem({ id: "review-2" });
+    const third = reviewItem({ id: "review-3" });
+    const fourth = reviewItem({ id: "review-4" });
+    const original = bootstrap([first, second, third, fourth]);
+    const firstRemoval = removeReviewItemOptimistically(original, second.id)!;
+    const secondRemoval = removeReviewItemOptimistically(
+      firstRemoval.data,
+      third.id
+    )!;
+
+    const firstFailureFirst = restoreReviewItemOptimistically(
+      restoreReviewItemOptimistically(
+        secondRemoval.data,
+        firstRemoval.removal
+      ),
+      secondRemoval.removal
+    );
+    const secondFailureFirst = restoreReviewItemOptimistically(
+      restoreReviewItemOptimistically(
+        secondRemoval.data,
+        secondRemoval.removal
+      ),
+      firstRemoval.removal
+    );
+
+    expect(firstFailureFirst.reviewItems.map((item) => item.id)).toEqual([
+      "review-1",
+      "review-2",
+      "review-3",
+      "review-4"
+    ]);
+    expect(secondFailureFirst.reviewItems.map((item) => item.id)).toEqual([
+      "review-1",
+      "review-2",
+      "review-3",
+      "review-4"
+    ]);
   });
 
   it("does not turn detected visit titles into draft descriptions", () => {
@@ -410,5 +566,22 @@ function timeEntry(overrides: Partial<MobileTimeEntry> = {}): MobileTimeEntry {
     stoppedAt: "2026-07-07T08:30:00.000Z",
     durationSeconds: 1800,
     ...overrides
+  };
+}
+
+function bootstrap(reviewItems: MobileReviewItem[]): MobileBootstrap {
+  return {
+    user: {
+      id: "user-1",
+      email: "review@example.com",
+      name: "Review Tester"
+    },
+    workspace: { id: "workspace-1", name: "Personal" },
+    activeEntry: null,
+    projects: [],
+    categories: [category()],
+    entries: [],
+    places: [],
+    reviewItems
   };
 }

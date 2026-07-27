@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
+  AccessibilityInfo,
   Animated,
   Dimensions,
   Easing,
@@ -12,7 +13,8 @@ import {
   Text,
   TextInput,
   useWindowDimensions,
-  View
+  View,
+  findNodeHandle
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
@@ -51,9 +53,11 @@ type ActiveTimerEditSheetProps = {
   descriptionPlaceholder?: string;
   elapsedSeconds: number;
   entry: MobileTimeEntry | null;
+  focusDescriptionOnShow?: boolean;
   lastStoppedAt: string | null;
   onCancel: () => void;
   onDelete?: (entryId: string) => Promise<boolean>;
+  onPresented?: () => void;
   onApplySuggestion?: (entryId: string, suggestion: RecentActivitySuggestion) => Promise<boolean>;
   onSave?: (entryId: string, patch: TimeEntryUpdatePatch) => Promise<boolean>;
   onStop?: () => Promise<boolean>;
@@ -73,10 +77,12 @@ export function ActiveTimerEditSheet({
   descriptionPlaceholder = "What are you working on?",
   elapsedSeconds,
   entry: currentEntry,
+  focusDescriptionOnShow = false,
   lastStoppedAt,
   mode = "running",
   onCancel,
   onDelete,
+  onPresented,
   onApplySuggestion,
   onSave,
   onStop,
@@ -688,6 +694,14 @@ export function ActiveTimerEditSheet({
     }]
   };
 
+  function handleModalShow() {
+    if (focusDescriptionOnShow) {
+      const handle = findNodeHandle(descriptionInputRef.current);
+      if (handle) AccessibilityInfo.setAccessibilityFocus(handle);
+    }
+    onPresented?.();
+  }
+
   return (
     <>
       <Modal
@@ -699,6 +713,7 @@ export function ActiveTimerEditSheet({
         }
         sheetRef.current?.dismiss();
       }}
+      onShow={handleModalShow}
       presentationStyle="overFullScreen"
       transparent
       visible={visible}

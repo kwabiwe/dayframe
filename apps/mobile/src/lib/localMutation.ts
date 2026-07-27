@@ -6,3 +6,17 @@ export async function applyAfterSuccessfulMutation<Result>(
   apply(result);
   return result;
 }
+
+export async function applyOptimisticMutation<Snapshot, Result>(
+  apply: () => Snapshot,
+  mutation: () => Promise<Result>,
+  rollback: (snapshot: Snapshot) => void
+) {
+  const snapshot = apply();
+  try {
+    return await mutation();
+  } catch (error) {
+    rollback(snapshot);
+    throw error;
+  }
+}

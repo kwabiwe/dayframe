@@ -23,9 +23,10 @@ describe("local motion ownership contracts", () => {
     expect(confirmationSource).toContain('animationType={reduceMotion ? "none" : "fade"}');
   });
 
-  it("gives Review and Places one local presence/layout owner after successful state changes", () => {
+  it("gives Review and Places one local presence/layout owner around mutations", () => {
+    expect(reviewSource).toContain("applyOptimisticMutation");
+    expect(placesSource).toContain("applyAfterSuccessfulMutation");
     for (const screenSource of [reviewSource, placesSource]) {
-      expect(screenSource).toContain("applyAfterSuccessfulMutation");
       expect(screenSource).toContain("localLayoutTransition(reduceMotion)");
       expect(screenSource).toContain("localPresenceExiting(reduceMotion)");
     }

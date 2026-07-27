@@ -285,3 +285,122 @@ mapping, and source action order, but they do not replace the physical checks.
   edge placement, rapid-repeat, and frame-pacing checks.
 - Simulator or physical-device interactive recording of menu entrance,
   outside dismissal, Edit/Dismiss selection, and Reduce Motion behaviour.
+
+## 2026-07-27 mobile Review interaction follow-up
+
+### Reported regression and source confirmation
+
+Physical-iPhone use after PR #122 found that Dismiss left a disabled card
+visible until its request and a later bootstrap refresh completed, Edit details
+could leave Review unresponsive, and the overflow menu appeared without a
+reliable entrance.
+
+Two source-level hypotheses were checked before implementation:
+
+- competing native modal presentation: `review.tsx` closed the overflow menu
+  and used `requestAnimationFrame` to create the `ActiveTimerEditSheet` target,
+  while `OverflowMenu` deliberately kept its own React Native `Modal` mounted
+  for its exit; and
+- premature presentation work: `OverflowMenu` began its Reanimated entrance
+  and scheduled accessibility focus in the same effect that changed it from
+  `null` to a rendered native modal, before native `Modal.onShow`.
+
+Both are present on merged `main`. The first permits the edit-sheet modal to be
+requested while the overflow modal is still mounted or exiting. The second can
+advance the shared animation value and focus before the modal produces its
+first presented frame. Separately, `resolveItem` awaits the mutation before
+removing the card, then awaits a full bootstrap refresh before clearing the
+disabled state. There is no local tombstone to filter a stale bootstrap
+response.
+
+### Follow-up motion and state contract
+
+- Trigger: opening the overflow menu, choosing Edit details or Dismiss
+  suggestion, or confirming a Review card.
+- Owners: `OverflowMenu` exclusively owns overflow-modal presentation and
+  opacity/translation; the Review parent exclusively owns the pending semantic
+  action and edit handover; each stable-key Reanimated card owns its
+  presence/list-layout transition.
+- Entrance: mount the native modal at zero progress, start the established
+  `MOBILE_MOTION.layout` local-panel fade and restrained `8pt` rise only from
+  `Modal.onShow`, then move VoiceOver focus to the first action after entrance
+  completion.
+- Update and surrounding layout: Confirm/Dismiss immediately tombstone and
+  remove the accepted item in memory. The card fades out and remaining cards
+  use the existing `MOBILE_MOTION.layout` reflow without changing card
+  geometry or adding loading content.
+- Exit and handover: an action locks once, the parent records its item ID,
+  action and monotonic token, and the menu reverses its transition. The menu
+  sets its native modal invisible, observes native dismissal, renders `null`,
+  and emits one exact completion. Only a current Edit token may then build the
+  draft and present `ActiveTimerEditSheet`; its `Modal.onShow` transfers
+  accessibility focus and completes the lock.
+- Interruption: outside tap, system close, rapid repeat, another item request,
+  stale animation completion, item reconciliation, route focus loss and app
+  backgrounding cannot replace the current presentation. Item IDs and tokens
+  are checked at each boundary. A removed item cancels its pending handover,
+  and no callback may open a different item.
+- Async outcome: mutation success keeps the tombstone and starts bootstrap
+  reconciliation without awaiting it. A stale or failed bootstrap cannot
+  restore the card. Once a successful refresh proves the item absent, its
+  tombstone is cleared. Mutation failure removes only the matching tombstone,
+  restores the exact item at its captured list position, re-enables action and
+  shows the existing error. Separate item mutations remain independent.
+- Accessibility: Reduce Motion removes translation while preserving the same
+  opacity/state ordering. Dynamic Type keeps the existing expanding menu rows
+  and safe-area bounds. VoiceOver focus moves only after each native modal is
+  shown; cancellation and rollback remain announced state changes.
+
+This follow-up is deliberately in-memory only. It does not add a SQLite review
+mutation queue or durable offline support. A network failure is a failed
+mutation and restores the card. If the app terminates before the server accepts
+a mutation, the optimistic removal is not guaranteed to survive.
+
+### Follow-up implementation and validation
+
+Implementation on `fix/mobile-review-action-handover` now:
+
+- gives the overflow menu an explicit presentation instance, `onShow` entrance,
+  native `onDismiss`, post-unmount `onClosed` contract and stale animation-token
+  guards;
+- keeps the pending action in the Review parent and opens Edit only after the
+  matching overflow instance has completed native dismissal and rendered
+  `null`;
+- cancels pending handovers on focus loss, backgrounding or item
+  reconciliation, and transfers VoiceOver focus when the edit modal reports
+  presentation;
+- removes Confirm/Dismiss cards synchronously through item-scoped in-memory
+  tombstones, then runs the request and bootstrap reconciliation without
+  blocking the visible action;
+- filters stale bootstrap data until a successful mutation is proven absent on
+  the server; and
+- restores failed concurrent mutations using captured surrounding-item anchors,
+  so request completion order cannot scramble the Review list.
+
+Automated validation:
+
+- focused Review/local-mutation contracts: 31 tests passed;
+- `npm run lint` — passed;
+- `npm run typecheck` — passed for mobile, web and shared;
+- `npm run test` — passed: 288 mobile, 469 web and 104 shared tests
+  (861 total);
+- `npm run build` — passed, including the 30-page Next.js production build;
+- `npm run check:brand-assets` — passed; and
+- `git diff --check` — passed.
+
+Native and interactive evidence:
+
+- `pod install` completed, but both the initial and explicitly cleaned
+  iPhone 17 Pro Max/iOS 26.5 simulator builds failed in the existing
+  `expo-sqlite` Swift module with 67 missing `exsqlite3_*` symbol errors;
+- no dependency or generated `Podfile.lock` change is included in this branch;
+- the existing development client launched against the local API and completed
+  Review bootstrap/reprocess requests, but the Mac locked before the overflow,
+  Edit, Dismiss, rollback or Reduce Motion interaction matrix could be
+  exercised; and
+- disposable local Review fixtures were removed after the interrupted pass.
+
+Physical-iPhone interaction, normal and Reduce Motion animation, VoiceOver,
+large Dynamic Type, background/resume during handover and frame pacing remain
+required before merge. No TestFlight build, deployment, production-data change
+or offline review-action outbox was created.
