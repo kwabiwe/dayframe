@@ -2795,6 +2795,10 @@ async function findOverlappingTimeEntry(
        and te.user_id = $2
        and te.started_at < $4::timestamptz
        and coalesce(te.stopped_at, 'infinity'::timestamptz) > $3::timestamptz
+       and least(
+             coalesce(te.stopped_at, 'infinity'::timestamptz),
+             $4::timestamptz
+           ) - greatest(te.started_at, $3::timestamptz) >= interval '1 minute'
      order by te.stopped_at is null desc, te.started_at desc
      limit 1`,
     [session.workspaceId, session.userId, startedAt, stoppedAt]

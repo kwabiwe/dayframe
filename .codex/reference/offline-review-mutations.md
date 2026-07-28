@@ -9,7 +9,7 @@ Calendar, reporting, or location-evidence operations generally offline-capable.
 - `activity_events`, the mobile event queue, and the protected location journal
   remain the owners of signal capture.
 - `reviewSyncStore.ts` is the only durable mobile owner of downloaded Review
-  snapshots, local terminal decisions, tombstones, retry state, and account
+  snapshots, local terminal decisions, pending presentation, retry state, and account
   lifecycle.
 - The server remains authoritative for canonical Review and time-entry state.
 - React state may project the SQLite owner but must never be the only record of
@@ -18,10 +18,11 @@ Calendar, reporting, or location-evidence operations generally offline-capable.
 ## Local acknowledgement
 
 Generate one UUID, validate the open item and its time window, and atomically
-write the canonical request, safe original snapshot, ordering anchors, and hidden
-local effect. Remove the visible card only after that transaction commits.
+write the canonical request, safe original snapshot, ordering anchors, and a
+visible pending local effect. Disable repeated actions and label the card
+`Waiting to sync`; do not remove it until the server acknowledges the mutation.
 Network success is not part of local acknowledgement. A retryable network
-failure must leave the durable tombstone in place.
+failure must leave the durable row and visible card in place.
 
 One account may have at most one stored terminal mutation per Review item. The
 same mutation ID plus the same canonical payload is idempotent; either a reused
@@ -39,7 +40,8 @@ ID with different data or a second terminal mutation for the item is rejected.
   the same account.
 - Mark semantic conflicts and unchanged permanent validation errors
   `needs_attention`; never retry them forever.
-- A successful response changes the local row to `acknowledged`. Delete it only
+- A successful response changes the local row to `acknowledged`, hides the card,
+  and triggers a canonical refresh. Delete the row only
   after a later canonical bootstrap proves that the Review item is no longer
   open.
 

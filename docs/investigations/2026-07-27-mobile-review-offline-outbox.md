@@ -359,6 +359,32 @@ upgrading Expo.
 
 ## Migration and deployment order
 
+## 2026-07-28 production correction
+
+Production inspection proved that
+`public.review_mutation_receipts` was absent even though TestFlight contained
+the durable envelope client. Every queued mutation therefore failed before it
+could create a time entry or receipt. The additive
+`202607270001_review_mutation_receipts.sql` migration was applied on
+2026-07-28 and verified with an empty receipt table before retry.
+
+The local presentation contract also changes. Enqueue keeps the Review card
+visible, disabled, and labelled `Waiting to sync`. Retry and authentication
+pause retain that state; permanent failure becomes `Sync issue`. Only server
+acknowledgement hides the card and triggers canonical bootstrap reconciliation.
+Schema version 2 restores every pre-existing unacknowledged tombstone so the
+four affected decisions cannot remain silently absent from Review.
+
+Motion contract:
+
+- enqueue updates badge/status in place; it does not remove or reflow the row;
+- acknowledgement lets the existing Reanimated presence/layout owner remove
+  and reflow the card;
+- retry/authentication/permanent failure keep the row stable;
+- repeated actions are disabled while any durable mutation owns that item;
+- existing Reduce Motion, Dynamic Type, and VoiceOver behavior remains the
+  transition/accessibility owner.
+
 Files:
 
 - base/local schema: `packages/db/migrations/001_init.sql`;

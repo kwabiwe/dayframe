@@ -57,6 +57,77 @@ describe("analyzeTimeIntervals", () => {
     expect(result.entries.every((entry) => entry.overlapCount === 0)).toBe(true);
   });
 
+  it("treats sub-minute boundary intersections as sequential noise", () => {
+    const result = analyzeTimeIntervals([
+      {
+        id: "before",
+        startedAt: "2026-07-27T07:13:00.000Z",
+        stoppedAt: "2026-07-27T08:20:26.338Z"
+      },
+      {
+        id: "after",
+        startedAt: "2026-07-27T08:20:00.000Z",
+        stoppedAt: "2026-07-27T08:30:00.000Z"
+      }
+    ]);
+
+    expect(result).toMatchObject({
+      additionalOverlapSeconds: 0,
+      concurrentCoverageSeconds: 0,
+      hasOverlap: false,
+      maxConcurrency: 1
+    });
+    expect(result.entries.every((entry) => entry.overlapCount === 0)).toBe(true);
+  });
+
+  it("counts one full shared minute as a meaningful overlap", () => {
+    const result = analyzeTimeIntervals([
+      interval("before", 9, 10),
+      {
+        id: "after",
+        startedAt: at(9, 59),
+        stoppedAt: at(11)
+      }
+    ]);
+
+    expect(result).toMatchObject({
+      additionalOverlapSeconds: 60,
+      concurrentCoverageSeconds: 60,
+      hasOverlap: true,
+      maxConcurrency: 2
+    });
+    expect(result.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "after",
+          overlapCount: 1,
+          uniqueOverlapSeconds: 60
+        }),
+        expect.objectContaining({
+          id: "before",
+          overlapCount: 1,
+          uniqueOverlapSeconds: 60
+        })
+      ])
+    );
+  });
+
+  it("uses an exact 60-second boundary without rounding timestamps", () => {
+    const base = Date.UTC(2026, 6, 27, 9);
+    const analyze = (sharedMs: number) => analyzeTimeIntervals([
+      { id: "a", startedAt: base, stoppedAt: base + 10 * 60_000 },
+      {
+        id: "b",
+        startedAt: base + 10 * 60_000 - sharedMs,
+        stoppedAt: base + 20 * 60_000
+      }
+    ]);
+
+    expect(analyze(59_999).hasOverlap).toBe(false);
+    expect(analyze(60_000).additionalOverlapSeconds).toBe(60);
+    expect(analyze(61_000).additionalOverlapSeconds).toBe(61);
+  });
+
   it("measures partial and contained overlaps without double-counting covered time", () => {
     const result = analyzeTimeIntervals([
       interval("base", 9, 12),
@@ -266,6 +337,26 @@ describe("layoutTimeIntervals", () => {
       { id: "large", startedAt: at(9, 15), stoppedAt: at(10, 45) }
     ]);
     expect(similarContainment.every((layout) => layout.mode === "lane")).toBe(true);
+  });
+
+  it("keeps sub-minute boundary intersections in sequential full-width layout", () => {
+    const result = layoutTimeIntervals([
+      {
+        id: "before",
+        startedAt: "2026-07-27T07:13:00.000Z",
+        stoppedAt: "2026-07-27T08:20:26.338Z"
+      },
+      {
+        id: "after",
+        startedAt: "2026-07-27T08:20:00.000Z",
+        stoppedAt: "2026-07-27T08:30:00.000Z"
+      }
+    ]);
+
+    expect(result).toEqual([
+      expect.objectContaining({ id: "after", mode: "full", laneCount: 1 }),
+      expect.objectContaining({ id: "before", mode: "full", laneCount: 1 })
+    ]);
   });
 
   it("uses compact lanes for dense collisions", () => {

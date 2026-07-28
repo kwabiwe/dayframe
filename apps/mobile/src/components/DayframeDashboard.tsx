@@ -2100,10 +2100,10 @@ function HistoryDayCard({
                       (historyOverlapById.get(groupedEntry.id)?.overlapCount ?? 0) > 0
                     ) ? (
                       <Text
-                        accessibilityLabel="Intentional overlap"
+                        accessibilityLabel="Overlap"
                         style={[styles.reviewMetaLine, { color: theme.warningText }]}
                       >
-                        Intentional overlap
+                        Overlap
                       </Text>
                     ) : null}
                   </View>

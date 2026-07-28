@@ -54,7 +54,7 @@ CREATE TABLE review_mutation_outbox (
   preceding_ids_json TEXT NOT NULL,
   following_ids_json TEXT NOT NULL,
   state TEXT NOT NULL,
-  local_effect TEXT NOT NULL DEFAULT 'hidden',
+  local_effect TEXT NOT NULL DEFAULT 'restore',
   attempt_count INTEGER NOT NULL DEFAULT 0,
   next_attempt_at TEXT,
   last_attempted_at TEXT,
@@ -101,13 +101,13 @@ INSERT INTO review_mutation_outbox (
 ) VALUES (
   'mutation-1', 'workspace-a:user-a', 'workspace-a', 'user-a', 'review-1',
   'accept', '{"clientMutationId":"mutation-1","mutation":{"action":"accept"}}',
-  '{"id":"review-1","status":"open"}', 0, '[]', '[]', 'pending', 'hidden',
+  '{"id":"review-1","status":"open"}', 0, '[]', '[]', 'pending', 'restore',
   '2026-07-27T10:00:00Z', '2026-07-27T10:00:00Z'
 );
 COMMIT;
 SQL
 
-expect_equal "$(sqlite3 "$database_path" "SELECT count(*) FROM review_mutation_outbox WHERE state='pending' AND local_effect='hidden'")" "1" "atomic enqueue and tombstone"
+expect_equal "$(sqlite3 "$database_path" "SELECT count(*) FROM review_mutation_outbox WHERE state='pending' AND local_effect='restore'")" "1" "atomic enqueue keeps the item visible"
 
 set +e
 sqlite3 "$database_path" "INSERT INTO review_mutation_outbox SELECT 'mutation-1', account_key, workspace_id, user_id, 'review-2', action_kind, '{}', original_snapshot_json, 1, '[]', '[]', state, local_effect, 0, NULL, NULL, NULL, NULL, created_at, updated_at, NULL FROM review_mutation_outbox WHERE client_mutation_id='mutation-1';" >/dev/null 2>&1
@@ -133,7 +133,7 @@ INSERT INTO review_mutation_outbox (
   'mutation-local-write-failure', 'workspace-a:user-a', 'workspace-a', 'user-a',
   'review-local-write-failure', 'accept', '{}',
   '{"id":"review-local-write-failure","status":"open"}', 4, '[]', '[]',
-  'invalid_state', 'hidden', '2026-07-27T10:01:00Z', '2026-07-27T10:01:00Z'
+  'invalid_state', 'restore', '2026-07-27T10:01:00Z', '2026-07-27T10:01:00Z'
 );
 COMMIT;
 SQL
@@ -164,7 +164,7 @@ INSERT INTO review_mutation_outbox (
 ) VALUES (
   'mutation-b', 'workspace-a:user-b', 'workspace-a', 'user-b', 'review-b',
   'ignore_once', '{}', '{"id":"review-b","status":"open"}', 0, '[]', '[]',
-  'auth_required', 'hidden', '2026-07-27T10:00:00Z', '2026-07-27T10:00:00Z'
+  'auth_required', 'restore', '2026-07-27T10:00:00Z', '2026-07-27T10:00:00Z'
 );
 COMMIT;
 SQL
@@ -173,7 +173,7 @@ expect_equal "$(sqlite3 "$database_path" "SELECT count(*) FROM review_mutation_o
 
 sqlite3 "$database_path" <<'SQL'
 UPDATE review_mutation_outbox
-SET state='acknowledged', acknowledged_at='2026-07-27T10:02:00Z'
+SET state='acknowledged', local_effect='hidden', acknowledged_at='2026-07-27T10:02:00Z'
 WHERE client_mutation_id='mutation-1';
 DELETE FROM review_item_cache
 WHERE account_key='workspace-a:user-a' AND review_item_id='review-1';
@@ -199,4 +199,4 @@ SQL
 expect_equal "$(sqlite3 "$database_path" "SELECT count(*) FROM review_mutation_outbox WHERE account_key='workspace-a:user-a'")" "0" "active-account logout cleanup"
 expect_equal "$(sqlite3 "$database_path" "SELECT count(*) FROM review_mutation_outbox WHERE account_key='workspace-a:user-b'")" "1" "logout preserves other isolated account fixture"
 
-echo "Review SQLite validation passed: WAL, foreign keys, busy timeout, schema version, atomic enqueue, durable tombstone, duplicate rejection, item uniqueness, failed-write rollback, stale in-flight recovery, restart persistence, account isolation, auth-required retention, acknowledged canonical cleanup, and scoped logout cleanup."
+echo "Review SQLite validation passed: WAL, foreign keys, busy timeout, schema version, visible pending enqueue, duplicate rejection, item uniqueness, failed-write rollback, stale in-flight recovery, restart persistence, account isolation, auth-required retention, acknowledged hiding, canonical cleanup, and scoped logout cleanup."

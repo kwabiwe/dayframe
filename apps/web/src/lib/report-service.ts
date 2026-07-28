@@ -124,23 +124,54 @@ export async function getReports(session: RequestSession, input: ReportQueryInpu
   const result = await query<ReportDataRow>(statement.text, statement.values);
   const row = result.rows[0] ?? emptyReportData(input);
   const totalSeconds = numberValue(row.totalSeconds);
-  const timeCoveredSeconds = numberValue(row.coveredSeconds);
   const previousPeriodSeconds = numberValue(row.previousPeriodSeconds);
   const previousPeriodCoveredSeconds = numberValue(row.previousPeriodCoveredSeconds);
-  const dailySeries = arrayValue(row.dailySeries).map((point) => ({
-    ...point,
-    seconds: numberValue(point.seconds),
-    coveredSeconds: numberValue(point.coveredSeconds),
-    additionalOverlappingActivitySeconds: numberValue(point.additionalOverlappingActivitySeconds)
-  }));
+  const analysisEntries = arrayValue(row.analysisEntries);
   const analysis = analyzeTimeIntervals(
-    arrayValue(row.analysisEntries).map((entry) => ({
+    analysisEntries.map((entry) => ({
       id: entry.id,
       startedAt: entry.startedAt,
       stoppedAt: entry.stoppedAt
     })),
     { now: capturedNow }
   );
+  const timeCoveredSeconds = Math.max(
+    0,
+    totalSeconds - analysis.additionalOverlappingActivitySeconds
+  );
+  const dailySeries = arrayValue(row.dailySeries).map((point, index) => {
+    const boundary = input.dayBoundaries[index];
+    const pointSeconds = numberValue(point.seconds);
+    if (!boundary) {
+      return {
+        ...point,
+        seconds: pointSeconds,
+        coveredSeconds: pointSeconds,
+        additionalOverlappingActivitySeconds: 0
+      };
+    }
+    const dayAnalysis = analyzeTimeIntervals(
+      analysisEntries.map((entry) => ({
+        id: entry.id,
+        startedAt: entry.startedAt,
+        stoppedAt: entry.stoppedAt
+      })),
+      {
+        now: capturedNow,
+        range: { start: boundary.start, end: boundary.end }
+      }
+    );
+    return {
+      ...point,
+      seconds: pointSeconds,
+      coveredSeconds: Math.max(
+        0,
+        pointSeconds - dayAnalysis.additionalOverlappingActivitySeconds
+      ),
+      additionalOverlappingActivitySeconds:
+        dayAnalysis.additionalOverlappingActivitySeconds
+    };
+  });
   const analysisById = new Map(analysis.entries.map((entry) => [entry.id, entry]));
   const totalEntries = numberValue(row.totalEntries);
   const totalPages = Math.max(1, Math.ceil(totalEntries / input.pageSize));
@@ -151,10 +182,11 @@ export async function getReports(session: RequestSession, input: ReportQueryInpu
     filterOptions,
     totalLoggedSeconds: totalSeconds,
     timeCoveredSeconds,
-    additionalOverlappingActivitySeconds: numberValue(row.additionalOverlapSeconds),
-    additionalOverlapSeconds: numberValue(row.additionalOverlapSeconds),
-    concurrentCoverageSeconds: numberValue(row.concurrentCoverageSeconds),
-    maxConcurrency: numberValue(row.maxConcurrency),
+    additionalOverlappingActivitySeconds:
+      analysis.additionalOverlappingActivitySeconds,
+    additionalOverlapSeconds: analysis.additionalOverlappingActivitySeconds,
+    concurrentCoverageSeconds: analysis.concurrentCoverageSeconds,
+    maxConcurrency: analysis.maxConcurrency,
     totalSeconds,
     previousPeriodSeconds,
     previousPeriodCoveredSeconds,

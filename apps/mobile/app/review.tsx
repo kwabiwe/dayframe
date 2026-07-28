@@ -57,7 +57,6 @@ import {
   isOpenReviewItem,
   isReviewNeededEntry,
   isLocationReviewItem,
-  removeReviewItemOptimistically,
   reduceReviewMenuState,
   reviewConfirmLabel,
   reviewItemCategoryLabel,
@@ -67,10 +66,12 @@ import {
 import {
   createReviewClientMutationId,
   enqueueReviewMutation,
+  getReviewItemSyncStates,
   getReviewSyncDiagnostics,
   loadCachedReviewBootstrap,
   subscribeReviewSync,
   synchroniseReviewMutations,
+  type ReviewItemSyncState,
   type ReviewSyncDiagnostics
 } from "@/lib/reviewSyncStore";
 
@@ -116,6 +117,9 @@ export default function ReviewScreen() {
   const [reviewSyncDiagnostics, setReviewSyncDiagnostics] = useState<ReviewSyncDiagnostics | null>(
     null
   );
+  const [reviewItemSyncStates, setReviewItemSyncStates] = useState<
+    Map<string, ReviewItemSyncState>
+  >(new Map());
   const [reprocessDiagnostics, setReprocessDiagnostics] = useState<ReviewReprocessDiagnostics>({
     apiBaseUrl: DAYFRAME_API_BASE,
     startedAt: null,
@@ -174,7 +178,12 @@ export default function ReviewScreen() {
   }, [commitData]);
 
   const refreshReviewSyncDiagnostics = useCallback(async () => {
-    setReviewSyncDiagnostics(await getReviewSyncDiagnostics());
+    const [diagnostics, itemStates] = await Promise.all([
+      getReviewSyncDiagnostics(),
+      getReviewItemSyncStates()
+    ]);
+    setReviewSyncDiagnostics(diagnostics);
+    setReviewItemSyncStates(itemStates);
   }, []);
 
   const cancelPendingReviewHandover = useCallback(() => {
@@ -386,7 +395,10 @@ export default function ReviewScreen() {
     applyReviewMenuEvent({
       type: "toggle",
       itemId: item.id,
-      disabled: reprocessRunning || reviewMutations.current.has(item.id)
+      disabled:
+        reprocessRunning ||
+        reviewMutations.current.has(item.id) ||
+        reviewItemSyncStates.has(item.id)
     });
   }
 
@@ -445,8 +457,7 @@ export default function ReviewScreen() {
     if (reviewMutations.current.has(item.id)) return;
     const currentData = dataRef.current;
     if (!currentData) return;
-    const optimistic = removeReviewItemOptimistically(currentData, item.id);
-    if (!optimistic) return;
+    if (!currentData.reviewItems.some((candidate) => candidate.id === item.id)) return;
 
     reviewMutations.current.set(item.id, 1);
     const clientMutationId = createReviewClientMutationId();
@@ -457,9 +468,9 @@ export default function ReviewScreen() {
       clientMutationId
     }).then(() => {
         if (!reviewMutations.current.has(item.id)) return;
-        commitData(optimistic.data);
         AccessibilityInfo.announceForAccessibility(successAnnouncement);
         reviewMutations.current.delete(item.id);
+        void refreshReviewSyncDiagnostics();
         void synchroniseReviewMutations()
           .then(() => {
             void load({
@@ -542,11 +553,9 @@ export default function ReviewScreen() {
         }
         const currentData = dataRef.current;
         if (!currentData) return false;
-        const optimistic = removeReviewItemOptimistically(
-          currentData,
-          editTarget.item.id
-        );
-        if (!optimistic) return false;
+        if (!currentData.reviewItems.some(
+          (candidate) => candidate.id === editTarget.item.id
+        )) return false;
         await enqueueReviewMutation({
           bootstrap: currentData,
           item: editTarget.item,
@@ -562,7 +571,7 @@ export default function ReviewScreen() {
             }
           }
         });
-        commitData(optimistic.data);
+        await refreshReviewSyncDiagnostics();
         AccessibilityInfo.announceForAccessibility(
           "Changes saved on this iPhone. Waiting to sync."
         );
@@ -698,6 +707,7 @@ export default function ReviewScreen() {
                       item={item}
                       peerEntries={reviewPeerEntries(data)}
                       disabled={reprocessRunning}
+                      syncState={reviewItemSyncStates.get(item.id) ?? null}
                       menuOpen={reviewMenuState.openItemId === item.id}
                       now={now}
                       onConfirm={() => confirmItem(item)}
@@ -818,6 +828,7 @@ function ReviewItemCard({
   onToggleMenu,
   onViewEvidence,
   peerEntries,
+  syncState,
   styles,
   theme
 }: {
@@ -829,6 +840,7 @@ function ReviewItemCard({
   onToggleMenu: () => void;
   onViewEvidence: () => void;
   peerEntries: MobileTimeEntry[];
+  syncState: ReviewItemSyncState | null;
   styles: ReturnType<typeof useMobileTheme>["styles"];
   theme: ReturnType<typeof useMobileTheme>["theme"];
 }) {
@@ -841,9 +853,10 @@ function ReviewItemCard({
     theme.textSecondary,
     theme.mode
   );
-  const controlsDisabled = disabled;
+  const controlsDisabled = disabled || syncState != null;
   const contextLines = reviewItemContextLines(item, categoryName);
   const overlapWarning = reviewItemOverlapWarning(item, peerEntries, now);
+  const syncCopy = reviewItemSyncStatusCopy(syncState);
 
   return (
     <View style={styles.reviewCard}>
@@ -854,9 +867,17 @@ function ReviewItemCard({
           <Text style={styles.reviewMetaLine}>{formatReviewItemSource(item)}</Text>
         </View>
         <View style={styles.reviewBadge}>
-          <Text style={styles.reviewBadgeText}>{REVIEW_COPY.needsReview}</Text>
+          <Text style={styles.reviewBadgeText}>
+            {syncCopy?.badge ?? REVIEW_COPY.needsReview}
+          </Text>
         </View>
       </View>
+
+      {syncCopy ? (
+        <Text accessibilityLiveRegion="polite" style={styles.reviewMetaLine}>
+          {syncCopy.detail}
+        </Text>
+      ) : null}
 
       <View style={styles.calendarBlockTitleRow}>
         <View style={[styles.colorDot, { backgroundColor: categoryColor }]} />
@@ -1282,6 +1303,32 @@ function reviewSyncStatusCopy(diagnostics: ReviewSyncDiagnostics) {
     } waiting to sync`;
   }
   return null;
+}
+
+function reviewItemSyncStatusCopy(syncState: ReviewItemSyncState | null) {
+  if (!syncState) return null;
+  if (syncState.state === "needs_attention") {
+    return {
+      badge: "Sync issue",
+      detail: "This saved change needs attention in Settings before it can reach Dayframe."
+    };
+  }
+  if (syncState.state === "auth_required") {
+    return {
+      badge: "Waiting to sync",
+      detail: "Saved on this iPhone. Sign in to send this change to Dayframe."
+    };
+  }
+  if (syncState.state === "retry_wait") {
+    return {
+      badge: "Waiting to sync",
+      detail: "Saved on this iPhone. It will stay here until Dayframe confirms the change."
+    };
+  }
+  return {
+    badge: "Waiting to sync",
+    detail: "Saving to Dayframe…"
+  };
 }
 
 function formatTimeOfDay(date: Date) {

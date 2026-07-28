@@ -44,9 +44,11 @@ describe("mobile Review action contracts", () => {
     expect(editSheetSource).toContain("AccessibilityInfo.setAccessibilityFocus");
   });
 
-  it("removes Review cards only after durable enqueue and reconciles stale bootstrap data", () => {
+  it("keeps Review cards pending until server acknowledgement and reconciles stale bootstrap data", () => {
     expect(reviewSource).toContain("enqueueReviewMutation");
-    expect(reviewSource).toContain("removeReviewItemOptimistically");
+    expect(reviewSource).toContain("getReviewItemSyncStates");
+    expect(reviewSource).toContain("Waiting to sync");
+    expect(reviewSource).not.toContain("removeReviewItemOptimistically");
     expect(reviewSource).toContain("synchroniseReviewMutations");
     expect(reviewSource).toContain("loadCachedReviewBootstrap");
     expect(reviewSource).toContain("new Map<string, number>()");

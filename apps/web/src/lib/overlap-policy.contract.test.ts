@@ -11,7 +11,7 @@ const genericReviewSource = readFileSync(
   "utf8"
 );
 
-describe("intentional overlap save policy", () => {
+describe("overlap save policy", () => {
   it("keeps every user-confirmed location Review path free of overlap blockers", () => {
     for (const action of [
       "confirm",

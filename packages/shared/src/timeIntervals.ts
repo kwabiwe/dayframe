@@ -70,6 +70,10 @@ export const TIME_OVERLAP_LAYOUT_CONSTANTS = {
   insetOffsetFraction: 0.18
 } as const;
 
+export const MINIMUM_MEANINGFUL_OVERLAP_MS = 60_000;
+export const MINIMUM_MEANINGFUL_OVERLAP_SECONDS =
+  MINIMUM_MEANINGFUL_OVERLAP_MS / 1000;
+
 export function analyzeTimeIntervals(
   input: ReadonlyArray<TimeIntervalInput>,
   {
@@ -110,28 +114,7 @@ export function analyzeTimeIntervals(
   }
 
   intervals.sort(compareIntervals);
-  const sweepPoints = intervals.flatMap((interval) => [
-    { at: interval.startMs, delta: 1 },
-    { at: interval.endMs, delta: -1 }
-  ]).sort((left, right) => left.at - right.at || left.delta - right.delta);
-
-  let active = 0;
-  let previousAt: number | null = null;
-  let coveredMs = 0;
-  let concurrentMs = 0;
-  let maxConcurrency = 0;
-  for (const point of sweepPoints) {
-    if (previousAt !== null && point.at > previousAt && active > 0) {
-      const segmentMs = point.at - previousAt;
-      coveredMs += segmentMs;
-      if (active > 1) {
-        concurrentMs += segmentMs;
-      }
-    }
-    active += point.delta;
-    maxConcurrency = Math.max(maxConcurrency, active);
-    previousAt = point.at;
-  }
+  const meaningfulPairs = meaningfulOverlapPairs(intervals);
 
   const analyzedEntries = intervals.map((interval) => {
     const overlappingEntryIds: string[] = [];
@@ -143,9 +126,9 @@ export function analyzeTimeIntervals(
 
     for (const other of intervals) {
       if (other.id === interval.id) continue;
+      if (!meaningfulPairs.has(pairKey(interval.id, other.id))) continue;
       const startMs = Math.max(interval.startMs, other.startMs);
       const endMs = Math.min(interval.endMs, other.endMs);
-      if (endMs <= startMs) continue;
       overlappingEntryIds.push(other.id);
       intersections.push({ startMs, endMs });
       entryPoints.push(
@@ -194,11 +177,17 @@ export function analyzeTimeIntervals(
     (total, interval) => total + interval.endMs - interval.startMs,
     0
   );
+  const meaningfulMetrics = meaningfulOverlapMetrics(
+    intervals,
+    meaningfulPairs
+  );
   const totalLoggedSeconds = seconds(loggedMs);
-  const timeCoveredSeconds = seconds(coveredMs);
-  const additionalOverlappingActivitySeconds = Math.max(
+  const additionalOverlappingActivitySeconds = seconds(
+    meaningfulMetrics.additionalMs
+  );
+  const timeCoveredSeconds = Math.max(
     0,
-    totalLoggedSeconds - timeCoveredSeconds
+    totalLoggedSeconds - additionalOverlappingActivitySeconds
   );
 
   return {
@@ -211,15 +200,20 @@ export function analyzeTimeIntervals(
     loggedSeconds: totalLoggedSeconds,
     coveredSeconds: timeCoveredSeconds,
     additionalOverlapSeconds: additionalOverlappingActivitySeconds,
-    concurrentCoverageSeconds: seconds(concurrentMs),
-    maxConcurrency,
+    concurrentCoverageSeconds: seconds(meaningfulMetrics.concurrentMs),
+    maxConcurrency: meaningfulMetrics.maxConcurrency,
     hasOverlap: additionalOverlappingActivitySeconds > 0
   };
 }
 
 export function layoutTimeIntervals(
   input: ReadonlyArray<Pick<TimeIntervalInput, "id" | "startedAt" | "stoppedAt">>,
-  now: Date | string | number = new Date()
+  now: Date | string | number = new Date(),
+  {
+    minimumOverlapMs = MINIMUM_MEANINGFUL_OVERLAP_MS
+  }: {
+    minimumOverlapMs?: number;
+  } = {}
 ) {
   const nowMs = toTimestamp(now);
   const intervals: NormalizedInterval[] = [];
@@ -240,25 +234,136 @@ export function layoutTimeIntervals(
     intervals.push({ id: candidate.id, startMs, endMs });
   }
   intervals.sort(compareIntervals);
-  const layouts: TimeIntervalLayout[] = [];
-  let group: NormalizedInterval[] = [];
-  let groupBottom = Number.NEGATIVE_INFINITY;
-
-  const finishGroup = () => {
-    if (group.length === 0) return;
-    layouts.push(...layoutCollisionGroup(group));
-    group = [];
-    groupBottom = Number.NEGATIVE_INFINITY;
-  };
-
-  for (const interval of intervals) {
-    if (group.length > 0 && interval.startMs >= groupBottom) finishGroup();
-    group.push(interval);
-    groupBottom = Math.max(groupBottom, interval.endMs);
-  }
-  finishGroup();
+  const layouts = collisionComponents(
+    intervals,
+    Math.max(0, minimumOverlapMs)
+  ).flatMap(layoutCollisionGroup);
 
   return layouts.sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function meaningfulOverlapPairs(intervals: NormalizedInterval[]) {
+  const pairs = new Set<string>();
+  for (let leftIndex = 0; leftIndex < intervals.length; leftIndex += 1) {
+    for (
+      let rightIndex = leftIndex + 1;
+      rightIndex < intervals.length;
+      rightIndex += 1
+    ) {
+      const left = intervals[leftIndex]!;
+      const right = intervals[rightIndex]!;
+      if (
+        intersectionDurationMs(left, right) >=
+        MINIMUM_MEANINGFUL_OVERLAP_MS
+      ) {
+        pairs.add(pairKey(left.id, right.id));
+      }
+    }
+  }
+  return pairs;
+}
+
+function meaningfulOverlapMetrics(
+  intervals: NormalizedInterval[],
+  pairs: Set<string>
+) {
+  if (intervals.length === 0) {
+    return { additionalMs: 0, concurrentMs: 0, maxConcurrency: 0 };
+  }
+  const points = [...new Set(
+    intervals.flatMap((interval) => [interval.startMs, interval.endMs])
+  )].sort((left, right) => left - right);
+  let additionalMs = 0;
+  let concurrentMs = 0;
+  let maxConcurrency = 1;
+
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const startMs = points[index]!;
+    const endMs = points[index + 1]!;
+    if (endMs <= startMs) continue;
+    const active = intervals.filter(
+      (interval) => interval.startMs < endMs && interval.endMs > startMs
+    );
+    const components = collisionComponentsFromPairs(active, pairs)
+      .filter((component) => component.length > 1);
+    if (components.length === 0) continue;
+    const segmentMs = endMs - startMs;
+    concurrentMs += segmentMs;
+    additionalMs += components.reduce(
+      (total, component) => total + (component.length - 1) * segmentMs,
+      0
+    );
+    maxConcurrency = Math.max(
+      maxConcurrency,
+      ...components.map((component) => component.length)
+    );
+  }
+
+  return { additionalMs, concurrentMs, maxConcurrency };
+}
+
+function collisionComponents(
+  intervals: NormalizedInterval[],
+  minimumOverlapMs: number
+) {
+  const pairs = new Set<string>();
+  for (let leftIndex = 0; leftIndex < intervals.length; leftIndex += 1) {
+    for (
+      let rightIndex = leftIndex + 1;
+      rightIndex < intervals.length;
+      rightIndex += 1
+    ) {
+      const left = intervals[leftIndex]!;
+      const right = intervals[rightIndex]!;
+      const overlapMs = intersectionDurationMs(left, right);
+      if (overlapMs > 0 && overlapMs >= minimumOverlapMs) {
+        pairs.add(pairKey(left.id, right.id));
+      }
+    }
+  }
+  return collisionComponentsFromPairs(intervals, pairs);
+}
+
+function collisionComponentsFromPairs(
+  intervals: NormalizedInterval[],
+  pairs: Set<string>
+) {
+  const remaining = new Map(intervals.map((interval) => [interval.id, interval]));
+  const components: NormalizedInterval[][] = [];
+  for (const interval of intervals) {
+    if (!remaining.has(interval.id)) continue;
+    const component: NormalizedInterval[] = [];
+    const queue = [interval];
+    remaining.delete(interval.id);
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      component.push(current);
+      for (const candidate of [...remaining.values()]) {
+        if (!pairs.has(pairKey(current.id, candidate.id))) continue;
+        remaining.delete(candidate.id);
+        queue.push(candidate);
+      }
+    }
+    components.push(component.sort(compareIntervals));
+  }
+  return components;
+}
+
+function intersectionDurationMs(
+  left: NormalizedInterval,
+  right: NormalizedInterval
+) {
+  return Math.max(
+    0,
+    Math.min(left.endMs, right.endMs) -
+      Math.max(left.startMs, right.startMs)
+  );
+}
+
+function pairKey(leftId: string, rightId: string) {
+  return leftId < rightId
+    ? `${leftId}\u0000${rightId}`
+    : `${rightId}\u0000${leftId}`;
 }
 
 function layoutCollisionGroup(group: NormalizedInterval[]): TimeIntervalLayout[] {

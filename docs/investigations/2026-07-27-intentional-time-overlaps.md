@@ -1,5 +1,28 @@
 # Intentional time overlaps
 
+## 2026-07-28 product correction
+
+Production evidence showed that raw timestamp intersections of 26.338 seconds
+and 636 milliseconds were presented as `Intentional overlap` beside
+minute-rounded times. That wording claimed user intent which Dayframe never
+stored, and the raw threshold elevated harmless capture jitter into a product
+warning.
+
+The corrected contract is deliberately smaller:
+
+- user-facing copy says `Overlap`, never `Intentional overlap`;
+- Dayframe detects overlap automatically and adds no user flag or prompt;
+- explicit Add, Edit, and Review actions remain permitted;
+- an intersection is meaningful at 60 seconds or longer;
+- shorter intersections remain in the original timestamps but do not drive
+  markers, warnings, Calendar collision layout, reports, or automatic
+  Health/location Review decisions.
+
+The shared analyser owns the 60-second boundary. Automatic ingestion SQL uses
+the same boundary so hidden pipeline decisions cannot disagree with History or
+Calendar. Raw intersections remain available only as underlying timestamp
+truth, not as a second user-facing state.
+
 ## Decision
 
 Dayframe preserves intentional overlap when a user explicitly adds, edits, or

@@ -70,7 +70,10 @@ export function layoutTimeBlockLanes(
       startedAt: block.top,
       stoppedAt: block.top + block.height
     })),
-    0
+    0,
+    // Rendered minimum heights still need collision lanes even when the
+    // underlying entries are sequential. These values are pixels, not time.
+    { minimumOverlapMs: 0 }
   )) {
     lanes.set(layout.id, {
       laneCount: layout.laneCount,
