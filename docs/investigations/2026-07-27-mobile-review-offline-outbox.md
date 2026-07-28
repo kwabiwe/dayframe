@@ -392,6 +392,27 @@ exists; Vercel production reached `READY`; TestFlight `0.1.0 (74)` reached
 remained open before retry, so build 74 can reconcile the original durable
 actions without inventing replacement decisions.
 
+## 2026-07-28 diagnostics export follow-up
+
+PR #129 merged at `64d041f`. The Sync screen already read the dedicated Review
+SQLite outbox, but Export diagnostics only serialised the older activity-event
+queue. This allowed the screen to report a Review issue while the exported JSON
+reported zero queued and failed events.
+
+The export now adds a `reviewSync` section containing the same aggregate counts
+as the Sync screen plus safe operational fields for every Review mutation:
+action, state, client mutation ID, Review item ID, attempt count, retry and
+attempt timestamps, HTTP status, and last error. It deliberately excludes the
+canonical request, cached Review snapshot, coordinates, and location evidence.
+No retry, conflict, reconciliation, API, or database behaviour changed.
+
+The merged change shipped in TestFlight `0.1.0 (75)`, delivery/build ID
+`222760fc-e59c-4b67-a2cb-7d0aab33069b`. App Store Connect reports
+`processingState=VALID`, `usesNonExemptEncryption=false`, en-GB notes set,
+`Internal Health Debug` all-build access, and
+`internalBuildState=IN_BETA_TESTING`. The signed archive uses production API
+`https://dayframe-web.vercel.app`.
+
 Files:
 
 - base/local schema: `packages/db/migrations/001_init.sql`;
