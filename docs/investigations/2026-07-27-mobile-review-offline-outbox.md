@@ -385,6 +385,13 @@ Motion contract:
 - existing Reduce Motion, Dynamic Type, and VoiceOver behavior remains the
   transition/accessibility owner.
 
+Release evidence: PR #127 merged at `b6132b7`; the production receipt table
+exists; Vercel production reached `READY`; TestFlight `0.1.0 (74)` reached
+`VALID` and `IN_BETA_TESTING` in `Internal Health Debug`, delivery/build ID
+`c729c0f0-97dc-4281-87a1-10a7eab710bd`. The two identified Sunday suggestions
+remained open before retry, so build 74 can reconcile the original durable
+actions without inventing replacement decisions.
+
 Files:
 
 - base/local schema: `packages/db/migrations/001_init.sql`;

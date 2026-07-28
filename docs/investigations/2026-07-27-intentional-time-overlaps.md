@@ -23,6 +23,11 @@ the same boundary so hidden pipeline decisions cannot disagree with History or
 Calendar. Raw intersections remain available only as underlying timestamp
 truth, not as a second user-facing state.
 
+Release evidence: PR #127 merged at `b6132b7`; Vercel production reached
+`READY`; TestFlight `0.1.0 (74)` reached `VALID` and `IN_BETA_TESTING` in
+`Internal Health Debug`, delivery/build ID
+`c729c0f0-97dc-4281-87a1-10a7eab710bd`.
+
 ## Decision
 
 Dayframe preserves intentional overlap when a user explicitly adds, edits, or
