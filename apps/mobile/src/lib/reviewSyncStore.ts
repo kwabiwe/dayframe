@@ -55,6 +55,20 @@ export type ReviewSyncResult = {
   reason?: "no_account" | "no_session" | "retryable_failure";
 };
 
+export type ReviewSyncDiagnosticMutation = {
+  clientMutationId: string;
+  reviewItemId: string;
+  action: string;
+  state: ReviewMutationState;
+  createdAt: string;
+  updatedAt: string;
+  attemptCount: number;
+  nextAttemptAt: string | null;
+  lastAttemptedAt: string | null;
+  lastHttpStatus: number | null;
+  lastError: string | null;
+};
+
 type AccountRow = {
   account_key: string;
   workspace_id: string;
@@ -1019,6 +1033,31 @@ export async function listReviewSyncIssues() {
             last_error as "lastError"
      from review_mutation_outbox
      where account_key = ? and state = 'needs_attention'
+     order by created_at`,
+    account.account_key
+  );
+}
+
+export async function listReviewSyncDiagnosticMutations(): Promise<
+  ReviewSyncDiagnosticMutation[]
+> {
+  const db = await database();
+  const account = await activeAccount(db);
+  if (!account) return [];
+  return await db.getAllAsync<ReviewSyncDiagnosticMutation>(
+    `select client_mutation_id as "clientMutationId",
+            review_item_id as "reviewItemId",
+            action_kind as action,
+            state,
+            created_at as "createdAt",
+            updated_at as "updatedAt",
+            attempt_count as "attemptCount",
+            next_attempt_at as "nextAttemptAt",
+            last_attempted_at as "lastAttemptedAt",
+            last_http_status as "lastHttpStatus",
+            last_error as "lastError"
+     from review_mutation_outbox
+     where account_key = ?
      order by created_at`,
     account.account_key
   );

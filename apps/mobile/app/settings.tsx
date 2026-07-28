@@ -109,6 +109,7 @@ import {
 import {
   discardReviewSyncIssue,
   getReviewSyncDiagnostics,
+  listReviewSyncDiagnosticMutations,
   listReviewSyncIssues,
   subscribeReviewSync,
   synchroniseReviewMutations,
@@ -781,10 +782,21 @@ export default function SettingsScreen() {
 
   async function exportQueueDiagnostics() {
     try {
-      const latestQueue = await readQueue();
-      const snapshot = buildQueueDiagnosticsSnapshot(latestQueue, lastSyncResult);
+      const [latestQueue, latestReviewDiagnostics, reviewMutations] = await Promise.all([
+        readQueue(),
+        getReviewSyncDiagnostics(),
+        listReviewSyncDiagnosticMutations()
+      ]);
+      const eventQueueSnapshot = buildQueueDiagnosticsSnapshot(latestQueue, lastSyncResult);
+      const snapshot = {
+        ...eventQueueSnapshot,
+        reviewSync: {
+          diagnostics: latestReviewDiagnostics,
+          mutations: reviewMutations
+        }
+      };
       await Share.share({
-        title: `Dayframe queue diagnostics ${snapshot.exportedAt}`,
+        title: `Dayframe sync diagnostics ${snapshot.exportedAt}`,
         message: JSON.stringify(snapshot, null, 2)
       });
       setQueueAndCache(latestQueue);
