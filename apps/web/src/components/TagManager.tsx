@@ -109,7 +109,7 @@ export function TagManager({ tags }: { tags: TagRow[] }) {
                 </div>
               </form>
             ) : (
-              <div className="motion-row flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between" key={tag.id}>
+              <div className="motion-row flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between" id={`tag-${tag.id}`} key={tag.id}>
                 <div className="flex min-w-0 items-center gap-3">
                   <Tag aria-hidden="true" className="shrink-0 text-[var(--muted)]" size={17} />
                   <div className="min-w-0">

@@ -3384,14 +3384,46 @@ kbd {
   overscroll-behavior: contain;
 }
 
+.swiss-search-result {
+  position: relative;
+  border-bottom: 1px solid var(--line);
+}
+
 .swiss-search-results a {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   min-height: 58px;
-  border-bottom: 1px solid var(--line);
   padding: 0 16px;
+}
+
+.swiss-search-result:has(.swiss-search-start-again) a {
+  padding-right: 118px;
+}
+
+.swiss-search-start-again {
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  translate: 0 -50%;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--web-control-radius);
+  background: var(--surface);
+  padding: 7px 9px;
+  color: var(--accent-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.swiss-search-start-again:hover {
+  border-color: var(--accent);
+}
+
+.place-list-row:target,
+.motion-row:target {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
 }
 
 .swiss-search-results strong {
