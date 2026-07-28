@@ -14,7 +14,7 @@ import type {
 import { createSerialMutationQueue } from "./location/mutationQueue";
 
 const DATABASE_NAME = "dayframe-review-sync.db";
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
 const ACTIVE_ACCOUNT_KEY = "active_account";
 const LAST_CACHE_AT_KEY = "last_cache_at";
 const LAST_SUCCESSFUL_SYNC_AT_KEY = "last_successful_sync_at";
@@ -28,6 +28,10 @@ const SYNC_STATES = [
 ] as const;
 
 export type ReviewMutationState = typeof SYNC_STATES[number];
+export type ReviewItemSyncState = {
+  action: string;
+  state: ReviewMutationState;
+};
 
 export type ReviewSyncDiagnostics = {
   pendingCount: number;
@@ -161,7 +165,7 @@ async function database() {
             preceding_ids_json text not null,
             following_ids_json text not null,
             state text not null,
-            local_effect text not null default 'hidden',
+            local_effect text not null default 'restore',
             attempt_count integer not null default 0,
             next_attempt_at text,
             last_attempted_at text,
@@ -179,6 +183,15 @@ async function database() {
           create index if not exists review_mutation_drain_idx
             on review_mutation_outbox(account_key, state, next_attempt_at, created_at);
         `);
+        if ((version?.user_version ?? 0) < 2) {
+          await transaction.execAsync(`
+            update review_mutation_outbox
+            set local_effect = case
+              when state = 'acknowledged' then 'hidden'
+              else 'restore'
+            end;
+          `);
+        }
         await transaction.execAsync(`PRAGMA user_version = ${DATABASE_VERSION}`);
       });
     }
@@ -607,7 +620,7 @@ export async function enqueueReviewMutation(input: {
            review_item_id, action_kind, request_json, original_snapshot_json,
            original_position, preceding_ids_json, following_ids_json,
            state, local_effect, created_at, updated_at
-         ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'hidden', ?, ?)`,
+         ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'restore', ?, ?)`,
         envelope.clientMutationId,
         key,
         input.bootstrap.workspace.id,
@@ -737,6 +750,7 @@ async function synchroniseReviewMutationsUnsafe(
           db.runAsync(
             `update review_mutation_outbox
              set state = 'acknowledged',
+                 local_effect = 'hidden',
                  next_attempt_at = null,
                  last_http_status = ?,
                  last_error = null,
@@ -766,7 +780,7 @@ async function synchroniseReviewMutationsUnsafe(
           response.status,
           "Authentication required.",
           null,
-          "hidden"
+          "restore"
         );
         await markAccountAuthenticationRequired(account.account_key);
         await clearSessionToken();
@@ -842,7 +856,7 @@ async function scheduleRetry(
     status,
     error,
     retryAt,
-    "hidden"
+    "restore"
   );
 }
 
@@ -960,6 +974,29 @@ export async function getReviewSyncDiagnostics(): Promise<ReviewSyncDiagnostics>
       db
     )
   };
+}
+
+export async function getReviewItemSyncStates() {
+  const db = await database();
+  const account = await activeAccount(db);
+  if (!account) return new Map<string, ReviewItemSyncState>();
+  const rows = await db.getAllAsync<{
+    action_kind: string;
+    review_item_id: string;
+    state: ReviewMutationState;
+  }>(
+    `select review_item_id, action_kind, state
+     from review_mutation_outbox
+     where account_key = ? and state != 'acknowledged'
+     order by created_at`,
+    account.account_key
+  );
+  return new Map(
+    rows.map((row) => [
+      row.review_item_id,
+      { action: row.action_kind, state: row.state }
+    ])
+  );
 }
 
 export async function listReviewSyncIssues() {

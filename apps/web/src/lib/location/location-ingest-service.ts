@@ -550,6 +550,8 @@ async function hasConfirmedTimeOverlap(
      where workspace_id = $1 and user_id = $2
        and review_status in ('confirmed', 'accepted')
        and started_at < $4 and coalesce(stopped_at, 'infinity'::timestamptz) > $3
+       and least(coalesce(stopped_at, 'infinity'::timestamptz), $4)
+           - greatest(started_at, $3) >= interval '1 minute'
        and not exists (
          select 1 from activity_events ae
          where ae.id = time_entries.created_from_event_id

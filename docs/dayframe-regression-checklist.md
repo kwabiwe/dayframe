@@ -33,7 +33,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Web Calendar hover/focus reveals only the inline Play action; it does not mount a floating details card. Double-click and keyboard Enter open Edit.
 - Web running blocks keep normal text opacity and use an explicit Running label plus a non-colour boundary treatment. Completed Calendar/List restart actions share the one shell timer runtime, copy only category/description/tags, gate duplicates, refuse to replace an active timer, and roll back on failure.
 - Calendar/time blocks at least 48px high can be resized from safe top/bottom pointer handles, snap to configured intervals, and save on release. Smaller blocks use Edit instead of overlapping resize targets.
-- Intentional overlaps save from web/mobile Add and Edit, Calendar resize, every explicit Review confirmation path, and offline Review replay. Warnings explain the overlap without disabling the primary action.
+- Overlaps of at least one minute save from web/mobile Add and Edit, Calendar resize, every explicit Review confirmation path, and offline Review replay. Warnings explain the automatically detected overlap without disabling the primary action; shorter intersections are boundary noise.
 - Boundary-touching entries have no overlap marker. Contained, partial, chained, cross-midnight, running, and dense overlaps show deterministic markers and Calendar geometry.
 - Calendar taps open the visible intended block in contained and dense collisions; enlarged hidden hit targets do not cover neighbouring blocks.
 - Timeline/History and Reports distinguish Total logged from Time covered. Category allocation and timesheets remain logged-time views, while daily/weekly goals advance on covered time.
@@ -88,11 +88,12 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Offline Review decisions use their dedicated account-scoped SQLite owner, not
   the activity-event queue or location-evidence database. With Review data
   already downloaded, Confirm, Dismiss, and Edit-and-confirm must commit the
-  request plus tombstone locally before the card exits, survive navigation,
-  background/foreground, force-quit, and restart, then synchronise exactly once
-  when Dayframe is active and authenticated again.
+  request locally, keep the card visibly disabled as `Waiting to sync`, survive
+  navigation, background/foreground, force-quit, and restart, then synchronise
+  exactly once when Dayframe is active and authenticated again. The card exits
+  only after server acknowledgement.
 - Cached Review data must never cross accounts or reinsert a pending local
-  tombstone. Session expiry preserves the same account's mutations as
+  mutation as actionable. Session expiry preserves the same account's mutations as
   sign-in-required; confirmed logout warns with the exact unsynchronised count
   and clears only that active account's Review cache/outbox.
 - Review retry coverage includes network/DNS failure, timeout, 408, 429, 5xx,

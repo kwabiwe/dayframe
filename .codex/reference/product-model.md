@@ -32,12 +32,12 @@ Use this when changing timer flows, dashboards, reports, entity management, onbo
 - Do not delete existing project/client data without an approved migration and export/safety plan.
 - Reports should prioritize category and source/place breakdowns. Legacy project/client reports should be hidden or demoted unless explicitly requested.
 
-## Intentional Time Overlap
+## Time Overlap
 
 - Confirmed time entries use half-open intervals, `[start, end)`. Touching boundaries do not overlap.
-- Manual Add/Edit and explicit Review confirmation may create intentional overlaps. Warn and explain; never reject solely because another entry occupies the same clock time.
+- Manual Add/Edit and explicit Review confirmation may create overlaps. Detect and explain meaningful overlaps automatically; never reject solely because another entry occupies the same clock time.
 - A time overlap is not a duplicate. Preserve source/client-event, Health sample, location segment, and Review mutation idempotency independently.
-- Only one active timer is allowed. Intentional overlap does not permit a second running timer.
+- Only one active timer is allowed. Overlap support does not permit a second running timer.
 - Automatic Health and location writes remain conservative: an overlap pauses automatic creation and leaves the signal in Review, where the user may still confirm it.
 - Display both `Total logged` (sum of entry durations) and `Time covered` (interval union) where totals guide decisions. Goals use covered time; timesheets and category allocation remain logged time.
 
