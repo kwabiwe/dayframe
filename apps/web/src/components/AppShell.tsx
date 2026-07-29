@@ -34,12 +34,14 @@ import { IconButton, ModalDialog, PopoverPanel } from "@/components/ui/Primitive
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { timeEntryTitle } from "@/lib/display";
 import { formatDuration, formatTime } from "@/lib/format";
+import type { GlobalSearchResult } from "@/lib/global-search";
 import { isSearchShortcut, SEARCH_SHORTCUT_LABEL } from "@/lib/keyboard-shortcuts";
 import type { BootstrapData } from "@/lib/queries";
 import {
   shiftTimelineState,
   timelineHref,
-  timelineStateFromSearchParams
+  timelineStateFromSearchParams,
+  toTimelineDateKey
 } from "@/lib/timeline-view";
 
 type Overlay = "search" | "profile" | "help" | null;
@@ -86,17 +88,59 @@ function AppShellContent({ children }: { children: ReactNode }) {
     openManualEntry,
     refresh,
     selectedDate,
+    startTimer,
     toggleTimer
   } = useAppShellRuntime();
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [query, setQuery] = useState("");
+  const [remoteSearch, setRemoteSearch] = useState<{ query: string; results: GlobalSearchResult[] }>({
+    query: "",
+    results: []
+  });
+  const [searchStatus, setSearchStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const showTimerShell = pathname === "/" || pathname === "/timeline";
   const showShellDateContext = pathname === "/";
   const timelineState = useMemo(
     () => timelineStateFromSearchParams(searchParams),
     [searchParams]
   );
-  const searchResults = useMemo(() => buildSearchResults(data, query), [data, query]);
+  const searchResults = useMemo(
+    () => query.trim().length >= 2
+      ? remoteSearch.query === query.trim()
+        ? remoteSearch.results.map(globalSearchResult)
+        : []
+      : buildSearchResults(data, ""),
+    [data, query, remoteSearch]
+  );
+
+  useEffect(() => {
+    const searchTerm = query.trim();
+    if (overlay !== "search" || searchTerm.length < 2) {
+      return;
+    }
+    const controller = new AbortController();
+    const timeout = window.setTimeout(async () => {
+      setSearchStatus("loading");
+      try {
+        const response = await clientFetch(`/api/search?q=${encodeURIComponent(searchTerm)}`, {
+          cache: "no-store",
+          signal: controller.signal
+        });
+        if (!response.ok) throw new Error(`Search failed: ${response.status}`);
+        const payload = (await response.json()) as { results: GlobalSearchResult[] };
+        setRemoteSearch({ query: searchTerm, results: payload.results });
+        setSearchStatus("ready");
+      } catch {
+        if (controller.signal.aborted) return;
+        setRemoteSearch({ query: searchTerm, results: [] });
+        setSearchStatus("error");
+      }
+    }, 180);
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [overlay, query]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -265,7 +309,20 @@ function AppShellContent({ children }: { children: ReactNode }) {
         />
       ) : null}
       {overlay === "search" ? (
-        <SearchPalette query={query} setQuery={setQuery} results={searchResults} onClose={() => setOverlay(null)} />
+        <SearchPalette
+          query={query}
+          setQuery={setQuery}
+          results={searchResults}
+          status={query.trim().length >= 2 && remoteSearch.query !== query.trim()
+            ? "loading"
+            : searchStatus}
+          onStartAgain={async (result) => {
+            const outcome = await startTimer(result.startAgain);
+            if (outcome.ok) setOverlay(null);
+            return outcome;
+          }}
+          onClose={() => setOverlay(null)}
+        />
       ) : null}
       {overlay === "help" ? <HelpDialog onClose={() => setOverlay(null)} /> : null}
     </div>
@@ -374,11 +431,15 @@ function SearchPalette({
   query,
   setQuery,
   results,
+  status,
+  onStartAgain,
   onClose
 }: {
   query: string;
   setQuery: (query: string) => void;
   results: SearchResult[];
+  status: "idle" | "loading" | "ready" | "error";
+  onStartAgain: (result: SearchResult & { startAgain: NonNullable<SearchResult["startAgain"]> }) => Promise<unknown>;
   onClose: () => void;
 }) {
   return (
@@ -393,14 +454,29 @@ function SearchPalette({
         {results.map((result) => {
           const Icon = result.icon;
           return (
-            <Link key={result.id} href={result.href} onClick={onClose}>
-              <Icon size={19} />
-              <span><strong>{result.label}</strong><small>{result.detail}</small></span>
-              <em>{result.group}</em>
-            </Link>
+            <div className="swiss-search-result" key={result.id}>
+              <Link href={result.href} onClick={onClose}>
+                <Icon size={19} />
+                <span><strong>{result.label}</strong><small>{result.detail}</small></span>
+                <em>{result.group}</em>
+              </Link>
+              {result.startAgain ? (
+                <button
+                  className="swiss-search-start-again"
+                  type="button"
+                  onClick={() => void onStartAgain({ ...result, startAgain: result.startAgain! })}
+                >
+                  Start Again
+                </button>
+              ) : null}
+            </div>
           );
         })}
-        {results.length === 0 ? <p>No matching results.</p> : null}
+        {status === "loading" ? <p role="status">Searching all history…</p> : null}
+        {status === "error" ? <p role="alert">Search is unavailable. Try again.</p> : null}
+        {status !== "loading" && status !== "error" && results.length === 0
+          ? <p>No matching results.</p>
+          : null}
       </div>
     </ModalDialog>
   );
@@ -423,7 +499,67 @@ type SearchResult = {
   group: string;
   href: string;
   icon: LucideIcon;
+  startAgain?: {
+    categoryId?: string;
+    placeId?: string;
+    description?: string;
+    tagNames?: string[];
+  };
 };
+
+function globalSearchResult(result: GlobalSearchResult): SearchResult {
+  const occurredAt = result.occurredAt ? new Date(result.occurredAt) : null;
+  const date = occurredAt && !Number.isNaN(occurredAt.getTime())
+    ? toTimelineDateKey(occurredAt)
+    : null;
+  const href = result.kind === "entry" && result.entryId && date
+    ? `/timeline?date=${date}&scope=day&view=list&entry=${result.entryId}`
+    : result.kind === "review"
+      ? `/review#review-${result.id.slice("review:".length)}`
+      : result.kind === "place"
+        ? `/places#place-${result.placeId}`
+        : result.kind === "tag"
+          ? `/tags#tag-${result.id.slice("tag:".length)}`
+          : result.kind === "category"
+            ? `/categories#category-${result.categoryId}`
+            : date && result.entryId
+              ? `/timeline?date=${date}&scope=day&view=list&entry=${result.entryId}`
+              : "/timeline?view=list";
+  const iconByKind: Record<GlobalSearchResult["kind"], LucideIcon> = {
+    activity: Clock3,
+    entry: Clock3,
+    place: MapPin,
+    category: FileText,
+    tag: Tags,
+    review: Inbox
+  };
+  const groupByKind: Record<GlobalSearchResult["kind"], string> = {
+    activity: "Activity",
+    entry: "Entry",
+    place: "Place",
+    category: "Category",
+    tag: "Tag",
+    review: "Review"
+  };
+  return {
+    id: result.id,
+    label: result.label,
+    detail: result.detail || (occurredAt ? occurredAt.toLocaleDateString() : groupByKind[result.kind]),
+    group: groupByKind[result.kind],
+    href,
+    icon: iconByKind[result.kind],
+    ...(result.kind === "activity"
+      ? {
+          startAgain: {
+            ...(result.categoryId ? { categoryId: result.categoryId } : {}),
+            ...(result.placeId ? { placeId: result.placeId } : {}),
+            ...(result.description ? { description: result.description } : {}),
+            ...(result.tagNames.length ? { tagNames: result.tagNames } : {})
+          }
+        }
+      : {})
+  };
+}
 
 function buildSearchResults(data: BootstrapData | null, query: string): SearchResult[] {
   if (!data) return [];
