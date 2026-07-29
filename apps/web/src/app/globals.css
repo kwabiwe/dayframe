@@ -2628,17 +2628,16 @@ dialog.ui-popover-panel.bottom-left {
 
 .calendar-start-again {
   position: absolute;
-  top: 6px;
-  right: 7px;
+  top: 0;
+  right: 2px;
   z-index: 4;
   display: inline-grid;
-  width: 28px;
+  width: 22px;
   height: 28px;
+  max-height: 100%;
   place-items: center;
   border: 0;
-  border-radius: 999px;
-  background: var(--surface-raised);
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--foreground) 12%, transparent);
+  background: transparent;
   color: var(--foreground);
   cursor: pointer;
   opacity: 0;
@@ -2646,7 +2645,7 @@ dialog.ui-popover-panel.bottom-left {
   visibility: hidden;
   transform: translateY(-2px);
   transition:
-    background-color 140ms ease,
+    color 140ms ease,
     opacity 140ms ease,
     transform 140ms ease,
     visibility 0s linear 140ms;
@@ -2666,11 +2665,11 @@ dialog.ui-popover-panel.bottom-left {
 .calendar-time-block:hover .calendar-entry-primary,
 .calendar-time-block.is-selected .calendar-entry-primary,
 .calendar-time-block:focus-within .calendar-entry-primary {
-  padding-right: 42px;
+  padding-right: 26px;
 }
 
 .calendar-start-again:hover {
-  background: var(--surface-muted);
+  color: var(--accent);
 }
 
 .calendar-start-again:disabled {

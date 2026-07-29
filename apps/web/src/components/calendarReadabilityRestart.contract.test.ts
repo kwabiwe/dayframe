@@ -45,6 +45,8 @@ describe("Calendar readability and restart contract", () => {
     expect(calendarRunningRule).toContain("outline:");
     expect(calendarRunningRule).not.toContain("opacity");
     expect(styles).toContain(".calendar-start-again");
+    expect(styles).toMatch(/\.calendar-start-again \{[^}]*width: 22px;[^}]*background: transparent;/s);
+    expect(styles).not.toMatch(/\.calendar-start-again \{[^}]*border-radius:/s);
     expect(styles).toMatch(/@media \(hover: none\)[\s\S]*\.calendar-start-again \{[^}]*display: none;/);
   });
 });

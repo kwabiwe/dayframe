@@ -40,7 +40,7 @@ export function getTimeBlockDensity({
 
   return {
     canDirectResize: height >= 48,
-    canShowInlineAction: height >= 40,
+    canShowInlineAction: height >= minimumClickableBlockHeight,
     isTiny,
     isShort,
     showTitle: height >= 18,
