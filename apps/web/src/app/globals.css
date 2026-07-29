@@ -8184,3 +8184,81 @@ dialog.ui-dialog.manual-entry-dialog {
 .calendar-time-block.is-tiny .calendar-entry-title {
   font-size: 11px;
 }
+.calendar-horizontal-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.calendar-entry-quick-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-raised);
+}
+
+.calendar-entry-quick-card > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.calendar-entry-quick-card span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.calendar-entry-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.calendar-entry-quick-actions button,
+.calendar-delete-undo button {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 12px;
+  background: var(--surface-muted);
+  color: var(--foreground);
+}
+
+.calendar-entry-quick-actions button.is-danger {
+  color: var(--danger-text);
+}
+
+.calendar-delete-undo {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 80;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-radius: 999px;
+  padding: 6px 8px 6px 16px;
+  background: var(--foreground);
+  color: var(--background);
+  box-shadow: var(--shadow-raised);
+}
+
+.calendar-delete-undo button {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+@media (max-width: 640px) {
+  .calendar-entry-quick-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
