@@ -21,7 +21,7 @@ describe("time block display helpers", () => {
       showDuration: false,
       showTags: false,
       canDirectResize: false,
-      canShowInlineAction: false
+      canShowInlineAction: true
     });
     expect(timeBlockDensityClassNames(tiny)).not.toContain("has-no-text");
   });
@@ -67,6 +67,8 @@ describe("time block display helpers", () => {
       .toEqual([true, true, true]);
     expect([oneHourZoom, halfHourZoom, quarterHourZoom].map((density) => density.showDuration))
       .toEqual([false, false, false]);
+    expect([oneHourZoom, halfHourZoom, quarterHourZoom].map((density) => density.canShowInlineAction))
+      .toEqual([true, true, true]);
   });
 
   it("assigns visual lanes when minimum heights would otherwise cover nearby blocks", () => {
