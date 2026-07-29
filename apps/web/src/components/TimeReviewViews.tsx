@@ -1,9 +1,9 @@
 "use client";
 
-import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from "react";
-import { useCallback, useMemo, useState, useTransition } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CalendarDays, ChevronLeft, ChevronRight, CircleDot, List, Play, Table2 } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, CircleDot, List, Pencil, Play, Table2, Trash2 } from "lucide-react";
 import { analyzeTimeIntervals, calendarBlockContinuationEdges } from "@dayframe/shared";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
@@ -329,6 +329,8 @@ function CalendarReview({
   const [resizeError, setResizeError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [continuingEntryId, setContinuingEntryId] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<TimeEntryRow | null>(null);
+  const deleteTimerRef = useRef<number | null>(null);
   const [zoomLevel, setZoomLevel] = useState<CalendarZoom>("hour");
   const today = capturedNow;
   const zoom = calendarZooms[zoomLevel];
@@ -338,6 +340,9 @@ function CalendarReview({
   const rowHeight = zoom.pixelsPerHour;
   const gridLineSpacing = (zoom.intervalMinutes / 60) * rowHeight;
   const calendarHeight = (calendarHours.endHour - calendarHours.startHour) * rowHeight;
+  useEffect(() => () => {
+    if (deleteTimerRef.current !== null) window.clearTimeout(deleteTimerRef.current);
+  }, []);
   const axisMarks = useMemo(() => {
     const startMinutes = calendarHours.startHour * 60;
     const totalMinutes = (calendarHours.endHour - calendarHours.startHour) * 60;
@@ -380,6 +385,36 @@ function CalendarReview({
     } finally {
       setContinuingEntryId(null);
     }
+  }
+
+  function deleteCalendarEntry(entry: TimeEntryRow) {
+    if (deleteTimerRef.current !== null) window.clearTimeout(deleteTimerRef.current);
+    setSelectedTarget(null);
+    setPendingDelete(entry);
+    deleteTimerRef.current = window.setTimeout(async () => {
+      deleteTimerRef.current = null;
+      const response = await clientFetch(`/api/time-entries/${entry.id}`, { method: "DELETE" });
+      if (!response.ok) {
+        setPendingDelete(null);
+        setActionError("Unable to delete this entry.");
+        return;
+      }
+      setPendingDelete(null);
+      await onSynced();
+      startTransition(() => router.refresh());
+    }, 5_000);
+  }
+
+  function undoCalendarDelete() {
+    if (deleteTimerRef.current !== null) window.clearTimeout(deleteTimerRef.current);
+    deleteTimerRef.current = null;
+    setPendingDelete(null);
+  }
+
+  function forwardVerticalCalendarWheel(event: ReactWheelEvent<HTMLDivElement>) {
+    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+    event.preventDefault();
+    window.scrollBy({ top: event.deltaY, behavior: "auto" });
   }
 
   async function saveCalendarResize(entry: TimeEntryRow, draft: CalendarResizeDraft) {
@@ -516,7 +551,7 @@ function CalendarReview({
           </button>
         </span>
       </div>
-      <div className="overflow-x-auto">
+      <div className="calendar-horizontal-scroll" onWheel={forwardVerticalCalendarWheel}>
         <div
           className="grid min-w-[980px]"
           style={{ gridTemplateColumns: `72px repeat(${visibleDays.length}, minmax(130px, 1fr))` }}
@@ -588,6 +623,7 @@ function CalendarReview({
             >
               {(() => {
                 const blocks = entries
+                  .filter((entry) => entry.id !== pendingDelete?.id)
                   .filter((entry) => entryOverlapsDay(entry, day, capturedNow))
                   .map((entry) => {
                     const activeDraft = resizeDraft?.entryId === entry.id ? resizeDraft : null;
@@ -763,6 +799,33 @@ function CalendarReview({
           ))}
         </div>
       </div>
+      {selectedTarget ? (
+        <div className="calendar-entry-quick-card" role="dialog" aria-label={`${timeEntryTitle(selectedTarget.entry)} actions`}>
+          <div>
+            <strong>{timeEntryTitle(selectedTarget.entry)}</strong>
+            <span>{formatTime(selectedTarget.entry.startedAt)}–{selectedTarget.entry.stoppedAt ? formatTime(selectedTarget.entry.stoppedAt) : "Running"}</span>
+          </div>
+          <div className="calendar-entry-quick-actions">
+            {selectedTarget.entry.stoppedAt ? (
+              <button type="button" onClick={() => void continueCalendarEntry(selectedTarget)}>
+                <Play size={15} fill="currentColor" strokeWidth={0} aria-hidden="true" /> Start again
+              </button>
+            ) : null}
+            <button type="button" onClick={() => editCalendarEntry(selectedTarget.entry)}>
+              <Pencil size={15} aria-hidden="true" /> Edit
+            </button>
+            <button className="is-danger" type="button" onClick={() => deleteCalendarEntry(selectedTarget.entry)}>
+              <Trash2 size={15} aria-hidden="true" /> Delete
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {pendingDelete ? (
+        <div className="calendar-delete-undo" role="status">
+          <span>{timeEntryTitle(pendingDelete)} deleted</span>
+          <button type="button" onClick={undoCalendarDelete}>Undo</button>
+        </div>
+      ) : null}
       {resizeDraft ? (
         <div className="border-t border-[var(--line)] px-4 py-2">
           <OverlapNotice
