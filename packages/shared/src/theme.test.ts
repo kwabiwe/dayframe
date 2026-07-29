@@ -49,14 +49,14 @@ describe("Midnight Core theme", () => {
   it("preserves palette keys and deterministic order", () => {
     expect(DAYFRAME_PALETTE.map((color) => color.key)).toEqual([
       "mint-soft", "yellow-soft", "orange-soft", "red-soft", "violet-soft",
-      "mint",
+      "lime",
       "amber",
       "orange",
       "red",
       "purple",
       "green", "olive", "rust", "crimson", "violet",
       "blue-soft", "sky-soft", "lime-soft", "rose-soft", "steel-soft",
-      "blue", "sky", "lime", "rose",
+      "blue", "sky", "chartreuse", "rose",
       "steel",
       "blue-bold", "teal", "moss", "magenta",
       "graphite"
