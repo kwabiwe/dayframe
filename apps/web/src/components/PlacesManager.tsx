@@ -95,7 +95,7 @@ export function PlacesManager({
         </header>
         <div className="places-list">
           {places.map((place) => (
-            <article className="place-list-row" key={place.id}>
+            <article className="place-list-row" id={`place-${place.id}`} key={place.id}>
               <span className="place-list-icon"><MapPin aria-hidden="true" size={19} /></span>
               <div className="place-list-copy">
                 <h3>{place.name}</h3>
