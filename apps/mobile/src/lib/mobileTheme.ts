@@ -2057,7 +2057,9 @@ function createStyles(theme: MobileTheme) {
       gap: 12
     },
     sheetHeaderRunning: {
-      justifyContent: "flex-end"
+      minHeight: 36,
+      justifyContent: "flex-end",
+      marginBottom: 4
     },
     sheetHeaderCentered: {
       justifyContent: "center"
@@ -2240,6 +2242,14 @@ function createStyles(theme: MobileTheme) {
       fontSize: 11,
       fontWeight: "400",
       flexShrink: 1
+    },
+    taskSuggestionTags: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 11,
+      fontWeight: "400",
+      flexShrink: 2,
+      minWidth: 0
     },
     activeEditDescriptionInput: {
       minHeight: 48

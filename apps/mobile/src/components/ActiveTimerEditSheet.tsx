@@ -1263,15 +1263,19 @@ function RunningTimerSuggestionRow({
   theme: MobileTheme;
 }) {
   const categoryName = suggestion.categoryName;
+  const tagLabel = suggestion.tagNames.map((tag) => `#${tag}`).join(" ");
   const color = categoryName
     ? paletteColorFor(suggestion.categoryColor ?? null, categoryName, theme.mode)
     : null;
 
   return (
     <Pressable
-      accessibilityLabel={categoryName
-        ? `Apply ${suggestion.description} in ${categoryName} to this timer`
-        : `Apply ${suggestion.description} to this timer`}
+      accessibilityLabel={[
+        `Apply ${suggestion.description}`,
+        categoryName ? `in ${categoryName}` : null,
+        tagLabel ? `with ${tagLabel}` : null,
+        "to this timer"
+      ].filter(Boolean).join(" ")}
       accessibilityRole="button"
       disabled={disabled}
       onPress={onPress}
@@ -1291,6 +1295,9 @@ function RunningTimerSuggestionRow({
             <View style={[styles.colorDot, { backgroundColor: color }]} />
             <Text style={styles.taskSuggestionMeta} numberOfLines={1}>{categoryName}</Text>
           </View>
+        ) : null}
+        {tagLabel ? (
+          <Text style={styles.taskSuggestionTags} numberOfLines={1}>{tagLabel}</Text>
         ) : null}
       </View>
     </Pressable>
