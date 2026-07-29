@@ -331,6 +331,8 @@ function CalendarReview({
   const [continuingEntryId, setContinuingEntryId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<TimeEntryRow | null>(null);
   const deleteTimerRef = useRef<number | null>(null);
+  const pendingDeleteRef = useRef<TimeEntryRow | null>(null);
+  const mountedRef = useRef(true);
   const [zoomLevel, setZoomLevel] = useState<CalendarZoom>("hour");
   const today = capturedNow;
   const zoom = calendarZooms[zoomLevel];
@@ -341,7 +343,13 @@ function CalendarReview({
   const gridLineSpacing = (zoom.intervalMinutes / 60) * rowHeight;
   const calendarHeight = (calendarHours.endHour - calendarHours.startHour) * rowHeight;
   useEffect(() => () => {
+    mountedRef.current = false;
     if (deleteTimerRef.current !== null) window.clearTimeout(deleteTimerRef.current);
+    const pending = pendingDeleteRef.current;
+    pendingDeleteRef.current = null;
+    if (pending) {
+      void clientFetch(`/api/time-entries/${pending.id}`, { method: "DELETE", keepalive: true });
+    }
   }, []);
   const axisMarks = useMemo(() => {
     const startMinutes = calendarHours.startHour * 60;
@@ -387,27 +395,37 @@ function CalendarReview({
     }
   }
 
+  async function commitCalendarDelete(entry: TimeEntryRow) {
+    pendingDeleteRef.current = null;
+    const response = await clientFetch(`/api/time-entries/${entry.id}`, { method: "DELETE" });
+    if (!mountedRef.current) return;
+    if (!response.ok) {
+      setPendingDelete(null);
+      setActionError("Unable to delete this entry.");
+      return;
+    }
+    setPendingDelete(null);
+    await onSynced();
+    startTransition(() => router.refresh());
+  }
+
   function deleteCalendarEntry(entry: TimeEntryRow) {
     if (deleteTimerRef.current !== null) window.clearTimeout(deleteTimerRef.current);
+    const replaced = pendingDeleteRef.current;
+    if (replaced) void commitCalendarDelete(replaced);
     setSelectedTarget(null);
+    pendingDeleteRef.current = entry;
     setPendingDelete(entry);
-    deleteTimerRef.current = window.setTimeout(async () => {
+    deleteTimerRef.current = window.setTimeout(() => {
       deleteTimerRef.current = null;
-      const response = await clientFetch(`/api/time-entries/${entry.id}`, { method: "DELETE" });
-      if (!response.ok) {
-        setPendingDelete(null);
-        setActionError("Unable to delete this entry.");
-        return;
-      }
-      setPendingDelete(null);
-      await onSynced();
-      startTransition(() => router.refresh());
+      if (pendingDeleteRef.current?.id === entry.id) void commitCalendarDelete(entry);
     }, 5_000);
   }
 
   function undoCalendarDelete() {
     if (deleteTimerRef.current !== null) window.clearTimeout(deleteTimerRef.current);
     deleteTimerRef.current = null;
+    pendingDeleteRef.current = null;
     setPendingDelete(null);
   }
 
