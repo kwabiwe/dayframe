@@ -18,6 +18,7 @@ const {
   createReviewClientMutationId,
   nextReviewRetryAt,
   projectReviewBootstrap,
+  sanitiseDashboardBootstrapForCache,
   reviewSyncDisposition,
   sanitiseReviewItemForCache
 } = await import("./reviewSyncStore");
@@ -85,6 +86,62 @@ describe("Review sync store contracts", () => {
       algorithmVersion: "location-v2.0",
       clientSegmentId: "segment-1",
       continuityStatus: "uncertain_gap"
+    });
+  });
+
+  it("caches dashboard presentation without location coordinates or raw evidence", () => {
+    const safe = sanitiseDashboardBootstrapForCache({
+      ...bootstrap([reviewItem({
+        rawPayload: {
+          algorithmVersion: "location-v2.0",
+          latitude: 51.5,
+          longitude: -0.1,
+          token: "secret"
+        }
+      })]),
+      places: [{
+        id: "place-1",
+        name: "Office",
+        latitude: 51.5,
+        longitude: -0.1,
+        radiusMeters: 100,
+        priority: 1,
+        defaultProjectId: null,
+        defaultCategoryId: null
+      }],
+      learnedPlaces: [{
+        id: "learned-1",
+        name: "Candidate",
+        latitude: 51.5,
+        longitude: -0.1,
+        radiusMeters: 100,
+        visitCount: 2,
+        distinctDayCount: 2,
+        sampleCount: 4,
+        totalDwellSeconds: 3600,
+        longestDwellSeconds: 1800,
+        averageAccuracyMeters: 8,
+        maxClusterSpreadMeters: 12,
+        firstSeenAt: "2026-07-26T08:00:00.000Z",
+        lastSeenAt: "2026-07-27T08:00:00.000Z",
+        lastStartedAt: null,
+        lastStoppedAt: null,
+        confidence: "medium",
+        classification: "place_candidate",
+        status: "candidate",
+        address: { postcode: "SECRET" },
+        poiName: null,
+        formattedAddress: null,
+        geocodedAt: null,
+        rawPayload: { samples: [] }
+      }]
+    });
+
+    expect(safe.places[0]).not.toHaveProperty("latitude");
+    expect(safe.places[0]).not.toHaveProperty("longitude");
+    expect(safe.learnedPlaces).toBeUndefined();
+    expect(safe.reviewItems[0].rawPayload).toEqual({
+      algorithmVersion: "location-v2.0"
     });
   });
 });
