@@ -39,6 +39,7 @@ export type DayframePaletteKey = (typeof DAYFRAME_PALETTE)[number]["key"];
 export const DEFAULT_PALETTE_KEY: DayframePaletteKey = "lime";
 
 const legacyColorMap: Record<string, DayframePaletteKey> = {
+  "coral": "red",
   // Previous Dayframe palette. Preserve colour-family identity during migration.
   "#3ed598": "lime",
   "#23a65c": "lime",

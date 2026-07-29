@@ -54,8 +54,8 @@ describe("native Shortcut bridge", () => {
     expect(JSON.parse(String(mocks.settingsStore.get("dayframe.shortcutCatalog.v1")))).toEqual({
       workspace: { id: "workspace-1", name: "Personal" },
       categories: [
-        { color: "#12B8B0", id: "category-2", name: "Family" },
-        { color: "#3ED598", id: "category-1", name: "Focus" }
+        { color: "#F87168", id: "category-2", name: "Family" },
+        { color: "#4BCE97", id: "category-1", name: "Focus" }
       ]
     });
   });

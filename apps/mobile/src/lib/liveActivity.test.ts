@@ -58,7 +58,7 @@ describe("Live Activity sync", () => {
     expect(mocks.start).toHaveBeenCalledWith(
       "School run",
       "Family",
-      "#8D63E6",
+      "#6E5DC6",
       "2026-07-12T06:45:00.000Z"
     );
   });
