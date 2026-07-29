@@ -65,9 +65,14 @@ import {
   type TimeEntryUpdatePatch
 } from "@/lib/api";
 import { handleDayframeUrl } from "@/lib/deepLinks";
+import { shouldApplyDashboardRefresh } from "@/lib/dashboardRefresh";
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
 import { configureLocationIntelligence } from "@/lib/location/runtime";
 import { recordLocationStoreError } from "@/lib/location/store";
+import {
+  cacheDashboardBootstrap,
+  loadCachedDashboardBootstrap
+} from "@/lib/reviewSyncStore";
 import {
   configureHealthKitAutomaticSync,
   friendlyHealthKitError,
@@ -137,6 +142,7 @@ import {
 type TimeEntry = MobileBootstrap["entries"][number];
 type AuthView = "login" | "signup";
 type AuthState = "checking" | "authenticated" | "signedOut";
+type DashboardLoadOptions = { silent?: boolean; visibleRefresh?: boolean };
 export type DayframeDashboardTab = "timer" | "calendar" | "reports";
 type ReportRange = "today" | "week";
 type ReportChartView = "pie" | "bars";
@@ -192,6 +198,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const reduceMotion = useReduceMotionPreference();
   const reduceTransparency = useReduceTransparencyPreference();
   const refreshInFlight = useRef(false);
+  const refreshQueued = useRef(false);
   const queueSyncInFlight = useRef(false);
   const healthAutoSyncInFlight = useRef(false);
   const latestData = useRef<MobileBootstrap | null>(null);
@@ -201,6 +208,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const pendingNativeShortcutLocalIds = useRef<Set<string>>(new Set());
   const timerMutationChain = useRef<Promise<void>>(Promise.resolve());
   const timerMutationCount = useRef(0);
+  const dashboardMutationRevision = useRef(0);
+  const loadRef = useRef<(options?: DashboardLoadOptions) => Promise<void>>(async () => undefined);
   const timerMutationVersions = useRef(new Map<string, number>());
   const historyDeletionCoordinator = useRef<ReturnType<typeof createHistoryDeletionCoordinator<
     TimeEntry,
@@ -248,9 +257,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     }
   }, []);
 
-  const load = useCallback(async (options?: { silent?: boolean; visibleRefresh?: boolean }) => {
-    if (refreshInFlight.current) return;
+  const load = useCallback(async (options?: DashboardLoadOptions) => {
+    if (refreshInFlight.current || timerMutationCount.current > 0) {
+      refreshQueued.current = true;
+      return;
+    }
     refreshInFlight.current = true;
+    const refreshRevision = dashboardMutationRevision.current;
     if (options?.visibleRefresh) setRefreshing(true);
     try {
       const date = formatDateKey(new Date());
@@ -274,8 +287,17 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         const pendingQueue = await readQueue().catch(() => []);
         liveActivityReconciliationDeferred.current = pendingQueue.some((event) => event.source === "shortcut");
       }
+      if (!shouldApplyDashboardRefresh({
+        startedRevision: refreshRevision,
+        currentRevision: dashboardMutationRevision.current,
+        timerMutationsInFlight: timerMutationCount.current
+      })) {
+        refreshQueued.current = true;
+        return;
+      }
       latestData.current = bootstrap;
       setData(bootstrap);
+      void cacheDashboardBootstrap(bootstrap).catch(() => undefined);
       syncShortcutCatalog(bootstrap);
       setAuthState("authenticated");
       void refreshLocationServices(bootstrap);
@@ -291,12 +313,18 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     } finally {
       refreshInFlight.current = false;
       if (options?.visibleRefresh) setRefreshing(false);
+      if (refreshQueued.current && timerMutationCount.current === 0) {
+        refreshQueued.current = false;
+        void loadRef.current({ silent: true });
+      }
     }
   }, []);
+  loadRef.current = load;
 
   function updateDashboardData(
     update: (current: MobileBootstrap | null) => MobileBootstrap | null
   ) {
+    dashboardMutationRevision.current += 1;
     setData((current) => {
       const next = update(current);
       latestData.current = next;
@@ -328,7 +356,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     timerMutationChain.current = run;
     void run.finally(() => {
       timerMutationCount.current = Math.max(0, timerMutationCount.current - 1);
-      if (timerMutationCount.current === 0) void load({ silent: true });
+      if (timerMutationCount.current === 0) {
+        refreshQueued.current = true;
+        void loadRef.current({ silent: true });
+      }
     });
   }
 
@@ -393,14 +424,22 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }, []);
 
   useEffect(() => {
+    const openDashboard = async () => {
+      const cached = await loadCachedDashboardBootstrap().catch(() => null);
+      if (cached && !latestData.current) {
+        latestData.current = cached.bootstrap;
+        setData(cached.bootstrap);
+      }
+      await loadRef.current();
+    };
     if (AppState.currentState === "active") {
-      void load();
+      void openDashboard();
       return undefined;
     }
     const subscription = AppState.addEventListener("change", (state) => {
       if (state !== "active") return;
       subscription.remove();
-      void load();
+      void openDashboard();
     });
     return () => subscription.remove();
   }, [load]);
@@ -438,8 +477,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       if (AppState.currentState !== "active") return;
       if (authState === "authenticated") {
         void syncQueuedEventsAndReload();
-      } else {
-        void load({ silent: true });
       }
     }, [authState, load, reloadThemePreference, syncQueuedEventsAndReload])
   );

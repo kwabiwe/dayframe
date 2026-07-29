@@ -14,7 +14,7 @@ import type {
 import { createSerialMutationQueue } from "./location/mutationQueue";
 
 const DATABASE_NAME = "dayframe-review-sync.db";
-const DATABASE_VERSION = 2;
+const DATABASE_VERSION = 3;
 const ACTIVE_ACCOUNT_KEY = "active_account";
 const LAST_CACHE_AT_KEY = "last_cache_at";
 const LAST_SUCCESSFUL_SYNC_AT_KEY = "last_successful_sync_at";
@@ -105,6 +105,11 @@ type CachedCategoryRow = {
   category_json: string;
 };
 
+type CachedDashboardRow = {
+  snapshot_json: string;
+  cached_at: string;
+};
+
 type CountRow = {
   pending_count: number;
   retry_wait_count: number;
@@ -164,6 +169,12 @@ async function database() {
             category_json text not null,
             cached_at text not null,
             primary key(account_key, category_id),
+            foreign key(account_key) references review_account_context(account_key) on delete cascade
+          );
+          create table if not exists dashboard_snapshot_cache (
+            account_key text primary key not null,
+            snapshot_json text not null,
+            cached_at text not null,
             foreign key(account_key) references review_account_context(account_key) on delete cascade
           );
           create table if not exists review_mutation_outbox (
@@ -535,6 +546,70 @@ export async function loadCachedReviewBootstrap(): Promise<{
       }
     }
   };
+}
+
+export async function loadCachedDashboardBootstrap(): Promise<{
+  bootstrap: MobileBootstrap;
+  cachedAt: string;
+} | null> {
+  const db = await database();
+  const account = await activeAccount(db);
+  if (!account) return null;
+  const row = await db.getFirstAsync<CachedDashboardRow>(
+    `select snapshot_json, cached_at
+     from dashboard_snapshot_cache
+     where account_key = ?`,
+    account.account_key
+  );
+  if (!row) return null;
+  try {
+    const bootstrap = JSON.parse(row.snapshot_json) as MobileBootstrap;
+    if (
+      bootstrap.user?.id !== account.user_id ||
+      bootstrap.workspace?.id !== account.workspace_id ||
+      !Array.isArray(bootstrap.entries) ||
+      !Array.isArray(bootstrap.categories) ||
+      !Array.isArray(bootstrap.reviewItems)
+    ) {
+      return null;
+    }
+    return {
+      bootstrap: projectReviewBootstrap(
+        bootstrap,
+        await hiddenReviewItemIds(account.account_key)
+      ),
+      cachedAt: row.cached_at
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function cacheDashboardBootstrap(bootstrap: MobileBootstrap) {
+  const db = await database();
+  const account = await activeAccount(db);
+  if (
+    !account ||
+    account.user_id !== bootstrap.user.id ||
+    account.workspace_id !== bootstrap.workspace.id
+  ) {
+    return false;
+  }
+  const cachedAt = new Date().toISOString();
+  await serialiseReviewMutation(() =>
+    db.runAsync(
+      `insert into dashboard_snapshot_cache (
+         account_key, snapshot_json, cached_at
+       ) values (?, ?, ?)
+       on conflict(account_key) do update set
+         snapshot_json = excluded.snapshot_json,
+         cached_at = excluded.cached_at`,
+      account.account_key,
+      JSON.stringify(sanitiseDashboardBootstrapForCache(bootstrap)),
+      cachedAt
+    )
+  );
+  return true;
 }
 
 export async function enqueueReviewMutation(input: {
@@ -1136,6 +1211,17 @@ export function sanitiseReviewItemForCache(
   return {
     ...item,
     rawPayload: sanitiseRawPayload(item.rawPayload)
+  };
+}
+
+export function sanitiseDashboardBootstrapForCache(
+  bootstrap: MobileBootstrap
+): MobileBootstrap {
+  return {
+    ...bootstrap,
+    places: bootstrap.places.map(({ latitude: _latitude, longitude: _longitude, ...place }) => place),
+    learnedPlaces: undefined,
+    reviewItems: bootstrap.reviewItems.map(sanitiseReviewItemForCache)
   };
 }
 
