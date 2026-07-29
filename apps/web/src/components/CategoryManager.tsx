@@ -220,7 +220,7 @@ function CategorySection({
               </div>
             </form>
           ) : (
-            <div key={category.id} className="motion-row flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between">
+            <div id={`category-${category.id}`} key={category.id} className="motion-row flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between">
               <div className="flex min-w-0 items-center gap-3">
                 <span
                   className="h-8 w-8 shrink-0 rounded-full"

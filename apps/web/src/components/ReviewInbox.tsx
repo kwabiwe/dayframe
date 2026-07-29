@@ -90,7 +90,7 @@ function ReviewItemCard({
   }
 
   return (
-    <article className="motion-row p-4">
+    <article className="motion-row p-4" id={`review-${item.id}`}>
       <div className="min-w-0">
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div className="min-w-0">
