@@ -2057,7 +2057,7 @@ function createStyles(theme: MobileTheme) {
       gap: 12
     },
     sheetHeaderRunning: {
-      minHeight: 36,
+      minHeight: 44,
       justifyContent: "flex-end",
       marginBottom: 4
     },
@@ -2097,12 +2097,18 @@ function createStyles(theme: MobileTheme) {
       justifyContent: "center"
     },
     sheetDoneButton: {
-      minHeight: 36,
+      minHeight: 44,
       backgroundColor: theme.surfaceMuted,
       borderRadius: 999,
       paddingHorizontal: 16,
       alignItems: "center",
       justifyContent: "center"
+    },
+    sheetDoneButtonRunning: {
+      position: "absolute",
+      top: 8,
+      right: 0,
+      zIndex: 2
     },
     sheetDoneText: {
       color: theme.accentText,

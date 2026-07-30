@@ -71,6 +71,14 @@ describe("running timer suggestion placement", () => {
     expect(editSheetSource).toContain("snapshot.suggestionsAvailable");
   });
 
+  it("keeps the running Done action independently aligned and coordinates keyboard reflow", () => {
+    expect(editSheetSource).toContain("isRunningMode ? styles.sheetDoneButtonRunning : null");
+    expect(editSheetSource).toContain("const animatedSheetHeight = useRef(new Animated.Value(0)).current");
+    expect(editSheetSource).toContain("Animated.parallel(animations)");
+    expect(editSheetSource).toContain("height: animatedSheetHeight");
+    expect(editSheetSource).toContain("closedSheetHeight.current = event.nativeEvent.layout.height");
+  });
+
   it("keeps destructive running-timer deletion inside the edit sheet instead of the active timer card", () => {
     const activeTimerCardSource = dashboardSource.slice(
       dashboardSource.indexOf('accessibilityLabel={hasLiveActiveTimer ? "Edit running timer"'),

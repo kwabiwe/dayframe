@@ -36,7 +36,7 @@ import {
   keyboardLiftAnimationDuration
 } from "@/lib/editSheetKeyboard";
 import type { MobileBootstrap, MobileTag, MobileTimeEntry, TimeEntryUpdatePatch } from "@/lib/api";
-import { useReduceMotionPreference } from "@/lib/motion";
+import { MOBILE_MOTION, useReduceMotionPreference } from "@/lib/motion";
 import { runningTimerSheetElapsedSeconds } from "@/lib/timerPresentation";
 import { TagMetadata } from "@/components/TagMetadata";
 import {
@@ -108,6 +108,7 @@ export function ActiveTimerEditSheet({
   const [stoppedTimeText, setStoppedTimeText] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [keyboardInset, setKeyboardInset] = useState(0);
+  const [sheetHeightAnimating, setSheetHeightAnimating] = useState(false);
   const [startTimeEdited, setStartTimeEdited] = useState(false);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [datePickerTarget, setDatePickerTarget] = useState<"start" | "end">("start");
@@ -122,9 +123,13 @@ export function ActiveTimerEditSheet({
   const [highlightedTagAction, setHighlightedTagAction] = useState<string | null>(null);
   const reduceMotion = useReduceMotionPreference();
   const keyboardLift = useRef(new Animated.Value(0)).current;
+  const animatedSheetHeight = useRef(new Animated.Value(0)).current;
   const sheetRef = useRef<SwipeDismissSheetHandle>(null);
   const presentedEntryRef = useRef<MobileTimeEntry | null>(currentEntry);
   const keyboardMotionFrozen = useRef(false);
+  const keyboardInsetRef = useRef(0);
+  const measuredSheetHeight = useRef(0);
+  const closedSheetHeight = useRef(0);
   const pendingKeyboardUpdate = useRef<{ event?: KeyboardEvent; inset: number } | null>(null);
   const applyKeyboardUpdateRef = useRef<(inset: number, event?: KeyboardEvent) => void>(() => undefined);
   const suggestionsProgress = useRef(new Animated.Value(0)).current;
@@ -237,6 +242,8 @@ export function ActiveTimerEditSheet({
       keyboardMotionFrozen.current = false;
       pendingKeyboardUpdate.current = null;
       setKeyboardInset(0);
+      keyboardInsetRef.current = 0;
+      setSheetHeightAnimating(false);
       keyboardLift.setValue(0);
       suggestionsProgress.setValue(0);
       setSuggestionsMounted(false);
@@ -245,10 +252,17 @@ export function ActiveTimerEditSheet({
       return undefined;
     }
 
-    function animateKeyboardLift(toValue: number, event?: KeyboardEvent) {
+    function animateKeyboardLayout(
+      toValue: number,
+      targetHeight: number | null,
+      event?: KeyboardEvent
+    ) {
       keyboardLift.stopAnimation();
+      animatedSheetHeight.stopAnimation();
       if (reduceMotion) {
         keyboardLift.setValue(toValue);
+        if (targetHeight !== null) animatedSheetHeight.setValue(targetHeight);
+        setSheetHeightAnimating(false);
         return;
       }
       const duration = keyboardLiftAnimationDuration({
@@ -257,14 +271,32 @@ export function ActiveTimerEditSheet({
       });
       if (duration === null) {
         keyboardLift.setValue(toValue);
+        if (targetHeight !== null) animatedSheetHeight.setValue(targetHeight);
+        setSheetHeightAnimating(false);
         return;
       }
-      Animated.timing(keyboardLift, {
-        toValue,
-        duration,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: false
-      }).start();
+      const animations = [
+        Animated.timing(keyboardLift, {
+          toValue,
+          duration,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: false
+        })
+      ];
+      if (targetHeight !== null) {
+        const currentHeight = measuredSheetHeight.current || targetHeight;
+        animatedSheetHeight.setValue(currentHeight);
+        setSheetHeightAnimating(true);
+        animations.push(Animated.timing(animatedSheetHeight, {
+          toValue: targetHeight,
+          duration,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: false
+        }));
+      }
+      Animated.parallel(animations).start(({ finished }) => {
+        if (finished) setSheetHeightAnimating(false);
+      });
     }
 
     function applyKeyboardUpdate(nextInset: number, event?: KeyboardEvent) {
@@ -274,8 +306,16 @@ export function ActiveTimerEditSheet({
         topInset: insets.top,
         windowHeight: windowDimensions.height
       });
+      const opening = nextInset > 0;
+      if (opening && keyboardInsetRef.current === 0 && measuredSheetHeight.current > 0) {
+        closedSheetHeight.current = measuredSheetHeight.current;
+      }
+      keyboardInsetRef.current = nextInset;
       setKeyboardInset(nextInset);
-      animateKeyboardLift(nextLayout.bottomLift, event);
+      const targetHeight = opening
+        ? nextLayout.sheetHeight
+        : closedSheetHeight.current || null;
+      animateKeyboardLayout(nextLayout.bottomLift, targetHeight, event);
       if (startTimeFocused.current) {
         requestAnimationFrame(() => {
           contentScrollRef.current?.scrollToEnd({ animated: !reduceMotion });
@@ -405,7 +445,7 @@ export function ActiveTimerEditSheet({
 
     const animation = Animated.timing(suggestionsProgress, {
       toValue: suggestionsVisible ? 1 : 0,
-      duration: suggestionsVisible ? 160 : 180,
+      duration: MOBILE_MOTION.layout,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: false
     });
@@ -478,7 +518,12 @@ export function ActiveTimerEditSheet({
     topInset: insets.top,
     windowHeight: windowDimensions.height
   });
-  const keyboardAwareSheetStyle = keyboardLayout.keyboardOpen
+  const keyboardAwareSheetStyle = sheetHeightAnimating
+    ? {
+        height: animatedSheetHeight,
+        maxHeight: keyboardLayout.sheetMaxHeight
+      }
+    : keyboardLayout.keyboardOpen
     ? {
         height: keyboardLayout.sheetHeight ?? undefined,
         maxHeight: keyboardLayout.sheetHeight ?? keyboardLayout.sheetMaxHeight
@@ -770,6 +815,12 @@ export function ActiveTimerEditSheet({
                 keyboardAwareSheetStyle,
                 { paddingBottom: Math.max(10, Math.min(16, insets.bottom)) }
               ]}
+              onLayout={(event) => {
+                measuredSheetHeight.current = event.nativeEvent.layout.height;
+                if (!keyboardLayout.keyboardOpen && !sheetHeightAnimating) {
+                  closedSheetHeight.current = event.nativeEvent.layout.height;
+                }
+              }}
               translateYOffset={Animated.multiply(keyboardLift, -1)}
               visible={visible}
             >
@@ -783,6 +834,7 @@ export function ActiveTimerEditSheet({
                       onPress={saveChanges}
                       style={({ pressed }) => [
                         styles.sheetDoneButton,
+                        isRunningMode ? styles.sheetDoneButtonRunning : null,
                         pressed && !busy ? styles.buttonPressed : null,
                         busy ? styles.buttonDisabled : null
                       ]}
