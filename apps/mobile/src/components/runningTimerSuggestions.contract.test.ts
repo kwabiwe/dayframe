@@ -12,6 +12,10 @@ const dashboardSource = readFileSync(
   fileURLToPath(new URL("./DayframeDashboard.tsx", import.meta.url)),
   "utf8"
 );
+const reviewSource = readFileSync(
+  fileURLToPath(new URL("../../app/review.tsx", import.meta.url)),
+  "utf8"
+);
 const deleteConfirmationSource = readFileSync(
   fileURLToPath(new URL("./DeleteEntryConfirmation.tsx", import.meta.url)),
   "utf8"
@@ -66,13 +70,20 @@ describe("running timer suggestion placement", () => {
     expect(editSheetSource).toContain("const editorSessionKey = entryStartedAt");
     expect(editSheetSource).not.toContain("const entryId = entry?.id");
     expect(editSheetSource).toContain("const editorSnapshot = useRef");
-    expect(editSheetSource).toContain("descriptionEntryStarted.current = true");
+    expect(editSheetSource).toContain("suggestionsDismissedForSession.current = true");
+    expect(editSheetSource).toContain("suggestionsDismissedForSession.current) return;");
+    expect(editSheetSource).toContain("shouldShowRunningSuggestions");
     expect(editSheetSource).toContain("suggestionsProgress.setValue(shouldShowSuggestions ? 1 : 0)");
     expect(editSheetSource).toContain("snapshot.suggestionsAvailable");
   });
 
-  it("keeps the running Done action independently aligned and coordinates keyboard reflow", () => {
-    expect(editSheetSource).toContain("isRunningMode ? styles.sheetDoneButtonRunning : null");
+  it("uses one outer-sheet Done action for every time-entry editor and coordinates keyboard reflow", () => {
+    expect(editSheetSource).toContain('pointerEvents="box-none" style={styles.sheetTopActionLayer}');
+    expect(editSheetSource).toContain("styles.sheetHeaderWithTopAction");
+    expect(editSheetSource).not.toContain("sheetDoneButtonRunning");
+    expect(dashboardSource).toContain('mode="add"');
+    expect(dashboardSource).toContain('mode="entry"');
+    expect(reviewSource).toContain('mode="entry"');
     expect(editSheetSource).toContain("const animatedSheetHeight = useRef(new Animated.Value(0)).current");
     expect(editSheetSource).toContain("Animated.parallel(animations)");
     expect(editSheetSource).toContain("height: animatedSheetHeight");
