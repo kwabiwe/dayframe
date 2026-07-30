@@ -47,10 +47,10 @@ reconstrained the sheet through a separate height change.
 
 | Sheet context | Before top/right | After top/right source contract | Rendered measurement |
 | --- | --- | --- | --- |
-| Running timer | Header-relative; not outer-sheet measurable from source | 16 pt / 16 pt | Not run — full Xcode unavailable |
-| Add time | Header-flow placement; not outer-sheet measurable from source | 16 pt / 16 pt | Not run — full Xcode unavailable |
-| Completed/history entry | Header-flow placement; not outer-sheet measurable from source | 16 pt / 16 pt | Not run — full Xcode unavailable |
-| Review edit | Shares completed-entry header-flow placement | 16 pt / 16 pt | Not run — full Xcode unavailable |
+| Running timer | Header-relative; not outer-sheet measurable from source | 16 pt / 16 pt | Not run — physical sheet interaction still pending |
+| Add time | Header-flow placement; not outer-sheet measurable from source | 16 pt / 16 pt | Not run — physical sheet interaction still pending |
+| Completed/history entry | Header-flow placement; not outer-sheet measurable from source | 16 pt / 16 pt | Not run — physical sheet interaction still pending |
+| Review edit | Shares completed-entry header-flow placement | 16 pt / 16 pt | Not run — physical sheet interaction still pending |
 
 The visual `Done` pill remains at least 44 × 44 pt. The after values are a
 source contract, not a claim of rendered-device measurement.
@@ -98,18 +98,21 @@ source contract, not a claim of rendered-device measurement.
   SecureStore, signing or entitlement diff, so the failure is documented as a
   pre-existing validation blocker rather than attributed to this UI change.
 - Physical device named `iPhone`: connected as an iPhone 11 on iOS 27.0 and
-  accepted the Dayframe Apple Development signing identity. The install build
-  stopped before compilation completed because the host has 229 MB free and
-  `rsync` could not copy `hermesvm.framework` (`No space left on device`).
-  11.5 GB of identified Dayframe-only Xcode DerivedData is available for a
-  safe scoped cleanup, but no cache was removed in this validation run.
+  accepted the Dayframe Apple Development signing identity. The first install
+  stopped at 229 MB free when `rsync` could not copy `hermesvm.framework`.
+  After permanently deleting only the eight identified regenerable Dayframe
+  DerivedData folders (about 11.5 GB), the signed Debug build completed,
+  installed, and launched as `com.layereight.dayframe`; the Dayframe process
+  is present on the device and Metro is listening on port 8081. Xcode's
+  automatic-signing edits to the project file were not retained in the branch.
+  Physical sheet interaction is still pending: iPhone Mirroring reaches its
+  Mac-login prompt for the `Agent` account, whose credential was not entered.
   System/Light/Dark, Reduce Motion, Dynamic Type, VoiceOver and Reduce
-  Transparency still require a successful physical install and interaction.
+  Transparency still require those direct interactions.
 
 ## Residual risk and release gate
 
 No web, API, database, sync or native-project contract changed. The branch is
-not ready to be described as visually validated or released until enough host
-space is available for the physical build, the existing simulator
-Keychain-entitlement failure is resolved, each sheet context can be measured
-and recorded, and the physical-iPhone matrix can complete.
+not ready to be described as visually validated or released until the existing
+simulator Keychain-entitlement failure is resolved, each sheet context can be
+measured and recorded, and the physical-iPhone matrix can complete.
