@@ -97,15 +97,19 @@ source contract, not a claim of rendered-device measurement.
   and the action reports `Timer not started`. This branch has no native,
   SecureStore, signing or entitlement diff, so the failure is documented as a
   pre-existing validation blocker rather than attributed to this UI change.
-- Physical device named `iPhone`: discovered by `xcrun xctrace list devices`,
-  but currently offline. No install or interaction could be performed.
+- Physical device named `iPhone`: connected as an iPhone 11 on iOS 27.0 and
+  accepted the Dayframe Apple Development signing identity. The install build
+  stopped before compilation completed because the host has 229 MB free and
+  `rsync` could not copy `hermesvm.framework` (`No space left on device`).
+  11.5 GB of identified Dayframe-only Xcode DerivedData is available for a
+  safe scoped cleanup, but no cache was removed in this validation run.
   System/Light/Dark, Reduce Motion, Dynamic Type, VoiceOver and Reduce
-  Transparency still require successful simulator/physical-device evidence.
+  Transparency still require a successful physical install and interaction.
 
 ## Residual risk and release gate
 
 No web, API, database, sync or native-project contract changed. The branch is
-not ready to be described as visually validated or released until the existing
-simulator Keychain-entitlement failure is resolved, each sheet context can be
-measured and recorded, and the physical-iPhone matrix can run with the device
-online.
+not ready to be described as visually validated or released until enough host
+space is available for the physical build, the existing simulator
+Keychain-entitlement failure is resolved, each sheet context can be measured
+and recorded, and the physical-iPhone matrix can complete.
