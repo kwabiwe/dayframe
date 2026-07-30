@@ -10,6 +10,7 @@ import {
 import {
   Animated as ReactNativeAnimated,
   Pressable,
+  type LayoutChangeEvent,
   type StyleProp,
   type ViewStyle,
   useWindowDimensions,
@@ -64,6 +65,7 @@ type SwipeDismissSheetProps = {
   onDismissStart?: () => void;
   onGestureSettled?: () => void;
   onGestureStart?: () => void;
+  onLayout?: (event: LayoutChangeEvent) => void;
   reduceMotion: boolean;
   style: StyleProp<ViewStyle>;
   translateYOffset?: ReactNativeAnimated.Value | ReactNativeAnimated.AnimatedInterpolation<number> | number;
@@ -82,6 +84,7 @@ function SwipeDismissSheet({
   onDismissStart,
   onGestureSettled,
   onGestureStart,
+  onLayout,
   reduceMotion,
   style,
   translateYOffset = 0,
@@ -333,6 +336,7 @@ function SwipeDismissSheet({
             );
             measuredSheetHeight.value = event.nativeEvent.layout.height;
             exitTarget.value = measuredTarget;
+            onLayout?.(event);
           }}
           style={[style, sheetAnimatedStyle]}
         >
