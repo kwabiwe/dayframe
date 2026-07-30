@@ -2,6 +2,12 @@
 
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import {
+  TIMER_STATE_RECONCILE_INTERVAL_MS,
+  timerStateChanged,
+  timerStatePollDelay,
+  type TimerStateFingerprint
+} from "@dayframe/shared";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
 import { timelineStateFromSearchParams } from "@/lib/timeline-view";
@@ -58,7 +64,7 @@ type RuntimeContext = {
 };
 
 const AppShellRuntimeContext = createContext<RuntimeContext | null>(null);
-export const BOOTSTRAP_RECONCILE_INTERVAL_MS = 30_000;
+export const BOOTSTRAP_RECONCILE_INTERVAL_MS = TIMER_STATE_RECONCILE_INTERVAL_MS;
 export const BOOTSTRAP_FOCUS_RECONCILE_MIN_AGE_MS = 10_000;
 export const DATE_DATA_CACHE_LIMIT = 8;
 
@@ -82,10 +88,19 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   const optimisticIdRef = useRef(0);
   const lastCommitAtRef = useRef(0);
   const mutationGateRef = useRef(createTimerMutationGate());
+  const timerStateRef = useRef<TimerStateFingerprint | null>(null);
+  const timerStatePollInFlightRef = useRef(false);
 
   const commitData = useCallback((nextData: BootstrapData | null) => {
     dataRef.current = nextData;
     lastCommitAtRef.current = nextData ? Date.now() : 0;
+    if (nextData && !timerStateRef.current) {
+      timerStateRef.current = {
+        activeEntryId: nextData.activeEntry?.id ?? null,
+        updatedAt: null,
+        serverNow: new Date().toISOString()
+      };
+    }
     if (nextData) {
       dateDataCacheRef.current.delete(nextData.dateRange.selectedDate);
       dateDataCacheRef.current.set(nextData.dateRange.selectedDate, nextData);
@@ -199,6 +214,60 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [commitData, refresh, selectedDate]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timeout: number | null = null;
+    let consecutiveFailures = 0;
+
+    const schedule = (delay: number) => {
+      if (cancelled || document.visibilityState !== "visible") return;
+      if (timeout !== null) window.clearTimeout(timeout);
+      timeout = window.setTimeout(() => void poll(), delay);
+    };
+
+    const poll = async () => {
+      if (
+        cancelled ||
+        document.visibilityState !== "visible" ||
+        timerStatePollInFlightRef.current
+      ) return;
+      timerStatePollInFlightRef.current = true;
+      try {
+        const response = await clientFetch("/api/timer-state", { cache: "no-store" });
+        if (!response.ok) throw new Error(`Unable to check timer state: ${response.status}`);
+        const next = (await response.json()) as TimerStateFingerprint;
+        const changed = timerStateChanged(timerStateRef.current, next);
+        timerStateRef.current = next;
+        consecutiveFailures = 0;
+        if (changed) await refresh();
+      } catch {
+        consecutiveFailures += 1;
+      } finally {
+        timerStatePollInFlightRef.current = false;
+        schedule(timerStatePollDelay(consecutiveFailures));
+      }
+    };
+
+    const resume = () => {
+      if (document.visibilityState !== "visible") {
+        if (timeout !== null) window.clearTimeout(timeout);
+        timeout = null;
+        return;
+      }
+      schedule(0);
+    };
+
+    schedule(0);
+    window.addEventListener("focus", resume);
+    document.addEventListener("visibilitychange", resume);
+    return () => {
+      cancelled = true;
+      if (timeout !== null) window.clearTimeout(timeout);
+      window.removeEventListener("focus", resume);
+      document.removeEventListener("visibilitychange", resume);
+    };
+  }, [refresh]);
 
   const hydrate = useCallback((nextData: BootstrapData) => {
     if (mutationGateRef.current.isActive()) return;

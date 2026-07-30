@@ -66,8 +66,11 @@ describe("web auth session-stability contracts", () => {
 
   it("reconciles bootstrap conservatively while elapsed time remains local", () => {
     expect(runtimeSource).toContain(
-      "export const BOOTSTRAP_RECONCILE_INTERVAL_MS = 30_000"
+      "export const BOOTSTRAP_RECONCILE_INTERVAL_MS = TIMER_STATE_RECONCILE_INTERVAL_MS"
     );
+    expect(runtimeSource).toContain('clientFetch("/api/timer-state"');
+    expect(runtimeSource).toContain("timerStateChanged(timerStateRef.current, next)");
+    expect(runtimeSource).toContain("timerStatePollDelay(consecutiveFailures)");
     expect(runtimeSource).toContain('window.addEventListener("focus"');
     expect(runtimeSource).toContain('document.addEventListener("visibilitychange"');
     expect(runtimeSource).not.toMatch(/setInterval\([^)]*1000/s);

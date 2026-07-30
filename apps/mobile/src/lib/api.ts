@@ -11,7 +11,8 @@ import {
   type LocationRolloutMode,
   type LocationReviewAction,
   type LocationReviewEvidenceDto,
-  type RecentActivitySuggestion
+  type RecentActivitySuggestion,
+  type TimerStateFingerprint
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
 import {
@@ -407,6 +408,21 @@ export async function fetchBootstrap(options: { date?: string } = {}): Promise<M
   const projected = await reviewStore.processReviewBootstrap(bootstrap);
   void reviewStore.synchroniseReviewMutations().catch(() => undefined);
   return projected;
+}
+
+export async function fetchTimerState(): Promise<TimerStateFingerprint> {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/timer-state`, {
+    headers: await authHeaders(),
+    cache: "no-store"
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) {
+    throw new Error(await errorMessage(response, "Unable to check timer state"));
+  }
+  return readJsonResponse<TimerStateFingerprint>(response);
 }
 
 export async function login(email: string, password: string) {
