@@ -88,17 +88,24 @@ source contract, not a claim of rendered-device measurement.
   `npm run check:brand-assets`: passed. The workspace test suite covered 138
   files / 945 tests.
 - `git diff --check`: passed at the focused-validation point.
-- `npm run ios -w @dayframe/mobile`: attempted and blocked before build because
-  `xcode-select -p` resolves to Command Line Tools. `expo run:ios` reported
-  that full Xcode must be installed; neither `xcrun simctl` nor `xcrun xctrace`
-  is available, so no simulator recording could be made.
-- Physical device named `iPhone`: not run; device discovery cannot be performed
-  without full Xcode/xctrace. System/Light/Dark, Reduce Motion, Dynamic Type,
-  VoiceOver and Reduce Transparency still require physical/simulator evidence.
+- `npm run ios -w @dayframe/mobile -- --device 'iPhone 17 Pro Max'`: passed.
+  The native Debug app built, installed and launched on iOS 26.5.
+- Simulator recording: captured under the untracked
+  `.codex-dayframe-qa/mobile-sheet-done-continuity/` directory. It is not a
+  successful sheet-flow recording: bootstrap and empty Play surface
+  `ExpoSecureStore`'s `KeyChainException: A required entitlement isn't present`,
+  and the action reports `Timer not started`. This branch has no native,
+  SecureStore, signing or entitlement diff, so the failure is documented as a
+  pre-existing validation blocker rather than attributed to this UI change.
+- Physical device named `iPhone`: discovered by `xcrun xctrace list devices`,
+  but currently offline. No install or interaction could be performed.
+  System/Light/Dark, Reduce Motion, Dynamic Type, VoiceOver and Reduce
+  Transparency still require successful simulator/physical-device evidence.
 
 ## Residual risk and release gate
 
 No web, API, database, sync or native-project contract changed. The branch is
-not ready to be described as visually validated or released until a macOS host
-with full Xcode can measure each sheet context, record normal and Reduce Motion
-transitions, and complete the physical-iPhone matrix.
+not ready to be described as visually validated or released until the existing
+simulator Keychain-entitlement failure is resolved, each sheet context can be
+measured and recorded, and the physical-iPhone matrix can run with the device
+online.
