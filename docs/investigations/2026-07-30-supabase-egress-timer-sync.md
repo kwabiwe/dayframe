@@ -1,7 +1,7 @@
 # Supabase egress and cross-device timer reconciliation
 
 Date: 2026-07-30  
-Status: Implementation in progress
+Status: Released to internal TestFlight build 79
 
 ## Observed cause
 
@@ -37,8 +37,8 @@ Dayframe mobile and web API clients use Dayframe app-session tokens rather than 
 
 ## Remaining release evidence
 
-- Optimized Vercel Preview with provider authentication and request tracing.
+- Production deployment `dpl_3izfY8fBFQSRUTPhag7ZP78zHBuR` is `READY` at the canonical API alias.
+- TestFlight `0.1.0 (79)`, delivery/build ID `c9aafbef-7d2f-43c6-a667-c48f4b501eb7`, is `VALID` and `IN_BETA_TESTING`; compliance is false and en-GB notes are set.
 - Two visible web clients plus web/mobile start, stop, edit, and delete.
 - Hidden/background, slow request, failure backoff, expired session, offline/reconnect, and overlapping local mutation checks.
-- Full workspace test, typecheck, lint, build, and diff checks.
-- Physical-iPhone/TestFlight verification after merge because the mobile polling owner changed.
+- Physical-iPhone verification because the mobile polling owner changed.
