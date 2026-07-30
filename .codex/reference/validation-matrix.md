@@ -247,7 +247,7 @@ Required checks:
 - Test missing, invalid, expired, revoked, valid, database-failure, and missing-scope paths. Only a structured session `401` may replace the browser location; `403` and `500` must remain in place.
 - Validate session TTL configuration at startup and prove cookie `maxAge` and database expiry share the resolved bounded value. Treat sliding renewal as a separate security/product design.
 - In an optimized web build, test Enter/click, wrong-then-correct credentials, duplicate submission, slow network, one continuous branded opening state, hard refresh, Back/Forward, direct `/login`, two tabs, timer start/stop, and console/network output at desktop and phone widths.
-- Measure authenticated reconciliation traffic. Keep elapsed display ticking locally while bootstrap uses initial/mutation/focus/visibility plus a conservative foreground interval.
+- Measure authenticated reconciliation traffic. Keep elapsed display ticking locally; use a bounded active-timer fingerprint for near-real-time checks, stop checks while hidden/backgrounded, allow only one check in flight, back off repeated failures, and run heavyweight bootstrap only after detected change plus initial/mutation/focus/visibility and conservative broader reconciliation.
 - Hosted auth changes require a provider-auth Vercel Preview pass before merge, including a 10-minute visible-tab observation, tab switching, safe Vercel reason logs, explicit logout/login, Safari/WebKit where available, and canonical/custom hostname checks for host-scoped cookies.
 - Mobile bearer session still works.
 - On iOS, gate the initial bearer-token read on active app state; test transient

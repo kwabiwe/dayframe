@@ -44,6 +44,7 @@ const {
   dismissReviewItem,
   enqueueEvent,
   fetchBootstrap,
+  fetchTimerState,
   getQueueDiagnostics,
   getSessionToken,
   ignoreLearnedPlace,
@@ -153,6 +154,37 @@ describe("mobile API client", () => {
       })
     );
     expect(bootstrap.places[0].defaultActivityDescription).toBe("School drop-off/pickup");
+  });
+
+  it("requests a no-store timer fingerprint with the bearer session", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({
+      activeEntryId: "entry-1",
+      updatedAt: "2026-07-30T15:00:00.000Z",
+      serverNow: "2026-07-30T15:00:03.000Z"
+    })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchTimerState()).resolves.toEqual({
+      activeEntryId: "entry-1",
+      updatedAt: "2026-07-30T15:00:00.000Z",
+      serverNow: "2026-07-30T15:00:03.000Z"
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/timer-state",
+      {
+        headers: { Authorization: "Bearer session-token" },
+        cache: "no-store"
+      }
+    );
+  });
+
+  it("clears the bearer session when the timer-state check returns 401", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "expired-token");
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({ error: "Login required" }, 401))));
+
+    await expect(fetchTimerState()).rejects.toBeInstanceOf(AuthRequiredError);
+    await expect(getSessionToken()).resolves.toBeNull();
   });
 
   it("migrates old queued items without losing their event fields", async () => {

@@ -37,7 +37,11 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import {
   analyzeTimeIntervals,
   paletteColorFor,
-  type RecentActivitySuggestion
+  TIMER_STATE_RECONCILE_INTERVAL_MS,
+  timerStateChanged,
+  timerStatePollDelay,
+  type RecentActivitySuggestion,
+  type TimerStateFingerprint
 } from "@dayframe/shared";
 import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
@@ -50,6 +54,7 @@ import {
   deleteTimeEntry,
   enqueueEvent,
   fetchBootstrap,
+  fetchTimerState,
   isNetworkTimerError,
   login,
   queueStopTimer,
@@ -211,6 +216,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const dashboardMutationRevision = useRef(0);
   const loadRef = useRef<(options?: DashboardLoadOptions) => Promise<void>>(async () => undefined);
   const timerMutationVersions = useRef(new Map<string, number>());
+  const timerStateRef = useRef<TimerStateFingerprint | null>(null);
+  const timerStatePollInFlight = useRef(false);
   const historyDeletionCoordinator = useRef<ReturnType<typeof createHistoryDeletionCoordinator<
     TimeEntry,
     MobileBootstrap | null
@@ -294,6 +301,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       })) {
         refreshQueued.current = true;
         return;
+      }
+      if (!timerStateRef.current) {
+        timerStateRef.current = {
+          activeEntryId: bootstrap.activeEntry?.id ?? null,
+          updatedAt: null,
+          serverNow: new Date().toISOString()
+        };
       }
       latestData.current = bootstrap;
       setData(bootstrap);
@@ -488,10 +502,73 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   useEffect(() => {
     const interval = setInterval(() => {
-      if (authState !== "signedOut") void load({ silent: true });
-    }, 30000);
+      if (
+        authState === "authenticated" &&
+        AppState.currentState === "active"
+      ) {
+        void load({ silent: true });
+      }
+    }, TIMER_STATE_RECONCILE_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [authState, load]);
+
+  useEffect(() => {
+    if (authState !== "authenticated") {
+      timerStateRef.current = null;
+      return undefined;
+    }
+    let cancelled = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    let consecutiveFailures = 0;
+
+    const schedule = (delay: number) => {
+      if (cancelled || AppState.currentState !== "active") return;
+      if (timeout) clearTimeout(timeout);
+      timeout = setTimeout(() => void poll(), delay);
+    };
+
+    const poll = async () => {
+      if (
+        cancelled ||
+        AppState.currentState !== "active" ||
+        timerStatePollInFlight.current
+      ) return;
+      timerStatePollInFlight.current = true;
+      try {
+        const next = await fetchTimerState();
+        const changed = timerStateChanged(timerStateRef.current, next);
+        timerStateRef.current = next;
+        consecutiveFailures = 0;
+        if (changed) await loadRef.current({ silent: true });
+      } catch (error) {
+        if (error instanceof AuthRequiredError) {
+          cancelled = true;
+          setData(null);
+          setAuthState("signedOut");
+          return;
+        }
+        consecutiveFailures += 1;
+      } finally {
+        timerStatePollInFlight.current = false;
+        schedule(timerStatePollDelay(consecutiveFailures));
+      }
+    };
+
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        schedule(0);
+      } else if (timeout) {
+        clearTimeout(timeout);
+        timeout = null;
+      }
+    });
+    schedule(0);
+    return () => {
+      cancelled = true;
+      if (timeout) clearTimeout(timeout);
+      subscription.remove();
+    };
+  }, [authState]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {

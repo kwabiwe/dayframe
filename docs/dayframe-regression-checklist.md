@@ -127,7 +127,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Only a structured session-related `401` starts one login replacement. Missing scope is `403`; an unstructured credential `401`, `403`, transient network failure, SQL/configuration error, or `500` does not masquerade as logout.
 - The app-session TTL is finite, integer, bounded, and shared by the cookie and database expiry. Changing absolute expiry or introducing sliding renewal requires a separate security design.
 - Login uses one controlled `onSubmit` path for Enter and click, rejects duplicate submission, retains useful input on failure, stays in a branded Opening state after success, and replaces `/login` in history.
-- Visible bootstrap reconciliation occurs initially, after mutations, on focus/visibility, and on a conservative interval. The elapsed timer still ticks locally every second and no one-second authenticated request storm returns.
+- Active timer state is checked through the bounded `/api/timer-state` fingerprint every three seconds only while web is visible or mobile is foregrounded. A changed ID or `updatedAt` triggers one canonical bootstrap through the existing mutation/race gate; failures back off to 6, 12, then 30 seconds; broader bootstrap reconciliation remains at five minutes. The elapsed timer still ticks locally every second, hidden/background clients stop polling, and no heavyweight authenticated request storm returns.
 - Hosted auth changes require an optimized production-build browser pass and a provider-auth Vercel Preview pass. Preserve Network logs, test two tabs/expiry/revocation/slow network/Back-Forward, inspect safe server logs, and verify authentication does not move between host-scoped aliases.
 
 ## Productivity Views
