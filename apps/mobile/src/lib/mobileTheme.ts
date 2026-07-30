@@ -43,6 +43,9 @@ export const themeOptions: Array<{ value: ThemePreference; label: string }> = [
 
 const THEME_PREFERENCE_KEY = "dayframe.themePreference.v1";
 const monoFont = "System";
+const TIME_ENTRY_SHEET_TOP_ACTION_INSET = 16;
+const TIME_ENTRY_SHEET_TOP_ACTION_MIN_TARGET = 44;
+const TIME_ENTRY_SHEET_TITLE_ACTION_CLEARANCE = 104;
 const MobileThemeContext = createContext<MobileThemeContextValue | null>(null);
 
 export function MobileThemeProvider({ children }: { children: ReactNode }) {
@@ -1948,6 +1951,7 @@ function createStyles(theme: MobileTheme) {
       width: "100%"
     },
     activeEditSheet: {
+      position: "relative",
       maxHeight: "96%",
       borderTopLeftRadius: 24,
       borderTopRightRadius: 24,
@@ -2050,16 +2054,14 @@ function createStyles(theme: MobileTheme) {
       backgroundColor: theme.borderStrong
     },
     sheetHeader: {
-      minHeight: 42,
+      minHeight: TIME_ENTRY_SHEET_TOP_ACTION_MIN_TARGET,
       flexDirection: "row",
       alignItems: "center",
-      justifyContent: "space-between",
-      gap: 12
-    },
-    sheetHeaderRunning: {
-      minHeight: 44,
-      justifyContent: "flex-end",
+      justifyContent: "center",
       marginBottom: 4
+    },
+    sheetHeaderWithTopAction: {
+      paddingRight: TIME_ENTRY_SHEET_TITLE_ACTION_CLEARANCE
     },
     sheetHeaderCentered: {
       justifyContent: "center"
@@ -2097,18 +2099,20 @@ function createStyles(theme: MobileTheme) {
       justifyContent: "center"
     },
     sheetDoneButton: {
-      minHeight: 44,
+      minWidth: TIME_ENTRY_SHEET_TOP_ACTION_MIN_TARGET,
+      minHeight: TIME_ENTRY_SHEET_TOP_ACTION_MIN_TARGET,
       backgroundColor: theme.surfaceMuted,
       borderRadius: 999,
       paddingHorizontal: 16,
       alignItems: "center",
       justifyContent: "center"
     },
-    sheetDoneButtonRunning: {
+    sheetTopActionLayer: {
       position: "absolute",
-      top: 8,
-      right: 0,
-      zIndex: 2
+      top: TIME_ENTRY_SHEET_TOP_ACTION_INSET,
+      right: TIME_ENTRY_SHEET_TOP_ACTION_INSET,
+      zIndex: 2,
+      elevation: 2
     },
     sheetDoneText: {
       color: theme.accentText,

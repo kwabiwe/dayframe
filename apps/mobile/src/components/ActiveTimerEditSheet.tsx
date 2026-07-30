@@ -37,6 +37,7 @@ import {
 } from "@/lib/editSheetKeyboard";
 import type { MobileBootstrap, MobileTag, MobileTimeEntry, TimeEntryUpdatePatch } from "@/lib/api";
 import { MOBILE_MOTION, useReduceMotionPreference } from "@/lib/motion";
+import { shouldShowRunningSuggestions } from "@/lib/runningSuggestionsSession";
 import { runningTimerSheetElapsedSeconds } from "@/lib/timerPresentation";
 import { TagMetadata } from "@/components/TagMetadata";
 import {
@@ -136,7 +137,9 @@ export function ActiveTimerEditSheet({
   const hashtagPanelProgress = useRef(new Animated.Value(0)).current;
   const descriptionInputRef = useRef<TextInput>(null);
   const contentScrollRef = useRef<ScrollView>(null);
-  const descriptionEntryStarted = useRef(false);
+  // This belongs to one visible editor presentation. It deliberately survives
+  // keyboard dismissal, draft clearing and bootstrap/suggestion refreshes.
+  const suggestionsDismissedForSession = useRef(false);
   const timeInputRef = useRef<TextInput>(null);
   const startTimeFocused = useRef(false);
   if (currentEntry) {
@@ -179,13 +182,13 @@ export function ActiveTimerEditSheet({
 
   useLayoutEffect(() => {
     if (!visible) {
-      descriptionEntryStarted.current = false;
+      suggestionsDismissedForSession.current = false;
       return;
     }
     const snapshot = editorSnapshot.current;
     if (!snapshot.startedAt) return;
     const startedAt = new Date(snapshot.startedAt);
-    descriptionEntryStarted.current = false;
+    suggestionsDismissedForSession.current = false;
     const hydratedDescription = snapshot.description ?? "";
     setDescription(hydratedDescription);
     setSelectedTagNames(snapshot.tags.map((tag) => tag.name));
@@ -209,11 +212,13 @@ export function ActiveTimerEditSheet({
     setDatePickerTarget("start");
     setStartTimeEdited(false);
     setDatePickerOpen(false);
-    const shouldShowSuggestions = (
-      isRunningMode &&
-      !snapshot.description &&
-      snapshot.suggestionsAvailable
-    );
+    const shouldShowSuggestions = shouldShowRunningSuggestions({
+      dismissedForSession: suggestionsDismissedForSession.current,
+      hasDescription: Boolean(snapshot.description),
+      isRunningMode,
+      suggestionsAvailable: snapshot.suggestionsAvailable,
+      visible
+    });
     setSuggestionsMounted(shouldShowSuggestions);
     setSuggestionsVisible(shouldShowSuggestions);
     suggestionsProgress.setValue(shouldShowSuggestions ? 1 : 0);
@@ -230,8 +235,14 @@ export function ActiveTimerEditSheet({
   ]);
 
   useLayoutEffect(() => {
-    if (!visible || !editorSessionKey || !isRunningMode || descriptionEntryStarted.current) return;
-    const shouldShowSuggestions = !entryDescription && suggestions.length > 0;
+    if (!visible || !editorSessionKey || !isRunningMode || suggestionsDismissedForSession.current) return;
+    const shouldShowSuggestions = shouldShowRunningSuggestions({
+      dismissedForSession: suggestionsDismissedForSession.current,
+      hasDescription: Boolean(entryDescription),
+      isRunningMode,
+      suggestionsAvailable: suggestions.length > 0,
+      visible
+    });
     setSuggestionsMounted(shouldShowSuggestions);
     setSuggestionsVisible(shouldShowSuggestions);
     suggestionsProgress.setValue(shouldShowSuggestions ? 1 : 0);
@@ -608,7 +619,7 @@ export function ActiveTimerEditSheet({
     if (busy || !entry || !onApplySuggestion) return;
     const previousDescription = description;
     const previousCategoryId = selectedCategoryId;
-    descriptionEntryStarted.current = true;
+    suggestionsDismissedForSession.current = true;
     setDescription(suggestion.description);
     setSelectedCategoryId(suggestion.categoryId);
     setSuggestionsVisible(false);
@@ -656,7 +667,7 @@ export function ActiveTimerEditSheet({
 
   function focusDescriptionField() {
     setDatePickerOpen(false);
-    descriptionEntryStarted.current = true;
+    suggestionsDismissedForSession.current = true;
     hideSuggestionsForDescriptionEntry();
     setDescriptionFocused(true);
   }
@@ -682,7 +693,7 @@ export function ActiveTimerEditSheet({
   function startTagEntry() {
     if (busy) return;
     setDatePickerOpen(false);
-    descriptionEntryStarted.current = true;
+    suggestionsDismissedForSession.current = true;
     hideSuggestionsForDescriptionEntry();
     const currentActive = findActiveHashtag(description, descriptionSelection.end);
     if (currentActive && descriptionSelection.start === descriptionSelection.end) {
@@ -824,24 +835,28 @@ export function ActiveTimerEditSheet({
               translateYOffset={Animated.multiply(keyboardLift, -1)}
               visible={visible}
             >
-              <View style={[styles.sheetHeader, isRunningMode ? styles.sheetHeaderRunning : null]}>
-                  {!isRunningMode ? <Text style={styles.sheetTitle}>{sheetTitle}</Text> : null}
-                  {showDoneButton ? (
-                    <Pressable
-                      accessibilityLabel={saveLabel}
-                      accessibilityRole="button"
-                      disabled={busy}
-                      onPress={saveChanges}
-                      style={({ pressed }) => [
-                        styles.sheetDoneButton,
-                        isRunningMode ? styles.sheetDoneButtonRunning : null,
-                        pressed && !busy ? styles.buttonPressed : null,
-                        busy ? styles.buttonDisabled : null
-                      ]}
-                    >
-                      <Text style={styles.sheetDoneText}>Done</Text>
-                    </Pressable>
-                  ) : null}
+              {showDoneButton ? (
+                <View pointerEvents="box-none" style={styles.sheetTopActionLayer}>
+                  <Pressable
+                    accessibilityLabel={saveLabel}
+                    accessibilityRole="button"
+                    disabled={busy}
+                    onPress={saveChanges}
+                    style={({ pressed }) => [
+                      styles.sheetDoneButton,
+                      pressed && !busy ? styles.buttonPressed : null,
+                      busy ? styles.buttonDisabled : null
+                    ]}
+                  >
+                    <Text style={styles.sheetDoneText}>Done</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+              <View style={[
+                styles.sheetHeader,
+                showDoneButton ? styles.sheetHeaderWithTopAction : null
+              ]}>
+                {!isRunningMode ? <Text style={styles.sheetTitle}>{sheetTitle}</Text> : null}
               </View>
 
               <ScrollView

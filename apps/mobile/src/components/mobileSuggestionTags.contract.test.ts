@@ -17,8 +17,13 @@ describe("running timer suggestion metadata", () => {
     expect(source).toContain("tagLabel ? `with ${tagLabel}` : null");
   });
 
-  it("keeps the running Done action above and clear of the Stop control", () => {
-    expect(theme).toMatch(/sheetHeaderRunning:[\s\S]*minHeight: 36/);
-    expect(theme).toMatch(/sheetHeaderRunning:[\s\S]*marginBottom: 4/);
+  it("uses the same outer-edge Done action for every time-entry sheet", () => {
+    expect(theme).toContain("const TIME_ENTRY_SHEET_TOP_ACTION_INSET = 16;");
+    expect(theme).toContain("top: TIME_ENTRY_SHEET_TOP_ACTION_INSET");
+    expect(theme).toContain("right: TIME_ENTRY_SHEET_TOP_ACTION_INSET");
+    expect(theme).toContain("minWidth: TIME_ENTRY_SHEET_TOP_ACTION_MIN_TARGET");
+    expect(theme).toContain("minHeight: TIME_ENTRY_SHEET_TOP_ACTION_MIN_TARGET");
+    expect(theme).not.toContain("sheetHeaderRunning:");
+    expect(theme).not.toContain("sheetDoneButtonRunning:");
   });
 });
