@@ -41,7 +41,17 @@ reconstrained the sheet through a separate height change.
 
 ## Validation
 
-- Mobile TypeScript typecheck.
-- Focused running-suggestion and keyboard-layout tests.
-- Full mobile test suite and iOS simulator/physical-iPhone interaction checks
-  remain release gates.
+- Mobile TypeScript typecheck passed.
+- Full mobile suite passed: 303 tests across 42 files.
+- Workspace lint and `git diff --check` passed.
+- The first simulator build attempt exposed an out-of-sync CocoaPods sandbox;
+  `npx pod-install` repaired it before release preflight.
+- Signed Release archive and App Store export passed from merged `main` at
+  `e71dda9`; the archive contains version `0.1.0 (78)` and production API base
+  `https://dayframe-web.vercel.app`.
+- App Store Connect delivery/build ID
+  `7b34be3b-c828-4e97-ab97-2ee1e0424e36` is `VALID`, export compliance is
+  false, en-GB notes are set, and the all-build `Internal Health Debug` group
+  reports `IN_BETA_TESTING`.
+- Physical-iPhone normal/Reduce Motion, Light/Dark, Dynamic Type and VoiceOver
+  interaction checks remain the acceptance gate.
