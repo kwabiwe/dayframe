@@ -8806,20 +8806,26 @@ dialog.ui-dialog.manual-entry-dialog {
 .calendar-grid-corner,
 .calendar-day-heading {
   z-index: 40;
-  min-height: 66px;
+  min-height: 52px;
   background: var(--surface-inset);
 }
 
 .calendar-grid-corner {
   z-index: 42;
-  align-content: stretch;
-  gap: 0;
-  padding: 4px 8px 0;
+  align-content: center;
+  padding: 4px 8px;
 }
 
-.calendar-grid-corner > span:last-child {
-  align-self: center;
-  text-align: center;
+.calendar-day-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-block: 4px;
+}
+
+.calendar-day-date,
+.calendar-day-total {
+  white-space: nowrap;
 }
 
 .calendar-corner-zoom {
@@ -8858,7 +8864,21 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .timeline-list-table {
+  --timeline-list-column-header-height: 40px;
   table-layout: fixed;
+}
+
+.timeline-list-table th {
+  z-index: 4;
+  height: var(--timeline-list-column-header-height);
+  min-height: 0;
+  padding-block: 0;
+}
+
+.timeline-list-day-heading > td {
+  top: var(--timeline-list-column-header-height);
+  z-index: 3;
+  box-shadow: 0 -1px 0 var(--line);
 }
 
 .timeline-list-table th:nth-child(2) {
