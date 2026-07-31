@@ -11,6 +11,7 @@ import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import { OverlapNotice } from "@/components/OverlapNotice";
 import { TagMetadata } from "@/components/TagMetadata";
 import { EntriesTable } from "@/components/EntriesTable";
+import { useTimelineDeleteUndo } from "@/components/useTimelineDeleteUndo";
 import { IconButton, SegmentedControl } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import {
@@ -214,9 +215,22 @@ export function TimeReviewViews({
     data.entries,
     data.activeEntry ? [data.activeEntry] : []
   ), ranges.week, capturedNow);
-  const activeEntries = state.scope === "day" ? dayEntries : weekEntries;
+  const timelineEntryIds = new Set([...dayEntries, ...weekEntries].map((entry) => entry.id));
+  const {
+    error: deleteError,
+    hiddenEntryIds,
+    pendingNotice,
+    requestDelete,
+    undoPendingDelete
+  } = useTimelineDeleteUndo({ entryIds: timelineEntryIds, onSynced: refreshData });
+  const requestTimelineDelete = useCallback((entries: readonly TimeEntryRow[]) => {
+    requestDelete({ entries, label: timelineDeleteNoticeLabel(entries) });
+  }, [requestDelete]);
+  const visibleDayEntries = dayEntries.filter((entry) => !hiddenEntryIds.has(entry.id));
+  const visibleWeekEntries = weekEntries.filter((entry) => !hiddenEntryIds.has(entry.id));
+  const activeEntries = state.scope === "day" ? visibleDayEntries : visibleWeekEntries;
   const dayAnalysis = analyzeTimeIntervals(
-    dayEntries.map((entry) => ({
+    visibleDayEntries.map((entry) => ({
       id: entry.id,
       startedAt: entry.startedAt,
       stoppedAt: entry.stoppedAt
@@ -224,7 +238,7 @@ export function TimeReviewViews({
     { range: ranges.day, now: capturedNow }
   );
   const weekAnalysis = analyzeTimeIntervals(
-    weekEntries.map((entry) => ({
+    visibleWeekEntries.map((entry) => ({
       id: entry.id,
       startedAt: entry.startedAt,
       stoppedAt: entry.stoppedAt
@@ -310,6 +324,11 @@ export function TimeReviewViews({
           {dateLoadError ?? "Loading period…"}
         </p>
       ) : null}
+      {deleteError ? (
+        <p className="timeline-delete-error" role="alert">
+          {deleteError}
+        </p>
+      ) : null}
 
       <div className="timeline-view-stage">
         {state.view === "calendar" ? (
@@ -318,6 +337,7 @@ export function TimeReviewViews({
             capturedNow={capturedNow}
             categories={data.categories}
             entries={activeEntries}
+            onDeleteEntries={requestTimelineDelete}
             onScroll={(event) => rememberScrollPosition("calendar", event)}
             onSynced={refreshData}
             places={data.places}
@@ -332,6 +352,7 @@ export function TimeReviewViews({
             entries={activeEntries}
             categories={data.categories}
             displayRange={ranges.active}
+            onDeleteEntries={requestTimelineDelete}
             places={data.places}
             groupByDay
             onChanged={refreshData}
@@ -343,15 +364,61 @@ export function TimeReviewViews({
         {state.view === "timesheet" ? (
           <TimesheetView
             capturedNow={capturedNow}
-            entries={weekEntries}
+            entries={visibleWeekEntries}
             onScroll={(event) => rememberScrollPosition("timesheet", event)}
             scrollContainerRef={registerScrollContainer}
             weekDays={ranges.weekDays}
           />
         ) : null}
       </div>
+      {pendingNotice ? (
+        <TimelineDeleteUndoNotice
+          isExiting={pendingNotice.isExiting}
+          notice={pendingNotice}
+          onUndo={undoPendingDelete}
+        />
+      ) : null}
     </section>
   );
+}
+
+function TimelineDeleteUndoNotice({
+  isExiting,
+  notice,
+  onUndo
+}: {
+  isExiting: boolean;
+  notice: { label: string; token: number };
+  onUndo: () => void;
+}) {
+  const undoRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (isExiting) return;
+    const frame = window.requestAnimationFrame(() => undoRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [isExiting, notice.token]);
+
+  return (
+    <div
+      className={`timeline-delete-undo${isExiting ? " is-exiting" : ""}`}
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <span>{notice.label}</span>
+      <button ref={undoRef} disabled={isExiting} type="button" onClick={onUndo}>Undo</button>
+    </div>
+  );
+}
+
+function timelineDeleteNoticeLabel(entries: readonly TimeEntryRow[]) {
+  const entry = entries[0];
+  if (!entry) return "Time entry deleted";
+  const title = `“${timeEntryTitle(entry)}”`;
+  return entries.length > 1
+    ? `${entries.length} ${title} occurrences deleted`
+    : `${title} deleted`;
 }
 
 type TimelineScrollPosition = { left: number; top: number };
@@ -361,6 +428,7 @@ function CalendarReview({
   capturedNow,
   categories,
   entries,
+  onDeleteEntries,
   onScroll,
   onSynced,
   places,
@@ -372,6 +440,7 @@ function CalendarReview({
   capturedNow: Date;
   categories: CategoryRow[];
   entries: TimeEntryRow[];
+  onDeleteEntries: (entries: readonly TimeEntryRow[]) => void;
   onScroll: (event: UIEvent<HTMLDivElement>) => void;
   onSynced: () => Promise<void>;
   places: PlaceRow[];
@@ -389,10 +458,6 @@ function CalendarReview({
   const [resizeError, setResizeError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [continuingEntryId, setContinuingEntryId] = useState<string | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<TimeEntryRow | null>(null);
-  const deleteTimerRef = useRef<number | null>(null);
-  const pendingDeleteRef = useRef<TimeEntryRow | null>(null);
-  const mountedRef = useRef(true);
   const [zoomLevel, setZoomLevel] = useState<CalendarZoom>("hour");
   const today = capturedNow;
   const zoom = calendarZooms[zoomLevel];
@@ -402,15 +467,6 @@ function CalendarReview({
   const rowHeight = zoom.pixelsPerHour;
   const gridLineSpacing = (zoom.intervalMinutes / 60) * rowHeight;
   const calendarHeight = (calendarHours.endHour - calendarHours.startHour) * rowHeight;
-  useEffect(() => () => {
-    mountedRef.current = false;
-    if (deleteTimerRef.current !== null) window.clearTimeout(deleteTimerRef.current);
-    const pending = pendingDeleteRef.current;
-    pendingDeleteRef.current = null;
-    if (pending) {
-      void clientFetch(`/api/time-entries/${pending.id}`, { method: "DELETE", keepalive: true });
-    }
-  }, []);
   const axisMarks = useMemo(() => {
     const startMinutes = calendarHours.startHour * 60;
     const totalMinutes = (calendarHours.endHour - calendarHours.startHour) * 60;
@@ -455,38 +511,9 @@ function CalendarReview({
     }
   }
 
-  async function commitCalendarDelete(entry: TimeEntryRow) {
-    pendingDeleteRef.current = null;
-    const response = await clientFetch(`/api/time-entries/${entry.id}`, { method: "DELETE" });
-    if (!mountedRef.current) return;
-    if (!response.ok) {
-      setPendingDelete(null);
-      setActionError("Unable to delete this entry.");
-      return;
-    }
-    setPendingDelete(null);
-    await onSynced();
-    startTransition(() => router.refresh());
-  }
-
   function deleteCalendarEntry(entry: TimeEntryRow) {
-    if (deleteTimerRef.current !== null) window.clearTimeout(deleteTimerRef.current);
-    const replaced = pendingDeleteRef.current;
-    if (replaced) void commitCalendarDelete(replaced);
     setSelectedTarget(null);
-    pendingDeleteRef.current = entry;
-    setPendingDelete(entry);
-    deleteTimerRef.current = window.setTimeout(() => {
-      deleteTimerRef.current = null;
-      if (pendingDeleteRef.current?.id === entry.id) void commitCalendarDelete(entry);
-    }, 5_000);
-  }
-
-  function undoCalendarDelete() {
-    if (deleteTimerRef.current !== null) window.clearTimeout(deleteTimerRef.current);
-    deleteTimerRef.current = null;
-    pendingDeleteRef.current = null;
-    setPendingDelete(null);
+    onDeleteEntries([entry]);
   }
 
   async function saveCalendarResize(entry: TimeEntryRow, draft: CalendarResizeDraft) {
@@ -696,7 +723,6 @@ function CalendarReview({
             >
               {(() => {
                 const blocks = entries
-                  .filter((entry) => entry.id !== pendingDelete?.id)
                   .filter((entry) => entryOverlapsDay(entry, day, capturedNow))
                   .map((entry) => {
                     const activeDraft = resizeDraft?.entryId === entry.id ? resizeDraft : null;
@@ -891,12 +917,6 @@ function CalendarReview({
               <Trash2 size={15} aria-hidden="true" /> Delete
             </button>
           </div>
-        </div>
-      ) : null}
-      {pendingDelete ? (
-        <div className="calendar-delete-undo" role="status">
-          <span>{timeEntryTitle(pendingDelete)} deleted</span>
-          <button type="button" onClick={undoCalendarDelete}>Undo</button>
         </div>
       ) : null}
       {resizeDraft ? (

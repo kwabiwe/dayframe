@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { groupTimelineEntries } from "@/lib/timeline-entry-groups";
+import {
+  groupTimelineEntries,
+  groupTimelineEntriesByDay,
+  timelineEntryGroupKey
+} from "@/lib/timeline-entry-groups";
 import type { TimeEntryRow } from "@/lib/queries";
 
 function entry(overrides: Partial<TimeEntryRow>): TimeEntryRow {
@@ -38,14 +42,59 @@ describe("groupTimelineEntries", () => {
     expect(groups[0].totalSeconds).toBe(2700);
   });
 
-  it("keeps categories separate and leaves blank uncategorized entries individual", () => {
+  it("keeps categories separate and groups blank uncategorized entries through the normal fallback key", () => {
     const groups = groupTimelineEntries([
       entry({ id: "work", categoryId: "work", categoryName: "Work" }),
       entry({ id: "home", categoryId: "home", categoryName: "Home" }),
       entry({ id: "blank-1", categoryId: null, categoryName: null, description: null }),
       entry({ id: "blank-2", categoryId: null, categoryName: null, description: " " })
     ]);
-    expect(groups).toHaveLength(4);
+    expect(groups).toHaveLength(3);
+    expect(groups.at(-1)?.entries.map((item) => item.id)).toEqual(["blank-1", "blank-2"]);
+    expect(timelineEntryGroupKey(groups.at(-1)!.representative)).not.toContain("entry:");
+  });
+
+  it("keeps blank uncategorized tag sets as part of the existing grouping identity", () => {
+    const sameTags = groupTimelineEntries([
+      entry({ id: "one", categoryId: null, categoryName: null, description: null, tagNames: [" Cubic ", "A24"] }),
+      entry({ id: "two", categoryId: null, categoryName: null, description: " ", tagNames: ["a24", "cubic"] })
+    ]);
+    const differentTags = groupTimelineEntries([
+      entry({ id: "a24", categoryId: null, categoryName: null, description: null, tagNames: ["A24"] }),
+      entry({ id: "cubic", categoryId: null, categoryName: null, description: null, tagNames: ["Cubic"] })
+    ]);
+
+    expect(sameTags).toHaveLength(1);
+    expect(sameTags[0]?.entries.map((item) => item.id)).toEqual(["one", "two"]);
+    expect(differentTags).toHaveLength(2);
+  });
+
+  it("keeps uncategorized descriptions grouped only when their normalized text matches", () => {
+    const matching = groupTimelineEntries([
+      entry({ id: "one", categoryId: null, categoryName: null, description: " Planning   notes " }),
+      entry({ id: "two", categoryId: null, categoryName: null, description: "planning notes" })
+    ]);
+    const different = groupTimelineEntries([
+      entry({ id: "one", categoryId: null, categoryName: null, description: "Planning" }),
+      entry({ id: "two", categoryId: null, categoryName: null, description: "Reading" })
+    ]);
+
+    expect(matching).toHaveLength(1);
+    expect(different).toHaveLength(2);
+  });
+
+  it("keeps matching blank uncategorized entries separate across List day partitions", () => {
+    const groups = groupTimelineEntriesByDay(
+      [
+        entry({ id: "friday", categoryId: null, categoryName: null, description: null, startedAt: "2026-07-31T08:00:00.000Z" }),
+        entry({ id: "thursday", categoryId: null, categoryName: null, description: null, startedAt: "2026-07-30T08:00:00.000Z" })
+      ],
+      (item) => item.startedAt.slice(0, 10)
+    );
+
+    expect(groups).toHaveLength(2);
+    expect(groups.map((group) => group.day)).toEqual(["2026-07-31", "2026-07-30"]);
+    expect(groups.map((group) => group.entries.map((item) => item.id))).toEqual([["friday"], ["thursday"]]);
   });
 
   it("groups descriptionless entries when category provides a useful identity", () => {

@@ -8557,8 +8557,8 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .calendar-entry-quick-actions button,
-.calendar-delete-undo button {
-  min-height: 38px;
+.timeline-delete-undo button {
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -8574,12 +8574,14 @@ dialog.ui-dialog.manual-entry-dialog {
   color: var(--danger-text);
 }
 
-.calendar-delete-undo {
+.timeline-delete-undo {
   position: fixed;
-  right: 20px;
-  bottom: 20px;
+  right: max(12px, env(safe-area-inset-right));
+  bottom: max(12px, env(safe-area-inset-bottom));
   z-index: 80;
-  min-height: 52px;
+  width: fit-content;
+  max-width: calc(100vw - 24px);
+  min-height: 56px;
   display: flex;
   align-items: center;
   gap: 16px;
@@ -8588,16 +8590,89 @@ dialog.ui-dialog.manual-entry-dialog {
   background: var(--foreground);
   color: var(--background);
   box-shadow: var(--shadow-raised);
+  animation: timeline-delete-notice-enter 160ms ease-out both;
 }
 
-.calendar-delete-undo button {
+.timeline-delete-undo.is-exiting {
+  pointer-events: none;
+  animation: timeline-delete-notice-exit 160ms ease-in both;
+}
+
+.timeline-delete-undo > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.timeline-delete-undo button {
+  flex: 0 0 auto;
   background: var(--accent);
   color: var(--on-accent);
+}
+
+.timeline-delete-error {
+  position: fixed;
+  right: max(12px, env(safe-area-inset-right));
+  bottom: max(12px, env(safe-area-inset-bottom));
+  z-index: 79;
+  width: min(420px, calc(100vw - 24px));
+  margin: 0;
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-raised);
+  color: var(--danger-text);
+  animation: timeline-delete-notice-enter 160ms ease-out both;
+}
+
+.timeline-workspace:has(.timeline-delete-undo) .timeline-delete-error {
+  bottom: max(80px, calc(env(safe-area-inset-bottom) + 68px));
+}
+
+@keyframes timeline-delete-notice-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes timeline-delete-notice-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(4px);
+  }
 }
 
 @media (max-width: 640px) {
   .calendar-entry-quick-card {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .timeline-delete-undo {
+    align-items: stretch;
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .timeline-delete-undo > span {
+    align-self: center;
+    padding-left: 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .timeline-delete-undo,
+  .timeline-delete-error {
+    animation: none;
   }
 }

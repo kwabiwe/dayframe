@@ -6,11 +6,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Ellipsis, Pencil, Play, Trash2 } from "lucide-react";
 import { analyzeTimeIntervals, type TimeIntervalAnalysisEntry } from "@dayframe/shared";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
-import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { TagMetadata } from "@/components/TagMetadata";
 import { IconButton } from "@/components/ui/Primitives";
-import { clientFetch } from "@/lib/client-auth-fetch";
 import { timeEntryCategoryColor, timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
 import type { CategoryRow, PlaceRow, TagRow, TimeEntryRow } from "@/lib/queries";
 import {
@@ -19,7 +17,7 @@ import {
   formatTime
 } from "@/lib/format";
 import { timelineEntryDisplayInterval } from "@/lib/timeline-calculations";
-import { groupTimelineEntries } from "@/lib/timeline-entry-groups";
+import { groupTimelineEntriesByDay } from "@/lib/timeline-entry-groups";
 import type { DateRange } from "@/lib/time-entry-overlap";
 
 export function EntriesTable({
@@ -28,6 +26,7 @@ export function EntriesTable({
   places,
   tags = [],
   groupByDay = false,
+  onDeleteEntries,
   onChanged,
   onScroll,
   scrollContainerRef,
@@ -39,6 +38,7 @@ export function EntriesTable({
   places: PlaceRow[];
   tags?: TagRow[];
   groupByDay?: boolean;
+  onDeleteEntries: (entries: readonly TimeEntryRow[]) => void;
   onChanged?: () => Promise<void>;
   onScroll: (event: UIEvent<HTMLDivElement>) => void;
   scrollContainerRef: (element: HTMLDivElement | null) => void;
@@ -50,12 +50,6 @@ export function EntriesTable({
   const { startEntryAgain } = useAppShellRuntime();
   const [isPending, startTransition] = useTransition();
   const [editingEntry, setEditingEntry] = useState<TimeEntryRow | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<{
-    entries: TimeEntryRow[];
-    title: string;
-  } | null>(null);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [isDeletingEntry, setIsDeletingEntry] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [continuingEntryId, setContinuingEntryId] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
@@ -81,25 +75,17 @@ export function EntriesTable({
     [overlapAnalysis.entries]
   );
   const grouped = useMemo(() => {
-    const byDay = new Map<string, TimeEntryRow[]>();
-    for (const entry of entries) {
-      const interval = timelineEntryDisplayInterval(entry, displayRange, capturedNow);
-      const day = formatDate(interval.startedAt);
-      const dayEntries = byDay.get(day) ?? [];
-      dayEntries.push(entry);
-      byDay.set(day, dayEntries);
-    }
-    return [...byDay].flatMap(([day, entriesForDay]) =>
-      groupTimelineEntries(entriesForDay).map((group) => ({
-        ...group,
-        day,
-        key: `${day}:${group.key}`,
-        totalSeconds: group.entries.reduce(
-          (sum, entry) => sum + intervalSeconds(timelineEntryDisplayInterval(entry, displayRange, capturedNow), capturedNow),
-          0
-        )
-      }))
-    );
+    return groupTimelineEntriesByDay(
+      entries,
+      (entry) => formatDate(timelineEntryDisplayInterval(entry, displayRange, capturedNow).startedAt)
+    ).map((group) => ({
+      ...group,
+      key: `${group.day}:${group.key}`,
+      totalSeconds: group.entries.reduce(
+        (sum, entry) => sum + intervalSeconds(timelineEntryDisplayInterval(entry, displayRange, capturedNow), capturedNow),
+        0
+      )
+    }));
   }, [capturedNow, displayRange, entries]);
 
   useEffect(() => {
@@ -117,38 +103,6 @@ export function EntriesTable({
     });
     return () => window.cancelAnimationFrame(frame);
   }, [grouped, highlightedEntryId]);
-
-  async function remove(entriesToDelete: TimeEntryRow[]) {
-    if (isDeletingEntry) return;
-    setIsDeletingEntry(true);
-    setDeleteError(null);
-    try {
-      const response = entriesToDelete.length === 1
-        ? await clientFetch(`/api/time-entries/${entriesToDelete[0].id}`, { method: "DELETE" })
-        : await clientFetch("/api/time-entries/batch-delete", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ids: entriesToDelete.map((entry) => entry.id) })
-          });
-      if (!response.ok) {
-        let errorMessage = `Unable to delete this entry: ${response.status}`;
-        try {
-          const payload = (await response.json()) as { error?: string };
-          errorMessage = payload.error ?? errorMessage;
-        } catch {
-          // Runtime failures may not return JSON.
-        }
-        throw new Error(errorMessage);
-      }
-      setPendingDelete(null);
-      await onChanged?.();
-      startTransition(() => router.refresh());
-    } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : "Unable to delete this entry.");
-    } finally {
-      setIsDeletingEntry(false);
-    }
-  }
 
   async function continueEntry(entry: TimeEntryRow) {
     if (continuingEntryId) return;
@@ -294,11 +248,7 @@ export function EntriesTable({
                         editLabel={isGrouped ? "Edit latest occurrence" : "Edit"}
                         label={`More actions for ${timeEntryTitle(entry)}`}
                         onDelete={() => {
-                          setDeleteError(null);
-                          setPendingDelete({
-                            entries: isGrouped ? group.entries : [entry],
-                            title: isGrouped ? `Delete all ${group.entries.length} occurrences?` : "Delete time entry?"
-                          });
+                          onDeleteEntries(isGrouped ? group.entries : [entry]);
                         }}
                         onEdit={() => setEditingEntry(entry)}
                       />
@@ -357,8 +307,7 @@ export function EntriesTable({
                           editLabel="Edit"
                           label={`More actions for ${timeEntryTitle(occurrence)} occurrence`}
                           onDelete={() => {
-                            setDeleteError(null);
-                            setPendingDelete({ entries: [occurrence], title: "Delete time entry?" });
+                            onDeleteEntries([occurrence]);
                           }}
                           onEdit={() => setEditingEntry(occurrence)}
                         />
@@ -385,19 +334,6 @@ export function EntriesTable({
           peerEntries={entries}
           places={places}
           tags={tags}
-        />
-      ) : null}
-      {pendingDelete ? (
-        <DestructiveConfirmationDialog
-          body={pendingDelete.entries.length > 1
-            ? `All ${pendingDelete.entries.length} “${timeEntryTitle(pendingDelete.entries[0])}” occurrences will be permanently removed.`
-            : `“${timeEntryTitle(pendingDelete.entries[0])}” will be permanently removed.`}
-          dialogId="delete-time-entry"
-          error={deleteError}
-          isBusy={isDeletingEntry || isPending}
-          onCancel={() => setPendingDelete(null)}
-          onConfirm={() => void remove(pendingDelete.entries)}
-          title={pendingDelete.title}
         />
       ) : null}
     </section>

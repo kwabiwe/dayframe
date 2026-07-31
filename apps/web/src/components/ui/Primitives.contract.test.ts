@@ -14,6 +14,10 @@ const entriesSource = readFileSync(
   fileURLToPath(new URL("../EntriesTable.tsx", import.meta.url)),
   "utf8"
 );
+const timelineDeleteSource = readFileSync(
+  fileURLToPath(new URL("../useTimelineDeleteUndo.ts", import.meta.url)),
+  "utf8"
+);
 
 describe("web UI foundation contracts", () => {
   it("uses one native modal owner with focus entry, cancellation, scroll lock and restoration", () => {
@@ -51,12 +55,12 @@ describe("web UI foundation contracts", () => {
     expect(globalStyles).not.toContain("swiss-dialog-backdrop");
   });
 
-  it("keeps entry deletion confirmed, busy-safe and recoverable on failure", () => {
-    expect(entriesSource).toContain("setPendingDelete({");
-    expect(entriesSource).toContain("<DestructiveConfirmationDialog");
-    expect(entriesSource).toContain("isBusy={isDeletingEntry || isPending}");
-    expect(entriesSource).toContain("error={deleteError}");
-    expect(entriesSource).toContain("if (!response.ok)");
-    expect(entriesSource).toContain("/api/time-entries/batch-delete");
+  it("uses shared immediate Timeline deletion with recoverable Undo", () => {
+    expect(entriesSource).toContain("onDeleteEntries(isGrouped ? group.entries : [entry])");
+    expect(entriesSource).toContain("onDeleteEntries([occurrence])");
+    expect(entriesSource).not.toContain("DestructiveConfirmationDialog");
+    expect(timelineDeleteSource).toContain("commitTimelineDelete");
+    expect(timelineDeleteSource).toContain('method: "DELETE"');
+    expect(timelineDeleteSource).toContain('clientFetch("/api/time-entries/batch-delete"');
   });
 });
