@@ -10,6 +10,17 @@ export type TimelineState = {
   view: TimelineView;
 };
 
+export type TimelinePreference = {
+  lastView: TimelineView;
+  preferredScope: TimelineScope;
+};
+
+export const TIMELINE_PREFERENCE_COOKIE = "dayframe_timeline_preference";
+export const DEFAULT_TIMELINE_PREFERENCE: TimelinePreference = {
+  lastView: "calendar",
+  preferredScope: "week"
+};
+
 export type TimelineRange = {
   start: Date;
   end: Date;
@@ -29,20 +40,49 @@ export type TimelineSearchInput =
 
 export function timelineStateFromSearchParams(
   input: TimelineSearchInput,
-  options: { now?: Date } = {}
+  options: { now?: Date; preference?: TimelinePreference | null } = {}
 ): TimelineState {
   const now = startOfLocalDay(options.now ?? new Date());
   const date = toTimelineDateKey(parseTimelineDateKey(searchValue(input, "date")) ?? now);
   const requestedScope = searchValue(input, "scope");
   const requestedView = searchValue(input, "view");
-  const view = isTimelineView(requestedView) ? requestedView : "calendar";
+  const preference = normalizeTimelinePreference(options.preference);
+  const view = requestedView == null
+    ? preference.lastView
+    : isTimelineView(requestedView)
+      ? requestedView
+      : DEFAULT_TIMELINE_PREFERENCE.lastView;
   const scope = view === "timesheet"
     ? "week"
-    : isTimelineScope(requestedScope)
-      ? requestedScope
-      : "week";
+    : requestedScope == null
+      ? preference.preferredScope
+      : isTimelineScope(requestedScope)
+        ? requestedScope
+        : DEFAULT_TIMELINE_PREFERENCE.preferredScope;
 
   return { date, scope, view };
+}
+
+export function timelinePreferenceFromCookieValue(value?: string | null): TimelinePreference | null {
+  if (!value) return null;
+  const [lastView, preferredScope] = value.split(":");
+  if (!isTimelineView(lastView) || !isTimelineScope(preferredScope)) return null;
+  return { lastView, preferredScope };
+}
+
+export function timelinePreferenceCookieValue(preference: TimelinePreference) {
+  const normalized = normalizeTimelinePreference(preference);
+  return `${normalized.lastView}:${normalized.preferredScope}`;
+}
+
+export function updateTimelinePreference(
+  current: TimelinePreference | null | undefined,
+  state: Pick<TimelineState, "scope" | "view">
+): TimelinePreference {
+  const preference = normalizeTimelinePreference(current);
+  return state.view === "timesheet"
+    ? { ...preference, lastView: "timesheet" }
+    : { lastView: state.view, preferredScope: state.scope };
 }
 
 export function timelineSearchString(input: TimelineSearchInput) {
@@ -104,6 +144,32 @@ export function resetTimelineState(state: TimelineState, now = new Date()): Time
   };
 }
 
+export function formatTimelinePeriodLabel(scope: TimelineScope, ranges: TimelineRanges) {
+  if (scope === "day") {
+    return new Intl.DateTimeFormat("en-GB", {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      year: "numeric"
+    }).format(ranges.day.start);
+  }
+
+  const start = ranges.weekDays[0];
+  const end = ranges.weekDays[6];
+  const startDay = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short" });
+  const endSameYear = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+  if (start.getFullYear() === end.getFullYear()) {
+    return `${startDay.format(start).replace(",", "")} – ${endSameYear.format(end).replace(",", "")}`;
+  }
+  const full = new Intl.DateTimeFormat("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric"
+  });
+  return `${full.format(start).replace(",", "")} – ${full.format(end).replace(",", "")}`;
+}
+
 export function parseTimelineDateKey(value?: string | null) {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
   const [year, month, day] = value.split("-").map(Number);
@@ -139,6 +205,18 @@ function normalizeTimelineState(state: TimelineState): TimelineState {
     date: toTimelineDateKey(date ?? startOfLocalDay(new Date())),
     scope,
     view
+  };
+}
+
+function normalizeTimelinePreference(preference: TimelinePreference | null | undefined): TimelinePreference {
+  if (!preference) return DEFAULT_TIMELINE_PREFERENCE;
+  return {
+    lastView: isTimelineView(preference.lastView)
+      ? preference.lastView
+      : DEFAULT_TIMELINE_PREFERENCE.lastView,
+    preferredScope: isTimelineScope(preference.preferredScope)
+      ? preference.preferredScope
+      : DEFAULT_TIMELINE_PREFERENCE.preferredScope
   };
 }
 

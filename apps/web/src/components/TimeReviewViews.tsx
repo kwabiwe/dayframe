@@ -1,7 +1,7 @@
 "use client";
 
-import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, UIEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CalendarDays, ChevronLeft, ChevronRight, CircleDot, List, Pencil, Play, Table2, Trash2 } from "lucide-react";
 import { analyzeTimeIntervals, calendarBlockContinuationEdges } from "@dayframe/shared";
@@ -43,12 +43,18 @@ import {
 } from "@/lib/timeline-calculations";
 import { entryOverlapSeconds } from "@/lib/time-entry-overlap";
 import {
+  TIMELINE_PREFERENCE_COOKIE,
+  formatTimelinePeriodLabel,
   resolveTimelineRanges,
   shiftTimelineState,
   timelineHref,
+  timelinePreferenceCookieValue,
+  updateTimelinePreference,
   timelineStateFromSearchParams,
   toTimelineDateKey,
+  type TimelinePreference,
   type TimelineScope,
+  type TimelineState,
   type TimelineView
 } from "@/lib/timeline-view";
 
@@ -92,9 +98,11 @@ type CalendarBlockTarget = {
 };
 
 export function TimeReviewViews({
-  initialData
+  initialData,
+  initialPreference
 }: {
   initialData: BootstrapData;
+  initialPreference: TimelinePreference | null;
 }) {
   const data = useRuntimePageData(initialData);
   const {
@@ -105,14 +113,54 @@ export function TimeReviewViews({
     refresh
   } = useAppShellRuntime();
   const searchParams = useSearchParams();
-  const state = timelineStateFromSearchParams(searchParams);
+  const state = timelineStateFromSearchParams(searchParams, { preference: initialPreference });
+  const preferenceState = useMemo(
+    () => ({ scope: state.scope, view: state.view }),
+    [state.scope, state.view]
+  );
   const ranges = resolveTimelineRanges(state);
   const capturedNow = new Date();
   const calendarHoursMode: CalendarHoursMode = "fullDay";
+  const preferenceRef = useRef<TimelinePreference | null>(initialPreference);
+  const scrollPositionsRef = useRef<Record<TimelineView, TimelineScrollPosition>>({
+    calendar: { left: 0, top: 0 },
+    list: { left: 0, top: 0 },
+    timesheet: { left: 0, top: 0 }
+  });
+  const activeScrollContainerRef = useRef<HTMLDivElement | null>(null);
 
   const refreshData = useCallback(async () => {
     await refresh();
   }, [refresh]);
+
+  const registerScrollContainer = useCallback((element: HTMLDivElement | null) => {
+    activeScrollContainerRef.current = element;
+  }, []);
+
+  const rememberScrollPosition = useCallback((view: TimelineView, event: UIEvent<HTMLDivElement>) => {
+    scrollPositionsRef.current[view] = {
+      left: event.currentTarget.scrollLeft,
+      top: event.currentTarget.scrollTop
+    };
+  }, []);
+
+  const persistPreference = useCallback((nextState: Pick<TimelineState, "scope" | "view">) => {
+    const nextPreference = updateTimelinePreference(preferenceRef.current, nextState);
+    preferenceRef.current = nextPreference;
+    document.cookie = `${TIMELINE_PREFERENCE_COOKIE}=${timelinePreferenceCookieValue(nextPreference)}; Path=/; Max-Age=31536000; SameSite=Lax`;
+  }, []);
+
+  useEffect(() => {
+    persistPreference(preferenceState);
+  }, [persistPreference, preferenceState]);
+
+  useLayoutEffect(() => {
+    const container = activeScrollContainerRef.current;
+    if (!container) return;
+    const position = scrollPositionsRef.current[state.view];
+    container.scrollLeft = position.left;
+    container.scrollTop = position.top;
+  }, [state.date, state.scope, state.view]);
 
   async function navigate(overrides: Partial<typeof state>) {
     const nextState = { ...state, ...overrides };
@@ -131,6 +179,7 @@ export function TimeReviewViews({
     if (nextState.date === state.date) {
       clearDateLoadError();
       window.history.pushState(null, "", href);
+      persistPreference(nextState);
       return;
     }
 
@@ -138,13 +187,14 @@ export function TimeReviewViews({
     if (!outcome.ok) return;
     if (window.location.search.slice(1) !== originSearch) return;
     window.history.pushState(null, "", href);
+    persistPreference(nextState);
   }
 
   function updateView(view: TimelineView) {
     if (isDateLoading) return;
     navigate({
       view,
-      scope: view === "timesheet" ? "week" : state.scope
+      scope: view === "timesheet" ? "week" : preferenceRef.current?.preferredScope ?? state.scope
     });
   }
 
@@ -185,7 +235,7 @@ export function TimeReviewViews({
   const todayKey = toTimelineDateKey(new Date());
 
   return (
-    <section className="space-y-5">
+    <section className="timeline-workspace">
       <section
         className="timeline-range-toolbar"
         aria-busy={isDateLoading}
@@ -219,16 +269,10 @@ export function TimeReviewViews({
           <div>
             <dt>Day</dt>
             <dd className="tabular">{formatDuration(dayAnalysis.totalLoggedSeconds)} logged</dd>
-            {dayAnalysis.hasOverlap ? (
-              <small className="tabular">{formatDuration(dayAnalysis.timeCoveredSeconds)} covered</small>
-            ) : null}
           </div>
           <div>
             <dt>Week</dt>
             <dd className="tabular">{formatDuration(weekAnalysis.totalLoggedSeconds)} logged</dd>
-            {weekAnalysis.hasOverlap ? (
-              <small className="tabular">{formatDuration(weekAnalysis.timeCoveredSeconds)} covered</small>
-            ) : null}
           </div>
         </dl>
 
@@ -256,57 +300,71 @@ export function TimeReviewViews({
           />
         </div>
       </section>
-      <p
-        aria-atomic="true"
-        aria-live={dateLoadError ? "assertive" : "polite"}
-        className={[
-          "timeline-range-feedback",
-          dateLoadError ? "is-error" : "",
-          !dateLoadError && !isDateLoading ? "is-idle" : ""
-        ].join(" ")}
-        role={dateLoadError ? "alert" : "status"}
-      >
-        {dateLoadError ?? (isDateLoading ? "Loading period…" : "\u00a0")}
-      </p>
+      {dateLoadError || isDateLoading ? (
+        <p
+          aria-atomic="true"
+          aria-live={dateLoadError ? "assertive" : "polite"}
+          className={`timeline-range-feedback${dateLoadError ? " is-error" : ""}`}
+          role={dateLoadError ? "alert" : "status"}
+        >
+          {dateLoadError ?? "Loading period…"}
+        </p>
+      ) : null}
 
-      {state.view === "calendar" ? (
-        <CalendarReview
-          calendarHoursMode={calendarHoursMode}
-          capturedNow={capturedNow}
-          categories={data.categories}
-          entries={activeEntries}
-          onSynced={refreshData}
-          places={data.places}
-          tags={data.tags}
-          visibleDays={state.scope === "day" ? [ranges.day.start] : ranges.weekDays}
-        />
-      ) : null}
-      {state.view === "list" ? (
-        <EntriesTable
-          capturedNow={capturedNow}
-          entries={activeEntries}
-          categories={data.categories}
-          displayRange={ranges.active}
-          places={data.places}
-          groupByDay
-          onChanged={refreshData}
-          tags={data.tags}
-        />
-      ) : null}
-      {state.view === "timesheet" ? (
-        <TimesheetView capturedNow={capturedNow} entries={weekEntries} weekDays={ranges.weekDays} />
-      ) : null}
+      <div className="timeline-view-stage">
+        {state.view === "calendar" ? (
+          <CalendarReview
+            calendarHoursMode={calendarHoursMode}
+            capturedNow={capturedNow}
+            categories={data.categories}
+            entries={activeEntries}
+            onScroll={(event) => rememberScrollPosition("calendar", event)}
+            onSynced={refreshData}
+            places={data.places}
+            scrollContainerRef={registerScrollContainer}
+            tags={data.tags}
+            visibleDays={state.scope === "day" ? [ranges.day.start] : ranges.weekDays}
+          />
+        ) : null}
+        {state.view === "list" ? (
+          <EntriesTable
+            capturedNow={capturedNow}
+            entries={activeEntries}
+            categories={data.categories}
+            displayRange={ranges.active}
+            places={data.places}
+            groupByDay
+            onChanged={refreshData}
+            onScroll={(event) => rememberScrollPosition("list", event)}
+            scrollContainerRef={registerScrollContainer}
+            tags={data.tags}
+          />
+        ) : null}
+        {state.view === "timesheet" ? (
+          <TimesheetView
+            capturedNow={capturedNow}
+            entries={weekEntries}
+            onScroll={(event) => rememberScrollPosition("timesheet", event)}
+            scrollContainerRef={registerScrollContainer}
+            weekDays={ranges.weekDays}
+          />
+        ) : null}
+      </div>
     </section>
   );
 }
+
+type TimelineScrollPosition = { left: number; top: number };
 
 function CalendarReview({
   calendarHoursMode,
   capturedNow,
   categories,
   entries,
+  onScroll,
   onSynced,
   places,
+  scrollContainerRef,
   tags,
   visibleDays
 }: {
@@ -314,8 +372,10 @@ function CalendarReview({
   capturedNow: Date;
   categories: CategoryRow[];
   entries: TimeEntryRow[];
+  onScroll: (event: UIEvent<HTMLDivElement>) => void;
   onSynced: () => Promise<void>;
   places: PlaceRow[];
+  scrollContainerRef: (element: HTMLDivElement | null) => void;
   tags: BootstrapData["tags"];
   visibleDays: Date[];
 }) {
@@ -429,12 +489,6 @@ function CalendarReview({
     setPendingDelete(null);
   }
 
-  function forwardVerticalCalendarWheel(event: ReactWheelEvent<HTMLDivElement>) {
-    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
-    event.preventDefault();
-    window.scrollBy({ top: event.deltaY, behavior: "auto" });
-  }
-
   async function saveCalendarResize(entry: TimeEntryRow, draft: CalendarResizeDraft) {
     const response = await clientFetch(`/api/time-entries/${entry.id}`, {
       method: "PATCH",
@@ -546,8 +600,8 @@ function CalendarReview({
   }
 
   return (
-    <section className="industrial-panel fill-calendar-panel">
-      <div className="fill-panel-header flex flex-col gap-3 px-4 py-3 md:flex-row md:items-center md:justify-between">
+    <section className="timeline-calendar-workspace">
+      <div className="timeline-view-title-row">
         <h2 className="text-lg font-semibold">Calendar</h2>
         <span className="swiss-zoom-control" role="group" aria-label="Calendar zoom">
           <button
@@ -569,12 +623,16 @@ function CalendarReview({
           </button>
         </span>
       </div>
-      <div className="calendar-horizontal-scroll" onWheel={forwardVerticalCalendarWheel}>
+      <div
+        className="calendar-grid-scroller"
+        onScroll={onScroll}
+        ref={scrollContainerRef}
+      >
         <div
-          className="grid min-w-[980px]"
+          className="timeline-calendar-grid"
           style={{ gridTemplateColumns: `72px repeat(${visibleDays.length}, minmax(130px, 1fr))` }}
         >
-          <div className="border-b border-r border-[var(--line)] bg-[var(--surface-inset)] px-3 py-3 text-xs text-[var(--muted)]">
+          <div className="calendar-grid-corner">
             Time
           </div>
           {visibleDays.map((day) => {
@@ -594,22 +652,19 @@ function CalendarReview({
               <div
                 key={day.toISOString()}
                 className={[
-                  "border-b border-r border-[var(--line)] px-3 py-3 last:border-r-0",
-                  sameDay(day, today) ? "bg-[var(--surface-muted)]" : "bg-[var(--surface-inset)]"
+                  "calendar-day-heading",
+                  sameDay(day, today) ? "is-today" : ""
                 ].join(" ")}
               >
                 <div className="text-sm font-semibold">{formatDate(day)}</div>
                 <div className="tabular mt-1 text-xs text-[var(--muted)]">
                   {formatDuration(total.loggedSeconds)} logged
-                  {total.additionalOverlapSeconds > 0
-                    ? ` · ${formatDuration(total.coveredSeconds)} covered`
-                    : ""}
                 </div>
               </div>
             );
           })}
 
-          <div className="relative border-r border-[var(--line)] bg-[var(--surface-inset)]" style={{ height: calendarHeight }}>
+          <div className="calendar-time-axis" style={{ height: calendarHeight }}>
             {axisMarks.map((mark) => (
               <div key={mark.key}>
                 <span
@@ -633,7 +688,7 @@ function CalendarReview({
             <div
               key={`${day.toISOString()}-body`}
               data-calendar-day-body
-              className="relative border-r border-[var(--line)] last:border-r-0"
+              className="calendar-day-body"
               style={{
                 height: calendarHeight,
                 backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${Math.max(0, gridLineSpacing - 1)}px, var(--line) ${gridLineSpacing}px)`
@@ -883,10 +938,14 @@ function CalendarReview({
 function TimesheetView({
   capturedNow,
   entries,
+  onScroll,
+  scrollContainerRef,
   weekDays
 }: {
   capturedNow: Date;
   entries: TimeEntryRow[];
+  onScroll: (event: UIEvent<HTMLDivElement>) => void;
+  scrollContainerRef: (element: HTMLDivElement | null) => void;
   weekDays: Date[];
 }) {
   const rows = buildTimelineTimesheetRows(entries, weekDays, capturedNow);
@@ -902,29 +961,22 @@ function TimesheetView({
       now: capturedNow
     }
   ));
-  const overlappingDays = dailyCoverage.filter((day) => day.hasOverlap).length;
-
   return (
-    <section className="industrial-panel overflow-x-auto">
-      <div className="border-b border-[var(--line)] px-4 py-3">
-        <h2 className="text-lg font-semibold">Timesheet</h2>
-        {overlappingDays > 0 ? (
-          <p className="mt-1 text-xs text-[var(--muted)]">
-            {overlappingDays} {overlappingDays === 1 ? "day contains" : "days contain"} concurrent entries.
-            Timesheet totals count every entry in full.
-          </p>
-        ) : null}
+    <section className="timeline-timesheet-workspace">
+      <div className="timeline-view-title-row">
+        <h2>Timesheet</h2>
       </div>
-      <table className="min-w-[980px] w-full border-collapse text-sm">
+      <div className="timeline-timesheet-scroll" onScroll={onScroll} ref={scrollContainerRef}>
+      <table className="timeline-timesheet-table">
         <thead className="bg-[var(--surface-inset)] text-left text-xs text-[var(--muted)]">
           <tr>
-            <th className="border-b border-r border-[var(--line)] px-3 py-3">Activity</th>
+            <th className="timeline-timesheet-activity-cell">Activity</th>
             {weekDays.map((day) => (
-              <th key={day.toISOString()} className="border-b border-r border-[var(--line)] px-3 py-3 last:border-r-0">
+              <th key={day.toISOString()}>
                 {formatDate(day)}
               </th>
             ))}
-            <th className="border-b border-[var(--line)] px-3 py-3">Total</th>
+            <th>Total</th>
           </tr>
         </thead>
         <tbody>
@@ -935,7 +987,7 @@ function TimesheetView({
           ) : null}
           {rows.map((row) => (
             <tr key={row.id} className="border-b border-[var(--line)] last:border-b-0">
-              <td className="border-r border-[var(--line)] px-3 py-3">
+              <td className="timeline-timesheet-activity-cell">
                 <span className="flex items-center gap-2 font-semibold">
                   <span
                     className={`category-data-marker${row.categoryName ? "" : " is-uncategorized"}`}
@@ -948,17 +1000,17 @@ function TimesheetView({
                 </span>
               </td>
               {row.days.map((seconds, index) => (
-                <td key={`${row.id}-${index}`} className="tabular border-r border-[var(--line)] px-3 py-3 text-[var(--muted)] last:border-r-0">
+                <td key={`${row.id}-${index}`} className="tabular">
                   {seconds > 0 ? formatDuration(seconds) : "-"}
                 </td>
               ))}
-              <td className="tabular px-3 py-3 font-semibold text-[var(--accent-text)]">{formatDuration(row.total)}</td>
+              <td className="tabular timeline-timesheet-total">{formatDuration(row.total)}</td>
             </tr>
           ))}
           <tr className="bg-[var(--surface-inset)] font-semibold">
-            <td className="border-r border-[var(--line)] px-3 py-3">Daily total</td>
+            <td className="timeline-timesheet-activity-cell">Daily total</td>
             {dailyTotals.map((seconds, index) => (
-              <td key={weekDays[index].toISOString()} className="tabular border-r border-[var(--line)] px-3 py-3">
+              <td key={weekDays[index].toISOString()} className="tabular">
                 {formatDuration(seconds)}
                 {dailyCoverage[index]?.hasOverlap ? (
                   <span className="mt-1 block text-xs font-normal text-[var(--warning-text)]">
@@ -967,12 +1019,13 @@ function TimesheetView({
                 ) : null}
               </td>
             ))}
-            <td className="tabular px-3 py-3 text-[var(--accent-text)]">
+            <td className="tabular timeline-timesheet-total">
               {formatDuration(dailyTotals.reduce((sum, seconds) => sum + seconds, 0))}
             </td>
           </tr>
         </tbody>
       </table>
+      </div>
     </section>
   );
 }
@@ -1160,30 +1213,4 @@ function sameDay(left: Date, right: Date) {
 function entryOverlapsDay(entry: TimeEntryRow, day: Date, capturedNow: Date) {
   const start = startOfDay(day);
   return entryOverlapSeconds(entry, { start, end: addDays(start, 1) }, capturedNow) > 0;
-}
-
-function formatTimelinePeriodLabel(
-  scope: TimelineScope,
-  ranges: ReturnType<typeof resolveTimelineRanges>
-) {
-  if (scope === "day") {
-    return new Intl.DateTimeFormat("en-GB", {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-      year: "numeric"
-    }).format(ranges.day.start);
-  }
-
-  const start = ranges.weekDays[0];
-  const end = ranges.weekDays[6];
-  const full = new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "long",
-    year: "numeric"
-  });
-  if (start.getFullYear() === end.getFullYear() && start.getMonth() === end.getMonth()) {
-    return `${start.getDate()}–${full.format(end)}`;
-  }
-  return `${full.format(start)} – ${full.format(end)}`;
 }

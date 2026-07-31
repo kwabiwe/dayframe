@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { Fragment, type UIEvent, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Ellipsis, Pencil, Play, Trash2 } from "lucide-react";
@@ -29,6 +29,8 @@ export function EntriesTable({
   tags = [],
   groupByDay = false,
   onChanged,
+  onScroll,
+  scrollContainerRef,
   displayRange,
   capturedNow = new Date()
 }: {
@@ -38,6 +40,8 @@ export function EntriesTable({
   tags?: TagRow[];
   groupByDay?: boolean;
   onChanged?: () => Promise<void>;
+  onScroll: (event: UIEvent<HTMLDivElement>) => void;
+  scrollContainerRef: (element: HTMLDivElement | null) => void;
   displayRange?: DateRange;
   capturedNow?: Date;
 }) {
@@ -45,7 +49,6 @@ export function EntriesTable({
   const searchParams = useSearchParams();
   const { startEntryAgain } = useAppShellRuntime();
   const [isPending, startTransition] = useTransition();
-  const [categoryFilter, setCategoryFilter] = useState("");
   const [editingEntry, setEditingEntry] = useState<TimeEntryRow | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{
     entries: TimeEntryRow[];
@@ -56,12 +59,9 @@ export function EntriesTable({
   const [actionError, setActionError] = useState<string | null>(null);
   const [continuingEntryId, setContinuingEntryId] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
+  const listScrollRef = useRef<HTMLDivElement | null>(null);
   const highlightedEntryId = searchParams.get("entry");
 
-  const filtered = useMemo(
-    () => entries.filter((entry) => !categoryFilter || entry.categoryId === categoryFilter),
-    [categoryFilter, entries]
-  );
   const overlapAnalysis = useMemo(
     () => analyzeTimeIntervals(
       entries.map((entry) => ({
@@ -82,7 +82,7 @@ export function EntriesTable({
   );
   const grouped = useMemo(() => {
     const byDay = new Map<string, TimeEntryRow[]>();
-    for (const entry of filtered) {
+    for (const entry of entries) {
       const interval = timelineEntryDisplayInterval(entry, displayRange, capturedNow);
       const day = formatDate(interval.startedAt);
       const dayEntries = byDay.get(day) ?? [];
@@ -100,14 +100,19 @@ export function EntriesTable({
         )
       }))
     );
-  }, [capturedNow, displayRange, filtered]);
+  }, [capturedNow, displayRange, entries]);
 
   useEffect(() => {
     if (!highlightedEntryId) return;
     const frame = window.requestAnimationFrame(() => {
-      document.getElementById(`timeline-entry-${highlightedEntryId}`)?.scrollIntoView({
-        block: "center",
-        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"
+      const container = listScrollRef.current;
+      const target = document.getElementById(`timeline-entry-${highlightedEntryId}`);
+      if (!container || !target) return;
+      const containerBounds = container.getBoundingClientRect();
+      const targetBounds = target.getBoundingClientRect();
+      container.scrollTo({
+        top: container.scrollTop + targetBounds.top - containerBounds.top - container.clientHeight / 2 + targetBounds.height / 2,
+        behavior: "auto"
       });
     });
     return () => window.cancelAnimationFrame(frame);
@@ -161,14 +166,9 @@ export function EntriesTable({
   }
 
   return (
-    <section className="space-y-5">
-      <div className="fill-group-surface grid gap-3 overflow-hidden p-4 md:max-w-sm">
-        <FilterSelect
-          label="Category"
-          value={categoryFilter}
-          onChange={setCategoryFilter}
-          options={categories.map((category) => ({ label: category.name, value: category.id }))}
-        />
+    <section className="timeline-list-workspace">
+      <div className="timeline-view-title-row">
+        <h2>List</h2>
       </div>
       {actionError ? (
         <p className="swiss-inline-error" role="alert">
@@ -176,9 +176,15 @@ export function EntriesTable({
         </p>
       ) : null}
 
-      <div className="fill-group-surface overflow-hidden">
-        <div className="overflow-x-auto">
-        <table className="min-w-[640px] w-full border-collapse text-sm">
+      <div
+        className="timeline-list-scroll"
+        onScroll={onScroll}
+        ref={(element) => {
+          listScrollRef.current = element;
+          scrollContainerRef(element);
+        }}
+      >
+        <table className="timeline-list-table">
           <thead className="bg-[var(--surface-inset)] text-left text-xs text-[var(--muted)]">
             <tr>
               <th className="border-b border-[var(--line)] px-3 py-3">Task</th>
@@ -205,8 +211,8 @@ export function EntriesTable({
               return (
                 <Fragment key={group.key}>
                   {shouldShowDate ? (
-                    <tr key={`${group.day}-${entry.id}-group`} className="bg-[var(--surface-inset)]">
-                      <td colSpan={4} className="border-b border-[var(--line)] px-3 py-2 text-xs font-semibold text-[var(--muted)]">
+                    <tr key={`${group.day}-${entry.id}-group`} className="timeline-list-day-heading">
+                      <td colSpan={4}>
                         {group.day}
                       </td>
                     </tr>
@@ -365,7 +371,6 @@ export function EntriesTable({
             })}
           </tbody>
         </table>
-        </div>
       </div>
       {editingEntry ? (
         <EditTimeEntryDialog
@@ -536,35 +541,5 @@ function intervalSeconds(
     Math.round(
       ((interval.stoppedAt ? Date.parse(interval.stoppedAt) : capturedNow.getTime()) - Date.parse(interval.startedAt)) / 1000
     )
-  );
-}
-
-function FilterSelect({
-  label,
-  value,
-  onChange,
-  options
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: Array<{ value: string; label: string }>;
-}) {
-  return (
-    <label className="text-sm">
-      <span className="industrial-field-label">{label}</span>
-      <select
-        className="industrial-field focus-ring"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        <option value="">All</option>
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
   );
 }

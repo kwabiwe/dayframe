@@ -1,10 +1,12 @@
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { PageHeader } from "@/components/PageHeader";
 import { TimeReviewViews } from "@/components/TimeReviewViews";
 import { resolvePageSession } from "@/lib/auth/server";
 import { getBootstrapData } from "@/lib/queries";
 import {
+  TIMELINE_PREFERENCE_COOKIE,
   timelineHref,
+  timelinePreferenceFromCookieValue,
   timelineSearchString,
   timelineStateFromSearchParams
 } from "@/lib/timeline-view";
@@ -18,7 +20,11 @@ export default async function TimelinePage({
 }) {
   const session = await resolvePageSession();
   const params = searchParams ? await searchParams : {};
-  const state = timelineStateFromSearchParams(params);
+  const cookieStore = await cookies();
+  const preference = timelinePreferenceFromCookieValue(
+    cookieStore.get(TIMELINE_PREFERENCE_COOKIE)?.value
+  );
+  const state = timelineStateFromSearchParams(params, { preference });
   const currentSearch = timelineSearchString(params);
   const currentHref = currentSearch ? `/timeline?${currentSearch}` : "/timeline";
   const canonicalHref = timelineHref(params, state);
@@ -26,14 +32,9 @@ export default async function TimelinePage({
   const data = await getBootstrapData(session, { selectedDate: state.date });
 
   return (
-    <>
-      <PageHeader
-        title="Timeline"
-        description="Review time as calendar blocks, grouped entries and a weekly timesheet."
-      />
-      <div className="space-y-6 px-5 py-6 md:px-8">
-        <TimeReviewViews initialData={data} />
-      </div>
-    </>
+    <div className="timeline-page">
+      <h1 className="sr-only">Timeline</h1>
+      <TimeReviewViews initialData={data} initialPreference={preference} />
+    </div>
   );
 }
