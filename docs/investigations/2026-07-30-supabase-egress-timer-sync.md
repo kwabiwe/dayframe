@@ -1,7 +1,7 @@
 # Supabase egress and cross-device timer reconciliation
 
 Date: 2026-07-30  
-Status: Implementation in progress
+Status: Released to internal TestFlight build 79
 
 ## Observed cause
 
@@ -35,10 +35,14 @@ Dayframe mobile and web API clients use Dayframe app-session tokens rather than 
 - Request tracing confirms the three-second path transfers only the fingerprint and the five-minute/heard-change path owns bootstrap.
 - Supabase usage is measured after deployment; payload estimates are not treated as quota proof.
 
-## Remaining release evidence
+## Release and remaining acceptance evidence
 
-- Optimized Vercel Preview with provider authentication and request tracing.
+- PR #140 merged as `a86a8f5`; no database migration was required.
+- TestFlight `0.1.0 (79)`, delivery/build ID
+  `c9aafbef-7d2f-43c6-a667-c48f4b501eb7`, is `VALID` and
+  `IN_BETA_TESTING` through `Internal Health Debug`; export compliance is false,
+  en-GB notes are set, and the archive uses API base
+  `https://dayframe-web.vercel.app`.
 - Two visible web clients plus web/mobile start, stop, edit, and delete.
 - Hidden/background, slow request, failure backoff, expired session, offline/reconnect, and overlapping local mutation checks.
-- Full workspace test, typecheck, lint, build, and diff checks.
-- Physical-iPhone/TestFlight verification after merge because the mobile polling owner changed.
+- Physical-iPhone verification remains required because the mobile polling owner changed.
