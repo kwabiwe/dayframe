@@ -25,12 +25,26 @@ As of 2026-07-19, Dayframe uses this internal release lane:
 - Bundle id: `com.layereight.dayframe`
 - Team: `65M773ZG6M`
 - Version: `0.1.0`
-- Latest verified build: `0.1.0 (58)`
+- Latest verified build: `0.1.0 (80)`
 - Group: `Internal Health Debug`
-- Latest delivery/build ID: `35172e2f-16e4-438b-96fa-83d03691675a`
+- Latest delivery/build ID: `c85104d0-ab2f-4acb-9383-e59398d2b05d`
 - Current release rule: implementation PRs are not done until the merged code is in a verified internal TestFlight build.
 
 Docs-only or planning-only PRs do not require a TestFlight build unless they change build, release, signing, environment, or runtime configuration.
+
+### Builds 78-80 release history
+
+| Build | Merged scope | Commit | Delivery/build ID | Verified state |
+| --- | --- | --- | --- | --- |
+| `0.1.0 (78)` | PR #138: running-sheet `Done` alignment and keyboard/Suggestions continuity | `e71dda9` | `7b34be3b-c828-4e97-ab97-2ee1e0424e36` | `VALID`, export compliance false, en-GB notes set, `IN_BETA_TESTING` through `Internal Health Debug` |
+| `0.1.0 (79)` | PR #140: three-second lightweight cross-device timer reconciliation | `a86a8f5` | `c9aafbef-7d2f-43c6-a667-c48f4b501eb7` | `VALID`, export compliance false, en-GB notes set, `IN_BETA_TESTING` through `Internal Health Debug` |
+| `0.1.0 (80)` | PR #142: final outer-sheet action alignment and Suggestions session suppression | `5200eb9` | `c85104d0-ab2f-4acb-9383-e59398d2b05d` | `VALID`, export compliance false, `IN_BETA_TESTING` through `Internal Health Debug` |
+
+All three archives used API base `https://dayframe-web.vercel.app`. Build 80
+supersedes 78 for the running-sheet action and motion behavior; build 79 remains
+the release record for the timer-sync/egress change. PR #145 merged after build
+80 and changes the mobile tag-creation path, so its mobile behavior first
+requires build 81.
 
 Swift/SwiftUI native-view changes require a new binary. JavaScript/OTA or Vercel deployment evidence cannot prove that an updated native Calendar module is present.
 

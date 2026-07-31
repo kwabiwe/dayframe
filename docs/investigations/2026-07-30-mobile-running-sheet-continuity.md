@@ -112,7 +112,14 @@ source contract, not a claim of rendered-device measurement.
 
 ## Residual risk and release gate
 
-No web, API, database, sync or native-project contract changed. The branch is
-not ready to be described as visually validated or released until the existing
-simulator Keychain-entitlement failure is resolved, each sheet context can be
-measured and recorded, and the physical-iPhone matrix can complete.
+No web, API, database, sync or native-project contract changed. PR #142 merged
+as `5200eb9` and shipped in TestFlight `0.1.0 (80)`, delivery/build ID
+`c85104d0-ab2f-4acb-9383-e59398d2b05d`. App Store Connect reports `VALID`,
+export compliance false and `IN_BETA_TESTING` through `Internal Health Debug`;
+the archive uses API base `https://dayframe-web.vercel.app`.
+
+The implementation is released but remains in `Watch` until each sheet context
+is measured and recorded on a physical iPhone and the Light/Dark, Reduce Motion,
+Dynamic Type, VoiceOver and Reduce Transparency interaction matrix completes.
+The simulator Keychain-entitlement failure remains a separate validation
+blocker rather than a release failure.
