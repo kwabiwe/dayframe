@@ -130,6 +130,13 @@ describe("Timeline range and toolbar contract", () => {
     expect(timeline).not.toContain('className="timeline-view-title-row"');
     expect(entries).not.toContain('className="timeline-view-title-row"');
     expect(timeline).toContain('className="calendar-corner-zoom"');
+    expect(timeline).not.toContain("<span>Time</span>");
+    expect(timeline).toContain('aria-label={`${loggedLabel} logged`}');
+    expect(timeline).toContain("{loggedLabel}");
+    expect(styles).toMatch(/\.calendar-grid-corner,[\s\S]*\.calendar-day-heading \{[^}]*min-height: 52px;/);
+    expect(styles).toContain("--timeline-list-column-header-height: 40px");
+    expect(styles).toMatch(/\.timeline-list-day-heading > td \{[^}]*top: var\(--timeline-list-column-header-height\);/s);
+    expect(styles).toMatch(/\.timeline-list-day-heading > td \{[^}]*box-shadow: 0 -1px 0 var\(--line\);/s);
     expect(styles).toMatch(/\.calendar-day-body \{[^}]*isolation: isolate;/s);
   });
 });

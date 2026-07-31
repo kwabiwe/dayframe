@@ -683,7 +683,6 @@ function CalendarReview({
                 +
               </button>
             </span>
-            <span>Time</span>
           </div>
           {visibleDays.map((day) => {
             const dayStart = startOfDay(day);
@@ -698,6 +697,7 @@ function CalendarReview({
                 now: capturedNow
               }
             );
+            const loggedLabel = formatDuration(total.loggedSeconds);
             return (
               <div
                 key={day.toISOString()}
@@ -706,9 +706,12 @@ function CalendarReview({
                   sameDay(day, today) ? "is-today" : ""
                 ].join(" ")}
               >
-                <div className="text-sm font-semibold">{formatDate(day)}</div>
-                <div className="tabular mt-1 text-xs text-[var(--muted)]">
-                  {formatDuration(total.loggedSeconds)} logged
+                <div className="calendar-day-date text-sm font-semibold">{formatDate(day)}</div>
+                <div
+                  aria-label={`${loggedLabel} logged`}
+                  className="calendar-day-total tabular text-xs text-[var(--muted)]"
+                >
+                  {loggedLabel}
                 </div>
               </div>
             );
