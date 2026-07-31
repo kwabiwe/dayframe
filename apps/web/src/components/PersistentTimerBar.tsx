@@ -23,7 +23,7 @@ import { shouldStartTimerFromEntrySubmit } from "@/lib/timer-entry-draft";
 
 const TASK_SUGGESTION_LIMIT = 5;
 
-export function PersistentTimerBar() {
+export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: boolean }) {
   const {
     clearTimerError,
     closeManualEntry,
@@ -279,7 +279,11 @@ export function PersistentTimerBar() {
 
   return (
     <section
-      className={["swiss-panel swiss-current-timer swiss-persistent-timer", active ? "is-running" : "is-idle"].join(" ")}
+      className={[
+        "swiss-panel swiss-current-timer swiss-persistent-timer",
+        active ? "is-running" : "is-idle",
+        workspaceMode ? "is-workspace" : ""
+      ].filter(Boolean).join(" ")}
       data-testid="persistent-timer"
       style={activeAccent ? ({ "--timer-accent": activeAccent } as CSSProperties) : undefined}
     >
@@ -600,7 +604,7 @@ export function PersistentTimerBar() {
 
       {quickActions.length ? (
         <div className="swiss-quick-actions-strip" aria-label="Quick actions">
-          <span>Quick actions</span>
+          {!workspaceMode ? <span>Quick actions</span> : null}
           <div className="swiss-quick-actions-rail">
             {quickActions.map((action) => (
               <button
@@ -622,6 +626,7 @@ export function PersistentTimerBar() {
           </div>
         </div>
       ) : null}
+      {workspaceMode ? <div className="swiss-timer-workspace-divider" aria-hidden="true" /> : null}
 
       {isManualEntryOpen ? (
         <ManualEntryDialog

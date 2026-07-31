@@ -130,6 +130,7 @@ export type TimeEntryRow = {
   description: string | null;
   startedAt: string;
   stoppedAt: string | null;
+  updatedAt: string;
   durationSeconds: number;
   tagNames: string[];
   tags: Array<Pick<TagRow, "id" | "name" | "normalizedName">>;
@@ -701,6 +702,7 @@ export function buildTimeEntriesQuery(
             te.description,
             te.started_at as "startedAt",
             te.stopped_at as "stoppedAt",
+            te.updated_at as "updatedAt",
             (
               select coalesce(array_agg(t.name order by t.name), '{}')
               from time_entry_tags tet
@@ -877,6 +879,7 @@ async function getActiveEntry(session: RequestSession) {
             te.description,
             te.started_at as "startedAt",
             te.stopped_at as "stoppedAt",
+            te.updated_at as "updatedAt",
             (
               select coalesce(array_agg(t.name order by t.name), '{}')
               from time_entry_tags tet

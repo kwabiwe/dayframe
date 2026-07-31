@@ -12,6 +12,7 @@ import { clientFetch } from "@/lib/client-auth-fetch";
 import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
 import { timelineStateFromSearchParams } from "@/lib/timeline-view";
 import {
+  applyAuthoritativeActiveEntryVersion,
   applyOptimisticActiveEntryPatch,
   applyOptimisticTimerDelete,
   applyOptimisticTimerStart,
@@ -20,9 +21,14 @@ import {
   entryContinuationDecision,
   timerStartErrorMessage,
   timerDraftForEntry,
+  timerDraftVersion,
   type TimerDraft,
   type TimerDraftInput
 } from "@/lib/timer-runtime";
+import {
+  reconcileTimerBootstrap,
+  type BootstrapCommitSource
+} from "@/lib/timer-bootstrap-reconciliation";
 
 type MutationOutcome = { ok: true } | { ok: false; error: string };
 type DateLoadOutcome = { ok: true } | { ok: false; error: string };
@@ -81,7 +87,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   const dataRef = useRef<BootstrapData | null>(null);
   const dateDataCacheRef = useRef(new Map<string, BootstrapData>());
   const draftRef = useRef(timerDraft);
-  const activeEntryIdRef = useRef<string | null>(null);
+  const activeEntryVersionRef = useRef("unhydrated");
   const refreshRequestRef = useRef(0);
   const dateLoadRequestRef = useRef(0);
   const isDateLoadingRef = useRef(false);
@@ -91,13 +97,16 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   const timerStateRef = useRef<TimerStateFingerprint | null>(null);
   const timerStatePollInFlightRef = useRef(false);
 
-  const commitData = useCallback((nextData: BootstrapData | null) => {
+  const commitData = useCallback((incoming: BootstrapData | null, source: BootstrapCommitSource) => {
+    const nextData = incoming
+      ? reconcileTimerBootstrap(dataRef.current, incoming, source)
+      : null;
     dataRef.current = nextData;
     lastCommitAtRef.current = nextData ? Date.now() : 0;
-    if (nextData && !timerStateRef.current) {
+    if (nextData && source !== "optimistic") {
       timerStateRef.current = {
         activeEntryId: nextData.activeEntry?.id ?? null,
-        updatedAt: null,
+        updatedAt: nextData.activeEntry?.updatedAt ?? null,
         serverNow: new Date().toISOString()
       };
     }
@@ -122,9 +131,9 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   }, []);
 
   useEffect(() => {
-    const activeEntryId = data?.activeEntry?.id ?? null;
-    if (activeEntryIdRef.current === activeEntryId) return;
-    activeEntryIdRef.current = activeEntryId;
+    const activeEntryVersion = timerDraftVersion(data?.activeEntry);
+    if (activeEntryVersionRef.current === activeEntryVersion) return;
+    activeEntryVersionRef.current = activeEntryVersion;
     setTimerDraft(timerDraftForEntry(data?.activeEntry));
   }, [data?.activeEntry, setTimerDraft]);
 
@@ -135,7 +144,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       const response = await clientFetch(`/api/bootstrap?date=${selectedDate}`, { cache: "no-store" });
       if (!response.ok || requestId !== refreshRequestRef.current) return dataRef.current;
       const payload = (await response.json()) as BootstrapData;
-      commitData(payload);
+      commitData(payload, "canonical");
       return payload;
     } catch {
       return dataRef.current;
@@ -146,7 +155,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     const cached = dateDataCacheRef.current.get(date);
     if (cached) {
       setDateLoadError(null);
-      commitData(withCurrentSharedBootstrap(cached, dataRef.current));
+      commitData(withCurrentSharedBootstrap(cached, dataRef.current), "cache");
       return { ok: true };
     }
     if (isDateLoadingRef.current) {
@@ -165,7 +174,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       if (requestId !== dateLoadRequestRef.current || payload.dateRange.selectedDate !== date) {
         throw new Error("The period response did not match the requested date.");
       }
-      commitData(payload);
+      commitData(payload, "canonical");
       return { ok: true };
     } catch {
       const error = "Couldn’t load that period. Your current view is unchanged.";
@@ -184,7 +193,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     if (!cached) return;
     setDateLoadError(null);
     if (dataRef.current?.dateRange.selectedDate !== selectedDate) {
-      commitData(withCurrentSharedBootstrap(cached, dataRef.current));
+      commitData(withCurrentSharedBootstrap(cached, dataRef.current), "cache");
     }
   }, [commitData, selectedDate]);
 
@@ -272,7 +281,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   const hydrate = useCallback((nextData: BootstrapData) => {
     if (mutationGateRef.current.isActive()) return;
     if (nextData.dateRange.selectedDate !== selectedDate) return;
-    commitData(nextData);
+    commitData(nextData, "hydrate");
   }, [commitData, selectedDate]);
 
   const startTimer = useCallback(async (input: TimerDraftInput = {}): Promise<MutationOutcome> => {
@@ -285,7 +294,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       refreshRequestRef.current += 1;
       const startedAt = new Date().toISOString();
       const optimisticId = `optimistic-timer:${startedAt}:${++optimisticIdRef.current}`;
-      commitData(applyOptimisticTimerStart(snapshot, draft, startedAt, optimisticId));
+      commitData(applyOptimisticTimerStart(snapshot, draft, startedAt, optimisticId), "optimistic");
       setTimerDraft(draft);
 
       try {
@@ -303,7 +312,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         await refresh({ force: true });
         return { ok: true } as const;
       } catch (error) {
-        commitData(snapshot);
+        commitData(snapshot, "optimistic");
         setTimerDraft(timerDraftForEntry(snapshot.activeEntry));
         const message = timerStartErrorMessage(error);
         setTimerError(message);
@@ -330,7 +339,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       setIsTimerBusy(true);
       setTimerError(null);
       refreshRequestRef.current += 1;
-      commitData(applyOptimisticTimerStop(snapshot, new Date().toISOString()));
+      commitData(applyOptimisticTimerStop(snapshot, new Date().toISOString()), "optimistic");
 
       try {
         const updateResponse = await clientFetch(`/api/time-entries/${snapshot.activeEntry!.id}`, {
@@ -357,7 +366,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         await refresh({ force: true });
         return { ok: true } as const;
       } catch (error) {
-        commitData(snapshot);
+        commitData(snapshot, "optimistic");
         setTimerDraft(draftSnapshot);
         const message = errorMessage(error, "Unable to stop the timer.");
         setTimerError(message);
@@ -377,7 +386,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       setIsTimerBusy(true);
       setTimerError(null);
       refreshRequestRef.current += 1;
-      commitData(applyOptimisticTimerDelete(snapshot));
+      commitData(applyOptimisticTimerDelete(snapshot), "optimistic");
       setTimerDraft(timerDraftForEntry(null));
       try {
         const response = await clientFetch(`/api/time-entries/${snapshot.activeEntry!.id}`, {
@@ -387,7 +396,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         await refresh({ force: true });
         return { ok: true } as const;
       } catch (error) {
-        commitData(snapshot);
+        commitData(snapshot, "optimistic");
         setTimerDraft(draftSnapshot);
         const message = errorMessage(error, "Unable to delete the running timer.");
         setTimerError(message);
@@ -406,7 +415,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       setIsTimerBusy(true);
       setTimerError(null);
       refreshRequestRef.current += 1;
-      commitData(applyOptimisticActiveEntryPatch(snapshot, draft));
+      commitData(applyOptimisticActiveEntryPatch(snapshot, draft), "optimistic");
       try {
         const response = await clientFetch(`/api/time-entries/${snapshot.activeEntry!.id}`, {
           method: "PATCH",
@@ -419,10 +428,17 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
           })
         });
         if (!response.ok) throw new Error(await responseError(response, `Unable to save timer details: ${response.status}`));
+        const result = (await response.json()) as { updatedAt?: string };
+        if (result.updatedAt && dataRef.current) {
+          commitData(
+            applyAuthoritativeActiveEntryVersion(dataRef.current, snapshot.activeEntry!.id, result.updatedAt),
+            "canonical"
+          );
+        }
         await refresh({ force: true });
         return { ok: true } as const;
       } catch {
-        commitData(snapshot);
+        commitData(snapshot, "optimistic");
         setTimerDraft(timerDraftForEntry(snapshot.activeEntry));
         const message = "Timer details were not saved. Your previous values were restored.";
         setTimerError(message);
@@ -442,7 +458,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       setIsTimerBusy(true);
       setTimerError(null);
       refreshRequestRef.current += 1;
-      commitData(applyOptimisticActiveEntryPatch(snapshot, draft, startedAt));
+      commitData(applyOptimisticActiveEntryPatch(snapshot, draft, startedAt), "optimistic");
       try {
         const response = await clientFetch(`/api/time-entries/${snapshot.activeEntry!.id}`, {
           method: "PATCH",
@@ -457,10 +473,17 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
           })
         });
         if (!response.ok) throw new Error(await responseError(response, `Unable to update start time: ${response.status}`));
+        const result = (await response.json()) as { updatedAt?: string };
+        if (result.updatedAt && dataRef.current) {
+          commitData(
+            applyAuthoritativeActiveEntryVersion(dataRef.current, snapshot.activeEntry!.id, result.updatedAt),
+            "canonical"
+          );
+        }
         await refresh({ force: true });
         return { ok: true } as const;
       } catch (error) {
-        commitData(snapshot);
+        commitData(snapshot, "optimistic");
         const message = errorMessage(error, "Unable to update the start time.");
         setTimerError(message);
         return { ok: false, error: message } as const;

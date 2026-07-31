@@ -2650,7 +2650,10 @@ describe("time entry tag transactions", () => {
   it("saves an overlapping manual edit without querying for a time conflict", async () => {
     const client = {
       query: vi.fn(async (statement: string, values?: unknown[]) => {
-        if (statement.includes("update time_entries")) return { rows: [{ id: "entry-1" }] };
+        if (statement.includes("update time_entries")) {
+          return { rows: [{ id: "entry-1", updatedAt: "2026-07-27T12:00:00.000Z" }] };
+        }
+        if (statement.includes("from tags") && statement.includes("normalized_name")) return { rows: [] };
         if (statement.includes("insert into tags")) {
           const normalizedName = String(values?.[2]);
           return {
@@ -2672,7 +2675,10 @@ describe("time entry tag transactions", () => {
       startedAt: "2026-07-27T10:00:00.000Z",
       stoppedAt: "2026-07-27T11:00:00.000Z",
       tagNames: ["Planning", "Deep work", "planning"]
-    }, session)).resolves.toEqual({ id: "entry-1" });
+    }, session)).resolves.toEqual({
+      id: "entry-1",
+      updatedAt: "2026-07-27T12:00:00.000Z"
+    });
 
     expect(client.query.mock.calls[0][0]).toBe("begin");
     const updateCall = client.query.mock.calls.find(([statement]) =>

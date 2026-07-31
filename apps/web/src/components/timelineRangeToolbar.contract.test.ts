@@ -52,8 +52,12 @@ describe("Timeline range and toolbar contract", () => {
     expect(timeline).toContain("data.weekEntries");
     expect(timeline).toContain("data.entries");
     expect(timeline).toContain('state.scope === "day" ? visibleDayEntries : visibleWeekEntries');
-    expect(timeline).toContain("<dt>Day</dt>");
-    expect(timeline).toContain("<dt>Week</dt>");
+    expect(timeline).toContain('className="timeline-range-totals"');
+    expect(timeline).toContain("reportsHrefForCustomRange(");
+    expect(timeline).toContain("formatCompactHoursMinutes(dayAnalysis.totalLoggedSeconds)");
+    expect(timeline).toContain("formatCompactHoursMinutes(weekAnalysis.totalLoggedSeconds)");
+    expect(timeline).toContain("Open Day report for ${dayReportFrom}, total ${dayTotalLabel}");
+    expect(timeline).toContain("Open Week report for ${weekReportFrom} to ${weekReportTo}, total ${weekTotalLabel}");
     expect(timeline).toContain("dayAnalysis.totalLoggedSeconds");
     expect(timeline).not.toContain("dayAnalysis.timeCoveredSeconds");
     expect(timeline).toContain("dailyCoverage[index].timeCoveredSeconds");
@@ -97,7 +101,8 @@ describe("Timeline range and toolbar contract", () => {
   it("keeps Timeline viewport-scoped and stacks the toolbar without page overflow at phone widths", () => {
     expect(shell).toContain('const isTimeline = pathname === "/timeline"');
     expect(shell).toContain('swiss-app-shell${isTimeline ? " is-timeline" : ""}');
-    expect(shell).toContain('className={isTimeline ? "swiss-timeline-main" : undefined}');
+    expect(shell).toContain('className="swiss-timeline-surface"');
+    expect(shell).toContain('className="swiss-timeline-main"');
     expect(styles).toContain(".swiss-app-shell.is-timeline");
     expect(styles).toContain(".timeline-view-stage");
     expect(styles).toContain(".calendar-grid-scroller");
@@ -114,8 +119,17 @@ describe("Timeline range and toolbar contract", () => {
     expect(entries).not.toContain("FilterSelect");
     expect(timeline).toContain('className="timeline-timesheet-workspace"');
     expect(timeline).not.toContain("Timesheet totals count every entry in full.");
-    expect(styles).toMatch(/@media \(max-width: 1180px\)[\s\S]*\.timeline-range-toolbar \{[^}]*grid-template-columns: minmax\(0, 1fr\) auto;/);
-    expect(styles).toMatch(/@media \(max-width: 760px\)[\s\S]*\.timeline-range-toolbar \{[^}]*grid-template-columns: minmax\(0, 1fr\);/);
+    expect(styles).toMatch(/\.swiss-timeline-surface \.timeline-range-toolbar \{[^}]*grid-template-columns: max-content max-content minmax\(0, 1fr\);/);
+    expect(styles).toMatch(/@media \(max-width: 760px\)[\s\S]*\.swiss-timeline-surface \.timeline-range-toolbar \{[^}]*grid-template-columns: minmax\(0, 1fr\);/);
     expect(styles).toMatch(/\.timeline-range-controls \.ui-segmented-control \{[^}]*width: 100%;/);
+  });
+
+  it("uses one outer Timeline surface and direct per-view scrollers without duplicate titles", () => {
+    expect(shell).toContain('<PersistentTimerBar workspaceMode={isTimeline} />');
+    expect(shell).toContain('className="swiss-timeline-surface"');
+    expect(timeline).not.toContain('className="timeline-view-title-row"');
+    expect(entries).not.toContain('className="timeline-view-title-row"');
+    expect(timeline).toContain('className="calendar-corner-zoom"');
+    expect(styles).toMatch(/\.calendar-day-body \{[^}]*isolation: isolate;/s);
   });
 });

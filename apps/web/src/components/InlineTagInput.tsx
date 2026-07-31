@@ -3,11 +3,13 @@
 import {
   consumeActiveHashtag,
   findActiveHashtag,
+  normalizeNewTagName,
   normalizeTagName
 } from "@dayframe/shared";
 import { Check, X } from "lucide-react";
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -16,6 +18,7 @@ import {
 } from "react";
 import type { TagRow } from "@/lib/queries";
 import { TagIcon } from "@/components/TagIcon";
+import { selectVisibleTags, TAG_SELECTION_MAX_COUNT } from "@/lib/tag-display";
 
 export function InlineTagInput({
   ariaLabel,
@@ -55,6 +58,7 @@ export function InlineTagInput({
   value: string;
 }) {
   const editorRef = useRef<HTMLDivElement | null>(null);
+  const anchorRef = useRef<HTMLDivElement | null>(null);
   const localInputRef = useRef<HTMLInputElement | null>(null);
   const pickerInputRef = useRef<HTMLInputElement | null>(null);
   const pickerTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -63,6 +67,8 @@ export function InlineTagInput({
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerQuery, setPickerQuery] = useState("");
+  const [anchorWidth, setAnchorWidth] = useState(0);
+  const [tagWidths, setTagWidths] = useState<number[]>([]);
   const active = focused && !pickerOpen ? findActiveHashtag(value, caret) : null;
   const selectedNormalized = useMemo(
     () => new Set(selectedTagNames.map((tagName) => normalizeTagName(tagName).normalizedName)),
@@ -81,7 +87,7 @@ export function InlineTagInput({
   const createName = useMemo(() => {
     if (!active?.query || exactMatch) return null;
     try {
-      return normalizeTagName(active.query).name;
+      return normalizeNewTagName(active.query).name;
     } catch {
       return null;
     }
@@ -122,11 +128,32 @@ export function InlineTagInput({
   const pickerCreateName = useMemo(() => {
     if (!pickerQuery.trim() || pickerExactMatch) return null;
     try {
-      return normalizeTagName(pickerQuery).name;
+      return normalizeNewTagName(pickerQuery).name;
     } catch {
       return null;
     }
   }, [pickerExactMatch, pickerQuery]);
+  const tagDisplay = selectVisibleTags(selectedTagNames, {
+    availableWidth: anchorWidth ? Math.max(0, Math.min(anchorWidth * 0.52, anchorWidth - 190)) : undefined,
+    tagWidths,
+    overflowWidth: 38
+  });
+
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current;
+    if (!anchor) return undefined;
+    const measure = () => {
+      setAnchorWidth(anchor.getBoundingClientRect().width);
+      setTagWidths(
+        [...anchor.querySelectorAll<HTMLElement>("[data-tag-measure]")]
+          .map((element) => element.getBoundingClientRect().width + 4)
+      );
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(anchor);
+    return () => observer.disconnect();
+  }, [selectedTagNames]);
 
   useEffect(() => {
     onHashtagPanelChange?.(shouldOpen || pickerOpen);
@@ -159,9 +186,11 @@ export function InlineTagInput({
 
   function addSelectedTag(tagName: string) {
     const normalized = normalizeTagName(tagName);
-    if (selectedNormalized.has(normalized.normalizedName)) return;
+    if (selectedNormalized.has(normalized.normalizedName)) return true;
+    if (selectedTagNames.length >= TAG_SELECTION_MAX_COUNT) return false;
     const existing = tags.find((tag) => tag.normalizedName === normalized.normalizedName);
     onSelectedTagNamesChange([...selectedTagNames, existing?.name ?? normalized.name]);
+    return true;
   }
 
   function toggleSelectedTag(tagName: string) {
@@ -177,7 +206,7 @@ export function InlineTagInput({
 
   function selectAction(action: (typeof actions)[number]) {
     if (!active) return;
-    addSelectedTag(action.label);
+    if (!addSelectedTag(action.label)) return;
     const replacement = consumeActiveHashtag(value, active);
     onChange(replacement.text);
     setCaret(replacement.caret);
@@ -213,7 +242,7 @@ export function InlineTagInput({
 
   return (
     <div className={`inline-tag-editor ${className}`} ref={editorRef}>
-      <div className="ui-compound-control inline-tag-input-anchor">
+      <div className="ui-compound-control inline-tag-input-anchor" ref={anchorRef}>
         <input
           aria-describedby={`${name}-tag-help`}
           aria-label={ariaLabel}
@@ -249,6 +278,36 @@ export function InlineTagInput({
           role="combobox"
           value={value}
         />
+        <span className="inline-selected-tags" aria-label="Selected tags">
+          {tagDisplay.visible.map((tagName) => (
+            <button
+              aria-label={`Remove tag ${tagName}`}
+              className="inline-selected-tag"
+              key={normalizeTagName(tagName).normalizedName}
+              onClick={() => toggleSelectedTag(tagName)}
+              type="button"
+            >
+              #{tagName}
+            </button>
+          ))}
+          {tagDisplay.hiddenCount > 0 ? (
+            <button
+              aria-label={`Show ${tagDisplay.hiddenCount} more selected tags`}
+              className="inline-selected-tag-overflow"
+              onClick={() => {
+                setPickerOpen(true);
+                setPickerQuery("");
+                window.requestAnimationFrame(() => pickerInputRef.current?.focus());
+              }}
+              type="button"
+            >
+              +{tagDisplay.hiddenCount}
+            </button>
+          ) : null}
+        </span>
+        <span className="inline-tag-measurer" aria-hidden="true">
+          {selectedTagNames.map((tagName) => <span data-tag-measure key={tagName}>#{tagName}</span>)}
+        </span>
         <button
           aria-expanded={pickerOpen}
           aria-haspopup="dialog"
@@ -332,6 +391,7 @@ export function InlineTagInput({
                 return (
                   <button
                     aria-pressed={selected}
+                    disabled={!selected && selectedTagNames.length >= TAG_SELECTION_MAX_COUNT}
                     key={tag.id}
                     onClick={() => toggleSelectedTag(tag.name)}
                     type="button"
@@ -347,7 +407,7 @@ export function InlineTagInput({
                 <span className="inline-tag-empty">No matching tags</span>
               ) : null}
             </div>
-            {pickerCreateName ? (
+            {pickerCreateName && selectedTagNames.length < TAG_SELECTION_MAX_COUNT ? (
               <button
                 className="inline-tag-picker-create"
                 onClick={() => {
@@ -362,20 +422,10 @@ export function InlineTagInput({
             ) : null}
         </section>
       </div>
-      <span className="inline-tag-help" id={`${name}-tag-help`}>
-        {selectedTagNames.map((tagName) => (
-          <button
-            aria-label={`Remove tag ${tagName}`}
-            className="inline-selected-tag"
-            key={normalizeTagName(tagName).normalizedName}
-            onClick={() => toggleSelectedTag(tagName)}
-            type="button"
-          >
-            <TagIcon aria-hidden="true" size={12} />
-            <span>{tagName}</span>
-            <X aria-hidden="true" size={12} />
-          </button>
-        ))}
+      <span className="sr-only" id={`${name}-tag-help`}>
+        {selectedTagNames.length
+          ? `Selected tags: ${selectedTagNames.join(", ")}. Activate a selected tag to remove it.`
+          : "No tags selected."}
       </span>
     </div>
   );

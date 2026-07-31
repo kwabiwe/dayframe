@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-export const TAG_DISPLAY_NAME_MAX_LENGTH = 48;
+/** Existing tag rows may retain the original 48-character display limit. */
+export const TAG_LEGACY_DISPLAY_NAME_MAX_LENGTH = 48;
+/** New and renamed tags use the tighter cross-platform editing contract. */
+export const TAG_MUTATION_NAME_MAX_LENGTH = 32;
+/** @deprecated Prefer the explicit legacy or mutation limit. */
+export const TAG_DISPLAY_NAME_MAX_LENGTH = TAG_LEGACY_DISPLAY_NAME_MAX_LENGTH;
 export const TAG_TOKEN_PATTERN = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/;
 
 export type NormalizedTagName = {
@@ -39,8 +44,19 @@ export const TagRecordSchema = z.object({
   usageCount: z.number().int().nonnegative().optional()
 });
 
+export const NewTagNameSchema = z.string().superRefine((value, context) => {
+  try {
+    normalizeNewTagName(value);
+  } catch (error) {
+    context.addIssue({
+      code: "custom",
+      message: error instanceof Error ? error.message : "Invalid tag name"
+    });
+  }
+});
+
 export const TagMutationSchema = z.object({
-  name: TagNameSchema
+  name: NewTagNameSchema
 });
 
 export const TimeEntryTagsPatchSchema = z.object({
@@ -75,6 +91,18 @@ export function normalizeTagName(value: string): NormalizedTagName {
   }
 
   return { name, normalizedName };
+}
+
+/** Validates names at creation/rename boundaries without breaking legacy rows. */
+export function normalizeNewTagName(value: string): NormalizedTagName {
+  const tag = normalizeTagName(value);
+  if (
+    tag.name.length > TAG_MUTATION_NAME_MAX_LENGTH ||
+    tag.normalizedName.length > TAG_MUTATION_NAME_MAX_LENGTH
+  ) {
+    throw new Error(`Tag names must be ${TAG_MUTATION_NAME_MAX_LENGTH} characters or fewer`);
+  }
+  return tag;
 }
 
 export function isValidHashtagBoundary(text: string, hashIndex: number) {

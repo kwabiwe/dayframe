@@ -21,8 +21,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       update.tagNames = z.array(TagNameSchema).max(24).parse(body.tagNames);
     }
     validateTimeWindow(update);
-    await updateTimeEntry(id, update, session);
-    return NextResponse.json({ ok: true });
+    const result = await updateTimeEntry(id, update, session);
+    return NextResponse.json({ ok: true, ...result });
   } catch (error) {
     const response = authErrorResponse(error);
     if (response) return response;

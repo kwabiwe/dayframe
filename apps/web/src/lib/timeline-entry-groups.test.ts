@@ -19,6 +19,7 @@ function entry(overrides: Partial<TimeEntryRow>): TimeEntryRow {
     description: "Planning",
     startedAt: "2026-07-25T08:00:00.000Z",
     stoppedAt: "2026-07-25T08:30:00.000Z",
+    updatedAt: "2026-07-25T08:30:00.000Z",
     durationSeconds: 1800,
     placeId: null,
     placeName: null,
@@ -132,5 +133,18 @@ describe("groupTimelineEntries", () => {
     ]);
 
     expect(groups).toHaveLength(2);
+  });
+
+  it("keeps a running entry separate while stopped matches still group", () => {
+    const groups = groupTimelineEntries([
+      entry({ id: "running", stoppedAt: null }),
+      entry({ id: "stopped-new" }),
+      entry({ id: "stopped-old", startedAt: "2026-07-25T07:00:00.000Z" })
+    ]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups[0]?.key).toBe("running:running");
+    expect(groups[0]?.entries).toHaveLength(1);
+    expect(groups[1]?.entries.map((item) => item.id)).toEqual(["stopped-new", "stopped-old"]);
   });
 });

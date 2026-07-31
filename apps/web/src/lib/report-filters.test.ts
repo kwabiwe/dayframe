@@ -5,6 +5,7 @@ import {
   filtersForCustomRange,
   filtersForPreset,
   parseReportQueryInput,
+  reportsHrefForCustomRange,
   serializeReportFilters,
   shiftReportRange
 } from "./report-filters";
@@ -155,5 +156,11 @@ describe("report filter URL model", () => {
       parseReportQueryInput(Object.fromEntries(new URLSearchParams(serializeReportFilters(filters))), { now }).filters
     );
     expect(history).toEqual([initial, filtered, custom]);
+  });
+
+  it("builds Timeline drill-down links without carrying unrelated report filters", () => {
+    expect(reportsHrefForCustomRange("2026-07-20", "2026-07-26")).toBe(
+      "/reports?range=custom&from=2026-07-20&to=2026-07-26"
+    );
   });
 });

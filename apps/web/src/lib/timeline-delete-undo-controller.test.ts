@@ -21,6 +21,7 @@ function entry(id: string, description = "Planning"): TimeEntryRow {
     description,
     startedAt: "2026-07-31T09:00:00.000Z",
     stoppedAt: "2026-07-31T09:30:00.000Z",
+    updatedAt: "2026-07-31T09:30:00.000Z",
     durationSeconds: 1800,
     placeId: null,
     placeName: null,

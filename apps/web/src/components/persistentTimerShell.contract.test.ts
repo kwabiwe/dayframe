@@ -47,7 +47,7 @@ describe("persistent timer shell contract", () => {
   it("keeps tags inside the task compound control and exposes the row to assistive technology", () => {
     const compoundControl = inlineTags.slice(
       inlineTags.indexOf('className="ui-compound-control inline-tag-input-anchor"'),
-      inlineTags.indexOf('<span className="inline-tag-help"')
+      inlineTags.indexOf('<span className="sr-only"')
     );
 
     expect(compoundControl).toContain('className={`inline-tag-picker-trigger');
@@ -58,6 +58,8 @@ describe("persistent timer shell contract", () => {
     expect(timer).toContain("disabled={isTimerBusy}");
     expect(inlineTags).toContain("selectedTagNames.map");
     expect(inlineTags).toContain("Remove tag ${tagName}");
+    expect(compoundControl).toContain('className="inline-selected-tags"');
+    expect(compoundControl).toContain('className="inline-selected-tag-overflow"');
   });
 
   it("keeps compact overlays and the timer row usable at phone widths", () => {

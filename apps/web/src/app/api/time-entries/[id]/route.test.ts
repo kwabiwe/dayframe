@@ -36,7 +36,10 @@ describe("PATCH /api/time-entries/[id]", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.resolveRequestSession.mockResolvedValue(session);
-    mocks.updateTimeEntry.mockResolvedValue(undefined);
+    mocks.updateTimeEntry.mockResolvedValue({
+      id: "entry-1",
+      updatedAt: "2026-07-31T15:00:00.000Z"
+    });
   });
 
   it("updates a running timer start time without stopping it", async () => {
@@ -53,6 +56,11 @@ describe("PATCH /api/time-entries/[id]", () => {
     );
 
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      id: "entry-1",
+      updatedAt: "2026-07-31T15:00:00.000Z"
+    });
     expect(mocks.updateTimeEntry).toHaveBeenCalledWith(
       "entry-1",
       {
@@ -87,6 +95,11 @@ describe("PATCH /api/time-entries/[id]", () => {
     );
 
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      id: "entry-1",
+      updatedAt: "2026-07-31T15:00:00.000Z"
+    });
     expect(mocks.updateTimeEntry).toHaveBeenCalledWith(
       "entry-1",
       { description: "Plan #planning", tagNames: ["Planning"] },

@@ -3,6 +3,7 @@ import {
   consumeActiveHashtag,
   findActiveHashtag,
   insertHashtagStarter,
+  normalizeNewTagName,
   normalizeTagName,
   parseHashtagTokens,
   replaceActiveHashtag,
@@ -31,6 +32,13 @@ describe("tag normalization", () => {
     expect(() => normalizeTagName("client/work")).toThrow();
     expect(() => normalizeTagName("planning!")).toThrow();
     expect(() => normalizeTagName(" ")).toThrow();
+  });
+
+  it("keeps legacy 33-48 character tags readable but rejects them for create/rename", () => {
+    const legacy = "a".repeat(48);
+    expect(normalizeTagName(legacy).name).toBe(legacy);
+    expect(() => normalizeNewTagName("a".repeat(33))).toThrow("32 characters or fewer");
+    expect(normalizeNewTagName("a".repeat(32)).name).toHaveLength(32);
   });
 });
 

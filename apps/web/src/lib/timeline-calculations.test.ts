@@ -111,6 +111,7 @@ function entry(id: string, startedAt: Date, stoppedAt: Date | null): TimeEntryRo
     description: id,
     startedAt: startedAt.toISOString(),
     stoppedAt: stoppedAt?.toISOString() ?? null,
+    updatedAt: startedAt.toISOString(),
     durationSeconds: stoppedAt ? Math.round((stoppedAt.getTime() - startedAt.getTime()) / 1000) : 0,
     tagNames: [],
     tags: []
