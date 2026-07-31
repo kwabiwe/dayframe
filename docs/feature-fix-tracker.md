@@ -1,12 +1,12 @@
 # Dayframe Feature And Fix Tracker
 
-Last verified: 2026-07-31 (`main` at `3d8360f6fac26e60e78d083c04e388975acfe0d1` includes merged PRs #138, #140, #142 and #145; iOS build `0.1.0 (80)` is the latest internal TestFlight build, and PR #145 is not yet in TestFlight)
+Last verified: 2026-07-31 (`main` at `745b24f589e8e5de08c687757ffb3ec583fbf9fa` includes merged PRs #138, #140, #142, #145 and #146; iOS build `0.1.0 (81)` is the latest internal TestFlight build)
 
 ## Verification Snapshot
 
-- Local repo: `origin/main` is `3d8360f6fac26e60e78d083c04e388975acfe0d1`, including merged PR #145.
+- Local repo: `origin/main` is `745b24f589e8e5de08c687757ffb3ec583fbf9fa`, including merged PR #146.
 - GitHub baseline: PR #85 is merged as `2c3e151` and is available in TestFlight for physical-iPhone verification.
-- Latest verified TestFlight build: `0.1.0 (80)`, delivery/build ID `c85104d0-ab2f-4acb-9383-e59398d2b05d`, `VALID` and `IN_BETA_TESTING` through `Internal Health Debug`; export compliance is false. The archive contains merged PRs through #142 at commit `5200eb9`, uses API base `https://dayframe-web.vercel.app`, and supersedes builds 78 and 79. PR #145 changes the mobile tag-creation path and therefore requires build 81 before that behavior is available in TestFlight.
+- Latest verified TestFlight build: `0.1.0 (81)`, delivery/build ID `381a7289-d13e-4f73-8440-f36bda2ab4a1`, `VALID` and `IN_BETA_TESTING` through `Internal Health Debug`; export compliance is false and en-GB notes are set. The archive contains merged PR #145's mobile tag-creation boundary from merged `main` at `745b24f`, uses API base `https://dayframe-web.vercel.app`, and supersedes build 80.
 - Vercel reports a successful production deployment from merged commit `3d8360f`; it includes PR #145's unified Timeline workspace and active-entry reconciliation. Hosted Supabase has the Tags columns, composite workspace constraints, RLS, and association policies. No migration was required for PRs #138, #140, #142 or #145, and the mobile archives use API base `https://dayframe-web.vercel.app`.
 - Web app parity audit completed for recent mobile-heavy PRs #32-#57; suitable web follow-ups are tracked below and mirrored to Trello with the `Web App` label. Native-only work such as App Intents, Live Activities, background HealthKit observers, iOS Settings navigation, and keyboard/safe-area fixes is intentionally excluded from the web backlog.
 - Evidence checked: recent memory, previous chat/session logs, local git log, GitHub PR/issues state, project docs, README, local archive/export/upload logs, and App Store Connect build state. Vercel deployment and production Supabase schema are checked when the shipped change affects web/API/database behavior.
