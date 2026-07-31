@@ -20,8 +20,10 @@ describe("Calendar quick entry actions", () => {
     expect(source).toContain('method: "DELETE", keepalive: true');
   });
 
-  it("forwards vertical wheel intent without changing horizontal gestures", () => {
-    expect(source).toContain("Math.abs(event.deltaY) <= Math.abs(event.deltaX)");
-    expect(source).toContain('window.scrollBy({ top: event.deltaY, behavior: "auto" })');
+  it("keeps both scroll axes inside the Calendar grid workspace", () => {
+    expect(source).toContain('className="calendar-grid-scroller"');
+    expect(source).toContain("onScroll={onScroll}");
+    expect(source).not.toContain("forwardVerticalCalendarWheel");
+    expect(source).not.toContain("window.scrollBy");
   });
 });

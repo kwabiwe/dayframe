@@ -1,11 +1,16 @@
 import { afterAll, describe, expect, it } from "vitest";
 import {
+  DEFAULT_TIMELINE_PREFERENCE,
+  formatTimelinePeriodLabel,
   resetTimelineState,
   resolveTimelineRanges,
   shiftTimelineState,
   timelineHref,
+  timelinePreferenceCookieValue,
+  timelinePreferenceFromCookieValue,
   timelineStateFromSearchParams,
-  toTimelineDateKey
+  toTimelineDateKey,
+  updateTimelinePreference
 } from "./timeline-view";
 
 const originalTimeZone = process.env.TZ;
@@ -101,6 +106,76 @@ describe("Timeline URL state", () => {
   });
 });
 
+describe("Timeline view and scope preference", () => {
+  it("uses today with Calendar Week when no preference exists", () => {
+    expect(timelineStateFromSearchParams(new URLSearchParams(), { now })).toEqual({
+      date: "2026-07-23",
+      scope: "week",
+      view: "calendar"
+    });
+  });
+
+  it("restores a saved List Day preference without persisting the selected date", () => {
+    const preference = { lastView: "list" as const, preferredScope: "day" as const };
+    expect(timelineStateFromSearchParams(new URLSearchParams(), { now, preference })).toEqual({
+      date: "2026-07-23",
+      scope: "day",
+      view: "list"
+    });
+    expect(updateTimelinePreference(preference, { scope: "day", view: "list" })).toEqual(preference);
+  });
+
+  it("lets a valid explicit URL override the saved view and scope", () => {
+    expect(timelineStateFromSearchParams(
+      new URLSearchParams("date=2026-07-30&scope=week&view=calendar"),
+      { now, preference: { lastView: "list", preferredScope: "day" } }
+    )).toEqual({
+      date: "2026-07-30",
+      scope: "week",
+      view: "calendar"
+    });
+  });
+
+  it("keeps the non-Timesheet scope through a Timesheet visit", () => {
+    const dayPreference = updateTimelinePreference(DEFAULT_TIMELINE_PREFERENCE, {
+      scope: "day",
+      view: "calendar"
+    });
+    const afterTimesheet = updateTimelinePreference(dayPreference, {
+      scope: "week",
+      view: "timesheet"
+    });
+    expect(afterTimesheet).toEqual({ lastView: "timesheet", preferredScope: "day" });
+    expect(timelineStateFromSearchParams(new URLSearchParams("view=list"), {
+      now,
+      preference: afterTimesheet
+    })).toEqual({ date: "2026-07-23", scope: "day", view: "list" });
+  });
+
+  it("restores Timesheet in Week while retaining the previous non-Timesheet scope", () => {
+    const preference = { lastView: "timesheet" as const, preferredScope: "day" as const };
+    expect(timelineStateFromSearchParams(new URLSearchParams(), { now, preference })).toEqual({
+      date: "2026-07-23",
+      scope: "week",
+      view: "timesheet"
+    });
+    expect(timelineStateFromSearchParams(new URLSearchParams("view=calendar"), { now, preference })).toEqual({
+      date: "2026-07-23",
+      scope: "day",
+      view: "calendar"
+    });
+  });
+
+  it("rejects invalid stored or explicit values without poisoning preferences", () => {
+    expect(timelinePreferenceFromCookieValue("grid:month")).toBeNull();
+    expect(timelineStateFromSearchParams(
+      new URLSearchParams("scope=month&view=grid"),
+      { now, preference: { lastView: "list", preferredScope: "day" } }
+    )).toEqual({ date: "2026-07-23", scope: "week", view: "calendar" });
+    expect(timelinePreferenceCookieValue({ lastView: "list", preferredScope: "day" })).toBe("list:day");
+  });
+});
+
 describe("Timeline local calendar ranges", () => {
   it("resolves a selected Day from local midnight to the next local midnight", () => {
     const ranges = resolveTimelineRanges({ date: "2026-07-23", scope: "day", view: "calendar" });
@@ -165,6 +240,29 @@ describe("Timeline local calendar ranges", () => {
     expect(toTimelineDateKey(week.week.start)).toBe("2026-10-19");
     expect(toTimelineDateKey(week.week.end)).toBe("2026-10-26");
     expect(week.week.end.getTime() - week.week.start.getTime()).toBe(169 * 60 * 60 * 1000);
+  });
+});
+
+describe("Timeline period labels", () => {
+  it("uses approved abbreviated day and same-year week formats", () => {
+    expect(formatTimelinePeriodLabel("day", resolveTimelineRanges({
+      date: "2026-07-31",
+      scope: "day",
+      view: "calendar"
+    }))).toBe("Fri, 31 Jul 2026");
+    expect(formatTimelinePeriodLabel("week", resolveTimelineRanges({
+      date: "2026-07-31",
+      scope: "week",
+      view: "calendar"
+    }))).toBe("Mon 27 Jul – Sun 2 Aug 2026");
+  });
+
+  it("keeps cross-year week ranges unambiguous", () => {
+    expect(formatTimelinePeriodLabel("week", resolveTimelineRanges({
+      date: "2026-12-30",
+      scope: "week",
+      view: "calendar"
+    }))).toBe("Mon 28 Dec 2026 – Sun 3 Jan 2027");
   });
 });
 

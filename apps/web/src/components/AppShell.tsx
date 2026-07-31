@@ -98,6 +98,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
     results: []
   });
   const [searchStatus, setSearchStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const isTimeline = pathname === "/timeline";
   const showTimerShell = pathname === "/" || pathname === "/timeline";
   const showShellDateContext = pathname === "/";
   const timelineState = useMemo(
@@ -232,7 +233,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
   }, [navigatePeriod, openManualEntry, router, selectedDate, showTimerShell, toggleTimer]);
 
   return (
-    <div className="swiss-app-shell">
+    <div className={`swiss-app-shell${isTimeline ? " is-timeline" : ""}`}>
       <aside className="swiss-sidebar">
         <div className="swiss-sidebar-head">
           <Link href="/" className="swiss-brand" aria-label="Dayframe dashboard">
@@ -280,7 +281,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      <div className="swiss-main-frame">
+      <div className={`swiss-main-frame${isTimeline ? " is-timeline" : ""}`}>
         {showTimerShell ? (
           <div className="swiss-persistent-timer-shell">
             <PersistentTimerBar />
@@ -294,7 +295,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
             ) : null}
           </div>
         ) : null}
-        <main>{children}</main>
+        <main className={isTimeline ? "swiss-timeline-main" : undefined}>{children}</main>
       </div>
 
       {overlay === "profile" && data ? (

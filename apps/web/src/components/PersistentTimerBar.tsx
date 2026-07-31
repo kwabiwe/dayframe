@@ -601,7 +601,7 @@ export function PersistentTimerBar() {
       {quickActions.length ? (
         <div className="swiss-quick-actions-strip" aria-label="Quick actions">
           <span>Quick actions</span>
-          <div>
+          <div className="swiss-quick-actions-rail">
             {quickActions.map((action) => (
               <button
                 key={action.key}

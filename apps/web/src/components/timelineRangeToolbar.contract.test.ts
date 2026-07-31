@@ -7,6 +7,7 @@ function source(relativePath: string) {
 }
 
 const timeline = source("./TimeReviewViews.tsx");
+const entries = source("./EntriesTable.tsx");
 const shell = source("./AppShell.tsx");
 const runtime = source("./AppShellRuntime.tsx");
 const page = source("../app/timeline/page.tsx");
@@ -14,11 +15,13 @@ const styles = source("../app/globals.css");
 const queries = source("../lib/queries.ts");
 
 describe("Timeline range and toolbar contract", () => {
-  it("keeps one URL-owned range/view toolbar and no route-local preference owner", () => {
+  it("keeps one URL-owned range/view toolbar with one cookie-backed preference owner", () => {
     expect(timeline.match(/className="timeline-range-toolbar"/g)).toHaveLength(1);
-    expect(timeline).toContain("timelineStateFromSearchParams(searchParams)");
+    expect(timeline).toContain("timelineStateFromSearchParams(searchParams, { preference: initialPreference })");
     expect(timeline).toContain("timelineHref(searchParams.toString(), state, nextState)");
     expect(timeline).toContain('window.history.pushState(null, "", href)');
+    expect(timeline).toContain("document.cookie");
+    expect(timeline).toContain("updateTimelinePreference");
     expect(timeline).not.toContain("weekAnchor");
     expect(timeline).not.toContain("calendarMode");
     expect(timeline).not.toContain("localStorage");
@@ -38,12 +41,12 @@ describe("Timeline range and toolbar contract", () => {
     expect(runtime).toContain("shellData: data");
     expect(runtime).toContain("data: selectedData");
     expect(source("./PersistentTimerBar.tsx")).toContain("shellData: data");
-    expect(timeline).toContain('view === "timesheet" ? "week" : state.scope');
+    expect(timeline).toContain('view === "timesheet" ? "week" : preferenceRef.current?.preferredScope ?? state.scope');
     expect(timeline).toContain('isDateLoading || (state.view === "timesheet" && item.id === "day")');
     expect(runtime).toContain("Couldn’t load that period. Your current view is unchanged.");
   });
 
-  it("gives all views the same clipped period data and both summary totals", () => {
+  it("gives all views the same clipped period data while limiting covered copy to Timesheet", () => {
     expect(timeline).toContain("clipTimelineEntries(mergeTimelineEntries(");
     expect(timeline).toContain("data.dayEntries");
     expect(timeline).toContain("data.weekEntries");
@@ -52,16 +55,22 @@ describe("Timeline range and toolbar contract", () => {
     expect(timeline).toContain("<dt>Day</dt>");
     expect(timeline).toContain("<dt>Week</dt>");
     expect(timeline).toContain("dayAnalysis.totalLoggedSeconds");
-    expect(timeline).toContain("dayAnalysis.timeCoveredSeconds");
+    expect(timeline).not.toContain("dayAnalysis.timeCoveredSeconds");
+    expect(timeline).toContain("dailyCoverage[index].timeCoveredSeconds");
+    expect(timeline).not.toContain("forwardVerticalCalendarWheel");
     expect(timeline).toContain('aria-label="Timeline period and view controls"');
     expect(timeline).toContain('ariaLabel="Timeline view"');
     expect(timeline).toContain('ariaLabel="Timeline scope"');
   });
 
   it("canonicalizes direct URLs before one selected-date bootstrap read", () => {
-    expect(page).toContain("timelineStateFromSearchParams(params)");
+    expect(page).toContain("await cookies()");
+    expect(page).toContain("timelinePreferenceFromCookieValue");
+    expect(page).toContain("timelineStateFromSearchParams(params, { preference })");
     expect(page).toContain("if (currentHref !== canonicalHref) redirect(canonicalHref)");
     expect(page).toContain("getBootstrapData(session, { selectedDate: state.date })");
+    expect(page).not.toContain("PageHeader");
+    expect(page).toContain('<h1 className="sr-only">Timeline</h1>');
     expect(page).not.toContain("key=");
     expect(runtime).toContain("dataRef.current?.dateRange.selectedDate !== selectedDate");
     expect(runtime).toContain("useLayoutEffect(() =>");
@@ -85,7 +94,26 @@ describe("Timeline range and toolbar contract", () => {
     expect(queries).toContain("greatest(started_at, $2::timestamptz)");
   });
 
-  it("stacks the toolbar without horizontal overflow at phone widths", () => {
+  it("keeps Timeline viewport-scoped and stacks the toolbar without page overflow at phone widths", () => {
+    expect(shell).toContain('const isTimeline = pathname === "/timeline"');
+    expect(shell).toContain('swiss-app-shell${isTimeline ? " is-timeline" : ""}');
+    expect(shell).toContain('className={isTimeline ? "swiss-timeline-main" : undefined}');
+    expect(styles).toContain(".swiss-app-shell.is-timeline");
+    expect(styles).toContain(".timeline-view-stage");
+    expect(styles).toContain(".calendar-grid-scroller");
+    expect(styles).toContain(".timeline-list-scroll");
+    expect(styles).toContain(".timeline-timesheet-scroll");
+    expect(styles).toContain(".calendar-time-axis");
+    expect(styles).toContain(".timeline-timesheet-activity-cell");
+    expect(styles).toContain(".swiss-quick-actions-rail");
+    expect(styles).toContain("flex-wrap: nowrap");
+    expect(styles).toContain("overflow-x: auto");
+    expect(styles).toContain(".swiss-timer-description-control .ui-compound-control");
+    expect(entries).toContain('className="timeline-list-workspace"');
+    expect(entries).toContain('className="timeline-list-scroll"');
+    expect(entries).not.toContain("FilterSelect");
+    expect(timeline).toContain('className="timeline-timesheet-workspace"');
+    expect(timeline).not.toContain("Timesheet totals count every entry in full.");
     expect(styles).toMatch(/@media \(max-width: 1180px\)[\s\S]*\.timeline-range-toolbar \{[^}]*grid-template-columns: minmax\(0, 1fr\) auto;/);
     expect(styles).toMatch(/@media \(max-width: 760px\)[\s\S]*\.timeline-range-toolbar \{[^}]*grid-template-columns: minmax\(0, 1fr\);/);
     expect(styles).toMatch(/\.timeline-range-controls \.ui-segmented-control \{[^}]*width: 100%;/);
