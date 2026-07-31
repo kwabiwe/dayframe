@@ -7,6 +7,8 @@ export type TimelineEntryGroup = {
   totalSeconds: number;
 };
 
+export type TimelineEntryDayGroup = TimelineEntryGroup & { day: string };
+
 export function groupTimelineEntries(entries: TimeEntryRow[]): TimelineEntryGroup[] {
   const groups = new Map<string, TimelineEntryGroup>();
 
@@ -29,11 +31,27 @@ export function groupTimelineEntries(entries: TimeEntryRow[]): TimelineEntryGrou
   return [...groups.values()];
 }
 
+/** List owns day partitioning; the grouping key remains category/description/tag-only. */
+export function groupTimelineEntriesByDay(
+  entries: TimeEntryRow[],
+  dayForEntry: (entry: TimeEntryRow) => string
+): TimelineEntryDayGroup[] {
+  const entriesByDay = new Map<string, TimeEntryRow[]>();
+  for (const entry of entries) {
+    const day = dayForEntry(entry);
+    const dayEntries = entriesByDay.get(day) ?? [];
+    dayEntries.push(entry);
+    entriesByDay.set(day, dayEntries);
+  }
+
+  return [...entriesByDay].flatMap(([day, entriesForDay]) =>
+    groupTimelineEntries(entriesForDay).map((group) => ({ ...group, day }))
+  );
+}
+
 export function timelineEntryGroupKey(entry: TimeEntryRow) {
   const categoryNameKey = normalizeGroupText(entry.categoryName);
   const descriptionKey = normalizeGroupText(entry.description);
-  if (!entry.categoryId && !categoryNameKey && !descriptionKey) return `entry:${entry.id}`;
-
   const categoryKey = entry.categoryId
     ? `id:${entry.categoryId}`
     : `name:${categoryNameKey || "uncategorized"}`;

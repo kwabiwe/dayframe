@@ -7,6 +7,7 @@ function source(path: string) {
 }
 
 const entries = source("./EntriesTable.tsx");
+const deleteHook = source("./useTimelineDeleteUndo.ts");
 const timer = source("./PersistentTimerBar.tsx");
 const settings = source("./SettingsForms.tsx");
 const goals = source("./GoalSettings.tsx");
@@ -29,7 +30,9 @@ describe("grouped Timeline and Settings follow-up contracts", () => {
     expect(entries).toContain('colSpan={4}');
     expect(entries).toContain("EntryActionsMenu");
     expect(entries).toContain("Delete whole group");
-    expect(entries).toContain("/api/time-entries/batch-delete");
+    expect(entries).toContain("onDeleteEntries(isGrouped ? group.entries : [entry])");
+    expect(entries).toContain("onDeleteEntries([occurrence])");
+    expect(deleteHook).toContain('clientFetch("/api/time-entries/batch-delete"');
   });
 
   it("offers the previous stop in the running start editor", () => {
