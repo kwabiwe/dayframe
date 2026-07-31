@@ -143,6 +143,12 @@ export function reportsHref(filters: ReportFilters, overrides: Partial<ReportFil
   return `/reports?${serializeReportFilters(filters, overrides)}`;
 }
 
+/** Timeline drill-downs intentionally start with a clean historical range. */
+export function reportsHrefForCustomRange(from: string, to: string) {
+  const params = new URLSearchParams({ range: "custom", from, to });
+  return `/reports?${params.toString()}`;
+}
+
 export function reportExportHref(filters: ReportFilters) {
   return `/api/reports/export?${serializeReportFilters(filters, { page: 1 })}`;
 }

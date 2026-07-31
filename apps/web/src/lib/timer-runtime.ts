@@ -42,6 +42,10 @@ export function timerDraftForEntry(entry: TimeEntryRow | null | undefined): Time
   };
 }
 
+export function timerDraftVersion(entry: TimeEntryRow | null | undefined) {
+  return entry ? `${entry.id}:${entry.updatedAt}` : "idle";
+}
+
 export function entryContinuationDecision(
   entry: TimeEntryRow
 ): EntryContinuationDecision {
@@ -107,6 +111,7 @@ export function applyOptimisticTimerStart(
     description: draft.description.trim() || null,
     startedAt,
     stoppedAt: null,
+    updatedAt: startedAt,
     durationSeconds: 0,
     tagNames: draft.tagNames,
     tags
@@ -121,7 +126,7 @@ export function applyOptimisticTimerStop(data: BootstrapData, stoppedAt: string)
     data.activeEntry.durationSeconds,
     Math.floor((new Date(stoppedAt).getTime() - new Date(data.activeEntry.startedAt).getTime()) / 1000)
   );
-  const entry = { ...data.activeEntry, stoppedAt, durationSeconds };
+  const entry = { ...data.activeEntry, stoppedAt, updatedAt: stoppedAt, durationSeconds };
   return replaceEntryCollections({ ...data, activeEntry: null }, entry);
 }
 
@@ -166,6 +171,16 @@ export function applyOptimisticActiveEntryPatch(
       };
     })
   };
+  return replaceEntryCollections({ ...data, activeEntry: entry }, entry);
+}
+
+export function applyAuthoritativeActiveEntryVersion(
+  data: BootstrapData,
+  entryId: string,
+  updatedAt: string
+) {
+  if (data.activeEntry?.id !== entryId) return data;
+  const entry = { ...data.activeEntry, updatedAt };
   return replaceEntryCollections({ ...data, activeEntry: entry }, entry);
 }
 

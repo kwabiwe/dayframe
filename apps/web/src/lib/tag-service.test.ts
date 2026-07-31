@@ -16,7 +16,8 @@ const {
   deleteTag,
   detachTagFromTimeEntry,
   listTags,
-  renameTag
+  renameTag,
+  syncTimeEntryTags
 } = await import("./tag-service");
 
 const session = {
@@ -115,6 +116,27 @@ describe("workspace tag persistence", () => {
     expect(mocks.query.mock.calls[1][1]).toEqual([
       session.workspaceId, entryId(), tagId(), session.userId
     ]);
+  });
+
+  it("reattaches an existing legacy-length tag without treating it as a new mutation", async () => {
+    const legacyName = "a".repeat(48);
+    const client = transactionClient((statement) => {
+      if (statement.includes("from tags") && statement.includes("normalized_name")) {
+        return { rows: [{ id: tagId(), name: legacyName, normalizedName: legacyName }] };
+      }
+      return { rows: [] };
+    });
+
+    await expect(syncTimeEntryTags(client as never, entryId(), [legacyName], session))
+      .resolves.toEqual([{ id: tagId(), name: legacyName, normalizedName: legacyName }]);
+    expect(client.query.mock.calls.some(([statement]) => String(statement).includes("insert into tags as existing")))
+      .toBe(false);
+  });
+
+  it("rejects creation of a missing tag longer than 32 characters", async () => {
+    const client = transactionClient(() => ({ rows: [] }));
+    await expect(syncTimeEntryTags(client as never, entryId(), ["a".repeat(33)], session))
+      .rejects.toThrow("32 characters or fewer");
   });
 });
 

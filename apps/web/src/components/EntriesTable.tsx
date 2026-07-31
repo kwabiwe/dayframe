@@ -121,9 +121,6 @@ export function EntriesTable({
 
   return (
     <section className="timeline-list-workspace">
-      <div className="timeline-view-title-row">
-        <h2>List</h2>
-      </div>
       {actionError ? (
         <p className="swiss-inline-error" role="alert">
           {actionError}
@@ -202,9 +199,11 @@ export function EntriesTable({
                         style={{ backgroundColor: timeEntryCategoryColor(entry) }}
                       />
                       <span className="timeline-task-details">
-                        <span className="timeline-task-title">{timeEntryTitle(entry)}</span>
-                        <span className="timeline-task-meta">{timeEntryCategoryLabel(entry)}</span>
-                        <TagMetadata tagNames={entry.tagNames} />
+                        <span className="timeline-task-primary-line">
+                          <span className="timeline-task-title">{timeEntryTitle(entry)}</span>
+                          <span className="timeline-task-meta">{timeEntryCategoryLabel(entry)}</span>
+                          <TagMetadata compact tagNames={entry.tagNames} />
+                        </span>
                         {overlappingOccurrences.length > 0 ? (
                           <span
                             className="overlap-marker"
@@ -236,9 +235,11 @@ export function EntriesTable({
                     <div className="flex gap-2">
                       <IconButton
                         disabled={isPending || Boolean(continuingEntryId)}
-                        label={isGrouped
-                          ? `Start ${timeEntryTitle(entry)} from this group again`
-                          : `Start ${timeEntryTitle(entry)} again`}
+                        label={!entry.stoppedAt
+                          ? `Restart ${timeEntryTitle(entry)} from zero`
+                          : isGrouped
+                            ? `Start ${timeEntryTitle(entry)} from this group again`
+                            : `Start ${timeEntryTitle(entry)} again`}
                         onClick={() => continueEntry(entry)}
                       >
                         <Play size={15} fill="currentColor" strokeWidth={0} />
@@ -272,9 +273,11 @@ export function EntriesTable({
                             style={{ backgroundColor: timeEntryCategoryColor(occurrence) }}
                           />
                           <span className="timeline-task-details">
-                            <span className="timeline-task-title">{timeEntryTitle(occurrence)}</span>
-                            <span className="timeline-task-meta">{timeEntryCategoryLabel(occurrence)}</span>
-                            <TagMetadata tagNames={occurrence.tagNames} />
+                            <span className="timeline-task-primary-line">
+                              <span className="timeline-task-title">{timeEntryTitle(occurrence)}</span>
+                              <span className="timeline-task-meta">{timeEntryCategoryLabel(occurrence)}</span>
+                              <TagMetadata compact tagNames={occurrence.tagNames} />
+                            </span>
                             {(overlapById.get(occurrence.id)?.overlapCount ?? 0) > 0 ? (
                               <span
                                 className="overlap-marker"

@@ -50,6 +50,7 @@ export function groupTimelineEntriesByDay(
 }
 
 export function timelineEntryGroupKey(entry: TimeEntryRow) {
+  if (entry.stoppedAt === null) return `running:${entry.id}`;
   const categoryNameKey = normalizeGroupText(entry.categoryName);
   const descriptionKey = normalizeGroupText(entry.description);
   const categoryKey = entry.categoryId

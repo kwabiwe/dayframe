@@ -2,6 +2,7 @@
 
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, UIEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CalendarDays, ChevronLeft, ChevronRight, CircleDot, List, Pencil, Play, Table2, Trash2 } from "lucide-react";
 import { analyzeTimeIntervals, calendarBlockContinuationEdges } from "@dayframe/shared";
@@ -25,6 +26,7 @@ import type { BootstrapData, CategoryRow, PlaceRow, TimeEntryRow } from "@/lib/q
 import {
   dateTimeLocalInputToIso,
   formatDate,
+  formatCompactHoursMinutes,
   formatDuration,
   formatTime
 } from "@/lib/format";
@@ -58,6 +60,7 @@ import {
   type TimelineState,
   type TimelineView
 } from "@/lib/timeline-view";
+import { reportsHrefForCustomRange } from "@/lib/report-filters";
 
 type CalendarHoursMode = "fullDay";
 
@@ -120,7 +123,13 @@ export function TimeReviewViews({
     [state.scope, state.view]
   );
   const ranges = resolveTimelineRanges(state);
-  const capturedNow = new Date();
+  const hasRunningEntry = Boolean(
+    data.activeEntry ||
+    data.entries.some((entry) => entry.stoppedAt === null) ||
+    data.weekEntries.some((entry) => entry.stoppedAt === null)
+  );
+  const [presentationNow, setPresentationNow] = useState(() => Date.now());
+  const capturedNow = useMemo(() => new Date(presentationNow), [presentationNow]);
   const calendarHoursMode: CalendarHoursMode = "fullDay";
   const preferenceRef = useRef<TimelinePreference | null>(initialPreference);
   const scrollPositionsRef = useRef<Record<TimelineView, TimelineScrollPosition>>({
@@ -154,6 +163,12 @@ export function TimeReviewViews({
   useEffect(() => {
     persistPreference(preferenceState);
   }, [persistPreference, preferenceState]);
+
+  useEffect(() => {
+    if (!hasRunningEntry) return undefined;
+    const interval = window.setInterval(() => setPresentationNow(Date.now()), 1_000);
+    return () => window.clearInterval(interval);
+  }, [hasRunningEntry]);
 
   useLayoutEffect(() => {
     const container = activeScrollContainerRef.current;
@@ -247,6 +262,12 @@ export function TimeReviewViews({
   );
   const periodLabel = formatTimelinePeriodLabel(state.scope, ranges);
   const todayKey = toTimelineDateKey(new Date());
+  const dayReportFrom = toTimelineDateKey(ranges.day.start);
+  const dayReportTo = toTimelineDateKey(addDays(ranges.day.end, -1));
+  const weekReportFrom = toTimelineDateKey(ranges.week.start);
+  const weekReportTo = toTimelineDateKey(addDays(ranges.week.end, -1));
+  const dayTotalLabel = formatCompactHoursMinutes(dayAnalysis.totalLoggedSeconds);
+  const weekTotalLabel = formatCompactHoursMinutes(weekAnalysis.totalLoggedSeconds);
 
   return (
     <section className="timeline-workspace">
@@ -279,16 +300,22 @@ export function TimeReviewViews({
           </IconButton>
         </div>
 
-        <dl className="timeline-range-totals">
-          <div>
-            <dt>Day</dt>
-            <dd className="tabular">{formatDuration(dayAnalysis.totalLoggedSeconds)} logged</dd>
-          </div>
-          <div>
-            <dt>Week</dt>
-            <dd className="tabular">{formatDuration(weekAnalysis.totalLoggedSeconds)} logged</dd>
-          </div>
-        </dl>
+        <nav className="timeline-range-totals" aria-label="Open Timeline totals in Reports">
+          <Link
+            aria-label={`Open Day report for ${dayReportFrom}, total ${dayTotalLabel}`}
+            href={reportsHrefForCustomRange(dayReportFrom, dayReportTo)}
+          >
+            <span>Day</span>
+            <strong className="tabular">{dayTotalLabel}</strong>
+          </Link>
+          <Link
+            aria-label={`Open Week report for ${weekReportFrom} to ${weekReportTo}, total ${weekTotalLabel}`}
+            href={reportsHrefForCustomRange(weekReportFrom, weekReportTo)}
+          >
+            <span>Week</span>
+            <strong className="tabular">{weekTotalLabel}</strong>
+          </Link>
+        </nav>
 
         <div className="timeline-range-controls">
           <SegmentedControl
@@ -628,28 +655,6 @@ function CalendarReview({
 
   return (
     <section className="timeline-calendar-workspace">
-      <div className="timeline-view-title-row">
-        <h2 className="text-lg font-semibold">Calendar</h2>
-        <span className="swiss-zoom-control" role="group" aria-label="Calendar zoom">
-          <button
-            type="button"
-            disabled={zoomIndex === 0}
-            aria-label="Zoom calendar out"
-            onClick={() => setZoomLevel(zoomKeys[Math.max(0, zoomIndex - 1)])}
-          >
-            -
-          </button>
-          <b>{zoom.label}</b>
-          <button
-            type="button"
-            disabled={zoomIndex === zoomKeys.length - 1}
-            aria-label="Zoom calendar in"
-            onClick={() => setZoomLevel(zoomKeys[Math.min(zoomKeys.length - 1, zoomIndex + 1)])}
-          >
-            +
-          </button>
-        </span>
-      </div>
       <div
         className="calendar-grid-scroller"
         onScroll={onScroll}
@@ -657,10 +662,28 @@ function CalendarReview({
       >
         <div
           className="timeline-calendar-grid"
-          style={{ gridTemplateColumns: `72px repeat(${visibleDays.length}, minmax(130px, 1fr))` }}
+          style={{ gridTemplateColumns: `104px repeat(${visibleDays.length}, minmax(130px, 1fr))` }}
         >
           <div className="calendar-grid-corner">
-            Time
+            <span className="calendar-corner-zoom" role="group" aria-label="Calendar zoom">
+              <button
+                type="button"
+                disabled={zoomIndex === 0}
+                aria-label="Zoom calendar out"
+                onClick={() => setZoomLevel(zoomKeys[Math.max(0, zoomIndex - 1)])}
+              >
+                −
+              </button>
+              <button
+                type="button"
+                disabled={zoomIndex === zoomKeys.length - 1}
+                aria-label="Zoom calendar in"
+                onClick={() => setZoomLevel(zoomKeys[Math.min(zoomKeys.length - 1, zoomIndex + 1)])}
+              >
+                +
+              </button>
+            </span>
+            <span>Time</span>
           </div>
           {visibleDays.map((day) => {
             const dayStart = startOfDay(day);
@@ -983,9 +1006,6 @@ function TimesheetView({
   ));
   return (
     <section className="timeline-timesheet-workspace">
-      <div className="timeline-view-title-row">
-        <h2>Timesheet</h2>
-      </div>
       <div className="timeline-timesheet-scroll" onScroll={onScroll} ref={scrollContainerRef}>
       <table className="timeline-timesheet-table">
         <thead className="bg-[var(--surface-inset)] text-left text-xs text-[var(--muted)]">

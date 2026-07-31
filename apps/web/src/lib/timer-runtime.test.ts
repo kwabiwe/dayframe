@@ -7,6 +7,7 @@ import {
   applyOptimisticTimerStop,
   createTimerMutationGate,
   entryContinuationDecision,
+  timerDraftVersion,
   timerStartErrorMessage
 } from "./timer-runtime";
 
@@ -154,6 +155,12 @@ describe("shell timer runtime", () => {
     );
     expect(timerStartErrorMessage(new Error("Timer conflict"))).toBe("Timer conflict");
   });
+
+  it("changes the timer draft hydration key for a newer same-entry version", () => {
+    expect(timerDraftVersion(entry({ id: "active", updatedAt: "2026-07-31T10:00:00.000Z" })))
+      .not.toBe(timerDraftVersion(entry({ id: "active", updatedAt: "2026-07-31T10:01:00.000Z" })));
+    expect(timerDraftVersion(null)).toBe("idle");
+  });
 });
 
 function bootstrapData(activeEntry: TimeEntryRow | null) {
@@ -194,6 +201,7 @@ function entry(overrides: Partial<TimeEntryRow> = {}) {
     description: "Work",
     startedAt: "2026-07-22T09:00:00.000Z",
     stoppedAt: null,
+    updatedAt: "2026-07-22T09:00:00.000Z",
     durationSeconds: 60,
     tagNames: [],
     tags: [],

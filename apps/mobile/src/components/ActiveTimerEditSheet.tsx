@@ -23,6 +23,7 @@ import {
   analyzeTimeIntervals,
   findActiveHashtag,
   insertHashtagStarter,
+  normalizeNewTagName,
   normalizeTagName,
   paletteColorFor,
   type RecentActivitySuggestion
@@ -410,7 +411,7 @@ export function ActiveTimerEditSheet({
   const createTagName = useMemo(() => {
     if (!activeHashtag?.query || exactTagMatch) return null;
     try {
-      return normalizeTagName(activeHashtag.query).name;
+      return normalizeNewTagName(activeHashtag.query).name;
     } catch {
       return null;
     }

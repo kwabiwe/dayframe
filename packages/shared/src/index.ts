@@ -2,7 +2,10 @@ import { z } from "zod";
 
 export {
   TAG_DISPLAY_NAME_MAX_LENGTH,
+  TAG_LEGACY_DISPLAY_NAME_MAX_LENGTH,
+  TAG_MUTATION_NAME_MAX_LENGTH,
   TAG_TOKEN_PATTERN,
+  NewTagNameSchema,
   TagMutationSchema,
   TagNameSchema,
   TagRecordSchema,
@@ -12,6 +15,7 @@ export {
   insertHashtagStarter,
   isValidHashtagBoundary,
   normalizeTagName,
+  normalizeNewTagName,
   parseHashtagTokens,
   replaceActiveHashtag,
   tagNamesFromDescription,

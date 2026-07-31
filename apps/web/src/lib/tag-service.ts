@@ -1,4 +1,4 @@
-import { normalizeTagName } from "@dayframe/shared";
+import { normalizeNewTagName, normalizeTagName } from "@dayframe/shared";
 import type pg from "pg";
 import { isUniqueViolationError, pool, query } from "./db";
 import { getDevSession, type RequestSession } from "./session";
@@ -58,7 +58,7 @@ export async function createTag(
   input: { name: string },
   session: RequestSession = getDevSession()
 ) {
-  const tag = normalizeTagName(input.name);
+  const tag = normalizeNewTagName(input.name);
   const result = await query<PersistedTag>(
     `insert into tags as existing (
         workspace_id, name, normalized_name, created_by_user_id
@@ -79,7 +79,7 @@ export async function renameTag(
   input: { name: string },
   session: RequestSession = getDevSession()
 ) {
-  const tag = normalizeTagName(input.name);
+  const tag = normalizeNewTagName(input.name);
   const client = await pool.connect();
   try {
     await client.query("begin");
@@ -213,6 +213,18 @@ export async function syncTimeEntryTags(
   const tags: PersistedTag[] = [];
 
   for (const tag of desired) {
+    const existing = await client.query<PersistedTag>(
+      `select id, name, normalized_name as "normalizedName"
+       from tags
+       where workspace_id = $1 and normalized_name = $2
+       limit 1`,
+      [session.workspaceId, tag.normalizedName]
+    );
+    if (existing.rows[0]) {
+      tags.push(existing.rows[0]);
+      continue;
+    }
+    const creatableTag = normalizeNewTagName(tag.name);
     const result = await client.query<PersistedTag>(
       `insert into tags as existing (
           workspace_id, name, normalized_name, created_by_user_id
@@ -223,7 +235,7 @@ export async function syncTimeEntryTags(
        returning existing.id,
                  existing.name,
                  existing.normalized_name as "normalizedName"`,
-      [session.workspaceId, tag.name, tag.normalizedName, session.userId]
+      [session.workspaceId, creatableTag.name, creatableTag.normalizedName, session.userId]
     );
     if (result.rows[0]) tags.push(result.rows[0]);
   }

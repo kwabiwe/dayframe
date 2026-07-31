@@ -202,6 +202,7 @@ describe("time-entry range query", () => {
     expect(statement.text).toContain("te.started_at < $5::timestamptz");
     expect(statement.text).toContain("coalesce(te.stopped_at, $3::timestamptz) > $4::timestamptz");
     expect(statement.text).toContain("coalesce(te.stopped_at, $3::timestamptz) - te.started_at");
+    expect(statement.text).toContain('te.updated_at as "updatedAt"');
     expect(statement.values).toEqual([
       session.workspaceId,
       session.userId,

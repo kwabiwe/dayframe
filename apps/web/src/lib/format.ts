@@ -6,6 +6,14 @@ export function formatDuration(seconds: number) {
   return `${hours}h ${minutes.toString().padStart(2, "0")}m`;
 }
 
+/** Dense Timeline total with stable H:MM geometry and no hour wrapping. */
+export function formatCompactHoursMinutes(seconds: number) {
+  const safe = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  return `${hours}:${minutes.toString().padStart(2, "0")}`;
+}
+
 export function formatClockDuration(seconds: number) {
   const safe = Math.max(0, Math.floor(seconds));
   const hours = Math.floor(safe / 3600);

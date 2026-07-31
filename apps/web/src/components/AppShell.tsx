@@ -173,6 +173,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
 
   const previousDate = addDaysKey(selectedDate, -1);
   const nextDate = addDaysKey(selectedDate, 1);
+  const persistentTimer = <PersistentTimerBar workspaceMode={isTimeline} />;
   const navigatePeriod = useCallback(async (direction: "previous" | "next") => {
     if (pathname === "/timeline") {
       const nextState = shiftTimelineState(timelineState, direction);
@@ -282,20 +283,31 @@ function AppShellContent({ children }: { children: ReactNode }) {
       </aside>
 
       <div className={`swiss-main-frame${isTimeline ? " is-timeline" : ""}`}>
-        {showTimerShell ? (
-          <div className="swiss-persistent-timer-shell">
-            <PersistentTimerBar />
-            {showShellDateContext ? (
-              <DateContextRow
-                selectedDate={selectedDate}
-                onPrevious={() => navigateDate(previousDate)}
-                onNext={() => navigateDate(nextDate)}
-                onSelect={navigateDate}
-              />
+        {isTimeline ? (
+          <section className="swiss-timeline-surface" aria-label="Timeline workspace">
+            <div className="swiss-persistent-timer-shell">
+              {persistentTimer}
+            </div>
+            <main className="swiss-timeline-main">{children}</main>
+          </section>
+        ) : (
+          <>
+            {showTimerShell ? (
+              <div className="swiss-persistent-timer-shell">
+                {persistentTimer}
+                {showShellDateContext ? (
+                  <DateContextRow
+                    selectedDate={selectedDate}
+                    onPrevious={() => navigateDate(previousDate)}
+                    onNext={() => navigateDate(nextDate)}
+                    onSelect={navigateDate}
+                  />
+                ) : null}
+              </div>
             ) : null}
-          </div>
-        ) : null}
-        <main className={isTimeline ? "swiss-timeline-main" : undefined}>{children}</main>
+            <main>{children}</main>
+          </>
+        )}
       </div>
 
       {overlay === "profile" && data ? (

@@ -1351,7 +1351,7 @@ export async function updateTimeEntry(
 
   try {
     await client.query("begin");
-    const result = await client.query<{ id: string }>(
+    const result = await client.query<{ id: string; updatedAt: string | Date }>(
       `update time_entries
      set project_id = case when $2 then $3 else project_id end,
          category_id = case when $4 then $5 else category_id end,
@@ -1361,7 +1361,7 @@ export async function updateTimeEntry(
          stopped_at = case when $12 then $13 else stopped_at end,
          updated_at = now()
      where id = $1 and workspace_id = $14 and user_id = $15
-     returning id`,
+     returning id, updated_at as "updatedAt"`,
       [
         id,
         hasProjectId,
@@ -1385,7 +1385,7 @@ export async function updateTimeEntry(
       await syncTimeEntryTags(client, id, input.tagNames ?? [], session);
     }
     await client.query("commit");
-    return { id };
+    return { id, updatedAt: new Date(result.rows[0].updatedAt).toISOString() };
   } catch (error) {
     await client.query("rollback");
     throw error;

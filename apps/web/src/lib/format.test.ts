@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   dateTimeLocalInputToIso,
   durationInputValue,
+  formatCompactHoursMinutes,
   parseDurationInput
 } from "./format";
 
@@ -44,5 +45,17 @@ describe("duration form helpers", () => {
 
   it("formats duration drafts as hours and minutes", () => {
     expect(durationInputValue(75 * 60)).toBe("1:15");
+  });
+});
+
+describe("formatCompactHoursMinutes", () => {
+  it.each([
+    [0, "0:00"],
+    [59, "0:00"],
+    [60, "0:01"],
+    [3660, "1:01"],
+    [360_060, "100:01"]
+  ])("formats %i seconds as %s", (seconds, expected) => {
+    expect(formatCompactHoursMinutes(seconds)).toBe(expected);
   });
 });

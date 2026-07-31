@@ -37,5 +37,8 @@ describe("web tag editor interaction contract", () => {
     expect(source).toContain("Remove tag ${tagName}");
     expect(source).toContain("onClick={() => toggleSelectedTag(tagName)}");
     expect(source).toContain('className="inline-selected-tag"');
+    expect(source).toContain('#{tagName}');
+    expect(source).toContain("selectVisibleTags(selectedTagNames");
+    expect(source).toContain('className="inline-selected-tag-overflow"');
   });
 });
