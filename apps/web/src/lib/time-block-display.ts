@@ -1,5 +1,8 @@
 const shortBlockMinutes = 15;
 const minimumClickableBlockHeight = 18;
+const calendarBlockVisualGapPx = 1;
+const calendarBlockLaneGapPx = 1;
+const calendarBlockOuterInsetPx = 8;
 
 export const resizeDragThresholdPx = 6;
 
@@ -23,6 +26,62 @@ export type TimeBlockLane = {
   zIndex: number;
   textDensity: TimeIntervalTextDensity;
 };
+
+export function calendarBlockVisualGeometry({
+  top,
+  height,
+  continuesIntoNextDay = false
+}: {
+  top: number;
+  height: number;
+  continuesIntoNextDay?: boolean;
+}) {
+  const visualGap = continuesIntoNextDay
+    ? 0
+    : Math.min(calendarBlockVisualGapPx, Math.max(0, height - 1));
+
+  return {
+    top,
+    height: Math.max(1, height - visualGap),
+    visualGap
+  };
+}
+
+export function calendarBlockLaneInsets({
+  offsetFraction,
+  widthFraction
+}: Pick<TimeBlockLane, "offsetFraction" | "widthFraction">) {
+  const before = offsetFraction * 100;
+  const after = Math.max(0, (1 - offsetFraction - widthFraction) * 100);
+  const innerInset = calendarBlockLaneGapPx / 2;
+
+  return {
+    left: before === 0 ? calendarBlockOuterInsetPx : `calc(${before}% + ${innerInset}px)`,
+    right: after === 0 ? calendarBlockOuterInsetPx : `calc(${after}% + ${innerInset}px)`
+  };
+}
+
+export function canShowTimeBlockInlineAction({
+  density,
+  isCompleted,
+  isResizing,
+  isSelected,
+  textDensity
+}: {
+  density: TimeBlockDensity;
+  isCompleted: boolean;
+  isResizing: boolean;
+  isSelected: boolean;
+  textDensity: TimeIntervalTextDensity;
+}) {
+  return (
+    isCompleted &&
+    density.canShowInlineAction &&
+    textDensity === "full" &&
+    !isResizing &&
+    !isSelected
+  );
+}
 
 export function minimumTimeBlockHeight(pixelsPerHour: number) {
   return Math.max(minimumClickableBlockHeight, (shortBlockMinutes / 60) * pixelsPerHour);

@@ -42,11 +42,40 @@ describe("Calendar readability and restart contract", () => {
 
   it("preserves a distinct running state and compact hover action", () => {
     const calendarRunningRule = styles.match(/\.calendar-time-block\.is-running \{([^}]*)\}/)?.[1] ?? "";
-    expect(calendarRunningRule).toContain("outline:");
+    expect(calendarRunningRule).toContain("border-style: dashed");
+    expect(calendarRunningRule).not.toContain("outline:");
     expect(calendarRunningRule).not.toContain("opacity");
     expect(styles).toContain(".calendar-start-again");
-    expect(styles).toMatch(/\.calendar-start-again \{[^}]*width: 22px;[^}]*background: transparent;/s);
+    expect(styles).toMatch(/\.calendar-start-again \{[^}]*bottom: 2px;[^}]*width: 22px;[^}]*background: transparent;/s);
+    expect(styles).toMatch(/\.calendar-time-block\.is-short \.calendar-start-again \{[^}]*top: 50%;[^}]*right: 1px;/s);
     expect(styles).not.toMatch(/\.calendar-start-again \{[^}]*border-radius:/s);
     expect(styles).toMatch(/@media \(hover: none\)[\s\S]*\.calendar-start-again \{[^}]*display: none;/);
+    expect(styles).toMatch(/@media \(pointer: coarse\)[\s\S]*\.calendar-start-again \{[^}]*display: none;/);
+    expect(styles).toMatch(/@media \(hover: hover\) and \(pointer: fine\)[\s\S]*\.calendar-time-block:hover \.calendar-start-again/);
+    expect(styles).not.toContain(".calendar-time-block.is-selected .calendar-start-again");
+    expect(styles).not.toContain(".calendar-time-block:focus-within .calendar-start-again");
+  });
+
+  it("keeps one compact radius, a real hairline border, and fill-led selection", () => {
+    const blockRule = styles.match(/\.calendar-time-block \{([^}]*--calendar-block-radius:[^}]*)\}/)?.[1] ?? "";
+    const selectedRule = styles.match(/\.calendar-time-block\.is-selected \{([^}]*)\}/)?.[1] ?? "";
+
+    expect(blockRule).toContain("--calendar-block-radius: 6px");
+    expect(blockRule).toContain("border: 1px solid var(--calendar-block-border)");
+    expect(blockRule).toContain("border-radius: var(--calendar-block-radius)");
+    expect(styles).not.toMatch(/\.calendar-time-block\.is-short\s*\{[^}]*border-radius:/s);
+    expect(styles).not.toMatch(/\.calendar-time-block\.is-tiny\s*\{[^}]*border-radius:/s);
+    expect(styles).not.toMatch(/\.calendar-time-block[^{]*\{[^}]*inset 3px 0 0 var\(--calendar-block-accent\)/s);
+    expect(selectedRule).toContain("background-color: var(--calendar-block-selected-fill)");
+    expect(selectedRule).not.toContain("outline");
+    expect(styles).toMatch(/\.calendar-time-block:has\(\.calendar-entry-primary:focus-visible\) \{[^}]*outline: 2px solid var\(--focus\);/s);
+    expect(timeline).toContain('onMouseDown={(event) => event.preventDefault()}');
+  });
+
+  it("keeps semantic lane ownership while applying visual-only gaps", () => {
+    expect(timeline).toContain("calendarBlockVisualGeometry");
+    expect(timeline).toContain("semanticBlockPositionStyle");
+    expect(timeline).toContain("calendarBlockLaneInsets");
+    expect(timeline).toContain("canShowTimeBlockInlineAction");
   });
 });
