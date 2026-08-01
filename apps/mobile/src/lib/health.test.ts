@@ -144,6 +144,50 @@ describe("HealthKit mapping", () => {
     });
   });
 
+  it("keeps different Health sources as separate sessions", () => {
+    const watch = sleepSample(
+      "watch-core",
+      "asleep_core",
+      "2026-07-31T22:53:00.000Z",
+      "2026-08-01T05:51:00.000Z"
+    );
+    const phone = {
+      ...sleepSample(
+        "phone-core",
+        "asleep_core",
+        "2026-07-31T22:57:00.000Z",
+        "2026-08-01T05:30:00.000Z"
+      ),
+      sourceName: "iPhone"
+    };
+
+    expect(groupSleepSamplesIntoSessions([watch, phone])).toHaveLength(2);
+  });
+
+  it("preserves split sleep beyond the canonical waking-gap boundary", () => {
+    const first = sleepSample(
+      "first",
+      "asleep_core",
+      "2026-07-31T21:00:00.000Z",
+      "2026-08-01T00:00:00.000Z"
+    );
+    const atBoundary = sleepSample(
+      "at-boundary",
+      "asleep_rem",
+      "2026-08-01T01:30:00.000Z",
+      "2026-08-01T02:00:00.000Z"
+    );
+    const beyondBoundary = sleepSample(
+      "beyond-boundary",
+      "asleep_rem",
+      "2026-08-01T01:30:00.001Z",
+      "2026-08-01T02:00:00.000Z"
+    );
+
+    expect(groupSleepSamplesIntoSessions([first, atBoundary])).toHaveLength(1);
+    expect(groupSleepSamplesIntoSessions([first, beyondBoundary])).toHaveLength(2);
+  });
+
   it("imports sleep phases as one queued sleep session", async () => {
     healthkitMocks.queryCategorySamplesWithAnchor.mockResolvedValueOnce({
       newAnchor: "sleep-anchor-1",

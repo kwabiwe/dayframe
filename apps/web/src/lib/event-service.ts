@@ -2,8 +2,10 @@ import {
   ActivityEventInputSchema,
   classifyLocationLearningEvidence,
   DEFAULT_HEALTH_IMPORT_PREFERENCES,
+  HEALTH_SLEEP_SESSION_GAP_MS,
   HEALTH_IMPORT_PREFERENCE_OPTIONS,
   healthAutoLogMappingFor,
+  matchHealthSleepSessionWindows,
   normalizeHealthWorkoutType,
   normalizeHealthAutoLogMappings,
   normalizePaletteKey,
@@ -17,6 +19,7 @@ import {
   type LocationDisplayAddress,
   type ActivityEventType,
   type ActivityEventInput,
+  type CandidateActivity,
   type HealthAutoLogMappings,
   type HealthImportPreferenceKey,
   type HealthImportPreferences
@@ -171,11 +174,20 @@ type SleepReviewSegment = {
   stoppedMs: number;
 };
 
+type HealthSleepTimeEntry = {
+  id: string;
+  startedAt: string;
+  stoppedAt: string;
+  rawPayload: unknown;
+};
+
 const CATEGORY_PINS_MIGRATION = "supabase/migrations/202607040001_category_pins_and_project_backfill.sql";
 const MOBILE_EVENT_IDEMPOTENCY_MIGRATION =
   "supabase/migrations/202607030001_mobile_event_idempotency_and_workouts.sql";
 const HEALTH_SLEEP_SCHEMA_MIGRATION =
   "supabase/migrations/202607070001_health_sleep_segments.sql";
+const HEALTH_SLEEP_RECONCILIATION_MIGRATION =
+  "supabase/migrations/202608010001_health_sleep_session_reconciliation.sql";
 const HEALTH_RLS_MIGRATION = "supabase/migrations/202607020001_dayframe_rls.sql";
 const PLACE_DEFAULT_ACTIVITY_DESCRIPTION_MIGRATION =
   "supabase/migrations/202607070002_place_default_activity_description.sql";
@@ -233,6 +245,15 @@ function eventSyncReadinessError(error: unknown, eventType: ActivityEventType) {
       "Authenticated session workspace is missing from public.workspaces. Log out and back in, then retry queued sync.",
       "public.workspaces",
       "docs/vercel-supabase-hosting.md",
+      error
+    );
+  }
+
+  if (eventType === "health_sleep_import" && isUndefinedColumnError(error, "user_edited_at")) {
+    return missingRequiredColumnError(
+      "time_entries",
+      "user_edited_at",
+      HEALTH_SLEEP_RECONCILIATION_MIGRATION,
       error
     );
   }
@@ -378,7 +399,16 @@ function healthSchemaReadinessError(
   return undefined;
 }
 
-export async function processActivityEvent(rawInput: unknown, session: RequestSession = getDevSession()) {
+export async function processActivityEvent(
+  rawInput: unknown,
+  session: RequestSession = getDevSession()
+): Promise<{
+  eventId: string;
+  candidate: CandidateActivity;
+  timeEntryId?: string;
+  duplicate?: boolean;
+  updatedExistingTimeEntry?: boolean;
+}> {
   const input = isRecord(rawInput) ? rawInput : {};
   const parsed = ActivityEventInputSchema.parse({
     occurredAt: new Date(),
@@ -393,7 +423,11 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
 
   try {
     await client.query("begin");
-    if (candidate.action === "start_timer" || candidate.action === "stop_timer") {
+    if (
+      candidate.action === "start_timer" ||
+      candidate.action === "stop_timer" ||
+      parsed.type === "health_sleep_import"
+    ) {
       await lockUserTimerState(client, session);
     }
 
@@ -432,6 +466,24 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
         action: "record_only",
         reviewStatus: "ignored",
         reason: "This learned-place cluster was ignored, so Dayframe suppresses future save/review prompts for it."
+      };
+    }
+
+    const matchingHealthSleepEntry = parsed.type === "health_sleep_import"
+      ? await findMatchingHealthSleepTimeEntry(
+        client,
+        session,
+        parsed.rawPayload,
+        suggestedStartedAtForEvent(parsed),
+        suggestedStoppedAtForEvent(parsed)
+      )
+      : null;
+    if (matchingHealthSleepEntry) {
+      candidate = {
+        ...candidate,
+        action: "record_only",
+        reviewStatus: "confirmed",
+        reason: "This Apple Health update belongs to an existing logical Sleep session."
       };
     }
 
@@ -496,7 +548,16 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
     const eventId = eventResult.rows[0].id;
     let timeEntryId: string | undefined;
 
-    if (candidate.action === "stop_timer") {
+    if (matchingHealthSleepEntry) {
+      const updatedEntry = await updateHealthSleepTimeEntryWindow(
+        client,
+        session,
+        matchingHealthSleepEntry,
+        suggestedStartedAtForEvent(parsed),
+        suggestedStoppedAtForEvent(parsed)
+      );
+      timeEntryId = updatedEntry?.id;
+    } else if (candidate.action === "stop_timer") {
       await client.query(
         `update time_entries
          set stopped_at = $1, updated_at = now()
@@ -691,7 +752,12 @@ export async function processActivityEvent(rawInput: unknown, session: RequestSe
     }
 
     await client.query("commit");
-    return { eventId, candidate, timeEntryId };
+    return {
+      eventId,
+      candidate,
+      timeEntryId,
+      ...(matchingHealthSleepEntry ? { updatedExistingTimeEntry: true } : {})
+    };
   } catch (error) {
     await client.query("rollback");
     throw eventSyncReadinessError(error, parsed.type) ?? error;
@@ -1359,6 +1425,7 @@ export async function updateTimeEntry(
          description = case when $8 then $9 else description end,
          started_at = case when $10 then $11 else started_at end,
          stopped_at = case when $12 then $13 else stopped_at end,
+         user_edited_at = now(),
          updated_at = now()
      where id = $1 and workspace_id = $14 and user_id = $15
      returning id, updated_at as "updatedAt"`,
@@ -1643,6 +1710,18 @@ export async function resolveReviewItem(
         const existingEntry = await getTimeEntryCreatedFromEvent(client, item.eventId, session);
         if (existingEntry) {
           entryId = existingEntry.id;
+          duplicate = true;
+        }
+      }
+
+      if (!entryId && item.eventType === "health_sleep_import") {
+        const matchingEntry = await reconcileMatchingHealthSleepTimeEntry(client, session, {
+          rawPayload: item.rawPayload,
+          startedAt: window.startedAt,
+          stoppedAt: window.stoppedAt
+        });
+        if (matchingEntry) {
+          entryId = matchingEntry.id;
           duplicate = true;
         }
       }
@@ -2077,7 +2156,26 @@ export async function reprocessHealthReviewItems(
           continue;
         }
 
-        const coveredEntry = await findCoveringHealthTimeEntry(client, session, item, startedAt, stoppedAt);
+        const isGroupedHealthSleep = item.eventType === "health_sleep_import" &&
+          Array.isArray(rawPayload.samples);
+        if (isGroupedHealthSleep) {
+          const matchingEntry = await reconcileMatchingHealthSleepTimeEntry(client, session, {
+            rawPayload,
+            startedAt,
+            stoppedAt
+          });
+          if (matchingEntry) {
+            await resolveReprocessedHealthReviewItem(client, item, "accepted");
+            result.confirmedCount += 1;
+            await client.query("release savepoint reprocess_health_item");
+            continue;
+          }
+        }
+
+        const mayUseLegacySleepCoverage = !isGroupedHealthSleep;
+        const coveredEntry = mayUseLegacySleepCoverage
+          ? await findCoveringHealthTimeEntry(client, session, item, startedAt, stoppedAt)
+          : null;
         if (coveredEntry) {
           await resolveReprocessedHealthReviewItem(client, item, "accepted");
           result.confirmedCount += 1;
@@ -2164,6 +2262,7 @@ async function repairHealthCategorySleepTimeEntries(
        and coalesce(current_category.is_archived, false) = false
        and te.review_status in ('confirmed', 'accepted')
        and te.stopped_at is not null
+       and te.user_edited_at is null
        and lower(coalesce(te.description, '')) = 'sleep'
        and (
          te.source = 'health_sleep'
@@ -2338,7 +2437,7 @@ async function consolidateLegacyHealthSleepReviewItems(
     }
 
     const currentStop = Math.max(...current.map((item) => item.stoppedMs));
-    if (segment.startedMs - currentStop <= 90 * 60 * 1000) {
+    if (segment.startedMs - currentStop <= HEALTH_SLEEP_SESSION_GAP_MS) {
       current.push(segment);
     } else {
       groups.push([segment]);
@@ -2713,6 +2812,133 @@ async function hasOverlappingTimeWindow(
   stoppedAt: string | Date | null | undefined
 ) {
   return Boolean(await findOverlappingTimeEntry(client, session, startedAt, stoppedAt));
+}
+
+export async function reconcileMatchingHealthSleepTimeEntry(
+  client: pg.PoolClient,
+  session: RequestSession,
+  input: {
+    rawPayload: unknown;
+    startedAt: string;
+    stoppedAt: string;
+  }
+) {
+  await lockUserTimerState(client, session);
+  const match = await findMatchingHealthSleepTimeEntry(
+    client,
+    session,
+    input.rawPayload,
+    input.startedAt,
+    input.stoppedAt
+  );
+  if (!match) return null;
+  return updateHealthSleepTimeEntryWindow(
+    client,
+    session,
+    match,
+    input.startedAt,
+    input.stoppedAt
+  );
+}
+
+async function findMatchingHealthSleepTimeEntry(
+  client: pg.PoolClient,
+  session: RequestSession,
+  incomingRawPayload: unknown,
+  startedAt: string | Date | null | undefined,
+  stoppedAt: string | Date | null | undefined
+) {
+  if (!startedAt || !stoppedAt) return null;
+  const incomingIdentity = healthSleepImportIdentity(incomingRawPayload);
+  const result = await client.query<HealthSleepTimeEntry>(
+    `/* matching_health_sleep_session */
+     select te.id,
+            te.started_at as "startedAt",
+            te.stopped_at as "stoppedAt",
+            ae.raw_payload as "rawPayload"
+     from time_entries te
+     join activity_events ae
+       on ae.id = te.created_from_event_id
+      and ae.workspace_id = te.workspace_id
+      and ae.user_id = te.user_id
+     where te.workspace_id = $1
+       and te.user_id = $2
+       and te.source = 'health_sleep'
+       and te.review_status in ('confirmed', 'accepted')
+       and te.stopped_at is not null
+       and te.user_edited_at is null
+       and ae.event_type = 'health_sleep_import'
+       and te.started_at < $4::timestamptz
+       and te.stopped_at > $3::timestamptz
+     order by te.started_at asc, te.id asc
+     for update of te`,
+    [session.workspaceId, session.userId, startedAt, stoppedAt]
+  );
+  const matches = result.rows.filter((entry) => {
+    const existingIdentity = healthSleepImportIdentity(entry.rawPayload);
+    if (
+      existingIdentity.provider !== incomingIdentity.provider ||
+      existingIdentity.sourceName !== incomingIdentity.sourceName
+    ) {
+      return false;
+    }
+    return matchHealthSleepSessionWindows(
+      { startedAt: entry.startedAt, stoppedAt: entry.stoppedAt },
+      { startedAt, stoppedAt }
+    ).matches;
+  });
+
+  // Multiple matches indicate historical duplicates; do not choose one
+  // automatically because cleanup requires row-level provenance evidence.
+  return matches.length === 1 ? matches[0] : null;
+}
+
+async function updateHealthSleepTimeEntryWindow(
+  client: pg.PoolClient,
+  session: RequestSession,
+  entry: HealthSleepTimeEntry,
+  startedAt: string | Date | null | undefined,
+  stoppedAt: string | Date | null | undefined
+) {
+  if (!startedAt || !stoppedAt) return null;
+  const match = matchHealthSleepSessionWindows(
+    { startedAt: entry.startedAt, stoppedAt: entry.stoppedAt },
+    { startedAt, stoppedAt }
+  );
+  if (!match.matches || !match.mergedStartedAt || !match.mergedStoppedAt) return null;
+
+  const result = await client.query<{ id: string; startedAt: string; stoppedAt: string }>(
+    `update time_entries
+     set started_at = $4,
+         stopped_at = $5,
+         updated_at = case
+           when started_at is distinct from $4::timestamptz
+             or stopped_at is distinct from $5::timestamptz
+           then now()
+           else updated_at
+         end
+     where id = $1
+       and workspace_id = $2
+       and user_id = $3
+       and user_edited_at is null
+     returning id, started_at as "startedAt", stopped_at as "stoppedAt"`,
+    [entry.id, session.workspaceId, session.userId, match.mergedStartedAt, match.mergedStoppedAt]
+  );
+  return result.rows[0] ?? null;
+}
+
+function healthSleepImportIdentity(rawPayload: unknown) {
+  const payload = isRecord(rawPayload) ? rawPayload : {};
+  const samples = Array.isArray(payload.samples) ? payload.samples.filter(isRecord) : [];
+  return {
+    provider: normalizedHealthIdentityText(payload.provider) || "healthkit",
+    sourceName: normalizedHealthIdentityText(payload.sourceName) ||
+      normalizedHealthIdentityText(samples[0]?.sourceName)
+  };
+}
+
+function normalizedHealthIdentityText(value: unknown) {
+  return typeof value === "string" ? value.trim().replace(/\s+/g, " ").toLocaleLowerCase() : "";
 }
 
 async function findCoveringHealthTimeEntry(

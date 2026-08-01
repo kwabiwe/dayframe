@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   DEFAULT_HEALTH_IMPORT_PREFERENCES,
   DEFAULT_HEALTH_WORKOUT_IMPORT_PREFERENCES,
+  HEALTH_SLEEP_SESSION_GAP_MS,
   HEALTH_IMPORT_PREFERENCE_OPTIONS as SHARED_HEALTH_IMPORT_PREFERENCE_OPTIONS,
   HEALTH_WORKOUT_TYPE_OPTIONS,
   healthAutoLogMappingFor,
@@ -36,7 +37,6 @@ const HEALTHKIT_WORKOUT_PREFERENCES_KEY = "dayframe.healthkit.workoutPreferences
 const HEALTHKIT_AUTOMATIC_SYNC_KEY = "dayframe.healthkit.automaticSync.v1";
 const HEALTHKIT_BACKGROUND_SYNC_TYPES = [HEALTHKIT_SLEEP_TYPE, HEALTHKIT_WORKOUT_TYPE] as const;
 const HEALTHKIT_UPDATE_FREQUENCY_IMMEDIATE = 1;
-const SLEEP_SESSION_GAP_MS = 90 * 60 * 1000;
 const HEALTH_REPROCESS_THROTTLE_MS = 5 * 60 * 1000;
 const HEALTH_REPROCESS_BACKOFF_MS = 10 * 60 * 1000;
 const HEALTH_REPROCESS_BATCH_SIZE = 25;
@@ -677,24 +677,37 @@ export function healthKitWorkoutEvent(sample: DayframeWorkoutSample, mapping: He
 export function groupSleepSamplesIntoSessions(samples: DayframeSleepSample[]): DayframeSleepSession[] {
   const asleepSamples = samples
     .filter((sample) => isAsleepStage(sample.stage))
-    .filter((sample) => validDate(sample.startedAt) && validDate(sample.stoppedAt))
-    .sort((left, right) => new Date(left.startedAt).getTime() - new Date(right.startedAt).getTime());
+    .filter((sample) => validDate(sample.startedAt) && validDate(sample.stoppedAt));
 
   const sessions: DayframeSleepSample[][] = [];
+  const samplesBySource = new Map<string, DayframeSleepSample[]>();
   for (const sample of asleepSamples) {
-    const current = sessions.at(-1);
-    if (!current) {
-      sessions.push([sample]);
-      continue;
-    }
+    const sourceKey = sleepSampleSourceKey(sample);
+    const sourceSamples = samplesBySource.get(sourceKey) ?? [];
+    sourceSamples.push(sample);
+    samplesBySource.set(sourceKey, sourceSamples);
+  }
+  for (const sourceSamples of samplesBySource.values()) {
+    sourceSamples.sort(
+      (left, right) => new Date(left.startedAt).getTime() - new Date(right.startedAt).getTime()
+    );
+    const sourceSessions: DayframeSleepSample[][] = [];
+    for (const sample of sourceSamples) {
+      const current = sourceSessions.at(-1);
+      if (!current) {
+        sourceSessions.push([sample]);
+        continue;
+      }
 
-    const currentStop = Math.max(...current.map((item) => new Date(item.stoppedAt).getTime()));
-    const nextStart = new Date(sample.startedAt).getTime();
-    if (nextStart - currentStop <= SLEEP_SESSION_GAP_MS) {
-      current.push(sample);
-    } else {
-      sessions.push([sample]);
+      const currentStop = Math.max(...current.map((item) => new Date(item.stoppedAt).getTime()));
+      const nextStart = new Date(sample.startedAt).getTime();
+      if (nextStart - currentStop <= HEALTH_SLEEP_SESSION_GAP_MS) {
+        current.push(sample);
+      } else {
+        sourceSessions.push([sample]);
+      }
     }
+    sessions.push(...sourceSessions);
   }
 
   return sessions.map((sessionSamples) => {
@@ -709,7 +722,7 @@ export function groupSleepSamplesIntoSessions(samples: DayframeSleepSample[]): D
       sourceName,
       samples: sessionSamples
     };
-  });
+  }).sort((left, right) => new Date(left.startedAt).getTime() - new Date(right.startedAt).getTime());
 }
 
 export function healthKitSleepSessionEvent(session: DayframeSleepSession, mapping: HealthAutoLogMapping = {}) {
@@ -920,6 +933,10 @@ function mergeHealthReprocessResults(
 
 function isAsleepStage(stage: SleepStage) {
   return stage === "asleep_unspecified" || stage === "asleep_core" || stage === "asleep_deep" || stage === "asleep_rem";
+}
+
+function sleepSampleSourceKey(sample: DayframeSleepSample) {
+  return sample.sourceName?.trim().toLocaleLowerCase() || "unknown";
 }
 
 function validDate(value: string) {

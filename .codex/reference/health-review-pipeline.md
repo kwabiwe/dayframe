@@ -36,7 +36,7 @@ Current state as of internal TestFlight `0.1.0 (13)`:
 - PR #36 added a compact Apple Health settings surface for sleep/workout category and description defaults.
 - New HealthKit imports and Health Review reprocess both apply the Health mapping defaults.
 - Sleep should route to a user-facing `Sleep` category by default; workouts can remain under `Health` unless the user changes the mapping.
-- Duplicate or overlapping Sleep rows are still a `Next` investigation item. Do not merge/delete them without inspecting production row metadata and preserving auditability.
+- New grouped Sleep imports reconcile same-source revisions into one logical session. Historical duplicate rows still require row-level production evidence before any merge/delete cleanup.
 
 ## Health Debug Export
 
@@ -75,6 +75,10 @@ Sleep:
 
 - Enabled by default.
 - Plausible sleep should become a single Sleep entry/session, not REM/Core/Deep fragments.
+- Group sleep samples independently per normalized Health source. Samples whose waking gap is at most 90 minutes belong to one session; a gap greater than 90 minutes preserves split sleep.
+- A grouped Health sleep import is the same logical session as one existing untouched Health-derived Sleep entry only when the provider/source identity matches and at least 80% of the shorter time window overlaps. The 80% rule is deliberately stricter than the one-minute UI/report overlap rule: contained or extended Health revisions reconcile, while partial collisions remain ambiguous.
+- Reconciliation updates the existing entry in place to the union of the valid windows. It must preserve the entry id, category, description, tags, place, original event provenance, and all other user metadata. Repeated and out-of-order imports must neither shrink the most complete window nor create another entry.
+- Never reconcile automatically into a manual entry, an explicitly edited imported entry, a different Health source, a weak overlap, or multiple matching historical entries. Leave those cases in Review.
 - Confirmed sleep should use a user-facing `Sleep` category, creating it when needed. Workouts can keep using the broader `Health` category unless a user changes defaults later.
 - User mapping defaults can override category and description for supported sleep/workout imports and for Health Review reprocess.
 - Implausible, too short, too long, overlapping, or malformed sleep should stay in Review with a reason.
@@ -88,7 +92,8 @@ Manual Confirm is a user decision. It should be more permissive than auto-log an
 An overlap may keep an automatic Health signal in Review, but it must not block
 the user's later explicit Confirm or Edit-and-confirm. The confirmed activity
 counts in full towards Total logged while concurrent clock time counts once
-towards Time covered. Health sample/event idempotency remains independent.
+towards Time covered. Health sample/event idempotency remains independent from
+logical sleep-session reconciliation.
 
 Expected Confirm behaviour:
 
@@ -139,7 +144,7 @@ If a reason is not visible in UI, it should at least be present in diagnostics o
 - Already-created Sleep/Health entries can cover sibling Health review rows; those covered rows should be accepted, not left open as overlaps.
 - High-confidence walks stay open because overlap detection is correct but invisible.
 - Health mapping defaults are absent, stale, or not applied consistently between new imports and reprocess.
-- Duplicate or overlapping Sleep entries may come from HealthKit overlap, legacy rows, or reprocess behavior; inspect row metadata before adding dedupe.
+- Duplicate or overlapping Sleep entries may come from HealthKit revisions, legacy rows, or old Review confirmations. Verify source identity, event provenance, `user_edited_at`, and all matching rows before cleanup; multiple matches must remain ambiguous.
 - Accepted/ignored review items leak back into Review due to query or mobile filtering.
 - Reprocess keeps reselecting the same open-but-explained Review items and never reaches later eligible Health rows.
 - Incomplete old Health review items show misleading multi-day durations because the mobile UI treats missing stop times as "now".

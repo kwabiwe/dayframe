@@ -983,6 +983,158 @@ describe("health event persistence", () => {
     ).toHaveLength(3);
   });
 
+  it("updates an incomplete Health sleep entry when the same-source session is extended", async () => {
+    const client = healthSleepReconciliationClient({
+      existingStartedAt: "2026-07-31T21:53:00.000Z",
+      existingStoppedAt: "2026-08-01T03:24:00.000Z"
+    });
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await processActivityEvent(
+      healthSleepEvent({
+        autoConfirm: true,
+        externalSampleId: "sleep-session-extended",
+        startedAt: "2026-07-31T21:53:00.000Z",
+        stoppedAt: "2026-08-01T04:51:00.000Z"
+      }),
+      session
+    );
+
+    expect(result).toMatchObject({
+      eventId: "event-update",
+      timeEntryId: "entry-sleep-existing",
+      updatedExistingTimeEntry: true
+    });
+    const update = client.query.mock.calls.find(([statement]) =>
+      String(statement).startsWith("update time_entries")
+    );
+    expect(update?.[1]).toEqual([
+      "entry-sleep-existing",
+      session.workspaceId,
+      session.userId,
+      "2026-07-31T21:53:00.000Z",
+      "2026-08-01T04:51:00.000Z"
+    ]);
+    expect(client.query.mock.calls.some(([statement]) =>
+      String(statement).includes("insert into time_entries")
+    )).toBe(false);
+    expect(client.query.mock.calls.some(([statement]) =>
+      String(statement).includes("insert into review_items")
+    )).toBe(false);
+    const statements = client.query.mock.calls.map(([statement]) => String(statement));
+    const lockIndex = statements.findIndex((statement) => statement.includes("pg_advisory_xact_lock"));
+    const matchIndex = statements.findIndex((statement) => statement.includes("matching_health_sleep_session"));
+    const eventIndex = statements.findIndex((statement) => statement.includes("insert into activity_events"));
+    const updateIndex = statements.findIndex((statement) => statement.startsWith("update time_entries"));
+    expect(lockIndex).toBeGreaterThan(-1);
+    expect(matchIndex).toBeGreaterThan(lockIndex);
+    expect(eventIndex).toBeGreaterThan(matchIndex);
+    expect(updateIndex).toBeGreaterThan(eventIndex);
+  });
+
+  it("does not shrink a complete Health sleep entry when an incomplete version arrives later", async () => {
+    const client = healthSleepReconciliationClient({
+      existingStartedAt: "2026-07-31T21:53:00.000Z",
+      existingStoppedAt: "2026-08-01T04:51:00.000Z"
+    });
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await processActivityEvent(
+      healthSleepEvent({
+        autoConfirm: true,
+        externalSampleId: "sleep-session-incomplete",
+        startedAt: "2026-07-31T21:53:00.000Z",
+        stoppedAt: "2026-08-01T03:24:00.000Z"
+      }),
+      session
+    );
+
+    const update = client.query.mock.calls.find(([statement]) =>
+      String(statement).startsWith("update time_entries")
+    );
+    expect(update?.[1]).toEqual(expect.arrayContaining([
+      "2026-07-31T21:53:00.000Z",
+      "2026-08-01T04:51:00.000Z"
+    ]));
+    expect(client.query.mock.calls.some(([statement]) =>
+      String(statement).includes("insert into time_entries")
+    )).toBe(false);
+  });
+
+  it("leaves an overlapping manually created Sleep entry in Review", async () => {
+    const client = healthSleepAmbiguityClient({ source: "manual_app" });
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await processActivityEvent(
+      healthSleepEvent({ autoConfirm: true, externalSampleId: "manual-conflict" }),
+      session
+    );
+
+    expect(client.query.mock.calls.some(([statement]) =>
+      String(statement).includes("insert into review_items")
+    )).toBe(true);
+    expect(client.query.mock.calls.some(([statement]) =>
+      String(statement).includes("insert into time_entries")
+    )).toBe(false);
+  });
+
+  it("leaves a manually edited imported Sleep entry protected in Review", async () => {
+    const client = healthSleepAmbiguityClient({ source: "health_sleep" });
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await processActivityEvent(
+      healthSleepEvent({ autoConfirm: true, externalSampleId: "edited-conflict" }),
+      session
+    );
+
+    const matchingLookup = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("matching_health_sleep_session")
+    );
+    expect(String(matchingLookup?.[0])).toContain("te.user_edited_at is null");
+    expect(client.query.mock.calls.some(([statement]) =>
+      String(statement).includes("insert into review_items")
+    )).toBe(true);
+  });
+
+  it("keeps cross-source and weak same-source overlaps ambiguous", async () => {
+    for (const scenario of [
+      {
+        name: "cross-source",
+        existingSourceName: "iPhone",
+        incoming: healthSleepEvent({ autoConfirm: true, externalSampleId: "cross-source" })
+      },
+      {
+        name: "weak-overlap",
+        existingSourceName: "Apple Watch",
+        incoming: healthSleepEvent({
+          autoConfirm: true,
+          externalSampleId: "weak-overlap",
+          startedAt: "2026-06-07T05:27:00.000Z",
+          stoppedAt: "2026-06-07T08:27:00.000Z"
+        })
+      }
+    ]) {
+      const client = healthSleepAmbiguityClient({
+        source: "health_sleep",
+        includeHealthMatchCandidate: true,
+        existingSourceName: scenario.existingSourceName
+      });
+      mocks.pool.connect.mockResolvedValueOnce(client);
+
+      await processActivityEvent(scenario.incoming, session);
+
+      expect(
+        client.query.mock.calls.some(([statement]) =>
+          String(statement).includes("insert into review_items")
+        ),
+        scenario.name
+      ).toBe(true);
+      expect(client.query.mock.calls.some(([statement]) =>
+        String(statement).startsWith("update time_entries")
+      )).toBe(false);
+    }
+  });
+
   it("does not duplicate auto-confirmed Health sleep entries on clientEventId retry", async () => {
     const client = {
       query: vi.fn(async (statement: string, values?: unknown[]) => {
@@ -2301,6 +2453,73 @@ describe("review item resolution", () => {
     expect(client.query).toHaveBeenCalledWith("commit");
   });
 
+  it("accepts an old extended-sleep Review card by updating the stable Health entry", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        if (statement.includes("from review_items ri")) {
+          return {
+            rows: [{
+              id: "review-extended",
+              eventId: "event-extended",
+              title: "Sleep",
+              suggestedProjectId: null,
+              suggestedCategoryId: sleepCategoryId(),
+              suggestedPlaceId: null,
+              suggestedStartedAt: "2026-07-31T21:53:00.000Z",
+              suggestedStoppedAt: "2026-08-01T04:51:00.000Z",
+              confidence: "high",
+              status: "open",
+              eventSource: "health_sleep",
+              eventType: "health_sleep_import",
+              rawPayload: { provider: "healthkit", sourceName: "Apple Watch" }
+            }]
+          };
+        }
+        if (statement.includes("created_from_event_id = $3")) return { rows: [] };
+        if (statement.includes("matching_health_sleep_session")) {
+          return {
+            rows: [{
+              id: "entry-sleep-existing",
+              startedAt: "2026-07-31T21:53:00.000Z",
+              stoppedAt: "2026-08-01T03:24:00.000Z",
+              rawPayload: { provider: "healthkit", sourceName: "Apple Watch" }
+            }]
+          };
+        }
+        if (statement.startsWith("update time_entries")) {
+          return {
+            rows: [{
+              id: "entry-sleep-existing",
+              startedAt: values?.[3],
+              stoppedAt: values?.[4]
+            }]
+          };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(resolveReviewItem("review-extended", "accept", session)).resolves.toMatchObject({
+      entryId: "entry-sleep-existing",
+      duplicate: true,
+      status: "accepted"
+    });
+    expect(client.query.mock.calls.some(([statement]) =>
+      String(statement).includes("insert into time_entries")
+    )).toBe(false);
+    expect(client.query.mock.calls.find(([statement]) =>
+      String(statement).startsWith("update time_entries")
+    )?.[1]).toEqual([
+      "entry-sleep-existing",
+      session.workspaceId,
+      session.userId,
+      "2026-07-31T21:53:00.000Z",
+      "2026-08-01T04:51:00.000Z"
+    ]);
+  });
+
   it("accepts commute reviews as category-only entries without descriptions", async () => {
     const client = {
       query: vi.fn(async (statement: string, values?: unknown[]) => {
@@ -2690,6 +2909,7 @@ describe("time entry tag transactions", () => {
       session.workspaceId,
       session.userId
     ]));
+    expect(String(updateCall?.[0])).toContain("user_edited_at = now()");
     expect(client.query.mock.calls.filter(([statement]) => String(statement).includes("insert into tags"))).toHaveLength(2);
     expect(client.query.mock.calls.some(([statement]) => String(statement).includes("delete from time_entry_tags"))).toBe(true);
     expect(client.query.mock.calls.filter(([statement]) => String(statement).includes("insert into time_entry_tags"))).toHaveLength(2);
@@ -2847,6 +3067,85 @@ function healthSleepReviewRow(overrides: {
   };
 }
 
+function healthSleepReconciliationClient(input: {
+  existingStartedAt: string;
+  existingStoppedAt: string;
+}) {
+  return {
+    query: vi.fn(async (statement: string, values?: unknown[]) => {
+      if (statement.includes("matching_health_sleep_session")) {
+        return {
+          rows: [{
+            id: "entry-sleep-existing",
+            startedAt: input.existingStartedAt,
+            stoppedAt: input.existingStoppedAt,
+            rawPayload: { provider: "healthkit", sourceName: "Apple Watch" }
+          }]
+        };
+      }
+      if (statement.includes("insert into activity_events")) {
+        return { rows: [{ id: "event-update" }] };
+      }
+      if (statement.startsWith("update time_entries")) {
+        return {
+          rows: [{
+            id: "entry-sleep-existing",
+            startedAt: values?.[3],
+            stoppedAt: values?.[4]
+          }]
+        };
+      }
+      return { rows: [] };
+    }),
+    release: vi.fn()
+  };
+}
+
+function healthSleepAmbiguityClient(input: {
+  source: string;
+  includeHealthMatchCandidate?: boolean;
+  existingSourceName?: string;
+}) {
+  return {
+    query: vi.fn(async (statement: string) => {
+      if (statement.includes("matching_health_sleep_session")) {
+        return {
+          rows: input.includeHealthMatchCandidate
+            ? [{
+              id: "entry-overlap",
+              startedAt: "2026-06-06T23:55:00.000Z",
+              stoppedAt: "2026-06-07T06:27:00.000Z",
+              rawPayload: {
+                provider: "healthkit",
+                sourceName: input.existingSourceName ?? "Apple Watch"
+              }
+            }]
+            : []
+        };
+      }
+      if (statement.includes("insert into activity_events")) {
+        return { rows: [{ id: "event-ambiguous" }] };
+      }
+      if (statement.includes("from time_entries te")) {
+        return {
+          rows: [{
+            id: "entry-overlap",
+            description: "Sleep",
+            source: input.source,
+            reviewStatus: "confirmed",
+            startedAt: "2026-06-06T23:55:00.000Z",
+            stoppedAt: "2026-06-07T06:27:00.000Z",
+            categoryName: "Sleep",
+            stoppedAtIsNull: false
+          }]
+        };
+      }
+      return { rows: [] };
+    }),
+    release: vi.fn()
+  };
+}
+
 function healthClientWithFailure(error: Error & { code?: string }) {
   return {
     query: vi.fn(async (statement: string, values?: unknown[]) => {
@@ -2861,14 +3160,20 @@ function healthClientWithFailure(error: Error & { code?: string }) {
 function healthSleepEvent(overrides: {
   autoConfirm?: boolean;
   durationSeconds?: number;
+  externalSampleId?: string;
+  sourceName?: string;
+  startedAt?: string;
+  stoppedAt?: string;
 } = {}) {
+  const startedAt = overrides.startedAt ?? "2026-06-06T23:55:00.000Z";
+  const stoppedAt = overrides.stoppedAt ?? "2026-06-07T06:27:00.000Z";
   const rawPayload: Record<string, unknown> = {
     provider: "healthkit",
-    externalSampleId: "sleep-session-1",
+    externalSampleId: overrides.externalSampleId ?? "sleep-session-1",
     sleepStage: "asleep_unspecified",
-    startedAt: "2026-06-06T23:55:00.000Z",
-    stoppedAt: "2026-06-07T06:27:00.000Z",
-    sourceName: "Apple Watch",
+    startedAt,
+    stoppedAt,
+    sourceName: overrides.sourceName ?? "Apple Watch",
     samples: [
       {
         externalSampleId: "sleep-core-1",
@@ -2902,7 +3207,7 @@ function healthSleepEvent(overrides: {
   return {
     source: "health_sleep",
     type: "health_sleep_import",
-    occurredAt: new Date("2026-06-06T23:55:00.000Z"),
+    occurredAt: new Date(startedAt),
     description: "Sleep",
     rawPayload
   };

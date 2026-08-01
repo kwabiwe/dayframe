@@ -319,6 +319,65 @@ export const SleepStageSchema = z.enum([
   "awake"
 ]);
 
+/**
+ * Sleep-stage samples separated by more than this are separate sleep periods.
+ * This is also the canonical split-sleep boundary used by mobile grouping and
+ * legacy server reconciliation.
+ */
+export const HEALTH_SLEEP_SESSION_GAP_MS = 90 * 60 * 1000;
+
+/**
+ * Logical-session reconciliation is intentionally stricter than Dayframe's
+ * one-minute display-overlap rule. Requiring 80% of the shorter sleep window
+ * to overlap catches contained/extended Health revisions while leaving weak
+ * or partial collisions for Review.
+ */
+export const HEALTH_SLEEP_SESSION_MINIMUM_OVERLAP_RATIO = 0.8;
+
+export type HealthSleepSessionWindow = {
+  startedAt: Date | string | number;
+  stoppedAt: Date | string | number;
+};
+
+export function matchHealthSleepSessionWindows(
+  left: HealthSleepSessionWindow,
+  right: HealthSleepSessionWindow
+) {
+  const leftStartMs = new Date(left.startedAt).getTime();
+  const leftStopMs = new Date(left.stoppedAt).getTime();
+  const rightStartMs = new Date(right.startedAt).getTime();
+  const rightStopMs = new Date(right.stoppedAt).getTime();
+  const valid = [leftStartMs, leftStopMs, rightStartMs, rightStopMs].every(Number.isFinite) &&
+    leftStopMs > leftStartMs &&
+    rightStopMs > rightStartMs;
+
+  if (!valid) {
+    return {
+      matches: false,
+      overlapRatio: 0,
+      mergedStartedAt: null,
+      mergedStoppedAt: null
+    };
+  }
+
+  const overlapMs = Math.max(
+    0,
+    Math.min(leftStopMs, rightStopMs) - Math.max(leftStartMs, rightStartMs)
+  );
+  const shorterDurationMs = Math.min(
+    leftStopMs - leftStartMs,
+    rightStopMs - rightStartMs
+  );
+  const overlapRatio = shorterDurationMs > 0 ? overlapMs / shorterDurationMs : 0;
+
+  return {
+    matches: overlapRatio >= HEALTH_SLEEP_SESSION_MINIMUM_OVERLAP_RATIO,
+    overlapRatio,
+    mergedStartedAt: new Date(Math.min(leftStartMs, rightStartMs)).toISOString(),
+    mergedStoppedAt: new Date(Math.max(leftStopMs, rightStopMs)).toISOString()
+  };
+}
+
 export const ActivityEventTypeSchema = z.enum([
   "timer_start",
   "timer_stop",
