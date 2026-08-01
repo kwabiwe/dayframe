@@ -22,7 +22,8 @@ the compact responsive Timeline control language.
   stacking context at z-index 25. Sticky Calendar headers use z-index 40/42,
   so they could paint over the panel regardless of its child z-index.
 - The Undo bean declared `min-height: 56px`; its phone override also added 8 px
-  vertical padding. Both contradicted the shared 44 px web control rhythm.
+  vertical padding. Both contradicted the shared responsive web control-height
+  contract.
 
 ## Fix
 
@@ -61,7 +62,14 @@ the compact responsive Timeline control language.
 - All 1,014 automated tests passed: 313 mobile, 565 web, and 136 shared.
 - The optimized Next.js production build, brand-asset contract, and diff checks
   passed.
-- Vercel Preview browser checks remain required in Timeline Calendar, List, and
-  Timesheet at desktop and phone widths, including Quick Action replacement,
-  Suggestions layering, Undo/expiry, keyboard focus, Light/Dark, Reduced
-  Motion, and console/runtime errors.
+- The updated Vercel Preview deployed successfully. Browser validation was
+  attempted through the authenticated Preview, but the Preview Dayframe login
+  failed with `Account provisioning failed. Confirm the Supabase database
+  schema is installed.` KB chose to skip this Preview-only matrix rather than
+  troubleshoot the unprovisioned Preview environment. No manual browser item
+  was marked passed.
+- Consequently, Quick Action persistence after refresh, Suggestions layering
+  in Calendar/List/Timesheet, individual/group delete and Undo/expiry, long
+  notices, Light/Dark, keyboard focus, Reduced Motion, desktop/phone widths,
+  clipping, and console/runtime errors remain unverified in a rendered hosted
+  browser. These are review risks, not automated-test failures.
