@@ -7,8 +7,13 @@ import {
   applyOptimisticTimerStop,
   createTimerMutationGate,
   entryContinuationDecision,
+  quickActionTimerDraft,
+  runTimerStartMutation,
+  timerDraftForEntry,
   timerDraftVersion,
-  timerStartErrorMessage
+  timerStartErrorMessage,
+  type TimerDraft,
+  type TimerStartRequestPayload
 } from "./timer-runtime";
 
 describe("shell timer runtime", () => {
@@ -84,6 +89,159 @@ describe("shell timer runtime", () => {
     expect(decision.ok && Object.keys(decision.draft)).not.toContain("placeId");
     expect(decision.ok && Object.keys(decision.draft)).not.toContain("projectId");
     expect(decision.ok && Object.keys(decision.draft)).not.toContain("clientName");
+  });
+
+  it("starts a Quick Action as a clean category-only task", () => {
+    expect(quickActionTimerDraft("chores")).toEqual({
+      categoryId: "chores",
+      description: "",
+      tagNames: []
+    });
+    expect(quickActionTimerDraft(null)).toEqual({
+      categoryId: "",
+      description: "",
+      tagNames: []
+    });
+  });
+
+  it("replaces an active timer through the Quick Action mutation without rewriting its metadata", async () => {
+    const previous = entry({
+      id: "active-work",
+      categoryId: "work",
+      categoryName: "Work",
+      description: "BAU",
+      tagNames: ["Cubic"],
+      tags: [{ id: "tag-cubic", name: "Cubic", normalizedName: "cubic" }],
+      placeId: "place-office",
+      placeName: "Office",
+      projectId: "legacy-project",
+      projectName: "Legacy project",
+      projectColor: "purple",
+      clientName: "Legacy client"
+    });
+    const harness = timerStartHarness(bootstrapData(previous));
+
+    await expect(harness.run(quickActionTimerDraft("chores"))).resolves.toEqual({ ok: true });
+
+    const state = harness.state();
+    const stoppedPrevious = state.data.entries.find((item) => item.id === previous.id);
+    expect(stoppedPrevious).toEqual(expect.objectContaining({
+      categoryId: "work",
+      description: "BAU",
+      tagNames: ["Cubic"],
+      placeId: "place-office",
+      projectId: "legacy-project",
+      clientName: "Legacy client"
+    }));
+    expect(stoppedPrevious?.stoppedAt).not.toBeNull();
+    expect(state.data.activeEntry).toEqual(expect.objectContaining({
+      categoryId: "chores",
+      description: null,
+      tagNames: [],
+      placeId: null,
+      projectId: null,
+      clientName: null
+    }));
+    expect(state.data.entries.filter((item) => item.stoppedAt === null)).toHaveLength(1);
+    expect(state.requests.map(serializedRequest)).toEqual([{
+      mode: "start",
+      categoryId: "chores",
+      tagNames: []
+    }]);
+  });
+
+  it("abandons a dirty idle draft when a Quick Action starts", async () => {
+    const harness = timerStartHarness(
+      bootstrapData(null),
+      { categoryId: "work", description: "Unstarted BAU", tagNames: ["Cubic"] }
+    );
+
+    await harness.run(quickActionTimerDraft("chores"));
+
+    expect(harness.state().draft).toEqual({
+      categoryId: "chores",
+      description: "",
+      tagNames: []
+    });
+    expect(harness.state().data.activeEntry).toEqual(expect.objectContaining({
+      categoryId: "chores",
+      description: null,
+      tagNames: []
+    }));
+    expect(harness.state().requests.map(serializedRequest)).toEqual([{
+      mode: "start",
+      categoryId: "chores",
+      tagNames: []
+    }]);
+  });
+
+  it("admits only the first of rapid same and different Quick Actions", async () => {
+    let releaseRequest: (() => void) | undefined;
+    const requestPending = new Promise<void>((resolve) => {
+      releaseRequest = resolve;
+    });
+    const previous = entry({
+      id: "active-work",
+      categoryId: "work",
+      categoryName: "Work",
+      description: "BAU",
+      tagNames: ["Cubic"],
+      startedAt: "2026-07-22T08:00:00.000Z"
+    });
+    const harness = timerStartHarness(bootstrapData(previous), undefined, () => requestPending);
+
+    const first = harness.run(quickActionTimerDraft("chores"));
+    const repeated = harness.run(quickActionTimerDraft("chores"));
+    const different = harness.run(quickActionTimerDraft("focus"));
+
+    await expect(repeated).resolves.toEqual({ ok: false, error: "A timer update is already in progress." });
+    await expect(different).resolves.toEqual({ ok: false, error: "A timer update is already in progress." });
+    expect(harness.state().requests).toHaveLength(1);
+    expect(harness.state().drafts).toEqual([{
+      categoryId: "chores",
+      description: "",
+      tagNames: []
+    }]);
+
+    releaseRequest?.();
+    await expect(first).resolves.toEqual({ ok: true });
+    const state = harness.state();
+    expect(state.data.entries.filter((item) => item.stoppedAt === null)).toHaveLength(1);
+    expect(state.data.entries.filter((item) => item.durationSeconds === 0 && item.stoppedAt !== null)).toHaveLength(0);
+    expect(state.requests).toHaveLength(1);
+  });
+
+  it("rolls a failed Quick Action back to the complete previous timer and draft", async () => {
+    const previous = entry({
+      id: "active-work",
+      categoryId: "work",
+      categoryName: "Work",
+      description: "BAU",
+      tagNames: ["Cubic"],
+      tags: [{ id: "tag-cubic", name: "Cubic", normalizedName: "cubic" }],
+      placeId: "place-office",
+      placeName: "Office",
+      projectId: "legacy-project",
+      projectName: "Legacy project",
+      clientName: "Legacy client"
+    });
+    const harness = timerStartHarness(
+      bootstrapData(previous),
+      undefined,
+      async () => { throw new Error("Unable to start Chores"); }
+    );
+
+    await expect(harness.run(quickActionTimerDraft("chores"))).resolves.toEqual({
+      ok: false,
+      error: "Unable to start Chores"
+    });
+
+    const state = harness.state();
+    expect(state.data.activeEntry).toEqual(previous);
+    expect(state.data.entries).toEqual([previous]);
+    expect(state.draft).toEqual(timerDraftForEntry(previous));
+    expect(state.error).toBe("Unable to start Chores");
+    expect(state.busy).toBe(false);
   });
 
   it("allows an active timer replacement but refuses a meaningless blank entry", () => {
@@ -167,8 +325,15 @@ function bootstrapData(activeEntry: TimeEntryRow | null) {
   const entries = activeEntry ? [activeEntry] : [];
   return {
     activeEntry,
-    categories: [{ id: "focus", name: "Focus", color: "coral", isPinned: true }],
-    tags: [{ id: "tag-1", name: "Ship", normalizedName: "ship" }],
+    categories: [
+      { id: "focus", name: "Focus", color: "coral", isPinned: true },
+      { id: "work", name: "Work", color: "blue", isPinned: true },
+      { id: "chores", name: "Chores", color: "orange", isPinned: true }
+    ],
+    tags: [
+      { id: "tag-1", name: "Ship", normalizedName: "ship" },
+      { id: "tag-cubic", name: "Cubic", normalizedName: "cubic" }
+    ],
     entries,
     historyEntries: entries,
     dayEntries: entries,
@@ -181,6 +346,51 @@ function bootstrapData(activeEntry: TimeEntryRow | null) {
       weekEnd: "2026-07-27T00:00:00.000Z"
     }
   } as unknown as BootstrapData;
+}
+
+function timerStartHarness(
+  initialData: BootstrapData,
+  initialDraft: TimerDraft = timerDraftForEntry(initialData.activeEntry),
+  send: (payload: TimerStartRequestPayload) => Promise<void> = async () => undefined
+) {
+  const gate = createTimerMutationGate();
+  let data = initialData;
+  let draft = initialDraft;
+  let busy = false;
+  let error: string | null = null;
+  const requests: TimerStartRequestPayload[] = [];
+  const drafts: TimerDraft[] = [];
+  let optimisticId = 0;
+
+  return {
+    run(input: Partial<TimerDraft>) {
+      return runTimerStartMutation({
+        gate,
+        snapshot: data,
+        currentDraft: draft,
+        input,
+        now: () => "2026-07-22T10:00:00.000Z",
+        createOptimisticId: () => `optimistic-${++optimisticId}`,
+        commit: (nextData) => { data = nextData; },
+        setDraft: (nextDraft) => {
+          draft = nextDraft;
+          drafts.push(nextDraft);
+        },
+        setBusy: (nextBusy) => { busy = nextBusy; },
+        setError: (nextError) => { error = nextError; },
+        send: async (payload) => {
+          requests.push(payload);
+          await send(payload);
+        },
+        refresh: async () => undefined
+      });
+    },
+    state: () => ({ data, draft, drafts, requests, busy, error })
+  };
+}
+
+function serializedRequest(payload: TimerStartRequestPayload) {
+  return JSON.parse(JSON.stringify(payload)) as Record<string, unknown>;
 }
 
 function entry(overrides: Partial<TimeEntryRow> = {}) {

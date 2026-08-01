@@ -11,6 +11,15 @@ export type TimerDraftInput = Partial<TimerDraft>;
 
 export type TimerMutationGate = ReturnType<typeof createTimerMutationGate>;
 
+export type TimerMutationOutcome = { ok: true } | { ok: false; error: string };
+
+export type TimerStartRequestPayload = {
+  mode: "start";
+  categoryId?: string;
+  description?: string;
+  tagNames: string[];
+};
+
 export type EntryContinuationDecision =
   | { ok: true; draft: TimerDraft }
   | { ok: false; error: string };
@@ -39,6 +48,89 @@ export function timerDraftForEntry(entry: TimeEntryRow | null | undefined): Time
     categoryId: entry?.categoryId ?? "",
     description: entry?.description ?? "",
     tagNames: entry?.tagNames ?? []
+  };
+}
+
+export function quickActionTimerDraft(categoryId: string | null | undefined): TimerDraft {
+  return {
+    categoryId: categoryId ?? "",
+    description: "",
+    tagNames: []
+  };
+}
+
+export function timerStartRequestPayload(draft: TimerDraft): TimerStartRequestPayload {
+  return {
+    mode: "start",
+    categoryId: draft.categoryId || undefined,
+    description: draft.description.trim() || undefined,
+    tagNames: draft.tagNames
+  };
+}
+
+export async function runTimerStartMutation({
+  gate,
+  snapshot,
+  currentDraft,
+  input,
+  now,
+  createOptimisticId,
+  onAccepted,
+  commit,
+  setDraft,
+  setBusy,
+  setError,
+  send,
+  refresh
+}: {
+  gate: TimerMutationGate;
+  snapshot: BootstrapData;
+  currentDraft: TimerDraft;
+  input: TimerDraftInput;
+  now: () => string;
+  createOptimisticId: (startedAt: string) => string;
+  onAccepted?: () => void;
+  commit: (data: BootstrapData) => void;
+  setDraft: (draft: TimerDraft) => void;
+  setBusy: (busy: boolean) => void;
+  setError: (error: string | null) => void;
+  send: (payload: TimerStartRequestPayload) => Promise<void>;
+  refresh: () => Promise<void>;
+}): Promise<TimerMutationOutcome> {
+  const result = await gate.run(async () => {
+    const draft = mergeTimerDraft(currentDraft, input);
+    const startedAt = now();
+    onAccepted?.();
+    setBusy(true);
+    setError(null);
+    commit(applyOptimisticTimerStart(snapshot, draft, startedAt, createOptimisticId(startedAt)));
+    setDraft(draft);
+
+    try {
+      await send(timerStartRequestPayload(draft));
+      await refresh();
+      return { ok: true } as const;
+    } catch (error) {
+      commit(snapshot);
+      setDraft(timerDraftForEntry(snapshot.activeEntry));
+      const message = timerStartErrorMessage(error);
+      setError(message);
+      return { ok: false, error: message } as const;
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  return result.ran
+    ? result.value
+    : { ok: false, error: "A timer update is already in progress." };
+}
+
+export function mergeTimerDraft(current: TimerDraft, input: TimerDraftInput): TimerDraft {
+  return {
+    categoryId: input.categoryId ?? current.categoryId,
+    description: input.description ?? current.description,
+    tagNames: input.tagNames ?? current.tagNames
   };
 }
 
