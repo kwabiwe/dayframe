@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DAYFRAME_PALETTE,
+  DAYFRAME_PALETTE_PICKER,
   DAYFRAME_THEME,
   paletteColorFor,
   paletteCssColorFor,
@@ -61,6 +62,24 @@ describe("Midnight Core theme", () => {
       "blue-bold", "teal", "moss", "magenta",
       "graphite"
     ]);
+  });
+
+  it("groups picker colours into light-to-dark hue-family columns", () => {
+    const pickerRows = Array.from({ length: 6 }, (_, row) =>
+      DAYFRAME_PALETTE_PICKER.slice(row * 5, row * 5 + 5).map((color) => color.key)
+    );
+
+    expect(pickerRows).toEqual([
+      ["mint-soft", "yellow-soft", "orange-soft", "red-soft", "violet-soft"],
+      ["lime", "amber", "orange", "red", "purple"],
+      ["green", "olive", "rust", "crimson", "violet"],
+      ["blue-soft", "sky-soft", "lime-soft", "rose-soft", "steel-soft"],
+      ["blue", "sky", "chartreuse", "rose", "steel"],
+      ["blue-bold", "teal", "moss", "magenta", "graphite"]
+    ]);
+    expect(new Set(DAYFRAME_PALETTE_PICKER.map((color) => color.key))).toEqual(
+      new Set(DAYFRAME_PALETTE.map((color) => color.key))
+    );
   });
 
   it("resolves mode-aware display colours without changing stored keys", () => {

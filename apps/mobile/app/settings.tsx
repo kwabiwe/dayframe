@@ -31,6 +31,7 @@ import {
 } from "@/lib/motion";
 import {
   DAYFRAME_PALETTE,
+  DAYFRAME_PALETTE_PICKER,
   paletteColorFor,
   type DayframePaletteKey,
   type HealthAutoLogMapping,
@@ -2085,7 +2086,7 @@ function CategoryColorPicker({
 }) {
   return (
     <View accessibilityLabel="Category colour" style={styles.paletteGrid}>
-      {DAYFRAME_PALETTE.map((color) => {
+      {DAYFRAME_PALETTE_PICKER.map((color) => {
         const selected = selectedColor === color.key;
         return (
           <Pressable

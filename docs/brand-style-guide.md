@@ -180,6 +180,13 @@ Palette keys are storage and API compatibility values. Never rename them or repl
 
 The five lead chart colours are Coral, Violet, Amber, Mint and Blue. Preserve deterministic ordering in existing data logic. All 12 display colours must remain perceptually distinct in each appearance; the shared tests enforce a minimum pairwise OKLab distance while legacy display HEX values continue resolving to their stable keys. Category colour should normally appear as a dot, rail, border or chart mark beside `textPrimary`; do not assume palette colours are accessible body-text colours or fill bright blocks with white text without measuring contrast.
 
+Category pickers present all 30 current shade choices in one shared order on web
+and iOS. The five-column layout forms two blocks of five hue families, with
+each family running light-to-dark down its column. Picker presentation order is
+separate from the stable deterministic fallback order: changing visual layout
+must never rename keys, change HEX values, rewrite stored category colours, or
+change fallback assignments for existing data.
+
 ## Typography
 
 The product UI uses system fonts. On iOS use San Francisco through React Native’s `System` family and favour its lighter regular/semi-bold hierarchy instead of uniformly heavy text. On web use the existing system-first stack: `-apple-system`, `BlinkMacSystemFont`, `"SF Pro Text"`, `"Segoe UI"`, sans-serif. Do not add Sofia Pro or another font dependency: the Dayframe wordmark is outline geometry and needs no font file.

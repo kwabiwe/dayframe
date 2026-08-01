@@ -8,6 +8,10 @@ const settingsSource = readFileSync(
   fileURLToPath(new URL("../../app/settings.tsx", import.meta.url)),
   "utf8"
 );
+const themeSource = readFileSync(
+  fileURLToPath(new URL("./mobileTheme.ts", import.meta.url)),
+  "utf8"
+);
 
 describe("mobile Categories creation contract", () => {
   it("keeps the focused creator in a keyboard-adjusted scroll viewport", () => {
@@ -20,8 +24,10 @@ describe("mobile Categories creation contract", () => {
     expect(settingsSource.match(/placeholder="New category"/g)).toHaveLength(1);
   });
 
-  it("offers the shared 12-colour picker before creating a category", () => {
+  it("offers the shared hue-grouped picker before creating a category", () => {
     expect(settingsSource.match(/<CategoryColorPicker/g)).toHaveLength(2);
+    expect(settingsSource).toContain("DAYFRAME_PALETTE_PICKER.map");
+    expect(themeSource).toMatch(/paletteGrid: \{[^}]*flexWrap: "wrap",[^}]*gap: 8,[^}]*width: 252,/s);
     expect(settingsSource).toContain("selectedColor={newCategoryColor}");
     expect(settingsSource).toContain("color: newCategoryColor");
     expect(settingsSource).toContain('accessibilityLabel="Category colour"');

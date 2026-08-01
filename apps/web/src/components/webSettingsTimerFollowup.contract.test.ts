@@ -67,6 +67,11 @@ describe("web Settings and running-timer follow-up", () => {
     expect(categories).not.toContain("<Check size={15} />");
   });
 
+  it("renders the shared colour picker in five hue-family columns", () => {
+    expect(categories).toContain("DAYFRAME_PALETTE_PICKER.map");
+    expect(categories).toContain("grid w-fit grid-cols-5 gap-2");
+  });
+
   it("keeps cached Settings data visible while refreshing quietly", () => {
     expect(settingsPage).toContain("useAppShellRuntime()");
     expect(settingsPage).toContain("void refresh()");
