@@ -226,6 +226,7 @@ create table if not exists time_entries (
   created_from_event_id uuid references activity_events(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  user_edited_at timestamptz,
   constraint time_entries_stops_after_start check (stopped_at is null or stopped_at > started_at),
   constraint time_entries_id_workspace_key unique (id, workspace_id)
 );
@@ -654,6 +655,27 @@ before insert or update of event_id, user_id, workspace_id, location_segment_id 
 for each row execute function dayframe_apply_review_owner();
 
 alter table activity_events add column if not exists client_event_id text;
+-- Existing local databases need the provenance column and a conservative
+-- historical backfill exactly once. Fresh schemas already created the column
+-- above, and rerunning db:setup must not mark later automatic reconciliation
+-- updates as explicit user edits.
+do $$
+begin
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_schema = current_schema()
+      and table_name = 'time_entries'
+      and column_name = 'user_edited_at'
+  ) then
+    alter table time_entries add column user_edited_at timestamptz;
+    update time_entries
+    set user_edited_at = updated_at
+    where source = 'health_sleep'
+      and updated_at > created_at;
+  end if;
+end
+$$;
 alter table automation_rules add column if not exists activity_description text;
 alter table categories add column if not exists is_pinned boolean not null default false;
 alter table health_workouts add column if not exists external_sample_id text;
@@ -737,6 +759,7 @@ create index if not exists idx_review_mutation_receipts_item
 create index if not exists idx_activity_events_health_review_lookup on activity_events(workspace_id, user_id, event_type, occurred_at desc, id) where event_type in ('health_sleep_import', 'health_workout_import');
 create index if not exists idx_time_entries_confirmed_overlap_lookup on time_entries(workspace_id, user_id, started_at, stopped_at) where review_status = 'confirmed';
 create index if not exists idx_time_entries_completed_health_overlap_lookup on time_entries(workspace_id, user_id, started_at, stopped_at) where review_status in ('confirmed', 'accepted');
+create index if not exists idx_time_entries_health_sleep_reconciliation on time_entries(workspace_id, user_id, started_at, stopped_at) where source = 'health_sleep' and stopped_at is not null and user_edited_at is null and review_status in ('confirmed', 'accepted');
 create index if not exists idx_time_entries_created_from_event_lookup on time_entries(workspace_id, user_id, created_from_event_id) where created_from_event_id is not null;
 create unique index if not exists idx_health_sleep_segments_external_sample on health_sleep_segments(workspace_id, provider, external_sample_id) where external_sample_id is not null;
 create unique index if not exists idx_health_workouts_external_sample on health_workouts(workspace_id, provider, external_sample_id) where external_sample_id is not null;

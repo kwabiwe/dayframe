@@ -85,6 +85,9 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Web and mobile use authenticated workspace-scoped API calls.
 - Mobile foreground start/stop actions attempt immediate API sync and only fall back to the offline queue for genuine network/offline failure.
 - Offline queue sync preserves shortcut, NFC, geofence, Apple Health, and other background event paths, respects retry backoff for automatic retries, and exposes retry/export diagnostics in Settings.
+- Apple Health sleep stages group per normalized source with the shared 90-minute maximum waking gap. A gap exactly at the boundary remains one session; a gap one millisecond beyond it remains legitimate split sleep.
+- Same-source grouped sleep revisions with at least 80% overlap of the shorter interval update one untouched Health-derived entry in place. Incomplete-then-extended, extended-then-incomplete, identical retries, and small boundary adjustments preserve one stable entry and one logical total.
+- Manual Sleep entries, explicitly edited imported entries, cross-source records, weak overlaps, and multiple historical matches remain protected or ambiguous and do not reconcile automatically.
 - Offline Review decisions use their dedicated account-scoped SQLite owner, not
   the activity-event queue or location-evidence database. With Review data
   already downloaded, Confirm, Dismiss, and Edit-and-confirm must commit the

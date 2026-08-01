@@ -9,6 +9,7 @@ import {
   draftAutomationRuleFromText,
   healthAutoLogMappingFor,
   healthWorkoutLabel,
+  matchHealthSleepSessionWindows,
   normalizeActivityEvent,
   normalizeHealthAutoLogMappings,
   normalizeHealthWorkoutType,
@@ -17,6 +18,63 @@ import {
   type NormalizationContext,
   type TimelineState
 } from "./index";
+
+describe("Health sleep logical-session identity", () => {
+  const incomplete = {
+    startedAt: "2026-07-31T21:53:00.000Z",
+    stoppedAt: "2026-08-01T03:24:00.000Z"
+  };
+  const extended = {
+    startedAt: "2026-07-31T21:53:00.000Z",
+    stoppedAt: "2026-08-01T04:51:00.000Z"
+  };
+
+  it("matches an incomplete session followed by its extension without depending on import order", () => {
+    expect(matchHealthSleepSessionWindows(incomplete, extended)).toMatchObject({
+      matches: true,
+      overlapRatio: 1,
+      mergedStartedAt: incomplete.startedAt,
+      mergedStoppedAt: extended.stoppedAt
+    });
+    expect(matchHealthSleepSessionWindows(extended, incomplete)).toMatchObject({
+      matches: true,
+      overlapRatio: 1,
+      mergedStartedAt: incomplete.startedAt,
+      mergedStoppedAt: extended.stoppedAt
+    });
+  });
+
+  it("matches identical repeats and slightly adjusted boundaries", () => {
+    expect(matchHealthSleepSessionWindows(extended, extended).matches).toBe(true);
+    expect(matchHealthSleepSessionWindows(extended, {
+      startedAt: "2026-07-31T21:57:00.000Z",
+      stoppedAt: "2026-08-01T04:55:00.000Z"
+    })).toMatchObject({
+      matches: true,
+      mergedStartedAt: extended.startedAt,
+      mergedStoppedAt: "2026-08-01T04:55:00.000Z"
+    });
+  });
+
+  it("uses the documented substantial-overlap boundary and rejects weak or split sessions", () => {
+    const tenHours = {
+      startedAt: "2026-07-31T20:00:00.000Z",
+      stoppedAt: "2026-08-01T06:00:00.000Z"
+    };
+    expect(matchHealthSleepSessionWindows(tenHours, {
+      startedAt: "2026-08-01T02:00:00.000Z",
+      stoppedAt: "2026-08-01T07:00:00.000Z"
+    }).matches).toBe(true);
+    expect(matchHealthSleepSessionWindows(tenHours, {
+      startedAt: "2026-08-01T02:00:00.001Z",
+      stoppedAt: "2026-08-01T07:00:00.000Z"
+    }).matches).toBe(false);
+    expect(matchHealthSleepSessionWindows(
+      { startedAt: "2026-07-31T22:00:00.000Z", stoppedAt: "2026-08-01T01:00:00.000Z" },
+      { startedAt: "2026-08-01T03:00:00.000Z", stoppedAt: "2026-08-01T06:00:00.000Z" }
+    ).matches).toBe(false);
+  });
+});
 
 describe("location learning classification", () => {
   it("ignores a weak pass-through cluster", () => {

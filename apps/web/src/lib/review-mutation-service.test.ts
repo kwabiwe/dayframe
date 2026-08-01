@@ -184,6 +184,36 @@ describe("idempotent Review mutations", () => {
       statement.includes("started_at <") && statement.includes("coalesce(stopped_at")
     ))).toBe(false);
   });
+
+  it("accepts an extended Health sleep review by updating one stable entry and receipt", async () => {
+    const reviewItemId = "30000000-0000-4000-8000-000000000003";
+    const client = clientForExtendedHealthSleep(reviewItemId);
+    mocks.connect.mockResolvedValue(client);
+
+    await expect(resolveIdempotentReviewMutation(
+      reviewItemId,
+      {
+        clientMutationId: "d87c35ce-2a63-4e44-a8fc-4370f2a5cda6",
+        mutation: { action: "accept" }
+      },
+      session
+    )).resolves.toMatchObject({
+      action: "accept",
+      entryId: "health-entry-stable",
+      status: "accepted",
+      duplicate: true
+    });
+
+    const statements = client.query.mock.calls.map(([statement]) => String(statement));
+    expect(statements.some((statement) => statement.includes("insert into time_entries"))).toBe(false);
+    expect(statements.some((statement) => statement.includes("insert into review_mutation_receipts"))).toBe(true);
+    const lockIndex = statements.findIndex((statement) => statement.includes("pg_advisory_xact_lock"));
+    const matchIndex = statements.findIndex((statement) => statement.includes("matching_health_sleep_session"));
+    const updateIndex = statements.findIndex((statement) => statement.startsWith("update time_entries"));
+    expect(lockIndex).toBeGreaterThan(-1);
+    expect(matchIndex).toBeGreaterThan(lockIndex);
+    expect(updateIndex).toBeGreaterThan(matchIndex);
+  });
 });
 
 function clientForReceipt(receipt: {
@@ -242,6 +272,59 @@ function clientForOverlappingGenericEdit(reviewItemId: string) {
     }
     if (statement.includes("insert into time_entries")) {
       return { rows: [{ id: "overlapping-entry" }] };
+    }
+    return { rows: [] };
+  });
+  return {
+    query,
+    release: vi.fn()
+  } as unknown as import("pg").PoolClient & { query: typeof query };
+}
+
+function clientForExtendedHealthSleep(reviewItemId: string) {
+  const query = vi.fn(async (statement: string, values?: unknown[]) => {
+    if (statement.includes("from review_mutation_receipts")) return { rows: [] };
+    if (statement.includes("select location_segment_id")) {
+      return { rows: [{ locationSegmentId: null }] };
+    }
+    if (statement.includes("for update of ri nowait")) {
+      return {
+        rows: [{
+          id: reviewItemId,
+          eventId: "health-event-extended",
+          title: "Sleep",
+          status: "open",
+          suggestedCategoryId: "sleep-category",
+          suggestedPlaceId: null,
+          suggestedStartedAt: "2026-07-31T21:53:00.000Z",
+          suggestedStoppedAt: "2026-08-01T04:51:00.000Z",
+          confidence: "high",
+          eventSource: "health_sleep",
+          eventType: "health_sleep_import",
+          rawPayload: { provider: "healthkit", sourceName: "Apple Watch" },
+          locationSegmentId: null
+        }]
+      };
+    }
+    if (statement.includes("created_from_event_id = $3")) return { rows: [] };
+    if (statement.includes("matching_health_sleep_session")) {
+      return {
+        rows: [{
+          id: "health-entry-stable",
+          startedAt: "2026-07-31T21:53:00.000Z",
+          stoppedAt: "2026-08-01T03:24:00.000Z",
+          rawPayload: { provider: "healthkit", sourceName: "Apple Watch" }
+        }]
+      };
+    }
+    if (statement.startsWith("update time_entries")) {
+      return {
+        rows: [{
+          id: "health-entry-stable",
+          startedAt: values?.[3],
+          stoppedAt: values?.[4]
+        }]
+      };
     }
     return { rows: [] };
   });

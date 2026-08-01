@@ -7,6 +7,7 @@ import {
 import type pg from "pg";
 import { isLockNotAvailableError, pool } from "./db";
 import {
+  reconcileMatchingHealthSleepTimeEntry,
   ReviewResolutionError,
   type ReviewResolutionResult
 } from "./event-service";
@@ -34,6 +35,8 @@ type GenericReviewRow = {
   suggestedStoppedAt: Date | string | null;
   confidence: string;
   eventSource: string | null;
+  eventType: string | null;
+  rawPayload: unknown;
   locationSegmentId: string | null;
 };
 
@@ -273,6 +276,8 @@ async function lockGenericReview(
             ri.suggested_stopped_at as "suggestedStoppedAt",
             ri.confidence,
             ae.source as "eventSource",
+            ae.event_type as "eventType",
+            ae.raw_payload as "rawPayload",
             ri.location_segment_id as "locationSegmentId"
      from review_items ri
      left join activity_events ae
@@ -348,6 +353,18 @@ async function acceptGenericReview(
     throw resolutionConflict(item.id, item.status);
   }
   let entryId = existing?.id;
+  let logicalDuplicate = false;
+  if (!entryId && item.eventType === "health_sleep_import") {
+    const matchingEntry = await reconcileMatchingHealthSleepTimeEntry(client, session, {
+      rawPayload: item.rawPayload,
+      startedAt: window.startedAt,
+      stoppedAt: window.stoppedAt
+    });
+    if (matchingEntry) {
+      entryId = matchingEntry.id;
+      logicalDuplicate = true;
+    }
+  }
   if (!entryId) {
     const inserted = await client.query<{ id: string }>(
       `insert into time_entries (
@@ -377,7 +394,7 @@ async function acceptGenericReview(
     action: "accept",
     status: "accepted",
     entryId,
-    duplicate: Boolean(existing)
+    duplicate: Boolean(existing) || logicalDuplicate
   };
 }
 
