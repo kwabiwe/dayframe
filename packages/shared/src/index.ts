@@ -26,6 +26,8 @@ export {
 
 export {
   DAYFRAME_PALETTE,
+  DAYFRAME_PALETTE_PICKER,
+  DAYFRAME_PALETTE_PICKER_KEYS,
   DEFAULT_PALETTE_KEY,
   deterministicPaletteIndex,
   isPaletteKey,

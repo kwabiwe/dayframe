@@ -1679,7 +1679,9 @@ function createStyles(theme: MobileTheme) {
     paletteGrid: {
       flexDirection: "row",
       flexWrap: "wrap",
-      gap: 8
+      gap: 8,
+      width: 252,
+      alignSelf: "center"
     },
     paletteSwatch: {
       width: 44,

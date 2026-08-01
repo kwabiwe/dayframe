@@ -155,7 +155,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Web shortcut copy is platform-neutral (`Ctrl/⌘ K`) and both Control-K and Command-K open Search only when the user is not typing in an input, textarea, select or editable surface.
 - A shared web visual-foundation change receives a route-by-route desktop and phone audit across both themes, including text containment, padding alignment, focus clipping, horizontal overflow and runtime overlays.
 - Source/contract tests guard ownership and tokens but do not replace actual-browser alignment, padding, keyboard and responsive validation.
-- Stable palette keys and legacy HEX compatibility are preserved while all 12 Midnight Core display colours remain perceptually distinct and are used consistently for category, calendar and report data.
+- Stable palette keys, deterministic fallback order and legacy HEX compatibility are preserved while all 30 category shade choices remain available. Web and iOS pickers use the same five-column hue-family order, light-to-dark within each family, without changing stored category assignments.
 - Light and dark themes apply across backgrounds, text, borders, controls, icons, panels, and time blocks.
 - Outer and inner panels, popovers, tables, color swatches, and floating dialogs have consistent rounded corners.
 - Typography uses the current modern system font stack and stays compact in dense productivity surfaces.

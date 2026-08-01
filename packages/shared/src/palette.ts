@@ -36,6 +36,24 @@ export const DAYFRAME_PALETTE = [
 
 export type DayframePaletteKey = (typeof DAYFRAME_PALETTE)[number]["key"];
 
+// Picker presentation is intentionally separate from DAYFRAME_PALETTE's stable
+// fallback order. Five columns produce two blocks of five hue families, with
+// each family reading light-to-dark down the column.
+export const DAYFRAME_PALETTE_PICKER_KEYS = [
+  "mint-soft", "yellow-soft", "orange-soft", "red-soft", "violet-soft",
+  "lime", "amber", "orange", "red", "purple",
+  "green", "olive", "rust", "crimson", "violet",
+  "blue-soft", "sky-soft", "lime-soft", "rose-soft", "steel-soft",
+  "blue", "sky", "chartreuse", "rose", "steel",
+  "blue-bold", "teal", "moss", "magenta", "graphite"
+] as const satisfies readonly DayframePaletteKey[];
+
+export const DAYFRAME_PALETTE_PICKER = DAYFRAME_PALETTE_PICKER_KEYS.map((key) => {
+  const color = DAYFRAME_PALETTE.find((candidate) => candidate.key === key);
+  if (!color) throw new Error(`Missing Dayframe palette colour: ${key}`);
+  return color;
+});
+
 export const DEFAULT_PALETTE_KEY: DayframePaletteKey = "lime";
 
 const legacyColorMap: Record<string, DayframePaletteKey> = {

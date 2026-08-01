@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { DAYFRAME_PALETTE, paletteCssColorFor, paletteKeyFor } from "@dayframe/shared";
+import { DAYFRAME_PALETTE_PICKER, paletteCssColorFor, paletteKeyFor } from "@dayframe/shared";
 import { Pencil, Pin, PinOff, Plus, Trash2 } from "lucide-react";
 import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
 import { clientFetch } from "@/lib/client-auth-fetch";
@@ -267,8 +267,8 @@ function PalettePicker({ name, defaultValue }: { name: string; defaultValue: str
   return (
     <fieldset className="text-sm">
       <legend className="industrial-field-label">Colour</legend>
-      <div className="grid grid-cols-6 gap-2">
-        {DAYFRAME_PALETTE.map((color) => (
+      <div className="grid w-fit grid-cols-5 gap-2">
+        {DAYFRAME_PALETTE_PICKER.map((color) => (
           <label
             key={color.key}
             aria-label={`Use ${color.label} colour`}
