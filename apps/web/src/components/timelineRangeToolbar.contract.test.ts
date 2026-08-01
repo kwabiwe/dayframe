@@ -140,10 +140,13 @@ describe("Timeline range and toolbar contract", () => {
     expect(styles).toMatch(/\.calendar-day-body \{[^}]*isolation: isolate;/s);
   });
 
-  it("keeps timer Suggestions above sticky Calendar chrome and the Undo bean at the shared control height", () => {
+  it("keeps timer Suggestions above sticky Calendar chrome and the complete Undo bean on the responsive control contract", () => {
     expect(styles).toMatch(/\.swiss-timeline-surface \.swiss-persistent-timer-shell \{[^}]*z-index: 50;/s);
     expect(styles).toMatch(/\.calendar-grid-corner,[\s\S]*\.calendar-day-heading \{[^}]*z-index: 40;/s);
-    expect(styles).toMatch(/\.timeline-delete-undo \{[^}]*height: var\(--web-control-height\);/s);
-    expect(styles).toMatch(/\.timeline-delete-undo button \{[^}]*min-height: 34px;[^}]*height: 34px;/s);
+    expect(styles).toMatch(/:root \{[^}]*--web-control-height: 44px;/s);
+    expect(styles).toMatch(/@media \(min-width: 761px\) \{[\s\S]*:root \{[^}]*--web-control-height: 38px;/s);
+    expect(styles).toMatch(/\.timeline-delete-undo \{[^}]*height: var\(--web-control-height\);[^}]*box-sizing: border-box;/s);
+    expect(styles).toMatch(/\.timeline-delete-undo button \{[^}]*min-height: 0;[^}]*height: auto;[^}]*align-self: stretch;/s);
+    expect(styles).not.toMatch(/\.timeline-delete-undo button \{[^}]*height: 34px;/s);
   });
 });

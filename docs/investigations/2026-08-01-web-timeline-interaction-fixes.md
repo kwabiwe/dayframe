@@ -6,12 +6,12 @@ Three issues were reported from the production web Timeline on 2026-08-01:
 
 - a category Quick Action inherited the running task's description and tags;
 - the sticky Calendar date header painted over the task Suggestions panel; and
-- the deletion Undo bean was taller than the adjacent 44 px Timeline controls.
+- the deletion Undo bean was taller than the adjacent responsive Timeline controls.
 
 The supplied screenshots showed `Work / BAU / #Cubic` followed by a Chores
 Quick Action that incorrectly created `Chores / BAU / #Cubic`, the `Sat 01 Aug`
 Calendar header crossing the Suggestions surface, and a 56 px Undo bean beside
-the compact Timeline control language.
+the compact responsive Timeline control language.
 
 ## Root causes
 
@@ -31,9 +31,10 @@ the compact Timeline control language.
 - The Timeline timer-shell stacking context is raised above its sticky view
   chrome while its existing floating children retain their established local
   ordering.
-- The outer Undo bean uses the shared 44 px control height. Its inner Undo
-  action remains a smaller 34 px pill, and long notices truncate on one line
-  rather than increasing the bean height.
+- The complete Undo bean uses the shared responsive control-height token: 44 px
+  on touch/mobile layouts and 38 px on compact desktop. Its orange action
+  stretches through the available inner height, and long notices truncate on
+  one line rather than increasing the bean height.
 
 ## Motion contract
 
@@ -41,7 +42,7 @@ the compact Timeline control language.
 - Owner: the existing CSS notice entrance/exit animation and
   `TimelineDeleteUndoController`; this PR adds no second owner.
 - Entrance/update/exit: unchanged 160 ms restrained translation/opacity; only
-  the resting geometry changes to 44 px.
+  the resting geometry changes to the responsive control-height contract.
 - Surrounding layout: none; the notice remains fixed and does not reflow the
   Timeline.
 - Interruption: existing tokenized rapid-delete and exit handling remains
@@ -53,9 +54,11 @@ the compact Timeline control language.
 
 ## Validation
 
-- Focused web runtime and component contract tests passed: 3 files, 22 tests.
+- Focused web runtime and component tests passed: 3 files, 26 tests covering active replacement, dirty idle
+  drafts, rapid repeated actions, request payloads, optimistic state, metadata
+  preservation, and failure rollback in addition to the CSS contracts.
 - Repository lint and all workspace typechecks passed.
-- All 1,010 automated tests passed: 313 mobile, 561 web, and 136 shared.
+- All 1,014 automated tests passed: 313 mobile, 565 web, and 136 shared.
 - The optimized Next.js production build, brand-asset contract, and diff checks
   passed.
 - Vercel Preview browser checks remain required in Timeline Calendar, List, and

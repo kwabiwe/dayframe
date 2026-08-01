@@ -15,11 +15,11 @@ import {
   applyAuthoritativeActiveEntryVersion,
   applyOptimisticActiveEntryPatch,
   applyOptimisticTimerDelete,
-  applyOptimisticTimerStart,
   applyOptimisticTimerStop,
   createTimerMutationGate,
   entryContinuationDecision,
-  timerStartErrorMessage,
+  mergeTimerDraft,
+  runTimerStartMutation,
   timerDraftForEntry,
   timerDraftVersion,
   type TimerDraft,
@@ -287,41 +287,32 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   const startTimer = useCallback(async (input: TimerDraftInput = {}): Promise<MutationOutcome> => {
     const snapshot = dataRef.current;
     if (!snapshot) return { ok: false, error: "Timer data is still loading." };
-    const draft = mergeDraft(draftRef.current, input);
-    const result = await mutationGateRef.current.run(async () => {
-      setIsTimerBusy(true);
-      setTimerError(null);
-      refreshRequestRef.current += 1;
-      const startedAt = new Date().toISOString();
-      const optimisticId = `optimistic-timer:${startedAt}:${++optimisticIdRef.current}`;
-      commitData(applyOptimisticTimerStart(snapshot, draft, startedAt, optimisticId), "optimistic");
-      setTimerDraft(draft);
-
-      try {
+    return runTimerStartMutation({
+      gate: mutationGateRef.current,
+      snapshot,
+      currentDraft: draftRef.current,
+      input,
+      now: () => new Date().toISOString(),
+      createOptimisticId: (startedAt) => `optimistic-timer:${startedAt}:${++optimisticIdRef.current}`,
+      onAccepted: () => {
+        refreshRequestRef.current += 1;
+      },
+      commit: (nextData) => commitData(nextData, "optimistic"),
+      setDraft: setTimerDraft,
+      setBusy: setIsTimerBusy,
+      setError: setTimerError,
+      send: async (payload) => {
         const response = await clientFetch("/api/time-entries", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            mode: "start",
-            categoryId: draft.categoryId || undefined,
-            description: draft.description.trim() || undefined,
-            tagNames: draft.tagNames
-          })
+          body: JSON.stringify(payload)
         });
         if (!response.ok) throw new Error(await responseError(response, `Unable to start timer: ${response.status}`));
+      },
+      refresh: async () => {
         await refresh({ force: true });
-        return { ok: true } as const;
-      } catch (error) {
-        commitData(snapshot, "optimistic");
-        setTimerDraft(timerDraftForEntry(snapshot.activeEntry));
-        const message = timerStartErrorMessage(error);
-        setTimerError(message);
-        return { ok: false, error: message } as const;
-      } finally {
-        setIsTimerBusy(false);
       }
     });
-    return result.ran ? result.value : { ok: false, error: "A timer update is already in progress." };
   }, [commitData, refresh, setTimerDraft]);
 
   const startEntryAgain = useCallback(async (entry: TimeEntryRow): Promise<MutationOutcome> => {
@@ -334,7 +325,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     const snapshot = dataRef.current;
     if (!snapshot?.activeEntry) return { ok: false, error: "There is no running timer to stop." };
     const draftSnapshot = draftRef.current;
-    const draft = mergeDraft(draftSnapshot, input);
+    const draft = mergeTimerDraft(draftSnapshot, input);
     const result = await mutationGateRef.current.run(async () => {
       setIsTimerBusy(true);
       setTimerError(null);
@@ -620,14 +611,6 @@ function withCurrentSharedBootstrap(
     activityEvents: current.activityEvents,
     categoryUsage: current.categoryUsage,
     taskSuggestions: current.taskSuggestions
-  };
-}
-
-function mergeDraft(current: TimerDraft, input: TimerDraftInput): TimerDraft {
-  return {
-    categoryId: input.categoryId ?? current.categoryId,
-    description: input.description ?? current.description,
-    tagNames: input.tagNames ?? current.tagNames
   };
 }
 

@@ -8582,11 +8582,12 @@ dialog.ui-dialog.manual-entry-dialog {
   width: fit-content;
   max-width: calc(100vw - 24px);
   height: var(--web-control-height);
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 12px;
   border-radius: 999px;
-  padding: 4px 5px 4px 14px;
+  padding: 3px 4px 3px 14px;
   background: var(--foreground);
   color: var(--background);
   box-shadow: var(--shadow-raised);
@@ -8606,8 +8607,9 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .timeline-delete-undo button {
-  min-height: 34px;
-  height: 34px;
+  min-height: 0;
+  height: auto;
+  align-self: stretch;
   flex: 0 0 auto;
   padding-inline: 11px;
   background: var(--accent);
@@ -8666,7 +8668,7 @@ dialog.ui-dialog.manual-entry-dialog {
   .timeline-delete-undo {
     align-items: center;
     gap: 8px;
-    padding: 4px 5px 4px 12px;
+    padding: 3px 4px 3px 12px;
   }
 
   .timeline-delete-undo > span {
