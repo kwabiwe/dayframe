@@ -43,4 +43,10 @@ describe("web task suggestion interaction", () => {
     expect(timerSource).toContain("onSelectedTagNamesChange");
     expect(timerSource).not.toContain("descriptionWithTagTokens");
   });
+
+  it("starts Quick Actions from a clean category-only draft", () => {
+    expect(timerSource).toContain("const draft = quickActionTimerDraft(action.categoryId)");
+    expect(timerSource).toContain("setTimerDraft(draft)");
+    expect(timerSource).toContain("void startTimer(draft)");
+  });
 });

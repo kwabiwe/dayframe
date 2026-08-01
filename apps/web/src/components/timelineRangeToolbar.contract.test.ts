@@ -139,4 +139,11 @@ describe("Timeline range and toolbar contract", () => {
     expect(styles).toMatch(/\.timeline-list-day-heading > td \{[^}]*box-shadow: 0 -1px 0 var\(--line\);/s);
     expect(styles).toMatch(/\.calendar-day-body \{[^}]*isolation: isolate;/s);
   });
+
+  it("keeps timer Suggestions above sticky Calendar chrome and the Undo bean at the shared control height", () => {
+    expect(styles).toMatch(/\.swiss-timeline-surface \.swiss-persistent-timer-shell \{[^}]*z-index: 50;/s);
+    expect(styles).toMatch(/\.calendar-grid-corner,[\s\S]*\.calendar-day-heading \{[^}]*z-index: 40;/s);
+    expect(styles).toMatch(/\.timeline-delete-undo \{[^}]*height: var\(--web-control-height\);/s);
+    expect(styles).toMatch(/\.timeline-delete-undo button \{[^}]*min-height: 34px;[^}]*height: 34px;/s);
+  });
 });

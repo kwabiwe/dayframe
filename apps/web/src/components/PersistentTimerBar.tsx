@@ -20,6 +20,7 @@ import { timeEntryAccentColor } from "@/lib/display";
 import { dateTimeLocalInputToIso, formatClockDuration, formatTime } from "@/lib/format";
 import type { BootstrapData } from "@/lib/queries";
 import { shouldStartTimerFromEntrySubmit } from "@/lib/timer-entry-draft";
+import { quickActionTimerDraft } from "@/lib/timer-runtime";
 
 const TASK_SUGGESTION_LIMIT = 5;
 
@@ -612,10 +613,11 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                 type="button"
                 disabled={isTimerBusy}
                 onClick={() => {
+                  const draft = quickActionTimerDraft(action.categoryId);
                   setCategoryMenuOpen(false);
                   setSuggestionsOpen(false);
-                  setTimerDraft((current) => ({ ...current, categoryId: action.categoryId ?? "" }));
-                  void startTimer({ categoryId: action.categoryId ?? "" });
+                  setTimerDraft(draft);
+                  void startTimer(draft);
                 }}
               >
                 <Play size={13} fill="currentColor" strokeWidth={0} />

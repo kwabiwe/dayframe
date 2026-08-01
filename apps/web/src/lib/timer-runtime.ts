@@ -42,6 +42,14 @@ export function timerDraftForEntry(entry: TimeEntryRow | null | undefined): Time
   };
 }
 
+export function quickActionTimerDraft(categoryId: string | null | undefined): TimerDraft {
+  return {
+    categoryId: categoryId ?? "",
+    description: "",
+    tagNames: []
+  };
+}
+
 export function timerDraftVersion(entry: TimeEntryRow | null | undefined) {
   return entry ? `${entry.id}:${entry.updatedAt}` : "idle";
 }

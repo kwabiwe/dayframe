@@ -7,6 +7,7 @@ import {
   applyOptimisticTimerStop,
   createTimerMutationGate,
   entryContinuationDecision,
+  quickActionTimerDraft,
   timerDraftVersion,
   timerStartErrorMessage
 } from "./timer-runtime";
@@ -84,6 +85,19 @@ describe("shell timer runtime", () => {
     expect(decision.ok && Object.keys(decision.draft)).not.toContain("placeId");
     expect(decision.ok && Object.keys(decision.draft)).not.toContain("projectId");
     expect(decision.ok && Object.keys(decision.draft)).not.toContain("clientName");
+  });
+
+  it("starts a Quick Action as a clean category-only task", () => {
+    expect(quickActionTimerDraft("chores")).toEqual({
+      categoryId: "chores",
+      description: "",
+      tagNames: []
+    });
+    expect(quickActionTimerDraft(null)).toEqual({
+      categoryId: "",
+      description: "",
+      tagNames: []
+    });
   });
 
   it("allows an active timer replacement but refuses a meaningless blank entry", () => {
