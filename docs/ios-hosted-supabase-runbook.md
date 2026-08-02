@@ -56,7 +56,7 @@ This value is public and is bundled into the app. Do not use `EXPO_PUBLIC_` for 
 Recommended EAS environments:
 
 - `development`: development client or simulator testing.
-- `preview`: internal distribution against a hosted preview or production Vercel URL.
+- `preview`: internal distribution against the stable staging Vercel URL only.
 - `production`: production build against the production Vercel URL.
 
 Dayframe's checked-in profiles enforce these hosted targets:
@@ -65,6 +65,8 @@ Dayframe's checked-in profiles enforce these hosted targets:
 - `production` -> `https://dayframe-web.vercel.app` and release channel `production`.
 
 A hosted preview build fails at startup if its API base is missing rather than silently falling back to production. Preview builds show a visible `STAGING` badge. Promote the intended PR deployment to the stable staging alias before building or testing the physical iPhone.
+
+Preview and production currently share the `com.layereight.dayframe` iOS bundle identity. Installing a preview build may therefore replace the installed TestFlight/production app and reuse bundle-scoped device state. A separate `Dayframe Staging` identity is deferred; until then, treat each preview install as a deliberate replace-and-test cycle and confirm the visible badge and API base before mutating data.
 
 ## iOS Capabilities
 

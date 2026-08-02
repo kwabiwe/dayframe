@@ -242,13 +242,16 @@ Required checks:
 
 - `DAYFRAME_AUTH_MODE=dev` if local dev flow is involved.
 - `DAYFRAME_AUTH_MODE=local` if local email/password is involved.
-- Provider/Supabase auth if production is involved.
+- Provider/Supabase auth against the staging Supabase project for PR testing; production auth only for explicit post-merge verification.
 - Never use a prefetchable GET link for logout or another state change. Verify rendering Profile, Settings, and troubleshooting makes no logout request; explicit logout is one POST; GET is side-effect free; repeated POST is safe.
 - Test missing, invalid, expired, revoked, valid, database-failure, and missing-scope paths. Only a structured session `401` may replace the browser location; `403` and `500` must remain in place.
 - Validate session TTL configuration at startup and prove cookie `maxAge` and database expiry share the resolved bounded value. Treat sliding renewal as a separate security/product design.
 - In an optimized web build, test Enter/click, wrong-then-correct credentials, duplicate submission, slow network, one continuous branded opening state, hard refresh, Back/Forward, direct `/login`, two tabs, timer start/stop, and console/network output at desktop and phone widths.
 - Measure authenticated reconciliation traffic. Keep elapsed display ticking locally; use a bounded active-timer fingerprint for near-real-time checks, stop checks while hidden/backgrounded, allow only one check in flight, back off repeated failures, and run heavyweight bootstrap only after detected change plus initial/mutation/focus/visibility and conservative broader reconciliation.
-- Hosted auth changes require a provider-auth Vercel Preview pass before merge, including a 10-minute visible-tab observation, tab switching, safe Vercel reason logs, explicit logout/login, Safari/WebKit where available, and canonical/custom hostname checks for host-scoped cookies.
+- Hosted auth changes require a provider-auth Vercel Preview pass against staging before merge, including a 10-minute visible-tab observation, tab switching, safe Vercel reason logs, explicit logout/login, Safari/WebKit where available, and canonical/custom hostname checks for host-scoped cookies.
+- Confirm the selected Ready Preview is manually promoted to `dayframe-staging.vercel.app`; the alias does not follow branches automatically.
+- Apply required migrations to staging before hosted checks. Confirm the visible `STAGING` badge, staging account/workspace and staging Supabase project before mutating data.
+- Mobile preview builds must report `https://dayframe-staging.vercel.app`; production/TestFlight builds must report `https://dayframe-web.vercel.app`. Until a separate staging bundle identity exists, note that installing preview may replace the existing app.
 - Mobile bearer session still works.
 - On iOS, gate the initial bearer-token read on active app state; test transient
   `errSecInteractionNotAllowed` recovery, legacy-token migration, explicit
@@ -269,6 +272,8 @@ Before telling KB to test an implementation PR:
 
 - Confirm branch and commit.
 - Confirm PR state.
+- Confirm the Vercel Preview is Ready, backed by staging, and promoted to the stable staging alias when hands-on testing is required.
+- Confirm relevant automated checks and hands-on staging checks passed before merge.
 - Confirm Vercel production deployment if server code changed.
 - Confirm TestFlight version/build if mobile code changed or if the user defined TestFlight as the success criterion.
 - Confirm API base URL.
