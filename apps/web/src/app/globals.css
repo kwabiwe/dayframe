@@ -8143,9 +8143,9 @@ kbd {
   align-items: center;
   gap: 4px;
   border: 0;
-  border-radius: 999px;
-  background: var(--surface-muted);
-  padding: 3px 7px;
+  border-radius: 6px;
+  background: transparent;
+  padding: 3px 5px;
   color: var(--text);
   font: inherit;
   font-weight: 600;
@@ -8153,8 +8153,8 @@ kbd {
 
 .inline-selected-tag:hover,
 .inline-selected-tag:focus-visible {
-  background: var(--surface-inset);
-  color: var(--danger);
+  background: var(--accent-soft);
+  color: var(--accent-text);
 }
 
 dialog.ui-dialog.manual-entry-dialog {
@@ -8638,12 +8638,18 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .calendar-compact-icon-action:focus-visible,
-.calendar-compact-category-field > button:focus-visible,
 .calendar-compact-category-menu button:focus-visible,
 .calendar-compact-save:focus-visible,
-.calendar-compact-editor input:focus-visible {
+.calendar-compact-discard-back:focus-visible,
+.calendar-compact-discard-confirm:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 1px;
+}
+
+.calendar-compact-category-field > button:focus-visible,
+.calendar-compact-editor input:focus-visible {
+  outline: 2px solid var(--control-border);
+  outline-offset: -2px;
 }
 
 .calendar-compact-editor-fields {
@@ -8798,15 +8804,95 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .calendar-compact-editor-footer {
+  display: grid;
+  min-height: 64px;
   border-top: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface-raised) 94%, var(--surface-inset));
 }
 
-.calendar-compact-editor-footer > span {
+.calendar-compact-editor-default-actions,
+.calendar-compact-discard-confirmation {
+  grid-area: 1 / 1;
+}
+
+.calendar-compact-editor-default-actions {
+  display: flex;
+  min-width: 0;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  opacity: 1;
+  transition: opacity 120ms ease-out, visibility 0s linear 0s;
+  visibility: visible;
+}
+
+.calendar-compact-editor-default-actions > span {
   min-width: 0;
   color: var(--muted);
   font-size: 0.7rem;
   line-height: 1.3;
+}
+
+.calendar-compact-editor-default-actions .calendar-compact-save {
+  margin-left: auto;
+}
+
+.calendar-compact-discard-confirmation {
+  display: grid;
+  min-width: 0;
+  min-height: 44px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease-out, visibility 0s linear 120ms;
+  visibility: hidden;
+}
+
+.calendar-compact-discard-confirmation strong {
+  min-width: 0;
+  font-size: 0.76rem;
+  line-height: 1.25;
+}
+
+.calendar-compact-discard-back,
+.calendar-compact-discard-confirm {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 11px;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.calendar-compact-discard-back {
+  background: var(--surface-muted);
+  color: var(--foreground);
+}
+
+.calendar-compact-discard-confirm {
+  background: var(--danger);
+  color: var(--on-danger);
+}
+
+.calendar-compact-editor-footer.is-confirming-discard .calendar-compact-editor-default-actions {
+  opacity: 0;
+  pointer-events: none;
+  transition-delay: 0s, 120ms;
+  visibility: hidden;
+}
+
+.calendar-compact-editor-footer.is-confirming-discard .calendar-compact-discard-confirmation {
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
+  transition-delay: 0s, 0s;
 }
 
 .calendar-compact-save {
@@ -8963,6 +9049,8 @@ dialog.ui-dialog.manual-entry-dialog {
 
 @media (prefers-reduced-motion: reduce) {
   .calendar-compact-editor,
+  .calendar-compact-editor-default-actions,
+  .calendar-compact-discard-confirmation,
   .timeline-delete-undo,
   .timeline-delete-error {
     animation: none;
@@ -9260,9 +9348,9 @@ dialog.ui-dialog.manual-entry-dialog {
   flex: 0 0 auto;
   align-items: center;
   border: 0;
-  border-radius: 999px;
-  background: var(--surface-muted);
-  padding: 0 8px;
+  border-radius: 6px;
+  background: transparent;
+  padding: 0 5px;
   color: var(--foreground);
   font: inherit;
   font-size: 11px;
@@ -9270,16 +9358,36 @@ dialog.ui-dialog.manual-entry-dialog {
   white-space: nowrap;
 }
 
+.inline-selected-tag {
+  gap: 3px;
+}
+
+.inline-selected-tag > svg {
+  flex: 0 0 auto;
+  pointer-events: none;
+}
+
 .inline-selected-tag-overflow {
+  padding-inline: 6px;
   color: var(--muted);
 }
 
 .inline-selected-tag:hover,
-.inline-selected-tag:focus-visible,
+.inline-selected-tag:focus-visible {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
 .inline-selected-tag-overflow:hover,
 .inline-selected-tag-overflow:focus-visible {
-  background: var(--surface-strong);
+  background: var(--surface-muted);
   color: var(--foreground);
+}
+
+.inline-selected-tag:focus-visible,
+.inline-selected-tag-overflow:focus-visible {
+  outline: 2px solid var(--control-border);
+  outline-offset: -2px;
 }
 
 .inline-tag-picker-trigger {
@@ -9299,6 +9407,9 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .inline-tag-measurer > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   padding: 0 8px;
   font-size: 11px;
   font-weight: 750;

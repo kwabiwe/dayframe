@@ -287,7 +287,8 @@ export function InlineTagInput({
               onClick={() => toggleSelectedTag(tagName)}
               type="button"
             >
-              #{tagName}
+              <span>#{tagName}</span>
+              <X aria-hidden="true" size={12} strokeWidth={1.6} />
             </button>
           ))}
           {tagDisplay.hiddenCount > 0 ? (
@@ -306,7 +307,12 @@ export function InlineTagInput({
           ) : null}
         </span>
         <span className="inline-tag-measurer" aria-hidden="true">
-          {selectedTagNames.map((tagName) => <span data-tag-measure key={tagName}>#{tagName}</span>)}
+          {selectedTagNames.map((tagName) => (
+            <span data-tag-measure key={tagName}>
+              <span>#{tagName}</span>
+              <X size={12} strokeWidth={1.6} />
+            </span>
+          ))}
         </span>
         <button
           aria-expanded={pickerOpen}

@@ -62,6 +62,15 @@ export function calendarEntryCompactInitialDraft(entry: TimeEntryRow): CalendarE
   };
 }
 
+export function calendarEntryCompactDraftHasChanges(
+  entry: TimeEntryRow,
+  draft: CalendarEntryCompactDraft
+) {
+  const initial = calendarEntryCompactInitialDraft(entry);
+  return (Object.keys(initial) as Array<keyof CalendarEntryCompactDraft>)
+    .some((key) => draft[key] !== initial[key]);
+}
+
 export function buildCalendarEntryCompactSavePlan({
   draft,
   dirty,

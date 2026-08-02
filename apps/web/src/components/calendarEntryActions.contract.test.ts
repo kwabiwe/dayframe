@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const source = readFileSync(new URL("./TimeReviewViews.tsx", import.meta.url), "utf8");
 const editor = readFileSync(new URL("./CalendarEntryCompactEditor.tsx", import.meta.url), "utf8");
+const styles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
 const runtime = readFileSync(new URL("./AppShellRuntime.tsx", import.meta.url), "utf8");
 const deleteHook = readFileSync(new URL("./useTimelineDeleteUndo.ts", import.meta.url), "utf8");
 const controller = readFileSync(new URL("../lib/timeline-delete-undo-controller.ts", import.meta.url), "utf8");
@@ -29,6 +30,21 @@ describe("Calendar compact entry editor", () => {
     expect(editor).not.toContain("projectId");
     expect(editor).not.toContain("tagNames");
     expect(editor).not.toContain("EditTimeEntryDialog");
+    expect(editor).toContain('placeholder="Enter task description"');
+    expect(editor).not.toContain("Times use this entry’s original dates.");
+    expect(styles).toMatch(/\.calendar-compact-editor input:focus-visible\s*\{[^}]*var\(--control-border\)/s);
+  });
+
+  it("guards outside dismissal when the local draft has unsaved changes", () => {
+    expect(editor).toContain("calendarEntryCompactDraftHasChanges");
+    expect(editor).toContain("Discard unsaved changes?");
+    expect(editor).toContain("Go back");
+    expect(editor).toMatch(/className="calendar-compact-discard-confirm"[^>]*>\s*Discard\s*</s);
+    expect(editor).toContain("event.stopPropagation()");
+    expect(editor).toContain("discardReturnFocusRef");
+    expect(editor).toContain("if (discardPromptRef.current) return;");
+    expect(styles).toContain(".calendar-compact-discard-confirmation");
+    expect(styles).toContain(".calendar-compact-editor-footer.is-confirming-discard");
   });
 
   it("sends only the compact partial payload and routes active edits through the shell gate", () => {

@@ -7,6 +7,7 @@ import {
   calendarEditorOwnsPayloadKey,
   calendarEditorPointerIsInside,
   calendarEditorRectIsVisible,
+  calendarEntryCompactDraftHasChanges,
   calendarEntryCompactInitialDraft,
   emptyCalendarEntryCompactDirty,
   type CalendarEntryCompactDirty,
@@ -35,11 +36,15 @@ describe("Calendar compact editor save plan", () => {
 
   it("closes as a no-op plan when nothing changed and preserves stored seconds", () => {
     const source = timeEntry();
-    const plan = savePlan(source, calendarEntryCompactInitialDraft(source), emptyCalendarEntryCompactDirty);
+    const draft = calendarEntryCompactInitialDraft(source);
+    const plan = savePlan(source, draft, emptyCalendarEntryCompactDirty);
 
     expect(plan.payload).toEqual({});
     expect(plan.resolved.startedAt).toBe(source.startedAt);
     expect(plan.resolved.stoppedAt).toBe(source.stoppedAt);
+    expect(calendarEntryCompactDraftHasChanges(source, draft)).toBe(false);
+    expect(calendarEntryCompactDraftHasChanges(source, { ...draft, description: `${draft.description} ` })).toBe(true);
+    expect(calendarEntryCompactDraftHasChanges(source, { ...draft, startedAt: "08:14" })).toBe(true);
   });
 
   it("emits only changed owned description and category fields, including clear-to-null", () => {

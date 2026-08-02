@@ -10,6 +10,7 @@ import {
   calculateCalendarEditorPosition,
   calendarEditorPointerIsInside,
   calendarEditorRectIsVisible,
+  calendarEntryCompactDraftHasChanges,
   calendarEntryCompactInitialDraft,
   emptyCalendarEntryCompactDirty,
   type CalendarEditorPosition,
@@ -58,6 +59,7 @@ export function CalendarEntryCompactEditor({
   const [isCategoryOpen, setIsCategoryOpen] = useState(false);
   const [categoryIndex, setCategoryIndex] = useState(0);
   const [isBusy, setIsBusy] = useState(false);
+  const [discardPrompt, setDiscardPrompt] = useState(false);
   const [isEntered, setIsEntered] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
   const [now, setNow] = useState(capturedNow);
@@ -65,6 +67,10 @@ export function CalendarEntryCompactEditor({
   const panelRef = useRef<HTMLDivElement | null>(null);
   const descriptionRef = useRef<HTMLInputElement | null>(null);
   const categoryButtonRef = useRef<HTMLButtonElement | null>(null);
+  const discardBackRef = useRef<HTMLButtonElement | null>(null);
+  const discardFocusRestorePendingRef = useRef(false);
+  const discardPromptRef = useRef(false);
+  const discardReturnFocusRef = useRef<HTMLElement | null>(null);
   const closeTokenRef = useRef(0);
   const exitTimeoutRef = useRef<number | null>(null);
   const selectedCategory = categories.find((category) => category.id === draft.categoryId) ?? null;
@@ -82,6 +88,11 @@ export function CalendarEntryCompactEditor({
       };
     }
   }, [dirty, draft, entry, now]);
+  const hasUnsavedChanges = useMemo(
+    () => calendarEntryCompactDraftHasChanges(entry, draft),
+    [draft, entry]
+  );
+  const controlsDisabled = isBusy || discardPrompt;
 
   const updateField = useCallback(<Key extends keyof CalendarEntryCompactDraft,>(
     key: Key,
@@ -117,10 +128,43 @@ export function CalendarEntryCompactEditor({
     }, 90);
   }, [finishDismiss, isBusy, onDismiss]);
 
+  const showDiscardPrompt = useCallback(() => {
+    if (discardPromptRef.current) return;
+    const panel = panelRef.current;
+    const activeElement = document.activeElement;
+    discardReturnFocusRef.current = panel && activeElement instanceof HTMLElement && panel.contains(activeElement)
+      ? activeElement
+      : descriptionRef.current;
+    discardPromptRef.current = true;
+    setIsCategoryOpen(false);
+    setDiscardPrompt(true);
+    window.requestAnimationFrame(() => discardBackRef.current?.focus());
+  }, []);
+
+  const cancelDiscardPrompt = useCallback(() => {
+    discardPromptRef.current = false;
+    discardFocusRestorePendingRef.current = true;
+    setDiscardPrompt(false);
+  }, []);
+
+  const confirmDiscard = useCallback(() => {
+    discardPromptRef.current = false;
+    setDiscardPrompt(false);
+    requestDismiss(false);
+  }, [requestDismiss]);
+
   useEffect(() => () => {
     closeTokenRef.current += 1;
+    discardPromptRef.current = false;
     if (exitTimeoutRef.current !== null) window.clearTimeout(exitTimeoutRef.current);
   }, []);
+
+  useLayoutEffect(() => {
+    if (discardPrompt || !discardFocusRestorePendingRef.current) return;
+    discardFocusRestorePendingRef.current = false;
+    const returnTarget = discardReturnFocusRef.current;
+    if (returnTarget?.isConnected) returnTarget.focus({ preventScroll: true });
+  }, [discardPrompt]);
 
   const updatePosition = useCallback(() => {
     const panel = panelRef.current;
@@ -209,20 +253,43 @@ export function CalendarEntryCompactEditor({
     const handlePointerDown = (event: PointerEvent) => {
       const panel = panelRef.current;
       if (isBusy || !panel || calendarEditorPointerIsInside(event.composedPath(), panel, anchor)) return;
+      if (hasUnsavedChanges) {
+        event.preventDefault();
+        event.stopPropagation();
+        showDiscardPrompt();
+        return;
+      }
       finishDismiss(false);
+    };
+    const handleClick = (event: MouseEvent) => {
+      const panel = panelRef.current;
+      if (
+        !discardPromptRef.current ||
+        !panel ||
+        calendarEditorPointerIsInside(event.composedPath(), panel, anchor)
+      ) return;
+      event.preventDefault();
+      event.stopPropagation();
     };
     const timeout = window.setTimeout(() => {
       document.addEventListener("pointerdown", handlePointerDown, true);
+      document.addEventListener("click", handleClick, true);
     }, 0);
     return () => {
       window.clearTimeout(timeout);
       document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("click", handleClick, true);
     };
-  }, [anchor, finishDismiss, isBusy]);
+  }, [anchor, finishDismiss, hasUnsavedChanges, isBusy, showDiscardPrompt]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      if (discardPrompt) {
+        event.preventDefault();
+        cancelDiscardPrompt();
+        return;
+      }
       if (isCategoryOpen) {
         event.preventDefault();
         setIsCategoryOpen(false);
@@ -234,7 +301,7 @@ export function CalendarEntryCompactEditor({
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isCategoryOpen, requestDismiss]);
+  }, [cancelDiscardPrompt, discardPrompt, isCategoryOpen, requestDismiss]);
 
   async function save() {
     if (isBusy) return;
@@ -333,16 +400,16 @@ export function CalendarEntryCompactEditor({
               className="calendar-compact-icon-action"
               type="button"
               aria-label={`Start ${title} again`}
-              disabled={isBusy || isTimerBusy}
+              disabled={controlsDisabled || isTimerBusy}
               onClick={() => void startAgain()}
             >
               <Play size={16} fill="currentColor" strokeWidth={0} aria-hidden="true" />
             </button>
           ) : null}
-          <button className="calendar-compact-icon-action is-danger" type="button" aria-label={`Delete ${title}`} disabled={isBusy} onClick={onDelete}>
+          <button className="calendar-compact-icon-action is-danger" type="button" aria-label={`Delete ${title}`} disabled={controlsDisabled} onClick={onDelete}>
             <Trash2 size={17} aria-hidden="true" />
           </button>
-          <button className="calendar-compact-icon-action" type="button" aria-label="Close editor" disabled={isBusy} onClick={() => requestDismiss(true)}>
+          <button className="calendar-compact-icon-action" type="button" aria-label="Close editor" disabled={controlsDisabled} onClick={() => requestDismiss(true)}>
             <X size={18} aria-hidden="true" />
           </button>
         </div>
@@ -355,8 +422,8 @@ export function CalendarEntryCompactEditor({
             ref={descriptionRef}
             type="text"
             value={draft.description}
-            placeholder="What are you working on?"
-            disabled={isBusy}
+            placeholder="Enter task description"
+            disabled={controlsDisabled}
             onChange={(event) => updateField("description", event.target.value)}
           />
         </label>
@@ -368,7 +435,7 @@ export function CalendarEntryCompactEditor({
             type="button"
             aria-expanded={isCategoryOpen}
             aria-haspopup="listbox"
-            disabled={isBusy}
+            disabled={controlsDisabled}
             onClick={openCategoryMenu}
             onKeyDown={handleCategoryKeyDown}
           >
@@ -421,7 +488,7 @@ export function CalendarEntryCompactEditor({
               type="text"
               value={draft.startedAt}
               placeholder="08:30"
-              disabled={isBusy}
+              disabled={controlsDisabled}
               onChange={(event) => updateField("startedAt", maskTimeInput(event.target.value))}
             />
           </label>
@@ -433,7 +500,7 @@ export function CalendarEntryCompactEditor({
                 type="text"
                 value={draft.stoppedAt}
                 placeholder="09:15"
-                disabled={isBusy}
+                disabled={controlsDisabled}
                 onChange={(event) => updateField("stoppedAt", maskTimeInput(event.target.value))}
               />
             </label>
@@ -464,11 +531,29 @@ export function CalendarEntryCompactEditor({
 
       {displayError ? <p className="calendar-compact-editor-error" role="alert">{displayError}</p> : null}
 
-      <div className="calendar-compact-editor-footer">
-        <span>{entry.stoppedAt ? "Times use this entry’s original dates." : "Running timer"}</span>
-        <button type="button" className="calendar-compact-save" disabled={isBusy} onClick={() => void save()}>
-          Save
-        </button>
+      <div className={`calendar-compact-editor-footer${discardPrompt ? " is-confirming-discard" : ""}`}>
+        <div className="calendar-compact-editor-default-actions" aria-hidden={discardPrompt} inert={discardPrompt}>
+          {entry.stoppedAt ? null : <span>Running timer</span>}
+          <button type="button" className="calendar-compact-save" disabled={isBusy} onClick={() => void save()}>
+            Save
+          </button>
+        </div>
+        <div
+          className="calendar-compact-discard-confirmation"
+          role="alertdialog"
+          aria-label="Discard unsaved changes?"
+          aria-hidden={!discardPrompt}
+          aria-modal="false"
+          inert={!discardPrompt}
+        >
+          <strong>Discard unsaved changes?</strong>
+          <button ref={discardBackRef} type="button" className="calendar-compact-discard-back" onClick={cancelDiscardPrompt}>
+            Go back
+          </button>
+          <button type="button" className="calendar-compact-discard-confirm" onClick={confirmDiscard}>
+            Discard
+          </button>
+        </div>
       </div>
     </div>,
     document.body
