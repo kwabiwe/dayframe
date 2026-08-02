@@ -70,6 +70,7 @@ import {
   type TimeEntryUpdatePatch
 } from "@/lib/api";
 import { handleDayframeUrl } from "@/lib/deepLinks";
+import { IS_DAYFRAME_STAGING } from "@/lib/config";
 import { shouldApplyDashboardRefresh } from "@/lib/dashboardRefresh";
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
 import { configureLocationIntelligence } from "@/lib/location/runtime";
@@ -149,6 +150,11 @@ type AuthView = "login" | "signup";
 type AuthState = "checking" | "authenticated" | "signedOut";
 type DashboardLoadOptions = { silent?: boolean; visibleRefresh?: boolean };
 export type DayframeDashboardTab = "timer" | "calendar" | "reports";
+
+function StagingBadge({ styles }: { styles: MobileStyles }) {
+  if (!IS_DAYFRAME_STAGING) return null;
+  return <Text style={styles.environmentBadge}>STAGING</Text>;
+}
 type ReportRange = "today" | "week";
 type ReportChartView = "pie" | "bars";
 type SummarySegment = {
@@ -1202,6 +1208,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 size="md"
                 tone={theme.mode === "dark" ? "light" : "dark"}
               />
+              <StagingBadge styles={styles} />
             </View>
           </View>
           <View style={styles.panel}>
@@ -1318,6 +1325,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                     size="md"
                     tone={theme.mode === "dark" ? "light" : "dark"}
                   />
+                  <StagingBadge styles={styles} />
                 </View>
                 <Pressable
                   accessibilityLabel="Open settings"
@@ -1532,6 +1540,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   size="md"
                   tone={theme.mode === "dark" ? "light" : "dark"}
                 />
+                <StagingBadge styles={styles} />
               </View>
               <Pressable
                 accessibilityLabel="Open settings"
@@ -1588,6 +1597,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 size="md"
                 tone={theme.mode === "dark" ? "light" : "dark"}
               />
+              <StagingBadge styles={styles} />
             </View>
             <Pressable
               accessibilityLabel="Open settings"

@@ -423,8 +423,21 @@ function createStyles(theme: MobileTheme) {
       textAlign: "right"
     },
     logoLockup: {
+      alignItems: "center",
+      flexDirection: "row",
       flexShrink: 1,
-      gap: 4
+      gap: 8
+    },
+    environmentBadge: {
+      backgroundColor: theme.warning,
+      borderRadius: 999,
+      color: theme.background,
+      fontSize: 10,
+      fontWeight: "800",
+      letterSpacing: 0.6,
+      overflow: "hidden",
+      paddingHorizontal: 8,
+      paddingVertical: 5
     },
     datePill: {
       minHeight: 38,

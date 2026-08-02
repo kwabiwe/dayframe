@@ -20,7 +20,8 @@
         "simulator": false
       },
       "env": {
-        "EXPO_PUBLIC_DAYFRAME_API_BASE": "https://dayframe-web.vercel.app"
+        "EXPO_PUBLIC_DAYFRAME_API_BASE": "https://dayframe-staging.vercel.app",
+        "EXPO_PUBLIC_DAYFRAME_RELEASE_CHANNEL": "preview"
       }
     },
     "production": {
@@ -29,7 +30,8 @@
         "simulator": false
       },
       "env": {
-        "EXPO_PUBLIC_DAYFRAME_API_BASE": "https://dayframe-web.vercel.app"
+        "EXPO_PUBLIC_DAYFRAME_API_BASE": "https://dayframe-web.vercel.app",
+        "EXPO_PUBLIC_DAYFRAME_RELEASE_CHANNEL": "production"
       }
     }
   }

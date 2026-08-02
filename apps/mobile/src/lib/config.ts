@@ -45,11 +45,15 @@ export function resolveApiBase(
   options: ApiBaseOptions = {}
 ) {
   const allowLocal = options.allowLocal ?? process.env.NODE_ENV !== "production";
+  if (!allowLocal && process.env.EXPO_PUBLIC_DAYFRAME_RELEASE_CHANNEL === "preview" && !normalizeApiBase(value)) {
+    throw new Error("Preview builds must set EXPO_PUBLIC_DAYFRAME_API_BASE explicitly.");
+  }
   const fallback = allowLocal ? DEFAULT_LOCAL_API_BASE : DEFAULT_HOSTED_API_BASE;
   return assertUsableApiBase(normalizeApiBase(value) || fallback, { allowLocal });
 }
 
 export const DAYFRAME_API_BASE = resolveApiBase();
+export const IS_DAYFRAME_STAGING = DAYFRAME_API_BASE === "https://dayframe-staging.vercel.app";
 
 function isLocalHost(hostname: string) {
   const normalized = hostname.toLowerCase();

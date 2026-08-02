@@ -67,6 +67,8 @@ const shortcuts = [
   ["Esc", "Close menus"]
 ];
 
+const isStaging = process.env.NEXT_PUBLIC_DAYFRAME_DEPLOYMENT_ENV === "staging";
+
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   if (pathname === "/login" || pathname === "/signup") return <>{children}</>;
@@ -239,6 +241,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
         <div className="swiss-sidebar-head">
           <Link href="/" className="swiss-brand" aria-label="Dayframe dashboard">
             <DayframeBrand decorative size="md" />
+            {isStaging ? <span className="dayframe-environment-badge">Staging</span> : null}
           </Link>
           <div className="swiss-mobile-shell-actions">
             <IconButton label="Search" onClick={() => setOverlay("search")}><Search size={19} /></IconButton>

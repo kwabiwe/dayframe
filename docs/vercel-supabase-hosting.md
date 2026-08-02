@@ -1,6 +1,11 @@
 # Vercel And Supabase Hosting
 
-Dayframe production hosting uses Vercel for the Next.js web app/API routes and Supabase for Postgres plus Supabase Auth identity.
+Dayframe uses separate hosted lanes:
+
+- production: `https://dayframe-web.vercel.app` with production Supabase;
+- staging: `https://dayframe-staging.vercel.app` with the `dayframe-staging` Supabase project.
+
+The stable staging alias is deliberately promoted to one selected Vercel Preview deployment at a time. Ordinary branch Preview URLs use the same Preview-scoped staging credentials.
 
 ## Credentials Needed
 
@@ -27,6 +32,16 @@ Do not paste the Supabase service-role key into chat unless an admin-only backen
    - If confirmation is enabled, signup will return a “check your email” state and the user logs in after confirmation.
 
 ## Vercel Environment
+
+Never copy production database or Supabase credentials into Vercel Preview. Preview must use the staging project; Production must use production. Set `NEXT_PUBLIC_DAYFRAME_DEPLOYMENT_ENV=staging` for Preview so signed-in web surfaces show the staging badge. Keep the variable absent in Production.
+
+After changing Preview variables, create a new Preview deployment; existing deployments retain their original environment snapshot. Promote the selected deployment with:
+
+```bash
+vercel alias set <preview-deployment-url> dayframe-staging.vercel.app
+```
+
+Before promotion, confirm the deployment is a Preview, its schema is current, and login reaches the staging account. The alias is a deliberate single-PR test lane, not an automatic alias for every branch.
 
 Create the Vercel project from the repository root so npm workspaces can install `packages/shared`. Keep the framework preset as Next.js, set the build command to `npm run build`, and use the default Next.js output from `apps/web/.next`.
 
