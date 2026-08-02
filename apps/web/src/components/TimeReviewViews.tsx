@@ -4,9 +4,10 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, UIEve
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CalendarDays, ChevronLeft, ChevronRight, CircleDot, List, Pencil, Play, Table2, Trash2 } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, CircleDot, List, Play, Table2 } from "lucide-react";
 import { analyzeTimeIntervals, calendarBlockContinuationEdges } from "@dayframe/shared";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
+import { CalendarEntryCompactEditor } from "@/components/CalendarEntryCompactEditor";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import { OverlapNotice } from "@/components/OverlapNotice";
@@ -64,6 +65,7 @@ import {
   type TimelineView
 } from "@/lib/timeline-view";
 import { reportsHrefForCustomRange } from "@/lib/report-filters";
+import type { CalendarEntryCompactSavePlan } from "@/lib/calendar-entry-compact-editor";
 
 type CalendarHoursMode = "fullDay";
 
@@ -99,9 +101,11 @@ type CalendarResizeDraft = {
 };
 
 type CalendarBlockTarget = {
+  anchor: HTMLElement;
   blockKey: string;
-  day: Date;
-  entry: TimeEntryRow;
+  entryId: string;
+  focusOnOpen: boolean;
+  sessionId: number;
 };
 
 export function TimeReviewViews({
@@ -479,16 +483,18 @@ function CalendarReview({
   visibleDays: Date[];
 }) {
   const router = useRouter();
-  const { isTimerBusy, startEntryAgain } = useAppShellRuntime();
+  const { isTimerBusy, startEntryAgain, updateActiveEntryFromCalendar } = useAppShellRuntime();
   const [, startTransition] = useTransition();
   const [editingEntry, setEditingEntry] = useState<TimeEntryRow | null>(null);
   const [selectedTarget, setSelectedTarget] = useState<CalendarBlockTarget | null>(null);
+  const selectedTargetRef = useRef<CalendarBlockTarget | null>(null);
+  const selectionSessionRef = useRef(0);
   const [resizeDraft, setResizeDraft] = useState<CalendarResizeDraft | null>(null);
   const [resizingId, setResizingId] = useState<string | null>(null);
   const [resizeError, setResizeError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
   const [continuingEntryId, setContinuingEntryId] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState<CalendarZoom>("hour");
+  const [calendarScroller, setCalendarScroller] = useState<HTMLDivElement | null>(null);
   const today = capturedNow;
   const zoom = calendarZooms[zoomLevel];
   const calendarHours = calendarHourModes[calendarHoursMode];
@@ -513,37 +519,84 @@ function CalendarReview({
       };
     });
   }, [calendarHeight, calendarHours.endHour, calendarHours.startHour, rowHeight, zoom.intervalMinutes]);
+  const selectedEntry = selectedTarget
+    ? entries.find((entry) => entry.id === selectedTarget.entryId) ?? null
+    : null;
+  const registerCalendarScroller = useCallback((element: HTMLDivElement | null) => {
+    setCalendarScroller(element);
+    scrollContainerRef(element);
+  }, [scrollContainerRef]);
 
-  function selectCalendarEntry(target: CalendarBlockTarget) {
-    setSelectedTarget(target);
-    setActionError(null);
+  function selectCalendarEntry(target: Omit<CalendarBlockTarget, "sessionId">) {
+    const nextTarget = { ...target, sessionId: ++selectionSessionRef.current };
+    selectedTargetRef.current = nextTarget;
+    setSelectedTarget(nextTarget);
+  }
+
+  function clearCalendarSelection() {
+    selectedTargetRef.current = null;
+    setSelectedTarget(null);
   }
 
   function editCalendarEntry(entry: TimeEntryRow) {
-    setSelectedTarget(null);
-    setActionError(null);
+    clearCalendarSelection();
     setEditingEntry(entry);
   }
 
-  async function continueCalendarEntry(target: CalendarBlockTarget) {
-    if (continuingEntryId || isTimerBusy || !target.entry.stoppedAt) return;
-    setContinuingEntryId(target.entry.id);
-    setActionError(null);
+  async function continueCalendarEntry(entry: TimeEntryRow) {
+    if (continuingEntryId || isTimerBusy || !entry.stoppedAt) {
+      return { ok: false, error: "A timer update is already in progress." } as const;
+    }
+    setContinuingEntryId(entry.id);
     try {
-      const outcome = await startEntryAgain(target.entry);
-      if (!outcome.ok) {
-        setActionError(outcome.error);
-        return;
-      }
-      setSelectedTarget(null);
+      return await startEntryAgain(entry);
     } finally {
       setContinuingEntryId(null);
     }
   }
 
   function deleteCalendarEntry(entry: TimeEntryRow) {
-    setSelectedTarget(null);
+    clearCalendarSelection();
     onDeleteEntries([entry]);
+  }
+
+  function dismissCalendarEditor(target: CalendarBlockTarget, restoreFocus: boolean) {
+    if (selectedTargetRef.current?.sessionId !== target.sessionId) return;
+    clearCalendarSelection();
+    if (restoreFocus) {
+      window.requestAnimationFrame(() => target.anchor.querySelector<HTMLButtonElement>(".calendar-entry-primary")?.focus({ preventScroll: true }));
+    }
+  }
+
+  async function saveCalendarEditor(
+    entry: TimeEntryRow,
+    plan: CalendarEntryCompactSavePlan
+  ) {
+    if (!entry.stoppedAt) {
+      return updateActiveEntryFromCalendar({ plan });
+    }
+    try {
+      const response = await clientFetch(`/api/time-entries/${entry.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(plan.payload)
+      });
+      if (!response.ok) {
+        let message = `Unable to save this entry: ${response.status}`;
+        try {
+          const payload = (await response.json()) as { error?: string };
+          message = payload.error ?? message;
+        } catch {
+          // Preserve the status fallback when the response is not JSON.
+        }
+        return { ok: false, error: message } as const;
+      }
+      await onSynced();
+      startTransition(() => router.refresh());
+      return { ok: true } as const;
+    } catch {
+      return { ok: false, error: "Unable to save this entry. Check your connection and try again." } as const;
+    }
   }
 
   async function saveCalendarResize(entry: TimeEntryRow, draft: CalendarResizeDraft) {
@@ -611,8 +664,7 @@ function CalendarReview({
     const beginResize = () => {
       if (hasStartedResize) return;
       hasStartedResize = true;
-      setSelectedTarget(null);
-      setActionError(null);
+      clearCalendarSelection();
       setResizingId(entry.id);
       setResizeError(null);
     };
@@ -661,7 +713,7 @@ function CalendarReview({
       <div
         className="calendar-grid-scroller"
         onScroll={onScroll}
-        ref={scrollContainerRef}
+        ref={registerCalendarScroller}
       >
         <div
           className="timeline-calendar-grid"
@@ -811,7 +863,6 @@ function CalendarReview({
                     startsBeforeDay
                   } = block;
                   const detailsLabel = calendarBlockDetailsLabel(entry, activeDraft, durationSeconds, day, capturedNow);
-                  const target = { blockKey, day, entry };
                   const lane = lanes.get(blockKey) ?? {
                     laneCount: 1,
                     laneIndex: 0,
@@ -871,7 +922,14 @@ function CalendarReview({
                         title={detailsLabel}
                         onClick={(event) => {
                           if (event.detail > 0) event.currentTarget.blur();
-                          selectCalendarEntry(target);
+                          const anchor = event.currentTarget.closest<HTMLElement>("[data-calendar-block-key]");
+                          if (!anchor) return;
+                          selectCalendarEntry({
+                            anchor,
+                            blockKey,
+                            entryId: entry.id,
+                            focusOnOpen: event.detail === 0
+                          });
                         }}
                         onDoubleClick={(event) => {
                           event.preventDefault();
@@ -881,6 +939,16 @@ function CalendarReview({
                           if (event.key === "Enter") {
                             event.preventDefault();
                             editCalendarEntry(entry);
+                          } else if (event.key === " " || event.key === "Spacebar") {
+                            event.preventDefault();
+                            const anchor = event.currentTarget.closest<HTMLElement>("[data-calendar-block-key]");
+                            if (!anchor) return;
+                            selectCalendarEntry({
+                              anchor,
+                              blockKey,
+                              entryId: entry.id,
+                              focusOnOpen: true
+                            });
                           }
                         }}
                         onMouseDown={(event) => event.preventDefault()}
@@ -913,7 +981,11 @@ function CalendarReview({
                           aria-busy={isContinuing}
                           aria-label={`Start ${timeEntryTitle(entry)} again`}
                           disabled={isTimerBusy || Boolean(continuingEntryId)}
-                          onClick={() => void continueCalendarEntry(target)}
+                          onClick={() => {
+                            void continueCalendarEntry(entry).then((outcome) => {
+                              if (outcome.ok) clearCalendarSelection();
+                            });
+                          }}
                           onDoubleClick={(event) => event.stopPropagation()}
                         >
                           <Play size={13} fill="currentColor" strokeWidth={0} aria-hidden="true" />
@@ -949,26 +1021,23 @@ function CalendarReview({
           ))}
         </div>
       </div>
-      {selectedTarget ? (
-        <div className="calendar-entry-quick-card" role="dialog" aria-label={`${timeEntryTitle(selectedTarget.entry)} actions`}>
-          <div>
-            <strong>{timeEntryTitle(selectedTarget.entry)}</strong>
-            <span>{formatTime(selectedTarget.entry.startedAt)}–{selectedTarget.entry.stoppedAt ? formatTime(selectedTarget.entry.stoppedAt) : "Running"}</span>
-          </div>
-          <div className="calendar-entry-quick-actions">
-            {selectedTarget.entry.stoppedAt ? (
-              <button type="button" onClick={() => void continueCalendarEntry(selectedTarget)}>
-                <Play size={15} fill="currentColor" strokeWidth={0} aria-hidden="true" /> Start again
-              </button>
-            ) : null}
-            <button type="button" onClick={() => editCalendarEntry(selectedTarget.entry)}>
-              <Pencil size={15} aria-hidden="true" /> Edit
-            </button>
-            <button className="is-danger" type="button" onClick={() => deleteCalendarEntry(selectedTarget.entry)}>
-              <Trash2 size={15} aria-hidden="true" /> Delete
-            </button>
-          </div>
-        </div>
+      {selectedTarget && selectedEntry ? (
+        <CalendarEntryCompactEditor
+          key={`${selectedTarget.blockKey}:${selectedTarget.sessionId}`}
+          anchor={selectedTarget.anchor}
+          capturedNow={capturedNow}
+          categories={categories}
+          entry={selectedEntry}
+          focusOnOpen={selectedTarget.focusOnOpen}
+          isTimerBusy={isTimerBusy}
+          onDelete={() => deleteCalendarEntry(selectedEntry)}
+          onDismiss={({ restoreFocus }) => dismissCalendarEditor(selectedTarget, restoreFocus)}
+          onSave={(plan) => saveCalendarEditor(selectedEntry, plan)}
+          onStartAgain={() => continueCalendarEntry(selectedEntry)}
+          peerEntries={entries}
+          positionKey={`${zoomLevel}:${rowHeight}`}
+          scrollContainer={calendarScroller}
+        />
       ) : null}
       {resizeDraft ? (
         <div className="border-t border-[var(--line)] px-4 py-2">
@@ -982,9 +1051,9 @@ function CalendarReview({
           />
         </div>
       ) : null}
-      {resizeError || actionError ? (
+      {resizeError ? (
         <p className="border-t border-[var(--line)] px-4 py-2 text-sm text-[var(--danger-text)]" role="alert">
-          {resizeError ?? actionError}
+          {resizeError}
         </p>
       ) : null}
       {editingEntry ? (

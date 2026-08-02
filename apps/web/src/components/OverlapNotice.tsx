@@ -10,10 +10,12 @@ export type { OverlapPeerEntry } from "@/lib/overlap-notice";
 
 export function OverlapNotice({
   candidate,
+  compact = false,
   entries,
   excludeEntryId
 }: {
   candidate: Omit<TimeIntervalInput, "id">;
+  compact?: boolean;
   entries: ReadonlyArray<OverlapPeerEntry>;
   excludeEntryId?: string | null;
 }) {
@@ -27,7 +29,7 @@ export function OverlapNotice({
   const duration = formatDuration(overlap.uniqueOverlapSeconds);
 
   return (
-    <aside className="overlap-notice swiss-form-wide" role="status" aria-live="polite">
+    <aside className={`overlap-notice swiss-form-wide${compact ? " is-compact" : ""}`} role="status" aria-live="polite">
       <AlertTriangle aria-hidden="true" size={17} />
       <div>
         <span className="overlap-notice-badge">Overlap</span>
@@ -47,9 +49,11 @@ export function OverlapNotice({
             ))}
           </ul>
         ) : null}
-        <p>
-          This is allowed. Both activities count towards Total logged; concurrent clock time counts once in Time covered.
-        </p>
+        {!compact ? (
+          <p>
+            This is allowed. Both activities count towards Total logged; concurrent clock time counts once in Time covered.
+          </p>
+        ) : null}
       </div>
     </aside>
   );

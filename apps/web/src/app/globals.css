@@ -8532,35 +8532,305 @@ dialog.ui-dialog.manual-entry-dialog {
 .calendar-time-block.is-tiny .calendar-entry-title {
   font-size: 11px;
 }
-.calendar-entry-quick-card {
+.calendar-compact-editor {
+  position: fixed;
+  z-index: 75;
+  box-sizing: border-box;
+  width: 360px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 24px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: 16px;
+  background: var(--surface-raised);
+  box-shadow: 0 22px 52px var(--shadow-color), var(--shadow-raised);
+  color: var(--foreground);
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 140ms ease-out, transform 140ms ease-out;
+}
+
+.calendar-compact-editor.is-above {
+  transform: translateY(4px);
+}
+
+.calendar-compact-editor.is-entered {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.calendar-compact-editor.is-exiting {
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(3px);
+  transition-duration: 90ms;
+  transition-timing-function: ease-in;
+}
+
+.calendar-compact-editor-header,
+.calendar-compact-editor-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  margin: 12px;
-  padding: 12px 14px;
-  border-radius: 14px;
+  gap: 12px;
+  padding: 10px 12px;
+}
+
+.calendar-compact-editor-header {
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-raised) 94%, var(--surface-inset));
+}
+
+.calendar-compact-editor-header > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.calendar-compact-editor-header strong {
+  overflow: hidden;
+  font-size: 0.9rem;
+  font-weight: 690;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-compact-editor-kicker,
+.calendar-compact-field-label,
+.calendar-compact-editor-fields label > span,
+.calendar-compact-duration > span {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.calendar-compact-editor-icons {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.calendar-compact-icon-action {
+  display: inline-flex;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.calendar-compact-icon-action:hover:not(:disabled) {
+  background: var(--surface-muted);
+  color: var(--foreground);
+}
+
+.calendar-compact-icon-action.is-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger-text);
+}
+
+.calendar-compact-icon-action:focus-visible,
+.calendar-compact-category-field > button:focus-visible,
+.calendar-compact-category-menu button:focus-visible,
+.calendar-compact-save:focus-visible,
+.calendar-compact-editor input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.calendar-compact-editor-fields {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.calendar-compact-editor-fields label {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.calendar-compact-editor input,
+.calendar-compact-category-field > button {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--surface-inset);
+  color: var(--foreground);
+  font: inherit;
+}
+
+.calendar-compact-editor input {
+  padding: 0 11px;
+}
+
+.calendar-compact-editor input::placeholder {
+  color: color-mix(in srgb, var(--muted) 72%, transparent);
+}
+
+.calendar-compact-category-field {
+  position: relative;
+  display: grid;
+  gap: 5px;
+}
+
+.calendar-compact-category-field > button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  text-align: left;
+}
+
+.calendar-compact-category-field > button > span:nth-child(2),
+.calendar-compact-category-menu button > span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-compact-category-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 15%, transparent);
+}
+
+.calendar-compact-category-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  z-index: 2;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 4px;
   background: var(--surface-raised);
   box-shadow: var(--shadow-raised);
 }
 
-.calendar-entry-quick-card > div:first-child {
+.calendar-compact-category-menu button {
   display: grid;
-  gap: 3px;
+  width: 100%;
+  min-height: 44px;
+  grid-template-columns: auto minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 9px;
+  background: transparent;
+  color: var(--foreground);
+  text-align: left;
 }
 
-.calendar-entry-quick-card span {
+.calendar-compact-category-menu button:hover,
+.calendar-compact-category-menu button.is-active {
+  background: var(--surface-muted);
+}
+
+.calendar-compact-category-menu button > svg {
+  color: var(--accent-text);
+}
+
+.calendar-compact-time-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.calendar-compact-time-row:has(> label:only-of-type) {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.calendar-compact-time-row input,
+.calendar-compact-duration strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.calendar-compact-duration {
+  display: grid;
+  min-height: 44px;
+  align-content: center;
+  gap: 4px;
+  border-radius: 10px;
+  padding: 0 10px;
+  background: color-mix(in srgb, var(--surface-inset) 78%, transparent);
+}
+
+.calendar-compact-duration strong {
+  font-size: 0.86rem;
+}
+
+.calendar-compact-date-context,
+.calendar-compact-editor-error {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.calendar-compact-date-context {
   color: var(--muted);
-  font-size: 12px;
 }
 
-.calendar-entry-quick-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+.calendar-compact-editor > .overlap-notice.is-compact {
+  margin: 0 12px 10px;
+  padding: 8px 10px;
+  font-size: 0.74rem;
 }
 
-.calendar-entry-quick-actions button,
+.calendar-compact-editor-error {
+  margin: 0 12px 10px;
+  color: var(--danger-text);
+}
+
+.calendar-compact-editor-footer {
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-raised) 94%, var(--surface-inset));
+}
+
+.calendar-compact-editor-footer > span {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.3;
+}
+
+.calendar-compact-save {
+  display: inline-flex;
+  min-width: 74px;
+  min-height: 44px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 16px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-weight: 720;
+}
+
+.calendar-compact-editor button:disabled,
+.calendar-compact-editor input:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 .timeline-delete-undo button {
   min-height: 44px;
   display: inline-flex;
@@ -8572,10 +8842,6 @@ dialog.ui-dialog.manual-entry-dialog {
   padding: 0 12px;
   background: var(--surface-muted);
   color: var(--foreground);
-}
-
-.calendar-entry-quick-actions button.is-danger {
-  color: var(--danger-text);
 }
 
 .timeline-delete-undo {
@@ -8664,9 +8930,24 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 @media (max-width: 640px) {
-  .calendar-entry-quick-card {
-    align-items: stretch;
-    flex-direction: column;
+  .calendar-compact-editor {
+    max-width: calc(100vw - 24px);
+    max-height: calc(100dvh - 24px);
+    border-radius: 18px;
+    transform: translateY(4px);
+  }
+
+  .calendar-compact-editor.is-entered {
+    transform: translateY(0);
+  }
+
+  .calendar-compact-time-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .calendar-compact-editor-header,
+  .calendar-compact-editor-footer {
+    padding-inline: 10px;
   }
 
   .timeline-delete-undo {
@@ -8681,9 +8962,12 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .calendar-compact-editor,
   .timeline-delete-undo,
   .timeline-delete-error {
     animation: none;
+    transition: opacity 1ms linear;
+    transform: none;
   }
 }
 

@@ -2,12 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
 import {
   applyOptimisticActiveEntryPatch,
+  applyOptimisticActiveEntryCompactPatch,
   applyOptimisticTimerDelete,
   applyOptimisticTimerStart,
   applyOptimisticTimerStop,
   createTimerMutationGate,
   entryContinuationDecision,
   quickActionTimerDraft,
+  runActiveEntryCompactMutation,
   runTimerStartMutation,
   timerDraftForEntry,
   timerDraftVersion,
@@ -15,6 +17,7 @@ import {
   type TimerDraft,
   type TimerStartRequestPayload
 } from "./timer-runtime";
+import type { CalendarEntryCompactSavePlan } from "./calendar-entry-compact-editor";
 
 describe("shell timer runtime", () => {
   it("admits exactly one mutation while an action is in flight", async () => {
@@ -65,6 +68,118 @@ describe("shell timer runtime", () => {
     expect(patched.activeEntry?.description).toBe("Final draft");
     expect(patched.entries.filter((item) => item.id === active.id)).toHaveLength(1);
     expect(patched.entries[0].tagNames).toEqual(["writing"]);
+  });
+
+  it("projects a compact active edit while preserving hidden metadata", () => {
+    const active = entry({
+      placeId: "place-office",
+      placeName: "Office",
+      projectId: "legacy-project",
+      clientName: "Legacy client",
+      tagNames: ["ship"],
+      tags: [{ id: "tag-1", name: "Ship", normalizedName: "ship" }]
+    });
+    const patched = applyOptimisticActiveEntryCompactPatch(bootstrapData(active), compactPlan());
+
+    expect(patched.activeEntry).toEqual(expect.objectContaining({
+      categoryId: "work",
+      description: "Calendar draft",
+      startedAt: "2026-07-22T08:45:00.000Z",
+      placeId: "place-office",
+      projectId: "legacy-project",
+      clientName: "Legacy client",
+      tagNames: ["ship"]
+    }));
+    expect(patched.entries.filter((item) => item.id === active.id)).toHaveLength(1);
+  });
+
+  it("gates a compact active edit, sends one partial PATCH payload, and reconciles one refresh", async () => {
+    const active = entry({
+      id: "active-calendar",
+      placeId: "place-office",
+      projectId: "legacy-project",
+      clientName: "Legacy client",
+      tagNames: ["ship"]
+    });
+    const snapshot = bootstrapData(active);
+    const draftSnapshot = timerDraftForEntry(active);
+    const gate = createTimerMutationGate();
+    let data = snapshot;
+    let draft = draftSnapshot;
+    const requests: Array<{ entryId: string; payload: Record<string, unknown> }> = [];
+    const refresh = vi.fn(async () => undefined);
+    let release: (() => void) | undefined;
+    const requestPending = new Promise<void>((resolve) => { release = resolve; });
+    const run = () => runActiveEntryCompactMutation({
+      commit: (nextData) => { data = nextData; },
+      draftSnapshot,
+      gate,
+      getCurrentData: () => data,
+      input: { plan: compactPlan() },
+      refresh,
+      send: async (entryId, payload) => {
+        requests.push({ entryId, payload: { ...payload } });
+        await requestPending;
+        return { updatedAt: "2026-07-22T10:05:00.000Z" };
+      },
+      setBusy: () => undefined,
+      setDraft: (nextDraft) => { draft = nextDraft; },
+      setError: () => undefined,
+      snapshot
+    });
+
+    const first = run();
+    await expect(run()).resolves.toEqual({ ok: false, error: "A timer update is already in progress." });
+    expect(requests).toEqual([{
+      entryId: "active-calendar",
+      payload: {
+        categoryId: "work",
+        description: "Calendar draft",
+        startedAt: "2026-07-22T08:45:00.000Z"
+      }
+    }]);
+    expect(data.activeEntry).toEqual(expect.objectContaining({
+      placeId: "place-office",
+      projectId: "legacy-project",
+      clientName: "Legacy client",
+      tagNames: ["ship"]
+    }));
+    expect(draft).toEqual({ categoryId: "work", description: "Calendar draft", tagNames: ["ship"] });
+
+    release?.();
+    await expect(first).resolves.toEqual({ ok: true });
+    expect(data.activeEntry?.updatedAt).toBe("2026-07-22T10:05:00.000Z");
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(requests).toHaveLength(1);
+  });
+
+  it("restores the exact active snapshot and timer draft after a compact edit failure", async () => {
+    const active = entry({ id: "active-calendar", placeId: "place-office", tagNames: ["ship"] });
+    const snapshot = bootstrapData(active);
+    const draftSnapshot = timerDraftForEntry(active);
+    let data = snapshot;
+    let draft = draftSnapshot;
+    let busy = false;
+    let error: string | null = null;
+
+    await expect(runActiveEntryCompactMutation({
+      commit: (nextData) => { data = nextData; },
+      draftSnapshot,
+      gate: createTimerMutationGate(),
+      getCurrentData: () => data,
+      input: { plan: compactPlan() },
+      refresh: async () => undefined,
+      send: async () => { throw new Error("Server kept the previous timer"); },
+      setBusy: (nextBusy) => { busy = nextBusy; },
+      setDraft: (nextDraft) => { draft = nextDraft; },
+      setError: (nextError) => { error = nextError; },
+      snapshot
+    })).resolves.toEqual({ ok: false, error: "Server kept the previous timer" });
+
+    expect(data).toBe(snapshot);
+    expect(draft).toBe(draftSnapshot);
+    expect(error).toBe("Server kept the previous timer");
+    expect(busy).toBe(false);
   });
 
   it("builds a category, description, and tags-only continuation draft", () => {
@@ -391,6 +506,23 @@ function timerStartHarness(
 
 function serializedRequest(payload: TimerStartRequestPayload) {
   return JSON.parse(JSON.stringify(payload)) as Record<string, unknown>;
+}
+
+function compactPlan(): CalendarEntryCompactSavePlan {
+  return {
+    durationSeconds: 4_800,
+    payload: {
+      categoryId: "work",
+      description: "Calendar draft",
+      startedAt: "2026-07-22T08:45:00.000Z"
+    },
+    resolved: {
+      categoryId: "work",
+      description: "Calendar draft",
+      startedAt: "2026-07-22T08:45:00.000Z",
+      stoppedAt: null
+    }
+  };
 }
 
 function entry(overrides: Partial<TimeEntryRow> = {}) {

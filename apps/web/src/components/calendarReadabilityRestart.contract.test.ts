@@ -9,6 +9,7 @@ function source(relativePath: string) {
 const timeline = source("./TimeReviewViews.tsx");
 const runtime = source("./AppShellRuntime.tsx");
 const entries = source("./EntriesTable.tsx");
+const compactEditor = source("./CalendarEntryCompactEditor.tsx");
 const styles = source("../app/globals.css");
 
 describe("Calendar readability and restart contract", () => {
@@ -23,7 +24,7 @@ describe("Calendar readability and restart contract", () => {
   });
 
   it("routes list and calendar continuations through the same guarded timer owner", () => {
-    expect(timeline).toContain("await startEntryAgain(target.entry)");
+    expect(timeline).toContain("return await startEntryAgain(entry)");
     expect(entries).toContain("await startEntryAgain(entry)");
     expect(runtime).toContain("entryContinuationDecision(entry)");
     expect(runtime).not.toContain("Stop it before starting another task.");
@@ -32,10 +33,12 @@ describe("Calendar readability and restart contract", () => {
     expect(entries).not.toContain('mode: "start"');
   });
 
-  it("keeps tiny blocks readable without mounting a floating details surface", () => {
+  it("keeps tiny blocks readable while isolating the portalled compact editor", () => {
     expect(timeline).toContain("layoutTimeBlockLanes");
     expect(timeline).not.toContain("<CalendarEntryDetails");
     expect(timeline).not.toContain("createPortal(");
+    expect(timeline).toContain("<CalendarEntryCompactEditor");
+    expect(compactEditor).toContain("createPortal(");
     expect(timeline).toContain("onDoubleClick={(event) =>");
     expect(timeline).toContain('className="calendar-entry-title"');
   });
