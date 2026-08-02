@@ -36,7 +36,9 @@ describe("Calendar readability and restart contract", () => {
   it("surfaces an unsuccessful inline Start again outcome without moving Calendar layout", () => {
     expect(timeline).toContain("const [actionError, setActionError]");
     expect(timeline).toContain('continueCalendarEntry(entry, "inline")');
-    expect(timeline).toContain('if (!outcome.ok && surface === "inline") setActionError(outcome.error)');
+    expect(timeline).toContain("if (!outcome.ok)");
+    expect(timeline).toContain("clearTimerError();");
+    expect(timeline).toContain('if (surface === "inline") setActionError(outcome.error)');
     expect(timeline).toMatch(/actionError \? \([\s\S]*className="timeline-delete-error"[\s\S]*role="alert"[\s\S]*aria-live="assertive"/s);
     expect(styles).toMatch(/\.timeline-delete-error \{[^}]*position:\s*fixed;/s);
   });
@@ -80,6 +82,9 @@ describe("Calendar readability and restart contract", () => {
     expect(selectedRule).toContain("background-color: var(--calendar-block-selected-fill)");
     expect(selectedRule).not.toContain("outline");
     expect(styles).toMatch(/\.calendar-time-block:has\(\.calendar-entry-primary:focus-visible\) \{[^}]*outline: 2px solid var\(--focus\);/s);
+    expect(styles).toMatch(/\.calendar-start-again \{[^}]*opacity: 0;[^}]*pointer-events: none;/s);
+    expect(styles).not.toMatch(/\.calendar-start-again \{[^}]*visibility: hidden;/s);
+    expect(styles).toMatch(/\.calendar-start-again:focus-visible \{[^}]*opacity: 1;[^}]*pointer-events: auto;/s);
     expect(timeline).toContain('onMouseDown={(event) => event.preventDefault()}');
   });
 

@@ -483,7 +483,7 @@ function CalendarReview({
   visibleDays: Date[];
 }) {
   const router = useRouter();
-  const { isTimerBusy, startEntryAgain, updateActiveEntryFromCalendar } = useAppShellRuntime();
+  const { clearTimerError, isTimerBusy, startEntryAgain, updateActiveEntryFromCalendar } = useAppShellRuntime();
   const [, startTransition] = useTransition();
   const [editingEntry, setEditingEntry] = useState<TimeEntryRow | null>(null);
   const [selectedTarget, setSelectedTarget] = useState<CalendarBlockTarget | null>(null);
@@ -556,7 +556,10 @@ function CalendarReview({
     if (surface === "inline") setActionError(null);
     try {
       const outcome = await startEntryAgain(entry);
-      if (!outcome.ok && surface === "inline") setActionError(outcome.error);
+      if (!outcome.ok) {
+        clearTimerError();
+        if (surface === "inline") setActionError(outcome.error);
+      }
       return outcome;
     } finally {
       setContinuingEntryId(null);

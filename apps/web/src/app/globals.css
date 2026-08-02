@@ -2762,11 +2762,9 @@ dialog.ui-popover-panel.bottom-left {
   cursor: pointer;
   opacity: 0;
   pointer-events: none;
-  visibility: hidden;
   transition:
     color 140ms ease,
-    opacity 140ms ease,
-    visibility 0s linear 140ms;
+    opacity 140ms ease;
 }
 
 .calendar-time-block.is-short .calendar-start-again {
@@ -2782,9 +2780,12 @@ dialog.ui-popover-panel.bottom-left {
   .calendar-time-block:hover .calendar-start-again {
     opacity: 1;
     pointer-events: auto;
-    visibility: visible;
-    transition-delay: 0s;
   }
+}
+
+.calendar-start-again:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .calendar-start-again:hover {
