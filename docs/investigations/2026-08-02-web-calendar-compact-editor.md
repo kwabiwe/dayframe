@@ -68,6 +68,7 @@ Observed PASS so far:
 
 - Draft PR #155 was opened from `codex/web-calendar-compact-editor` without merging.
 - Code commit `672064e` deployed as Vercel Preview `dpl_J4SK7amPr8RgNEbjeHqaKytCXQfm`; Vercel reported target `preview` and status `Ready`.
-- `dayframe-staging.vercel.app` was explicitly assigned to that Ready Preview. A separate inspection still resolved `dayframe-web.vercel.app` to its pre-existing Ready production deployment `dpl_ALXRvmHJUSvmfHLxRARgPsG5HpBM`; production was not changed.
-- The branch Preview and stable staging `/login` routes rendered the Dayframe provider login surface. No staging credentials were available in this environment, so authenticated Calendar parity, staging workspace identity/badge confirmation and data mutations were not claimed.
+- Follow-up commit `d865fec` deployed as exact branch Preview `dpl_HpNerqmW1qDYuJ1rN4PDts87iDxB` (`https://dayframe-c2kedc6wk-dayframeworkshop.vercel.app`); the GitHub Vercel check and direct Vercel inspection both reported target `preview` and status `Ready`.
+- `dayframe-staging.vercel.app` was explicitly reassigned to that follow-up Ready Preview. A separate inspection still resolved `dayframe-web.vercel.app` to its pre-existing Ready production deployment `dpl_ALXRvmHJUSvmfHLxRARgPsG5HpBM`; production was not changed.
+- The exact branch Preview and stable staging `/login` routes rendered the Dayframe provider login surface with no browser runtime errors. No staging credentials were available in this environment, so authenticated Calendar parity, staging workspace identity/badge confirmation and data mutations were not claimed.
 - The in-app browser blocked direct navigation to the anonymous `/api/bootstrap` endpoint with `ERR_BLOCKED_BY_CLIENT`; its expected hosted `401` response was therefore not re-claimed for this PR.
