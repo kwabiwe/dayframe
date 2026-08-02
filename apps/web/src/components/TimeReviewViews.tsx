@@ -31,6 +31,9 @@ import {
   formatTime
 } from "@/lib/format";
 import {
+  calendarBlockLaneInsets,
+  calendarBlockVisualGeometry,
+  canShowTimeBlockInlineAction,
   getTimeBlockDensity,
   layoutTimeBlockLanes,
   minimumTimeBlockHeight,
@@ -762,11 +765,19 @@ function CalendarReview({
                       capturedNow
                     );
                     if (!blockStyle) return null;
-                    const { startsBeforeDay, continuesIntoNextDay, ...blockPositionStyle } = blockStyle;
+                    const { startsBeforeDay, continuesIntoNextDay, ...semanticBlockPositionStyle } = blockStyle;
+                    const visualBlockGeometry = calendarBlockVisualGeometry({
+                      ...semanticBlockPositionStyle,
+                      continuesIntoNextDay
+                    });
+                    const blockPositionStyle = {
+                      top: visualBlockGeometry.top,
+                      height: visualBlockGeometry.height
+                    };
                     const durationSeconds = calendarDurationSeconds(entry, activeDraft, day, capturedNow);
                     const density = getTimeBlockDensity({
                       durationSeconds,
-                      height: blockPositionStyle.height
+                      height: semanticBlockPositionStyle.height
                     });
                     const blockKey = calendarBlockKey(entry.id, day);
                     return {
@@ -777,14 +788,15 @@ function CalendarReview({
                       density,
                       durationSeconds,
                       entry,
+                      semanticBlockPositionStyle,
                       startsBeforeDay
                     };
                   })
                   .filter((block): block is NonNullable<typeof block> => Boolean(block));
                 const lanes = layoutTimeBlockLanes(blocks.map((block) => ({
                   key: block.blockKey,
-                  top: block.blockPositionStyle.top,
-                  height: block.blockPositionStyle.height
+                  top: block.semanticBlockPositionStyle.top,
+                  height: block.semanticBlockPositionStyle.height
                 })));
 
                 return blocks.map((block) => {
@@ -813,6 +825,16 @@ function CalendarReview({
                   const isResizing = resizingId === entry.id;
                   const isContinuing = continuingEntryId === entry.id;
                   const accent = timeEntryAccentColor(entry);
+                  const hasInlineActionSlot = Boolean(
+                    entry.stoppedAt && density.canShowInlineAction && lane.textDensity === "full"
+                  );
+                  const showInlineAction = canShowTimeBlockInlineAction({
+                    density,
+                    isCompleted: Boolean(entry.stoppedAt),
+                    isResizing,
+                    isSelected: selected,
+                    textDensity: lane.textDensity
+                  });
                   return (
                     <article
                       key={blockKey}
@@ -825,14 +847,16 @@ function CalendarReview({
                         continuesIntoNextDay ? "is-continuation-to-next" : "",
                         entry.categoryId ? "" : "is-uncategorized",
                         lane.textDensity === "none" ? "has-no-text is-compact-overlap" : "",
+                        hasInlineActionSlot ? "has-inline-action-slot" : "",
                         ...timeBlockDensityClassNames(density)
                       ].join(" ")}
                       style={{
                         ...blockPositionStyle,
                         ...calendarBlockLaneStyle(lane),
                         "--calendar-block-accent": accent,
-                        backgroundColor: `color-mix(in srgb, ${accent} 18%, var(--surface))`,
-                        borderColor: `color-mix(in srgb, ${accent} 72%, var(--line))`,
+                        "--calendar-block-fill": `color-mix(in srgb, ${accent} 18%, var(--surface))`,
+                        "--calendar-block-selected-fill": `color-mix(in srgb, ${accent} 26%, var(--surface-inset))`,
+                        "--calendar-block-border": `color-mix(in srgb, ${accent} 42%, var(--line))`,
                         color: "var(--foreground)"
                       } as CSSProperties}
                       data-entry-id={entry.id}
@@ -845,7 +869,10 @@ function CalendarReview({
                         aria-label={detailsLabel}
                         aria-pressed={selected}
                         title={detailsLabel}
-                        onClick={() => selectCalendarEntry(target)}
+                        onClick={(event) => {
+                          if (event.detail > 0) event.currentTarget.blur();
+                          selectCalendarEntry(target);
+                        }}
                         onDoubleClick={(event) => {
                           event.preventDefault();
                           editCalendarEntry(entry);
@@ -856,9 +883,7 @@ function CalendarReview({
                             editCalendarEntry(entry);
                           }
                         }}
-                        onMouseDown={(event) => {
-                          if (event.detail > 1) event.preventDefault();
-                        }}
+                        onMouseDown={(event) => event.preventDefault()}
                       >
                         {density.showTitle && lane.textDensity !== "none" ? (
                           <span className="calendar-entry-title">{timeEntryTitle(entry)}</span>
@@ -881,7 +906,7 @@ function CalendarReview({
                         ) : null}
                         {density.showTags && lane.textDensity === "full" ? <TagMetadata tagNames={entry.tagNames} /> : null}
                       </button>
-                      {entry.stoppedAt && density.canShowInlineAction && lane.textDensity === "full" && !isResizing ? (
+                      {showInlineAction ? (
                         <button
                           type="button"
                           className="calendar-start-again"
@@ -1132,11 +1157,8 @@ function calendarBlockLaneStyle({
   widthFraction,
   zIndex
 }: TimeBlockLane): CSSProperties {
-  const before = offsetFraction * 100;
-  const after = Math.max(0, (1 - offsetFraction - widthFraction) * 100);
   return {
-    left: before === 0 ? 8 : `calc(${before}% + 2px)`,
-    right: after === 0 ? 8 : `calc(${after}% + 2px)`,
+    ...calendarBlockLaneInsets({ offsetFraction, widthFraction }),
     zIndex: 2 + zIndex
   };
 }
