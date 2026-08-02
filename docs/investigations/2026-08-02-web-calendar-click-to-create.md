@@ -1,7 +1,7 @@
 # Web Calendar Click-To-Create
 
 Date: 2026-08-02
-Status: In progress on `codex/web-calendar-click-to-create`; keep the pull request draft and unmerged until the hosted and physical-device items below are complete.
+Status: Draft PR [#156](https://github.com/kwabiwe/dayframe/pull/156) on `codex/web-calendar-click-to-create`; keep it unmerged until the remaining authenticated hosted and physical-device items below are complete.
 
 ## Scope
 
@@ -159,12 +159,20 @@ Short interaction recording: NOT RUN; the in-app browser control available in th
 
 ## Hosted and device validation
 
-Pending until the draft PR has an exact Ready Preview:
+Initial implementation-commit deployment evidence:
 
-- verify the exact Preview commit uses staging Supabase;
-- promote only that Ready deployment to `dayframe-staging.vercel.app`;
-- inspect alias assignment and hosted response;
-- run authenticated staging Calendar Day/Week, create, overlap, failure, Light/Dark, narrow and console checks if credentials/session are available;
+- PR: draft [#156](https://github.com/kwabiwe/dayframe/pull/156), base `main`, implementation commit `2f57d8b76e0e16c240f3ef764305b7db11b90e3d`.
+- Vercel deployment: `dpl_HcriCiPb6onzuMgqovvdpYVjGBoj`, `target=preview`, `status=Ready`, URL `https://dayframe-2qpcf22ll-dayframeworkshop.vercel.app`.
+- Vercel Preview exposes encrypted Preview-scoped `NEXT_PUBLIC_DAYFRAME_DEPLOYMENT_ENV`, provider-auth, public Supabase, database and location-rollout variables. Vercel redacted their values in this agent session, so variable presence and Preview targeting passed while an independent project-ref comparison was NOT RUN.
+- Exact Preview `/login` returned Dayframe HTTP 200 and anonymous `/api/bootstrap` returned 401; no Vercel SSO barrier — PASS.
+- The exact Ready Preview was assigned to `https://dayframe-staging.vercel.app`; Vercel inspection resolved the alias back to the same Preview deployment, staging `/login` returned 200 and anonymous `/api/bootstrap` returned 401 — PASS.
+- Production `dayframe-web.vercel.app` remained on separate Ready production deployment `dpl_3RjPENnphD3vRqSR7tcYWKotJVwP`; no production alias/config/deployment was changed — PASS.
+- A browser visit to the stable staging Timeline redirected to Dayframe `/login`; no staging credentials or authenticated session were available. Authenticated Calendar Day/Week, persistence, overlap, active-timer, Light/Dark, narrow and console checks are NOT RUN.
+- This evidence-only documentation follow-up creates a newer PR-head commit/Preview. Its exact Ready deployment and final staging-alias target are recorded in the PR status and implementation handoff to avoid an endless deployment-observer commit loop.
+
+Still pending:
+
+- run the authenticated staging Calendar matrix with an authorised staging account;
 - run the mobile preview profile against staging on a physical iPhone for compatibility only;
 - verify touch/coarse web interaction does not create;
 - verify physical mouse/trackpad native scrollbar behavior;
@@ -185,7 +193,7 @@ If no physical iPhone is available, leave these explicitly not run:
 ## Closure criteria
 
 - final repository-wide validation passes;
-- exact draft commit is deployed Ready on Vercel Preview;
+- exact PR-head commit is deployed Ready on Vercel Preview;
 - only the staging alias is promoted and inspected;
 - hosted authenticated checks are completed or explicitly recorded as not run with the exact blocker;
 - physical-device checks are completed or explicitly recorded as not run;
