@@ -1,7 +1,7 @@
 # Web Calendar Compact Editor
 
 Date: 2026-08-02
-Status: In progress on `codex/web-calendar-compact-editor`
+Status: Draft PR [#155](https://github.com/kwabiwe/dayframe/pull/155), unmerged
 Baseline: `a669102` (`origin/main`, including PR #152's Calendar block visual system and PR #154's staging-first workflow)
 
 ## Problem
@@ -59,4 +59,12 @@ Observed PASS so far:
 
 - Automated validation passed: `npm run lint`; `npm run typecheck` across mobile/web/shared; `npm run test` with 1040 tests (314 mobile, 589 web, 137 shared); `npm run check:brand-assets`; and the optimized `npm run build` with 32 static pages generated and all dynamic routes compiled.
 - System-theme resolution, Reduced Motion, failure injection/rollback, scroll interruption and rapid concurrent Save checks.
-- Draft PR, Vercel Preview, stable staging-alias promotion, staging browser parity and preview-profile iPhone validation. Keep the PR draft and unmerged.
+- Authenticated staging Calendar parity and preview-profile physical-iPhone validation. Keep the PR draft and unmerged.
+
+## Hosted Preview Evidence
+
+- Draft PR #155 was opened from `codex/web-calendar-compact-editor` without merging.
+- Code commit `672064e` deployed as Vercel Preview `dpl_J4SK7amPr8RgNEbjeHqaKytCXQfm`; Vercel reported target `preview` and status `Ready`.
+- `dayframe-staging.vercel.app` was explicitly assigned to that Ready Preview. A separate inspection still resolved `dayframe-web.vercel.app` to its pre-existing Ready production deployment `dpl_ALXRvmHJUSvmfHLxRARgPsG5HpBM`; production was not changed.
+- The branch Preview and stable staging `/login` routes rendered the Dayframe provider login surface. No staging credentials were available in this environment, so authenticated Calendar parity, staging workspace identity/badge confirmation and data mutations were not claimed.
+- The in-app browser blocked direct navigation to the anonymous `/api/bootstrap` endpoint with `ERR_BLOCKED_BY_CLIENT`; its expected hosted `401` response was therefore not re-claimed for this PR.
