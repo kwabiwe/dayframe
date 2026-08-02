@@ -6985,7 +6985,7 @@ kbd {
 }
 
 .swiss-timer-description-control .ui-compound-control:focus-within {
-  border-color: var(--web-focus-border);
+  border-color: var(--control-border);
 }
 
 .swiss-timer-description-control .ui-compound-control:has(input[aria-invalid="true"]) {
@@ -6993,7 +6993,18 @@ kbd {
 }
 
 .swiss-timer-description-control .ui-compound-control:has(input[aria-invalid="true"]):focus-within {
-  border-color: var(--web-focus-border);
+  border-color: var(--control-border);
+  box-shadow: inset 0 -2px 0 var(--danger);
+}
+
+.edit-time-entry-dialog .ui-control:focus-visible,
+.edit-time-entry-dialog .ui-compound-control:focus-within {
+  border-color: var(--control-border);
+}
+
+.edit-time-entry-dialog .ui-control[aria-invalid="true"]:focus-visible,
+.edit-time-entry-dialog .ui-compound-control:has(input[aria-invalid="true"]):focus-within {
+  border-color: var(--control-border);
   box-shadow: inset 0 -2px 0 var(--danger);
 }
 
@@ -8137,26 +8148,6 @@ kbd {
   gap: 4px;
 }
 
-.inline-selected-tag {
-  display: inline-flex;
-  min-height: 44px;
-  align-items: center;
-  gap: 4px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  padding: 3px 5px;
-  color: var(--text);
-  font: inherit;
-  font-weight: 600;
-}
-
-.inline-selected-tag:hover,
-.inline-selected-tag:focus-visible {
-  background: var(--accent-soft);
-  color: var(--accent-text);
-}
-
 dialog.ui-dialog.manual-entry-dialog {
   overflow: visible;
   border-radius: 24px;
@@ -8533,6 +8524,8 @@ dialog.ui-dialog.manual-entry-dialog {
   font-size: 11px;
 }
 .calendar-compact-editor {
+  --web-control-height: 44px;
+  --calendar-compact-horizontal-inset: 12px;
   position: fixed;
   z-index: 75;
   box-sizing: border-box;
@@ -8575,7 +8568,7 @@ dialog.ui-dialog.manual-entry-dialog {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 12px;
+  padding: 10px var(--calendar-compact-horizontal-inset);
 }
 
 .calendar-compact-editor-header {
@@ -8655,7 +8648,7 @@ dialog.ui-dialog.manual-entry-dialog {
 .calendar-compact-editor-fields {
   display: grid;
   gap: 10px;
-  padding: 12px;
+  padding: 12px var(--calendar-compact-horizontal-inset);
 }
 
 .calendar-compact-editor-fields label {
@@ -8793,19 +8786,21 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .calendar-compact-editor > .overlap-notice.is-compact {
-  margin: 0 12px 10px;
+  margin: 0 var(--calendar-compact-horizontal-inset) 10px;
   padding: 8px 10px;
   font-size: 0.74rem;
 }
 
 .calendar-compact-editor-error {
-  margin: 0 12px 10px;
+  margin: 0 var(--calendar-compact-horizontal-inset) 10px;
   color: var(--danger-text);
 }
 
 .calendar-compact-editor-footer {
   display: grid;
+  width: 100%;
   min-height: 64px;
+  grid-template-columns: minmax(0, 1fr);
   border-top: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface-raised) 94%, var(--surface-inset));
 }
@@ -8813,6 +8808,7 @@ dialog.ui-dialog.manual-entry-dialog {
 .calendar-compact-editor-default-actions,
 .calendar-compact-discard-confirmation {
   grid-area: 1 / 1;
+  width: 100%;
 }
 
 .calendar-compact-editor-default-actions {
@@ -8820,7 +8816,7 @@ dialog.ui-dialog.manual-entry-dialog {
   min-width: 0;
   min-height: 44px;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
   opacity: 1;
   transition: opacity 120ms ease-out, visibility 0s linear 0s;
@@ -8834,17 +8830,13 @@ dialog.ui-dialog.manual-entry-dialog {
   line-height: 1.3;
 }
 
-.calendar-compact-editor-default-actions .calendar-compact-save {
-  margin-left: auto;
-}
-
 .calendar-compact-discard-confirmation {
   display: grid;
   min-width: 0;
   min-height: 44px;
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   opacity: 0;
   pointer-events: none;
   transition: opacity 120ms ease-out, visibility 0s linear 120ms;
@@ -8853,22 +8845,28 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .calendar-compact-discard-confirmation strong {
   min-width: 0;
-  font-size: 0.76rem;
-  line-height: 1.25;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
 }
 
+.calendar-compact-save,
 .calendar-compact-discard-back,
 .calendar-compact-discard-confirm {
   display: inline-flex;
-  min-height: 44px;
+  box-sizing: border-box;
+  height: var(--web-control-height);
+  min-height: var(--web-control-height);
   align-items: center;
   justify-content: center;
   border: 0;
   border-radius: 999px;
-  padding: 0 11px;
+  padding: 0 14px;
   font: inherit;
-  font-size: 0.75rem;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.2;
 }
 
 .calendar-compact-discard-back {
@@ -8877,8 +8875,8 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .calendar-compact-discard-confirm {
-  background: var(--danger);
-  color: var(--on-danger);
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .calendar-compact-editor-footer.is-confirming-discard .calendar-compact-editor-default-actions {
@@ -8896,19 +8894,10 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .calendar-compact-save {
-  display: inline-flex;
   min-width: 74px;
-  min-height: 44px;
   flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 999px;
-  padding: 0 16px;
   background: var(--accent);
   color: var(--on-accent);
-  font: inherit;
-  font-weight: 720;
 }
 
 .calendar-compact-editor button:disabled,
@@ -9017,6 +9006,7 @@ dialog.ui-dialog.manual-entry-dialog {
 
 @media (max-width: 640px) {
   .calendar-compact-editor {
+    --calendar-compact-horizontal-inset: 10px;
     max-width: calc(100vw - 24px);
     max-height: calc(100dvh - 24px);
     border-radius: 18px;
@@ -9031,11 +9021,6 @@ dialog.ui-dialog.manual-entry-dialog {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .calendar-compact-editor-header,
-  .calendar-compact-editor-footer {
-    padding-inline: 10px;
-  }
-
   .timeline-delete-undo {
     align-items: center;
     gap: 8px;
@@ -9044,6 +9029,30 @@ dialog.ui-dialog.manual-entry-dialog {
 
   .timeline-delete-undo > span {
     padding-left: 0;
+  }
+}
+
+@media (max-width: 350px) {
+  .calendar-compact-discard-confirmation {
+    grid-template-areas:
+      "prompt prompt"
+      "back discard";
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 6px;
+  }
+
+  .calendar-compact-discard-confirmation strong {
+    grid-area: prompt;
+    white-space: normal;
+  }
+
+  .calendar-compact-discard-back {
+    grid-area: back;
+    justify-self: end;
+  }
+
+  .calendar-compact-discard-confirm {
+    grid-area: discard;
   }
 }
 
@@ -9318,6 +9327,8 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .inline-tag-input-anchor {
+  --inline-selected-tag-target-height: 44px;
+  --inline-selected-tag-visual-height: 24px;
   display: flex;
   align-items: center;
   overflow: visible;
@@ -9344,50 +9355,69 @@ dialog.ui-dialog.manual-entry-dialog {
 .inline-selected-tag-overflow {
   display: inline-flex;
   min-width: 0;
-  min-height: 32px;
+  height: var(--inline-selected-tag-target-height);
+  min-height: var(--inline-selected-tag-target-height);
   flex: 0 0 auto;
   align-items: center;
+  justify-content: center;
   border: 0;
-  border-radius: 6px;
   background: transparent;
-  padding: 0 5px;
+  margin-block: calc((var(--web-control-height) - var(--inline-selected-tag-target-height)) / 2);
+  padding: 0;
   color: var(--foreground);
   font: inherit;
   font-size: 11px;
-  font-weight: 750;
+  font-weight: 400;
   white-space: nowrap;
 }
 
-.inline-selected-tag {
+.inline-selected-tag-visual,
+.inline-selected-tag-overflow-visual {
+  display: inline-flex;
+  height: var(--inline-selected-tag-visual-height);
+  min-height: var(--inline-selected-tag-visual-height);
+  align-items: center;
+  border-radius: 6px;
+  padding: 0 5px;
+  background: transparent;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.inline-selected-tag-visual {
   gap: 3px;
 }
 
-.inline-selected-tag > svg {
+.inline-selected-tag-visual > svg {
   flex: 0 0 auto;
   pointer-events: none;
 }
 
-.inline-selected-tag-overflow {
+.inline-selected-tag-overflow-visual {
   padding-inline: 6px;
   color: var(--muted);
 }
 
-.inline-selected-tag:hover,
-.inline-selected-tag:focus-visible {
+.inline-selected-tag:hover .inline-selected-tag-visual,
+.inline-selected-tag:focus-visible .inline-selected-tag-visual {
   background: var(--accent-soft);
   color: var(--accent-text);
 }
 
-.inline-selected-tag-overflow:hover,
-.inline-selected-tag-overflow:focus-visible {
+.inline-selected-tag-overflow:hover .inline-selected-tag-overflow-visual,
+.inline-selected-tag-overflow:focus-visible .inline-selected-tag-overflow-visual {
   background: var(--surface-muted);
   color: var(--foreground);
 }
 
 .inline-selected-tag:focus-visible,
 .inline-selected-tag-overflow:focus-visible {
-  outline: 2px solid var(--control-border);
-  outline-offset: -2px;
+  outline: 0;
+}
+
+.inline-selected-tag:focus-visible .inline-selected-tag-visual,
+.inline-selected-tag-overflow:focus-visible .inline-selected-tag-overflow-visual {
+  box-shadow: inset 0 0 0 2px var(--control-border);
 }
 
 .inline-tag-picker-trigger {
@@ -9407,13 +9437,8 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .inline-tag-measurer > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 0 8px;
   font-size: 11px;
-  font-weight: 750;
-  white-space: nowrap;
+  font-weight: 400;
 }
 
 @media (max-width: 1020px) {

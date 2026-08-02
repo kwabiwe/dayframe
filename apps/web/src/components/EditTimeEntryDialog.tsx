@@ -167,6 +167,7 @@ export function EditTimeEntryDialog({
   return (
     <ModalDialog
       busy={isBusy}
+      className="edit-time-entry-dialog"
       onClose={onClose}
       title="Edit time block"
       footer={(

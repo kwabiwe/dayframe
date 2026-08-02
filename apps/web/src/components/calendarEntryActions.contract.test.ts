@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const source = readFileSync(new URL("./TimeReviewViews.tsx", import.meta.url), "utf8");
 const editor = readFileSync(new URL("./CalendarEntryCompactEditor.tsx", import.meta.url), "utf8");
+const editDialog = readFileSync(new URL("./EditTimeEntryDialog.tsx", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
 const runtime = readFileSync(new URL("./AppShellRuntime.tsx", import.meta.url), "utf8");
 const deleteHook = readFileSync(new URL("./useTimelineDeleteUndo.ts", import.meta.url), "utf8");
@@ -33,6 +34,9 @@ describe("Calendar compact entry editor", () => {
     expect(editor).toContain('placeholder="Enter task description"');
     expect(editor).not.toContain("Times use this entry’s original dates.");
     expect(styles).toMatch(/\.calendar-compact-editor input:focus-visible\s*\{[^}]*var\(--control-border\)/s);
+    expect(styles).toMatch(/\.calendar-compact-icon-action:focus-visible,[\s\S]*outline:\s*2px solid var\(--focus\);/s);
+    expect(editDialog).toContain('className="edit-time-entry-dialog"');
+    expect(styles).toMatch(/\.edit-time-entry-dialog \.ui-control:focus-visible,[\s\S]*border-color:\s*var\(--control-border\);/s);
   });
 
   it("guards outside dismissal when the local draft has unsaved changes", () => {
@@ -45,6 +49,19 @@ describe("Calendar compact entry editor", () => {
     expect(editor).toContain("if (discardPromptRef.current) return;");
     expect(styles).toContain(".calendar-compact-discard-confirmation");
     expect(styles).toContain(".calendar-compact-editor-footer.is-confirming-discard");
+  });
+
+  it("aligns the normal and discard actions to one stable compact-editor footer grid", () => {
+    expect(styles).toMatch(/\.calendar-compact-editor \{[^}]*--web-control-height:\s*44px;[^}]*--calendar-compact-horizontal-inset:\s*12px;/s);
+    expect(styles).toMatch(/\.calendar-compact-editor-fields \{[^}]*padding:\s*12px var\(--calendar-compact-horizontal-inset\);/s);
+    expect(styles).toMatch(/\.calendar-compact-editor-header,\s*\.calendar-compact-editor-footer \{[^}]*padding:\s*10px var\(--calendar-compact-horizontal-inset\);/s);
+    expect(styles).toMatch(/\.calendar-compact-editor-footer \{[^}]*display:\s*grid;[^}]*width:\s*100%;[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s);
+    expect(styles).toMatch(/\.calendar-compact-editor-default-actions,[\s\S]*\.calendar-compact-discard-confirmation \{[^}]*grid-area:\s*1 \/ 1;[^}]*width:\s*100%;/s);
+    expect(styles).toMatch(/\.calendar-compact-editor-default-actions \{[^}]*justify-content:\s*flex-end;/s);
+    expect(styles).toMatch(/\.calendar-compact-save,[\s\S]*\.calendar-compact-discard-confirm \{[^}]*height:\s*var\(--web-control-height\);[^}]*font-size:\s*14px;[^}]*font-weight:\s*650;/s);
+    expect(styles).toMatch(/\.calendar-compact-save \{[^}]*background:\s*var\(--accent\);[^}]*color:\s*var\(--on-accent\);/s);
+    expect(styles).toMatch(/\.calendar-compact-discard-confirm \{[^}]*background:\s*var\(--accent\);[^}]*color:\s*var\(--on-accent\);/s);
+    expect(styles).toMatch(/@media \(max-width: 350px\)[\s\S]*\.calendar-compact-discard-confirmation \{[^}]*grid-template-areas:[^}]*"prompt prompt"[^}]*"back discard";/s);
   });
 
   it("sends only the compact partial payload and routes active edits through the shell gate", () => {

@@ -1,3 +1,56 @@
+# PR #155 visual consistency design QA
+
+Source visual truth paths:
+
+- `/var/folders/_y/d82t1rxn1yx387zk0tktcmv40000gq/T/codex-clipboard-c3793c59-75a7-4ea4-bfc1-5c7c25e1b334.png`
+- `/var/folders/_y/d82t1rxn1yx387zk0tktcmv40000gq/T/codex-clipboard-2384fc2a-facb-4b7e-a2e9-12c0ea822d12.png`
+- `/var/folders/_y/d82t1rxn1yx387zk0tktcmv40000gq/T/codex-clipboard-a8c1c16e-9013-4049-8bbd-d6c93c733d7e.png`
+
+Implementation screenshot paths:
+
+- `/Users/major/.openclaw/workspace/projects/dayframe/.codex/qa/pr155-visual-consistency/compact-discard-consistent-light-390.png`
+- `/Users/major/.openclaw/workspace/projects/dayframe/.codex/qa/pr155-visual-consistency/compact-save-aligned-light-390.png`
+- `/Users/major/.openclaw/workspace/projects/dayframe/.codex/qa/pr155-visual-consistency/timer-neutral-focus-selected-tag-light-1440.png`
+
+Viewport and normalization:
+
+- Compact editor: implementation captured at a 390x844 CSS viewport with device scale factor 1, then cropped to a 378x470 component region. Source pixels are 400x412 for discard and 368x377 for Save. The comparison used component crops rather than density scaling; source and implementation use different fixture copy, and the implementation intentionally includes a real overlap notice.
+- Persistent timer: implementation captured at a 1440x900 CSS viewport with device scale factor 1, then cropped to 1204x241. Source pixels are 1108x254. The comparison used the shared timer/Timeline-toolbar region; the source is idle with Suggestions while the implementation is running with a selected tag so the requested focus and tag states are visible together.
+- State: Light appearance for source-matched comparisons. Separate rendered checks covered explicit Dark and System-resolved Dark.
+
+## Full-view comparison evidence
+
+- The supplied discard image and `compact-discard-consistent-light-390.png` were opened together. The implementation preserves the same compact card hierarchy and stable footer, while deliberately changing Discard from danger red to the same coral accent as Save and matching action typography/height. The overlap row is fixture-driven product content, not design drift.
+- The supplied Save image and `compact-save-aligned-light-390.png` were opened together. Save now owns the form's right inset rather than the previous centred/intrinsic position; its right edge equals the Description, Category and Duration right edge.
+- The supplied timer image and `timer-neutral-focus-selected-tag-light-1440.png` were opened together. The blue field perimeter is replaced by neutral control-border while coral selection/actions and blue standalone focus semantics remain available. The selected tag is normal-weight plain text with a thin X and no default fill.
+
+## Focused region comparison evidence
+
+- Typography: system stack retained. Tag computes to weight 400; compact action labels compute to 14px/650; prompt computes to 12px/600 and remains one line at 390px.
+- Spacing/layout: removable tag target is 44px and visual wrapper 24px; compact field and Save right edges are all 367px at 390px and 691px at 1440px; footer height is unchanged when the discard layer replaces Save.
+- Colors/tokens: field focus resolves to `control-border`; Light Save/Discard both resolve to `rgb(244, 93, 67)` and Dark Save/Discard to `rgb(255, 98, 72)`; `+N` remains neutral.
+- Image quality/assets: no source imagery is involved. Existing Lucide icon assets remain sharp and unchanged; no approximated or replacement art was introduced.
+- Copy/content: `Discard unsaved changes?`, `Go back`, `Discard`, and `Save` match the requested copy. Fixture descriptions/categories/times and the overlap notice intentionally differ from the supplied regression screenshots.
+
+## Findings
+
+- No actionable P0, P1 or P2 mismatch remains in the requested focus, tag, Save-alignment or discard-decision surfaces.
+- P3: the compact-desktop Timeline segment buttons retain the existing 38px density token while compact-editor actions are the requested 44px. At the 390px touch breakpoint both render at 44px. The selector was intentionally not changed because the request explicitly scoped the geometry change to the compact editor.
+
+## Comparison history
+
+- Pass 1: no actionable P0/P1/P2 findings. No visual fix was made in response to this comparison.
+
+## Primary interactions and runtime checks
+
+- Tested neutral pointer focus in idle/running timer states; one/multiple/long/`+1` tags; full Edit time block field focus; tag add/remove; compact Save; dirty outside decision; Go back/Escape focus restoration; Discard without save; phone containment; explicit Light/Dark/System; and console warnings/errors.
+- Browser console/runtime errors: none.
+- OS-level Reduced Motion emulation was not available in the selected browser; the unchanged 1ms media-query path remains contract-covered.
+
+final result: passed
+
+---
+
 # Dayframe Dashboard Design QA
 
 Source visual: `/Users/ksibanda/Downloads/Image.png`

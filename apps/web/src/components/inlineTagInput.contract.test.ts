@@ -40,13 +40,25 @@ describe("web tag editor interaction contract", () => {
     expect(source).toContain("Remove tag ${tagName}");
     expect(source).toContain("onClick={() => toggleSelectedTag(tagName)}");
     expect(source).toContain('className="inline-selected-tag"');
+    expect(source).toContain('className="inline-selected-tag-visual"');
     expect(source).toContain('#{tagName}');
     expect(source).toContain("selectVisibleTags(selectedTagNames");
     expect(source).toContain('className="inline-selected-tag-overflow"');
     expect(source).toContain('<X aria-hidden="true" size={12} strokeWidth={1.6} />');
     expect(editDialogSource).toContain("<InlineTagInput");
     expect(timerSource).toContain("<InlineTagInput");
-    expect(styles).toMatch(/\.inline-selected-tag,\s*\.inline-selected-tag-overflow\s*\{[^}]*border-radius:\s*6px;[^}]*background:\s*transparent;/s);
-    expect(styles).toMatch(/\.inline-selected-tag:hover,\s*\.inline-selected-tag:focus-visible\s*\{[^}]*background:\s*var\(--accent-soft\);[^}]*color:\s*var\(--accent-text\);/s);
+  });
+
+  it("separates the accessible hit target from the compact visible tag fill", () => {
+    expect(styles).toMatch(/\.inline-tag-input-anchor \{[^}]*--inline-selected-tag-target-height:\s*44px;[^}]*--inline-selected-tag-visual-height:\s*24px;/s);
+    expect(styles).toMatch(/\.inline-selected-tag,\s*\.inline-selected-tag-overflow\s*\{[^}]*height:\s*var\(--inline-selected-tag-target-height\);[^}]*background:\s*transparent;[^}]*font-weight:\s*400;/s);
+    expect(styles).toMatch(/\.inline-selected-tag-visual,\s*\.inline-selected-tag-overflow-visual\s*\{[^}]*height:\s*var\(--inline-selected-tag-visual-height\);[^}]*border-radius:\s*6px;[^}]*background:\s*transparent;/s);
+    expect(styles).toMatch(/\.inline-selected-tag:hover \.inline-selected-tag-visual,\s*\.inline-selected-tag:focus-visible \.inline-selected-tag-visual\s*\{[^}]*background:\s*var\(--accent-soft\);[^}]*color:\s*var\(--accent-text\);/s);
+    expect(styles).toMatch(/\.inline-selected-tag-overflow:hover \.inline-selected-tag-overflow-visual,[\s\S]*background:\s*var\(--surface-muted\);/s);
+  });
+
+  it("measures the same normal-weight label and thin X used by visible tags", () => {
+    expect(source).toMatch(/className="inline-selected-tag-visual" data-tag-measure[^>]*>[\s\S]*#\{tagName\}[\s\S]*<X size=\{12\} strokeWidth=\{1\.6\}/);
+    expect(styles).toMatch(/\.inline-tag-measurer > span \{[^}]*font-size:\s*11px;[^}]*font-weight:\s*400;/s);
   });
 });

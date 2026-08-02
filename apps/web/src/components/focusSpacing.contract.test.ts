@@ -33,4 +33,9 @@ describe("web focus and control contracts", () => {
     expect(styles).toMatch(/button:focus-visible,[\s\S]*outline: 2px solid var\(--focus\);[\s\S]*outline-offset: 2px;/);
     expect(styles).toContain(".focus-ring:not(input, select, textarea):focus-visible");
   });
+
+  it("keeps the persistent timer Description perimeter neutral without hiding validation", () => {
+    expect(styles).toMatch(/\.swiss-timer-description-control \.ui-compound-control:focus-within \{[^}]*border-color:\s*var\(--control-border\);/s);
+    expect(styles).toMatch(/\.swiss-timer-description-control \.ui-compound-control:has\(input\[aria-invalid="true"\]\):focus-within \{[^}]*border-color:\s*var\(--control-border\);[^}]*box-shadow:\s*inset 0 -2px 0 var\(--danger\);/s);
+  });
 });
