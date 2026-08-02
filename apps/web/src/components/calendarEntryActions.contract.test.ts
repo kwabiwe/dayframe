@@ -12,7 +12,7 @@ const controller = readFileSync(new URL("../lib/timeline-delete-undo-controller.
 describe("Calendar compact entry editor", () => {
   it("replaces the bottom quick card with one anchored portalled editor", () => {
     expect(source).toContain("<CalendarEntryCompactEditor");
-    expect(source).toContain("anchor={selectedTarget.anchor}");
+    expect(source).toContain("anchor={visibleSelectedTarget.anchor}");
     expect(source).not.toContain("calendar-entry-quick-card");
     expect(editor).toContain("createPortal(");
     expect(editor).toContain('data-testid="calendar-compact-editor"');
@@ -48,6 +48,8 @@ describe("Calendar compact entry editor", () => {
     expect(editor).toContain("event.stopPropagation()");
     expect(editor).toContain("discardReturnFocusRef");
     expect(editor).toContain("if (discardPromptRef.current) return;");
+    expect(editor).toContain("onClick={() => attemptDismiss(Boolean(entry))}");
+    expect(editor).toContain("attemptDismiss(Boolean(entry));");
     expect(styles).toContain(".calendar-compact-discard-confirmation");
     expect(styles).toContain(".calendar-compact-editor-footer.is-confirming-discard");
   });
@@ -115,7 +117,7 @@ describe("Calendar compact entry editor", () => {
   it("invalidates stale exit work when a newer editor session replaces it", () => {
     expect(source).toContain("selectionSessionRef");
     expect(source).toContain("selectedTargetRef.current?.sessionId !== target.sessionId");
-    expect(source).toContain('key={`${selectedTarget.blockKey}:${selectedTarget.sessionId}`}');
+    expect(source).toContain('key={`${visibleSelectedTarget.blockKey}:${visibleSelectedTarget.sessionId}`}');
     expect(editor).toContain("window.clearTimeout(exitTimeoutRef.current)");
     expect(editor).toContain("closeTokenRef.current += 1");
   });

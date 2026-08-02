@@ -29,6 +29,28 @@ export type CalendarEntryCompactSavePlan = {
   };
 };
 
+export type CalendarEntryCompactCreateSource = {
+  startedAt: string;
+  stoppedAt: string;
+};
+
+export type CalendarEntryCompactCreatePlan = {
+  durationSeconds: number;
+  input: {
+    categoryId?: string;
+    description?: string;
+    tagNames: [];
+    startedAt: string;
+    stoppedAt: string;
+  };
+  resolved: {
+    categoryId: string | null;
+    description: string | null;
+    startedAt: string;
+    stoppedAt: string;
+  };
+};
+
 export type CalendarEditorRect = {
   bottom: number;
   height: number;
@@ -62,11 +84,31 @@ export function calendarEntryCompactInitialDraft(entry: TimeEntryRow): CalendarE
   };
 }
 
+export function calendarEntryCompactCreateInitialDraft(
+  source: CalendarEntryCompactCreateSource
+): CalendarEntryCompactDraft {
+  return {
+    categoryId: "",
+    description: "",
+    startedAt: dateTimeLocal(source.startedAt).slice(11),
+    stoppedAt: dateTimeLocal(source.stoppedAt).slice(11)
+  };
+}
+
 export function calendarEntryCompactDraftHasChanges(
   entry: TimeEntryRow,
   draft: CalendarEntryCompactDraft
 ) {
   const initial = calendarEntryCompactInitialDraft(entry);
+  return (Object.keys(initial) as Array<keyof CalendarEntryCompactDraft>)
+    .some((key) => draft[key] !== initial[key]);
+}
+
+export function calendarEntryCompactCreateDraftHasChanges(
+  source: CalendarEntryCompactCreateSource,
+  draft: CalendarEntryCompactDraft
+) {
+  const initial = calendarEntryCompactCreateInitialDraft(source);
   return (Object.keys(initial) as Array<keyof CalendarEntryCompactDraft>)
     .some((key) => draft[key] !== initial[key]);
 }
@@ -119,6 +161,44 @@ export function buildCalendarEntryCompactSavePlan({
       Math.floor(((stoppedAt ? new Date(stoppedAt) : now).getTime() - new Date(startedAt).getTime()) / 1_000)
     ),
     payload,
+    resolved: { categoryId, description, startedAt, stoppedAt }
+  };
+}
+
+export function buildCalendarEntryCompactCreatePlan({
+  draft,
+  source
+}: {
+  draft: CalendarEntryCompactDraft;
+  source: CalendarEntryCompactCreateSource;
+}): CalendarEntryCompactCreatePlan {
+  const description = draft.description.trim() || null;
+  const categoryId = draft.categoryId || null;
+  const startedAt = timeOnOriginalLocalDate(
+    source.startedAt,
+    draft.startedAt,
+    "Enter a valid start time."
+  );
+  const stoppedAt = timeOnOriginalLocalDate(
+    source.stoppedAt,
+    draft.stoppedAt,
+    "Enter a valid finish time."
+  );
+  const startedAtMs = new Date(startedAt).getTime();
+  const stoppedAtMs = new Date(stoppedAt).getTime();
+  if (stoppedAtMs <= startedAtMs) {
+    throw new Error("Finish time must be after the start time.");
+  }
+
+  return {
+    durationSeconds: Math.floor((stoppedAtMs - startedAtMs) / 1_000),
+    input: {
+      ...(categoryId ? { categoryId } : {}),
+      ...(description ? { description } : {}),
+      tagNames: [],
+      startedAt,
+      stoppedAt
+    },
     resolved: { categoryId, description, startedAt, stoppedAt }
   };
 }

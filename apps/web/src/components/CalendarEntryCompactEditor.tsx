@@ -6,14 +6,19 @@ import { createPortal } from "react-dom";
 import { Check, ChevronDown, Play, Trash2, X } from "lucide-react";
 import { OverlapNotice } from "@/components/OverlapNotice";
 import {
+  buildCalendarEntryCompactCreatePlan,
   buildCalendarEntryCompactSavePlan,
   calculateCalendarEditorPosition,
   calendarEditorPointerIsInside,
   calendarEditorRectIsVisible,
+  calendarEntryCompactCreateDraftHasChanges,
+  calendarEntryCompactCreateInitialDraft,
   calendarEntryCompactDraftHasChanges,
   calendarEntryCompactInitialDraft,
   emptyCalendarEntryCompactDirty,
   type CalendarEditorPosition,
+  type CalendarEntryCompactCreatePlan,
+  type CalendarEntryCompactCreateSource,
   type CalendarEntryCompactDirty,
   type CalendarEntryCompactDraft,
   type CalendarEntryCompactSavePlan
@@ -25,36 +30,56 @@ import type { CategoryRow, TimeEntryRow } from "@/lib/queries";
 
 type MutationOutcome = { ok: true } | { ok: false; error: string };
 
-export function CalendarEntryCompactEditor({
-  anchor,
-  capturedNow,
-  categories,
-  entry,
-  focusOnOpen,
-  isTimerBusy,
-  onDelete,
-  onDismiss,
-  onSave,
-  onStartAgain,
-  peerEntries,
-  positionKey,
-  scrollContainer
-}: {
+type CalendarEntryCompactEditorSharedProps = {
   anchor: HTMLElement;
   capturedNow: Date;
   categories: CategoryRow[];
-  entry: TimeEntryRow;
   focusOnOpen: boolean;
   isTimerBusy: boolean;
-  onDelete: () => void;
   onDismiss: (options: { restoreFocus: boolean }) => void;
-  onSave: (plan: CalendarEntryCompactSavePlan) => Promise<MutationOutcome>;
-  onStartAgain: () => Promise<MutationOutcome>;
+  onOutsidePointerDown?: (pointer: { pointerId: number; pointerDownTimeStamp: number }) => void;
   peerEntries: TimeEntryRow[];
   positionKey: string;
   scrollContainer: HTMLElement | null;
-}) {
-  const [draft, setDraft] = useState<CalendarEntryCompactDraft>(() => calendarEntryCompactInitialDraft(entry));
+};
+
+type CalendarEntryCompactEditorProps = CalendarEntryCompactEditorSharedProps & (
+  | {
+      mode: "entry";
+      entry: TimeEntryRow;
+      onDelete: () => void;
+      onSave: (plan: CalendarEntryCompactSavePlan) => Promise<MutationOutcome>;
+      onStartAgain: () => Promise<MutationOutcome>;
+    }
+  | {
+      mode: "create";
+      source: CalendarEntryCompactCreateSource;
+      onDraftChange: (plan: CalendarEntryCompactCreatePlan | null) => void;
+      onSave: (plan: CalendarEntryCompactCreatePlan) => Promise<MutationOutcome>;
+    }
+);
+
+export function CalendarEntryCompactEditor(props: CalendarEntryCompactEditorProps) {
+  const {
+    anchor,
+    capturedNow,
+    categories,
+    focusOnOpen,
+    isTimerBusy,
+    onDismiss,
+    onOutsidePointerDown,
+    peerEntries,
+    positionKey,
+    scrollContainer
+  } = props;
+  const entry = props.mode === "entry" ? props.entry : null;
+  const createSource = props.mode === "create" ? props.source : null;
+  const onCreateDraftChange = props.mode === "create" ? props.onDraftChange : null;
+  const [draft, setDraft] = useState<CalendarEntryCompactDraft>(() => (
+    props.mode === "entry"
+      ? calendarEntryCompactInitialDraft(props.entry)
+      : calendarEntryCompactCreateInitialDraft(props.source)
+  ));
   const [dirty, setDirty] = useState<CalendarEntryCompactDirty>(emptyCalendarEntryCompactDirty);
   const [error, setError] = useState<string | null>(null);
   const [isCategoryOpen, setIsCategoryOpen] = useState(false);
@@ -72,15 +97,19 @@ export function CalendarEntryCompactEditor({
   const discardFocusRestorePendingRef = useRef(false);
   const discardPromptRef = useRef(false);
   const discardReturnFocusRef = useRef<HTMLElement | null>(null);
+  const busyRef = useRef(false);
   const closeTokenRef = useRef(0);
   const exitTimeoutRef = useRef<number | null>(null);
+  const onDraftChangeRef = useRef(onCreateDraftChange);
   const selectedCategory = categories.find((category) => category.id === draft.categoryId) ?? null;
   const categoryOptions = useMemo(() => [null, ...categories] as Array<CategoryRow | null>, [categories]);
   const preview = useMemo(() => {
     try {
       return {
         error: null,
-        plan: buildCalendarEntryCompactSavePlan({ draft, dirty, entry, now })
+        plan: entry
+          ? buildCalendarEntryCompactSavePlan({ draft, dirty, entry, now })
+          : buildCalendarEntryCompactCreatePlan({ draft, source: createSource as CalendarEntryCompactCreateSource })
       };
     } catch (previewError) {
       return {
@@ -88,10 +117,12 @@ export function CalendarEntryCompactEditor({
         plan: null
       };
     }
-  }, [dirty, draft, entry, now]);
+  }, [createSource, dirty, draft, entry, now]);
   const hasUnsavedChanges = useMemo(
-    () => calendarEntryCompactDraftHasChanges(entry, draft),
-    [draft, entry]
+    () => entry
+      ? calendarEntryCompactDraftHasChanges(entry, draft)
+      : calendarEntryCompactCreateDraftHasChanges(createSource as CalendarEntryCompactCreateSource, draft),
+    [createSource, draft, entry]
   );
   const controlsDisabled = isBusy || discardPrompt;
 
@@ -114,7 +145,7 @@ export function CalendarEntryCompactEditor({
   }, [onDismiss]);
 
   const requestDismiss = useCallback((restoreFocus: boolean) => {
-    if (isBusy) return;
+    if (busyRef.current) return;
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (reduceMotion) {
       finishDismiss(restoreFocus);
@@ -127,7 +158,7 @@ export function CalendarEntryCompactEditor({
       exitTimeoutRef.current = null;
       if (closeTokenRef.current === token) onDismiss({ restoreFocus });
     }, 90);
-  }, [finishDismiss, isBusy, onDismiss]);
+  }, [finishDismiss, onDismiss]);
 
   const showDiscardPrompt = useCallback(() => {
     if (discardPromptRef.current) return;
@@ -154,11 +185,31 @@ export function CalendarEntryCompactEditor({
     requestDismiss(false);
   }, [requestDismiss]);
 
+  const attemptDismiss = useCallback((restoreFocus: boolean) => {
+    if (hasUnsavedChanges) {
+      showDiscardPrompt();
+      return;
+    }
+    requestDismiss(restoreFocus);
+  }, [hasUnsavedChanges, requestDismiss, showDiscardPrompt]);
+
   useEffect(() => () => {
     closeTokenRef.current += 1;
     discardPromptRef.current = false;
     if (exitTimeoutRef.current !== null) window.clearTimeout(exitTimeoutRef.current);
   }, []);
+
+  useEffect(() => {
+    onDraftChangeRef.current = onCreateDraftChange;
+  }, [onCreateDraftChange]);
+
+  useEffect(() => {
+    if (!createSource) return;
+    onDraftChangeRef.current?.(preview.plan as CalendarEntryCompactCreatePlan | null);
+  }, [
+    createSource,
+    preview.plan
+  ]);
 
   useLayoutEffect(() => {
     if (discardPrompt || !discardFocusRestorePendingRef.current) return;
@@ -245,22 +296,26 @@ export function CalendarEntryCompactEditor({
   }, [focusOnOpen]);
 
   useEffect(() => {
-    if (entry.stoppedAt) return undefined;
+    if (!entry || entry.stoppedAt) return undefined;
     const interval = window.setInterval(() => setNow(new Date()), 1_000);
     return () => window.clearInterval(interval);
-  }, [entry.stoppedAt]);
+  }, [entry]);
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
       const panel = panelRef.current;
-      if (isBusy || !panel || calendarEditorPointerIsInside(event.composedPath(), panel, anchor)) return;
+      if (busyRef.current || !panel || calendarEditorPointerIsInside(event.composedPath(), panel, anchor)) return;
+      onOutsidePointerDown?.({
+        pointerId: event.pointerId,
+        pointerDownTimeStamp: event.timeStamp
+      });
       if (hasUnsavedChanges) {
         event.preventDefault();
         event.stopPropagation();
         showDiscardPrompt();
         return;
       }
-      finishDismiss(false);
+      requestDismiss(false);
     };
     const handleClick = (event: MouseEvent) => {
       const panel = panelRef.current;
@@ -281,7 +336,7 @@ export function CalendarEntryCompactEditor({
       document.removeEventListener("pointerdown", handlePointerDown, true);
       document.removeEventListener("click", handleClick, true);
     };
-  }, [anchor, finishDismiss, hasUnsavedChanges, isBusy, showDiscardPrompt]);
+  }, [anchor, hasUnsavedChanges, onOutsidePointerDown, requestDismiss, showDiscardPrompt]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -298,40 +353,46 @@ export function CalendarEntryCompactEditor({
         return;
       }
       event.preventDefault();
-      requestDismiss(true);
+      attemptDismiss(Boolean(entry));
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [cancelDiscardPrompt, discardPrompt, isCategoryOpen, requestDismiss]);
+  }, [attemptDismiss, cancelDiscardPrompt, discardPrompt, entry, isCategoryOpen]);
 
   async function save() {
-    if (isBusy) return;
+    if (busyRef.current || isTimerBusy) return;
     if (!preview.plan) {
       setError(preview.error);
       return;
     }
-    if (Object.keys(preview.plan.payload).length === 0) {
+    if (entry && Object.keys((preview.plan as CalendarEntryCompactSavePlan).payload).length === 0) {
       finishDismiss(true);
       return;
     }
+    busyRef.current = true;
     setIsBusy(true);
     setError(null);
-    const outcome = await onSave(preview.plan);
+    const outcome = props.mode === "entry"
+      ? await props.onSave(preview.plan as CalendarEntryCompactSavePlan)
+      : await props.onSave(preview.plan as CalendarEntryCompactCreatePlan);
     if (!outcome.ok) {
       setError(outcome.error);
+      busyRef.current = false;
       setIsBusy(false);
       return;
     }
-    finishDismiss(true);
+    finishDismiss(Boolean(entry));
   }
 
   async function startAgain() {
-    if (isBusy || isTimerBusy) return;
+    if (props.mode !== "entry" || busyRef.current || isTimerBusy) return;
+    busyRef.current = true;
     setIsBusy(true);
     setError(null);
-    const outcome = await onStartAgain();
+    const outcome = await props.onStartAgain();
     if (!outcome.ok) {
       setError(outcome.error);
+      busyRef.current = false;
       setIsBusy(false);
       return;
     }
@@ -362,10 +423,16 @@ export function CalendarEntryCompactEditor({
     }
   }
 
-  const title = entry.description?.trim() || entry.categoryName?.trim() || "Untitled entry";
-  const datesDiffer = entry.stoppedAt
-    ? dateTimeLocal(entry.startedAt).slice(0, 10) !== dateTimeLocal(entry.stoppedAt).slice(0, 10)
-    : false;
+  const title = entry
+    ? entry.description?.trim() || entry.categoryName?.trim() || "Untitled entry"
+    : draft.description.trim() || selectedCategory?.name || "Uncategorized";
+  const displayedStartedAt = entry?.startedAt ?? createSource?.startedAt ?? null;
+  const displayedStoppedAt = entry?.stoppedAt ?? createSource?.stoppedAt ?? null;
+  const datesDiffer = Boolean(
+    displayedStartedAt &&
+    displayedStoppedAt &&
+    dateTimeLocal(displayedStartedAt).slice(0, 10) !== dateTimeLocal(displayedStoppedAt).slice(0, 10)
+  );
   const displayError = error ?? preview.error;
   const startIsInvalid = Boolean(preview.error && /start time/i.test(preview.error));
   const finishIsInvalid = Boolean(preview.error && /finish time/i.test(preview.error));
@@ -376,7 +443,7 @@ export function CalendarEntryCompactEditor({
           stoppedAt: preview.plan.resolved.stoppedAt
         },
         entries: peerEntries,
-        excludeEntryId: entry.id
+        excludeEntryId: entry?.id ?? null
       })
     : null;
   const feedbackMode = discardPrompt
@@ -392,7 +459,7 @@ export function CalendarEntryCompactEditor({
       <button
         type="button"
         className="calendar-compact-save"
-        disabled={isBusy || !preview.plan}
+        disabled={isBusy || isTimerBusy || !preview.plan}
         onClick={() => void save()}
       >
         Save
@@ -412,7 +479,8 @@ export function CalendarEntryCompactEditor({
       ].join(" ")}
       data-testid="calendar-compact-editor"
       role="dialog"
-      aria-label={`Edit ${title}`}
+      aria-label={entry ? `Edit ${title}` : "Create Calendar entry"}
+      aria-busy={isBusy || undefined}
       aria-modal="false"
       style={{
         left: position?.left ?? 12,
@@ -424,11 +492,11 @@ export function CalendarEntryCompactEditor({
     >
       <div className="calendar-compact-editor-header">
         <div>
-          <span className="calendar-compact-editor-kicker">Calendar entry</span>
+          <span className="calendar-compact-editor-kicker">{entry ? "Calendar entry" : "New Calendar entry"}</span>
           <strong>{title}</strong>
         </div>
         <div className="calendar-compact-editor-icons">
-          {entry.stoppedAt ? (
+          {entry?.stoppedAt && props.mode === "entry" ? (
             <button
               className="calendar-compact-icon-action"
               type="button"
@@ -439,10 +507,12 @@ export function CalendarEntryCompactEditor({
               <Play size={16} fill="currentColor" strokeWidth={0} aria-hidden="true" />
             </button>
           ) : null}
-          <button className="calendar-compact-icon-action is-danger" type="button" aria-label={`Delete ${title}`} disabled={controlsDisabled} onClick={onDelete}>
-            <Trash2 size={17} aria-hidden="true" />
-          </button>
-          <button className="calendar-compact-icon-action" type="button" aria-label="Close editor" disabled={controlsDisabled} onClick={() => requestDismiss(true)}>
+          {props.mode === "entry" ? (
+            <button className="calendar-compact-icon-action is-danger" type="button" aria-label={`Delete ${title}`} disabled={controlsDisabled} onClick={props.onDelete}>
+              <Trash2 size={17} aria-hidden="true" />
+            </button>
+          ) : null}
+          <button className="calendar-compact-icon-action" type="button" aria-label="Close editor" disabled={controlsDisabled} onClick={() => attemptDismiss(Boolean(entry))}>
             <X size={18} aria-hidden="true" />
           </button>
         </div>
@@ -477,7 +547,7 @@ export function CalendarEntryCompactEditor({
               style={{ background: selectedCategory?.color ?? "var(--muted)" }}
               aria-hidden="true"
             />
-            <span>{selectedCategory?.name ?? "No category"}</span>
+            <span>{selectedCategory?.name ?? (entry ? "No category" : "Uncategorized")}</span>
             <ChevronDown size={15} aria-hidden="true" />
           </button>
           {isCategoryOpen ? (
@@ -504,7 +574,7 @@ export function CalendarEntryCompactEditor({
                       style={{ background: category?.color ?? "var(--muted)" }}
                       aria-hidden="true"
                     />
-                    <span>{category?.name ?? "No category"}</span>
+                    <span>{category?.name ?? (entry ? "No category" : "Uncategorized")}</span>
                     {selected ? <Check size={15} aria-hidden="true" /> : null}
                   </button>
                 );
@@ -527,7 +597,7 @@ export function CalendarEntryCompactEditor({
               onChange={(event) => updateField("startedAt", maskTimeInput(event.target.value))}
             />
           </label>
-          {entry.stoppedAt ? (
+          {entry?.stoppedAt || createSource ? (
             <label>
               <span>Finish</span>
               <input
@@ -542,14 +612,20 @@ export function CalendarEntryCompactEditor({
               />
             </label>
           ) : null}
-          <div className="calendar-compact-duration" aria-label={entry.stoppedAt ? "Duration" : "Elapsed time"}>
-            <span>{entry.stoppedAt ? "Duration" : "Elapsed"}</span>
-            <strong className="tabular">{preview.plan ? formatClockDuration(preview.plan.durationSeconds) : "—"}</strong>
+          <div className="calendar-compact-duration" aria-label={entry?.stoppedAt || createSource ? "Duration" : "Elapsed time"}>
+            <span>{entry?.stoppedAt || createSource ? "Duration" : "Elapsed"}</span>
+            <strong className="tabular">
+              {preview.plan
+                ? entry
+                  ? formatClockDuration(preview.plan.durationSeconds)
+                  : formatFullClockDuration(preview.plan.durationSeconds)
+                : "—"}
+            </strong>
           </div>
         </div>
         {datesDiffer ? (
           <p className="calendar-compact-date-context">
-            Start {formatDate(entry.startedAt)} · Finish {formatDate(entry.stoppedAt as string)}
+            Start {formatDate(displayedStartedAt as string)} · Finish {formatDate(displayedStoppedAt as string)}
           </p>
         ) : null}
       </div>
@@ -567,7 +643,7 @@ export function CalendarEntryCompactEditor({
           aria-hidden={feedbackMode !== "default"}
           inert={feedbackMode !== "default"}
         >
-          {entry.stoppedAt ? null : <span>Running timer</span>}
+          {entry && !entry.stoppedAt ? <span>Running timer</span> : null}
           {saveButton()}
         </div>
         <div
@@ -587,7 +663,7 @@ export function CalendarEntryCompactEditor({
                   stoppedAt: preview.plan.resolved.stoppedAt
                 }}
                 entries={peerEntries}
-                excludeEntryId={entry.id}
+                excludeEntryId={entry?.id ?? null}
               />
             ) : null}
           </div>
@@ -613,4 +689,12 @@ export function CalendarEntryCompactEditor({
     </div>,
     document.body
   );
+}
+
+function formatFullClockDuration(totalSeconds: number): string {
+  const safeSeconds = Math.max(0, Math.round(totalSeconds));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const seconds = safeSeconds % 60;
+  return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }

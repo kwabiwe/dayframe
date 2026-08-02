@@ -2578,6 +2578,37 @@ dialog.ui-popover-panel.bottom-left {
   -webkit-user-select: none;
 }
 
+.calendar-draft-slot-anchor {
+  position: absolute;
+  right: 8px;
+  left: 8px;
+  z-index: 9;
+  box-sizing: border-box;
+  min-height: 1px;
+  border: 1px dashed var(--control-border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface-muted) 52%, transparent);
+  opacity: 0.72;
+  pointer-events: none;
+  animation: calendar-draft-slot-enter 140ms ease-out both;
+}
+
+.calendar-draft-slot-anchor.is-continuation-to-next {
+  border-bottom-style: none;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+@keyframes calendar-draft-slot-enter {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 0.72;
+  }
+}
+
 .swiss-time-block {
   left: 24px;
   right: 72px;
@@ -9147,6 +9178,10 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .calendar-draft-slot-anchor {
+    animation-duration: 1ms;
+  }
+
   .calendar-compact-editor,
   .calendar-compact-editor-default-actions,
   .calendar-compact-feedback-actions,
