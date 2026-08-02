@@ -20,6 +20,17 @@ describe("mobile config", () => {
     expect(resolveApiBase(undefined, { allowLocal: false })).toBe("https://dayframe-web.vercel.app");
   });
 
+  it("does not let preview builds silently fall back to production", () => {
+    const previous = process.env.EXPO_PUBLIC_DAYFRAME_RELEASE_CHANNEL;
+    process.env.EXPO_PUBLIC_DAYFRAME_RELEASE_CHANNEL = "preview";
+    try {
+      expect(() => resolveApiBase("", { allowLocal: false })).toThrow(/Preview builds/);
+    } finally {
+      if (previous === undefined) delete process.env.EXPO_PUBLIC_DAYFRAME_RELEASE_CHANNEL;
+      else process.env.EXPO_PUBLIC_DAYFRAME_RELEASE_CHANNEL = previous;
+    }
+  });
+
   it("rejects localhost and http URLs for hosted builds", () => {
     expect(() => assertUsableApiBase("http://localhost:3000", { allowLocal: false })).toThrow(/https/);
     expect(() => assertUsableApiBase("https://127.0.0.1:3000", { allowLocal: false })).toThrow(/localhost/);

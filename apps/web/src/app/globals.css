@@ -1555,6 +1555,19 @@ dialog.ui-popover-panel.bottom-left {
   padding: 0 22px;
 }
 
+.dayframe-environment-badge {
+  align-self: center;
+  border-radius: 999px;
+  background: var(--warning);
+  color: var(--background);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  padding: 5px 8px;
+  text-transform: uppercase;
+}
+
 .swiss-brand .dayframe-brand {
   max-width: 100%;
 }

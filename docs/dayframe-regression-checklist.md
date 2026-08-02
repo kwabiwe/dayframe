@@ -135,6 +135,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Login uses one controlled `onSubmit` path for Enter and click, rejects duplicate submission, retains useful input on failure, stays in a branded Opening state after success, and replaces `/login` in history.
 - Active timer state is checked through the bounded `/api/timer-state` fingerprint every three seconds only while web is visible or mobile is foregrounded. A changed ID or `updatedAt` triggers one canonical bootstrap through the existing mutation/race gate; failures back off to 6, 12, then 30 seconds; broader bootstrap reconciliation remains at five minutes. The elapsed timer still ticks locally every second, hidden/background clients stop polling, and no heavyweight authenticated request storm returns.
 - Hosted auth changes require an optimized production-build browser pass and a provider-auth Vercel Preview pass. Preserve Network logs, test two tabs/expiry/revocation/slow network/Back-Forward, inspect safe server logs, and verify authentication does not move between host-scoped aliases.
+- Vercel Preview and mobile preview builds use `dayframe-staging.vercel.app` plus the separate staging Supabase project. Confirm the visible `STAGING` badge, staging account/workspace, staging schema version and baked mobile API base before mutating data. Production must remain on `dayframe-web.vercel.app` with no staging badge.
 
 ## Productivity Views
 

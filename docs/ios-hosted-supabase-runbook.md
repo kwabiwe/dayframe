@@ -59,6 +59,13 @@ Recommended EAS environments:
 - `preview`: internal distribution against a hosted preview or production Vercel URL.
 - `production`: production build against the production Vercel URL.
 
+Dayframe's checked-in profiles enforce these hosted targets:
+
+- `preview` -> `https://dayframe-staging.vercel.app` and release channel `preview`;
+- `production` -> `https://dayframe-web.vercel.app` and release channel `production`.
+
+A hosted preview build fails at startup if its API base is missing rather than silently falling back to production. Preview builds show a visible `STAGING` badge. Promote the intended PR deployment to the stable staging alias before building or testing the physical iPhone.
+
 ## iOS Capabilities
 
 The native build must preserve:
