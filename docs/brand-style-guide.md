@@ -111,7 +111,7 @@ Eight-digit HEX values below include alpha as the last two digits. RGB entries f
 | `accentPressed` | `#E94D35` | `233, 77, 53` | Pressed/active feedback. |
 | `accentSoft` | `#FF62481F` | `rgba(255, 98, 72, 0.12)` | Low-emphasis selection background; pair with text or an icon. |
 | `onAccent` | `#050914` | `5, 9, 20` | Text/icons on coral; 6.72:1 on `accent`. |
-| `focus` | `#71C5F4` | `113, 197, 244` | Keyboard focus. Field-like controls change one reserved 2 px perimeter in place; standalone actions use one 2 px offset ring. |
+| `focus` | `#64718A` | `100, 113, 138` | Neutral grey keyboard focus across all web controls. Field-like controls change one reserved 2 px perimeter in place; standalone actions use one 2 px offset ring. |
 | `success` | `#39D99A` | `57, 217, 154` | Completed/success state; always include copy or iconography. |
 | `warning` | `#F2BA38` | `242, 186, 56` | Review and warning state; never colour alone. |
 | `warningText` | `#F2BA38` | `242, 186, 56` | Contrast-safe warning foreground on dark surfaces. |
@@ -146,7 +146,7 @@ Eight-digit HEX values below include alpha as the last two digits. RGB entries f
 | `accentPressed` | `#E9523B` | `233, 82, 59` | Accessibility-adjusted pressed fill; 4.84:1 with `onAccent`. |
 | `accentSoft` | `#FFE7E1` | `255, 231, 225` | Low-emphasis selected background. |
 | `onAccent` | `#111827` | `17, 24, 39` | Text/icons on coral; 5.49:1 on `accent`. |
-| `focus` | `#2563EB` | `37, 99, 235` | Keyboard focus. Field-like controls change one reserved 2 px perimeter in place; standalone actions use one 2 px offset ring. |
+| `focus` | `#7D8797` | `125, 135, 151` | Neutral grey keyboard focus across all web controls. Field-like controls change one reserved 2 px perimeter in place; standalone actions use one 2 px offset ring. |
 | `success` | `#20B978` | `32, 185, 120` | Completed/success state with copy or iconography. |
 | `warning` | `#D9940A` | `217, 148, 10` | Review/warning state with a non-colour cue. |
 | `warningText` | `#805600` | `128, 86, 0` | Small warning foreground; 5.71:1 on `surfaceMuted`. |
@@ -235,7 +235,7 @@ Use Lucide on web and the established `react-native-svg` glyph style on mobile. 
 
 ### Focus and accessibility
 
-Meet WCAG AA where practical: 4.5:1 for normal text, 3:1 for large text and essential non-text UI boundaries. Every keyboard-operable web control needs a visible focus indicator. Focus must remain distinct from selection, validation and disabled state; focused invalid fields retain error copy and a separate internal danger cue. Preserve VoiceOver labels, selected-state announcements, 44 px/pt targets, safe areas, keyboard avoidance, Reduce Motion and Reduce Transparency fallbacks.
+Meet WCAG AA where practical: 4.5:1 for normal text, 3:1 for large text and essential non-text UI boundaries. Every keyboard-operable web control needs a visible neutral grey focus indicator, using the shared `focus`/`controlBorder` treatment rather than blue `info` or accent colour. Focus must remain distinct from selection, validation and disabled state; focused invalid fields retain error copy and a separate internal danger cue. Preserve VoiceOver labels, selected-state announcements, 44 px/pt targets, safe areas, keyboard avoidance, Reduce Motion and Reduce Transparency fallbacks.
 
 ### Charts
 

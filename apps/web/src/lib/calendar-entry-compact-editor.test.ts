@@ -108,8 +108,30 @@ describe("Calendar compact editor save plan", () => {
     const future = { ...calendarEntryCompactInitialDraft(source), startedAt: "23:59" };
     expect(() => savePlan(source, future, dirty({ startedAt: true }), new Date(2026, 0, 3, 10))).toThrow("future");
 
+    const futureFinish = { ...calendarEntryCompactInitialDraft(source), stoppedAt: "23:59" };
+    expect(() => savePlan(source, futureFinish, dirty({ stoppedAt: true }), new Date(2026, 0, 3, 10))).toThrow(
+      "Finish time cannot be in the future."
+    );
+
     const reversed = { ...calendarEntryCompactInitialDraft(source), stoppedAt: "07:00" };
     expect(() => savePlan(source, reversed, dirty({ stoppedAt: true }))).toThrow("after the start");
+  });
+
+  it("validates each partial timestamp combination against the canonical opposite edge", () => {
+    const source = timeEntry();
+    const finishOnly = savePlan(
+      source,
+      { ...calendarEntryCompactInitialDraft(source), stoppedAt: "09:45" },
+      dirty({ stoppedAt: true })
+    );
+    expect(finishOnly.payload).toEqual({ stoppedAt: localIso("2026-01-03T09:45") });
+    expect(finishOnly.resolved.startedAt).toBe(source.startedAt);
+
+    const startAfterStoredFinish = { ...calendarEntryCompactInitialDraft(source), startedAt: "09:30" };
+    expect(() => savePlan(source, startAfterStoredFinish, dirty({ startedAt: true }))).toThrow("after the start");
+
+    const finishBeforeStoredStart = { ...calendarEntryCompactInitialDraft(source), stoppedAt: "08:00" };
+    expect(() => savePlan(source, finishBeforeStoredStart, dirty({ stoppedAt: true }))).toThrow("after the start");
   });
 
   it("calculates live elapsed time from the resolved running start", () => {

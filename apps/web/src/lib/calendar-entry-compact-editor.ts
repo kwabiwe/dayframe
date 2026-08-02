@@ -96,6 +96,9 @@ export function buildCalendarEntryCompactSavePlan({
   if (dirty.startedAt && new Date(startedAt).getTime() > now.getTime()) {
     throw new Error("Start time cannot be in the future.");
   }
+  if (dirty.stoppedAt && stoppedAt && new Date(stoppedAt).getTime() > now.getTime()) {
+    throw new Error("Finish time cannot be in the future.");
+  }
   if (
     (dirty.startedAt || dirty.stoppedAt) &&
     stoppedAt &&

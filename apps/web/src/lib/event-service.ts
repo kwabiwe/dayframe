@@ -1417,6 +1417,24 @@ export async function updateTimeEntry(
 
   try {
     await client.query("begin");
+    if (hasStartedAt || hasStoppedAt) {
+      const existing = await client.query<{
+        startedAt: string | Date;
+        stoppedAt: string | Date | null;
+      }>(
+        `select started_at as "startedAt", stopped_at as "stoppedAt"
+         from time_entries
+         where id = $1 and workspace_id = $2 and user_id = $3
+         for update`,
+        [id, session.workspaceId, session.userId]
+      );
+      const current = existing.rows[0];
+      if (!current) throw new TimeEntryNotFoundError();
+      validateResolvedTimeEntryWindow({
+        startedAt: hasStartedAt ? input.startedAt : current.startedAt,
+        stoppedAt: hasStoppedAt ? input.stoppedAt ?? null : current.stoppedAt
+      });
+    }
     const result = await client.query<{ id: string; updatedAt: string | Date }>(
       `update time_entries
      set project_id = case when $2 then $3 else project_id end,
@@ -1465,6 +1483,45 @@ export class TimeEntryNotFoundError extends Error {
   constructor() {
     super("Time entry not found.");
     this.name = "TimeEntryNotFoundError";
+  }
+}
+
+export class TimeEntryValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TimeEntryValidationError";
+  }
+}
+
+function validateResolvedTimeEntryWindow({
+  startedAt,
+  stoppedAt,
+  now = new Date()
+}: {
+  startedAt: string | Date | undefined;
+  stoppedAt: string | Date | null;
+  now?: Date;
+}) {
+  const started = startedAt
+    ? new Date(startedAt instanceof Date ? startedAt.getTime() : startedAt)
+    : null;
+  if (!started || Number.isNaN(started.getTime())) {
+    throw new TimeEntryValidationError("startedAt must be a valid date.");
+  }
+  if (started.getTime() > now.getTime()) {
+    throw new TimeEntryValidationError("Start time cannot be in the future.");
+  }
+  if (stoppedAt === null) return;
+
+  const stopped = new Date(stoppedAt instanceof Date ? stoppedAt.getTime() : stoppedAt);
+  if (Number.isNaN(stopped.getTime())) {
+    throw new TimeEntryValidationError("stoppedAt must be a valid date.");
+  }
+  if (stopped.getTime() > now.getTime()) {
+    throw new TimeEntryValidationError("Finish time cannot be in the future.");
+  }
+  if (stopped.getTime() <= started.getTime()) {
+    throw new TimeEntryValidationError("Finish time must be after the start time.");
   }
 }
 

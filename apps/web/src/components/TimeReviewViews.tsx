@@ -492,6 +492,7 @@ function CalendarReview({
   const [resizeDraft, setResizeDraft] = useState<CalendarResizeDraft | null>(null);
   const [resizingId, setResizingId] = useState<string | null>(null);
   const [resizeError, setResizeError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [continuingEntryId, setContinuingEntryId] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState<CalendarZoom>("hour");
   const [calendarScroller, setCalendarScroller] = useState<HTMLDivElement | null>(null);
@@ -530,6 +531,7 @@ function CalendarReview({
   function selectCalendarEntry(target: Omit<CalendarBlockTarget, "sessionId">) {
     const nextTarget = { ...target, sessionId: ++selectionSessionRef.current };
     selectedTargetRef.current = nextTarget;
+    setActionError(null);
     setSelectedTarget(nextTarget);
   }
 
@@ -540,16 +542,22 @@ function CalendarReview({
 
   function editCalendarEntry(entry: TimeEntryRow) {
     clearCalendarSelection();
+    setActionError(null);
     setEditingEntry(entry);
   }
 
-  async function continueCalendarEntry(entry: TimeEntryRow) {
+  async function continueCalendarEntry(entry: TimeEntryRow, surface: "editor" | "inline" = "editor") {
     if (continuingEntryId || isTimerBusy || !entry.stoppedAt) {
-      return { ok: false, error: "A timer update is already in progress." } as const;
+      const outcome = { ok: false, error: "A timer update is already in progress." } as const;
+      if (surface === "inline") setActionError(outcome.error);
+      return outcome;
     }
     setContinuingEntryId(entry.id);
+    if (surface === "inline") setActionError(null);
     try {
-      return await startEntryAgain(entry);
+      const outcome = await startEntryAgain(entry);
+      if (!outcome.ok && surface === "inline") setActionError(outcome.error);
+      return outcome;
     } finally {
       setContinuingEntryId(null);
     }
@@ -557,6 +565,7 @@ function CalendarReview({
 
   function deleteCalendarEntry(entry: TimeEntryRow) {
     clearCalendarSelection();
+    setActionError(null);
     onDeleteEntries([entry]);
   }
 
@@ -982,7 +991,7 @@ function CalendarReview({
                           aria-label={`Start ${timeEntryTitle(entry)} again`}
                           disabled={isTimerBusy || Boolean(continuingEntryId)}
                           onClick={() => {
-                            void continueCalendarEntry(entry).then((outcome) => {
+                            void continueCalendarEntry(entry, "inline").then((outcome) => {
                               if (outcome.ok) clearCalendarSelection();
                             });
                           }}
@@ -1054,6 +1063,11 @@ function CalendarReview({
       {resizeError ? (
         <p className="border-t border-[var(--line)] px-4 py-2 text-sm text-[var(--danger-text)]" role="alert">
           {resizeError}
+        </p>
+      ) : null}
+      {actionError ? (
+        <p className="timeline-delete-error" role="alert" aria-atomic="true" aria-live="assertive">
+          {actionError}
         </p>
       ) : null}
       {editingEntry ? (

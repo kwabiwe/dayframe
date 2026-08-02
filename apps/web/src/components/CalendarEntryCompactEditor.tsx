@@ -20,6 +20,7 @@ import {
 } from "@/lib/calendar-entry-compact-editor";
 import { maskTimeInput } from "@/lib/calendar-grid";
 import { dateTimeLocal, formatClockDuration, formatDate } from "@/lib/format";
+import { overlapNoticeForCandidate } from "@/lib/overlap-notice";
 import type { CategoryRow, TimeEntryRow } from "@/lib/queries";
 
 type MutationOutcome = { ok: true } | { ok: false; error: string };
@@ -366,6 +367,38 @@ export function CalendarEntryCompactEditor({
     ? dateTimeLocal(entry.startedAt).slice(0, 10) !== dateTimeLocal(entry.stoppedAt).slice(0, 10)
     : false;
   const displayError = error ?? preview.error;
+  const startIsInvalid = Boolean(preview.error && /start time/i.test(preview.error));
+  const finishIsInvalid = Boolean(preview.error && /finish time/i.test(preview.error));
+  const overlap = preview.plan
+    ? overlapNoticeForCandidate({
+        candidate: {
+          startedAt: preview.plan.resolved.startedAt,
+          stoppedAt: preview.plan.resolved.stoppedAt
+        },
+        entries: peerEntries,
+        excludeEntryId: entry.id
+      })
+    : null;
+  const feedbackMode = discardPrompt
+    ? "discard"
+    : displayError
+      ? "error"
+      : overlap?.overlapCount
+        ? "overlap"
+        : "default";
+
+  function saveButton() {
+    return (
+      <button
+        type="button"
+        className="calendar-compact-save"
+        disabled={isBusy || !preview.plan}
+        onClick={() => void save()}
+      >
+        Save
+      </button>
+    );
+  }
 
   return createPortal(
     <div
@@ -488,6 +521,8 @@ export function CalendarEntryCompactEditor({
               type="text"
               value={draft.startedAt}
               placeholder="08:30"
+              aria-describedby={startIsInvalid ? "calendar-compact-time-error" : undefined}
+              aria-invalid={startIsInvalid || undefined}
               disabled={controlsDisabled}
               onChange={(event) => updateField("startedAt", maskTimeInput(event.target.value))}
             />
@@ -500,6 +535,8 @@ export function CalendarEntryCompactEditor({
                 type="text"
                 value={draft.stoppedAt}
                 placeholder="09:15"
+                aria-describedby={finishIsInvalid ? "calendar-compact-time-error" : undefined}
+                aria-invalid={finishIsInvalid || undefined}
                 disabled={controlsDisabled}
                 onChange={(event) => updateField("stoppedAt", maskTimeInput(event.target.value))}
               />
@@ -517,26 +554,44 @@ export function CalendarEntryCompactEditor({
         ) : null}
       </div>
 
-      {preview.plan ? (
-        <OverlapNotice
-          compact
-          candidate={{
-            startedAt: preview.plan.resolved.startedAt,
-            stoppedAt: preview.plan.resolved.stoppedAt
-          }}
-          entries={peerEntries}
-          excludeEntryId={entry.id}
-        />
-      ) : null}
-
-      {displayError ? <p className="calendar-compact-editor-error" role="alert">{displayError}</p> : null}
-
-      <div className={`calendar-compact-editor-footer${discardPrompt ? " is-confirming-discard" : ""}`}>
-        <div className="calendar-compact-editor-default-actions" aria-hidden={discardPrompt} inert={discardPrompt}>
+      <div
+        className={[
+          "calendar-compact-editor-footer",
+          feedbackMode === "discard" ? "is-confirming-discard" : "",
+          feedbackMode === "error" || feedbackMode === "overlap" ? "is-showing-feedback" : ""
+        ].join(" ")}
+        data-feedback-mode={feedbackMode}
+      >
+        <div
+          className="calendar-compact-editor-default-actions"
+          aria-hidden={feedbackMode !== "default"}
+          inert={feedbackMode !== "default"}
+        >
           {entry.stoppedAt ? null : <span>Running timer</span>}
-          <button type="button" className="calendar-compact-save" disabled={isBusy} onClick={() => void save()}>
-            Save
-          </button>
+          {saveButton()}
+        </div>
+        <div
+          className="calendar-compact-feedback-actions"
+          aria-hidden={feedbackMode !== "error" && feedbackMode !== "overlap"}
+          inert={feedbackMode !== "error" && feedbackMode !== "overlap"}
+        >
+          <div className={`calendar-compact-feedback-copy${feedbackMode === "error" ? " is-error" : ""}`}>
+            {feedbackMode === "error" && displayError ? (
+              <p id="calendar-compact-time-error" role="alert" aria-atomic="true" aria-live="assertive">{displayError}</p>
+            ) : null}
+            {feedbackMode === "overlap" && preview.plan ? (
+              <OverlapNotice
+                compact
+                candidate={{
+                  startedAt: preview.plan.resolved.startedAt,
+                  stoppedAt: preview.plan.resolved.stoppedAt
+                }}
+                entries={peerEntries}
+                excludeEntryId={entry.id}
+              />
+            ) : null}
+          </div>
+          {saveButton()}
         </div>
         <div
           className="calendar-compact-discard-confirmation"
