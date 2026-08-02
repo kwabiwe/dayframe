@@ -36,6 +36,7 @@ const {
   resolveLearnedPlaceLocation,
   resolveReviewItem,
   TimeEntryNotFoundError,
+  TimeEntryValidationError,
   updateLearnedPlaceStatus,
   updateCategory,
   updateTimeEntry,
@@ -2863,6 +2864,86 @@ describe("time entry deletion", () => {
   });
 });
 
+describe("time entry partial timestamp validation", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it("validates a stoppedAt-only update against the stored start inside the transaction", async () => {
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes('select started_at as "startedAt"')) {
+          return {
+            rows: [{
+              startedAt: "2026-08-02T10:00:00.000Z",
+              stoppedAt: "2026-08-02T11:00:00.000Z"
+            }]
+          };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(updateTimeEntry("entry-1", {
+      stoppedAt: "2026-08-02T09:00:00.000Z"
+    }, session)).rejects.toEqual(expect.objectContaining({
+      name: "TimeEntryValidationError",
+      message: "Finish time must be after the start time."
+    }));
+    expect(client.query.mock.calls.some(([statement]) => String(statement).includes("update time_entries"))).toBe(false);
+    expect(client.query).toHaveBeenCalledWith("rollback");
+    expect(client.release).toHaveBeenCalled();
+  });
+
+  it("rejects a future finish before a stoppedAt-only update reaches persistence", async () => {
+    const startedAt = new Date(Date.now() - 60 * 60_000).toISOString();
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes('select started_at as "startedAt"')) {
+          return { rows: [{ startedAt, stoppedAt: null }] };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(updateTimeEntry("entry-1", {
+      stoppedAt: new Date(Date.now() + 60_000).toISOString()
+    }, session)).rejects.toBeInstanceOf(TimeEntryValidationError);
+    expect(client.query.mock.calls.some(([statement]) => String(statement).includes("update time_entries"))).toBe(false);
+    expect(client.query).toHaveBeenCalledWith("rollback");
+  });
+
+  it("persists a valid stoppedAt-only update while preserving the stored start", async () => {
+    const startedAt = new Date(Date.now() - 60 * 60_000).toISOString();
+    const stoppedAt = new Date(Date.now() - 5 * 60_000).toISOString();
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes('select started_at as "startedAt"')) {
+          return { rows: [{ startedAt, stoppedAt: null }] };
+        }
+        if (statement.includes("update time_entries")) {
+          return { rows: [{ id: "entry-1", updatedAt: stoppedAt }] };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(updateTimeEntry("entry-1", { stoppedAt }, session)).resolves.toEqual({
+      id: "entry-1",
+      updatedAt: stoppedAt
+    });
+    expect(client.query).toHaveBeenCalledWith(
+      expect.stringContaining("update time_entries"),
+      expect.arrayContaining(["entry-1", stoppedAt])
+    );
+    expect(client.query).toHaveBeenCalledWith("commit");
+  });
+});
+
 describe("time entry tag transactions", () => {
   beforeEach(() => vi.resetAllMocks());
 
@@ -2871,6 +2952,14 @@ describe("time entry tag transactions", () => {
       query: vi.fn(async (statement: string, values?: unknown[]) => {
         if (statement.includes("update time_entries")) {
           return { rows: [{ id: "entry-1", updatedAt: "2026-07-27T12:00:00.000Z" }] };
+        }
+        if (statement.includes('select started_at as "startedAt"')) {
+          return {
+            rows: [{
+              startedAt: "2026-07-27T10:00:00.000Z",
+              stoppedAt: "2026-07-27T11:00:00.000Z"
+            }]
+          };
         }
         if (statement.includes("from tags") && statement.includes("normalized_name")) return { rows: [] };
         if (statement.includes("insert into tags")) {

@@ -17,6 +17,12 @@ const mocks = vi.hoisted(() => ({
       super("Time entry not found.");
       this.name = "TimeEntryNotFoundError";
     }
+  },
+  TimeEntryValidationError: class TimeEntryValidationError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = "TimeEntryValidationError";
+    }
   }
 }));
 
@@ -27,7 +33,8 @@ vi.mock("@/lib/ingest-auth", () => ({
 vi.mock("@/lib/event-service", () => ({
   updateTimeEntry: mocks.updateTimeEntry,
   deleteTimeEntry: mocks.deleteTimeEntry,
-  TimeEntryNotFoundError: mocks.TimeEntryNotFoundError
+  TimeEntryNotFoundError: mocks.TimeEntryNotFoundError,
+  TimeEntryValidationError: mocks.TimeEntryValidationError
 }));
 
 const { DELETE, PATCH } = await import("./route");
@@ -86,6 +93,38 @@ describe("PATCH /api/time-entries/[id]", () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "Start time cannot be in the future." });
     expect(mocks.updateTimeEntry).not.toHaveBeenCalled();
+  });
+
+  it("rejects a completed entry finish time in the future", async () => {
+    const response = await PATCH(
+      jsonRequest({ stoppedAt: new Date(Date.now() + 60_000).toISOString() }),
+      routeContext()
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Finish time cannot be in the future." });
+    expect(mocks.updateTimeEntry).not.toHaveBeenCalled();
+  });
+
+  it("passes a stoppedAt-only PATCH through for validation against the stored start", async () => {
+    const stoppedAt = new Date(Date.now() - 5 * 60_000).toISOString();
+    const response = await PATCH(jsonRequest({ stoppedAt }), routeContext());
+
+    expect(response.status).toBe(200);
+    expect(mocks.updateTimeEntry).toHaveBeenCalledWith("entry-1", { stoppedAt }, session);
+  });
+
+  it("returns the transactional stored-start validation error for a stoppedAt-only PATCH", async () => {
+    mocks.updateTimeEntry.mockRejectedValueOnce(
+      new mocks.TimeEntryValidationError("Finish time must be after the start time.")
+    );
+    const response = await PATCH(
+      jsonRequest({ stoppedAt: new Date(Date.now() - 5 * 60_000).toISOString() }),
+      routeContext()
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Finish time must be after the start time." });
   });
 
   it("accepts an optional complete tag association set", async () => {

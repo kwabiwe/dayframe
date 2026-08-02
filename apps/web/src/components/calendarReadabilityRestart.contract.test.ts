@@ -9,6 +9,7 @@ function source(relativePath: string) {
 const timeline = source("./TimeReviewViews.tsx");
 const runtime = source("./AppShellRuntime.tsx");
 const entries = source("./EntriesTable.tsx");
+const compactEditor = source("./CalendarEntryCompactEditor.tsx");
 const styles = source("../app/globals.css");
 
 describe("Calendar readability and restart contract", () => {
@@ -23,7 +24,7 @@ describe("Calendar readability and restart contract", () => {
   });
 
   it("routes list and calendar continuations through the same guarded timer owner", () => {
-    expect(timeline).toContain("await startEntryAgain(target.entry)");
+    expect(timeline).toContain("const outcome = await startEntryAgain(entry)");
     expect(entries).toContain("await startEntryAgain(entry)");
     expect(runtime).toContain("entryContinuationDecision(entry)");
     expect(runtime).not.toContain("Stop it before starting another task.");
@@ -32,10 +33,22 @@ describe("Calendar readability and restart contract", () => {
     expect(entries).not.toContain('mode: "start"');
   });
 
-  it("keeps tiny blocks readable without mounting a floating details surface", () => {
+  it("surfaces an unsuccessful inline Start again outcome without moving Calendar layout", () => {
+    expect(timeline).toContain("const [actionError, setActionError]");
+    expect(timeline).toContain('continueCalendarEntry(entry, "inline")');
+    expect(timeline).toContain("if (!outcome.ok)");
+    expect(timeline).toContain("clearTimerError();");
+    expect(timeline).toContain('if (surface === "inline") setActionError(outcome.error)');
+    expect(timeline).toMatch(/actionError \? \([\s\S]*className="timeline-delete-error"[\s\S]*role="alert"[\s\S]*aria-live="assertive"/s);
+    expect(styles).toMatch(/\.timeline-delete-error \{[^}]*position:\s*fixed;/s);
+  });
+
+  it("keeps tiny blocks readable while isolating the portalled compact editor", () => {
     expect(timeline).toContain("layoutTimeBlockLanes");
     expect(timeline).not.toContain("<CalendarEntryDetails");
     expect(timeline).not.toContain("createPortal(");
+    expect(timeline).toContain("<CalendarEntryCompactEditor");
+    expect(compactEditor).toContain("createPortal(");
     expect(timeline).toContain("onDoubleClick={(event) =>");
     expect(timeline).toContain('className="calendar-entry-title"');
   });
@@ -69,6 +82,9 @@ describe("Calendar readability and restart contract", () => {
     expect(selectedRule).toContain("background-color: var(--calendar-block-selected-fill)");
     expect(selectedRule).not.toContain("outline");
     expect(styles).toMatch(/\.calendar-time-block:has\(\.calendar-entry-primary:focus-visible\) \{[^}]*outline: 2px solid var\(--focus\);/s);
+    expect(styles).toMatch(/\.calendar-start-again \{[^}]*opacity: 0;[^}]*pointer-events: none;/s);
+    expect(styles).not.toMatch(/\.calendar-start-again \{[^}]*visibility: hidden;/s);
+    expect(styles).toMatch(/\.calendar-start-again:focus-visible \{[^}]*opacity: 1;[^}]*pointer-events: auto;/s);
     expect(timeline).toContain('onMouseDown={(event) => event.preventDefault()}');
   });
 

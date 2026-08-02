@@ -19,11 +19,13 @@ import {
   createTimerMutationGate,
   entryContinuationDecision,
   mergeTimerDraft,
+  runActiveEntryCompactMutation,
   runTimerStartMutation,
   timerDraftForEntry,
   timerDraftVersion,
   type TimerDraft,
-  type TimerDraftInput
+  type TimerDraftInput,
+  type ActiveEntryCompactMutationInput
 } from "@/lib/timer-runtime";
 import {
   reconcileTimerBootstrap,
@@ -66,6 +68,7 @@ type RuntimeContext = {
   timerError: string | null;
   toggleTimer: () => Promise<MutationOutcome>;
   updateActiveDetails: (draft: TimerDraft) => Promise<MutationOutcome>;
+  updateActiveEntryFromCalendar: (input: ActiveEntryCompactMutationInput) => Promise<MutationOutcome>;
   updateActiveStartTime: (startedAt: string) => Promise<MutationOutcome>;
 };
 
@@ -441,6 +444,40 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     return result.ran ? result.value : { ok: false, error: "A timer update is already in progress." };
   }, [commitData, refresh, setTimerDraft]);
 
+  const updateActiveEntryFromCalendar = useCallback(async (
+    input: ActiveEntryCompactMutationInput
+  ): Promise<MutationOutcome> => {
+    const snapshot = dataRef.current;
+    if (!snapshot?.activeEntry) return { ok: false, error: "There is no running timer to edit." };
+    const draftSnapshot = draftRef.current;
+    refreshRequestRef.current += 1;
+    return runActiveEntryCompactMutation({
+      commit: (nextData) => commitData(nextData, "optimistic"),
+      draftSnapshot,
+      gate: mutationGateRef.current,
+      getCurrentData: () => dataRef.current,
+      input,
+      refresh: async () => {
+        await refresh({ force: true });
+      },
+      send: async (entryId, payload) => {
+        const response = await clientFetch(`/api/time-entries/${entryId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (!response.ok) {
+          throw new Error(await responseError(response, `Unable to save timer details: ${response.status}`));
+        }
+        return (await response.json()) as { updatedAt?: string };
+      },
+      setBusy: setIsTimerBusy,
+      setDraft: setTimerDraft,
+      setError: setTimerError,
+      snapshot
+    });
+  }, [commitData, refresh, setTimerDraft]);
+
   const updateActiveStartTime = useCallback(async (startedAt: string): Promise<MutationOutcome> => {
     const snapshot = dataRef.current;
     if (!snapshot?.activeEntry) return { ok: false, error: "There is no running timer to edit." };
@@ -537,6 +574,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     timerError,
     toggleTimer,
     updateActiveDetails,
+    updateActiveEntryFromCalendar,
     updateActiveStartTime
   }), [
     createManualEntry,
@@ -559,6 +597,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     timerError,
     toggleTimer,
     updateActiveDetails,
+    updateActiveEntryFromCalendar,
     updateActiveStartTime
   ]);
 

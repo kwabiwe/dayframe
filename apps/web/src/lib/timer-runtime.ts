@@ -1,4 +1,8 @@
 import { normalizeTagName } from "@dayframe/shared";
+import type {
+  CalendarEntryCompactPatch,
+  CalendarEntryCompactSavePlan
+} from "@/lib/calendar-entry-compact-editor";
 import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
 
 export type TimerDraft = {
@@ -18,6 +22,10 @@ export type TimerStartRequestPayload = {
   categoryId?: string;
   description?: string;
   tagNames: string[];
+};
+
+export type ActiveEntryCompactMutationInput = {
+  plan: CalendarEntryCompactSavePlan;
 };
 
 export type EntryContinuationDecision =
@@ -264,6 +272,90 @@ export function applyOptimisticActiveEntryPatch(
     })
   };
   return replaceEntryCollections({ ...data, activeEntry: entry }, entry);
+}
+
+export function applyOptimisticActiveEntryCompactPatch(
+  data: BootstrapData,
+  plan: CalendarEntryCompactSavePlan
+) {
+  if (!data.activeEntry) return data;
+  const category = data.categories.find((item) => item.id === plan.resolved.categoryId) ?? null;
+  const entry: TimeEntryRow = {
+    ...data.activeEntry,
+    categoryId: category?.id ?? null,
+    categoryName: category?.name ?? null,
+    categoryColor: category?.color ?? null,
+    description: plan.resolved.description,
+    startedAt: plan.resolved.startedAt,
+    stoppedAt: plan.resolved.stoppedAt,
+    durationSeconds: plan.durationSeconds
+  };
+  return replaceEntryCollections({ ...data, activeEntry: entry }, entry);
+}
+
+export async function runActiveEntryCompactMutation({
+  commit,
+  draftSnapshot,
+  gate,
+  getCurrentData,
+  input,
+  refresh,
+  send,
+  setBusy,
+  setDraft,
+  setError,
+  snapshot
+}: {
+  commit: (data: BootstrapData) => void;
+  draftSnapshot: TimerDraft;
+  gate: TimerMutationGate;
+  getCurrentData: () => BootstrapData | null;
+  input: ActiveEntryCompactMutationInput;
+  refresh: () => Promise<void>;
+  send: (entryId: string, payload: CalendarEntryCompactPatch) => Promise<{ updatedAt?: string }>;
+  setBusy: (busy: boolean) => void;
+  setDraft: (draft: TimerDraft) => void;
+  setError: (error: string | null) => void;
+  snapshot: BootstrapData;
+}): Promise<TimerMutationOutcome> {
+  if (!snapshot.activeEntry) return { ok: false, error: "There is no running timer to edit." };
+  const activeEntry = snapshot.activeEntry;
+  const nextDraft: TimerDraft = {
+    categoryId: input.plan.resolved.categoryId ?? "",
+    description: input.plan.resolved.description ?? "",
+    tagNames: [...activeEntry.tagNames]
+  };
+  const result = await gate.run(async () => {
+    setBusy(true);
+    setError(null);
+    commit(applyOptimisticActiveEntryCompactPatch(snapshot, input.plan));
+    setDraft(nextDraft);
+    try {
+      const response = await send(activeEntry.id, input.plan.payload);
+      const current = getCurrentData();
+      if (response.updatedAt && current) {
+        commit(applyAuthoritativeActiveEntryVersion(current, activeEntry.id, response.updatedAt));
+      }
+      await refresh();
+      return { ok: true } as const;
+    } catch (error) {
+      commit(snapshot);
+      setDraft(draftSnapshot);
+      const message = timerCompactEditErrorMessage(error);
+      setError(message);
+      return { ok: false, error: message } as const;
+    } finally {
+      setBusy(false);
+    }
+  });
+  return result.ran
+    ? result.value
+    : { ok: false, error: "A timer update is already in progress." };
+}
+
+export function timerCompactEditErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  return "Timer details were not saved. Your previous values were restored.";
 }
 
 export function applyAuthoritativeActiveEntryVersion(

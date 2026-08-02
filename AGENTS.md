@@ -85,6 +85,7 @@ npm run export:workspace -- ./dayframe-backup.json
 - User-facing source labels should go through formatting helpers; do not expose raw strings like `manual_app` in UI.
 - Use palette keys from `packages/shared`; avoid arbitrary hex color pickers.
 - For frontend changes, preserve the current Dayframe Midnight Core visual system: midnight-navy dark canvas, designed light companion, restrained rounded surfaces, coral primary states, unchanged colour logo artwork, accessible semantic tokens, and compact productivity UI.
+- Dayframe keyboard focus styling is neutral grey throughout the web UI. Use the shared neutral focus/control-border treatment for fields, buttons, links, compound controls, icon actions, menus and options; never use blue `info`/accent colours for focus. Keep selected/active/accent state independent, and preserve a separate danger cue on invalid focused fields.
 - Use lucide icons where practical.
 - All floating UI surfaces must be mobile-safe. Popovers, dropdowns, menus, modals, profile panels, workspace switchers, help panels, search palettes, and notification panels must fit within phone viewports without horizontal overflow.
 - On narrow screens, desktop popovers should become centered dialogs, full-width sheets, or bottom sheets with `max-width: calc(100vw - 24px)`, `max-height`, internal scrolling, visible close controls, and 44px minimum touch targets.

@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { z, ZodError } from "zod";
-import { deleteTimeEntry, TimeEntryNotFoundError, updateTimeEntry } from "@/lib/event-service";
+import {
+  deleteTimeEntry,
+  TimeEntryNotFoundError,
+  TimeEntryValidationError,
+  updateTimeEntry
+} from "@/lib/event-service";
 import { authErrorResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import { TagNameSchema } from "@dayframe/shared";
@@ -26,7 +31,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   } catch (error) {
     const response = authErrorResponse(error);
     if (response) return response;
-    if (error instanceof ZodError || error instanceof BadRequestError) {
+    if (error instanceof ZodError || error instanceof BadRequestError || error instanceof TimeEntryValidationError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
     if (error instanceof TimeEntryNotFoundError) {
@@ -75,16 +80,15 @@ class BadRequestError extends Error {
 }
 
 function validateTimeWindow(update: Parameters<typeof updateTimeEntry>[1]) {
-  if (!update.startedAt) return;
-
-  const startedAt = new Date(update.startedAt);
-  if (Number.isNaN(startedAt.getTime())) {
-    throw new BadRequestError("startedAt must be a valid date.");
-  }
-
   const now = new Date();
-  if (startedAt.getTime() > now.getTime()) {
-    throw new BadRequestError("Start time cannot be in the future.");
+  const startedAt = update.startedAt ? new Date(update.startedAt) : null;
+  if (startedAt) {
+    if (Number.isNaN(startedAt.getTime())) {
+      throw new BadRequestError("startedAt must be a valid date.");
+    }
+    if (startedAt.getTime() > now.getTime()) {
+      throw new BadRequestError("Start time cannot be in the future.");
+    }
   }
 
   if (update.stoppedAt) {
@@ -92,7 +96,10 @@ function validateTimeWindow(update: Parameters<typeof updateTimeEntry>[1]) {
     if (Number.isNaN(stoppedAt.getTime())) {
       throw new BadRequestError("stoppedAt must be a valid date.");
     }
-    if (startedAt.getTime() >= stoppedAt.getTime()) {
+    if (stoppedAt.getTime() > now.getTime()) {
+      throw new BadRequestError("Finish time cannot be in the future.");
+    }
+    if (startedAt && startedAt.getTime() >= stoppedAt.getTime()) {
       throw new BadRequestError("Start time must be before the finish time.");
     }
   }

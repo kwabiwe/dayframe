@@ -16,7 +16,7 @@ describe("Midnight Core theme", () => {
       surfaceRaised: "#1B2230",
       accent: "#FF6248",
       onAccent: "#050914",
-      focus: "#71C5F4",
+      focus: "#64718A",
       chartTrack: "#252E40"
     });
     expect(DAYFRAME_THEME.light).toMatchObject({
@@ -25,7 +25,7 @@ describe("Midnight Core theme", () => {
       surfaceRaised: "#FFFFFF",
       accent: "#F45D43",
       onAccent: "#111827",
-      focus: "#2563EB",
+      focus: "#7D8797",
       chartTrack: "#E5E9F0"
     });
   });
@@ -45,6 +45,13 @@ describe("Midnight Core theme", () => {
     }
     expect(contrast(DAYFRAME_THEME.light.accentText, DAYFRAME_THEME.light.accentSoft))
       .toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("keeps keyboard focus permanently neutral and aligned with the control boundary", () => {
+    for (const theme of Object.values(DAYFRAME_THEME)) {
+      expect(theme.focus).toBe(theme.controlBorder);
+      expect(theme.focus).not.toBe(theme.info);
+    }
   });
 
   it("preserves palette keys and deterministic order", () => {
