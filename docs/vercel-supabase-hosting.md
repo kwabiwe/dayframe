@@ -94,7 +94,7 @@ Supabase Auth owns identity and password verification. Dayframe provisions a mat
 
 The web app uses an HTTP-only `dayframe_session` cookie. The mobile app receives the same Dayframe token as a bearer token and stores it in SecureStore.
 
-For mobile builds, set `EXPO_PUBLIC_DAYFRAME_API_BASE` to the hosted Vercel URL so the iOS app syncs with production. Do not point mobile builds at the Supabase project URL, do not write directly to Supabase tables from iOS, and do not put service-role keys in EAS or app config.
+For mobile builds, set `EXPO_PUBLIC_DAYFRAME_API_BASE` to the environment's Vercel URL: `dayframe-staging.vercel.app` for `preview`, and `dayframe-web.vercel.app` for `production`. Do not point mobile builds at the Supabase project URL, do not write directly to Supabase tables from iOS, and do not put service-role keys in EAS or app config. Preview and production currently share one iOS bundle identity, so installing a preview build may replace the existing TestFlight/production app; a separate staging identity is deferred.
 
 See `docs/ios-hosted-supabase-runbook.md` for the iOS/EAS setup and physical-device validation checklist.
 

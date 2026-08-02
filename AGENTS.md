@@ -14,7 +14,7 @@ Use `docs/PRD.md` for product direction, then check `docs/feature-fix-tracker.md
 - Web: Next.js App Router, React, TypeScript, Tailwind CSS, route handlers.
 - Mobile: Expo Router and React Native with targeted Swift/SwiftUI native modules for iOS-specific interaction surfaces, plus HealthKit and Expo Location/Task Manager.
 - Shared: Zod schemas, palette/theme constants, event normalization.
-- Database: Postgres/PostGIS via `pg`; Supabase Postgres/Auth for hosted production.
+- Database: Postgres/PostGIS via `pg`; separate Supabase Postgres/Auth projects for hosted staging and production.
 - Tests: Vitest plus TypeScript checks.
 
 ## Commands
@@ -66,7 +66,7 @@ npm run export:workspace -- ./dayframe-backup.json
 ## Architecture Rules
 
 - Preserve the event-first model. Do not bypass `activity_events` for new signal sources.
-- Preserve category/task-first UX. Users track a title/description and optional category; projects/clients are legacy/internal compatibility until explicitly reintroduced.
+- Preserve category/task-first UX. Users track a title/description with an optional category and user-facing tags; projects/clients are legacy/internal compatibility until explicitly reintroduced.
 - Keep automatic behavior conservative. Trusted places may auto-start; broad/unknown/Home-like signals should go to review unless the user has configured a rule.
 - Keep web and mobile API contracts compatible. Mobile relies on `/api/bootstrap`, `/api/time-entries`, `/api/events`, and bearer app sessions.
 - Maintain workspace/user scoping on all data access. API routes must resolve a `RequestSession` before reading or writing workspace data.
@@ -147,6 +147,10 @@ npm run build
 - For app chrome, account, workspace, navigation, settings, or floating-surface changes, explicitly test mobile overlay behavior at phone widths. Do not treat a generic responsive pass as sufficient.
 - For auth/deployment changes, verify `DAYFRAME_AUTH_MODE=dev`, `local`, and `provider` code paths where practical.
 - For hosted deployment changes, verify the Supabase schema has all columns/indexes used by the deployed code before smoke-testing Vercel.
+- Every implementation PR receives a Vercel Preview backed by the staging Supabase project. Never use production credentials or production data for PR testing.
+- Before merge, promote the selected Ready Preview to `dayframe-staging.vercel.app`, apply required migrations to staging, and complete the relevant browser/mobile smoke checks. The stable alias does not move automatically between PRs.
+- Mobile `preview` builds must use `https://dayframe-staging.vercel.app`; production/TestFlight builds must use `https://dayframe-web.vercel.app`. The two profiles currently share one iOS bundle identity, so installing a preview may replace the production/TestFlight app until the deferred staging identity is implemented.
+- Merge only after automated checks and hands-on staging validation pass. After merge, verify the production Vercel deployment and apply production migrations in the documented safe order.
 - Do not claim scripts passed if they were not run.
 - Before diagnosing screenshots or production regressions, use `.codex/reference/debugging-playbook.md` to verify build, deployment, schema, and runtime state before changing code.
 - When a bug exposes a missing recurring guardrail, update the relevant `.codex/reference/` doc or investigation note as part of the fix.
@@ -155,7 +159,7 @@ npm run build
 
 - `docs/PRD.md`: product requirements and MVP scope.
 - `docs/brand-style-guide.md`: canonical logo usage, Midnight Core tokens, typography, component states, charts, and accessibility.
-- `docs/vercel-supabase-hosting.md`: production hosting/auth runbook.
+- `docs/vercel-supabase-hosting.md`: staging/production hosting, auth, Preview and alias-promotion runbook.
 - `docs/dayframe-regression-checklist.md`: feature checklist to avoid regressions.
 - `.codex/reference/product-model.md`: category/task-first product rules.
 - `.codex/reference/mobile-permissions.md`: iOS permission state rules.

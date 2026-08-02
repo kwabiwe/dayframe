@@ -2,6 +2,17 @@
 
 Use this before saying a mobile/API fix is present or absent in production.
 
+## Hosted Environment Lanes
+
+- PR Preview: per-branch Vercel deployment using the separate staging Supabase project.
+- Stable staging: `https://dayframe-staging.vercel.app`, manually assigned to the one PR Preview selected for web/iPhone testing.
+- Production: `https://dayframe-web.vercel.app` using production Supabase.
+- Mobile `preview`: staging API only. Mobile `production`/TestFlight: production API only.
+
+The staging alias does not move automatically. Before merging an implementation PR, confirm its Preview is Ready, apply migrations to staging, promote that deployment to the stable alias, and complete the relevant hands-on checks. Production credentials and data are not a PR test lane.
+
+Preview and production currently share one iOS bundle identity, so installing an internal preview may replace the TestFlight/production app. The separate staging identity is deferred; always confirm the visible `STAGING` badge and baked API base after installation.
+
 ## Version Truth Table
 
 A Dayframe fix may span several independently deployed surfaces:
@@ -178,6 +189,8 @@ For Vercel-hosted fixes:
 4. If there are DB-related changes, verify Supabase migration state before testing.
 
 If the user says "I merged it", still verify deployment completion and commit SHA.
+
+For pre-merge checks, use staging instead: verify the branch Preview commit, staging schema, stable-alias promotion, provider login, anonymous `401` behavior, and the feature-specific browser/mobile matrix before approving merge.
 
 ## Mobile Runtime Check
 

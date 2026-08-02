@@ -125,7 +125,7 @@ This repo now has explicit local-dev auth/session configuration, scoped ingest-t
 
 For DB-backed local login/signup sessions, use `DAYFRAME_AUTH_MODE=local` and see [docs/local-auth-and-hosting-plan.md](docs/local-auth-and-hosting-plan.md).
 
-For hosted Vercel/Supabase setup, use `DAYFRAME_AUTH_MODE=provider` and see [docs/vercel-supabase-hosting.md](docs/vercel-supabase-hosting.md).
+For hosted Vercel/Supabase setup, use `DAYFRAME_AUTH_MODE=provider` and see [docs/vercel-supabase-hosting.md](docs/vercel-supabase-hosting.md). Production uses `dayframe-web.vercel.app` with production Supabase. Each PR receives a Vercel Preview backed by the separate staging Supabase project; the PR selected for hands-on testing is manually promoted to `dayframe-staging.vercel.app` before merge. Mobile preview builds use staging while production/TestFlight builds use production.
 
 Useful commands:
 

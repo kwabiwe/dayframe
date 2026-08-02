@@ -36,10 +36,11 @@ On 2026-08-02 the empty staging project accepted the base schema and every hoste
 
 ## Hosted evidence
 
-PR #153 deployed successfully and `dayframe-staging.vercel.app` was assigned to its Ready Preview deployment. The first anonymous request reproduced a Vercel SSO redirect. Project-level Vercel Authentication was then disabled, after which the stable `/login` route returned the Dayframe page with HTTP 200. Production application authentication remains unchanged.
+PR #153 deployed successfully, was merged to `main` as `6e93855`, and `dayframe-staging.vercel.app` was assigned to its Ready Preview deployment. The first anonymous request reproduced a Vercel SSO redirect. Project-level Vercel Authentication was then disabled, after which the stable `/login` route returned the Dayframe page with HTTP 200 and anonymous `/api/bootstrap` returned HTTP 401. The post-merge production Vercel deployment completed successfully; production `/login` returned HTTP 200 and anonymous `/api/bootstrap` returned HTTP 401. Production application authentication and Supabase configuration remain separate from staging.
 
 ## Remaining evidence
 
 - Hosted staging login and first workspace provisioning.
 - Physical-iPhone internal preview build and cross-surface smoke test.
 - Light/Dark, narrow layout and accessibility review of the staging badge.
+- Separate staging iOS bundle identity; deferred and tracked outside this PR. Until then, preview installation may replace the TestFlight/production app.
