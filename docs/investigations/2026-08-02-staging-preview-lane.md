@@ -13,6 +13,7 @@ Dayframe uses a separate Supabase project for pre-merge testing. Production rema
 - Staging uses a separate Auth user and workspace.
 - Database migrations must pass on staging before production rollout.
 - The stable alias points to one explicitly selected PR deployment at a time.
+- Vercel Authentication is disabled so native iOS can reach the stable alias; Dayframe provider authentication remains mandatory for application and API data.
 
 ## Mobile contract
 
@@ -33,9 +34,12 @@ On 2026-08-02 the empty staging project accepted the base schema and every hoste
 7. Test web/mobile start, stop, edit, refresh, persistence and logout against the staging workspace.
 8. Merge only after review. Apply new migrations to production before deploying schema-dependent production code.
 
+## Hosted evidence
+
+PR #153 deployed successfully and `dayframe-staging.vercel.app` was assigned to its Ready Preview deployment. The first anonymous request reproduced a Vercel SSO redirect. Project-level Vercel Authentication was then disabled, after which the stable `/login` route returned the Dayframe page with HTTP 200. Production application authentication remains unchanged.
+
 ## Remaining evidence
 
 - Hosted staging login and first workspace provisioning.
-- Stable-alias and Vercel protection behaviour.
 - Physical-iPhone internal preview build and cross-surface smoke test.
 - Light/Dark, narrow layout and accessibility review of the staging badge.

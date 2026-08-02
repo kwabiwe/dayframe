@@ -43,6 +43,8 @@ vercel alias set <preview-deployment-url> dayframe-staging.vercel.app
 
 Before promotion, confirm the deployment is a Preview, its schema is current, and login reaches the staging account. The alias is a deliberate single-PR test lane, not an automatic alias for every branch.
 
+Vercel Authentication is disabled for this project because it intercepted the stable `.vercel.app` staging alias and native iOS cannot complete Vercel's interactive SSO flow. Dayframe's own provider authentication remains the application boundary: anonymous API requests fail closed, signups remain controlled by the configured allowlist/switch, and no database credentials are exposed to clients.
+
 Create the Vercel project from the repository root so npm workspaces can install `packages/shared`. Keep the framework preset as Next.js, set the build command to `npm run build`, and use the default Next.js output from `apps/web/.next`.
 
 Set these Vercel environment variables for Production and Preview:
