@@ -237,9 +237,20 @@ This follow-up is applied on top of `0d74c4d961789f74624f847c56b16e1cbea86f70`. 
 - Final repository gates after implementation: `npm run lint` PASS; `npm run typecheck` PASS for mobile/web/shared; `npm run test` PASS with 1,111 tests (mobile 314, web 659, shared 138); `npm run build` PASS with Next.js 16.2.9; `npm run check:brand-assets` PASS; `git diff --check` PASS before documentation and repeated in the final source audit.
 - Rendered local dev validation: 1280×720 Dark and Light cards measured 420px wide with exact 72px footer height and no document overflow; invalid and discard feedback left editor/footer top, height and position unchanged; compact overlap rendered exactly `Overlaps with 1 entry by 00:15`; the shared picker was fixed, unclipped and viewport-contained; the running card showed editable Start, `Running` Finish and live read-only Duration.
 - At 390×844 Light and Dark, the card measured 366px from x=12 to x=378 with document `scrollWidth === clientWidth`; date/time controls fit without clipping. At 350×844 they stacked to two 304px rows, the card measured x=12–338, the fixed phone feedback plane measured 104px, and the picker remained within x=23–303 and y=31–413.
-- No local entry was saved during this follow-up rendered pass. Production was not opened or changed. Browser-console and exact Preview/staging evidence are recorded after the final branch deployment below.
+- No local entry was saved during this follow-up rendered pass. Production was not opened or changed by the browser. No runtime overlay appeared in the rendered checks. The browser log API and later hosted UI navigation were blocked by the in-app browser URL policy, so console history and authenticated staging UI are explicitly NOT RUN rather than inferred from the clean page.
 
 ## Hosted and device validation
+
+Agreed product-spec implementation deployment:
+
+- Implementation commit: `74d10f1779b7708dbd292ec38e2960ce197a2e16`, based directly on the completed Opus follow-up `0d74c4d961789f74624f847c56b16e1cbea86f70`.
+- GitHub Preview deployment `5732313048` matched that exact SHA and completed successfully.
+- Vercel deployment `dpl_CWi3ikcpDrieF4Aed24po8pCPHmW`, target `preview`, status `Ready`, URL `https://dayframe-l4lwur9og-dayframeworkshop.vercel.app`.
+- The exact Preview was assigned to `https://dayframe-staging.vercel.app`; Vercel inspection resolved the stable alias back to `dpl_CWi3ikcpDrieF4Aed24po8pCPHmW`.
+- Exact Preview and staging `/login` returned HTTP 200; anonymous `/api/bootstrap` returned the expected HTTP 401 on both hosts.
+- Production remained unchanged on Ready production deployment `dpl_3RjPENnphD3vRqSR7tcYWKotJVwP`. No production alias, configuration, credential or data mutation occurred.
+- No migration is required. Authenticated staging Calendar behavior remains NOT RUN: the in-app browser was on its stopped-local-server error page and blocked subsequent hosted navigation under its URL policy. No alternate browser or policy workaround was attempted.
+- This evidence documentation creates a newer PR-head commit and Preview. The exact final Ready deployment and staging-alias resolution are recorded in the PR handoff/status rather than creating another documentation-only deployment loop.
 
 Initial implementation-commit deployment evidence:
 
