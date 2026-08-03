@@ -94,7 +94,7 @@ describe("Calendar click-to-create DOM interactions", () => {
 
     fireEvent.scroll(screen.getByLabelText("Calendar time grid"));
     const prompt = await screen.findByRole("alertdialog");
-    expect(prompt.textContent).toContain("Discard unsaved changes?");
+    expect(prompt.textContent).toContain("Discard changes?");
     fireEvent.scroll(screen.getByLabelText("Calendar time grid"));
     expect(screen.getAllByRole("alertdialog")).toHaveLength(1);
 
@@ -138,7 +138,7 @@ describe("Calendar click-to-create DOM interactions", () => {
 
     await clickDay(dayBody, 9 * 60, 32);
     expect(await screen.findByTestId("calendar-compact-editor")).not.toBeNull();
-    expect((screen.getByLabelText("Start") as HTMLInputElement).value).toBe("09:00");
+    expect((screen.getByLabelText("Start time") as HTMLInputElement).value).toBe("09:00");
   });
 
   it("repositions with a same-duration moved anchor and keeps a real overlapping entry above it", async () => {
@@ -149,8 +149,8 @@ describe("Calendar click-to-create DOM interactions", () => {
     const anchor = document.querySelector<HTMLElement>("[data-calendar-draft]") as HTMLElement;
     const initialHeight = Number.parseFloat(anchor.style.height);
 
-    fireEvent.change(screen.getByLabelText("Start"), { target: { value: "11:00" } });
-    fireEvent.change(screen.getByLabelText("Finish"), { target: { value: "11:30" } });
+    fireEvent.change(screen.getByLabelText("Start time"), { target: { value: "11:00" } });
+    fireEvent.change(screen.getByLabelText("Finish time"), { target: { value: "11:30" } });
     await waitFor(() => expect(Number.parseFloat(anchor.style.top)).toBe(11 * 64));
     await waitFor(() => expect(Number.parseFloat(editor.style.top)).toBeGreaterThan(initialEditorTop));
     expect(Number.parseFloat(anchor.style.height)).toBe(initialHeight);

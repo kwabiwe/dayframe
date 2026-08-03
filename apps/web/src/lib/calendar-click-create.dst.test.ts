@@ -100,16 +100,26 @@ describe.each([
     });
 
     const editedStart = buildCalendarEntryCompactCreatePlan({
-      draft: { ...calendarEntryCompactCreateInitialDraft(source), startedAt: "01:30" },
+      draft: {
+        ...calendarEntryCompactCreateInitialDraft(source),
+        startedAtTime: "01:30",
+        temporalOwner: "start"
+      },
       now: new Date(day.getFullYear(), day.getMonth(), day.getDate(), 12),
       source
     });
     expect(editedStart.resolved.startedAt).toBe(fallEditedStartIso);
-    expect(editedStart.resolved.stoppedAt).toBe(fallStopIso);
-    expect(editedStart.durationSeconds).toBeGreaterThan(0);
+    expect(editedStart.resolved.stoppedAt).toBe(
+      new Date(new Date(fallEditedStartIso).getTime() + 30 * 60_000).toISOString()
+    );
+    expect(editedStart.durationSeconds).toBe(1_800);
 
     const editedFinish = buildCalendarEntryCompactCreatePlan({
-      draft: { ...calendarEntryCompactCreateInitialDraft(source), stoppedAt: "01:30" },
+      draft: {
+        ...calendarEntryCompactCreateInitialDraft(source),
+        stoppedAtTime: "01:30",
+        temporalOwner: "finish"
+      },
       now: new Date(day.getFullYear(), day.getMonth(), day.getDate(), 12),
       source
     });

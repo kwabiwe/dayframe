@@ -12,257 +12,233 @@ import {
   calendarEntryCompactDraftHasChanges,
   calendarEntryCompactInitialDraft,
   emptyCalendarEntryCompactDirty,
+  normalizeCalendarEntryCompactDuration,
+  synchronizeCalendarEntryCompactDraft,
   type CalendarEntryCompactDirty,
   type CalendarEntryCompactDraft
 } from "./calendar-entry-compact-editor";
 
-describe("Calendar compact editor save plan", () => {
-  it("builds completed and running drafts without exposing hidden metadata", () => {
-    const completed = timeEntry({ stoppedAt: localIso("2026-01-03T09:20") });
+describe("Calendar compact editor temporal model", () => {
+  it("shows explicit dates, full duration, and no hidden legacy metadata", () => {
+    const completed = timeEntry({ stoppedAt: localIso("2026-01-03T09:20", 19) });
     const running = timeEntry({ stoppedAt: null });
 
     expect(calendarEntryCompactInitialDraft(completed)).toEqual({
       categoryId: "focus",
       description: "Deep work",
-      startedAt: "08:13",
-      stoppedAt: "09:20"
+      startedAtDate: "2026-01-03",
+      startedAtTime: "08:13",
+      stoppedAtDate: "2026-01-03",
+      stoppedAtTime: "09:20",
+      duration: "01:06:37",
+      temporalOwner: "source"
     });
-    expect(calendarEntryCompactInitialDraft(running).stoppedAt).toBe("");
-    expect(Object.keys(calendarEntryCompactInitialDraft(completed))).toEqual([
-      "categoryId",
-      "description",
-      "startedAt",
-      "stoppedAt"
-    ]);
+    expect(calendarEntryCompactInitialDraft(running).stoppedAtDate).toBe("");
+    expect(calendarEntryCompactInitialDraft(running).stoppedAtTime).toBe("");
   });
 
-  it("closes as a no-op plan when nothing changed and preserves stored seconds", () => {
+  it("preserves untouched exact instants and stored seconds", () => {
     const source = timeEntry();
     const draft = calendarEntryCompactInitialDraft(source);
-    const plan = savePlan(source, draft, emptyCalendarEntryCompactDirty);
+    const plan = savePlan(source, draft);
 
     expect(plan.payload).toEqual({});
     expect(plan.resolved.startedAt).toBe(source.startedAt);
     expect(plan.resolved.stoppedAt).toBe(source.stoppedAt);
+    expect(plan.durationSeconds).toBe(3_997);
     expect(calendarEntryCompactDraftHasChanges(source, draft)).toBe(false);
-    expect(calendarEntryCompactDraftHasChanges(source, { ...draft, description: `${draft.description} ` })).toBe(true);
-    expect(calendarEntryCompactDraftHasChanges(source, { ...draft, startedAt: "08:14" })).toBe(true);
   });
 
-  it("emits only changed owned description and category fields, including clear-to-null", () => {
-    const source = timeEntry({
-      placeId: "office",
-      projectId: "legacy-project",
-      clientName: "Legacy client",
-      tagNames: ["private"]
+  it("makes Start the owner, preserves Duration, and moves Finish", () => {
+    const source = timeEntry();
+    const draft = synchronize(source, {
+      ...calendarEntryCompactInitialDraft(source),
+      startedAtTime: "08:00"
+    }, "start");
+    const plan = savePlan(source, draft);
+
+    expect(draft.stoppedAtTime).toBe("09:06");
+    expect(draft.duration).toBe("01:06:37");
+    expect(plan.resolved.startedAt).toBe(localIso("2026-01-03T08:00"));
+    expect(plan.resolved.stoppedAt).toBe(localIso("2026-01-03T09:06", 37));
+    expect(plan.payload).toEqual({
+      startedAt: localIso("2026-01-03T08:00"),
+      stoppedAt: localIso("2026-01-03T09:06", 37)
     });
-    const plan = savePlan(
-      source,
-      { ...calendarEntryCompactInitialDraft(source), categoryId: "", description: "   " },
-      dirty({ categoryId: true, description: true })
-    );
+  });
+
+  it("makes Finish the owner and recalculates Duration", () => {
+    const source = timeEntry();
+    const draft = synchronize(source, {
+      ...calendarEntryCompactInitialDraft(source),
+      stoppedAtTime: "10:00"
+    }, "finish");
+    const plan = savePlan(source, draft);
+
+    expect(draft.duration).toBe("01:46:18");
+    expect(plan.resolved.startedAt).toBe(source.startedAt);
+    expect(plan.resolved.stoppedAt).toBe(localIso("2026-01-03T10:00"));
+  });
+
+  it.each([
+    ["30", "00:30:00", 1_800],
+    ["30:00", "00:30:00", 1_800],
+    ["1:30:00", "01:30:00", 5_400],
+    ["27:00:01", "27:00:01", 97_201]
+  ])("normalizes duration shorthand %s without a 24-hour cap", (raw, normalized, seconds) => {
+    expect(normalizeCalendarEntryCompactDuration(raw)).toEqual({ seconds, value: normalized });
+  });
+
+  it("makes Duration the owner, keeps Start, and moves Finish across days", () => {
+    const source = timeEntry();
+    const draft = synchronize(source, {
+      ...calendarEntryCompactInitialDraft(source),
+      duration: "49:30:00"
+    }, "duration");
+    const plan = savePlan(source, draft, new Date(2026, 0, 8));
+
+    expect(draft.duration).toBe("49:30:00");
+    expect(draft.stoppedAtDate).toBe("2026-01-05");
+    expect(draft.stoppedAtTime).toBe("09:43");
+    expect(plan.resolved.startedAt).toBe(source.startedAt);
+    expect(plan.durationSeconds).toBe(178_200);
+  });
+
+  it("rejects zero and malformed duration while retaining the raw draft", () => {
+    const source = timeEntry();
+    const draft = {
+      ...calendarEntryCompactInitialDraft(source),
+      duration: "0",
+      temporalOwner: "duration" as const
+    };
+    expect(() => savePlan(source, draft)).toThrow("at least 00:00:01");
+    expect(draft.duration).toBe("0");
+    expect(() => normalizeCalendarEntryCompactDuration("1:60")).toThrow("at least 00:00:01");
+  });
+
+  it("keeps an invalid Finish input and uses the exact agreed error", () => {
+    const source = timeEntry();
+    const draft = {
+      ...calendarEntryCompactInitialDraft(source),
+      stoppedAtTime: "07:00",
+      temporalOwner: "finish" as const
+    };
+    expect(() => savePlan(source, draft)).toThrow("Finish must be after Start");
+    expect(draft.stoppedAtTime).toBe("07:00");
+  });
+
+  it("supports same-day, cross-midnight, and multi-day explicit dates", () => {
+    const source = timeEntry();
+    const sameDay = savePlan(source, {
+      ...calendarEntryCompactInitialDraft(source),
+      stoppedAtTime: "11:00",
+      temporalOwner: "finish"
+    });
+    const crossMidnight = savePlan(source, {
+      ...calendarEntryCompactInitialDraft(source),
+      stoppedAtDate: "2026-01-04",
+      stoppedAtTime: "00:15",
+      temporalOwner: "finish"
+    }, new Date(2026, 0, 5));
+    const multiDay = savePlan(source, {
+      ...calendarEntryCompactInitialDraft(source),
+      stoppedAtDate: "2026-01-06",
+      stoppedAtTime: "10:15",
+      temporalOwner: "finish"
+    }, new Date(2026, 0, 7));
+
+    expect(sameDay.durationSeconds).toBe(9_978);
+    expect(crossMidnight.resolved.stoppedAt).toBe(localIso("2026-01-04T00:15"));
+    expect(multiDay.durationSeconds).toBeGreaterThan(72 * 3_600);
+  });
+
+  it("keeps a running timer running while Start is editable and Duration stays live", () => {
+    const source = timeEntry({ stoppedAt: null });
+    const initial = savePlan(source, calendarEntryCompactInitialDraft(source), new Date(2026, 0, 3, 9, 13, 42));
+    const editedDraft = synchronize(source, {
+      ...calendarEntryCompactInitialDraft(source),
+      startedAtTime: "08:00"
+    }, "start");
+    const edited = savePlan(source, editedDraft, new Date(2026, 0, 3, 9, 13, 42));
+
+    expect(initial.durationSeconds).toBe(3_600);
+    expect(edited.resolved.stoppedAt).toBeNull();
+    expect(edited.payload).toEqual({ startedAt: localIso("2026-01-03T08:00") });
+    expect(edited.durationSeconds).toBe(4_422);
+    expect(edited.payload).not.toHaveProperty("stoppedAt");
+  });
+
+  it("rejects future Start and Finish after synchronization", () => {
+    const source = timeEntry();
+    const now = new Date(2026, 0, 3, 10);
+    expect(() => savePlan(source, {
+      ...calendarEntryCompactInitialDraft(source),
+      startedAtTime: "11:00",
+      temporalOwner: "start"
+    }, now)).toThrow("Start time cannot be in the future.");
+    expect(() => savePlan(source, {
+      ...calendarEntryCompactInitialDraft(source),
+      stoppedAtTime: "11:00",
+      temporalOwner: "finish"
+    }, now)).toThrow("Finish time cannot be in the future.");
+  });
+
+  it("emits only compact-editor-owned category and description fields", () => {
+    const source = timeEntry({ placeId: "office", projectId: "legacy", tagNames: ["private"] });
+    const plan = savePlan(source, {
+      ...calendarEntryCompactInitialDraft(source),
+      categoryId: "",
+      description: "   "
+    }, new Date(2026, 0, 3, 12), dirty({ categoryId: true, description: true }));
 
     expect(plan.payload).toEqual({ categoryId: null, description: null });
     expect(Object.keys(plan.payload).every(calendarEditorOwnsPayloadKey)).toBe(true);
-    expect(plan.payload).not.toHaveProperty("placeId");
-    expect(plan.payload).not.toHaveProperty("projectId");
-    expect(plan.payload).not.toHaveProperty("clientName");
-    expect(plan.payload).not.toHaveProperty("tagNames");
-  });
-
-  it("normalizes an edited time to minute precision while leaving the other timestamp exact", () => {
-    const source = timeEntry();
-    const plan = savePlan(
-      source,
-      { ...calendarEntryCompactInitialDraft(source), startedAt: "8:13" },
-      dirty({ startedAt: true })
-    );
-
-    expect(plan.payload).toEqual({ startedAt: localIso("2026-01-03T08:13") });
-    expect(plan.resolved.stoppedAt).toBe(source.stoppedAt);
-  });
-
-  it("retains each original date when editing a cross-midnight entry", () => {
-    const source = timeEntry({
-      startedAt: localIso("2026-01-03T23:50", 37),
-      stoppedAt: localIso("2026-01-04T00:20", 21)
-    });
-    const plan = savePlan(
-      source,
-      { ...calendarEntryCompactInitialDraft(source), startedAt: "23:45", stoppedAt: "00:30" },
-      dirty({ startedAt: true, stoppedAt: true }),
-      new Date(2026, 0, 5, 12)
-    );
-
-    expect(plan.payload).toEqual({
-      startedAt: localIso("2026-01-03T23:45"),
-      stoppedAt: localIso("2026-01-04T00:30")
-    });
-    expect(plan.durationSeconds).toBe(45 * 60);
-  });
-
-  it("validates malformed, future, and reversed times without mutating the draft", () => {
-    const source = timeEntry();
-    const malformed = { ...calendarEntryCompactInitialDraft(source), startedAt: "29:99" };
-    expect(() => savePlan(source, malformed, dirty({ startedAt: true }))).toThrow("valid start time");
-    expect(malformed.startedAt).toBe("29:99");
-
-    const future = { ...calendarEntryCompactInitialDraft(source), startedAt: "23:59" };
-    expect(() => savePlan(source, future, dirty({ startedAt: true }), new Date(2026, 0, 3, 10))).toThrow("future");
-
-    const futureFinish = { ...calendarEntryCompactInitialDraft(source), stoppedAt: "23:59" };
-    expect(() => savePlan(source, futureFinish, dirty({ stoppedAt: true }), new Date(2026, 0, 3, 10))).toThrow(
-      "Finish time cannot be in the future."
-    );
-
-    const reversed = { ...calendarEntryCompactInitialDraft(source), stoppedAt: "07:00" };
-    expect(() => savePlan(source, reversed, dirty({ stoppedAt: true }))).toThrow("after the start");
-  });
-
-  it("validates each partial timestamp combination against the canonical opposite edge", () => {
-    const source = timeEntry();
-    const finishOnly = savePlan(
-      source,
-      { ...calendarEntryCompactInitialDraft(source), stoppedAt: "09:45" },
-      dirty({ stoppedAt: true })
-    );
-    expect(finishOnly.payload).toEqual({ stoppedAt: localIso("2026-01-03T09:45") });
-    expect(finishOnly.resolved.startedAt).toBe(source.startedAt);
-
-    const startAfterStoredFinish = { ...calendarEntryCompactInitialDraft(source), startedAt: "09:30" };
-    expect(() => savePlan(source, startAfterStoredFinish, dirty({ startedAt: true }))).toThrow("after the start");
-
-    const finishBeforeStoredStart = { ...calendarEntryCompactInitialDraft(source), stoppedAt: "08:00" };
-    expect(() => savePlan(source, finishBeforeStoredStart, dirty({ stoppedAt: true }))).toThrow("after the start");
-  });
-
-  it("calculates live elapsed time from the resolved running start", () => {
-    const source = timeEntry({ stoppedAt: null });
-    const plan = savePlan(
-      source,
-      calendarEntryCompactInitialDraft(source),
-      emptyCalendarEntryCompactDirty,
-      new Date(2026, 0, 3, 9, 13, 42)
-    );
-    expect(plan.durationSeconds).toBe(3_600);
-    expect(plan.resolved.stoppedAt).toBeNull();
   });
 });
 
 describe("Calendar compact editor create plan", () => {
-  const source = {
-    startedAt: localIso("2026-01-03T10:00"),
-    stoppedAt: localIso("2026-01-03T10:30")
-  };
-
-  it("starts blank and uncategorized while remaining a valid no-edit creation", () => {
+  it("keeps the initial click-created cross-midnight rollover exact", () => {
+    const source = {
+      startedAt: localIso("2026-01-03T23:45"),
+      stoppedAt: localIso("2026-01-04T00:15")
+    };
     const draft = calendarEntryCompactCreateInitialDraft(source);
-    const plan = buildCalendarEntryCompactCreatePlan({ draft, source });
+    const plan = buildCalendarEntryCompactCreatePlan({ draft, now: new Date(2026, 0, 5), source });
 
-    expect(draft).toEqual({
-      categoryId: "",
-      description: "",
-      startedAt: "10:00",
-      stoppedAt: "10:30"
-    });
+    expect(draft.startedAtDate).toBe("2026-01-03");
+    expect(draft.stoppedAtDate).toBe("2026-01-04");
+    expect(draft.duration).toBe("00:30:00");
+    expect(plan.resolved).toMatchObject(source);
     expect(calendarEntryCompactCreateDraftHasChanges(source, draft)).toBe(false);
-    expect(plan).toEqual({
-      durationSeconds: 1_800,
-      input: {
-        tagNames: [],
-        startedAt: source.startedAt,
-        stoppedAt: source.stoppedAt
-      },
-      resolved: {
-        categoryId: null,
-        description: null,
-        startedAt: source.startedAt,
-        stoppedAt: source.stoppedAt
-      }
-    });
   });
 
-  it("trims owned values, omits blanks, and never leaks hidden fields", () => {
-    const draft = {
-      ...calendarEntryCompactCreateInitialDraft(source),
-      categoryId: "focus",
-      description: "  Plan release  "
+  it("uses the same three-way synchronization and owned create payload", () => {
+    const source = {
+      startedAt: localIso("2026-01-03T10:00"),
+      stoppedAt: localIso("2026-01-03T10:30")
     };
-    const plan = buildCalendarEntryCompactCreatePlan({ draft, source });
+    const draft = synchronizeCalendarEntryCompactDraft({
+      draft: {
+        ...calendarEntryCompactCreateInitialDraft(source),
+        categoryId: "focus",
+        description: "  Plan release  ",
+        duration: "1:30:00"
+      },
+      originalStartedAt: source.startedAt,
+      originalStoppedAt: source.stoppedAt,
+      owner: "duration"
+    });
+    const plan = buildCalendarEntryCompactCreatePlan({ draft, now: new Date(2026, 0, 4), source });
 
-    expect(calendarEntryCompactCreateDraftHasChanges(source, draft)).toBe(true);
+    expect(draft.duration).toBe("01:30:00");
     expect(plan.input).toEqual({
       categoryId: "focus",
       description: "Plan release",
       tagNames: [],
       startedAt: source.startedAt,
-      stoppedAt: source.stoppedAt
+      stoppedAt: localIso("2026-01-03T11:30")
     });
     expect(plan.input).not.toHaveProperty("placeId");
-    expect(plan.input).not.toHaveProperty("projectId");
-    expect(plan.input).not.toHaveProperty("clientId");
-  });
-
-  it("normalizes edited times on their displayed local dates", () => {
-    const plan = buildCalendarEntryCompactCreatePlan({
-      source,
-      draft: {
-        ...calendarEntryCompactCreateInitialDraft(source),
-        startedAt: "10:15",
-        stoppedAt: "11:05"
-      }
-    });
-    expect(plan.resolved.startedAt).toBe(localIso("2026-01-03T10:15"));
-    expect(plan.resolved.stoppedAt).toBe(localIso("2026-01-03T11:05"));
-    expect(plan.durationSeconds).toBe(3_000);
-  });
-
-  it("retains next-day Finish context for a cross-midnight draft", () => {
-    const crossMidnight = {
-      startedAt: localIso("2026-01-03T23:45"),
-      stoppedAt: localIso("2026-01-04T00:15")
-    };
-    const plan = buildCalendarEntryCompactCreatePlan({
-      source: crossMidnight,
-      draft: {
-        ...calendarEntryCompactCreateInitialDraft(crossMidnight),
-        startedAt: "23:30",
-        stoppedAt: "00:20"
-      }
-    });
-    expect(plan.resolved.startedAt).toBe(localIso("2026-01-03T23:30"));
-    expect(plan.resolved.stoppedAt).toBe(localIso("2026-01-04T00:20"));
-    expect(plan.durationSeconds).toBe(3_000);
-  });
-
-  it("rejects malformed and reversed times without mutating the draft", () => {
-    const malformed = { ...calendarEntryCompactCreateInitialDraft(source), startedAt: "25:99" };
-    expect(() => buildCalendarEntryCompactCreatePlan({ draft: malformed, source })).toThrow("valid start time");
-    expect(malformed.startedAt).toBe("25:99");
-
-    const reversed = { ...calendarEntryCompactCreateInitialDraft(source), stoppedAt: "09:45" };
-    expect(() => buildCalendarEntryCompactCreatePlan({ draft: reversed, source })).toThrow("after the start");
-  });
-
-  it("rejects future starts and finishes against one captured save time", () => {
-    const now = new Date(2026, 0, 3, 10, 15);
-    const futureStart = {
-      ...calendarEntryCompactCreateInitialDraft(source),
-      startedAt: "10:30",
-      stoppedAt: "11:00"
-    };
-    expect(() => buildCalendarEntryCompactCreatePlan({ draft: futureStart, now, source })).toThrow(
-      "Start time cannot be in the future."
-    );
-
-    const futureFinish = {
-      ...calendarEntryCompactCreateInitialDraft(source),
-      startedAt: "09:30",
-      stoppedAt: "10:30"
-    };
-    expect(() => buildCalendarEntryCompactCreatePlan({ draft: futureFinish, now, source })).toThrow(
-      "Finish time cannot be in the future."
-    );
   });
 });
 
@@ -271,63 +247,51 @@ describe("Calendar compact editor portal geometry and dismissal", () => {
 
   it("prefers an eight-pixel below-anchor gap and clamps the horizontal edge", () => {
     expect(calculateCalendarEditorPosition({
-      anchor: { ...anchor, left: 600, right: 720 },
-      panelHeight: 240,
-      panelWidth: 360,
-      viewportHeight: 800,
-      viewportWidth: 700
-    })).toEqual({ left: 328, maxHeight: 776, placement: "below", top: 168, width: 360 });
+      anchor: { ...anchor, left: 600, right: 720 }, panelHeight: 240, panelWidth: 420,
+      viewportHeight: 800, viewportWidth: 700
+    })).toEqual({ left: 268, maxHeight: 776, placement: "below", top: 168, width: 420 });
   });
 
   it("flips above and falls back to a twelve-pixel phone card", () => {
     expect(calculateCalendarEditorPosition({
-      anchor: { ...anchor, top: 620, bottom: 680 },
-      panelHeight: 240,
-      panelWidth: 360,
-      viewportHeight: 720,
-      viewportWidth: 900
-    })).toEqual({ left: 100, maxHeight: 696, placement: "above", top: 372, width: 360 });
-
+      anchor: { ...anchor, top: 620, bottom: 680 }, panelHeight: 240, panelWidth: 420,
+      viewportHeight: 720, viewportWidth: 900
+    })).toEqual({ left: 100, maxHeight: 696, placement: "above", top: 372, width: 420 });
     expect(calculateCalendarEditorPosition({
-      anchor,
-      panelHeight: 400,
-      panelWidth: 360,
-      viewportHeight: 700,
-      viewportWidth: 390
+      anchor, panelHeight: 400, panelWidth: 420, viewportHeight: 700, viewportWidth: 390
     })).toEqual({ left: 12, maxHeight: 676, placement: "phone", top: 288, width: 366 });
   });
 
-  it("clamps to the roomier side when the panel barely fits neither side", () => {
-    expect(calculateCalendarEditorPosition({
-      anchor: { ...anchor, top: 462, bottom: 480 },
-      panelHeight: 445,
-      panelWidth: 360,
-      viewportHeight: 720,
-      viewportWidth: 1280
-    })).toEqual({ left: 100, maxHeight: 696, placement: "above", top: 12, width: 360 });
-  });
-
   it("detects when an anchor leaves the viewport or Calendar scroller", () => {
-    expect(calendarEditorRectIsVisible(
-      anchor,
-      { left: 0, right: 900, top: 0, bottom: 700 },
-      { left: 0, right: 500, top: 50, bottom: 500 }
-    )).toBe(true);
-    expect(calendarEditorRectIsVisible(
-      { ...anchor, top: 900, bottom: 960 },
-      { left: 0, right: 900, top: 0, bottom: 700 },
-      null
-    )).toBe(false);
+    expect(calendarEditorRectIsVisible(anchor, { left: 0, right: 900, top: 0, bottom: 700 }, {
+      left: 0, right: 500, top: 50, bottom: 500
+    })).toBe(true);
+    expect(calendarEditorRectIsVisible({ ...anchor, top: 900, bottom: 960 }, {
+      left: 0, right: 900, top: 0, bottom: 700
+    }, null)).toBe(false);
   });
 });
 
 function savePlan(
   entry: TimeEntryRow,
   draft: CalendarEntryCompactDraft,
-  dirtyState: CalendarEntryCompactDirty,
-  now = new Date(2026, 0, 3, 12)
+  now = new Date(2026, 0, 3, 12),
+  dirtyState = emptyCalendarEntryCompactDirty
 ) {
   return buildCalendarEntryCompactSavePlan({ entry, draft, dirty: dirtyState, now });
+}
+
+function synchronize(
+  entry: TimeEntryRow,
+  draft: CalendarEntryCompactDraft,
+  owner: "start" | "finish" | "duration"
+) {
+  return synchronizeCalendarEntryCompactDraft({
+    draft,
+    originalStartedAt: entry.startedAt,
+    originalStoppedAt: entry.stoppedAt,
+    owner
+  });
 }
 
 function dirty(overrides: Partial<CalendarEntryCompactDirty>): CalendarEntryCompactDirty {

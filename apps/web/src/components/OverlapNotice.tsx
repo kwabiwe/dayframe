@@ -21,6 +21,18 @@ export function OverlapNotice({
 }) {
   const overlap = overlapNoticeForCandidate({ candidate, entries, excludeEntryId });
   if (!overlap?.overlapCount) return null;
+  if (compact) {
+    const totalMinutes = Math.max(0, Math.round(overlap.uniqueOverlapSeconds / 60));
+    const duration = `${String(Math.floor(totalMinutes / 60)).padStart(2, "0")}:${String(totalMinutes % 60).padStart(2, "0")}`;
+    return (
+      <aside className="overlap-notice is-compact" role="status" aria-live="polite">
+        <AlertTriangle aria-hidden="true" size={17} />
+        <p>
+          Overlaps with {overlap.overlapCount} {overlap.overlapCount === 1 ? "entry" : "entries"} by {duration}
+        </p>
+      </aside>
+    );
+  }
   const peerById = new Map(entries.map((entry) => [entry.id, entry]));
   const visiblePeers = overlap.overlappingEntryIds
     .map((id) => peerById.get(id))
@@ -29,7 +41,7 @@ export function OverlapNotice({
   const duration = formatDuration(overlap.uniqueOverlapSeconds);
 
   return (
-    <aside className={`overlap-notice swiss-form-wide${compact ? " is-compact" : ""}`} role="status" aria-live="polite">
+    <aside className="overlap-notice swiss-form-wide" role="status" aria-live="polite">
       <AlertTriangle aria-hidden="true" size={17} />
       <div>
         <span className="overlap-notice-badge">Overlap</span>
@@ -49,11 +61,9 @@ export function OverlapNotice({
             ))}
           </ul>
         ) : null}
-        {!compact ? (
-          <p>
-            This is allowed. Both activities count towards Total logged; concurrent clock time counts once in Time covered.
-          </p>
-        ) : null}
+        <p>
+          This is allowed. Both activities count towards Total logged; concurrent clock time counts once in Time covered.
+        </p>
       </div>
     </aside>
   );

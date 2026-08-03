@@ -36,8 +36,10 @@ describe("Calendar click-to-create contract", () => {
     expect(editor).toContain('props.mode === "entry" ? props.entry : null');
     expect(editor).toContain('props.mode === "create"');
     expect(editor).toContain('aria-label={entry ? `Edit ${title}` : "Create Calendar entry"}');
-    expect(editor).toMatch(/\? entry\s*\? formatClockDuration\(preview\.plan\.durationSeconds\)/s);
-    expect(editor).toContain("formatFullClockDuration(preview.plan.durationSeconds)");
+    expect(editor).toContain("formatCalendarEntryCompactDuration(preview.plan.durationSeconds)");
+    expect(editor.match(/<DatePickerPopover/g)).toHaveLength(2);
+    expect(editor).toContain('label={formatCompactDateLabel(draft.startedAtDate)}');
+    expect(editor).toContain('label={formatCompactDateLabel(draft.stoppedAtDate)}');
     expect(editor).toMatch(/\{props\.mode === "entry" \? \([\s\S]*aria-label=\{`Delete \$\{title\}`\}/s);
   });
 

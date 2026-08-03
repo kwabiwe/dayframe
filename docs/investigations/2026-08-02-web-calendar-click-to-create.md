@@ -205,6 +205,40 @@ Optimized local rendered follow-up at `1280x720`:
 - No runtime overlay was visible. Browser console history, phone-width emulation and Reduce Motion media emulation were unavailable in the in-app browser for this follow-up, so they are NOT RUN here. The earlier PR evidence above retains its phone-width rendered checks; current reduced-motion behavior remains covered by CSS/contracts, not claimed as rendered.
 - Physical iPhone checks remain NOT RUN because no device is available in this environment.
 
+## 2026-08-03 agreed product-spec follow-up
+
+This follow-up is applied on top of `0d74c4d961789f74624f847c56b16e1cbea86f70`. The older click-to-create brief remains baseline history; the contracts below supersede its compact-card date, Duration, feedback-copy and focus details. Every completed Opus guard remains in place.
+
+### Temporal and presentation contract
+
+- Completed and new compact cards always show separate Start and Finish dates plus times. Both date triggers reuse the existing `DatePickerPopover` and `DayframeCalendar`; the broader web date-field migration remains outside this PR.
+- Completed/new Duration is editable. `30`, `30:00`, and `1:30:00` normalize on blur to `00:30:00`, `00:30:00`, and `01:30:00`. Minimum is one second and hours are unbounded by a 24-hour cap.
+- The last actively changed temporal field is the only synchronization owner: Start preserves Duration and moves Finish, Finish derives Duration, and Duration preserves Start and moves Finish. Blur without a preceding value change cannot steal ownership or round-trip hidden seconds.
+- A running card exposes editable Start date/time, literal `Running` Finish and live read-only Duration. A running-to-stopped prop transition hydrates exact Finish and makes Finish/Duration editable without stopping, restarting or duplicating the timer.
+- Manual Finish less than or equal to Start retains the entered value and reports exactly `Finish must be after Start`; it never guesses next day. The click-created `23:45`–`00:15` source is already an exact next-day interval and remains valid.
+- Untouched timestamps remain exact ISO instants. Edited nonexistent wall times remain invalid; repeated wall-time candidates are evaluated as positive Start/Finish pairs and the valid pair closest to the exact source instants wins.
+- One fixed feedback plane uses `discard > validation/save error > overlap > empty`. Discard is exactly `Discard changes?`, `Go back`, `Discard`. Compact overlap is only the warning triangle plus `Overlaps with N entry/entries by HH:MM`; long errors scroll internally.
+- App-wide web focus is neutral: ordinary text/date/time/select/textarea controls use a grey focused border for pointer or keyboard focus; buttons, links, tabs, dropdown/icon triggers and other non-field controls use grey `:focus-visible` only. Blue/info/accent focus is forbidden in Light and Dark.
+- Desktop width increases modestly from 360px to 420px. The phone card keeps 12px gutters; date/time rows fit at 390px and stack at 350px, with fixed footer/feedback geometry and no document overflow.
+
+### Motion contract
+
+- Triggers: temporal input/change/blur, date-picker open/choose/Escape, feedback-priority changes, running-to-stopped state, and normal editor dismissal.
+- Owners: `CalendarEntryCompactEditor` exclusively owns temporal synchronization and feedback opacity; `DatePickerPopover`/`DayframeCalendar` own picker entrance, keyboard interaction and return focus; the existing portal owns editor entrance/exit.
+- Entrance/update/exit: the editor retains its existing opacity plus at-most-four-pixel entrance/exit. Temporal values and provisional geometry update immediately with no competing layout animation. The portalled picker uses the shared floating-surface transition. Feedback layers crossfade inside one reserved plane; no height/top/left animation occurs.
+- Interruption and async rollback: active-field identity prevents loops; invalid raw input stays owned; pending Save, dirty/busy scroll, consumed-pointer/session and runtime rollback behavior remain unchanged. Picker Escape closes only the picker and restores its trigger.
+- Reduce Motion: existing one-millisecond editor/feedback/picker treatment remains; temporal synchronization itself never animates.
+
+### Added regression coverage and local evidence
+
+- Pure unit tests cover Start/Finish/Duration ownership, same-day/cross-midnight/multi-day dates, durations over 24 hours, all shorthand forms, one-second minimum, exact invalid-Finish copy, running payloads, future rejection and exact/DST preservation.
+- A real React DOM suite covers three-way blur synchronization, keyboard use of the shared picker, always-visible same-day dates, fixed feedback priority/copy, one/two-entry overlap pluralization without names/ranges, live running Duration, running Start-only PATCH, and Finish/Duration becoming editable after stop.
+- Focus and responsive contracts assert pointer-field `:focus`, non-field `:focus-visible`, neutral Light/Dark tokens, no blue/info/accent focus, 420px desktop width, fixed picker portal and stacked sub-380px rows.
+- Final repository gates after implementation: `npm run lint` PASS; `npm run typecheck` PASS for mobile/web/shared; `npm run test` PASS with 1,111 tests (mobile 314, web 659, shared 138); `npm run build` PASS with Next.js 16.2.9; `npm run check:brand-assets` PASS; `git diff --check` PASS before documentation and repeated in the final source audit.
+- Rendered local dev validation: 1280×720 Dark and Light cards measured 420px wide with exact 72px footer height and no document overflow; invalid and discard feedback left editor/footer top, height and position unchanged; compact overlap rendered exactly `Overlaps with 1 entry by 00:15`; the shared picker was fixed, unclipped and viewport-contained; the running card showed editable Start, `Running` Finish and live read-only Duration.
+- At 390×844 Light and Dark, the card measured 366px from x=12 to x=378 with document `scrollWidth === clientWidth`; date/time controls fit without clipping. At 350×844 they stacked to two 304px rows, the card measured x=12–338, the fixed phone feedback plane measured 104px, and the picker remained within x=23–303 and y=31–413.
+- No local entry was saved during this follow-up rendered pass. Production was not opened or changed. Browser-console and exact Preview/staging evidence are recorded after the final branch deployment below.
+
 ## Hosted and device validation
 
 Initial implementation-commit deployment evidence:
