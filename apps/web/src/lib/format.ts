@@ -82,10 +82,55 @@ export function dateTimeLocalInputToIso(
     return null;
   }
 
-  const timezoneOffsetMinutes =
-    options.timezoneOffsetMinutes ??
-    new Date(year, month - 1, day, hour, minute, 0, 0).getTimezoneOffset();
-  return new Date(utcCandidate.getTime() + timezoneOffsetMinutes * 60_000).toISOString();
+  if (options.timezoneOffsetMinutes !== undefined) {
+    return new Date(
+      utcCandidate.getTime() + options.timezoneOffsetMinutes * 60_000
+    ).toISOString();
+  }
+
+  return dateTimeLocalInputToIsoCandidates(value)[0] ?? null;
+}
+
+/**
+ * Returns every exact instant represented by a local minute. Most minutes have
+ * one candidate, fall-back minutes have two, and spring-forward gaps have none.
+ */
+export function dateTimeLocalInputToIsoCandidates(value: unknown): string[] {
+  if (typeof value !== "string") return [];
+  const normalized = value.trim();
+  const match = dateTimeLocalPattern.exec(normalized);
+  if (!match) return [];
+
+  const [, yearText, monthText, dayText, hourText, minuteText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const utcCandidate = new Date(Date.UTC(year, month - 1, day, hour, minute, 0, 0));
+  if (
+    utcCandidate.getUTCFullYear() !== year ||
+    utcCandidate.getUTCMonth() !== month - 1 ||
+    utcCandidate.getUTCDate() !== day ||
+    utcCandidate.getUTCHours() !== hour ||
+    utcCandidate.getUTCMinutes() !== minute
+  ) {
+    return [];
+  }
+
+  const localCandidate = new Date(year, month - 1, day, hour, minute, 0, 0);
+  const offsetProbes = [
+    localCandidate,
+    new Date(year, month - 1, day - 1, 12, 0, 0, 0),
+    new Date(year, month - 1, day + 1, 12, 0, 0, 0)
+  ];
+  const offsets = new Set(offsetProbes.map((probe) => probe.getTimezoneOffset()));
+  const candidates = [...offsets]
+    .map((offset) => new Date(utcCandidate.getTime() + offset * 60_000))
+    .filter((candidate) => dateTimeLocal(candidate) === normalized)
+    .map((candidate) => candidate.toISOString());
+
+  return [...new Set(candidates)].sort();
 }
 
 export function durationInputValue(seconds: number) {

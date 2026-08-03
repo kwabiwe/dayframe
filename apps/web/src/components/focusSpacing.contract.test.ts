@@ -24,7 +24,8 @@ describe("web focus and control contracts", () => {
 
   it("reserves field border width and preserves invalid state while focused", () => {
     expect(styles).toContain("--web-control-border-width: 2px;");
-    expect(styles).toMatch(/input\[aria-invalid="true"\]:focus-visible,[\s\S]*box-shadow: inset 0 -2px 0 var\(--danger\);/);
+    expect(styles).toMatch(/input:not\(:is\([^}]*\)\):focus,[\s\S]*border-color: var\(--web-focus-border\);/s);
+    expect(styles).toMatch(/input\[aria-invalid="true"\]:focus,[\s\S]*box-shadow: inset 0 -2px 0 var\(--danger\);/);
     expect(styles).toMatch(/\.report-multi-select-trigger:focus-visible,[^{]*\{[^}]*outline: 2px solid var\(--focus\);[^}]*outline-offset: 2px;/s);
     expect(reports).toContain('className="ui-control"');
   });
@@ -35,6 +36,7 @@ describe("web focus and control contracts", () => {
     expect(styles).toContain("--web-focus-border: var(--focus);");
     expect(styles).toMatch(/button:focus-visible,[\s\S]*outline: 2px solid var\(--focus\);[\s\S]*outline-offset: 2px;/);
     expect(styles).toContain(".focus-ring:not(input, select, textarea):focus-visible");
+    expect(styles).toMatch(/button:focus:not\(:focus-visible\),[\s\S]*outline: 0;[\s\S]*box-shadow: none;/s);
 
     const focusBlocks = styles.match(/[^{}]*(?:focus-visible|focus-within)[^{}]*\{[^}]*\}/g) ?? [];
     const focusRules = focusBlocks.join("\n");

@@ -18,6 +18,7 @@ import { OverlapNotice } from "@/components/OverlapNotice";
 import { Button, Field, IconButton, ModalDialog } from "@/components/ui/Primitives";
 import { timeEntryAccentColor } from "@/lib/display";
 import { dateTimeLocalInputToIso, formatClockDuration, formatTime } from "@/lib/format";
+import { validateManualTimeEntryWindow } from "@/lib/manual-time-entry";
 import type { BootstrapData } from "@/lib/queries";
 import { shouldStartTimerFromEntrySubmit } from "@/lib/timer-entry-draft";
 import { quickActionTimerDraft } from "@/lib/timer-runtime";
@@ -823,16 +824,23 @@ function ManualEntryDialog({
       setFormError("Use valid start and finish times.");
       return;
     }
-    if (new Date(startedAt).getTime() >= new Date(stoppedAt).getTime()) {
-      setFormError("Finish time must be after start time.");
+    let validatedWindow: { startedAt: string; stoppedAt: string };
+    try {
+      validatedWindow = validateManualTimeEntryWindow({
+        now: new Date(),
+        startedAt,
+        stoppedAt
+      });
+    } catch (validationError) {
+      setFormError(validationError instanceof Error ? validationError.message : "Check the time values.");
       return;
     }
     const outcome = await onCreate({
       categoryId: categoryId || undefined,
       description: description.trim() || undefined,
       tagNames,
-      startedAt,
-      stoppedAt
+      startedAt: validatedWindow.startedAt,
+      stoppedAt: validatedWindow.stoppedAt
     });
     if (outcome.ok) onClose();
     else setFormError(outcome.error);
@@ -1073,11 +1081,14 @@ function buildLearnedQuickActions(data: BootstrapData): QuickAction[] {
 
 function manualEntryDefaults(selectedDate: string) {
   const [year, month, day] = selectedDate.split("-").map(Number);
-  const start = new Date(year, month - 1, day, 9, 0, 0, 0);
   const today = new Date();
   if (dateKey(today) === selectedDate) {
-    start.setHours(today.getHours(), 0, 0, 0);
+    const finish = new Date(today);
+    finish.setSeconds(0, 0);
+    const start = new Date(finish.getTime() - 60 * 60 * 1000);
+    return { start: dateTimeLocal(start), finish: dateTimeLocal(finish) };
   }
+  const start = new Date(year, month - 1, day, 9, 0, 0, 0);
   const finish = new Date(start.getTime() + 60 * 60 * 1000);
   return { start: dateTimeLocal(start), finish: dateTimeLocal(finish) };
 }

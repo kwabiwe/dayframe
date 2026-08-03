@@ -1,15 +1,22 @@
-import { formatLocalDate, parseTimeInput } from "@/lib/calendar-grid";
-import { dateTimeLocal, dateTimeLocalInputToIso } from "@/lib/format";
+import { parseTimeInput } from "@/lib/calendar-grid";
+import { dateTimeLocal, dateTimeLocalInputToIsoCandidates } from "@/lib/format";
 import type { TimeEntryRow } from "@/lib/queries";
+
+export type CalendarEntryCompactTemporalOwner = "source" | "start" | "finish" | "duration";
 
 export type CalendarEntryCompactDraft = {
   categoryId: string;
   description: string;
-  startedAt: string;
-  stoppedAt: string;
+  startedAtDate: string;
+  startedAtTime: string;
+  stoppedAtDate: string;
+  stoppedAtTime: string;
+  duration: string;
+  temporalOwner: CalendarEntryCompactTemporalOwner;
 };
 
-export type CalendarEntryCompactDirty = Record<keyof CalendarEntryCompactDraft, boolean>;
+export type CalendarEntryCompactEditableKey = Exclude<keyof CalendarEntryCompactDraft, "temporalOwner">;
+export type CalendarEntryCompactDirty = Record<CalendarEntryCompactEditableKey, boolean>;
 
 export type CalendarEntryCompactPatch = {
   categoryId?: string | null;
@@ -26,6 +33,28 @@ export type CalendarEntryCompactSavePlan = {
     description: string | null;
     startedAt: string;
     stoppedAt: string | null;
+  };
+};
+
+export type CalendarEntryCompactCreateSource = {
+  startedAt: string;
+  stoppedAt: string;
+};
+
+export type CalendarEntryCompactCreatePlan = {
+  durationSeconds: number;
+  input: {
+    categoryId?: string;
+    description?: string;
+    tagNames: [];
+    startedAt: string;
+    stoppedAt: string;
+  };
+  resolved: {
+    categoryId: string | null;
+    description: string | null;
+    startedAt: string;
+    stoppedAt: string;
   };
 };
 
@@ -49,26 +78,139 @@ export type CalendarEditorPosition = {
 export const emptyCalendarEntryCompactDirty: CalendarEntryCompactDirty = {
   categoryId: false,
   description: false,
-  startedAt: false,
-  stoppedAt: false
+  startedAtDate: false,
+  startedAtTime: false,
+  stoppedAtDate: false,
+  stoppedAtTime: false,
+  duration: false
 };
 
 export function calendarEntryCompactInitialDraft(entry: TimeEntryRow): CalendarEntryCompactDraft {
-  return {
+  return initialDraft({
     categoryId: entry.categoryId ?? "",
     description: entry.description ?? "",
-    startedAt: dateTimeLocal(entry.startedAt).slice(11),
-    stoppedAt: entry.stoppedAt ? dateTimeLocal(entry.stoppedAt).slice(11) : ""
-  };
+    durationSeconds: entry.stoppedAt
+      ? elapsedSeconds(entry.startedAt, entry.stoppedAt)
+      : Math.max(0, entry.durationSeconds),
+    startedAt: entry.startedAt,
+    stoppedAt: entry.stoppedAt
+  });
+}
+
+export function calendarEntryCompactCreateInitialDraft(
+  source: CalendarEntryCompactCreateSource
+): CalendarEntryCompactDraft {
+  return initialDraft({
+    categoryId: "",
+    description: "",
+    durationSeconds: elapsedSeconds(source.startedAt, source.stoppedAt),
+    startedAt: source.startedAt,
+    stoppedAt: source.stoppedAt
+  });
 }
 
 export function calendarEntryCompactDraftHasChanges(
   entry: TimeEntryRow,
   draft: CalendarEntryCompactDraft
 ) {
-  const initial = calendarEntryCompactInitialDraft(entry);
-  return (Object.keys(initial) as Array<keyof CalendarEntryCompactDraft>)
-    .some((key) => draft[key] !== initial[key]);
+  return editableDraftHasChanges(calendarEntryCompactInitialDraft(entry), draft);
+}
+
+export function calendarEntryCompactCreateDraftHasChanges(
+  source: CalendarEntryCompactCreateSource,
+  draft: CalendarEntryCompactDraft
+) {
+  return editableDraftHasChanges(calendarEntryCompactCreateInitialDraft(source), draft);
+}
+
+export function normalizeCalendarEntryCompactDuration(raw: string) {
+  const value = raw.trim();
+  let seconds: number | null = null;
+  if (/^\d+$/.test(value)) {
+    seconds = Number(value) * 60;
+  } else {
+    const parts = value.split(":");
+    if (parts.length === 2 && parts.every((part) => /^\d+$/.test(part))) {
+      const [minutes, remainderSeconds] = parts.map(Number);
+      if (remainderSeconds < 60) seconds = minutes * 60 + remainderSeconds;
+    } else if (parts.length === 3 && parts.every((part) => /^\d+$/.test(part))) {
+      const [hours, minutes, remainderSeconds] = parts.map(Number);
+      if (minutes < 60 && remainderSeconds < 60) {
+        seconds = hours * 3_600 + minutes * 60 + remainderSeconds;
+      }
+    }
+  }
+  if (seconds === null || !Number.isSafeInteger(seconds) || seconds < 1) {
+    throw new Error("Enter a duration of at least 00:00:01.");
+  }
+  return { seconds, value: formatCalendarEntryCompactDuration(seconds) };
+}
+
+export function formatCalendarEntryCompactDuration(totalSeconds: number) {
+  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(safeSeconds / 3_600);
+  const minutes = Math.floor((safeSeconds % 3_600) / 60);
+  const seconds = safeSeconds % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+export function synchronizeCalendarEntryCompactDraft({
+  draft,
+  originalStartedAt,
+  originalStoppedAt,
+  owner
+}: {
+  draft: CalendarEntryCompactDraft;
+  originalStartedAt: string;
+  originalStoppedAt: string | null;
+  owner: Exclude<CalendarEntryCompactTemporalOwner, "source">;
+}): CalendarEntryCompactDraft {
+  const next = { ...draft, temporalOwner: owner };
+  const initial = initialDraft({
+    categoryId: draft.categoryId,
+    description: draft.description,
+    durationSeconds: originalStoppedAt ? elapsedSeconds(originalStartedAt, originalStoppedAt) : 0,
+    startedAt: originalStartedAt,
+    stoppedAt: originalStoppedAt
+  });
+  if (originalStoppedAt && owner === "finish") {
+    const window = resolveExplicitDraftWindow({
+      draft: next,
+      initial,
+      originalStartedAt,
+      originalStoppedAt
+    });
+    const normalizedStart = localParts(window.startedAt);
+    const normalizedFinish = localParts(window.stoppedAt);
+    next.startedAtDate = normalizedStart.date;
+    next.startedAtTime = normalizedStart.time;
+    next.stoppedAtDate = normalizedFinish.date;
+    next.stoppedAtTime = normalizedFinish.time;
+    next.duration = formatCalendarEntryCompactDuration(elapsedSeconds(window.startedAt, window.stoppedAt));
+    return next;
+  }
+
+  const startedAt = resolveDraftEdge({
+    date: next.startedAtDate,
+    initialDate: initial.startedAtDate,
+    initialTime: initial.startedAtTime,
+    label: "start",
+    original: originalStartedAt,
+    time: next.startedAtTime
+  });
+  const normalizedStart = localParts(startedAt);
+  next.startedAtDate = normalizedStart.date;
+  next.startedAtTime = normalizedStart.time;
+
+  if (!originalStoppedAt) return next;
+
+  const duration = normalizeCalendarEntryCompactDuration(next.duration);
+  const stoppedAt = new Date(new Date(startedAt).getTime() + duration.seconds * 1_000).toISOString();
+  const normalizedFinish = localParts(stoppedAt);
+  next.stoppedAtDate = normalizedFinish.date;
+  next.stoppedAtTime = normalizedFinish.time;
+  next.duration = duration.value;
+  return next;
 }
 
 export function buildCalendarEntryCompactSavePlan({
@@ -84,52 +226,259 @@ export function buildCalendarEntryCompactSavePlan({
 }): CalendarEntryCompactSavePlan {
   const description = draft.description.trim() || null;
   const categoryId = draft.categoryId || null;
-  const startedAt = dirty.startedAt
-    ? timeOnOriginalLocalDate(entry.startedAt, draft.startedAt, "Enter a valid start time.")
-    : entry.startedAt;
-  const stoppedAt = entry.stoppedAt
-    ? dirty.stoppedAt
-      ? timeOnOriginalLocalDate(entry.stoppedAt, draft.stoppedAt, "Enter a valid finish time.")
-      : entry.stoppedAt
-    : null;
-
-  if (dirty.startedAt && new Date(startedAt).getTime() > now.getTime()) {
-    throw new Error("Start time cannot be in the future.");
-  }
-  if (dirty.stoppedAt && stoppedAt && new Date(stoppedAt).getTime() > now.getTime()) {
-    throw new Error("Finish time cannot be in the future.");
-  }
-  if (
-    (dirty.startedAt || dirty.stoppedAt) &&
-    stoppedAt &&
-    new Date(stoppedAt).getTime() <= new Date(startedAt).getTime()
-  ) {
-    throw new Error("Finish time must be after the start time.");
-  }
+  const window = resolveDraftWindow({
+    draft,
+    originalStartedAt: entry.startedAt,
+    originalStoppedAt: entry.stoppedAt
+  });
+  validateNotFuture(window.startedAt, window.stoppedAt, now);
 
   const payload: CalendarEntryCompactPatch = {};
   if (dirty.description && description !== entry.description) payload.description = description;
   if (dirty.categoryId && categoryId !== entry.categoryId) payload.categoryId = categoryId;
-  if (dirty.startedAt && startedAt !== entry.startedAt) payload.startedAt = startedAt;
-  if (dirty.stoppedAt && stoppedAt && stoppedAt !== entry.stoppedAt) payload.stoppedAt = stoppedAt;
+  if (window.startedAt !== entry.startedAt) payload.startedAt = window.startedAt;
+  if (window.stoppedAt && window.stoppedAt !== entry.stoppedAt) payload.stoppedAt = window.stoppedAt;
 
   return {
-    durationSeconds: Math.max(
-      0,
-      Math.floor(((stoppedAt ? new Date(stoppedAt) : now).getTime() - new Date(startedAt).getTime()) / 1_000)
-    ),
+    durationSeconds: window.stoppedAt
+      ? elapsedSeconds(window.startedAt, window.stoppedAt)
+      : Math.max(0, Math.floor((now.getTime() - new Date(window.startedAt).getTime()) / 1_000)),
     payload,
-    resolved: { categoryId, description, startedAt, stoppedAt }
+    resolved: { categoryId, description, ...window }
   };
 }
 
-function timeOnOriginalLocalDate(original: string, rawTime: string, error: string) {
-  const time = parseTimeInput(rawTime);
-  if (!time) throw new Error(error);
-  const localDate = formatLocalDate(new Date(original));
-  const iso = dateTimeLocalInputToIso(`${localDate}T${time}`);
-  if (!iso) throw new Error(error);
-  return iso;
+export function buildCalendarEntryCompactCreatePlan({
+  draft,
+  now = new Date(),
+  source
+}: {
+  draft: CalendarEntryCompactDraft;
+  now?: Date;
+  source: CalendarEntryCompactCreateSource;
+}): CalendarEntryCompactCreatePlan {
+  const description = draft.description.trim() || null;
+  const categoryId = draft.categoryId || null;
+  const window = resolveDraftWindow({
+    draft,
+    originalStartedAt: source.startedAt,
+    originalStoppedAt: source.stoppedAt
+  });
+  validateNotFuture(window.startedAt, window.stoppedAt, now);
+  const stoppedAt = window.stoppedAt as string;
+
+  return {
+    durationSeconds: elapsedSeconds(window.startedAt, stoppedAt),
+    input: {
+      ...(categoryId ? { categoryId } : {}),
+      ...(description ? { description } : {}),
+      tagNames: [],
+      startedAt: window.startedAt,
+      stoppedAt
+    },
+    resolved: { categoryId, description, startedAt: window.startedAt, stoppedAt }
+  };
+}
+
+function initialDraft({
+  categoryId,
+  description,
+  durationSeconds,
+  startedAt,
+  stoppedAt
+}: {
+  categoryId: string;
+  description: string;
+  durationSeconds: number;
+  startedAt: string;
+  stoppedAt: string | null;
+}): CalendarEntryCompactDraft {
+  const start = localParts(startedAt);
+  const finish = stoppedAt ? localParts(stoppedAt) : { date: "", time: "" };
+  return {
+    categoryId,
+    description,
+    startedAtDate: start.date,
+    startedAtTime: start.time,
+    stoppedAtDate: finish.date,
+    stoppedAtTime: finish.time,
+    duration: formatCalendarEntryCompactDuration(durationSeconds),
+    temporalOwner: "source"
+  };
+}
+
+function editableDraftHasChanges(initial: CalendarEntryCompactDraft, draft: CalendarEntryCompactDraft) {
+  return (Object.keys(emptyCalendarEntryCompactDirty) as CalendarEntryCompactEditableKey[])
+    .some((key) => draft[key] !== initial[key]);
+}
+
+function resolveDraftWindow({
+  draft,
+  originalStartedAt,
+  originalStoppedAt
+}: {
+  draft: CalendarEntryCompactDraft;
+  originalStartedAt: string;
+  originalStoppedAt: string | null;
+}) {
+  const initial = initialDraft({
+    categoryId: draft.categoryId,
+    description: draft.description,
+    durationSeconds: originalStoppedAt ? elapsedSeconds(originalStartedAt, originalStoppedAt) : 0,
+    startedAt: originalStartedAt,
+    stoppedAt: originalStoppedAt
+  });
+  const startChanged = draft.startedAtDate !== initial.startedAtDate || draft.startedAtTime !== initial.startedAtTime;
+  const finishChanged = draft.stoppedAtDate !== initial.stoppedAtDate || draft.stoppedAtTime !== initial.stoppedAtTime;
+  const durationChanged = draft.duration !== initial.duration;
+
+  if (!startChanged && !finishChanged && !durationChanged) {
+    return { startedAt: originalStartedAt, stoppedAt: originalStoppedAt };
+  }
+
+  if (draft.temporalOwner === "start" || draft.temporalOwner === "duration") {
+    const startedAt = resolveDraftEdge({
+      date: draft.startedAtDate,
+      initialDate: initial.startedAtDate,
+      initialTime: initial.startedAtTime,
+      label: "start",
+      original: originalStartedAt,
+      time: draft.startedAtTime
+    });
+    if (!originalStoppedAt) return { startedAt, stoppedAt: null };
+    const duration = normalizeCalendarEntryCompactDuration(draft.duration);
+    return {
+      startedAt,
+      stoppedAt: new Date(new Date(startedAt).getTime() + duration.seconds * 1_000).toISOString()
+    };
+  }
+
+  if (!originalStoppedAt) {
+    const startedAt = resolveDraftEdge({
+      date: draft.startedAtDate,
+      initialDate: initial.startedAtDate,
+      initialTime: initial.startedAtTime,
+      label: "start",
+      original: originalStartedAt,
+      time: draft.startedAtTime
+    });
+    return { startedAt, stoppedAt: null };
+  }
+  return resolveExplicitDraftWindow({ draft, initial, originalStartedAt, originalStoppedAt });
+}
+
+function resolveExplicitDraftWindow({
+  draft,
+  initial,
+  originalStartedAt,
+  originalStoppedAt
+}: {
+  draft: CalendarEntryCompactDraft;
+  initial: CalendarEntryCompactDraft;
+  originalStartedAt: string;
+  originalStoppedAt: string;
+}) {
+  const startedAtCandidates = draftEdgeCandidates({
+    date: draft.startedAtDate,
+    initialDate: initial.startedAtDate,
+    initialTime: initial.startedAtTime,
+    label: "start",
+    original: originalStartedAt,
+    time: draft.startedAtTime
+  });
+  const stoppedAtCandidates = draftEdgeCandidates({
+    date: draft.stoppedAtDate,
+    initialDate: initial.stoppedAtDate,
+    initialTime: initial.stoppedAtTime,
+    label: "finish",
+    original: originalStoppedAt,
+    time: draft.stoppedAtTime
+  });
+  const originalStartMs = new Date(originalStartedAt).getTime();
+  const originalStopMs = new Date(originalStoppedAt).getTime();
+  const valid = startedAtCandidates.flatMap((startedAt) => (
+    stoppedAtCandidates
+      .filter((stoppedAt) => new Date(stoppedAt).getTime() > new Date(startedAt).getTime())
+      .map((stoppedAt) => ({ startedAt, stoppedAt }))
+  ));
+  if (!valid.length) throw new Error("Finish must be after Start");
+  valid.sort((left, right) => {
+    const leftDistance = candidateDistance(left.startedAt, originalStartMs) +
+      candidateDistance(left.stoppedAt, originalStopMs);
+    const rightDistance = candidateDistance(right.startedAt, originalStartMs) +
+      candidateDistance(right.stoppedAt, originalStopMs);
+    return leftDistance - rightDistance || left.startedAt.localeCompare(right.startedAt) ||
+      left.stoppedAt.localeCompare(right.stoppedAt);
+  });
+  return valid[0];
+}
+
+function resolveDraftEdge({
+  date,
+  initialDate,
+  initialTime,
+  label,
+  original,
+  time
+}: {
+  date: string;
+  initialDate: string;
+  initialTime: string;
+  label: "start" | "finish";
+  original: string;
+  time: string;
+}) {
+  const candidates = draftEdgeCandidates({ date, initialDate, initialTime, label, original, time });
+  if (candidates.length === 1) return candidates[0];
+  const originalMs = new Date(original).getTime();
+  return [...candidates].sort((left, right) => (
+    candidateDistance(left, originalMs) - candidateDistance(right, originalMs) || left.localeCompare(right)
+  ))[0];
+}
+
+function draftEdgeCandidates({
+  date,
+  initialDate,
+  initialTime,
+  label,
+  original,
+  time
+}: {
+  date: string;
+  initialDate: string;
+  initialTime: string;
+  label: "start" | "finish";
+  original: string;
+  time: string;
+}) {
+  if (date === initialDate && time === initialTime) return [original];
+  const parsedTime = parseTimeInput(time);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !parsedTime) {
+    throw new Error(`Enter a valid ${label} date and time.`);
+  }
+  const candidates = dateTimeLocalInputToIsoCandidates(`${date}T${parsedTime}`);
+  if (!candidates.length) throw new Error(`Enter a valid ${label} date and time.`);
+  return candidates;
+}
+
+function validateNotFuture(startedAt: string, stoppedAt: string | null, now: Date) {
+  if (new Date(startedAt).getTime() > now.getTime()) throw new Error("Start time cannot be in the future.");
+  if (stoppedAt && new Date(stoppedAt).getTime() > now.getTime()) {
+    throw new Error("Finish time cannot be in the future.");
+  }
+}
+
+function localParts(value: string) {
+  const local = dateTimeLocal(value);
+  return { date: local.slice(0, 10), time: local.slice(11) };
+}
+
+function elapsedSeconds(startedAt: string, stoppedAt: string) {
+  return Math.max(0, Math.floor((new Date(stoppedAt).getTime() - new Date(startedAt).getTime()) / 1_000));
+}
+
+function candidateDistance(value: string, originalMs: number) {
+  return Math.abs(new Date(value).getTime() - originalMs);
 }
 
 export function calculateCalendarEditorPosition({
@@ -189,14 +538,6 @@ export function calendarEditorRectIsVisible(
   scroller?: Pick<CalendarEditorRect, "bottom" | "left" | "right" | "top"> | null
 ) {
   return rectsIntersect(anchor, viewport) && (!scroller || rectsIntersect(anchor, scroller));
-}
-
-export function calendarEditorPointerIsInside(
-  path: readonly unknown[],
-  panel: unknown,
-  anchor: unknown
-) {
-  return path.includes(panel) || path.includes(anchor);
 }
 
 export function calendarEditorOwnsPayloadKey(key: string) {

@@ -12,7 +12,7 @@ const controller = readFileSync(new URL("../lib/timeline-delete-undo-controller.
 describe("Calendar compact entry editor", () => {
   it("replaces the bottom quick card with one anchored portalled editor", () => {
     expect(source).toContain("<CalendarEntryCompactEditor");
-    expect(source).toContain("anchor={selectedTarget.anchor}");
+    expect(source).toContain("anchor={visibleSelectedTarget.anchor}");
     expect(source).not.toContain("calendar-entry-quick-card");
     expect(editor).toContain("createPortal(");
     expect(editor).toContain('data-testid="calendar-compact-editor"');
@@ -33,7 +33,7 @@ describe("Calendar compact entry editor", () => {
     expect(editor).not.toContain("EditTimeEntryDialog");
     expect(editor).toContain('placeholder="Enter task description"');
     expect(editor).not.toContain("Times use this entry’s original dates.");
-    expect(styles).toMatch(/\.calendar-compact-editor input:focus-visible\s*\{[^}]*var\(--focus\)/s);
+    expect(styles).toMatch(/\.calendar-compact-editor input:focus\s*\{[^}]*var\(--web-focus-border\)/s);
     expect(styles).toMatch(/--focus:\s*#7d8797;/s);
     expect(styles).toMatch(/\.calendar-compact-icon-action:focus-visible,[\s\S]*outline:\s*2px solid var\(--focus\);/s);
     expect(editDialog).toContain('className="edit-time-entry-dialog"');
@@ -42,12 +42,15 @@ describe("Calendar compact entry editor", () => {
 
   it("guards outside dismissal when the local draft has unsaved changes", () => {
     expect(editor).toContain("calendarEntryCompactDraftHasChanges");
-    expect(editor).toContain("Discard unsaved changes?");
+    expect(editor).toContain("Discard changes?");
+    expect(editor).not.toContain("Discard unsaved changes?");
     expect(editor).toContain("Go back");
     expect(editor).toMatch(/className="calendar-compact-discard-confirm"[^>]*>\s*Discard\s*</s);
     expect(editor).toContain("event.stopPropagation()");
     expect(editor).toContain("discardReturnFocusRef");
     expect(editor).toContain("if (discardPromptRef.current) return;");
+    expect(editor).toContain("onClick={() => attemptDismiss(true)}");
+    expect(editor).toContain("attemptDismiss(true);");
     expect(styles).toContain(".calendar-compact-discard-confirmation");
     expect(styles).toContain(".calendar-compact-editor-footer.is-confirming-discard");
   });
@@ -61,7 +64,7 @@ describe("Calendar compact entry editor", () => {
     expect(editor).toContain('aria-invalid={startIsInvalid || undefined}');
     expect(editor).toContain('aria-invalid={finishIsInvalid || undefined}');
     expect(editor).toContain('id="calendar-compact-time-error"');
-    expect(styles).toMatch(/input\[aria-invalid="true"\]:focus-visible,[\s\S]*border-color: var\(--web-focus-border\);[\s\S]*box-shadow: inset 0 -2px 0 var\(--danger\);/s);
+    expect(styles).toMatch(/input\[aria-invalid="true"\]:focus,[\s\S]*border-color: var\(--web-focus-border\);[\s\S]*box-shadow: inset 0 -2px 0 var\(--danger\);/s);
     expect(styles).toMatch(/\.calendar-compact-editor \{[^}]*--web-control-height:\s*44px;[^}]*--calendar-compact-horizontal-inset:\s*12px;[^}]*--calendar-compact-feedback-height:\s*72px;/s);
     expect(styles).toMatch(/\.calendar-compact-editor-fields \{[^}]*padding:\s*12px var\(--calendar-compact-horizontal-inset\);/s);
     expect(styles).toMatch(/\.calendar-compact-editor-header,\s*\.calendar-compact-editor-footer \{[^}]*padding:\s*10px var\(--calendar-compact-horizontal-inset\);/s);
@@ -73,6 +76,16 @@ describe("Calendar compact entry editor", () => {
     expect(styles).toMatch(/\.calendar-compact-save \{[^}]*background:\s*var\(--accent\);[^}]*color:\s*var\(--on-accent\);/s);
     expect(styles).toMatch(/\.calendar-compact-discard-confirm \{[^}]*background:\s*var\(--accent\);[^}]*color:\s*var\(--on-accent\);/s);
     expect(styles).toMatch(/@media \(max-width: 350px\)[\s\S]*--calendar-compact-feedback-height:\s*104px;[\s\S]*\.calendar-compact-feedback-actions \{[^}]*grid-template-areas:[^}]*"message message"[^}]*"spacer action";[\s\S]*\.calendar-compact-discard-confirmation \{[^}]*grid-template-areas:[^}]*"prompt prompt"[^}]*"back discard";/s);
+  });
+
+  it("keeps explicit date/time controls and a stable narrow-screen layout", () => {
+    expect(editor.match(/<DatePickerPopover/g)).toHaveLength(2);
+    expect(editor).toContain('ariaLabel="Choose Start date"');
+    expect(editor).toContain('ariaLabel="Choose Finish date"');
+    expect(editor).toContain('placeholder="00:30:00"');
+    expect(styles).toMatch(/\.calendar-compact-editor \{[^}]*width:\s*420px;[^}]*max-width:\s*calc\(100vw - 24px\);[^}]*overflow-x:\s*hidden;/s);
+    expect(styles).toMatch(/@media \(max-width: 380px\) \{[\s\S]*\.calendar-compact-date-time-controls \{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s);
+    expect(styles).toMatch(/\.timeline-date-picker-panel\.is-portalled \{[^}]*position:\s*fixed;/s);
   });
 
   it("sends only the compact partial payload and routes active edits through the shell gate", () => {
@@ -115,7 +128,7 @@ describe("Calendar compact entry editor", () => {
   it("invalidates stale exit work when a newer editor session replaces it", () => {
     expect(source).toContain("selectionSessionRef");
     expect(source).toContain("selectedTargetRef.current?.sessionId !== target.sessionId");
-    expect(source).toContain('key={`${selectedTarget.blockKey}:${selectedTarget.sessionId}`}');
+    expect(source).toContain('key={`${visibleSelectedTarget.blockKey}:${visibleSelectedTarget.sessionId}`}');
     expect(editor).toContain("window.clearTimeout(exitTimeoutRef.current)");
     expect(editor).toContain("closeTokenRef.current += 1");
   });

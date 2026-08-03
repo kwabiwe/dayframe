@@ -65,7 +65,21 @@ import {
   type TimelineView
 } from "@/lib/timeline-view";
 import { reportsHrefForCustomRange } from "@/lib/report-filters";
-import type { CalendarEntryCompactSavePlan } from "@/lib/calendar-entry-compact-editor";
+import type {
+  CalendarEntryCompactCreatePlan,
+  CalendarEntryCompactSavePlan
+} from "@/lib/calendar-entry-compact-editor";
+import {
+  calculateCalendarClickCreateSlot,
+  calculateCalendarDraftAnchorGeometry,
+  calendarCreatePointerSequenceAccepted,
+  calendarPointHitsSemanticBlock,
+  calendarPointerMatchesConsumed,
+  isEligibleCalendarCreatePointer,
+  type CalendarConsumedPointer,
+  type CalendarCreatePointerSequence,
+  type CalendarCreateTargetKind
+} from "@/lib/calendar-click-create";
 
 type CalendarHoursMode = "fullDay";
 
@@ -100,13 +114,29 @@ type CalendarResizeDraft = {
   stoppedAt: string;
 };
 
-type CalendarBlockTarget = {
+type CalendarEntryEditorTarget = {
+  kind: "entry";
   anchor: HTMLElement;
   blockKey: string;
   entryId: string;
   focusOnOpen: boolean;
+  scopeKey: string;
   sessionId: number;
 };
+
+type CalendarCreateEditorTarget = {
+  kind: "create";
+  anchor: HTMLElement | null;
+  dayKey: string;
+  draftStartedAt: string;
+  draftStoppedAt: string;
+  startedAt: string;
+  stoppedAt: string;
+  scopeKey: string;
+  sessionId: number;
+};
+
+type CalendarEditorTarget = CalendarEntryEditorTarget | CalendarCreateEditorTarget;
 
 export function TimeReviewViews({
   initialData,
@@ -457,7 +487,7 @@ function timelineDeleteNoticeLabel(entries: readonly TimeEntryRow[]) {
 
 type TimelineScrollPosition = { left: number; top: number };
 
-function CalendarReview({
+export function CalendarReview({
   calendarHoursMode,
   capturedNow,
   categories,
@@ -483,12 +513,20 @@ function CalendarReview({
   visibleDays: Date[];
 }) {
   const router = useRouter();
-  const { clearTimerError, isTimerBusy, startEntryAgain, updateActiveEntryFromCalendar } = useAppShellRuntime();
+  const {
+    clearTimerError,
+    createManualEntry,
+    isTimerBusy,
+    startEntryAgain,
+    updateActiveEntryFromCalendar
+  } = useAppShellRuntime();
   const [, startTransition] = useTransition();
   const [editingEntry, setEditingEntry] = useState<TimeEntryRow | null>(null);
-  const [selectedTarget, setSelectedTarget] = useState<CalendarBlockTarget | null>(null);
-  const selectedTargetRef = useRef<CalendarBlockTarget | null>(null);
+  const [selectedTarget, setSelectedTarget] = useState<CalendarEditorTarget | null>(null);
+  const selectedTargetRef = useRef<CalendarEditorTarget | null>(null);
   const selectionSessionRef = useRef(0);
+  const createPointerSequenceRef = useRef<CalendarCreatePointerSequence | null>(null);
+  const consumedPointerRef = useRef<CalendarConsumedPointer | null>(null);
   const [resizeDraft, setResizeDraft] = useState<CalendarResizeDraft | null>(null);
   const [resizingId, setResizingId] = useState<string | null>(null);
   const [resizeError, setResizeError] = useState<string | null>(null);
@@ -520,25 +558,75 @@ function CalendarReview({
       };
     });
   }, [calendarHeight, calendarHours.endHour, calendarHours.startHour, rowHeight, zoom.intervalMinutes]);
-  const selectedEntry = selectedTarget
-    ? entries.find((entry) => entry.id === selectedTarget.entryId) ?? null
+  const visibleDaysKey = visibleDays.map(formatCalendarDateKey).join("|");
+  const selectionScopeKey = `${calendarHoursMode}:${visibleDaysKey}`;
+  const visibleSelectedTarget = selectedTarget?.scopeKey === selectionScopeKey ? selectedTarget : null;
+  const selectedEntry = visibleSelectedTarget?.kind === "entry"
+    ? entries.find((entry) => entry.id === visibleSelectedTarget.entryId) ?? null
     : null;
   const registerCalendarScroller = useCallback((element: HTMLDivElement | null) => {
     setCalendarScroller(element);
     scrollContainerRef(element);
   }, [scrollContainerRef]);
 
-  function selectCalendarEntry(target: Omit<CalendarBlockTarget, "sessionId">) {
-    const nextTarget = { ...target, sessionId: ++selectionSessionRef.current };
+  useEffect(() => {
+    const clearConsumedPointer = (event: PointerEvent) => {
+      if (consumedPointerRef.current?.pointerId === event.pointerId) {
+        consumedPointerRef.current = null;
+      }
+    };
+    document.addEventListener("pointerup", clearConsumedPointer);
+    document.addEventListener("pointercancel", clearConsumedPointer);
+    return () => {
+      document.removeEventListener("pointerup", clearConsumedPointer);
+      document.removeEventListener("pointercancel", clearConsumedPointer);
+    };
+  }, []);
+
+  function selectCalendarEntry(target: Omit<CalendarEntryEditorTarget, "kind" | "scopeKey" | "sessionId">) {
+    const nextTarget: CalendarEntryEditorTarget = {
+      ...target,
+      kind: "entry",
+      scopeKey: selectionScopeKey,
+      sessionId: ++selectionSessionRef.current
+    };
     selectedTargetRef.current = nextTarget;
     setActionError(null);
     setSelectedTarget(nextTarget);
   }
 
   function clearCalendarSelection() {
+    createPointerSequenceRef.current = null;
     selectedTargetRef.current = null;
     setSelectedTarget(null);
   }
+
+  function createCalendarDraft(day: Date, slot: NonNullable<ReturnType<typeof calculateCalendarClickCreateSlot>>) {
+    const nextTarget: CalendarCreateEditorTarget = {
+      anchor: null,
+      dayKey: formatCalendarDateKey(day),
+      draftStartedAt: slot.startedAt,
+      draftStoppedAt: slot.stoppedAt,
+      kind: "create",
+      scopeKey: selectionScopeKey,
+      sessionId: ++selectionSessionRef.current,
+      startedAt: slot.startedAt,
+      stoppedAt: slot.stoppedAt
+    };
+    selectedTargetRef.current = nextTarget;
+    setActionError(null);
+    setSelectedTarget(nextTarget);
+  }
+
+  const registerCalendarDraftAnchor = useCallback((element: HTMLDivElement | null) => {
+    if (!element) return;
+    const sessionId = Number(element.dataset.calendarDraftSession);
+    const current = selectedTargetRef.current;
+    if (current?.kind !== "create" || current.sessionId !== sessionId || current.anchor === element) return;
+    const nextTarget = { ...current, anchor: element };
+    selectedTargetRef.current = nextTarget;
+    setSelectedTarget(nextTarget);
+  }, []);
 
   function editCalendarEntry(entry: TimeEntryRow) {
     clearCalendarSelection();
@@ -572,12 +660,54 @@ function CalendarReview({
     onDeleteEntries([entry]);
   }
 
-  function dismissCalendarEditor(target: CalendarBlockTarget, restoreFocus: boolean) {
+  function dismissCalendarEditor(target: CalendarEditorTarget, restoreFocus: boolean) {
     if (selectedTargetRef.current?.sessionId !== target.sessionId) return;
     clearCalendarSelection();
     if (restoreFocus) {
-      window.requestAnimationFrame(() => target.anchor.querySelector<HTMLButtonElement>(".calendar-entry-primary")?.focus({ preventScroll: true }));
+      window.requestAnimationFrame(() => {
+        if (target.kind === "entry") {
+          target.anchor.querySelector<HTMLButtonElement>(".calendar-entry-primary")?.focus({ preventScroll: true });
+          return;
+        }
+        calendarScroller?.focus({ preventScroll: true });
+      });
     }
+  }
+
+  function consumeCalendarEditorPointer(
+    target: CalendarEditorTarget,
+    pointer: { pointerId: number; pointerDownTimeStamp: number }
+  ) {
+    consumedPointerRef.current = {
+      ...pointer,
+      sessionId: target.sessionId
+    };
+  }
+
+  function updateCalendarCreateDraft(
+    target: CalendarCreateEditorTarget,
+    plan: CalendarEntryCompactCreatePlan | null
+  ) {
+    if (!plan) return;
+    const current = selectedTargetRef.current;
+    if (
+      current?.kind !== "create" ||
+      current.sessionId !== target.sessionId ||
+      (current.draftStartedAt === plan.resolved.startedAt && current.draftStoppedAt === plan.resolved.stoppedAt)
+    ) {
+      return;
+    }
+    const nextTarget = {
+      ...current,
+      draftStartedAt: plan.resolved.startedAt,
+      draftStoppedAt: plan.resolved.stoppedAt
+    };
+    selectedTargetRef.current = nextTarget;
+    setSelectedTarget(nextTarget);
+  }
+
+  async function saveCalendarCreate(plan: CalendarEntryCompactCreatePlan) {
+    return createManualEntry(plan.input);
   }
 
   async function saveCalendarEditor(
@@ -720,12 +850,116 @@ function CalendarReview({
     window.addEventListener("pointercancel", cancelResize, { once: true });
   }
 
+  function startCalendarCreatePointer(
+    day: Date,
+    event: ReactPointerEvent<HTMLDivElement>
+  ) {
+    const dayBody = event.currentTarget;
+    const pointer = { pointerId: event.pointerId, pointerDownTimeStamp: event.timeStamp };
+    const consumed = calendarPointerMatchesConsumed(consumedPointerRef.current, pointer);
+    const targetKind = calendarCreateTargetKind(event.target, dayBody);
+    if (!isEligibleCalendarCreatePointer({
+      button: event.button,
+      consumed,
+      ctrlKey: event.ctrlKey,
+      defaultPrevented: event.defaultPrevented,
+      isPrimary: event.isPrimary,
+      pointerType: event.pointerType,
+      resizeActive: Boolean(resizingId),
+      targetKind
+    })) {
+      createPointerSequenceRef.current = null;
+      return;
+    }
+
+    createPointerSequenceRef.current = {
+      clientX: event.clientX,
+      clientY: event.clientY,
+      dayKey: formatCalendarDateKey(day),
+      pointerId: event.pointerId,
+      pointerDownTimeStamp: event.timeStamp,
+      scrollLeft: calendarScroller?.scrollLeft ?? 0,
+      scrollTop: calendarScroller?.scrollTop ?? 0
+    };
+    dayBody.setPointerCapture(event.pointerId);
+  }
+
+  function finishCalendarCreatePointer(
+    day: Date,
+    event: ReactPointerEvent<HTMLDivElement>
+  ) {
+    const dayBody = event.currentTarget;
+    const sequence = createPointerSequenceRef.current;
+    createPointerSequenceRef.current = null;
+    if (dayBody.hasPointerCapture(event.pointerId)) {
+      dayBody.releasePointerCapture(event.pointerId);
+    }
+
+    const underlyingTarget = document.elementFromPoint(event.clientX, event.clientY);
+    const targetKind = calendarCreateTargetKind(underlyingTarget, dayBody);
+    const accepted = calendarCreatePointerSequenceAccepted({
+      clientX: event.clientX,
+      clientY: event.clientY,
+      consumed: sequence
+        ? calendarPointerMatchesConsumed(consumedPointerRef.current, sequence)
+        : false,
+      dayKey: formatCalendarDateKey(day),
+      movementThresholdPx: resizeDragThresholdPx,
+      pointerId: event.pointerId,
+      scrollLeft: calendarScroller?.scrollLeft ?? 0,
+      scrollTop: calendarScroller?.scrollTop ?? 0,
+      sequence,
+      targetEligible: targetKind === "day-body"
+    });
+    if (!accepted) return;
+
+    const dayBodyRect = dayBody.getBoundingClientRect();
+    const semanticBlocks = Array.from(
+      dayBody.querySelectorAll<HTMLElement>("[data-calendar-block-key]")
+    ).map((block) => {
+      const rect = block.getBoundingClientRect();
+      return {
+        height: Number(block.dataset.calendarSemanticHeight),
+        left: rect.left,
+        right: rect.right,
+        top: Number(block.dataset.calendarSemanticTop)
+      };
+    }).filter((block) => Number.isFinite(block.top) && Number.isFinite(block.height));
+    if (calendarPointHitsSemanticBlock({
+      blocks: semanticBlocks,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      dayBodyTop: dayBodyRect.top
+    })) {
+      return;
+    }
+
+    const slot = calculateCalendarClickCreateSlot({
+      clientY: event.clientY,
+      day,
+      dayBodyRect,
+      endHour: calendarHours.endHour,
+      now: new Date(),
+      rowHeight,
+      startHour: calendarHours.startHour
+    });
+    if (slot) createCalendarDraft(day, slot);
+  }
+
+  function cancelCalendarCreatePointer(event: ReactPointerEvent<HTMLDivElement>) {
+    if (createPointerSequenceRef.current?.pointerId === event.pointerId) {
+      createPointerSequenceRef.current = null;
+    }
+  }
+
   return (
     <section className="timeline-calendar-workspace">
       <div
+        aria-label="Calendar time grid"
         className="calendar-grid-scroller"
         onScroll={onScroll}
         ref={registerCalendarScroller}
+        tabIndex={0}
       >
         <div
           className="timeline-calendar-grid"
@@ -808,12 +1042,45 @@ function CalendarReview({
             <div
               key={`${day.toISOString()}-body`}
               data-calendar-day-body
+              data-calendar-day-key={formatCalendarDateKey(day)}
               className="calendar-day-body"
+              onLostPointerCapture={cancelCalendarCreatePointer}
+              onPointerCancel={cancelCalendarCreatePointer}
+              onPointerDown={(event) => startCalendarCreatePointer(day, event)}
+              onPointerUp={(event) => finishCalendarCreatePointer(day, event)}
               style={{
                 height: calendarHeight,
                 backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${Math.max(0, gridLineSpacing - 1)}px, var(--line) ${gridLineSpacing}px)`
               }}
             >
+              {visibleSelectedTarget?.kind === "create" && visibleSelectedTarget.dayKey === formatCalendarDateKey(day) ? (() => {
+                const geometry = calculateCalendarDraftAnchorGeometry({
+                  day,
+                  endHour: calendarHours.endHour,
+                  rowHeight,
+                  startedAt: visibleSelectedTarget.draftStartedAt,
+                  startHour: calendarHours.startHour,
+                  stoppedAt: visibleSelectedTarget.draftStoppedAt
+                });
+                if (!geometry) return null;
+                return (
+                  <div
+                    aria-hidden="true"
+                    className={[
+                      "calendar-draft-slot-anchor",
+                      geometry.continuesIntoNextDay ? "is-continuation-to-next" : ""
+                    ].join(" ")}
+                    data-calendar-draft
+                    data-calendar-draft-session={visibleSelectedTarget.sessionId}
+                    ref={registerCalendarDraftAnchor}
+                    style={{
+                      height: geometry.height,
+                      top: geometry.top,
+                      zIndex: 1
+                    }}
+                  />
+                );
+              })() : null}
               {(() => {
                 const blocks = entries
                   .filter((entry) => entryOverlapsDay(entry, day, capturedNow))
@@ -884,7 +1151,7 @@ function CalendarReview({
                     zIndex: 0,
                     textDensity: "full"
                   } satisfies TimeBlockLane;
-                  const selected = selectedTarget?.blockKey === blockKey;
+                  const selected = visibleSelectedTarget?.kind === "entry" && visibleSelectedTarget.blockKey === blockKey;
                   const isResizing = resizingId === entry.id;
                   const isContinuing = continuingEntryId === entry.id;
                   const accent = timeEntryAccentColor(entry);
@@ -924,6 +1191,8 @@ function CalendarReview({
                       } as CSSProperties}
                       data-entry-id={entry.id}
                       data-calendar-block-key={blockKey}
+                      data-calendar-semantic-height={block.semanticBlockPositionStyle.height}
+                      data-calendar-semantic-top={block.semanticBlockPositionStyle.top}
                       data-overlap-layout={lane.mode}
                     >
                       <button
@@ -1033,22 +1302,46 @@ function CalendarReview({
           ))}
         </div>
       </div>
-      {selectedTarget && selectedEntry ? (
+      {visibleSelectedTarget?.kind === "entry" && selectedEntry ? (
         <CalendarEntryCompactEditor
-          key={`${selectedTarget.blockKey}:${selectedTarget.sessionId}`}
-          anchor={selectedTarget.anchor}
+          key={`${visibleSelectedTarget.blockKey}:${visibleSelectedTarget.sessionId}`}
+          anchor={visibleSelectedTarget.anchor}
           capturedNow={capturedNow}
           categories={categories}
           entry={selectedEntry}
-          focusOnOpen={selectedTarget.focusOnOpen}
+          focusOnOpen={visibleSelectedTarget.focusOnOpen}
           isTimerBusy={isTimerBusy}
+          mode="entry"
           onDelete={() => deleteCalendarEntry(selectedEntry)}
-          onDismiss={({ restoreFocus }) => dismissCalendarEditor(selectedTarget, restoreFocus)}
+          onDismiss={({ restoreFocus }) => dismissCalendarEditor(visibleSelectedTarget, restoreFocus)}
+          onOutsidePointerDown={(pointer) => consumeCalendarEditorPointer(visibleSelectedTarget, pointer)}
           onSave={(plan) => saveCalendarEditor(selectedEntry, plan)}
           onStartAgain={() => continueCalendarEntry(selectedEntry)}
           peerEntries={entries}
-          positionKey={`${zoomLevel}:${rowHeight}`}
+          positionKey={`${zoomLevel}:${rowHeight}:${selectedEntry.startedAt}:${selectedEntry.stoppedAt ?? "running"}`}
           scrollContainer={calendarScroller}
+        />
+      ) : null}
+      {visibleSelectedTarget?.kind === "create" && visibleSelectedTarget.anchor ? (
+        <CalendarEntryCompactEditor
+          key={`create:${visibleSelectedTarget.sessionId}`}
+          anchor={visibleSelectedTarget.anchor}
+          capturedNow={capturedNow}
+          categories={categories}
+          focusOnOpen
+          isTimerBusy={isTimerBusy}
+          mode="create"
+          onDismiss={({ restoreFocus }) => dismissCalendarEditor(visibleSelectedTarget, restoreFocus)}
+          onDraftChange={(plan) => updateCalendarCreateDraft(visibleSelectedTarget, plan)}
+          onOutsidePointerDown={(pointer) => consumeCalendarEditorPointer(visibleSelectedTarget, pointer)}
+          onSave={saveCalendarCreate}
+          peerEntries={entries}
+          positionKey={`${zoomLevel}:${rowHeight}:${visibleSelectedTarget.draftStartedAt}:${visibleSelectedTarget.draftStoppedAt}`}
+          scrollContainer={calendarScroller}
+          source={{
+            startedAt: visibleSelectedTarget.startedAt,
+            stoppedAt: visibleSelectedTarget.stoppedAt
+          }}
         />
       ) : null}
       {resizeDraft ? (
@@ -1213,9 +1506,19 @@ function calendarBlockStyle(
   const startMinutes = visibleStart <= axisStart
     ? 0
     : minutesFromDate(visibleStart) - calendarHours.startHour * 60;
-  const endMinutes = visibleEnd >= axisEnd
+  let endMinutes = visibleEnd >= axisEnd
     ? (calendarHours.endHour - calendarHours.startHour) * 60
     : minutesFromDate(visibleEnd) - calendarHours.startHour * 60;
+  if (
+    endMinutes <= startMinutes &&
+    visibleEnd > visibleStart &&
+    sameDay(visibleStart, visibleEnd)
+  ) {
+    endMinutes = Math.min(
+      (calendarHours.endHour - calendarHours.startHour) * 60,
+      startMinutes + Math.max(1, (visibleEnd.getTime() - visibleStart.getTime()) / 60_000)
+    );
+  }
   const durationMinutes = Math.max(1, endMinutes - startMinutes);
   const minimumHeight = minimumTimeBlockHeight(rowHeight);
   const top = Math.min(calendarHeight - minimumHeight, Math.max(0, (startMinutes / 60) * rowHeight));
@@ -1364,4 +1667,18 @@ function sameDay(left: Date, right: Date) {
 function entryOverlapsDay(entry: TimeEntryRow, day: Date, capturedNow: Date) {
   const start = startOfDay(day);
   return entryOverlapSeconds(entry, { start, end: addDays(start, 1) }, capturedNow) > 0;
+}
+
+function calendarCreateTargetKind(
+  target: EventTarget | null,
+  dayBody: HTMLElement
+): CalendarCreateTargetKind {
+  if (!(target instanceof Element) || target.closest("[data-calendar-day-body]") !== dayBody) {
+    return "other";
+  }
+  if (target.closest("[data-calendar-draft]")) return "draft";
+  if (target.closest(".swiss-resize-handle")) return "resize";
+  if (target.closest("[data-calendar-block-key]")) return "entry";
+  if (target.closest("button, a, input, select, textarea, [role='button']")) return "action";
+  return target === dayBody ? "day-body" : "other";
 }

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const session = {
   userId: "00000000-0000-4000-8000-000000000001",
@@ -37,9 +37,15 @@ const { POST } = await import("./route");
 describe("POST /api/time-entries", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-04T12:00:00.000Z"));
     mocks.resolveRequestSession.mockResolvedValue(session);
     mocks.processActivityEvent.mockResolvedValue({ eventId: "event-1", candidate: { action: "start_timer" } });
     mocks.createManualEntry.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("starts a category-only task without requiring a project", async () => {
@@ -181,6 +187,53 @@ describe("POST /api/time-entries", () => {
 
     expect(response.status).toBe(400);
     expect(mocks.createManualEntry).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "invalid Start",
+      { startedAt: "not-a-timestamp", stoppedAt: "2026-07-04T10:00:00.000Z" },
+      "startedAt must be a valid date."
+    ],
+    [
+      "invalid Finish",
+      { startedAt: "2026-07-04T09:00:00.000Z", stoppedAt: "not-a-timestamp" },
+      "stoppedAt must be a valid date."
+    ],
+    [
+      "reversed interval",
+      { startedAt: "2026-07-04T10:00:00.000Z", stoppedAt: "2026-07-04T09:00:00.000Z" },
+      "Finish time must be after the start time."
+    ],
+    [
+      "future Start",
+      { startedAt: "2026-07-04T13:00:00.000Z", stoppedAt: "2026-07-04T14:00:00.000Z" },
+      "Start time cannot be in the future."
+    ],
+    [
+      "future Finish",
+      { startedAt: "2026-07-04T11:00:00.000Z", stoppedAt: "2026-07-04T13:00:00.000Z" },
+      "Finish time cannot be in the future."
+    ]
+  ])("returns a specific 400 for %s", async (_label, interval, error) => {
+    const response = await POST(jsonRequest({ mode: "manual", ...interval }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error });
+    expect(mocks.createManualEntry).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["ordinary past entry", "2026-07-04T09:00:00.000Z", "2026-07-04T10:00:00.000Z"],
+    ["past midnight rollover", "2026-07-03T23:45:00.000Z", "2026-07-04T00:15:00.000Z"]
+  ])("accepts a valid %s", async (_label, startedAt, stoppedAt) => {
+    const response = await POST(jsonRequest({ mode: "manual", startedAt, stoppedAt }));
+
+    expect(response.status).toBe(201);
+    expect(mocks.createManualEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ startedAt, stoppedAt }),
+      session
+    );
   });
 });
 
