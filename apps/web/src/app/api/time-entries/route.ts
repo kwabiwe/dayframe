@@ -3,6 +3,10 @@ import { z, ZodError } from "zod";
 import { createManualEntry, processActivityEvent, splitActiveEntry, TimerReplacementWindowError } from "@/lib/event-service";
 import { authErrorResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
+import {
+  ManualTimeEntryValidationError,
+  validateManualTimeEntryWindow
+} from "@/lib/manual-time-entry";
 import { TagNameSchema } from "@dayframe/shared";
 
 export async function POST(request: Request) {
@@ -14,8 +18,12 @@ export async function POST(request: Request) {
     const tagNames = optionalTagNames(body.tagNames);
 
     if (body.mode === "manual") {
-      const startedAt = requiredString(body.startedAt, "startedAt");
-      const stoppedAt = requiredString(body.stoppedAt, "stoppedAt");
+      const now = new Date();
+      const { startedAt, stoppedAt } = validateManualTimeEntryWindow({
+        now,
+        startedAt: requiredString(body.startedAt, "startedAt"),
+        stoppedAt: requiredString(body.stoppedAt, "stoppedAt")
+      });
       await createManualEntry(
         {
           projectId: optionalString(body.projectId),
@@ -76,7 +84,11 @@ export async function POST(request: Request) {
     if (error instanceof TimerReplacementWindowError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    if (error instanceof ZodError || error instanceof BadRequestError) {
+    if (
+      error instanceof ZodError ||
+      error instanceof BadRequestError ||
+      error instanceof ManualTimeEntryValidationError
+    ) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
     console.error("Dayframe timer action failed", error);

@@ -51,6 +51,7 @@ export function calculateCalendarClickCreateSlot({
   dayBodyRect,
   defaultDurationMinutes = calendarClickCreateDurationMinutes,
   endHour,
+  now = new Date(),
   rowHeight,
   snapMinutes = calendarClickCreateSnapMinutes,
   startHour
@@ -60,6 +61,7 @@ export function calculateCalendarClickCreateSlot({
   dayBodyRect: { height: number; top: number };
   defaultDurationMinutes?: number;
   endHour: number;
+  now?: Date;
   rowHeight: number;
   snapMinutes?: number;
   startHour: number;
@@ -73,7 +75,8 @@ export function calculateCalendarClickCreateSlot({
     rowHeight,
     snapMinutes,
     startHour,
-    day.getTime()
+    day.getTime(),
+    now.getTime()
   ];
   if (
     values.some((value) => !Number.isFinite(value)) ||
@@ -102,6 +105,8 @@ export function calculateCalendarClickCreateSlot({
   const startedAtMs = new Date(startedAt).getTime();
   const stoppedAtMs = startedAtMs + defaultDurationMinutes * 60_000;
   if (!Number.isFinite(startedAtMs) || !Number.isFinite(stoppedAtMs)) return null;
+  const nowMs = now.getTime();
+  if (startedAtMs > nowMs || stoppedAtMs > nowMs) return null;
   const stoppedAt = new Date(stoppedAtMs).toISOString();
   const stoppedAtDate = new Date(stoppedAt);
   const continuesIntoNextDay = formatLocalDate(stoppedAtDate) !== formatLocalDate(day);
@@ -164,9 +169,19 @@ export function calculateCalendarDraftAnchorGeometry({
   const startMinutes = visibleStart <= axisStart
     ? startHour * 60
     : visibleStart.getHours() * 60 + visibleStart.getMinutes();
-  const endMinutes = visibleEnd >= axisEnd
+  let endMinutes = visibleEnd >= axisEnd
     ? endHour * 60
     : visibleEnd.getHours() * 60 + visibleEnd.getMinutes();
+  if (
+    endMinutes <= startMinutes &&
+    stop > start &&
+    formatLocalDate(visibleStart) === formatLocalDate(visibleEnd)
+  ) {
+    endMinutes = Math.min(
+      endHour * 60,
+      startMinutes + Math.max(1, (visibleEnd.getTime() - visibleStart.getTime()) / 60_000)
+    );
+  }
   return {
     continuesIntoNextDay: stop > dayEnd,
     height: ((endMinutes - startMinutes) / 60) * rowHeight,

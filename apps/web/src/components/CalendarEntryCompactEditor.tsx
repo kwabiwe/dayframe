@@ -9,7 +9,6 @@ import {
   buildCalendarEntryCompactCreatePlan,
   buildCalendarEntryCompactSavePlan,
   calculateCalendarEditorPosition,
-  calendarEditorPointerIsInside,
   calendarEditorRectIsVisible,
   calendarEntryCompactCreateDraftHasChanges,
   calendarEntryCompactCreateInitialDraft,
@@ -98,6 +97,7 @@ export function CalendarEntryCompactEditor(props: CalendarEntryCompactEditorProp
   const discardPromptRef = useRef(false);
   const discardReturnFocusRef = useRef<HTMLElement | null>(null);
   const busyRef = useRef(false);
+  const anchorVisibilityDismissRequestedRef = useRef(false);
   const closeTokenRef = useRef(0);
   const exitTimeoutRef = useRef<number | null>(null);
   const onDraftChangeRef = useRef(onCreateDraftChange);
@@ -109,7 +109,11 @@ export function CalendarEntryCompactEditor(props: CalendarEntryCompactEditorProp
         error: null,
         plan: entry
           ? buildCalendarEntryCompactSavePlan({ draft, dirty, entry, now })
-          : buildCalendarEntryCompactCreatePlan({ draft, source: createSource as CalendarEntryCompactCreateSource })
+          : buildCalendarEntryCompactCreatePlan({
+              draft,
+              now,
+              source: createSource as CalendarEntryCompactCreateSource
+            })
       };
     } catch (previewError) {
       return {
@@ -125,6 +129,8 @@ export function CalendarEntryCompactEditor(props: CalendarEntryCompactEditorProp
     [createSource, draft, entry]
   );
   const controlsDisabled = isBusy || discardPrompt;
+  const mutationBlockedByTimer = props.mode === "create" || !entry?.stoppedAt;
+  const saveBlockedByTimer = mutationBlockedByTimer && isTimerBusy;
 
   const updateField = useCallback(<Key extends keyof CalendarEntryCompactDraft,>(
     key: Key,
@@ -177,6 +183,10 @@ export function CalendarEntryCompactEditor(props: CalendarEntryCompactEditorProp
     discardPromptRef.current = false;
     discardFocusRestorePendingRef.current = true;
     setDiscardPrompt(false);
+    window.requestAnimationFrame(() => {
+      const returnTarget = discardReturnFocusRef.current;
+      if (returnTarget?.isConnected) returnTarget.focus({ preventScroll: true });
+    });
   }, []);
 
   const confirmDiscard = useCallback(() => {
@@ -186,6 +196,7 @@ export function CalendarEntryCompactEditor(props: CalendarEntryCompactEditorProp
   }, [requestDismiss]);
 
   const attemptDismiss = useCallback((restoreFocus: boolean) => {
+    if (busyRef.current) return;
     if (hasUnsavedChanges) {
       showDiscardPrompt();
       return;
@@ -220,8 +231,12 @@ export function CalendarEntryCompactEditor(props: CalendarEntryCompactEditorProp
 
   const updatePosition = useCallback(() => {
     const panel = panelRef.current;
-    if (!panel || !anchor.isConnected) {
-      finishDismiss(false);
+    if (!panel) return;
+    if (!anchor.isConnected) {
+      if (!anchorVisibilityDismissRequestedRef.current) {
+        anchorVisibilityDismissRequestedRef.current = true;
+        attemptDismiss(false);
+      }
       return;
     }
     const visualViewport = window.visualViewport;
@@ -238,9 +253,13 @@ export function CalendarEntryCompactEditor(props: CalendarEntryCompactEditorProp
       top: viewportTop
     };
     if (!calendarEditorRectIsVisible(anchorRect, viewportRect, scrollerRect)) {
-      finishDismiss(false);
+      if (!anchorVisibilityDismissRequestedRef.current) {
+        anchorVisibilityDismissRequestedRef.current = true;
+        attemptDismiss(false);
+      }
       return;
     }
+    anchorVisibilityDismissRequestedRef.current = false;
     const panelRect = panel.getBoundingClientRect();
     const next = calculateCalendarEditorPosition({
       anchor: {
@@ -257,7 +276,7 @@ export function CalendarEntryCompactEditor(props: CalendarEntryCompactEditorProp
       viewportWidth
     });
     setPosition({ ...next, left: next.left + viewportLeft, top: next.top + viewportTop });
-  }, [anchor, finishDismiss, scrollContainer]);
+  }, [anchor, attemptDismiss, scrollContainer]);
 
   useLayoutEffect(() => {
     updatePosition();
@@ -296,19 +315,30 @@ export function CalendarEntryCompactEditor(props: CalendarEntryCompactEditorProp
   }, [focusOnOpen]);
 
   useEffect(() => {
-    if (!entry || entry.stoppedAt) return undefined;
+    if (!createSource && (!entry || entry.stoppedAt)) return undefined;
     const interval = window.setInterval(() => setNow(new Date()), 1_000);
     return () => window.clearInterval(interval);
-  }, [entry]);
+  }, [createSource, entry]);
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
       const panel = panelRef.current;
-      if (busyRef.current || !panel || calendarEditorPointerIsInside(event.composedPath(), panel, anchor)) return;
-      onOutsidePointerDown?.({
-        pointerId: event.pointerId,
-        pointerDownTimeStamp: event.timeStamp
-      });
+      if (!panel) return;
+      const path = event.composedPath();
+      if (path.includes(panel)) return;
+      const pointerIsOnAnchor = path.includes(anchor);
+      if (!pointerIsOnAnchor) {
+        onOutsidePointerDown?.({
+          pointerId: event.pointerId,
+          pointerDownTimeStamp: event.timeStamp
+        });
+      }
+      if (busyRef.current) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if (pointerIsOnAnchor) return;
       if (hasUnsavedChanges) {
         event.preventDefault();
         event.stopPropagation();
@@ -320,9 +350,9 @@ export function CalendarEntryCompactEditor(props: CalendarEntryCompactEditorProp
     const handleClick = (event: MouseEvent) => {
       const panel = panelRef.current;
       if (
-        !discardPromptRef.current ||
         !panel ||
-        calendarEditorPointerIsInside(event.composedPath(), panel, anchor)
+        event.composedPath().includes(panel) ||
+        (!busyRef.current && !discardPromptRef.current)
       ) return;
       event.preventDefault();
       event.stopPropagation();
@@ -341,6 +371,11 @@ export function CalendarEntryCompactEditor(props: CalendarEntryCompactEditorProp
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      if (busyRef.current) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       if (discardPrompt) {
         event.preventDefault();
         cancelDiscardPrompt();
@@ -353,35 +388,63 @@ export function CalendarEntryCompactEditor(props: CalendarEntryCompactEditorProp
         return;
       }
       event.preventDefault();
-      attemptDismiss(Boolean(entry));
+      attemptDismiss(true);
+    };
+    const blockNavigationWhileOwned = (event: KeyboardEvent) => {
+      if (!event.altKey || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
+      if (busyRef.current) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if (hasUnsavedChanges) {
+        event.preventDefault();
+        event.stopPropagation();
+        showDiscardPrompt();
+      }
     };
     document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [attemptDismiss, cancelDiscardPrompt, discardPrompt, entry, isCategoryOpen]);
+    document.addEventListener("keydown", blockNavigationWhileOwned);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("keydown", blockNavigationWhileOwned);
+    };
+  }, [attemptDismiss, cancelDiscardPrompt, discardPrompt, hasUnsavedChanges, isCategoryOpen, showDiscardPrompt]);
 
   async function save() {
-    if (busyRef.current || isTimerBusy) return;
-    if (!preview.plan) {
-      setError(preview.error);
+    if (busyRef.current || saveBlockedByTimer) return;
+    let plan: CalendarEntryCompactSavePlan | CalendarEntryCompactCreatePlan | null = null;
+    try {
+      const saveNow = new Date();
+      plan = props.mode === "entry"
+        ? buildCalendarEntryCompactSavePlan({ draft, dirty, entry: props.entry, now: saveNow })
+        : buildCalendarEntryCompactCreatePlan({ draft, now: saveNow, source: props.source });
+    } catch (planError) {
+      setError(planError instanceof Error ? planError.message : "Check the time values.");
       return;
     }
-    if (entry && Object.keys((preview.plan as CalendarEntryCompactSavePlan).payload).length === 0) {
+    if (entry && Object.keys((plan as CalendarEntryCompactSavePlan).payload).length === 0) {
       finishDismiss(true);
       return;
     }
     busyRef.current = true;
     setIsBusy(true);
     setError(null);
-    const outcome = props.mode === "entry"
-      ? await props.onSave(preview.plan as CalendarEntryCompactSavePlan)
-      : await props.onSave(preview.plan as CalendarEntryCompactCreatePlan);
+    let outcome: MutationOutcome;
+    try {
+      outcome = props.mode === "entry"
+        ? await props.onSave(plan as CalendarEntryCompactSavePlan)
+        : await props.onSave(plan as CalendarEntryCompactCreatePlan);
+    } catch {
+      outcome = { ok: false, error: "Unable to save this entry. Check your connection and try again." };
+    }
     if (!outcome.ok) {
       setError(outcome.error);
       busyRef.current = false;
       setIsBusy(false);
       return;
     }
-    finishDismiss(Boolean(entry));
+    finishDismiss(true);
   }
 
   async function startAgain() {
@@ -389,7 +452,12 @@ export function CalendarEntryCompactEditor(props: CalendarEntryCompactEditorProp
     busyRef.current = true;
     setIsBusy(true);
     setError(null);
-    const outcome = await props.onStartAgain();
+    let outcome: MutationOutcome;
+    try {
+      outcome = await props.onStartAgain();
+    } catch {
+      outcome = { ok: false, error: "Unable to start this entry again. Check your connection and try again." };
+    }
     if (!outcome.ok) {
       setError(outcome.error);
       busyRef.current = false;
@@ -459,7 +527,7 @@ export function CalendarEntryCompactEditor(props: CalendarEntryCompactEditorProp
       <button
         type="button"
         className="calendar-compact-save"
-        disabled={isBusy || isTimerBusy || !preview.plan}
+        disabled={isBusy || saveBlockedByTimer || !preview.plan}
         onClick={() => void save()}
       >
         Save
@@ -512,7 +580,7 @@ export function CalendarEntryCompactEditor(props: CalendarEntryCompactEditorProp
               <Trash2 size={17} aria-hidden="true" />
             </button>
           ) : null}
-          <button className="calendar-compact-icon-action" type="button" aria-label="Close editor" disabled={controlsDisabled} onClick={() => attemptDismiss(Boolean(entry))}>
+          <button className="calendar-compact-icon-action" type="button" aria-label="Close editor" disabled={controlsDisabled} onClick={() => attemptDismiss(true)}>
             <X size={18} aria-hidden="true" />
           </button>
         </div>

@@ -157,6 +157,54 @@ Screenshot: `/tmp/dayframe-qa/web-calendar-click-to-create/create-light-10-00.pn
 Responsive stills: `/tmp/dayframe-qa/web-calendar-click-to-create/create-narrow-light-390x844.png` and `/tmp/dayframe-qa/web-calendar-click-to-create/create-narrow-dark-390x844.png`.
 Short interaction recording: NOT RUN; the in-app browser control available in this session does not expose video recording. The complete sequence was exercised as individual real-pointer interactions instead.
 
+## 2026-08-03 review follow-up
+
+PR #156 remained draft and unmerged while the review defect set was reproduced and fixed on `codex/web-calendar-click-to-create`. No production configuration, alias, credentials or data were used.
+
+### Competing root-cause hypotheses and evidence
+
+1. **The dismiss-plus-create regression was caused either by timestamp comparison drift or by premature consumed-pointer cleanup.** The pointer identity values were stable in focused helper tests, which weakened the timestamp hypothesis. A real DOM interaction showed document-capture cleanup ran before React's delegated day-body `pointerup`, deleting the valid token before Calendar could inspect it. Cleanup now runs in document bubble after React's handler; the first physical blank click dismisses only and the next independent click creates.
+2. **Anchor loss was caused either by a stale portal position or by dismissal bypassing the editor state machine.** Geometry recomputation still observed scroll and resize correctly, but `updatePosition()` called `finishDismiss()` directly for a detached/non-intersecting anchor. That bypassed dirty confirmation and pending mutation ownership. Anchor loss now requests dismissal through the same clean/dirty/busy gate, latches one prompt per out-of-view excursion, and keeps a busy editor mounted.
+3. **Fall-back corruption was caused either by ambiguous wall-time parsing or by ordinary Calendar geometry.** Exact ISO sources remained ordered while their repeated-hour wall labels could appear reversed, proving the stored instants were valid and the wall-minute geometry was the failing layer. Untouched fields now retain source ISO values exactly, edited fields enumerate valid local-time candidates, and repeated-hour geometry falls back to positive elapsed-time height. Spring-forward wall times that do not round-trip are rejected.
+
+### Corrected contracts
+
+- Outside pointer identity is published before the pending-save guard. While a create/running mutation is pending, outside and anchor clicks, Escape, Alt+Left/Right navigation, scroll-away and anchor removal cannot dismiss, replace or unmount the editor. A rejected/throwing mutation keeps the same editor node, exact draft, anchor and assertive live error.
+- Dirty scroll-away opens one discard decision per visibility excursion. Repeated scroll events do not stack prompts; Go back restores the exact prior focus and draft without immediately re-prompting. A clean editor may dismiss; a busy editor remains owned.
+- Click-created slots, compact create Save, full Add time and the authoritative manual-entry POST all use one captured `now` per operation and reject malformed, reversed, future-Start and future-Finish windows with specific messages. Valid past and cross-midnight entries remain accepted.
+- Create mode focuses Description. Category consumes its first Escape, the next Escape reaches the editor, and successful create/clean close returns focus to the keyboard-reachable Calendar grid.
+- Nonexistent spring-forward local times return no candidate. Ambiguous fall-back source instants remain byte-for-byte unchanged unless their specific field is edited; a positive real duration always gets positive Calendar geometry.
+- Editor placement reacts to canonical or provisional Start/Finish identity, so a same-duration move follows its moved anchor.
+- Completed-entry PATCH Save is not disabled by an unrelated timer mutation. Only create and running-entry mutations share the timer gate.
+- The provisional anchor has `z-index: 1`; canonical blocks begin at `z-index: 2`. The obsolete inside-pointer helper was removed.
+
+### Review regression coverage
+
+- Added a jsdom + React Testing Library suite that renders the real `CalendarReview` and portalled `CalendarEntryCompactEditor`, drives real pointer/keyboard/scroll events and mocks only the Next/runtime/API boundary. It covers pending Save plus scroll/navigation/outside-pointer failure retention, dirty scroll-away prompt latching and Go back focus, create autofocus and two-stage Escape, consumed-pointer lifetime, moved-anchor following/layering, and completed PATCH during unrelated timer busy state.
+- Added explicit `TZ=Europe/London` and `TZ=America/New_York` tests for spring-forward gaps, fall-back repetition, ordinary slots, midnight rollover, future rejection, exact untouched source instants and positive geometry.
+- Expanded manual-entry route tests for malformed, reversed, future Start, future Finish, ordinary past and cross-midnight inputs. Expanded create-plan tests for future Start/Finish against one supplied current time.
+- Added jsdom-only test dependencies and explicit automatic JSX runtime configuration for Vitest component imports.
+
+Validation after the follow-up implementation:
+
+- `npm run lint` — PASS.
+- `npm run typecheck` — PASS for mobile, web and shared.
+- `npm run test` — PASS: mobile 44 files/314 tests, web 95 files/651 tests, shared 8 files/138 tests; 1,103 tests total.
+- `npm run build` — PASS with Next.js 16.2.9 optimized production build.
+- `git diff --check` — PASS before documentation updates and repeated in the final source audit.
+
+Optimized local rendered follow-up at `1280x720`:
+
+- Day and Week Calendar, all three zoom densities, vertical scrolling, Dark and Light themes — PASS.
+- Click-create autofocus, Category-first Escape, dirty Escape decision, Go back exact draft/focus, successful Save and return focus to `Calendar time grid` — PASS.
+- Dirty anchor scroll-away produced one prompt across repeated scroll events; Go back restored `QA scroll draft` and Description focus without an immediate second prompt — PASS.
+- Editing `02:15–02:45` to `03:15–03:45` kept the 64 px duration, moved the draft top from 373.55 px to 501.55 px, and moved the editor top from 12 px to 119.48 px — PASS.
+- Overlap preview announced one 15-minute overlap; computed layering was provisional `1` versus canonical blocks `2` — PASS.
+- A rendered future `23:15` click on the current date did not open create mode — PASS.
+- The locally created `QA click-create` persistence probe was deleted through Dayframe's normal Timeline delete flow after validation; no staging or production row was created.
+- No runtime overlay was visible. Browser console history, phone-width emulation and Reduce Motion media emulation were unavailable in the in-app browser for this follow-up, so they are NOT RUN here. The earlier PR evidence above retains its phone-width rendered checks; current reduced-motion behavior remains covered by CSS/contracts, not claimed as rendered.
+- Physical iPhone checks remain NOT RUN because no device is available in this environment.
+
 ## Hosted and device validation
 
 Initial implementation-commit deployment evidence:

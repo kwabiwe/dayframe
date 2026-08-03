@@ -6,7 +6,6 @@ import {
   buildCalendarEntryCompactSavePlan,
   calculateCalendarEditorPosition,
   calendarEditorOwnsPayloadKey,
-  calendarEditorPointerIsInside,
   calendarEditorRectIsVisible,
   calendarEntryCompactCreateDraftHasChanges,
   calendarEntryCompactCreateInitialDraft,
@@ -244,6 +243,27 @@ describe("Calendar compact editor create plan", () => {
     const reversed = { ...calendarEntryCompactCreateInitialDraft(source), stoppedAt: "09:45" };
     expect(() => buildCalendarEntryCompactCreatePlan({ draft: reversed, source })).toThrow("after the start");
   });
+
+  it("rejects future starts and finishes against one captured save time", () => {
+    const now = new Date(2026, 0, 3, 10, 15);
+    const futureStart = {
+      ...calendarEntryCompactCreateInitialDraft(source),
+      startedAt: "10:30",
+      stoppedAt: "11:00"
+    };
+    expect(() => buildCalendarEntryCompactCreatePlan({ draft: futureStart, now, source })).toThrow(
+      "Start time cannot be in the future."
+    );
+
+    const futureFinish = {
+      ...calendarEntryCompactCreateInitialDraft(source),
+      startedAt: "09:30",
+      stoppedAt: "10:30"
+    };
+    expect(() => buildCalendarEntryCompactCreatePlan({ draft: futureFinish, now, source })).toThrow(
+      "Finish time cannot be in the future."
+    );
+  });
 });
 
 describe("Calendar compact editor portal geometry and dismissal", () => {
@@ -287,12 +307,7 @@ describe("Calendar compact editor portal geometry and dismissal", () => {
     })).toEqual({ left: 100, maxHeight: 696, placement: "above", top: 12, width: 360 });
   });
 
-  it("distinguishes anchor/panel pointer paths from outside dismissal and detects removed visibility", () => {
-    const panel = {};
-    const anchorNode = {};
-    expect(calendarEditorPointerIsInside([panel], panel, anchorNode)).toBe(true);
-    expect(calendarEditorPointerIsInside([anchorNode], panel, anchorNode)).toBe(true);
-    expect(calendarEditorPointerIsInside([{}], panel, anchorNode)).toBe(false);
+  it("detects when an anchor leaves the viewport or Calendar scroller", () => {
     expect(calendarEditorRectIsVisible(
       anchor,
       { left: 0, right: 900, top: 0, bottom: 700 },

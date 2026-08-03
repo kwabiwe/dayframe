@@ -487,7 +487,7 @@ function timelineDeleteNoticeLabel(entries: readonly TimeEntryRow[]) {
 
 type TimelineScrollPosition = { left: number; top: number };
 
-function CalendarReview({
+export function CalendarReview({
   calendarHoursMode,
   capturedNow,
   categories,
@@ -575,11 +575,11 @@ function CalendarReview({
         consumedPointerRef.current = null;
       }
     };
-    document.addEventListener("pointerup", clearConsumedPointer, true);
-    document.addEventListener("pointercancel", clearConsumedPointer, true);
+    document.addEventListener("pointerup", clearConsumedPointer);
+    document.addEventListener("pointercancel", clearConsumedPointer);
     return () => {
-      document.removeEventListener("pointerup", clearConsumedPointer, true);
-      document.removeEventListener("pointercancel", clearConsumedPointer, true);
+      document.removeEventListener("pointerup", clearConsumedPointer);
+      document.removeEventListener("pointercancel", clearConsumedPointer);
     };
   }, []);
 
@@ -663,8 +663,14 @@ function CalendarReview({
   function dismissCalendarEditor(target: CalendarEditorTarget, restoreFocus: boolean) {
     if (selectedTargetRef.current?.sessionId !== target.sessionId) return;
     clearCalendarSelection();
-    if (restoreFocus && target.kind === "entry") {
-      window.requestAnimationFrame(() => target.anchor.querySelector<HTMLButtonElement>(".calendar-entry-primary")?.focus({ preventScroll: true }));
+    if (restoreFocus) {
+      window.requestAnimationFrame(() => {
+        if (target.kind === "entry") {
+          target.anchor.querySelector<HTMLButtonElement>(".calendar-entry-primary")?.focus({ preventScroll: true });
+          return;
+        }
+        calendarScroller?.focus({ preventScroll: true });
+      });
     }
   }
 
@@ -933,6 +939,7 @@ function CalendarReview({
       day,
       dayBodyRect,
       endHour: calendarHours.endHour,
+      now: new Date(),
       rowHeight,
       startHour: calendarHours.startHour
     });
@@ -948,9 +955,11 @@ function CalendarReview({
   return (
     <section className="timeline-calendar-workspace">
       <div
+        aria-label="Calendar time grid"
         className="calendar-grid-scroller"
         onScroll={onScroll}
         ref={registerCalendarScroller}
+        tabIndex={0}
       >
         <div
           className="timeline-calendar-grid"
@@ -1066,7 +1075,8 @@ function CalendarReview({
                     ref={registerCalendarDraftAnchor}
                     style={{
                       height: geometry.height,
-                      top: geometry.top
+                      top: geometry.top,
+                      zIndex: 1
                     }}
                   />
                 );
@@ -1308,7 +1318,7 @@ function CalendarReview({
           onSave={(plan) => saveCalendarEditor(selectedEntry, plan)}
           onStartAgain={() => continueCalendarEntry(selectedEntry)}
           peerEntries={entries}
-          positionKey={`${zoomLevel}:${rowHeight}`}
+          positionKey={`${zoomLevel}:${rowHeight}:${selectedEntry.startedAt}:${selectedEntry.stoppedAt ?? "running"}`}
           scrollContainer={calendarScroller}
         />
       ) : null}
@@ -1318,7 +1328,7 @@ function CalendarReview({
           anchor={visibleSelectedTarget.anchor}
           capturedNow={capturedNow}
           categories={categories}
-          focusOnOpen={false}
+          focusOnOpen
           isTimerBusy={isTimerBusy}
           mode="create"
           onDismiss={({ restoreFocus }) => dismissCalendarEditor(visibleSelectedTarget, restoreFocus)}
@@ -1326,7 +1336,7 @@ function CalendarReview({
           onOutsidePointerDown={(pointer) => consumeCalendarEditorPointer(visibleSelectedTarget, pointer)}
           onSave={saveCalendarCreate}
           peerEntries={entries}
-          positionKey={`${zoomLevel}:${rowHeight}`}
+          positionKey={`${zoomLevel}:${rowHeight}:${visibleSelectedTarget.draftStartedAt}:${visibleSelectedTarget.draftStoppedAt}`}
           scrollContainer={calendarScroller}
           source={{
             startedAt: visibleSelectedTarget.startedAt,
@@ -1496,9 +1506,19 @@ function calendarBlockStyle(
   const startMinutes = visibleStart <= axisStart
     ? 0
     : minutesFromDate(visibleStart) - calendarHours.startHour * 60;
-  const endMinutes = visibleEnd >= axisEnd
+  let endMinutes = visibleEnd >= axisEnd
     ? (calendarHours.endHour - calendarHours.startHour) * 60
     : minutesFromDate(visibleEnd) - calendarHours.startHour * 60;
+  if (
+    endMinutes <= startMinutes &&
+    visibleEnd > visibleStart &&
+    sameDay(visibleStart, visibleEnd)
+  ) {
+    endMinutes = Math.min(
+      (calendarHours.endHour - calendarHours.startHour) * 60,
+      startMinutes + Math.max(1, (visibleEnd.getTime() - visibleStart.getTime()) / 60_000)
+    );
+  }
   const durationMinutes = Math.max(1, endMinutes - startMinutes);
   const minimumHeight = minimumTimeBlockHeight(rowHeight);
   const top = Math.min(calendarHeight - minimumHeight, Math.max(0, (startMinutes / 60) * rowHeight));

@@ -1,5 +1,5 @@
 import { formatLocalDate, parseTimeInput } from "@/lib/calendar-grid";
-import { dateTimeLocal, dateTimeLocalInputToIso } from "@/lib/format";
+import { dateTimeLocal, dateTimeLocalInputToIsoCandidates } from "@/lib/format";
 import type { TimeEntryRow } from "@/lib/queries";
 
 export type CalendarEntryCompactDraft = {
@@ -126,14 +126,30 @@ export function buildCalendarEntryCompactSavePlan({
 }): CalendarEntryCompactSavePlan {
   const description = draft.description.trim() || null;
   const categoryId = draft.categoryId || null;
-  const startedAt = dirty.startedAt
-    ? timeOnOriginalLocalDate(entry.startedAt, draft.startedAt, "Enter a valid start time.")
-    : entry.startedAt;
-  const stoppedAt = entry.stoppedAt
+  const startedAtCandidates = dirty.startedAt
+    ? timeCandidatesOnOriginalLocalDate(entry.startedAt, draft.startedAt, "Enter a valid start time.")
+    : [entry.startedAt];
+  const stoppedAtCandidates = entry.stoppedAt
     ? dirty.stoppedAt
-      ? timeOnOriginalLocalDate(entry.stoppedAt, draft.stoppedAt, "Enter a valid finish time.")
-      : entry.stoppedAt
-    : null;
+      ? timeCandidatesOnOriginalLocalDate(entry.stoppedAt, draft.stoppedAt, "Enter a valid finish time.")
+      : [entry.stoppedAt]
+    : [null];
+  if (dirty.startedAt && startedAtCandidates.every((candidate) => new Date(candidate).getTime() > now.getTime())) {
+    throw new Error("Start time cannot be in the future.");
+  }
+  if (
+    dirty.stoppedAt &&
+    stoppedAtCandidates.every((candidate) => candidate !== null && new Date(candidate).getTime() > now.getTime())
+  ) {
+    throw new Error("Finish time cannot be in the future.");
+  }
+  const resolvedWindow = resolveEditorTimeWindow({
+    originalStartedAt: entry.startedAt,
+    originalStoppedAt: entry.stoppedAt,
+    startedAtCandidates,
+    stoppedAtCandidates
+  });
+  const { startedAt, stoppedAt } = resolvedWindow;
 
   if (dirty.startedAt && new Date(startedAt).getTime() > now.getTime()) {
     throw new Error("Start time cannot be in the future.");
@@ -167,28 +183,32 @@ export function buildCalendarEntryCompactSavePlan({
 
 export function buildCalendarEntryCompactCreatePlan({
   draft,
+  now = new Date(),
   source
 }: {
   draft: CalendarEntryCompactDraft;
+  now?: Date;
   source: CalendarEntryCompactCreateSource;
 }): CalendarEntryCompactCreatePlan {
   const description = draft.description.trim() || null;
   const categoryId = draft.categoryId || null;
-  const startedAt = timeOnOriginalLocalDate(
-    source.startedAt,
-    draft.startedAt,
-    "Enter a valid start time."
-  );
-  const stoppedAt = timeOnOriginalLocalDate(
-    source.stoppedAt,
-    draft.stoppedAt,
-    "Enter a valid finish time."
-  );
+  const initialDraft = calendarEntryCompactCreateInitialDraft(source);
+  const startEdited = draft.startedAt !== initialDraft.startedAt;
+  const finishEdited = draft.stoppedAt !== initialDraft.stoppedAt;
+  const { startedAt, stoppedAt } = resolveEditorTimeWindow({
+    originalStartedAt: source.startedAt,
+    originalStoppedAt: source.stoppedAt,
+    startedAtCandidates: startEdited
+      ? timeCandidatesOnOriginalLocalDate(source.startedAt, draft.startedAt, "Enter a valid start time.")
+      : [source.startedAt],
+    stoppedAtCandidates: finishEdited
+      ? timeCandidatesOnOriginalLocalDate(source.stoppedAt, draft.stoppedAt, "Enter a valid finish time.")
+      : [source.stoppedAt]
+  });
   const startedAtMs = new Date(startedAt).getTime();
-  const stoppedAtMs = new Date(stoppedAt).getTime();
-  if (stoppedAtMs <= startedAtMs) {
-    throw new Error("Finish time must be after the start time.");
-  }
+  const stoppedAtMs = new Date(stoppedAt as string).getTime();
+  if (startedAtMs > now.getTime()) throw new Error("Start time cannot be in the future.");
+  if (stoppedAtMs > now.getTime()) throw new Error("Finish time cannot be in the future.");
 
   return {
     durationSeconds: Math.floor((stoppedAtMs - startedAtMs) / 1_000),
@@ -197,19 +217,55 @@ export function buildCalendarEntryCompactCreatePlan({
       ...(description ? { description } : {}),
       tagNames: [],
       startedAt,
-      stoppedAt
+      stoppedAt: stoppedAt as string
     },
-    resolved: { categoryId, description, startedAt, stoppedAt }
+    resolved: { categoryId, description, startedAt, stoppedAt: stoppedAt as string }
   };
 }
 
-function timeOnOriginalLocalDate(original: string, rawTime: string, error: string) {
+function timeCandidatesOnOriginalLocalDate(original: string, rawTime: string, error: string) {
   const time = parseTimeInput(rawTime);
   if (!time) throw new Error(error);
   const localDate = formatLocalDate(new Date(original));
-  const iso = dateTimeLocalInputToIso(`${localDate}T${time}`);
-  if (!iso) throw new Error(error);
-  return iso;
+  const candidates = dateTimeLocalInputToIsoCandidates(`${localDate}T${time}`);
+  if (!candidates.length) throw new Error(error);
+  return candidates;
+}
+
+function resolveEditorTimeWindow({
+  originalStartedAt,
+  originalStoppedAt,
+  startedAtCandidates,
+  stoppedAtCandidates
+}: {
+  originalStartedAt: string;
+  originalStoppedAt: string | null;
+  startedAtCandidates: string[];
+  stoppedAtCandidates: Array<string | null>;
+}) {
+  const originalStartMs = new Date(originalStartedAt).getTime();
+  const originalStopMs = originalStoppedAt ? new Date(originalStoppedAt).getTime() : null;
+  const candidates = startedAtCandidates.flatMap((startedAt) => (
+    stoppedAtCandidates.map((stoppedAt) => ({ startedAt, stoppedAt }))
+  ));
+  const valid = candidates.filter(({ startedAt, stoppedAt }) => (
+    stoppedAt === null || new Date(stoppedAt).getTime() > new Date(startedAt).getTime()
+  ));
+  if (!valid.length) throw new Error("Finish time must be after the start time.");
+
+  valid.sort((left, right) => {
+    const leftScore = candidateDistance(left.startedAt, originalStartMs) +
+      (left.stoppedAt && originalStopMs !== null ? candidateDistance(left.stoppedAt, originalStopMs) : 0);
+    const rightScore = candidateDistance(right.startedAt, originalStartMs) +
+      (right.stoppedAt && originalStopMs !== null ? candidateDistance(right.stoppedAt, originalStopMs) : 0);
+    return leftScore - rightScore || left.startedAt.localeCompare(right.startedAt) ||
+      String(left.stoppedAt).localeCompare(String(right.stoppedAt));
+  });
+  return valid[0];
+}
+
+function candidateDistance(value: string, originalMs: number) {
+  return Math.abs(new Date(value).getTime() - originalMs);
 }
 
 export function calculateCalendarEditorPosition({
@@ -269,14 +325,6 @@ export function calendarEditorRectIsVisible(
   scroller?: Pick<CalendarEditorRect, "bottom" | "left" | "right" | "top"> | null
 ) {
   return rectsIntersect(anchor, viewport) && (!scroller || rectsIntersect(anchor, scroller));
-}
-
-export function calendarEditorPointerIsInside(
-  path: readonly unknown[],
-  panel: unknown,
-  anchor: unknown
-) {
-  return path.includes(panel) || path.includes(anchor);
 }
 
 export function calendarEditorOwnsPayloadKey(key: string) {

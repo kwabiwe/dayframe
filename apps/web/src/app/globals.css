@@ -2582,7 +2582,7 @@ dialog.ui-popover-panel.bottom-left {
   position: absolute;
   right: 8px;
   left: 8px;
-  z-index: 9;
+  z-index: 1;
   box-sizing: border-box;
   min-height: 1px;
   border: 1px dashed var(--control-border);

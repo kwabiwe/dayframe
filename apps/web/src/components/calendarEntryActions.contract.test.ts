@@ -48,8 +48,8 @@ describe("Calendar compact entry editor", () => {
     expect(editor).toContain("event.stopPropagation()");
     expect(editor).toContain("discardReturnFocusRef");
     expect(editor).toContain("if (discardPromptRef.current) return;");
-    expect(editor).toContain("onClick={() => attemptDismiss(Boolean(entry))}");
-    expect(editor).toContain("attemptDismiss(Boolean(entry));");
+    expect(editor).toContain("onClick={() => attemptDismiss(true)}");
+    expect(editor).toContain("attemptDismiss(true);");
     expect(styles).toContain(".calendar-compact-discard-confirmation");
     expect(styles).toContain(".calendar-compact-editor-footer.is-confirming-discard");
   });
