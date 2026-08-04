@@ -214,6 +214,15 @@ Native Calendar evidence:
 - On a physical iPhone, record repeated pinch-in/pinch-out while moving the midpoint, vertical pan at multiple zoom levels, day/week navigation, and entry/review taps. Inspect frame pacing with Xcode tooling when available; screenshots alone cannot validate gesture smoothness.
 - Verify System, Light, and Dark, Dynamic Type, VoiceOver, Reduce Motion, Reduce Transparency, and the minimum supported iOS version.
 
+Native Calendar block styling additionally requires:
+
+- Swift behaviour tests proving one nominal compact radius, a one-point visual-only gap, zero gap for next-day continuation, positive tiny geometry, unchanged semantic text thresholds, and semantic hit height.
+- Source/bridge contracts proving the old half-height capsule rule is absent; active/Review dashes and Uncategorized hatch remain; no long press, Play, networking, mutation, model-version bump, or second hosting controller was added.
+- Rendered tall, short, tiny, exact sequential, active, Review, Uncategorized, tagged, long-title, contained/partial/dense overlap, and both continuation directions at minimum/default/maximum zoom.
+- Measure a stable `1pt` vertical separation and `1pt` border at each zoom/display scale. Confirm no false midnight gap, no time/grid/current-line drift, no overlap-lane change, and no text/marker clipping from the one-point paint inset.
+- Tap every fixture, including both sides of a sequential boundary and dense/contained lanes. Verify isolated `44pt` targets and semantic-height overlap targets route to the intended existing React editor/Review flow.
+- Use a physical staging iPhone for short-block shape, Light/Dark/System, Reduce Transparency, Dynamic Type, VoiceOver, repeated pinch/scroll, active-tick refresh, optimistic reconciliation, and callback accuracy. Record each result as PASS, FAIL, or NOT RUN; simulator/source evidence cannot substitute.
+
 ## Native iOS Tabs And App Chrome
 
 Required checks when changing the mobile root navigator or tab bar:

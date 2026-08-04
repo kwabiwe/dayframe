@@ -6,6 +6,9 @@ public enum DayframeCalendarConstants {
   public static let maximumHourHeight = 128.0
   public static let minutesPerDay = 24.0 * 60.0
   public static let minimumVisibleBlockHeight = 4.0
+  public static let minimumVisualBlockHeight = 1.0
+  public static let blockCornerRadius = 8.0
+  public static let blockVisualGap = 1.0
   public static let titleMinimumHeight = 24.0
   public static let metaMinimumHeight = 58.0
   public static let titleMinimumWidth = 64.0
@@ -33,7 +36,7 @@ public enum DayframeCalendarHorizontalMath {
     availableWidth: Double,
     offsetFraction: Double,
     widthFraction: Double,
-    visualHeight: Double,
+    semanticHeight: Double,
     overlapCount: Int,
     textDensity: String
   ) -> DayframeCalendarHorizontalMetrics {
@@ -44,14 +47,100 @@ public enum DayframeCalendarHorizontalMath {
       max(0, widthFraction.isFinite ? widthFraction : 1)
     )
     let width = safeAvailableWidth * safeWidthFraction
+    let safeSemanticHeight = max(0, semanticHeight.isFinite ? semanticHeight : 0)
     let densityAllowsTitle = textDensity != "none"
     let densityAllowsMeta = textDensity == "full"
     return DayframeCalendarHorizontalMetrics(
       offset: safeAvailableWidth * safeOffsetFraction,
       width: width,
-      hitHeight: overlapCount > 0 ? max(0, visualHeight) : max(44, visualHeight),
+      hitHeight: overlapCount > 0 ? safeSemanticHeight : max(44, safeSemanticHeight),
       showMeta: densityAllowsMeta && width >= DayframeCalendarConstants.metaMinimumWidth,
       showTitle: densityAllowsTitle && width >= DayframeCalendarConstants.titleMinimumWidth
+    )
+  }
+}
+
+public struct DayframeCalendarVerticalMetrics: Equatable {
+  public let hitHeight: Double
+  public let hitCenterY: Double
+  public let visualOffsetWithinHitTarget: Double
+
+  public init(
+    hitHeight: Double,
+    hitCenterY: Double,
+    visualOffsetWithinHitTarget: Double
+  ) {
+    self.hitHeight = hitHeight
+    self.hitCenterY = hitCenterY
+    self.visualOffsetWithinHitTarget = visualOffsetWithinHitTarget
+  }
+}
+
+public enum DayframeCalendarVerticalMath {
+  public static func metrics(
+    semanticTop: Double,
+    semanticHeight: Double,
+    hitHeight: Double
+  ) -> DayframeCalendarVerticalMetrics {
+    let safeSemanticTop = semanticTop.isFinite ? semanticTop : 0
+    let safeSemanticHeight = max(0, semanticHeight.isFinite ? semanticHeight : 0)
+    let safeHitHeight = max(
+      safeSemanticHeight,
+      hitHeight.isFinite ? hitHeight : safeSemanticHeight
+    )
+
+    return DayframeCalendarVerticalMetrics(
+      hitHeight: safeHitHeight,
+      hitCenterY: safeSemanticTop + safeSemanticHeight / 2,
+      visualOffsetWithinHitTarget: (safeHitHeight - safeSemanticHeight) / 2
+    )
+  }
+}
+
+public struct DayframeCalendarBlockVisualMetrics: Equatable {
+  public let cornerRadius: Double
+  public let semanticHeight: Double
+  public let visualHeight: Double
+  public let visualGap: Double
+
+  public init(
+    cornerRadius: Double,
+    semanticHeight: Double,
+    visualHeight: Double,
+    visualGap: Double
+  ) {
+    self.cornerRadius = cornerRadius
+    self.semanticHeight = semanticHeight
+    self.visualHeight = visualHeight
+    self.visualGap = visualGap
+  }
+}
+
+public enum DayframeCalendarBlockVisualMath {
+  public static func metrics(
+    semanticHeight: Double,
+    continuesIntoNextDay: Bool
+  ) -> DayframeCalendarBlockVisualMetrics {
+    // Semantic block math normally supplies at least 4 pt. Clamp malformed direct
+    // callers to 1 pt so drawing remains finite without changing valid geometry.
+    let safeSemanticHeight = max(
+      DayframeCalendarConstants.minimumVisualBlockHeight,
+      semanticHeight.isFinite ? semanticHeight : DayframeCalendarConstants.minimumVisualBlockHeight
+    )
+    let requestedGap = continuesIntoNextDay ? 0 : DayframeCalendarConstants.blockVisualGap
+    let visualGap = min(
+      requestedGap,
+      max(0, safeSemanticHeight - DayframeCalendarConstants.minimumVisualBlockHeight)
+    )
+
+    return DayframeCalendarBlockVisualMetrics(
+      cornerRadius: DayframeCalendarConstants.blockCornerRadius,
+      semanticHeight: safeSemanticHeight,
+      visualHeight: max(
+        DayframeCalendarConstants.minimumVisualBlockHeight,
+        safeSemanticHeight - visualGap
+      ),
+      visualGap: visualGap
     )
   }
 }
