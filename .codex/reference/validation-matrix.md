@@ -223,6 +223,14 @@ Native Calendar block styling additionally requires:
 - Tap every fixture, including both sides of a sequential boundary and dense/contained lanes. Verify isolated `44pt` targets and semantic-height overlap targets route to the intended existing React editor/Review flow.
 - Use a physical staging iPhone for short-block shape, Light/Dark/System, Reduce Transparency, Dynamic Type, VoiceOver, repeated pinch/scroll, active-tick refresh, optimistic reconciliation, and callback accuracy. Record each result as PASS, FAIL, or NOT RUN; simulator/source evidence cannot substitute.
 
+Native Calendar long-press creation additionally requires:
+
+- Swift tests for 15-minute floor snapping, 23:45 clamp, min/default/max zoom equivalence, scrolled content coordinates, invalid layout, hour-axis rejection, and semantic Button hit frames for tall/short/sequential/active/Review/contained/partial/dense/continuation fixtures.
+- Bridge and source contracts proving exactly one `UILongPressGestureRecognizer` in `DayframeCalendarScrollCoordinator`, no SwiftUI or React Native duplicate gesture, `.began`-only dispatch, one-finger/0.50-second/11-point configuration, `dayKey` plus `startMinute` payload, no native timestamps/networking/persistence, and no native presentation-version bump solely for the callback.
+- TypeScript tests in an explicit local timezone for native-event validation, defensive floor/clamp, exact 1,800-second duration, midnight rollover, blank/Uncategorized/tag-free metadata, unique draft identity, nonexistent spring time, deterministic repeated-hour handling, and stale-day rejection.
+- On a physical staging iPhone, record PASS/FAIL/NOT RUN for representative slot mapping at every zoom and after scrolling; entry/44-point/gap/overlap-lane/hour-axis rejection; short tap; vertical scroll; horizontal swipe; pinch; pull-to-refresh; movement; second finger; one haptic/event/sheet; Add-field defaults; Cancel/failure/success; and creation while one active timer and Live Activity remain unchanged.
+- Verify the saved entry through stable staging web, edit/delete cross-surface, refresh iOS, and prove one active timer plus one completed entry. Use the exact Ready PR Preview and an EAS `preview` internal build targeting `https://dayframe-staging.vercel.app`; never substitute production/TestFlight or infer physical gesture quality from source, tests, simulator, or still images.
+
 ## Native iOS Tabs And App Chrome
 
 Required checks when changing the mobile root navigator or tab bar:

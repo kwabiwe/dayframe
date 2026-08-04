@@ -79,6 +79,9 @@ Use this when working on frontend components.
 - When an isolated short Calendar entry expands to the minimum touch height, keep the expanded target centred on the semantic slot and offset the painted content within that target so its visible top remains the exact semantic top. Never let the minimum hit frame become the block's visual origin; overlapping entries continue to use semantic-height targets.
 - Derive confirmed/active native block borders from the category cue and semantic Calendar border. Preserve the neutral Review dash, active dash, Uncategorized hatch/boundary, and continuation exception without adding a new colour bridge field.
 - Native Calendar blocks do not gain desktop hover actions such as Play. Swift emits only the existing semantic open actions; React continues to own editing, Review, timer mutations, and persistence.
+- Native Calendar empty-time long press belongs to the existing `DayframeCalendarScrollCoordinator`; do not add a SwiftUI long-press modifier, React Native Gesture Handler owner, second scroll view, or delayed timer. Swift owns recognition and rendered geometry only, then emits `dayKey` plus 15-minute `startMinute` once at `.began`.
+- Reject native Calendar creation with the same semantic Button hit frames used by rendering, including isolated 44-point short-entry targets, overlap-lane semantic height, continuation blocks, and the one-point visual-only gap. Do not mark a whole time row occupied when the touched horizontal lane is empty.
+- React creates the DST-safe blank/Uncategorized/tag-free 30-minute draft, presents the existing `ActiveTimerEditSheet` in Add mode, saves through `createManualTimeEntry`, and refreshes bootstrap. Do not insert an unsaved native block, change the Plus route, prefill from timer/recent/place metadata, or stop/replace an active timer.
 
 ## Review Checklist
 

@@ -360,6 +360,182 @@ final class DayframeCalendarCoreTests: XCTestCase {
     XCTAssertEqual(overlapping.hitHeight, 8)
   }
 
+  func testLongPressSlotFloorsToContainingQuarterHour() {
+    let hourHeight = 72.0
+
+    XCTAssertEqual(slot(minute: 0, hourHeight: hourHeight), 0)
+    XCTAssertEqual(slot(minute: 600, hourHeight: hourHeight), 600)
+    XCTAssertEqual(slot(minute: 607, hourHeight: hourHeight), 600)
+    XCTAssertEqual(slot(minute: 614, hourHeight: hourHeight), 600)
+    XCTAssertEqual(slot(minute: 615, hourHeight: hourHeight), 615)
+    XCTAssertEqual(slot(minute: 629.99, hourHeight: hourHeight), 615)
+  }
+
+  func testLongPressSlotClampsBottomAndRejectsInvalidInputs() {
+    XCTAssertEqual(
+      DayframeCalendarLongPressMath.slot(contentY: 24 * 72, hourHeight: 72)?.startMinute,
+      1_425
+    )
+    XCTAssertNil(DayframeCalendarLongPressMath.slot(contentY: -0.1, hourHeight: 72))
+    XCTAssertNil(DayframeCalendarLongPressMath.slot(contentY: .nan, hourHeight: 72))
+    XCTAssertNil(DayframeCalendarLongPressMath.slot(contentY: 100, hourHeight: .infinity))
+    XCTAssertNil(DayframeCalendarLongPressMath.slot(contentY: 100, hourHeight: 0))
+  }
+
+  func testLongPressSlotIsStableAcrossZoomLevelsAndScrolledContentCoordinates() {
+    for hourHeight in [
+      DayframeCalendarConstants.minimumHourHeight,
+      DayframeCalendarConstants.defaultHourHeight,
+      DayframeCalendarConstants.maximumHourHeight
+    ] {
+      XCTAssertEqual(slot(minute: 607, hourHeight: hourHeight), 600)
+    }
+
+    let contentOffsetY = 9 * 72.0
+    let viewportPointY = 67.0 / 60.0 * 72.0
+    XCTAssertEqual(
+      DayframeCalendarLongPressMath.slot(
+        contentY: contentOffsetY + viewportPointY,
+        hourHeight: 72
+      )?.startMinute,
+      600
+    )
+  }
+
+  func testLongPressTimelineRejectsHourAxisAndOutsideOrInvalidLayout() {
+    let valid = DayframeCalendarPoint(x: 120, y: 600)
+    XCTAssertTrue(DayframeCalendarLongPressMath.pointIsInTimeline(
+      point: valid,
+      availableWidth: 320,
+      hourLabelWidth: 68,
+      hourHeight: 72
+    ))
+    for point in [
+      DayframeCalendarPoint(x: 68, y: 600),
+      DayframeCalendarPoint(x: -1, y: 600),
+      DayframeCalendarPoint(x: 321, y: 600),
+      DayframeCalendarPoint(x: 120, y: -1),
+      DayframeCalendarPoint(x: 120, y: 24 * 72 + 0.1)
+    ] {
+      XCTAssertFalse(DayframeCalendarLongPressMath.pointIsInTimeline(
+        point: point,
+        availableWidth: 320,
+        hourLabelWidth: 68,
+        hourHeight: 72
+      ))
+    }
+    XCTAssertFalse(DayframeCalendarLongPressMath.pointIsInTimeline(
+      point: valid,
+      availableWidth: 68,
+      hourLabelWidth: 68,
+      hourHeight: 72
+    ))
+  }
+
+  func testLongPressHitFramesUseTallSemanticButtonGeometry() throws {
+    let geometry = try XCTUnwrap(entryGeometry(
+      semanticTop: 180,
+      semanticHeight: 90,
+      overlapCount: 0
+    ))
+    XCTAssertEqual(geometry.hitFrame.minY, 180)
+    XCTAssertEqual(geometry.hitFrame.maxY, 270)
+    XCTAssertTrue(DayframeCalendarLongPressMath.pointHitsEntry(
+      point: DayframeCalendarPoint(x: 100, y: 225),
+      frames: [geometry.hitFrame]
+    ))
+  }
+
+  func testLongPressHitFramesProtectIsolatedShortTargetAndVisualGap() throws {
+    let short = try XCTUnwrap(entryGeometry(
+      semanticTop: 100,
+      semanticHeight: 4,
+      overlapCount: 0
+    ))
+    XCTAssertEqual(short.vertical.hitHeight, 44)
+    XCTAssertEqual(short.hitFrame.minY, 80)
+    XCTAssertEqual(short.hitFrame.maxY, 124)
+    XCTAssertTrue(DayframeCalendarLongPressMath.pointHitsEntry(
+      point: DayframeCalendarPoint(x: 100, y: 103.5),
+      frames: [short.hitFrame]
+    ))
+  }
+
+  func testLongPressHitFramesPreserveOverlapLaneOwnership() throws {
+    let left = try XCTUnwrap(entryGeometry(
+      semanticTop: 300,
+      semanticHeight: 60,
+      offsetFraction: 0,
+      widthFraction: 1.0 / 3.0,
+      overlapCount: 2
+    ))
+    let right = try XCTUnwrap(entryGeometry(
+      semanticTop: 300,
+      semanticHeight: 60,
+      offsetFraction: 2.0 / 3.0,
+      widthFraction: 1.0 / 3.0,
+      overlapCount: 2
+    ))
+    let occupied = DayframeCalendarPoint(
+      x: (left.hitFrame.minX + left.hitFrame.maxX) / 2,
+      y: 330
+    )
+    let emptyLane = DayframeCalendarPoint(
+      x: (left.hitFrame.maxX + right.hitFrame.minX) / 2,
+      y: 330
+    )
+
+    XCTAssertTrue(DayframeCalendarLongPressMath.pointHitsEntry(
+      point: occupied,
+      frames: [left.hitFrame, right.hitFrame]
+    ))
+    XCTAssertFalse(DayframeCalendarLongPressMath.pointHitsEntry(
+      point: emptyLane,
+      frames: [left.hitFrame, right.hitFrame]
+    ))
+  }
+
+  func testLongPressHitFramesCoverContainedAndContinuationEntries() throws {
+    let base = try XCTUnwrap(entryGeometry(
+      semanticTop: 400,
+      semanticHeight: 180,
+      overlapCount: 1
+    ))
+    let contained = try XCTUnwrap(entryGeometry(
+      semanticTop: 430,
+      semanticHeight: 30,
+      offsetFraction: 0.14,
+      widthFraction: 0.86,
+      overlapCount: 1
+    ))
+    let continuation = try XCTUnwrap(entryGeometry(
+      semanticTop: 1_680,
+      semanticHeight: 48,
+      overlapCount: 0
+    ))
+
+    XCTAssertTrue(DayframeCalendarLongPressMath.pointHitsEntry(
+      point: DayframeCalendarPoint(x: contained.hitFrame.maxX - 1, y: 445),
+      frames: [base.hitFrame, contained.hitFrame]
+    ))
+    XCTAssertTrue(DayframeCalendarLongPressMath.pointHitsEntry(
+      point: DayframeCalendarPoint(x: 100, y: 1_727),
+      frames: [continuation.hitFrame]
+    ))
+  }
+
+  func testLongPressPointHitRejectsNonFinitePoint() throws {
+    let geometry = try XCTUnwrap(entryGeometry(
+      semanticTop: 100,
+      semanticHeight: 60,
+      overlapCount: 0
+    ))
+    XCTAssertFalse(DayframeCalendarLongPressMath.pointHitsEntry(
+      point: DayframeCalendarPoint(x: .nan, y: 120),
+      frames: [geometry.hitFrame]
+    ))
+  }
+
   func testSerializedModelDecodesInitialAndLaterRevisions() throws {
     let initial = try decodePresentation(
       selectedDayKey: "2026-07-19",
@@ -422,5 +598,31 @@ final class DayframeCalendarCoreTests: XCTestCase {
     let formatter = ISO8601DateFormatter()
     let date = try XCTUnwrap(formatter.date(from: value))
     return date.timeIntervalSince1970 * 1_000
+  }
+
+  private func slot(minute: Double, hourHeight: Double) -> Int? {
+    DayframeCalendarLongPressMath.slot(
+      contentY: minute / 60 * hourHeight,
+      hourHeight: hourHeight
+    )?.startMinute
+  }
+
+  private func entryGeometry(
+    semanticTop: Double,
+    semanticHeight: Double,
+    offsetFraction: Double = 0,
+    widthFraction: Double = 1,
+    overlapCount: Int
+  ) -> DayframeCalendarEntryGeometryMetrics? {
+    DayframeCalendarEntryGeometryMath.metrics(
+      availableWidth: 320,
+      hourLabelWidth: 68,
+      semanticTop: semanticTop,
+      semanticHeight: semanticHeight,
+      offsetFraction: offsetFraction,
+      widthFraction: widthFraction,
+      overlapCount: overlapCount,
+      textDensity: "full"
+    )
   }
 }

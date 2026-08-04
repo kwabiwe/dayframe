@@ -1120,6 +1120,34 @@ describe("mobile API client", () => {
     );
   });
 
+  it("sends explicit blank manual-entry fields and an empty tag set", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 201)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createManualTimeEntry({
+      categoryId: null,
+      description: "   ",
+      startedAt: "2026-08-04T09:00:00.000Z",
+      stoppedAt: "2026-08-04T09:30:00.000Z",
+      tagNames: []
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/time-entries",
+      expect.objectContaining({
+        body: JSON.stringify({
+          mode: "manual",
+          categoryId: null,
+          description: null,
+          tagNames: [],
+          startedAt: "2026-08-04T09:00:00.000Z",
+          stoppedAt: "2026-08-04T09:30:00.000Z"
+        })
+      })
+    );
+  });
+
   it("confirms and dismisses review items through the hosted API", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));

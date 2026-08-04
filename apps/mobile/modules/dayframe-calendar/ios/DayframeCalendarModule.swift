@@ -11,6 +11,7 @@ public final class DayframeCalendarModule: Module {
         "onOpenActiveTimer",
         "onOpenCompletedEntry",
         "onOpenReviewItem",
+        "onRequestCreateEntry",
         "onRequestRefresh",
         "onSelectDay"
       )

@@ -8,6 +8,7 @@ export type DayframeCalendarChangeDayEvent = { days: number };
 export type DayframeCalendarChangeWeekEvent = { weeks: number };
 export type DayframeCalendarEntryEvent = { entryId: string };
 export type DayframeCalendarReviewEvent = { reviewItemId: string };
+export type DayframeCalendarCreateEntryEvent = { dayKey: string; startMinute: number };
 
 export type DayframeCalendarViewProps = ViewProps & {
   model: NativeCalendarPresentation;
@@ -16,6 +17,7 @@ export type DayframeCalendarViewProps = ViewProps & {
   onOpenActiveTimer?: (event: NativeSyntheticEvent<DayframeCalendarEntryEvent>) => void;
   onOpenCompletedEntry?: (event: NativeSyntheticEvent<DayframeCalendarEntryEvent>) => void;
   onOpenReviewItem?: (event: NativeSyntheticEvent<DayframeCalendarReviewEvent>) => void;
+  onRequestCreateEntry?: (event: NativeSyntheticEvent<DayframeCalendarCreateEntryEvent>) => void;
   onRequestRefresh?: () => void;
   onSelectDay?: (event: NativeSyntheticEvent<DayframeCalendarSelectDayEvent>) => void;
 };

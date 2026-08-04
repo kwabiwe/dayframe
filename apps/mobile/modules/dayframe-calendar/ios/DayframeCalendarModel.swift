@@ -202,6 +202,7 @@ struct DayframeCalendarActions {
   let changeDay: (Int) -> Void
   let changeWeek: (Int) -> Void
   let open: (DayframeCalendarActionTarget) -> Void
+  let requestCreateEntry: (DayframeCalendarCreateRequest) -> Void
   let requestRefresh: () -> Void
   let selectDay: (String) -> Void
 }

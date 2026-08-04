@@ -13,6 +13,9 @@ public enum DayframeCalendarConstants {
   public static let metaMinimumHeight = 58.0
   public static let titleMinimumWidth = 64.0
   public static let metaMinimumWidth = 150.0
+  public static let longPressMinimumDuration = 0.50
+  public static let longPressAllowableMovement = 11.0
+  public static let longPressSnapMinutes = 15
 }
 
 public struct DayframeCalendarHorizontalMetrics: Equatable {
@@ -94,6 +97,191 @@ public enum DayframeCalendarVerticalMath {
       hitCenterY: safeSemanticTop + safeSemanticHeight / 2,
       visualOffsetWithinHitTarget: (safeHitHeight - safeSemanticHeight) / 2
     )
+  }
+}
+
+public struct DayframeCalendarPoint: Equatable {
+  public let x: Double
+  public let y: Double
+
+  public init(x: Double, y: Double) {
+    self.x = x
+    self.y = y
+  }
+}
+
+public struct DayframeCalendarHitFrame: Equatable {
+  public let minX: Double
+  public let maxX: Double
+  public let minY: Double
+  public let maxY: Double
+
+  public init(minX: Double, maxX: Double, minY: Double, maxY: Double) {
+    self.minX = minX
+    self.maxX = maxX
+    self.minY = minY
+    self.maxY = maxY
+  }
+
+  public func contains(_ point: DayframeCalendarPoint) -> Bool {
+    point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY
+  }
+}
+
+public struct DayframeCalendarTimelineLayout: Equatable {
+  public let availableWidth: Double
+  public let hourLabelWidth: Double
+
+  public init(availableWidth: Double, hourLabelWidth: Double) {
+    self.availableWidth = availableWidth
+    self.hourLabelWidth = hourLabelWidth
+  }
+}
+
+public struct DayframeCalendarLongPressSlot: Equatable {
+  public let startMinute: Int
+
+  public init(startMinute: Int) {
+    self.startMinute = startMinute
+  }
+}
+
+public struct DayframeCalendarCreateRequest: Equatable {
+  public let dayKey: String
+  public let startMinute: Int
+
+  public init(dayKey: String, startMinute: Int) {
+    self.dayKey = dayKey
+    self.startMinute = startMinute
+  }
+}
+
+public struct DayframeCalendarEntryGeometryMetrics: Equatable {
+  public let hitFrame: DayframeCalendarHitFrame
+  public let horizontal: DayframeCalendarHorizontalMetrics
+  public let vertical: DayframeCalendarVerticalMetrics
+
+  public init(
+    hitFrame: DayframeCalendarHitFrame,
+    horizontal: DayframeCalendarHorizontalMetrics,
+    vertical: DayframeCalendarVerticalMetrics
+  ) {
+    self.hitFrame = hitFrame
+    self.horizontal = horizontal
+    self.vertical = vertical
+  }
+}
+
+public enum DayframeCalendarEntryGeometryMath {
+  public static func metrics(
+    availableWidth: Double,
+    hourLabelWidth: Double,
+    semanticTop: Double,
+    semanticHeight: Double,
+    offsetFraction: Double,
+    widthFraction: Double,
+    overlapCount: Int,
+    textDensity: String
+  ) -> DayframeCalendarEntryGeometryMetrics? {
+    guard
+      availableWidth.isFinite,
+      hourLabelWidth.isFinite,
+      semanticTop.isFinite,
+      semanticHeight.isFinite,
+      availableWidth > hourLabelWidth,
+      hourLabelWidth >= 0,
+      semanticHeight > 0
+    else {
+      return nil
+    }
+
+    let blockWidth = max(0, availableWidth - hourLabelWidth - 18)
+    let horizontal = DayframeCalendarHorizontalMath.metrics(
+      availableWidth: blockWidth,
+      offsetFraction: offsetFraction,
+      widthFraction: widthFraction,
+      semanticHeight: semanticHeight,
+      overlapCount: overlapCount,
+      textDensity: textDensity
+    )
+    let vertical = DayframeCalendarVerticalMath.metrics(
+      semanticTop: semanticTop,
+      semanticHeight: semanticHeight,
+      hitHeight: horizontal.hitHeight
+    )
+    let minX = hourLabelWidth + 8 + horizontal.offset
+    let minY = vertical.hitCenterY - vertical.hitHeight / 2
+
+    return DayframeCalendarEntryGeometryMetrics(
+      hitFrame: DayframeCalendarHitFrame(
+        minX: minX,
+        maxX: minX + horizontal.width,
+        minY: minY,
+        maxY: minY + vertical.hitHeight
+      ),
+      horizontal: horizontal,
+      vertical: vertical
+    )
+  }
+}
+
+public enum DayframeCalendarLongPressMath {
+  public static func slot(
+    contentY: Double,
+    hourHeight: Double,
+    snapMinutes: Int = DayframeCalendarConstants.longPressSnapMinutes
+  ) -> DayframeCalendarLongPressSlot? {
+    guard
+      contentY.isFinite,
+      hourHeight.isFinite,
+      contentY >= 0,
+      hourHeight > 0,
+      snapMinutes > 0
+    else {
+      return nil
+    }
+
+    let rawMinute = contentY / hourHeight * 60
+    guard rawMinute.isFinite else { return nil }
+    let flooredMinute = floor(rawMinute / Double(snapMinutes)) * Double(snapMinutes)
+    let maximumStartMinute = max(0, Int(DayframeCalendarConstants.minutesPerDay) - snapMinutes)
+    return DayframeCalendarLongPressSlot(
+      startMinute: min(maximumStartMinute, max(0, Int(flooredMinute)))
+    )
+  }
+
+  public static func pointIsInTimeline(
+    point: DayframeCalendarPoint,
+    availableWidth: Double,
+    hourLabelWidth: Double,
+    hourHeight: Double
+  ) -> Bool {
+    guard
+      point.x.isFinite,
+      point.y.isFinite,
+      availableWidth.isFinite,
+      hourLabelWidth.isFinite,
+      hourHeight.isFinite,
+      availableWidth > hourLabelWidth,
+      hourLabelWidth >= 0,
+      hourHeight > 0
+    else {
+      return false
+    }
+
+    let timelineHeight = 24 * hourHeight
+    return point.x > hourLabelWidth
+      && point.x <= availableWidth
+      && point.y >= 0
+      && point.y <= timelineHeight
+  }
+
+  public static func pointHitsEntry(
+    point: DayframeCalendarPoint,
+    frames: [DayframeCalendarHitFrame]
+  ) -> Bool {
+    guard point.x.isFinite, point.y.isFinite else { return false }
+    return frames.contains { $0.contains(point) }
   }
 }
 
