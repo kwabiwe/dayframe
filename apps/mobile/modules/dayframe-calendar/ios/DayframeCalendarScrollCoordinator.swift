@@ -16,6 +16,9 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
     view.onResolve = { scrollView in
       context.coordinator.attach(to: scrollView)
     }
+    view.onDetach = {
+      context.coordinator.detach()
+    }
     return view
   }
 
@@ -24,13 +27,33 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
     view.onResolve = { scrollView in
       context.coordinator.attach(to: scrollView)
     }
+    view.onDetach = {
+      context.coordinator.detach()
+    }
     view.resolveScrollView()
     context.coordinator.synchronize()
+  }
+
+  static func dismantleUIView(
+    _ view: DayframeCalendarResolverView,
+    coordinator: Coordinator
+  ) {
+    view.onResolve = nil
+    view.onDetach = nil
+    coordinator.detach()
   }
 
   final class Coordinator: NSObject, UIGestureRecognizerDelegate {
     private struct LongPressCandidate {
       let dayKey: String
+    }
+
+    private final class DisplayLinkProxy: NSObject {
+      weak var owner: Coordinator?
+
+      @objc func tick(_ displayLink: CADisplayLink) {
+        owner?.handleEdgeAutoscrollFrame(displayLink)
+      }
     }
 
     private weak var model: DayframeCalendarViewModel?
@@ -41,8 +64,18 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
     private let longPressGesture = UILongPressGestureRecognizer()
     private let refreshControl = UIRefreshControl()
     private let selectionHaptic = UISelectionFeedbackGenerator()
+    private let displayLinkProxy = DisplayLinkProxy()
     private var layout: DayframeCalendarTimelineLayout
     private var longPressCandidate: LongPressCandidate?
+    private var creationDragState = DayframeCalendarCreationDragState()
+    private var creationPreviewSessionToken: UInt64?
+    private var creationGestureLockActive = false
+    private var scrollPanWasEnabled = true
+    private var pinchWasEnabled = true
+    private var horizontalPanWasEnabled = true
+    private var edgeAutoscrollDisplayLink: CADisplayLink?
+    private var edgeAutoscrollVelocity = 0.0
+    private var edgeAutoscrollLastTimestamp: CFTimeInterval?
     private var selectedDayKey = ""
     private var pinchStart: DayframeCalendarPinchStart?
     private var pendingContentOffsetY: Double?
@@ -56,6 +89,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
       self.actions = actions
       self.layout = layout
       super.init()
+      displayLinkProxy.owner = self
 
       pinchGesture.addTarget(self, action: #selector(handlePinch(_:)))
       pinchGesture.delegate = self
@@ -75,6 +109,17 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
       longPressGesture.cancelsTouchesInView = true
 
       refreshControl.addTarget(self, action: #selector(handleRefresh), for: .valueChanged)
+      NotificationCenter.default.addObserver(
+        self,
+        selector: #selector(handleApplicationWillResignActive),
+        name: UIApplication.willResignActiveNotification,
+        object: nil
+      )
+    }
+
+    deinit {
+      NotificationCenter.default.removeObserver(self)
+      edgeAutoscrollDisplayLink?.invalidate()
     }
 
     func update(layout nextLayout: DayframeCalendarTimelineLayout) {
@@ -90,6 +135,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
       }
 
       if let previous = scrollView {
+        cancelLongPressRecognition()
         previous.removeGestureRecognizer(pinchGesture)
         previous.removeGestureRecognizer(horizontalPanGesture)
         previous.removeGestureRecognizer(longPressGesture)
@@ -98,7 +144,6 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
         }
       }
 
-      cancelLongPressRecognition()
       scrollView = nextScrollView
       nextScrollView.alwaysBounceVertical = true
       nextScrollView.canCancelContentTouches = true
@@ -114,6 +159,21 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
       synchronize()
     }
 
+    func detach() {
+      guard let scrollView else {
+        cancelCreationInteraction()
+        return
+      }
+      cancelLongPressRecognition()
+      scrollView.removeGestureRecognizer(pinchGesture)
+      scrollView.removeGestureRecognizer(horizontalPanGesture)
+      scrollView.removeGestureRecognizer(longPressGesture)
+      if scrollView.refreshControl === refreshControl {
+        scrollView.refreshControl = nil
+      }
+      self.scrollView = nil
+    }
+
     func synchronize() {
       guard let model, let scrollView else { return }
       let nextSelectedDayKey = model.presentation.selectedDayKey
@@ -121,6 +181,20 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
         selectedDayKey = nextSelectedDayKey
       } else if selectedDayKey != nextSelectedDayKey {
         selectedDayKey = nextSelectedDayKey
+        cancelLongPressRecognition()
+      }
+      if
+        !creationContextIsValid(model: model),
+        creationDragState.session != nil || longPressCandidate != nil
+      {
+        cancelLongPressRecognition()
+      }
+      if let token = creationPreviewSessionToken,
+         model.creationPreview?.sessionToken != token {
+        cancelLongPressRecognition()
+      }
+      if model.presentation.refreshing,
+         creationDragState.session != nil || longPressCandidate != nil {
         cancelLongPressRecognition()
       }
       refreshControl.tintColor = UIColor(dayframeCSS: model.presentation.theme.accent)
@@ -156,11 +230,16 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
     }
 
     @objc private func handleRefresh() {
+      cancelLongPressRecognition()
       actions.requestRefresh()
     }
 
+    @objc private func handleApplicationWillResignActive() {
+      cancelLongPressRecognition()
+    }
+
     @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
-      guard let model, let scrollView else { return }
+      guard creationDragState.session == nil, let model, let scrollView else { return }
       let midpointY = viewportMidpointY(for: gesture, in: scrollView)
 
       switch gesture.state {
@@ -194,6 +273,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
     }
 
     @objc private func handleHorizontalPan(_ gesture: UIPanGestureRecognizer) {
+      guard creationDragState.session == nil else { return }
       guard gesture.state == .ended, let view = gesture.view else { return }
       let translation = gesture.translation(in: view)
       let velocity = gesture.velocity(in: view)
@@ -223,14 +303,77 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
           let request = createRequest(for: gesture, model: model, scrollView: scrollView)
         else {
           longPressCandidate = nil
+          cancelCreationInteraction()
           return
         }
 
         longPressCandidate = nil
-        selectionHaptic.selectionChanged()
-        actions.requestCreateEntry(request)
-      case .ended, .cancelled, .failed:
-        longPressCandidate = nil
+        let contentY = Double(gesture.location(in: scrollView).y)
+        let transition = DayframeCalendarCreationDragReducer.reduce(
+          state: creationDragState,
+          event: .began(
+            dayKey: request.dayKey,
+            contentY: contentY,
+            hourHeight: Double(model.hourHeight)
+          )
+        )
+        guard
+          transition.request == nil,
+          let previewStartMinute = transition.previewStartMinute,
+          transition.state.session != nil
+        else {
+          cancelCreationInteraction()
+          return
+        }
+        creationDragState = transition.state
+        creationPreviewSessionToken = model.beginCreationPreview(
+          dayKey: request.dayKey,
+          startMinute: previewStartMinute
+        )
+        setCreationGestureLock(true)
+        if transition.shouldTriggerHaptic {
+          selectionHaptic.selectionChanged()
+          selectionHaptic.prepare()
+        }
+        updateEdgeAutoscrollIntent(for: gesture, in: scrollView)
+
+      case .changed:
+        guard
+          let model,
+          let scrollView,
+          gesture.numberOfTouches == 1,
+          let session = creationDragState.session,
+          session.dayKey == model.presentation.selectedDayKey,
+          creationContextIsValid(model: model)
+        else {
+          cancelLongPressRecognition()
+          return
+        }
+        updateCreationDrag(
+          contentY: Double(gesture.location(in: scrollView).y),
+          model: model
+        )
+        updateEdgeAutoscrollIntent(for: gesture, in: scrollView)
+
+      case .ended:
+        guard
+          let model,
+          let scrollView,
+          let session = creationDragState.session,
+          session.dayKey == model.presentation.selectedDayKey,
+          creationContextIsValid(model: model)
+        else {
+          cancelCreationInteraction()
+          return
+        }
+        updateCreationDrag(
+          contentY: Double(gesture.location(in: scrollView).y),
+          model: model
+        )
+        completeCreationInteraction()
+
+      case .cancelled, .failed:
+        cancelCreationInteraction()
       default:
         break
       }
@@ -238,15 +381,21 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
 
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
       if gestureRecognizer === horizontalPanGesture {
+        guard creationDragState.session == nil else { return false }
         guard let view = gestureRecognizer.view else { return false }
         let velocity = horizontalPanGesture.velocity(in: view)
         return abs(velocity.x) > abs(velocity.y) * 0.72
+      }
+
+      if gestureRecognizer === pinchGesture {
+        return creationDragState.session == nil
       }
 
       if gestureRecognizer === longPressGesture {
         guard
           let model,
           let scrollView,
+          creationDragState.session == nil,
           longPressGesture.numberOfTouches == 1,
           !scrollView.isDragging,
           !scrollView.isDecelerating,
@@ -353,8 +502,183 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
 
     private func cancelLongPressRecognition() {
       longPressCandidate = nil
+      cancelCreationInteraction()
       longPressGesture.isEnabled = false
       longPressGesture.isEnabled = true
+    }
+
+    private func updateCreationDrag(
+      contentY: Double,
+      model: DayframeCalendarViewModel
+    ) {
+      let transition = DayframeCalendarCreationDragReducer.reduce(
+        state: creationDragState,
+        event: .changed(contentY: contentY, hourHeight: Double(model.hourHeight))
+      )
+      creationDragState = transition.state
+      if
+        let previewStartMinute = transition.previewStartMinute,
+        let token = creationPreviewSessionToken
+      {
+        model.updateCreationPreview(
+          sessionToken: token,
+          startMinute: previewStartMinute
+        )
+      }
+      if transition.shouldTriggerHaptic {
+        selectionHaptic.selectionChanged()
+        selectionHaptic.prepare()
+      }
+    }
+
+    private func completeCreationInteraction() {
+      stopEdgeAutoscroll()
+      let transition = DayframeCalendarCreationDragReducer.reduce(
+        state: creationDragState,
+        event: .ended
+      )
+      creationDragState = transition.state
+      if let token = creationPreviewSessionToken {
+        model?.clearCreationPreview(sessionToken: token)
+      }
+      creationPreviewSessionToken = nil
+      longPressCandidate = nil
+      setCreationGestureLock(false)
+      if let request = transition.request {
+        actions.requestCreateEntry(request)
+      }
+    }
+
+    private func cancelCreationInteraction() {
+      stopEdgeAutoscroll()
+      let transition = DayframeCalendarCreationDragReducer.reduce(
+        state: creationDragState,
+        event: .cancelled
+      )
+      creationDragState = transition.state
+      if let token = creationPreviewSessionToken {
+        model?.clearCreationPreview(sessionToken: token)
+      }
+      creationPreviewSessionToken = nil
+      longPressCandidate = nil
+      setCreationGestureLock(false)
+    }
+
+    private func setCreationGestureLock(_ locked: Bool) {
+      guard creationGestureLockActive != locked else { return }
+      creationGestureLockActive = locked
+      guard let scrollView else { return }
+      if locked {
+        scrollPanWasEnabled = scrollView.panGestureRecognizer.isEnabled
+        pinchWasEnabled = pinchGesture.isEnabled
+        horizontalPanWasEnabled = horizontalPanGesture.isEnabled
+        scrollView.panGestureRecognizer.isEnabled = false
+        pinchGesture.isEnabled = false
+        horizontalPanGesture.isEnabled = false
+      } else {
+        scrollView.panGestureRecognizer.isEnabled = scrollPanWasEnabled
+        pinchGesture.isEnabled = pinchWasEnabled
+        horizontalPanGesture.isEnabled = horizontalPanWasEnabled
+      }
+    }
+
+    private func creationContextIsValid(model: DayframeCalendarViewModel) -> Bool {
+      let presentation = model.presentation
+      return !presentation.selectedDayKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        && presentation.dayEndMs.isFinite
+        && presentation.dayStartMs.isFinite
+        && presentation.dayEndMs > presentation.dayStartMs
+        && layout.availableWidth.isFinite
+        && layout.hourLabelWidth.isFinite
+        && layout.availableWidth > layout.hourLabelWidth
+        && layout.hourLabelWidth >= 0
+        && model.hourHeight.isFinite
+        && model.hourHeight > 0
+    }
+
+    private func updateEdgeAutoscrollIntent(
+      for gesture: UILongPressGestureRecognizer,
+      in scrollView: UIScrollView
+    ) {
+      let viewportY = Double(gesture.location(in: scrollView).y - scrollView.bounds.minY)
+      guard
+        let velocity = DayframeCalendarEdgeAutoscrollMath.velocity(
+          viewportY: viewportY,
+          viewportHeight: Double(scrollView.bounds.height)
+        ),
+        velocity != 0,
+        creationDragState.session != nil
+      else {
+        stopEdgeAutoscroll()
+        return
+      }
+      edgeAutoscrollVelocity = velocity
+      guard edgeAutoscrollDisplayLink == nil else { return }
+      edgeAutoscrollLastTimestamp = nil
+      let displayLink = CADisplayLink(target: displayLinkProxy, selector: #selector(DisplayLinkProxy.tick(_:)))
+      displayLink.preferredFramesPerSecond = 60
+      displayLink.add(to: .main, forMode: .common)
+      edgeAutoscrollDisplayLink = displayLink
+    }
+
+    private func stopEdgeAutoscroll() {
+      edgeAutoscrollDisplayLink?.invalidate()
+      edgeAutoscrollDisplayLink = nil
+      edgeAutoscrollVelocity = 0
+      edgeAutoscrollLastTimestamp = nil
+    }
+
+    fileprivate func handleEdgeAutoscrollFrame(_ displayLink: CADisplayLink) {
+      guard
+        let model,
+        let scrollView,
+        creationDragState.session != nil,
+        creationContextIsValid(model: model),
+        longPressGesture.state == .began || longPressGesture.state == .changed
+      else {
+        cancelLongPressRecognition()
+        return
+      }
+      let viewportY = Double(longPressGesture.location(in: scrollView).y - scrollView.bounds.minY)
+      guard
+        let velocity = DayframeCalendarEdgeAutoscrollMath.velocity(
+          viewportY: viewportY,
+          viewportHeight: Double(scrollView.bounds.height)
+        ),
+        velocity != 0
+      else {
+        stopEdgeAutoscroll()
+        return
+      }
+      edgeAutoscrollVelocity = velocity
+      guard let previousTimestamp = edgeAutoscrollLastTimestamp else {
+        edgeAutoscrollLastTimestamp = displayLink.timestamp
+        return
+      }
+      edgeAutoscrollLastTimestamp = displayLink.timestamp
+      let deltaTime = min(1.0 / 15.0, max(0, displayLink.timestamp - previousTimestamp))
+      guard let nextOffset = DayframeCalendarEdgeAutoscrollMath.nextContentOffset(
+        currentOffset: Double(scrollView.contentOffset.y),
+        velocity: edgeAutoscrollVelocity,
+        deltaTime: deltaTime,
+        hourHeight: Double(model.hourHeight),
+        viewportHeight: Double(scrollView.bounds.height)
+      ) else {
+        cancelLongPressRecognition()
+        return
+      }
+      guard abs(nextOffset - Double(scrollView.contentOffset.y)) > 0.001 else {
+        stopEdgeAutoscroll()
+        return
+      }
+      scrollView.setContentOffset(
+        CGPoint(x: scrollView.contentOffset.x, y: CGFloat(nextOffset)),
+        animated: false
+      )
+      updateCreationDrag(
+        contentY: Double(longPressGesture.location(in: scrollView).y),
+        model: model
+      )
     }
 
     private func viewportMidpointY(
@@ -368,6 +692,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
 
 final class DayframeCalendarResolverView: UIView {
   var onResolve: ((UIScrollView) -> Void)?
+  var onDetach: (() -> Void)?
 
   override func didMoveToSuperview() {
     super.didMoveToSuperview()
@@ -376,7 +701,11 @@ final class DayframeCalendarResolverView: UIView {
 
   override func didMoveToWindow() {
     super.didMoveToWindow()
-    resolveScrollView()
+    if window == nil {
+      onDetach?()
+    } else {
+      resolveScrollView()
+    }
   }
 
   func resolveScrollView() {

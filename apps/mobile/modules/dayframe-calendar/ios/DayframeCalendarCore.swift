@@ -16,6 +16,9 @@ public enum DayframeCalendarConstants {
   public static let longPressMinimumDuration = 0.50
   public static let longPressAllowableMovement = 11.0
   public static let longPressSnapMinutes = 15
+  public static let creationPreviewDurationMinutes = 30
+  public static let edgeAutoscrollActivationInset = 52.0
+  public static let edgeAutoscrollMaximumSpeed = 420.0
 }
 
 public struct DayframeCalendarHorizontalMetrics: Equatable {
@@ -282,6 +285,299 @@ public enum DayframeCalendarLongPressMath {
   ) -> Bool {
     guard point.x.isFinite, point.y.isFinite else { return false }
     return frames.contains { $0.contains(point) }
+  }
+}
+
+public enum DayframeCalendarCreationDragMath {
+  public static func rawMinute(contentY: Double, hourHeight: Double) -> Double? {
+    guard contentY.isFinite, hourHeight.isFinite, hourHeight > 0 else { return nil }
+    let minute = contentY / hourHeight * 60
+    return minute.isFinite ? minute : nil
+  }
+
+  public static func grabOffsetMinutes(
+    contentY: Double,
+    hourHeight: Double,
+    startMinute: Int,
+    snapMinutes: Int = DayframeCalendarConstants.longPressSnapMinutes
+  ) -> Double? {
+    guard
+      let minute = rawMinute(contentY: contentY, hourHeight: hourHeight),
+      snapMinutes > 0,
+      startMinute >= 0
+    else {
+      return nil
+    }
+    return min(Double(snapMinutes), max(0, minute - Double(startMinute)))
+  }
+
+  public static func startMinute(
+    contentY: Double,
+    hourHeight: Double,
+    grabOffsetMinutes: Double,
+    snapMinutes: Int = DayframeCalendarConstants.longPressSnapMinutes
+  ) -> Int? {
+    guard
+      let minute = rawMinute(contentY: contentY, hourHeight: hourHeight),
+      grabOffsetMinutes.isFinite,
+      snapMinutes > 0
+    else {
+      return nil
+    }
+    let anchoredMinute = minute - grabOffsetMinutes
+    let flooredMinute = floor(anchoredMinute / Double(snapMinutes)) * Double(snapMinutes)
+    guard flooredMinute.isFinite else { return nil }
+    let maximumStartMinute = max(0, Int(DayframeCalendarConstants.minutesPerDay) - snapMinutes)
+    return min(maximumStartMinute, max(0, Int(flooredMinute)))
+  }
+}
+
+public struct DayframeCalendarCreationDragSession: Equatable {
+  public let dayKey: String
+  public let initialStartMinute: Int
+  public let grabOffsetMinutes: Double
+  public var currentStartMinute: Int
+  public var lastHapticMinute: Int
+
+  public init(
+    dayKey: String,
+    initialStartMinute: Int,
+    grabOffsetMinutes: Double,
+    currentStartMinute: Int,
+    lastHapticMinute: Int
+  ) {
+    self.dayKey = dayKey
+    self.initialStartMinute = initialStartMinute
+    self.grabOffsetMinutes = grabOffsetMinutes
+    self.currentStartMinute = currentStartMinute
+    self.lastHapticMinute = lastHapticMinute
+  }
+}
+
+public struct DayframeCalendarCreationDragState: Equatable {
+  public var session: DayframeCalendarCreationDragSession?
+
+  public init(session: DayframeCalendarCreationDragSession? = nil) {
+    self.session = session
+  }
+}
+
+public enum DayframeCalendarCreationDragEvent: Equatable {
+  case began(dayKey: String, contentY: Double, hourHeight: Double)
+  case changed(contentY: Double, hourHeight: Double)
+  case ended
+  case cancelled
+}
+
+public struct DayframeCalendarCreationDragTransition: Equatable {
+  public let state: DayframeCalendarCreationDragState
+  public let previewStartMinute: Int?
+  public let request: DayframeCalendarCreateRequest?
+  public let shouldClearPreview: Bool
+  public let shouldTriggerHaptic: Bool
+
+  public init(
+    state: DayframeCalendarCreationDragState,
+    previewStartMinute: Int? = nil,
+    request: DayframeCalendarCreateRequest? = nil,
+    shouldClearPreview: Bool = false,
+    shouldTriggerHaptic: Bool = false
+  ) {
+    self.state = state
+    self.previewStartMinute = previewStartMinute
+    self.request = request
+    self.shouldClearPreview = shouldClearPreview
+    self.shouldTriggerHaptic = shouldTriggerHaptic
+  }
+}
+
+public enum DayframeCalendarCreationDragReducer {
+  public static func reduce(
+    state: DayframeCalendarCreationDragState,
+    event: DayframeCalendarCreationDragEvent
+  ) -> DayframeCalendarCreationDragTransition {
+    switch event {
+    case let .began(dayKey, contentY, hourHeight):
+      guard
+        !dayKey.isEmpty,
+        let slot = DayframeCalendarLongPressMath.slot(contentY: contentY, hourHeight: hourHeight),
+        let grabOffset = DayframeCalendarCreationDragMath.grabOffsetMinutes(
+          contentY: contentY,
+          hourHeight: hourHeight,
+          startMinute: slot.startMinute
+        )
+      else {
+        return DayframeCalendarCreationDragTransition(state: state)
+      }
+      let session = DayframeCalendarCreationDragSession(
+        dayKey: dayKey,
+        initialStartMinute: slot.startMinute,
+        grabOffsetMinutes: grabOffset,
+        currentStartMinute: slot.startMinute,
+        lastHapticMinute: slot.startMinute
+      )
+      return DayframeCalendarCreationDragTransition(
+        state: DayframeCalendarCreationDragState(session: session),
+        previewStartMinute: slot.startMinute,
+        shouldTriggerHaptic: true
+      )
+
+    case let .changed(contentY, hourHeight):
+      guard
+        var session = state.session,
+        let startMinute = DayframeCalendarCreationDragMath.startMinute(
+          contentY: contentY,
+          hourHeight: hourHeight,
+          grabOffsetMinutes: session.grabOffsetMinutes
+        )
+      else {
+        return DayframeCalendarCreationDragTransition(state: state)
+      }
+      guard startMinute != session.currentStartMinute else {
+        return DayframeCalendarCreationDragTransition(state: state)
+      }
+      session.currentStartMinute = startMinute
+      let shouldTriggerHaptic = startMinute != session.lastHapticMinute
+      if shouldTriggerHaptic {
+        session.lastHapticMinute = startMinute
+      }
+      return DayframeCalendarCreationDragTransition(
+        state: DayframeCalendarCreationDragState(session: session),
+        previewStartMinute: startMinute,
+        shouldTriggerHaptic: shouldTriggerHaptic
+      )
+
+    case .ended:
+      guard let session = state.session else {
+        return DayframeCalendarCreationDragTransition(state: state)
+      }
+      return DayframeCalendarCreationDragTransition(
+        state: DayframeCalendarCreationDragState(),
+        request: DayframeCalendarCreateRequest(
+          dayKey: session.dayKey,
+          startMinute: session.currentStartMinute
+        ),
+        shouldClearPreview: true
+      )
+
+    case .cancelled:
+      return DayframeCalendarCreationDragTransition(
+        state: DayframeCalendarCreationDragState(),
+        shouldClearPreview: state.session != nil
+      )
+    }
+  }
+}
+
+public struct DayframeCalendarCreationPreviewGeometry: Equatable {
+  public let continuesIntoNextDay: Bool
+  public let semanticHeight: Double
+  public let top: Double
+  public let visibleHeight: Double
+
+  public init(
+    continuesIntoNextDay: Bool,
+    semanticHeight: Double,
+    top: Double,
+    visibleHeight: Double
+  ) {
+    self.continuesIntoNextDay = continuesIntoNextDay
+    self.semanticHeight = semanticHeight
+    self.top = top
+    self.visibleHeight = visibleHeight
+  }
+}
+
+public enum DayframeCalendarCreationPreviewMath {
+  public static func geometry(
+    startMinute: Int,
+    durationMinutes: Int = DayframeCalendarConstants.creationPreviewDurationMinutes,
+    hourHeight: Double
+  ) -> DayframeCalendarCreationPreviewGeometry? {
+    guard
+      hourHeight.isFinite,
+      hourHeight > 0,
+      startMinute >= 0,
+      startMinute < Int(DayframeCalendarConstants.minutesPerDay),
+      durationMinutes > 0
+    else {
+      return nil
+    }
+    let endMinute = startMinute + durationMinutes
+    let visibleMinutes = max(
+      0,
+      min(durationMinutes, Int(DayframeCalendarConstants.minutesPerDay) - startMinute)
+    )
+    return DayframeCalendarCreationPreviewGeometry(
+      continuesIntoNextDay: endMinute > Int(DayframeCalendarConstants.minutesPerDay),
+      semanticHeight: Double(durationMinutes) / 60 * hourHeight,
+      top: Double(startMinute) / 60 * hourHeight,
+      visibleHeight: Double(visibleMinutes) / 60 * hourHeight
+    )
+  }
+}
+
+public enum DayframeCalendarEdgeAutoscrollMath {
+  public static func velocity(
+    viewportY: Double,
+    viewportHeight: Double,
+    activationInset: Double = DayframeCalendarConstants.edgeAutoscrollActivationInset,
+    maximumSpeed: Double = DayframeCalendarConstants.edgeAutoscrollMaximumSpeed
+  ) -> Double? {
+    guard
+      viewportY.isFinite,
+      viewportHeight.isFinite,
+      activationInset.isFinite,
+      maximumSpeed.isFinite,
+      viewportHeight > 0,
+      activationInset > 0,
+      maximumSpeed > 0
+    else {
+      return nil
+    }
+    let resolvedInset = min(activationInset, viewportHeight / 2)
+    if viewportY < resolvedInset {
+      let depth = min(1, max(0, (resolvedInset - viewportY) / resolvedInset))
+      return -maximumSpeed * depth
+    }
+    let bottomStart = viewportHeight - resolvedInset
+    if viewportY > bottomStart {
+      let depth = min(1, max(0, (viewportY - bottomStart) / resolvedInset))
+      return maximumSpeed * depth
+    }
+    return 0
+  }
+
+  public static func nextContentOffset(
+    currentOffset: Double,
+    velocity: Double,
+    deltaTime: Double,
+    hourHeight: Double,
+    viewportHeight: Double
+  ) -> Double? {
+    guard
+      currentOffset.isFinite,
+      velocity.isFinite,
+      deltaTime.isFinite,
+      hourHeight.isFinite,
+      viewportHeight.isFinite,
+      deltaTime >= 0,
+      hourHeight > 0,
+      viewportHeight > 0
+    else {
+      return nil
+    }
+    return DayframeCalendarZoomMath.clampContentOffset(
+      currentOffset + velocity * deltaTime,
+      hourHeight: hourHeight,
+      viewportHeight: viewportHeight
+    )
+  }
+
+  public static func contentY(viewportY: Double, contentOffsetY: Double) -> Double? {
+    guard viewportY.isFinite, contentOffsetY.isFinite else { return nil }
+    let contentY = viewportY + contentOffsetY
+    return contentY.isFinite ? contentY : nil
   }
 }
 
