@@ -70,6 +70,7 @@ import {
   type TimeEntryUpdatePatch
 } from "@/lib/api";
 import { handleDayframeUrl } from "@/lib/deepLinks";
+import { resolveCalendarManualEntryRequest } from "@/lib/calendarManualEntry";
 import { IS_DAYFRAME_STAGING } from "@/lib/config";
 import { shouldApplyDashboardRefresh } from "@/lib/dashboardRefresh";
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
@@ -199,6 +200,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [now, setNow] = useState(() => Date.now());
   const [manualDraftEntry, setManualDraftEntry] = useState<TimeEntry | null>(null);
   const [manualEntrySaving, setManualEntrySaving] = useState(false);
+  const manualEntrySavingRef = useRef(false);
   const [activeEditVisible, setActiveEditVisible] = useState(false);
   const [presentedActiveEntry, setPresentedActiveEntry] = useState<TimeEntry | null>(null);
   const [pendingHistoryDeletion, setPendingHistoryDeletion] = useState<{
@@ -804,8 +806,23 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     setManualDraftEntry(createManualDraftEntry(recentStoppedAt, now));
   }
 
+  function openCalendarManualEntry(dayKey: string, startMinute: number) {
+    const result = resolveCalendarManualEntryRequest({
+      dayKey,
+      selectedDayKey,
+      startMinute,
+      now: Date.now()
+    });
+    if (!result.ok) {
+      if (!result.ignored) Alert.alert("Unable to add time", result.error);
+      return;
+    }
+    setManualDraftEntry(result.entry);
+  }
+
   async function saveManualEntry(_entryId: string, patch: TimeEntryUpdatePatch) {
-    if (!patch.startedAt || !patch.stoppedAt || manualEntrySaving) return false;
+    if (!patch.startedAt || !patch.stoppedAt || manualEntrySavingRef.current) return false;
+    manualEntrySavingRef.current = true;
     setManualEntrySaving(true);
     try {
       await createManualTimeEntry({
@@ -830,6 +847,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       );
       return false;
     } finally {
+      manualEntrySavingRef.current = false;
       setManualEntrySaving(false);
     }
   }
@@ -1561,6 +1579,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               onOpenActiveTimer={(event) => routeOpenEvent("active", event.nativeEvent.entryId)}
               onOpenCompletedEntry={(event) => routeOpenEvent("completed", event.nativeEvent.entryId)}
               onOpenReviewItem={(event) => routeOpenEvent("review", event.nativeEvent.reviewItemId)}
+              onRequestCreateEntry={(event) => {
+                openCalendarManualEntry(
+                  event.nativeEvent.dayKey,
+                  event.nativeEvent.startMinute
+                );
+              }}
               onRequestRefresh={() => {
                 routeNativeCalendarRefresh(() => {
                   void load({ visibleRefresh: true });

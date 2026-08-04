@@ -2,6 +2,7 @@ export { DayframeCalendarView } from "./src/DayframeCalendarView";
 export type {
   DayframeCalendarChangeDayEvent,
   DayframeCalendarChangeWeekEvent,
+  DayframeCalendarCreateEntryEvent,
   DayframeCalendarEntryEvent,
   DayframeCalendarReviewEvent,
   DayframeCalendarSelectDayEvent,

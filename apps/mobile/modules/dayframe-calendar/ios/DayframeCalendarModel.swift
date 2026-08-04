@@ -166,10 +166,19 @@ struct DayframeCalendarPresentation: Equatable {
   static let empty = DayframeCalendarPresentation(DayframeCalendarPresentationRecord())
 }
 
+struct DayframeCalendarCreationPreview: Equatable {
+  let sessionToken: UInt64
+  let dayKey: String
+  let startMinute: Int
+  let durationMinutes: Int
+}
+
 @MainActor
 final class DayframeCalendarViewModel: ObservableObject {
   @Published private(set) var presentation = DayframeCalendarPresentation.empty
   @Published private(set) var hourHeight = CGFloat(DayframeCalendarConstants.defaultHourHeight)
+  @Published private(set) var creationPreview: DayframeCalendarCreationPreview?
+  private var nextCreationSessionToken: UInt64 = 0
 
   func update(_ record: DayframeCalendarPresentationRecord) {
     guard record.modelVersion == 3 else {
@@ -180,12 +189,16 @@ final class DayframeCalendarViewModel: ObservableObject {
     guard next != presentation else { return }
     withTransaction(Transaction(animation: nil)) {
       presentation = next
+      if creationPreview?.dayKey != next.selectedDayKey {
+        creationPreview = nil
+      }
     }
   }
 
   func reset() {
     withTransaction(Transaction(animation: nil)) {
       presentation = .empty
+      creationPreview = nil
     }
   }
 
@@ -196,12 +209,63 @@ final class DayframeCalendarViewModel: ObservableObject {
       hourHeight = clamped
     }
   }
+
+  @discardableResult
+  func beginCreationPreview(dayKey: String, startMinute: Int) -> UInt64 {
+    nextCreationSessionToken &+= 1
+    if nextCreationSessionToken == 0 {
+      nextCreationSessionToken = 1
+    }
+    let token = nextCreationSessionToken
+    withTransaction(Transaction(animation: nil)) {
+      creationPreview = DayframeCalendarCreationPreview(
+        sessionToken: token,
+        dayKey: dayKey,
+        startMinute: startMinute,
+        durationMinutes: DayframeCalendarConstants.creationPreviewDurationMinutes
+      )
+    }
+    return token
+  }
+
+  @discardableResult
+  func updateCreationPreview(sessionToken: UInt64, startMinute: Int) -> Bool {
+    guard
+      let current = creationPreview,
+      current.sessionToken == sessionToken,
+      current.startMinute != startMinute
+    else {
+      return false
+    }
+    withTransaction(Transaction(animation: nil)) {
+      creationPreview = DayframeCalendarCreationPreview(
+        sessionToken: current.sessionToken,
+        dayKey: current.dayKey,
+        startMinute: startMinute,
+        durationMinutes: current.durationMinutes
+      )
+    }
+    return true
+  }
+
+  func clearCreationPreview(sessionToken: UInt64? = nil) {
+    guard
+      creationPreview != nil,
+      sessionToken == nil || creationPreview?.sessionToken == sessionToken
+    else {
+      return
+    }
+    withTransaction(Transaction(animation: nil)) {
+      creationPreview = nil
+    }
+  }
 }
 
 struct DayframeCalendarActions {
   let changeDay: (Int) -> Void
   let changeWeek: (Int) -> Void
   let open: (DayframeCalendarActionTarget) -> Void
+  let requestCreateEntry: (DayframeCalendarCreateRequest) -> Void
   let requestRefresh: () -> Void
   let selectDay: (String) -> Void
 }

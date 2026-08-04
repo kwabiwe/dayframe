@@ -92,17 +92,13 @@ struct DayframeCalendarRootView: View {
       ScrollView(.vertical) {
         DayframeCalendarTimelineCanvas(model: model, actions: actions)
           .frame(height: 24 * model.hourHeight)
-          .background(
-            DayframeCalendarScrollResolver(model: model, actions: actions)
-              .frame(width: 1, height: 1)
-          )
       }
       .dynamicTypeSize(.xSmall ... .large)
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .background(Color(dayframeCSS: theme.surfaceMuted))
       .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
       .accessibilityLabel("24-hour Calendar timeline")
-      .accessibilityHint("Scroll vertically. Use two fingers to change time density.")
+      .accessibilityHint("Scroll vertically. Use two fingers to change time density. Touch and hold empty time, drag to adjust, then release to add an entry.")
     }
     .padding(14)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -231,6 +227,23 @@ private struct DayframeCalendarTimelineCanvas: View {
             .accessibilityHidden(true)
         }
 
+        if
+          let preview = model.creationPreview,
+          preview.dayKey == presentation.selectedDayKey
+        {
+          DayframeCalendarCreationPreviewLayer(
+            availableWidth: geometry.size.width,
+            hourHeight: hourHeight,
+            hourLabelWidth: hourLabelWidth,
+            preview: preview,
+            reduceTransparency: presentation.reduceTransparency,
+            theme: theme
+          )
+          .zIndex(10_000)
+          .allowsHitTesting(false)
+          .accessibilityHidden(true)
+        }
+
         if presentation.entries.isEmpty {
           Text(presentation.emptyState)
             .font(.footnote)
@@ -246,6 +259,18 @@ private struct DayframeCalendarTimelineCanvas: View {
       }
       .frame(width: geometry.size.width, height: timelineHeight)
       .clipped()
+      .background(alignment: .topLeading) {
+        DayframeCalendarScrollResolver(
+          model: model,
+          actions: actions,
+          layout: DayframeCalendarTimelineLayout(
+            availableWidth: Double(geometry.size.width),
+            hourLabelWidth: Double(hourLabelWidth)
+          )
+        )
+        .frame(width: 1, height: 1)
+        .accessibilityHidden(true)
+      }
       .animation(
         presentation.reduceMotion ? nil : .easeOut(duration: 0.21),
         value: presentation.selectedDayKey
@@ -259,6 +284,88 @@ private struct DayframeCalendarTimelineCanvas: View {
     return Double(components.hour ?? 0) * 60
       + Double(components.minute ?? 0)
       + Double(components.second ?? 0) / 60
+  }
+}
+
+private struct DayframeCalendarCreationPreviewLayer: View {
+  let availableWidth: CGFloat
+  let hourHeight: CGFloat
+  let hourLabelWidth: CGFloat
+  let preview: DayframeCalendarCreationPreview
+  let reduceTransparency: Bool
+  let theme: DayframeCalendarTheme
+
+  var body: some View {
+    if let geometry = DayframeCalendarCreationPreviewMath.geometry(
+      startMinute: preview.startMinute,
+      durationMinutes: preview.durationMinutes,
+      hourHeight: Double(hourHeight)
+    ) {
+      let visual = DayframeCalendarBlockVisualMath.metrics(
+        semanticHeight: geometry.semanticHeight,
+        continuesIntoNextDay: geometry.continuesIntoNextDay
+      )
+      let width = max(0, availableWidth - hourLabelWidth - 18)
+      let semanticHeight = CGFloat(visual.semanticHeight)
+      let visualHeight = CGFloat(visual.visualHeight)
+      let visibleHeight = CGFloat(geometry.visibleHeight)
+      let shape = DayframeCalendarBlockShape(
+        cornerRadius: CGFloat(visual.cornerRadius),
+        continuesIntoNextDay: geometry.continuesIntoNextDay,
+        startsBeforeDay: false
+      )
+      let accentColor = UIColor(dayframeCSS: theme.accent)
+      let backgroundColor = UIColor(dayframeCSS: theme.surfaceMuted)
+      let borderBase = UIColor(dayframeCSS: theme.borderStrong)
+      let fill = accentColor.dayframeBlended(
+        over: backgroundColor,
+        alpha: reduceTransparency ? 0.34 : 0.22
+      )
+      let border = accentColor.dayframeBlended(over: borderBase, alpha: 0.72)
+
+      ZStack(alignment: .leading) {
+        shape.fill(Color(uiColor: fill))
+        shape.strokeBorder(
+          Color(uiColor: border),
+          style: StrokeStyle(lineWidth: 1, lineCap: .round, dash: [5, 3])
+        )
+
+        if visibleHeight >= 18 {
+          VStack(alignment: .leading, spacing: 1) {
+            if visibleHeight >= 50 {
+              Text("New entry")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(Color(dayframeCSS: theme.textPrimary))
+                .lineLimit(1)
+            }
+            Text(timeRange)
+              .font(.caption2.weight(.semibold))
+              .monospacedDigit()
+              .foregroundStyle(Color(dayframeCSS: theme.accentText))
+              .lineLimit(1)
+              .minimumScaleFactor(0.72)
+          }
+          .padding(.horizontal, 8)
+          .padding(.vertical, visibleHeight >= 50 ? 6 : 3)
+        }
+      }
+      .frame(width: width, height: visualHeight)
+      .frame(height: semanticHeight, alignment: .top)
+      .position(
+        x: hourLabelWidth + 8 + width / 2,
+        y: CGFloat(geometry.top) + semanticHeight / 2
+      )
+    }
+  }
+
+  private var timeRange: String {
+    let finishMinute = preview.startMinute + preview.durationMinutes
+    return "\(clock(preview.startMinute))–\(clock(finishMinute))"
+  }
+
+  private func clock(_ minute: Int) -> String {
+    let normalized = ((minute % 1_440) + 1_440) % 1_440
+    return String(format: "%02d:%02d", normalized / 60, normalized % 60)
   }
 }
 
@@ -310,27 +417,24 @@ private struct DayframeCalendarEntriesLayer: View {
           dayStartMs: presentation.dayStartMs,
           dayEndMs: presentation.dayEndMs,
           hourHeight: Double(hourHeight)
+        ), let entryGeometry = DayframeCalendarEntryGeometryMath.metrics(
+          availableWidth: Double(availableWidth),
+          hourLabelWidth: Double(hourLabelWidth),
+          semanticTop: metrics.top,
+          semanticHeight: metrics.height,
+          offsetFraction: entry.offsetFraction,
+          widthFraction: entry.widthFraction,
+          overlapCount: entry.overlapCount,
+          textDensity: entry.textDensity
         ) {
-          let blockWidth = max(0, availableWidth - hourLabelWidth - 18)
           let visualMetrics = DayframeCalendarBlockVisualMath.metrics(
             semanticHeight: metrics.height,
             continuesIntoNextDay: metrics.continuesIntoNextDay
           )
           let semanticHeight = CGFloat(visualMetrics.semanticHeight)
           let visualHeight = CGFloat(visualMetrics.visualHeight)
-          let horizontal = DayframeCalendarHorizontalMath.metrics(
-            availableWidth: Double(blockWidth),
-            offsetFraction: entry.offsetFraction,
-            widthFraction: entry.widthFraction,
-            semanticHeight: metrics.height,
-            overlapCount: entry.overlapCount,
-            textDensity: entry.textDensity
-          )
-          let vertical = DayframeCalendarVerticalMath.metrics(
-            semanticTop: metrics.top,
-            semanticHeight: metrics.height,
-            hitHeight: horizontal.hitHeight
-          )
+          let horizontal = entryGeometry.horizontal
+          let vertical = entryGeometry.vertical
           let resolvedWidth = CGFloat(horizontal.width)
           let hitHeight = CGFloat(vertical.hitHeight)
 
@@ -355,7 +459,7 @@ private struct DayframeCalendarEntriesLayer: View {
           .contentShape(Rectangle())
           .modifier(DayframeCalendarHorizontalGeometry(
             width: resolvedWidth,
-            x: hourLabelWidth + 8 + CGFloat(horizontal.offset) + resolvedWidth / 2,
+            x: CGFloat((entryGeometry.hitFrame.minX + entryGeometry.hitFrame.maxX) / 2),
             y: CGFloat(vertical.hitCenterY)
           ))
           .animation(

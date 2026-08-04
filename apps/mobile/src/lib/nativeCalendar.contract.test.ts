@@ -109,9 +109,127 @@ describe("native Calendar production contract", () => {
     expect(rootView).toContain("DayframeCalendarHatch");
     expect(swiftSources).not.toContain("min(13");
     expect(swiftSources).not.toContain("rect.height / 2), height: min(13");
-    expect(swiftSources).not.toContain("LongPressGesture");
     expect(swiftSources).not.toContain("onLongPressGesture");
     expect(swiftSources).not.toContain("contextMenu");
     expect(swiftSources).not.toContain("play.fill");
+  });
+
+  it("owns exactly one UIKit long press in the existing scroll coordinator", () => {
+    const coordinator = readFileSync(`${moduleRoot}ios/DayframeCalendarScrollCoordinator.swift`, "utf8");
+    const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
+    const dashboard = readFileSync(dashboardPath, "utf8");
+    const handler = coordinator.slice(
+      coordinator.indexOf("@objc private func handleLongPress"),
+      coordinator.indexOf("func gestureRecognizerShouldBegin")
+    );
+    const began = handler.slice(handler.indexOf("case .began:"), handler.indexOf("case .changed:"));
+    const changed = handler.slice(handler.indexOf("case .changed:"), handler.indexOf("case .ended:"));
+    const ended = handler.slice(handler.indexOf("case .ended:"), handler.indexOf("case .cancelled"));
+
+    expect(coordinator.match(/private let longPressGesture = UILongPressGestureRecognizer\(\)/g)).toHaveLength(1);
+    expect(coordinator).toContain("minimumPressDuration = DayframeCalendarConstants.longPressMinimumDuration");
+    expect(coordinator).toContain("allowableMovement = DayframeCalendarConstants.longPressAllowableMovement");
+    expect(coordinator).toContain("numberOfTouchesRequired = 1");
+    expect(coordinator).toContain("longPressGesture.numberOfTouches == 1");
+    expect(coordinator).toContain("if longPressGesture.numberOfTouches >= 1");
+    expect(coordinator).toContain("case .began:");
+    expect(coordinator).toContain("case .changed:");
+    expect(coordinator).toContain("case .ended:");
+    expect(coordinator).toContain("selectionHaptic.selectionChanged()");
+    expect(began).toContain("model.beginCreationPreview(");
+    expect(began).not.toContain("actions.requestCreateEntry");
+    expect(changed).toContain("updateCreationDrag(");
+    expect(ended).toContain("completeCreationInteraction()");
+    expect(coordinator.slice(coordinator.indexOf("private func completeCreationInteraction"))).toContain(
+      "actions.requestCreateEntry(request)"
+    );
+    expect(rootView).not.toContain("onLongPressGesture");
+    expect(dashboard).not.toContain("Gesture.LongPress");
+  });
+
+  it("keeps the creation preview native, ephemeral, non-interactive, and separate from entries", () => {
+    const core = readFileSync(`${moduleRoot}ios/DayframeCalendarCore.swift`, "utf8");
+    const model = readFileSync(`${moduleRoot}ios/DayframeCalendarModel.swift`, "utf8");
+    const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
+    const previewView = rootView.slice(
+      rootView.indexOf("private struct DayframeCalendarCreationPreviewLayer"),
+      rootView.indexOf("private struct DayframeCalendarHourGrid")
+    );
+
+    expect(core).toContain("public static let creationPreviewDurationMinutes = 30");
+    expect(core).toContain("public enum DayframeCalendarCreationPreviewMath");
+    expect(model).toContain("@Published private(set) var creationPreview");
+    expect(model).toContain("func beginCreationPreview(dayKey: String, startMinute: Int)");
+    expect(model).toContain("func updateCreationPreview(sessionToken: UInt64, startMinute: Int)");
+    expect(model).toContain("func clearCreationPreview(sessionToken: UInt64? = nil)");
+    expect(model).toContain("if creationPreview?.dayKey != next.selectedDayKey");
+    expect(rootView).toContain("preview.dayKey == presentation.selectedDayKey");
+    expect(previewView).toContain("DayframeCalendarBlockVisualMath.metrics");
+    expect(previewView).toContain("cornerRadius: CGFloat(visual.cornerRadius)");
+    expect(previewView).toContain("StrokeStyle(lineWidth: 1");
+    expect(previewView).toContain("dash: [5, 3]");
+    expect(previewView).toContain('Text("New entry")');
+    expect(previewView).toContain("theme.accent");
+    expect(previewView).toContain(".monospacedDigit()");
+    expect(rootView).toContain(".zIndex(10_000)");
+    expect(rootView).toContain(".allowsHitTesting(false)");
+    expect(rootView).toContain(".accessibilityHidden(true)");
+    expect(previewView).not.toContain("presentation.entries");
+    expect(previewView).not.toContain("entry.color");
+    expect(previewView).not.toContain('Image(systemName: "tag.fill")');
+    expect(previewView).not.toContain("play.fill");
+  });
+
+  it("uses one coordinator-owned display link and restores competing gestures deterministically", () => {
+    const coordinator = readFileSync(`${moduleRoot}ios/DayframeCalendarScrollCoordinator.swift`, "utf8");
+
+    expect(coordinator.match(/private var edgeAutoscrollDisplayLink: CADisplayLink\?/g)).toHaveLength(1);
+    expect(coordinator).toContain("DayframeCalendarEdgeAutoscrollMath.velocity(");
+    expect(coordinator).toContain("DayframeCalendarEdgeAutoscrollMath.nextContentOffset(");
+    expect(coordinator).toContain("animated: false");
+    expect(coordinator).toContain("stopEdgeAutoscroll()");
+    expect(coordinator).toContain("setCreationGestureLock(true)");
+    expect(coordinator).toContain("setCreationGestureLock(false)");
+    expect(coordinator).toContain("UIApplication.willResignActiveNotification");
+    expect(coordinator).toContain("static func dismantleUIView");
+    expect(coordinator).not.toMatch(/\bTimer\b/);
+  });
+
+  it("bridges only dayKey and startMinute to the React-owned manual draft", () => {
+    const expoView = readFileSync(`${moduleRoot}ios/DayframeCalendarExpoView.swift`, "utf8");
+    const module = readFileSync(`${moduleRoot}ios/DayframeCalendarModule.swift`, "utf8");
+    const wrapper = readFileSync(`${moduleRoot}src/DayframeCalendarView.tsx`, "utf8");
+    const presentation = readFileSync(`${mobileRoot}src/lib/nativeCalendarPresentation.ts`, "utf8");
+    const dashboard = readFileSync(dashboardPath, "utf8");
+
+    expect(module).toContain('"onRequestCreateEntry"');
+    expect(expoView).toContain('"dayKey": request.dayKey');
+    expect(expoView).toContain('"startMinute": request.startMinute');
+    expect(wrapper).toContain("export type DayframeCalendarCreateEntryEvent = { dayKey: string; startMinute: number }");
+    expect(dashboard).toContain("resolveCalendarManualEntryRequest({");
+    expect(dashboard).toContain("onRequestCreateEntry={(event) => {");
+    expect(dashboard).toContain('Alert.alert("Unable to add time", result.error)');
+    expect(presentation).toContain("modelVersion: 3");
+    expect(presentation).not.toContain("modelVersion: 4");
+    expect(expoView).not.toContain("createManualTimeEntry");
+  });
+
+  it("keeps Calendar creation separate from Plus and active-timer ownership", () => {
+    const dashboard = readFileSync(dashboardPath, "utf8");
+    const handler = dashboard.slice(
+      dashboard.indexOf("function openCalendarManualEntry"),
+      dashboard.indexOf("async function saveManualEntry")
+    );
+
+    expect(handler).toContain("resolveCalendarManualEntryRequest");
+    expect(handler).toContain("setManualDraftEntry(result.entry)");
+    expect(handler).not.toContain("openManualEntry()");
+    expect(handler).not.toContain("setActiveEditVisible");
+    expect(handler).not.toContain("startTimer");
+    expect(handler).not.toContain("stopTimer");
+    expect(dashboard).toContain("if (latestData.current?.activeEntry) {");
+    expect(dashboard).toContain("manualEntrySavingRef.current = true");
+    expect(dashboard).toContain("await createManualTimeEntry({");
+    expect(dashboard).toContain("await load({ silent: true })");
   });
 });

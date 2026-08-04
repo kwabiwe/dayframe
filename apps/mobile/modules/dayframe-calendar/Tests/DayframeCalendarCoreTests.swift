@@ -360,6 +360,494 @@ final class DayframeCalendarCoreTests: XCTestCase {
     XCTAssertEqual(overlapping.hitHeight, 8)
   }
 
+  func testLongPressSlotFloorsToContainingQuarterHour() {
+    let hourHeight = 72.0
+
+    XCTAssertEqual(slot(minute: 0, hourHeight: hourHeight), 0)
+    XCTAssertEqual(slot(minute: 600, hourHeight: hourHeight), 600)
+    XCTAssertEqual(slot(minute: 607, hourHeight: hourHeight), 600)
+    XCTAssertEqual(slot(minute: 614, hourHeight: hourHeight), 600)
+    XCTAssertEqual(slot(minute: 615, hourHeight: hourHeight), 615)
+    XCTAssertEqual(slot(minute: 629.99, hourHeight: hourHeight), 615)
+  }
+
+  func testLongPressSlotClampsBottomAndRejectsInvalidInputs() {
+    XCTAssertEqual(
+      DayframeCalendarLongPressMath.slot(contentY: 24 * 72, hourHeight: 72)?.startMinute,
+      1_425
+    )
+    XCTAssertNil(DayframeCalendarLongPressMath.slot(contentY: -0.1, hourHeight: 72))
+    XCTAssertNil(DayframeCalendarLongPressMath.slot(contentY: .nan, hourHeight: 72))
+    XCTAssertNil(DayframeCalendarLongPressMath.slot(contentY: 100, hourHeight: .infinity))
+    XCTAssertNil(DayframeCalendarLongPressMath.slot(contentY: 100, hourHeight: 0))
+  }
+
+  func testLongPressSlotIsStableAcrossZoomLevelsAndScrolledContentCoordinates() {
+    for hourHeight in [
+      DayframeCalendarConstants.minimumHourHeight,
+      DayframeCalendarConstants.defaultHourHeight,
+      DayframeCalendarConstants.maximumHourHeight
+    ] {
+      XCTAssertEqual(slot(minute: 607, hourHeight: hourHeight), 600)
+    }
+
+    let contentOffsetY = 9 * 72.0
+    let viewportPointY = 67.0 / 60.0 * 72.0
+    XCTAssertEqual(
+      DayframeCalendarLongPressMath.slot(
+        contentY: contentOffsetY + viewportPointY,
+        hourHeight: 72
+      )?.startMinute,
+      600
+    )
+  }
+
+  func testLongPressTimelineRejectsHourAxisAndOutsideOrInvalidLayout() {
+    let valid = DayframeCalendarPoint(x: 120, y: 600)
+    XCTAssertTrue(DayframeCalendarLongPressMath.pointIsInTimeline(
+      point: valid,
+      availableWidth: 320,
+      hourLabelWidth: 68,
+      hourHeight: 72
+    ))
+    for point in [
+      DayframeCalendarPoint(x: 68, y: 600),
+      DayframeCalendarPoint(x: -1, y: 600),
+      DayframeCalendarPoint(x: 321, y: 600),
+      DayframeCalendarPoint(x: 120, y: -1),
+      DayframeCalendarPoint(x: 120, y: 24 * 72 + 0.1)
+    ] {
+      XCTAssertFalse(DayframeCalendarLongPressMath.pointIsInTimeline(
+        point: point,
+        availableWidth: 320,
+        hourLabelWidth: 68,
+        hourHeight: 72
+      ))
+    }
+    XCTAssertFalse(DayframeCalendarLongPressMath.pointIsInTimeline(
+      point: valid,
+      availableWidth: 68,
+      hourLabelWidth: 68,
+      hourHeight: 72
+    ))
+  }
+
+  func testLongPressHitFramesUseTallSemanticButtonGeometry() throws {
+    let geometry = try XCTUnwrap(entryGeometry(
+      semanticTop: 180,
+      semanticHeight: 90,
+      overlapCount: 0
+    ))
+    XCTAssertEqual(geometry.hitFrame.minY, 180)
+    XCTAssertEqual(geometry.hitFrame.maxY, 270)
+    XCTAssertTrue(DayframeCalendarLongPressMath.pointHitsEntry(
+      point: DayframeCalendarPoint(x: 100, y: 225),
+      frames: [geometry.hitFrame]
+    ))
+  }
+
+  func testLongPressHitFramesProtectIsolatedShortTargetAndVisualGap() throws {
+    let short = try XCTUnwrap(entryGeometry(
+      semanticTop: 100,
+      semanticHeight: 4,
+      overlapCount: 0
+    ))
+    XCTAssertEqual(short.vertical.hitHeight, 44)
+    XCTAssertEqual(short.hitFrame.minY, 80)
+    XCTAssertEqual(short.hitFrame.maxY, 124)
+    XCTAssertTrue(DayframeCalendarLongPressMath.pointHitsEntry(
+      point: DayframeCalendarPoint(x: 100, y: 103.5),
+      frames: [short.hitFrame]
+    ))
+  }
+
+  func testLongPressHitFramesPreserveOverlapLaneOwnership() throws {
+    let left = try XCTUnwrap(entryGeometry(
+      semanticTop: 300,
+      semanticHeight: 60,
+      offsetFraction: 0,
+      widthFraction: 1.0 / 3.0,
+      overlapCount: 2
+    ))
+    let right = try XCTUnwrap(entryGeometry(
+      semanticTop: 300,
+      semanticHeight: 60,
+      offsetFraction: 2.0 / 3.0,
+      widthFraction: 1.0 / 3.0,
+      overlapCount: 2
+    ))
+    let occupied = DayframeCalendarPoint(
+      x: (left.hitFrame.minX + left.hitFrame.maxX) / 2,
+      y: 330
+    )
+    let emptyLane = DayframeCalendarPoint(
+      x: (left.hitFrame.maxX + right.hitFrame.minX) / 2,
+      y: 330
+    )
+
+    XCTAssertTrue(DayframeCalendarLongPressMath.pointHitsEntry(
+      point: occupied,
+      frames: [left.hitFrame, right.hitFrame]
+    ))
+    XCTAssertFalse(DayframeCalendarLongPressMath.pointHitsEntry(
+      point: emptyLane,
+      frames: [left.hitFrame, right.hitFrame]
+    ))
+  }
+
+  func testLongPressHitFramesCoverContainedAndContinuationEntries() throws {
+    let base = try XCTUnwrap(entryGeometry(
+      semanticTop: 400,
+      semanticHeight: 180,
+      overlapCount: 1
+    ))
+    let contained = try XCTUnwrap(entryGeometry(
+      semanticTop: 430,
+      semanticHeight: 30,
+      offsetFraction: 0.14,
+      widthFraction: 0.86,
+      overlapCount: 1
+    ))
+    let continuation = try XCTUnwrap(entryGeometry(
+      semanticTop: 1_680,
+      semanticHeight: 48,
+      overlapCount: 0
+    ))
+
+    XCTAssertTrue(DayframeCalendarLongPressMath.pointHitsEntry(
+      point: DayframeCalendarPoint(x: contained.hitFrame.maxX - 1, y: 445),
+      frames: [base.hitFrame, contained.hitFrame]
+    ))
+    XCTAssertTrue(DayframeCalendarLongPressMath.pointHitsEntry(
+      point: DayframeCalendarPoint(x: 100, y: 1_727),
+      frames: [continuation.hitFrame]
+    ))
+  }
+
+  func testLongPressPointHitRejectsNonFinitePoint() throws {
+    let geometry = try XCTUnwrap(entryGeometry(
+      semanticTop: 100,
+      semanticHeight: 60,
+      overlapCount: 0
+    ))
+    XCTAssertFalse(DayframeCalendarLongPressMath.pointHitsEntry(
+      point: DayframeCalendarPoint(x: .nan, y: 120),
+      frames: [geometry.hitFrame]
+    ))
+  }
+
+  func testCreationDragCapturesInitialGrabOffsetWithoutJumping() {
+    let transition = DayframeCalendarCreationDragReducer.reduce(
+      state: DayframeCalendarCreationDragState(),
+      event: .began(
+        dayKey: "2026-08-04",
+        contentY: 607.0 / 60 * 72,
+        hourHeight: 72
+      )
+    )
+
+    XCTAssertEqual(transition.previewStartMinute, 600)
+    XCTAssertEqual(transition.state.session?.initialStartMinute, 600)
+    XCTAssertEqual(transition.state.session?.currentStartMinute, 600)
+    XCTAssertEqual(transition.state.session?.grabOffsetMinutes ?? -1, 7, accuracy: 0.001)
+    XCTAssertNil(transition.request)
+    XCTAssertFalse(transition.shouldClearPreview)
+    XCTAssertTrue(transition.shouldTriggerHaptic)
+  }
+
+  func testCreationDragMovesUpDownAndAcrossMultipleQuarterHours() throws {
+    let began = DayframeCalendarCreationDragReducer.reduce(
+      state: DayframeCalendarCreationDragState(),
+      event: .began(
+        dayKey: "2026-08-04",
+        contentY: 607.0 / 60 * 72,
+        hourHeight: 72
+      )
+    )
+    let up = DayframeCalendarCreationDragReducer.reduce(
+      state: began.state,
+      event: .changed(contentY: 592.0 / 60 * 72, hourHeight: 72)
+    )
+    let down = DayframeCalendarCreationDragReducer.reduce(
+      state: began.state,
+      event: .changed(contentY: 622.0 / 60 * 72, hourHeight: 72)
+    )
+    let several = DayframeCalendarCreationDragReducer.reduce(
+      state: began.state,
+      event: .changed(contentY: 682.0 / 60 * 72, hourHeight: 72)
+    )
+
+    XCTAssertEqual(up.previewStartMinute, 585)
+    XCTAssertEqual(down.previewStartMinute, 615)
+    XCTAssertEqual(several.previewStartMinute, 675)
+    XCTAssertEqual(up.state.session?.grabOffsetMinutes, began.state.session?.grabOffsetMinutes)
+  }
+
+  func testCreationDragDoesNothingAndDoesNotHapticWithinSameSlot() {
+    let began = DayframeCalendarCreationDragReducer.reduce(
+      state: DayframeCalendarCreationDragState(),
+      event: .began(
+        dayKey: "2026-08-04",
+        contentY: 607.0 / 60 * 72,
+        hourHeight: 72
+      )
+    )
+    let unchanged = DayframeCalendarCreationDragReducer.reduce(
+      state: began.state,
+      event: .changed(contentY: 610.0 / 60 * 72, hourHeight: 72)
+    )
+
+    XCTAssertEqual(unchanged.state, began.state)
+    XCTAssertNil(unchanged.previewStartMinute)
+    XCTAssertFalse(unchanged.shouldTriggerHaptic)
+  }
+
+  func testCreationDragClampsAtStartAndLastQuarterHour() {
+    XCTAssertEqual(
+      DayframeCalendarCreationDragMath.startMinute(
+        contentY: -200,
+        hourHeight: 72,
+        grabOffsetMinutes: 7
+      ),
+      0
+    )
+    XCTAssertEqual(
+      DayframeCalendarCreationDragMath.startMinute(
+        contentY: 10_000,
+        hourHeight: 72,
+        grabOffsetMinutes: 7
+      ),
+      1_425
+    )
+  }
+
+  func testCreationDragIsEquivalentAtMinimumDefaultMaximumZoom() {
+    for hourHeight in [
+      DayframeCalendarConstants.minimumHourHeight,
+      DayframeCalendarConstants.defaultHourHeight,
+      DayframeCalendarConstants.maximumHourHeight
+    ] {
+      let offset = DayframeCalendarCreationDragMath.grabOffsetMinutes(
+        contentY: 607.0 / 60 * hourHeight,
+        hourHeight: hourHeight,
+        startMinute: 600
+      )
+      XCTAssertEqual(offset ?? -1, 7, accuracy: 0.001)
+      XCTAssertEqual(
+        DayframeCalendarCreationDragMath.startMinute(
+          contentY: 637.0 / 60 * hourHeight,
+          hourHeight: hourHeight,
+          grabOffsetMinutes: offset ?? 0
+        ),
+        630
+      )
+    }
+  }
+
+  func testCreationDragUsesScrolledContentCoordinatesAndRejectsInvalidInput() {
+    let contentY = DayframeCalendarEdgeAutoscrollMath.contentY(
+      viewportY: 67.0 / 60 * 72,
+      contentOffsetY: 9 * 72
+    )
+    XCTAssertEqual(
+      DayframeCalendarCreationDragMath.startMinute(
+        contentY: contentY ?? -1,
+        hourHeight: 72,
+        grabOffsetMinutes: 7
+      ),
+      600
+    )
+    XCTAssertNil(DayframeCalendarCreationDragMath.startMinute(
+      contentY: .nan,
+      hourHeight: 72,
+      grabOffsetMinutes: 0
+    ))
+    XCTAssertNil(DayframeCalendarCreationDragMath.startMinute(
+      contentY: 100,
+      hourHeight: 0,
+      grabOffsetMinutes: 0
+    ))
+    XCTAssertNil(DayframeCalendarCreationDragMath.startMinute(
+      contentY: 100,
+      hourHeight: 72,
+      grabOffsetMinutes: .infinity
+    ))
+    XCTAssertNil(DayframeCalendarEdgeAutoscrollMath.contentY(
+      viewportY: .nan,
+      contentOffsetY: 100
+    ))
+  }
+
+  func testCreationPreviewKeepsThirtyMinutesAndClipsAcrossMidnight() throws {
+    for hourHeight in [48.0, 72.0, 128.0] {
+      let ordinary = try XCTUnwrap(DayframeCalendarCreationPreviewMath.geometry(
+        startMinute: 600,
+        hourHeight: hourHeight
+      ))
+      XCTAssertEqual(ordinary.top, 10 * hourHeight)
+      XCTAssertEqual(ordinary.semanticHeight, 0.5 * hourHeight)
+      XCTAssertEqual(ordinary.visibleHeight, ordinary.semanticHeight)
+      XCTAssertFalse(ordinary.continuesIntoNextDay)
+    }
+
+    let midnight = try XCTUnwrap(DayframeCalendarCreationPreviewMath.geometry(
+      startMinute: 1_425,
+      hourHeight: 72
+    ))
+    XCTAssertEqual(midnight.top, 23.75 * 72)
+    XCTAssertEqual(midnight.semanticHeight, 36)
+    XCTAssertEqual(midnight.visibleHeight, 18)
+    XCTAssertTrue(midnight.continuesIntoNextDay)
+    XCTAssertEqual(
+      DayframeCalendarBlockVisualMath.metrics(
+        semanticHeight: midnight.semanticHeight,
+        continuesIntoNextDay: midnight.continuesIntoNextDay
+      ).visualGap,
+      0
+    )
+  }
+
+  func testCreationDragReducerEmitsOnlyOnceAtEndAndClearsPreview() {
+    let began = DayframeCalendarCreationDragReducer.reduce(
+      state: DayframeCalendarCreationDragState(),
+      event: .began(
+        dayKey: "2026-08-04",
+        contentY: 607.0 / 60 * 72,
+        hourHeight: 72
+      )
+    )
+    let moved = DayframeCalendarCreationDragReducer.reduce(
+      state: began.state,
+      event: .changed(contentY: 637.0 / 60 * 72, hourHeight: 72)
+    )
+    let ended = DayframeCalendarCreationDragReducer.reduce(
+      state: moved.state,
+      event: .ended
+    )
+    let endedAgain = DayframeCalendarCreationDragReducer.reduce(
+      state: ended.state,
+      event: .ended
+    )
+
+    XCTAssertNil(began.request)
+    XCTAssertNil(moved.request)
+    XCTAssertEqual(
+      ended.request,
+      DayframeCalendarCreateRequest(dayKey: "2026-08-04", startMinute: 630)
+    )
+    XCTAssertTrue(ended.shouldClearPreview)
+    XCTAssertNil(ended.state.session)
+    XCTAssertNil(endedAgain.request)
+    XCTAssertFalse(endedAgain.shouldClearPreview)
+  }
+
+  func testCreationDragReducerCancelsWithoutRequest() {
+    let began = DayframeCalendarCreationDragReducer.reduce(
+      state: DayframeCalendarCreationDragState(),
+      event: .began(
+        dayKey: "2026-08-04",
+        contentY: 607.0 / 60 * 72,
+        hourHeight: 72
+      )
+    )
+    let cancelled = DayframeCalendarCreationDragReducer.reduce(
+      state: began.state,
+      event: .cancelled
+    )
+
+    XCTAssertNil(cancelled.request)
+    XCTAssertTrue(cancelled.shouldClearPreview)
+    XCTAssertNil(cancelled.state.session)
+  }
+
+  func testEdgeAutoscrollZonesDirectionDepthAndNoScrollArea() throws {
+    XCTAssertEqual(
+      try XCTUnwrap(DayframeCalendarEdgeAutoscrollMath.velocity(
+        viewportY: 350,
+        viewportHeight: 700
+      )),
+      0
+    )
+    let shallowUp = try XCTUnwrap(DayframeCalendarEdgeAutoscrollMath.velocity(
+      viewportY: 39,
+      viewportHeight: 700
+    ))
+    let deepUp = try XCTUnwrap(DayframeCalendarEdgeAutoscrollMath.velocity(
+      viewportY: 0,
+      viewportHeight: 700
+    ))
+    let shallowDown = try XCTUnwrap(DayframeCalendarEdgeAutoscrollMath.velocity(
+      viewportY: 661,
+      viewportHeight: 700
+    ))
+    let deepDown = try XCTUnwrap(DayframeCalendarEdgeAutoscrollMath.velocity(
+      viewportY: 700,
+      viewportHeight: 700
+    ))
+
+    XCTAssertLessThan(shallowUp, 0)
+    XCTAssertLessThan(deepUp, shallowUp)
+    XCTAssertGreaterThan(shallowDown, 0)
+    XCTAssertGreaterThan(deepDown, shallowDown)
+    XCTAssertEqual(deepUp, -DayframeCalendarConstants.edgeAutoscrollMaximumSpeed)
+    XCTAssertEqual(deepDown, DayframeCalendarConstants.edgeAutoscrollMaximumSpeed)
+  }
+
+  func testEdgeAutoscrollClampsDayBoundariesAndRecalculatesSlot() throws {
+    XCTAssertEqual(
+      DayframeCalendarEdgeAutoscrollMath.nextContentOffset(
+        currentOffset: 0,
+        velocity: -420,
+        deltaTime: 1,
+        hourHeight: 72,
+        viewportHeight: 700
+      ),
+      0
+    )
+    XCTAssertEqual(
+      DayframeCalendarEdgeAutoscrollMath.nextContentOffset(
+        currentOffset: 1_028,
+        velocity: 420,
+        deltaTime: 1,
+        hourHeight: 72,
+        viewportHeight: 700
+      ),
+      1_028
+    )
+
+    let beforeY = try XCTUnwrap(DayframeCalendarEdgeAutoscrollMath.contentY(
+      viewportY: 120,
+      contentOffsetY: 600
+    ))
+    let afterOffset = try XCTUnwrap(DayframeCalendarEdgeAutoscrollMath.nextContentOffset(
+      currentOffset: 600,
+      velocity: 360,
+      deltaTime: 0.05,
+      hourHeight: 72,
+      viewportHeight: 700
+    ))
+    let afterY = try XCTUnwrap(DayframeCalendarEdgeAutoscrollMath.contentY(
+      viewportY: 120,
+      contentOffsetY: afterOffset
+    ))
+    XCTAssertEqual(
+      DayframeCalendarCreationDragMath.startMinute(
+        contentY: beforeY,
+        hourHeight: 72,
+        grabOffsetMinutes: 0
+      ),
+      600
+    )
+    XCTAssertEqual(
+      DayframeCalendarCreationDragMath.startMinute(
+        contentY: afterY,
+        hourHeight: 72,
+        grabOffsetMinutes: 0
+      ),
+      615
+    )
+  }
+
   func testSerializedModelDecodesInitialAndLaterRevisions() throws {
     let initial = try decodePresentation(
       selectedDayKey: "2026-07-19",
@@ -422,5 +910,31 @@ final class DayframeCalendarCoreTests: XCTestCase {
     let formatter = ISO8601DateFormatter()
     let date = try XCTUnwrap(formatter.date(from: value))
     return date.timeIntervalSince1970 * 1_000
+  }
+
+  private func slot(minute: Double, hourHeight: Double) -> Int? {
+    DayframeCalendarLongPressMath.slot(
+      contentY: minute / 60 * hourHeight,
+      hourHeight: hourHeight
+    )?.startMinute
+  }
+
+  private func entryGeometry(
+    semanticTop: Double,
+    semanticHeight: Double,
+    offsetFraction: Double = 0,
+    widthFraction: Double = 1,
+    overlapCount: Int
+  ) -> DayframeCalendarEntryGeometryMetrics? {
+    DayframeCalendarEntryGeometryMath.metrics(
+      availableWidth: 320,
+      hourLabelWidth: 68,
+      semanticTop: semanticTop,
+      semanticHeight: semanticHeight,
+      offsetFraction: offsetFraction,
+      widthFraction: widthFraction,
+      overlapCount: overlapCount,
+      textDensity: "full"
+    )
   }
 }

@@ -719,8 +719,8 @@ export async function createManualTimeEntry(input: ManualTimeEntryInput) {
     },
     body: JSON.stringify({
       mode: "manual",
-      categoryId: input.categoryId ?? undefined,
-      description: input.description?.trim() || undefined,
+      categoryId: input.categoryId ?? null,
+      description: input.description?.trim() || null,
       ...(input.tagNames ? { tagNames: input.tagNames } : {}),
       startedAt: input.startedAt,
       stoppedAt: input.stoppedAt
