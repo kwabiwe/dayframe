@@ -6,9 +6,9 @@ Branch: `codex/mobile-calendar-long-press-create`
 
 Base: `fea966516e5705f43dd264ec1f7b4b932e4c2578` (merged PR #157)
 
-Status: implementation and automated/local build validation complete; draft PR,
-hosted Preview, EAS preview, physical-iPhone and authenticated staging evidence
-pending
+Status: implementation, automated/local build validation, draft PR and stable
+staging promotion complete; EAS preview, physical-iPhone and authenticated staging
+evidence pending
 
 ## Scope and non-goals
 
@@ -234,25 +234,36 @@ Completed during implementation:
   bundled 2,041 modules: PASS. Computer Use then reported that the Mac was locked,
   so no screen, layout, gesture, haptic or runtime-overlay claim is made.
 
-Pending: rendered simulator matrix, draft PR/checks, exact Vercel Preview and
-stable alias, EAS preview, physical iPhone, and authenticated staging compatibility.
+Pending: rendered simulator matrix, EAS preview, physical iPhone, and authenticated
+staging compatibility.
 
 ## Hosted, device and release evidence
 
-- Draft PR: PENDING.
-- Head SHA: PENDING.
-- Ready Vercel Preview/deployment ID: PENDING.
-- Stable staging alias target: PENDING.
-- EAS `preview` build: PENDING.
+- Draft PR: [#158](https://github.com/kwabiwe/dayframe/pull/158).
+- Implementation commit: `98dd89c69c09b272d6b7dbd9d7b4baab9c0eec88`.
+- Initial Ready Vercel Preview for that commit:
+  `dpl_8XM9Van6xEb9ms1PxN7NariRP9fj` /
+  `https://dayframe-cu8a1ekde-dayframeworkshop.vercel.app`.
+- Stable staging alias: promotion PASS; `https://dayframe-staging.vercel.app`
+  resolved to that exact deployment after assignment. Root and Login returned 200;
+  unauthenticated `/api/auth/me` correctly returned 401. This evidence-only doc
+  commit creates a successor Preview, whose immutable ID and final alias promotion
+  are recorded on the PR and in the final handoff instead of recursively changing
+  the head again.
+- EAS `preview` build: BLOCKED; `npx --yes eas-cli@21.5.0 whoami` returned
+  `Not logged in`, so no build was started.
+- Paired device discovery: `KB's 17`, iPhone 17 Pro, available. Preview installation
+  was NOT RUN because there is no EAS artifact and the Mac is locked.
 - Physical iPhone matrix: NOT RUN.
 - Authenticated staging web/mobile matrix: NOT RUN.
 - Database migration: none.
 - Production/TestFlight: intentionally unchanged and NOT RUN.
 
-Before any preview installation, the handoff must state that preview and
-TestFlight share `com.layereight.dayframe`, so preview may replace the installed
-production/TestFlight app. This PR does not implement the deferred staging bundle
-identity.
+Before any preview installation, the handoff must state that preview and TestFlight
+share `com.layereight.dayframe`, so preview may replace the installed
+production/TestFlight app. That warning was surfaced before considering device
+installation; no preview installation occurred. This PR does not implement the
+deferred staging bundle identity.
 
 ## Remaining acceptance and self-review
 
