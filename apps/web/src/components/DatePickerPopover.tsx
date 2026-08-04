@@ -11,6 +11,7 @@ export function DatePickerPopover({
   ariaLabel,
   className = "",
   disabled = false,
+  iconOnly = false,
   label,
   onChange,
   onOpenChange,
@@ -24,6 +25,7 @@ export function DatePickerPopover({
   ariaLabel?: string;
   className?: string;
   disabled?: boolean;
+  iconOnly?: boolean;
   label: string;
   onChange: (date: string) => void;
   onOpenChange?: (open: boolean) => void;
@@ -79,26 +81,35 @@ export function DatePickerPopover({
       if (!trigger || !panel) return;
       const margin = 12;
       const gap = 6;
+      const viewport = window.visualViewport;
+      const viewportLeft = viewport?.offsetLeft ?? 0;
+      const viewportTop = viewport?.offsetTop ?? 0;
+      const viewportWidth = viewport?.width ?? window.innerWidth;
+      const viewportHeight = viewport?.height ?? window.innerHeight;
       const triggerRect = trigger.getBoundingClientRect();
       const panelRect = panel.getBoundingClientRect();
-      const width = Math.min(280, window.innerWidth - margin * 2);
+      const width = Math.min(280, viewportWidth - margin * 2);
       const height = panelRect.height;
       const left = Math.min(
-        Math.max(margin, triggerRect.left),
-        Math.max(margin, window.innerWidth - width - margin)
+        Math.max(viewportLeft + margin, triggerRect.left),
+        Math.max(viewportLeft + margin, viewportLeft + viewportWidth - width - margin)
       );
       const below = triggerRect.bottom + gap;
-      const top = below + height <= window.innerHeight - margin
+      const top = below + height <= viewportTop + viewportHeight - margin
         ? below
-        : Math.max(margin, triggerRect.top - height - gap);
+        : Math.max(viewportTop + margin, triggerRect.top - height - gap);
       setPortalPosition({ left, top, width });
     }
     updatePosition();
     window.addEventListener("resize", updatePosition);
     window.addEventListener("scroll", updatePosition, true);
+    window.visualViewport?.addEventListener("resize", updatePosition);
+    window.visualViewport?.addEventListener("scroll", updatePosition);
     return () => {
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
+      window.visualViewport?.removeEventListener("resize", updatePosition);
+      window.visualViewport?.removeEventListener("scroll", updatePosition);
     };
   }, [open, portal]);
 
@@ -106,7 +117,7 @@ export function DatePickerPopover({
     if (!date) return;
     onChange(date);
     updateOpen(false);
-    window.requestAnimationFrame(() => triggerRef.current?.focus());
+    triggerRef.current?.focus();
   }
 
   const panel = (
@@ -130,18 +141,19 @@ export function DatePickerPopover({
   return (
     <div className={`timeline-date-picker${className ? ` ${className}` : ""}`} ref={rootRef}>
       <button
-        aria-label={ariaLabel}
+        aria-label={ariaLabel ?? (iconOnly ? `Choose date, currently ${label}` : undefined)}
         aria-controls={panelId}
         aria-expanded={open}
         aria-haspopup="dialog"
-        className={`timeline-period-trigger${triggerClassName ? ` ${triggerClassName}` : ""}`}
+        className={`timeline-period-trigger${iconOnly ? " is-icon-only" : ""}${triggerClassName ? ` ${triggerClassName}` : ""}`}
         disabled={disabled}
         onClick={() => updateOpen(!open)}
         ref={triggerRef}
+        title={iconOnly ? (ariaLabel ?? `Choose date, currently ${label}`) : undefined}
         type="button"
       >
         <CalendarDays aria-hidden="true" size={16} />
-        <strong aria-atomic="true" aria-live="polite">{label}</strong>
+        {iconOnly ? null : <strong aria-atomic="true" aria-live="polite">{label}</strong>}
       </button>
       {portal ? (typeof document === "undefined" ? null : createPortal(panel, document.body)) : panel}
     </div>

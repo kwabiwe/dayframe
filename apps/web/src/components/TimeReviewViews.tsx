@@ -9,7 +9,6 @@ import { analyzeTimeIntervals, calendarBlockContinuationEdges } from "@dayframe/
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { CalendarEntryCompactEditor } from "@/components/CalendarEntryCompactEditor";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
-import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import { OverlapNotice } from "@/components/OverlapNotice";
 import { TagMetadata } from "@/components/TagMetadata";
 import { EntriesTable } from "@/components/EntriesTable";
@@ -404,7 +403,6 @@ export function TimeReviewViews({
             onDeleteEntries={requestTimelineDelete}
             onScroll={(event) => rememberScrollPosition("calendar", event)}
             onSynced={refreshData}
-            places={data.places}
             scrollContainerRef={registerScrollContainer}
             tags={data.tags}
             visibleDays={state.scope === "day" ? [ranges.day.start] : ranges.weekDays}
@@ -417,7 +415,6 @@ export function TimeReviewViews({
             categories={data.categories}
             displayRange={ranges.active}
             onDeleteEntries={requestTimelineDelete}
-            places={data.places}
             groupByDay
             onChanged={refreshData}
             onScroll={(event) => rememberScrollPosition("list", event)}
@@ -495,7 +492,6 @@ export function CalendarReview({
   onDeleteEntries,
   onScroll,
   onSynced,
-  places,
   scrollContainerRef,
   tags,
   visibleDays
@@ -507,7 +503,7 @@ export function CalendarReview({
   onDeleteEntries: (entries: readonly TimeEntryRow[]) => void;
   onScroll: (event: UIEvent<HTMLDivElement>) => void;
   onSynced: () => Promise<void>;
-  places: PlaceRow[];
+  places?: PlaceRow[];
   scrollContainerRef: (element: HTMLDivElement | null) => void;
   tags: BootstrapData["tags"];
   visibleDays: Date[];
@@ -521,7 +517,6 @@ export function CalendarReview({
     updateActiveEntryFromCalendar
   } = useAppShellRuntime();
   const [, startTransition] = useTransition();
-  const [editingEntry, setEditingEntry] = useState<TimeEntryRow | null>(null);
   const [selectedTarget, setSelectedTarget] = useState<CalendarEditorTarget | null>(null);
   const selectedTargetRef = useRef<CalendarEditorTarget | null>(null);
   const selectionSessionRef = useRef(0);
@@ -584,6 +579,13 @@ export function CalendarReview({
   }, []);
 
   function selectCalendarEntry(target: Omit<CalendarEntryEditorTarget, "kind" | "scopeKey" | "sessionId">) {
+    const current = selectedTargetRef.current;
+    if (
+      current?.kind === "entry" &&
+      current.scopeKey === selectionScopeKey &&
+      current.entryId === target.entryId &&
+      current.blockKey === target.blockKey
+    ) return;
     const nextTarget: CalendarEntryEditorTarget = {
       ...target,
       kind: "entry",
@@ -627,12 +629,6 @@ export function CalendarReview({
     selectedTargetRef.current = nextTarget;
     setSelectedTarget(nextTarget);
   }, []);
-
-  function editCalendarEntry(entry: TimeEntryRow) {
-    clearCalendarSelection();
-    setActionError(null);
-    setEditingEntry(entry);
-  }
 
   async function continueCalendarEntry(entry: TimeEntryRow, surface: "editor" | "inline" = "editor") {
     if (continuingEntryId || isTimerBusy || !entry.stoppedAt) {
@@ -1212,15 +1208,8 @@ export function CalendarReview({
                             focusOnOpen: event.detail === 0
                           });
                         }}
-                        onDoubleClick={(event) => {
-                          event.preventDefault();
-                          editCalendarEntry(entry);
-                        }}
                         onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            event.preventDefault();
-                            editCalendarEntry(entry);
-                          } else if (event.key === " " || event.key === "Spacebar") {
+                          if (event.key === "Enter" || event.key === " " || event.key === "Spacebar") {
                             event.preventDefault();
                             const anchor = event.currentTarget.closest<HTMLElement>("[data-calendar-block-key]");
                             if (!anchor) return;
@@ -1320,6 +1309,7 @@ export function CalendarReview({
           peerEntries={entries}
           positionKey={`${zoomLevel}:${rowHeight}:${selectedEntry.startedAt}:${selectedEntry.stoppedAt ?? "running"}`}
           scrollContainer={calendarScroller}
+          tags={tags}
         />
       ) : null}
       {visibleSelectedTarget?.kind === "create" && visibleSelectedTarget.anchor ? (
@@ -1342,6 +1332,7 @@ export function CalendarReview({
             startedAt: visibleSelectedTarget.startedAt,
             stoppedAt: visibleSelectedTarget.stoppedAt
           }}
+          tags={tags}
         />
       ) : null}
       {resizeDraft ? (
@@ -1365,21 +1356,6 @@ export function CalendarReview({
         <p className="timeline-delete-error" role="alert" aria-atomic="true" aria-live="assertive">
           {actionError}
         </p>
-      ) : null}
-      {editingEntry ? (
-        <EditTimeEntryDialog
-          categories={categories}
-          entry={editingEntry}
-          onClose={() => setEditingEntry(null)}
-          onSaved={async () => {
-            setEditingEntry(null);
-            await onSynced();
-            startTransition(() => router.refresh());
-          }}
-          peerEntries={entries}
-          places={places}
-          tags={tags}
-        />
       ) : null}
     </section>
   );

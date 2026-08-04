@@ -7,13 +7,16 @@ import {
   normalizeTagName
 } from "@dayframe/shared";
 import { Check, X } from "lucide-react";
+import { createPortal } from "react-dom";
 import {
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
+  type ReactNode,
   type RefObject
 } from "react";
 import type { TagRow } from "@/lib/queries";
@@ -23,6 +26,7 @@ import { selectVisibleTags, TAG_SELECTION_MAX_COUNT } from "@/lib/tag-display";
 export function InlineTagInput({
   ariaLabel,
   className = "",
+  closeSignal = 0,
   inputClassName = "",
   inputId,
   inputRef: externalInputRef,
@@ -35,12 +39,14 @@ export function InlineTagInput({
   onInputKeyDown,
   onSelectedTagNamesChange,
   placeholder,
+  portal = false,
   selectedTagNames,
   tags,
   value
 }: {
   ariaLabel: string;
   className?: string;
+  closeSignal?: number;
   inputClassName?: string;
   inputId?: string;
   inputRef?: RefObject<HTMLInputElement | null>;
@@ -53,6 +59,7 @@ export function InlineTagInput({
   onInputKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
   onSelectedTagNamesChange: (tagNames: string[]) => void;
   placeholder?: string;
+  portal?: boolean;
   selectedTagNames: string[];
   tags: TagRow[];
   value: string;
@@ -62,6 +69,8 @@ export function InlineTagInput({
   const localInputRef = useRef<HTMLInputElement | null>(null);
   const pickerInputRef = useRef<HTMLInputElement | null>(null);
   const pickerTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const pickerPanelRef = useRef<HTMLElement | null>(null);
+  const suggestionsPanelRef = useRef<HTMLDivElement | null>(null);
   const [focused, setFocused] = useState(false);
   const [caret, setCaret] = useState(value.length);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
@@ -69,6 +78,8 @@ export function InlineTagInput({
   const [pickerQuery, setPickerQuery] = useState("");
   const [anchorWidth, setAnchorWidth] = useState(0);
   const [tagWidths, setTagWidths] = useState<number[]>([]);
+  const [pickerPosition, setPickerPosition] = useState<CSSProperties | null>(null);
+  const [suggestionsPosition, setSuggestionsPosition] = useState<CSSProperties | null>(null);
   const active = focused && !pickerOpen ? findActiveHashtag(value, caret) : null;
   const selectedNormalized = useMemo(
     () => new Set(selectedTagNames.map((tagName) => normalizeTagName(tagName).normalizedName)),
@@ -150,9 +161,9 @@ export function InlineTagInput({
       );
     };
     measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(anchor);
-    return () => observer.disconnect();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(anchor);
+    return () => observer?.disconnect();
   }, [selectedTagNames]);
 
   useEffect(() => {
@@ -161,14 +172,31 @@ export function InlineTagInput({
 
   useEffect(() => {
     if (!pickerOpen) return undefined;
+    const frame = window.requestAnimationFrame(() => pickerInputRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [pickerOpen]);
+
+  useEffect(() => {
+    if (!closeSignal) return undefined;
+    const timeout = window.setTimeout(() => {
+      setFocused(false);
+      setPickerOpen(false);
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [closeSignal]);
+
+  useEffect(() => {
+    if (!pickerOpen) return undefined;
     function closeOnOutside(event: MouseEvent) {
-      if (!editorRef.current?.contains(event.target as Node)) setPickerOpen(false);
+      const target = event.target as Node;
+      if (!editorRef.current?.contains(target) && !pickerPanelRef.current?.contains(target)) setPickerOpen(false);
     }
     function closeOnEscape(event: globalThis.KeyboardEvent) {
       if (event.key === "Escape") {
         event.preventDefault();
+        pickerInputRef.current?.blur();
         setPickerOpen(false);
-        pickerTriggerRef.current?.focus();
+        window.setTimeout(() => pickerTriggerRef.current?.focus(), 0);
       }
     }
     document.addEventListener("mousedown", closeOnOutside);
@@ -178,6 +206,51 @@ export function InlineTagInput({
       document.removeEventListener("keydown", closeOnEscape);
     };
   }, [pickerOpen]);
+
+  useLayoutEffect(() => {
+    if (!portal || (!shouldOpen && !pickerOpen)) return undefined;
+    function updatePosition() {
+      const anchor = anchorRef.current;
+      if (!anchor) return;
+      const viewport = window.visualViewport;
+      const viewportLeft = viewport?.offsetLeft ?? 0;
+      const viewportTop = viewport?.offsetTop ?? 0;
+      const viewportWidth = viewport?.width ?? window.innerWidth;
+      const viewportHeight = viewport?.height ?? window.innerHeight;
+      const margin = 12;
+      const gap = 6;
+      const anchorRect = anchor.getBoundingClientRect();
+      const availableWidth = Math.max(0, viewportWidth - margin * 2);
+      const suggestionsWidth = Math.min(anchorRect.width, availableWidth);
+      const pickerWidth = Math.min(272, availableWidth);
+      const place = (panel: HTMLElement | null, width: number, alignRight: boolean) => {
+        const height = panel?.getBoundingClientRect().height ?? 260;
+        const preferredLeft = alignRight ? anchorRect.right - width : anchorRect.left;
+        const left = Math.min(
+          Math.max(viewportLeft + margin, preferredLeft),
+          viewportLeft + viewportWidth - width - margin
+        );
+        const below = anchorRect.bottom + gap;
+        const top = below + height <= viewportTop + viewportHeight - margin
+          ? below
+          : Math.max(viewportTop + margin, anchorRect.top - height - gap);
+        return { left, top, width } satisfies CSSProperties;
+      };
+      if (shouldOpen) setSuggestionsPosition(place(suggestionsPanelRef.current, suggestionsWidth, false));
+      if (pickerOpen) setPickerPosition(place(pickerPanelRef.current, pickerWidth, true));
+    }
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    window.visualViewport?.addEventListener("resize", updatePosition);
+    window.visualViewport?.addEventListener("scroll", updatePosition);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+      window.visualViewport?.removeEventListener("resize", updatePosition);
+      window.visualViewport?.removeEventListener("scroll", updatePosition);
+    };
+  }, [pickerOpen, portal, shouldOpen]);
 
   function updateCaret() {
     const input = localInputRef.current;
@@ -240,6 +313,10 @@ export function InlineTagInput({
     }
   }
 
+  function maybePortal(panel: ReactNode) {
+    return portal && typeof document !== "undefined" ? createPortal(panel, document.body) : panel;
+  }
+
   return (
     <div className={`inline-tag-editor ${className}`} ref={editorRef}>
       <div className="ui-compound-control inline-tag-input-anchor" ref={anchorRef}>
@@ -300,7 +377,6 @@ export function InlineTagInput({
               onClick={() => {
                 setPickerOpen(true);
                 setPickerQuery("");
-                window.requestAnimationFrame(() => pickerInputRef.current?.focus());
               }}
               type="button"
             >
@@ -324,7 +400,6 @@ export function InlineTagInput({
           onClick={() => {
             setPickerOpen((open) => {
               const next = !open;
-              if (next) window.requestAnimationFrame(() => pickerInputRef.current?.focus());
               return next;
             });
             setPickerQuery("");
@@ -334,12 +409,14 @@ export function InlineTagInput({
         >
           <TagIcon size={15} />
         </button>
-        <div
+        {maybePortal(<div
           aria-hidden={!shouldOpen}
-          className={`ui-floating-surface inline-tag-suggestions${shouldOpen ? " is-open" : ""}`}
+          className={`ui-floating-surface inline-tag-suggestions${shouldOpen ? " is-open" : ""}${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
           id={`${name}-tag-suggestions`}
           inert={!shouldOpen}
+          ref={suggestionsPanelRef}
           role="listbox"
+          style={portal ? { ...suggestionsPosition, visibility: suggestionsPosition ? "visible" : "hidden" } : undefined}
         >
           <span className="inline-tag-suggestions-title">TAGS</span>
           <div>
@@ -361,21 +438,24 @@ export function InlineTagInput({
             ))}
             {actions.length === 0 ? <span className="inline-tag-empty">Type a name to search or create</span> : null}
           </div>
-        </div>
-        <section
+        </div>)}
+        {maybePortal(<section
           aria-hidden={!pickerOpen}
           aria-label="Add or filter tags"
-          className={`ui-floating-surface inline-tag-picker${pickerOpen ? " is-open" : ""}`}
+          className={`ui-floating-surface inline-tag-picker${pickerOpen ? " is-open" : ""}${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
           inert={!pickerOpen}
+          ref={pickerPanelRef}
           role="dialog"
+          style={portal ? { ...pickerPosition, visibility: pickerPosition ? "visible" : "hidden" } : undefined}
         >
             <div className="inline-tag-picker-header">
               <strong>Tags</strong>
               <button
                 aria-label="Close tag picker"
                 onClick={() => {
+                  pickerInputRef.current?.blur();
                   setPickerOpen(false);
-                  pickerTriggerRef.current?.focus();
+                  window.setTimeout(() => pickerTriggerRef.current?.focus(), 0);
                 }}
                 type="button"
               >
@@ -428,7 +508,7 @@ export function InlineTagInput({
                 + Create “{pickerCreateName}”
               </button>
             ) : null}
-        </section>
+        </section>)}
       </div>
       <span className="sr-only" id={`${name}-tag-help`}>
         {selectedTagNames.length

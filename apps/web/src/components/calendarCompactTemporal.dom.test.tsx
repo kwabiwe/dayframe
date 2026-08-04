@@ -51,10 +51,10 @@ describe("Calendar compact temporal DOM", () => {
   it("always renders both dates and supports keyboard selection in the shared picker", async () => {
     const user = userEvent.setup();
     renderCompletedEditor();
-    const startDate = await screen.findByRole("button", { name: "Choose Start date" });
-    const finishDate = screen.getByRole("button", { name: "Choose Finish date" });
-    expect(startDate.textContent).toContain("02 Aug 2026");
-    expect(finishDate.textContent).toContain("02 Aug 2026");
+    const startDate = await screen.findByRole("button", { name: /Choose Start date, currently 2 August 2026/ });
+    const finishDate = screen.getByRole("button", { name: /Choose Finish date, currently 2 August 2026/ });
+    expect(startDate.textContent).toBe("");
+    expect(finishDate.textContent).toBe("");
 
     finishDate.focus();
     await user.keyboard("{Enter}");
@@ -63,7 +63,8 @@ describe("Calendar compact temporal DOM", () => {
     nextDay.focus();
     await user.keyboard("{Enter}");
 
-    await waitFor(() => expect(finishDate.textContent).toContain("03 Aug 2026"));
+    await waitFor(() => expect(finishDate.getAttribute("aria-label")).toContain("3 August 2026"));
+    expect(screen.getByText("+1").getAttribute("title")).toBe("Finish time, one day after Start");
     expect((screen.getByLabelText("Duration") as HTMLInputElement).value).toBe("24:30:00");
     expect(document.activeElement).toBe(finishDate);
   });
@@ -121,7 +122,7 @@ describe("Calendar compact temporal DOM", () => {
     await act(async () => vi.advanceTimersByTime(0));
     expect(screen.getByText("Running")).not.toBeNull();
     expect(screen.queryByLabelText("Finish time")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Choose Finish date" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Choose Finish date/ })).toBeNull();
     expect(screen.queryByLabelText("Duration")).toBeNull();
     expect(screen.getByLabelText("Elapsed time").textContent).toContain("00:30:00");
 
@@ -138,7 +139,7 @@ describe("Calendar compact temporal DOM", () => {
 
     view.rerenderEntry(entry("2026-08-02T10:00", "2026-08-02T10:30"));
     await act(async () => Promise.resolve());
-    expect(screen.getByRole("button", { name: "Choose Finish date" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: /Choose Finish date/ })).not.toBeNull();
     expect(screen.getByLabelText("Finish time")).not.toBeNull();
     expect(screen.getByLabelText("Duration")).not.toBeNull();
   });

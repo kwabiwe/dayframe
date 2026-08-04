@@ -7,6 +7,7 @@ export type CalendarEntryCompactTemporalOwner = "source" | "start" | "finish" | 
 export type CalendarEntryCompactDraft = {
   categoryId: string;
   description: string;
+  tagNames: string[];
   startedAtDate: string;
   startedAtTime: string;
   stoppedAtDate: string;
@@ -21,6 +22,7 @@ export type CalendarEntryCompactDirty = Record<CalendarEntryCompactEditableKey, 
 export type CalendarEntryCompactPatch = {
   categoryId?: string | null;
   description?: string | null;
+  tagNames?: string[];
   startedAt?: string;
   stoppedAt?: string;
 };
@@ -31,6 +33,7 @@ export type CalendarEntryCompactSavePlan = {
   resolved: {
     categoryId: string | null;
     description: string | null;
+    tagNames: string[];
     startedAt: string;
     stoppedAt: string | null;
   };
@@ -46,13 +49,14 @@ export type CalendarEntryCompactCreatePlan = {
   input: {
     categoryId?: string;
     description?: string;
-    tagNames: [];
+    tagNames: string[];
     startedAt: string;
     stoppedAt: string;
   };
   resolved: {
     categoryId: string | null;
     description: string | null;
+    tagNames: string[];
     startedAt: string;
     stoppedAt: string;
   };
@@ -78,6 +82,7 @@ export type CalendarEditorPosition = {
 export const emptyCalendarEntryCompactDirty: CalendarEntryCompactDirty = {
   categoryId: false,
   description: false,
+  tagNames: false,
   startedAtDate: false,
   startedAtTime: false,
   stoppedAtDate: false,
@@ -89,6 +94,7 @@ export function calendarEntryCompactInitialDraft(entry: TimeEntryRow): CalendarE
   return initialDraft({
     categoryId: entry.categoryId ?? "",
     description: entry.description ?? "",
+    tagNames: entry.tagNames,
     durationSeconds: entry.stoppedAt
       ? elapsedSeconds(entry.startedAt, entry.stoppedAt)
       : Math.max(0, entry.durationSeconds),
@@ -103,6 +109,7 @@ export function calendarEntryCompactCreateInitialDraft(
   return initialDraft({
     categoryId: "",
     description: "",
+    tagNames: [],
     durationSeconds: elapsedSeconds(source.startedAt, source.stoppedAt),
     startedAt: source.startedAt,
     stoppedAt: source.stoppedAt
@@ -113,7 +120,8 @@ export function calendarEntryCompactDraftHasChanges(
   entry: TimeEntryRow,
   draft: CalendarEntryCompactDraft
 ) {
-  return editableDraftHasChanges(calendarEntryCompactInitialDraft(entry), draft);
+  const initial = calendarEntryCompactInitialDraft(entry);
+  return editableDraftHasChanges(initial, entry.stoppedAt ? draft : { ...draft, duration: initial.duration });
 }
 
 export function calendarEntryCompactCreateDraftHasChanges(
@@ -169,6 +177,7 @@ export function synchronizeCalendarEntryCompactDraft({
   const initial = initialDraft({
     categoryId: draft.categoryId,
     description: draft.description,
+    tagNames: draft.tagNames,
     durationSeconds: originalStoppedAt ? elapsedSeconds(originalStartedAt, originalStoppedAt) : 0,
     startedAt: originalStartedAt,
     stoppedAt: originalStoppedAt
@@ -226,6 +235,7 @@ export function buildCalendarEntryCompactSavePlan({
 }): CalendarEntryCompactSavePlan {
   const description = draft.description.trim() || null;
   const categoryId = draft.categoryId || null;
+  const tagNames = [...draft.tagNames];
   const window = resolveDraftWindow({
     draft,
     originalStartedAt: entry.startedAt,
@@ -236,6 +246,7 @@ export function buildCalendarEntryCompactSavePlan({
   const payload: CalendarEntryCompactPatch = {};
   if (dirty.description && description !== entry.description) payload.description = description;
   if (dirty.categoryId && categoryId !== entry.categoryId) payload.categoryId = categoryId;
+  if (dirty.tagNames && !sameTagNames(tagNames, entry.tagNames)) payload.tagNames = tagNames;
   if (window.startedAt !== entry.startedAt) payload.startedAt = window.startedAt;
   if (window.stoppedAt && window.stoppedAt !== entry.stoppedAt) payload.stoppedAt = window.stoppedAt;
 
@@ -244,7 +255,7 @@ export function buildCalendarEntryCompactSavePlan({
       ? elapsedSeconds(window.startedAt, window.stoppedAt)
       : Math.max(0, Math.floor((now.getTime() - new Date(window.startedAt).getTime()) / 1_000)),
     payload,
-    resolved: { categoryId, description, ...window }
+    resolved: { categoryId, description, tagNames, ...window }
   };
 }
 
@@ -259,6 +270,7 @@ export function buildCalendarEntryCompactCreatePlan({
 }): CalendarEntryCompactCreatePlan {
   const description = draft.description.trim() || null;
   const categoryId = draft.categoryId || null;
+  const tagNames = [...draft.tagNames];
   const window = resolveDraftWindow({
     draft,
     originalStartedAt: source.startedAt,
@@ -272,23 +284,25 @@ export function buildCalendarEntryCompactCreatePlan({
     input: {
       ...(categoryId ? { categoryId } : {}),
       ...(description ? { description } : {}),
-      tagNames: [],
+      tagNames,
       startedAt: window.startedAt,
       stoppedAt
     },
-    resolved: { categoryId, description, startedAt: window.startedAt, stoppedAt }
+    resolved: { categoryId, description, tagNames, startedAt: window.startedAt, stoppedAt }
   };
 }
 
 function initialDraft({
   categoryId,
   description,
+  tagNames,
   durationSeconds,
   startedAt,
   stoppedAt
 }: {
   categoryId: string;
   description: string;
+  tagNames: string[];
   durationSeconds: number;
   startedAt: string;
   stoppedAt: string | null;
@@ -298,6 +312,7 @@ function initialDraft({
   return {
     categoryId,
     description,
+    tagNames: [...tagNames],
     startedAtDate: start.date,
     startedAtTime: start.time,
     stoppedAtDate: finish.date,
@@ -309,7 +324,9 @@ function initialDraft({
 
 function editableDraftHasChanges(initial: CalendarEntryCompactDraft, draft: CalendarEntryCompactDraft) {
   return (Object.keys(emptyCalendarEntryCompactDirty) as CalendarEntryCompactEditableKey[])
-    .some((key) => draft[key] !== initial[key]);
+    .some((key) => key === "tagNames"
+      ? !sameTagNames(draft.tagNames, initial.tagNames)
+      : draft[key] !== initial[key]);
 }
 
 function resolveDraftWindow({
@@ -324,6 +341,7 @@ function resolveDraftWindow({
   const initial = initialDraft({
     categoryId: draft.categoryId,
     description: draft.description,
+    tagNames: draft.tagNames,
     durationSeconds: originalStoppedAt ? elapsedSeconds(originalStartedAt, originalStoppedAt) : 0,
     startedAt: originalStartedAt,
     stoppedAt: originalStoppedAt
@@ -541,7 +559,14 @@ export function calendarEditorRectIsVisible(
 }
 
 export function calendarEditorOwnsPayloadKey(key: string) {
-  return key === "description" || key === "categoryId" || key === "startedAt" || key === "stoppedAt";
+  return key === "description" || key === "categoryId" || key === "tagNames" || key === "startedAt" || key === "stoppedAt";
+}
+
+export function calendarEntryLocalDayOffset(startDate: string, finishDate: string) {
+  const start = parseLocalDateKey(startDate);
+  const finish = parseLocalDateKey(finishDate);
+  if (!start || !finish) return 0;
+  return Math.round((finish - start) / 86_400_000);
 }
 
 function rectsIntersect(
@@ -553,4 +578,21 @@ function rectsIntersect(
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(Math.max(value, minimum), maximum);
+}
+
+function sameTagNames(left: readonly string[], right: readonly string[]) {
+  return left.length === right.length && left.every((name, index) => name === right[index]);
+}
+
+function parseLocalDateKey(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const [, year, month, day] = match;
+  const parsed = Date.UTC(Number(year), Number(month) - 1, Number(day));
+  const check = new Date(parsed);
+  return check.getUTCFullYear() === Number(year) &&
+    check.getUTCMonth() === Number(month) - 1 &&
+    check.getUTCDate() === Number(day)
+    ? parsed
+    : null;
 }

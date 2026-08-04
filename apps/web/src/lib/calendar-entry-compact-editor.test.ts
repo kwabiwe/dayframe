@@ -11,6 +11,7 @@ import {
   calendarEntryCompactCreateInitialDraft,
   calendarEntryCompactDraftHasChanges,
   calendarEntryCompactInitialDraft,
+  calendarEntryLocalDayOffset,
   emptyCalendarEntryCompactDirty,
   normalizeCalendarEntryCompactDuration,
   synchronizeCalendarEntryCompactDraft,
@@ -26,6 +27,7 @@ describe("Calendar compact editor temporal model", () => {
     expect(calendarEntryCompactInitialDraft(completed)).toEqual({
       categoryId: "focus",
       description: "Deep work",
+      tagNames: [],
       startedAtDate: "2026-01-03",
       startedAtTime: "08:13",
       stoppedAtDate: "2026-01-03",
@@ -168,6 +170,15 @@ describe("Calendar compact editor temporal model", () => {
     expect(edited.payload).not.toHaveProperty("stoppedAt");
   });
 
+  it("does not treat a live running-duration refresh as an unsaved edit", () => {
+    const opened = timeEntry({ durationSeconds: 3_997, stoppedAt: null });
+    const refreshed = timeEntry({ durationSeconds: 4_012, stoppedAt: null });
+    const draft = calendarEntryCompactInitialDraft(opened);
+
+    expect(calendarEntryCompactDraftHasChanges(refreshed, draft)).toBe(false);
+    expect(calendarEntryCompactDraftHasChanges(refreshed, { ...draft, description: "Updated" })).toBe(true);
+  });
+
   it("rejects future Start and Finish after synchronization", () => {
     const source = timeEntry();
     const now = new Date(2026, 0, 3, 10);
@@ -183,16 +194,59 @@ describe("Calendar compact editor temporal model", () => {
     }, now)).toThrow("Finish time cannot be in the future.");
   });
 
-  it("emits only compact-editor-owned category and description fields", () => {
+  it("emits only quick-editor-owned fields and never clears hidden Place metadata", () => {
     const source = timeEntry({ placeId: "office", projectId: "legacy", tagNames: ["private"] });
-    const plan = savePlan(source, {
-      ...calendarEntryCompactInitialDraft(source),
-      categoryId: "",
-      description: "   "
-    }, new Date(2026, 0, 3, 12), dirty({ categoryId: true, description: true }));
+    const cases = [
+      savePlan(source, {
+        ...calendarEntryCompactInitialDraft(source),
+        description: "Updated"
+      }, new Date(2026, 0, 3, 12), dirty({ description: true })),
+      savePlan(source, {
+        ...calendarEntryCompactInitialDraft(source),
+        tagNames: ["private", "planning"]
+      }, new Date(2026, 0, 3, 12), dirty({ tagNames: true })),
+      savePlan(source, {
+        ...calendarEntryCompactInitialDraft(source),
+        categoryId: ""
+      }, new Date(2026, 0, 3, 12), dirty({ categoryId: true })),
+      savePlan(source, {
+        ...calendarEntryCompactInitialDraft(source),
+        startedAtTime: "08:00",
+        temporalOwner: "start"
+      }),
+      savePlan(source, {
+        ...calendarEntryCompactInitialDraft(source),
+        duration: "02:00:00",
+        temporalOwner: "duration"
+      })
+    ];
 
-    expect(plan.payload).toEqual({ categoryId: null, description: null });
-    expect(Object.keys(plan.payload).every(calendarEditorOwnsPayloadKey)).toBe(true);
+    expect(cases[0].payload).toEqual({ description: "Updated" });
+    expect(cases[1].payload).toEqual({ tagNames: ["private", "planning"] });
+    expect(cases[2].payload).toEqual({ categoryId: null });
+    for (const plan of cases) {
+      expect(plan.payload).not.toHaveProperty("placeId");
+      expect(Object.keys(plan.payload).every(calendarEditorOwnsPayloadKey)).toBe(true);
+    }
+  });
+
+  it("hydrates tags, detects tag dirtiness, and emits one tag-only PATCH", () => {
+    const source = timeEntry({ tagNames: ["planning"] });
+    const initial = calendarEntryCompactInitialDraft(source);
+    const draft = { ...initial, tagNames: ["planning", "deep work"] };
+
+    expect(initial.tagNames).toEqual(["planning"]);
+    expect(calendarEntryCompactDraftHasChanges(source, initial)).toBe(false);
+    expect(calendarEntryCompactDraftHasChanges(source, draft)).toBe(true);
+    expect(savePlan(source, draft, undefined, dirty({ tagNames: true })).payload).toEqual({
+      tagNames: ["planning", "deep work"]
+    });
+  });
+
+  it("calculates same-day, next-day and multi-day local offsets without DST arithmetic", () => {
+    expect(calendarEntryLocalDayOffset("2026-03-28", "2026-03-28")).toBe(0);
+    expect(calendarEntryLocalDayOffset("2026-03-28", "2026-03-29")).toBe(1);
+    expect(calendarEntryLocalDayOffset("2026-03-28", "2026-04-02")).toBe(5);
   });
 });
 
@@ -222,6 +276,7 @@ describe("Calendar compact editor create plan", () => {
         ...calendarEntryCompactCreateInitialDraft(source),
         categoryId: "focus",
         description: "  Plan release  ",
+        tagNames: ["planning"],
         duration: "1:30:00"
       },
       originalStartedAt: source.startedAt,
@@ -234,7 +289,7 @@ describe("Calendar compact editor create plan", () => {
     expect(plan.input).toEqual({
       categoryId: "focus",
       description: "Plan release",
-      tagNames: [],
+      tagNames: ["planning"],
       startedAt: source.startedAt,
       stoppedAt: localIso("2026-01-03T11:30")
     });

@@ -288,7 +288,17 @@ export function applyOptimisticActiveEntryCompactPatch(
     description: plan.resolved.description,
     startedAt: plan.resolved.startedAt,
     stoppedAt: plan.resolved.stoppedAt,
-    durationSeconds: plan.durationSeconds
+    durationSeconds: plan.durationSeconds,
+    tagNames: [...plan.resolved.tagNames],
+    tags: plan.resolved.tagNames.map((name) => {
+      const normalizedName = normalizeTagName(name).normalizedName;
+      const existing = data.tags.find((tag) => tag.normalizedName === normalizedName);
+      return {
+        id: existing?.id ?? `optimistic-tag:${normalizedName}`,
+        name: existing?.name ?? name,
+        normalizedName
+      };
+    })
   };
   return replaceEntryCollections({ ...data, activeEntry: entry }, entry);
 }
@@ -323,7 +333,7 @@ export async function runActiveEntryCompactMutation({
   const nextDraft: TimerDraft = {
     categoryId: input.plan.resolved.categoryId ?? "",
     description: input.plan.resolved.description ?? "",
-    tagNames: [...activeEntry.tagNames]
+    tagNames: [...input.plan.resolved.tagNames]
   };
   const result = await gate.run(async () => {
     setBusy(true);

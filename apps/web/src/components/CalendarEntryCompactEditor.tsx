@@ -1,35 +1,22 @@
 "use client";
 
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronDown, Play, Trash2, X } from "lucide-react";
-import { DatePickerPopover } from "@/components/DatePickerPopover";
-import { OverlapNotice } from "@/components/OverlapNotice";
 import {
-  buildCalendarEntryCompactCreatePlan,
-  buildCalendarEntryCompactSavePlan,
+  TimeEntryQuickEditorPanel,
+  useTimeEntryQuickEditor,
+  type TimeEntryQuickEditorProps
+} from "@/components/TimeEntryQuickEditor";
+import {
   calculateCalendarEditorPosition,
   calendarEditorRectIsVisible,
-  calendarEntryCompactCreateDraftHasChanges,
-  calendarEntryCompactCreateInitialDraft,
-  calendarEntryCompactDraftHasChanges,
-  calendarEntryCompactInitialDraft,
-  emptyCalendarEntryCompactDirty,
-  formatCalendarEntryCompactDuration,
-  synchronizeCalendarEntryCompactDraft,
   type CalendarEditorPosition,
   type CalendarEntryCompactCreatePlan,
   type CalendarEntryCompactCreateSource,
-  type CalendarEntryCompactDirty,
-  type CalendarEntryCompactDraft,
-  type CalendarEntryCompactEditableKey,
   type CalendarEntryCompactSavePlan
 } from "@/lib/calendar-entry-compact-editor";
-import { maskTimeInput } from "@/lib/calendar-grid";
-import { dateTimeLocal } from "@/lib/format";
-import { overlapNoticeForCandidate } from "@/lib/overlap-notice";
-import type { CategoryRow, TimeEntryRow } from "@/lib/queries";
+import type { CategoryRow, TagRow, TimeEntryRow } from "@/lib/queries";
 
 type MutationOutcome = { ok: true } | { ok: false; error: string };
 
@@ -44,6 +31,7 @@ type CalendarEntryCompactEditorSharedProps = {
   peerEntries: TimeEntryRow[];
   positionKey: string;
   scrollContainer: HTMLElement | null;
+  tags?: TagRow[];
 };
 
 type CalendarEntryCompactEditorProps = CalendarEntryCompactEditorSharedProps & (
@@ -65,250 +53,29 @@ type CalendarEntryCompactEditorProps = CalendarEntryCompactEditorSharedProps & (
 export function CalendarEntryCompactEditor(props: CalendarEntryCompactEditorProps) {
   const {
     anchor,
-    capturedNow,
-    categories,
     focusOnOpen,
-    isTimerBusy,
-    onDismiss,
     onOutsidePointerDown,
-    peerEntries,
     positionKey,
     scrollContainer
   } = props;
-  const entry = props.mode === "entry" ? props.entry : null;
-  const createSource = props.mode === "create" ? props.source : null;
-  const onCreateDraftChange = props.mode === "create" ? props.onDraftChange : null;
-  const [draft, setDraft] = useState<CalendarEntryCompactDraft>(() => (
-    props.mode === "entry"
-      ? calendarEntryCompactInitialDraft(props.entry)
-      : calendarEntryCompactCreateInitialDraft(props.source)
-  ));
-  const [dirty, setDirty] = useState<CalendarEntryCompactDirty>(emptyCalendarEntryCompactDirty);
-  const [error, setError] = useState<string | null>(null);
-  const [isCategoryOpen, setIsCategoryOpen] = useState(false);
-  const [openDatePicker, setOpenDatePicker] = useState<"start" | "finish" | null>(null);
-  const [categoryIndex, setCategoryIndex] = useState(0);
-  const [isBusy, setIsBusy] = useState(false);
-  const [discardPrompt, setDiscardPrompt] = useState(false);
-  const [isEntered, setIsEntered] = useState(false);
-  const [isExiting, setIsExiting] = useState(false);
-  const [now, setNow] = useState(capturedNow);
-  const [position, setPosition] = useState<CalendarEditorPosition | null>(null);
-  const panelRef = useRef<HTMLDivElement | null>(null);
-  const descriptionRef = useRef<HTMLInputElement | null>(null);
-  const categoryButtonRef = useRef<HTMLButtonElement | null>(null);
-  const discardBackRef = useRef<HTMLButtonElement | null>(null);
-  const discardFocusRestorePendingRef = useRef(false);
-  const discardPromptRef = useRef(false);
-  const discardReturnFocusRef = useRef<HTMLElement | null>(null);
-  const busyRef = useRef(false);
+  const editorProps = { ...props, tags: props.tags ?? [] } as TimeEntryQuickEditorProps;
+  const controller = useTimeEntryQuickEditor(editorProps);
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const attemptDismissRef = useRef(controller.attemptDismiss);
   const anchorVisibilityDismissRequestedRef = useRef(false);
-  const closeTokenRef = useRef(0);
-  const exitTimeoutRef = useRef<number | null>(null);
-  const onDraftChangeRef = useRef(onCreateDraftChange);
-  const previousStoppedAtRef = useRef(entry?.stoppedAt ?? null);
-  const selectedCategory = categories.find((category) => category.id === draft.categoryId) ?? null;
-  const categoryOptions = useMemo(() => [null, ...categories] as Array<CategoryRow | null>, [categories]);
-  const preview = useMemo(() => {
-    try {
-      return {
-        error: null,
-        plan: entry
-          ? buildCalendarEntryCompactSavePlan({ draft, dirty, entry, now })
-          : buildCalendarEntryCompactCreatePlan({
-              draft,
-              now,
-              source: createSource as CalendarEntryCompactCreateSource
-            })
-      };
-    } catch (previewError) {
-      return {
-        error: previewError instanceof Error ? previewError.message : "Check the time values.",
-        plan: null
-      };
-    }
-  }, [createSource, dirty, draft, entry, now]);
-  const hasUnsavedChanges = useMemo(
-    () => entry
-      ? calendarEntryCompactDraftHasChanges(entry, draft)
-      : calendarEntryCompactCreateDraftHasChanges(createSource as CalendarEntryCompactCreateSource, draft),
-    [createSource, draft, entry]
-  );
-  const controlsDisabled = isBusy || discardPrompt;
-  const mutationBlockedByTimer = props.mode === "create" || !entry?.stoppedAt;
-  const saveBlockedByTimer = mutationBlockedByTimer && isTimerBusy;
-
-  const updateField = useCallback(<Key extends CalendarEntryCompactEditableKey,>(
-    key: Key,
-    value: CalendarEntryCompactDraft[Key]
-  ) => {
-    setDraft((current) => ({ ...current, [key]: value }));
-    setDirty((current) => ({ ...current, [key]: true }));
-    setError(null);
-  }, []);
-
-  const temporalSource = useMemo(() => ({
-    originalStartedAt: entry?.startedAt ?? (createSource as CalendarEntryCompactCreateSource).startedAt,
-    originalStoppedAt: entry?.stoppedAt ?? createSource?.stoppedAt ?? null
-  }), [createSource, entry]);
-
-  const updateTemporalField = useCallback((
-    key: "startedAtDate" | "startedAtTime" | "stoppedAtDate" | "stoppedAtTime" | "duration",
-    value: string,
-    owner: "start" | "finish" | "duration",
-    commit = false
-  ) => {
-    setDraft((current) => {
-      const next = { ...current, [key]: value, temporalOwner: owner };
-      if (!commit) return next;
-      try {
-        return synchronizeCalendarEntryCompactDraft({ ...temporalSource, draft: next, owner });
-      } catch {
-        return next;
-      }
-    });
-    setDirty((current) => ({ ...current, [key]: true }));
-    setError(null);
-  }, [temporalSource]);
-
-  const commitTemporalField = useCallback((owner: "start" | "finish" | "duration") => {
-    setDraft((current) => {
-      if (current.temporalOwner !== owner) return current;
-      try {
-        return synchronizeCalendarEntryCompactDraft({ ...temporalSource, draft: current, owner });
-      } catch {
-        return { ...current, temporalOwner: owner };
-      }
-    });
-    setError(null);
-  }, [temporalSource]);
-
-  const finishDismiss = useCallback((restoreFocus: boolean) => {
-    if (exitTimeoutRef.current !== null) {
-      window.clearTimeout(exitTimeoutRef.current);
-      exitTimeoutRef.current = null;
-    }
-    closeTokenRef.current += 1;
-    onDismiss({ restoreFocus });
-  }, [onDismiss]);
-
-  const requestDismiss = useCallback((restoreFocus: boolean) => {
-    if (busyRef.current) return;
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduceMotion) {
-      finishDismiss(restoreFocus);
-      return;
-    }
-    const token = ++closeTokenRef.current;
-    setIsExiting(true);
-    if (exitTimeoutRef.current !== null) window.clearTimeout(exitTimeoutRef.current);
-    exitTimeoutRef.current = window.setTimeout(() => {
-      exitTimeoutRef.current = null;
-      if (closeTokenRef.current === token) onDismiss({ restoreFocus });
-    }, 90);
-  }, [finishDismiss, onDismiss]);
-
-  const showDiscardPrompt = useCallback(() => {
-    if (discardPromptRef.current) return;
-    const panel = panelRef.current;
-    const activeElement = document.activeElement;
-    discardReturnFocusRef.current = panel && activeElement instanceof HTMLElement && panel.contains(activeElement)
-      ? activeElement
-      : descriptionRef.current;
-    discardPromptRef.current = true;
-    setIsCategoryOpen(false);
-    setOpenDatePicker(null);
-    setDiscardPrompt(true);
-    window.requestAnimationFrame(() => discardBackRef.current?.focus());
-  }, []);
-
-  const cancelDiscardPrompt = useCallback(() => {
-    discardPromptRef.current = false;
-    discardFocusRestorePendingRef.current = true;
-    setDiscardPrompt(false);
-    window.requestAnimationFrame(() => {
-      const returnTarget = discardReturnFocusRef.current;
-      if (returnTarget?.isConnected) returnTarget.focus({ preventScroll: true });
-    });
-  }, []);
-
-  const confirmDiscard = useCallback(() => {
-    discardPromptRef.current = false;
-    setDiscardPrompt(false);
-    requestDismiss(false);
-  }, [requestDismiss]);
-
-  const attemptDismiss = useCallback((restoreFocus: boolean) => {
-    if (busyRef.current) return;
-    if (hasUnsavedChanges) {
-      showDiscardPrompt();
-      return;
-    }
-    requestDismiss(restoreFocus);
-  }, [hasUnsavedChanges, requestDismiss, showDiscardPrompt]);
-
-  useEffect(() => () => {
-    closeTokenRef.current += 1;
-    discardPromptRef.current = false;
-    if (exitTimeoutRef.current !== null) window.clearTimeout(exitTimeoutRef.current);
-  }, []);
-
-  useEffect(() => {
-    onDraftChangeRef.current = onCreateDraftChange;
-  }, [onCreateDraftChange]);
-
-  useEffect(() => {
-    const previousStoppedAt = previousStoppedAtRef.current;
-    const nextStoppedAt = entry?.stoppedAt ?? null;
-    previousStoppedAtRef.current = nextStoppedAt;
-    if (!entry || previousStoppedAt || !nextStoppedAt) return;
-    const stoppedDraft = calendarEntryCompactInitialDraft(entry);
-    setDraft((current) => {
-      const merged = {
-        ...current,
-        stoppedAtDate: stoppedDraft.stoppedAtDate,
-        stoppedAtTime: stoppedDraft.stoppedAtTime,
-        duration: stoppedDraft.duration,
-        temporalOwner: "source" as const
-      };
-      const startWasEdited = current.startedAtDate !== stoppedDraft.startedAtDate ||
-        current.startedAtTime !== stoppedDraft.startedAtTime;
-      if (!startWasEdited) return merged;
-      try {
-        return synchronizeCalendarEntryCompactDraft({
-          draft: { ...merged, temporalOwner: "finish" },
-          originalStartedAt: entry.startedAt,
-          originalStoppedAt: nextStoppedAt,
-          owner: "finish"
-        });
-      } catch {
-        return { ...merged, temporalOwner: "finish" };
-      }
-    });
-  }, [entry]);
-
-  useEffect(() => {
-    if (!createSource) return;
-    onDraftChangeRef.current?.(preview.plan as CalendarEntryCompactCreatePlan | null);
-  }, [
-    createSource,
-    preview.plan
-  ]);
+  const [position, setPosition] = useState<CalendarEditorPosition | null>(null);
 
   useLayoutEffect(() => {
-    if (discardPrompt || !discardFocusRestorePendingRef.current) return;
-    discardFocusRestorePendingRef.current = false;
-    const returnTarget = discardReturnFocusRef.current;
-    if (returnTarget?.isConnected) returnTarget.focus({ preventScroll: true });
-  }, [discardPrompt]);
+    attemptDismissRef.current = controller.attemptDismiss;
+  }, [controller.attemptDismiss]);
 
   const updatePosition = useCallback(() => {
-    const panel = panelRef.current;
-    if (!panel) return;
+    const surface = surfaceRef.current;
+    if (!surface) return;
     if (!anchor.isConnected) {
       if (!anchorVisibilityDismissRequestedRef.current) {
         anchorVisibilityDismissRequestedRef.current = true;
-        attemptDismiss(false);
+        attemptDismissRef.current(false);
       }
       return;
     }
@@ -328,12 +95,12 @@ export function CalendarEntryCompactEditor(props: CalendarEntryCompactEditorProp
     if (!calendarEditorRectIsVisible(anchorRect, viewportRect, scrollerRect)) {
       if (!anchorVisibilityDismissRequestedRef.current) {
         anchorVisibilityDismissRequestedRef.current = true;
-        attemptDismiss(false);
+        attemptDismissRef.current(false);
       }
       return;
     }
     anchorVisibilityDismissRequestedRef.current = false;
-    const panelRect = panel.getBoundingClientRect();
+    const panelRect = surface.getBoundingClientRect();
     const next = calculateCalendarEditorPosition({
       anchor: {
         bottom: anchorRect.bottom - viewportTop,
@@ -349,26 +116,21 @@ export function CalendarEntryCompactEditor(props: CalendarEntryCompactEditorProp
       viewportWidth
     });
     setPosition({ ...next, left: next.left + viewportLeft, top: next.top + viewportTop });
-  }, [anchor, attemptDismiss, scrollContainer]);
+  }, [anchor, scrollContainer]);
 
   useLayoutEffect(() => {
     updatePosition();
-    const panel = panelRef.current;
+    const surface = surfaceRef.current;
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updatePosition);
-    const mutationObserver = typeof MutationObserver === "undefined"
-      ? null
-      : new MutationObserver(updatePosition);
     observer?.observe(anchor);
-    if (panel) observer?.observe(panel);
+    if (surface) observer?.observe(surface);
     if (scrollContainer) observer?.observe(scrollContainer);
-    mutationObserver?.observe(document.body, { childList: true, subtree: true });
     window.addEventListener("resize", updatePosition);
     window.addEventListener("scroll", updatePosition, true);
     window.visualViewport?.addEventListener("resize", updatePosition);
     window.visualViewport?.addEventListener("scroll", updatePosition);
     return () => {
       observer?.disconnect();
-      mutationObserver?.disconnect();
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
       window.visualViewport?.removeEventListener("resize", updatePosition);
@@ -377,252 +139,69 @@ export function CalendarEntryCompactEditor(props: CalendarEntryCompactEditorProp
   }, [anchor, positionKey, scrollContainer, updatePosition]);
 
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => setIsEntered(true));
-    return () => window.cancelAnimationFrame(frame);
-  }, []);
-
-  useEffect(() => {
     if (!focusOnOpen) return;
-    const frame = window.requestAnimationFrame(() => descriptionRef.current?.focus());
+    const frame = window.requestAnimationFrame(() => controller.descriptionRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
-  }, [focusOnOpen]);
-
-  useEffect(() => {
-    if (!createSource && (!entry || entry.stoppedAt)) return undefined;
-    const interval = window.setInterval(() => setNow(new Date()), 1_000);
-    return () => window.clearInterval(interval);
-  }, [createSource, entry]);
+  }, [controller.descriptionRef, focusOnOpen]);
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
-      const panel = panelRef.current;
-      if (!panel) return;
+      const surface = surfaceRef.current;
+      if (!surface) return;
       const path = event.composedPath();
       if (
-        path.includes(panel) ||
-        path.some((target) => target instanceof HTMLElement && target.classList.contains("calendar-compact-date-picker-panel"))
+        path.includes(surface) ||
+        path.some((target) => target instanceof HTMLElement && target.classList.contains("time-entry-quick-editor-nested-surface"))
       ) return;
       const pointerIsOnAnchor = path.includes(anchor);
       if (!pointerIsOnAnchor) {
-        onOutsidePointerDown?.({
-          pointerId: event.pointerId,
-          pointerDownTimeStamp: event.timeStamp
-        });
+        onOutsidePointerDown?.({ pointerId: event.pointerId, pointerDownTimeStamp: event.timeStamp });
       }
-      if (busyRef.current) {
+      if (controller.isBusy) {
         event.preventDefault();
         event.stopPropagation();
         return;
       }
       if (pointerIsOnAnchor) return;
-      if (hasUnsavedChanges) {
+      if (controller.hasUnsavedChanges) {
         event.preventDefault();
         event.stopPropagation();
-        showDiscardPrompt();
-        return;
       }
-      requestDismiss(false);
+      controller.attemptDismiss(false);
     };
-    const handleClick = (event: MouseEvent) => {
-      const panel = panelRef.current;
-      if (
-        !panel ||
-        event.composedPath().includes(panel) ||
-        (!busyRef.current && !discardPromptRef.current)
-      ) return;
-      event.preventDefault();
-      event.stopPropagation();
-    };
-    const timeout = window.setTimeout(() => {
-      document.addEventListener("pointerdown", handlePointerDown, true);
-      document.addEventListener("click", handleClick, true);
-    }, 0);
+    const timeout = window.setTimeout(() => document.addEventListener("pointerdown", handlePointerDown, true), 0);
     return () => {
       window.clearTimeout(timeout);
       document.removeEventListener("pointerdown", handlePointerDown, true);
-      document.removeEventListener("click", handleClick, true);
     };
-  }, [anchor, hasUnsavedChanges, onOutsidePointerDown, requestDismiss, showDiscardPrompt]);
+  }, [anchor, controller, onOutsidePointerDown]);
 
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      if (busyRef.current) {
-        event.preventDefault();
-        event.stopPropagation();
-        return;
-      }
-      if (discardPrompt) {
-        event.preventDefault();
-        cancelDiscardPrompt();
-        return;
-      }
-      if (openDatePicker) return;
-      if (isCategoryOpen) {
-        event.preventDefault();
-        setIsCategoryOpen(false);
-        categoryButtonRef.current?.focus();
-        return;
-      }
-      event.preventDefault();
-      attemptDismiss(true);
-    };
     const blockNavigationWhileOwned = (event: KeyboardEvent) => {
       if (!event.altKey || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
-      if (busyRef.current) {
+      if (controller.isBusy || controller.hasUnsavedChanges) {
         event.preventDefault();
         event.stopPropagation();
-        return;
-      }
-      if (hasUnsavedChanges) {
-        event.preventDefault();
-        event.stopPropagation();
-        showDiscardPrompt();
+        controller.attemptDismiss(false);
       }
     };
-    document.addEventListener("keydown", handleKeyDown);
     document.addEventListener("keydown", blockNavigationWhileOwned);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      document.removeEventListener("keydown", blockNavigationWhileOwned);
-    };
-  }, [attemptDismiss, cancelDiscardPrompt, discardPrompt, hasUnsavedChanges, isCategoryOpen, openDatePicker, showDiscardPrompt]);
+    return () => document.removeEventListener("keydown", blockNavigationWhileOwned);
+  }, [controller]);
 
-  async function save() {
-    if (busyRef.current || saveBlockedByTimer) return;
-    let plan: CalendarEntryCompactSavePlan | CalendarEntryCompactCreatePlan | null = null;
-    try {
-      const saveNow = new Date();
-      plan = props.mode === "entry"
-        ? buildCalendarEntryCompactSavePlan({ draft, dirty, entry: props.entry, now: saveNow })
-        : buildCalendarEntryCompactCreatePlan({ draft, now: saveNow, source: props.source });
-    } catch (planError) {
-      setError(planError instanceof Error ? planError.message : "Check the time values.");
-      return;
-    }
-    if (entry && Object.keys((plan as CalendarEntryCompactSavePlan).payload).length === 0) {
-      finishDismiss(true);
-      return;
-    }
-    busyRef.current = true;
-    setIsBusy(true);
-    setError(null);
-    let outcome: MutationOutcome;
-    try {
-      outcome = props.mode === "entry"
-        ? await props.onSave(plan as CalendarEntryCompactSavePlan)
-        : await props.onSave(plan as CalendarEntryCompactCreatePlan);
-    } catch {
-      outcome = { ok: false, error: "Unable to save this entry. Check your connection and try again." };
-    }
-    if (!outcome.ok) {
-      setError(outcome.error);
-      busyRef.current = false;
-      setIsBusy(false);
-      return;
-    }
-    finishDismiss(true);
-  }
-
-  async function startAgain() {
-    if (props.mode !== "entry" || busyRef.current || isTimerBusy) return;
-    busyRef.current = true;
-    setIsBusy(true);
-    setError(null);
-    let outcome: MutationOutcome;
-    try {
-      outcome = await props.onStartAgain();
-    } catch {
-      outcome = { ok: false, error: "Unable to start this entry again. Check your connection and try again." };
-    }
-    if (!outcome.ok) {
-      setError(outcome.error);
-      busyRef.current = false;
-      setIsBusy(false);
-      return;
-    }
-    finishDismiss(false);
-  }
-
-  function openCategoryMenu() {
-    const selectedIndex = categoryOptions.findIndex((category) => (category?.id ?? "") === draft.categoryId);
-    setCategoryIndex(Math.max(0, selectedIndex));
-    setIsCategoryOpen((open) => !open);
-  }
-
-  function handleCategoryKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      const direction = event.key === "ArrowDown" ? 1 : -1;
-      setCategoryIndex((current) => (current + direction + categoryOptions.length) % categoryOptions.length);
-      setIsCategoryOpen(true);
-    } else if (event.key === "Home" || event.key === "End") {
-      event.preventDefault();
-      setCategoryIndex(event.key === "Home" ? 0 : categoryOptions.length - 1);
-      setIsCategoryOpen(true);
-    } else if (event.key === "Enter" && isCategoryOpen) {
-      event.preventDefault();
-      const category = categoryOptions[categoryIndex];
-      updateField("categoryId", category?.id ?? "");
-      setIsCategoryOpen(false);
-    }
-  }
-
-  const title = entry
-    ? entry.description?.trim() || entry.categoryName?.trim() || "Untitled entry"
-    : draft.description.trim() || selectedCategory?.name || "Uncategorized";
-  const displayError = error ?? preview.error;
-  const startIsInvalid = Boolean(preview.error && (/^Start\b/i.test(preview.error) || /valid start/i.test(preview.error)));
-  const finishIsInvalid = Boolean(preview.error && (/^Finish\b/i.test(preview.error) || /valid finish/i.test(preview.error)));
-  const durationIsInvalid = Boolean(preview.error && /duration/i.test(preview.error));
-  const isRunning = Boolean(entry && (!entry.stoppedAt || !draft.stoppedAtDate));
-  const today = dateTimeLocal(now.toISOString()).slice(0, 10);
-  const overlap = preview.plan
-    ? overlapNoticeForCandidate({
-        candidate: {
-          startedAt: preview.plan.resolved.startedAt,
-          stoppedAt: preview.plan.resolved.stoppedAt
-        },
-        entries: peerEntries,
-        excludeEntryId: entry?.id ?? null
-      })
-    : null;
-  const feedbackMode = discardPrompt
-    ? "discard"
-    : displayError
-      ? "error"
-      : overlap?.overlapCount
-        ? "overlap"
-        : "default";
-
-  function saveButton() {
-    return (
-      <button
-        type="button"
-        className="calendar-compact-save"
-        disabled={isBusy || saveBlockedByTimer || !preview.plan}
-        onClick={() => void save()}
-      >
-        Save
-      </button>
-    );
-  }
-
+  if (typeof document === "undefined") return null;
   return createPortal(
     <div
-      ref={panelRef}
+      ref={surfaceRef}
       className={[
         "calendar-compact-editor",
-        isEntered ? "is-entered" : "",
-        isExiting ? "is-exiting" : "",
+        controller.isEntered ? "is-entered" : "",
+        controller.isExiting ? "is-exiting" : "",
         position?.placement === "above" ? "is-above" : "",
         position?.placement === "phone" ? "is-phone" : ""
       ].join(" ")}
       data-testid="calendar-compact-editor"
-      role="dialog"
-      aria-label={entry ? `Edit ${title}` : "Create Calendar entry"}
-      aria-busy={isBusy || undefined}
-      aria-modal="false"
+      aria-busy={controller.isBusy || undefined}
       style={{
         left: position?.left ?? 12,
         maxHeight: position?.maxHeight,
@@ -631,265 +210,8 @@ export function CalendarEntryCompactEditor(props: CalendarEntryCompactEditorProp
         width: position?.width
       } as CSSProperties}
     >
-      <div className="calendar-compact-editor-header">
-        <div>
-          <span className="calendar-compact-editor-kicker">{entry ? "Calendar entry" : "New Calendar entry"}</span>
-          <strong>{title}</strong>
-        </div>
-        <div className="calendar-compact-editor-icons">
-          {entry?.stoppedAt && props.mode === "entry" ? (
-            <button
-              className="calendar-compact-icon-action"
-              type="button"
-              aria-label={`Start ${title} again`}
-              disabled={controlsDisabled || isTimerBusy}
-              onClick={() => void startAgain()}
-            >
-              <Play size={16} fill="currentColor" strokeWidth={0} aria-hidden="true" />
-            </button>
-          ) : null}
-          {props.mode === "entry" ? (
-            <button className="calendar-compact-icon-action is-danger" type="button" aria-label={`Delete ${title}`} disabled={controlsDisabled} onClick={props.onDelete}>
-              <Trash2 size={17} aria-hidden="true" />
-            </button>
-          ) : null}
-          <button className="calendar-compact-icon-action" type="button" aria-label="Close editor" disabled={controlsDisabled} onClick={() => attemptDismiss(true)}>
-            <X size={18} aria-hidden="true" />
-          </button>
-        </div>
-      </div>
-
-      <div className="calendar-compact-editor-fields">
-        <label className="calendar-compact-editor-description">
-          <span>Description</span>
-          <input
-            ref={descriptionRef}
-            type="text"
-            value={draft.description}
-            placeholder="Enter task description"
-            disabled={controlsDisabled}
-            onChange={(event) => updateField("description", event.target.value)}
-          />
-        </label>
-
-        <div className="calendar-compact-category-field">
-          <span className="calendar-compact-field-label">Category</span>
-          <button
-            ref={categoryButtonRef}
-            type="button"
-            aria-expanded={isCategoryOpen}
-            aria-haspopup="listbox"
-            disabled={controlsDisabled}
-            onClick={openCategoryMenu}
-            onKeyDown={handleCategoryKeyDown}
-          >
-            <span
-              className="calendar-compact-category-dot"
-              style={{ background: selectedCategory?.color ?? "var(--muted)" }}
-              aria-hidden="true"
-            />
-            <span>{selectedCategory?.name ?? (entry ? "No category" : "Uncategorized")}</span>
-            <ChevronDown size={15} aria-hidden="true" />
-          </button>
-          {isCategoryOpen ? (
-            <div className="calendar-compact-category-menu" role="listbox" aria-label="Categories">
-              {categoryOptions.map((category, index) => {
-                const value = category?.id ?? "";
-                const selected = value === draft.categoryId;
-                return (
-                  <button
-                    key={category?.id ?? "no-category"}
-                    type="button"
-                    role="option"
-                    aria-selected={selected}
-                    className={index === categoryIndex ? "is-active" : ""}
-                    onMouseEnter={() => setCategoryIndex(index)}
-                    onClick={() => {
-                      updateField("categoryId", value);
-                      setIsCategoryOpen(false);
-                      categoryButtonRef.current?.focus();
-                    }}
-                  >
-                    <span
-                      className="calendar-compact-category-dot"
-                      style={{ background: category?.color ?? "var(--muted)" }}
-                      aria-hidden="true"
-                    />
-                    <span>{category?.name ?? (entry ? "No category" : "Uncategorized")}</span>
-                    {selected ? <Check size={15} aria-hidden="true" /> : null}
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
-        </div>
-
-        <div className="calendar-compact-temporal-fields">
-          <div className="calendar-compact-moment-field">
-            <span className="calendar-compact-field-label">Start</span>
-            <div className="calendar-compact-date-time-controls">
-              <DatePickerPopover
-                ariaLabel="Choose Start date"
-                className="calendar-compact-date-picker"
-                disabled={controlsDisabled}
-                label={formatCompactDateLabel(draft.startedAtDate)}
-                onChange={(date) => updateTemporalField("startedAtDate", date, "start", true)}
-                onOpenChange={(open) => setOpenDatePicker((current) => open ? "start" : current === "start" ? null : current)}
-                panelClassName="calendar-compact-date-picker-panel"
-                panelLabel="Choose Start date"
-                portal
-                today={today}
-                triggerClassName="calendar-compact-date-trigger"
-                value={draft.startedAtDate}
-              />
-              <label className="calendar-compact-time-control">
-                <span className="sr-only">Start time</span>
-                <input
-                  inputMode="numeric"
-                  type="text"
-                  value={draft.startedAtTime}
-                  placeholder="08:30"
-                  aria-describedby={startIsInvalid ? "calendar-compact-time-error" : undefined}
-                  aria-invalid={startIsInvalid || undefined}
-                  disabled={controlsDisabled}
-                  onBlur={() => commitTemporalField("start")}
-                  onChange={(event) => updateTemporalField("startedAtTime", maskTimeInput(event.target.value), "start")}
-                />
-              </label>
-            </div>
-          </div>
-
-          <div className="calendar-compact-moment-field">
-            <span className="calendar-compact-field-label">Finish</span>
-            {isRunning ? (
-              <div className="calendar-compact-running-value">Running</div>
-            ) : (
-              <div className="calendar-compact-date-time-controls">
-                <DatePickerPopover
-                  ariaLabel="Choose Finish date"
-                  className="calendar-compact-date-picker"
-                  disabled={controlsDisabled}
-                  label={formatCompactDateLabel(draft.stoppedAtDate)}
-                  onChange={(date) => updateTemporalField("stoppedAtDate", date, "finish", true)}
-                  onOpenChange={(open) => setOpenDatePicker((current) => open ? "finish" : current === "finish" ? null : current)}
-                  panelClassName="calendar-compact-date-picker-panel"
-                  panelLabel="Choose Finish date"
-                  portal
-                  today={today}
-                  triggerClassName="calendar-compact-date-trigger"
-                  value={draft.stoppedAtDate}
-                />
-                <label className="calendar-compact-time-control">
-                  <span className="sr-only">Finish time</span>
-                  <input
-                    inputMode="numeric"
-                    type="text"
-                    value={draft.stoppedAtTime}
-                    placeholder="09:15"
-                    aria-describedby={finishIsInvalid ? "calendar-compact-time-error" : undefined}
-                    aria-invalid={finishIsInvalid || undefined}
-                    disabled={controlsDisabled}
-                    onBlur={() => commitTemporalField("finish")}
-                    onChange={(event) => updateTemporalField("stoppedAtTime", maskTimeInput(event.target.value), "finish")}
-                  />
-                </label>
-              </div>
-            )}
-          </div>
-
-          {isRunning ? (
-            <div className="calendar-compact-duration is-readonly" aria-label="Elapsed time">
-              <span>Duration</span>
-              <strong className="tabular">
-                {preview.plan ? formatCalendarEntryCompactDuration(preview.plan.durationSeconds) : "—"}
-              </strong>
-            </div>
-          ) : (
-            <label className="calendar-compact-duration-input">
-              <span>Duration</span>
-              <input
-                inputMode="numeric"
-                type="text"
-                value={draft.duration}
-                placeholder="00:30:00"
-                aria-describedby={durationIsInvalid ? "calendar-compact-time-error" : undefined}
-                aria-invalid={durationIsInvalid || undefined}
-                disabled={controlsDisabled}
-                onBlur={() => commitTemporalField("duration")}
-                onChange={(event) => updateTemporalField("duration", event.target.value.replace(/[^\d:]/g, ""), "duration")}
-              />
-            </label>
-          )}
-        </div>
-      </div>
-
-      <div
-        className={[
-          "calendar-compact-editor-footer",
-          feedbackMode === "discard" ? "is-confirming-discard" : "",
-          feedbackMode === "error" || feedbackMode === "overlap" ? "is-showing-feedback" : ""
-        ].join(" ")}
-        data-feedback-mode={feedbackMode}
-      >
-        <div
-          className="calendar-compact-editor-default-actions"
-          aria-hidden={feedbackMode !== "default"}
-          inert={feedbackMode !== "default"}
-        >
-          {entry && !entry.stoppedAt ? <span>Running timer</span> : null}
-          {saveButton()}
-        </div>
-        <div
-          className="calendar-compact-feedback-actions"
-          aria-hidden={feedbackMode !== "error" && feedbackMode !== "overlap"}
-          inert={feedbackMode !== "error" && feedbackMode !== "overlap"}
-        >
-          <div className={`calendar-compact-feedback-copy${feedbackMode === "error" ? " is-error" : ""}`}>
-            {feedbackMode === "error" && displayError ? (
-              <p id="calendar-compact-time-error" role="alert" aria-atomic="true" aria-live="assertive">{displayError}</p>
-            ) : null}
-            {feedbackMode === "overlap" && preview.plan ? (
-              <OverlapNotice
-                compact
-                candidate={{
-                  startedAt: preview.plan.resolved.startedAt,
-                  stoppedAt: preview.plan.resolved.stoppedAt
-                }}
-                entries={peerEntries}
-                excludeEntryId={entry?.id ?? null}
-              />
-            ) : null}
-          </div>
-          {saveButton()}
-        </div>
-        <div
-          className="calendar-compact-discard-confirmation"
-          role="alertdialog"
-          aria-label="Discard changes?"
-          aria-hidden={!discardPrompt}
-          aria-modal="false"
-          inert={!discardPrompt}
-        >
-          <strong>Discard changes?</strong>
-          <button ref={discardBackRef} type="button" className="calendar-compact-discard-back" onClick={cancelDiscardPrompt}>
-            Go back
-          </button>
-          <button type="button" className="calendar-compact-discard-confirm" onClick={confirmDiscard}>
-            Discard
-          </button>
-        </div>
-      </div>
+      <TimeEntryQuickEditorPanel controller={controller} props={editorProps} surface="anchored" />
     </div>,
     document.body
   );
-}
-
-function formatCompactDateLabel(value: string) {
-  const [year, month, day] = value.split("-").map(Number);
-  if (!year || !month || !day) return value;
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric"
-  }).format(new Date(year, month - 1, day, 12));
 }

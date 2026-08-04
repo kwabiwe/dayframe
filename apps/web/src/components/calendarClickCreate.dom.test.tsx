@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { createElement } from "react";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TimeEntryRow } from "@/lib/queries";
@@ -110,11 +110,16 @@ describe("Calendar click-to-create DOM interactions", () => {
     renderCalendar();
     await openCreateAt(8 * 60);
     const description = screen.getByLabelText("Description");
+    const tags = screen.getByRole("button", { name: "Add or filter tags" });
     const category = screen.getByRole("button", { name: /Uncategorized/ });
     await waitFor(() => expect(document.activeElement).toBe(description));
 
     await userEvent.tab();
+    expect(document.activeElement).toBe(tags);
+    await userEvent.tab();
     expect(document.activeElement).toBe(category);
+    await userEvent.tab({ shift: true });
+    expect(document.activeElement).toBe(tags);
     await userEvent.tab({ shift: true });
     expect(document.activeElement).toBe(description);
 
@@ -126,6 +131,34 @@ describe("Calendar click-to-create DOM interactions", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     await waitFor(() => expect(screen.queryByTestId("calendar-compact-editor")).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("Calendar time grid")));
+  });
+
+  it("creates a tag inside Description and includes it in the click-created entry", async () => {
+    renderCalendar([], [{ id: "planning", name: "Planning", normalizedName: "planning", usageCount: 1 }]);
+    await openCreateAt(8 * 60);
+    await userEvent.click(screen.getByRole("button", { name: "Add or filter tags" }));
+    const picker = await screen.findByRole("dialog", { name: "Add or filter tags" });
+    const search = within(picker).getByRole("textbox", { name: "Add or filter tags" });
+    await userEvent.type(search, "New tag");
+    await userEvent.click(within(picker).getByRole("button", { name: /Create “New tag”/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(runtime.createManualEntry).toHaveBeenCalledOnce());
+    expect(runtime.createManualEntry).toHaveBeenCalledWith(expect.objectContaining({ tagNames: ["New tag"] }));
+  });
+
+  it("does not reset or replace a dirty editor when the selected block is double-clicked", async () => {
+    renderCalendar([entryAt("2026-08-02T09:00:00.000Z", "2026-08-02T09:30:00.000Z")]);
+    const block = document.querySelector<HTMLButtonElement>(".calendar-entry-primary") as HTMLButtonElement;
+    await userEvent.click(block);
+    const editor = await screen.findByTestId("calendar-compact-editor");
+    const description = screen.getByLabelText("Time entry description") as HTMLInputElement;
+    await userEvent.clear(description);
+    await userEvent.type(description, "Dirty draft");
+
+    await userEvent.dblClick(block);
+    expect(screen.getByTestId("calendar-compact-editor")).toBe(editor);
+    expect(description.value).toBe("Dirty draft");
   });
 
   it("keeps the consumed pointer through React pointerup so the first blank click only dismisses", async () => {
@@ -192,7 +225,12 @@ describe("Calendar click-to-create DOM interactions", () => {
   });
 });
 
-function renderCalendar(entries: TimeEntryRow[] = []) {
+function renderCalendar(entries: TimeEntryRow[] = [], tags: Array<{
+  id: string;
+  name: string;
+  normalizedName: string;
+  usageCount: number;
+}> = []) {
   return render(createElement(CalendarReview, {
     calendarHoursMode: "fullDay",
     capturedNow: new Date("2026-08-02T12:00:00.000Z"),
@@ -203,7 +241,7 @@ function renderCalendar(entries: TimeEntryRow[] = []) {
     onSynced: vi.fn().mockResolvedValue(undefined),
     places: [],
     scrollContainerRef: vi.fn(),
-    tags: [],
+    tags,
     visibleDays: [new Date(2026, 7, 2, 12, 0, 0, 0)]
   }));
 }
