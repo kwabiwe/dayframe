@@ -245,3 +245,29 @@ but the locked Mac UI and offline physical devices mean the rendered Calendar
 fixture matrix, physical touch, display-scale hairline appearance, pinch frame
 pacing, and real-device Light/Dark/Reduce Transparency rendering remain explicitly
 NOT RUN until recorded later in this note and the draft PR.
+
+## Review follow-up: isolated short-block alignment
+
+Claude Sonnet's PR review identified that the 44 pt minimum Button frame could
+become the painted label's visual origin. For an eight-point isolated entry, that
+could place the visible block approximately `(44 - 8) / 2 = 18 pt` above its true
+time slot even though the semantic centre passed to `position` was correct.
+
+The renderer now uses `DayframeCalendarVerticalMath` to make the three vertical
+geometries explicit. The expanded hit target remains centred at
+`semanticTop + semanticHeight / 2`; painted content is offset within that target by
+`(hitHeight - semanticHeight) / 2`, which reconstructs its visible top exactly to
+`semanticTop`. The Button label itself owns the hit-height frame, and the horizontal
+animation modifier now changes only width and horizontal position. Overlapping
+entries retain semantic-height targets and therefore a zero visual offset.
+
+Focused regression coverage proves:
+
+- an isolated eight-point entry retains a 44 pt target and renders at its semantic
+  top rather than 18 pt early;
+- a four-point entry followed by an exactly adjacent entry preserves their semantic
+  boundary and the intended one-point painted gap;
+- an overlapping eight-point entry retains an eight-point target, zero offset, and
+  exact semantic visual top;
+- the native source contract keeps hit-height ownership in the Button label and
+  prevents the positioning modifier from reintroducing a hit-height frame.

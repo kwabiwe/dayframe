@@ -60,6 +60,43 @@ public enum DayframeCalendarHorizontalMath {
   }
 }
 
+public struct DayframeCalendarVerticalMetrics: Equatable {
+  public let hitHeight: Double
+  public let hitCenterY: Double
+  public let visualOffsetWithinHitTarget: Double
+
+  public init(
+    hitHeight: Double,
+    hitCenterY: Double,
+    visualOffsetWithinHitTarget: Double
+  ) {
+    self.hitHeight = hitHeight
+    self.hitCenterY = hitCenterY
+    self.visualOffsetWithinHitTarget = visualOffsetWithinHitTarget
+  }
+}
+
+public enum DayframeCalendarVerticalMath {
+  public static func metrics(
+    semanticTop: Double,
+    semanticHeight: Double,
+    hitHeight: Double
+  ) -> DayframeCalendarVerticalMetrics {
+    let safeSemanticTop = semanticTop.isFinite ? semanticTop : 0
+    let safeSemanticHeight = max(0, semanticHeight.isFinite ? semanticHeight : 0)
+    let safeHitHeight = max(
+      safeSemanticHeight,
+      hitHeight.isFinite ? hitHeight : safeSemanticHeight
+    )
+
+    return DayframeCalendarVerticalMetrics(
+      hitHeight: safeHitHeight,
+      hitCenterY: safeSemanticTop + safeSemanticHeight / 2,
+      visualOffsetWithinHitTarget: (safeHitHeight - safeSemanticHeight) / 2
+    )
+  }
+}
+
 public struct DayframeCalendarBlockVisualMetrics: Equatable {
   public let cornerRadius: Double
   public let semanticHeight: Double

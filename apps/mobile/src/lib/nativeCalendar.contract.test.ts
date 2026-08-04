@@ -95,10 +95,15 @@ describe("native Calendar production contract", () => {
     expect(core).toContain("public static let blockCornerRadius = 8.0");
     expect(core).toContain("public static let blockVisualGap = 1.0");
     expect(core).toContain("public enum DayframeCalendarBlockVisualMath");
+    expect(core).toContain("public enum DayframeCalendarVerticalMath");
     expect(core).toContain("semanticHeight: Double");
     expect(rootView).toContain(".frame(height: visualHeight)");
     expect(rootView).toContain(".frame(height: semanticHeight, alignment: .top)");
+    expect(rootView).toContain(".offset(y: CGFloat(vertical.visualOffsetWithinHitTarget))");
+    expect(rootView).toContain(".frame(height: hitHeight, alignment: .top)");
+    expect(rootView).toContain("y: CGFloat(vertical.hitCenterY)");
     expect(rootView).toContain("semanticHeight: metrics.height");
+    expect(rootView).not.toContain(".frame(width: width, height: hitHeight)");
     expect(rootView).toContain("alpha: 0.42");
     expect(rootView).toContain("entry.isReview || entry.isActive ? [4, 3] : []");
     expect(rootView).toContain("DayframeCalendarHatch");

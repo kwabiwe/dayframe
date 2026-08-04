@@ -273,6 +273,66 @@ final class DayframeCalendarCoreTests: XCTestCase {
     XCTAssertEqual(isolated.hitHeight, 44)
   }
 
+  func testIsolatedShortHitTargetDoesNotMoveVisibleTimeSlot() {
+    let vertical = DayframeCalendarVerticalMath.metrics(
+      semanticTop: 180,
+      semanticHeight: 8,
+      hitHeight: 44
+    )
+    let reconstructedVisualTop = vertical.hitCenterY
+      - vertical.hitHeight / 2
+      + vertical.visualOffsetWithinHitTarget
+
+    XCTAssertEqual(vertical.hitHeight, 44)
+    XCTAssertEqual(vertical.hitCenterY, 184)
+    XCTAssertEqual(vertical.visualOffsetWithinHitTarget, 18)
+    XCTAssertEqual(reconstructedVisualTop, 180)
+  }
+
+  func testTinyAdjacentSlotsKeepExactBoundaryAndOnePointPaintGap() {
+    let first = DayframeCalendarVerticalMath.metrics(
+      semanticTop: 100,
+      semanticHeight: 4,
+      hitHeight: 44
+    )
+    let second = DayframeCalendarVerticalMath.metrics(
+      semanticTop: 104,
+      semanticHeight: 8,
+      hitHeight: 44
+    )
+    let firstVisual = DayframeCalendarBlockVisualMath.metrics(
+      semanticHeight: 4,
+      continuesIntoNextDay: false
+    )
+    let firstRenderedTop = first.hitCenterY
+      - first.hitHeight / 2
+      + first.visualOffsetWithinHitTarget
+    let secondRenderedTop = second.hitCenterY
+      - second.hitHeight / 2
+      + second.visualOffsetWithinHitTarget
+
+    XCTAssertEqual(firstRenderedTop, 100)
+    XCTAssertEqual(secondRenderedTop, 104)
+    XCTAssertEqual(firstRenderedTop + 4, secondRenderedTop)
+    XCTAssertEqual(secondRenderedTop - (firstRenderedTop + firstVisual.visualHeight), 1)
+  }
+
+  func testOverlappingShortBlockKeepsSemanticHitAndVisualGeometryAligned() {
+    let vertical = DayframeCalendarVerticalMath.metrics(
+      semanticTop: 240,
+      semanticHeight: 8,
+      hitHeight: 8
+    )
+    let reconstructedVisualTop = vertical.hitCenterY
+      - vertical.hitHeight / 2
+      + vertical.visualOffsetWithinHitTarget
+
+    XCTAssertEqual(vertical.hitHeight, 8)
+    XCTAssertEqual(vertical.hitCenterY, 244)
+    XCTAssertEqual(vertical.visualOffsetWithinHitTarget, 0)
+    XCTAssertEqual(reconstructedVisualTop, 240)
+  }
+
   func testVisualShrinkDoesNotDriveHitHeightMath() {
     let visual = DayframeCalendarBlockVisualMath.metrics(
       semanticHeight: 8,

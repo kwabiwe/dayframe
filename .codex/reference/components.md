@@ -76,6 +76,7 @@ Use this when working on frontend components.
 - Map stable entry/review identifiers through callbacks and add contract tests for serialization, callback routing, and no duplicate mutation path.
 - Native Calendar blocks use one nominal compact radius across densities; very small paths may clamp only to fit their actual rectangle. Do not introduce short/tiny capsule tokens.
 - Keep semantic, visual, and hit geometry separate. A visual Calendar gap may shorten only the painted fill, hatch, stroke, text, metadata, and marker; it must not change timestamps, semantic block position/height, overlap lanes, density thresholds, totals, or callback hit math.
+- When an isolated short Calendar entry expands to the minimum touch height, keep the expanded target centred on the semantic slot and offset the painted content within that target so its visible top remains the exact semantic top. Never let the minimum hit frame become the block's visual origin; overlapping entries continue to use semantic-height targets.
 - Derive confirmed/active native block borders from the category cue and semantic Calendar border. Preserve the neutral Review dash, active dash, Uncategorized hatch/boundary, and continuation exception without adding a new colour bridge field.
 - Native Calendar blocks do not gain desktop hover actions such as Play. Swift emits only the existing semantic open actions; React continues to own editing, Review, timer mutations, and persistence.
 

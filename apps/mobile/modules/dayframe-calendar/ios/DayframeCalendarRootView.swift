@@ -326,8 +326,13 @@ private struct DayframeCalendarEntriesLayer: View {
             overlapCount: entry.overlapCount,
             textDensity: entry.textDensity
           )
+          let vertical = DayframeCalendarVerticalMath.metrics(
+            semanticTop: metrics.top,
+            semanticHeight: metrics.height,
+            hitHeight: horizontal.hitHeight
+          )
           let resolvedWidth = CGFloat(horizontal.width)
-          let hitHeight = CGFloat(horizontal.hitHeight)
+          let hitHeight = CGFloat(vertical.hitHeight)
 
           Button {
             actions.open(entry.actionTarget)
@@ -343,14 +348,15 @@ private struct DayframeCalendarEntriesLayer: View {
             .frame(maxWidth: .infinity)
             .frame(height: visualHeight)
             .frame(height: semanticHeight, alignment: .top)
+            .offset(y: CGFloat(vertical.visualOffsetWithinHitTarget))
+            .frame(height: hitHeight, alignment: .top)
           }
           .buttonStyle(.plain)
           .contentShape(Rectangle())
           .modifier(DayframeCalendarHorizontalGeometry(
-            hitHeight: hitHeight,
             width: resolvedWidth,
             x: hourLabelWidth + 8 + CGFloat(horizontal.offset) + resolvedWidth / 2,
-            y: CGFloat(metrics.top + metrics.height / 2)
+            y: CGFloat(vertical.hitCenterY)
           ))
           .animation(
             presentation.reduceMotion ? nil : .easeOut(duration: 0.21),
@@ -464,7 +470,6 @@ private struct DayframeCalendarBlockView: View {
 }
 
 private struct DayframeCalendarHorizontalGeometry: AnimatableModifier {
-  let hitHeight: CGFloat
   var width: CGFloat
   var x: CGFloat
   let y: CGFloat
@@ -479,7 +484,7 @@ private struct DayframeCalendarHorizontalGeometry: AnimatableModifier {
 
   func body(content: Content) -> some View {
     content
-      .frame(width: width, height: hitHeight)
+      .frame(width: width)
       .position(x: x, y: y)
   }
 }
