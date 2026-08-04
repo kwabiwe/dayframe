@@ -74,6 +74,10 @@ Use this when working on frontend components.
 - Preserve native view identity across ordinary React prop updates so ticking time, bootstrap refreshes, and optimistic reconciliation do not reset zoom or scroll unexpectedly.
 - Give the timeline one gesture and vertical-scroll owner. A SwiftUI Calendar may wrap `UIScrollView` with `UIViewRepresentable` for continuous focal-point-preserving zoom; do not nest a competing React Native pinch/pan handler around it.
 - Map stable entry/review identifiers through callbacks and add contract tests for serialization, callback routing, and no duplicate mutation path.
+- Native Calendar blocks use one nominal compact radius across densities; very small paths may clamp only to fit their actual rectangle. Do not introduce short/tiny capsule tokens.
+- Keep semantic, visual, and hit geometry separate. A visual Calendar gap may shorten only the painted fill, hatch, stroke, text, metadata, and marker; it must not change timestamps, semantic block position/height, overlap lanes, density thresholds, totals, or callback hit math.
+- Derive confirmed/active native block borders from the category cue and semantic Calendar border. Preserve the neutral Review dash, active dash, Uncategorized hatch/boundary, and continuation exception without adding a new colour bridge field.
+- Native Calendar blocks do not gain desktop hover actions such as Play. Swift emits only the existing semantic open actions; React continues to own editing, Review, timer mutations, and persistence.
 
 ## Review Checklist
 

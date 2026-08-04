@@ -86,4 +86,27 @@ describe("native Calendar production contract", () => {
     expect(rootView).toContain("theme.warning");
     expect(rootView).not.toContain("#F0AA55");
   });
+
+  it("keeps native block styling visual-only and preserves semantic state treatments", () => {
+    const core = readFileSync(`${moduleRoot}ios/DayframeCalendarCore.swift`, "utf8");
+    const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
+    const swiftSources = [core, rootView].join("\n");
+
+    expect(core).toContain("public static let blockCornerRadius = 8.0");
+    expect(core).toContain("public static let blockVisualGap = 1.0");
+    expect(core).toContain("public enum DayframeCalendarBlockVisualMath");
+    expect(core).toContain("semanticHeight: Double");
+    expect(rootView).toContain(".frame(height: visualHeight)");
+    expect(rootView).toContain(".frame(height: semanticHeight, alignment: .top)");
+    expect(rootView).toContain("semanticHeight: metrics.height");
+    expect(rootView).toContain("alpha: 0.42");
+    expect(rootView).toContain("entry.isReview || entry.isActive ? [4, 3] : []");
+    expect(rootView).toContain("DayframeCalendarHatch");
+    expect(swiftSources).not.toContain("min(13");
+    expect(swiftSources).not.toContain("rect.height / 2), height: min(13");
+    expect(swiftSources).not.toContain("LongPressGesture");
+    expect(swiftSources).not.toContain("onLongPressGesture");
+    expect(swiftSources).not.toContain("contextMenu");
+    expect(swiftSources).not.toContain("play.fill");
+  });
 });

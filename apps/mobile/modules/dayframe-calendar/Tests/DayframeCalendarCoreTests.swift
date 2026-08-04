@@ -133,6 +133,80 @@ final class DayframeCalendarCoreTests: XCTestCase {
     XCTAssertEqual(tiny?.showMeta, false)
   }
 
+  func testVisualGeometryAddsOnePointGapWithoutChangingSemanticHeight() {
+    let visual = DayframeCalendarBlockVisualMath.metrics(
+      semanticHeight: 72,
+      continuesIntoNextDay: false
+    )
+
+    XCTAssertEqual(visual.cornerRadius, 8)
+    XCTAssertEqual(visual.semanticHeight, 72)
+    XCTAssertEqual(visual.visualHeight, 71)
+    XCTAssertEqual(visual.visualGap, 1)
+  }
+
+  func testNormalShortAndTinyBlocksShareOneNominalRadius() {
+    let heights = [72.0, 18.0, DayframeCalendarConstants.minimumVisibleBlockHeight]
+    let metrics = heights.map {
+      DayframeCalendarBlockVisualMath.metrics(
+        semanticHeight: $0,
+        continuesIntoNextDay: false
+      )
+    }
+
+    XCTAssertEqual(metrics.map(\.cornerRadius), [8, 8, 8])
+    XCTAssertEqual(metrics.last?.visualHeight, 3)
+    XCTAssertEqual(metrics.last?.visualGap, 1)
+  }
+
+  func testContinuationIntoNextDayKeepsFullVisualHeightAtDayBoundary() {
+    let visual = DayframeCalendarBlockVisualMath.metrics(
+      semanticHeight: 180,
+      continuesIntoNextDay: true
+    )
+
+    XCTAssertEqual(visual.semanticHeight, 180)
+    XCTAssertEqual(visual.visualHeight, 180)
+    XCTAssertEqual(visual.visualGap, 0)
+  }
+
+  func testVisualGeometryClampsMalformedDirectHeightsSafely() {
+    for height in [Double.nan, -Double.infinity, -20, 0] {
+      let visual = DayframeCalendarBlockVisualMath.metrics(
+        semanticHeight: height,
+        continuesIntoNextDay: false
+      )
+      XCTAssertEqual(visual.semanticHeight, 1)
+      XCTAssertEqual(visual.visualHeight, 1)
+      XCTAssertEqual(visual.visualGap, 0)
+    }
+  }
+
+  func testVisualGapDoesNotChangeSemanticTextThresholds() throws {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let dayStart = try milliseconds("2026-07-10T00:00:00Z")
+    let dayEnd = try milliseconds("2026-07-11T00:00:00Z")
+    let semantic = try XCTUnwrap(DayframeCalendarBlockMath.metrics(
+      startedAtMs: try milliseconds("2026-07-10T09:00:00Z"),
+      stoppedAtMs: try milliseconds("2026-07-10T09:20:00Z"),
+      nowMs: dayEnd,
+      dayStartMs: dayStart,
+      dayEndMs: dayEnd,
+      hourHeight: 72,
+      calendar: calendar
+    ))
+    let visual = DayframeCalendarBlockVisualMath.metrics(
+      semanticHeight: semantic.height,
+      continuesIntoNextDay: semantic.continuesIntoNextDay
+    )
+
+    XCTAssertEqual(semantic.height, DayframeCalendarConstants.titleMinimumHeight)
+    XCTAssertTrue(semantic.showTitle)
+    XCTAssertFalse(semantic.showMeta)
+    XCTAssertEqual(visual.visualHeight, semantic.height - 1)
+  }
+
   func testStableCallbackTargetsKeepSemanticIDs() {
     XCTAssertEqual(
       DayframeCalendarActionTarget(id: "entry-123", kind: .completed),
@@ -149,7 +223,7 @@ final class DayframeCalendarCoreTests: XCTestCase {
       availableWidth: 300,
       offsetFraction: 0,
       widthFraction: 1,
-      visualHeight: 120,
+      semanticHeight: 120,
       overlapCount: 1,
       textDensity: "full"
     )
@@ -157,7 +231,7 @@ final class DayframeCalendarCoreTests: XCTestCase {
       availableWidth: 300,
       offsetFraction: 0.14,
       widthFraction: 0.86,
-      visualHeight: 24,
+      semanticHeight: 24,
       overlapCount: 1,
       textDensity: "title"
     )
@@ -176,7 +250,7 @@ final class DayframeCalendarCoreTests: XCTestCase {
       availableWidth: 180,
       offsetFraction: 2.0 / 3.0,
       widthFraction: 1.0 / 3.0,
-      visualHeight: 12,
+      semanticHeight: 12,
       overlapCount: 2,
       textDensity: "none"
     )
@@ -192,11 +266,38 @@ final class DayframeCalendarCoreTests: XCTestCase {
       availableWidth: 180,
       offsetFraction: 0,
       widthFraction: 1,
-      visualHeight: 8,
+      semanticHeight: 8,
       overlapCount: 0,
       textDensity: "full"
     )
     XCTAssertEqual(isolated.hitHeight, 44)
+  }
+
+  func testVisualShrinkDoesNotDriveHitHeightMath() {
+    let visual = DayframeCalendarBlockVisualMath.metrics(
+      semanticHeight: 8,
+      continuesIntoNextDay: false
+    )
+    let isolated = DayframeCalendarHorizontalMath.metrics(
+      availableWidth: 180,
+      offsetFraction: 0,
+      widthFraction: 1,
+      semanticHeight: visual.semanticHeight,
+      overlapCount: 0,
+      textDensity: "full"
+    )
+    let overlapping = DayframeCalendarHorizontalMath.metrics(
+      availableWidth: 180,
+      offsetFraction: 0,
+      widthFraction: 0.5,
+      semanticHeight: visual.semanticHeight,
+      overlapCount: 1,
+      textDensity: "title"
+    )
+
+    XCTAssertEqual(visual.visualHeight, 7)
+    XCTAssertEqual(isolated.hitHeight, 44)
+    XCTAssertEqual(overlapping.hitHeight, 8)
   }
 
   func testSerializedModelDecodesInitialAndLaterRevisions() throws {

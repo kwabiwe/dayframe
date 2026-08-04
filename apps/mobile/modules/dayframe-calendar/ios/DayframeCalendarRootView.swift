@@ -312,12 +312,17 @@ private struct DayframeCalendarEntriesLayer: View {
           hourHeight: Double(hourHeight)
         ) {
           let blockWidth = max(0, availableWidth - hourLabelWidth - 18)
-          let visualHeight = CGFloat(metrics.height)
+          let visualMetrics = DayframeCalendarBlockVisualMath.metrics(
+            semanticHeight: metrics.height,
+            continuesIntoNextDay: metrics.continuesIntoNextDay
+          )
+          let semanticHeight = CGFloat(visualMetrics.semanticHeight)
+          let visualHeight = CGFloat(visualMetrics.visualHeight)
           let horizontal = DayframeCalendarHorizontalMath.metrics(
             availableWidth: Double(blockWidth),
             offsetFraction: entry.offsetFraction,
             widthFraction: entry.widthFraction,
-            visualHeight: Double(visualHeight),
+            semanticHeight: metrics.height,
             overlapCount: entry.overlapCount,
             textDensity: entry.textDensity
           )
@@ -328,6 +333,7 @@ private struct DayframeCalendarEntriesLayer: View {
             actions.open(entry.actionTarget)
           } label: {
             DayframeCalendarBlockView(
+              cornerRadius: CGFloat(visualMetrics.cornerRadius),
               entry: entry,
               horizontal: horizontal,
               metrics: metrics,
@@ -336,6 +342,7 @@ private struct DayframeCalendarEntriesLayer: View {
             )
             .frame(maxWidth: .infinity)
             .frame(height: visualHeight)
+            .frame(height: semanticHeight, alignment: .top)
           }
           .buttonStyle(.plain)
           .contentShape(Rectangle())
@@ -361,6 +368,7 @@ private struct DayframeCalendarEntriesLayer: View {
 }
 
 private struct DayframeCalendarBlockView: View {
+  let cornerRadius: CGFloat
   let entry: DayframeCalendarEntry
   let horizontal: DayframeCalendarHorizontalMetrics
   let metrics: DayframeCalendarBlockMetrics
@@ -369,14 +377,24 @@ private struct DayframeCalendarBlockView: View {
 
   var body: some View {
     let shape = DayframeCalendarBlockShape(
+      cornerRadius: cornerRadius,
       continuesIntoNextDay: metrics.continuesIntoNextDay,
       startsBeforeDay: metrics.startsBeforeDay
     )
     let cueColor = UIColor(dayframeCSS: entry.color)
     let backgroundColor = UIColor(dayframeCSS: theme.surfaceMuted)
+    let baseBorderColor = UIColor(dayframeCSS: theme.border)
+    let strongBorderColor = UIColor(dayframeCSS: theme.borderStrong)
     let fillAlpha: CGFloat = entry.isReview ? 0.16 : entry.isActive ? 0.22 : 0.30
     let resolvedAlpha = reduceTransparency ? min(0.48, fillAlpha + 0.10) : fillAlpha
     let fill = cueColor.dayframeBlended(over: backgroundColor, alpha: resolvedAlpha)
+    let border: UIColor = if entry.isReview {
+      strongBorderColor
+    } else if entry.isUncategorized {
+      reduceTransparency ? strongBorderColor : baseBorderColor
+    } else {
+      cueColor.dayframeBlended(over: baseBorderColor, alpha: 0.42)
+    }
 
     ZStack(alignment: .leading) {
       shape.fill(Color(uiColor: fill))
@@ -387,8 +405,8 @@ private struct DayframeCalendarBlockView: View {
           .opacity(reduceTransparency ? 0.34 : 0.22)
       }
 
-      shape.stroke(
-        Color(dayframeCSS: entry.isReview ? theme.borderStrong : entry.color),
+      shape.strokeBorder(
+        Color(uiColor: border),
         style: StrokeStyle(
           lineWidth: 1,
           lineCap: .round,
@@ -466,9 +484,17 @@ private struct DayframeCalendarHorizontalGeometry: AnimatableModifier {
   }
 }
 
-private struct DayframeCalendarBlockShape: Shape {
+private struct DayframeCalendarBlockShape: InsettableShape {
+  let cornerRadius: CGFloat
   let continuesIntoNextDay: Bool
   let startsBeforeDay: Bool
+  var insetAmount: CGFloat = 0
+
+  func inset(by amount: CGFloat) -> DayframeCalendarBlockShape {
+    var copy = self
+    copy.insetAmount += amount
+    return copy
+  }
 
   func path(in rect: CGRect) -> Path {
     var corners: UIRectCorner = []
@@ -478,10 +504,18 @@ private struct DayframeCalendarBlockShape: Shape {
     if !continuesIntoNextDay {
       corners.formUnion([.bottomLeft, .bottomRight])
     }
+    let insetRect = rect.insetBy(dx: insetAmount, dy: insetAmount)
+    let effectiveRadius = max(
+      0,
+      min(cornerRadius - insetAmount, insetRect.width / 2, insetRect.height / 2)
+    )
     let path = UIBezierPath(
-      roundedRect: rect,
+      roundedRect: insetRect,
       byRoundingCorners: corners,
-      cornerRadii: CGSize(width: min(13, rect.height / 2), height: min(13, rect.height / 2))
+      cornerRadii: CGSize(
+        width: effectiveRadius,
+        height: effectiveRadius
+      )
     )
     return Path(path.cgPath)
   }
