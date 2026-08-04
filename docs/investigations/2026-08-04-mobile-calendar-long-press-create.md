@@ -7,10 +7,10 @@ Branch: `codex/mobile-calendar-long-press-create`
 Base: `fea966516e5705f43dd264ec1f7b4b932e4c2578` (merged PR #157)
 
 Status: draft PR #158 follow-up implemented; focused and repository-wide tests,
-the native target build, and the checked-in app simulator build/install/bundle
-pass. Updated Preview/staging evidence remains pending the final push. EAS is
-blocked on authentication; rendered simulator, physical-iPhone and authenticated
-staging evidence remain not run. The PR remains draft and unmerged.
+the native target build, the checked-in app simulator build/install/bundle, and
+the implementation commit's updated Preview/staging promotion pass. EAS is blocked
+on authentication; rendered simulator, physical-iPhone and authenticated staging
+evidence remain not run. The PR remains draft and unmerged.
 
 ## Scope and non-goals
 
@@ -293,7 +293,9 @@ Completed for this follow-up:
 
 Still pending:
 
-- updated immutable Vercel Preview and stable staging alias promotion;
+- the documentation-only evidence commit's successor Vercel Preview and final
+  staging alias promotion, to be recorded on the PR without another recursive
+  evidence commit;
 - EAS login and `preview` build;
 - physical-iPhone matrix and screen recording;
 - authenticated staging web/mobile compatibility.
@@ -305,9 +307,18 @@ No unrun item is inferred from source, simulator stills or prior-build evidence.
 - Draft PR: [#158](https://github.com/kwabiwe/dayframe/pull/158), kept draft and
   unmerged.
 - Pre-follow-up implementation head: `f3b6fac4d4c8aa61e3b61504f005f7da2f6c2069`.
-- Follow-up head: pending commit/push.
-- Updated Vercel Preview/deployment ID: pending final push.
-- Stable staging alias: pending repoint to the updated exact Ready Preview.
+- Follow-up implementation commit:
+  `7abfa95b61cbceadce336edf406137ecbaa820de`.
+- Updated Ready Vercel Preview for that implementation commit:
+  `dpl_6mLGvuk5A2tpV96B5zTyWbrUN97L` /
+  `https://dayframe-lgryqkr79-dayframeworkshop.vercel.app`.
+- Stable staging alias: promotion PASS;
+  `https://dayframe-staging.vercel.app` resolved to that exact deployment after
+  explicit assignment. Root and Login returned 200; unauthenticated
+  `/api/auth/me` correctly returned 401.
+- This exact evidence record is a documentation-only successor commit. Its own
+  immutable Vercel deployment and final stable-alias target are recorded in the
+  PR evidence ledger and handoff rather than recursively changing the head again.
 - EAS `preview`: BLOCKED; CLI is not authenticated. No build ID or URL exists. A
   future build must use the checked-in `preview` profile targeting
   `https://dayframe-staging.vercel.app`.
