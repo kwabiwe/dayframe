@@ -1,7 +1,7 @@
 # Web Unified Compact Time Editor
 
 Date: 2026-08-04
-Status: Active branch, draft PR pending
+Status: Draft PR [#159](https://github.com/kwabiwe/dayframe/pull/159), unmerged
 Baseline: `136b049` (`origin/main`, including PR #158)
 Branch: `codex/web-unified-compact-time-editor`
 
@@ -90,4 +90,13 @@ The Preview/staging evidence and exact hosted limitations remain pending until t
 
 ## Hosted Preview And Staging
 
-Pending draft PR and Ready Preview. Production must remain unchanged. Stable staging may move only to the exact Ready branch Preview; authenticated staging and the mobile preview-profile smoke are recorded `PASS`, `FAIL`, or `NOT RUN` independently.
+- PASS: draft PR [#159](https://github.com/kwabiwe/dayframe/pull/159) opened from `codex/web-unified-compact-time-editor` at implementation commit `5768931` and remains unmerged.
+- PASS: Vercel deployment `dpl_E35vEWD8MHu9w4ZDYUXmB8v7ih9e` completed as target `preview`, status `Ready`, at `https://dayframe-opfje98r4-dayframeworkshop.vercel.app`.
+- PASS: direct Preview `/login` returned `200` and rendered the Dayframe provider login with no browser warnings/errors; anonymous `/api/bootstrap` returned JSON `401`.
+- PASS: the existing staging tag schema required by this editor was checked read-only: tag/workspace columns, normalized-name/workspace unique constraints, workspace-qualified association foreign keys, and workspace-member tag/association RLS policies are present. This PR adds no migration.
+- PASS: the stable `dayframe-staging.vercel.app` alias was explicitly assigned to that exact Ready Preview. `vercel inspect` resolved the alias to the same Preview deployment id; stable staging `/login` returned/rendered `200` with no browser warnings/errors, and anonymous `/api/bootstrap` returned JSON `401`.
+- PASS: production was not moved. `dayframe-web.vercel.app` continued to resolve to separate Ready production deployment `dpl_AcNzWzah1knjLxMwy43KbZek6qbu` at `https://dayframe-7be352pod-dayframeworkshop.vercel.app`.
+- NOT RUN: authenticated staging Calendar/List/Reports edit/save/delete/Undo parity. No staging login credentials were available in the workspace or connector session, so no authenticated data mutation is claimed.
+- NOT RUN: staging-pinned mobile `preview` profile smoke on a physical iPhone. No device/build session was available, and this PR changes no mobile code or web/mobile API route contract.
+
+The documentation evidence commit creates a final docs-only branch head after the implementation Preview above. The stable alias must be rechecked against the final Ready branch Preview before handoff; production remains untouched.
