@@ -6,9 +6,11 @@ Branch: `codex/mobile-calendar-block-visual-system`
 
 Base: `a7f0cf7030166d2ed999c094f82fafcc842c9af3` (`origin/main`, merged PR #156)
 
-Head: pending commit; the final PR head will be recorded in the PR and handoff
+Implementation head: `aacaed02007b7f545d246a88364962e7d8dab9c4`; this
+evidence update advances the draft PR head without changing runtime code
 
-Status: implementation and local automated/native-build validation complete; hosted and physical-device validation in progress
+Status: implementation, local validation, draft PR, and staging Preview promotion
+complete; EAS, authenticated staging, and physical-device validation remain blocked
 
 ## Scope and non-goals
 
@@ -183,9 +185,44 @@ Not run locally:
   evidence.
 - physical-iPhone validation. Xcode reported the available iPhones and iPad as
   offline, so no real-device install or gesture/display-scale check was possible.
-- exact Vercel Preview, stable staging alias, EAS preview build, and authenticated
-  staging web/mobile compatibility matrix. These are completed after the branch is
-  pushed and the draft PR exists.
+- EAS preview build. `eas-cli whoami` returned `Not logged in`; no interactive
+  credential flow was started and no build/artifact ID exists.
+- authenticated staging web/mobile compatibility. No staging test-account session
+  was available, and no preview binary could be created without EAS authentication.
+
+## Draft PR, Vercel Preview, and staging
+
+- Draft PR: [#157](https://github.com/kwabiwe/dayframe/pull/157), intentionally
+  left draft and unmerged.
+- The GitHub Vercel check passed for exact implementation head `aacaed0`.
+- Exact Ready deployment: `dpl_t4Zn2VqXF8U8NbcSENfVeyPm8MKK`, target `preview`,
+  with branch alias
+  `dayframe-web-git-codex-mobile-calendar-bf5c05-dayframeworkshop.vercel.app`.
+- Vercel lists encrypted Preview-scoped deployment-environment, provider-auth,
+  public Supabase, database, and location-rollout variables. Pulled values were
+  returned only as `[SENSITIVE]`, so independent staging-versus-production project
+  reference comparison was NOT RUN; no value was printed or retained.
+- The exact Ready Preview was assigned to `https://dayframe-staging.vercel.app`.
+  Vercel inspection resolved the stable alias back to the same Preview deployment;
+  staging `/login` returned 200 and anonymous `/api/bootstrap` returned 401.
+- Production remained unchanged on separate Ready production deployment
+  `dpl_3vHmHCMZp7vUcrUwFcurFot2TuTD`. No production alias, configuration,
+  credential, data, or deployment mutation was performed.
+
+## EAS preview and staging compatibility
+
+The checked-in `preview` profile bakes
+`EXPO_PUBLIC_DAYFRAME_API_BASE=https://dayframe-staging.vercel.app`, uses internal
+distribution, and identifies the release channel as `preview`. Preview and
+TestFlight still share `com.layereight.dayframe`; installing a future preview may
+replace the production/TestFlight app until the deferred staging identity lands.
+
+`npx --yes eas-cli@21.5.0 whoami` returned `Not logged in`, so the authorized
+preview build could not be submitted. No production profile, TestFlight upload, or
+credential mutation was attempted. The anonymous hosted matrix passed for staging
+web/login and fail-closed bootstrap; provider-authenticated web and mobile parity,
+Calendar data refresh, edits, timer sync, Review sync, overlap continuity, and
+cross-surface checks remain NOT RUN.
 
 ## Migration and production safety
 
