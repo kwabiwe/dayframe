@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  calendarBlockFallbackLine,
   calendarBlockLaneInsets,
   calendarBlockPrimaryParts,
   calendarBlockPrimaryLine,
@@ -137,7 +136,7 @@ describe("time block display helpers", () => {
     expect(policy()).toBe(true);
   });
 
-  it("formats the combined primary, fallback, and full-entry secondary lines", () => {
+  it("formats the combined primary and full-entry secondary lines", () => {
     const entry = {
       categoryName: "Personal",
       description: "Train station pickup/drop-off",
@@ -154,7 +153,6 @@ describe("time block display helpers", () => {
       firstTag: "Family duties",
       hiddenTagCount: 2
     });
-    expect(calendarBlockFallbackLine(entry)).toBe("Train station pickup/drop-off");
     expect(calendarBlockPrimaryLine({ ...entry, description: "", categoryName: null })).toBe(
       "Uncategorized · #Family duties +2"
     );

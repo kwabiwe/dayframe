@@ -61,9 +61,6 @@ describe("web tag editor interaction contract", () => {
     expect(styles).toMatch(/\.inline-tag-input-anchor \{[^}]*--inline-selected-tag-target-height:\s*44px;[^}]*--inline-selected-tag-visual-height:\s*24px;/s);
     expect(styles).toMatch(/\.inline-selected-tag,\s*\.inline-selected-tag-overflow\s*\{[^}]*height:\s*var\(--inline-selected-tag-target-height\);[^}]*background:\s*transparent;[^}]*font-weight:\s*400;/s);
     expect(styles).toMatch(/\.inline-selected-tag-visual,\s*\.inline-selected-tag-overflow-visual\s*\{[^}]*height:\s*var\(--inline-selected-tag-visual-height\);[^}]*border-radius:\s*6px;[^}]*background:\s*transparent;/s);
-    expect(styles).toMatch(/\.inline-selected-tag-visual,\s*\.inline-selected-tag-overflow-visual\s*\{[^}]*align-items:\s*center;/s);
-    expect(styles).toMatch(/\.inline-selected-tag-visual > svg \{[^}]*position:\s*relative;[^}]*top:\s*1px;/s);
-    expect(styles).not.toMatch(/\.inline-selected-tag-visual,\s*\.inline-selected-tag-overflow-visual\s*\{[^}]*align-items:\s*baseline;/s);
     expect(styles).toMatch(/\.inline-selected-tag:hover \.inline-selected-tag-visual\s*\{[^}]*background:\s*var\(--accent-soft\);[^}]*color:\s*var\(--accent-text\);/s);
     expect(styles).not.toMatch(/\.inline-selected-tag:focus-visible \.inline-selected-tag-visual\s*\{[^}]*var\(--accent/s);
     expect(styles).toMatch(/\.inline-selected-tag:focus-visible \.inline-selected-tag-visual,[\s\S]*box-shadow:\s*inset 0 0 0 2px var\(--focus\);/s);

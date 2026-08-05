@@ -74,7 +74,7 @@ describe("persistent timer floating surfaces", () => {
     );
     expect(tagSource).toContain("<TagIcon size={15} />");
     expect(tagSource).toContain("pickerTriggerRef.current?.focus()");
-    expect(tagSource).toContain("inert={!pickerOpen}");
+    expect(tagSource).toContain("inert={!effectivePickerOpen}");
   });
 
   it("uses one restrained presence transition with a reduced-motion path", () => {

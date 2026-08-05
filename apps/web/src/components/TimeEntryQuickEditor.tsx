@@ -1,7 +1,7 @@
 "use client";
 
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, Play, Trash2, X } from "lucide-react";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
@@ -36,6 +36,8 @@ import type { CategoryRow, TagRow, TimeEntryRow } from "@/lib/queries";
 
 export type TimeEntryQuickEditorMutationOutcome = { ok: true } | { ok: false; error: string };
 
+type TimeEntryQuickEditorBusyAction = "delete" | "save" | "start";
+
 type TimeEntryQuickEditorBaseProps = {
   capturedNow: Date;
   categories: CategoryRow[];
@@ -62,6 +64,7 @@ export type TimeEntryQuickEditorProps = TimeEntryQuickEditorBaseProps & (
 );
 
 export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
+  const temporalErrorId = useId();
   const entry = props.mode === "entry" ? props.entry : null;
   const createSource = props.mode === "create" ? props.source : null;
   const onCreateDraftChange = props.mode === "create" ? props.onDraftChange : null;
@@ -78,6 +81,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
   const [dismissTagPanelsSignal, setDismissTagPanelsSignal] = useState(0);
   const [categoryIndex, setCategoryIndex] = useState(0);
   const [isBusy, setIsBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<TimeEntryQuickEditorBusyAction | null>(null);
   const [discardPrompt, setDiscardPrompt] = useState(false);
   const [isEntered, setIsEntered] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
@@ -95,6 +99,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
   const discardPromptRef = useRef(false);
   const discardReturnFocusRef = useRef<HTMLElement | null>(null);
   const busyRef = useRef(false);
+  const mutationReturnFocusRef = useRef<HTMLElement | null>(null);
   const closeTokenRef = useRef(0);
   const exitTimeoutRef = useRef<number | null>(null);
   const onDraftChangeRef = useRef(onCreateDraftChange);
@@ -135,10 +140,43 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
   const mutationBlockedByTimer = props.mode === "create" || !entry?.stoppedAt;
   const saveBlockedByTimer = mutationBlockedByTimer && props.isTimerBusy;
 
+  const beginMutation = useCallback((action: TimeEntryQuickEditorBusyAction) => {
+    if (busyRef.current) return false;
+    const activeElement = document.activeElement;
+    mutationReturnFocusRef.current = activeElement instanceof HTMLElement && panelRef.current?.contains(activeElement)
+      ? activeElement
+      : descriptionRef.current;
+    busyRef.current = true;
+    setBusyAction(action);
+    setIsBusy(true);
+    setError(null);
+    setIsCategoryOpen(false);
+    setOpenDatePicker(null);
+    setDismissTagPanelsSignal((value) => value + 1);
+    return true;
+  }, []);
+
+  const recoverMutation = useCallback((message: string) => {
+    setError(message);
+    busyRef.current = false;
+    setBusyAction(null);
+    setIsBusy(false);
+    window.requestAnimationFrame(() => {
+      const returnTarget = mutationReturnFocusRef.current;
+      const canRestoreReturnTarget = Boolean(
+        returnTarget?.isConnected &&
+        !returnTarget.matches(":disabled") &&
+        !returnTarget.closest("[inert]")
+      );
+      (canRestoreReturnTarget ? returnTarget : descriptionRef.current)?.focus({ preventScroll: true });
+    });
+  }, []);
+
   const updateField = useCallback(<Key extends CalendarEntryCompactEditableKey,>(
     key: Key,
     value: CalendarEntryCompactDraft[Key]
   ) => {
+    if (busyRef.current) return;
     setDraft((current) => ({ ...current, [key]: value }));
     setDirty((current) => ({ ...current, [key]: true }));
     setError(null);
@@ -155,6 +193,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     owner: "start" | "finish" | "duration",
     commit = false
   ) => {
+    if (busyRef.current) return;
     setActiveTemporalOwner(commit ? null : owner);
     setDraft((current) => {
       const next = { ...current, [key]: value, temporalOwner: owner };
@@ -169,6 +208,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
   }, [temporalSource]);
 
   const commitTemporalField = useCallback((owner: "start" | "finish" | "duration") => {
+    if (busyRef.current) return;
     setActiveTemporalOwner(null);
     setDraft((current) => {
       if (current.temporalOwner !== owner) return current;
@@ -351,9 +391,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
       finishDismiss(true);
       return;
     }
-    busyRef.current = true;
-    setIsBusy(true);
-    setError(null);
+    if (!beginMutation("save")) return;
     let outcome: TimeEntryQuickEditorMutationOutcome;
     try {
       outcome = props.mode === "entry"
@@ -363,9 +401,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
       outcome = { ok: false, error: "Unable to save this entry. Check your connection and try again." };
     }
     if (!outcome.ok) {
-      setError(outcome.error);
-      busyRef.current = false;
-      setIsBusy(false);
+      recoverMutation(outcome.error);
       return;
     }
     finishDismiss(true);
@@ -382,9 +418,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
 
   async function startAgain() {
     if (props.mode !== "entry" || !props.onStartAgain || busyRef.current || props.isTimerBusy) return;
-    busyRef.current = true;
-    setIsBusy(true);
-    setError(null);
+    if (!beginMutation("start")) return;
     let outcome: TimeEntryQuickEditorMutationOutcome;
     try {
       outcome = await props.onStartAgain();
@@ -392,9 +426,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
       outcome = { ok: false, error: "Unable to start this entry again. Check your connection and try again." };
     }
     if (!outcome.ok) {
-      setError(outcome.error);
-      busyRef.current = false;
-      setIsBusy(false);
+      recoverMutation(outcome.error);
       return;
     }
     finishDismiss(false);
@@ -402,21 +434,28 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
 
   async function deleteEntry() {
     if (props.mode !== "entry" || !props.onDelete || busyRef.current) return;
+    if (!beginMutation("delete")) return;
     try {
       const outcome = await props.onDelete();
-      if (outcome && !outcome.ok) setError(outcome.error);
+      if (outcome && !outcome.ok) {
+        recoverMutation(outcome.error);
+        return;
+      }
+      finishDismiss(false);
     } catch {
-      setError("Unable to delete this entry. Check your connection and try again.");
+      recoverMutation("Unable to delete this entry. Check your connection and try again.");
     }
   }
 
   function openCategoryMenu() {
+    if (busyRef.current) return;
     const selectedIndex = categoryOptions.findIndex((category) => (category?.id ?? "") === draft.categoryId);
     setCategoryIndex(Math.max(0, selectedIndex));
     setIsCategoryOpen((open) => !open);
   }
 
   function handleCategoryKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (busyRef.current) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       const direction = event.key === "ArrowDown" ? 1 : -1;
@@ -465,6 +504,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
 
   return {
     attemptDismiss,
+    busyAction,
     cancelDiscardPrompt,
     categoryButtonRef,
     categoryIndex,
@@ -503,6 +543,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     startAgain,
     startIsInvalid,
     today,
+    temporalErrorId,
     title,
     updateField,
     updateTemporalField,
@@ -525,6 +566,7 @@ export function TimeEntryQuickEditorPanel({
 }) {
   const entry = props.mode === "entry" ? props.entry : null;
   const {
+    busyAction,
     categoryButtonRef,
     categoryIndex,
     categoryOptions,
@@ -546,6 +588,7 @@ export function TimeEntryQuickEditorPanel({
     saveBlockedByTimer,
     selectedCategory,
     startIsInvalid,
+    temporalErrorId,
     today,
     title
   } = controller;
@@ -560,6 +603,7 @@ export function TimeEntryQuickEditorPanel({
       <button
         type="button"
         className="calendar-compact-save"
+        aria-busy={busyAction === "save" || undefined}
         disabled={isBusy || saveBlockedByTimer || !preview.plan}
         onClick={() => void controller.save()}
       >
@@ -592,6 +636,11 @@ export function TimeEntryQuickEditorPanel({
       aria-busy={isBusy || undefined}
       aria-modal={surface === "modal"}
     >
+      {busyAction ? (
+        <span className="sr-only" role="status" aria-live="polite">
+          {busyAction === "delete" ? "Deleting entry…" : busyAction === "start" ? "Starting entry…" : "Saving entry…"}
+        </span>
+      ) : null}
       <div className="calendar-compact-editor-header">
         <div>
           <span className="calendar-compact-editor-kicker">{entry ? "Calendar entry" : "New Calendar entry"}</span>
@@ -603,6 +652,7 @@ export function TimeEntryQuickEditorPanel({
               className="calendar-compact-icon-action"
               type="button"
               aria-label={`Start ${title} again`}
+              aria-busy={busyAction === "start" || undefined}
               disabled={controlsDisabled || props.isTimerBusy}
               onClick={() => void controller.startAgain()}
             >
@@ -614,6 +664,7 @@ export function TimeEntryQuickEditorPanel({
               className="calendar-compact-icon-action is-danger"
               type="button"
               aria-label={`Delete ${title}`}
+              aria-busy={busyAction === "delete" || undefined}
               disabled={controlsDisabled}
               onClick={() => void controller.deleteEntry()}
             >
@@ -639,6 +690,7 @@ export function TimeEntryQuickEditorPanel({
             ariaLabel="Time entry description"
             className="time-entry-quick-tags"
             closeSignal={controller.dismissTagPanelsSignal}
+            disabled={controlsDisabled}
             inputId="time-entry-quick-description"
             inputRef={descriptionRef}
             onChange={(value) => controller.updateField("description", value)}
@@ -684,6 +736,7 @@ export function TimeEntryQuickEditorPanel({
                     role="option"
                     aria-selected={selected}
                     className={index === categoryIndex ? "is-active" : ""}
+                    disabled={controlsDisabled}
                     onMouseEnter={() => controller.setCategoryIndex(index)}
                     onClick={() => {
                       controller.updateField("categoryId", value);
@@ -710,6 +763,7 @@ export function TimeEntryQuickEditorPanel({
             <span className="calendar-compact-field-label">Start</span>
             <div className="calendar-compact-date-time-controls">
               <input
+                aria-describedby={feedbackMode === "error" && startIsInvalid ? temporalErrorId : undefined}
                 aria-invalid={startIsInvalid || undefined}
                 aria-label="Start time"
                 disabled={controlsDisabled}
@@ -745,6 +799,7 @@ export function TimeEntryQuickEditorPanel({
             ) : (
               <div className="calendar-compact-date-time-controls">
                 <input
+                  aria-describedby={feedbackMode === "error" && finishIsInvalid ? temporalErrorId : undefined}
                   aria-invalid={finishIsInvalid || undefined}
                   aria-label={finishDescription}
                   disabled={controlsDisabled}
@@ -788,6 +843,7 @@ export function TimeEntryQuickEditorPanel({
             <label className="calendar-compact-duration-input">
               <span>Duration</span>
               <input
+                aria-describedby={feedbackMode === "error" && controller.durationIsInvalid ? temporalErrorId : undefined}
                 aria-invalid={controller.durationIsInvalid || undefined}
                 aria-label="Duration in hours and minutes"
                 disabled={controlsDisabled}
@@ -823,7 +879,7 @@ export function TimeEntryQuickEditorPanel({
         >
           <div className={`calendar-compact-feedback-copy${feedbackMode === "error" ? " is-error" : ""}`}>
             {feedbackMode === "error" && displayError ? (
-              <p id="calendar-compact-time-error" role="alert" aria-atomic="true" aria-live="assertive">{displayError}</p>
+              <p id={temporalErrorId} role="alert" aria-atomic="true" aria-live="assertive">{displayError}</p>
             ) : null}
             {feedbackMode === "overlap" && preview.plan ? (
               <OverlapNotice

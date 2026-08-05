@@ -27,6 +27,7 @@ export function InlineTagInput({
   ariaLabel,
   className = "",
   closeSignal = 0,
+  disabled = false,
   inputClassName = "",
   inputId,
   inputRef: externalInputRef,
@@ -47,6 +48,7 @@ export function InlineTagInput({
   ariaLabel: string;
   className?: string;
   closeSignal?: number;
+  disabled?: boolean;
   inputClassName?: string;
   inputId?: string;
   inputRef?: RefObject<HTMLInputElement | null>;
@@ -80,7 +82,7 @@ export function InlineTagInput({
   const [tagWidths, setTagWidths] = useState<number[]>([]);
   const [pickerPosition, setPickerPosition] = useState<CSSProperties | null>(null);
   const [suggestionsPosition, setSuggestionsPosition] = useState<CSSProperties | null>(null);
-  const active = focused && !pickerOpen ? findActiveHashtag(value, caret) : null;
+  const active = !disabled && focused && !pickerOpen ? findActiveHashtag(value, caret) : null;
   const selectedNormalized = useMemo(
     () => new Set(selectedTagNames.map((tagName) => normalizeTagName(tagName).normalizedName)),
     [selectedTagNames]
@@ -110,7 +112,8 @@ export function InlineTagInput({
     ],
     [createName, matches]
   );
-  const shouldOpen = focused && Boolean(active) && !pickerOpen;
+  const shouldOpen = !disabled && focused && Boolean(active) && !pickerOpen;
+  const effectivePickerOpen = !disabled && pickerOpen;
   const normalizedPickerQuery = pickerQuery.trim().toLowerCase();
   const pickerOptions = useMemo(() => {
     const byNormalized = new Map(tags.map((tag) => [tag.normalizedName, tag]));
@@ -167,14 +170,23 @@ export function InlineTagInput({
   }, [selectedTagNames]);
 
   useEffect(() => {
-    onHashtagPanelChange?.(shouldOpen || pickerOpen);
-  }, [onHashtagPanelChange, pickerOpen, shouldOpen]);
+    onHashtagPanelChange?.(shouldOpen || effectivePickerOpen);
+  }, [effectivePickerOpen, onHashtagPanelChange, shouldOpen]);
 
   useEffect(() => {
-    if (!pickerOpen) return undefined;
+    if (!effectivePickerOpen) return undefined;
     const frame = window.requestAnimationFrame(() => pickerInputRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
-  }, [pickerOpen]);
+  }, [effectivePickerOpen]);
+
+  useEffect(() => {
+    if (!disabled) return undefined;
+    const timeout = window.setTimeout(() => {
+      setFocused(false);
+      setPickerOpen(false);
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [disabled]);
 
   useEffect(() => {
     if (!closeSignal) return undefined;
@@ -186,7 +198,7 @@ export function InlineTagInput({
   }, [closeSignal]);
 
   useEffect(() => {
-    if (!pickerOpen) return undefined;
+    if (!effectivePickerOpen) return undefined;
     function closeOnOutside(event: MouseEvent) {
       const target = event.target as Node;
       if (!editorRef.current?.contains(target) && !pickerPanelRef.current?.contains(target)) setPickerOpen(false);
@@ -205,10 +217,10 @@ export function InlineTagInput({
       document.removeEventListener("mousedown", closeOnOutside);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [pickerOpen]);
+  }, [effectivePickerOpen]);
 
   useLayoutEffect(() => {
-    if (!portal || (!shouldOpen && !pickerOpen)) return undefined;
+    if (!portal || (!shouldOpen && !effectivePickerOpen)) return undefined;
     function updatePosition() {
       const anchor = anchorRef.current;
       if (!anchor) return;
@@ -237,7 +249,7 @@ export function InlineTagInput({
         return { left, top, width } satisfies CSSProperties;
       };
       if (shouldOpen) setSuggestionsPosition(place(suggestionsPanelRef.current, suggestionsWidth, false));
-      if (pickerOpen) setPickerPosition(place(pickerPanelRef.current, pickerWidth, true));
+      if (effectivePickerOpen) setPickerPosition(place(pickerPanelRef.current, pickerWidth, true));
     }
     updatePosition();
     window.addEventListener("resize", updatePosition);
@@ -250,7 +262,7 @@ export function InlineTagInput({
       window.visualViewport?.removeEventListener("resize", updatePosition);
       window.visualViewport?.removeEventListener("scroll", updatePosition);
     };
-  }, [pickerOpen, portal, shouldOpen]);
+  }, [effectivePickerOpen, portal, shouldOpen]);
 
   function updateCaret() {
     const input = localInputRef.current;
@@ -258,6 +270,7 @@ export function InlineTagInput({
   }
 
   function addSelectedTag(tagName: string) {
+    if (disabled) return false;
     const normalized = normalizeTagName(tagName);
     if (selectedNormalized.has(normalized.normalizedName)) return true;
     if (selectedTagNames.length >= TAG_SELECTION_MAX_COUNT) return false;
@@ -267,6 +280,7 @@ export function InlineTagInput({
   }
 
   function toggleSelectedTag(tagName: string) {
+    if (disabled) return;
     const normalizedName = normalizeTagName(tagName).normalizedName;
     if (selectedNormalized.has(normalizedName)) {
       onSelectedTagNamesChange(selectedTagNames.filter(
@@ -278,7 +292,7 @@ export function InlineTagInput({
   }
 
   function selectAction(action: (typeof actions)[number]) {
-    if (!active) return;
+    if (disabled || !active) return;
     if (!addSelectedTag(action.label)) return;
     const replacement = consumeActiveHashtag(value, active);
     onChange(replacement.text);
@@ -291,6 +305,7 @@ export function InlineTagInput({
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (disabled) return;
     if (!shouldOpen) {
       onInputKeyDown?.(event);
       if (event.defaultPrevented) return;
@@ -328,6 +343,7 @@ export function InlineTagInput({
           aria-expanded={shouldOpen}
           autoComplete="off"
           className={`${inputClassName} inline-tag-description-input`.trim()}
+          disabled={disabled}
           id={inputId}
           name={name}
           onBlur={() => setFocused(false)}
@@ -360,6 +376,7 @@ export function InlineTagInput({
             <button
               aria-label={`Remove tag ${tagName}`}
               className="inline-selected-tag"
+              disabled={disabled}
               key={normalizeTagName(tagName).normalizedName}
               onClick={() => toggleSelectedTag(tagName)}
               type="button"
@@ -374,6 +391,7 @@ export function InlineTagInput({
             <button
               aria-label={`Show ${tagDisplay.hiddenCount} more selected tags`}
               className="inline-selected-tag-overflow"
+              disabled={disabled}
               onClick={() => {
                 setPickerOpen(true);
                 setPickerQuery("");
@@ -393,10 +411,11 @@ export function InlineTagInput({
           ))}
         </span>
         <button
-          aria-expanded={pickerOpen}
+          aria-expanded={effectivePickerOpen}
           aria-haspopup="dialog"
           aria-label="Add or filter tags"
-          className={`inline-tag-picker-trigger${pickerOpen ? " is-open" : ""}`}
+          className={`inline-tag-picker-trigger${effectivePickerOpen ? " is-open" : ""}`}
+          disabled={disabled}
           onClick={() => {
             setPickerOpen((open) => {
               const next = !open;
@@ -425,6 +444,7 @@ export function InlineTagInput({
                 aria-label={action.create ? `Create new tag, ${action.label}` : `Existing tag, ${action.label}`}
                 aria-selected={highlightedIndex === index}
                 className={`${highlightedIndex === index ? "is-highlighted" : ""}${action.create ? " is-create" : ""}`}
+                disabled={disabled}
                 key={action.id}
                 onMouseDown={(event) => event.preventDefault()}
                 onMouseEnter={() => setHighlightedIndex(index)}
@@ -440,10 +460,10 @@ export function InlineTagInput({
           </div>
         </div>)}
         {maybePortal(<section
-          aria-hidden={!pickerOpen}
+          aria-hidden={!effectivePickerOpen}
           aria-label="Add or filter tags"
-          className={`ui-floating-surface inline-tag-picker${pickerOpen ? " is-open" : ""}${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
-          inert={!pickerOpen}
+          className={`ui-floating-surface inline-tag-picker${effectivePickerOpen ? " is-open" : ""}${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
+          inert={!effectivePickerOpen}
           ref={pickerPanelRef}
           role="dialog"
           style={portal ? { ...pickerPosition, visibility: pickerPosition ? "visible" : "hidden" } : undefined}
@@ -452,6 +472,7 @@ export function InlineTagInput({
               <strong>Tags</strong>
               <button
                 aria-label="Close tag picker"
+                disabled={disabled}
                 onClick={() => {
                   pickerInputRef.current?.blur();
                   setPickerOpen(false);
@@ -467,6 +488,7 @@ export function InlineTagInput({
               <input
                 aria-label="Add or filter tags"
                 autoComplete="off"
+                disabled={disabled}
                 onChange={(event) => setPickerQuery(event.target.value)}
                 placeholder="Add/filter tags"
                 ref={pickerInputRef}
@@ -479,7 +501,7 @@ export function InlineTagInput({
                 return (
                   <button
                     aria-pressed={selected}
-                    disabled={!selected && selectedTagNames.length >= TAG_SELECTION_MAX_COUNT}
+                    disabled={disabled || (!selected && selectedTagNames.length >= TAG_SELECTION_MAX_COUNT)}
                     key={tag.id}
                     onClick={() => toggleSelectedTag(tag.name)}
                     type="button"
@@ -498,6 +520,7 @@ export function InlineTagInput({
             {pickerCreateName && selectedTagNames.length < TAG_SELECTION_MAX_COUNT ? (
               <button
                 className="inline-tag-picker-create"
+                disabled={disabled}
                 onClick={() => {
                   addSelectedTag(pickerCreateName);
                   setPickerQuery("");

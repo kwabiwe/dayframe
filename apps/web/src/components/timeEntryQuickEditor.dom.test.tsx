@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { createElement } from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CalendarEntryCompactSavePlan } from "@/lib/calendar-entry-compact-editor";
@@ -10,6 +10,7 @@ import type { TimeEntryRow } from "@/lib/queries";
 import { TimeEntryQuickEditorModal } from "./TimeEntryQuickEditor";
 
 type SaveHandler = (plan: CalendarEntryCompactSavePlan) => Promise<{ ok: true } | { ok: false; error: string }>;
+type DeleteHandler = () => Promise<{ ok: true } | { ok: false; error: string }>;
 
 describe("TimeEntryQuickEditorModal", () => {
   beforeEach(() => {
@@ -168,6 +169,86 @@ describe("TimeEntryQuickEditorModal", () => {
     resolveSave({ ok: true });
   });
 
+  it("disables Description, tags, and every conflicting control for the full Save request", async () => {
+    const deferred = promiseController<{ ok: false; error: string }>();
+    const onClose = vi.fn();
+    const onSave = vi.fn<SaveHandler>().mockReturnValue(deferred.promise);
+    const onDelete = vi.fn<DeleteHandler>().mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    renderModal({ onClose, onDelete, onSave });
+    const editor = await screen.findByTestId("time-entry-quick-editor");
+    const description = screen.getByLabelText("Time entry description") as HTMLInputElement;
+
+    await user.clear(description);
+    await user.type(description, "Captured before save{Enter}");
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+
+    expect(editor.getAttribute("aria-busy")).toBe("true");
+    expect(screen.getByRole("status").textContent).toBe("Saving entry…");
+    expect(description.disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Remove tag Planning" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Add or filter tags" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /Uncategorized/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Start time") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Finish time") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Duration in hours and minutes") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /Delete Plan release/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Close editor" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+
+    await user.type(description, " late edit");
+    await user.click(screen.getByRole("button", { name: "Remove tag Planning" }));
+    expect(description.value).toBe("Captured before save");
+    expect(screen.getByRole("button", { name: "Remove tag Planning" })).not.toBeNull();
+
+    await act(async () => deferred.resolve({ ok: false, error: "Save failed safely." }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Save failed safely");
+    await waitFor(() => expect(description.disabled).toBe(false));
+    await waitFor(() => expect(document.activeElement).toBe(description));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("enters a duplicate-safe Delete busy state and restores the editor after failure", async () => {
+    const deferred = promiseController<{ ok: false; error: string }>();
+    const onClose = vi.fn();
+    const onDelete = vi.fn<DeleteHandler>().mockReturnValue(deferred.promise);
+    const user = userEvent.setup();
+    renderModal({ onClose, onDelete });
+    const editor = await screen.findByTestId("time-entry-quick-editor");
+    const deleteButton = screen.getByRole("button", { name: "Delete Plan release" }) as HTMLButtonElement;
+
+    await user.click(deleteButton);
+    expect(onDelete).toHaveBeenCalledOnce();
+    expect(editor.getAttribute("aria-busy")).toBe("true");
+    expect(deleteButton.getAttribute("aria-busy")).toBe("true");
+    expect(deleteButton.disabled).toBe(true);
+    expect(screen.getByRole("status").textContent).toBe("Deleting entry…");
+    expect((screen.getByLabelText("Time entry description") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(deleteButton);
+    expect(onDelete).toHaveBeenCalledOnce();
+
+    await act(async () => deferred.resolve({ ok: false, error: "Delete was rejected." }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Delete was rejected");
+    await waitFor(() => expect(editor.getAttribute("aria-busy")).toBeNull());
+    expect(deleteButton.disabled).toBe(false);
+    await waitFor(() => expect(document.activeElement).toBe(deleteButton));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("dismisses only after a successful asynchronous Delete settles", async () => {
+    const deferred = promiseController<{ ok: true }>();
+    const onClose = vi.fn();
+    const onDelete = vi.fn<DeleteHandler>().mockReturnValue(deferred.promise);
+    renderModal({ onClose, onDelete });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Delete Plan release" }));
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => deferred.resolve({ ok: true }));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it("dismisses an untouched running editor cleanly but prompts after a real Start edit", async () => {
     const onClose = vi.fn();
     const view = renderModal({ onClose, sourceEntry: timeEntry({ stoppedAt: null, durationSeconds: 3_600 }) });
@@ -189,10 +270,12 @@ describe("TimeEntryQuickEditorModal", () => {
 
 function renderModal({
   onClose = vi.fn(),
+  onDelete,
   onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true }),
   sourceEntry = timeEntry()
 }: {
   onClose?: () => void;
+  onDelete?: DeleteHandler;
   onSave?: SaveHandler;
   sourceEntry?: TimeEntryRow;
 } = {}) {
@@ -202,6 +285,7 @@ function renderModal({
     entry: sourceEntry,
     isTimerBusy: false,
     onClose,
+    onDelete,
     onSave,
     peerEntries: [],
     tags: [
@@ -209,6 +293,14 @@ function renderModal({
       { id: "deep-work", name: "Deep work", normalizedName: "deep work", usageCount: 1 }
     ]
   }));
+}
+
+function promiseController<Value>() {
+  let resolve!: (value: Value) => void;
+  const promise = new Promise<Value>((resolver) => {
+    resolve = resolver;
+  });
+  return { promise, resolve };
 }
 
 function timeEntry(overrides: Partial<TimeEntryRow> = {}): TimeEntryRow {

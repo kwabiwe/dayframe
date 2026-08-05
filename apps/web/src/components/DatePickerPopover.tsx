@@ -37,6 +37,7 @@ export function DatePickerPopover({
   value: string;
 }) {
   const [open, setOpen] = useState(false);
+  const effectiveOpen = open && !disabled;
   const panelId = useId();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
@@ -51,7 +52,13 @@ export function DatePickerPopover({
   }, [onOpenChange]);
 
   useEffect(() => {
-    if (!open) return undefined;
+    if (!disabled || !open) return undefined;
+    const timeout = window.setTimeout(() => updateOpen(false), 0);
+    return () => window.clearTimeout(timeout);
+  }, [disabled, open, updateOpen]);
+
+  useEffect(() => {
+    if (!effectiveOpen) return undefined;
     function closeOnOutside(event: MouseEvent) {
       if (
         !rootRef.current?.contains(event.target as Node) &&
@@ -71,10 +78,10 @@ export function DatePickerPopover({
       document.removeEventListener("mousedown", closeOnOutside);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [open, updateOpen]);
+  }, [effectiveOpen, updateOpen]);
 
   useLayoutEffect(() => {
-    if (!open || !portal) return undefined;
+    if (!effectiveOpen || !portal) return undefined;
     function updatePosition() {
       const trigger = triggerRef.current;
       const panel = panelRef.current;
@@ -111,10 +118,10 @@ export function DatePickerPopover({
       window.visualViewport?.removeEventListener("resize", updatePosition);
       window.visualViewport?.removeEventListener("scroll", updatePosition);
     };
-  }, [open, portal]);
+  }, [effectiveOpen, portal]);
 
   function choose(date: string) {
-    if (!date) return;
+    if (disabled || !date) return;
     onChange(date);
     updateOpen(false);
     triggerRef.current?.focus();
@@ -122,11 +129,11 @@ export function DatePickerPopover({
 
   const panel = (
     <section
-      aria-hidden={!open}
+      aria-hidden={!effectiveOpen}
       aria-label={panelLabel}
-      className={`ui-floating-surface timeline-date-picker-panel${open ? " is-open" : ""}${portal ? " is-portalled" : ""}${panelClassName ? ` ${panelClassName}` : ""}`}
+      className={`ui-floating-surface timeline-date-picker-panel${effectiveOpen ? " is-open" : ""}${portal ? " is-portalled" : ""}${panelClassName ? ` ${panelClassName}` : ""}`}
       id={panelId}
-      inert={!open}
+      inert={!effectiveOpen}
       ref={panelRef}
       role="dialog"
       style={portal ? { ...portalPosition, visibility: portalPosition ? "visible" : "hidden" } : undefined}
@@ -143,7 +150,7 @@ export function DatePickerPopover({
       <button
         aria-label={ariaLabel ?? (iconOnly ? `Choose date, currently ${label}` : undefined)}
         aria-controls={panelId}
-        aria-expanded={open}
+        aria-expanded={effectiveOpen}
         aria-haspopup="dialog"
         className={`timeline-period-trigger${iconOnly ? " is-icon-only" : ""}${triggerClassName ? ` ${triggerClassName}` : ""}`}
         disabled={disabled}

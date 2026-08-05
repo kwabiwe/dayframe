@@ -156,10 +156,6 @@ export function calendarBlockPrimaryLine(entry: CalendarBlockDisplayEntry) {
   return parts.join(" · ");
 }
 
-export function calendarBlockFallbackLine(entry: CalendarBlockDisplayEntry) {
-  return calendarBlockPrimaryParts(entry).description;
-}
-
 export function calendarBlockSecondaryLine(
   entry: Pick<CalendarBlockDisplayEntry, "startedAt" | "stoppedAt">,
   capturedNow: Date

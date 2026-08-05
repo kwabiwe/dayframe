@@ -223,6 +223,59 @@ describe("Calendar click-to-create DOM interactions", () => {
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     expect(onDismiss).toHaveBeenCalledWith({ restoreFocus: true });
   });
+
+  it("renders the same structured primary line at short, medium, and full densities", () => {
+    const content = {
+      categoryColor: "#64748b",
+      categoryId: "work",
+      categoryName: "Work",
+      tagNames: ["Planning", "Review", "Deep work"]
+    };
+    renderCalendar([
+      entryAt("2026-08-02T07:00:00.000Z", "2026-08-02T07:15:00.000Z", {
+        ...content,
+        id: "short-entry",
+        description: "Short block"
+      }),
+      entryAt("2026-08-02T08:00:00.000Z", "2026-08-02T08:30:00.000Z", {
+        ...content,
+        id: "medium-entry",
+        description: "Medium block"
+      }),
+      entryAt("2026-08-02T09:00:00.000Z", "2026-08-02T10:00:00.000Z", {
+        ...content,
+        id: "full-entry",
+        description: "Full block"
+      })
+    ]);
+
+    for (const [id, description] of [
+      ["short-entry", "Short block"],
+      ["medium-entry", "Medium block"],
+      ["full-entry", "Full block"]
+    ] as const) {
+      const block = document.querySelector<HTMLElement>(`[data-entry-id="${id}"]`) as HTMLElement;
+      const primary = block.querySelector<HTMLElement>(".calendar-entry-primary-line") as HTMLElement;
+      expect(primary).not.toBeNull();
+      expect(primary.querySelector(".calendar-entry-description")?.textContent).toBe(description);
+      expect(primary.querySelector(".calendar-entry-category")?.textContent).toBe("Work");
+      expect(primary.querySelectorAll(".calendar-entry-tag")).toHaveLength(1);
+      expect(primary.querySelector(".calendar-entry-tag")?.textContent).toBe("#Planning");
+      expect(primary.querySelector(".calendar-entry-tag-count")?.textContent).toBe(" +2");
+      expect(primary.textContent).toBe(`${description} · Work · #Planning +2`);
+      expect(block.querySelector(".calendar-compact-category-dot")).toBeNull();
+    }
+
+    const short = document.querySelector<HTMLElement>('[data-entry-id="short-entry"]') as HTMLElement;
+    const medium = document.querySelector<HTMLElement>('[data-entry-id="medium-entry"]') as HTMLElement;
+    const full = document.querySelector<HTMLElement>('[data-entry-id="full-entry"]') as HTMLElement;
+    expect(short.dataset.calendarSemanticHeight).toBe("18");
+    expect(medium.dataset.calendarSemanticHeight).toBe("32");
+    expect(full.dataset.calendarSemanticHeight).toBe("64");
+    expect(short.querySelector(".calendar-entry-secondary-line")).toBeNull();
+    expect(medium.querySelector(".calendar-entry-secondary-line")).toBeNull();
+    expect(full.querySelector(".calendar-entry-secondary-line")?.textContent).toMatch(/^1h 00m \(.+ – .+\)$/);
+  });
 });
 
 function renderCalendar(entries: TimeEntryRow[] = [], tags: Array<{
@@ -396,7 +449,12 @@ function promiseController<Value>() {
   return { promise, resolve };
 }
 
-function entryAt(startedAt: string, stoppedAt: string): TimeEntryRow {
+function entryAt(
+  startedAt: string,
+  stoppedAt: string,
+  overrides: Partial<TimeEntryRow> = {}
+): TimeEntryRow {
+  const durationSeconds = Math.floor((new Date(stoppedAt).getTime() - new Date(startedAt).getTime()) / 1_000);
   return {
     id: `entry-${startedAt}`,
     projectId: null,
@@ -415,8 +473,9 @@ function entryAt(startedAt: string, stoppedAt: string): TimeEntryRow {
     startedAt,
     stoppedAt,
     updatedAt: stoppedAt,
-    durationSeconds: 1_800,
+    durationSeconds,
     tagNames: [],
-    tags: []
+    tags: [],
+    ...overrides
   };
 }

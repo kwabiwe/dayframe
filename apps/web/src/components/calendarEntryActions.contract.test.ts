@@ -65,18 +65,7 @@ describe("shared web time-entry quick editor", () => {
     expect(styles).toMatch(/\.calendar-compact-date-trigger:hover,[\s\S]*background:\s*transparent;/s);
   });
 
-  it("renders one combined Calendar line, one temporal line, and density-independent safe Play", () => {
-    expect(timeline).toContain("<CalendarBlockPrimaryLine entry={displayEntry} />");
-    expect(timeline).toContain("calendarBlockPrimaryParts(entry)");
-    expect(timeline).toContain("calendarBlockSecondaryLine(displayEntry, capturedNow)");
-    expect(timeline).toContain('className="calendar-entry-primary-line"');
-    expect(timeline).toContain('className="calendar-entry-secondary-line tabular"');
-    expect(timeline).not.toContain("<TagMetadata");
-    expect(timeline).not.toContain("density.showContext");
-    expect(timeline).not.toContain("density.showTags");
-    expect(timeline).not.toContain('textDensity: lane.textDensity');
-    expect(timeline).toContain('density.showCombinedPrimary && lane.textDensity !== "none"');
-    expect(timeline).toContain('density.showSecondary && lane.textDensity !== "none"');
+  it("keeps the CSS-only Calendar text hierarchy and narrow-container fallback", () => {
     expect(styles).toMatch(/\.calendar-entry-description \{[^}]*font-weight:\s*650;/s);
     expect(styles).toMatch(/\.calendar-entry-category \{[^}]*font-weight:\s*400;/s);
     expect(styles).toMatch(/\.calendar-entry-tag \{[^}]*font-weight:\s*700;/s);
