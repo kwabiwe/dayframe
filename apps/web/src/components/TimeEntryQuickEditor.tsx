@@ -10,14 +10,16 @@ import { OverlapNotice } from "@/components/OverlapNotice";
 import {
   buildCalendarEntryCompactCreatePlan,
   buildCalendarEntryCompactSavePlan,
-  calendarEntryCompactCreateDraftHasChanges,
   calendarEntryCompactCreateInitialDraft,
-  calendarEntryCompactDraftHasChanges,
+  calendarEntryCompactDraftsHaveChanges,
   calendarEntryCompactInitialDraft,
   calendarEntryLocalDayOffset,
   emptyCalendarEntryCompactDirty,
   formatCalendarEntryCompactDuration,
+  isCompleteCalendarEntryCompactDurationInput,
+  isCompleteCalendarEntryCompactTimeInput,
   synchronizeCalendarEntryCompactDraft,
+  trySynchronizeCalendarEntryCompactDraft,
   type CalendarEntryCompactCreatePlan,
   type CalendarEntryCompactCreateSource,
   type CalendarEntryCompactDirty,
@@ -80,6 +82,12 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
   const [isEntered, setIsEntered] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
   const [now, setNow] = useState(props.capturedNow);
+  const [activeTemporalOwner, setActiveTemporalOwner] = useState<"start" | "finish" | "duration" | null>(null);
+  const [initialDraft, setInitialDraft] = useState<CalendarEntryCompactDraft>(() => (
+    props.mode === "entry"
+      ? calendarEntryCompactInitialDraft(props.entry)
+      : calendarEntryCompactCreateInitialDraft(props.source)
+  ));
   const panelRef = useRef<HTMLDivElement | null>(null);
   const descriptionRef = useRef<HTMLInputElement | null>(null);
   const categoryButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -116,11 +124,13 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     }
   }, [createSource, dirty, draft, entry, now]);
   const hasUnsavedChanges = useMemo(
-    () => entry
-      ? calendarEntryCompactDraftHasChanges(entry, draft)
-      : calendarEntryCompactCreateDraftHasChanges(createSource as CalendarEntryCompactCreateSource, draft),
-    [createSource, draft, entry]
+    () => calendarEntryCompactDraftsHaveChanges(initialDraft, draft, { running: Boolean(entry && !entry.stoppedAt) }),
+    [draft, entry, initialDraft]
   );
+  const hasUnsavedChangesRef = useRef(hasUnsavedChanges);
+  useLayoutEffect(() => {
+    hasUnsavedChangesRef.current = hasUnsavedChanges;
+  }, [hasUnsavedChanges]);
   const controlsDisabled = isBusy || discardPrompt;
   const mutationBlockedByTimer = props.mode === "create" || !entry?.stoppedAt;
   const saveBlockedByTimer = mutationBlockedByTimer && props.isTimerBusy;
@@ -145,20 +155,21 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     owner: "start" | "finish" | "duration",
     commit = false
   ) => {
+    setActiveTemporalOwner(commit ? null : owner);
     setDraft((current) => {
       const next = { ...current, [key]: value, temporalOwner: owner };
-      if (!commit) return next;
-      try {
-        return synchronizeCalendarEntryCompactDraft({ ...temporalSource, draft: next, owner });
-      } catch {
-        return next;
-      }
+      const isComplete = commit || (owner === "duration"
+        ? isCompleteCalendarEntryCompactDurationInput(value)
+        : isCompleteCalendarEntryCompactTimeInput(value));
+      if (!isComplete) return next;
+      return trySynchronizeCalendarEntryCompactDraft({ ...temporalSource, draft: next, owner }) ?? next;
     });
     setDirty((current) => ({ ...current, [key]: true }));
     setError(null);
   }, [temporalSource]);
 
   const commitTemporalField = useCallback((owner: "start" | "finish" | "duration") => {
+    setActiveTemporalOwner(null);
     setDraft((current) => {
       if (current.temporalOwner !== owner) return current;
       try {
@@ -227,12 +238,12 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
 
   const attemptDismiss = useCallback((restoreFocus: boolean) => {
     if (busyRef.current) return;
-    if (hasUnsavedChanges) {
+    if (hasUnsavedChangesRef.current) {
       showDiscardPrompt();
       return;
     }
     requestDismiss(restoreFocus);
-  }, [hasUnsavedChanges, requestDismiss, showDiscardPrompt]);
+  }, [requestDismiss, showDiscardPrompt]);
 
   useEffect(() => () => {
     closeTokenRef.current += 1;
@@ -277,6 +288,13 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
         return { ...merged, temporalOwner: "finish" };
       }
     });
+    setInitialDraft((current) => ({
+      ...current,
+      stoppedAtDate: stoppedDraft.stoppedAtDate,
+      stoppedAtTime: stoppedDraft.stoppedAtTime,
+      duration: stoppedDraft.duration,
+      durationSeconds: stoppedDraft.durationSeconds
+    }));
   }, [entry]);
 
   useEffect(() => {
@@ -353,6 +371,15 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     finishDismiss(true);
   }
 
+  function handleDescriptionEnter(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (
+      event.altKey || event.ctrlKey || event.metaKey || event.shiftKey ||
+      event.nativeEvent.isComposing || busyRef.current
+    ) return;
+    event.preventDefault();
+    void save();
+  }
+
   async function startAgain() {
     if (props.mode !== "entry" || !props.onStartAgain || busyRef.current || props.isTimerBusy) return;
     busyRef.current = true;
@@ -410,10 +437,11 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
   const title = entry
     ? entry.description?.trim() || entry.categoryName?.trim() || "Untitled entry"
     : draft.description.trim() || selectedCategory?.name || "Uncategorized";
-  const displayError = error ?? preview.error;
-  const startIsInvalid = Boolean(preview.error && (/^Start\b/i.test(preview.error) || /valid start/i.test(preview.error)));
-  const finishIsInvalid = Boolean(preview.error && (/^Finish\b/i.test(preview.error) || /valid finish/i.test(preview.error)));
-  const durationIsInvalid = Boolean(preview.error && /duration/i.test(preview.error));
+  const previewError = activeTemporalOwner ? null : preview.error;
+  const displayError = error ?? previewError;
+  const startIsInvalid = Boolean(displayError && (/^Start\b/i.test(displayError) || /valid start/i.test(displayError)));
+  const finishIsInvalid = Boolean(displayError && (/^Finish\b/i.test(displayError) || /valid finish/i.test(displayError)));
+  const durationIsInvalid = Boolean(displayError && /duration/i.test(displayError));
   const isRunning = Boolean(entry && (!entry.stoppedAt || !draft.stoppedAtDate));
   const today = dateTimeLocal(now.toISOString()).slice(0, 10);
   const overlap = preview.plan
@@ -455,6 +483,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     finishDayOffset,
     finishIsInvalid,
     handleCategoryKeyDown,
+    handleDescriptionEnter,
     hasUnsavedChanges,
     isBusy,
     isCategoryOpen,
@@ -614,6 +643,7 @@ export function TimeEntryQuickEditorPanel({
             inputRef={descriptionRef}
             onChange={(value) => controller.updateField("description", value)}
             onHashtagPanelChange={controller.setTagPanelOpen}
+            onEnter={controller.handleDescriptionEnter}
             onSelectedTagNamesChange={(tagNames) => controller.updateField("tagNames", tagNames)}
             placeholder="Enter task description"
             portal
@@ -759,12 +789,12 @@ export function TimeEntryQuickEditorPanel({
               <span>Duration</span>
               <input
                 aria-invalid={controller.durationIsInvalid || undefined}
-                aria-label="Duration in hours, minutes and seconds"
+                aria-label="Duration in hours and minutes"
                 disabled={controlsDisabled}
                 inputMode="numeric"
                 onBlur={() => commitTemporalField("duration")}
-                onChange={(event) => controller.updateTemporalField("duration", event.target.value.replace(/[^\d:]/g, ""), "duration")}
-                placeholder="00:30:00"
+                onChange={(event) => controller.updateTemporalField("duration", event.target.value.replace(/[^\dhm:\s]/gi, ""), "duration")}
+                placeholder="00:30"
                 type="text"
                 value={draft.duration}
               />

@@ -1,3 +1,11 @@
+import {
+  layoutTimeIntervals,
+  type TimeIntervalLayoutMode,
+  type TimeIntervalTextDensity
+} from "@dayframe/shared";
+import { timeEntryCategoryLabel } from "@/lib/display";
+import { dateTimeLocal, formatDuration, formatTime } from "@/lib/format";
+
 const shortBlockMinutes = 15;
 const minimumClickableBlockHeight = 18;
 const calendarBlockVisualGapPx = 1;
@@ -11,10 +19,17 @@ export type TimeBlockDensity = {
   canShowInlineAction: boolean;
   isTiny: boolean;
   isShort: boolean;
-  showTitle: boolean;
-  showContext: boolean;
-  showDuration: boolean;
-  showTags: boolean;
+  showAnyText: boolean;
+  showFullPrimary: boolean;
+  showSecondary: boolean;
+};
+
+type CalendarBlockDisplayEntry = {
+  categoryName?: string | null;
+  description?: string | null;
+  startedAt: string;
+  stoppedAt: string | null;
+  tagNames: string[];
 };
 
 export type TimeBlockLane = {
@@ -65,19 +80,16 @@ export function canShowTimeBlockInlineAction({
   density,
   isCompleted,
   isResizing,
-  isSelected,
-  textDensity
+  isSelected
 }: {
   density: TimeBlockDensity;
   isCompleted: boolean;
   isResizing: boolean;
   isSelected: boolean;
-  textDensity: TimeIntervalTextDensity;
 }) {
   return (
     isCompleted &&
     density.canShowInlineAction &&
-    textDensity === "full" &&
     !isResizing &&
     !isSelected
   );
@@ -99,13 +111,12 @@ export function getTimeBlockDensity({
 
   return {
     canDirectResize: height >= 48,
-    canShowInlineAction: height >= minimumClickableBlockHeight,
+    canShowInlineAction: height >= 24,
     isTiny,
     isShort,
-    showTitle: height >= 18,
-    showContext: height >= 58,
-    showDuration: durationSeconds > 0 && height >= 34,
-    showTags: height >= 78
+    showAnyText: height >= 18,
+    showFullPrimary: height >= 24,
+    showSecondary: durationSeconds > 0 && height >= 40
   };
 }
 
@@ -115,8 +126,40 @@ export function timeBlockDensityClassNames(density: TimeBlockDensity) {
     density.isShort ? "is-short" : "",
     density.canDirectResize ? "can-direct-resize" : "",
     density.canShowInlineAction ? "can-show-inline-action" : "",
-    density.showTitle ? "" : "has-no-text"
+    density.showAnyText ? "" : "has-no-text"
   ];
+}
+
+export function calendarBlockPrimaryLine(entry: CalendarBlockDisplayEntry) {
+  const parts = [entry.description?.trim(), timeEntryCategoryLabel(entry)].filter(Boolean);
+  const [firstTag, ...hiddenTags] = entry.tagNames;
+  if (firstTag) parts.push(`#${firstTag}${hiddenTags.length ? ` +${hiddenTags.length}` : ""}`);
+  return parts.join(" · ");
+}
+
+export function calendarBlockFallbackLine(entry: CalendarBlockDisplayEntry) {
+  return entry.description?.trim() || timeEntryCategoryLabel(entry);
+}
+
+export function calendarBlockSecondaryLine(
+  entry: Pick<CalendarBlockDisplayEntry, "startedAt" | "stoppedAt">,
+  capturedNow: Date
+) {
+  const stoppedAt = entry.stoppedAt ?? capturedNow.toISOString();
+  const durationSeconds = Math.max(0, Math.floor(
+    (new Date(stoppedAt).getTime() - new Date(entry.startedAt).getTime()) / 1_000
+  ));
+  const dayOffset = localDayOffset(entry.startedAt, stoppedAt);
+  const finish = entry.stoppedAt ? `${formatTime(stoppedAt)}${dayOffset > 0 ? ` +${dayOffset}` : ""}` : "now";
+  return `${formatDuration(durationSeconds)} (${formatTime(entry.startedAt)} – ${finish})`;
+}
+
+function localDayOffset(startedAt: string, stoppedAt: string) {
+  const start = dateTimeLocal(startedAt).slice(0, 10);
+  const finish = dateTimeLocal(stoppedAt).slice(0, 10);
+  const startDate = Date.parse(`${start}T00:00:00Z`);
+  const finishDate = Date.parse(`${finish}T00:00:00Z`);
+  return Math.max(0, Math.round((finishDate - startDate) / 86_400_000));
 }
 
 export function layoutTimeBlockLanes(
@@ -146,8 +189,3 @@ export function layoutTimeBlockLanes(
   }
   return lanes;
 }
-import {
-  layoutTimeIntervals,
-  type TimeIntervalLayoutMode,
-  type TimeIntervalTextDensity
-} from "@dayframe/shared";

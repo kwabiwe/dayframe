@@ -73,14 +73,43 @@ Current limits:
 - The local browser reported normal motion (`prefers-reduced-motion: reduce` was false). Reduce Motion remains automated CSS/contract evidence unless a reduced-motion browser session is available.
 - The local seeded range exposed one long-running entry, so completed/cross-midnight/overlap/tag-create persistence remains automated coverage rather than claimed rendered local evidence.
 
+## PR #159 Follow-up: Quick Editor And Calendar Blocks
+
+Reported regressions covered by this follow-up were the selected-tag `X` sitting above its text baseline, date icons reading as separate circular buttons, second-precision Duration copy, blur-only temporal synchronization, running ticks affecting dismissal, no Description Enter-to-save shortcut, fragmented Calendar block metadata, and Play disappearing solely because a lane suppressed text.
+
+Implementation decisions:
+
+- The editable draft now carries internal `durationSeconds` separately from the visible minute-only `HH:MM` value. Untouched `01:15:29` displays `01:15` while no-op, Description-only and tag-only saves retain the original exact instants and 4,529 seconds. Untouched sub-minute entries display `00:00` and remain exact. A deliberate Duration edit becomes a whole-minute value.
+- Duration accepts `30`, `30m`, `90`, `90m`, `1:30`, `01:30`, `1h30m`, `1h 30m` and compatibility `1:30:00`; explicit non-zero seconds are rejected. Edited duration has a one-minute minimum and unbounded hours.
+- Complete valid Start, Finish and Duration input synchronizes its dependent fields during `onChange`. Incomplete input such as `11:` remains raw and preserves the last valid dependent fields without an error until blur or Save.
+- Plain Enter from Description calls the same mutation-gated Save function as the button. Inline hashtag suggestions consume Enter first; modifier Enter and IME composition do not save. Validation/server failure retains the exact editor draft, while a no-op existing entry closes without PATCH.
+- Dirty state compares the live draft against one immutable editor-session baseline. The one-second running clock remains presentation-only. A running-to-stopped hydration updates only the new Finish/Duration baseline and preserves any genuine user Start edit.
+- The Start/Finish time input and date trigger are one `focus-within` compound field. The trigger retains a 44px target but has no circular fill in normal, hover, focus or open states. Invalid focus keeps the neutral compound perimeter plus a separate danger inset cue.
+- Selected tag visuals use baseline alignment with the Lucide `X` optically lowered by 1px; the existing 44px target, 24px visual wrapper and hidden width measure remain shared.
+- Calendar primary content is `Description · Category · #FirstTag +N`; blank Description falls back to Category and blank Uncategorized falls back to `Uncategorized`. The secondary line is the full canonical `Duration (Start – Finish)`, using `now` for running entries and local `+N` for cross-day Finish. All tag names remain in the accessible block label.
+- Density is height/lane driven: below 18px no text; 18–23px fallback only; 24–39px full primary; 40px and above primary plus secondary; `title` lanes use fallback and `none` lanes use no text. Direct resize remains 48px and above.
+- Completed blocks at least 24px high may mount pointer-hover Play regardless of lane text density. Selected, running and resizing blocks reject it; a named inline-size container hides it below 28px rendered width. The stable right action lane prevents hover reflow, and the first click owns the action while a double-click cannot start twice.
+
+Motion contract remains owned by the existing React editor/Calendar CSS paths: the follow-up changes content and state updates inside the current entrance/update/exit surfaces, adds no animation owner, preserves the fixed feedback plane and stable block geometry, and retains the existing Reduce Motion overrides.
+
+Follow-up local browser evidence used the optimized development-auth build with disposable event-first QA entries, all removed through the normal API after capture:
+
+- PASS: Calendar rendered the full primary metadata order and complete secondary `Duration (Start – Finish)` line, including all-tag accessible names, `+N`, `now`, compact fallbacks and no text below 18px.
+- PASS: completed blocks at least 24px high retained the stable Play lane even where lane text density suppressed text; automated contracts cover the selected/running/resizing/coarse-pointer/tiny-block exclusions and one-click ownership. The automation browser could not synthesize a real CSS `:hover`, so rendered hardware-hover reveal remains NOT RUN.
+- PASS: the completed editor displayed `01:15` for an exact 4,529-second entry, normalized `90m` to `01:30` and moved Finish immediately, retained incomplete `11:` without dependent movement or error until blur, and then showed the validation error in the fixed feedback plane.
+- PASS: plain Description Enter saved and closed from Calendar; no-op Enter closed without a mutation from Timeline List and Reports through the same shared panel. Focused DOM coverage supplies failure retention, modifier/IME exclusion, tag-suggestion precedence and rapid-repeat mutation gating.
+- PASS: the date icon stayed visually seamless inside the compound Start/Finish field in normal, hover, focus and open states; tag text and `X` shared a measured baseline while preserving the 44px target.
+- PASS: 1440x900, 1280x720, 1024x768, 768x844, 390x844, 350x844 and 720x450 had zero document-width overflow. The phone editor was 366px wide with 12px gutters and remained inside the 390x844 viewport. Explicit Light and Dark captures are outside the repository under `/tmp/dayframe-qa/pr159-editor-calendar-followup/`.
+- NOT RUN: an emulated Reduce Motion browser session; the active browser reported normal motion. The existing CSS and contract coverage remains the evidence for that path.
+
 ## Validation
 
 Final local results:
 
-- PASS: focused quick-editor temporal/modal tests, 26 tests.
+- PASS: focused quick-editor temporal/modal suites, including the final shorthand-completeness regression.
 - PASS: `npm run lint`.
 - PASS: `npm run typecheck` across mobile, web and shared.
-- PASS: `npm run test` with 1,132 tests: 330 mobile, 664 web and 138 shared.
+- PASS: `npm run test` with 1,148 tests: 330 mobile, 680 web and 138 shared.
 - PASS: `npm run build`, optimized Next.js build with 32 generated static pages.
 - PASS: `npm run check:brand-assets`.
 - PASS: `git diff --check`.

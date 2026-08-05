@@ -50,7 +50,8 @@ describe("Calendar readability and restart contract", () => {
     expect(timeline).toContain("<CalendarEntryCompactEditor");
     expect(compactEditor).toContain("createPortal(");
     expect(timeline).toContain("onDoubleClick={(event) =>");
-    expect(timeline).toContain('className="calendar-entry-title"');
+    expect(timeline).toContain('className="calendar-entry-primary-line"');
+    expect(timeline).toContain('className="calendar-entry-secondary-line tabular"');
   });
 
   it("preserves a distinct running state and compact hover action", () => {
@@ -59,12 +60,13 @@ describe("Calendar readability and restart contract", () => {
     expect(calendarRunningRule).not.toContain("outline:");
     expect(calendarRunningRule).not.toContain("opacity");
     expect(styles).toContain(".calendar-start-again");
-    expect(styles).toMatch(/\.calendar-start-again \{[^}]*bottom: 2px;[^}]*width: 22px;[^}]*background: transparent;/s);
-    expect(styles).toMatch(/\.calendar-time-block\.is-short \.calendar-start-again \{[^}]*top: 50%;[^}]*right: 1px;/s);
+    expect(styles).toMatch(/\.calendar-start-again \{[^}]*bottom: 0;[^}]*width: 28px;[^}]*background: transparent;/s);
+    expect(styles).toMatch(/\.calendar-time-block\.is-short \.calendar-start-again \{[^}]*top: 50%;[^}]*right: 0;/s);
     expect(styles).not.toMatch(/\.calendar-start-again \{[^}]*border-radius:/s);
     expect(styles).toMatch(/@media \(hover: none\)[\s\S]*\.calendar-start-again \{[^}]*display: none;/);
     expect(styles).toMatch(/@media \(pointer: coarse\)[\s\S]*\.calendar-start-again \{[^}]*display: none;/);
     expect(styles).toMatch(/@media \(hover: hover\) and \(pointer: fine\)[\s\S]*\.calendar-time-block:hover \.calendar-start-again/);
+    expect(styles).toMatch(/@container calendar-time-block \(max-width: 27px\)[\s\S]*\.calendar-start-again \{[^}]*display: none;/s);
     expect(styles).not.toContain(".calendar-time-block.is-selected .calendar-start-again");
     expect(styles).not.toContain(".calendar-time-block:focus-within .calendar-start-again");
   });

@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CalendarEntryCompactSavePlan } from "@/lib/calendar-entry-compact-editor";
+import { dateTimeLocalInputToIso } from "@/lib/format";
 import type { TimeEntryRow } from "@/lib/queries";
 import { TimeEntryQuickEditorModal } from "./TimeEntryQuickEditor";
 
@@ -88,19 +89,117 @@ describe("TimeEntryQuickEditorModal", () => {
     await userEvent.click(screen.getByRole("button", { name: "Discard" }));
     expect(onClose).toHaveBeenCalledOnce();
   });
+
+  it("saves the complete valid draft once from plain Enter in Description and exits", async () => {
+    const onClose = vi.fn();
+    const onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true });
+    renderModal({ onClose, onSave });
+    const start = await screen.findByLabelText("Start time");
+    const description = screen.getByLabelText("Time entry description");
+
+    fireEvent.change(start, { target: { value: "08:30" } });
+    fireEvent.change(description, { target: { value: "Plan release follow-up" } });
+    fireEvent.keyDown(description, { key: "Enter" });
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+    expect(onSave.mock.calls[0][0].payload).toEqual({
+      description: "Plan release follow-up",
+      startedAt: localIso("2026-08-04T08:30"),
+      stoppedAt: localIso("2026-08-04T09:30")
+    });
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("closes a no-change existing entry from Enter without PATCH", async () => {
+    const onClose = vi.fn();
+    const onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true });
+    renderModal({ onClose, onSave });
+    const description = await screen.findByLabelText("Time entry description");
+
+    fireEvent.keyDown(description, { key: "Enter" });
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the draft open after Enter save failure", async () => {
+    const onClose = vi.fn();
+    const onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: false, error: "Server rejected the update." });
+    renderModal({ onClose, onSave });
+    const description = await screen.findByLabelText("Time entry description") as HTMLInputElement;
+    fireEvent.change(description, { target: { value: "Keep this draft" } });
+    fireEvent.keyDown(description, { key: "Enter" });
+
+    expect((await screen.findByRole("alert")).textContent).toContain("Server rejected the update");
+    expect(description.value).toBe("Keep this draft");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("gives hashtag selection, modifiers, and IME composition precedence over Enter save", async () => {
+    const onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true });
+    renderModal({ onSave });
+    const description = await screen.findByLabelText("Time entry description");
+
+    for (const modifier of ["shiftKey", "ctrlKey", "altKey", "metaKey"] as const) {
+      fireEvent.keyDown(description, { key: "Enter", [modifier]: true });
+    }
+    fireEvent.keyDown(description, { key: "Enter", isComposing: true });
+    expect(onSave).not.toHaveBeenCalled();
+
+    fireEvent.change(description, { target: { value: "#Pla", selectionStart: 4 } });
+    fireEvent.keyUp(description, { key: "a" });
+    await screen.findByRole("listbox");
+    fireEvent.keyDown(description, { key: "Enter" });
+    expect(screen.getByRole("button", { name: "Remove tag Planning" })).not.toBeNull();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("mutation-gates rapid Description Enter presses", async () => {
+    let resolveSave!: (value: { ok: true }) => void;
+    const onSave = vi.fn<SaveHandler>().mockImplementation(() => new Promise((resolve) => {
+      resolveSave = resolve;
+    }));
+    renderModal({ onSave });
+    const description = await screen.findByLabelText("Time entry description");
+    fireEvent.change(description, { target: { value: "Changed" } });
+    fireEvent.keyDown(description, { key: "Enter" });
+    fireEvent.keyDown(description, { key: "Enter" });
+    expect(onSave).toHaveBeenCalledOnce();
+    resolveSave({ ok: true });
+  });
+
+  it("dismisses an untouched running editor cleanly but prompts after a real Start edit", async () => {
+    const onClose = vi.fn();
+    const view = renderModal({ onClose, sourceEntry: timeEntry({ stoppedAt: null, durationSeconds: 3_600 }) });
+    await screen.findByText("Running");
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("alertdialog", { name: "Discard changes?" })).toBeNull();
+    expect(onClose).toHaveBeenCalledOnce();
+
+    view.unmount();
+    const dirtyClose = vi.fn();
+    renderModal({ onClose: dirtyClose, sourceEntry: timeEntry({ stoppedAt: null, durationSeconds: 3_600 }) });
+    const start = await screen.findByLabelText("Start time");
+    fireEvent.change(start, { target: { value: "08:30" } });
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(await screen.findByRole("alertdialog", { name: "Discard changes?" })).not.toBeNull();
+    expect(dirtyClose).not.toHaveBeenCalled();
+  });
 });
 
 function renderModal({
   onClose = vi.fn(),
-  onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true })
+  onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true }),
+  sourceEntry = timeEntry()
 }: {
   onClose?: () => void;
   onSave?: SaveHandler;
+  sourceEntry?: TimeEntryRow;
 } = {}) {
   return render(createElement(TimeEntryQuickEditorModal, {
     capturedNow: new Date("2026-08-04T12:00:00.000Z"),
     categories: [],
-    entry: timeEntry(),
+    entry: sourceEntry,
     isTimerBusy: false,
     onClose,
     onSave,
@@ -112,7 +211,7 @@ function renderModal({
   }));
 }
 
-function timeEntry(): TimeEntryRow {
+function timeEntry(overrides: Partial<TimeEntryRow> = {}): TimeEntryRow {
   return {
     id: "entry-1",
     projectId: "legacy-project",
@@ -133,6 +232,13 @@ function timeEntry(): TimeEntryRow {
     updatedAt: "2026-08-04T10:00:00.000Z",
     durationSeconds: 3_600,
     tagNames: ["Planning"],
-    tags: [{ id: "planning", name: "Planning", normalizedName: "planning" }]
+    tags: [{ id: "planning", name: "Planning", normalizedName: "planning" }],
+    ...overrides
   };
+}
+
+function localIso(value: string) {
+  const iso = dateTimeLocalInputToIso(value);
+  if (!iso) throw new Error(`Bad test date: ${value}`);
+  return iso;
 }

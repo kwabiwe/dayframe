@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  calendarBlockFallbackLine,
   calendarBlockLaneInsets,
+  calendarBlockPrimaryLine,
+  calendarBlockSecondaryLine,
   calendarBlockVisualGeometry,
   canShowTimeBlockInlineAction,
   getTimeBlockDensity,
@@ -11,53 +14,38 @@ import {
 } from "./time-block-display";
 
 describe("time block display helpers", () => {
-  it("uses rendered height to keep one readable title line in a minimum-height block", () => {
+  it("uses the exact text and action density thresholds", () => {
     expect(minimumTimeBlockHeight(64)).toBe(18);
     expect(minimumTimeBlockHeight(128)).toBe(32);
 
-    const tiny = getTimeBlockDensity({ durationSeconds: 5 * 60, height: 18 });
-    expect(tiny).toMatchObject({
+    expect(getTimeBlockDensity({ durationSeconds: 5 * 60, height: 17 })).toMatchObject({
+      showAnyText: false,
+      showFullPrimary: false,
+      showSecondary: false,
+      canShowInlineAction: false
+    });
+    const fallback = getTimeBlockDensity({ durationSeconds: 5 * 60, height: 18 });
+    expect(fallback).toMatchObject({
       isTiny: true,
       isShort: true,
-      showTitle: true,
-      showContext: false,
-      showDuration: false,
-      showTags: false,
+      showAnyText: true,
+      showFullPrimary: false,
+      showSecondary: false,
       canDirectResize: false,
+      canShowInlineAction: false
+    });
+    expect(timeBlockDensityClassNames(fallback)).not.toContain("has-no-text");
+    expect(getTimeBlockDensity({ durationSeconds: 20 * 60, height: 24 })).toMatchObject({
+      showAnyText: true,
+      showFullPrimary: true,
+      showSecondary: false,
       canShowInlineAction: true
     });
-    expect(timeBlockDensityClassNames(tiny)).not.toContain("has-no-text");
-  });
-
-  it("degrades metadata by title, duration, context, then tags", () => {
-    const short = getTimeBlockDensity({ durationSeconds: 5 * 60, height: 32 });
-    expect(short).toMatchObject({
-      showTitle: true,
-      showContext: false,
-      showDuration: false,
-      showTags: false
-    });
-
-    const medium = getTimeBlockDensity({ durationSeconds: 20 * 60, height: 43 });
-    expect(medium).toMatchObject({
-      isTiny: false,
+    expect(getTimeBlockDensity({ durationSeconds: 20 * 60, height: 40 })).toMatchObject({
       isShort: false,
-      showTitle: true,
-      showDuration: true,
-      showContext: false,
-      showTags: false,
+      showSecondary: true,
       canShowInlineAction: true,
       canDirectResize: false
-    });
-
-    const roomy = getTimeBlockDensity({ durationSeconds: 60 * 60, height: 80 });
-    expect(roomy).toMatchObject({
-      showTitle: true,
-      showDuration: true,
-      showContext: true,
-      showTags: true,
-      canShowInlineAction: true,
-      canDirectResize: true
     });
   });
 
@@ -66,12 +54,12 @@ describe("time block display helpers", () => {
     const halfHourZoom = getTimeBlockDensity({ durationSeconds: 8 * 60, height: 23 });
     const quarterHourZoom = getTimeBlockDensity({ durationSeconds: 8 * 60, height: 32 });
 
-    expect([oneHourZoom, halfHourZoom, quarterHourZoom].map((density) => density.showTitle))
+    expect([oneHourZoom, halfHourZoom, quarterHourZoom].map((density) => density.showAnyText))
       .toEqual([true, true, true]);
-    expect([oneHourZoom, halfHourZoom, quarterHourZoom].map((density) => density.showDuration))
+    expect([oneHourZoom, halfHourZoom, quarterHourZoom].map((density) => density.showSecondary))
       .toEqual([false, false, false]);
     expect([oneHourZoom, halfHourZoom, quarterHourZoom].map((density) => density.canShowInlineAction))
-      .toEqual([true, true, true]);
+      .toEqual([false, false, true]);
   });
 
   it("assigns visual lanes when minimum heights would otherwise cover nearby blocks", () => {
@@ -124,25 +112,50 @@ describe("time block display helpers", () => {
     });
   });
 
-  it("only permits inline Play for completed, unselected pointer layouts with room", () => {
+  it("permits inline Play at safe height regardless of lane text density", () => {
     const tall = getTimeBlockDensity({ durationSeconds: 60 * 60, height: 64 });
-    const short = getTimeBlockDensity({ durationSeconds: 5 * 60, height: 18 });
+    const tiny = getTimeBlockDensity({ durationSeconds: 5 * 60, height: 23 });
     const policy = (overrides: Partial<Parameters<typeof canShowTimeBlockInlineAction>[0]> = {}) =>
       canShowTimeBlockInlineAction({
         density: tall,
         isCompleted: true,
         isResizing: false,
         isSelected: false,
-        textDensity: "full",
         ...overrides
       });
 
     expect(policy()).toBe(true);
-    expect(policy({ density: short })).toBe(true);
+    expect(policy({ density: tiny })).toBe(false);
     expect(policy({ isCompleted: false })).toBe(false);
     expect(policy({ isSelected: true })).toBe(false);
     expect(policy({ isResizing: true })).toBe(false);
-    expect(policy({ textDensity: "none" })).toBe(false);
+    expect(policy()).toBe(true);
+  });
+
+  it("formats the combined primary, fallback, and full-entry secondary lines", () => {
+    const entry = {
+      categoryName: "Personal",
+      description: "Train station pickup/drop-off",
+      startedAt: "2026-08-02T08:00:00.000Z",
+      stoppedAt: "2026-08-02T09:15:29.000Z",
+      tagNames: ["Family duties", "Errands", "Travel"]
+    };
+    expect(calendarBlockPrimaryLine(entry)).toBe(
+      "Train station pickup/drop-off · Personal · #Family duties +2"
+    );
+    expect(calendarBlockFallbackLine(entry)).toBe("Train station pickup/drop-off");
+    expect(calendarBlockPrimaryLine({ ...entry, description: "", categoryName: null })).toBe(
+      "Uncategorized · #Family duties +2"
+    );
+    expect(calendarBlockSecondaryLine(entry, new Date("2026-08-02T12:00:00.000Z"))).toMatch(
+      /^1h 15m \(.+ – .+\)$/
+    );
+    expect(calendarBlockSecondaryLine({
+      startedAt: "2026-01-02T23:30:00.000Z",
+      stoppedAt: "2026-01-03T00:30:00.000Z"
+    }, new Date("2026-01-03T12:00:00.000Z"))).toContain("+1)");
+    expect(calendarBlockSecondaryLine({ ...entry, stoppedAt: null }, new Date("2026-08-02T10:00:00.000Z")))
+      .toContain("– now)");
   });
 
   it("requires deliberate resize movement", () => {

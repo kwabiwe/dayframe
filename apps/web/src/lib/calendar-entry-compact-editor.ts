@@ -13,10 +13,11 @@ export type CalendarEntryCompactDraft = {
   stoppedAtDate: string;
   stoppedAtTime: string;
   duration: string;
+  durationSeconds: number;
   temporalOwner: CalendarEntryCompactTemporalOwner;
 };
 
-export type CalendarEntryCompactEditableKey = Exclude<keyof CalendarEntryCompactDraft, "temporalOwner">;
+export type CalendarEntryCompactEditableKey = Exclude<keyof CalendarEntryCompactDraft, "durationSeconds" | "temporalOwner">;
 export type CalendarEntryCompactDirty = Record<CalendarEntryCompactEditableKey, boolean>;
 
 export type CalendarEntryCompactPatch = {
@@ -121,36 +122,46 @@ export function calendarEntryCompactDraftHasChanges(
   draft: CalendarEntryCompactDraft
 ) {
   const initial = calendarEntryCompactInitialDraft(entry);
-  return editableDraftHasChanges(initial, entry.stoppedAt ? draft : { ...draft, duration: initial.duration });
+  return calendarEntryCompactDraftsHaveChanges(initial, draft, { running: !entry.stoppedAt });
 }
 
 export function calendarEntryCompactCreateDraftHasChanges(
   source: CalendarEntryCompactCreateSource,
   draft: CalendarEntryCompactDraft
 ) {
-  return editableDraftHasChanges(calendarEntryCompactCreateInitialDraft(source), draft);
+  return calendarEntryCompactDraftsHaveChanges(calendarEntryCompactCreateInitialDraft(source), draft);
+}
+
+export function calendarEntryCompactDraftsHaveChanges(
+  initial: CalendarEntryCompactDraft,
+  draft: CalendarEntryCompactDraft,
+  { running = false }: { running?: boolean } = {}
+) {
+  return editableDraftHasChanges(initial, running ? { ...draft, duration: initial.duration } : draft);
 }
 
 export function normalizeCalendarEntryCompactDuration(raw: string) {
-  const value = raw.trim();
-  let seconds: number | null = null;
-  if (/^\d+$/.test(value)) {
-    seconds = Number(value) * 60;
-  } else {
-    const parts = value.split(":");
-    if (parts.length === 2 && parts.every((part) => /^\d+$/.test(part))) {
-      const [minutes, remainderSeconds] = parts.map(Number);
-      if (remainderSeconds < 60) seconds = minutes * 60 + remainderSeconds;
-    } else if (parts.length === 3 && parts.every((part) => /^\d+$/.test(part))) {
-      const [hours, minutes, remainderSeconds] = parts.map(Number);
-      if (minutes < 60 && remainderSeconds < 60) {
-        seconds = hours * 3_600 + minutes * 60 + remainderSeconds;
-      }
-    }
+  const value = raw.trim().toLowerCase();
+  let minutes: number | null = null;
+  const numericMinutes = /^(\d+)m?$/.exec(value);
+  const writtenDuration = /^(\d+)h(?:\s*(\d+)m?)?$/.exec(value);
+  const clockDuration = /^(\d+):(\d{2})(?::(\d{2}))?$/.exec(value);
+  if (numericMinutes) {
+    minutes = Number(numericMinutes[1]);
+  } else if (writtenDuration) {
+    const remainder = Number(writtenDuration[2] ?? 0);
+    if (remainder < 60) minutes = Number(writtenDuration[1]) * 60 + remainder;
+  } else if (clockDuration) {
+    const hours = Number(clockDuration[1]);
+    const remainder = Number(clockDuration[2]);
+    const explicitSeconds = clockDuration[3] === undefined ? 0 : Number(clockDuration[3]);
+    if (remainder < 60 && explicitSeconds === 0) minutes = hours * 60 + remainder;
   }
-  if (seconds === null || !Number.isSafeInteger(seconds) || seconds < 1) {
-    throw new Error("Enter a duration of at least 00:00:01.");
+  if (minutes === null || !Number.isSafeInteger(minutes) || minutes < 1) {
+    throw new Error("Enter a duration of at least 00:01 using HH:MM.");
   }
+  const seconds = minutes * 60;
+  if (!Number.isSafeInteger(seconds)) throw new Error("Enter a duration of at least 00:01 using HH:MM.");
   return { seconds, value: formatCalendarEntryCompactDuration(seconds) };
 }
 
@@ -158,8 +169,27 @@ export function formatCalendarEntryCompactDuration(totalSeconds: number) {
   const safeSeconds = Math.max(0, Math.floor(totalSeconds));
   const hours = Math.floor(safeSeconds / 3_600);
   const minutes = Math.floor((safeSeconds % 3_600) / 60);
-  const seconds = safeSeconds % 60;
-  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+export function isCompleteCalendarEntryCompactTimeInput(value: string) {
+  const trimmed = value.trim();
+  return /^(?:\d{1,2}:\d{2}|\d{3,4})$/.test(trimmed) && Boolean(parseTimeInput(trimmed));
+}
+
+export function isCompleteCalendarEntryCompactDurationInput(value: string) {
+  const trimmed = value.trim().toLowerCase();
+  return /^(?:\d+m?|\d+:\d{2}(?::\d{2})?|\d+h(?:\s*\d+m?)?)$/.test(trimmed);
+}
+
+export function trySynchronizeCalendarEntryCompactDraft(
+  args: Parameters<typeof synchronizeCalendarEntryCompactDraft>[0]
+) {
+  try {
+    return synchronizeCalendarEntryCompactDraft(args);
+  } catch {
+    return null;
+  }
 }
 
 export function synchronizeCalendarEntryCompactDraft({
@@ -195,7 +225,8 @@ export function synchronizeCalendarEntryCompactDraft({
     next.startedAtTime = normalizedStart.time;
     next.stoppedAtDate = normalizedFinish.date;
     next.stoppedAtTime = normalizedFinish.time;
-    next.duration = formatCalendarEntryCompactDuration(elapsedSeconds(window.startedAt, window.stoppedAt));
+    next.durationSeconds = elapsedSeconds(window.startedAt, window.stoppedAt);
+    next.duration = formatCalendarEntryCompactDuration(next.durationSeconds);
     return next;
   }
 
@@ -213,12 +244,15 @@ export function synchronizeCalendarEntryCompactDraft({
 
   if (!originalStoppedAt) return next;
 
-  const duration = normalizeCalendarEntryCompactDuration(next.duration);
-  const stoppedAt = new Date(new Date(startedAt).getTime() + duration.seconds * 1_000).toISOString();
+  const durationSeconds = owner === "duration"
+    ? normalizeCalendarEntryCompactDuration(next.duration).seconds
+    : next.durationSeconds;
+  const stoppedAt = new Date(new Date(startedAt).getTime() + durationSeconds * 1_000).toISOString();
   const normalizedFinish = localParts(stoppedAt);
   next.stoppedAtDate = normalizedFinish.date;
   next.stoppedAtTime = normalizedFinish.time;
-  next.duration = duration.value;
+  next.durationSeconds = durationSeconds;
+  next.duration = formatCalendarEntryCompactDuration(durationSeconds);
   return next;
 }
 
@@ -318,6 +352,7 @@ function initialDraft({
     stoppedAtDate: finish.date,
     stoppedAtTime: finish.time,
     duration: formatCalendarEntryCompactDuration(durationSeconds),
+    durationSeconds,
     temporalOwner: "source"
   };
 }
@@ -348,7 +383,7 @@ function resolveDraftWindow({
   });
   const startChanged = draft.startedAtDate !== initial.startedAtDate || draft.startedAtTime !== initial.startedAtTime;
   const finishChanged = draft.stoppedAtDate !== initial.stoppedAtDate || draft.stoppedAtTime !== initial.stoppedAtTime;
-  const durationChanged = draft.duration !== initial.duration;
+  const durationChanged = draft.duration !== initial.duration || draft.durationSeconds !== initial.durationSeconds;
 
   if (!startChanged && !finishChanged && !durationChanged) {
     return { startedAt: originalStartedAt, stoppedAt: originalStoppedAt };
@@ -364,10 +399,12 @@ function resolveDraftWindow({
       time: draft.startedAtTime
     });
     if (!originalStoppedAt) return { startedAt, stoppedAt: null };
-    const duration = normalizeCalendarEntryCompactDuration(draft.duration);
+    const durationSeconds = draft.temporalOwner === "duration"
+      ? normalizeCalendarEntryCompactDuration(draft.duration).seconds
+      : draft.durationSeconds;
     return {
       startedAt,
-      stoppedAt: new Date(new Date(startedAt).getTime() + duration.seconds * 1_000).toISOString()
+      stoppedAt: new Date(new Date(startedAt).getTime() + durationSeconds * 1_000).toISOString()
     };
   }
 
@@ -470,7 +507,7 @@ function draftEdgeCandidates({
   time: string;
 }) {
   if (date === initialDate && time === initialTime) return [original];
-  const parsedTime = parseTimeInput(time);
+  const parsedTime = isCompleteCalendarEntryCompactTimeInput(time) ? parseTimeInput(time) : null;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !parsedTime) {
     throw new Error(`Enter a valid ${label} date and time.`);
   }

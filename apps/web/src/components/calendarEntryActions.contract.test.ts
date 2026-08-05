@@ -40,6 +40,9 @@ describe("shared web time-entry quick editor", () => {
     expect(quick).toContain("calendar-compact-day-offset");
     expect(quick).not.toContain("placeId");
     expect(quick).not.toContain("taskSuggestions");
+    expect(quick).toContain("onEnter={controller.handleDescriptionEnter}");
+    expect(quick).toContain('aria-label="Duration in hours and minutes"');
+    expect(quick).toContain('placeholder="00:30"');
   });
 
   it("uses one fixed feedback plane with danger discard copy and equal action sizing", () => {
@@ -57,6 +60,21 @@ describe("shared web time-entry quick editor", () => {
     expect(styles).toMatch(/\.calendar-compact-temporal-fields \{[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);/s);
     expect(styles).toMatch(/@container time-entry-editor \(max-width: 380px\)[\s\S]*repeat\(2, minmax\(0, 1fr\)\)/s);
     expect(styles).toMatch(/@container time-entry-editor \(max-width: 340px\)[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\)/s);
+    expect(styles).toMatch(/\.calendar-compact-date-time-controls:focus-within \{[^}]*var\(--web-focus-border\)/s);
+    expect(styles).toMatch(/\.calendar-compact-date-trigger \{[^}]*border-radius:\s*0;[^}]*background:\s*transparent;/s);
+    expect(styles).toMatch(/\.calendar-compact-date-trigger:hover,[\s\S]*background:\s*transparent;/s);
+  });
+
+  it("renders one combined Calendar line, one temporal line, and density-independent safe Play", () => {
+    expect(timeline).toContain("calendarBlockPrimaryLine(displayEntry)");
+    expect(timeline).toContain("calendarBlockFallbackLine(displayEntry)");
+    expect(timeline).toContain("calendarBlockSecondaryLine(displayEntry, capturedNow)");
+    expect(timeline).toContain('className="calendar-entry-primary-line"');
+    expect(timeline).toContain('className="calendar-entry-secondary-line tabular"');
+    expect(timeline).not.toContain("<TagMetadata");
+    expect(timeline).not.toContain("density.showContext");
+    expect(timeline).not.toContain("density.showTags");
+    expect(timeline).not.toContain('textDensity: lane.textDensity');
   });
 
   it("routes active edits through the shell mutation and keeps List ownership", () => {

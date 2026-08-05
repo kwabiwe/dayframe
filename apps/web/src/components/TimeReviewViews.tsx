@@ -4,13 +4,12 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, UIEve
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CalendarDays, ChevronLeft, ChevronRight, CircleDot, List, Play, Table2 } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, List, Play, Table2 } from "lucide-react";
 import { analyzeTimeIntervals, calendarBlockContinuationEdges } from "@dayframe/shared";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { CalendarEntryCompactEditor } from "@/components/CalendarEntryCompactEditor";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { OverlapNotice } from "@/components/OverlapNotice";
-import { TagMetadata } from "@/components/TagMetadata";
 import { EntriesTable } from "@/components/EntriesTable";
 import { useTimelineDeleteUndo } from "@/components/useTimelineDeleteUndo";
 import { IconButton, SegmentedControl } from "@/components/ui/Primitives";
@@ -19,7 +18,6 @@ import {
   timeEntryAccentColor,
   timeEntryCategoryColor,
   timeEntryCategoryLabel,
-  timeEntryContextLabel,
   timeEntryTitle
 } from "@/lib/display";
 import type { BootstrapData, CategoryRow, PlaceRow, TimeEntryRow } from "@/lib/queries";
@@ -32,6 +30,9 @@ import {
 } from "@/lib/format";
 import {
   calendarBlockLaneInsets,
+  calendarBlockFallbackLine,
+  calendarBlockPrimaryLine,
+  calendarBlockSecondaryLine,
   calendarBlockVisualGeometry,
   canShowTimeBlockInlineAction,
   getTimeBlockDensity,
@@ -1151,16 +1152,23 @@ export function CalendarReview({
                   const isResizing = resizingId === entry.id;
                   const isContinuing = continuingEntryId === entry.id;
                   const accent = timeEntryAccentColor(entry);
+                  const displayEntry = {
+                    ...entry,
+                    startedAt: activeDraft?.startedAt ?? entry.startedAt,
+                    stoppedAt: activeDraft?.stoppedAt ?? entry.stoppedAt
+                  };
                   const hasInlineActionSlot = Boolean(
-                    entry.stoppedAt && density.canShowInlineAction && lane.textDensity === "full"
+                    entry.stoppedAt && density.canShowInlineAction
                   );
                   const showInlineAction = canShowTimeBlockInlineAction({
                     density,
                     isCompleted: Boolean(entry.stoppedAt),
                     isResizing,
-                    isSelected: selected,
-                    textDensity: lane.textDensity
+                    isSelected: selected
                   });
+                  const primaryLine = density.showFullPrimary && lane.textDensity === "full"
+                    ? calendarBlockPrimaryLine(displayEntry)
+                    : calendarBlockFallbackLine(displayEntry);
                   return (
                     <article
                       key={blockKey}
@@ -1223,26 +1231,14 @@ export function CalendarReview({
                         }}
                         onMouseDown={(event) => event.preventDefault()}
                       >
-                        {density.showTitle && lane.textDensity !== "none" ? (
-                          <span className="calendar-entry-title">{timeEntryTitle(entry)}</span>
+                        {density.showAnyText && lane.textDensity !== "none" ? (
+                          <span className="calendar-entry-primary-line">{primaryLine}</span>
                         ) : null}
-                        {density.showDuration && lane.textDensity === "full" ? (
-                          entry.stoppedAt ? (
-                            <span className="calendar-entry-duration tabular">{formatDuration(durationSeconds)}</span>
-                          ) : (
-                            <span className="calendar-entry-running-row">
-                              <span className="calendar-entry-running-status">
-                                <CircleDot size={11} aria-hidden="true" />
-                                Running
-                              </span>
-                              <span className="calendar-entry-duration tabular">{formatDuration(durationSeconds)}</span>
-                            </span>
-                          )
+                        {density.showSecondary && lane.textDensity === "full" ? (
+                          <span className="calendar-entry-secondary-line tabular">
+                            {calendarBlockSecondaryLine(displayEntry, capturedNow)}
+                          </span>
                         ) : null}
-                        {density.showContext && lane.textDensity === "full" ? (
-                          <span className="calendar-entry-context">{timeEntryContextLabel(entry)}</span>
-                        ) : null}
-                        {density.showTags && lane.textDensity === "full" ? <TagMetadata tagNames={entry.tagNames} /> : null}
                       </button>
                       {showInlineAction ? (
                         <button
@@ -1251,7 +1247,9 @@ export function CalendarReview({
                           aria-busy={isContinuing}
                           aria-label={`Start ${timeEntryTitle(entry)} again`}
                           disabled={isTimerBusy || Boolean(continuingEntryId)}
-                          onClick={() => {
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (event.detail > 1) return;
                             void continueCalendarEntry(entry, "inline").then((outcome) => {
                               if (outcome.ok) clearCalendarSelection();
                             });
@@ -1531,15 +1529,18 @@ function calendarBlockLaneStyle({
 function calendarBlockDetailsLabel(
   entry: TimeEntryRow,
   draft: CalendarResizeDraft | null,
-  durationSeconds: number,
+  _durationSeconds: number,
   day: Date,
   capturedNow: Date
 ) {
   const details = calendarEntrySliceDetails(entry, draft, day, capturedNow);
-  const durationLabel = details.isLiveSlice
-    ? `Running, ${formatDuration(durationSeconds)}`
-    : formatDuration(durationSeconds);
-  return `${timeEntryTitle(entry)}. ${timeEntryContextLabel(entry)}. ${details.timeRange}. ${durationLabel}.${details.continuation ? ` ${details.continuation}` : ""}`;
+  const displayEntry = {
+    ...entry,
+    startedAt: draft?.startedAt ?? entry.startedAt,
+    stoppedAt: draft?.stoppedAt ?? entry.stoppedAt
+  };
+  const tags = entry.tagNames.length ? ` All tags: ${entry.tagNames.join(", ")}.` : "";
+  return `${calendarBlockPrimaryLine(displayEntry)}. ${calendarBlockSecondaryLine(displayEntry, capturedNow)}.${tags}${details.continuation ? ` ${details.continuation}` : ""}`;
 }
 
 function calendarEntrySliceDetails(
