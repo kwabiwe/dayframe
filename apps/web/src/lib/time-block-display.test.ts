@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   calendarBlockFallbackLine,
   calendarBlockLaneInsets,
+  calendarBlockPrimaryParts,
   calendarBlockPrimaryLine,
   calendarBlockSecondaryLine,
   calendarBlockVisualGeometry,
@@ -20,7 +21,7 @@ describe("time block display helpers", () => {
 
     expect(getTimeBlockDensity({ durationSeconds: 5 * 60, height: 17 })).toMatchObject({
       showAnyText: false,
-      showFullPrimary: false,
+      showCombinedPrimary: false,
       showSecondary: false,
       canShowInlineAction: false
     });
@@ -29,7 +30,7 @@ describe("time block display helpers", () => {
       isTiny: true,
       isShort: true,
       showAnyText: true,
-      showFullPrimary: false,
+      showCombinedPrimary: true,
       showSecondary: false,
       canDirectResize: false,
       canShowInlineAction: false
@@ -37,15 +38,19 @@ describe("time block display helpers", () => {
     expect(timeBlockDensityClassNames(fallback)).not.toContain("has-no-text");
     expect(getTimeBlockDensity({ durationSeconds: 20 * 60, height: 24 })).toMatchObject({
       showAnyText: true,
-      showFullPrimary: true,
+      showCombinedPrimary: true,
       showSecondary: false,
       canShowInlineAction: true
     });
     expect(getTimeBlockDensity({ durationSeconds: 20 * 60, height: 40 })).toMatchObject({
       isShort: false,
-      showSecondary: true,
+      showSecondary: false,
       canShowInlineAction: true,
       canDirectResize: false
+    });
+    expect(getTimeBlockDensity({ durationSeconds: 20 * 60, height: 48 })).toMatchObject({
+      showSecondary: true,
+      canDirectResize: true
     });
   });
 
@@ -143,6 +148,12 @@ describe("time block display helpers", () => {
     expect(calendarBlockPrimaryLine(entry)).toBe(
       "Train station pickup/drop-off · Personal · #Family duties +2"
     );
+    expect(calendarBlockPrimaryParts(entry)).toEqual({
+      description: "Train station pickup/drop-off",
+      category: "Personal",
+      firstTag: "Family duties",
+      hiddenTagCount: 2
+    });
     expect(calendarBlockFallbackLine(entry)).toBe("Train station pickup/drop-off");
     expect(calendarBlockPrimaryLine({ ...entry, description: "", categoryName: null })).toBe(
       "Uncategorized · #Family duties +2"
@@ -156,6 +167,17 @@ describe("time block display helpers", () => {
     }, new Date("2026-01-03T12:00:00.000Z"))).toContain("+1)");
     expect(calendarBlockSecondaryLine({ ...entry, stoppedAt: null }, new Date("2026-08-02T10:00:00.000Z")))
       .toContain("– now)");
+  });
+
+  it("keeps the combined first line independent from the secondary-line height", () => {
+    const short = getTimeBlockDensity({ durationSeconds: 15 * 60, height: 18 });
+    const medium = getTimeBlockDensity({ durationSeconds: 30 * 60, height: 32 });
+    const normal = getTimeBlockDensity({ durationSeconds: 60 * 60, height: 64 });
+
+    expect([short, medium, normal].map((density) => density.showCombinedPrimary))
+      .toEqual([true, true, true]);
+    expect([short, medium, normal].map((density) => density.showSecondary))
+      .toEqual([false, false, true]);
   });
 
   it("requires deliberate resize movement", () => {

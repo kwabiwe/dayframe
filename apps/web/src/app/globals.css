@@ -2760,7 +2760,32 @@ dialog.ui-popover-panel.bottom-left {
 }
 
 .calendar-entry-primary-line {
+  color: var(--foreground);
+  font-weight: 400;
+}
+
+.calendar-entry-description {
   font-weight: 650;
+}
+
+.calendar-entry-primary-metadata,
+.calendar-entry-separator,
+.calendar-entry-category,
+.calendar-entry-tag,
+.calendar-entry-tag-count {
+  color: color-mix(in srgb, var(--foreground) 68%, var(--surface));
+}
+
+.calendar-entry-category {
+  font-weight: 400;
+}
+
+.calendar-entry-tag {
+  font-weight: 700;
+}
+
+.calendar-entry-tag-count {
+  font-weight: 500;
 }
 
 .calendar-entry-secondary-line {
@@ -2822,6 +2847,12 @@ dialog.ui-popover-panel.bottom-left {
 
 @container calendar-time-block (max-width: 27px) {
   .calendar-start-again {
+    display: none;
+  }
+}
+
+@container calendar-time-block (max-width: 111px) {
+  .calendar-entry-primary-metadata {
     display: none;
   }
 }
@@ -9704,7 +9735,7 @@ dialog.ui-dialog.manual-entry-dialog {
   display: inline-flex;
   height: var(--inline-selected-tag-visual-height);
   min-height: var(--inline-selected-tag-visual-height);
-  align-items: baseline;
+  align-items: center;
   border-radius: 6px;
   padding: 0 5px;
   background: transparent;

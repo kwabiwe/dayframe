@@ -20,7 +20,7 @@ export type TimeBlockDensity = {
   isTiny: boolean;
   isShort: boolean;
   showAnyText: boolean;
-  showFullPrimary: boolean;
+  showCombinedPrimary: boolean;
   showSecondary: boolean;
 };
 
@@ -30,6 +30,13 @@ type CalendarBlockDisplayEntry = {
   startedAt: string;
   stoppedAt: string | null;
   tagNames: string[];
+};
+
+export type CalendarBlockPrimaryParts = {
+  description: string;
+  category: string | null;
+  firstTag: string | null;
+  hiddenTagCount: number;
 };
 
 export type TimeBlockLane = {
@@ -115,8 +122,8 @@ export function getTimeBlockDensity({
     isTiny,
     isShort,
     showAnyText: height >= 18,
-    showFullPrimary: height >= 24,
-    showSecondary: durationSeconds > 0 && height >= 40
+    showCombinedPrimary: height >= 18,
+    showSecondary: durationSeconds > 0 && height >= 48
   };
 }
 
@@ -130,15 +137,27 @@ export function timeBlockDensityClassNames(density: TimeBlockDensity) {
   ];
 }
 
-export function calendarBlockPrimaryLine(entry: CalendarBlockDisplayEntry) {
-  const parts = [entry.description?.trim(), timeEntryCategoryLabel(entry)].filter(Boolean);
+export function calendarBlockPrimaryParts(entry: CalendarBlockDisplayEntry): CalendarBlockPrimaryParts {
+  const description = entry.description?.trim();
+  const category = timeEntryCategoryLabel(entry);
   const [firstTag, ...hiddenTags] = entry.tagNames;
-  if (firstTag) parts.push(`#${firstTag}${hiddenTags.length ? ` +${hiddenTags.length}` : ""}`);
+  return {
+    description: description || category,
+    category: description ? category : null,
+    firstTag: firstTag ?? null,
+    hiddenTagCount: hiddenTags.length
+  };
+}
+
+export function calendarBlockPrimaryLine(entry: CalendarBlockDisplayEntry) {
+  const { category, description, firstTag, hiddenTagCount } = calendarBlockPrimaryParts(entry);
+  const parts = [description, category].filter(Boolean);
+  if (firstTag) parts.push(`#${firstTag}${hiddenTagCount ? ` +${hiddenTagCount}` : ""}`);
   return parts.join(" · ");
 }
 
 export function calendarBlockFallbackLine(entry: CalendarBlockDisplayEntry) {
-  return entry.description?.trim() || timeEntryCategoryLabel(entry);
+  return calendarBlockPrimaryParts(entry).description;
 }
 
 export function calendarBlockSecondaryLine(

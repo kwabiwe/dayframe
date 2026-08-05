@@ -30,7 +30,7 @@ import {
 } from "@/lib/format";
 import {
   calendarBlockLaneInsets,
-  calendarBlockFallbackLine,
+  calendarBlockPrimaryParts,
   calendarBlockPrimaryLine,
   calendarBlockSecondaryLine,
   calendarBlockVisualGeometry,
@@ -1166,9 +1166,6 @@ export function CalendarReview({
                     isResizing,
                     isSelected: selected
                   });
-                  const primaryLine = density.showFullPrimary && lane.textDensity === "full"
-                    ? calendarBlockPrimaryLine(displayEntry)
-                    : calendarBlockFallbackLine(displayEntry);
                   return (
                     <article
                       key={blockKey}
@@ -1231,10 +1228,10 @@ export function CalendarReview({
                         }}
                         onMouseDown={(event) => event.preventDefault()}
                       >
-                        {density.showAnyText && lane.textDensity !== "none" ? (
-                          <span className="calendar-entry-primary-line">{primaryLine}</span>
+                        {density.showCombinedPrimary && lane.textDensity !== "none" ? (
+                          <CalendarBlockPrimaryLine entry={displayEntry} />
                         ) : null}
-                        {density.showSecondary && lane.textDensity === "full" ? (
+                        {density.showSecondary && lane.textDensity !== "none" ? (
                           <span className="calendar-entry-secondary-line tabular">
                             {calendarBlockSecondaryLine(displayEntry, capturedNow)}
                           </span>
@@ -1356,6 +1353,36 @@ export function CalendarReview({
         </p>
       ) : null}
     </section>
+  );
+}
+
+function CalendarBlockPrimaryLine({
+  entry
+}: {
+  entry: Parameters<typeof calendarBlockPrimaryParts>[0];
+}) {
+  const { category, description, firstTag, hiddenTagCount } = calendarBlockPrimaryParts(entry);
+  return (
+    <span className="calendar-entry-primary-line">
+      <span className="calendar-entry-description">{description}</span>
+      {category || firstTag ? (
+        <span className="calendar-entry-primary-metadata">
+          {category ? (
+            <>
+              <span className="calendar-entry-separator"> · </span>
+              <span className="calendar-entry-category">{category}</span>
+            </>
+          ) : null}
+          {firstTag ? (
+            <>
+              <span className="calendar-entry-separator"> · </span>
+              <span className="calendar-entry-tag">#{firstTag}</span>
+              {hiddenTagCount ? <span className="calendar-entry-tag-count"> +{hiddenTagCount}</span> : null}
+            </>
+          ) : null}
+        </span>
+      ) : null}
+    </span>
   );
 }
 

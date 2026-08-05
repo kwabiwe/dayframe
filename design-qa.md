@@ -249,3 +249,35 @@ None required for this focused PR.
 
 - The reference uses a different light-theme density and example category set. Dayframe keeps its existing Midnight Core tokens, real seeded categories, and compact productivity density.
 - Timeline range architecture, Calendar blocks/actions, grouped lists, Reports filters, Search, and unrelated route surfaces remain out of scope.
+
+---
+
+# PR #159 Calendar content and selected-tag alignment follow-up
+
+## Source and implementation truth
+
+- Calendar reference: `/var/folders/_y/d82t1rxn1yx387zk0tktcmv40000gq/T/codex-clipboard-bcc197be-4f42-4506-b407-159b3df8e13c.png` (1045x616).
+- Selected-tag reference: `/var/folders/_y/d82t1rxn1yx387zk0tktcmv40000gq/T/codex-clipboard-82181684-ab0d-4a70-a9c5-9600b76dceda.png` (267x101).
+- Light Calendar implementation: `/tmp/dayframe-qa/pr159-calendar-content-followup/calendar-light-1440x900.png`.
+- Dark Calendar implementation: `/tmp/dayframe-qa/pr159-calendar-content-followup/calendar-dark-1440x900.png`.
+- Light selected-tag implementation: `/tmp/dayframe-qa/pr159-calendar-content-followup/tag-editor-light-normal-1440x900.png`.
+- Dark focused selected-tag implementation: `/tmp/dayframe-qa/pr159-calendar-content-followup/tag-editor-dark-focus-1440x900.png`.
+- Same-input comparisons: `/tmp/dayframe-qa/pr159-calendar-content-followup/calendar-comparison-light.jpg` and `/tmp/dayframe-qa/pr159-calendar-content-followup/tag-comparison-focus.jpg`; the reference is on the left and the implementation is on the right.
+- Implementation viewport: 1440x900 CSS pixels at device scale factor 1. The comparison is intentionally scoped to the Calendar content hierarchy and selected-tag alignment shown by the supplied regression captures.
+
+## Comparison evidence
+
+- Typography: every readable Calendar block uses the same non-wrapping structured first line. Description is primary semibold; Category is muted normal; the first tag is muted bold; and the remaining-tag count is muted medium.
+- Density: the 4-hour and 2-hour blocks show the combined primary line plus the independently height-gated temporal line. The 15-minute block keeps the same combined primary line on one row without mounting the second line.
+- Content: only the first tag and `+N` are visible in each Calendar block; category colour dots and wrapped text are absent. Narrow container fallback hides metadata while retaining Description, and sub-18px/none-density blocks remain text-free by contract.
+- Selected tag: measured geometry is 44px for the interaction target and 24px for the visual wrapper. The label and wrapper share the same vertical centre; only the 12px `X` is shifted down 1px. The hidden measurement markup reuses the same visual class and dimensions.
+- Themes: the supplied Calendar and selected-tag states were checked in explicit Light and Dark appearance at desktop width. No horizontal overflow, runtime overlay, or browser console warning/error was present.
+- Assets and motion: no image, logo, icon-library, navigation, presentation, or animation owner changed in this follow-up.
+
+## Findings and history
+
+- Pass 1 exposed stale generated Next.js development CSS after the source edits. The generated cache was removed recoverably and the development server was restarted from a clean build.
+- Pass 2 found no actionable P0, P1, or P2 mismatch in the requested surfaces. The tag label remains stationary between normal and focus states; hover changes only colour/fill under the unchanged CSS geometry contract.
+- No P3 visual follow-up is required for this focused change.
+
+final result: passed

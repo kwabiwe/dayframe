@@ -66,8 +66,8 @@ describe("shared web time-entry quick editor", () => {
   });
 
   it("renders one combined Calendar line, one temporal line, and density-independent safe Play", () => {
-    expect(timeline).toContain("calendarBlockPrimaryLine(displayEntry)");
-    expect(timeline).toContain("calendarBlockFallbackLine(displayEntry)");
+    expect(timeline).toContain("<CalendarBlockPrimaryLine entry={displayEntry} />");
+    expect(timeline).toContain("calendarBlockPrimaryParts(entry)");
     expect(timeline).toContain("calendarBlockSecondaryLine(displayEntry, capturedNow)");
     expect(timeline).toContain('className="calendar-entry-primary-line"');
     expect(timeline).toContain('className="calendar-entry-secondary-line tabular"');
@@ -75,6 +75,13 @@ describe("shared web time-entry quick editor", () => {
     expect(timeline).not.toContain("density.showContext");
     expect(timeline).not.toContain("density.showTags");
     expect(timeline).not.toContain('textDensity: lane.textDensity');
+    expect(timeline).toContain('density.showCombinedPrimary && lane.textDensity !== "none"');
+    expect(timeline).toContain('density.showSecondary && lane.textDensity !== "none"');
+    expect(styles).toMatch(/\.calendar-entry-description \{[^}]*font-weight:\s*650;/s);
+    expect(styles).toMatch(/\.calendar-entry-category \{[^}]*font-weight:\s*400;/s);
+    expect(styles).toMatch(/\.calendar-entry-tag \{[^}]*font-weight:\s*700;/s);
+    expect(styles).toMatch(/\.calendar-entry-primary-metadata,[\s\S]*\.calendar-entry-tag-count \{[^}]*color:\s*color-mix\(in srgb, var\(--foreground\) 68%, var\(--surface\)\);/s);
+    expect(styles).toMatch(/@container calendar-time-block \(max-width: 111px\)[\s\S]*\.calendar-entry-primary-metadata \{[^}]*display:\s*none;/s);
   });
 
   it("routes active edits through the shell mutation and keeps List ownership", () => {
