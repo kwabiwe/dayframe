@@ -26,35 +26,95 @@ describe("Calendar compact temporal DOM", () => {
     document.body.innerHTML = "";
   });
 
-  it("synchronizes Start, Finish, and Duration from the actively blurred field", async () => {
+  it("synchronizes complete Start, Finish, and Duration values before blur", async () => {
     renderCompletedEditor();
     const start = await screen.findByLabelText("Start time") as HTMLInputElement;
     const finish = screen.getByLabelText("Finish time") as HTMLInputElement;
     const duration = screen.getByLabelText("Duration") as HTMLInputElement;
 
     fireEvent.change(start, { target: { value: "09:30" } });
-    fireEvent.blur(start);
-    expect(duration.value).toBe("00:30:00");
+    expect(duration.value).toBe("00:30");
     expect(finish.value).toBe("10:00");
 
     fireEvent.change(finish, { target: { value: "10:30" } });
-    fireEvent.blur(finish);
-    expect(duration.value).toBe("01:00:00");
+    expect(duration.value).toBe("01:00");
 
-    fireEvent.change(duration, { target: { value: "1:30:00" } });
-    fireEvent.blur(duration);
-    expect(duration.value).toBe("01:30:00");
+    fireEvent.change(duration, { target: { value: "90m" } });
+    expect(duration.value).toBe("01:30");
     expect(start.value).toBe("09:30");
     expect(finish.value).toBe("11:00");
+    expect(duration.getAttribute("aria-label")).toBe("Duration in hours and minutes");
+    expect(duration.getAttribute("placeholder")).toBe("00:30");
+  });
+
+  it("keeps incomplete time raw and delays its error until blur", async () => {
+    renderCompletedEditor();
+    const start = await screen.findByLabelText("Start time") as HTMLInputElement;
+    const finish = screen.getByLabelText("Finish time") as HTMLInputElement;
+    const duration = screen.getByLabelText("Duration") as HTMLInputElement;
+
+    fireEvent.change(start, { target: { value: "11:" } });
+    expect(start.value).toBe("11:");
+    expect(finish.value).toBe("10:30");
+    expect(duration.value).toBe("00:30");
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    fireEvent.blur(start);
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("valid start date and time");
+    expect(alert.id).not.toBe("");
+    expect(start.getAttribute("aria-describedby")).toBe(alert.id);
+    expect(finish.getAttribute("aria-describedby")).toBeNull();
+    expect(duration.getAttribute("aria-describedby")).toBeNull();
+    expect(document.getElementById(alert.id)).toBe(alert);
+  });
+
+  it("links Duration to its live validation error with a stable editor-scoped id", async () => {
+    renderCompletedEditor();
+    const duration = await screen.findByLabelText("Duration") as HTMLInputElement;
+    const start = screen.getByLabelText("Start time");
+    const finish = screen.getByLabelText("Finish time");
+
+    fireEvent.change(duration, { target: { value: "" } });
+    fireEvent.blur(duration);
+    const alert = await screen.findByRole("alert");
+    const errorId = alert.id;
+    expect(alert.textContent).toMatch(/duration/i);
+    expect(errorId).not.toBe("");
+    expect(duration.getAttribute("aria-describedby")).toBe(errorId);
+    expect(start.getAttribute("aria-describedby")).toBeNull();
+    expect(finish.getAttribute("aria-describedby")).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("Time entry description"), { target: { value: "Still invalid" } });
+    expect((await screen.findByRole("alert")).id).toBe(errorId);
+  });
+
+  it("keeps validation description ids unique across simultaneous editor instances", async () => {
+    renderCompletedEditor();
+    renderCompletedEditor();
+    const finishes = screen.getAllByLabelText("Finish time") as HTMLInputElement[];
+
+    fireEvent.change(finishes[0], { target: { value: "09:00" } });
+    fireEvent.blur(finishes[0]);
+    fireEvent.change(finishes[1], { target: { value: "08:30" } });
+    fireEvent.blur(finishes[1]);
+
+    const alerts = await screen.findAllByRole("alert");
+    expect(alerts).toHaveLength(2);
+    expect(new Set(alerts.map((alert) => alert.id)).size).toBe(2);
+    expect(finishes[0].getAttribute("aria-describedby")).toBe(alerts[0].id);
+    expect(finishes[1].getAttribute("aria-describedby")).toBe(alerts[1].id);
+    expect(document.getElementById(alerts[0].id)).toBe(alerts[0]);
+    expect(document.getElementById(alerts[1].id)).toBe(alerts[1]);
   });
 
   it("always renders both dates and supports keyboard selection in the shared picker", async () => {
     const user = userEvent.setup();
     renderCompletedEditor();
-    const startDate = await screen.findByRole("button", { name: "Choose Start date" });
-    const finishDate = screen.getByRole("button", { name: "Choose Finish date" });
-    expect(startDate.textContent).toContain("02 Aug 2026");
-    expect(finishDate.textContent).toContain("02 Aug 2026");
+    const startDate = await screen.findByRole("button", { name: /Choose Start date, currently 2 August 2026/ });
+    const finishDate = screen.getByRole("button", { name: /Choose Finish date, currently 2 August 2026/ });
+    expect(startDate.textContent).toBe("");
+    expect(finishDate.textContent).toBe("");
 
     finishDate.focus();
     await user.keyboard("{Enter}");
@@ -63,8 +123,9 @@ describe("Calendar compact temporal DOM", () => {
     nextDay.focus();
     await user.keyboard("{Enter}");
 
-    await waitFor(() => expect(finishDate.textContent).toContain("03 Aug 2026"));
-    expect((screen.getByLabelText("Duration") as HTMLInputElement).value).toBe("24:30:00");
+    await waitFor(() => expect(finishDate.getAttribute("aria-label")).toContain("3 August 2026"));
+    expect(screen.getByText("+1").getAttribute("title")).toBe("Finish time, one day after Start");
+    expect((screen.getByLabelText("Duration") as HTMLInputElement).value).toBe("24:30");
     expect(document.activeElement).toBe(finishDate);
   });
 
@@ -80,14 +141,19 @@ describe("Calendar compact temporal DOM", () => {
     fireEvent.change(finish, { target: { value: "09:00" } });
     fireEvent.blur(finish);
     expect(finish.value).toBe("09:00");
-    expect((await screen.findByRole("alert")).textContent).toContain("Finish must be after Start");
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Finish must be after Start");
     expect(screen.getByLabelText("Start time").getAttribute("aria-invalid")).toBeNull();
     expect(finish.getAttribute("aria-invalid")).toBe("true");
+    expect(finish.getAttribute("aria-describedby")).toBe(alert.id);
+    expect(document.getElementById(alert.id)).toBe(alert);
     expect(feedback.getAttribute("data-feedback-mode")).toBe("error");
 
     await user.click(screen.getByRole("button", { name: "Close editor" }));
     expect(await screen.findByRole("alertdialog", { name: "Discard changes?" })).not.toBeNull();
     expect(feedback.getAttribute("data-feedback-mode")).toBe("discard");
+    expect(finish.getAttribute("aria-describedby")).toBeNull();
+    expect(document.getElementById(alert.id)).toBeNull();
     expect(screen.getByRole("button", { name: "Go back" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "Discard" })).not.toBeNull();
   });
@@ -121,12 +187,12 @@ describe("Calendar compact temporal DOM", () => {
     await act(async () => vi.advanceTimersByTime(0));
     expect(screen.getByText("Running")).not.toBeNull();
     expect(screen.queryByLabelText("Finish time")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Choose Finish date" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Choose Finish date/ })).toBeNull();
     expect(screen.queryByLabelText("Duration")).toBeNull();
-    expect(screen.getByLabelText("Elapsed time").textContent).toContain("00:30:00");
+    expect(screen.getByLabelText("Elapsed time").textContent).toContain("00:30");
 
     act(() => vi.advanceTimersByTime(1_000));
-    expect(screen.getByLabelText("Elapsed time").textContent).toContain("00:30:01");
+    expect(screen.getByLabelText("Elapsed time").textContent).toContain("00:30");
 
     const start = screen.getByLabelText("Start time");
     fireEvent.change(start, { target: { value: "09:45" } });
@@ -138,7 +204,7 @@ describe("Calendar compact temporal DOM", () => {
 
     view.rerenderEntry(entry("2026-08-02T10:00", "2026-08-02T10:30"));
     await act(async () => Promise.resolve());
-    expect(screen.getByRole("button", { name: "Choose Finish date" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: /Choose Finish date/ })).not.toBeNull();
     expect(screen.getByLabelText("Finish time")).not.toBeNull();
     expect(screen.getByLabelText("Duration")).not.toBeNull();
   });

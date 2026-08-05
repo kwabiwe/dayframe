@@ -2639,6 +2639,8 @@ dialog.ui-popover-panel.bottom-left {
 
 .calendar-time-block {
   --calendar-block-radius: 6px;
+  container-name: calendar-time-block;
+  container-type: inline-size;
   display: block;
   box-sizing: border-box;
   overflow: visible;
@@ -2722,12 +2724,10 @@ dialog.ui-popover-panel.bottom-left {
   position: absolute;
   inset: 0;
   z-index: 1;
-  display: flex;
+  display: grid;
   min-width: 0;
-  align-items: flex-start;
-  flex-direction: column;
-  justify-content: flex-start;
-  gap: 1px;
+  align-content: start;
+  gap: 2px;
   overflow: hidden;
   border: 0;
   border-radius: inherit;
@@ -2749,9 +2749,8 @@ dialog.ui-popover-panel.bottom-left {
   outline-offset: 1px;
 }
 
-.calendar-entry-title,
-.calendar-entry-duration,
-.calendar-entry-context {
+.calendar-entry-primary-line,
+.calendar-entry-secondary-line {
   display: block;
   width: 100%;
   min-width: 0;
@@ -2760,39 +2759,49 @@ dialog.ui-popover-panel.bottom-left {
   white-space: nowrap;
 }
 
-.calendar-entry-title {
+.calendar-entry-primary-line {
+  color: var(--foreground);
+  font-weight: 400;
+}
+
+.calendar-entry-description {
   font-weight: 650;
 }
 
-.calendar-entry-duration {
-  font-weight: 600;
+.calendar-entry-primary-metadata,
+.calendar-entry-separator,
+.calendar-entry-category,
+.calendar-entry-tag,
+.calendar-entry-tag-count {
+  color: color-mix(in srgb, var(--foreground) 68%, var(--surface));
 }
 
-.calendar-entry-context {
-  color: color-mix(in srgb, var(--foreground) 78%, var(--surface));
+.calendar-entry-category {
+  font-weight: 400;
 }
 
-.calendar-entry-running-status {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 4px;
+.calendar-entry-tag {
+  font-weight: 700;
+}
+
+.calendar-entry-tag-count {
+  font-weight: 500;
+}
+
+.calendar-entry-secondary-line {
+  color: color-mix(in srgb, var(--foreground) 72%, var(--surface));
   font-size: 11px;
-  font-weight: 650;
-}
-
-.calendar-entry-running-status svg {
-  flex: 0 0 auto;
+  font-weight: 550;
 }
 
 .calendar-start-again {
   position: absolute;
-  right: 2px;
-  bottom: 2px;
+  right: 0;
+  bottom: 0;
   z-index: 8;
   display: inline-grid;
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
   max-height: 100%;
   place-items: center;
   border: 0;
@@ -2808,10 +2817,10 @@ dialog.ui-popover-panel.bottom-left {
 
 .calendar-time-block.is-short .calendar-start-again {
   top: 50%;
-  right: 1px;
+  right: 0;
   bottom: auto;
-  width: 20px;
-  height: 20px;
+  width: 28px;
+  height: 28px;
   transform: translateY(-50%);
 }
 
@@ -2834,6 +2843,18 @@ dialog.ui-popover-panel.bottom-left {
 .calendar-start-again:disabled {
   cursor: not-allowed;
   opacity: 0.58;
+}
+
+@container calendar-time-block (max-width: 27px) {
+  .calendar-start-again {
+    display: none;
+  }
+}
+
+@container calendar-time-block (max-width: 111px) {
+  .calendar-entry-primary-metadata {
+    display: none;
+  }
 }
 
 .calendar-time-block.is-resizing .calendar-start-again {
@@ -2948,12 +2969,13 @@ dialog.ui-popover-panel.bottom-left {
 }
 
 .swiss-time-block.is-short strong,
-.calendar-time-block.is-short .calendar-entry-title {
+.calendar-time-block.is-short .calendar-entry-primary-line {
   font-size: 11px;
   line-height: 1.15;
 }
 
 .calendar-time-block.is-short .calendar-entry-primary {
+  align-content: center;
   gap: 0;
   padding: 2px 7px;
 }
@@ -2971,7 +2993,7 @@ dialog.ui-popover-panel.bottom-left {
 }
 
 .swiss-time-block.is-tiny strong,
-.calendar-time-block.is-tiny .calendar-entry-title {
+.calendar-time-block.is-tiny .calendar-entry-primary-line {
   font-size: 10.5px;
 }
 
@@ -2981,25 +3003,11 @@ dialog.ui-popover-panel.bottom-left {
 }
 
 .calendar-time-block.has-inline-action-slot .calendar-entry-primary {
-  padding-right: 26px;
+  padding-right: 31px;
 }
 
 .calendar-time-block.is-short.has-inline-action-slot .calendar-entry-primary {
-  padding-right: 23px;
-}
-
-.calendar-entry-running-row {
-  display: flex;
-  width: 100%;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-}
-
-.calendar-entry-running-row .calendar-entry-duration {
-  width: auto;
-  flex: 0 0 auto;
+  padding-right: 29px;
 }
 
 .calendar-entry-details {
@@ -8557,16 +8565,14 @@ dialog.ui-dialog.manual-entry-dialog {
   }
 }
 
-.calendar-entry-title,
-.calendar-entry-duration,
-.calendar-entry-context,
-.calendar-entry-running-status {
+.calendar-entry-primary-line,
+.calendar-entry-secondary-line {
   font-size: 11px;
   line-height: 1.2;
 }
 
-.calendar-time-block.is-short .calendar-entry-title,
-.calendar-time-block.is-tiny .calendar-entry-title {
+.calendar-time-block.is-short .calendar-entry-primary-line,
+.calendar-time-block.is-tiny .calendar-entry-primary-line {
   font-size: 11px;
 }
 .calendar-compact-editor {
@@ -8590,6 +8596,56 @@ dialog.ui-dialog.manual-entry-dialog {
   opacity: 0;
   transform: translateY(-4px);
   transition: opacity 140ms ease-out, transform 140ms ease-out;
+}
+
+.calendar-compact-editor-panel {
+  container: time-entry-editor / inline-size;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.time-entry-quick-editor-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  background: var(--overlay);
+}
+
+.time-entry-quick-editor-modal {
+  --web-control-height: 44px;
+  --calendar-compact-horizontal-inset: 12px;
+  --calendar-compact-feedback-height: 72px;
+  width: min(420px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: 16px;
+  background: var(--surface-raised);
+  box-shadow: 0 22px 52px var(--shadow-color), var(--shadow-raised);
+  color: var(--foreground);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 180ms ease-out, transform 180ms ease-out;
+}
+
+.time-entry-quick-editor-modal.is-entered {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.time-entry-quick-editor-modal.is-exiting {
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(3px);
+  transition-duration: 90ms;
+  transition-timing-function: ease-in;
 }
 
 .calendar-compact-editor.is-above {
@@ -8640,6 +8696,7 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .calendar-compact-editor-kicker,
 .calendar-compact-field-label,
+.calendar-compact-editor-description > label,
 .calendar-compact-editor-fields label > span,
 .calendar-compact-duration > span {
   color: var(--muted);
@@ -8680,6 +8737,7 @@ dialog.ui-dialog.manual-entry-dialog {
 .calendar-compact-icon-action:focus-visible,
 .calendar-compact-category-menu button:focus-visible,
 .calendar-compact-save:focus-visible,
+.calendar-compact-cancel:focus-visible,
 .calendar-compact-discard-back:focus-visible,
 .calendar-compact-discard-confirm:focus-visible {
   outline: 2px solid var(--focus);
@@ -8688,19 +8746,16 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .calendar-compact-category-field > button:focus-visible,
 .calendar-compact-date-trigger:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: -2px;
-}
-
-.calendar-compact-editor input:focus {
-  border-color: var(--web-focus-border);
   outline: 0;
-  box-shadow: none;
 }
 
-.calendar-compact-editor input[aria-invalid="true"]:focus {
-  border-color: var(--web-focus-border);
-  box-shadow: inset 0 -2px 0 var(--danger);
+.calendar-compact-editor-panel input:focus {
+  outline: 0;
+  box-shadow: inset 0 0 0 2px var(--web-focus-border);
+}
+
+.calendar-compact-editor-panel input[aria-invalid="true"]:focus {
+  box-shadow: inset 0 0 0 2px var(--web-focus-border), inset 0 -2px 0 var(--danger);
 }
 
 .calendar-compact-editor-fields {
@@ -8709,29 +8764,30 @@ dialog.ui-dialog.manual-entry-dialog {
   padding: 12px var(--calendar-compact-horizontal-inset);
 }
 
-.calendar-compact-editor-fields label {
+.calendar-compact-editor-fields label,
+.calendar-compact-editor-description {
   display: grid;
   min-width: 0;
   gap: 5px;
 }
 
-.calendar-compact-editor input,
+.calendar-compact-editor-panel input,
 .calendar-compact-category-field > button {
   box-sizing: border-box;
   width: 100%;
   min-height: 44px;
-  border: 2px solid transparent;
+  border: 0;
   border-radius: 10px;
   background: var(--surface-inset);
   color: var(--foreground);
   font: inherit;
 }
 
-.calendar-compact-editor input {
+.calendar-compact-editor-panel input {
   padding: 0 11px;
 }
 
-.calendar-compact-editor input::placeholder {
+.calendar-compact-editor-panel input::placeholder {
   color: color-mix(in srgb, var(--muted) 72%, transparent);
 }
 
@@ -8805,6 +8861,7 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .calendar-compact-temporal-fields {
   display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -8817,8 +8874,25 @@ dialog.ui-dialog.manual-entry-dialog {
 .calendar-compact-date-time-controls {
   display: grid;
   min-width: 0;
-  grid-template-columns: minmax(0, 1fr) 96px;
-  gap: 8px;
+  min-height: 44px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  border-radius: 10px;
+  background: var(--surface-inset);
+  overflow: hidden;
+  box-shadow: inset 0 0 0 2px transparent;
+}
+
+.calendar-compact-date-time-controls:focus-within {
+  box-shadow: inset 0 0 0 2px var(--web-focus-border);
+}
+
+.calendar-compact-date-time-controls:has(input[aria-invalid="true"]) {
+  box-shadow: inset 0 -2px 0 var(--danger);
+}
+
+.calendar-compact-date-time-controls:focus-within:has(input[aria-invalid="true"]) {
+  box-shadow: inset 0 0 0 2px var(--web-focus-border), inset 0 -2px 0 var(--danger);
 }
 
 .calendar-compact-date-picker,
@@ -8827,16 +8901,41 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .calendar-compact-date-trigger {
-  justify-content: flex-start;
-  border: 2px solid transparent;
-  border-radius: 10px;
-  background: var(--surface-inset);
-  padding-inline: 11px;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  justify-content: center;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
 }
 
 .calendar-compact-date-trigger:hover,
 .calendar-compact-date-trigger[aria-expanded="true"] {
-  background: var(--surface-muted);
+  background: transparent;
+  color: var(--foreground);
+}
+
+.calendar-compact-date-time-controls > input {
+  min-width: 0;
+  border-radius: 10px 0 0 10px;
+  background: transparent;
+  padding-inline: 11px 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.calendar-compact-date-time-controls > input:focus,
+.calendar-compact-date-time-controls > input[aria-invalid="true"]:focus {
+  box-shadow: none;
+}
+
+.calendar-compact-day-offset {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
 }
 
 .calendar-compact-date-trigger strong,
@@ -8850,6 +8949,33 @@ dialog.ui-dialog.manual-entry-dialog {
   z-index: 120;
   max-height: calc(100dvh - 24px);
   overflow-y: auto;
+}
+
+.time-entry-quick-tags .inline-tag-input-anchor {
+  border: 0;
+  border-radius: 10px;
+  background: var(--surface-inset);
+  box-shadow: none;
+}
+
+.time-entry-quick-tags .inline-tag-input-anchor:focus-within {
+  border: 0;
+  box-shadow: inset 0 0 0 2px var(--web-focus-border);
+}
+
+.time-entry-quick-tags .inline-tag-description-input,
+.time-entry-quick-tags .inline-tag-description-input:focus {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.inline-tag-picker.is-portalled,
+.inline-tag-suggestions.is-portalled {
+  position: fixed;
+  right: auto;
+  bottom: auto;
+  z-index: 120;
 }
 
 .calendar-compact-duration-input {
@@ -8927,7 +9053,7 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .calendar-compact-feedback-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   opacity: 0;
   pointer-events: none;
   visibility: hidden;
@@ -8988,13 +9114,15 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .calendar-compact-discard-confirmation strong {
   min-width: 0;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.35;
+  color: var(--danger-text);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.2;
   white-space: nowrap;
 }
 
 .calendar-compact-save,
+.calendar-compact-cancel,
 .calendar-compact-discard-back,
 .calendar-compact-discard-confirm {
   display: inline-flex;
@@ -9015,6 +9143,15 @@ dialog.ui-dialog.manual-entry-dialog {
 .calendar-compact-discard-back {
   background: var(--surface-muted);
   color: var(--foreground);
+}
+
+.calendar-compact-cancel {
+  background: transparent;
+  color: var(--foreground);
+}
+
+.calendar-compact-cancel:hover:not(:disabled) {
+  background: var(--surface-muted);
 }
 
 .calendar-compact-discard-confirm {
@@ -9064,8 +9201,8 @@ dialog.ui-dialog.manual-entry-dialog {
   color: var(--on-accent);
 }
 
-.calendar-compact-editor button:disabled,
-.calendar-compact-editor input:disabled {
+.calendar-compact-editor-panel button:disabled,
+.calendar-compact-editor-panel input:disabled {
   cursor: not-allowed;
   opacity: 0.58;
 }
@@ -9192,14 +9329,31 @@ dialog.ui-dialog.manual-entry-dialog {
   }
 }
 
-@media (max-width: 380px) {
-  .calendar-compact-date-time-controls {
+@container time-entry-editor (max-width: 380px) {
+  .calendar-compact-temporal-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .calendar-compact-duration,
+  .calendar-compact-duration-input {
+    grid-column: 1 / -1;
+  }
+}
+
+@container time-entry-editor (max-width: 340px) {
+  .calendar-compact-temporal-fields {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .calendar-compact-duration,
+  .calendar-compact-duration-input {
+    grid-column: auto;
   }
 }
 
 @media (max-width: 350px) {
-  .calendar-compact-editor {
+  .calendar-compact-editor,
+  .time-entry-quick-editor-modal {
     --calendar-compact-feedback-height: 104px;
   }
 
@@ -9207,9 +9361,9 @@ dialog.ui-dialog.manual-entry-dialog {
   .calendar-compact-feedback-actions {
     display: grid;
     grid-template-areas:
-      "message message"
-      "spacer action";
-    grid-template-columns: minmax(0, 1fr) auto;
+      "message message message"
+      "spacer cancel action";
+    grid-template-columns: minmax(0, 1fr) auto auto;
     row-gap: 6px;
   }
 
@@ -9221,6 +9375,11 @@ dialog.ui-dialog.manual-entry-dialog {
   .calendar-compact-editor-default-actions .calendar-compact-save,
   .calendar-compact-feedback-actions .calendar-compact-save {
     grid-area: action;
+  }
+
+  .calendar-compact-editor-default-actions .calendar-compact-cancel,
+  .calendar-compact-feedback-actions .calendar-compact-cancel {
+    grid-area: cancel;
   }
 
   .calendar-compact-feedback-copy {
@@ -9256,6 +9415,7 @@ dialog.ui-dialog.manual-entry-dialog {
   }
 
   .calendar-compact-editor,
+  .time-entry-quick-editor-modal,
   .calendar-compact-editor-default-actions,
   .calendar-compact-feedback-actions,
   .calendar-compact-discard-confirmation,
@@ -9579,7 +9739,7 @@ dialog.ui-dialog.manual-entry-dialog {
   border-radius: 6px;
   padding: 0 5px;
   background: transparent;
-  line-height: 1;
+  line-height: 1.2;
   white-space: nowrap;
 }
 
@@ -9590,6 +9750,8 @@ dialog.ui-dialog.manual-entry-dialog {
 .inline-selected-tag-visual > svg {
   flex: 0 0 auto;
   pointer-events: none;
+  position: relative;
+  top: 1px;
 }
 
 .inline-selected-tag-overflow-visual {

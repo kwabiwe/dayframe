@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const source = readFileSync(new URL("./TimeReviewViews.tsx", import.meta.url), "utf8");
 const editor = readFileSync(new URL("./CalendarEntryCompactEditor.tsx", import.meta.url), "utf8");
+const quickEditor = readFileSync(new URL("./TimeEntryQuickEditor.tsx", import.meta.url), "utf8");
 const createPlan = readFileSync(new URL("../lib/calendar-entry-compact-editor.ts", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
 const runtime = readFileSync(new URL("./AppShellRuntime.tsx", import.meta.url), "utf8");
@@ -33,19 +34,18 @@ describe("Calendar click-to-create contract", () => {
   });
 
   it("reuses the compact editor without entry-only actions", () => {
-    expect(editor).toContain('props.mode === "entry" ? props.entry : null');
-    expect(editor).toContain('props.mode === "create"');
-    expect(editor).toContain('aria-label={entry ? `Edit ${title}` : "Create Calendar entry"}');
-    expect(editor).toContain("formatCalendarEntryCompactDuration(preview.plan.durationSeconds)");
-    expect(editor.match(/<DatePickerPopover/g)).toHaveLength(2);
-    expect(editor).toContain('label={formatCompactDateLabel(draft.startedAtDate)}');
-    expect(editor).toContain('label={formatCompactDateLabel(draft.stoppedAtDate)}');
-    expect(editor).toMatch(/\{props\.mode === "entry" \? \([\s\S]*aria-label=\{`Delete \$\{title\}`\}/s);
+    expect(editor).toContain("<TimeEntryQuickEditorPanel");
+    expect(quickEditor).toContain('props.mode === "entry" ? props.entry : null');
+    expect(quickEditor).toContain('aria-label={entry ? `Edit ${title}` : "Create Calendar entry"}');
+    expect(quickEditor).toContain("formatCalendarEntryCompactDuration(preview.plan.durationSeconds)");
+    expect(quickEditor.match(/<DatePickerPopover/g)).toHaveLength(2);
+    expect(quickEditor.match(/iconOnly/g)).toHaveLength(2);
+    expect(quickEditor).toMatch(/\{props\.mode === "entry" && props\.onDelete \? \([\s\S]*aria-label=\{`Delete \$\{title\}`\}/s);
   });
 
   it("saves through the existing manual-entry runtime with no hidden metadata", () => {
     expect(source).toContain("return createManualEntry(plan.input)");
-    expect(createPlan).toContain("tagNames: []");
+    expect(createPlan).toContain("tagNames,");
     expect(createPlan).not.toMatch(/CalendarEntryCompactCreatePlan[\s\S]*placeId/s);
     const createManualEntry = runtime.slice(
       runtime.indexOf("const createManualEntry"),

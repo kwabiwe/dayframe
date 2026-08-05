@@ -4,7 +4,8 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Pencil } from "lucide-react";
-import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
+import { useAppShellRuntime } from "@/components/AppShellRuntime";
+import { saveTimeEntryQuickEdit, TimeEntryQuickEditorModal } from "@/components/TimeEntryQuickEditor";
 import { TagMetadata } from "@/components/TagMetadata";
 import { IconButton } from "@/components/ui/Primitives";
 import { timeEntryCategoryColor, timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
@@ -14,6 +15,7 @@ import type { ReportResult } from "@/lib/report-service";
 
 export function ReportDetailsTable({ report }: { report: ReportResult }) {
   const router = useRouter();
+  const { isTimerBusy, updateActiveEntryFromCalendar } = useAppShellRuntime();
   const [isPending, startTransition] = useTransition();
   const [editingEntry, setEditingEntry] = useState<ReportResult["entries"][number] | null>(null);
 
@@ -114,15 +116,19 @@ export function ReportDetailsTable({ report }: { report: ReportResult }) {
       ) : null}
 
       {editingEntry ? (
-        <EditTimeEntryDialog
+        <TimeEntryQuickEditorModal
+          capturedNow={new Date(report.capturedNow)}
           categories={report.filterOptions.categories}
           entry={editingEntry}
+          isTimerBusy={isTimerBusy}
           onClose={() => setEditingEntry(null)}
-          onSaved={() => {
-            setEditingEntry(null);
-            startTransition(() => router.refresh());
+          onSave={async (plan) => {
+            const outcome = editingEntry.stoppedAt
+              ? await saveTimeEntryQuickEdit(editingEntry.id, plan)
+              : await updateActiveEntryFromCalendar({ plan });
+            if (outcome.ok) startTransition(() => router.refresh());
+            return outcome;
           }}
-          places={report.filterOptions.places}
           peerEntries={report.overlapCandidates}
           tags={report.filterOptions.tags}
         />

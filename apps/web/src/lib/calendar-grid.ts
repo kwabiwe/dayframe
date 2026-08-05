@@ -41,6 +41,10 @@ export function parseTimeInput(raw: string): string | null {
 }
 
 export function maskTimeInput(raw: string) {
+  if (raw.includes(":")) {
+    const [hours = "", minutes = ""] = raw.replace(/[^\d:]/g, "").split(":", 2);
+    return `${hours.slice(0, 2)}:${minutes.slice(0, 2)}`;
+  }
   const digits = raw.replace(/\D/g, "").slice(0, 4);
   if (digits.length <= 2) return digits;
   if (digits.length === 3) return `${digits.slice(0, 1)}:${digits.slice(1)}`;

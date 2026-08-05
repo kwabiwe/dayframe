@@ -153,6 +153,41 @@ describe("shell timer runtime", () => {
     expect(requests).toHaveLength(1);
   });
 
+  it("projects active tag edits into every timer surface and sends them in the same PATCH", async () => {
+    const active = entry({ id: "active-tags", placeId: "place-office", tagNames: ["ship"] });
+    const snapshot = bootstrapData(active);
+    const draftSnapshot = timerDraftForEntry(active);
+    const plan = {
+      ...compactPlan(),
+      payload: { ...compactPlan().payload, tagNames: ["writing"] },
+      resolved: { ...compactPlan().resolved, tagNames: ["writing"] }
+    };
+    let data = snapshot;
+    let draft = draftSnapshot;
+    const send = vi.fn(async () => ({ updatedAt: "2026-07-22T10:06:00.000Z" }));
+
+    await expect(runActiveEntryCompactMutation({
+      commit: (nextData) => { data = nextData; },
+      draftSnapshot,
+      gate: createTimerMutationGate(),
+      getCurrentData: () => data,
+      input: { plan },
+      refresh: async () => undefined,
+      send,
+      setBusy: () => undefined,
+      setDraft: (nextDraft) => { draft = nextDraft; },
+      setError: () => undefined,
+      snapshot
+    })).resolves.toEqual({ ok: true });
+
+    expect(send).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith("active-tags", expect.objectContaining({ tagNames: ["writing"] }));
+    expect(data.activeEntry?.tagNames).toEqual(["writing"]);
+    expect(data.entries.find((candidate) => candidate.id === active.id)?.tagNames).toEqual(["writing"]);
+    expect(draft.tagNames).toEqual(["writing"]);
+    expect(data.activeEntry?.placeId).toBe("place-office");
+  });
+
   it("restores the exact active snapshot and timer draft after a compact edit failure", async () => {
     const active = entry({ id: "active-calendar", placeId: "place-office", tagNames: ["ship"] });
     const snapshot = bootstrapData(active);
@@ -519,6 +554,7 @@ function compactPlan(): CalendarEntryCompactSavePlan {
     resolved: {
       categoryId: "work",
       description: "Calendar draft",
+      tagNames: ["ship"],
       startedAt: "2026-07-22T08:45:00.000Z",
       stoppedAt: null
     }

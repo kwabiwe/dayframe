@@ -11,7 +11,9 @@ import {
   calendarEntryCompactCreateInitialDraft,
   calendarEntryCompactDraftHasChanges,
   calendarEntryCompactInitialDraft,
+  calendarEntryLocalDayOffset,
   emptyCalendarEntryCompactDirty,
+  isCompleteCalendarEntryCompactDurationInput,
   normalizeCalendarEntryCompactDuration,
   synchronizeCalendarEntryCompactDraft,
   type CalendarEntryCompactDirty,
@@ -26,11 +28,13 @@ describe("Calendar compact editor temporal model", () => {
     expect(calendarEntryCompactInitialDraft(completed)).toEqual({
       categoryId: "focus",
       description: "Deep work",
+      tagNames: [],
       startedAtDate: "2026-01-03",
       startedAtTime: "08:13",
       stoppedAtDate: "2026-01-03",
       stoppedAtTime: "09:20",
-      duration: "01:06:37",
+      duration: "01:06",
+      durationSeconds: 3_997,
       temporalOwner: "source"
     });
     expect(calendarEntryCompactInitialDraft(running).stoppedAtDate).toBe("");
@@ -49,6 +53,33 @@ describe("Calendar compact editor temporal model", () => {
     expect(calendarEntryCompactDraftHasChanges(source, draft)).toBe(false);
   });
 
+  it("preserves hidden seconds for metadata-only saves and untouched sub-minute entries", () => {
+    const source = timeEntry();
+    const descriptionPlan = savePlan(source, {
+      ...calendarEntryCompactInitialDraft(source),
+      description: "Updated"
+    }, undefined, dirty({ description: true }));
+    const tagPlan = savePlan(source, {
+      ...calendarEntryCompactInitialDraft(source),
+      tagNames: ["Planning"]
+    }, undefined, dirty({ tagNames: true }));
+    expect(descriptionPlan.payload).toEqual({ description: "Updated" });
+    expect(tagPlan.payload).toEqual({ tagNames: ["Planning"] });
+    for (const plan of [descriptionPlan, tagPlan]) {
+      expect(plan.resolved.startedAt).toBe(source.startedAt);
+      expect(plan.resolved.stoppedAt).toBe(source.stoppedAt);
+      expect(plan.durationSeconds).toBe(3_997);
+    }
+
+    const subMinute = timeEntry({
+      stoppedAt: localIso("2026-01-03T08:14", 11),
+      durationSeconds: 29
+    });
+    const subMinuteDraft = calendarEntryCompactInitialDraft(subMinute);
+    expect(subMinuteDraft.duration).toBe("00:00");
+    expect(savePlan(subMinute, subMinuteDraft).durationSeconds).toBe(29);
+  });
+
   it("makes Start the owner, preserves Duration, and moves Finish", () => {
     const source = timeEntry();
     const draft = synchronize(source, {
@@ -58,7 +89,8 @@ describe("Calendar compact editor temporal model", () => {
     const plan = savePlan(source, draft);
 
     expect(draft.stoppedAtTime).toBe("09:06");
-    expect(draft.duration).toBe("01:06:37");
+    expect(draft.duration).toBe("01:06");
+    expect(draft.durationSeconds).toBe(3_997);
     expect(plan.resolved.startedAt).toBe(localIso("2026-01-03T08:00"));
     expect(plan.resolved.stoppedAt).toBe(localIso("2026-01-03T09:06", 37));
     expect(plan.payload).toEqual({
@@ -75,29 +107,42 @@ describe("Calendar compact editor temporal model", () => {
     }, "finish");
     const plan = savePlan(source, draft);
 
-    expect(draft.duration).toBe("01:46:18");
+    expect(draft.duration).toBe("01:46");
+    expect(draft.durationSeconds).toBe(6_378);
     expect(plan.resolved.startedAt).toBe(source.startedAt);
     expect(plan.resolved.stoppedAt).toBe(localIso("2026-01-03T10:00"));
   });
 
   it.each([
-    ["30", "00:30:00", 1_800],
-    ["30:00", "00:30:00", 1_800],
-    ["1:30:00", "01:30:00", 5_400],
-    ["27:00:01", "27:00:01", 97_201]
+    ["30", "00:30", 1_800],
+    ["30m", "00:30", 1_800],
+    ["90", "01:30", 5_400],
+    ["90m", "01:30", 5_400],
+    ["1:30", "01:30", 5_400],
+    ["01:30", "01:30", 5_400],
+    ["1h 30m", "01:30", 5_400],
+    ["1h30m", "01:30", 5_400],
+    ["1:30:00", "01:30", 5_400],
+    ["27:01", "27:01", 97_260]
   ])("normalizes duration shorthand %s without a 24-hour cap", (raw, normalized, seconds) => {
     expect(normalizeCalendarEntryCompactDuration(raw)).toEqual({ seconds, value: normalized });
+  });
+
+  it("waits for both clock-minute digits before live Duration synchronization", () => {
+    expect(isCompleteCalendarEntryCompactDurationInput("1:2")).toBe(false);
+    expect(isCompleteCalendarEntryCompactDurationInput("1:20")).toBe(true);
+    expect(isCompleteCalendarEntryCompactDurationInput("1h30m")).toBe(true);
   });
 
   it("makes Duration the owner, keeps Start, and moves Finish across days", () => {
     const source = timeEntry();
     const draft = synchronize(source, {
       ...calendarEntryCompactInitialDraft(source),
-      duration: "49:30:00"
+      duration: "49:30"
     }, "duration");
     const plan = savePlan(source, draft, new Date(2026, 0, 8));
 
-    expect(draft.duration).toBe("49:30:00");
+    expect(draft.duration).toBe("49:30");
     expect(draft.stoppedAtDate).toBe("2026-01-05");
     expect(draft.stoppedAtTime).toBe("09:43");
     expect(plan.resolved.startedAt).toBe(source.startedAt);
@@ -111,9 +156,11 @@ describe("Calendar compact editor temporal model", () => {
       duration: "0",
       temporalOwner: "duration" as const
     };
-    expect(() => savePlan(source, draft)).toThrow("at least 00:00:01");
+    expect(() => savePlan(source, draft)).toThrow("at least 00:01 using HH:MM");
     expect(draft.duration).toBe("0");
-    expect(() => normalizeCalendarEntryCompactDuration("1:60")).toThrow("at least 00:00:01");
+    expect(() => normalizeCalendarEntryCompactDuration("1:60")).toThrow("at least 00:01 using HH:MM");
+    expect(() => normalizeCalendarEntryCompactDuration("1:30:29")).toThrow("at least 00:01 using HH:MM");
+    expect(normalizeCalendarEntryCompactDuration("00:01")).toEqual({ seconds: 60, value: "00:01" });
   });
 
   it("keeps an invalid Finish input and uses the exact agreed error", () => {
@@ -168,6 +215,16 @@ describe("Calendar compact editor temporal model", () => {
     expect(edited.payload).not.toHaveProperty("stoppedAt");
   });
 
+  it("does not treat a live running-duration refresh as an unsaved edit", () => {
+    const opened = timeEntry({ durationSeconds: 3_997, stoppedAt: null });
+    const refreshed = timeEntry({ durationSeconds: 4_012, stoppedAt: null });
+    const draft = calendarEntryCompactInitialDraft(opened);
+
+    expect(calendarEntryCompactDraftHasChanges(refreshed, draft)).toBe(false);
+    expect(calendarEntryCompactDraftHasChanges(refreshed, { ...draft, description: "Updated" })).toBe(true);
+    expect(calendarEntryCompactDraftHasChanges(refreshed, { ...draft, description: "Deep work" })).toBe(false);
+  });
+
   it("rejects future Start and Finish after synchronization", () => {
     const source = timeEntry();
     const now = new Date(2026, 0, 3, 10);
@@ -183,16 +240,59 @@ describe("Calendar compact editor temporal model", () => {
     }, now)).toThrow("Finish time cannot be in the future.");
   });
 
-  it("emits only compact-editor-owned category and description fields", () => {
+  it("emits only quick-editor-owned fields and never clears hidden Place metadata", () => {
     const source = timeEntry({ placeId: "office", projectId: "legacy", tagNames: ["private"] });
-    const plan = savePlan(source, {
-      ...calendarEntryCompactInitialDraft(source),
-      categoryId: "",
-      description: "   "
-    }, new Date(2026, 0, 3, 12), dirty({ categoryId: true, description: true }));
+    const cases = [
+      savePlan(source, {
+        ...calendarEntryCompactInitialDraft(source),
+        description: "Updated"
+      }, new Date(2026, 0, 3, 12), dirty({ description: true })),
+      savePlan(source, {
+        ...calendarEntryCompactInitialDraft(source),
+        tagNames: ["private", "planning"]
+      }, new Date(2026, 0, 3, 12), dirty({ tagNames: true })),
+      savePlan(source, {
+        ...calendarEntryCompactInitialDraft(source),
+        categoryId: ""
+      }, new Date(2026, 0, 3, 12), dirty({ categoryId: true })),
+      savePlan(source, {
+        ...calendarEntryCompactInitialDraft(source),
+        startedAtTime: "08:00",
+        temporalOwner: "start"
+      }),
+      savePlan(source, {
+        ...calendarEntryCompactInitialDraft(source),
+        duration: "02:00",
+        temporalOwner: "duration"
+      })
+    ];
 
-    expect(plan.payload).toEqual({ categoryId: null, description: null });
-    expect(Object.keys(plan.payload).every(calendarEditorOwnsPayloadKey)).toBe(true);
+    expect(cases[0].payload).toEqual({ description: "Updated" });
+    expect(cases[1].payload).toEqual({ tagNames: ["private", "planning"] });
+    expect(cases[2].payload).toEqual({ categoryId: null });
+    for (const plan of cases) {
+      expect(plan.payload).not.toHaveProperty("placeId");
+      expect(Object.keys(plan.payload).every(calendarEditorOwnsPayloadKey)).toBe(true);
+    }
+  });
+
+  it("hydrates tags, detects tag dirtiness, and emits one tag-only PATCH", () => {
+    const source = timeEntry({ tagNames: ["planning"] });
+    const initial = calendarEntryCompactInitialDraft(source);
+    const draft = { ...initial, tagNames: ["planning", "deep work"] };
+
+    expect(initial.tagNames).toEqual(["planning"]);
+    expect(calendarEntryCompactDraftHasChanges(source, initial)).toBe(false);
+    expect(calendarEntryCompactDraftHasChanges(source, draft)).toBe(true);
+    expect(savePlan(source, draft, undefined, dirty({ tagNames: true })).payload).toEqual({
+      tagNames: ["planning", "deep work"]
+    });
+  });
+
+  it("calculates same-day, next-day and multi-day local offsets without DST arithmetic", () => {
+    expect(calendarEntryLocalDayOffset("2026-03-28", "2026-03-28")).toBe(0);
+    expect(calendarEntryLocalDayOffset("2026-03-28", "2026-03-29")).toBe(1);
+    expect(calendarEntryLocalDayOffset("2026-03-28", "2026-04-02")).toBe(5);
   });
 });
 
@@ -207,7 +307,7 @@ describe("Calendar compact editor create plan", () => {
 
     expect(draft.startedAtDate).toBe("2026-01-03");
     expect(draft.stoppedAtDate).toBe("2026-01-04");
-    expect(draft.duration).toBe("00:30:00");
+    expect(draft.duration).toBe("00:30");
     expect(plan.resolved).toMatchObject(source);
     expect(calendarEntryCompactCreateDraftHasChanges(source, draft)).toBe(false);
   });
@@ -222,7 +322,8 @@ describe("Calendar compact editor create plan", () => {
         ...calendarEntryCompactCreateInitialDraft(source),
         categoryId: "focus",
         description: "  Plan release  ",
-        duration: "1:30:00"
+        tagNames: ["planning"],
+        duration: "1:30"
       },
       originalStartedAt: source.startedAt,
       originalStoppedAt: source.stoppedAt,
@@ -230,11 +331,11 @@ describe("Calendar compact editor create plan", () => {
     });
     const plan = buildCalendarEntryCompactCreatePlan({ draft, now: new Date(2026, 0, 4), source });
 
-    expect(draft.duration).toBe("01:30:00");
+    expect(draft.duration).toBe("01:30");
     expect(plan.input).toEqual({
       categoryId: "focus",
       description: "Plan release",
-      tagNames: [],
+      tagNames: ["planning"],
       startedAt: source.startedAt,
       stoppedAt: localIso("2026-01-03T11:30")
     });

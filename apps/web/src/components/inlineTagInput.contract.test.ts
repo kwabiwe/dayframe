@@ -7,7 +7,7 @@ const source = readFileSync(
   "utf8"
 );
 const iconSource = readFileSync(fileURLToPath(new URL("./TagIcon.tsx", import.meta.url)), "utf8");
-const editDialogSource = readFileSync(fileURLToPath(new URL("./EditTimeEntryDialog.tsx", import.meta.url)), "utf8");
+const quickEditorSource = readFileSync(fileURLToPath(new URL("./TimeEntryQuickEditor.tsx", import.meta.url)), "utf8");
 const timerSource = readFileSync(fileURLToPath(new URL("./PersistentTimerBar.tsx", import.meta.url)), "utf8");
 const styles = readFileSync(fileURLToPath(new URL("../app/globals.css", import.meta.url)), "utf8");
 
@@ -45,8 +45,16 @@ describe("web tag editor interaction contract", () => {
     expect(source).toContain("selectVisibleTags(selectedTagNames");
     expect(source).toContain('className="inline-selected-tag-overflow"');
     expect(source).toContain('<X aria-hidden="true" size={12} strokeWidth={1.6} />');
-    expect(editDialogSource).toContain("<InlineTagInput");
+    expect(quickEditorSource).toContain("<InlineTagInput");
     expect(timerSource).toContain("<InlineTagInput");
+  });
+
+  it("can portal both tag surfaces without losing containment or Escape focus return", () => {
+    expect(source).toContain("maybePortal(");
+    expect(source).toContain("suggestionsPanelRef");
+    expect(source).toContain("pickerPanelRef");
+    expect(source).toContain("time-entry-quick-editor-nested-surface");
+    expect(source).toContain("pickerTriggerRef.current?.focus()");
   });
 
   it("separates the accessible hit target from the compact visible tag fill", () => {

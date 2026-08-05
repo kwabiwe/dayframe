@@ -5,12 +5,12 @@ import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Ellipsis, Pencil, Play, Trash2 } from "lucide-react";
 import { analyzeTimeIntervals, type TimeIntervalAnalysisEntry } from "@dayframe/shared";
-import { EditTimeEntryDialog } from "@/components/EditTimeEntryDialog";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
+import { saveTimeEntryQuickEdit, TimeEntryQuickEditorModal } from "@/components/TimeEntryQuickEditor";
 import { TagMetadata } from "@/components/TagMetadata";
 import { IconButton } from "@/components/ui/Primitives";
 import { timeEntryCategoryColor, timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
-import type { CategoryRow, PlaceRow, TagRow, TimeEntryRow } from "@/lib/queries";
+import type { CategoryRow, TagRow, TimeEntryRow } from "@/lib/queries";
 import {
   formatDate,
   formatDuration,
@@ -23,7 +23,6 @@ import type { DateRange } from "@/lib/time-entry-overlap";
 export function EntriesTable({
   entries,
   categories,
-  places,
   tags = [],
   groupByDay = false,
   onDeleteEntries,
@@ -35,7 +34,6 @@ export function EntriesTable({
 }: {
   entries: TimeEntryRow[];
   categories: CategoryRow[];
-  places: PlaceRow[];
   tags?: TagRow[];
   groupByDay?: boolean;
   onDeleteEntries: (entries: readonly TimeEntryRow[]) => void;
@@ -47,7 +45,12 @@ export function EntriesTable({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { startEntryAgain } = useAppShellRuntime();
+  const {
+    clearTimerError,
+    isTimerBusy,
+    startEntryAgain,
+    updateActiveEntryFromCalendar
+  } = useAppShellRuntime();
   const [isPending, startTransition] = useTransition();
   const [editingEntry, setEditingEntry] = useState<TimeEntryRow | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -104,16 +107,29 @@ export function EntriesTable({
     return () => window.cancelAnimationFrame(frame);
   }, [grouped, highlightedEntryId]);
 
-  async function continueEntry(entry: TimeEntryRow) {
-    if (continuingEntryId) return;
+  async function continueEntry(entry: TimeEntryRow, surface: "row" | "editor" = "row") {
+    if (continuingEntryId || isTimerBusy) {
+      const outcome = { ok: false, error: "A timer update is already in progress." } as const;
+      if (surface === "row") setActionError(outcome.error);
+      return outcome;
+    }
 
     setContinuingEntryId(entry.id);
     setActionError(null);
     try {
       const outcome = await startEntryAgain(entry);
-      if (!outcome.ok) throw new Error(outcome.error);
+      if (!outcome.ok) {
+        clearTimerError();
+        if (surface === "row") setActionError(outcome.error);
+      }
+      return outcome;
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : "Unable to start this task.");
+      const outcome = {
+        ok: false,
+        error: error instanceof Error ? error.message : "Unable to start this task."
+      } as const;
+      if (surface === "row") setActionError(outcome.error);
+      return outcome;
     } finally {
       setContinuingEntryId(null);
     }
@@ -325,17 +341,29 @@ export function EntriesTable({
         </table>
       </div>
       {editingEntry ? (
-        <EditTimeEntryDialog
+        <TimeEntryQuickEditorModal
+          capturedNow={capturedNow}
           categories={categories}
           entry={editingEntry}
+          isTimerBusy={isTimerBusy}
           onClose={() => setEditingEntry(null)}
-          onSaved={async () => {
+          onDelete={() => {
+            const entry = editingEntry;
             setEditingEntry(null);
-            await onChanged?.();
-            startTransition(() => router.refresh());
+            onDeleteEntries([entry]);
           }}
+          onSave={async (plan) => {
+            const outcome = editingEntry.stoppedAt
+              ? await saveTimeEntryQuickEdit(editingEntry.id, plan)
+              : await updateActiveEntryFromCalendar({ plan });
+            if (outcome.ok) {
+              await onChanged?.();
+              startTransition(() => router.refresh());
+            }
+            return outcome;
+          }}
+          onStartAgain={editingEntry.stoppedAt ? () => continueEntry(editingEntry, "editor") : undefined}
           peerEntries={entries}
-          places={places}
           tags={tags}
         />
       ) : null}

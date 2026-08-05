@@ -50,6 +50,9 @@ describe("Reports accessibility and responsive contracts", () => {
 
   it("preserves the active URL on edit refresh and adapts detail rows below 760px", () => {
     expect(detailsSource).toContain("startTransition(() => router.refresh())");
+    expect(detailsSource).toContain("<TimeEntryQuickEditorModal");
+    expect(detailsSource).not.toContain("EditTimeEntryDialog");
+    expect(detailsSource).toContain("saveTimeEntryQuickEdit");
     expect(detailsSource).toContain("Running");
     expect(detailsSource).not.toContain("Confidence");
     expect(detailsSource).not.toContain("Review status");
