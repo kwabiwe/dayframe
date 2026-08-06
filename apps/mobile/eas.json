@@ -17,7 +17,8 @@
     "preview": {
       "distribution": "internal",
       "ios": {
-        "simulator": false
+        "simulator": false,
+        "buildConfiguration": "Release"
       },
       "env": {
         "EXPO_PUBLIC_DAYFRAME_API_BASE": "https://dayframe-staging.vercel.app",
@@ -27,7 +28,8 @@
     "production": {
       "distribution": "store",
       "ios": {
-        "simulator": false
+        "simulator": false,
+        "buildConfiguration": "Release"
       },
       "env": {
         "EXPO_PUBLIC_DAYFRAME_API_BASE": "https://dayframe-web.vercel.app",

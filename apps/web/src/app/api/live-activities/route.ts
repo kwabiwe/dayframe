@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authErrorResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
-import { LiveActivityRegistrationError, registerLiveActivity } from "@/lib/live-activity-push";
+import {
+  LiveActivityRegistrationError,
+  notifyLiveActivitiesBestEffort,
+  registerLiveActivity
+} from "@/lib/live-activity-push";
 
 const RegistrationSchema = z.object({
   token: z.string().regex(/^[0-9a-f]+$/i).min(32).max(512),
@@ -16,6 +20,7 @@ export async function POST(request: Request) {
     const session = await resolveRequestSession(request);
     const registration = RegistrationSchema.parse(await request.json());
     await registerLiveActivity(session, registration);
+    await notifyLiveActivitiesBestEffort(session);
     return NextResponse.json({ ok: true }, { status: 201 });
   } catch (error) {
     const response = authErrorResponse(error);

@@ -9,6 +9,7 @@ const session = {
 
 const mocks = vi.hoisted(() => ({
   resolveRequestSession: vi.fn(),
+  notifyLiveActivitiesBestEffort: vi.fn(),
   registerLiveActivity: vi.fn()
 }));
 
@@ -17,6 +18,8 @@ vi.mock("@/lib/ingest-auth", () => ({
 }));
 
 vi.mock("@/lib/live-activity-push", () => ({
+  LiveActivityRegistrationError: class LiveActivityRegistrationError extends Error {},
+  notifyLiveActivitiesBestEffort: mocks.notifyLiveActivitiesBestEffort,
   registerLiveActivity: mocks.registerLiveActivity
 }));
 
@@ -26,6 +29,7 @@ describe("/api/live-activities", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.resolveRequestSession.mockResolvedValue(session);
+    mocks.notifyLiveActivitiesBestEffort.mockResolvedValue(undefined);
     mocks.registerLiveActivity.mockResolvedValue(undefined);
   });
 
@@ -44,6 +48,7 @@ describe("/api/live-activities", () => {
 
     expect(response.status).toBe(201);
     expect(mocks.registerLiveActivity).toHaveBeenCalledWith(session, body);
+    expect(mocks.notifyLiveActivitiesBestEffort).toHaveBeenCalledWith(session);
   });
 
   it("rejects malformed or non-hex tokens", async () => {

@@ -1,104 +1,4 @@
 import Foundation
-import Security
-
-private struct DayframeShortcutRuntimeContext: Codable, Equatable {
-  let apiBase: String
-  let sessionToken: String
-}
-
-enum DayframeShortcutRuntimeContextStore {
-  private static let service = "com.dayframe.app.shortcut-direct-event"
-  private static let account = "runtime-context-v1"
-  private static let lock = NSLock()
-  private static let allowedAPIBaseURLs = Set([
-    "https://dayframe-staging.vercel.app",
-    "https://dayframe-web.vercel.app"
-  ])
-
-  static func set(apiBase: String, sessionToken: String) -> Bool {
-    guard
-      let normalizedAPIBase = normalizedAPIBase(apiBase),
-      !sessionToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-      let data = try? JSONEncoder().encode(
-        DayframeShortcutRuntimeContext(apiBase: normalizedAPIBase, sessionToken: sessionToken)
-      )
-    else {
-      clear()
-      return false
-    }
-
-    return lock.withLock {
-      let query = baseQuery
-      var existingQuery = query
-      existingQuery[kSecReturnData] = true
-      existingQuery[kSecMatchLimit] = kSecMatchLimitOne
-      var existingResult: CFTypeRef?
-      if
-        SecItemCopyMatching(existingQuery as CFDictionary, &existingResult) == errSecSuccess,
-        let existingData = existingResult as? Data,
-        existingData == data
-      {
-        return true
-      }
-
-      let attributes: [CFString: Any] = [
-        kSecValueData: data,
-        kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-      ]
-      let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-      if updateStatus == errSecSuccess {
-        return true
-      }
-      guard updateStatus == errSecItemNotFound else {
-        return false
-      }
-
-      var item = query
-      attributes.forEach { item[$0] = $1 }
-      return SecItemAdd(item as CFDictionary, nil) == errSecSuccess
-    }
-  }
-
-  static func clear() {
-    lock.withLock {
-      SecItemDelete(baseQuery as CFDictionary)
-    }
-  }
-
-  fileprivate static func current() -> DayframeShortcutRuntimeContext? {
-    lock.withLock {
-      var query = baseQuery
-      query[kSecReturnData] = true
-      query[kSecMatchLimit] = kSecMatchLimitOne
-
-      var result: CFTypeRef?
-      guard
-        SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-        let data = result as? Data,
-        let context = try? JSONDecoder().decode(DayframeShortcutRuntimeContext.self, from: data),
-        normalizedAPIBase(context.apiBase) == context.apiBase,
-        !context.sessionToken.isEmpty
-      else {
-        return nil
-      }
-      return context
-    }
-  }
-
-  private static var baseQuery: [CFString: Any] {
-    [
-      kSecClass: kSecClassGenericPassword,
-      kSecAttrService: service,
-      kSecAttrAccount: account
-    ]
-  }
-
-  private static func normalizedAPIBase(_ value: String) -> String? {
-    let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
-      .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-    return allowedAPIBaseURLs.contains(normalized) ? normalized : nil
-  }
-}
 
 enum DayframeShortcutDirectEventClient {
   private struct EventRequest: Encodable {
@@ -152,7 +52,7 @@ enum DayframeShortcutDirectEventClient {
         let httpResponse = response as? HTTPURLResponse,
         httpResponse.statusCode == 200 || httpResponse.statusCode == 201,
         let payload = try? JSONDecoder().decode(EventResponse.self, from: data),
-        !payload.eventId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !payload.eventId.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty
       else {
         return false
       }

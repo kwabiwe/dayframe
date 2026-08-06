@@ -15,6 +15,84 @@ Physical-iPhone review found three follow-ups on the draft branch:
 
 The existing Live Activity Stop-to-server path remains event-first: the native App Intent ends the local activity immediately, submits the same idempotent event directly to the configured Dayframe API, and retains the native queue as the offline or lost-response fallback.
 
+## Opus 5 Review Investigation
+
+The review exposed three distinct cross-process/deployment risks that must be
+tested independently rather than treated as one APNs failure.
+
+### Hypotheses before implementation
+
+1. **Lock Screen Stop has process-private storage.** The shared Swift source is
+   compiled into both targets, but the credential query omits
+   `kSecAttrAccessGroup` and the queue uses `UserDefaults.standard`. This would
+   prove that the extension can end ActivityKit locally while having neither a
+   bearer credential nor a host-visible fallback event. It is disproved only by
+   signed entitlements containing one common App Group/Keychain group and by an
+   extension-originated stop that the terminated host later drains. Checks:
+   source/entitlement inspection, signed-product entitlement extraction, a
+   native shared-store test harness, and a terminated-app physical test.
+2. **The credential is available but inaccessible before first unlock.** Even a
+   correct access group would fail after reboot until first unlock because the
+   intended accessibility class is `AfterFirstUnlockThisDeviceOnly`. This is a
+   deliberate security boundary, not an online/offline bug. Checks: Keychain OS
+   status diagnostics without credential values, plus device tests after one
+   unlock and with the app backgrounded/terminated. A pre-first-unlock failure
+   must leave the shared queued event intact.
+3. **Preview signing selects the wrong APNs host.** EAS preview currently uses
+   the default Release configuration, whose checked-in build setting is
+   `production`; the successful staging install supplied a shell override.
+   Checks: resolved Xcode build settings and entitlements from final signed app
+   and extension products for preview and production configurations.
+4. **APNs delivery is lost after one transient provider failure.** The server
+   records an error on the token row but has no pending desired state,
+   `next_attempt_at`, or retry worker. A mocked 5xx/network response followed by
+   no second HTTP/2 request proves it. The fix must persist the newest desired
+   state before delivery, retry only due transient rows with bounded backoff,
+   supersede stale state per token, and terminally invalidate permanent token
+   failures.
+
+Apple's documented model supports the architecture above: App Groups provide a
+shared app/extension container and suite-based `UserDefaults`; Keychain items
+must be written into a group available to both signed targets; and the
+`aps-environment` entitlement is ultimately governed by the provisioning
+profile. Expo's EAS schema supports selecting an explicit Xcode
+`buildConfiguration` per build profile.
+
+The literal proposal that every staging build must use APNs Sandbox is not valid
+for EAS Ad Hoc distribution. Expo's internal-distribution documentation confirms
+that EAS Preview uses Ad Hoc provisioning, and Apple's provisioning profile then
+supplies the production `aps-environment`. The deterministic supported lanes are
+therefore local Xcode `Staging` = development/sandbox, EAS Preview =
+Release/Ad Hoc/production APNs with the staging API, and TestFlight/App Store =
+Release/production APNs with the production API. A checked-in assertion verifies
+the configuration and can extract the final signed host/extension entitlements.
+
+### Shared Stop storage
+
+The review's P0 diagnosis was correct. The earlier code shared Swift source but
+not storage: its Keychain query omitted `kSecAttrAccessGroup`, and its fallback
+queue was process-private `UserDefaults.standard`. The containing app and Live
+Activity extension now carry matching App Group and Keychain Sharing
+entitlements. Runtime context is stored under the shared access group with
+`AfterFirstUnlockThisDeviceOnly`; the queue is an atomic, file-protected App
+Group JSON file guarded by both an in-process lock and `flock` for cross-process
+updates. The host migrates the old private credential and each process merges
+its old private queue without deleting either legacy value until the shared
+write succeeds.
+
+### Durable APNs delivery
+
+The single best-effort request is replaced by a per-token outbox that persists
+the newest desired update or end state before delivery. Claims use short leases
+and `FOR UPDATE SKIP LOCKED`; revision guards and monotonic ActivityKit
+timestamps prevent an older worker from committing over a newer state. Network,
+429, and 5xx failures get bounded exponential backoff and capped
+`Retry-After`; other 4xx failures are terminal, and 410 or invalid/unregistered
+token reasons invalidate the token. Successful, retryable, permanent, invalid
+token, and later-recovery paths have focused coverage. Timer-state requests
+reconcile due work, with a protected daily sweep as the durable fallback allowed
+by the staging Vercel Hobby plan.
+
 ## Root Cause And Implementation
 
 ### Control geometry
@@ -121,3 +199,53 @@ No redacted delivery-time/APNs response capture is claimed here; the provider cr
 ## Remaining Validation
 
 The keyboard runtime is promoted to `dayframe-staging.vercel.app`, the exact embedded staging build is installed and launched, and the draft PR description carries the PASS / FAIL / NOT RUN matrix. Remaining validation is limited to the login/signup keyboard and password-visibility checks on the installed iPhone, final Dynamic Island screenshots, and one redacted APNs status/timing record.
+
+## Opus 5 Follow-up Evidence
+
+The follow-up implementation adds hosted migration
+`202608060003_live_activity_delivery_outbox.sql`; it was applied to the separate
+staging Supabase database and the table, three indexes, and RLS state were
+verified. Preview alone received a newly generated sensitive `CRON_SECRET`.
+Production database, environment, deployment, and alias were not changed.
+
+Automated evidence after the final implementation:
+
+- `npm run lint`: PASS, including the checked-in iOS lane/capability assertion;
+- `npm run typecheck`: PASS for mobile, web, and shared;
+- `npm run test`: PASS, 1,196 tests (356 mobile, 702 web, 138 shared);
+- `npm run build`: PASS, optimized Next.js build with 33 static pages;
+- clean `Staging` simulator workspace build: PASS, including compilation and
+  embedding of `DayframeSharedStorage.swift`, the App Intents, direct client,
+  and Live Activity extension;
+- focused outbox and route tests: PASS for successful sandbox delivery,
+  `Retry-After` 503 scheduling, permanent 403 handling, 410 invalidation,
+  idempotent later recovery, registration-triggered delivery, authenticated
+  reconciliation, and protected cron;
+- structural searches: PASS; no custom `InputAccessoryView`, accessory ID, or
+  toolbar implementation remains, and the shared rounded Play path plus 44 pt
+  primary control contracts remain active while history replay stays compact.
+
+The signed physical-device `Staging` build is currently NOT RUN to completion.
+It fails closed before compilation/signing because the installed provisioning
+profiles for `com.layereight.dayframe` and its Live Activity extension do not
+include the new App Group entitlement, and this command-line Xcode session has
+no Apple account available to regenerate them. This is the expected external
+capability step, not a source fallback: register
+`group.com.layereight.dayframe`, attach it and the shared Keychain group to both
+identifiers, refresh development and distribution profiles, rebuild without an
+`APS_ENVIRONMENT` override, then run the signed-product assertion.
+
+After provisioning, the exact remaining physical-iPhone matrix is:
+
+1. unlock once after boot, launch staging and log in so the host migrates/mirrors
+   the runtime credential;
+2. start a timer, background Dayframe, lock the phone, tap Live Activity Stop,
+   and prove staging web becomes idle without an app launch;
+3. repeat after force-terminating Dayframe and capture extension/process logs;
+4. repeat offline, confirm the Live Activity ends locally, relaunch online, and
+   prove exactly one queued stop reconciles with no duplicate event/entry;
+5. inspect the signed host and extension entitlements, confirming their exact
+   App Group and resolved Keychain access group match, and confirming local
+   `Staging` reports APNs `development`;
+6. repeat login/signup Return navigation, password reveal/conceal, logout,
+   primary Play/Stop geometry, and Dynamic Island normal/large-text checks.

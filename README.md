@@ -149,7 +149,14 @@ The V2 engine (`location-v2.0`) consumes an ordered journal from Expo standard u
 
 Rollout is server-controlled by `DAYFRAME_LOCATION_ROLLOUT_MODE` and defaults to `v2_shadow`. The supported modes are `v1` (previous production behaviour), `v2_shadow` (capture/replay only while V1 remains active), `v2_review` (V2 review items with competing V1 location semantics suppressed), and the later high-confidence gate `v2_enabled`. A client must acknowledge the same semantic mode before the server records a cutover; segments that started in shadow cannot be backfilled into user-visible history. Return the server to `v2_shadow` or `v1` before rolling back code; user-confirmed V2 entries remain ordinary event-first time entries.
 
-Vercel Cron invokes `GET /api/cron/location-retention` daily at `03:17 UTC`. The production environment must provide `CRON_SECRET`; the route accepts only the matching bearer token, uses the database service role to run bounded cleanup, returns `no-store`, and reports a non-2xx result when cleanup fails. Verify the secret, function grant, schedule, and Vercel invocation logs after deployment. Do not expose the route without its secret or grant retention execution to authenticated users.
+Vercel Cron invokes `GET /api/cron/location-retention` daily at `03:17 UTC`
+and the bounded Live Activity outbox sweep at `03:47 UTC`. The production
+environment must provide `CRON_SECRET`; both routes accept only the matching
+bearer token and return `no-store`. Retention uses the database service role for
+bounded cleanup, while Live Activity delivery processes a leased outbox batch
+and records sanitized APNs diagnostics. Verify the secret, schedules, and Vercel
+invocation logs after deployment. Do not expose either route without its secret
+or grant retention execution to authenticated users.
 
 Web evidence maps use MapLibre. Set `NEXT_PUBLIC_DAYFRAME_MAP_STYLE_URL` to a production style whose tile, glyph, sprite, and attribution terms you are authorised to use. With no value, Dayframe uses a private tile-free canvas that still renders the supplied evidence layers; no public demo tile service is hardcoded. If a CSP is introduced, allow only the selected provider's exact `connect-src`/`img-src` hosts plus the worker/blob requirements documented by that provider.
 

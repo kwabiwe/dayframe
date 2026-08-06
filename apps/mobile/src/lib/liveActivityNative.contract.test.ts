@@ -42,12 +42,50 @@ describe("native Live Activity presentation contract", () => {
       `${mobileRoot}ios/Dayframe/DayframeShortcutDirectEventClient.swift`,
       "utf8"
     );
+    const sharedStorage = readFileSync(
+      `${mobileRoot}ios/Dayframe/DayframeSharedStorage.swift`,
+      "utf8"
+    );
 
     expect(shortcuts).toContain("static var openAppWhenRun: Bool = false");
-    expect(directClient).toContain('"https://dayframe-staging.vercel.app"');
-    expect(directClient).toContain('"https://dayframe-web.vercel.app"');
-    expect(directClient).toContain("kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly");
+    expect(sharedStorage).toContain('"https://dayframe-staging.vercel.app"');
+    expect(sharedStorage).toContain('"https://dayframe-web.vercel.app"');
+    expect(sharedStorage).toContain("kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly");
     expect(directClient).toContain("URLSessionConfiguration.ephemeral");
+  });
+
+  it("compiles Stop and its storage into the extension with matching shared capabilities", () => {
+    const project = readFileSync(`${mobileRoot}ios/Dayframe.xcodeproj/project.pbxproj`, "utf8");
+    const sharedStorage = readFileSync(
+      `${mobileRoot}ios/Dayframe/DayframeSharedStorage.swift`,
+      "utf8"
+    );
+    const hostEntitlements = readFileSync(
+      `${mobileRoot}ios/Dayframe/Dayframe.entitlements`,
+      "utf8"
+    );
+    const extensionEntitlements = readFileSync(
+      `${mobileRoot}ios/DayframeLiveActivity/DayframeLiveActivity.entitlements`,
+      "utf8"
+    );
+
+    expect(project.match(/DayframeShortcuts\.swift in Sources/g)).toHaveLength(4);
+    expect(project.match(/DayframeShortcutDirectEventClient\.swift in Sources/g)).toHaveLength(4);
+    expect(project.match(/DayframeSharedStorage\.swift in Sources/g)).toHaveLength(4);
+    for (const entitlements of [hostEntitlements, extensionEntitlements]) {
+      expect(entitlements).toContain("com.apple.security.application-groups");
+      expect(entitlements).toContain("group.com.layereight.dayframe");
+      expect(entitlements).toContain("keychain-access-groups");
+      expect(entitlements).toContain("$(AppIdentifierPrefix)com.layereight.dayframe.shared");
+    }
+
+    expect(sharedStorage).toContain("kSecAttrAccessGroup");
+    expect(sharedStorage).toContain("containerURL(");
+    expect(sharedStorage).toContain("forSecurityApplicationGroupIdentifier: appGroupIdentifier");
+    expect(sharedStorage).toContain("flock(descriptor, LOCK_EX)");
+    expect(sharedStorage).toContain("options: .atomic");
+    expect(sharedStorage).toContain("completeUntilFirstUserAuthentication");
+    expect(sharedStorage).toContain('legacyKey = "dayframe.nativeShortcutQueue.v1"');
   });
 
   it("registers the immediate ActivityKit token with the APNs environment baked into signing", () => {
@@ -61,6 +99,7 @@ describe("native Live Activity presentation contract", () => {
     );
     const infoPlist = readFileSync(`${mobileRoot}ios/Dayframe/Info.plist`, "utf8");
     const project = readFileSync(`${mobileRoot}ios/Dayframe.xcodeproj/project.pbxproj`, "utf8");
+    const eas = JSON.parse(readFileSync(`${mobileRoot}eas.json`, "utf8"));
 
     expect(controller).toContain("if let token = activity.pushToken");
     expect(controller).toContain("for await token in activity.pushTokenUpdates");
@@ -70,6 +109,10 @@ describe("native Live Activity presentation contract", () => {
     expect(module).not.toContain("#if DEBUG");
     expect(project).toContain("APS_ENVIRONMENT = development;");
     expect(project).toContain("APS_ENVIRONMENT = production;");
+    expect(eas.build.preview.distribution).toBe("internal");
+    expect(eas.build.preview.ios.buildConfiguration).toBe("Release");
+    expect(eas.build.production.distribution).toBe("store");
+    expect(eas.build.production.ios.buildConfiguration).toBe("Release");
   });
 
   it("lifts both lock-screen metadata rows clear of the lower clipping edge", () => {
