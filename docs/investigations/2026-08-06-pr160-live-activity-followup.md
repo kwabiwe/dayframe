@@ -93,13 +93,13 @@ No delivery-time or redacted Vercel/APNs response log is claimed because Apple w
 
 ## Hosted Staging Evidence
 
-- Implementation commit `142a4b1e8142194dfb8dfed634c732d7db7b6f16` produced Ready Preview `dpl_ATHUVPSWbkcDe5kLwGWi6Mqh1Rqk` at `dayframe-e0b1hkuby-dayframeworkshop.vercel.app`.
-- That exact Ready Preview was explicitly assigned to `dayframe-staging.vercel.app`; hosted `/login` returned 200 and anonymous `/api/bootstrap` returned the expected JSON 401.
+- Keyboard-fix runtime commit `624e654a49bad3b193e2efecf6729c878d874e55` produced Ready Preview `dpl_5p7vFsfSLWbXvaPMK7iz9jSrhYEA` at `dayframe-fvu86zkdk-dayframeworkshop.vercel.app`.
+- That exact Ready Preview was explicitly assigned to `dayframe-staging.vercel.app`; hosted `/login` returned 200 and anonymous `/api/bootstrap` returned the expected JSON 401 before promotion.
 - Preview-scoped Vercel configuration now contains the required APNs provider settings. Values were not printed.
 - Staging Supabase has the four diagnostics columns. Historical pre-fix rows remain useful only as evidence of the old environment-classification bug; the user has confirmed the newly configured delivery path works.
-- Production was not changed. `dayframe-web.vercel.app` remained on separate Ready production deployment `dpl_RF9WcfxPVZvEBcRGMHtwV22qqVqC`.
+- Production was not changed by this follow-up. At the post-promotion check, `dayframe-web.vercel.app` resolved to separate Ready production deployment `dpl_Cm3ztUXiU5798QpuR85N6prQUDmU`.
 - PR #160 remained open, draft, and unmerged.
 
 ## Remaining Validation
 
-After the keyboard follow-up is pushed, promote its exact final Ready Preview to `dayframe-staging.vercel.app`, recheck production remains unchanged, complete the login/signup keyboard and password-visibility checks on the installed staging build, and update the draft PR description with the final head plus exact PASS / FAIL / NOT RUN results.
+The keyboard runtime is promoted to `dayframe-staging.vercel.app`, the exact embedded staging build is installed and launched, and the draft PR description carries the PASS / FAIL / NOT RUN matrix. Remaining validation is limited to the login/signup keyboard and password-visibility checks on the installed iPhone, final Dynamic Island screenshots, and one redacted APNs status/timing record.
