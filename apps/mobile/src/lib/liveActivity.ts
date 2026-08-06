@@ -1,6 +1,7 @@
 import { NativeModules, Platform } from "react-native";
 import { paletteColorFor } from "@dayframe/shared";
 import type { MobileBootstrap } from "./api";
+import { registerLiveActivity } from "./api";
 
 type LiveActivityEntry = Pick<
   NonNullable<MobileBootstrap["activeEntry"]>,
@@ -13,7 +14,11 @@ type DayframeLiveActivityModule = {
     categoryName?: string | null,
     categoryColor?: string | null,
     startedAt?: string | null
-  ): Promise<boolean>;
+  ): Promise<boolean | { started: boolean; activityId?: string | null }>;
+  pushToken?(activityId: string): Promise<{
+    token?: string | null;
+    environment: "development" | "production";
+  }>;
   stop(): Promise<boolean>;
 };
 
@@ -52,14 +57,25 @@ async function reconcileLatestEntry() {
     const categoryColor = entry.categoryName
       ? paletteColorFor(entry.categoryColor ?? entry.categoryName, entry.categoryName, "dark")
       : null;
-    const didStart = await nativeLiveActivity!.start(
+    const result = await nativeLiveActivity!.start(
       title,
       entry.categoryName,
       categoryColor,
       entry.startedAt
     ).catch(() => false);
     if (requestedEntry !== entry) continue;
-    if (didStart) lastSyncedLiveActivityKey = requestedKey;
+    const didStart = typeof result === "boolean" ? result : result.started;
+    if (didStart) {
+      lastSyncedLiveActivityKey = requestedKey;
+      if (
+        typeof result === "object" &&
+        result.activityId &&
+        nativeLiveActivity?.pushToken &&
+        isUuid(entry.id)
+      ) {
+        void registerRemoteUpdates(result.activityId, entry.id);
+      }
+    }
     return;
   }
 }
@@ -78,5 +94,20 @@ function displayLiveActivityTitle(entry: LiveActivityEntry) {
   if (description) return description;
   const categoryName = entry.categoryName?.trim();
   if (categoryName) return categoryName;
-  return "Tracking";
+  return "Uncategorized";
+}
+
+async function registerRemoteUpdates(activityId: string, activeEntryId: string) {
+  const registration = await nativeLiveActivity?.pushToken?.(activityId).catch(() => null);
+  if (!registration?.token) return;
+  await registerLiveActivity({
+    token: registration.token,
+    activityId,
+    activeEntryId,
+    environment: registration.environment
+  }).catch(() => undefined);
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }

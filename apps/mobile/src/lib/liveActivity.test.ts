@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  registerLiveActivity: vi.fn(),
+  pushToken: vi.fn(),
   start: vi.fn(),
   stop: vi.fn()
 }));
@@ -9,10 +11,15 @@ vi.mock("react-native", () => ({
   NativeModules: {
     DayframeLiveActivityModule: {
       start: mocks.start,
+      pushToken: mocks.pushToken,
       stop: mocks.stop
     }
   },
   Platform: { OS: "ios" }
+}));
+
+vi.mock("./api", () => ({
+  registerLiveActivity: mocks.registerLiveActivity
 }));
 
 async function loadModule() {
@@ -24,8 +31,50 @@ describe("Live Activity sync", () => {
   beforeEach(() => {
     mocks.start.mockReset();
     mocks.start.mockResolvedValue(true);
+    mocks.pushToken.mockReset();
+    mocks.pushToken.mockResolvedValue({ token: "a".repeat(64), environment: "production" });
+    mocks.registerLiveActivity.mockReset();
+    mocks.registerLiveActivity.mockResolvedValue(undefined);
     mocks.stop.mockReset();
     mocks.stop.mockResolvedValue(true);
+  });
+
+  it("shows Uncategorized instead of Tracking for a blank timer", async () => {
+    const { syncLiveActivityForEntry } = await loadModule();
+
+    await syncLiveActivityForEntry({
+      id: "entry-1",
+      startedAt: "2026-07-12T06:45:00.000Z",
+      description: null,
+      categoryName: null,
+      categoryColor: null
+    });
+
+    expect(mocks.start).toHaveBeenCalledWith(
+      "Uncategorized",
+      null,
+      null,
+      "2026-07-12T06:45:00.000Z"
+    );
+  });
+
+  it("registers a persisted activity for remote updates", async () => {
+    mocks.start.mockResolvedValue({ started: true, activityId: "activity-1" });
+    const { syncLiveActivityForEntry } = await loadModule();
+
+    await syncLiveActivityForEntry({
+      id: "80000000-0000-4000-8000-000000000001",
+      startedAt: "2026-07-12T06:45:00.000Z",
+      description: "School run",
+      categoryName: "Family",
+      categoryColor: "violet"
+    });
+    await vi.waitFor(() => expect(mocks.registerLiveActivity).toHaveBeenCalledWith({
+      token: "a".repeat(64),
+      activityId: "activity-1",
+      activeEntryId: "80000000-0000-4000-8000-000000000001",
+      environment: "production"
+    }));
   });
 
   it("clears stale native activities on the first idle bootstrap", async () => {

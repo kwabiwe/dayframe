@@ -18,13 +18,38 @@ class DayframeLiveActivityModule: NSObject {
     reject: @escaping RCTPromiseRejectBlock
   ) {
     Task {
-      let didStart = await DayframeLiveActivityController.start(
+      let result = await DayframeLiveActivityController.start(
         title: title,
         categoryName: categoryName,
         categoryColor: categoryColor,
         startedAt: Self.date(from: startedAt) ?? Date()
       )
-      resolve(didStart)
+      let payload: [String: Any] = [
+        "started": result != nil,
+        "activityId": result?.activityId ?? NSNull()
+      ]
+      resolve(payload)
+    }
+  }
+
+  @objc(pushToken:resolver:rejecter:)
+  func pushToken(
+    activityId: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    Task {
+      let token = await DayframeLiveActivityController.pushToken(activityId: activityId)
+      #if DEBUG
+      let environment = "development"
+      #else
+      let environment = "production"
+      #endif
+      let payload: [String: Any] = [
+        "token": token ?? NSNull(),
+        "environment": environment
+      ]
+      resolve(payload)
     }
   }
 

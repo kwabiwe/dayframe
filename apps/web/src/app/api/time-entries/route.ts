@@ -8,6 +8,7 @@ import {
   validateManualTimeEntryWindow
 } from "@/lib/manual-time-entry";
 import { TagNameSchema } from "@dayframe/shared";
+import { notifyLiveActivitiesBestEffort } from "@/lib/live-activity-push";
 
 export async function POST(request: Request) {
   try {
@@ -36,6 +37,7 @@ export async function POST(request: Request) {
         },
         session
       );
+      await notifyLiveActivitiesBestEffort(session);
       return NextResponse.json({ ok: true }, { status: 201 });
     }
 
@@ -49,11 +51,13 @@ export async function POST(request: Request) {
         },
         session
       );
+      await notifyLiveActivitiesBestEffort(session);
       return NextResponse.json(result, { status: 201 });
     }
 
     if (body.mode === "split") {
       await splitActiveEntry(session);
+      await notifyLiveActivitiesBestEffort(session);
       return NextResponse.json({ ok: true }, { status: 201 });
     }
 
@@ -77,6 +81,7 @@ export async function POST(request: Request) {
       },
       session
     );
+    await notifyLiveActivitiesBestEffort(session);
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     const response = authErrorResponse(error);
