@@ -66,6 +66,27 @@ BLOCKED / NOT RUN:
 
 Those checks cannot be marked complete until a genuine APNs provider `APNS_KEY_ID` and `APNS_PRIVATE_KEY` are configured for the Preview environment and the installed app is opened on the unlocked device to register a fresh development token.
 
+### Required Real Scenarios
+
+| Scenario | Result | Evidence / limitation |
+| --- | --- | --- |
+| Web description edit updates locked/backgrounded Live Activity | NOT RUN | Preview has no APNs provider key, so no authenticated Apple delivery attempt can be made. |
+| Web category edit updates name, colour, and dot | NOT RUN | Same APNs credential blocker. |
+| Web Stop ends and dismisses the Live Activity | NOT RUN | Same APNs credential blocker. |
+| Live Activity Stop makes staging web idle without opening Dayframe | NOT RUN in this follow-up | The direct native/event-first implementation and focused replay tests pass, but the installed app could not be launched while the iPhone was locked. |
+| Reopen after each scenario with no stale timer, duplicate event, or duplicate entry | NOT RUN | Depends on the four device scenarios above. Controlled idempotent replay remains covered by the existing focused tests. |
+
+No delivery-time or redacted Vercel/APNs response log is claimed because Apple was never contacted without the provider credential.
+
+## Hosted Staging Evidence
+
+- Implementation commit `142a4b1e8142194dfb8dfed634c732d7db7b6f16` produced Ready Preview `dpl_ATHUVPSWbkcDe5kLwGWi6Mqh1Rqk` at `dayframe-e0b1hkuby-dayframeworkshop.vercel.app`.
+- That exact Ready Preview was explicitly assigned to `dayframe-staging.vercel.app`; hosted `/login` returned 200 and anonymous `/api/bootstrap` returned the expected JSON 401.
+- Preview-scoped Vercel configuration contains `APNS_TEAM_ID` and `APNS_BUNDLE_ID`. It does not contain `APNS_KEY_ID` or `APNS_PRIVATE_KEY`; values were not printed.
+- Staging Supabase has the four diagnostics columns. Its seven historical Live Activity rows remain active, all are labelled `production`, none has a delivery timestamp, and opening the newly installed development build is still required to register a fresh sandbox row.
+- Production was not changed. `dayframe-web.vercel.app` remained on separate Ready production deployment `dpl_RF9WcfxPVZvEBcRGMHtwV22qqVqC`.
+- PR #160 remained open, draft, and unmerged.
+
 ## Remaining Validation
 
-Before handoff, run the final structural glyph/toolbar searches and `git diff --check`; publish the final branch Preview; promote that exact Ready deployment to `dayframe-staging.vercel.app`; verify production remains unchanged; and update this document plus the draft PR description with exact PASS / FAIL / NOT RUN results.
+After this evidence-only documentation update is pushed, promote its exact final Ready Preview to `dayframe-staging.vercel.app`, recheck production remains unchanged, and update the draft PR description with the final head plus exact PASS / FAIL / NOT RUN results.
