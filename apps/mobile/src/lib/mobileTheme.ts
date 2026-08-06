@@ -1741,12 +1741,34 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       overflow: "hidden"
     },
+    authPasswordInputFrame: {
+      flex: 1,
+      minWidth: 0,
+      minHeight: 48,
+      justifyContent: "center"
+    },
     authPasswordInput: {
       flex: 1,
       minWidth: 0,
       backgroundColor: "transparent",
       borderRadius: 0,
       paddingRight: 4
+    },
+    authPasswordInputRevealed: {
+      color: "transparent"
+    },
+    authPasswordRevealOverlay: {
+      position: "absolute",
+      top: 0,
+      right: 4,
+      bottom: 0,
+      left: 12,
+      justifyContent: "center"
+    },
+    authPasswordRevealText: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 15
     },
     authPasswordVisibilityButton: {
       width: 44,

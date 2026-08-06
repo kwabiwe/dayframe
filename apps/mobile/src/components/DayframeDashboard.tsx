@@ -109,6 +109,7 @@ import {
   type MobileStyles,
   type MobileTheme
 } from "@/lib/mobileTheme";
+import { subscribeMobileSignedOut } from "@/lib/mobileSessionTransition";
 import {
   buildNativeCalendarBridgeState,
   routeNativeCalendarOpenEvent,
@@ -242,6 +243,29 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const authEmailRef = useRef<TextInput>(null);
   const authPasswordRef = useRef<TextInput>(null);
 
+  const transitionToSignedOut = useCallback(() => {
+    dashboardMutationRevision.current += 1;
+    refreshQueued.current = false;
+    latestData.current = null;
+    timerStateRef.current = null;
+    setData(null);
+    setRefreshing(false);
+    setAuthSubmitting(false);
+    authSubmittingRef.current = false;
+    setAuthPassword("");
+    setAuthPasswordVisible(false);
+    setAuthError(null);
+    setAuthNotice(null);
+    setAuthView("login");
+    setActiveEditVisible(false);
+    setPresentedActiveEntry(null);
+    setManualDraftEntry(null);
+    setCalendarEditEntry(null);
+    setAuthState("signedOut");
+  }, []);
+
+  useEffect(() => subscribeMobileSignedOut(transitionToSignedOut), [transitionToSignedOut]);
+
   const changeReportRange = useCallback((nextRange: ReportRange) => {
     scheduleLayoutTransition(reduceMotion);
     setReportRange(nextRange);
@@ -329,8 +353,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       void refreshLocationServices(bootstrap);
     } catch (error) {
       if (error instanceof AuthRequiredError) {
-        setData(null);
-        setAuthState("signedOut");
+        transitionToSignedOut();
         return;
       }
       if (!options?.silent && !options?.visibleRefresh) {
@@ -344,7 +367,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         void loadRef.current({ silent: true });
       }
     }
-  }, []);
+  }, [transitionToSignedOut]);
   loadRef.current = load;
 
   function updateDashboardData(
@@ -1275,23 +1298,42 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               submitBehavior="submit"
             />
             <View style={styles.authPasswordField}>
-              <TextInput
-                ref={authPasswordRef}
-                style={[styles.textInput, styles.authPasswordInput]}
-                value={authPassword}
-                onChangeText={setAuthPassword}
-                onSubmitEditing={submitAuth}
-                placeholder="Password"
-                placeholderTextColor={theme.textSecondary}
-                autoCapitalize="none"
-                autoComplete="off"
-                autoCorrect={false}
-                returnKeyType="done"
-                secureTextEntry={!authPasswordVisible}
-                spellCheck={false}
-                submitBehavior="blurAndSubmit"
-                textContentType="none"
-              />
+              <View style={styles.authPasswordInputFrame}>
+                <TextInput
+                  ref={authPasswordRef}
+                  style={[
+                    styles.textInput,
+                    styles.authPasswordInput,
+                    authPasswordVisible ? styles.authPasswordInputRevealed : null
+                  ]}
+                  value={authPassword}
+                  onChangeText={setAuthPassword}
+                  onSubmitEditing={submitAuth}
+                  placeholder="Password"
+                  placeholderTextColor={theme.textSecondary}
+                  autoCapitalize="none"
+                  autoComplete="off"
+                  autoCorrect={false}
+                  caretHidden={authPasswordVisible}
+                  returnKeyType="done"
+                  secureTextEntry
+                  spellCheck={false}
+                  submitBehavior="blurAndSubmit"
+                  textContentType="none"
+                />
+                {authPasswordVisible && authPassword ? (
+                  <View
+                    accessibilityElementsHidden
+                    importantForAccessibility="no-hide-descendants"
+                    pointerEvents="none"
+                    style={styles.authPasswordRevealOverlay}
+                  >
+                    <Text numberOfLines={1} style={styles.authPasswordRevealText}>
+                      {authPassword}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
               <Pressable
                 accessibilityLabel={authPasswordVisible ? "Hide password" : "Show password"}
                 accessibilityRole="button"

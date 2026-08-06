@@ -33,7 +33,11 @@ describe("auth keyboard navigation contract", () => {
 
   it("keeps one fixed password field while exposing an accessible visibility action", () => {
     expect(dashboard).toContain("const [authPasswordVisible, setAuthPasswordVisible] = useState(false)");
-    expect(dashboard).toContain("secureTextEntry={!authPasswordVisible}");
+    expect(dashboard).toMatch(/<TextInput[\s\S]*?caretHidden=\{authPasswordVisible\}[\s\S]*?secureTextEntry[\s\S]*?textContentType="none"/);
+    expect(dashboard).not.toContain("secureTextEntry={!authPasswordVisible}");
+    expect(dashboard).toContain("styles.authPasswordRevealOverlay");
+    expect(dashboard).toContain('pointerEvents="none"');
+    expect(dashboard).toContain('importantForAccessibility="no-hide-descendants"');
     expect(dashboard).toContain('authPasswordVisible ? "Hide password" : "Show password"');
     expect(dashboard).toContain('accessibilityRole="button"');
     expect(dashboard).toContain("<PasswordVisibilityGlyph");
