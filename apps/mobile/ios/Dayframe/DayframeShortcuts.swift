@@ -99,7 +99,7 @@ private enum DayframeShortcutPerformer {
     case .start(_, let categoryName, _):
       let category = catalog.category(named: categoryName)
       _ = await DayframeLiveActivityController.start(
-        title: event.description ?? "Tracking",
+        title: event.description ?? category?.name ?? "Uncategorized",
         categoryName: category?.name ?? dayframeCleanText(categoryName),
         categoryColor: category?.color,
         startedAt: event.occurredAt

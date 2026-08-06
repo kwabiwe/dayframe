@@ -65,6 +65,7 @@ private struct DayframeLockScreenTimerView: View {
       VStack(alignment: .leading, spacing: 10) {
         DayframeElapsedTimerText(state: state, size: .lockScreen)
         DayframeLiveActivityLabel(state: state, size: .lockScreen)
+          .offset(y: -4)
       }
       Spacer(minLength: 12)
       if state.isRunning {
