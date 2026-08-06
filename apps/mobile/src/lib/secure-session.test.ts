@@ -6,12 +6,25 @@ const secureStore = vi.hoisted(() => ({
   setItemAsync: vi.fn(),
   deleteItemAsync: vi.fn()
 }));
+const nativeModule = vi.hoisted(() => ({
+  setRuntimeContext: vi.fn(),
+  clearRuntimeContext: vi.fn()
+}));
 
 vi.mock("expo-secure-store", () => ({
   AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 1,
   getItemAsync: secureStore.getItemAsync,
   setItemAsync: secureStore.setItemAsync,
   deleteItemAsync: secureStore.deleteItemAsync
+}));
+
+vi.mock("react-native", () => ({
+  NativeModules: { DayframeLiveActivityModule: nativeModule },
+  Platform: { OS: "ios" }
+}));
+
+vi.mock("./config", () => ({
+  DAYFRAME_API_BASE: "https://dayframe-staging.vercel.app"
 }));
 
 const {
@@ -38,6 +51,8 @@ describe("secure mobile session", () => {
       values.delete(key);
       return Promise.resolve();
     });
+    nativeModule.setRuntimeContext.mockResolvedValue(true);
+    nativeModule.clearRuntimeContext.mockResolvedValue(true);
   });
 
   it("stores new sessions with background-safe device-only accessibility", async () => {
@@ -49,6 +64,10 @@ describe("secure mobile session", () => {
       { keychainAccessible: 1 }
     );
     expect(values.get("dayframe.localSessionToken.v2")).toBe("session-token");
+    expect(nativeModule.setRuntimeContext).toHaveBeenCalledWith(
+      "https://dayframe-staging.vercel.app",
+      "session-token"
+    );
   });
 
   it("migrates the legacy token without signing the user out", async () => {
@@ -57,6 +76,28 @@ describe("secure mobile session", () => {
     await expect(getSessionToken()).resolves.toBe("legacy-token");
     expect(values.get("dayframe.localSessionToken.v2")).toBe("legacy-token");
     expect(values.has("dayframe.localSessionToken.v1")).toBe(false);
+    expect(nativeModule.setRuntimeContext).toHaveBeenCalledWith(
+      "https://dayframe-staging.vercel.app",
+      "legacy-token"
+    );
+  });
+
+  it("mirrors an existing session for app-intent execution", async () => {
+    values.set("dayframe.localSessionToken.v2", "current-token");
+
+    await expect(getSessionToken()).resolves.toBe("current-token");
+
+    expect(nativeModule.setRuntimeContext).toHaveBeenCalledWith(
+      "https://dayframe-staging.vercel.app",
+      "current-token"
+    );
+  });
+
+  it("keeps the normal session usable when native context mirroring is unavailable", async () => {
+    nativeModule.setRuntimeContext.mockRejectedValueOnce(new Error("Native module unavailable"));
+
+    await expect(setSessionToken("session-token")).resolves.toBeUndefined();
+    expect(values.get("dayframe.localSessionToken.v2")).toBe("session-token");
   });
 
   it("retries the transient iOS interaction error before returning the token", async () => {
@@ -99,5 +140,13 @@ describe("secure mobile session", () => {
     await clearSessionToken();
 
     expect(values.size).toBe(0);
+    expect(nativeModule.clearRuntimeContext).toHaveBeenCalledOnce();
+  });
+
+  it("clears native context even when secure storage deletion fails", async () => {
+    secureStore.deleteItemAsync.mockRejectedValueOnce(new Error("Keychain unavailable"));
+
+    await expect(clearSessionToken()).rejects.toThrow("Keychain unavailable");
+    expect(nativeModule.clearRuntimeContext).toHaveBeenCalledOnce();
   });
 });

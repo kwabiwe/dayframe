@@ -425,6 +425,29 @@ export async function fetchTimerState(): Promise<TimerStateFingerprint> {
   return readJsonResponse<TimerStateFingerprint>(response);
 }
 
+export async function registerLiveActivity(input: {
+  token: string;
+  activityId: string;
+  activeEntryId: string;
+  environment: "development" | "production";
+}) {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/live-activities`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...await authHeaders()
+    },
+    body: JSON.stringify(input)
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) {
+    throw new Error(await errorMessage(response, "Unable to register Live Activity"));
+  }
+}
+
 export async function login(email: string, password: string) {
   return authenticate("/api/auth/login", { email, password });
 }

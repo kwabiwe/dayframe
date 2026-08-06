@@ -4,6 +4,10 @@
     {
       "path": "/api/cron/location-retention",
       "schedule": "17 3 * * *"
+    },
+    {
+      "path": "/api/cron/live-activity-retry",
+      "schedule": "47 3 * * *"
     }
   ]
 }

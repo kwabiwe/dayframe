@@ -2,18 +2,22 @@ import ActivityKit
 import Foundation
 
 enum DayframeLiveActivityController {
+  struct StartResult {
+    let activityId: String
+  }
+
   static func start(
     title: String,
     categoryName: String?,
     categoryColor: String? = nil,
     startedAt: Date = Date()
-  ) async -> Bool {
+  ) async -> StartResult? {
     guard #available(iOS 16.2, *) else {
-      return false
+      return nil
     }
 
     guard ActivityAuthorizationInfo().areActivitiesEnabled else {
-      return false
+      return nil
     }
 
     await endActive(dismissalPolicy: .immediate)
@@ -29,14 +33,42 @@ enum DayframeLiveActivityController {
     )
 
     do {
-      _ = try Activity.request(
+      let activity = try Activity.request(
         attributes: attributes,
         content: ActivityContent(state: state, staleDate: nil),
-        pushType: nil
+        pushType: .token
       )
-      return true
+      return StartResult(activityId: activity.id)
     } catch {
-      return false
+      return nil
+    }
+  }
+
+  static func pushToken(activityId: String) async -> String? {
+    guard #available(iOS 16.2, *),
+          let activity = Activity<DayframeTimerAttributes>.activities.first(where: { $0.id == activityId })
+    else {
+      return nil
+    }
+
+    if let token = activity.pushToken {
+      return token.dayframeHexString
+    }
+
+    return await withTaskGroup(of: String?.self) { group in
+      group.addTask {
+        for await token in activity.pushTokenUpdates {
+          return token.dayframeHexString
+        }
+        return nil
+      }
+      group.addTask {
+        try? await Task.sleep(for: .seconds(15))
+        return nil
+      }
+      let token = await group.next() ?? nil
+      group.cancelAll()
+      return token
     }
   }
 
@@ -76,7 +108,7 @@ enum DayframeLiveActivityController {
 
   private static func cleanTitle(_ value: String) -> String {
     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmed.isEmpty ? "Tracking" : String(trimmed.prefix(80))
+    return trimmed.isEmpty ? "Uncategorized" : String(trimmed.prefix(80))
   }
 
   private static func cleanText(_ value: String?) -> String? {
@@ -84,5 +116,11 @@ enum DayframeLiveActivityController {
       return nil
     }
     return String(trimmed.prefix(80))
+  }
+}
+
+private extension Data {
+  var dayframeHexString: String {
+    map { String(format: "%02x", $0) }.joined()
   }
 }

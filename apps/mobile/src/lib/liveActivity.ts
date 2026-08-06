@@ -1,6 +1,7 @@
 import { NativeModules, Platform } from "react-native";
 import { paletteColorFor } from "@dayframe/shared";
 import type { MobileBootstrap } from "./api";
+import { registerLiveActivity } from "./api";
 
 type LiveActivityEntry = Pick<
   NonNullable<MobileBootstrap["activeEntry"]>,
@@ -13,7 +14,11 @@ type DayframeLiveActivityModule = {
     categoryName?: string | null,
     categoryColor?: string | null,
     startedAt?: string | null
-  ): Promise<boolean>;
+  ): Promise<boolean | { started: boolean; activityId?: string | null }>;
+  pushToken?(activityId: string): Promise<{
+    token?: string | null;
+    environment?: "development" | "production" | null;
+  }>;
   stop(): Promise<boolean>;
 };
 
@@ -22,6 +27,8 @@ const nativeLiveActivity = NativeModules.DayframeLiveActivityModule as DayframeL
 let lastSyncedLiveActivityKey: string | null = null;
 let requestedEntry: LiveActivityEntry | null = null;
 let reconciliation: Promise<void> | null = null;
+const remoteRegistrations = new Map<string, Promise<void>>();
+const REMOTE_REGISTRATION_RETRY_DELAYS_MS = [0, 1_500, 5_000] as const;
 
 export async function syncLiveActivityForEntry(entry: LiveActivityEntry | null | undefined) {
   if (Platform.OS !== "ios" || !nativeLiveActivity) return;
@@ -52,14 +59,25 @@ async function reconcileLatestEntry() {
     const categoryColor = entry.categoryName
       ? paletteColorFor(entry.categoryColor ?? entry.categoryName, entry.categoryName, "dark")
       : null;
-    const didStart = await nativeLiveActivity!.start(
+    const result = await nativeLiveActivity!.start(
       title,
       entry.categoryName,
       categoryColor,
       entry.startedAt
     ).catch(() => false);
     if (requestedEntry !== entry) continue;
-    if (didStart) lastSyncedLiveActivityKey = requestedKey;
+    const didStart = typeof result === "boolean" ? result : result.started;
+    if (didStart) {
+      lastSyncedLiveActivityKey = requestedKey;
+      if (
+        typeof result === "object" &&
+        result.activityId &&
+        nativeLiveActivity?.pushToken &&
+        isUuid(entry.id)
+      ) {
+        queueRemoteRegistration(result.activityId, entry.id);
+      }
+    }
     return;
   }
 }
@@ -78,5 +96,35 @@ function displayLiveActivityTitle(entry: LiveActivityEntry) {
   if (description) return description;
   const categoryName = entry.categoryName?.trim();
   if (categoryName) return categoryName;
-  return "Tracking";
+  return "Uncategorized";
+}
+
+function queueRemoteRegistration(activityId: string, activeEntryId: string) {
+  if (remoteRegistrations.has(activityId)) return;
+  const registration = registerRemoteUpdates(activityId, activeEntryId).finally(() => {
+    remoteRegistrations.delete(activityId);
+  });
+  remoteRegistrations.set(activityId, registration);
+  void registration;
+}
+
+async function registerRemoteUpdates(activityId: string, activeEntryId: string) {
+  for (const delay of REMOTE_REGISTRATION_RETRY_DELAYS_MS) {
+    if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+    if (requestedEntry?.id !== activeEntryId) return;
+
+    const registration = await nativeLiveActivity?.pushToken?.(activityId).catch(() => null);
+    if (!registration?.token || !registration.environment) continue;
+    const didRegister = await registerLiveActivity({
+      token: registration.token,
+      activityId,
+      activeEntryId,
+      environment: registration.environment
+    }).then(() => true).catch(() => false);
+    if (didRegister) return;
+  }
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }

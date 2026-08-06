@@ -5,6 +5,7 @@ import WidgetKit
 
 private let dayframeLiveActivityAccent = Color(red: 1.0, green: 0.38, blue: 0.32)
 private let dayframeLiveActivityStopBackground = Color(red: 0.28, green: 0.11, blue: 0.09)
+private let dayframeExpandedMetadataLift: CGFloat = 10
 
 struct DayframeTimerLiveActivity: Widget {
   var body: some WidgetConfiguration {
@@ -26,8 +27,8 @@ struct DayframeTimerLiveActivity: Widget {
         }
         DynamicIslandExpandedRegion(.bottom) {
           DayframeLiveActivityLabel(state: context.state, size: .expandedIsland)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .offset(y: -3)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .offset(y: -dayframeExpandedMetadataLift)
         }
       } compactLeading: {
         DayframeElapsedTimerText(state: context.state, size: .compact)
@@ -65,6 +66,7 @@ private struct DayframeLockScreenTimerView: View {
       VStack(alignment: .leading, spacing: 10) {
         DayframeElapsedTimerText(state: state, size: .lockScreen)
         DayframeLiveActivityLabel(state: state, size: .lockScreen)
+          .offset(y: -4)
       }
       Spacer(minLength: 12)
       if state.isRunning {
@@ -79,13 +81,18 @@ private struct DayframeLockScreenTimerView: View {
 private struct DayframeLiveActivityLabel: View {
   let state: DayframeTimerAttributes.ContentState
   let size: DayframeLiveActivityLabelSize
+  @ScaledMetric(relativeTo: .headline) private var expandedTitleSize: CGFloat = 19
+  @ScaledMetric(relativeTo: .subheadline) private var expandedCategorySize: CGFloat = 14
+  @ScaledMetric(relativeTo: .title3) private var lockScreenTitleSize: CGFloat = 20
+  @ScaledMetric(relativeTo: .body) private var lockScreenCategorySize: CGFloat = 16
 
   var body: some View {
     VStack(alignment: .leading, spacing: size.spacing) {
       Text(state.title)
-        .font(.system(size: size.titleSize, weight: .semibold, design: .default))
+        .font(.system(size: titleSize, weight: .semibold, design: .default))
         .lineLimit(1)
         .minimumScaleFactor(0.72)
+        .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
       if let categoryName = state.categoryName {
         HStack(spacing: 7) {
@@ -95,13 +102,33 @@ private struct DayframeLiveActivityLabel: View {
               .frame(width: 8, height: 8)
           }
           Text(categoryName)
-            .font(.system(size: size.categorySize, weight: .medium, design: .default))
+            .font(.system(size: categorySize, weight: .medium, design: .default))
             .foregroundStyle(.secondary)
             .lineLimit(1)
             .minimumScaleFactor(0.75)
+            .fixedSize(horizontal: false, vertical: true)
         }
+        .frame(minHeight: categorySize + 2, alignment: .topLeading)
         .frame(maxWidth: .infinity, alignment: .leading)
       }
+    }
+  }
+
+  private var titleSize: CGFloat {
+    switch size {
+    case .expandedIsland:
+      return expandedTitleSize
+    case .lockScreen:
+      return lockScreenTitleSize
+    }
+  }
+
+  private var categorySize: CGFloat {
+    switch size {
+    case .expandedIsland:
+      return expandedCategorySize
+    case .lockScreen:
+      return lockScreenCategorySize
     }
   }
 }
@@ -109,24 +136,6 @@ private struct DayframeLiveActivityLabel: View {
 private enum DayframeLiveActivityLabelSize {
   case expandedIsland
   case lockScreen
-
-  var titleSize: CGFloat {
-    switch self {
-    case .expandedIsland:
-      return 19
-    case .lockScreen:
-      return 20
-    }
-  }
-
-  var categorySize: CGFloat {
-    switch self {
-    case .expandedIsland:
-      return 14
-    case .lockScreen:
-      return 16
-    }
-  }
 
   var spacing: CGFloat {
     switch self {

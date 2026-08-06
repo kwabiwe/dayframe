@@ -1733,6 +1733,54 @@ function createStyles(theme: MobileTheme) {
       paddingHorizontal: 12,
       paddingVertical: 10
     },
+    authPasswordField: {
+      minHeight: 48,
+      backgroundColor: theme.surfaceMuted,
+      borderRadius: 14,
+      flexDirection: "row",
+      alignItems: "center",
+      overflow: "hidden"
+    },
+    authPasswordInputFrame: {
+      flex: 1,
+      minWidth: 0,
+      minHeight: 48,
+      justifyContent: "center"
+    },
+    authPasswordInput: {
+      flex: 1,
+      minWidth: 0,
+      backgroundColor: "transparent",
+      borderRadius: 0,
+      paddingRight: 4
+    },
+    authPasswordInputRevealed: {
+      color: "transparent"
+    },
+    authPasswordRevealOverlay: {
+      position: "absolute",
+      top: 0,
+      right: 4,
+      bottom: 0,
+      left: 12,
+      justifyContent: "center"
+    },
+    authPasswordRevealText: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 15
+    },
+    authPasswordVisibilityButton: {
+      width: 44,
+      height: 44,
+      marginRight: 2,
+      borderRadius: 999,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    authPasswordVisibilityPressed: {
+      backgroundColor: theme.surfaceInset
+    },
     primaryButton: {
       marginTop: 8,
       minHeight: 48,
@@ -1777,19 +1825,6 @@ function createStyles(theme: MobileTheme) {
     startActionColumn: {
       gap: 8
     },
-    playButton: {
-      width: 44,
-      height: 44,
-      backgroundColor: theme.accent,
-      borderRadius: 999,
-      alignItems: "center",
-      justifyContent: "center",
-      shadowColor: theme.shadow,
-      shadowOpacity: 1,
-      shadowRadius: 10,
-      shadowOffset: { width: 0, height: 6 },
-      elevation: 3
-    },
     addPastTimeButton: {
       width: 44,
       height: 44,
@@ -1797,19 +1832,6 @@ function createStyles(theme: MobileTheme) {
       borderRadius: 999,
       alignItems: "center",
       justifyContent: "center"
-    },
-    stopButton: {
-      width: 44,
-      height: 44,
-      backgroundColor: theme.accent,
-      borderRadius: 999,
-      alignItems: "center",
-      justifyContent: "center",
-      shadowColor: theme.shadow,
-      shadowOpacity: 1,
-      shadowRadius: 8,
-      shadowOffset: { width: 0, height: 4 },
-      elevation: 3
     },
     deleteTimerButton: {
       width: 44,

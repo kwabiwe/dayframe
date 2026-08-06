@@ -47,7 +47,10 @@ import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { TagMetadata } from "@/components/TagMetadata";
 import { DayframeBrand } from "@/components/brand";
-import { useKeyboardAccessory, type KeyboardAccessoryField } from "@/components/KeyboardAccessory";
+import {
+  CompactReplayPlayGlyph,
+  PrimaryTimerAction
+} from "@/components/PrimaryTimerAction";
 import {
   AuthRequiredError,
   createManualTimeEntry,
@@ -106,6 +109,7 @@ import {
   type MobileStyles,
   type MobileTheme
 } from "@/lib/mobileTheme";
+import { subscribeMobileSignedOut } from "@/lib/mobileSessionTransition";
 import {
   buildNativeCalendarBridgeState,
   routeNativeCalendarOpenEvent,
@@ -166,7 +170,6 @@ type SummarySegment = {
   color: string;
   isUncategorized: boolean;
 };
-const AUTH_KEYBOARD_ACCESSORY_ID = "dayframe-auth-keyboard-accessory";
 const RECENT_LAST_STOP_WINDOW_MS = 24 * 60 * 60 * 1000;
 const HISTORY_DELETE_ACTION_BUTTON_WIDTH = 64;
 const HISTORY_DELETE_ACTION_GAP = 14;
@@ -193,6 +196,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [authView, setAuthView] = useState<AuthView>("login");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
+  const [authPasswordVisible, setAuthPasswordVisible] = useState(false);
   const [authName, setAuthName] = useState("");
   const [authWorkspace, setAuthWorkspace] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
@@ -201,6 +205,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [manualDraftEntry, setManualDraftEntry] = useState<TimeEntry | null>(null);
   const [manualEntrySaving, setManualEntrySaving] = useState(false);
   const manualEntrySavingRef = useRef(false);
+  const authSubmittingRef = useRef(false);
   const [activeEditVisible, setActiveEditVisible] = useState(false);
   const [presentedActiveEntry, setPresentedActiveEntry] = useState<TimeEntry | null>(null);
   const [pendingHistoryDeletion, setPendingHistoryDeletion] = useState<{
@@ -237,6 +242,29 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const authWorkspaceRef = useRef<TextInput>(null);
   const authEmailRef = useRef<TextInput>(null);
   const authPasswordRef = useRef<TextInput>(null);
+
+  const transitionToSignedOut = useCallback(() => {
+    dashboardMutationRevision.current += 1;
+    refreshQueued.current = false;
+    latestData.current = null;
+    timerStateRef.current = null;
+    setData(null);
+    setRefreshing(false);
+    setAuthSubmitting(false);
+    authSubmittingRef.current = false;
+    setAuthPassword("");
+    setAuthPasswordVisible(false);
+    setAuthError(null);
+    setAuthNotice(null);
+    setAuthView("login");
+    setActiveEditVisible(false);
+    setPresentedActiveEntry(null);
+    setManualDraftEntry(null);
+    setCalendarEditEntry(null);
+    setAuthState("signedOut");
+  }, []);
+
+  useEffect(() => subscribeMobileSignedOut(transitionToSignedOut), [transitionToSignedOut]);
 
   const changeReportRange = useCallback((nextRange: ReportRange) => {
     scheduleLayoutTransition(reduceMotion);
@@ -325,8 +353,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       void refreshLocationServices(bootstrap);
     } catch (error) {
       if (error instanceof AuthRequiredError) {
-        setData(null);
-        setAuthState("signedOut");
+        transitionToSignedOut();
         return;
       }
       if (!options?.silent && !options?.visibleRefresh) {
@@ -340,7 +367,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         void loadRef.current({ silent: true });
       }
     }
-  }, []);
+  }, [transitionToSignedOut]);
   loadRef.current = load;
 
   function updateDashboardData(
@@ -604,24 +631,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     () => sortMobileCategoriesByUsage(data?.categories ?? [], data?.categoryUsage ?? []).map(({ category }) => category),
     [data?.categories, data?.categoryUsage]
   );
-  const authKeyboardFields = useMemo<KeyboardAccessoryField[]>(() => (
-    authView === "signup"
-      ? [
-        { id: "auth-name", ref: authNameRef },
-        { id: "auth-workspace", ref: authWorkspaceRef },
-        { id: "auth-email", ref: authEmailRef },
-        { id: "auth-password", ref: authPasswordRef }
-      ]
-      : [
-        { id: "auth-email", ref: authEmailRef },
-        { id: "auth-password", ref: authPasswordRef }
-      ]
-  ), [authView]);
-  const authKeyboard = useKeyboardAccessory({
-    nativeID: AUTH_KEYBOARD_ACCESSORY_ID,
-    fields: authKeyboardFields,
-    theme
-  });
   const activeEntryForDisplay = data?.activeEntry ?? null;
   const activeDurationSeconds = activeTimerElapsedSeconds(activeEntryForDisplay, now);
   const hasLiveActiveTimer = Boolean(activeEntryForDisplay);
@@ -1175,6 +1184,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   async function submitAuth() {
+    if (authSubmittingRef.current) return;
+    authSubmittingRef.current = true;
     setAuthError(null);
     setAuthNotice(null);
     setAuthSubmitting(true);
@@ -1189,17 +1200,20 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         : await login(authEmail, authPassword);
       if ("requiresEmailConfirmation" in auth) {
         setAuthPassword("");
+        setAuthPasswordVisible(false);
         setAuthNotice(auth.message);
         setAuthView("login");
         setAuthState("signedOut");
         return;
       }
       setAuthPassword("");
+      setAuthPasswordVisible(false);
       await load();
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : "Unable to authenticate");
       setAuthState("signedOut");
     } finally {
+      authSubmittingRef.current = false;
       setAuthSubmitting(false);
     }
   }
@@ -1241,26 +1255,28 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   style={styles.textInput}
                   value={authName}
                   onChangeText={setAuthName}
-                  onSubmitEditing={authKeyboard.focusNext}
+                  onSubmitEditing={() => authWorkspaceRef.current?.focus()}
                   placeholder="Name"
                   placeholderTextColor={theme.textSecondary}
                   autoCapitalize="words"
+                  autoComplete="off"
+                  textContentType="none"
                   returnKeyType="next"
-                  blurOnSubmit={false}
-                  {...authKeyboard.getTextInputProps("auth-name")}
+                  submitBehavior="submit"
                 />
                 <TextInput
                   ref={authWorkspaceRef}
                   style={styles.textInput}
                   value={authWorkspace}
                   onChangeText={setAuthWorkspace}
-                  onSubmitEditing={authKeyboard.focusNext}
+                  onSubmitEditing={() => authEmailRef.current?.focus()}
                   placeholder="Workspace"
                   placeholderTextColor={theme.textSecondary}
                   autoCapitalize="words"
+                  autoComplete="off"
+                  textContentType="none"
                   returnKeyType="next"
-                  blurOnSubmit={false}
-                  {...authKeyboard.getTextInputProps("auth-workspace")}
+                  submitBehavior="submit"
                 />
               </>
             ) : null}
@@ -1269,32 +1285,82 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               style={styles.textInput}
               value={authEmail}
               onChangeText={setAuthEmail}
-              onSubmitEditing={authKeyboard.focusNext}
+              onSubmitEditing={() => authPasswordRef.current?.focus()}
               placeholder="Email"
               placeholderTextColor={theme.textSecondary}
               autoCapitalize="none"
+              autoComplete="off"
+              autoCorrect={false}
               keyboardType="email-address"
-              textContentType="emailAddress"
+              spellCheck={false}
+              textContentType="none"
               returnKeyType="next"
-              blurOnSubmit={false}
-              {...authKeyboard.getTextInputProps("auth-email")}
+              submitBehavior="submit"
             />
-            <TextInput
-              ref={authPasswordRef}
-              style={styles.textInput}
-              value={authPassword}
-              onChangeText={setAuthPassword}
-              onSubmitEditing={submitAuth}
-              placeholder="Password"
-              placeholderTextColor={theme.textSecondary}
-              returnKeyType="done"
-              secureTextEntry
-              textContentType={authView === "signup" ? "newPassword" : "password"}
-              {...authKeyboard.getTextInputProps("auth-password")}
-            />
+            <View style={styles.authPasswordField}>
+              <View style={styles.authPasswordInputFrame}>
+                <TextInput
+                  ref={authPasswordRef}
+                  style={[
+                    styles.textInput,
+                    styles.authPasswordInput,
+                    authPasswordVisible ? styles.authPasswordInputRevealed : null
+                  ]}
+                  value={authPassword}
+                  onChangeText={setAuthPassword}
+                  onSubmitEditing={submitAuth}
+                  placeholder="Password"
+                  placeholderTextColor={theme.textSecondary}
+                  autoCapitalize="none"
+                  autoComplete="off"
+                  autoCorrect={false}
+                  caretHidden={authPasswordVisible}
+                  returnKeyType="done"
+                  secureTextEntry
+                  spellCheck={false}
+                  submitBehavior="blurAndSubmit"
+                  textContentType="none"
+                />
+                {authPasswordVisible && authPassword ? (
+                  <View
+                    accessibilityElementsHidden
+                    importantForAccessibility="no-hide-descendants"
+                    pointerEvents="none"
+                    style={styles.authPasswordRevealOverlay}
+                  >
+                    <Text numberOfLines={1} style={styles.authPasswordRevealText}>
+                      {authPassword}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+              <Pressable
+                accessibilityLabel={authPasswordVisible ? "Hide password" : "Show password"}
+                accessibilityRole="button"
+                accessibilityState={{ selected: authPasswordVisible }}
+                onPress={() => setAuthPasswordVisible((visible) => !visible)}
+                style={({ pressed }) => [
+                  styles.authPasswordVisibilityButton,
+                  pressed ? styles.authPasswordVisibilityPressed : null
+                ]}
+              >
+                <PasswordVisibilityGlyph
+                  color={theme.textSecondary}
+                  passwordVisible={authPasswordVisible}
+                />
+              </Pressable>
+            </View>
             {authNotice ? <Text style={styles.statusText}>{authNotice}</Text> : null}
             {authError ? <Text style={styles.errorText}>{authError}</Text> : null}
-            <Pressable style={pressable(styles.primaryButton, styles.buttonPressed)} onPress={submitAuth}>
+            <Pressable
+              accessibilityState={{ disabled: authSubmitting }}
+              disabled={authSubmitting}
+              style={pressable(
+                [styles.primaryButton, authSubmitting ? styles.buttonDisabled : null],
+                styles.buttonPressed
+              )}
+              onPress={submitAuth}
+            >
               <Text style={styles.primaryButtonText}>
                 {authSubmitting ? "Working..." : authView === "signup" ? "Create account" : "Log in"}
               </Text>
@@ -1303,6 +1369,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               style={pressable([styles.secondaryButton, styles.authSecondaryButton], styles.buttonPressed)}
               onPress={() => {
                 setAuthError(null);
+                setAuthPasswordVisible(false);
                 setAuthView(authView === "signup" ? "login" : "signup");
               }}
             >
@@ -1312,7 +1379,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             </Pressable>
           </View>
         </ScrollView>
-        {authKeyboard.accessory}
       </SafeAreaView>
     );
   }
@@ -1405,17 +1471,16 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                       pointerEvents={hasLiveActiveTimer ? "auto" : "none"}
                       style={[styles.activeTimerActions, activeTimerActionsStyle]}
                     >
-                      <Pressable
+                      <PrimaryTimerAction
                         accessibilityLabel="Stop current timer"
-                        accessibilityRole="button"
-                        style={pressable(styles.stopButton, styles.buttonPressed)}
+                        backgroundColor={theme.accent}
+                        glyphColor={theme.onAccent}
+                        mode="stop"
                         onPress={(event) => {
                           event.stopPropagation();
                           void stopActiveTimer();
                         }}
-                      >
-                        <StopGlyph color={theme.onAccent} />
-                      </Pressable>
+                      />
                     </Animated.View>
                   </View>
                 </Pressable>
@@ -1475,14 +1540,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                       </ScrollView>
                     </View>
                     <View style={styles.startActionColumn}>
-                      <Pressable
+                      <PrimaryTimerAction
                         accessibilityLabel="Start task"
-                        accessibilityRole="button"
-                        style={pressable(styles.playButton, styles.buttonPressed)}
+                        backgroundColor={theme.accent}
+                        glyphColor={theme.onAccent}
+                        mode="play"
                         onPress={startBlankTask}
-                      >
-                        <PlayGlyph color={theme.onAccent} />
-                      </Pressable>
+                      />
                       <Pressable
                         accessibilityLabel="Add past time"
                         accessibilityRole="button"
@@ -1987,14 +2051,6 @@ function SettingsGlyph({ color }: { color: string }) {
   );
 }
 
-function PlayGlyph({ color, size = 20 }: { color: string; size?: number }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24">
-      <Path d="M7 4v16l13-8L7 4Z" fill={color} />
-    </Svg>
-  );
-}
-
 function PlusGlyph({ color }: { color: string }) {
   return (
     <Svg width={20} height={20} viewBox="0 0 24 24">
@@ -2003,10 +2059,33 @@ function PlusGlyph({ color }: { color: string }) {
   );
 }
 
-function StopGlyph({ color }: { color: string }) {
+function PasswordVisibilityGlyph({
+  color,
+  passwordVisible
+}: {
+  color: string;
+  passwordVisible: boolean;
+}) {
   return (
-    <Svg width={19} height={19} viewBox="0 0 24 24">
-      <Path d="M6 6h12v12H6V6Z" fill={color} />
+    <Svg width={20} height={20} viewBox="0 0 24 24">
+      <Path
+        d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"
+        fill="none"
+        stroke={color}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+      />
+      <Circle cx={12} cy={12} r={2.7} fill="none" stroke={color} strokeWidth={2} />
+      {passwordVisible ? (
+        <Path
+          d="M4 4l16 16"
+          fill="none"
+          stroke={color}
+          strokeLinecap="round"
+          strokeWidth={2}
+        />
+      ) : null}
     </Svg>
   );
 }
@@ -2272,7 +2351,9 @@ function HistoryDayCard({
                         pressed && canReplay ? styles.buttonPressed : null
                       ]}
                     >
-                      <PlayGlyph color={canReplay ? theme.accentText : theme.textSecondary} size={14} />
+                      <CompactReplayPlayGlyph
+                        color={canReplay ? theme.accentText : theme.textSecondary}
+                      />
                     </Pressable>
                   </View>
                 </View>

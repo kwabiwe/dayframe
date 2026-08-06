@@ -144,6 +144,8 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 
 ## Authentication And Sessions
 
+- Mobile login and signup use native Return-key navigation with no custom `InputAccessoryView`. Switching between their ordinary and secure fields keeps one continuous keyboard presentation without a Password AutoFill/QuickType height rebuild; the final field submits normally. The password stays natively secure and focused even while its fixed 44 pt, VoiceOver-labelled Show/Hide action reveals a non-interactive visual mirror; toggling visibility must never change `secureTextEntry`, dismiss/reopen the keyboard, or reflow the 48 pt field.
+- Mobile logout keeps the complete Settings screen visible during credential/account cleanup, publishes one synchronous signed-out state to the mounted dashboard owner, then uses one native stack pop to the already-rendered Login surface. It must never clear Account details in place, traverse the Index redirect, reveal an authenticated/blank Today frame, or accept a duplicate in-flight logout.
 - Authentication, logout, and every other state-changing action must never be exposed as a prefetchable GET link. Logout requires one explicit POST; `GET /logout` has no session or cookie side effect.
 - Profile, Settings, and troubleshooting use the shared sign-out button/form. Rendering, opening, scrolling to, or discovering those surfaces never revokes a session.
 - Explicit logout prevents duplicate submission, shows a pending state, revokes only the current session idempotently, clears `dayframe_session`, and returns a host-preserving 303 to `/login?signedOut=1`.

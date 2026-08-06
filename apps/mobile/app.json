@@ -12,6 +12,14 @@
       "icon": "./assets/dayframe_app_icon.png",
       "supportsTablet": true,
       "bundleIdentifier": "com.layereight.dayframe",
+      "entitlements": {
+        "com.apple.security.application-groups": [
+          "group.com.layereight.dayframe"
+        ],
+        "keychain-access-groups": [
+          "$(AppIdentifierPrefix)com.layereight.dayframe.shared"
+        ]
+      },
       "infoPlist": {
         "UIBackgroundModes": [
           "location",
@@ -37,6 +45,30 @@
       ],
       "expo-sqlite"
     ],
+    "extra": {
+      "eas": {
+        "build": {
+          "experimental": {
+            "ios": {
+              "appExtensions": [
+                {
+                  "targetName": "DayframeLiveActivity",
+                  "bundleIdentifier": "com.layereight.dayframe.DayframeLiveActivity",
+                  "entitlements": {
+                    "com.apple.security.application-groups": [
+                      "group.com.layereight.dayframe"
+                    ],
+                    "keychain-access-groups": [
+                      "$(AppIdentifierPrefix)com.layereight.dayframe.shared"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
     "experiments": {
       "typedRoutes": true
     }

@@ -19,6 +19,10 @@ Provide these values from Supabase and Vercel when you want the hosted deploymen
 - `GEOAPIFY_API_KEY`: server-only Geoapify key used by the authenticated web
   place-search route. Never expose it through a `NEXT_PUBLIC_` variable.
 - `EXPO_PUBLIC_DAYFRAME_API_BASE`: hosted Vercel URL for mobile builds.
+- `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY`, and `APNS_BUNDLE_ID`:
+  server-only Apple provider-token credentials and the Dayframe app bundle ID.
+- `CRON_SECRET`: server-only bearer value Vercel supplies to protected cron
+  requests, including the Live Activity delivery reconciliation sweep.
 
 Do not paste the Supabase service-role key into chat unless an admin-only backend task explicitly needs it. The current app does not need it for login/signup.
 
@@ -26,7 +30,10 @@ Do not paste the Supabase service-role key into chat unless an admin-only backen
 
 1. Create a Supabase project.
 2. Run the base Dayframe migration from `packages/db/migrations/001_init.sql`.
-3. Run the hosted security migration from `supabase/migrations/202607020001_dayframe_rls.sql`.
+3. Run every hosted migration in `supabase/migrations/` in timestamp order.
+   Live Activity delivery retries require
+   `202608060003_live_activity_delivery_outbox.sql` before the corresponding API
+   is deployed.
 4. In Auth settings, choose whether email confirmation is required.
    - For personal sideload/beta testing, disabling confirmation is simplest.
    - If confirmation is enabled, signup will return a “check your email” state and the user logs in after confirmation.
@@ -57,6 +64,11 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
 DAYFRAME_ALLOWED_SIGNUP_EMAILS=you@example.com,friend@example.com
 DAYFRAME_SIGNUPS_ENABLED=false
 GEOAPIFY_API_KEY=...
+APNS_KEY_ID=...
+APNS_TEAM_ID=...
+APNS_PRIVATE_KEY=...
+APNS_BUNDLE_ID=com.layereight.dayframe
+CRON_SECRET=...
 ```
 
 If your Supabase project still uses legacy API keys, `NEXT_PUBLIC_SUPABASE_ANON_KEY` also works. Prefer the publishable key for new Supabase projects.
@@ -68,6 +80,16 @@ Optional integration tokens:
 ```bash
 DAYFRAME_INGEST_TOKEN=...
 ```
+
+APNs delivery uses a durable per-token outbox. Timer mutations enqueue the
+newest state before the immediate provider request. Network failures, 429, and
+5xx responses retry with bounded backoff and `Retry-After`; permanent failures
+stop, and invalid/expired tokens are invalidated. Authenticated timer-state
+reads reconcile due rows promptly. `vercel.json` adds a protected daily sweep,
+which is the highest cron frequency available on this project's current Hobby
+plan; do not silently change that schedule without checking the Vercel plan.
+Diagnostics include status, sanitized Apple reason, APNs request ID, and counts,
+but never device tokens, provider keys, or session credentials.
 
 ## Web Place Search
 

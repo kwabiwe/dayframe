@@ -91,26 +91,32 @@ private enum DayframeShortcutPerformer {
     let catalog = DayframeShortcutCatalogStore.catalog
     let event = DayframeShortcutEvent(action: action, catalog: catalog)
     let queued = DayframeNativeShortcutQueue.append(event)
-    guard queued else {
-      return
-    }
 
     switch action {
     case .start(_, let categoryName, _):
+      guard queued else {
+        return
+      }
       let category = catalog.category(named: categoryName)
       _ = await DayframeLiveActivityController.start(
-        title: event.description ?? "Tracking",
+        title: event.description ?? category?.name ?? "Uncategorized",
         categoryName: category?.name ?? dayframeCleanText(categoryName),
         categoryColor: category?.color,
         startedAt: event.occurredAt
       )
     case .stop:
       _ = await DayframeLiveActivityController.stop()
+      guard queued else {
+        return
+      }
+      if await DayframeShortcutDirectEventClient.submit(event) {
+        _ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])
+      }
     }
   }
 }
 
-fileprivate struct DayframeShortcutEvent: Codable {
+struct DayframeShortcutEvent: Codable {
   let localId: String
   let source: String
   let type: String
@@ -119,7 +125,7 @@ fileprivate struct DayframeShortcutEvent: Codable {
   let description: String?
   let rawPayload: [String: String]
 
-  init(action: DayframeShortcutAction, catalog: DayframeShortcutCatalog) {
+  fileprivate init(action: DayframeShortcutAction, catalog: DayframeShortcutCatalog) {
     let now = Date()
     let actionName: String
     var nextType: String
@@ -157,73 +163,8 @@ fileprivate struct DayframeShortcutEvent: Codable {
 
 }
 
-enum DayframeNativeShortcutQueue {
-  private static let key = "dayframe.nativeShortcutQueue.v1"
-  private static let lock = NSLock()
-
-  fileprivate static func append(_ event: DayframeShortcutEvent) -> Bool {
-    lock.withLock {
-      var queue = readUnlocked()
-      guard !queue.contains(where: { $0.localId == event.localId }) else {
-        return true
-      }
-      queue.append(event)
-      return writeUnlocked(queue)
-    }
-  }
-
-  static func pendingDictionaries() -> [[String: Any]] {
-    lock.withLock {
-      guard
-        let data = try? JSONEncoder.dayframe.encode(readUnlocked()),
-        let object = try? JSONSerialization.jsonObject(with: data),
-        let dictionaries = object as? [[String: Any]]
-      else {
-        return []
-      }
-      return dictionaries
-    }
-  }
-
-  static func remove(localIds: [String]) -> Int {
-    let ids = Set(localIds.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
-    guard !ids.isEmpty else {
-      return 0
-    }
-
-    return lock.withLock {
-      let queue = readUnlocked()
-      let next = queue.filter { !ids.contains($0.localId) }
-      let removed = queue.count - next.count
-      guard removed > 0 else {
-        return 0
-      }
-      return writeUnlocked(next) ? removed : 0
-    }
-  }
-
-  private static func readUnlocked() -> [DayframeShortcutEvent] {
-    guard
-      let value = UserDefaults.standard.string(forKey: key),
-      let data = value.data(using: .utf8),
-      let decoded = try? JSONDecoder.dayframe.decode([DayframeShortcutEvent].self, from: data)
-    else {
-      return []
-    }
-    return decoded
-  }
-
-  private static func writeUnlocked(_ events: [DayframeShortcutEvent]) -> Bool {
-    guard let data = try? JSONEncoder.dayframe.encode(events), let value = String(data: data, encoding: .utf8) else {
-      return false
-    }
-    UserDefaults.standard.set(value, forKey: key)
-    return UserDefaults.standard.synchronize()
-  }
-}
-
 extension NSLock {
-  fileprivate func withLock<T>(_ body: () throws -> T) rethrows -> T {
+  func withLock<T>(_ body: () throws -> T) rethrows -> T {
     lock()
     defer { unlock() }
     return try body()

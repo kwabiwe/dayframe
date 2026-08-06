@@ -16,7 +16,7 @@ import {
 } from "react-native";
 import Reanimated from "react-native-reanimated";
 import Svg, { Path } from "react-native-svg";
-import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
   SwipeDismissSheet,
@@ -89,6 +89,7 @@ import {
   type MobileStyles,
   type MobileTheme
 } from "@/lib/mobileTheme";
+import { publishMobileSignedOut } from "@/lib/mobileSessionTransition";
 import { REVIEW_COPY, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
 import {
   SETTINGS_HEALTH_SNAPSHOT_TTL_MS,
@@ -174,6 +175,10 @@ function updateSettingsSnapshot(patch: Partial<SettingsSnapshot>) {
   };
 }
 
+function clearSettingsSnapshot() {
+  cachedSettingsSnapshot = null;
+}
+
 function isSettingsSnapshotFresh(now = Date.now()) {
   return !shouldRefreshSettingsSnapshot(cachedSettingsSnapshot?.updatedAt, now, SETTINGS_SNAPSHOT_TTL_MS);
 }
@@ -207,6 +212,7 @@ export default function SettingsScreen() {
   const [queue, setQueue] = useState<QueuedEvent[]>(cachedSnapshot?.queue ?? []);
   const [lastSyncResult, setLastSyncResult] = useState<SyncQueueResult | null>(cachedSnapshot?.lastSyncResult ?? null);
   const [syncingQueue, setSyncingQueue] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const [syncStatusMessage, setSyncStatusMessage] = useState<string | null>(cachedSnapshot?.syncStatusMessage ?? null);
   const [showQueueDetails, setShowQueueDetails] = useState(false);
   const [reviewSyncDiagnostics, setReviewSyncDiagnostics] =
@@ -256,6 +262,19 @@ export default function SettingsScreen() {
   const settingsScrollOffsetRef = useRef(0);
   const settingsScrollContentHeightRef = useRef(0);
   const settingsScrollViewportHeightRef = useRef(0);
+  const signingOutRef = useRef(false);
+  const signedOutNavigationScheduledRef = useRef(false);
+
+  const finishSignedOutNavigation = useCallback(() => {
+    if (signedOutNavigationScheduledRef.current) return;
+    signedOutNavigationScheduledRef.current = true;
+    clearSettingsSnapshot();
+    publishMobileSignedOut();
+    requestAnimationFrame(() => {
+      if (router.canDismiss()) router.dismissAll();
+      else router.replace("/(tabs)/today");
+    });
+  }, []);
 
   const clampSettingsScroll = useCallback(() => {
     const offset = settingsScrollOffsetRef.current;
@@ -373,7 +392,7 @@ export default function SettingsScreen() {
       await refreshReviewDiagnostics();
     } catch (error) {
       if (error instanceof AuthRequiredError) {
-        router.replace("/");
+        finishSignedOutNavigation();
         return;
       }
       if (!options?.silent) {
@@ -383,7 +402,7 @@ export default function SettingsScreen() {
       refreshInFlight.current = false;
       if (showRefreshIndicator) setRefreshing(false);
     }
-  }, [refreshReviewDiagnostics]);
+  }, [finishSignedOutNavigation, refreshReviewDiagnostics]);
 
   useEffect(() => {
     if (!isSettingsSnapshotFresh()) void load({ silent: true });
@@ -576,7 +595,7 @@ export default function SettingsScreen() {
       await load();
     } catch (error) {
       if (error instanceof AuthRequiredError) {
-        router.replace("/");
+        finishSignedOutNavigation();
         return;
       }
       Alert.alert("Categories", error instanceof Error ? error.message : "Unable to create category.");
@@ -611,7 +630,7 @@ export default function SettingsScreen() {
       await load();
     } catch (error) {
       if (error instanceof AuthRequiredError) {
-        router.replace("/");
+        finishSignedOutNavigation();
         return;
       }
       Alert.alert("Categories", error instanceof Error ? error.message : "Unable to save category.");
@@ -630,7 +649,7 @@ export default function SettingsScreen() {
     } catch (error) {
       patchCategory(category.id, { isPinned: category.isPinned });
       if (error instanceof AuthRequiredError) {
-        router.replace("/");
+        finishSignedOutNavigation();
         return;
       }
       Alert.alert("Categories", error instanceof Error ? error.message : "Unable to update category.");
@@ -661,7 +680,7 @@ export default function SettingsScreen() {
       await load();
     } catch (error) {
       if (error instanceof AuthRequiredError) {
-        router.replace("/");
+        finishSignedOutNavigation();
         return;
       }
       Alert.alert("Categories", error instanceof Error ? error.message : "Unable to delete category.");
@@ -684,7 +703,7 @@ export default function SettingsScreen() {
       return result;
     } catch (error) {
       if (error instanceof AuthRequiredError) {
-        router.replace("/");
+        finishSignedOutNavigation();
         return null;
       }
       setSyncStatusMessageAndCache(error instanceof Error ? error.message : "Unable to sync queued events.");
@@ -741,7 +760,7 @@ export default function SettingsScreen() {
       await load();
     } catch (error) {
       if (error instanceof AuthRequiredError) {
-        router.replace("/");
+        finishSignedOutNavigation();
         return;
       }
       setSyncStatusMessageAndCache(error instanceof Error ? error.message : "Unable to retry failed events.");
@@ -898,7 +917,7 @@ export default function SettingsScreen() {
       );
     } catch (error) {
       if (error instanceof AuthRequiredError) {
-        router.replace("/");
+        finishSignedOutNavigation();
         return;
       }
       Alert.alert("Location evidence", error instanceof Error ? error.message : "Unable to delete evidence.");
@@ -1098,19 +1117,32 @@ export default function SettingsScreen() {
   }
 
   async function completeSignOut() {
-    await logout();
-    setDataAndCache(null);
-    setQueueAndCache(await readQueue());
-    router.replace("/");
+    if (signingOutRef.current) return;
+    signingOutRef.current = true;
+    setSigningOut(true);
+    try {
+      await logout();
+      finishSignedOutNavigation();
+    } catch (error) {
+      signingOutRef.current = false;
+      setSigningOut(false);
+      Alert.alert(
+        "Unable to log out",
+        error instanceof Error ? error.message : "Dayframe could not finish logging out."
+      );
+    }
   }
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <Stack.Screen options={{ gestureEnabled: !signingOut }} />
       <View style={styles.settingsFloatingHeader}>
         <View style={styles.settingsHeader}>
           <Pressable
             accessibilityLabel="Back"
             accessibilityRole="button"
+            accessibilityState={{ disabled: signingOut }}
+            disabled={signingOut}
             style={pressable(styles.iconButton, styles.buttonPressed)}
             onPress={goBack}
           >
@@ -1534,8 +1566,18 @@ export default function SettingsScreen() {
               </View>
             ) : null}
             <View style={styles.buttonRow}>
-              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={signOut}>
-                <Text style={styles.secondaryButtonText}>Log out</Text>
+              <Pressable
+                accessibilityState={{ disabled: signingOut }}
+                disabled={signingOut}
+                style={pressable(
+                  [styles.secondaryButton, signingOut ? styles.buttonDisabled : null],
+                  styles.buttonPressed
+                )}
+                onPress={signOut}
+              >
+                <Text style={styles.secondaryButtonText}>
+                  {signingOut ? "Logging out..." : "Log out"}
+                </Text>
               </Pressable>
             </View>
           </View>
