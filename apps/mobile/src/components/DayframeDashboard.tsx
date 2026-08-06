@@ -195,6 +195,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [authView, setAuthView] = useState<AuthView>("login");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
+  const [authPasswordVisible, setAuthPasswordVisible] = useState(false);
   const [authName, setAuthName] = useState("");
   const [authWorkspace, setAuthWorkspace] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
@@ -1176,12 +1177,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         : await login(authEmail, authPassword);
       if ("requiresEmailConfirmation" in auth) {
         setAuthPassword("");
+        setAuthPasswordVisible(false);
         setAuthNotice(auth.message);
         setAuthView("login");
         setAuthState("signedOut");
         return;
       }
       setAuthPassword("");
+      setAuthPasswordVisible(false);
       await load();
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : "Unable to authenticate");
@@ -1233,8 +1236,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   placeholder="Name"
                   placeholderTextColor={theme.textSecondary}
                   autoCapitalize="words"
+                  autoComplete="off"
+                  textContentType="none"
                   returnKeyType="next"
-                  blurOnSubmit={false}
+                  submitBehavior="submit"
                 />
                 <TextInput
                   ref={authWorkspaceRef}
@@ -1245,8 +1250,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   placeholder="Workspace"
                   placeholderTextColor={theme.textSecondary}
                   autoCapitalize="words"
+                  autoComplete="off"
+                  textContentType="none"
                   returnKeyType="next"
-                  blurOnSubmit={false}
+                  submitBehavior="submit"
                 />
               </>
             ) : null}
@@ -1259,23 +1266,48 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               placeholder="Email"
               placeholderTextColor={theme.textSecondary}
               autoCapitalize="none"
+              autoComplete="off"
+              autoCorrect={false}
               keyboardType="email-address"
-              textContentType="emailAddress"
+              spellCheck={false}
+              textContentType="none"
               returnKeyType="next"
-              blurOnSubmit={false}
+              submitBehavior="submit"
             />
-            <TextInput
-              ref={authPasswordRef}
-              style={styles.textInput}
-              value={authPassword}
-              onChangeText={setAuthPassword}
-              onSubmitEditing={submitAuth}
-              placeholder="Password"
-              placeholderTextColor={theme.textSecondary}
-              returnKeyType="done"
-              secureTextEntry
-              textContentType={authView === "signup" ? "newPassword" : "password"}
-            />
+            <View style={styles.authPasswordField}>
+              <TextInput
+                ref={authPasswordRef}
+                style={[styles.textInput, styles.authPasswordInput]}
+                value={authPassword}
+                onChangeText={setAuthPassword}
+                onSubmitEditing={submitAuth}
+                placeholder="Password"
+                placeholderTextColor={theme.textSecondary}
+                autoCapitalize="none"
+                autoComplete="off"
+                autoCorrect={false}
+                returnKeyType="done"
+                secureTextEntry={!authPasswordVisible}
+                spellCheck={false}
+                submitBehavior="blurAndSubmit"
+                textContentType="none"
+              />
+              <Pressable
+                accessibilityLabel={authPasswordVisible ? "Hide password" : "Show password"}
+                accessibilityRole="button"
+                accessibilityState={{ selected: authPasswordVisible }}
+                onPress={() => setAuthPasswordVisible((visible) => !visible)}
+                style={({ pressed }) => [
+                  styles.authPasswordVisibilityButton,
+                  pressed ? styles.authPasswordVisibilityPressed : null
+                ]}
+              >
+                <PasswordVisibilityGlyph
+                  color={theme.textSecondary}
+                  passwordVisible={authPasswordVisible}
+                />
+              </Pressable>
+            </View>
             {authNotice ? <Text style={styles.statusText}>{authNotice}</Text> : null}
             {authError ? <Text style={styles.errorText}>{authError}</Text> : null}
             <Pressable
@@ -1295,6 +1327,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               style={pressable([styles.secondaryButton, styles.authSecondaryButton], styles.buttonPressed)}
               onPress={() => {
                 setAuthError(null);
+                setAuthPasswordVisible(false);
                 setAuthView(authView === "signup" ? "login" : "signup");
               }}
             >
@@ -1980,6 +2013,37 @@ function PlusGlyph({ color }: { color: string }) {
   return (
     <Svg width={20} height={20} viewBox="0 0 24 24">
       <Path d="M12 5v14M5 12h14" fill="none" stroke={color} strokeLinecap="round" strokeWidth={2.2} />
+    </Svg>
+  );
+}
+
+function PasswordVisibilityGlyph({
+  color,
+  passwordVisible
+}: {
+  color: string;
+  passwordVisible: boolean;
+}) {
+  return (
+    <Svg width={20} height={20} viewBox="0 0 24 24">
+      <Path
+        d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"
+        fill="none"
+        stroke={color}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+      />
+      <Circle cx={12} cy={12} r={2.7} fill="none" stroke={color} strokeWidth={2} />
+      {passwordVisible ? (
+        <Path
+          d="M4 4l16 16"
+          fill="none"
+          stroke={color}
+          strokeLinecap="round"
+          strokeWidth={2}
+        />
+      ) : null}
     </Svg>
   );
 }

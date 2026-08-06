@@ -1733,6 +1733,32 @@ function createStyles(theme: MobileTheme) {
       paddingHorizontal: 12,
       paddingVertical: 10
     },
+    authPasswordField: {
+      minHeight: 48,
+      backgroundColor: theme.surfaceMuted,
+      borderRadius: 14,
+      flexDirection: "row",
+      alignItems: "center",
+      overflow: "hidden"
+    },
+    authPasswordInput: {
+      flex: 1,
+      minWidth: 0,
+      backgroundColor: "transparent",
+      borderRadius: 0,
+      paddingRight: 4
+    },
+    authPasswordVisibilityButton: {
+      width: 44,
+      height: 44,
+      marginRight: 2,
+      borderRadius: 999,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    authPasswordVisibilityPressed: {
+      backgroundColor: theme.surfaceInset
+    },
     primaryButton: {
       marginTop: 8,
       minHeight: 48,
