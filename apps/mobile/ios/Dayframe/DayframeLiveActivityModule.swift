@@ -40,14 +40,9 @@ class DayframeLiveActivityModule: NSObject {
   ) {
     Task {
       let token = await DayframeLiveActivityController.pushToken(activityId: activityId)
-      #if DEBUG
-      let environment = "development"
-      #else
-      let environment = "production"
-      #endif
       let payload: [String: Any] = [
         "token": token ?? NSNull(),
-        "environment": environment
+        "environment": Self.pushEnvironment() ?? NSNull()
       ]
       resolve(payload)
     }
@@ -105,5 +100,15 @@ class DayframeLiveActivityModule: NSObject {
       return nil
     }
     return ISO8601DateFormatter.dayframe.date(from: value)
+  }
+
+  private static func pushEnvironment() -> String? {
+    guard
+      let value = Bundle.main.object(forInfoDictionaryKey: "DayframeAPNSEnvironment") as? String,
+      value == "development" || value == "production"
+    else {
+      return nil
+    }
+    return value
   }
 }

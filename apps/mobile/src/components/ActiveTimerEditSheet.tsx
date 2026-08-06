@@ -30,6 +30,7 @@ import {
 } from "@dayframe/shared";
 import { FloatingDatePicker } from "@/components/FloatingDatePicker";
 import { DeleteEntryConfirmation } from "@/components/DeleteEntryConfirmation";
+import { PrimaryTimerGlyph } from "@/components/PrimaryTimerAction";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
 import {
   editSheetKeyboardLayout,
@@ -891,7 +892,7 @@ export function ActiveTimerEditSheet({
                         busy ? styles.buttonDisabled : null
                       ]}
                     >
-                      <StopGlyph color={theme.onAccent} />
+                      <PrimaryTimerGlyph color={theme.onAccent} mode="stop" />
                     </Pressable>
                   ) : null}
                 </View>
@@ -1534,12 +1535,4 @@ function colorWithAlpha(hex: string, alpha: number) {
   const green = Number.parseInt(value.slice(2, 4), 16);
   const blue = Number.parseInt(value.slice(4, 6), 16);
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
-}
-
-function StopGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={19} height={19} viewBox="0 0 24 24">
-      <Path d="M6 6h12v12H6V6Z" fill={color} />
-    </Svg>
-  );
 }

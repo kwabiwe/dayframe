@@ -14,6 +14,7 @@ export type LiveActivityRegistration = {
 export class LiveActivityRegistrationError extends Error {}
 
 type PushTokenRow = {
+  id: string;
   token: string;
   environment: "development" | "production";
 };
@@ -26,12 +27,42 @@ type ActiveTimerRow = {
   startedAt: string;
 };
 
+type LiveActivityDeliveryFailure = {
+  environment: "development" | "production";
+  event: "update" | "end";
+  status: number | null;
+  reason: string;
+};
+
+class LiveActivityDeliveryError extends Error {
+  constructor(readonly failure: LiveActivityDeliveryFailure) {
+    super(`APNs Live Activity delivery failed: ${failure.reason}`);
+    this.name = "LiveActivityDeliveryError";
+  }
+}
+
+class LiveActivityDeliveryAggregateError extends Error {
+  constructor(readonly failures: LiveActivityDeliveryFailure[]) {
+    super(`${failures.length} APNs Live Activity delivery attempt(s) failed.`);
+    this.name = "LiveActivityDeliveryAggregateError";
+  }
+}
+
 export async function registerLiveActivity(
   session: RequestSession,
   registration: LiveActivityRegistration
 ) {
   const result = await query(
-    `insert into live_activity_push_tokens (
+    `with invalidated_previous_tokens as (
+       update live_activity_push_tokens
+       set invalidated_at = now()
+       where workspace_id = $1
+         and user_id = $2
+         and activity_id = $4
+         and token <> $3
+         and invalidated_at is null
+     )
+     insert into live_activity_push_tokens (
        workspace_id, user_id, token, activity_id, active_entry_id, environment
      )
      select $1, $2, $3, $4, te.id, $6
@@ -64,11 +95,32 @@ export async function registerLiveActivity(
 }
 
 export async function notifyLiveActivities(session: RequestSession) {
-  if (!apnsConfiguration()) return;
+  const configuration = apnsConfiguration();
+  if (!configuration.config) {
+    console.warn("Dayframe Live Activity APNs delivery skipped", {
+      missingConfiguration: configuration.missing
+    });
+    return;
+  }
+  const config = configuration.config;
+
+  let authorization: string;
+  try {
+    authorization = `bearer ${apnsJwt(config)}`;
+  } catch {
+    throw new LiveActivityDeliveryAggregateError([{
+      environment: "production",
+      event: "update",
+      status: null,
+      reason: "InvalidProviderKey"
+    }]);
+  }
 
   const [tokensResult, activeResult] = await Promise.all([
     query<PushTokenRow>(
-      `select token, environment
+      `select id,
+              token,
+              environment
        from live_activity_push_tokens
        where workspace_id = $1
          and user_id = $2
@@ -93,21 +145,53 @@ export async function notifyLiveActivities(session: RequestSession) {
   ]);
 
   const active = activeResult.rows[0] ?? null;
-  await Promise.allSettled(tokensResult.rows.map((row) => sendTimerState(row, active)));
+  const results = await Promise.allSettled(
+    tokensResult.rows.map((row) => sendTimerState(
+      row,
+      active,
+      config,
+      authorization
+    ))
+  );
+  const failures = results.flatMap((result) => {
+    if (result.status === "fulfilled") return [];
+    if (result.reason instanceof LiveActivityDeliveryError) return [result.reason.failure];
+    return [{
+      environment: "production" as const,
+      event: active ? "update" as const : "end" as const,
+      status: null,
+      reason: "UnexpectedDeliveryError"
+    }];
+  });
+  if (failures.length) throw new LiveActivityDeliveryAggregateError(failures);
 }
 
 export async function notifyLiveActivitiesBestEffort(session: RequestSession) {
   try {
     await notifyLiveActivities(session);
   } catch (error) {
-    console.error("Dayframe Live Activity sync failed", error);
+    const failures = error instanceof LiveActivityDeliveryAggregateError
+      ? error.failures
+      : [{
+          environment: "production" as const,
+          event: "update" as const,
+          status: null,
+          reason: "UnexpectedDeliveryError"
+        }];
+    console.error("Dayframe Live Activity APNs delivery failed", {
+      failures
+    });
   }
 }
 
-async function sendTimerState(tokenRow: PushTokenRow, active: ActiveTimerRow | null) {
-  const config = apnsConfiguration();
-  if (!config) return;
+async function sendTimerState(
+  tokenRow: PushTokenRow,
+  active: ActiveTimerRow | null,
+  config: ApnsConfiguration,
+  authorization: string
+) {
   const timestamp = Math.floor(Date.now() / 1000);
+  const event = active ? "update" as const : "end" as const;
   const payload = active
     ? {
         aps: {
@@ -135,31 +219,53 @@ async function sendTimerState(tokenRow: PushTokenRow, active: ActiveTimerRow | n
   const host = tokenRow.environment === "development"
     ? "api.sandbox.push.apple.com"
     : "api.push.apple.com";
-  const response = await sendApnsRequest(host, tokenRow.token, {
-    authorization: `bearer ${apnsJwt(config)}`,
-    "apns-push-type": "liveactivity",
-    "apns-priority": "10",
-    "apns-topic": `${config.bundleId}.push-type.liveactivity`,
-    "content-type": "application/json"
-  }, JSON.stringify(payload));
+  let response: { ok: boolean; status: number; body: string };
+  try {
+    response = await sendApnsRequest(host, tokenRow.token, {
+      authorization,
+      "apns-push-type": "liveactivity",
+      "apns-priority": "10",
+      "apns-topic": `${config.bundleId}.push-type.liveactivity`,
+      "content-type": "application/json"
+    }, JSON.stringify(payload));
+  } catch {
+    const failure = {
+      environment: tokenRow.environment,
+      event,
+      status: null,
+      reason: "NetworkError"
+    };
+    await recordDeliveryFailure(tokenRow.id, failure, false);
+    throw new LiveActivityDeliveryError(failure);
+  }
 
   if (response.ok) {
     await query(
-      `update live_activity_push_tokens set last_delivered_at = now()
-       where token = $1`,
-      [tokenRow.token]
+      `update live_activity_push_tokens
+       set last_attempt_at = now(),
+           last_delivered_at = now(),
+           last_delivery_status = $2,
+           last_delivery_reason = null,
+           consecutive_failures = 0,
+           active_entry_id = $3,
+           invalidated_at = case when $3::uuid is null then now() else null end
+       where id = $1`,
+      [tokenRow.id, response.status, active?.id ?? null]
     );
-    if (!active) await invalidateToken(tokenRow.token);
     return;
   }
 
-  if (response.status === 400 || response.status === 410) {
-    const body = parseApnsBody(response.body);
-    if (response.status === 410 || body.reason === "BadDeviceToken" || body.reason === "Unregistered") {
-      await invalidateToken(tokenRow.token);
-    }
-  }
-  throw new Error(`APNs Live Activity delivery failed with ${response.status}.`);
+  const body = parseApnsBody(response.body);
+  const reason = safeApnsReason(body.reason, response.status);
+  const shouldInvalidate = response.status === 410 || reason === "BadDeviceToken" || reason === "Unregistered";
+  const failure = {
+    environment: tokenRow.environment,
+    event,
+    status: response.status,
+    reason
+  };
+  await recordDeliveryFailure(tokenRow.id, failure, shouldInvalidate);
+  throw new LiveActivityDeliveryError(failure);
 }
 
 function sendApnsRequest(
@@ -188,6 +294,13 @@ function sendApnsRequest(
       ":path": `/3/device/${token}`,
       ...headers
     });
+    request.setTimeout(10_000, () => {
+      request.close(http2.constants.NGHTTP2_CANCEL);
+      if (settled) return;
+      settled = true;
+      client.close();
+      reject(new Error("APNs request timed out."));
+    });
     let status = 500;
     let responseBody = "";
     request.setEncoding("utf8");
@@ -195,7 +308,7 @@ function sendApnsRequest(
       status = Number(responseHeaders[":status"] ?? 500);
     });
     request.on("data", (chunk) => {
-      responseBody += chunk;
+      if (responseBody.length < 4_096) responseBody += chunk;
     });
     request.once("end", () => finish({ ok: status >= 200 && status < 300, status, body: responseBody }));
     request.once("error", (error) => {
@@ -216,6 +329,11 @@ function parseApnsBody(body: string) {
   }
 }
 
+function safeApnsReason(reason: string | undefined, status: number) {
+  if (reason && /^[A-Za-z0-9_-]{1,64}$/.test(reason)) return reason;
+  return `HTTP_${status}`;
+}
+
 function contentState(active: ActiveTimerRow, isRunning: boolean) {
   const startedAt = new Date(active.startedAt);
   const description = active.description?.trim();
@@ -233,10 +351,20 @@ function contentState(active: ActiveTimerRow, isRunning: boolean) {
   };
 }
 
-async function invalidateToken(token: string) {
+async function recordDeliveryFailure(
+  rowId: string,
+  failure: LiveActivityDeliveryFailure,
+  invalidate: boolean
+) {
   await query(
-    `update live_activity_push_tokens set invalidated_at = now() where token = $1`,
-    [token]
+    `update live_activity_push_tokens
+     set last_attempt_at = now(),
+         last_delivery_status = $2,
+         last_delivery_reason = $3,
+         consecutive_failures = consecutive_failures + 1,
+         invalidated_at = case when $4 then now() else invalidated_at end
+     where id = $1`,
+    [rowId, failure.status, failure.reason, invalidate]
   );
 }
 
@@ -247,12 +375,22 @@ type ApnsConfiguration = {
   teamId: string;
 };
 
-function apnsConfiguration(): ApnsConfiguration | null {
+function apnsConfiguration(): { config: ApnsConfiguration | null; missing: string[] } {
   const keyId = process.env.APNS_KEY_ID?.trim();
   const teamId = process.env.APNS_TEAM_ID?.trim();
   const privateKey = process.env.APNS_PRIVATE_KEY?.replace(/\\n/g, "\n").trim();
-  const bundleId = process.env.APNS_BUNDLE_ID?.trim() || "com.layereight.dayframe";
-  return keyId && teamId && privateKey ? { bundleId, keyId, privateKey, teamId } : null;
+  const bundleId = process.env.APNS_BUNDLE_ID?.trim();
+  const missing: string[] = [];
+  if (!keyId) missing.push("APNS_KEY_ID");
+  if (!teamId) missing.push("APNS_TEAM_ID");
+  if (!privateKey) missing.push("APNS_PRIVATE_KEY");
+  if (!bundleId) missing.push("APNS_BUNDLE_ID");
+  return {
+    config: keyId && teamId && privateKey && bundleId
+      ? { bundleId, keyId, privateKey, teamId }
+      : null,
+    missing
+  };
 }
 
 function apnsJwt(config: ApnsConfiguration) {

@@ -17,7 +17,7 @@ type DayframeLiveActivityModule = {
   ): Promise<boolean | { started: boolean; activityId?: string | null }>;
   pushToken?(activityId: string): Promise<{
     token?: string | null;
-    environment: "development" | "production";
+    environment?: "development" | "production" | null;
   }>;
   stop(): Promise<boolean>;
 };
@@ -27,6 +27,8 @@ const nativeLiveActivity = NativeModules.DayframeLiveActivityModule as DayframeL
 let lastSyncedLiveActivityKey: string | null = null;
 let requestedEntry: LiveActivityEntry | null = null;
 let reconciliation: Promise<void> | null = null;
+const remoteRegistrations = new Map<string, Promise<void>>();
+const REMOTE_REGISTRATION_RETRY_DELAYS_MS = [0, 1_500, 5_000] as const;
 
 export async function syncLiveActivityForEntry(entry: LiveActivityEntry | null | undefined) {
   if (Platform.OS !== "ios" || !nativeLiveActivity) return;
@@ -73,7 +75,7 @@ async function reconcileLatestEntry() {
         nativeLiveActivity?.pushToken &&
         isUuid(entry.id)
       ) {
-        void registerRemoteUpdates(result.activityId, entry.id);
+        queueRemoteRegistration(result.activityId, entry.id);
       }
     }
     return;
@@ -97,15 +99,30 @@ function displayLiveActivityTitle(entry: LiveActivityEntry) {
   return "Uncategorized";
 }
 
+function queueRemoteRegistration(activityId: string, activeEntryId: string) {
+  if (remoteRegistrations.has(activityId)) return;
+  const registration = registerRemoteUpdates(activityId, activeEntryId).finally(() => {
+    remoteRegistrations.delete(activityId);
+  });
+  remoteRegistrations.set(activityId, registration);
+  void registration;
+}
+
 async function registerRemoteUpdates(activityId: string, activeEntryId: string) {
-  const registration = await nativeLiveActivity?.pushToken?.(activityId).catch(() => null);
-  if (!registration?.token) return;
-  await registerLiveActivity({
-    token: registration.token,
-    activityId,
-    activeEntryId,
-    environment: registration.environment
-  }).catch(() => undefined);
+  for (const delay of REMOTE_REGISTRATION_RETRY_DELAYS_MS) {
+    if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+    if (requestedEntry?.id !== activeEntryId) return;
+
+    const registration = await nativeLiveActivity?.pushToken?.(activityId).catch(() => null);
+    if (!registration?.token || !registration.environment) continue;
+    const didRegister = await registerLiveActivity({
+      token: registration.token,
+      activityId,
+      activeEntryId,
+      environment: registration.environment
+    }).then(() => true).catch(() => false);
+    if (didRegister) return;
+  }
 }
 
 function isUuid(value: string) {

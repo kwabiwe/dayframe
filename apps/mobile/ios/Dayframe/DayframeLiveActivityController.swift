@@ -51,15 +51,19 @@ enum DayframeLiveActivityController {
       return nil
     }
 
+    if let token = activity.pushToken {
+      return token.dayframeHexString
+    }
+
     return await withTaskGroup(of: String?.self) { group in
       group.addTask {
         for await token in activity.pushTokenUpdates {
-          return token.map { String(format: "%02x", $0) }.joined()
+          return token.dayframeHexString
         }
         return nil
       }
       group.addTask {
-        try? await Task.sleep(for: .seconds(8))
+        try? await Task.sleep(for: .seconds(15))
         return nil
       }
       let token = await group.next() ?? nil
@@ -112,5 +116,11 @@ enum DayframeLiveActivityController {
       return nil
     }
     return String(trimmed.prefix(80))
+  }
+}
+
+private extension Data {
+  var dayframeHexString: String {
+    map { String(format: "%02x", $0) }.joined()
   }
 }

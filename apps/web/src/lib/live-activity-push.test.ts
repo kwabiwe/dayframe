@@ -19,7 +19,9 @@ vi.mock("node:http2", () => ({
         http2Mocks.calls.push(call);
         const handlers: Record<string, (value?: unknown) => void> = {};
         return {
+          close: vi.fn(),
           setEncoding: vi.fn(),
+          setTimeout: vi.fn(),
           on: (event: string, handler: (value?: unknown) => void) => {
             handlers[event] = handler;
           },
@@ -38,7 +40,11 @@ vi.mock("node:http2", () => ({
   }
 }));
 
-const { notifyLiveActivities, registerLiveActivity } = await import("./live-activity-push");
+const {
+  notifyLiveActivities,
+  notifyLiveActivitiesBestEffort,
+  registerLiveActivity
+} = await import("./live-activity-push");
 
 const session = {
   userId: "00000000-0000-4000-8000-000000000001",
@@ -56,6 +62,7 @@ describe("Live Activity remote sync", () => {
     delete process.env.APNS_KEY_ID;
     delete process.env.APNS_TEAM_ID;
     delete process.env.APNS_PRIVATE_KEY;
+    delete process.env.APNS_BUNDLE_ID;
   });
 
   it("stores tokens inside the authenticated user and workspace", async () => {
@@ -69,6 +76,7 @@ describe("Live Activity remote sync", () => {
 
     expect(mocks.query).toHaveBeenCalledOnce();
     expect(mocks.query.mock.calls[0][0]).toContain("live_activity_push_tokens");
+    expect(mocks.query.mock.calls[0][0]).toContain("invalidated_previous_tokens");
     expect(mocks.query.mock.calls[0][1]).toEqual([
       session.workspaceId,
       session.userId,
@@ -79,15 +87,25 @@ describe("Live Activity remote sync", () => {
     ]);
   });
 
-  it("does no database or network work until APNs is configured", async () => {
+  it("reports the exact missing APNs configuration without doing database or network work", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     await notifyLiveActivities(session);
     expect(mocks.query).not.toHaveBeenCalled();
+    expect(warning).toHaveBeenCalledWith(
+      "Dayframe Live Activity APNs delivery skipped",
+      { missingConfiguration: [
+        "APNS_KEY_ID",
+        "APNS_TEAM_ID",
+        "APNS_PRIVATE_KEY",
+        "APNS_BUNDLE_ID"
+      ] }
+    );
   });
 
   it("pushes the newest running timer state to every registered activity", async () => {
     configureApns();
     mocks.query
-      .mockResolvedValueOnce({ rows: [{ token: "b".repeat(64), environment: "production" }] })
+      .mockResolvedValueOnce({ rows: [{ id: "token-row", token: "b".repeat(64), environment: "production" }] })
       .mockResolvedValueOnce({ rows: [{
         id: "entry-1",
         description: "Architecture",
@@ -115,12 +133,14 @@ describe("Live Activity remote sync", () => {
         })
       })
     }));
+    expect(mocks.query.mock.calls.at(-1)?.[0]).toContain("last_delivery_status");
+    expect(mocks.query.mock.calls.at(-1)?.[1]).toEqual(["token-row", 200, "entry-1"]);
   });
 
   it("ends and immediately dismisses stale activities after a remote stop", async () => {
     configureApns();
     mocks.query
-      .mockResolvedValueOnce({ rows: [{ token: "c".repeat(64), environment: "development" }] })
+      .mockResolvedValueOnce({ rows: [{ id: "token-row", token: "c".repeat(64), environment: "development" }] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValue({ rows: [] });
     await notifyLiveActivities(session);
@@ -131,6 +151,42 @@ describe("Live Activity remote sync", () => {
     expect(payload.aps.event).toBe("end");
     expect(payload.aps["dismissal-date"]).toBeLessThan(payload.aps.timestamp);
     expect(mocks.query.mock.calls.at(-1)?.[0]).toContain("invalidated_at");
+    expect(mocks.query.mock.calls.at(-1)?.[1]).toEqual(["token-row", 200, null]);
+  });
+
+  it("records and safely logs Apple's status and reason while invalidating stale tokens", async () => {
+    configureApns();
+    http2Mocks.status = 410;
+    http2Mocks.responseBody = JSON.stringify({ reason: "Unregistered" });
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{ id: "token-row", token: "d".repeat(64), environment: "development" }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValue({ rows: [] });
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await notifyLiveActivitiesBestEffort(session);
+
+    expect(mocks.query.mock.calls.at(-1)?.[0]).toContain("last_delivery_reason");
+    expect(mocks.query.mock.calls.at(-1)?.[1]).toEqual([
+      "token-row",
+      410,
+      "Unregistered",
+      true
+    ]);
+    expect(errorLog).toHaveBeenCalledWith(
+      "Dayframe Live Activity APNs delivery failed",
+      {
+        failures: [{
+          environment: "development",
+          event: "end",
+          status: 410,
+          reason: "Unregistered"
+        }]
+      }
+    );
+    const serializedLog = JSON.stringify(errorLog.mock.calls);
+    expect(serializedLog).not.toContain("d".repeat(64));
+    expect(serializedLog).not.toContain(process.env.APNS_PRIVATE_KEY);
   });
 });
 
@@ -139,4 +195,5 @@ function configureApns() {
   process.env.APNS_KEY_ID = "KEY123";
   process.env.APNS_TEAM_ID = "TEAM123";
   process.env.APNS_PRIVATE_KEY = privateKey.export({ format: "pem", type: "pkcs8" }).toString();
+  process.env.APNS_BUNDLE_ID = "com.layereight.dayframe";
 }

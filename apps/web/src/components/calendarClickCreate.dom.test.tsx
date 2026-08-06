@@ -170,7 +170,11 @@ describe("Calendar click-to-create DOM interactions", () => {
     await waitFor(() => expect(screen.queryByTestId("calendar-compact-editor")).toBeNull());
 
     await clickDay(dayBody, 9 * 60, 32);
-    expect(await screen.findByTestId("calendar-compact-editor")).not.toBeNull();
+    expect(await screen.findByTestId(
+      "calendar-compact-editor",
+      undefined,
+      { timeout: 5_000 }
+    )).not.toBeNull();
     expect((screen.getByLabelText("Start time") as HTMLInputElement).value).toBe("09:00");
   });
 

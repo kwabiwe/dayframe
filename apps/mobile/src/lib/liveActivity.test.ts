@@ -29,10 +29,11 @@ async function loadModule() {
 
 describe("Live Activity sync", () => {
   beforeEach(() => {
+    vi.useRealTimers();
     mocks.start.mockReset();
     mocks.start.mockResolvedValue(true);
     mocks.pushToken.mockReset();
-    mocks.pushToken.mockResolvedValue({ token: "a".repeat(64), environment: "production" });
+    mocks.pushToken.mockResolvedValue({ token: "a".repeat(64), environment: "development" });
     mocks.registerLiveActivity.mockReset();
     mocks.registerLiveActivity.mockResolvedValue(undefined);
     mocks.stop.mockReset();
@@ -73,8 +74,33 @@ describe("Live Activity sync", () => {
       token: "a".repeat(64),
       activityId: "activity-1",
       activeEntryId: "80000000-0000-4000-8000-000000000001",
-      environment: "production"
+      environment: "development"
     }));
+  });
+
+  it("retries until ActivityKit provides both a token and its signed APNs environment", async () => {
+    vi.useFakeTimers();
+    mocks.start.mockResolvedValue({ started: true, activityId: "activity-1" });
+    mocks.pushToken
+      .mockResolvedValueOnce({ token: "a".repeat(64), environment: null })
+      .mockResolvedValueOnce({ token: "b".repeat(64), environment: "development" });
+    const { syncLiveActivityForEntry } = await loadModule();
+
+    await syncLiveActivityForEntry({
+      id: "80000000-0000-4000-8000-000000000001",
+      startedAt: "2026-07-12T06:45:00.000Z",
+      description: "School run",
+      categoryName: "Family",
+      categoryColor: "violet"
+    });
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    expect(mocks.pushToken).toHaveBeenCalledTimes(2);
+    expect(mocks.registerLiveActivity).toHaveBeenCalledWith(expect.objectContaining({
+      token: "b".repeat(64),
+      environment: "development"
+    }));
+    vi.useRealTimers();
   });
 
   it("clears stale native activities on the first idle bootstrap", async () => {

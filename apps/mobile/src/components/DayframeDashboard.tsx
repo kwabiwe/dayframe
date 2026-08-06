@@ -47,7 +47,10 @@ import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { TagMetadata } from "@/components/TagMetadata";
 import { DayframeBrand } from "@/components/brand";
-import { PrimaryTimerAction } from "@/components/PrimaryTimerAction";
+import {
+  CompactReplayPlayGlyph,
+  PrimaryTimerAction
+} from "@/components/PrimaryTimerAction";
 import {
   AuthRequiredError,
   createManualTimeEntry,
@@ -1973,14 +1976,6 @@ function SettingsGlyph({ color }: { color: string }) {
   );
 }
 
-function PlayGlyph({ color, size = 20 }: { color: string; size?: number }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24">
-      <Path d="M7 4v16l13-8L7 4Z" fill={color} />
-    </Svg>
-  );
-}
-
 function PlusGlyph({ color }: { color: string }) {
   return (
     <Svg width={20} height={20} viewBox="0 0 24 24">
@@ -2250,7 +2245,9 @@ function HistoryDayCard({
                         pressed && canReplay ? styles.buttonPressed : null
                       ]}
                     >
-                      <PlayGlyph color={canReplay ? theme.accentText : theme.textSecondary} size={14} />
+                      <CompactReplayPlayGlyph
+                        color={canReplay ? theme.accentText : theme.textSecondary}
+                      />
                     </Pressable>
                   </View>
                 </View>
