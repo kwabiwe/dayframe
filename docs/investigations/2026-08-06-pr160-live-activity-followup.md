@@ -72,6 +72,7 @@ Logout motion contract:
 - A clean checked-in workspace simulator build passed for the Debug staging configuration.
 - A signed Debug staging build passed for the attached `KB's 17`, with bundle ID `com.layereight.dayframe`, team `65M773ZG6M`, and embedded `aps-environment=development`.
 - The signed app installed and launched successfully on the attached iPhone after it was unlocked.
+- After the password-reveal/logout follow-up, a fresh Release-config build embedded the exact staging JavaScript, passed signing/validation, and replaced and launched the installed app on `KB's 17`.
 - The user subsequently confirmed that Live Activity and Push Notification delivery work with the configured provider credential. That is user-reported acceptance; this repository record does not claim access to the secret value.
 
 ## Acceptance State
@@ -111,8 +112,7 @@ No redacted delivery-time/APNs response capture is claimed here; the provider cr
 
 ## Hosted Staging Evidence
 
-- Keyboard-fix runtime commit `624e654a49bad3b193e2efecf6729c878d874e55` produced Ready Preview `dpl_5p7vFsfSLWbXvaPMK7iz9jSrhYEA` at `dayframe-fvu86zkdk-dayframeworkshop.vercel.app`.
-- That exact Ready Preview was explicitly assigned to `dayframe-staging.vercel.app`; hosted `/login` returned 200 and anonymous `/api/bootstrap` returned the expected JSON 401 before promotion.
+- The latest password-reveal/logout runtime produced a Ready Preview and was explicitly assigned to `dayframe-staging.vercel.app`; hosted `/login` returned 200 and anonymous `/api/bootstrap` returned the expected JSON 401 before promotion. The draft PR description records the exact current head, deployment ID, and immutable Preview URL so this investigation note does not become stale after evidence-only commits.
 - Preview-scoped Vercel configuration now contains the required APNs provider settings. Values were not printed.
 - Staging Supabase has the four diagnostics columns. Historical pre-fix rows remain useful only as evidence of the old environment-classification bug; the user has confirmed the newly configured delivery path works.
 - Production was not changed by this follow-up. At the post-promotion check, `dayframe-web.vercel.app` resolved to separate Ready production deployment `dpl_Cm3ztUXiU5798QpuR85N6prQUDmU`.
