@@ -91,12 +91,12 @@ private enum DayframeShortcutPerformer {
     let catalog = DayframeShortcutCatalogStore.catalog
     let event = DayframeShortcutEvent(action: action, catalog: catalog)
     let queued = DayframeNativeShortcutQueue.append(event)
-    guard queued else {
-      return
-    }
 
     switch action {
     case .start(_, let categoryName, _):
+      guard queued else {
+        return
+      }
       let category = catalog.category(named: categoryName)
       _ = await DayframeLiveActivityController.start(
         title: event.description ?? category?.name ?? "Uncategorized",
@@ -106,11 +106,17 @@ private enum DayframeShortcutPerformer {
       )
     case .stop:
       _ = await DayframeLiveActivityController.stop()
+      guard queued else {
+        return
+      }
+      if await DayframeShortcutDirectEventClient.submit(event) {
+        _ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])
+      }
     }
   }
 }
 
-fileprivate struct DayframeShortcutEvent: Codable {
+struct DayframeShortcutEvent: Codable {
   let localId: String
   let source: String
   let type: String
@@ -119,7 +125,7 @@ fileprivate struct DayframeShortcutEvent: Codable {
   let description: String?
   let rawPayload: [String: String]
 
-  init(action: DayframeShortcutAction, catalog: DayframeShortcutCatalog) {
+  fileprivate init(action: DayframeShortcutAction, catalog: DayframeShortcutCatalog) {
     let now = Date()
     let actionName: String
     var nextType: String
@@ -161,7 +167,7 @@ enum DayframeNativeShortcutQueue {
   private static let key = "dayframe.nativeShortcutQueue.v1"
   private static let lock = NSLock()
 
-  fileprivate static func append(_ event: DayframeShortcutEvent) -> Bool {
+  static func append(_ event: DayframeShortcutEvent) -> Bool {
     lock.withLock {
       var queue = readUnlocked()
       guard !queue.contains(where: { $0.localId == event.localId }) else {
@@ -223,7 +229,7 @@ enum DayframeNativeShortcutQueue {
 }
 
 extension NSLock {
-  fileprivate func withLock<T>(_ body: () throws -> T) rethrows -> T {
+  func withLock<T>(_ body: () throws -> T) rethrows -> T {
     lock()
     defer { unlock() }
     return try body()

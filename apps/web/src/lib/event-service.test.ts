@@ -61,6 +61,49 @@ describe("category persistence", () => {
     });
   });
 
+  it("stops the active timer once when a Live Activity event is retried", async () => {
+    const firstClient = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes("client_event_id = $3")) return { rows: [] };
+        if (statement.includes("insert into activity_events")) return { rows: [{ id: "event-stop-1" }] };
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    const retryClient = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes("client_event_id = $3")) return { rows: [{ id: "event-stop-1" }] };
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect
+      .mockResolvedValueOnce(firstClient)
+      .mockResolvedValueOnce(retryClient);
+    const stopEvent = {
+      source: "shortcut",
+      type: "timer_stop",
+      occurredAt: new Date("2026-08-06T09:30:00.000Z"),
+      clientEventId: "ios-shortcut-stop-1722936600000-event",
+      rawPayload: { origin: "ios_app_intent" }
+    };
+
+    const first = await processActivityEvent(stopEvent, session);
+    const retry = await processActivityEvent(stopEvent, session);
+
+    expect(first).toMatchObject({ eventId: "event-stop-1", candidate: { action: "stop_timer" } });
+    expect(retry).toMatchObject({ eventId: "event-stop-1", duplicate: true });
+    expect(
+      firstClient.query.mock.calls.filter(([statement]) =>
+        String(statement).includes("set stopped_at = $1")
+      )
+    ).toHaveLength(1);
+    expect(
+      retryClient.query.mock.calls.some(([statement]) => String(statement).includes("set stopped_at = $1"))
+    ).toBe(false);
+    expect(retryClient.query).toHaveBeenCalledWith("commit");
+  });
+
   it("persists pin state to the categories.is_pinned column", async () => {
     mocks.query.mockResolvedValueOnce({
       rows: [{ id: categoryId(), name: "Focus", color: "lime", isPinned: true }]

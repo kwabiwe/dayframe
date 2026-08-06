@@ -17,6 +17,16 @@ vi.mock("expo-secure-store", () => ({
   })
 }));
 
+vi.mock("react-native", () => ({
+  NativeModules: {
+    DayframeLiveActivityModule: {
+      clearRuntimeContext: vi.fn(() => Promise.resolve(true)),
+      setRuntimeContext: vi.fn(() => Promise.resolve(true))
+    }
+  },
+  Platform: { OS: "ios" }
+}));
+
 vi.mock("@react-native-async-storage/async-storage", () => ({
   default: {
     getItem: vi.fn((key: string) => Promise.resolve(asyncStore.get(key) ?? null)),

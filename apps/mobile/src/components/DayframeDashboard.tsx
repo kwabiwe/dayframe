@@ -47,7 +47,7 @@ import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { TagMetadata } from "@/components/TagMetadata";
 import { DayframeBrand } from "@/components/brand";
-import { useKeyboardAccessory, type KeyboardAccessoryField } from "@/components/KeyboardAccessory";
+import { PrimaryTimerAction } from "@/components/PrimaryTimerAction";
 import {
   AuthRequiredError,
   createManualTimeEntry,
@@ -166,7 +166,6 @@ type SummarySegment = {
   color: string;
   isUncategorized: boolean;
 };
-const AUTH_KEYBOARD_ACCESSORY_ID = "dayframe-auth-keyboard-accessory";
 const RECENT_LAST_STOP_WINDOW_MS = 24 * 60 * 60 * 1000;
 const HISTORY_DELETE_ACTION_BUTTON_WIDTH = 64;
 const HISTORY_DELETE_ACTION_GAP = 14;
@@ -201,6 +200,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [manualDraftEntry, setManualDraftEntry] = useState<TimeEntry | null>(null);
   const [manualEntrySaving, setManualEntrySaving] = useState(false);
   const manualEntrySavingRef = useRef(false);
+  const authSubmittingRef = useRef(false);
   const [activeEditVisible, setActiveEditVisible] = useState(false);
   const [presentedActiveEntry, setPresentedActiveEntry] = useState<TimeEntry | null>(null);
   const [pendingHistoryDeletion, setPendingHistoryDeletion] = useState<{
@@ -604,24 +604,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     () => sortMobileCategoriesByUsage(data?.categories ?? [], data?.categoryUsage ?? []).map(({ category }) => category),
     [data?.categories, data?.categoryUsage]
   );
-  const authKeyboardFields = useMemo<KeyboardAccessoryField[]>(() => (
-    authView === "signup"
-      ? [
-        { id: "auth-name", ref: authNameRef },
-        { id: "auth-workspace", ref: authWorkspaceRef },
-        { id: "auth-email", ref: authEmailRef },
-        { id: "auth-password", ref: authPasswordRef }
-      ]
-      : [
-        { id: "auth-email", ref: authEmailRef },
-        { id: "auth-password", ref: authPasswordRef }
-      ]
-  ), [authView]);
-  const authKeyboard = useKeyboardAccessory({
-    nativeID: AUTH_KEYBOARD_ACCESSORY_ID,
-    fields: authKeyboardFields,
-    theme
-  });
   const activeEntryForDisplay = data?.activeEntry ?? null;
   const activeDurationSeconds = activeTimerElapsedSeconds(activeEntryForDisplay, now);
   const hasLiveActiveTimer = Boolean(activeEntryForDisplay);
@@ -1175,6 +1157,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   async function submitAuth() {
+    if (authSubmittingRef.current) return;
+    authSubmittingRef.current = true;
     setAuthError(null);
     setAuthNotice(null);
     setAuthSubmitting(true);
@@ -1200,6 +1184,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       setAuthError(error instanceof Error ? error.message : "Unable to authenticate");
       setAuthState("signedOut");
     } finally {
+      authSubmittingRef.current = false;
       setAuthSubmitting(false);
     }
   }
@@ -1241,26 +1226,24 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   style={styles.textInput}
                   value={authName}
                   onChangeText={setAuthName}
-                  onSubmitEditing={authKeyboard.focusNext}
+                  onSubmitEditing={() => authWorkspaceRef.current?.focus()}
                   placeholder="Name"
                   placeholderTextColor={theme.textSecondary}
                   autoCapitalize="words"
                   returnKeyType="next"
                   blurOnSubmit={false}
-                  {...authKeyboard.getTextInputProps("auth-name")}
                 />
                 <TextInput
                   ref={authWorkspaceRef}
                   style={styles.textInput}
                   value={authWorkspace}
                   onChangeText={setAuthWorkspace}
-                  onSubmitEditing={authKeyboard.focusNext}
+                  onSubmitEditing={() => authEmailRef.current?.focus()}
                   placeholder="Workspace"
                   placeholderTextColor={theme.textSecondary}
                   autoCapitalize="words"
                   returnKeyType="next"
                   blurOnSubmit={false}
-                  {...authKeyboard.getTextInputProps("auth-workspace")}
                 />
               </>
             ) : null}
@@ -1269,7 +1252,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               style={styles.textInput}
               value={authEmail}
               onChangeText={setAuthEmail}
-              onSubmitEditing={authKeyboard.focusNext}
+              onSubmitEditing={() => authPasswordRef.current?.focus()}
               placeholder="Email"
               placeholderTextColor={theme.textSecondary}
               autoCapitalize="none"
@@ -1277,7 +1260,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               textContentType="emailAddress"
               returnKeyType="next"
               blurOnSubmit={false}
-              {...authKeyboard.getTextInputProps("auth-email")}
             />
             <TextInput
               ref={authPasswordRef}
@@ -1290,11 +1272,18 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               returnKeyType="done"
               secureTextEntry
               textContentType={authView === "signup" ? "newPassword" : "password"}
-              {...authKeyboard.getTextInputProps("auth-password")}
             />
             {authNotice ? <Text style={styles.statusText}>{authNotice}</Text> : null}
             {authError ? <Text style={styles.errorText}>{authError}</Text> : null}
-            <Pressable style={pressable(styles.primaryButton, styles.buttonPressed)} onPress={submitAuth}>
+            <Pressable
+              accessibilityState={{ disabled: authSubmitting }}
+              disabled={authSubmitting}
+              style={pressable(
+                [styles.primaryButton, authSubmitting ? styles.buttonDisabled : null],
+                styles.buttonPressed
+              )}
+              onPress={submitAuth}
+            >
               <Text style={styles.primaryButtonText}>
                 {authSubmitting ? "Working..." : authView === "signup" ? "Create account" : "Log in"}
               </Text>
@@ -1312,7 +1301,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             </Pressable>
           </View>
         </ScrollView>
-        {authKeyboard.accessory}
       </SafeAreaView>
     );
   }
@@ -1405,17 +1393,16 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                       pointerEvents={hasLiveActiveTimer ? "auto" : "none"}
                       style={[styles.activeTimerActions, activeTimerActionsStyle]}
                     >
-                      <Pressable
+                      <PrimaryTimerAction
                         accessibilityLabel="Stop current timer"
-                        accessibilityRole="button"
-                        style={pressable(styles.stopButton, styles.buttonPressed)}
+                        backgroundColor={theme.accent}
+                        glyphColor={theme.onAccent}
+                        mode="stop"
                         onPress={(event) => {
                           event.stopPropagation();
                           void stopActiveTimer();
                         }}
-                      >
-                        <StopGlyph color={theme.onAccent} />
-                      </Pressable>
+                      />
                     </Animated.View>
                   </View>
                 </Pressable>
@@ -1475,14 +1462,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                       </ScrollView>
                     </View>
                     <View style={styles.startActionColumn}>
-                      <Pressable
+                      <PrimaryTimerAction
                         accessibilityLabel="Start task"
-                        accessibilityRole="button"
-                        style={pressable(styles.playButton, styles.buttonPressed)}
+                        backgroundColor={theme.accent}
+                        glyphColor={theme.onAccent}
+                        mode="play"
                         onPress={startBlankTask}
-                      >
-                        <PlayGlyph color={theme.onAccent} />
-                      </Pressable>
+                      />
                       <Pressable
                         accessibilityLabel="Add past time"
                         accessibilityRole="button"
@@ -1999,14 +1985,6 @@ function PlusGlyph({ color }: { color: string }) {
   return (
     <Svg width={20} height={20} viewBox="0 0 24 24">
       <Path d="M12 5v14M5 12h14" fill="none" stroke={color} strokeLinecap="round" strokeWidth={2.2} />
-    </Svg>
-  );
-}
-
-function StopGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={19} height={19} viewBox="0 0 24 24">
-      <Path d="M6 6h12v12H6V6Z" fill={color} />
     </Svg>
   );
 }

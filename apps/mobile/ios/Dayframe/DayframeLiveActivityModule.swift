@@ -81,6 +81,25 @@ class DayframeLiveActivityModule: NSObject {
     resolve(DayframeNativeShortcutQueue.remove(localIds: localIds))
   }
 
+  @objc(setRuntimeContext:sessionToken:resolver:rejecter:)
+  func setRuntimeContext(
+    apiBase: String,
+    sessionToken: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    resolve(DayframeShortcutRuntimeContextStore.set(apiBase: apiBase, sessionToken: sessionToken))
+  }
+
+  @objc(clearRuntimeContext:rejecter:)
+  func clearRuntimeContext(
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DayframeShortcutRuntimeContextStore.clear()
+    resolve(true)
+  }
+
   private static func date(from value: String?) -> Date? {
     guard let value else {
       return nil

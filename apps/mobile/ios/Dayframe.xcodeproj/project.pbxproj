@@ -23,6 +23,8 @@
 		DFA7120001BC49B8811A0008 /* DayframeLiveActivity.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0019 /* DayframeLiveActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		DFA7130001BC49B8811A0001 /* DayframeShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7110001BC49B8811A0002 /* DayframeShortcuts.swift */; };
 		DFA7130001BC49B8811A0002 /* DayframeLiveActivityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0012 /* DayframeLiveActivityController.swift */; };
+		DFA7140001BC49B8811A0001 /* DayframeShortcutDirectEventClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7140001BC49B8811A0003 /* DayframeShortcutDirectEventClient.swift */; };
+		DFA7140001BC49B8811A0002 /* DayframeShortcutDirectEventClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7140001BC49B8811A0003 /* DayframeShortcutDirectEventClient.swift */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
 		F8E5DEB5A642AF9128DE2E3F /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 47826C218DF2CD53638292FB /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
@@ -71,6 +73,7 @@
 		DFA7120001BC49B8811A0017 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		DFA7120001BC49B8811A0018 /* DayframeLiveActivity.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = DayframeLiveActivity.entitlements; sourceTree = "<group>"; };
 		DFA7120001BC49B8811A0019 /* DayframeLiveActivity.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = DayframeLiveActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		DFA7140001BC49B8811A0003 /* DayframeShortcutDirectEventClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeShortcutDirectEventClient.swift; path = Dayframe/DayframeShortcutDirectEventClient.swift; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = Dayframe/AppDelegate.swift; sourceTree = "<group>"; };
 		F11748442D0722820044C1D9 /* Dayframe-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "Dayframe-Bridging-Header.h"; path = "Dayframe/Dayframe-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -109,6 +112,7 @@
 			children = (
 				F11748412D0307B40044C1D9 /* AppDelegate.swift */,
 				DFA7110001BC49B8811A0002 /* DayframeShortcuts.swift */,
+				DFA7140001BC49B8811A0003 /* DayframeShortcutDirectEventClient.swift */,
 				DFA7120001BC49B8811A0011 /* DayframeLiveActivityAttributes.swift */,
 				DFA7120001BC49B8811A0012 /* DayframeLiveActivityController.swift */,
 				DFA7120001BC49B8811A0013 /* DayframeLiveActivityModule.swift */,
@@ -443,6 +447,7 @@
 			files = (
 				F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */,
 				DFA7110001BC49B8811A0001 /* DayframeShortcuts.swift in Sources */,
+				DFA7140001BC49B8811A0001 /* DayframeShortcutDirectEventClient.swift in Sources */,
 				DFA7120001BC49B8811A0001 /* DayframeLiveActivityAttributes.swift in Sources */,
 				DFA7120001BC49B8811A0002 /* DayframeLiveActivityController.swift in Sources */,
 				DFA7120001BC49B8811A0003 /* DayframeLiveActivityModule.swift in Sources */,
@@ -456,6 +461,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				DFA7130001BC49B8811A0001 /* DayframeShortcuts.swift in Sources */,
+				DFA7140001BC49B8811A0002 /* DayframeShortcutDirectEventClient.swift in Sources */,
 				DFA7120001BC49B8811A0005 /* DayframeLiveActivityAttributes.swift in Sources */,
 				DFA7130001BC49B8811A0002 /* DayframeLiveActivityController.swift in Sources */,
 				DFA7120001BC49B8811A0006 /* DayframeLiveActivityBundle.swift in Sources */,

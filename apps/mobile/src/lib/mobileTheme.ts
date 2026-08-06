@@ -1777,19 +1777,6 @@ function createStyles(theme: MobileTheme) {
     startActionColumn: {
       gap: 8
     },
-    playButton: {
-      width: 44,
-      height: 44,
-      backgroundColor: theme.accent,
-      borderRadius: 999,
-      alignItems: "center",
-      justifyContent: "center",
-      shadowColor: theme.shadow,
-      shadowOpacity: 1,
-      shadowRadius: 10,
-      shadowOffset: { width: 0, height: 6 },
-      elevation: 3
-    },
     addPastTimeButton: {
       width: 44,
       height: 44,
@@ -1797,19 +1784,6 @@ function createStyles(theme: MobileTheme) {
       borderRadius: 999,
       alignItems: "center",
       justifyContent: "center"
-    },
-    stopButton: {
-      width: 44,
-      height: 44,
-      backgroundColor: theme.accent,
-      borderRadius: 999,
-      alignItems: "center",
-      justifyContent: "center",
-      shadowColor: theme.shadow,
-      shadowOpacity: 1,
-      shadowRadius: 8,
-      shadowOffset: { width: 0, height: 4 },
-      elevation: 3
     },
     deleteTimerButton: {
       width: 44,

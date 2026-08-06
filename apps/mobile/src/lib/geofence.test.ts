@@ -52,6 +52,16 @@ vi.mock("expo-secure-store", () => ({
   })
 }));
 
+vi.mock("react-native", () => ({
+  NativeModules: {
+    DayframeLiveActivityModule: {
+      clearRuntimeContext: vi.fn(() => Promise.resolve(true)),
+      setRuntimeContext: vi.fn(() => Promise.resolve(true))
+    }
+  },
+  Platform: { OS: "ios" }
+}));
+
 vi.mock("expo-location", () => ({
   Accuracy: { Balanced: 3 },
   GeofencingEventType: { Enter: 1, Exit: 2 },

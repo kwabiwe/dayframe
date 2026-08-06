@@ -39,6 +39,28 @@ describe("POST /api/events", () => {
     expect(mocks.processActivityEvent).toHaveBeenCalledWith(healthSleepEvent(), session);
   });
 
+  it("accepts an idempotent Live Activity stop retry without creating another mutation", async () => {
+    const stopEvent = {
+      source: "shortcut",
+      type: "timer_stop",
+      occurredAt: "2026-08-06T09:30:00.000Z",
+      clientEventId: "ios-shortcut-stop-1722936600000-event",
+      rawPayload: { origin: "ios_app_intent" }
+    };
+    mocks.processActivityEvent.mockResolvedValueOnce({
+      eventId: "event-stop-1",
+      candidate: { action: "stop_timer" },
+      duplicate: true
+    });
+
+    const response = await POST(jsonRequest(stopEvent));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({ eventId: "event-stop-1", duplicate: true });
+    expect(mocks.processActivityEvent).toHaveBeenCalledWith(stopEvent, session);
+  });
+
   it("returns a precise schema error when health sleep storage is missing", async () => {
     mocks.processActivityEvent.mockRejectedValueOnce(
       databaseReadinessError(
