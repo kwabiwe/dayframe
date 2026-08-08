@@ -125,8 +125,6 @@ function isThemePreference(value: string | null): value is ThemePreference {
 }
 
 function createStyles(theme: MobileTheme) {
-  const historicalSuggestionsBackground = theme.mode === "dark" ? "#302824" : "#FFF3E8";
-
   return StyleSheet.create({
     safeArea: {
       flex: 1,
@@ -2213,16 +2211,7 @@ function createStyles(theme: MobileTheme) {
       position: "absolute",
       zIndex: 100,
       elevation: 24,
-      backgroundColor: historicalSuggestionsBackground,
-      borderLeftWidth: 1,
-      borderRightWidth: 1,
-      borderBottomWidth: 1,
-      borderTopWidth: 0,
-      borderColor: theme.borderStrong,
-      borderRadius: 14,
-      borderTopLeftRadius: 0,
-      borderTopRightRadius: 0,
-      overflow: "hidden",
+      backgroundColor: "transparent",
       shadowColor: theme.shadow,
       shadowOffset: { width: 0, height: 8 },
       shadowOpacity: 1,
@@ -2231,7 +2220,15 @@ function createStyles(theme: MobileTheme) {
     historicalSuggestionsSurface: {
       flex: 1,
       minHeight: 0,
-      backgroundColor: historicalSuggestionsBackground
+      backgroundColor: theme.surfaceRaised,
+      borderLeftWidth: 1,
+      borderRightWidth: 1,
+      borderBottomWidth: 1,
+      borderTopWidth: 0,
+      borderColor: theme.borderStrong,
+      borderBottomLeftRadius: 14,
+      borderBottomRightRadius: 14,
+      overflow: "hidden"
     },
     historicalSuggestionsHeader: {
       minHeight: 44,
@@ -2253,7 +2250,7 @@ function createStyles(theme: MobileTheme) {
       justifyContent: "center"
     },
     historicalSuggestionsList: {
-      backgroundColor: historicalSuggestionsBackground,
+      backgroundColor: "transparent",
       flex: 1,
       flexShrink: 1,
       minHeight: 0
@@ -2272,7 +2269,7 @@ function createStyles(theme: MobileTheme) {
     },
     taskSuggestionRow: {
       minHeight: 46,
-      backgroundColor: historicalSuggestionsBackground,
+      backgroundColor: "transparent",
       paddingHorizontal: 12,
       paddingVertical: 8,
       flexDirection: "row",

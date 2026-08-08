@@ -21,7 +21,10 @@ describe("native duration dial contract", () => {
 
   it("keeps direct manipulation native and relative to one gesture snapshot", () => {
     expect(expoViewSource.match(/UIPanGestureRecognizer\(\)/g)).toHaveLength(1);
+    expect(expoViewSource).toContain("interactionRecord = record");
     expect(expoViewSource).toContain("accumulatedRadians += delta");
+    expect(expoViewSource).toContain("record: interactionRecord");
+    expect(expoViewSource).toContain("interactionRecord = nil");
     expect(expoViewSource).toContain("deltaMinutes: accepted");
     expect(expoViewSource).toContain('phase: "cancelled"');
     expect(componentSource).toContain("snapshotsRef.current.get(interaction.interactionId)");

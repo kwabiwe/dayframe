@@ -44,6 +44,7 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
   private let pan = UIPanGestureRecognizer()
   private var activeHandle: DayframeDurationDialHandle?
   private var activeInteractionId: String?
+  private var interactionRecord: DayframeDurationDialRecord?
   private var previousAngle = 0.0
   private var accumulatedRadians = 0.0
   private var lastMinuteDelta = 0
@@ -141,6 +142,7 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
     case .began:
       let interactionId = UUID().uuidString
       activeInteractionId = interactionId
+      interactionRecord = record
       previousAngle = angle
       accumulatedRadians = 0
       lastMinuteDelta = 0
@@ -150,23 +152,46 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
       hourHaptic.prepare()
       emit(phase: "began", handle: activeHandle, deltaMinutes: 0, record: record)
     case .changed:
+      guard let interactionRecord else {
+        cancelInteraction(emit: false)
+        return
+      }
       let delta = DayframeDurationDialCore.unwrap(previous: previousAngle, next: angle)
       previousAngle = angle
       accumulatedRadians += delta
       let proposed = DayframeDurationDialCore.minuteDelta(radians: accumulatedRadians)
-      let accepted = clamp(deltaMinutes: proposed, handle: activeHandle, record: record)
+      let accepted = clamp(
+        deltaMinutes: proposed,
+        handle: activeHandle,
+        record: interactionRecord
+      )
       if accepted != proposed {
         accumulatedRadians = Double(accepted) / 60 * DayframeDurationDialCore.fullTurn
       }
       guard accepted != lastMinuteDelta else { return }
       fireHaptic(from: lastMinuteDelta, to: accepted)
       lastMinuteDelta = accepted
-      emit(phase: "changed", handle: activeHandle, deltaMinutes: accepted, record: record)
+      emit(
+        phase: "changed",
+        handle: activeHandle,
+        deltaMinutes: accepted,
+        record: interactionRecord
+      )
     case .ended:
-      emit(phase: "ended", handle: activeHandle, deltaMinutes: lastMinuteDelta, record: record)
+      emit(
+        phase: "ended",
+        handle: activeHandle,
+        deltaMinutes: lastMinuteDelta,
+        record: interactionRecord ?? record
+      )
       cancelInteraction(emit: false)
     case .cancelled, .failed:
-      emit(phase: "cancelled", handle: activeHandle, deltaMinutes: lastMinuteDelta, record: record)
+      emit(
+        phase: "cancelled",
+        handle: activeHandle,
+        deltaMinutes: lastMinuteDelta,
+        record: interactionRecord ?? record
+      )
       cancelInteraction(emit: false)
     default:
       break
@@ -262,6 +287,7 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
     disabledAncestorScrollView = nil
     activeHandle = nil
     activeInteractionId = nil
+    interactionRecord = nil
     accumulatedRadians = 0
     lastMinuteDelta = 0
   }
