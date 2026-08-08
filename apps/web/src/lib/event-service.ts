@@ -441,8 +441,18 @@ export async function processActivityEvent(
       );
 
       if (existingEvent.rows[0]) {
+        const existingTimeEntry = await getTimeEntryCreatedFromEvent(
+          client,
+          existingEvent.rows[0].id,
+          session
+        );
         await client.query("commit");
-        return { eventId: existingEvent.rows[0].id, candidate, duplicate: true };
+        return {
+          eventId: existingEvent.rows[0].id,
+          candidate,
+          duplicate: true,
+          ...(existingTimeEntry ? { timeEntryId: existingTimeEntry.id } : {})
+        };
       }
     }
 

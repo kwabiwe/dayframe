@@ -5,7 +5,6 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const pickerSource = source("./FloatingDatePicker.tsx");
-const confirmationSource = source("./DeleteEntryConfirmation.tsx");
 const reviewSource = source("../../app/review.tsx");
 const placesSource = source("../../app/places.tsx");
 
@@ -15,12 +14,6 @@ describe("local motion ownership contracts", () => {
     expect(pickerSource).toContain("localPresenceExiting");
     expect(pickerSource).toContain("key={formatDateKey(month)}");
     expect(pickerSource).not.toContain("LayoutAnimation.configureNext");
-  });
-
-  it("animates only the contained Edit Timer confirmation", () => {
-    expect(confirmationSource).toContain('presentation === "contained"');
-    expect(confirmationSource).toContain('localPresenceEntering(reduceMotion, "scale")');
-    expect(confirmationSource).toContain('animationType={reduceMotion ? "none" : "fade"}');
   });
 
   it("gives Review and Places one local presence/layout owner around mutations", () => {

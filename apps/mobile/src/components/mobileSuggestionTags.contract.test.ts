@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const source = readFileSync(
-  new URL("./ActiveTimerEditSheet.tsx", import.meta.url),
+const overlay = readFileSync(
+  new URL("./HistoricalSuggestionsOverlay.tsx", import.meta.url),
   "utf8"
 );
 const theme = readFileSync(
@@ -12,9 +12,9 @@ const theme = readFileSync(
 
 describe("running timer suggestion metadata", () => {
   it("renders every suggested tag and includes it in the accessible action name", () => {
-    expect(source).toContain("suggestion.tagNames.map((tag) => `#${tag}`)");
-    expect(source).toContain("style={styles.taskSuggestionTags}");
-    expect(source).toContain("tagLabel ? `with ${tagLabel}` : null");
+    expect(overlay).toContain("suggestion.tagNames.map((tag) => `#${tag}`)");
+    expect(overlay).toContain("style={styles.taskSuggestionTags}");
+    expect(overlay).toContain("tagLabel ? `with ${tagLabel}` : null");
   });
 
   it("uses the same outer-edge Done action for every time-entry sheet", () => {

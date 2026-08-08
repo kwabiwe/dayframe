@@ -27,6 +27,8 @@
 		DFA7140001BC49B8811A0002 /* DayframeShortcutDirectEventClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7140001BC49B8811A0003 /* DayframeShortcutDirectEventClient.swift */; };
 		DFA7150001BC49B8811A0001 /* DayframeSharedStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7150001BC49B8811A0003 /* DayframeSharedStorage.swift */; };
 		DFA7150001BC49B8811A0002 /* DayframeSharedStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7150001BC49B8811A0003 /* DayframeSharedStorage.swift */; };
+		DFA7200001BC49B8811A0001 /* DayframeSheetQATests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7200001BC49B8811A0013 /* DayframeSheetQATests.swift */; };
+		DFA7200001BC49B8811A0002 /* SheetQAHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7200001BC49B8811A0014 /* SheetQAHarness.swift */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
 		F8E5DEB5A642AF9128DE2E3F /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 47826C218DF2CD53638292FB /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
@@ -38,6 +40,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = DFA7120001BC49B8811A0031;
 			remoteInfo = DayframeLiveActivity;
+		};
+		DFA7200001BC49B8811A0010 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 13B07F861A680F5B00A75B9A;
+			remoteInfo = Dayframe;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -78,6 +87,9 @@
 		DFA7120001BC49B8811A0019 /* DayframeLiveActivity.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = DayframeLiveActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		DFA7140001BC49B8811A0003 /* DayframeShortcutDirectEventClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeShortcutDirectEventClient.swift; path = Dayframe/DayframeShortcutDirectEventClient.swift; sourceTree = "<group>"; };
 		DFA7150001BC49B8811A0003 /* DayframeSharedStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeSharedStorage.swift; path = Dayframe/DayframeSharedStorage.swift; sourceTree = "<group>"; };
+		DFA7200001BC49B8811A0012 /* DayframeSheetQATests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DayframeSheetQATests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		DFA7200001BC49B8811A0013 /* DayframeSheetQATests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayframeSheetQATests.swift; sourceTree = "<group>"; };
+		DFA7200001BC49B8811A0014 /* SheetQAHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetQAHarness.swift; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = Dayframe/AppDelegate.swift; sourceTree = "<group>"; };
 		F11748442D0722820044C1D9 /* Dayframe-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "Dayframe-Bridging-Header.h"; path = "Dayframe/Dayframe-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -94,6 +106,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		DFA7120001BC49B8811A0022 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DFA7200001BC49B8811A0020 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -153,6 +172,7 @@
 			children = (
 				13B07FAE1A68108700A75B9A /* Dayframe */,
 				DFA7120001BC49B8811A0050 /* DayframeLiveActivity */,
+				DFA7200001BC49B8811A0030 /* DayframeSheetQATests */,
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
@@ -169,6 +189,7 @@
 			children = (
 				13B07F961A680F5B00A75B9A /* Dayframe.app */,
 				DFA7120001BC49B8811A0019 /* DayframeLiveActivity.appex */,
+				DFA7200001BC49B8811A0012 /* DayframeSheetQATests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -210,6 +231,15 @@
 				DFA7120001BC49B8811A0018 /* DayframeLiveActivity.entitlements */,
 			);
 			path = DayframeLiveActivity;
+			sourceTree = "<group>";
+		};
+		DFA7200001BC49B8811A0030 /* DayframeSheetQATests */ = {
+			isa = PBXGroup;
+			children = (
+				DFA7200001BC49B8811A0013 /* DayframeSheetQATests.swift */,
+				DFA7200001BC49B8811A0014 /* SheetQAHarness.swift */,
+			);
+			path = DayframeSheetQATests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -256,6 +286,24 @@
 			productReference = DFA7120001BC49B8811A0019 /* DayframeLiveActivity.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		DFA7200001BC49B8811A0040 /* DayframeSheetQATests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DFA7200001BC49B8811A0050 /* Build configuration list for PBXNativeTarget "DayframeSheetQATests" */;
+			buildPhases = (
+				DFA7200001BC49B8811A0022 /* Sources */,
+				DFA7200001BC49B8811A0020 /* Frameworks */,
+				DFA7200001BC49B8811A0021 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				DFA7200001BC49B8811A0011 /* PBXTargetDependency */,
+			);
+			name = DayframeSheetQATests;
+			productName = DayframeSheetQATests;
+			productReference = DFA7200001BC49B8811A0012 /* DayframeSheetQATests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -269,6 +317,10 @@
 					};
 					DFA7120001BC49B8811A0031 = {
 						CreatedOnToolsVersion = 26.6;
+					};
+					DFA7200001BC49B8811A0040 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = 13B07F861A680F5B00A75B9A;
 					};
 				};
 			};
@@ -287,6 +339,7 @@
 			targets = (
 				13B07F861A680F5B00A75B9A /* Dayframe */,
 				DFA7120001BC49B8811A0031 /* DayframeLiveActivity */,
+				DFA7200001BC49B8811A0040 /* DayframeSheetQATests */,
 			);
 		};
 /* End PBXProject section */
@@ -304,6 +357,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		DFA7120001BC49B8811A0023 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DFA7200001BC49B8811A0021 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -477,6 +537,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		DFA7200001BC49B8811A0022 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DFA7200001BC49B8811A0001 /* DayframeSheetQATests.swift in Sources */,
+				DFA7200001BC49B8811A0002 /* SheetQAHarness.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -484,6 +553,11 @@
 			isa = PBXTargetDependency;
 			target = DFA7120001BC49B8811A0031 /* DayframeLiveActivity */;
 			targetProxy = DFA7120001BC49B8811A0032 /* PBXContainerItemProxy */;
+		};
+		DFA7200001BC49B8811A0011 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 13B07F861A680F5B00A75B9A /* Dayframe */;
+			targetProxy = DFA7200001BC49B8811A0010 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -862,6 +936,81 @@
 			};
 			name = Staging;
 		};
+		DFA7200001BC49B8811A0051 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
+				PRODUCT_BUNDLE_IDENTIFIER = com.layereight.dayframe.DayframeSheetQATests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Dayframe;
+			};
+			name = Debug;
+		};
+		DFA7200001BC49B8811A0052 /* Staging */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
+				PRODUCT_BUNDLE_IDENTIFIER = com.layereight.dayframe.DayframeSheetQATests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Dayframe;
+			};
+			name = Staging;
+		};
+		DFA7200001BC49B8811A0053 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
+				PRODUCT_BUNDLE_IDENTIFIER = com.layereight.dayframe.DayframeSheetQATests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Dayframe;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -891,6 +1040,16 @@
 				DFA7120001BC49B8811A0041 /* Debug */,
 				DFA7160001BC49B8811A0003 /* Staging */,
 				DFA7120001BC49B8811A0042 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		DFA7200001BC49B8811A0050 /* Build configuration list for PBXNativeTarget "DayframeSheetQATests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DFA7200001BC49B8811A0051 /* Debug */,
+				DFA7200001BC49B8811A0052 /* Staging */,
+				DFA7200001BC49B8811A0053 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

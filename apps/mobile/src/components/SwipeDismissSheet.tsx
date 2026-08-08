@@ -28,7 +28,9 @@ import Reanimated, {
 import { MOBILE_MOTION } from "@/lib/motion";
 import {
   backdropProgressForTranslation,
+  canSettleSwipeGesture,
   createSwipeDismissCoordinator,
+  createSwipeSheetPresentationCoordinator,
   shouldDismissSwipe,
   swipeSheetExitPlan,
   swipeSheetPresentationPlan,
@@ -61,13 +63,17 @@ type SwipeDismissSheetProps = {
   children: ReactNode;
   disabled?: boolean;
   handleStyle: StyleProp<ViewStyle>;
-  onDismiss: () => void;
-  onDismissStart?: () => void;
-  onGestureSettled?: () => void;
-  onGestureStart?: () => void;
+  onDismiss: (presentationId: number) => void;
+  onDismissStart?: (presentationId: number) => boolean | void;
+  onGestureSettled?: (presentationId: number) => void;
+  onGestureStart?: (presentationId: number) => void;
   onLayout?: (event: LayoutChangeEvent) => void;
+  onPresented?: (presentationId: number) => void;
+  onStaleCallback?: (presentationId: number) => void;
+  presentationId?: number;
   reduceMotion: boolean;
   style: StyleProp<ViewStyle>;
+  testID?: string;
   translateYOffset?: ReactNativeAnimated.Value | ReactNativeAnimated.AnimatedInterpolation<number> | number;
   visible: boolean;
 };
@@ -85,8 +91,12 @@ function SwipeDismissSheet({
   onGestureSettled,
   onGestureStart,
   onLayout,
+  onPresented,
+  onStaleCallback,
+  presentationId = 0,
   reduceMotion,
   style,
+  testID,
   translateYOffset = 0,
   visible
 }, ref) {
@@ -103,40 +113,181 @@ function SwipeDismissSheet({
   const onDismissStartRef = useRef(onDismissStart);
   const onGestureSettledRef = useRef(onGestureSettled);
   const onGestureStartRef = useRef(onGestureStart);
-  const wasVisibleRef = useRef(false);
-  const coordinatorRef = useRef(createSwipeDismissCoordinator(() => onDismissRef.current()));
+  const onPresentedRef = useRef(onPresented);
+  const onStaleCallbackRef = useRef(onStaleCallback);
+  const activePresentationIdRef = useRef(presentationId);
+  const committedPresentationIdRef = useRef<number | null>(null);
+  const dismissRequestInFlightRef = useRef<number | null>(null);
+  const visiblePresentationRef = useRef<number | null>(null);
+  const visibleRef = useRef(visible);
+  const presentationAnimationSequenceRef = useRef(0);
+  const presentationCoordinatorRef = useRef(
+    createSwipeSheetPresentationCoordinator()
+  );
+  const coordinatorRef = useRef(createSwipeDismissCoordinator(() => {
+    const committedPresentationId = committedPresentationIdRef.current;
+    if (
+      committedPresentationId === null ||
+      committedPresentationId !== activePresentationIdRef.current ||
+      !visibleRef.current
+    ) return;
+    onDismissRef.current(committedPresentationId);
+  }));
   onDismissRef.current = onDismiss;
   onDismissStartRef.current = onDismissStart;
   onGestureSettledRef.current = onGestureSettled;
   onGestureStartRef.current = onGestureStart;
+  onPresentedRef.current = onPresented;
+  onStaleCallbackRef.current = onStaleCallback;
+  activePresentationIdRef.current = presentationId;
+  visibleRef.current = visible;
 
-  const notifyGestureStart = useCallback(() => {
-    onGestureStartRef.current?.();
+  const notifyGestureStart = useCallback((gesturePresentationId: number) => {
+    if (
+      gesturePresentationId !== activePresentationIdRef.current ||
+      !visibleRef.current
+    ) {
+      onStaleCallbackRef.current?.(gesturePresentationId);
+      return;
+    }
+    onGestureStartRef.current?.(gesturePresentationId);
   }, []);
 
-  const notifyGestureSettled = useCallback(() => {
-    onGestureSettledRef.current?.();
+  const notifyGestureSettled = useCallback((gesturePresentationId: number) => {
+    if (
+      gesturePresentationId !== activePresentationIdRef.current ||
+      !visibleRef.current
+    ) {
+      onStaleCallbackRef.current?.(gesturePresentationId);
+      return false;
+    }
+    onGestureSettledRef.current?.(gesturePresentationId);
+    return true;
   }, []);
 
-  const notifyDismissStart = useCallback(() => {
-    onDismissStartRef.current?.();
+  const approveDismissStart = useCallback((committedPresentationId: number) => {
+    if (
+      committedPresentationId !== activePresentationIdRef.current ||
+      !visibleRef.current
+    ) {
+      onStaleCallbackRef.current?.(committedPresentationId);
+      return false;
+    }
+    return onDismissStartRef.current?.(committedPresentationId) !== false;
   }, []);
 
-  const beginGestureDismiss = useCallback(() => {
-    if (!coordinatorRef.current.commit()) return;
-    onDismissStartRef.current?.();
+  const notifyPresented = useCallback((
+    presentedId: number,
+    animationSequence: number
+  ) => {
+    if (animationSequence !== presentationAnimationSequenceRef.current) return;
+    if (
+      presentedId !== activePresentationIdRef.current ||
+      visiblePresentationRef.current !== presentedId ||
+      !visibleRef.current
+    ) {
+      onStaleCallbackRef.current?.(presentedId);
+      return;
+    }
+    const completion = presentationCoordinatorRef.current.complete(presentedId);
+    if (completion === "stale") {
+      onStaleCallbackRef.current?.(presentedId);
+      return;
+    }
+    if (completion !== "accepted") return;
+    onPresentedRef.current?.(presentedId);
   }, []);
 
-  const finishDismiss = useCallback(() => {
+  const notifyGestureSettledAtRest = useCallback((gesturePresentationId: number) => {
+    if (!canSettleSwipeGesture({
+      activePresentationId: activePresentationIdRef.current,
+      committedPresentationId: committedPresentationIdRef.current,
+      coordinatorCanSettle: coordinatorRef.current.canSettle(),
+      dismissCommitted: dismissCommitted.value,
+      dismissRequestPresentationId: dismissRequestInFlightRef.current,
+      gesturePresentationId,
+      presentationCanSettle: presentationCoordinatorRef.current.canSettle(
+        gesturePresentationId
+      ),
+      visible: visibleRef.current
+    })) {
+      if (gesturePresentationId !== activePresentationIdRef.current) {
+        onStaleCallbackRef.current?.(gesturePresentationId);
+      }
+      return;
+    }
+    if (!notifyGestureSettled(gesturePresentationId)) return;
+    translationY.value = 0;
+    presence.value = 1;
+    notifyPresented(
+      gesturePresentationId,
+      presentationAnimationSequenceRef.current
+    );
+  }, [dismissCommitted, notifyGestureSettled, notifyPresented, presence, translationY]);
+
+  const finishDismiss = useCallback((committedPresentationId: number) => {
+    if (
+      committedPresentationId !== activePresentationIdRef.current ||
+      committedPresentationIdRef.current !== committedPresentationId ||
+      !visibleRef.current
+    ) {
+      onStaleCallbackRef.current?.(committedPresentationId);
+      return;
+    }
     coordinatorRef.current.finish();
   }, []);
 
-  const requestDismiss = useCallback(() => {
-    if (!visible || dismissCommitted.value || !coordinatorRef.current.commit()) return;
+  const commitDismiss = useCallback((
+    committedPresentationId: number,
+    velocityY: number,
+    gestureOwned: boolean
+  ) => {
+    if (
+      committedPresentationId !== activePresentationIdRef.current ||
+      !visibleRef.current
+    ) {
+      onStaleCallbackRef.current?.(committedPresentationId);
+      return;
+    }
+    if (dismissRequestInFlightRef.current === committedPresentationId) return;
+    dismissRequestInFlightRef.current = committedPresentationId;
+    if (!approveDismissStart(committedPresentationId)) {
+      dismissRequestInFlightRef.current = null;
+      if (!gestureOwned) return;
+      dismissCommitted.value = false;
+      gestureState.value = "settling";
+      cancelAnimation(translationY);
+      cancelAnimation(presence);
+      if (reduceMotion) {
+        translationY.value = 0;
+        presence.value = 1;
+        gestureState.value = "idle";
+        notifyGestureSettledAtRest(committedPresentationId);
+        return;
+      }
+      translationY.value = withSpring(0, {
+        ...RETURN_SPRING,
+        velocity: Math.max(0, velocityY)
+      }, (finished) => {
+        if (!finished || dismissCommitted.value) return;
+        gestureState.value = "idle";
+        runOnJS(notifyGestureSettledAtRest)(committedPresentationId);
+      });
+      return;
+    }
+    if (
+      !presentationCoordinatorRef.current.commitDismiss(committedPresentationId) ||
+      !coordinatorRef.current.commit()
+    ) {
+      dismissRequestInFlightRef.current = null;
+      return;
+    }
+    presentationAnimationSequenceRef.current += 1;
+    committedPresentationIdRef.current = committedPresentationId;
     dismissCommitted.value = true;
     gestureState.value = "dismissing";
-    notifyDismissStart();
     cancelAnimation(translationY);
+    cancelAnimation(presence);
     const exitPlan = swipeSheetExitPlan({
       currentTranslation: translationY.value,
       exitTarget: exitTarget.value,
@@ -144,22 +295,36 @@ function SwipeDismissSheet({
     });
     if (exitPlan.fadeOnly) {
       presence.value = withTiming(0, { duration: REDUCE_MOTION_FADE_MS }, (finished) => {
-        if (finished) runOnJS(finishDismiss)();
+        if (finished) runOnJS(finishDismiss)(committedPresentationId);
       });
       return;
     }
-    translationY.value = withSpring(exitPlan.translationTarget, EXIT_SPRING, (finished) => {
-      if (finished) runOnJS(finishDismiss)();
+    translationY.value = withSpring(exitPlan.translationTarget, {
+      ...EXIT_SPRING,
+      velocity: Math.max(0, velocityY)
+    }, (finished) => {
+      if (finished) runOnJS(finishDismiss)(committedPresentationId);
     });
   }, [
+    approveDismissStart,
     dismissCommitted,
     exitTarget,
     finishDismiss,
     gestureState,
-    notifyDismissStart,
+    notifyGestureSettledAtRest,
     presence,
     reduceMotion,
-    translationY,
+    translationY
+  ]);
+
+  const requestDismiss = useCallback(() => {
+    if (!visible || dismissCommitted.value) return;
+    const committedPresentationId = presentationId;
+    commitDismiss(committedPresentationId, 0, false);
+  }, [
+    commitDismiss,
+    dismissCommitted,
+    presentationId,
     visible
   ]);
 
@@ -172,37 +337,68 @@ function SwipeDismissSheet({
       visible
     });
     if (!visible) {
+      presentationAnimationSequenceRef.current += 1;
       cancelAnimation(translationY);
       cancelAnimation(presence);
-      wasVisibleRef.current = false;
+      visiblePresentationRef.current = null;
+      presentationCoordinatorRef.current.hide();
       coordinatorRef.current.hide();
+      committedPresentationIdRef.current = null;
+      dismissRequestInFlightRef.current = null;
       dismissCommitted.value = false;
       gestureState.value = "idle";
       presence.value = plan.initialPresence;
       translationY.value = plan.initialTranslation;
       return;
     }
-    if (wasVisibleRef.current) return;
-    wasVisibleRef.current = true;
+    const presentationMode = reduceMotion ? "fade" : "slide";
+    const presentationAction = presentationCoordinatorRef.current.begin(
+      presentationId,
+      presentationMode
+    );
+    if (presentationAction === "unchanged") return;
+    visiblePresentationRef.current = presentationId;
+    presentationAnimationSequenceRef.current += 1;
+    const presentationAnimationSequence = presentationAnimationSequenceRef.current;
     cancelAnimation(translationY);
     cancelAnimation(presence);
 
     coordinatorRef.current.hide();
+    committedPresentationIdRef.current = null;
+    dismissRequestInFlightRef.current = null;
     dismissCommitted.value = false;
     gestureState.value = "idle";
     if (reduceMotion) {
       translationY.value = plan.initialTranslation;
       presence.value = plan.initialPresence;
-      presence.value = withTiming(plan.animatePresenceTo, { duration: REDUCE_MOTION_FADE_MS });
+      presence.value = withTiming(
+        plan.animatePresenceTo,
+        { duration: REDUCE_MOTION_FADE_MS },
+        (finished) => {
+          if (finished) {
+            runOnJS(notifyPresented)(presentationId, presentationAnimationSequence);
+          }
+        }
+      );
       return;
     }
     presence.value = plan.initialPresence;
     translationY.value = plan.initialTranslation;
-    translationY.value = withTiming(plan.animateTranslationTo, { duration: MOBILE_MOTION.sheet });
+    translationY.value = withTiming(
+      plan.animateTranslationTo,
+      { duration: MOBILE_MOTION.sheet },
+      (finished) => {
+        if (finished) {
+          runOnJS(notifyPresented)(presentationId, presentationAnimationSequence);
+        }
+      }
+    );
   }, [
     dismissCommitted,
     exitTarget,
     gestureState,
+    notifyPresented,
+    presentationId,
     presence,
     reduceMotion,
     translationY,
@@ -219,9 +415,10 @@ function SwipeDismissSheet({
     .onBegin(() => {
       if (dismissCommitted.value) return;
       cancelAnimation(translationY);
+      cancelAnimation(presence);
       gestureOriginY.value = translationY.value;
       gestureState.value = "dragging";
-      runOnJS(notifyGestureStart)();
+      runOnJS(notifyGestureStart)(presentationId);
     })
     .onUpdate((event) => {
       if (gestureState.value !== "dragging" || dismissCommitted.value) return;
@@ -233,7 +430,9 @@ function SwipeDismissSheet({
         disabled,
         sheetHeight: measuredSheetHeight.value,
         translationX: event.translationX,
-        translationY: translationY.value,
+        // The animated sheet may still carry entrance translation. Dismissal
+        // ownership is decided only from travel caused by this gesture.
+        translationY: event.translationY,
         velocityY: event.velocityY
       });
       if (!dismiss) {
@@ -241,7 +440,7 @@ function SwipeDismissSheet({
         if (reduceMotion) {
           translationY.value = 0;
           gestureState.value = "idle";
-          runOnJS(notifyGestureSettled)();
+          runOnJS(notifyGestureSettledAtRest)(presentationId);
           return;
         }
         translationY.value = withSpring(0, {
@@ -250,31 +449,14 @@ function SwipeDismissSheet({
         }, (finished) => {
           if (!finished || dismissCommitted.value) return;
           gestureState.value = "idle";
-          runOnJS(notifyGestureSettled)();
+          runOnJS(notifyGestureSettledAtRest)(presentationId);
         });
         return;
       }
 
-      dismissCommitted.value = true;
-      gestureState.value = "dismissing";
-      runOnJS(beginGestureDismiss)();
-      const exitPlan = swipeSheetExitPlan({
-        currentTranslation: translationY.value,
-        exitTarget: exitTarget.value,
-        reduceMotion
-      });
-      if (exitPlan.fadeOnly) {
-        presence.value = withTiming(0, { duration: REDUCE_MOTION_FADE_MS }, (finished) => {
-          if (finished) runOnJS(finishDismiss)();
-        });
-        return;
-      }
-      translationY.value = withSpring(exitPlan.translationTarget, {
-        ...EXIT_SPRING,
-        velocity: Math.max(0, event.velocityY)
-      }, (finished) => {
-        if (finished) runOnJS(finishDismiss)();
-      });
+      const committedPresentationId = presentationId;
+      gestureState.value = "settling";
+      runOnJS(commitDismiss)(committedPresentationId, event.velocityY, true);
     })
     .onFinalize((_event, succeeded) => {
       if (succeeded || gestureState.value !== "dragging" || dismissCommitted.value) return;
@@ -282,32 +464,32 @@ function SwipeDismissSheet({
       if (reduceMotion) {
         translationY.value = 0;
         gestureState.value = "idle";
-        runOnJS(notifyGestureSettled)();
+        runOnJS(notifyGestureSettledAtRest)(presentationId);
         return;
       }
       translationY.value = withSpring(0, RETURN_SPRING, (finished) => {
         if (!finished || dismissCommitted.value) return;
         gestureState.value = "idle";
-        runOnJS(notifyGestureSettled)();
+        runOnJS(notifyGestureSettledAtRest)(presentationId);
       });
     }), [
     disabled,
     dismissCommitted,
-    exitTarget,
-    finishDismiss,
+    commitDismiss,
     gestureOriginY,
     gestureState,
     measuredSheetHeight,
-    beginGestureDismiss,
-    notifyGestureSettled,
+    notifyGestureSettledAtRest,
     notifyGestureStart,
     presence,
+    presentationId,
     reduceMotion,
     translationY,
     visible
   ]);
 
   const sheetAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: presence.value,
     transform: [{ translateY: translationY.value }]
   }));
   const backdropAnimatedStyle = useAnimatedStyle(() => ({
@@ -317,11 +499,17 @@ function SwipeDismissSheet({
 
   return (
     <>
-      <Reanimated.View pointerEvents={visible ? "auto" : "none"} style={[backdropStyle, backdropAnimatedStyle]}>
+      <Reanimated.View
+        pointerEvents={visible ? "auto" : "none"}
+        style={[backdropStyle, backdropAnimatedStyle]}
+        testID={testID ? `${testID}-backdrop` : undefined}
+      >
         <Pressable
           accessibilityLabel={backdropAccessibilityLabel}
           accessibilityRole="button"
-          onPress={requestDismiss}
+          accessibilityState={{ disabled }}
+          disabled={disabled}
+          onPress={disabled ? undefined : requestDismiss}
           style={BACKDROP_PRESSABLE_STYLE}
         />
       </Reanimated.View>
@@ -339,6 +527,7 @@ function SwipeDismissSheet({
             onLayout?.(event);
           }}
           style={[style, sheetAnimatedStyle]}
+          testID={testID}
         >
           <GestureDetector gesture={gesture}>
             <View
@@ -348,6 +537,7 @@ function SwipeDismissSheet({
               accessibilityState={{ disabled }}
               onAccessibilityTap={disabled ? undefined : requestDismiss}
               style={HANDLE_TOUCH_STYLE}
+              testID={testID ? `${testID}-handle` : undefined}
             >
               <View pointerEvents="none" style={handleStyle} />
             </View>

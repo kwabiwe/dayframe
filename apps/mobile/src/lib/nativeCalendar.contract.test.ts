@@ -222,7 +222,7 @@ describe("native Calendar production contract", () => {
     );
 
     expect(handler).toContain("resolveCalendarManualEntryRequest");
-    expect(handler).toContain("setManualDraftEntry(result.entry)");
+    expect(handler).toContain("presentManualEntry(result.entry)");
     expect(handler).not.toContain("openManualEntry()");
     expect(handler).not.toContain("setActiveEditVisible");
     expect(handler).not.toContain("startTimer");
