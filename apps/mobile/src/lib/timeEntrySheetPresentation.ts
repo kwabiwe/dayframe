@@ -226,7 +226,8 @@ export function timeEntrySheetReducer(
       if (
         !state.focusOwnershipReady ||
         state.appState !== "active" ||
-        state.sheetPhase !== "presented"
+        state.sheetPhase !== "presented" ||
+        state.surface === "date_picker"
       ) return state;
       next = {
         ...state,
@@ -517,6 +518,40 @@ export function pendingTimeEntrySheetDismissRequestId({
     return null;
   }
   return dismissRequestId ?? null;
+}
+
+/**
+ * iOS can accept a TextInput as first responder (native onFocus fires,
+ * descriptionFocused becomes true) while its window has not yet become key,
+ * silently dropping the keyboard-frame notification. A bounded blur/refocus
+ * retry loop recovers from that race. This only decides whether the next
+ * retry should fire for the exact presentation/keyboard-session it was armed
+ * for; it stops once the retry budget is exhausted, and never overrides a
+ * real keyboard success or a deliberate user blur/dismiss/backgrounding.
+ */
+export function shouldRetryKeyboardConfirmation({
+  currentPresentationId,
+  maxRetries,
+  retryCount,
+  state,
+  watchdogPresentationId,
+  watchdogSessionToken
+}: {
+  currentPresentationId: number;
+  maxRetries: number;
+  retryCount: number;
+  state: TimeEntrySheetState;
+  watchdogPresentationId: number;
+  watchdogSessionToken: number;
+}): boolean {
+  return Boolean(
+    retryCount < maxRetries &&
+    currentPresentationId === watchdogPresentationId &&
+    state.appState === "active" &&
+    state.keyboardSessionToken === watchdogSessionToken &&
+    state.keyboardPhase === "focus_requested" &&
+    state.descriptionFocused
+  );
 }
 
 export function historicalSuggestionsVisibleTarget(state: TimeEntrySheetState) {

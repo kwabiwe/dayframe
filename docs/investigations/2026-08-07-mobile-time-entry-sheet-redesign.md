@@ -491,6 +491,19 @@ Exploratory `current-*.png` files and pre-freeze QA logs in the ignored evidence
 - **Inferred but not directly automated:** record the specific limitation and the closest deterministic proof; do not convert it to PASS.
 - **Still required before merge on a physical iPhone:** real touch/keyboard feel and frame pacing; the simultaneous in-flight keyboard-dismissal/sheet-handle gesture that XCUITest could not create; VoiceOver focus order and success/rollback announcements; accessibility-large Dynamic Type; Reduce Motion and Reduce Transparency; and background/foreground behavior during focus, dismissal and the Undo interval.
 
+## Post-freeze regression-audit repair (2026-08-08)
+
+An independent regression audit (4 bounded reviewers covering UI/motion, timer/data-integrity, QA-harness/evidence, and regression/scope/accessibility) ran against the frozen revision above. Two confirmed findings were repaired with unit-test coverage; mobile (576), web (704) and shared (150) test suites and all three workspace typechecks pass on the repaired tree.
+
+- **Stale Review edit-presentation callback:** `finishEditHandover`/`cancelEdit` in `apps/mobile/app/review.tsx` compared only the presentation ID, so a delayed callback from an already-superseded presentation (rapid cancel-then-reopen) could still apply. Added `isCurrentReviewEditPresentation` in `apps/mobile/src/lib/review.ts` as the single comparison point, with a regression test for the exact race.
+- **Keyboard-confirmation retry session-token race:** while root-causing the blank-keyboard failure below, a bounded blur/refocus retry watchdog was added (`shouldRetryKeyboardConfirmation` in `apps/mobile/src/lib/timeEntrySheetPresentation.ts`) to recover from iOS silently dropping the keyboard-frame notification after accepting first responder. Verification found the retry's own synthetic `blur()` call produced a genuine native `keyboardWillHide` notification that wasn't suppressed the same way the `onBlur` prop dispatch was; a late-arriving instance could be misattributed to the fresh session the refocus had just started and tear it down. Fixed in `apps/mobile/src/components/ActiveTimerEditSheet.tsx` by routing the native listener through the same suppression flag, held for a 300ms settle window instead of one animation frame. Retries now complete without corrupting session state.
+
+### Blank-keyboard root cause: still open, not resolved by retry
+
+With the retry mechanism now behaving correctly, the underlying blank-keyboard failure persists. Native XCUITest evidence across three post-fix runs: after the retry budget is exhausted (3/3 retries, all sessions clean), the keyboard never reaches `visible`. The decisive signal is `keyboardWillChangeFrame`'s reported `endCoordinates.screenY`, which equals the simulator's exact screen height (844pt on iPhone 17e) — i.e. UIKit itself is reporting a zero-height keyboard frame, not something the JS bridge is misreading. This points away from "one-off first-responder race, recoverable by retrying" and toward something more structural: either native window/key-window state during this specific presentation path, or an artifact of how `xcodebuild test` drives the Simulator. Neither was root-caused further; a targeted native (Swift) or outside-XCUITest investigation is required next and is intentionally out of scope for this pass.
+
+The keyboard-confirmation retry watchdog is retained as a real (if incomplete) improvement — it correctly recovers from the narrower class of first-responder races it targets and no longer corrupts state when it can't — but it does not by itself close the acceptance gate below. This PR remains draft/not-merge-ready for that reason.
+
 ## Draft PR and safety handoff
 
 - Frozen implementation commit: **`1768806bf35d42ae0fd3742b4079a1013fb43197`**

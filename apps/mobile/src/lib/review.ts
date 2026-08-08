@@ -310,6 +310,13 @@ export function canRunReviewMenuAction(state: ReviewMenuState, itemId: string) {
   );
 }
 
+export function isCurrentReviewEditPresentation(
+  currentPresentationId: number | null,
+  presentationId: number
+) {
+  return currentPresentationId !== null && currentPresentationId === presentationId;
+}
+
 export function removeReviewItemOptimistically(
   data: MobileBootstrap,
   itemId: string

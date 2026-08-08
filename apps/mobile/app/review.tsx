@@ -53,6 +53,7 @@ import {
   canRunReviewMenuAction,
   hasSuggestedTimeWindow,
   hasV2LocationEvidence,
+  isCurrentReviewEditPresentation,
   isOneOffLocationReviewItem,
   isOpenReviewItem,
   isReviewNeededEntry,
@@ -546,7 +547,9 @@ export default function ReviewScreen() {
   }
 
   function finishEditHandover(presentationId: number) {
-    if (editPresentationRef.current?.id !== presentationId) return;
+    if (!isCurrentReviewEditPresentation(editPresentationRef.current?.id ?? null, presentationId)) {
+      return;
+    }
     const currentEditTarget = editTargetRef.current;
     if (currentEditTarget?.kind !== "reviewItem") return;
     applyReviewMenuEvent({
@@ -557,7 +560,9 @@ export default function ReviewScreen() {
   }
 
   function cancelEdit(presentationId: number) {
-    if (editPresentationRef.current?.id !== presentationId) return;
+    if (!isCurrentReviewEditPresentation(editPresentationRef.current?.id ?? null, presentationId)) {
+      return;
+    }
     const currentEditTarget = editTargetRef.current;
     if (currentEditTarget?.kind === "reviewItem") {
       applyReviewMenuEvent({

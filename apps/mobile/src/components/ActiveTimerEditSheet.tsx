@@ -73,6 +73,7 @@ import {
   historicalSuggestionsObscureFormAccessibility,
   pendingDescriptionFocusPresentationId,
   pendingTimeEntrySheetDismissRequestId,
+  shouldRetryKeyboardConfirmation,
   timeEntrySheetReducer,
   type TimeEntrySheetMutationPhase,
   type TimeEntrySheetPresentation
@@ -84,6 +85,21 @@ import {
 
 const HISTORICAL_SUGGESTION_LIMIT = 12;
 const HISTORICAL_OVERLAY_MAX_HEIGHT = 384;
+// iOS can accept a TextInput as first responder (onFocus fires) while its
+// window has not yet become key, silently dropping the keyboard-frame
+// notification. A bounded blur/refocus retry loop recovers from that race
+// without masking a genuine keyboard failure. The blur half of each retry is
+// native-only (its reducer dispatch is suppressed) so it cannot perturb
+// Suggestions or any other focus-driven state.
+const KEYBOARD_CONFIRMATION_TIMEOUT_MS = 700;
+const KEYBOARD_CONFIRMATION_MAX_RETRIES = 3;
+// A retry's blur() can still produce a genuine keyboardWillHide notification
+// (the responder chain change is real even though the keyboard never
+// visually appeared). That notification is delivered asynchronously and can
+// arrive after the refocus below has already started a new native keyboard
+// session, misattributing itself to that fresh session and tearing it down.
+// Suppression must therefore outlast native delivery, not just one frame.
+const KEYBOARD_CONFIRMATION_SUPPRESSION_SETTLE_MS = 300;
 
 type Category = MobileBootstrap["categories"][number];
 type EditSheetMode = "running" | "entry" | "add";
@@ -224,6 +240,9 @@ export function ActiveTimerEditSheet({
   const keyboardFrameSequenceRef = useRef(0);
   const keyboardSessionSequenceRef = useRef(0);
   const activeKeyboardSessionTokenRef = useRef<number | null>(null);
+  const keyboardConfirmationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const keyboardConfirmationRetryCountRef = useRef(0);
+  const suppressDescriptionBlurDispatchRef = useRef(false);
   const appActivityRef = useRef<"active" | "background">(
     AppState.currentState === "active" ? "active" : "background"
   );
@@ -248,6 +267,7 @@ export function ActiveTimerEditSheet({
   const [dismissedCallbackCount, setDismissedCallbackCount] = useState(0);
   const [staleCallbackCount, setStaleCallbackCount] = useState(0);
   const [interactiveKeyboardFrameCount, setInteractiveKeyboardFrameCount] = useState(0);
+  const [keyboardConfirmationRetryCount, setKeyboardConfirmationRetryCount] = useState(0);
   const [swipeStartedCount, setSwipeStartedCount] = useState(0);
   const [swipeCancelledCount, setSwipeCancelledCount] = useState(0);
   const [lastSwipeStartedPresentationId, setLastSwipeStartedPresentationId] =
@@ -278,6 +298,55 @@ export function ActiveTimerEditSheet({
     });
     return sessionToken;
   }, []);
+  const clearKeyboardConfirmationWatchdog = useCallback(() => {
+    if (keyboardConfirmationTimeoutRef.current !== null) {
+      clearTimeout(keyboardConfirmationTimeoutRef.current);
+      keyboardConfirmationTimeoutRef.current = null;
+    }
+  }, []);
+  const armKeyboardConfirmationWatchdog = useCallback((sessionToken: number) => {
+    clearKeyboardConfirmationWatchdog();
+    if (
+      !presentationRef.current.requestDescriptionFocus ||
+      keyboardConfirmationRetryCountRef.current >= KEYBOARD_CONFIRMATION_MAX_RETRIES
+    ) {
+      return;
+    }
+    const watchdogPresentationId = presentationRef.current.id;
+    keyboardConfirmationTimeoutRef.current = setTimeout(() => {
+      keyboardConfirmationTimeoutRef.current = null;
+      if (!shouldRetryKeyboardConfirmation({
+        currentPresentationId: presentationRef.current.id,
+        maxRetries: KEYBOARD_CONFIRMATION_MAX_RETRIES,
+        retryCount: keyboardConfirmationRetryCountRef.current,
+        state: sheetStateRef.current,
+        watchdogPresentationId,
+        watchdogSessionToken: sessionToken
+      })) {
+        return;
+      }
+      keyboardConfirmationRetryCountRef.current += 1;
+      setKeyboardConfirmationRetryCount((count) => count + 1);
+      // Force iOS to redo the first-responder handshake. Both the onBlur prop
+      // and the native keyboardWillHide notification this blur() triggers are
+      // suppressed until well after the refocus below, so neither the reducer
+      // nor the keyboard-session ref can observe the synthetic churn. onFocus
+      // re-arms this same watchdog if the retry still doesn't land, up to
+      // KEYBOARD_CONFIRMATION_MAX_RETRIES.
+      suppressDescriptionBlurDispatchRef.current = true;
+      descriptionInputRef.current?.blur();
+      requestAnimationFrame(() => {
+        if (presentationRef.current.id !== watchdogPresentationId) {
+          suppressDescriptionBlurDispatchRef.current = false;
+          return;
+        }
+        descriptionInputRef.current?.focus();
+        setTimeout(() => {
+          suppressDescriptionBlurDispatchRef.current = false;
+        }, KEYBOARD_CONFIRMATION_SUPPRESSION_SETTLE_MS);
+      });
+    }, KEYBOARD_CONFIRMATION_TIMEOUT_MS);
+  }, [clearKeyboardConfirmationWatchdog]);
   const cancelPendingTagFocus = useCallback(() => {
     tagFocusRequestSequenceRef.current += 1;
     if (tagFocusFrameRef.current !== null) {
@@ -330,6 +399,13 @@ export function ActiveTimerEditSheet({
       cancelAnimationFrame(scrollFrameRef.current);
       scrollFrameRef.current = null;
     }
+    if (geometryFrameRef.current !== null) {
+      cancelAnimationFrame(geometryFrameRef.current);
+      geometryFrameRef.current = null;
+    }
+    clearKeyboardConfirmationWatchdog();
+    keyboardConfirmationRetryCountRef.current = 0;
+    suppressDescriptionBlurDispatchRef.current = false;
     scrollFrameSequenceRef.current += 1;
     if (!visible) {
       if (sheetStateRef.current.presentation?.id === presentation.id) {
@@ -396,6 +472,7 @@ export function ActiveTimerEditSheet({
   }, [
     invalidateNativeKeyboardSession,
     cancelPendingTagFocus,
+    clearKeyboardConfirmationWatchdog,
     presentation.id,
     recordStaleCallback,
     visible
@@ -578,6 +655,10 @@ export function ActiveTimerEditSheet({
     if (focusFrameRef.current !== null) cancelAnimationFrame(focusFrameRef.current);
     if (tagFocusFrameRef.current !== null) cancelAnimationFrame(tagFocusFrameRef.current);
     if (scrollFrameRef.current !== null) cancelAnimationFrame(scrollFrameRef.current);
+    if (keyboardConfirmationTimeoutRef.current !== null) {
+      clearTimeout(keyboardConfirmationTimeoutRef.current);
+      keyboardConfirmationTimeoutRef.current = null;
+    }
     scrollFrameSequenceRef.current += 1;
   }, []);
 
@@ -857,6 +938,7 @@ export function ActiveTimerEditSheet({
     const hideSubscription = Keyboard.addListener(
       Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
       (event) => {
+        if (suppressDescriptionBlurDispatchRef.current) return;
         const sessionToken = activeKeyboardSessionTokenRef.current;
         if (appActivityRef.current !== "active" || sessionToken === null) return;
         Keyboard.scheduleLayoutAnimation(event);
@@ -945,6 +1027,7 @@ export function ActiveTimerEditSheet({
       cancelAnimationFrame(focusFrameRef.current);
       focusFrameRef.current = null;
     }
+    clearKeyboardConfirmationWatchdog();
     keyboardMotionFrozen.current = true;
     invalidateNativeKeyboardSession();
     keyboardFrameSequenceRef.current += 1;
@@ -1220,6 +1303,7 @@ export function ActiveTimerEditSheet({
     focusCommandCount,
     inputFocusCount,
     interactiveKeyboardFrameCount,
+    keyboardConfirmationRetryCount,
     swipeStartedCount,
     swipeCancelledCount,
     lastSwipeStartedPresentationId,
@@ -1505,7 +1589,8 @@ export function ActiveTimerEditSheet({
       Keyboard.dismiss();
       return;
     }
-    if (beginNativeKeyboardSession() === null) {
+    const sessionToken = beginNativeKeyboardSession();
+    if (sessionToken === null) {
       descriptionInputRef.current?.blur();
       Keyboard.dismiss();
       return;
@@ -1515,6 +1600,7 @@ export function ActiveTimerEditSheet({
     dispatchSheetEvent({ type: "date_picker_closed", presentationId: presentation.id });
     dispatchSheetEvent({ type: "description_focused", presentationId: presentation.id });
     scheduleGeometryMeasurement();
+    armKeyboardConfirmationWatchdog(sessionToken);
   }
 
   function focusDescriptionAfterTagUpdate() {
@@ -1856,10 +1942,13 @@ export function ActiveTimerEditSheet({
                       accessibilityLabel={isRunningMode ? "Timer description" : "Entry description"}
                       blurOnSubmit
                       editable={!busy}
-                      onBlur={() => dispatchSheetEvent({
-                        type: "description_blurred",
-                        presentationId: presentation.id
-                      })}
+                      onBlur={() => {
+                        if (suppressDescriptionBlurDispatchRef.current) return;
+                        dispatchSheetEvent({
+                          type: "description_blurred",
+                          presentationId: presentation.id
+                        });
+                      }}
                       onFocus={focusDescriptionField}
                       onPressIn={() => {
                         if (!busy) descriptionInputRef.current?.focus();

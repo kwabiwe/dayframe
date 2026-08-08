@@ -6,6 +6,7 @@ import {
   historicalSuggestionsVisibleTarget,
   pendingDescriptionFocusPresentationId,
   pendingTimeEntrySheetDismissRequestId,
+  shouldRetryKeyboardConfirmation,
   timeEntrySheetInvariantViolations,
   timeEntrySheetReducer,
   type TimeEntrySheetEvent,
@@ -524,6 +525,19 @@ describe("time-entry sheet Suggestions and picker precedence", () => {
     expect(state.surface).toBe("form");
     expect(historicalSuggestionsVisibleTarget(state)).toBe(false);
   });
+
+  it("ignores a stray Description focus event while the date picker owns the surface", () => {
+    let state = focusedWithResults();
+    state = timeEntrySheetReducer(state, { type: "date_picker_requested", presentationId: 12 });
+    expect(state.surface).toBe("date_picker");
+    const beforeFocus = state;
+    state = timeEntrySheetReducer(state, { type: "description_focused", presentationId: 12 });
+    expect(state).toBe(beforeFocus);
+    expect(state.surface).toBe("date_picker");
+    expect(state.descriptionFocused).toBe(false);
+    expect(historicalSuggestionsVisibleTarget(state)).toBe(false);
+    expect(timeEntrySheetInvariantViolations(state)).toEqual([]);
+  });
 });
 
 describe("time-entry sheet generation-scoped caller dismissal", () => {
@@ -918,6 +932,151 @@ describe("generated transition sequences", () => {
         expect(timeEntrySheetInvariantViolations(state), `seed ${seed}, event ${index}`).toEqual([]);
       }
     }
+  });
+});
+
+describe("keyboard confirmation retry decision", () => {
+  function stuckAtFocusRequested(sessionToken = 1) {
+    let state = presented(BLANK_PRESENTATION);
+    state = acquireKeyboardSession(state, BLANK_PRESENTATION.id, sessionToken);
+    state = timeEntrySheetReducer(state, {
+      type: "description_focused",
+      presentationId: BLANK_PRESENTATION.id
+    });
+    expect(state.keyboardPhase).toBe("focus_requested");
+    expect(state.descriptionFocused).toBe(true);
+    return state;
+  }
+
+  it("retries when under budget and focus is confirmed but no keyboard frame ever arrived", () => {
+    const state = stuckAtFocusRequested(1);
+    for (const retryCount of [0, 1, 2]) {
+      expect(shouldRetryKeyboardConfirmation({
+        currentPresentationId: BLANK_PRESENTATION.id,
+        maxRetries: 3,
+        retryCount,
+        state,
+        watchdogPresentationId: BLANK_PRESENTATION.id,
+        watchdogSessionToken: 1
+      })).toBe(true);
+    }
+  });
+
+  it("stops once the retry budget is exhausted for the same presentation", () => {
+    const state = stuckAtFocusRequested(1);
+    expect(shouldRetryKeyboardConfirmation({
+      currentPresentationId: BLANK_PRESENTATION.id,
+      maxRetries: 3,
+      retryCount: 3,
+      state,
+      watchdogPresentationId: BLANK_PRESENTATION.id,
+      watchdogSessionToken: 1
+    })).toBe(false);
+  });
+
+  it("does not retry once a newer presentation has opened", () => {
+    const state = stuckAtFocusRequested(1);
+    expect(shouldRetryKeyboardConfirmation({
+      currentPresentationId: 999,
+      maxRetries: 3,
+      retryCount: 0,
+      state,
+      watchdogPresentationId: BLANK_PRESENTATION.id,
+      watchdogSessionToken: 1
+    })).toBe(false);
+  });
+
+  it("does not retry a stale watchdog whose keyboard session has moved on", () => {
+    const state = stuckAtFocusRequested(1);
+    expect(shouldRetryKeyboardConfirmation({
+      currentPresentationId: BLANK_PRESENTATION.id,
+      maxRetries: 3,
+      retryCount: 0,
+      state,
+      watchdogPresentationId: BLANK_PRESENTATION.id,
+      watchdogSessionToken: 2
+    })).toBe(false);
+  });
+
+  it("does not retry once a real keyboard frame already arrived", () => {
+    let state = stuckAtFocusRequested(1);
+    state = timeEntrySheetReducer(state, {
+      type: "keyboard_frame_changed",
+      presentationId: BLANK_PRESENTATION.id,
+      frame: { inset: 300, sequence: 1 },
+      interactive: false,
+      sessionToken: 1
+    });
+    expect(state.keyboardPhase).toBe("visible");
+    expect(shouldRetryKeyboardConfirmation({
+      currentPresentationId: BLANK_PRESENTATION.id,
+      maxRetries: 3,
+      retryCount: 0,
+      state,
+      watchdogPresentationId: BLANK_PRESENTATION.id,
+      watchdogSessionToken: 1
+    })).toBe(false);
+  });
+
+  it("does not retry after the user deliberately blurred Description", () => {
+    let state = stuckAtFocusRequested(1);
+    state = timeEntrySheetReducer(state, {
+      type: "description_blurred",
+      presentationId: BLANK_PRESENTATION.id
+    });
+    expect(state.descriptionFocused).toBe(false);
+    expect(shouldRetryKeyboardConfirmation({
+      currentPresentationId: BLANK_PRESENTATION.id,
+      maxRetries: 3,
+      retryCount: 0,
+      state,
+      watchdogPresentationId: BLANK_PRESENTATION.id,
+      watchdogSessionToken: 1
+    })).toBe(false);
+  });
+
+  it("does not retry while the app is backgrounded", () => {
+    let state = stuckAtFocusRequested(1);
+    state = timeEntrySheetReducer(state, {
+      type: "app_backgrounded",
+      presentationId: BLANK_PRESENTATION.id
+    });
+    expect(state.appState).toBe("background");
+    expect(shouldRetryKeyboardConfirmation({
+      currentPresentationId: BLANK_PRESENTATION.id,
+      maxRetries: 3,
+      retryCount: 0,
+      state,
+      watchdogPresentationId: BLANK_PRESENTATION.id,
+      watchdogSessionToken: 1
+    })).toBe(false);
+  });
+
+  it("re-arming a keyboard session for a retry never interrupts an opening Suggestions panel", () => {
+    // The component's retry never dispatches description_blurred (that
+    // dispatch is suppressed at the native-event boundary); it only requests
+    // a fresh keyboard session and re-affirms description_focused. Suggestions
+    // must stay "opening" throughout and never dip through "closing".
+    let state = presented(BLANK_PRESENTATION);
+    state = acquireKeyboardSession(state, BLANK_PRESENTATION.id, 1);
+    state = timeEntrySheetReducer(state, {
+      type: "description_focused",
+      presentationId: BLANK_PRESENTATION.id
+    });
+    state = timeEntrySheetReducer(state, {
+      type: "suggestion_results_changed",
+      presentationId: BLANK_PRESENTATION.id,
+      count: 5
+    });
+    expect(state.suggestionsPhase).toBe("opening");
+    state = acquireKeyboardSession(state, BLANK_PRESENTATION.id, 2);
+    expect(state.suggestionsPhase).toBe("opening");
+    state = timeEntrySheetReducer(state, {
+      type: "description_focused",
+      presentationId: BLANK_PRESENTATION.id
+    });
+    expect(state.suggestionsPhase).toBe("opening");
+    expect(state.descriptionFocused).toBe(true);
   });
 });
 
