@@ -4,7 +4,8 @@
 
 This follow-up is stacked on PR #161 at exact commit
 `f68c89d809520aab4be172a165cb1d72a78eea16`, the source shipped as internal
-TestFlight `0.1.0 (86)`. It intentionally leaves PR #161 unchanged and unmerged.
+TestFlight `0.1.0 (86)`. It is draft PR #162 and intentionally leaves PR #161
+unchanged and unmerged.
 
 The requested fixes are limited to the shared iOS time-entry sheets:
 
