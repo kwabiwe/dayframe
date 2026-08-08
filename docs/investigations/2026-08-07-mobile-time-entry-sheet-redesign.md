@@ -3,7 +3,7 @@
 Date: 2026-08-07
 Baseline commit: `5b93914f4c4e9001acf94b49823f913684abde8a` (`origin/main`)
 Branch: `codex/mobile-sheet-redesign`
-Status: implementation frozen; source validation passed; required Simulator keyboard acceptance failed; draft PR publication in progress
+Status: draft PR open; implementation frozen and source validation passed; required Simulator keyboard acceptance remains failed
 
 ## Scope and governing contract
 
@@ -467,7 +467,7 @@ The coordinator must replace every placeholder below with the exact terminal res
 
 ### Final evidence status
 
-- Frozen implementation revision: **`[TO BE RECORDED AFTER IMPLEMENTATION COMMIT]`**
+- Frozen implementation revision: **`1768806bf35d42ae0fd3742b4079a1013fb43197`**
 - Runner provenance: **NOT QUALIFYING AS FINAL EVIDENCE** — the diagnostic used `--allow-dirty`, and the single permitted rerun reused its build with `--no-build`; both correctly remain diagnostic-only.
 - Available devices/runtime: small `D2D581C4-2003-4888-AFAB-32528B372EAC`, large `14065E33-D874-408F-A090-891F19450322`, iPhone 17e `8D9C36E2-D7BA-43EE-89B0-2BE56CBD7459`, iOS 26.5.
 - Final after-screenshots: **NOT RUN** after the native gate failed.
@@ -478,8 +478,8 @@ The coordinator must replace every placeholder below with the exact terminal res
 - Diagnostic geometry at failure: live/base sheet 358×487 pt; Description y=130.333 pt, h=48 pt; overlay y=184.333 pt, max h=294.667 pt; keyboard inset remained 0, so no keyboard-settled geometry table is claimed.
 - Appearance/accessibility matrix: **NOT RUN** after the native gate failed.
 - Reviewer closure: source/test lifecycle and analyzer scope closed; final passing-evidence review **NOT RUN**.
-- Draft PR revision and URL: **`[TO BE RECORDED AFTER DRAFT PR CREATION]`**
-- Final working-tree state: **`[TO BE RECORDED AFTER PUSH]`**
+- Draft PR: frozen implementation revision **`1768806bf35d42ae0fd3742b4079a1013fb43197`**, [#161](https://github.com/kwabiwe/dayframe/pull/161). The PR remains draft and explicitly not merge-ready.
+- Final working-tree state: **clean after the documentation-only handoff commit is pushed**.
 
 Exploratory `current-*.png` files and pre-freeze QA logs in the ignored evidence directory are diagnostic artifacts, not final proof. Only evidence whose recorded revision matches the final committed source may close the Simulator goals.
 
@@ -493,8 +493,8 @@ Exploratory `current-*.png` files and pre-freeze QA logs in the ignored evidence
 
 ## Draft PR and safety handoff
 
-- Frozen implementation commit: **`[TO BE RECORDED AFTER COMMIT]`**
-- Draft PR into `main`: **`[TO BE RECORDED AFTER CREATION]`**
-- Draft state confirmed: **`[TO BE RECORDED AFTER CREATION]`**
-- Branch pushed and clean: **`[TO BE RECORDED AFTER PUSH]`**
+- Frozen implementation commit: **`1768806bf35d42ae0fd3742b4079a1013fb43197`**
+- Draft PR into `main`: **[#161](https://github.com/kwabiwe/dayframe/pull/161)**
+- Draft state confirmed: **YES — GitHub reports the PR as draft.**
+- Branch pushed and clean: **YES — `codex/mobile-sheet-redesign` is pushed; clean status verified after the final documentation push.**
 - No merge, staging-alias promotion, deployment, production configuration change, production migration or TestFlight upload: **CONFIRMED — none performed.**
