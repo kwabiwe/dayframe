@@ -95,15 +95,15 @@ describe("PATCH /api/time-entries/[id]", () => {
     expect(mocks.updateTimeEntry).not.toHaveBeenCalled();
   });
 
-  it("rejects a completed entry finish time in the future", async () => {
+  it("accepts a completed entry finish time in the future", async () => {
+    const stoppedAt = new Date(Date.now() + 60_000).toISOString();
     const response = await PATCH(
-      jsonRequest({ stoppedAt: new Date(Date.now() + 60_000).toISOString() }),
+      jsonRequest({ stoppedAt }),
       routeContext()
     );
 
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: "Finish time cannot be in the future." });
-    expect(mocks.updateTimeEntry).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(mocks.updateTimeEntry).toHaveBeenCalledWith("entry-1", { stoppedAt }, session);
   });
 
   it("passes a stoppedAt-only PATCH through for validation against the stored start", async () => {

@@ -14,7 +14,7 @@ describe("edit sheet keyboard layout", () => {
     })).toBe(332);
   });
 
-  it("keeps the sheet above the keyboard on a small iPhone viewport", () => {
+  it("keeps one fixed outer sheet while the keyboard only increases internal padding", () => {
     const layout = editSheetKeyboardLayout({
       bottomInset: 0,
       keyboardInset: 301,
@@ -23,17 +23,16 @@ describe("edit sheet keyboard layout", () => {
     });
 
     expect(layout).toEqual({
-      bottomLift: 301,
-      contentPaddingBottom: 32,
+      bottomLift: 0,
+      contentPaddingBottom: 333,
       keyboardOpen: true,
       sheetMaxHeight: 629,
-      sheetHeight: 328,
+      sheetHeight: 629,
       topSafeGap: 38
     });
-    expect(layout.sheetHeight! + layout.bottomLift).toBeLessThanOrEqual(667 - layout.topSafeGap);
   });
 
-  it("does not double count the bottom safe area when lifting above the keyboard", () => {
+  it("does not move or resize the outer sheet for a safe-area keyboard frame", () => {
     const layout = editSheetKeyboardLayout({
       bottomInset: 34,
       keyboardInset: 336,
@@ -41,10 +40,10 @@ describe("edit sheet keyboard layout", () => {
       windowHeight: 844
     });
 
-    expect(layout.bottomLift).toBe(302);
-    expect(layout.contentPaddingBottom).toBe(32);
+    expect(layout.bottomLift).toBe(0);
+    expect(layout.contentPaddingBottom).toBe(368);
     expect(layout.sheetMaxHeight).toBe(779);
-    expect(layout.sheetHeight).toBe(477);
+    expect(layout.sheetHeight).toBe(779);
     expect(layout.topSafeGap).toBe(65);
   });
 
@@ -58,7 +57,7 @@ describe("edit sheet keyboard layout", () => {
 
     expect(layout.topSafeGap).toBe(77);
     expect(layout.sheetMaxHeight).toBe(775);
-    expect(layout.sheetHeight).toBeNull();
+    expect(layout.sheetHeight).toBe(775);
   });
 
   it("leaves normal bottom-sheet layout alone when the keyboard is closed", () => {
@@ -72,7 +71,7 @@ describe("edit sheet keyboard layout", () => {
       contentPaddingBottom: 18,
       keyboardOpen: false,
       sheetMaxHeight: 779,
-      sheetHeight: null,
+      sheetHeight: 779,
       topSafeGap: 65
     });
   });

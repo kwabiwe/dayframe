@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { QueuedEvent } from "./api";
+import {
+  createOptimisticTimerStartReconciler,
+  requireQueuedTimerStartRemoval,
+  requireQueuedTimerStartUpdate
+} from "./timerPresentation";
+import { createDeletionCoordinator } from "./historyDeletion";
 
 const secureStore = vi.hoisted(() => new Map<string, string>());
 const asyncStore = vi.hoisted(() => new Map<string, string>());
@@ -60,11 +66,17 @@ const {
   ignoreLearnedPlace,
   isNetworkTimerError,
   login,
+  queueStopTimer,
   readQueue,
+  readTimerEntryIdCorrelations,
   reprocessHealthReviewItems,
   retryFailedQueuedEvents,
+  removeQueuedEvent,
+  removeTimerEntryIdCorrelation,
+  resolveTimerEntryIdAfterQueueBarrier,
   saveEditedReviewItem,
   startTimer,
+  stopTimer,
   signup,
   syncQueue,
   updateCategory,
@@ -303,6 +315,310 @@ describe("mobile API client", () => {
       workspaceId: "00000000-0000-4000-8000-000000000010"
     });
     await expect(readQueue()).resolves.toHaveLength(0);
+  });
+
+  it("durably correlates a synced offline timer start before removing its local event", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    await enqueueEvent({
+      localId: "optimistic-active-timer:offline-1",
+      source: "mobile_app",
+      type: "timer_start",
+      description: "Offline work"
+    });
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({
+      eventId: "event-start-1",
+      timeEntryId: "entry-canonical-1"
+    }, 201))));
+
+    const result = await syncQueue();
+
+    expect(result.synced).toEqual(["optimistic-active-timer:offline-1"]);
+    expect(result.timerEntryIdCorrelations).toEqual([{
+      localId: "optimistic-active-timer:offline-1",
+      timeEntryId: "entry-canonical-1"
+    }]);
+    await expect(readTimerEntryIdCorrelations()).resolves.toEqual(
+      new Map([["optimistic-active-timer:offline-1", "entry-canonical-1"]])
+    );
+    await expect(readQueue()).resolves.toEqual([]);
+
+    await expect(removeTimerEntryIdCorrelation("optimistic-active-timer:offline-1"))
+      .resolves.toBe(true);
+    await expect(readTimerEntryIdCorrelations()).resolves.toEqual(new Map());
+  });
+
+  it("keeps a timer start queued when a successful response omits canonical correlation", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    await enqueueEvent({
+      localId: "optimistic-active-timer:missing-correlation",
+      source: "mobile_app",
+      type: "timer_start"
+    });
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({
+      eventId: "event-start-without-entry"
+    }, 200))));
+
+    const result = await syncQueue();
+
+    expect(result.synced).toEqual([]);
+    expect(result.timerEntryIdCorrelations).toEqual([]);
+    expect(result.remaining.map((event) => event.localId)).toEqual([
+      "optimistic-active-timer:missing-correlation"
+    ]);
+  });
+
+  it.each(["suggestion", "stop", "delete"] as const)(
+    "retargets an accepted %s after an in-flight offline start syncs to its canonical ID",
+    async (action) => {
+      const optimisticId = `optimistic-active-timer:in-flight-${action}`;
+      const canonicalId = `entry-canonical-${action}`;
+      secureStore.set("dayframe.localSessionToken.v1", "session-token");
+      await enqueueEvent({
+        localId: optimisticId,
+        source: "mobile_app",
+        type: "timer_start",
+        description: "Original offline title"
+      });
+
+      const startResponse = deferred<Response>();
+      let serverActiveEntry: { id: string; description: string | null } | null = null;
+      const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (url.endsWith("/api/events") && method === "POST") {
+          return startResponse.promise;
+        }
+        if (url.includes(`/api/time-entries/${canonicalId}`) && method === "PATCH") {
+          const patch = JSON.parse(String(init?.body)) as { description?: string | null };
+          serverActiveEntry = serverActiveEntry
+            ? { ...serverActiveEntry, description: patch.description ?? null }
+            : null;
+          return jsonResponse({ ok: true });
+        }
+        if (url.endsWith("/api/time-entries") && method === "POST") {
+          const body = JSON.parse(String(init?.body)) as { mode?: string };
+          if (body.mode === "stop") serverActiveEntry = null;
+          return jsonResponse({ eventId: "event-stop", timeEntryId: canonicalId });
+        }
+        if (url.includes(`/api/time-entries/${canonicalId}`) && method === "DELETE") {
+          serverActiveEntry = null;
+          return jsonResponse({ ok: true });
+        }
+        if (url.includes("/api/bootstrap")) {
+          return jsonResponse({
+            activeEntry: serverActiveEntry,
+            entries: serverActiveEntry ? [serverActiveEntry] : []
+          });
+        }
+        throw new Error(`Unexpected request: ${method} ${url}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      // This intentionally bypasses Dashboard's local persistence queue, just
+      // like Settings retry does. The API barrier must still retarget the
+      // dependent action after syncQueue records O -> C.
+      const syncCompletion = syncQueue();
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+      let dependentPersistenceApplied = false;
+      const dependentCompletion = (async () => {
+        const persistedId = await resolveTimerEntryIdAfterQueueBarrier(optimisticId);
+        dependentPersistenceApplied = true;
+        if (action === "suggestion") {
+          if (persistedId) {
+            await updateTimeEntry(persistedId, { description: "Accepted suggestion" });
+          } else {
+            await requireQueuedTimerStartUpdate(() => updateQueuedTimerStart(
+              optimisticId,
+              { description: "Accepted suggestion" }
+            ));
+          }
+          return;
+        }
+        if (action === "stop") {
+          if (persistedId) {
+            await stopTimer();
+          } else {
+            await requireQueuedTimerStartUpdate(() => updateQueuedTimerStart(optimisticId, {}));
+            await queueStopTimer();
+          }
+          return;
+        }
+        if (persistedId) {
+          await deleteTimeEntry(persistedId);
+          await removeTimerEntryIdCorrelation(optimisticId);
+        } else {
+          await requireQueuedTimerStartRemoval(() => removeQueuedEvent(optimisticId));
+        }
+      })();
+
+      await Promise.resolve();
+      expect(dependentPersistenceApplied).toBe(false);
+      await expect(readQueue()).resolves.toEqual([
+        expect.objectContaining({ localId: optimisticId, type: "timer_start" })
+      ]);
+
+      serverActiveEntry = { id: canonicalId, description: "Original offline title" };
+      startResponse.resolve(jsonResponse({
+        eventId: `event-${action}`,
+        timeEntryId: canonicalId
+      }, 201));
+      await Promise.all([syncCompletion, dependentCompletion]);
+
+      expect(dependentPersistenceApplied).toBe(true);
+      await expect(readQueue()).resolves.toEqual([]);
+      if (action === "suggestion") {
+        expect(fetchMock).toHaveBeenCalledWith(
+          `https://dayframe.test/api/time-entries/${canonicalId}`,
+          expect.objectContaining({
+            body: JSON.stringify({ description: "Accepted suggestion" }),
+            method: "PATCH"
+          })
+        );
+      } else if (action === "stop") {
+        expect(fetchMock).toHaveBeenCalledWith(
+          "https://dayframe.test/api/time-entries",
+          expect.objectContaining({
+            body: expect.stringContaining('"mode":"stop"'),
+            method: "POST"
+          })
+        );
+      } else {
+        expect(fetchMock).toHaveBeenCalledWith(
+          `https://dayframe.test/api/time-entries/${canonicalId}`,
+          expect.objectContaining({ method: "DELETE" })
+        );
+        await expect(readTimerEntryIdCorrelations()).resolves.toEqual(new Map());
+      }
+
+      const firstRefresh = await fetchBootstrap();
+      const secondRefresh = await fetchBootstrap();
+      if (action === "suggestion") {
+        expect(firstRefresh.activeEntry).toEqual({
+          id: canonicalId,
+          description: "Accepted suggestion"
+        });
+        expect(secondRefresh.activeEntry).toEqual(firstRefresh.activeEntry);
+      } else {
+        expect(firstRefresh.activeEntry).toBeNull();
+        expect(secondRefresh.activeEntry).toBeNull();
+      }
+    }
+  );
+
+  it("hydrates an externally synced canonical alias before active-deletion collision classification", async () => {
+    const optimisticId = "optimistic-active-timer:settings-sync-deletion";
+    const canonicalId = "entry-settings-sync-deletion";
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    await enqueueEvent({
+      localId: optimisticId,
+      source: "mobile_app",
+      type: "timer_start"
+    });
+    const startResponse = deferred<Response>();
+    const fetchMock = vi.fn(() => startResponse.promise);
+    vi.stubGlobal("fetch", fetchMock);
+
+    let now = 1_000;
+    let restoredId: string | null = null;
+    const commits = vi.fn();
+    const reconciler = createOptimisticTimerStartReconciler();
+    reconciler.begin(optimisticId);
+    reconciler.settle(optimisticId, "queued");
+    const coordinator = createDeletionCoordinator<
+      { id: string },
+      { activeEntry: { id: string } | null }
+    >({
+      clearTimer: () => undefined,
+      now: () => now,
+      onCommit: commits,
+      onPendingChange: () => undefined,
+      onRestore: () => {
+        restoredId = canonicalId;
+      },
+      setTimer: () => 1
+    });
+    const prepared = coordinator.prepare(
+      [{ id: optimisticId }],
+      { activeEntry: { id: optimisticId } }
+    );
+    if (!prepared) throw new Error("Expected prepared deletion");
+    coordinator.activate(prepared.token);
+
+    // Settings owns this direct sync; Dashboard has not entered its local
+    // mutation queue and must discover the durable alias at poll time.
+    const settingsSync = syncQueue();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    let pollResolved = false;
+    const pollTombstones = (async () => {
+      const durableId = await resolveTimerEntryIdAfterQueueBarrier(optimisticId);
+      if (durableId) {
+        coordinator.registerPendingId(prepared.token, durableId);
+        reconciler.settle(optimisticId, "persisted");
+      }
+      const pendingIds = coordinator.pendingEntryIds();
+      if (!reconciler.deferExternalActiveEntry({
+        deletedActiveEntryId: optimisticId,
+        externalActiveEntryId: canonicalId,
+        pendingEntryIds: pendingIds
+      })) {
+        coordinator.reconcileExternalActiveEntry({
+          deletedActiveEntryId: optimisticId,
+          externalActiveEntryId: canonicalId
+        });
+      }
+      pollResolved = true;
+      return coordinator.pendingEntryIds();
+    })();
+
+    await Promise.resolve();
+    expect(pollResolved).toBe(false);
+    startResponse.resolve(jsonResponse({
+      eventId: "event-settings-sync-deletion",
+      timeEntryId: canonicalId
+    }, 201));
+    await settingsSync;
+    const tombstones = await pollTombstones;
+
+    expect(tombstones).toEqual(new Set([optimisticId, canonicalId]));
+    expect(tombstones.has(canonicalId)).toBe(true);
+    expect(commits).not.toHaveBeenCalled();
+    now = 5_999;
+    expect(coordinator.undo(prepared.token)).toBe(true);
+    expect(restoredId).toBe(canonicalId);
+  });
+
+  it("does not let an in-flight sync overwrite a newly queued Stop event", async () => {
+    const optimisticId = "optimistic-active-timer:queue-lock";
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    await enqueueEvent({
+      localId: optimisticId,
+      source: "mobile_app",
+      type: "timer_start"
+    });
+    const startResponse = deferred<Response>();
+    const fetchMock = vi.fn(() => startResponse.promise);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const syncCompletion = syncQueue();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    const stopEnqueue = queueStopTimer();
+    let stopEnqueued = false;
+    void stopEnqueue.then(() => {
+      stopEnqueued = true;
+    });
+
+    await Promise.resolve();
+    expect(stopEnqueued).toBe(false);
+    startResponse.resolve(jsonResponse({
+      eventId: "event-queue-lock",
+      timeEntryId: "entry-queue-lock"
+    }, 201));
+    await Promise.all([syncCompletion, stopEnqueue]);
+
+    await expect(readQueue()).resolves.toEqual([
+      expect.objectContaining({ type: "timer_stop" })
+    ]);
   });
 
   it("preserves queue order when the first event fails to sync", async () => {
@@ -625,6 +941,7 @@ describe("mobile API client", () => {
 
     const snapshot = buildQueueDiagnosticsSnapshot(queue, {
       synced: [],
+      timerEntryIdCorrelations: [],
       remaining: queue,
       failed: queue,
       syncedCount: 0,
@@ -1485,4 +1802,14 @@ function readMigratedQueuedEventForTest(item: ReturnType<typeof storedQueuedEven
     type: item.type as QueuedEvent["type"],
     occurredAt: new Date(item.occurredAt)
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
 }

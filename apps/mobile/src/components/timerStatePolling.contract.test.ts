@@ -9,7 +9,11 @@ const dashboardSource = readFileSync(
 
 describe("mobile timer-state polling contracts", () => {
   it("checks only while active and reconciles through the guarded dashboard loader", () => {
-    expect(dashboardSource).toContain("const next = await fetchTimerState()");
+    expect(dashboardSource).toContain("const fetched = await fetchTimerState()");
+    expect(dashboardSource).toContain(
+      "await reconcilePendingActiveDeletionAfterQueueBarrier(\n          fetched.activeEntryId"
+    );
+    expect(dashboardSource).toContain("tombstones.has(fetched.activeEntryId)");
     expect(dashboardSource).toContain("timerStateChanged(timerStateRef.current, next)");
     expect(dashboardSource).toContain("await loadRef.current({ silent: true })");
     expect(dashboardSource).toContain('AppState.currentState !== "active"');

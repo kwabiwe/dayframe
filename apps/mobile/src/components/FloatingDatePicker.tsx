@@ -10,7 +10,7 @@ import {
 } from "@/lib/motion";
 
 export function FloatingDatePicker({
-  maxDate = new Date(),
+  maxDate = null,
   onClose,
   onSelect,
   selectedDate,
@@ -18,7 +18,7 @@ export function FloatingDatePicker({
   theme,
   visible
 }: {
-  maxDate?: Date;
+  maxDate?: Date | null;
   onClose: () => void;
   onSelect: (date: Date) => void;
   selectedDate: Date;
@@ -29,15 +29,18 @@ export function FloatingDatePicker({
   const reduceMotion = useReduceMotionPreference();
   const [month, setMonth] = useState(() => startOfMonth(selectedDate));
   const selectedDayKey = formatDateKey(selectedDate);
-  const maxDay = startOfDay(maxDate);
-  const maxDayKey = formatDateKey(maxDay);
+  const today = startOfDay(new Date());
+  const maxDay = maxDate ? startOfDay(maxDate) : null;
+  const todayKey = formatDateKey(today);
 
   useEffect(() => {
     if (visible) setMonth(startOfMonth(selectedDate));
   }, [selectedDayKey, visible]);
 
   const days = useMemo(() => monthGridDays(month), [month]);
-  const nextMonthDisabled = addMonths(month, 1).getTime() > startOfMonth(maxDay).getTime();
+  const nextMonthDisabled = Boolean(
+    maxDay && addMonths(month, 1).getTime() > startOfMonth(maxDay).getTime()
+  );
 
   if (!visible) return null;
 
@@ -100,9 +103,9 @@ export function FloatingDatePicker({
             {days.map((date) => {
               const dayKey = formatDateKey(date);
               const selected = dayKey === selectedDayKey;
-              const isToday = dayKey === maxDayKey;
+              const isToday = dayKey === todayKey;
               const inMonth = date.getMonth() === month.getMonth();
-              const disabled = startOfDay(date).getTime() > maxDay.getTime();
+              const disabled = Boolean(maxDay && startOfDay(date).getTime() > maxDay.getTime());
               return (
                 <Pressable
                   key={dayKey}
@@ -139,7 +142,7 @@ export function FloatingDatePicker({
             <Pressable
               accessibilityLabel="Select today"
               accessibilityRole="button"
-              onPress={() => onSelect(maxDay)}
+              onPress={() => onSelect(today)}
               style={pressable(styles.datePickerTodayButton, styles.buttonPressed)}
             >
               <Text style={styles.datePickerTodayText}>Today</Text>

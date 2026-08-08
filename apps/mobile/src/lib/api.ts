@@ -22,8 +22,11 @@ import {
 } from "./secure-session";
 
 const QUEUE_KEY = "dayframe.offlineQueue.v1";
+const TIMER_ENTRY_ID_CORRELATIONS_KEY = "dayframe.timerEntryIdCorrelations.v1";
 const DEFAULT_PLACE_RADIUS_METERS = 100;
 const DEFAULT_PLACE_PRIORITY = 5;
+let queueMutationTail: Promise<void> = Promise.resolve();
+let timerEntryIdCorrelationMutationTail: Promise<void> = Promise.resolve();
 
 export type MobileDateRange = {
   selectedDate: string;
@@ -297,6 +300,7 @@ export type QueueFailureReport = {
 
 export type SyncQueueResult = {
   synced: string[];
+  timerEntryIdCorrelations: TimerEntryIdCorrelation[];
   remaining: QueuedEvent[];
   failed: QueuedEvent[];
   syncedCount: number;
@@ -304,6 +308,11 @@ export type SyncQueueResult = {
   failedCount: number;
   firstError?: QueueFailureReport;
   stopped: boolean;
+};
+
+export type TimerEntryIdCorrelation = {
+  localId: string;
+  timeEntryId: string;
 };
 
 export type QueueDiagnostics = {
@@ -480,22 +489,24 @@ export async function logout() {
 export { clearSessionToken, getSessionToken };
 
 export async function enqueueEvent(input: ActivityEventDraft) {
-  const { localId, ...eventInput } = input;
-  const parsed = ActivityEventInputSchema.parse({
-    ...eventInput,
-    occurredAt: input.occurredAt ?? new Date(),
-    rawPayload: eventInput.rawPayload ?? {}
+  return withQueueMutation(async () => {
+    const { localId, ...eventInput } = input;
+    const parsed = ActivityEventInputSchema.parse({
+      ...eventInput,
+      occurredAt: input.occurredAt ?? new Date(),
+      rawPayload: eventInput.rawPayload ?? {}
+    });
+    const queue = await readQueue();
+    const queuedLocalId = normalizeLocalId(localId) ?? generatedLocalId();
+    if (queue.some((item) => item.localId === queuedLocalId)) return queue;
+    queue.push({
+      ...queuedEventFromParsedEvent(parsed),
+      localId: queuedLocalId,
+      queuedAt: new Date().toISOString()
+    });
+    await writeQueue(queue);
+    return queue;
   });
-  const queue = await readQueue();
-  const queuedLocalId = normalizeLocalId(localId) ?? generatedLocalId();
-  if (queue.some((item) => item.localId === queuedLocalId)) return queue;
-  queue.push({
-    ...queuedEventFromParsedEvent(parsed),
-    localId: queuedLocalId,
-    queuedAt: new Date().toISOString()
-  });
-  await writeQueue(queue);
-  return queue;
 }
 
 export async function readQueue(): Promise<QueuedEvent[]> {
@@ -505,42 +516,101 @@ export async function readQueue(): Promise<QueuedEvent[]> {
   return parsed.map(migrateQueuedEvent);
 }
 
+export async function readTimerEntryIdCorrelations() {
+  const raw = await AsyncStorage.getItem(TIMER_ENTRY_ID_CORRELATIONS_KEY);
+  if (!raw) return new Map<string, string>();
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return new Map(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, string] => Boolean(entry[0] && typeof entry[1] === "string" && entry[1])
+      )
+    );
+  } catch {
+    return new Map<string, string>();
+  }
+}
+
+export async function recordTimerEntryIdCorrelation(localId: string, timeEntryId: string) {
+  if (!localId || !timeEntryId) return false;
+  return withTimerEntryIdCorrelationMutation(async () => {
+    const correlations = await readTimerEntryIdCorrelations();
+    correlations.set(localId, timeEntryId);
+    await AsyncStorage.setItem(
+      TIMER_ENTRY_ID_CORRELATIONS_KEY,
+      JSON.stringify(Object.fromEntries(correlations))
+    );
+    return true;
+  });
+}
+
+export async function removeTimerEntryIdCorrelation(localId: string) {
+  return withTimerEntryIdCorrelationMutation(async () => {
+    const correlations = await readTimerEntryIdCorrelations();
+    if (!correlations.delete(localId)) return false;
+    await AsyncStorage.setItem(
+      TIMER_ENTRY_ID_CORRELATIONS_KEY,
+      JSON.stringify(Object.fromEntries(correlations))
+    );
+    return true;
+  });
+}
+
+/**
+ * Waits behind any queue sync that may be turning a local timer-start ID into
+ * a canonical entry ID, then reads that durable correlation under its own
+ * storage lock. Callers can safely choose between canonical persistence and a
+ * still-queued local mutation after this resolves.
+ */
+export async function resolveTimerEntryIdAfterQueueBarrier(localId: string) {
+  if (!localId) return null;
+  await withQueueMutation(async () => undefined);
+  return withTimerEntryIdCorrelationMutation(async () => {
+    const correlations = await readTimerEntryIdCorrelations();
+    return correlations.get(localId) ?? null;
+  });
+}
+
 export async function updateQueuedTimerStart(
   localId: string,
   patch: Pick<TimeEntryUpdatePatch, "categoryId" | "description" | "startedAt" | "tagNames">
 ) {
-  const queue = await readQueue();
-  let updated = false;
-  const next = queue.map((item) => {
-    if (item.localId !== localId || item.type !== "timer_start") return item;
-    updated = true;
-    return {
-      ...item,
-      categoryId: Object.prototype.hasOwnProperty.call(patch, "categoryId")
-        ? patch.categoryId ?? undefined
-        : item.categoryId,
-      description: Object.prototype.hasOwnProperty.call(patch, "description")
-        ? patch.description?.trim() || undefined
-        : item.description,
-      occurredAt: patch.startedAt ? new Date(patch.startedAt) : item.occurredAt,
-      rawPayload: {
-        ...item.rawPayload,
-        ...(patch.startedAt ? { startedAt: patch.startedAt } : {}),
-        ...(Object.prototype.hasOwnProperty.call(patch, "tagNames")
-          ? { tagNames: patch.tagNames ?? [] }
-          : {})
-      }
-    };
+  return withQueueMutation(async () => {
+    const queue = await readQueue();
+    let updated = false;
+    const next = queue.map((item) => {
+      if (item.localId !== localId || item.type !== "timer_start") return item;
+      updated = true;
+      return {
+        ...item,
+        categoryId: Object.prototype.hasOwnProperty.call(patch, "categoryId")
+          ? patch.categoryId ?? undefined
+          : item.categoryId,
+        description: Object.prototype.hasOwnProperty.call(patch, "description")
+          ? patch.description?.trim() || undefined
+          : item.description,
+        occurredAt: patch.startedAt ? new Date(patch.startedAt) : item.occurredAt,
+        rawPayload: {
+          ...item.rawPayload,
+          ...(patch.startedAt ? { startedAt: patch.startedAt } : {}),
+          ...(Object.prototype.hasOwnProperty.call(patch, "tagNames")
+            ? { tagNames: patch.tagNames ?? [] }
+            : {})
+        }
+      };
+    });
+    if (updated) await writeQueue(next);
+    return updated;
   });
-  if (updated) await writeQueue(next);
-  return updated;
 }
 
 export async function removeQueuedEvent(localId: string) {
-  const queue = await readQueue();
-  const next = queue.filter((item) => item.localId !== localId);
-  if (next.length !== queue.length) await writeQueue(next);
-  return next.length !== queue.length;
+  return withQueueMutation(async () => {
+    const queue = await readQueue();
+    const next = queue.filter((item) => item.localId !== localId);
+    if (next.length !== queue.length) await writeQueue(next);
+    return next.length !== queue.length;
+  });
 }
 
 export function getQueueDiagnostics(queue: QueuedEvent[]): QueueDiagnostics {
@@ -588,22 +658,29 @@ export async function retryFailedQueuedEvents() {
 }
 
 export async function clearFailedQueuedEvents() {
-  const queue = await readQueue();
-  const remaining = queue.filter((item) => !isClearableFailedEvent(item));
-  const removed = queue.filter(isClearableFailedEvent);
-  await writeQueue(remaining);
-  return {
-    removed,
-    remaining,
-    removedCount: removed.length,
-    remainingCount: remaining.length
-  };
+  return withQueueMutation(async () => {
+    const queue = await readQueue();
+    const remaining = queue.filter((item) => !isClearableFailedEvent(item));
+    const removed = queue.filter(isClearableFailedEvent);
+    await writeQueue(remaining);
+    return {
+      removed,
+      remaining,
+      removedCount: removed.length,
+      remainingCount: remaining.length
+    };
+  });
 }
 
 export async function syncQueue(options: SyncQueueOptions = {}): Promise<SyncQueueResult> {
+  return withQueueMutation(() => syncQueueUnlocked(options));
+}
+
+async function syncQueueUnlocked(options: SyncQueueOptions): Promise<SyncQueueResult> {
   const queue = await readQueue();
   const remaining: QueuedEvent[] = [];
   const synced: string[] = [];
+  const timerEntryIdCorrelations: TimerEntryIdCorrelation[] = [];
   let firstError: QueueFailureReport | undefined;
   let stopped = false;
   const now = new Date();
@@ -663,6 +740,17 @@ export async function syncQueue(options: SyncQueueOptions = {}): Promise<SyncQue
         }
         continue;
       }
+      const payload = await readJsonResponse<{ eventId?: string; timeEntryId?: string }>(response);
+      if (item.type === "timer_start") {
+        if (!payload.timeEntryId) {
+          throw new Error("Synced timer start did not return its canonical time entry.");
+        }
+        await recordTimerEntryIdCorrelation(item.localId, payload.timeEntryId);
+        timerEntryIdCorrelations.push({
+          localId: item.localId,
+          timeEntryId: payload.timeEntryId
+        });
+      }
       synced.push(item.localId);
     } catch (error) {
       if (error instanceof AuthRequiredError) throw error;
@@ -676,7 +764,13 @@ export async function syncQueue(options: SyncQueueOptions = {}): Promise<SyncQue
   }
 
   await writeQueue(remaining);
-  return queueSyncResult(synced, remaining, firstError, stopped);
+  return queueSyncResult(
+    synced,
+    remaining,
+    firstError,
+    stopped,
+    timerEntryIdCorrelations
+  );
 }
 
 export async function startTimer(
@@ -1307,11 +1401,13 @@ function queueSyncResult(
   synced: string[],
   remaining: QueuedEvent[],
   firstError: QueueFailureReport | undefined,
-  stopped: boolean
+  stopped: boolean,
+  timerEntryIdCorrelations: TimerEntryIdCorrelation[] = []
 ): SyncQueueResult {
   const failed = remaining.filter(hasQueueFailure);
   return {
     synced,
+    timerEntryIdCorrelations,
     remaining,
     failed,
     syncedCount: synced.length,
@@ -1343,6 +1439,20 @@ function generatedUuid() {
     hex.slice(16, 20),
     hex.slice(20)
   ].join("-");
+}
+
+function withQueueMutation<Result>(operation: () => Promise<Result>) {
+  const result = queueMutationTail.catch(() => undefined).then(operation);
+  queueMutationTail = result.then(() => undefined, () => undefined);
+  return result;
+}
+
+function withTimerEntryIdCorrelationMutation<Result>(operation: () => Promise<Result>) {
+  const result = timerEntryIdCorrelationMutationTail
+    .catch(() => undefined)
+    .then(operation);
+  timerEntryIdCorrelationMutationTail = result.then(() => undefined, () => undefined);
+  return result;
 }
 
 async function writeQueue(queue: QueuedEvent[]) {

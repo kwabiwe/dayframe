@@ -61,6 +61,32 @@ describe("POST /api/events", () => {
     expect(mocks.processActivityEvent).toHaveBeenCalledWith(stopEvent, session);
   });
 
+  it("preserves canonical timer-entry correlation on an idempotent start replay", async () => {
+    const startEvent = {
+      source: "mobile_app",
+      type: "timer_start",
+      occurredAt: "2026-08-08T06:00:00.000Z",
+      clientEventId: "optimistic-active-timer:offline-replay",
+      rawPayload: { origin: "mobile_custom_start_fallback" }
+    };
+    mocks.processActivityEvent.mockResolvedValueOnce({
+      eventId: "event-start-existing",
+      timeEntryId: "entry-start-canonical",
+      candidate: { action: "start_timer" },
+      duplicate: true
+    });
+
+    const response = await POST(jsonRequest(startEvent));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      duplicate: true,
+      eventId: "event-start-existing",
+      timeEntryId: "entry-start-canonical"
+    });
+  });
+
   it("returns a precise schema error when health sleep storage is missing", async () => {
     mocks.processActivityEvent.mockRejectedValueOnce(
       databaseReadinessError(

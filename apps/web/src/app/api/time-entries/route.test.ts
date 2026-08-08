@@ -206,14 +206,9 @@ describe("POST /api/time-entries", () => {
       "Finish time must be after the start time."
     ],
     [
-      "future Start",
-      { startedAt: "2026-07-04T13:00:00.000Z", stoppedAt: "2026-07-04T14:00:00.000Z" },
-      "Start time cannot be in the future."
-    ],
-    [
-      "future Finish",
-      { startedAt: "2026-07-04T11:00:00.000Z", stoppedAt: "2026-07-04T13:00:00.000Z" },
-      "Finish time cannot be in the future."
+      "longer than 24 hours",
+      { startedAt: "2026-07-04T09:00:00.000Z", stoppedAt: "2026-07-05T09:00:01.000Z" },
+      "Entries can be no longer than 24 hours."
     ]
   ])("returns a specific 400 for %s", async (_label, interval, error) => {
     const response = await POST(jsonRequest({ mode: "manual", ...interval }));
@@ -225,7 +220,9 @@ describe("POST /api/time-entries", () => {
 
   it.each([
     ["ordinary past entry", "2026-07-04T09:00:00.000Z", "2026-07-04T10:00:00.000Z"],
-    ["past midnight rollover", "2026-07-03T23:45:00.000Z", "2026-07-04T00:15:00.000Z"]
+    ["past midnight rollover", "2026-07-03T23:45:00.000Z", "2026-07-04T00:15:00.000Z"],
+    ["future entry", "2026-07-04T13:00:00.000Z", "2026-07-04T14:00:00.000Z"],
+    ["exactly 24 hours", "2026-07-04T13:00:00.000Z", "2026-07-05T13:00:00.000Z"]
   ])("accepts a valid %s", async (_label, startedAt, stoppedAt) => {
     const response = await POST(jsonRequest({ mode: "manual", startedAt, stoppedAt }));
 

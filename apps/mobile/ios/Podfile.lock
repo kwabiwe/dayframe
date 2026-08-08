@@ -1,13 +1,15 @@
 PODS:
   - DayframeCalendar (0.1.0):
     - ExpoModulesCore
+  - DayframeDurationDial (0.1.0):
+    - ExpoModulesCore
   - DayframeLocationVisits (0.1.0):
     - ExpoModulesCore
   - DayframePlaceSearch (0.1.0):
     - ExpoModulesCore
-  - EXConstants (56.0.21):
+  - EXConstants (56.0.23):
     - ExpoModulesCore
-  - Expo (56.0.16):
+  - Expo (56.0.19):
     - ExpoModulesCore
     - ExpoModulesJSI
     - hermes-engine
@@ -33,13 +35,13 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - ExpoAsset (56.0.20):
+  - ExpoAsset (56.0.22):
     - ExpoModulesCore
   - ExpoClipboard (56.0.4):
     - ExpoModulesCore
   - ExpoDomWebView (56.0.6):
     - ExpoModulesCore
-  - ExpoFileSystem (56.0.8):
+  - ExpoFileSystem (56.0.9):
     - ExpoModulesCore
   - ExpoFont (56.0.7):
     - ExpoModulesCore
@@ -47,13 +49,13 @@ PODS:
     - ExpoModulesCore
   - ExpoKeepAwake (56.0.3):
     - ExpoModulesCore
-  - ExpoLinking (56.0.15):
+  - ExpoLinking (56.0.16):
     - ExpoModulesCore
-  - ExpoLocation (56.0.21):
+  - ExpoLocation (56.0.23):
     - ExpoModulesCore
   - ExpoLogBox (56.0.14):
     - React-Core
-  - ExpoModulesCore (56.0.21):
+  - ExpoModulesCore (56.0.23):
     - ExpoModulesJSI
     - hermes-engine
     - RCTRequired
@@ -80,29 +82,29 @@ PODS:
   - ExpoModulesJSI (56.0.12):
     - React-Core
     - ReactCommon
-  - ExpoModulesWorklets (56.0.21):
+  - ExpoModulesWorklets (56.0.23):
     - ExpoModulesCore
     - ExpoModulesJSI
-  - ExpoModulesWorkletsAdapter (56.0.21):
+  - ExpoModulesWorkletsAdapter (56.0.23):
     - ExpoModulesCore
     - ExpoModulesJSI
     - ExpoModulesWorklets
     - RNWorklets
-  - ExpoRouter (56.2.15):
+  - ExpoRouter (56.2.18):
     - ExpoModulesCore
     - RNScreens
   - ExpoSecureStore (56.0.4):
     - ExpoModulesCore
   - ExpoSQLite (56.0.5):
     - ExpoModulesCore
-  - ExpoSymbols (56.0.6):
+  - ExpoSymbols (56.0.7):
     - ExpoModulesCore
   - ExpoSystemUI (56.0.5):
     - ExpoModulesCore
-  - ExpoTaskManager (56.0.22):
+  - ExpoTaskManager (56.0.25):
     - ExpoModulesCore
     - UMAppLoader
-  - ExpoUI (56.0.22):
+  - ExpoUI (56.0.25):
     - ExpoModulesCore
     - ExpoModulesWorklets
     - React-RCTFabric
@@ -2197,7 +2199,7 @@ PODS:
     - ReactNativeDependencies
     - RNWorklets
     - Yoga
-  - RNScreens (4.25.2):
+  - RNScreens (4.26.2):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -2219,9 +2221,9 @@ PODS:
     - ReactCommon/turbomodule/bridging
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
-    - RNScreens/common (= 4.25.2)
+    - RNScreens/common (= 4.26.2)
     - Yoga
-  - RNScreens/common (4.25.2):
+  - RNScreens/common (4.26.2):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -2365,6 +2367,7 @@ PODS:
 
 DEPENDENCIES:
   - DayframeCalendar (from `../modules/dayframe-calendar/ios`)
+  - DayframeDurationDial (from `../modules/dayframe-duration-dial/ios`)
   - DayframeLocationVisits (from `../modules/dayframe-location-visits/ios`)
   - DayframePlaceSearch (from `../modules/dayframe-place-search/ios`)
   - EXConstants (from `../../../node_modules/expo-constants/ios`)
@@ -2372,24 +2375,24 @@ DEPENDENCIES:
   - ExpoAsset (from `../../../node_modules/expo-asset/ios`)
   - ExpoClipboard (from `../../../node_modules/expo-clipboard/ios`)
   - "ExpoDomWebView (from `../../../node_modules/@expo/dom-webview/ios`)"
-  - ExpoFileSystem (from `../../../node_modules/expo-file-system/ios/ExpoFileSystem.podspec`)
-  - ExpoFont (from `../../../node_modules/expo-font/ios/ExpoFont.podspec`)
+  - ExpoFileSystem (from `../../../node_modules/expo-file-system/ios`)
+  - ExpoFont (from `../../../node_modules/expo-font/ios`)
   - ExpoGlassEffect (from `../../../node_modules/expo-glass-effect/ios`)
   - ExpoKeepAwake (from `../../../node_modules/expo-keep-awake/ios`)
   - ExpoLinking (from `../../../node_modules/expo-linking/ios`)
-  - ExpoLocation (from `../../../node_modules/expo-location/ios/ExpoLocation.podspec`)
+  - ExpoLocation (from `../../../node_modules/expo-location/ios`)
   - "ExpoLogBox (from `../../../node_modules/@expo/log-box`)"
-  - ExpoModulesCore (from `../node_modules/expo-modules-core/ExpoModulesCore.podspec`)
+  - ExpoModulesCore (from `../node_modules/expo-modules-core`)
   - ExpoModulesJSI (from `../../../node_modules/expo-modules-jsi/apple`)
-  - ExpoModulesWorklets (from `../node_modules/expo-modules-core/ExpoModulesWorklets.podspec`)
+  - ExpoModulesWorklets (from `../node_modules/expo-modules-core`)
   - ExpoModulesWorkletsAdapter (from `../node_modules/expo-modules-core`)
-  - ExpoRouter (from `../../../node_modules/expo-router/ios`)
+  - ExpoRouter (from `../node_modules/expo-router/ios`)
   - ExpoSecureStore (from `../../../node_modules/expo-secure-store/ios`)
   - ExpoSQLite (from `../../../node_modules/expo-sqlite/ios`)
-  - ExpoSymbols (from `../../../node_modules/expo-symbols/ios`)
+  - ExpoSymbols (from `../node_modules/expo-router/node_modules/expo-symbols/ios`)
   - ExpoSystemUI (from `../../../node_modules/expo-system-ui/ios`)
   - ExpoTaskManager (from `../../../node_modules/expo-task-manager/ios`)
-  - "ExpoUI (from `../../../node_modules/@expo/ui/ios`)"
+  - "ExpoUI (from `../node_modules/expo-router/node_modules/@expo/ui/ios`)"
   - FBLazyVector (from `../../../node_modules/react-native/Libraries/FBLazyVector`)
   - hermes-engine (from `../../../node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec`)
   - NitroModules (from `../../../node_modules/react-native-nitro-modules`)
@@ -2481,6 +2484,8 @@ DEPENDENCIES:
 EXTERNAL SOURCES:
   DayframeCalendar:
     :path: "../modules/dayframe-calendar/ios"
+  DayframeDurationDial:
+    :path: "../modules/dayframe-duration-dial/ios"
   DayframeLocationVisits:
     :path: "../modules/dayframe-location-visits/ios"
   DayframePlaceSearch:
@@ -2496,9 +2501,9 @@ EXTERNAL SOURCES:
   ExpoDomWebView:
     :path: "../../../node_modules/@expo/dom-webview/ios"
   ExpoFileSystem:
-    :podspec: "../../../node_modules/expo-file-system/ios/ExpoFileSystem.podspec"
+    :path: "../../../node_modules/expo-file-system/ios"
   ExpoFont:
-    :podspec: "../../../node_modules/expo-font/ios/ExpoFont.podspec"
+    :path: "../../../node_modules/expo-font/ios"
   ExpoGlassEffect:
     :path: "../../../node_modules/expo-glass-effect/ios"
   ExpoKeepAwake:
@@ -2506,31 +2511,31 @@ EXTERNAL SOURCES:
   ExpoLinking:
     :path: "../../../node_modules/expo-linking/ios"
   ExpoLocation:
-    :podspec: "../../../node_modules/expo-location/ios/ExpoLocation.podspec"
+    :path: "../../../node_modules/expo-location/ios"
   ExpoLogBox:
     :path: "../../../node_modules/@expo/log-box"
   ExpoModulesCore:
-    :podspec: "../node_modules/expo-modules-core/ExpoModulesCore.podspec"
+    :path: "../node_modules/expo-modules-core"
   ExpoModulesJSI:
     :path: "../../../node_modules/expo-modules-jsi/apple"
   ExpoModulesWorklets:
-    :podspec: "../node_modules/expo-modules-core/ExpoModulesWorklets.podspec"
+    :path: "../node_modules/expo-modules-core"
   ExpoModulesWorkletsAdapter:
     :path: "../node_modules/expo-modules-core"
   ExpoRouter:
-    :path: "../../../node_modules/expo-router/ios"
+    :path: "../node_modules/expo-router/ios"
   ExpoSecureStore:
     :path: "../../../node_modules/expo-secure-store/ios"
   ExpoSQLite:
     :path: "../../../node_modules/expo-sqlite/ios"
   ExpoSymbols:
-    :path: "../../../node_modules/expo-symbols/ios"
+    :path: "../node_modules/expo-router/node_modules/expo-symbols/ios"
   ExpoSystemUI:
     :path: "../../../node_modules/expo-system-ui/ios"
   ExpoTaskManager:
     :path: "../../../node_modules/expo-task-manager/ios"
   ExpoUI:
-    :path: "../../../node_modules/@expo/ui/ios"
+    :path: "../node_modules/expo-router/node_modules/@expo/ui/ios"
   FBLazyVector:
     :path: "../../../node_modules/react-native/Libraries/FBLazyVector"
   hermes-engine:
@@ -2707,33 +2712,34 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   DayframeCalendar: 105d3dd67c3a016050217d253a97bc81eeed0cbe
+  DayframeDurationDial: dfee3e1252be07902bf9097d15129947d54b96b2
   DayframeLocationVisits: a92d96c395edf56959289c8e57ebb10ab4417884
   DayframePlaceSearch: 0dca400edd668a45b1c00b986ecb147ada6bfea5
-  EXConstants: b761e3534d6066412c7c3276dd4f104d2275e6d4
-  Expo: db3a7098c5a6b97f1805a1c2c9394627caf8d29b
-  ExpoAsset: d69e54981e14baa059c5d9cc9580d06fffc44644
+  EXConstants: 6bcea1db4d1215969dc3409dfe33d94a5bfe50ca
+  Expo: b06a9178293f86989516ee226c240605fb307d12
+  ExpoAsset: 87b14d63c50edc7a07f6e99128c0832c03ef2bad
   ExpoClipboard: 342ae52697ff1cf89b8849bee624a9a320e77d3c
   ExpoDomWebView: 4e53b05879dc73ba374f76bff93dd64c8a0d91b3
-  ExpoFileSystem: 9dc04ec1e11bc3c7b965d7feb2de12c789755c7b
+  ExpoFileSystem: fcd66cde377289cd8eeade5b307f742bd1d6bdfa
   ExpoFont: 274487aa78f8c65d6551e2558eca3ec6ce3432ce
   ExpoGlassEffect: 7d4233dc0727ee2b28dd757eda70e1b6abf662fd
   ExpoKeepAwake: 359c47a1d9ccc3a3c519bca6e39562cce230c5bb
-  ExpoLinking: f8a78524352bf2c3baed5b33c8b56cd57c448702
-  ExpoLocation: 5a75576d74fa6e491df56677369f99f3635dd3c5
+  ExpoLinking: 58d1cc05b96ead9e921353464ad03651eeb71ab9
+  ExpoLocation: 91767066d799150edd734b453bd801c7b4769107
   ExpoLogBox: cdad5c9402a186574fb5924ea91df1f08ba9a98a
-  ExpoModulesCore: a3cc6da0973e1363b2003cefa478ca0af92a8171
+  ExpoModulesCore: 06410c6ac2f13edaae5f5444689b9cacc6a9c6d7
   ExpoModulesJSI: e62656cfaffb5aeb3fdc1dd2bc49f77e87ed2261
-  ExpoModulesWorklets: 58bf4b7f263b5cad3f6017a68148789878ffd5a3
-  ExpoModulesWorkletsAdapter: ce33983ace4e3574d82bb002627cc4240e97ba68
-  ExpoRouter: 4de33711ec1e4ae28a0c7dae4412669d48cb0283
+  ExpoModulesWorklets: 40fe3862230a3d967899ff29211480efc5daf4e2
+  ExpoModulesWorkletsAdapter: 036c0be70f07d6fff89023f33da6e28556a85838
+  ExpoRouter: fc7a05eee579d54869806f9f95c799020c7800fc
   ExpoSecureStore: f1bd083c1b7b8d4142013ffcc0082d377d9f49f4
   ExpoSQLite: eba0f88d7c17165f4af12fb311b30d5a6a34b00e
-  ExpoSymbols: 377747de25bcb1ab68ec68f23d81fb81d43eae83
+  ExpoSymbols: 37e96a38eed3fb50af4b7c86b8a80ed3054a0a01
   ExpoSystemUI: 8f4fb641c6a6ebe2a01dda0fbd3fdd952ab5823a
-  ExpoTaskManager: 5882d7b0e3be1ef74ade8519c266e88cb247632c
-  ExpoUI: 41ec84b8a9c2de820ae3e2e209d66e683be0e435
+  ExpoTaskManager: 705d2ceb645d42cdb6485ec1ac1a01c95e01de6c
+  ExpoUI: 664174621222257d368cfd3c5e68b9ed1d4cb165
   FBLazyVector: 24e62c765683b8d89006a88a2c8f5cf019f0074d
-  hermes-engine: 9900246f026022138469c34d56e25f066e0e3519
+  hermes-engine: bcb636da4032e15fbbc3d9e9efd6669e2adf3419
   NitroModules: 16bc17a076b12304d608f7c915b9d321f56dfc19
   RCTDeprecation: a4c521821fab57cbb125b36effe84d897d0dfa12
   RCTRequired: 9f3a7e5645d4bc3f551593de7550bb66ab6e42bc
@@ -2743,7 +2749,7 @@ SPEC CHECKSUMS:
   React: e2dc35338068bbd299c66f043ae0d7f25de8499e
   React-callinvoker: 28b25d21b124c26cebaea713ba7d801b9351dc48
   React-Core: 02ed7d2ffb70437bdf2aba074a13078a7b0b9ff0
-  React-Core-prebuilt: b634622824989962556480500094e006d61ccda1
+  React-Core-prebuilt: 7086e4fb89d4f0fd38b3d242f701e9fe737705ed
   React-CoreModules: b3a5a42dadcde3b5d47b325bd912eb2ced89e146
   React-cxxreact: fe8f88dda044e5905e99a00f41b7a874c3908716
   React-debug: 92944dc4d89f56d640e75498266cbde557a48189
@@ -2807,13 +2813,13 @@ SPEC CHECKSUMS:
   ReactAppDependencyProvider: 25c9c516839be2c5e3d3344f95dc7da5f7e63fc2
   ReactCodegen: dfe41c3f92bdf782bcf9b2c9d7c12cb9cfd82cb7
   ReactCommon: 7dfc3250793bf36cf221096ff59e1179e13eef7f
-  ReactNativeDependencies: a48a0ee9be78642568de72f287cb4118e53b280a
+  ReactNativeDependencies: bf0405ce569bdbde8accdabce029a6fa855bbc1e
   ReactNativeHealthkit: af20857324ceab69398bfb08924bb136b77a70a4
   RNCAsyncStorage: 2ad919e88b8bc2cd80e8697ce66d04d006743283
   RNCMaskedView: eb2b2e538afa907f05a5848a1a1ac26092e6fec9
   RNGestureHandler: 2ff61eac036eaf89f6818bf4ed9c39771a17d134
   RNReanimated: 07fe6682b1d90b9d536540614562850503c63dbb
-  RNScreens: f94000b3cb1eb14cbb8d08dd6074fdd6ccf0e6b0
+  RNScreens: c1a06fd73d0581a2a28a160577be393f579662b9
   RNSVG: 04044c3abcf177fd674a1a3d13097efa1adebcbe
   RNWorklets: 2b1732dea513e38333481dc919029c1e14dc647d
   UMAppLoader: b7d22886a244871c20b5a8f2fcea13c18534e677

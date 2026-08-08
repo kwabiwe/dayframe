@@ -9,6 +9,7 @@ import {
   hasSuggestedTimeWindow,
   hideTombstonedReviewItems,
   isCalendarPreviewReviewItem,
+  isCurrentReviewEditPresentation,
   isOneOffLocationReviewItem,
   isOpenReviewItem,
   isReviewNeededEntry,
@@ -513,6 +514,24 @@ describe("mobile review helpers", () => {
       "Dismiss suggestion"
     ]));
     expect(copy.join(" ")).not.toMatch(/\b(projects?|clients?|tags?)\b/i);
+  });
+
+  it("rejects a stale Review edit-presentation callback after rapid open/cancel/reopen", () => {
+    // Simulates review.tsx's monotonic editPresentationSequence: begin(1), begin(2)
+    // (a rapid cancel-then-reopen), then a delayed onPresented/onCancel callback
+    // for presentation 1 arrives after presentation 2 is already current.
+    let currentPresentationId: number | null = null;
+
+    currentPresentationId = 1;
+    expect(isCurrentReviewEditPresentation(currentPresentationId, 1)).toBe(true);
+
+    currentPresentationId = 2;
+    expect(isCurrentReviewEditPresentation(currentPresentationId, 1)).toBe(false);
+    expect(isCurrentReviewEditPresentation(currentPresentationId, 2)).toBe(true);
+
+    currentPresentationId = null;
+    expect(isCurrentReviewEditPresentation(currentPresentationId, 2)).toBe(false);
+    expect(isCurrentReviewEditPresentation(currentPresentationId, 0)).toBe(false);
   });
 });
 

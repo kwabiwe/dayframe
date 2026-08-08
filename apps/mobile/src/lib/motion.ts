@@ -16,6 +16,32 @@ export const MOBILE_MOTION = {
 
 export type LocalMotionPresence = "fade" | "rise" | "scale";
 
+export type ResolvedReduceMotionPreference = {
+  reduceMotion: boolean;
+  resolved: boolean;
+};
+
+let cachedReduceMotionPreference: boolean | null = null;
+let pendingReduceMotionPreference: Promise<boolean> | null = null;
+
+function loadReduceMotionPreference() {
+  if (cachedReduceMotionPreference !== null) {
+    return Promise.resolve(cachedReduceMotionPreference);
+  }
+  if (pendingReduceMotionPreference) return pendingReduceMotionPreference;
+
+  pendingReduceMotionPreference = AccessibilityInfo.isReduceMotionEnabled()
+    .catch(() => cachedReduceMotionPreference ?? true)
+    .then((enabled) => {
+      cachedReduceMotionPreference = enabled;
+      return enabled;
+    })
+    .finally(() => {
+      pendingReduceMotionPreference = null;
+    });
+  return pendingReduceMotionPreference;
+}
+
 export function localPresenceEntering(
   reduceMotion: boolean,
   presence: LocalMotionPresence = "fade"
@@ -39,24 +65,39 @@ export function localLayoutTransition(reduceMotion: boolean) {
     .reduceMotion(reduceMotion ? ReduceMotion.Always : ReduceMotion.System);
 }
 
-export function useReduceMotionPreference() {
-  const [reduceMotion, setReduceMotion] = useState(true);
+export function useResolvedReduceMotionPreference(): ResolvedReduceMotionPreference {
+  const [preference, setPreference] = useState<ResolvedReduceMotionPreference>(() => ({
+    reduceMotion: cachedReduceMotionPreference ?? true,
+    resolved: cachedReduceMotionPreference !== null
+  }));
 
   useEffect(() => {
     let mounted = true;
-    void AccessibilityInfo.isReduceMotionEnabled()
+    void loadReduceMotionPreference()
       .then((enabled) => {
-        if (mounted) setReduceMotion(enabled);
+        if (mounted) setPreference({ reduceMotion: enabled, resolved: true });
       })
-      .catch(() => undefined);
-    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduceMotion);
+      .catch(() => {
+        if (mounted) setPreference({ reduceMotion: true, resolved: true });
+      });
+    const subscription = AccessibilityInfo.addEventListener(
+      "reduceMotionChanged",
+      (enabled) => {
+        cachedReduceMotionPreference = enabled;
+        if (mounted) setPreference({ reduceMotion: enabled, resolved: true });
+      }
+    );
     return () => {
       mounted = false;
       subscription.remove();
     };
   }, []);
 
-  return reduceMotion;
+  return preference;
+}
+
+export function useReduceMotionPreference() {
+  return useResolvedReduceMotionPreference().reduceMotion;
 }
 
 export function useReduceTransparencyPreference() {

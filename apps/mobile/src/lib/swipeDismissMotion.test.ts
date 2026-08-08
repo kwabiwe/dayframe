@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   backdropProgressForTranslation,
+  canSettleSwipeGesture,
   createSwipeDismissCoordinator,
+  createSwipeSheetPresentationCoordinator,
   dismissDistanceForSheet,
   projectedSwipeEndpoint,
   shouldDismissSwipe,
@@ -38,6 +40,17 @@ describe("swipe dismissal decision", () => {
       ...BASE_RELEASE,
       translationY: 42,
       velocityY: 80
+    })).toBe(false);
+  });
+
+  it("never counts an interrupted entrance offset as user dismissal travel", () => {
+    const entranceOffset = 640;
+    const userTravel = 5;
+    const visualTranslation = entranceOffset + userTravel;
+    expect(visualTranslation).toBeGreaterThan(dismissDistanceForSheet(600));
+    expect(shouldDismissSwipe({
+      ...BASE_RELEASE,
+      translationY: userTravel
     })).toBe(false);
   });
 
@@ -156,6 +169,60 @@ describe("dismiss callback coordination", () => {
     coordinator.hide();
     expect(coordinator.commit()).toBe(true);
   });
+
+  it("rejects a queued settle delivered after exit ownership commits", () => {
+    for (const reduceMotion of [false, true]) {
+      const onDismiss = vi.fn();
+      const onGestureSettled = vi.fn();
+      const restWrite = vi.fn();
+      const dismissal = createSwipeDismissCoordinator(onDismiss);
+      const presentation = createSwipeSheetPresentationCoordinator();
+      expect(presentation.begin(41, reduceMotion ? "fade" : "slide")).toBe("start");
+
+      // Gesture settlement is queued while this generation still owns rest.
+      expect(canSettleSwipeGesture({
+        activePresentationId: 41,
+        committedPresentationId: null,
+        coordinatorCanSettle: dismissal.canSettle(),
+        dismissCommitted: false,
+        dismissRequestPresentationId: null,
+        gesturePresentationId: 41,
+        presentationCanSettle: presentation.canSettle(41),
+        visible: true
+      })).toBe(true);
+
+      // Another input commits the exit before the queued callback is delivered.
+      expect(presentation.commitDismiss(41)).toBe(true);
+      expect(dismissal.commit()).toBe(true);
+      const canDeliverQueuedSettlement = canSettleSwipeGesture({
+        activePresentationId: 41,
+        committedPresentationId: 41,
+        coordinatorCanSettle: dismissal.canSettle(),
+        dismissCommitted: true,
+        dismissRequestPresentationId: 41,
+        gesturePresentationId: 41,
+        presentationCanSettle: presentation.canSettle(41),
+        visible: true
+      });
+      if (canDeliverQueuedSettlement) {
+        restWrite();
+        onGestureSettled();
+      }
+
+      expect(canDeliverQueuedSettlement).toBe(false);
+      expect(restWrite).not.toHaveBeenCalled();
+      expect(onGestureSettled).not.toHaveBeenCalled();
+      expect(presentation.complete(41)).toBe("dismissed");
+      expect(dismissal.finish()).toBe(true);
+      expect(dismissal.finish()).toBe(false);
+      expect(onDismiss).toHaveBeenCalledTimes(1);
+      expect(swipeSheetExitPlan({
+        currentTranslation: 72,
+        exitTarget: 800,
+        reduceMotion
+      }).fadeOnly).toBe(reduceMotion);
+    }
+  });
 });
 
 describe("presentation lifecycle", () => {
@@ -218,5 +285,64 @@ describe("presentation lifecycle", () => {
       fadeOnly: false,
       translationTarget: 800
     });
+  });
+
+  it("completes an entrance exactly once when animation and gesture settlement race", () => {
+    for (const completionOrder of [["entrance", "settle"], ["settle", "entrance"]]) {
+      const coordinator = createSwipeSheetPresentationCoordinator();
+      expect(coordinator.begin(41, "slide")).toBe("start");
+      expect(completionOrder.map(() => coordinator.complete(41))).toEqual([
+        "accepted",
+        "duplicate"
+      ]);
+    }
+  });
+
+  it("settles a subthreshold early pan but suppresses presentation after a deliberate flick", () => {
+    const settled = createSwipeSheetPresentationCoordinator();
+    expect(settled.begin(41, "slide")).toBe("start");
+    expect(shouldDismissSwipe({
+      ...BASE_RELEASE,
+      translationY: 5,
+      velocityY: 40
+    })).toBe(false);
+    expect(settled.complete(41)).toBe("accepted");
+    expect(settled.complete(41)).toBe("duplicate");
+
+    const dismissed = createSwipeSheetPresentationCoordinator();
+    expect(dismissed.begin(42, "slide")).toBe("start");
+    expect(shouldDismissSwipe({
+      ...BASE_RELEASE,
+      translationY: 18,
+      velocityY: 900
+    })).toBe(true);
+    expect(dismissed.commitDismiss(42)).toBe(true);
+    expect(dismissed.complete(42)).toBe("dismissed");
+    dismissed.hide();
+    expect(dismissed.begin(43, "fade")).toBe("start");
+    expect(dismissed.complete(42)).toBe("stale");
+    expect(dismissed.complete(43)).toBe("accepted");
+  });
+
+  it("restarts only an unresolved same-generation entrance when motion mode resolves", () => {
+    const coordinator = createSwipeSheetPresentationCoordinator();
+    expect(coordinator.begin(41, "fade")).toBe("start");
+    expect(coordinator.begin(41, "slide")).toBe("restart_for_motion_mode");
+    expect(coordinator.complete(41)).toBe("accepted");
+    expect(coordinator.begin(41, "fade")).toBe("unchanged");
+    expect(coordinator.complete(41)).toBe("duplicate");
+  });
+
+  it("suppresses presentation after an early dismiss and rejects stale generations", () => {
+    const coordinator = createSwipeSheetPresentationCoordinator();
+    expect(coordinator.begin(41, "fade")).toBe("start");
+    expect(coordinator.commitDismiss(41)).toBe(true);
+    expect(coordinator.complete(41)).toBe("dismissed");
+    expect(coordinator.begin(41, "slide")).toBe("unchanged");
+
+    coordinator.hide();
+    expect(coordinator.begin(42, "slide")).toBe("start");
+    expect(coordinator.complete(41)).toBe("stale");
+    expect(coordinator.complete(42)).toBe("accepted");
   });
 });

@@ -21,7 +21,7 @@ The running Today list also confirmed stable expanded and collapsed identity for
 
 ## Documentation conflict reconciled
 
-Earlier sections of `2026-07-17-today-swipe-delete-motion.md` describe a shared confirmation path and treat collapsed aggregate deletion as a possible safety follow-up. Its later superseding decision, the current feature tracker, regression checklist, PRD, and current code all require direct Today deletion with Undo, including collapsed-group deletion. Edit Timer alone retains the app-owned contained confirmation. This PR follows the superseding current contract and records the historical conflict in its PR notes.
+Earlier sections of `2026-07-17-today-swipe-delete-motion.md` describe a shared confirmation path and treat collapsed aggregate deletion as a possible safety follow-up. Its later superseding decision required direct Today deletion with Undo, including collapsed-group deletion. At the time of this July investigation, Edit Timer still retained an app-owned contained prompt. The 2026-08-07 shared-sheet redesign later superseded and removed that prompt too: running and completed editors now exit directly into the same five-second Undo lifecycle. This section records historical ownership only; it is not a current acceptance contract.
 
 ## Motion contracts
 
@@ -45,7 +45,9 @@ Earlier sections of `2026-07-17-today-swipe-delete-motion.md` describe a shared 
 - Async outcomes: none.
 - Reduce Motion: no rise or month travel; state changes and a brief opacity transition remain.
 
-### Contained Edit Timer deletion confirmation
+### Historical contained Edit Timer deletion prompt (superseded)
+
+The contract below describes the July implementation and its archived evidence. It was removed by the later direct Delete/Undo redesign and must not be used for current regression acceptance.
 
 - Trigger: Delete entry opens the confirmation; Cancel or successful delete dismisses it.
 - Single owner: a Reanimated presence wrapper owns the contained scrim and confirmation card. The existing Edit Timer sheet remains mounted beneath it.
@@ -79,7 +81,7 @@ Earlier sections of `2026-07-17-today-swipe-delete-motion.md` describe a shared 
 
 - `DayframeDashboard` retains `ReanimatedSwipeable` as the Today direct-manipulation owner and adds stable-key Reanimated presence/layout transitions for individual rows, grouped rows, expanded children, restoration, list reflow, and the inverse Undo bean.
 - A tokenized five-second deletion coordinator makes rapid consecutive deletion deterministic: the older deletion commits before the newer window begins, Undo targets only the current token, stale callbacks are ignored, and dashboard unmount disposes the outstanding timer.
-- `FloatingDatePicker` now owns its local overlay/sheet presence and restrained keyed month crossfade. `DeleteEntryConfirmation` animates only its contained Edit Timer presentation; the full-screen modal keeps its established owner.
+- `FloatingDatePicker` now owns its local overlay/sheet presence and restrained keyed month crossfade. At that point, the entry-deletion prompt animated only its contained editor presentation; the full-screen modal retained its established owner. The prompt was removed by the later direct Delete/Undo redesign.
 - Review and Places keep rows mounted until API success, then animate the exact stable-key removal and sibling reflow. Failure leaves the item in place. Places copy feedback is an overlaid, tokenized live notice so it does not reflow unrelated content and an older timeout cannot clear newer copy.
 - The implementation stays in React Native/Reanimated because all changed transitions are ordinary local presence or list layout changes and the existing swipe already proves the UI-thread gesture stack is sufficient. No evidence justified a Swift owner.
 
@@ -110,7 +112,7 @@ The following evidence is still required and is not claimed as passed:
 
 - Post-adjustment Places copy feedback and destructive delete/ignore/forget recordings.
 - Today individual, grouped, expanded-child, and blank-row direct swipe deletion; Undo, five-second expiry, rapid consecutive deletion, offline rollback, and vertical-scroll arbitration. The computer-control drag did not produce a reliable swipe, and the Mac locked again before another capture could be inspected.
-- Date selection, Review Dismiss, Edit Timer successful delete, timer start/stop/edit/delete regressions, tab and push/back/swipe-back regressions, and native Calendar scroll/day/pinch regressions.
+- Date selection, Review Dismiss, the then-current Edit Timer prompt's successful path, timer start/stop/edit/delete regressions, tab and push/back/swipe-back regressions, and native Calendar scroll/day/pinch regressions. Current entry deletion is validated by the later shared-sheet investigation instead.
 - System/Light/Dark, Reduce Motion, Dynamic Type, VoiceOver, and Reduce Transparency passes. The completed post-change recordings are normal-motion Light only.
 - Physical-iPhone direct manipulation, native-transition, and frame-pacing validation. `devicectl` found one paired physical iPad Pro 10.5-inch but no physical iPhone; the iPad does not satisfy the required iPhone check. Xcode performance tooling was therefore not used.
 

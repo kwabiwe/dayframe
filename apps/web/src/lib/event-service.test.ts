@@ -36,7 +36,6 @@ const {
   resolveLearnedPlaceLocation,
   resolveReviewItem,
   TimeEntryNotFoundError,
-  TimeEntryValidationError,
   updateLearnedPlaceStatus,
   updateCategory,
   updateTimeEntry,
@@ -102,6 +101,41 @@ describe("category persistence", () => {
       retryClient.query.mock.calls.some(([statement]) => String(statement).includes("set stopped_at = $1"))
     ).toBe(false);
     expect(retryClient.query).toHaveBeenCalledWith("commit");
+  });
+
+  it("returns the canonical time entry for an idempotent timer-start replay", async () => {
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes("client_event_id = $3")) {
+          return { rows: [{ id: "event-start-existing" }] };
+        }
+        if (statement.includes("created_from_event_id = $3")) {
+          return { rows: [{ id: "entry-start-canonical" }] };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await processActivityEvent({
+      source: "mobile_app",
+      type: "timer_start",
+      occurredAt: new Date("2026-08-08T06:00:00.000Z"),
+      clientEventId: "optimistic-active-timer:offline-replay",
+      rawPayload: { origin: "mobile_custom_start_fallback" }
+    }, session);
+
+    expect(result).toMatchObject({
+      duplicate: true,
+      eventId: "event-start-existing",
+      timeEntryId: "entry-start-canonical"
+    });
+    expect(client.query).toHaveBeenCalledWith(
+      expect.stringContaining("created_from_event_id = $3"),
+      [session.workspaceId, session.userId, "event-start-existing"]
+    );
+    expect(client.query).toHaveBeenCalledWith("commit");
   });
 
   it("persists pin state to the categories.is_pinned column", async () => {
@@ -2938,12 +2972,16 @@ describe("time entry partial timestamp validation", () => {
     expect(client.release).toHaveBeenCalled();
   });
 
-  it("rejects a future finish before a stoppedAt-only update reaches persistence", async () => {
+  it("persists a future finish for a completed stoppedAt-only update", async () => {
     const startedAt = new Date(Date.now() - 60 * 60_000).toISOString();
+    const stoppedAt = new Date(Date.now() + 60_000).toISOString();
     const client = {
       query: vi.fn(async (statement: string) => {
         if (statement.includes('select started_at as "startedAt"')) {
           return { rows: [{ startedAt, stoppedAt: null }] };
+        }
+        if (statement.includes("update time_entries")) {
+          return { rows: [{ id: "entry-1", updatedAt: stoppedAt }] };
         }
         return { rows: [] };
       }),
@@ -2951,11 +2989,15 @@ describe("time entry partial timestamp validation", () => {
     };
     mocks.pool.connect.mockResolvedValueOnce(client);
 
-    await expect(updateTimeEntry("entry-1", {
-      stoppedAt: new Date(Date.now() + 60_000).toISOString()
-    }, session)).rejects.toBeInstanceOf(TimeEntryValidationError);
-    expect(client.query.mock.calls.some(([statement]) => String(statement).includes("update time_entries"))).toBe(false);
-    expect(client.query).toHaveBeenCalledWith("rollback");
+    await expect(updateTimeEntry("entry-1", { stoppedAt }, session)).resolves.toEqual({
+      id: "entry-1",
+      updatedAt: stoppedAt
+    });
+    expect(client.query).toHaveBeenCalledWith(
+      expect.stringContaining("update time_entries"),
+      expect.arrayContaining(["entry-1", stoppedAt])
+    );
+    expect(client.query).toHaveBeenCalledWith("commit");
   });
 
   it("persists a valid stoppedAt-only update while preserving the stored start", async () => {

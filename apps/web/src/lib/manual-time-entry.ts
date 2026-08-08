@@ -14,6 +14,9 @@ export function validateManualTimeEntryWindow({
   startedAt: string;
   stoppedAt: string;
 }) {
+  // Retain `now` in the public validator contract for callers that share the
+  // timer-validation payload. Manual entries may intentionally be future-dated.
+  void now;
   const start = new Date(startedAt);
   if (Number.isNaN(start.getTime())) {
     throw new ManualTimeEntryValidationError("startedAt must be a valid date.");
@@ -27,11 +30,8 @@ export function validateManualTimeEntryWindow({
   if (finish.getTime() <= start.getTime()) {
     throw new ManualTimeEntryValidationError("Finish time must be after the start time.");
   }
-  if (start.getTime() > now.getTime()) {
-    throw new ManualTimeEntryValidationError("Start time cannot be in the future.");
-  }
-  if (finish.getTime() > now.getTime()) {
-    throw new ManualTimeEntryValidationError("Finish time cannot be in the future.");
+  if (finish.getTime() - start.getTime() > 24 * 60 * 60 * 1_000) {
+    throw new ManualTimeEntryValidationError("Entries can be no longer than 24 hours.");
   }
 
   return {
