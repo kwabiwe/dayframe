@@ -125,6 +125,8 @@ function isThemePreference(value: string | null): value is ThemePreference {
 }
 
 function createStyles(theme: MobileTheme) {
+  const historicalSuggestionsBackground = theme.mode === "dark" ? "#302824" : "#FFF3E8";
+
   return StyleSheet.create({
     safeArea: {
       flex: 1,
@@ -2125,7 +2127,7 @@ function createStyles(theme: MobileTheme) {
       marginTop: 2
     },
     activeEditDeleteText: {
-      color: theme.dangerText,
+      color: theme.accentText,
       fontFamily: monoFont,
       fontSize: 13,
       fontWeight: "600"
@@ -2211,13 +2213,15 @@ function createStyles(theme: MobileTheme) {
       position: "absolute",
       zIndex: 100,
       elevation: 24,
-      backgroundColor: theme.surfaceRaised,
+      backgroundColor: historicalSuggestionsBackground,
       borderLeftWidth: 1,
       borderRightWidth: 1,
       borderBottomWidth: 1,
+      borderTopWidth: 0,
       borderColor: theme.borderStrong,
-      borderBottomLeftRadius: 14,
-      borderBottomRightRadius: 14,
+      borderRadius: 14,
+      borderTopLeftRadius: 0,
+      borderTopRightRadius: 0,
       overflow: "hidden",
       shadowColor: theme.shadow,
       shadowOffset: { width: 0, height: 8 },
@@ -2227,7 +2231,7 @@ function createStyles(theme: MobileTheme) {
     historicalSuggestionsSurface: {
       flex: 1,
       minHeight: 0,
-      backgroundColor: theme.surfaceRaised
+      backgroundColor: historicalSuggestionsBackground
     },
     historicalSuggestionsHeader: {
       minHeight: 44,
@@ -2249,7 +2253,7 @@ function createStyles(theme: MobileTheme) {
       justifyContent: "center"
     },
     historicalSuggestionsList: {
-      backgroundColor: theme.surfaceRaised,
+      backgroundColor: historicalSuggestionsBackground,
       flex: 1,
       flexShrink: 1,
       minHeight: 0
@@ -2268,6 +2272,7 @@ function createStyles(theme: MobileTheme) {
     },
     taskSuggestionRow: {
       minHeight: 46,
+      backgroundColor: historicalSuggestionsBackground,
       paddingHorizontal: 12,
       paddingVertical: 8,
       flexDirection: "row",
@@ -2531,8 +2536,6 @@ function createStyles(theme: MobileTheme) {
       width: 72,
       minHeight: 44,
       backgroundColor: "transparent",
-      borderLeftWidth: 1,
-      borderLeftColor: theme.border,
       borderRadius: 0,
       paddingHorizontal: 6,
       paddingVertical: 0,
@@ -2553,15 +2556,19 @@ function createStyles(theme: MobileTheme) {
       justifyContent: "space-between",
       gap: 6
     },
+    activeEditTimeDivider: {
+      width: 1,
+      height: 22,
+      flexShrink: 0,
+      backgroundColor: theme.border
+    },
     activeEditRunningEndTime: {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 15,
       fontWeight: "600",
       fontVariant: ["tabular-nums"],
-      borderLeftWidth: 1,
-      borderLeftColor: theme.border,
-      paddingLeft: 9
+      paddingLeft: 3
     },
     activeEditDateInput: {
       flex: 1.25,

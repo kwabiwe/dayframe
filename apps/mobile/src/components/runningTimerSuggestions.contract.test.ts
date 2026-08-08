@@ -30,8 +30,8 @@ describe("time-entry sheet historical Suggestions contract", () => {
     expect(pinnedRunningHeroIndex).toBeGreaterThan(-1);
     expect(pinnedRunningHeroIndex).toBeLessThan(formIndex);
     expect(themeSource).toMatch(/historicalSuggestionsOverlay:\s*\{[\s\S]*?position: "absolute"/);
-    expect(themeSource).toMatch(/historicalSuggestionsSurface:\s*\{[\s\S]*?backgroundColor: theme\.surfaceRaised/);
-    expect(themeSource).toMatch(/historicalSuggestionsList:\s*\{[\s\S]*?backgroundColor: theme\.surfaceRaised[\s\S]*?flexShrink: 1[\s\S]*?minHeight: 0/);
+    expect(themeSource).toMatch(/historicalSuggestionsSurface:\s*\{[\s\S]*?backgroundColor: historicalSuggestionsBackground/);
+    expect(themeSource).toMatch(/historicalSuggestionsList:\s*\{[\s\S]*?backgroundColor: historicalSuggestionsBackground[\s\S]*?flexShrink: 1[\s\S]*?minHeight: 0/);
     expect(themeSource).toMatch(/activeEditBodyKeyboard:\s*\{[\s\S]*?flex: 1[\s\S]*?minHeight: 0/);
     expect(themeSource).toMatch(/activeEditPinnedHeroRow:\s*\{[\s\S]*?flexShrink: 0/);
     expect(overlaySource).toContain("<ScrollView");

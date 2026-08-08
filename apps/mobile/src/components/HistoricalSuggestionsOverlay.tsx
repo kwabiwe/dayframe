@@ -379,7 +379,6 @@ function HistoricalSuggestionRow({
       style={pressable(
         [
           styles.taskSuggestionRow,
-          { backgroundColor: theme.surfaceRaised },
           disabled ? styles.buttonDisabled : null
         ],
         styles.buttonPressed

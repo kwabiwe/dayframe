@@ -1874,7 +1874,12 @@ export function ActiveTimerEditSheet({
                 pointerEvents={presentationInteractionReady ? "auto" : "none"}
                 testID="time-entry-sheet-content"
               >
-              <View style={styles.sheetHeader} />
+              <Pressable
+                accessible={false}
+                onPress={dismissTransientEditingSurfaces}
+                style={styles.sheetHeader}
+                testID="time-entry-sheet-upper-dismiss-area"
+              />
 
               {isRunningMode ? timeEntryHero : null}
 
@@ -2124,6 +2129,7 @@ export function ActiveTimerEditSheet({
                             {formatPickerDate(displayedStartAt)}
                           </Text>
                         </Pressable>
+                        <View pointerEvents="none" style={styles.activeEditTimeDivider} />
                         <TextInput
                           ref={timeInputRef}
                           accessibilityLabel="Start time"
@@ -2169,6 +2175,7 @@ export function ActiveTimerEditSheet({
                               {formatPickerDate(displayedEndAt)}
                             </Text>
                           </Pressable>
+                          <View pointerEvents="none" style={styles.activeEditTimeDivider} />
                           <TextInput
                             ref={endTimeInputRef}
                             accessibilityLabel="End time"
@@ -2202,6 +2209,7 @@ export function ActiveTimerEditSheet({
                           <Text style={styles.activeEditCompactDateText} numberOfLines={1}>
                             {formatPickerDate(new Date(dialNowMs))}
                           </Text>
+                          <View pointerEvents="none" style={styles.activeEditTimeDivider} />
                           <Text style={styles.activeEditRunningEndTime}>
                             {formatTimeInput(new Date(dialNowMs))}
                           </Text>

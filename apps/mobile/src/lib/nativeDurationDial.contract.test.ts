@@ -35,11 +35,14 @@ describe("native duration dial contract", () => {
     expect(expoViewSource).not.toMatch(/URLSession|fetch\(|axios|WebSocket/);
   });
 
-  it("supports multi-turn minutes, separated handles, and graduated haptics", () => {
+  it("supports multi-turn minutes, centred stacked handles, and graduated haptics", () => {
     expect(coreSource).toContain("radians / fullTurn * 60");
-    expect(expoViewSource).toContain("baseRadius - 8");
-    expect(expoViewSource).toContain("baseRadius + 8");
+    expect(expoViewSource).toContain("handle == .range ? baseRadius + 34 : baseRadius");
+    expect(expoViewSource).toContain("drawHandle(.end, record: record)");
+    expect(expoViewSource).toContain("drawHandle(.start, record: record)");
+    expect(expoViewSource).toContain("bringSubviewToFront(startButton)");
     expect(expoViewSource).toContain("baseRadius + 34");
+    expect(expoViewSource).toContain("duration >= 3_600_000");
     expect(expoViewSource).toContain("UISelectionFeedbackGenerator");
     expect(expoViewSource).toContain("UIImpactFeedbackGenerator(style: .light)");
     expect(expoViewSource).toContain("UIImpactFeedbackGenerator(style: .heavy)");

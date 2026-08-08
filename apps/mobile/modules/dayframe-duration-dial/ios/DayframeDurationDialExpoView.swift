@@ -86,6 +86,7 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
       }
       addSubview(button)
     }
+    bringSubviewToFront(startButton)
   }
 
   func update(modelJSON: String) {
@@ -117,10 +118,10 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
     drawTicks(context: context, centre: centre, radius: baseRadius, record: record)
     drawArc(context: context, centre: centre, radius: baseRadius, record: record)
     drawCentre(context: context, centre: centre, record: record)
-    drawHandle(.start, centre: centre, radius: baseRadius - 8, record: record)
-    drawHandle(.end, centre: centre, radius: baseRadius + 8, record: record)
+    drawHandle(.end, record: record)
+    drawHandle(.start, record: record)
     if record.mode != "running" {
-      drawHandle(.range, centre: centre, radius: baseRadius + 34, record: record)
+      drawHandle(.range, record: record)
     }
   }
 
@@ -289,9 +290,7 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
   ) -> CGPoint {
     let centre = CGPoint(x: bounds.midX, y: bounds.midY)
     let baseRadius = min(bounds.width, bounds.height) * 0.34
-    let radius: CGFloat = handle == .start
-      ? baseRadius - 8
-      : handle == .end ? baseRadius + 8 : baseRadius + 34
+    let radius: CGFloat = handle == .range ? baseRadius + 34 : baseRadius
     let angle: Double
     switch handle {
     case .start:
@@ -342,9 +341,11 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
     record: DayframeDurationDialRecord
   ) {
     let start = DayframeDurationDialCore.angle(timestampMilliseconds: record.startMs)
-    let end = DayframeDurationDialCore.angle(
-      timestampMilliseconds: record.mode == "running" ? record.nowMs : record.endMs
-    )
+    let effectiveEnd = record.mode == "running" ? record.nowMs : record.endMs
+    let duration = max(0, effectiveEnd - record.startMs)
+    let end = duration >= 3_600_000
+      ? start + DayframeDurationDialCore.fullTurn
+      : DayframeDurationDialCore.angle(timestampMilliseconds: effectiveEnd)
     context.saveGState()
     context.setStrokeColor(UIColor(dayframeHex: record.theme.accent).cgColor)
     context.setLineWidth(5)
@@ -380,8 +381,6 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
 
   private func drawHandle(
     _ handle: DayframeDurationDialHandle,
-    centre: CGPoint,
-    radius: CGFloat,
     record: DayframeDurationDialRecord
   ) {
     let point = handlePoint(handle, record: record)
