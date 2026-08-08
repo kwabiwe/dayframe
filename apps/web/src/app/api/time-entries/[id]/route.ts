@@ -89,7 +89,7 @@ function validateTimeWindow(update: Parameters<typeof updateTimeEntry>[1]) {
     if (Number.isNaN(startedAt.getTime())) {
       throw new BadRequestError("startedAt must be a valid date.");
     }
-    if (startedAt.getTime() > now.getTime()) {
+    if (update.stoppedAt === null && startedAt.getTime() > now.getTime()) {
       throw new BadRequestError("Start time cannot be in the future.");
     }
   }
@@ -98,9 +98,6 @@ function validateTimeWindow(update: Parameters<typeof updateTimeEntry>[1]) {
     const stoppedAt = new Date(update.stoppedAt);
     if (Number.isNaN(stoppedAt.getTime())) {
       throw new BadRequestError("stoppedAt must be a valid date.");
-    }
-    if (stoppedAt.getTime() > now.getTime()) {
-      throw new BadRequestError("Finish time cannot be in the future.");
     }
     if (startedAt && startedAt.getTime() >= stoppedAt.getTime()) {
       throw new BadRequestError("Start time must be before the finish time.");

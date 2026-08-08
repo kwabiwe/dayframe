@@ -1518,20 +1518,22 @@ function validateResolvedTimeEntryWindow({
   if (!started || Number.isNaN(started.getTime())) {
     throw new TimeEntryValidationError("startedAt must be a valid date.");
   }
-  if (started.getTime() > now.getTime()) {
-    throw new TimeEntryValidationError("Start time cannot be in the future.");
+  if (stoppedAt === null) {
+    if (started.getTime() > now.getTime()) {
+      throw new TimeEntryValidationError("Start time cannot be in the future.");
+    }
+    return;
   }
-  if (stoppedAt === null) return;
 
   const stopped = new Date(stoppedAt instanceof Date ? stoppedAt.getTime() : stoppedAt);
   if (Number.isNaN(stopped.getTime())) {
     throw new TimeEntryValidationError("stoppedAt must be a valid date.");
   }
-  if (stopped.getTime() > now.getTime()) {
-    throw new TimeEntryValidationError("Finish time cannot be in the future.");
-  }
   if (stopped.getTime() <= started.getTime()) {
     throw new TimeEntryValidationError("Finish time must be after the start time.");
+  }
+  if (stopped.getTime() - started.getTime() > 24 * 60 * 60 * 1_000) {
+    throw new TimeEntryValidationError("Entries can be no longer than 24 hours.");
   }
 }
 

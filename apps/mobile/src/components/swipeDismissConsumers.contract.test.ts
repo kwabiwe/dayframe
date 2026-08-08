@@ -100,10 +100,17 @@ describe("shared swipe-dismiss ownership integration", () => {
 
   it("uses gesture travel for dismissal while preserving the interrupted visual origin", () => {
     expect(sheetSource).toContain(
-      "translationY.value = Math.max(0, gestureOriginY.value + event.translationY)"
+      "translationY.value = Math.max(0, gestureOriginY.value + gestureTravelY.value)"
     );
-    expect(sheetSource).toContain("translationY: event.translationY,");
+    expect(sheetSource).toContain("translationY: gestureTravelY.value,");
+    expect(sheetSource).toContain("keyboardHandoffTranslationY.value = event.translationY");
     expect(sheetSource).not.toContain("translationY: translationY.value,");
+  });
+
+  it("does not claim ordinary taps while waiting for the downward pan threshold", () => {
+    expect(sheetSource).toContain(".onStart(() => {");
+    expect(sheetSource).not.toContain(".onBegin(() => {");
+    expect(sheetSource).toContain(".activeOffsetY(SWIPE_DISMISS_MOTION.activeOffsetY)");
   });
 
   it("keeps form interaction and deferred focus behind presentation ownership", () => {

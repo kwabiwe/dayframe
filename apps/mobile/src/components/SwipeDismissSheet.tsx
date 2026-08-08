@@ -1,6 +1,7 @@
 import {
   forwardRef,
   useCallback,
+  useEffect,
   useImperativeHandle,
   useLayoutEffect,
   useMemo,
@@ -63,6 +64,7 @@ type SwipeDismissSheetProps = {
   children: ReactNode;
   disabled?: boolean;
   handleStyle: StyleProp<ViewStyle>;
+  keyboardInset?: number;
   onDismiss: (presentationId: number) => void;
   onDismissStart?: (presentationId: number) => boolean | void;
   onGestureSettled?: (presentationId: number) => void;
@@ -86,6 +88,7 @@ function SwipeDismissSheet({
   children,
   disabled = false,
   handleStyle,
+  keyboardInset = 0,
   onDismiss,
   onDismissStart,
   onGestureSettled,
@@ -106,6 +109,10 @@ function SwipeDismissSheet({
   const exitTarget = useSharedValue(initialExitTarget);
   const measuredSheetHeight = useSharedValue(windowHeight);
   const gestureOriginY = useSharedValue(0);
+  const keyboardInsetValue = useSharedValue(keyboardInset);
+  const keyboardHandoffPending = useSharedValue(false);
+  const keyboardHandoffTranslationY = useSharedValue(0);
+  const gestureTravelY = useSharedValue(0);
   const presence = useSharedValue(0);
   const gestureState = useSharedValue<"idle" | "dragging" | "settling" | "dismissing">("idle");
   const dismissCommitted = useSharedValue(false);
@@ -141,6 +148,10 @@ function SwipeDismissSheet({
   onStaleCallbackRef.current = onStaleCallback;
   activePresentationIdRef.current = presentationId;
   visibleRef.current = visible;
+
+  useEffect(() => {
+    keyboardInsetValue.value = keyboardInset;
+  }, [keyboardInset, keyboardInsetValue]);
 
   const notifyGestureStart = useCallback((gesturePresentationId: number) => {
     if (
@@ -412,17 +423,36 @@ function SwipeDismissSheet({
       -SWIPE_DISMISS_MOTION.horizontalFailureOffset,
       SWIPE_DISMISS_MOTION.horizontalFailureOffset
     ])
-    .onBegin(() => {
+    // Only claim the interaction after the pan crosses activeOffsetY. Using
+    // onBegin here would dismiss the keyboard for ordinary taps on fields,
+    // Suggestions, and quick actions before those controls can respond.
+    .onStart(() => {
       if (dismissCommitted.value) return;
       cancelAnimation(translationY);
       cancelAnimation(presence);
       gestureOriginY.value = translationY.value;
+      keyboardHandoffPending.value = keyboardInsetValue.value > 0.5;
+      keyboardHandoffTranslationY.value = 0;
+      gestureTravelY.value = 0;
       gestureState.value = "dragging";
       runOnJS(notifyGestureStart)(presentationId);
     })
     .onUpdate((event) => {
       if (gestureState.value !== "dragging" || dismissCommitted.value) return;
-      translationY.value = Math.max(0, gestureOriginY.value + event.translationY);
+      if (keyboardHandoffPending.value) {
+        if (keyboardInsetValue.value > 0.5) {
+          translationY.value = 0;
+          gestureTravelY.value = 0;
+          return;
+        }
+        keyboardHandoffPending.value = false;
+        keyboardHandoffTranslationY.value = event.translationY;
+      }
+      gestureTravelY.value = Math.max(
+        0,
+        event.translationY - keyboardHandoffTranslationY.value
+      );
+      translationY.value = Math.max(0, gestureOriginY.value + gestureTravelY.value);
     })
     .onEnd((event) => {
       if (gestureState.value !== "dragging" || dismissCommitted.value) return;
@@ -432,7 +462,7 @@ function SwipeDismissSheet({
         translationX: event.translationX,
         // The animated sheet may still carry entrance translation. Dismissal
         // ownership is decided only from travel caused by this gesture.
-        translationY: event.translationY,
+        translationY: gestureTravelY.value,
         velocityY: event.velocityY
       });
       if (!dismiss) {
@@ -477,7 +507,11 @@ function SwipeDismissSheet({
     dismissCommitted,
     commitDismiss,
     gestureOriginY,
+    gestureTravelY,
     gestureState,
+    keyboardHandoffPending,
+    keyboardHandoffTranslationY,
+    keyboardInsetValue,
     measuredSheetHeight,
     notifyGestureSettledAtRest,
     notifyGestureStart,
@@ -514,22 +548,22 @@ function SwipeDismissSheet({
         />
       </Reanimated.View>
       <ReactNativeAnimated.View style={{ transform: [{ translateY: translateYOffset }] }}>
-        <Reanimated.View
-          accessibilityLabel={accessibilityLabel}
-          accessibilityViewIsModal
-          onLayout={(event) => {
-            const measuredTarget = Math.max(
-              event.nativeEvent.layout.height + OFFSCREEN_PADDING,
-              windowHeight + OFFSCREEN_PADDING
-            );
-            measuredSheetHeight.value = event.nativeEvent.layout.height;
-            exitTarget.value = measuredTarget;
-            onLayout?.(event);
-          }}
-          style={[style, sheetAnimatedStyle]}
-          testID={testID}
-        >
-          <GestureDetector gesture={gesture}>
+        <GestureDetector gesture={gesture}>
+          <Reanimated.View
+            accessibilityLabel={accessibilityLabel}
+            accessibilityViewIsModal
+            onLayout={(event) => {
+              const measuredTarget = Math.max(
+                event.nativeEvent.layout.height + OFFSCREEN_PADDING,
+                windowHeight + OFFSCREEN_PADDING
+              );
+              measuredSheetHeight.value = event.nativeEvent.layout.height;
+              exitTarget.value = measuredTarget;
+              onLayout?.(event);
+            }}
+            style={[style, sheetAnimatedStyle]}
+            testID={testID}
+          >
             <View
               accessibilityHint="Swipe down or double tap to close"
               accessibilityLabel="Dismiss sheet"
@@ -541,9 +575,9 @@ function SwipeDismissSheet({
             >
               <View pointerEvents="none" style={handleStyle} />
             </View>
-          </GestureDetector>
-          {children}
-        </Reanimated.View>
+            {children}
+          </Reanimated.View>
+        </GestureDetector>
       </ReactNativeAnimated.View>
     </>
   );

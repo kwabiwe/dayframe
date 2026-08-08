@@ -1,6 +1,8 @@
 PODS:
   - DayframeCalendar (0.1.0):
     - ExpoModulesCore
+  - DayframeDurationDial (0.1.0):
+    - ExpoModulesCore
   - DayframeLocationVisits (0.1.0):
     - ExpoModulesCore
   - DayframePlaceSearch (0.1.0):
@@ -2365,6 +2367,7 @@ PODS:
 
 DEPENDENCIES:
   - DayframeCalendar (from `../modules/dayframe-calendar/ios`)
+  - DayframeDurationDial (from `../modules/dayframe-duration-dial/ios`)
   - DayframeLocationVisits (from `../modules/dayframe-location-visits/ios`)
   - DayframePlaceSearch (from `../modules/dayframe-place-search/ios`)
   - EXConstants (from `../../../node_modules/expo-constants/ios`)
@@ -2372,16 +2375,16 @@ DEPENDENCIES:
   - ExpoAsset (from `../../../node_modules/expo-asset/ios`)
   - ExpoClipboard (from `../../../node_modules/expo-clipboard/ios`)
   - "ExpoDomWebView (from `../../../node_modules/@expo/dom-webview/ios`)"
-  - ExpoFileSystem (from `../../../node_modules/expo-file-system/ios/ExpoFileSystem.podspec`)
-  - ExpoFont (from `../../../node_modules/expo-font/ios/ExpoFont.podspec`)
+  - ExpoFileSystem (from `../../../node_modules/expo-file-system/ios`)
+  - ExpoFont (from `../../../node_modules/expo-font/ios`)
   - ExpoGlassEffect (from `../../../node_modules/expo-glass-effect/ios`)
   - ExpoKeepAwake (from `../../../node_modules/expo-keep-awake/ios`)
   - ExpoLinking (from `../../../node_modules/expo-linking/ios`)
-  - ExpoLocation (from `../../../node_modules/expo-location/ios/ExpoLocation.podspec`)
+  - ExpoLocation (from `../../../node_modules/expo-location/ios`)
   - "ExpoLogBox (from `../../../node_modules/@expo/log-box`)"
-  - ExpoModulesCore (from `../node_modules/expo-modules-core/ExpoModulesCore.podspec`)
+  - ExpoModulesCore (from `../node_modules/expo-modules-core`)
   - ExpoModulesJSI (from `../../../node_modules/expo-modules-jsi/apple`)
-  - ExpoModulesWorklets (from `../node_modules/expo-modules-core/ExpoModulesWorklets.podspec`)
+  - ExpoModulesWorklets (from `../node_modules/expo-modules-core`)
   - ExpoModulesWorkletsAdapter (from `../node_modules/expo-modules-core`)
   - ExpoRouter (from `../node_modules/expo-router/ios`)
   - ExpoSecureStore (from `../../../node_modules/expo-secure-store/ios`)
@@ -2481,6 +2484,8 @@ DEPENDENCIES:
 EXTERNAL SOURCES:
   DayframeCalendar:
     :path: "../modules/dayframe-calendar/ios"
+  DayframeDurationDial:
+    :path: "../modules/dayframe-duration-dial/ios"
   DayframeLocationVisits:
     :path: "../modules/dayframe-location-visits/ios"
   DayframePlaceSearch:
@@ -2496,9 +2501,9 @@ EXTERNAL SOURCES:
   ExpoDomWebView:
     :path: "../../../node_modules/@expo/dom-webview/ios"
   ExpoFileSystem:
-    :podspec: "../../../node_modules/expo-file-system/ios/ExpoFileSystem.podspec"
+    :path: "../../../node_modules/expo-file-system/ios"
   ExpoFont:
-    :podspec: "../../../node_modules/expo-font/ios/ExpoFont.podspec"
+    :path: "../../../node_modules/expo-font/ios"
   ExpoGlassEffect:
     :path: "../../../node_modules/expo-glass-effect/ios"
   ExpoKeepAwake:
@@ -2506,15 +2511,15 @@ EXTERNAL SOURCES:
   ExpoLinking:
     :path: "../../../node_modules/expo-linking/ios"
   ExpoLocation:
-    :podspec: "../../../node_modules/expo-location/ios/ExpoLocation.podspec"
+    :path: "../../../node_modules/expo-location/ios"
   ExpoLogBox:
     :path: "../../../node_modules/@expo/log-box"
   ExpoModulesCore:
-    :podspec: "../node_modules/expo-modules-core/ExpoModulesCore.podspec"
+    :path: "../node_modules/expo-modules-core"
   ExpoModulesJSI:
     :path: "../../../node_modules/expo-modules-jsi/apple"
   ExpoModulesWorklets:
-    :podspec: "../node_modules/expo-modules-core/ExpoModulesWorklets.podspec"
+    :path: "../node_modules/expo-modules-core"
   ExpoModulesWorkletsAdapter:
     :path: "../node_modules/expo-modules-core"
   ExpoRouter:
@@ -2707,6 +2712,7 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   DayframeCalendar: 105d3dd67c3a016050217d253a97bc81eeed0cbe
+  DayframeDurationDial: dfee3e1252be07902bf9097d15129947d54b96b2
   DayframeLocationVisits: a92d96c395edf56959289c8e57ebb10ab4417884
   DayframePlaceSearch: 0dca400edd668a45b1c00b986ecb147ada6bfea5
   EXConstants: 6bcea1db4d1215969dc3409dfe33d94a5bfe50ca
@@ -2721,7 +2727,7 @@ SPEC CHECKSUMS:
   ExpoLinking: 58d1cc05b96ead9e921353464ad03651eeb71ab9
   ExpoLocation: 91767066d799150edd734b453bd801c7b4769107
   ExpoLogBox: cdad5c9402a186574fb5924ea91df1f08ba9a98a
-  ExpoModulesCore: beb67ef469a2dcfd15181c7208289fa79e232ff6
+  ExpoModulesCore: 06410c6ac2f13edaae5f5444689b9cacc6a9c6d7
   ExpoModulesJSI: e62656cfaffb5aeb3fdc1dd2bc49f77e87ed2261
   ExpoModulesWorklets: 40fe3862230a3d967899ff29211480efc5daf4e2
   ExpoModulesWorkletsAdapter: 036c0be70f07d6fff89023f33da6e28556a85838

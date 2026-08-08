@@ -99,8 +99,6 @@ try {
       "Native evidence requires a clean source tree. Commit the intended source first, or use --allow-dirty only for diagnostic runs."
     );
   }
-  await ensureSimulatorBooted(options.udid);
-  originalReduceMotion = await readReduceMotion(options.udid);
   originalHardwareKeyboard = await readHostDefault(
     "com.apple.iphonesimulator",
     "ConnectHardwareKeyboard"
@@ -112,6 +110,11 @@ try {
     "-bool",
     "false"
   ]);
+  // Simulator consumes this host preference during process/device startup.
+  // Setting it after boot can leave a hardware keyboard attached: TextInput
+  // focuses successfully while UIKit reports a zero-height software keyboard.
+  await restartSimulatorForHardwareKeyboard(options.udid);
+  originalReduceMotion = await readReduceMotion(options.udid);
   let xctestrunPath;
   if (!options.noBuild) {
     await runChecked("xcodebuild", [
@@ -258,6 +261,9 @@ try {
     "ConnectHardwareKeyboard",
     originalHardwareKeyboard
   );
+  if (originalHardwareKeyboard !== null) {
+    await restartSimulatorForHardwareKeyboard(options.udid, { quiet: true });
+  }
 }
 
 process.stderr.write(`Dayframe sheet QA NDJSON: ${outputPath}\n`);
@@ -469,6 +475,13 @@ async function ensureSimulatorBooted(udid) {
     await runChecked("xcrun", ["simctl", "boot", udid]);
   }
   await runChecked("xcrun", ["simctl", "bootstatus", udid, "-b"]);
+}
+
+async function restartSimulatorForHardwareKeyboard(udid, { quiet = false } = {}) {
+  await runAllowFailure("xcrun", ["simctl", "shutdown", udid], { quiet: true });
+  await runAllowFailure("killall", ["Simulator"], { quiet: true });
+  await ensureSimulatorBooted(udid);
+  if (!quiet) record("simulator_restarted_for_keyboard_preference", { udid });
 }
 
 async function ensureMetro(port) {

@@ -511,3 +511,27 @@ The keyboard-confirmation retry watchdog is retained as a real (if incomplete) i
 - Draft state confirmed: **YES — GitHub reports the PR as draft.**
 - Branch pushed and clean: **YES — `codex/mobile-sheet-redesign` is pushed; clean status verified after the final documentation push.**
 - No merge, staging-alias promotion, deployment, production configuration change, production migration or TestFlight upload: **CONFIRMED — none performed.**
+
+## Product-owner revision after device review (2026-08-08)
+
+The product owner rejected the frozen draft above after reviewing it on a physical iPhone and supplied a new, authoritative specification through the `PR161 Timer sheet fixes` Trello card, five visual references and three clarification rounds. This section supersedes the earlier layout and interaction conclusions where they conflict.
+
+Implemented in the same PR #161 branch:
+
+- all running, completed and Add Past Time editors now use one fixed full-height sheet; keyboard, Suggestions and the date picker do not resize or reposition the outer sheet;
+- restored the Done control to a 16-point top/right outer inset, aligned the running actions, and added the 44-point active-timer Plus action eight points below Stop;
+- made blank Play and Add Past Time keyboard-first journeys while existing running and completed entries initially remain keyboard-free;
+- converted Suggestions to an anchored floating surface with an independent close action, background dismissal, single-line historical metadata and Description-first truncation;
+- compressed Start/End controls into one normal-size row with accessibility-only stacking, removed disruptive overlap warnings, and permitted future completed/Add entries up to 24 hours;
+- added a native UIKit duration dial with Dayframe styling, 60 ticks, stronger five-minute markers, Play/Stop/range handles, preserved seconds, multi-revolution hours, one-second minimum, 24-hour maximum, cross-midnight editing, haptics and accessible adjustable controls;
+- added Set to Last Stop Time, five-minute Round Stop and Round Duration actions with midpoint-up rounding and running-timer-specific semantics;
+- kept running End tied to the current time, made only its Start handle editable, and left stopped/Add changes as drafts until Done;
+- moved Delete beneath the dial and retained immediate deletion with the existing five-second Undo lifecycle;
+- made internal content scroll only when keyboard, small-screen or accessibility overflow requires it, while preserving the fixed sheet geometry and continuous keyboard-to-sheet downward dismissal gesture;
+- corrected Add Past Time while a timer is running to end at the live timer's start, using the most recent prior stop when suitable and otherwise a 30-minute interval;
+- replaced the precompiled Expo module ABI path with source-built Expo modules so the local native duration-dial module registers safely with the app's React Native runtime;
+- hardened keyboard ownership against missed early iOS notifications by reconciling retained native metrics and both `keyboardWillChangeFrame` and `keyboardDidShow`, while retaining a bounded responder recovery path that does not perturb Suggestions state.
+
+Validation note: focused development checks and native diagnostic runs were used while implementing these changes. At 18:44 BST, the product owner explicitly instructed the implementation pass to stop the repeated Simulator/XCUITest cycle, skip further tests and prepare the PR. Therefore the earlier ledger must not be read as exact-head validation for this revision, and no unrun stress, recording, appearance or physical-device result is claimed as passing.
+
+Safety remains unchanged: the branch is prepared as a draft PR only. No merge, deployment, production migration, production configuration change or TestFlight upload is part of this handoff.

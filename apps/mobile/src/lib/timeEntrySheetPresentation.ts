@@ -90,6 +90,8 @@ export type TimeEntrySheetEvent =
   | { type: "hashtag_query_changed"; presentationId: number; active: boolean }
   | { type: "suggestion_results_changed"; presentationId: number; count: number }
   | { type: "suggestions_animation_finished"; presentationId: number; direction: "open" | "close" }
+  | { type: "suggestions_dismissed"; presentationId: number }
+  | { type: "background_interaction"; presentationId: number }
   | { type: "suggestion_selected"; presentationId: number }
   | { type: "suggestion_selection_failed"; presentationId: number }
   | { type: "date_picker_requested"; presentationId: number }
@@ -279,6 +281,18 @@ export function timeEntrySheetReducer(
       } else if (state.suggestionsPhase === "closing") {
         next = { ...state, suggestionsPhase: "closed" };
       }
+      break;
+    case "suggestions_dismissed":
+      next = { ...state, suggestionsSuppressed: true };
+      break;
+    case "background_interaction":
+      next = {
+        ...state,
+        descriptionFocused: false,
+        keyboardPhase: state.keyboardPhase === "hidden" ? "hidden" : "dismissing",
+        suggestionsSuppressed: true,
+        surface: "form"
+      };
       break;
     case "suggestion_selected":
       next = { ...state, suggestionsSuppressed: true };
@@ -549,7 +563,9 @@ export function shouldRetryKeyboardConfirmation({
     currentPresentationId === watchdogPresentationId &&
     state.appState === "active" &&
     state.keyboardSessionToken === watchdogSessionToken &&
-    state.keyboardPhase === "focus_requested" &&
+    (state.keyboardPhase === "focus_requested" ||
+      state.keyboardPhase === "presenting" ||
+      state.keyboardPhase === "hidden") &&
     state.descriptionFocused
   );
 }

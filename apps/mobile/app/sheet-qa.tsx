@@ -163,11 +163,10 @@ function SheetQaHarness() {
     () => historyFixtures.slice(0, suggestionCount),
     [suggestionCount]
   );
-  const peerEntries = historicalEntries;
   const presentation = useMemo<TimeEntrySheetPresentation>(() => ({
     id: presentationId,
     reason: openReasonForFixture(fixtureKey),
-    requestDescriptionFocus: fixtureKey === "blank" || fixtureKey === "review",
+    requestDescriptionFocus: fixtureKey === "blank" || fixtureKey === "add" || fixtureKey === "review",
     allowSuggestionsOnFocus: true
   }), [fixtureKey, presentationId]);
 
@@ -524,7 +523,6 @@ function SheetQaHarness() {
           ) as MobileBootstrap);
           return true;
         } : undefined}
-        peerEntries={peerEntries}
         presentation={presentation}
         reduceMotion={reduceMotion}
         saving={false}

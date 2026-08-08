@@ -36,7 +36,6 @@ const {
   resolveLearnedPlaceLocation,
   resolveReviewItem,
   TimeEntryNotFoundError,
-  TimeEntryValidationError,
   updateLearnedPlaceStatus,
   updateCategory,
   updateTimeEntry,
@@ -2973,12 +2972,16 @@ describe("time entry partial timestamp validation", () => {
     expect(client.release).toHaveBeenCalled();
   });
 
-  it("rejects a future finish before a stoppedAt-only update reaches persistence", async () => {
+  it("persists a future finish for a completed stoppedAt-only update", async () => {
     const startedAt = new Date(Date.now() - 60 * 60_000).toISOString();
+    const stoppedAt = new Date(Date.now() + 60_000).toISOString();
     const client = {
       query: vi.fn(async (statement: string) => {
         if (statement.includes('select started_at as "startedAt"')) {
           return { rows: [{ startedAt, stoppedAt: null }] };
+        }
+        if (statement.includes("update time_entries")) {
+          return { rows: [{ id: "entry-1", updatedAt: stoppedAt }] };
         }
         return { rows: [] };
       }),
@@ -2986,11 +2989,15 @@ describe("time entry partial timestamp validation", () => {
     };
     mocks.pool.connect.mockResolvedValueOnce(client);
 
-    await expect(updateTimeEntry("entry-1", {
-      stoppedAt: new Date(Date.now() + 60_000).toISOString()
-    }, session)).rejects.toBeInstanceOf(TimeEntryValidationError);
-    expect(client.query.mock.calls.some(([statement]) => String(statement).includes("update time_entries"))).toBe(false);
-    expect(client.query).toHaveBeenCalledWith("rollback");
+    await expect(updateTimeEntry("entry-1", { stoppedAt }, session)).resolves.toEqual({
+      id: "entry-1",
+      updatedAt: stoppedAt
+    });
+    expect(client.query).toHaveBeenCalledWith(
+      expect.stringContaining("update time_entries"),
+      expect.arrayContaining(["entry-1", stoppedAt])
+    );
+    expect(client.query).toHaveBeenCalledWith("commit");
   });
 
   it("persists a valid stoppedAt-only update while preserving the stored start", async () => {

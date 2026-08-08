@@ -1,0 +1,12 @@
+{
+  "name": "dayframe-duration-dial",
+  "version": "0.1.0",
+  "description": "Dayframe's iOS-native multi-revolution duration dial",
+  "main": "index.ts",
+  "private": true,
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

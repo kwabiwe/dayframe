@@ -515,6 +515,49 @@ describe("time-entry sheet Suggestions and picker precedence", () => {
     expect(state.suggestionsPhase).toBe("opening");
   });
 
+  it("lets the Suggestions X close only the panel while focus and keyboard ownership survive", () => {
+    let state = focusedWithResults();
+    state = timeEntrySheetReducer(state, {
+      type: "keyboard_focus_requested",
+      presentationId: 12,
+      sessionToken: 1
+    });
+    state = timeEntrySheetReducer(state, {
+      type: "keyboard_frame_changed",
+      presentationId: 12,
+      frame: { inset: 320, sequence: 1 },
+      interactive: false,
+      sessionToken: 1
+    });
+    state = timeEntrySheetReducer(state, { type: "suggestions_dismissed", presentationId: 12 });
+    expect(state.descriptionFocused).toBe(true);
+    expect(state.keyboardPhase).toBe("visible");
+    expect(state.keyboardSessionToken).toBe(1);
+    expect(state.suggestionsPhase).toBe("closing");
+    state = timeEntrySheetReducer(state, { type: "description_query_changed", presentationId: 12 });
+    expect(state.suggestionsPhase).toBe("opening");
+  });
+
+  it("treats a background/control interaction as a separate full editing dismissal", () => {
+    let state = focusedWithResults();
+    state = timeEntrySheetReducer(state, {
+      type: "keyboard_focus_requested",
+      presentationId: 12,
+      sessionToken: 2
+    });
+    state = timeEntrySheetReducer(state, {
+      type: "keyboard_frame_changed",
+      presentationId: 12,
+      frame: { inset: 320, sequence: 1 },
+      interactive: false,
+      sessionToken: 2
+    });
+    state = timeEntrySheetReducer(state, { type: "background_interaction", presentationId: 12 });
+    expect(state.descriptionFocused).toBe(false);
+    expect(state.keyboardPhase).toBe("dismissing");
+    expect(state.suggestionsPhase).toBe("closing");
+  });
+
   it("closes for a date picker and does not reopen when the picker closes", () => {
     let state = focusedWithResults();
     state = timeEntrySheetReducer(state, { type: "date_picker_requested", presentationId: 12 });
@@ -960,6 +1003,40 @@ describe("keyboard confirmation retry decision", () => {
         watchdogSessionToken: 1
       })).toBe(true);
     }
+  });
+
+  it("retries when native focus is presenting but no keyboard frame arrives", () => {
+    let state = presented(BLANK_PRESENTATION);
+    state = timeEntrySheetReducer(state, {
+      type: "description_focused",
+      presentationId: BLANK_PRESENTATION.id
+    });
+    state = acquireKeyboardSession(state, BLANK_PRESENTATION.id, 1);
+    expect(state.keyboardPhase).toBe("focus_requested");
+    state = { ...state, keyboardPhase: "presenting" };
+    expect(shouldRetryKeyboardConfirmation({
+      currentPresentationId: BLANK_PRESENTATION.id,
+      maxRetries: 3,
+      retryCount: 1,
+      state,
+      watchdogPresentationId: BLANK_PRESENTATION.id,
+      watchdogSessionToken: 1
+    })).toBe(true);
+  });
+
+  it("retries when UIKit reports a zero-height hidden frame during initial focus", () => {
+    const state = {
+      ...stuckAtFocusRequested(1),
+      keyboardPhase: "hidden" as const
+    };
+    expect(shouldRetryKeyboardConfirmation({
+      currentPresentationId: BLANK_PRESENTATION.id,
+      maxRetries: 3,
+      retryCount: 2,
+      state,
+      watchdogPresentationId: BLANK_PRESENTATION.id,
+      watchdogSessionToken: 1
+    })).toBe(true);
   });
 
   it("stops once the retry budget is exhausted for the same presentation", () => {

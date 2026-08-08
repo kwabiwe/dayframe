@@ -107,6 +107,7 @@ final class DayframeSheetQATests: XCTestCase {
 
   private func runSmokeFlow() throws {
     let opened = try openHarness(fixture: "blank", count: 1)
+    try requireSoftwareKeyboard("blank smoke")
     let sheet = try waitForSheet("blank smoke ready") { state in
       SheetQAValue.bool(state, "ready") == true
         && SheetQAValue.string(state, "keyboardPhase") == "visible"
@@ -133,6 +134,7 @@ final class DayframeSheetQATests: XCTestCase {
 
   private func runBlankFlow(iteration: Int? = nil) throws {
     let harness = try openHarness(fixture: "blank", count: 12)
+    try requireSoftwareKeyboard("blank Play")
     let initial = try waitForSheet("blank Play focus, keyboard, and Suggestions") { state in
       SheetQAValue.bool(state, "ready") == true
         && SheetQAValue.string(state, "keyboardPhase") == "visible"
@@ -356,12 +358,21 @@ final class DayframeSheetQATests: XCTestCase {
 
   private func runAddFlow(iteration: Int? = nil) throws {
     let harness = try openHarness(fixture: "add", count: 6)
+    try requireSoftwareKeyboard("Add past time")
     let initial = try waitForSheet("Add past time initial state") { state in
       SheetQAValue.bool(state, "ready") == true
-        && SheetQAValue.string(state, "keyboardPhase") == "hidden"
+        && SheetQAValue.string(state, "keyboardPhase") == "visible"
+        && SheetQAValue.string(state, "suggestionsPhase") == "visible"
+        && self.suggestionsAreVisiblyRenderable(state)
+        && SheetQAValue.int(state, "focusCommandCount") == 1
     }
     try assertPresentedSheet(initial, harness: harness, reason: "add_past_time")
-    let timeField = element(SheetQAIdentifiers.startTime)
+    try tap("historical-suggestions-close")
+    _ = try waitForSheet("Add past time Suggestions close") { state in
+      SheetQAValue.string(state, "keyboardPhase") == "visible"
+        && SheetQAValue.string(state, "suggestionsPhase") == "closed"
+    }
+    var timeField = element(SheetQAIdentifiers.startTime)
     try waitForElement(timeField, description: "Add past time start-time field")
     guard let originalTime = elementValue(timeField), !originalTime.isEmpty else {
       throw SheetQAFailure("Add past time did not expose a readable start-time value.")
@@ -380,6 +391,8 @@ final class DayframeSheetQATests: XCTestCase {
     )
     julyFifteenth.tap()
     try waitForElementToDisappear(picker, description: "date picker after selecting 15 July")
+    timeField = element(SheetQAIdentifiers.startTime)
+    try waitForElement(timeField, description: "Add past time start-time field after date selection")
     let preservedTime = elementValue(timeField)
     try require(
       preservedTime == originalTime,
@@ -388,6 +401,14 @@ final class DayframeSheetQATests: XCTestCase {
     try tap(SheetQAIdentifiers.startTime, scrollIn: SheetQAIdentifiers.sheetForm)
     try replaceFieldValue(timeField, with: "16:30")
     try waitForElementValue(timeField, equals: "16:30", description: "edited Add past time start time")
+    try require(
+      app.keyboards.firstMatch.exists,
+      "Add past time time editing did not present the software keyboard."
+    )
+    timeField.typeText(XCUIKeyboardKey.return.rawValue)
+    _ = try waitForSheet("Add past time keyboard dismissal") { state in
+      SheetQAValue.string(state, "keyboardPhase") == "hidden"
+    }
     let temporalBeforeSuggestion = try temporalSnapshot()
     try bringDescriptionIntoView()
     let selected = try selectBauhausSuggestion()
@@ -1077,6 +1098,16 @@ final class DayframeSheetQATests: XCTestCase {
     }
   }
 
+  private func requireSoftwareKeyboard(_ context: String) throws {
+    let keyboard = app.keyboards.firstMatch
+    guard keyboard.waitForExistence(timeout: 8) else {
+      throw SheetQAFailure(
+        "QA environment misconfiguration during \(context): no software keyboard exists. " +
+        "Restart Simulator after setting ConnectHardwareKeyboard=false before attributing this to app focus."
+      )
+    }
+  }
+
   @discardableResult
   private func openHarness(
     fixture: String,
@@ -1507,16 +1538,64 @@ final class DayframeSheetQATests: XCTestCase {
     try waitForElement(field, description: "Description field")
     try require(field.isHittable, "Description field could not be brought into view.")
     field.tap()
-    try replaceFieldValue(field, with: replacement)
+    try replaceFieldValue(
+      field,
+      with: replacement,
+      emptyDisplayValues: ["What are you working on?"]
+    )
   }
 
-  private func replaceFieldValue(_ field: XCUIElement, with replacement: String) throws {
-    if let current = elementValue(field), !current.isEmpty {
-      field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count))
+  private func replaceFieldValue(
+    _ field: XCUIElement,
+    with replacement: String,
+    emptyDisplayValues: Set<String> = []
+  ) throws {
+    // A normal center tap can place the insertion point at the start of a
+    // compact five-character time field. Put it at the trailing edge before
+    // issuing backspaces so the edit is deterministic.
+    field.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+    if let current = elementValue(field),
+       !current.isEmpty,
+       !emptyDisplayValues.contains(current) {
+      // Controlled React Native fields reconcile after every edit. Sending a
+      // whole delete run as one synthesized event can race that reconciliation
+      // and leave formatted time text partially intact, so delete one
+      // character at a time just as a user would.
+      for _ in current {
+        let previous = elementValue(field)
+        field.typeText(XCUIKeyboardKey.delete.rawValue)
+        try waitForElementValueToChange(
+          field,
+          from: previous,
+          description: "field deletion reconciliation"
+        )
+      }
     }
-    if !replacement.isEmpty {
-      field.typeText(replacement)
+    for character in replacement {
+      let previous = elementValue(field)
+      field.typeText(String(character))
+      try waitForElementValueToChange(
+        field,
+        from: previous,
+        description: "field input reconciliation"
+      )
     }
+  }
+
+  private func waitForElementValueToChange(
+    _ candidate: XCUIElement,
+    from previous: String?,
+    timeout: TimeInterval = 2,
+    description: String
+  ) throws {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+      if candidate.exists && elementValue(candidate) != previous { return }
+      pollRunLoop()
+    }
+    throw SheetQAFailure(
+      "Timed out waiting for \(description); value remained \(previous ?? "<nil>")."
+    )
   }
 
   private func bringDescriptionIntoView() throws {

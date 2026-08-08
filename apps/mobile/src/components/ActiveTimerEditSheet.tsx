@@ -20,7 +20,6 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import Svg, { Path } from "react-native-svg";
 import {
   consumeActiveHashtag,
-  analyzeTimeIntervals,
   buildHistoricalEntrySuggestions,
   findActiveHashtag,
   historicalSuggestionPatch,
@@ -36,11 +35,11 @@ import {
   type HistoricalSuggestionsOverlayRenderState
 } from "@/components/HistoricalSuggestionsOverlay";
 import { PrimaryTimerGlyph } from "@/components/PrimaryTimerAction";
+import { TimeEntryDurationDial } from "@/components/TimeEntryDurationDial";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
 import {
   editSheetKeyboardLayout,
-  keyboardInsetFromScreenY,
-  keyboardLiftAnimationDuration
+  keyboardInsetFromScreenY
 } from "@/lib/editSheetKeyboard";
 import type { MobileBootstrap, MobileTag, MobileTimeEntry, TimeEntryUpdatePatch } from "@/lib/api";
 import { runningTimerSheetElapsedSeconds } from "@/lib/timerPresentation";
@@ -56,7 +55,6 @@ import {
 import {
   beginTimeEntrySheetGeometryPresentation,
   calculateHistoricalSuggestionsOverlayGeometry,
-  classifyKeyboardHeightAnimationCompletion,
   createTimeEntrySheetGeometryCache,
   invalidateTimeEntrySheetGeometry,
   isCurrentTimeEntrySheetFrameToken,
@@ -82,23 +80,22 @@ import {
   createTimeEntrySheetMutationTelemetry,
   timeEntrySheetMutationTelemetryReducer
 } from "@/lib/timeEntrySheetTelemetry";
+import {
+  mergeTimeEntryDialLocalDateTime,
+  TIME_ENTRY_DIAL_MAX_DURATION_MS,
+  TIME_ENTRY_DIAL_MIN_DURATION_MS,
+  type TimeEntryDialInterval
+} from "@/lib/timeEntryDurationDial";
 
 const HISTORICAL_SUGGESTION_LIMIT = 12;
 const HISTORICAL_OVERLAY_MAX_HEIGHT = 384;
-// iOS can accept a TextInput as first responder (onFocus fires) while its
-// window has not yet become key, silently dropping the keyboard-frame
-// notification. A bounded blur/refocus retry loop recovers from that race
-// without masking a genuine keyboard failure. The blur half of each retry is
-// native-only (its reducer dispatch is suppressed) so it cannot perturb
-// Suggestions or any other focus-driven state.
+// UIKit can accept the TextInput as first responder before the Modal window is
+// ready to own the software keyboard. Recover with a bounded, native-only
+// responder handshake that deliberately leaves reducer/Suggestions focus state
+// untouched.
 const KEYBOARD_CONFIRMATION_TIMEOUT_MS = 700;
 const KEYBOARD_CONFIRMATION_MAX_RETRIES = 3;
-// A retry's blur() can still produce a genuine keyboardWillHide notification
-// (the responder chain change is real even though the keyboard never
-// visually appeared). That notification is delivered asynchronously and can
-// arrive after the refocus below has already started a new native keyboard
-// session, misattributing itself to that fresh session and tearing it down.
-// Suppression must therefore outlast native delivery, not just one frame.
+const KEYBOARD_CONFIRMATION_REFOCUS_DELAY_MS = 120;
 const KEYBOARD_CONFIRMATION_SUPPRESSION_SETTLE_MS = 300;
 
 type Category = MobileBootstrap["categories"][number];
@@ -119,7 +116,6 @@ type ActiveTimerEditSheetProps = {
   onApplySuggestion?: (entryId: string, suggestion: RecentActivitySuggestion) => Promise<boolean>;
   onSave?: (entryId: string, patch: TimeEntryUpdatePatch) => Promise<boolean>;
   onStop?: () => Promise<boolean>;
-  peerEntries?: MobileTimeEntry[];
   presentation: TimeEntrySheetPresentation;
   reduceMotion: boolean;
   mode?: EditSheetMode;
@@ -148,7 +144,6 @@ export function ActiveTimerEditSheet({
   onApplySuggestion,
   onSave,
   onStop,
-  peerEntries = [],
   presentation,
   reduceMotion,
   deleting = false,
@@ -167,6 +162,9 @@ export function ActiveTimerEditSheet({
   const [timeText, setTimeText] = useState("");
   const [stoppedDateText, setStoppedDateText] = useState("");
   const [stoppedTimeText, setStoppedTimeText] = useState("");
+  const [draftStartMs, setDraftStartMs] = useState(0);
+  const [draftEndMs, setDraftEndMs] = useState(0);
+  const [draftRevision, setDraftRevision] = useState(0);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [sheetHeightAnimating, setSheetHeightAnimating] = useState(false);
@@ -249,6 +247,7 @@ export function ActiveTimerEditSheet({
   const keyboardHeightAnimationTokenRef = useRef<KeyboardHeightAnimationToken | null>(null);
   const keyboardTopRef = useRef<number | null>(null);
   const operationTokenRef = useRef(0);
+  const suggestionMutationSequenceRef = useRef(0);
   const mutationGateRef = useRef<{ presentationId: number; token: number } | null>(null);
   const handledDismissRequestIdRef = useRef<number | null>(null);
   const [overlayGeometry, setOverlayGeometry] = useState<HistoricalSuggestionsOverlayGeometry | null>(null);
@@ -304,6 +303,42 @@ export function ActiveTimerEditSheet({
       keyboardConfirmationTimeoutRef.current = null;
     }
   }, []);
+  const synchronizeVisibleKeyboardMetrics = useCallback((sessionToken: number) => {
+    if (
+      appActivityRef.current !== "active" ||
+      activeKeyboardSessionTokenRef.current !== sessionToken
+    ) {
+      return false;
+    }
+    // The initial keyboard frame can be delivered before the component's
+    // listener effect subscribes. React Native keeps the last native metrics,
+    // so reconcile them before assuming that focus failed and perturbing the
+    // responder chain with a retry.
+    const metrics = Keyboard.metrics();
+    if (!metrics || metrics.height <= 0) return false;
+    const windowHeight = Dimensions.get("window").height;
+    const screenHeight = Dimensions.get("screen").height;
+    const inset = keyboardInsetFromScreenY({
+      keyboardScreenY: metrics.screenY,
+      screenHeight,
+      windowHeight
+    });
+    if (inset <= 0) return false;
+    keyboardTopRef.current = metrics.screenY;
+    keyboardFrameSequenceRef.current += 1;
+    dispatchSheetEvent({
+      type: "keyboard_frame_changed",
+      presentationId: presentationRef.current.id,
+      frame: {
+        inset,
+        sequence: keyboardFrameSequenceRef.current
+      },
+      interactive: false,
+      sessionToken
+    });
+    applyKeyboardUpdateRef.current(inset, undefined, sessionToken, false);
+    return true;
+  }, []);
   const armKeyboardConfirmationWatchdog = useCallback((sessionToken: number) => {
     clearKeyboardConfirmationWatchdog();
     if (
@@ -315,6 +350,7 @@ export function ActiveTimerEditSheet({
     const watchdogPresentationId = presentationRef.current.id;
     keyboardConfirmationTimeoutRef.current = setTimeout(() => {
       keyboardConfirmationTimeoutRef.current = null;
+      if (synchronizeVisibleKeyboardMetrics(sessionToken)) return;
       if (!shouldRetryKeyboardConfirmation({
         currentPresentationId: presentationRef.current.id,
         maxRetries: KEYBOARD_CONFIRMATION_MAX_RETRIES,
@@ -327,26 +363,28 @@ export function ActiveTimerEditSheet({
       }
       keyboardConfirmationRetryCountRef.current += 1;
       setKeyboardConfirmationRetryCount((count) => count + 1);
-      // Force iOS to redo the first-responder handshake. Both the onBlur prop
-      // and the native keyboardWillHide notification this blur() triggers are
-      // suppressed until well after the refocus below, so neither the reducer
-      // nor the keyboard-session ref can observe the synthetic churn. onFocus
-      // re-arms this same watchdog if the retry still doesn't land, up to
-      // KEYBOARD_CONFIRMATION_MAX_RETRIES.
       suppressDescriptionBlurDispatchRef.current = true;
       descriptionInputRef.current?.blur();
-      requestAnimationFrame(() => {
+      // Let UIKit finish resigning first responder before requesting it again.
+      // A one-frame handoff can be coalesced into a no-op by the Modal's
+      // responder window, leaving focus true but the software keyboard absent.
+      keyboardConfirmationTimeoutRef.current = setTimeout(() => {
+        keyboardConfirmationTimeoutRef.current = null;
         if (presentationRef.current.id !== watchdogPresentationId) {
           suppressDescriptionBlurDispatchRef.current = false;
           return;
         }
         descriptionInputRef.current?.focus();
+        // UIKit does not guarantee that a second native onFocus callback is
+        // emitted after a responder recovery. Re-arm explicitly so every
+        // bounded attempt gets its own confirmation window.
+        armKeyboardConfirmationWatchdog(sessionToken);
         setTimeout(() => {
           suppressDescriptionBlurDispatchRef.current = false;
         }, KEYBOARD_CONFIRMATION_SUPPRESSION_SETTLE_MS);
-      });
+      }, KEYBOARD_CONFIRMATION_REFOCUS_DELAY_MS);
     }, KEYBOARD_CONFIRMATION_TIMEOUT_MS);
-  }, [clearKeyboardConfirmationWatchdog]);
+  }, [clearKeyboardConfirmationWatchdog, synchronizeVisibleKeyboardMetrics]);
   const cancelPendingTagFocus = useCallback(() => {
     tagFocusRequestSequenceRef.current += 1;
     if (tagFocusFrameRef.current !== null) {
@@ -458,6 +496,7 @@ export function ActiveTimerEditSheet({
     setPresentedCallbackCount(0);
     setDismissedCallbackCount(0);
     setInteractiveKeyboardFrameCount(0);
+    setKeyboardConfirmationRetryCount(0);
     setTelemetryBaseRect(null);
     setTelemetrySheetRect(null);
     setTelemetryDescriptionRect(null);
@@ -502,14 +541,18 @@ export function ActiveTimerEditSheet({
     setSelectedCategoryId(snapshot.categoryId);
     setDateText(formatDateInput(startedAt));
     setTimeText(formatTimeInput(startedAt));
+    setDraftStartMs(startedAt.getTime());
     if (snapshot.stoppedAt) {
       const stoppedAt = new Date(snapshot.stoppedAt);
       setStoppedDateText(formatDateInput(stoppedAt));
       setStoppedTimeText(formatTimeInput(stoppedAt));
+      setDraftEndMs(stoppedAt.getTime());
     } else {
       setStoppedDateText("");
       setStoppedTimeText("");
+      setDraftEndMs(Date.now());
     }
+    setDraftRevision(0);
     setPickerStartAt(startedAt);
     setDatePickerTarget("start");
     setStartTimeEdited(false);
@@ -606,7 +649,10 @@ export function ActiveTimerEditSheet({
       const nextOverlayGeometry = calculateHistoricalSuggestionsOverlayGeometry({
         descriptionRect: localGeometry.descriptionRect,
         desiredHeight: HISTORICAL_OVERLAY_MAX_HEIGHT,
-        keyboardTop: localGeometry.overlayBottomBoundary,
+        keyboardTop: Math.max(
+          localGeometry.overlayTopBoundary,
+          localGeometry.overlayBottomBoundary - keyboardInsetRef.current
+        ),
         safeAreaBottom: 0,
         sheetRect: localGeometry.sheetRect,
         topBoundary: localGeometry.overlayTopBoundary
@@ -778,71 +824,21 @@ export function ActiveTimerEditSheet({
       return undefined;
     }
 
-    function animateKeyboardLayout(
+  function animateKeyboardLayout(
       toValue: number,
       targetHeight: number | null,
-      event?: KeyboardEvent
+      _event?: KeyboardEvent
     ) {
-      const completionToken = {
-        presentationId: presentation.id,
-        sequence: keyboardFrameSequenceRef.current
-      } satisfies KeyboardHeightAnimationToken;
-      keyboardHeightAnimationTokenRef.current = completionToken;
+      // The keyboard is an internal occlusion boundary only. It must never
+      // translate or resize the fixed outer sheet.
+      keyboardHeightAnimationTokenRef.current = null;
       keyboardLift.stopAnimation();
       animatedSheetHeight.stopAnimation();
-      if (reduceMotion) {
-        keyboardLift.setValue(toValue);
-        if (targetHeight !== null) animatedSheetHeight.setValue(targetHeight);
-        keyboardHeightAnimationTokenRef.current = null;
-        setSheetHeightAnimating(false);
-        return;
-      }
-      const duration = keyboardLiftAnimationDuration({
-        eventDuration: event?.duration,
-        platform: Platform.OS
-      });
-      if (duration === null) {
-        keyboardLift.setValue(toValue);
-        if (targetHeight !== null) animatedSheetHeight.setValue(targetHeight);
-        keyboardHeightAnimationTokenRef.current = null;
-        setSheetHeightAnimating(false);
-        return;
-      }
-      const animations = [
-        Animated.timing(keyboardLift, {
-          toValue,
-          duration,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: false
-        })
-      ];
+      keyboardLift.setValue(toValue);
       if (targetHeight !== null) {
-        const currentHeight = measuredSheetHeight.current || targetHeight;
-        animatedSheetHeight.setValue(currentHeight);
-        setSheetHeightAnimating(true);
-        animations.push(Animated.timing(animatedSheetHeight, {
-          toValue: targetHeight,
-          duration,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: false
-        }));
+        animatedSheetHeight.setValue(targetHeight);
       }
-      Animated.parallel(animations).start(({ finished }) => {
-        const completion = classifyKeyboardHeightAnimationCompletion({
-          completionToken,
-          currentPresentationId: presentationRef.current.id,
-          currentSequence: keyboardFrameSequenceRef.current,
-          currentToken: keyboardHeightAnimationTokenRef.current,
-          finished
-        });
-        if (completion === "stale") {
-          recordStaleCallback();
-          return;
-        }
-        if (completion !== "accepted") return;
-        keyboardHeightAnimationTokenRef.current = null;
-        setSheetHeightAnimating(false);
-      });
+      setSheetHeightAnimating(false);
     }
 
     function applyKeyboardUpdateForSession(
@@ -863,16 +859,9 @@ export function ActiveTimerEditSheet({
         topInset: insets.top,
         windowHeight: windowDimensions.height
       });
-      const opening = nextInset > 0;
-      if (opening && keyboardInsetRef.current === 0 && measuredSheetHeight.current > 0) {
-        closedSheetHeight.current = measuredSheetHeight.current;
-      }
       keyboardInsetRef.current = nextInset;
       setKeyboardInset(nextInset);
-      const targetHeight = opening
-        ? nextLayout.sheetHeight
-        : closedSheetHeight.current || null;
-      animateKeyboardLayout(nextLayout.bottomLift, targetHeight, event);
+      animateKeyboardLayout(0, nextLayout.sheetHeight, event);
       if (startTimeFocused.current) {
         scheduleScrollToEnd();
       }
@@ -935,9 +924,14 @@ export function ActiveTimerEditSheet({
       Platform.OS === "ios" ? "keyboardWillChangeFrame" : "keyboardDidShow",
       updateKeyboardInset
     );
-    const hideSubscription = Keyboard.addListener(
-      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
-      (event) => {
+    // Simulator and some restored iOS keyboard states can omit the early
+    // frame-change notification while still delivering keyboardDidShow.
+    // Reconcile both phases; duplicate frames are harmless and keep the app's
+    // geometry truthful to the actual native keyboard.
+    const didShowSubscription = Platform.OS === "ios"
+      ? Keyboard.addListener("keyboardDidShow", updateKeyboardInset)
+      : null;
+    const handleKeyboardHidden = (event: KeyboardEvent) => {
         if (suppressDescriptionBlurDispatchRef.current) return;
         const sessionToken = activeKeyboardSessionTokenRef.current;
         if (appActivityRef.current !== "active" || sessionToken === null) return;
@@ -952,12 +946,20 @@ export function ActiveTimerEditSheet({
         queueOrApplyKeyboardUpdate(0, event, sessionToken);
         activeKeyboardSessionTokenRef.current = null;
         scheduleGeometryMeasurement();
-      }
+      };
+    const hideSubscription = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      handleKeyboardHidden
     );
+    const didHideSubscription = Platform.OS === "ios"
+      ? Keyboard.addListener("keyboardDidHide", handleKeyboardHidden)
+      : null;
 
     return () => {
       changeSubscription.remove();
+      didShowSubscription?.remove();
       hideSubscription.remove();
+      didHideSubscription?.remove();
     };
   }, [
     hashtagPanelProgress,
@@ -980,11 +982,12 @@ export function ActiveTimerEditSheet({
       return;
     }
     if (mutationGateRef.current !== null) return;
-    keyboardMotionFrozen.current = true;
-    keyboardFrameSequenceRef.current += 1;
-    keyboardHeightAnimationTokenRef.current = null;
-    keyboardLift.stopAnimation();
-    animatedSheetHeight.stopAnimation();
+    // Keyboard frames must keep flowing during an interactive downward swipe
+    // so the native keyboard-to-sheet handoff remains observable.
+    keyboardMotionFrozen.current = false;
+    if (keyboardInsetRef.current > 0) {
+      dismissTransientEditingSurfaces();
+    }
     setSwipeStartedCount((count) => count + 1);
     setLastSwipeStartedPresentationId(gesturePresentationId);
     dispatchSheetEvent({ type: "swipe_started", presentationId: gesturePresentationId });
@@ -995,22 +998,8 @@ export function ActiveTimerEditSheet({
       recordStaleCallback();
       return;
     }
-    if (!keyboardMotionFrozen.current) return;
     keyboardMotionFrozen.current = false;
-    const pending = pendingKeyboardUpdate.current;
     pendingKeyboardUpdate.current = null;
-    // A swipe can cancel the Animated.parallel completion before a new native
-    // keyboard frame arrives. Always start a fresh generation toward the last
-    // authoritative inset so sheetHeightAnimating reaches a terminal state.
-    const sessionToken = pending?.sessionToken ?? activeKeyboardSessionTokenRef.current;
-    if (sessionToken !== null) {
-      applyKeyboardUpdateRef.current(
-        pending?.inset ?? keyboardInsetRef.current,
-        pending?.event,
-        sessionToken,
-        pending?.inset === 0
-      );
-    }
     setSwipeCancelledCount((count) => count + 1);
     setLastSwipeCancelledPresentationId(gesturePresentationId);
     dispatchSheetEvent({ type: "swipe_cancelled", presentationId: gesturePresentationId });
@@ -1141,54 +1130,44 @@ export function ActiveTimerEditSheet({
     setHighlightedTagAction(matchingTags[0]?.id ?? (createTagName ? "create" : null));
   }, [activeHashtag?.query, createTagName, matchingTags]);
 
-  const parsedStart = useMemo(
-    () => parseLocalDateTime(dateText, timeText),
-    [dateText, timeText]
-  );
-  const parsedStop = useMemo(
-    () => parseLocalDateTime(stoppedDateText, stoppedTimeText),
-    [stoppedDateText, stoppedTimeText]
-  );
-  const previewStartAt = datePickerOpen && pickerStartAt
-    ? parseLocalDateTime(formatDateInput(pickerStartAt), timeText).date
+  const parsedStart = useMemo(() => {
+    const result = mergeTimeEntryDialLocalDateTime({
+      baseTimestampMs: draftStartMs,
+      dateText,
+      timeText
+    });
+    return {
+      date: result.timestampMs === null ? null : new Date(result.timestampMs),
+      error: result.error
+    };
+  }, [dateText, draftStartMs, timeText]);
+  const parsedStop = useMemo(() => {
+    const result = mergeTimeEntryDialLocalDateTime({
+      baseTimestampMs: draftEndMs,
+      dateText: stoppedDateText,
+      timeText: stoppedTimeText
+    });
+    return {
+      date: result.timestampMs === null ? null : new Date(result.timestampMs),
+      error: result.error
+    };
+  }, [draftEndMs, stoppedDateText, stoppedTimeText]);
+  const previewStartAt = datePickerOpen && datePickerTarget === "start" && pickerStartAt
+    ? new Date(mergeTimeEntryDialLocalDateTime({
+        baseTimestampMs: draftStartMs,
+        dateText: formatDateInput(pickerStartAt),
+        timeText
+      }).timestampMs ?? draftStartMs)
     : parsedStart.date;
+  const dialNowMs = Date.now();
   const elapsedPreviewSeconds = hasStoppedTime && parsedStart.date && parsedStop.date
       ? Math.max(0, Math.floor((parsedStop.date.getTime() - parsedStart.date.getTime()) / 1000))
       : runningTimerSheetElapsedSeconds({
           activeElapsedSeconds: elapsedSeconds,
-          nowMs: Date.now(),
+          nowMs: dialNowMs,
           previewStartAt,
           startTimeEdited
         });
-  const overlapWarning = useMemo(() => {
-    if (!entry || !parsedStart.date || (hasStoppedTime && !parsedStop.date)) return null;
-    const candidateId = "__mobile_overlap_candidate__";
-    return analyzeTimeIntervals(
-      [
-        ...peerEntries
-          .filter((candidate) => candidate.id !== entry.id)
-          .map((candidate) => ({
-            id: candidate.id,
-            startedAt: candidate.startedAt,
-            stoppedAt: candidate.stoppedAt
-          })),
-        {
-          id: candidateId,
-          startedAt: parsedStart.date,
-          stoppedAt: hasStoppedTime ? parsedStop.date : null
-        }
-      ],
-      { now: new Date() }
-    ).entries.find((candidate) => candidate.id === candidateId) ?? null;
-  }, [entry, hasStoppedTime, parsedStart.date, parsedStop.date, peerEntries]);
-  const overlapPeers = useMemo(() => {
-    if (!overlapWarning) return [];
-    const peerById = new Map(peerEntries.map((candidate) => [candidate.id, candidate]));
-    return overlapWarning.overlappingEntryIds
-      .map((id) => peerById.get(id))
-      .filter((candidate): candidate is MobileTimeEntry => Boolean(candidate))
-      .slice(0, 2);
-  }, [overlapWarning, peerEntries]);
 
   const busy = saving || stopping || deleting || sheetState.mutationPhase !== "idle";
   const canStop = isRunningMode && Boolean(onStop);
@@ -1196,7 +1175,6 @@ export function ActiveTimerEditSheet({
   const cancelLabel = isRunningMode ? "Cancel editing timer" : isAddMode ? "Cancel adding time" : "Cancel editing entry";
   const saveLabel = isRunningMode ? "Save timer edits" : isAddMode ? "Create time entry" : "Save entry edits";
   const sheetTitle = isAddMode ? "Add time" : "Edit entry";
-  const elapsedLabel = hasStoppedTime ? "Duration" : null;
   const elapsedText = formatClockDuration(elapsedPreviewSeconds);
   const keyboardLayout = editSheetKeyboardLayout({
     bottomInset: insets.bottom,
@@ -1204,17 +1182,10 @@ export function ActiveTimerEditSheet({
     topInset: insets.top,
     windowHeight: windowDimensions.height
   });
-  const keyboardAwareSheetStyle = sheetHeightAnimating
-    ? {
-        height: animatedSheetHeight,
-        maxHeight: keyboardLayout.sheetMaxHeight
-      }
-    : keyboardLayout.keyboardOpen
-    ? {
-        height: keyboardLayout.sheetHeight ?? undefined,
-        maxHeight: keyboardLayout.sheetHeight ?? keyboardLayout.sheetMaxHeight
-      }
-    : { maxHeight: keyboardLayout.sheetMaxHeight };
+  const keyboardAwareSheetStyle = {
+    height: keyboardLayout.sheetHeight,
+    maxHeight: keyboardLayout.sheetMaxHeight
+  };
   const pendingCallerDismissRequestId = pendingTimeEntrySheetDismissRequestId({
     dismissRequestId,
     handledDismissRequestId: handledDismissRequestIdRef.current,
@@ -1456,15 +1427,29 @@ export function ActiveTimerEditSheet({
 
   async function saveChanges() {
     if (busy || !entry || !onSave) return;
-    const parsed = datePickerOpen && pickerStartAt
-      ? parseLocalDateTime(formatDateInput(pickerStartAt), timeText)
-      : parseLocalDateTime(dateText, timeText);
+    const parsed = datePickerOpen && datePickerTarget === "start" && pickerStartAt
+      ? (() => {
+          const merged = mergeTimeEntryDialLocalDateTime({
+            baseTimestampMs: draftStartMs,
+            dateText: formatDateInput(pickerStartAt),
+            timeText
+          });
+          return {
+            date: merged.timestampMs === null ? null : new Date(merged.timestampMs),
+            error: merged.error
+          };
+        })()
+      : parsedStart;
     if (parsed.error || !parsed.date) {
       setValidationError(parsed.error ?? "Choose a valid start date and time.");
       return;
     }
-    if (parsed.date.getTime() > Date.now()) {
-      setValidationError("Start time cannot be in the future.");
+    if (isRunningMode && parsed.date.getTime() > Date.now() - TIME_ENTRY_DIAL_MIN_DURATION_MS) {
+      setValidationError("A running timer must start at least one second before now.");
+      return;
+    }
+    if (isRunningMode && Date.now() - parsed.date.getTime() > TIME_ENTRY_DIAL_MAX_DURATION_MS) {
+      setValidationError("Timers can be no longer than 24 hours.");
       return;
     }
 
@@ -1479,17 +1464,17 @@ export function ActiveTimerEditSheet({
     }
 
     if (hasStoppedTime) {
-      const stopped = parseLocalDateTime(stoppedDateText, stoppedTimeText);
+      const stopped = parsedStop;
       if (stopped.error || !stopped.date) {
         setValidationError(stopped.error ?? "Choose a valid end date and time.");
         return;
       }
-      if (stopped.date.getTime() > Date.now()) {
-        setValidationError("End time cannot be in the future.");
-        return;
-      }
       if (parsed.date.getTime() >= stopped.date.getTime()) {
         setValidationError("Start time must be before the end time.");
+        return;
+      }
+      if (stopped.date.getTime() - parsed.date.getTime() > TIME_ENTRY_DIAL_MAX_DURATION_MS) {
+        setValidationError("Entries can be no longer than 24 hours.");
         return;
       }
       patch.stoppedAt = stopped.date.toISOString();
@@ -1505,6 +1490,7 @@ export function ActiveTimerEditSheet({
 
   async function stopFromSheet() {
     if (busy || !onStop) return;
+    dismissTransientEditingSurfaces();
     const token = beginMutation("stopping");
     if (token === null) return;
     const ok = await resolveMutation(onStop);
@@ -1520,31 +1506,40 @@ export function ActiveTimerEditSheet({
     const previousTagNames = [...selectedTagNames];
     const previousSelection = descriptionSelection;
     const requiresPersistence = isRunningMode && Boolean(onApplySuggestion);
-    const token = requiresPersistence ? beginMutation("saving") : null;
-    if (requiresPersistence && token === null) return;
+    suggestionMutationSequenceRef.current += 1;
+    const suggestionMutationSequence = suggestionMutationSequenceRef.current;
     dispatchSheetEvent({ type: "suggestion_selected", presentationId: presentation.id });
     setDescription(patch.description);
     setDescriptionSelection({ start: patch.description.length, end: patch.description.length });
     setSelectedCategoryId(patch.categoryId);
     setSelectedTagNames(patch.tagNames);
     setValidationError(null);
-    if (!requiresPersistence || !onApplySuggestion || token === null) {
+    if (!requiresPersistence || !onApplySuggestion) {
       AccessibilityInfo.announceForAccessibility(
         historicalSuggestionAppliedAnnouncement(suggestion)
       );
       return;
     }
     const ok = await resolveMutation(() => onApplySuggestion(entry.id, suggestion));
-    const accepted = finishMutation(token, ok ? "succeeded" : "failed");
+    const accepted = suggestionMutationSequence === suggestionMutationSequenceRef.current &&
+      presentation.id === presentationRef.current.id;
     if (accepted && ok) {
       AccessibilityInfo.announceForAccessibility(
         historicalSuggestionAppliedAnnouncement(suggestion)
       );
     } else if (accepted) {
-      setDescription(previousDescription);
-      setDescriptionSelection(previousSelection);
-      setSelectedCategoryId(previousCategoryId);
-      setSelectedTagNames(previousTagNames);
+      // Keep subsequent typing/focus live while persistence is in flight. Only
+      // restore fields that still contain this exact optimistic suggestion.
+      setDescription((current) => current === patch.description ? previousDescription : current);
+      setDescriptionSelection((current) => (
+        current.start === patch.description.length && current.end === patch.description.length
+          ? previousSelection
+          : current
+      ));
+      setSelectedCategoryId((current) => current === patch.categoryId ? previousCategoryId : current);
+      setSelectedTagNames((current) => (
+        current.join("\u0000") === patch.tagNames.join("\u0000") ? previousTagNames : current
+      ));
       dispatchSheetEvent({
         type: "suggestion_selection_failed",
         presentationId: presentation.id
@@ -1557,24 +1552,13 @@ export function ActiveTimerEditSheet({
 
   async function deleteEntryFromSheet() {
     if (busy || !entry || !onDelete) return;
+    dismissTransientEditingSurfaces();
     const token = beginMutation("deleting");
     if (token === null) return;
     Keyboard.dismiss();
     const ok = await resolveMutation(() => onDelete(entry.id));
     const accepted = finishMutation(token, ok ? "succeeded" : "failed");
     if (accepted && ok) requestCoordinatedDismiss();
-  }
-
-  function useLastStopTime() {
-    if (!lastStoppedAt) return;
-    const stoppedAt = new Date(lastStoppedAt);
-    setDateText(formatDateInput(stoppedAt));
-    setTimeText(formatTimeInput(stoppedAt));
-    setPickerStartAt(stoppedAt);
-    if (!hasStoppedTime) setStartTimeEdited(true);
-    setDatePickerOpen(false);
-    dispatchSheetEvent({ type: "date_picker_closed", presentationId: presentation.id });
-    setValidationError(null);
   }
 
   function updateTimeText(value: string) {
@@ -1589,7 +1573,17 @@ export function ActiveTimerEditSheet({
       Keyboard.dismiss();
       return;
     }
-    const sessionToken = beginNativeKeyboardSession();
+    // An internal watchdog recovery is still the same native keyboard
+    // ownership attempt. Starting a new session here would overwrite a frame
+    // that arrived between blur and refocus, put the reducer back into
+    // `focus_requested`, and trigger unnecessary retries while the keyboard is
+    // already visible.
+    const currentSheetState = sheetStateRef.current;
+    const activeSessionToken = activeKeyboardSessionTokenRef.current;
+    const sessionToken = activeSessionToken !== null &&
+        currentSheetState.descriptionFocused
+      ? activeSessionToken
+      : beginNativeKeyboardSession();
     if (sessionToken === null) {
       descriptionInputRef.current?.blur();
       Keyboard.dismiss();
@@ -1665,8 +1659,36 @@ export function ActiveTimerEditSheet({
     setValidationError(null);
   }
 
-  function openStartPicker() {
+  function applyDialInterval(interval: TimeEntryDialInterval) {
+    const start = new Date(interval.startMs);
+    const end = new Date(interval.endMs);
+    setDraftStartMs(interval.startMs);
+    setDraftEndMs(interval.endMs);
+    setDateText(formatDateInput(start));
+    setTimeText(formatTimeInput(start));
+    if (hasStoppedTime) {
+      setStoppedDateText(formatDateInput(end));
+      setStoppedTimeText(formatTimeInput(end));
+    }
+    if (isRunningMode) setStartTimeEdited(true);
+    setDraftRevision((current) => current + 1);
+    setValidationError(null);
+  }
+
+  function dismissTransientEditingSurfaces() {
+    descriptionInputRef.current?.blur();
+    timeInputRef.current?.blur();
+    endTimeInputRef.current?.blur();
+    setDatePickerOpen(false);
+    dispatchSheetEvent({
+      type: "background_interaction",
+      presentationId: presentation.id
+    });
     Keyboard.dismiss();
+  }
+
+  function openStartPicker() {
+    dismissTransientEditingSurfaces();
     dispatchSheetEvent({ type: "date_picker_requested", presentationId: presentation.id });
     const currentStart = parsedStart.date ?? fallbackStartAt();
     setDatePickerTarget("start");
@@ -1676,7 +1698,7 @@ export function ActiveTimerEditSheet({
   }
 
   function openEndPicker() {
-    Keyboard.dismiss();
+    dismissTransientEditingSurfaces();
     dispatchSheetEvent({ type: "date_picker_requested", presentationId: presentation.id });
     const currentEnd = parsedStop.date ?? parsedStart.date ?? fallbackStartAt();
     setDatePickerTarget("end");
@@ -1687,34 +1709,40 @@ export function ActiveTimerEditSheet({
 
   function selectDate(date: Date) {
     if (datePickerTarget === "end") {
-      const parsed = parseLocalDateTime(formatDateInput(date), stoppedTimeText);
-      if (parsed.error || !parsed.date) {
-        setValidationError(parsed.error ?? "Choose a valid end date and time.");
+      const merged = mergeTimeEntryDialLocalDateTime({
+        baseTimestampMs: draftEndMs,
+        dateText: formatDateInput(date),
+        timeText: stoppedTimeText
+      });
+      if (merged.error || merged.timestampMs === null) {
+        setValidationError(merged.error ?? "Choose a valid end date and time.");
         return;
       }
-      if (parsed.date.getTime() > Date.now()) {
-        setValidationError("End time cannot be in the future.");
-        return;
-      }
-      setPickerStartAt(parsed.date);
-      setStoppedDateText(formatDateInput(parsed.date));
+      const parsedDate = new Date(merged.timestampMs);
+      setDraftEndMs(merged.timestampMs);
+      setDraftRevision((current) => current + 1);
+      setPickerStartAt(parsedDate);
+      setStoppedDateText(formatDateInput(parsedDate));
       setDatePickerOpen(false);
       dispatchSheetEvent({ type: "date_picker_closed", presentationId: presentation.id });
       setValidationError(null);
       return;
     }
 
-    const parsed = parseLocalDateTime(formatDateInput(date), timeText);
-    if (parsed.error || !parsed.date) {
-      setValidationError(parsed.error ?? "Choose a valid start date and time.");
+    const merged = mergeTimeEntryDialLocalDateTime({
+      baseTimestampMs: draftStartMs,
+      dateText: formatDateInput(date),
+      timeText
+    });
+    if (merged.error || merged.timestampMs === null) {
+      setValidationError(merged.error ?? "Choose a valid start date and time.");
       return;
     }
-    if (parsed.date.getTime() > Date.now()) {
-      setValidationError("Start time cannot be in the future.");
-      return;
-    }
-    setPickerStartAt(parsed.date);
-    setDateText(formatDateInput(parsed.date));
+    const parsedDate = new Date(merged.timestampMs);
+    setDraftStartMs(merged.timestampMs);
+    setDraftRevision((current) => current + 1);
+    setPickerStartAt(parsedDate);
+    setDateText(formatDateInput(parsedDate));
     if (isRunningMode) setStartTimeEdited(true);
     setDatePickerOpen(false);
     dispatchSheetEvent({ type: "date_picker_closed", presentationId: presentation.id });
@@ -1745,7 +1773,9 @@ export function ActiveTimerEditSheet({
   }
 
   const timeEntryHero = (
-    <View
+    <Pressable
+      accessibilityHint="Dismisses the keyboard and Suggestions"
+      onPress={dismissTransientEditingSurfaces}
       style={[
         styles.activeEditHeroRow,
         isRunningMode ? styles.activeEditPinnedHeroRow : null
@@ -1756,7 +1786,6 @@ export function ActiveTimerEditSheet({
         <Text style={styles.activeEditElapsed} testID="time-entry-sheet-elapsed">
           {elapsedText}
         </Text>
-        {elapsedLabel ? <Text style={styles.activeEditElapsedLabel}>{elapsedLabel}</Text> : null}
       </View>
       {canStop ? (
         <Pressable
@@ -1774,7 +1803,7 @@ export function ActiveTimerEditSheet({
           <PrimaryTimerGlyph color={theme.onAccent} mode="stop" />
         </Pressable>
       ) : null}
-    </View>
+    </Pressable>
   );
 
   return (
@@ -1798,6 +1827,7 @@ export function ActiveTimerEditSheet({
               backdropStyle={styles.sheetBackdrop}
               disabled={busy || datePickerOpen}
               handleStyle={styles.sheetHandle}
+              keyboardInset={keyboardInset}
               onDismiss={(dismissedPresentationId) => {
                 if (dismissedPresentationId !== presentationRef.current.id) {
                   recordStaleCallback();
@@ -1841,27 +1871,9 @@ export function ActiveTimerEditSheet({
                 scheduleGeometryMeasurement();
               }}
               testID="time-entry-sheet"
-              translateYOffset={Animated.multiply(keyboardLift, -1)}
+              translateYOffset={0}
               visible={visible}
             >
-              <View
-                accessibilityElementsHidden={!presentationInteractionReady}
-                collapsable={false}
-                importantForAccessibility={
-                  presentationInteractionReady ? "auto" : "no-hide-descendants"
-                }
-                onLayout={(event) => {
-                  const { height, width } = event.nativeEvent.layout;
-                  sheetRootLayoutRef.current = { height, width, x: 0, y: 0 };
-                  scheduleGeometryMeasurement();
-                }}
-                style={[
-                  styles.activeEditBody,
-                  keyboardLayout.keyboardOpen ? styles.activeEditBodyKeyboard : null
-                ]}
-                pointerEvents={presentationInteractionReady ? "auto" : "none"}
-                testID="time-entry-sheet-content"
-              >
               {showDoneButton ? (
                 <View pointerEvents="box-none" style={styles.sheetTopActionLayer}>
                   <Pressable
@@ -1880,12 +1892,25 @@ export function ActiveTimerEditSheet({
                   </Pressable>
                 </View>
               ) : null}
-              <View style={[
-                styles.sheetHeader,
-                showDoneButton ? styles.sheetHeaderWithTopAction : null
-              ]}>
-                {!isRunningMode ? <Text style={styles.sheetTitle}>{sheetTitle}</Text> : null}
-              </View>
+              <View
+                accessibilityElementsHidden={!presentationInteractionReady}
+                collapsable={false}
+                importantForAccessibility={
+                  presentationInteractionReady ? "auto" : "no-hide-descendants"
+                }
+                onLayout={(event) => {
+                  const { height, width } = event.nativeEvent.layout;
+                  sheetRootLayoutRef.current = { height, width, x: 0, y: 0 };
+                  scheduleGeometryMeasurement();
+                }}
+                style={[
+                  styles.activeEditBody,
+                  keyboardLayout.keyboardOpen ? styles.activeEditBodyKeyboard : null
+                ]}
+                pointerEvents={presentationInteractionReady ? "auto" : "none"}
+                testID="time-entry-sheet-content"
+              >
+              <View style={styles.sheetHeader} />
 
               {isRunningMode ? timeEntryHero : null}
 
@@ -1896,7 +1921,7 @@ export function ActiveTimerEditSheet({
                   keyboardLayout.keyboardOpen ? { paddingBottom: keyboardLayout.contentPaddingBottom } : null
                 ]}
                 keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-                keyboardShouldPersistTaps="always"
+                keyboardShouldPersistTaps="handled"
                 onLayout={(event) => {
                   const { height, width, x, y } = event.nativeEvent.layout;
                   scrollViewportLayoutRef.current = { height, width, x, y };
@@ -1915,8 +1940,6 @@ export function ActiveTimerEditSheet({
                 ]}
                 testID="time-entry-sheet-form"
               >
-                {!isRunningMode ? timeEntryHero : null}
-
                 <View style={[
                   styles.activeEditSection,
                   hashtagPanelMounted ? styles.activeEditTagSectionOpen : null
@@ -2091,6 +2114,7 @@ export function ActiveTimerEditSheet({
                         styles={styles}
                         theme={theme}
                         onPress={() => {
+                          dismissTransientEditingSurfaces();
                           setSelectedCategoryId(null);
                         }}
                       />
@@ -2102,6 +2126,7 @@ export function ActiveTimerEditSheet({
                           styles={styles}
                           theme={theme}
                           onPress={() => {
+                            dismissTransientEditingSurfaces();
                             setSelectedCategoryId(category.id);
                           }}
                         />
@@ -2111,148 +2136,125 @@ export function ActiveTimerEditSheet({
                 </View>
 
                 <View style={styles.activeEditSection}>
-                  <Text style={styles.activeEditSectionLabel}>Start time</Text>
-                  <View style={styles.activeEditTimeRow}>
-                    <Pressable
-                      accessibilityLabel="Edit start date"
-                      accessibilityRole="button"
-                      onPress={openStartPicker}
-                      style={pressable(styles.activeEditStartSummary, styles.buttonPressed)}
-                      testID="time-entry-start-date"
-                    >
-                      <View style={styles.activeEditStartSummaryText}>
-                        <Text style={styles.activeEditStartDate} numberOfLines={1}>
-                          {formatPickerDate(displayedStartAt)}
-                        </Text>
+                  <View style={[
+                    styles.activeEditTimeGroups,
+                    windowDimensions.fontScale >= 1.6 ? styles.activeEditTimeGroupsStacked : null
+                  ]}>
+                    <View style={styles.activeEditTimeGroup}>
+                      <Text style={styles.activeEditSectionLabel}>Start</Text>
+                      <View style={styles.activeEditCompactTimeRow}>
+                        <Pressable
+                          accessibilityLabel="Edit start date"
+                          accessibilityRole="button"
+                          disabled={busy}
+                          onPress={openStartPicker}
+                          style={pressable(styles.activeEditCompactDate, styles.buttonPressed)}
+                          testID="time-entry-start-date"
+                        >
+                          <Text style={styles.activeEditCompactDateText} numberOfLines={1}>
+                            {formatPickerDate(displayedStartAt)}
+                          </Text>
+                        </Pressable>
+                        <TextInput
+                          ref={timeInputRef}
+                          accessibilityLabel="Start time"
+                          blurOnSubmit
+                          editable={!busy}
+                          keyboardType="numbers-and-punctuation"
+                          maxLength={5}
+                          onChangeText={updateTimeText}
+                          onFocus={() => {
+                            if (beginNativeKeyboardSession() === null) {
+                              timeInputRef.current?.blur();
+                              Keyboard.dismiss();
+                              return;
+                            }
+                            startTimeFocused.current = true;
+                            setDatePickerOpen(false);
+                            scheduleScrollToEnd();
+                          }}
+                          onBlur={() => { startTimeFocused.current = false; }}
+                          onSubmitEditing={Keyboard.dismiss}
+                          placeholder="09:00"
+                          placeholderTextColor={theme.textSecondary}
+                          returnKeyType="done"
+                          style={[styles.textInput, styles.activeEditCompactTimeInput]}
+                          testID="time-entry-start-time"
+                          value={timeText}
+                        />
                       </View>
-                    </Pressable>
-                    <TextInput
-                      ref={timeInputRef}
-                      accessibilityLabel="Start time"
-                      blurOnSubmit
-                      editable={!busy}
-                      keyboardType={Platform.OS === "ios" ? "numbers-and-punctuation" : "numeric"}
-                      maxLength={5}
-                      onChangeText={updateTimeText}
-                      onFocus={() => {
-                        if (beginNativeKeyboardSession() === null) {
-                          timeInputRef.current?.blur();
-                          Keyboard.dismiss();
-                          return;
-                        }
-                        startTimeFocused.current = true;
-                        setDatePickerOpen(false);
-                        scheduleScrollToEnd();
-                      }}
-                      onBlur={() => {
-                        startTimeFocused.current = false;
-                      }}
-                      onPressIn={() => {
-                        if (!busy) timeInputRef.current?.focus();
-                      }}
-                      onSubmitEditing={Keyboard.dismiss}
-                      placeholder="21:22"
-                      placeholderTextColor={theme.textSecondary}
-                      returnKeyType="done"
-                      showSoftInputOnFocus
-                      style={[styles.textInput, styles.activeEditTimeInput]}
-                      testID="time-entry-start-time"
-                      value={timeText}
-                    />
+                    </View>
+                    <View style={styles.activeEditTimeGroup}>
+                      <Text style={styles.activeEditSectionLabel}>End</Text>
+                      {hasStoppedTime ? (
+                        <View style={styles.activeEditCompactTimeRow}>
+                          <Pressable
+                            accessibilityLabel="Edit end date"
+                            accessibilityRole="button"
+                            disabled={busy}
+                            onPress={openEndPicker}
+                            style={pressable(styles.activeEditCompactDate, styles.buttonPressed)}
+                            testID="time-entry-end-date"
+                          >
+                            <Text style={styles.activeEditCompactDateText} numberOfLines={1}>
+                              {formatPickerDate(displayedEndAt)}
+                            </Text>
+                          </Pressable>
+                          <TextInput
+                            ref={endTimeInputRef}
+                            accessibilityLabel="End time"
+                            blurOnSubmit
+                            editable={!busy}
+                            keyboardType="numbers-and-punctuation"
+                            maxLength={5}
+                            onChangeText={updateStoppedTimeText}
+                            onFocus={() => {
+                              if (beginNativeKeyboardSession() === null) {
+                                endTimeInputRef.current?.blur();
+                                Keyboard.dismiss();
+                                return;
+                              }
+                              setDatePickerOpen(false);
+                            }}
+                            onSubmitEditing={Keyboard.dismiss}
+                            placeholder="17:30"
+                            placeholderTextColor={theme.textSecondary}
+                            returnKeyType="done"
+                            style={[styles.textInput, styles.activeEditCompactTimeInput]}
+                            testID="time-entry-end-time"
+                            value={stoppedTimeText}
+                          />
+                        </View>
+                      ) : (
+                        <View style={styles.activeEditRunningEndSummary}>
+                          <Text style={styles.activeEditCompactDateText} numberOfLines={1}>
+                            {formatPickerDate(new Date(dialNowMs))}
+                          </Text>
+                          <Text style={styles.activeEditRunningEndTime}>
+                            {formatTimeInput(new Date(dialNowMs))}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
                   </View>
-                  {lastStoppedAt ? (
-                    <Pressable
-                      accessibilityLabel="Set start time to last stop time"
-                      accessibilityRole="button"
-                      disabled={busy}
-                      onPress={useLastStopTime}
-                      style={pressable(styles.activeEditLastStopButton, styles.buttonPressed)}
-                    >
-                      <Text style={styles.activeEditLastStopText}>Set to last stop time</Text>
-                      <Text style={styles.activeEditLastStopMeta}>{formatTimeInput(new Date(lastStoppedAt))}</Text>
-                    </Pressable>
-                  ) : null}
                   {validationError ? <Text style={styles.errorText}>{validationError}</Text> : null}
                 </View>
 
-                {hasStoppedTime ? (
-                  <View style={styles.activeEditSection}>
-                    <Text style={styles.activeEditSectionLabel}>End time</Text>
-                    <View style={styles.activeEditTimeRow}>
-                      <Pressable
-                        accessibilityLabel="End date"
-                        accessibilityRole="button"
-                        disabled={busy}
-                        onPress={openEndPicker}
-                        style={({ pressed }) => [
-                          styles.activeEditStartSummary,
-                          pressed && !busy ? styles.buttonPressed : null,
-                          busy ? styles.buttonDisabled : null
-                        ]}
-                        testID="time-entry-end-date"
-                      >
-                        <View style={styles.activeEditStartSummaryText}>
-                          <Text style={styles.activeEditStartDate} numberOfLines={1}>
-                            {formatPickerDate(displayedEndAt)}
-                          </Text>
-                        </View>
-                      </Pressable>
-                      <TextInput
-                        ref={endTimeInputRef}
-                        accessibilityLabel="End time"
-                        blurOnSubmit
-                        editable={!busy}
-                        keyboardType={Platform.OS === "ios" ? "numbers-and-punctuation" : "numeric"}
-                        maxLength={5}
-                        onChangeText={updateStoppedTimeText}
-                        onFocus={() => {
-                          if (beginNativeKeyboardSession() === null) {
-                            endTimeInputRef.current?.blur();
-                            Keyboard.dismiss();
-                            return;
-                          }
-                          setDatePickerOpen(false);
-                        }}
-                        onSubmitEditing={Keyboard.dismiss}
-                        placeholder="17:30"
-                        placeholderTextColor={theme.textSecondary}
-                        returnKeyType="done"
-                        showSoftInputOnFocus
-                        style={[styles.textInput, styles.activeEditTimeInput]}
-                        testID="time-entry-end-time"
-                        value={stoppedTimeText}
-                      />
-                    </View>
-                  </View>
-                ) : null}
-
-                {overlapWarning?.overlapCount ? (
-                  <View
-                    accessibilityLiveRegion="polite"
-                    style={{
-                      backgroundColor: colorWithAlpha(theme.warning, theme.mode === "dark" ? 0.14 : 0.11),
-                      borderRadius: 12,
-                      gap: 3,
-                      paddingHorizontal: 12,
-                      paddingVertical: 10
-                    }}
-                  >
-                    <Text style={[styles.activeEditSectionLabel, { color: theme.warningText }]}>
-                      Overlap · {formatClockDuration(overlapWarning.uniqueOverlapSeconds)}
-                    </Text>
-                    <Text style={[styles.muted, { color: theme.textSecondary }]}>
-                      Overlaps {overlapWarning.overlapCount} other {overlapWarning.overlapCount === 1 ? "entry" : "entries"}.
-                      You can still save it; reports show both Total logged and Time covered.
-                    </Text>
-                    {overlapPeers.map((candidate) => (
-                      <Text key={candidate.id} style={[styles.muted, { color: theme.textPrimary }]} numberOfLines={1}>
-                        {candidate.description?.trim() || candidate.categoryName?.trim() || "Untitled entry"}
-                        {" · "}{formatTimeInput(new Date(candidate.startedAt))}–
-                        {candidate.stoppedAt ? formatTimeInput(new Date(candidate.stoppedAt)) : "now"}
-                      </Text>
-                    ))}
-                  </View>
-                ) : null}
+                <TimeEntryDurationDial
+                  disabled={busy}
+                  endMs={parsedStop.date?.getTime() ?? draftEndMs}
+                  lastStoppedAt={lastStoppedAt}
+                  mode={isRunningMode ? "running" : "stopped"}
+                  nowMs={dialNowMs}
+                  onChange={applyDialInterval}
+                  onInteractionStart={dismissTransientEditingSurfaces}
+                  presentationId={presentation.id}
+                  reduceMotion={reduceMotion}
+                  revision={draftRevision}
+                  startMs={parsedStart.date?.getTime() ?? draftStartMs}
+                  styles={styles}
+                  theme={theme}
+                />
 
                 {canDelete ? (
                   <Pressable
@@ -2290,6 +2292,13 @@ export function ActiveTimerEditSheet({
                     direction
                   });
                 }}
+                onClose={() => {
+                  dispatchSheetEvent({
+                    type: "suggestions_dismissed",
+                    presentationId: presentation.id
+                  });
+                  descriptionInputRef.current?.focus();
+                }}
                 onRenderStateChange={(nextRenderState) => {
                   if (nextRenderState.presentationId !== presentationRef.current.id) {
                     recordStaleCallback();
@@ -2322,7 +2331,6 @@ export function ActiveTimerEditSheet({
           </SafeAreaView>
         </View>
         <FloatingDatePicker
-          maxDate={new Date()}
           onClose={() => {
             setDatePickerOpen(false);
             dispatchSheetEvent({
@@ -2482,35 +2490,6 @@ function CategoryChip({
   );
 }
 
-function parseLocalDateTime(dateText: string, timeText: string): { date: Date | null; error: string | null } {
-  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateText.trim());
-  if (!dateMatch) return { date: null, error: "Enter the date as YYYY-MM-DD." };
-  const timeMatch = /^(\d{1,2}):(\d{2})$/.exec(timeText.trim());
-  if (!timeMatch) return { date: null, error: "Enter the time as HH:mm." };
-
-  const year = Number(dateMatch[1]);
-  const month = Number(dateMatch[2]);
-  const day = Number(dateMatch[3]);
-  const hour = Number(timeMatch[1]);
-  const minute = Number(timeMatch[2]);
-  if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59) {
-    return { date: null, error: "Enter a valid start date and time." };
-  }
-
-  const date = new Date(year, month - 1, day, hour, minute, 0, 0);
-  if (
-    date.getFullYear() !== year ||
-    date.getMonth() !== month - 1 ||
-    date.getDate() !== day ||
-    date.getHours() !== hour ||
-    date.getMinutes() !== minute
-  ) {
-    return { date: null, error: "Enter a valid start date and time." };
-  }
-
-  return { date, error: null };
-}
-
 function formatPickerDate(date: Date) {
   if (isToday(date)) return "Today";
   return date.toLocaleDateString(undefined, {
@@ -2561,13 +2540,6 @@ function formatEditableTime(value: string) {
   const hour = Math.min(Number(digits.slice(0, 2)), 23);
   const minute = Math.min(Number(digits.slice(2)), 59);
   return `${pad2(hour)}:${pad2(minute)}`;
-}
-
-function formatEditableDate(value: string) {
-  const digits = value.replace(/\D/g, "").slice(0, 8);
-  if (digits.length <= 4) return digits;
-  if (digits.length <= 6) return `${digits.slice(0, 4)}-${digits.slice(4)}`;
-  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6)}`;
 }
 
 function pad2(value: number) {

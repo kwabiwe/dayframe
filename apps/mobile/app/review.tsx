@@ -803,7 +803,6 @@ export default function ReviewScreen() {
           onCancel={cancelEdit}
           onPresented={finishEditHandover}
           onSave={saveEdit}
-          peerEntries={reviewPeerEntries(data)}
           presentation={editPresentation}
           reduceMotion={reduceMotion}
           saving={editSaving}

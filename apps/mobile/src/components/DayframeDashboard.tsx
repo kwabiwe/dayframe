@@ -608,7 +608,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   function presentManualEntry(entry: TimeEntry) {
-    const presentation = createSheetPresentation("add_past_time", false);
+    const presentation = createSheetPresentation("add_past_time", true);
     manualEntryPresentationRef.current = presentation;
     setManualDraftEntry(entry);
     setManualEntryPresentation(presentation);
@@ -1128,11 +1128,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   function openManualEntry() {
-    if (latestData.current?.activeEntry) {
-      presentActiveEditor("existing_active_timer");
-      return;
-    }
-    presentManualEntry(createManualDraftEntry(recentStoppedAt, now));
+    const activeStartedAt = latestData.current?.activeEntry?.startedAt;
+    const draftEndMs = activeStartedAt ? Date.parse(activeStartedAt) : now;
+    presentManualEntry(createManualDraftEntry(
+      recentStoppedAt,
+      Number.isFinite(draftEndMs) ? draftEndMs : now
+    ));
   }
 
   function openCalendarManualEntry(dayKey: string, startMinute: number) {
@@ -2034,6 +2035,18 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                           void stopActiveTimer();
                         }}
                       />
+                      <Pressable
+                        accessibilityLabel="Add past time"
+                        accessibilityRole="button"
+                        onPress={(event) => {
+                          event.stopPropagation();
+                          openManualEntry();
+                        }}
+                        style={pressable(styles.addPastTimeButton, styles.buttonPressed)}
+                        testID="active-timer-add-past-time"
+                      >
+                        <PlusGlyph color={theme.accentText} />
+                      </Pressable>
                     </Animated.View>
                   </View>
                 </Pressable>
@@ -2309,7 +2322,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         mode="add"
         onCancel={completeManualEntryExit}
         onSave={saveManualEntry}
-        peerEntries={historySourceEntries}
         presentation={manualEntryPresentation}
         reduceMotion={reduceMotion}
         saving={manualEntrySaving}
@@ -2332,7 +2344,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         onPresented={completeActiveEditorPresentation}
         onSave={saveActiveTimerEdit}
         onStop={stopActiveTimer}
-        peerEntries={historySourceEntries}
         presentation={activeEditPresentation}
         reduceMotion={reduceMotion}
         deleting={false}
@@ -2353,7 +2364,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         onCancel={completeCalendarEntryExit}
         onDelete={deleteCalendarEntry}
         onSave={saveCalendarEntryEdit}
-        peerEntries={historySourceEntries}
         presentation={calendarEditPresentation}
         reduceMotion={reduceMotion}
         deleting={false}

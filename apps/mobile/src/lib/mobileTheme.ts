@@ -760,7 +760,7 @@ function createStyles(theme: MobileTheme) {
       gap: 5
     },
     activeTimerActions: {
-      flexDirection: "row",
+      flexDirection: "column",
       alignItems: "center",
       gap: 8
     },
@@ -2130,6 +2130,37 @@ function createStyles(theme: MobileTheme) {
       fontSize: 13,
       fontWeight: "600"
     },
+    durationDialSection: {
+      alignItems: "stretch",
+      gap: 8
+    },
+    durationDialNativeView: {
+      alignSelf: "center",
+      width: "100%",
+      maxWidth: 340,
+      height: 286
+    },
+    durationDialQuickActions: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8
+    },
+    durationDialAction: {
+      minHeight: 44,
+      borderRadius: 999,
+      backgroundColor: theme.surfaceMuted,
+      paddingHorizontal: 13,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    durationDialActionText: {
+      color: theme.accentText,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "600"
+    },
     activeEditHeroRow: {
       flexDirection: "row",
       alignItems: "center",
@@ -2191,6 +2222,20 @@ function createStyles(theme: MobileTheme) {
       minHeight: 0,
       backgroundColor: theme.surfaceRaised
     },
+    historicalSuggestionsHeader: {
+      minHeight: 44,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingLeft: 12
+    },
+    historicalSuggestionsCloseButton: {
+      width: 44,
+      height: 44,
+      borderRadius: 999,
+      alignItems: "center",
+      justifyContent: "center"
+    },
     historicalSuggestionsList: {
       borderTopWidth: 1,
       borderTopColor: theme.border,
@@ -2205,7 +2250,6 @@ function createStyles(theme: MobileTheme) {
       fontSize: 11,
       fontWeight: "600",
       letterSpacing: 0.4,
-      paddingHorizontal: 12,
       paddingVertical: 8
     },
     taskSuggestionsList: {
@@ -2213,7 +2257,7 @@ function createStyles(theme: MobileTheme) {
       borderTopColor: theme.border
     },
     taskSuggestionRow: {
-      minHeight: 56,
+      minHeight: 46,
       paddingHorizontal: 12,
       paddingVertical: 8,
       flexDirection: "row",
@@ -2227,14 +2271,17 @@ function createStyles(theme: MobileTheme) {
     taskSuggestionTextStack: {
       flex: 1,
       minWidth: 0,
-      gap: 4
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8
     },
     taskSuggestionTitle: {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 13,
       fontWeight: "500",
-      flexShrink: 1,
+      flex: 1,
+      flexShrink: 4,
       minWidth: 0
     },
     taskSuggestionMetadataLine: {
@@ -2247,7 +2294,7 @@ function createStyles(theme: MobileTheme) {
       flexDirection: "row",
       alignItems: "center",
       gap: 5,
-      flexShrink: 2,
+      flexShrink: 0,
       minWidth: 0
     },
     taskSuggestionMeta: {
@@ -2255,15 +2302,16 @@ function createStyles(theme: MobileTheme) {
       fontFamily: monoFont,
       fontSize: 11,
       fontWeight: "400",
-      flexShrink: 1
+      flexShrink: 1,
+      maxWidth: 112
     },
     taskSuggestionTags: {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 11,
       fontWeight: "400",
-      flexShrink: 2,
-      minWidth: 0
+      flexShrink: 1,
+      maxWidth: 96
     },
     activeEditDescriptionInput: {
       minHeight: 48
@@ -2425,6 +2473,69 @@ function createStyles(theme: MobileTheme) {
       flexDirection: "row",
       alignItems: "center",
       gap: 8
+    },
+    activeEditTimeGroups: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 10
+    },
+    activeEditTimeGroupsStacked: {
+      flexDirection: "column"
+    },
+    activeEditTimeGroup: {
+      flex: 1,
+      minWidth: 0,
+      gap: 6
+    },
+    activeEditCompactTimeRow: {
+      minWidth: 0,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6
+    },
+    activeEditCompactDate: {
+      flex: 1,
+      minWidth: 0,
+      minHeight: 44,
+      borderRadius: 12,
+      backgroundColor: theme.surfaceMuted,
+      paddingHorizontal: 9,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    activeEditCompactDateText: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "600"
+    },
+    activeEditCompactTimeInput: {
+      width: 72,
+      minHeight: 44,
+      paddingHorizontal: 6,
+      color: theme.accentText,
+      fontFamily: monoFont,
+      fontSize: 15,
+      fontWeight: "600",
+      fontVariant: ["tabular-nums"],
+      textAlign: "center"
+    },
+    activeEditRunningEndSummary: {
+      minHeight: 44,
+      borderRadius: 12,
+      backgroundColor: theme.surfaceMuted,
+      paddingHorizontal: 9,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 6
+    },
+    activeEditRunningEndTime: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 15,
+      fontWeight: "600",
+      fontVariant: ["tabular-nums"]
     },
     activeEditDateInput: {
       flex: 1.25,

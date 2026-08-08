@@ -214,11 +214,15 @@ describe("native Calendar production contract", () => {
     expect(expoView).not.toContain("createManualTimeEntry");
   });
 
-  it("keeps Calendar creation separate from Plus and active-timer ownership", () => {
+  it("keeps Calendar creation separate while Plus can draft time before an active timer", () => {
     const dashboard = readFileSync(dashboardPath, "utf8");
     const handler = dashboard.slice(
       dashboard.indexOf("function openCalendarManualEntry"),
       dashboard.indexOf("async function saveManualEntry")
+    );
+    const plusHandler = dashboard.slice(
+      dashboard.indexOf("function openManualEntry"),
+      dashboard.indexOf("function openCalendarManualEntry")
     );
 
     expect(handler).toContain("resolveCalendarManualEntryRequest");
@@ -227,7 +231,9 @@ describe("native Calendar production contract", () => {
     expect(handler).not.toContain("setActiveEditVisible");
     expect(handler).not.toContain("startTimer");
     expect(handler).not.toContain("stopTimer");
-    expect(dashboard).toContain("if (latestData.current?.activeEntry) {");
+    expect(plusHandler).toContain("latestData.current?.activeEntry?.startedAt");
+    expect(plusHandler).toContain("presentManualEntry(createManualDraftEntry(");
+    expect(plusHandler).not.toContain("stopTimer");
     expect(dashboard).toContain("manualEntrySavingRef.current = true");
     expect(dashboard).toContain("await createManualTimeEntry({");
     expect(dashboard).toContain("await load({ silent: true })");

@@ -50,22 +50,25 @@ describe("time-entry sheet historical Suggestions contract", () => {
     expect(editSheetSource).not.toMatch(/Animated\.timing\([^)]*height/);
     expect(editSheetSource).toContain("resolveTimeEntrySheetLocalGeometry");
     expect(editSheetSource).toContain("contentScrollOffsetRef.current = { x, y }");
-    expect(editSheetSource).toContain("keyboardTop: localGeometry.overlayBottomBoundary");
+    expect(editSheetSource).toContain("localGeometry.overlayBottomBoundary - keyboardInsetRef.current");
     expect(editSheetSource).toContain("topBoundary: localGeometry.overlayTopBoundary");
     expect(editSheetSource).not.toContain("measureInWindow");
   });
 
-  it("restarts the keyboard height owner after a cancelled sheet swipe", () => {
-    expect(editSheetSource).toMatch(
-      /function freezeKeyboardMotion[\s\S]*?keyboardFrameSequenceRef\.current \+= 1;[\s\S]*?keyboardHeightAnimationTokenRef\.current = null;[\s\S]*?keyboardLift\.stopAnimation\(\);[\s\S]*?animatedSheetHeight\.stopAnimation\(\);/
+  it("keeps keyboard frames flowing into the fixed-sheet handoff", () => {
+    const freezeSource = editSheetSource.slice(
+      editSheetSource.indexOf("function freezeKeyboardMotion"),
+      editSheetSource.indexOf("function releaseKeyboardMotion")
     );
+    expect(freezeSource).toContain("keyboardMotionFrozen.current = false");
+    expect(freezeSource).toContain("dismissTransientEditingSurfaces()");
+    expect(freezeSource).not.toContain("animatedSheetHeight.stopAnimation()");
     const releaseSource = editSheetSource.slice(
       editSheetSource.indexOf("function releaseKeyboardMotion"),
       editSheetSource.indexOf("function commitSheetDismissal")
     );
-    expect(releaseSource).toContain("pending?.sessionToken");
-    expect(releaseSource).toContain("applyKeyboardUpdateRef.current(");
-    expect(releaseSource).toContain("pending?.inset === 0");
+    expect(releaseSource).toContain("keyboardMotionFrozen.current = false");
+    expect(releaseSource).not.toContain("applyKeyboardUpdateRef.current(");
   });
 
   it("removes only post-Description siblings from native traversal while Suggestions obscure them", () => {
@@ -123,6 +126,13 @@ describe("time-entry sheet historical Suggestions contract", () => {
     expect(editSheetSource).toContain('type: "focus_ownership_reset"');
     expect(editSheetSource).not.toContain("focusResetFrameRef");
     expect(editSheetSource).toContain("descriptionInputRef.current?.focus()");
+    expect(editSheetSource).toContain("currentSheetState.descriptionFocused\n      ? activeSessionToken");
+    expect(editSheetSource).toContain("? activeSessionToken\n      : beginNativeKeyboardSession()");
+    expect(editSheetSource).toContain("armKeyboardConfirmationWatchdog(sessionToken)");
+    expect(editSheetSource).toContain("const metrics = Keyboard.metrics()");
+    expect(editSheetSource).toContain("synchronizeVisibleKeyboardMetrics(sessionToken)");
+    expect(editSheetSource).toContain('Keyboard.addListener("keyboardDidShow", updateKeyboardInset)');
+    expect(editSheetSource).toContain('Keyboard.addListener("keyboardDidHide", handleKeyboardHidden)');
     expect(editSheetSource).toContain("onPresented?.(presentedPresentationId)");
     expect(editSheetSource).toContain("onCancel(dismissedPresentationId)");
     expect(swipeSource).toContain("createSwipeSheetPresentationCoordinator()");

@@ -7,6 +7,7 @@ import {
   Text,
   View
 } from "react-native";
+import Svg, { Path } from "react-native-svg";
 import {
   paletteColorFor,
   type RecentActivitySuggestion
@@ -41,6 +42,7 @@ export function HistoricalSuggestionsOverlay({
   contentKey,
   geometry,
   onAnimationFinished,
+  onClose,
   onRenderStateChange,
   onSelect,
   onStaleCallback,
@@ -55,6 +57,7 @@ export function HistoricalSuggestionsOverlay({
   contentKey: string;
   geometry: HistoricalSuggestionsOverlayGeometry | null;
   onAnimationFinished: (presentationId: number, direction: "open" | "close") => void;
+  onClose: () => void;
   onRenderStateChange: (state: HistoricalSuggestionsOverlayRenderState) => void;
   onSelect: (suggestion: RecentActivitySuggestion) => void;
   onStaleCallback?: () => void;
@@ -263,7 +266,7 @@ export function HistoricalSuggestionsOverlay({
       testID="historical-suggestions-overlay"
     >
       <View style={styles.historicalSuggestionsSurface}>
-        <Text
+        <View
           key={`historical-suggestions-header-${presentationId}`}
           onLayout={(event) => {
             const measurementPresentationId = presentationId;
@@ -278,10 +281,22 @@ export function HistoricalSuggestionsOverlay({
               presentationId: measurementPresentationId
             }));
           }}
-          style={styles.taskSuggestionsTitle}
+          style={styles.historicalSuggestionsHeader}
         >
-          SUGGESTIONS
-        </Text>
+          <Text style={styles.taskSuggestionsTitle}>SUGGESTIONS</Text>
+          <Pressable
+            accessibilityHint="Keeps the Description field and keyboard active"
+            accessibilityLabel="Close Suggestions"
+            accessibilityRole="button"
+            disabled={disabled}
+            hitSlop={6}
+            onPress={onClose}
+            style={pressable(styles.historicalSuggestionsCloseButton, styles.buttonPressed)}
+            testID="historical-suggestions-close"
+          >
+            <CloseGlyph color={theme.textSecondary} />
+          </Pressable>
+        </View>
         <ScrollView
           accessibilityLabel="Historical Suggestions results"
           keyboardShouldPersistTaps="always"
@@ -375,18 +390,30 @@ function HistoricalSuggestionRow({
         <Text style={styles.taskSuggestionTitle} numberOfLines={1}>
           {suggestion.description}
         </Text>
-        <View style={styles.taskSuggestionMetadataLine}>
-          {categoryName && color ? (
-            <View style={styles.taskSuggestionMetaRow}>
-              <View style={[styles.colorDot, { backgroundColor: color }]} />
-              <Text style={styles.taskSuggestionMeta} numberOfLines={1}>{categoryName}</Text>
-            </View>
-          ) : null}
-          {tagLabel ? (
-            <Text style={styles.taskSuggestionTags} numberOfLines={1}>{tagLabel}</Text>
-          ) : null}
-        </View>
+        {categoryName && color ? (
+          <View style={styles.taskSuggestionMetaRow}>
+            <View style={[styles.colorDot, { backgroundColor: color }]} />
+            <Text style={styles.taskSuggestionMeta} numberOfLines={1}>{categoryName}</Text>
+          </View>
+        ) : null}
+        {tagLabel ? (
+          <Text style={styles.taskSuggestionTags} numberOfLines={1}>{tagLabel}</Text>
+        ) : null}
       </View>
     </Pressable>
+  );
+}
+
+function CloseGlyph({ color }: { color: string }) {
+  return (
+    <Svg accessibilityElementsHidden width={16} height={16} viewBox="0 0 24 24">
+      <Path
+        d="m6 6 12 12M18 6 6 18"
+        fill="none"
+        stroke={color}
+        strokeLinecap="round"
+        strokeWidth={2.2}
+      />
+    </Svg>
   );
 }
