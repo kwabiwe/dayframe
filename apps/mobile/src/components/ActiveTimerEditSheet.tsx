@@ -57,7 +57,6 @@ import {
   calculateHistoricalSuggestionsOverlayGeometry,
   createTimeEntrySheetGeometryCache,
   invalidateTimeEntrySheetGeometry,
-  isCurrentTimeEntrySheetFrameToken,
   recordTimeEntrySheetGeometry,
   resolveTimeEntrySheetLocalGeometry,
   timeEntrySheetVisualReadiness,
@@ -219,13 +218,10 @@ export function ActiveTimerEditSheet({
   const contentScrollOffsetRef = useRef({ x: 0, y: 0 });
   const timeInputRef = useRef<TextInput>(null);
   const endTimeInputRef = useRef<TextInput>(null);
-  const startTimeFocused = useRef(false);
   const focusFrameRef = useRef<number | null>(null);
   const tagFocusFrameRef = useRef<number | null>(null);
   const tagFocusRequestSequenceRef = useRef(0);
   const geometryFrameRef = useRef<number | null>(null);
-  const scrollFrameRef = useRef<number | null>(null);
-  const scrollFrameSequenceRef = useRef(0);
   const geometryCacheRef = useRef(createTimeEntrySheetGeometryCache());
   const geometryEnvironmentRef = useRef({
     presentationId: presentation.id,
@@ -433,10 +429,6 @@ export function ActiveTimerEditSheet({
       focusFrameRef.current = null;
     }
     cancelPendingTagFocus();
-    if (scrollFrameRef.current !== null) {
-      cancelAnimationFrame(scrollFrameRef.current);
-      scrollFrameRef.current = null;
-    }
     if (geometryFrameRef.current !== null) {
       cancelAnimationFrame(geometryFrameRef.current);
       geometryFrameRef.current = null;
@@ -444,7 +436,6 @@ export function ActiveTimerEditSheet({
     clearKeyboardConfirmationWatchdog();
     keyboardConfirmationRetryCountRef.current = 0;
     suppressDescriptionBlurDispatchRef.current = false;
-    scrollFrameSequenceRef.current += 1;
     if (!visible) {
       if (sheetStateRef.current.presentation?.id === presentation.id) {
         dispatchSheetEvent({ type: "externally_hidden", presentationId: presentation.id });
@@ -470,7 +461,6 @@ export function ActiveTimerEditSheet({
     invalidateNativeKeyboardSession();
     keyboardInsetRef.current = 0;
     keyboardTopRef.current = null;
-    startTimeFocused.current = false;
     keyboardFrameSequenceRef.current += 1;
     keyboardHeightAnimationTokenRef.current = null;
     keyboardLift.stopAnimation();
@@ -670,42 +660,14 @@ export function ActiveTimerEditSheet({
     });
   }, [presentation.id, recordStaleCallback, visible]);
 
-  const scheduleScrollToEnd = useCallback(() => {
-    if (scrollFrameRef.current !== null) {
-      cancelAnimationFrame(scrollFrameRef.current);
-    }
-    scrollFrameSequenceRef.current += 1;
-    const token = {
-      presentationId: presentation.id,
-      sequence: scrollFrameSequenceRef.current
-    };
-    scrollFrameRef.current = requestAnimationFrame(() => {
-      scrollFrameRef.current = null;
-      if (
-        !visible ||
-        !isCurrentTimeEntrySheetFrameToken(
-          token,
-          presentationRef.current.id,
-          scrollFrameSequenceRef.current
-        )
-      ) {
-        recordStaleCallback();
-        return;
-      }
-      contentScrollRef.current?.scrollToEnd({ animated: !reduceMotion });
-    });
-  }, [presentation.id, recordStaleCallback, reduceMotion, visible]);
-
   useEffect(() => () => {
     if (geometryFrameRef.current !== null) cancelAnimationFrame(geometryFrameRef.current);
     if (focusFrameRef.current !== null) cancelAnimationFrame(focusFrameRef.current);
     if (tagFocusFrameRef.current !== null) cancelAnimationFrame(tagFocusFrameRef.current);
-    if (scrollFrameRef.current !== null) cancelAnimationFrame(scrollFrameRef.current);
     if (keyboardConfirmationTimeoutRef.current !== null) {
       clearTimeout(keyboardConfirmationTimeoutRef.current);
       keyboardConfirmationTimeoutRef.current = null;
     }
-    scrollFrameSequenceRef.current += 1;
   }, []);
 
   useEffect(() => {
@@ -778,7 +740,6 @@ export function ActiveTimerEditSheet({
       keyboardMotionFrozen.current = false;
       keyboardInsetRef.current = 0;
       keyboardTopRef.current = null;
-      startTimeFocused.current = false;
       keyboardFrameSequenceRef.current += 1;
       keyboardHeightAnimationTokenRef.current = null;
       keyboardLift.stopAnimation();
@@ -862,9 +823,6 @@ export function ActiveTimerEditSheet({
       keyboardInsetRef.current = nextInset;
       setKeyboardInset(nextInset);
       animateKeyboardLayout(0, nextLayout.sheetHeight, event);
-      if (startTimeFocused.current) {
-        scheduleScrollToEnd();
-      }
     }
     applyKeyboardUpdateRef.current = applyKeyboardUpdateForSession;
 
@@ -971,7 +929,6 @@ export function ActiveTimerEditSheet({
     recordStaleCallback,
     reduceMotion,
     scheduleGeometryMeasurement,
-    scheduleScrollToEnd,
     visible,
     windowDimensions.height
   ]);
@@ -1186,6 +1143,13 @@ export function ActiveTimerEditSheet({
     height: keyboardLayout.sheetHeight,
     maxHeight: keyboardLayout.sheetMaxHeight
   };
+  const sheetContentScrollable = windowDimensions.height < 780 || windowDimensions.fontScale >= 1.3;
+  useEffect(() => {
+    if (sheetContentScrollable) return;
+    contentScrollOffsetRef.current = { x: 0, y: 0 };
+    contentScrollRef.current?.scrollTo({ x: 0, y: 0, animated: false });
+    scheduleGeometryMeasurement();
+  }, [presentation.id, scheduleGeometryMeasurement, sheetContentScrollable]);
   const pendingCallerDismissRequestId = pendingTimeEntrySheetDismissRequestId({
     dismissRequestId,
     handledDismissRequestId: handledDismissRequestIdRef.current,
@@ -1916,9 +1880,13 @@ export function ActiveTimerEditSheet({
 
               <ScrollView
                 ref={contentScrollRef}
+                alwaysBounceVertical={sheetContentScrollable}
+                bounces={sheetContentScrollable}
                 contentContainerStyle={[
                   styles.activeEditContent,
-                  keyboardLayout.keyboardOpen ? { paddingBottom: keyboardLayout.contentPaddingBottom } : null
+                  sheetContentScrollable && keyboardLayout.keyboardOpen
+                    ? { paddingBottom: keyboardLayout.contentPaddingBottom }
+                    : null
                 ]}
                 keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
                 keyboardShouldPersistTaps="handled"
@@ -1933,6 +1901,7 @@ export function ActiveTimerEditSheet({
                   scheduleGeometryMeasurement();
                 }}
                 scrollEventThrottle={16}
+                scrollEnabled={sheetContentScrollable}
                 showsVerticalScrollIndicator={false}
                 style={[
                   styles.activeEditScroller,
@@ -2159,8 +2128,10 @@ export function ActiveTimerEditSheet({
                           ref={timeInputRef}
                           accessibilityLabel="Start time"
                           blurOnSubmit
+                          caretHidden
+                          contextMenuHidden
                           editable={!busy}
-                          keyboardType="numbers-and-punctuation"
+                          keyboardType="number-pad"
                           maxLength={5}
                           onChangeText={updateTimeText}
                           onFocus={() => {
@@ -2169,15 +2140,13 @@ export function ActiveTimerEditSheet({
                               Keyboard.dismiss();
                               return;
                             }
-                            startTimeFocused.current = true;
                             setDatePickerOpen(false);
-                            scheduleScrollToEnd();
                           }}
-                          onBlur={() => { startTimeFocused.current = false; }}
                           onSubmitEditing={Keyboard.dismiss}
                           placeholder="09:00"
                           placeholderTextColor={theme.textSecondary}
                           returnKeyType="done"
+                          selectTextOnFocus
                           style={[styles.textInput, styles.activeEditCompactTimeInput]}
                           testID="time-entry-start-time"
                           value={timeText}
@@ -2204,8 +2173,10 @@ export function ActiveTimerEditSheet({
                             ref={endTimeInputRef}
                             accessibilityLabel="End time"
                             blurOnSubmit
+                            caretHidden
+                            contextMenuHidden
                             editable={!busy}
-                            keyboardType="numbers-and-punctuation"
+                            keyboardType="number-pad"
                             maxLength={5}
                             onChangeText={updateStoppedTimeText}
                             onFocus={() => {
@@ -2220,6 +2191,7 @@ export function ActiveTimerEditSheet({
                             placeholder="17:30"
                             placeholderTextColor={theme.textSecondary}
                             returnKeyType="done"
+                            selectTextOnFocus
                             style={[styles.textInput, styles.activeEditCompactTimeInput]}
                             testID="time-entry-end-time"
                             value={stoppedTimeText}
@@ -2467,7 +2439,7 @@ function CategoryChip({
       accessibilityLabel={category ? `Set category to ${category.name}` : "Clear category"}
       accessibilityRole="button"
       accessibilityState={{ selected }}
-      hitSlop={{ top: 2, bottom: 2 }}
+      hitSlop={{ top: 6, bottom: 6 }}
       onPress={onPress}
       testID={category ? `time-entry-category-${category.id}` : "time-entry-category-clear"}
       style={pressable(

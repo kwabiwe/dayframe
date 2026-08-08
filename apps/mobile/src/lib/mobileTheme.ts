@@ -2138,7 +2138,9 @@ function createStyles(theme: MobileTheme) {
       alignSelf: "center",
       width: "100%",
       maxWidth: 340,
-      height: 286
+      height: 286,
+      backgroundColor: "transparent",
+      overflow: "visible"
     },
     durationDialQuickActions: {
       flexDirection: "row",
@@ -2210,7 +2212,12 @@ function createStyles(theme: MobileTheme) {
       zIndex: 100,
       elevation: 24,
       backgroundColor: theme.surfaceRaised,
-      borderRadius: 14,
+      borderLeftWidth: 1,
+      borderRightWidth: 1,
+      borderBottomWidth: 1,
+      borderColor: theme.borderStrong,
+      borderBottomLeftRadius: 14,
+      borderBottomRightRadius: 14,
       overflow: "hidden",
       shadowColor: theme.shadow,
       shadowOffset: { width: 0, height: 8 },
@@ -2229,6 +2236,11 @@ function createStyles(theme: MobileTheme) {
       justifyContent: "space-between",
       paddingLeft: 12
     },
+    historicalSuggestionsDivider: {
+      height: 1,
+      marginHorizontal: 12,
+      backgroundColor: theme.border
+    },
     historicalSuggestionsCloseButton: {
       width: 44,
       height: 44,
@@ -2237,8 +2249,6 @@ function createStyles(theme: MobileTheme) {
       justifyContent: "center"
     },
     historicalSuggestionsList: {
-      borderTopWidth: 1,
-      borderTopColor: theme.border,
       backgroundColor: theme.surfaceRaised,
       flex: 1,
       flexShrink: 1,
@@ -2265,8 +2275,12 @@ function createStyles(theme: MobileTheme) {
       gap: 10
     },
     taskSuggestionRowDivider: {
-      borderTopWidth: 1,
-      borderTopColor: theme.border
+      position: "absolute",
+      top: 0,
+      left: 12,
+      right: 12,
+      height: 1,
+      backgroundColor: theme.border
     },
     taskSuggestionTextStack: {
       flex: 1,
@@ -2433,25 +2447,25 @@ function createStyles(theme: MobileTheme) {
       fontWeight: "400"
     },
     activeEditCategoryViewport: {
-      height: 48,
+      height: 36,
       overflow: "hidden"
     },
     activeEditCategoryScroll: {
-      height: 48,
+      height: 36,
       flexGrow: 0
     },
     activeEditCategoryScroller: {
-      minHeight: 48,
+      minHeight: 36,
       alignItems: "center",
       gap: 8,
       paddingRight: 4
     },
     activeEditCategoryChip: {
-      minHeight: 44,
+      minHeight: 32,
       backgroundColor: theme.surfaceMuted,
       borderRadius: 999,
       paddingHorizontal: 11,
-      paddingVertical: 4,
+      paddingVertical: 2,
       flexDirection: "row",
       alignItems: "center",
       gap: 7
@@ -2489,16 +2503,20 @@ function createStyles(theme: MobileTheme) {
     },
     activeEditCompactTimeRow: {
       minWidth: 0,
+      minHeight: 44,
+      backgroundColor: theme.surfaceMuted,
+      borderRadius: 12,
+      overflow: "hidden",
       flexDirection: "row",
       alignItems: "center",
-      gap: 6
+      gap: 0
     },
     activeEditCompactDate: {
       flex: 1,
       minWidth: 0,
       minHeight: 44,
-      borderRadius: 12,
-      backgroundColor: theme.surfaceMuted,
+      borderRadius: 0,
+      backgroundColor: "transparent",
       paddingHorizontal: 9,
       alignItems: "center",
       justifyContent: "center"
@@ -2512,7 +2530,12 @@ function createStyles(theme: MobileTheme) {
     activeEditCompactTimeInput: {
       width: 72,
       minHeight: 44,
+      backgroundColor: "transparent",
+      borderLeftWidth: 1,
+      borderLeftColor: theme.border,
+      borderRadius: 0,
       paddingHorizontal: 6,
+      paddingVertical: 0,
       color: theme.accentText,
       fontFamily: monoFont,
       fontSize: 15,
@@ -2535,7 +2558,10 @@ function createStyles(theme: MobileTheme) {
       fontFamily: monoFont,
       fontSize: 15,
       fontWeight: "600",
-      fontVariant: ["tabular-nums"]
+      fontVariant: ["tabular-nums"],
+      borderLeftWidth: 1,
+      borderLeftColor: theme.border,
+      paddingLeft: 9
     },
     activeEditDateInput: {
       flex: 1.25,

@@ -297,6 +297,7 @@ export function HistoricalSuggestionsOverlay({
             <CloseGlyph color={theme.textSecondary} />
           </Pressable>
         </View>
+        <View pointerEvents="none" style={styles.historicalSuggestionsDivider} />
         <ScrollView
           accessibilityLabel="Historical Suggestions results"
           keyboardShouldPersistTaps="always"
@@ -379,13 +380,15 @@ function HistoricalSuggestionRow({
         [
           styles.taskSuggestionRow,
           { backgroundColor: theme.surfaceRaised },
-          index > 0 ? styles.taskSuggestionRowDivider : null,
           disabled ? styles.buttonDisabled : null
         ],
         styles.buttonPressed
       )}
       testID={`historical-suggestion-row-${index}`}
     >
+      {index > 0 ? (
+        <View pointerEvents="none" style={styles.taskSuggestionRowDivider} />
+      ) : null}
       <View style={styles.taskSuggestionTextStack}>
         <Text style={styles.taskSuggestionTitle} numberOfLines={1}>
           {suggestion.description}

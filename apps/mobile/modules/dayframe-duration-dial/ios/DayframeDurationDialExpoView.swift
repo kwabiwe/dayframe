@@ -59,6 +59,11 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
     backgroundColor = .clear
+    isOpaque = false
+    layer.isOpaque = false
+    layer.backgroundColor = UIColor.clear.cgColor
+    clearsContextBeforeDrawing = true
+    contentMode = .redraw
     clipsToBounds = false
     isMultipleTouchEnabled = false
 
@@ -321,7 +326,9 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
       let outer = radius + (strong ? 2 : 0)
       context.move(to: CGPoint(x: centre.x + cos(angle) * inner, y: centre.y + sin(angle) * inner))
       context.addLine(to: CGPoint(x: centre.x + cos(angle) * outer, y: centre.y + sin(angle) * outer))
-      context.setStrokeColor(UIColor(dayframeHex: record.theme.border).cgColor)
+      let tickColor = UIColor(dayframeHex: record.theme.textSecondary)
+        .withAlphaComponent(strong ? 0.9 : 0.55)
+      context.setStrokeColor(tickColor.cgColor)
       context.setLineWidth(strong ? 2 : 1)
       context.strokePath()
     }
@@ -389,8 +396,11 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
     UIBezierPath(ovalIn: rect).fill()
     guard handle != .range else { return }
     let symbolName = handle == .start ? "play.fill" : "stop.fill"
+    let symbolColor = handle == .end && record.mode == "running"
+      ? UIColor(dayframeHex: record.theme.textPrimary)
+      : UIColor(dayframeHex: record.theme.onAccent)
     let symbol = UIImage(systemName: symbolName)?.withTintColor(
-      UIColor(dayframeHex: record.theme.onAccent),
+      symbolColor,
       renderingMode: .alwaysOriginal
     )
     symbol?.draw(in: rect.insetBy(dx: 10, dy: 10))
