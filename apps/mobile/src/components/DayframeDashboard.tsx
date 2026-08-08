@@ -1128,12 +1128,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   function openManualEntry() {
-    const activeStartedAt = latestData.current?.activeEntry?.startedAt;
-    const draftEndMs = activeStartedAt ? Date.parse(activeStartedAt) : now;
-    presentManualEntry(createManualDraftEntry(
-      recentStoppedAt,
-      Number.isFinite(draftEndMs) ? draftEndMs : now
-    ));
+    presentManualEntry(createManualDraftEntry(Date.now()));
   }
 
   function openCalendarManualEntry(dayKey: string, startMinute: number) {
@@ -3244,11 +3239,9 @@ function pendingEntryFromStartInput(input: {
   };
 }
 
-function createManualDraftEntry(lastStoppedAt: string | null, nowMs: number): TimeEntry {
+function createManualDraftEntry(nowMs: number): TimeEntry {
   const stoppedAt = new Date(nowMs);
-  const lastStopMs = lastStoppedAt ? Date.parse(lastStoppedAt) : Number.NaN;
-  const useLastStop = Number.isFinite(lastStopMs) && lastStopMs < nowMs && nowMs - lastStopMs <= RECENT_LAST_STOP_WINDOW_MS;
-  const startedAt = new Date(useLastStop ? lastStopMs : nowMs - 30 * 60 * 1000);
+  const startedAt = new Date(nowMs - 30 * 60 * 1000);
   return {
     categoryColor: null,
     categoryId: null,
@@ -3256,7 +3249,7 @@ function createManualDraftEntry(lastStoppedAt: string | null, nowMs: number): Ti
     clientName: null,
     confidence: "manual",
     description: null,
-    durationSeconds: Math.max(60, Math.floor((stoppedAt.getTime() - startedAt.getTime()) / 1000)),
+    durationSeconds: 30 * 60,
     id: `manual-draft:${nowMs}`,
     placeName: null,
     projectColor: null,

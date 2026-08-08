@@ -1,6 +1,10 @@
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, type MutableRefObject } from "react";
 import { Pressable, Text, View } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import {
+  Gesture,
+  GestureDetector,
+  type GestureType
+} from "react-native-gesture-handler";
 import {
   DayframeDurationDialView,
   type DayframeDurationDialInteraction
@@ -26,6 +30,7 @@ type TimeEntryDurationDialProps = {
   presentationId: number;
   reduceMotion: boolean;
   revision: number;
+  sheetDismissGestureRef: MutableRefObject<GestureType | undefined>;
   startMs: number;
   styles: MobileStyles;
   theme: MobileTheme;
@@ -42,14 +47,17 @@ export function TimeEntryDurationDial({
   presentationId,
   reduceMotion,
   revision,
+  sheetDismissGestureRef,
   startMs,
   styles,
   theme
 }: TimeEntryDurationDialProps) {
   const snapshotsRef = useRef(new Map<string, TimeEntryDialInterval>());
   const nativeDialGesture = useMemo(
-    () => Gesture.Native().disallowInterruption(true),
-    []
+    () => Gesture.Native()
+      .disallowInterruption(true)
+      .blocksExternalGesture(sheetDismissGestureRef),
+    [sheetDismissGestureRef]
   );
   const effectiveEndMs = mode === "running" ? nowMs : endMs;
   const model = useMemo(() => ({

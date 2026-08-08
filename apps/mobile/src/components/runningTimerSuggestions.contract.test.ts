@@ -176,7 +176,9 @@ describe("time-entry sheet historical Suggestions contract", () => {
     expect(editSheetSource).not.toContain(removedPromptName);
     expect(editSheetSource).toContain("const token = beginMutation(\"deleting\")");
     expect(editSheetSource).toContain("resolveMutation(() => onDelete(entry.id))");
-    expect(editSheetSource).toContain("if (accepted && ok) requestCoordinatedDismiss()");
+    expect(editSheetSource).toContain(
+      "if (accepted && ok) requestCoordinatedDismiss({ bypassDiscardConfirmation: true })"
+    );
     expect(editSheetSource).toContain("onRequestClose={handleUserRequestClose}");
     expect(editSheetSource).toContain("dismissRequestId?: number | null");
     expect(editSheetSource).toContain("pendingTimeEntrySheetDismissRequestId({");

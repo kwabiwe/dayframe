@@ -26,6 +26,8 @@ describe("mobile tag interaction contract", () => {
   it("uses a compact shortcut and consumes selected hashtag commands into separate tag state", () => {
     expect(sheet).toContain("accessibilityLabel=\"Add a tag\"");
     expect(sheet).toContain("insertHashtagStarter");
+    expect(sheet).toContain("selectionAfterDescriptionChange");
+    expect(sheet).toContain("setHashtagEntryRequested(true)");
     expect(sheet).toContain("consumeActiveHashtag");
     expect(sheet).toContain("setSelectedTagNames");
     expect(sheet).not.toContain("descriptionWithTagTokens");

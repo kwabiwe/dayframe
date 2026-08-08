@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   AccessibilityInfo,
+  Alert,
   Animated,
   AppState,
   Dimensions,
@@ -16,6 +17,7 @@ import {
   useWindowDimensions,
   View
 } from "react-native";
+import type { GestureType } from "react-native-gesture-handler";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import {
@@ -85,6 +87,12 @@ import {
   TIME_ENTRY_DIAL_MIN_DURATION_MS,
   type TimeEntryDialInterval
 } from "@/lib/timeEntryDurationDial";
+import {
+  selectionAfterDescriptionChange,
+  shouldScrollTimeEntrySheetContent,
+  timeEntrySheetDraftHasChanges,
+  type TimeEntrySheetDraftSnapshot
+} from "@/lib/timeEntrySheetDraft";
 
 const HISTORICAL_SUGGESTION_LIMIT = 12;
 const HISTORICAL_OVERLAY_MAX_HEIGHT = 384;
@@ -174,7 +182,11 @@ export function ActiveTimerEditSheet({
   const [descriptionSelection, setDescriptionSelection] = useState({ start: 0, end: 0 });
   const [selectedTagNames, setSelectedTagNames] = useState<string[]>([]);
   const [hashtagPanelMounted, setHashtagPanelMounted] = useState(false);
+  const [hashtagEntryRequested, setHashtagEntryRequested] = useState(false);
   const [highlightedTagAction, setHighlightedTagAction] = useState<string | null>(null);
+  const [contentHeight, setContentHeight] = useState(0);
+  const [contentViewportHeight, setContentViewportHeight] = useState(0);
+  const [draftBaseline, setDraftBaseline] = useState<TimeEntrySheetDraftSnapshot | null>(null);
   const [sheetState, dispatchSheetEvent] = useReducer(
     timeEntrySheetReducer,
     undefined,
@@ -192,6 +204,9 @@ export function ActiveTimerEditSheet({
   const keyboardLift = useRef(new Animated.Value(0)).current;
   const animatedSheetHeight = useRef(new Animated.Value(0)).current;
   const sheetRef = useRef<SwipeDismissSheetHandle>(null);
+  const sheetDismissGestureRef = useRef<GestureType | undefined>(undefined);
+  const discardPromptPresentationIdRef = useRef<number | null>(null);
+  const discardBypassPresentationIdRef = useRef<number | null>(null);
   const presentedEntryRef = useRef<MobileTimeEntry | null>(currentEntry);
   const keyboardMotionFrozen = useRef(false);
   const keyboardInsetRef = useRef(0);
@@ -436,6 +451,10 @@ export function ActiveTimerEditSheet({
     clearKeyboardConfirmationWatchdog();
     keyboardConfirmationRetryCountRef.current = 0;
     suppressDescriptionBlurDispatchRef.current = false;
+    setDraftBaseline(null);
+    discardPromptPresentationIdRef.current = null;
+    discardBypassPresentationIdRef.current = null;
+    setHashtagEntryRequested(false);
     if (!visible) {
       if (sheetStateRef.current.presentation?.id === presentation.id) {
         dispatchSheetEvent({ type: "externally_hidden", presentationId: presentation.id });
@@ -522,26 +541,42 @@ export function ActiveTimerEditSheet({
     if (!snapshot.startedAt) return;
     const startedAt = new Date(snapshot.startedAt);
     const hydratedDescription = snapshot.description ?? "";
+    const hydratedDateText = formatDateInput(startedAt);
+    const hydratedTimeText = formatTimeInput(startedAt);
+    const hydratedTagNames = snapshot.tags.map((tag) => tag.name);
     setDescription(hydratedDescription);
-    setSelectedTagNames(snapshot.tags.map((tag) => tag.name));
+    setSelectedTagNames(hydratedTagNames);
     setDescriptionSelection({
       start: hydratedDescription.length,
       end: hydratedDescription.length
     });
     setSelectedCategoryId(snapshot.categoryId);
-    setDateText(formatDateInput(startedAt));
-    setTimeText(formatTimeInput(startedAt));
+    setDateText(hydratedDateText);
+    setTimeText(hydratedTimeText);
     setDraftStartMs(startedAt.getTime());
+    let hydratedStoppedDateText = "";
+    let hydratedStoppedTimeText = "";
     if (snapshot.stoppedAt) {
       const stoppedAt = new Date(snapshot.stoppedAt);
-      setStoppedDateText(formatDateInput(stoppedAt));
-      setStoppedTimeText(formatTimeInput(stoppedAt));
+      hydratedStoppedDateText = formatDateInput(stoppedAt);
+      hydratedStoppedTimeText = formatTimeInput(stoppedAt);
+      setStoppedDateText(hydratedStoppedDateText);
+      setStoppedTimeText(hydratedStoppedTimeText);
       setDraftEndMs(stoppedAt.getTime());
     } else {
       setStoppedDateText("");
       setStoppedTimeText("");
       setDraftEndMs(Date.now());
     }
+    setDraftBaseline({
+      categoryId: snapshot.categoryId,
+      dateText: hydratedDateText,
+      description: hydratedDescription,
+      stoppedDateText: hydratedStoppedDateText,
+      stoppedTimeText: hydratedStoppedTimeText,
+      tagNames: hydratedTagNames,
+      timeText: hydratedTimeText
+    });
     setDraftRevision(0);
     setPickerStartAt(startedAt);
     setDatePickerTarget("start");
@@ -549,6 +584,7 @@ export function ActiveTimerEditSheet({
     setDatePickerOpen(false);
     setValidationError(null);
     setHashtagPanelMounted(false);
+    setHashtagEntryRequested(false);
     hashtagPanelProgress.setValue(0);
   }, [hashtagPanelProgress, presentation.id, visible]);
 
@@ -968,6 +1004,12 @@ export function ActiveTimerEditSheet({
       return false;
     }
     if (mutationGateRef.current !== null) return false;
+    if (discardBypassPresentationIdRef.current === committedPresentationId) {
+      discardBypassPresentationIdRef.current = null;
+    } else if (draftHasUnsavedChanges) {
+      presentDiscardConfirmation();
+      return false;
+    }
     cancelPendingTagFocus();
     if (focusFrameRef.current !== null) {
       cancelAnimationFrame(focusFrameRef.current);
@@ -1047,12 +1089,27 @@ export function ActiveTimerEditSheet({
       return null;
     }
   }, [activeHashtag, exactTagMatch]);
-  const hashtagPanelVisible = sheetState.descriptionFocused && Boolean(activeHashtag);
+  const hashtagPanelVisible = Boolean(activeHashtag) && (
+    sheetState.descriptionFocused || hashtagEntryRequested
+  );
   const selectedNormalizedTagNames = useMemo(
     () => new Set(selectedTagNames.map((name) => normalizeTagName(name).normalizedName)),
     [selectedTagNames]
   );
   const appliedTagNames = selectedTagNames;
+  const draftHasUnsavedChanges = timeEntrySheetDraftHasChanges({
+    baseline: draftBaseline,
+    current: {
+      categoryId: selectedCategoryId,
+      dateText,
+      description,
+      stoppedDateText,
+      stoppedTimeText,
+      tagNames: appliedTagNames,
+      timeText
+    },
+    includeStoppedTime: hasStoppedTime
+  });
 
   useEffect(() => {
     if (!visible) return;
@@ -1129,6 +1186,7 @@ export function ActiveTimerEditSheet({
   const busy = saving || stopping || deleting || sheetState.mutationPhase !== "idle";
   const canStop = isRunningMode && Boolean(onStop);
   const canDelete = Boolean(onDelete);
+  const showDeleteButton = canDelete || isAddMode;
   const cancelLabel = isRunningMode ? "Cancel editing timer" : isAddMode ? "Cancel adding time" : "Cancel editing entry";
   const saveLabel = isRunningMode ? "Save timer edits" : isAddMode ? "Create time entry" : "Save entry edits";
   const sheetTitle = isAddMode ? "Add time" : "Edit entry";
@@ -1143,7 +1201,12 @@ export function ActiveTimerEditSheet({
     height: keyboardLayout.sheetHeight,
     maxHeight: keyboardLayout.sheetMaxHeight
   };
-  const sheetContentScrollable = windowDimensions.height < 780 || windowDimensions.fontScale >= 1.3;
+  const sheetContentScrollable = shouldScrollTimeEntrySheetContent({
+    contentHeight,
+    fontScale: windowDimensions.fontScale,
+    viewportHeight: contentViewportHeight,
+    windowHeight: windowDimensions.height
+  });
   useEffect(() => {
     if (sheetContentScrollable) return;
     contentScrollOffsetRef.current = { x: 0, y: 0 };
@@ -1159,7 +1222,7 @@ export function ActiveTimerEditSheet({
   useEffect(() => {
     if (pendingCallerDismissRequestId === null) return;
     handledDismissRequestIdRef.current = pendingCallerDismissRequestId;
-    requestCoordinatedDismiss();
+    requestCoordinatedDismiss({ bypassDiscardConfirmation: true });
   }, [pendingCallerDismissRequestId]);
   const suggestionsExpectedForReady = Boolean(
     presentation.allowSuggestionsOnFocus &&
@@ -1369,11 +1432,62 @@ export function ActiveTimerEditSheet({
     }
   }
 
-  function requestCoordinatedDismiss() {
+  function requestCoordinatedDismiss({
+    bypassDiscardConfirmation = false
+  }: { bypassDiscardConfirmation?: boolean } = {}) {
     const presentationId = presentationRef.current.id;
+    if (bypassDiscardConfirmation) {
+      discardBypassPresentationIdRef.current = presentationId;
+    }
     cancelPendingTagFocus();
     dispatchSheetEvent({ type: "dismiss_requested", presentationId });
     sheetRef.current?.dismiss();
+  }
+
+  function presentDiscardConfirmation() {
+    const promptPresentationId = presentationRef.current.id;
+    if (discardPromptPresentationIdRef.current === promptPresentationId) return;
+    discardPromptPresentationIdRef.current = promptPresentationId;
+    Alert.alert(
+      "Discard changes?",
+      "Your unsaved changes will be lost.",
+      [
+        {
+          text: "Keep editing",
+          style: "cancel",
+          onPress: () => {
+            if (discardPromptPresentationIdRef.current === promptPresentationId) {
+              discardPromptPresentationIdRef.current = null;
+            }
+          }
+        },
+        {
+          text: "Discard",
+          style: "destructive",
+          onPress: () => {
+            if (presentationRef.current.id !== promptPresentationId) return;
+            discardPromptPresentationIdRef.current = null;
+            requestCoordinatedDismiss({ bypassDiscardConfirmation: true });
+          }
+        }
+      ],
+      {
+        cancelable: true,
+        onDismiss: () => {
+          if (discardPromptPresentationIdRef.current === promptPresentationId) {
+            discardPromptPresentationIdRef.current = null;
+          }
+        }
+      }
+    );
+  }
+
+  function requestUserDismiss() {
+    if (draftHasUnsavedChanges) {
+      presentDiscardConfirmation();
+      return;
+    }
+    requestCoordinatedDismiss();
   }
 
   function handleUserRequestClose() {
@@ -1386,7 +1500,7 @@ export function ActiveTimerEditSheet({
       return;
     }
     if (busy) return;
-    requestCoordinatedDismiss();
+    requestUserDismiss();
   }
 
   async function saveChanges() {
@@ -1449,7 +1563,7 @@ export function ActiveTimerEditSheet({
     setValidationError(null);
     const ok = await resolveMutation(() => onSave(entry.id, patch));
     const accepted = finishMutation(token, ok ? "succeeded" : "failed");
-    if (accepted && ok) requestCoordinatedDismiss();
+    if (accepted && ok) requestCoordinatedDismiss({ bypassDiscardConfirmation: true });
   }
 
   async function stopFromSheet() {
@@ -1459,7 +1573,7 @@ export function ActiveTimerEditSheet({
     if (token === null) return;
     const ok = await resolveMutation(onStop);
     const accepted = finishMutation(token, ok ? "succeeded" : "failed");
-    if (accepted && ok) requestCoordinatedDismiss();
+    if (accepted && ok) requestCoordinatedDismiss({ bypassDiscardConfirmation: true });
   }
 
   async function applyHistoricalSuggestion(suggestion: RecentActivitySuggestion) {
@@ -1488,6 +1602,12 @@ export function ActiveTimerEditSheet({
     const accepted = suggestionMutationSequence === suggestionMutationSequenceRef.current &&
       presentation.id === presentationRef.current.id;
     if (accepted && ok) {
+      setDraftBaseline((current) => current ? {
+        ...current,
+        categoryId: patch.categoryId,
+        description: patch.description,
+        tagNames: patch.tagNames
+      } : current);
       AccessibilityInfo.announceForAccessibility(
         historicalSuggestionAppliedAnnouncement(suggestion)
       );
@@ -1515,6 +1635,10 @@ export function ActiveTimerEditSheet({
   }
 
   async function deleteEntryFromSheet() {
+    if (isAddMode) {
+      requestUserDismiss();
+      return;
+    }
     if (busy || !entry || !onDelete) return;
     dismissTransientEditingSurfaces();
     const token = beginMutation("deleting");
@@ -1522,7 +1646,7 @@ export function ActiveTimerEditSheet({
     Keyboard.dismiss();
     const ok = await resolveMutation(() => onDelete(entry.id));
     const accepted = finishMutation(token, ok ? "succeeded" : "failed");
-    if (accepted && ok) requestCoordinatedDismiss();
+    if (accepted && ok) requestCoordinatedDismiss({ bypassDiscardConfirmation: true });
   }
 
   function updateTimeText(value: string) {
@@ -1555,6 +1679,9 @@ export function ActiveTimerEditSheet({
     }
     setDatePickerOpen(false);
     setInputFocusCount((count) => count + 1);
+    setHashtagEntryRequested(Boolean(
+      findActiveHashtag(description, descriptionSelection.end)
+    ));
     dispatchSheetEvent({ type: "date_picker_closed", presentationId: presentation.id });
     dispatchSheetEvent({ type: "description_focused", presentationId: presentation.id });
     scheduleGeometryMeasurement();
@@ -1597,6 +1724,7 @@ export function ActiveTimerEditSheet({
     const replacement = consumeActiveHashtag(description, activeHashtag);
     setDescription(replacement.text);
     setDescriptionSelection({ start: replacement.caret, end: replacement.caret });
+    setHashtagEntryRequested(false);
     dispatchSheetEvent({ type: "suggestion_selected", presentationId: presentation.id });
     setValidationError(null);
     focusDescriptionAfterTagUpdate();
@@ -1608,12 +1736,14 @@ export function ActiveTimerEditSheet({
     dispatchSheetEvent({ type: "date_picker_closed", presentationId: presentation.id });
     const currentActive = findActiveHashtag(description, descriptionSelection.end);
     if (currentActive && descriptionSelection.start === descriptionSelection.end) {
+      setHashtagEntryRequested(true);
       focusDescriptionAfterTagUpdate();
       return;
     }
     const next = insertHashtagStarter(description, descriptionSelection);
     setDescription(next.text);
     setDescriptionSelection({ start: next.caret, end: next.caret });
+    setHashtagEntryRequested(true);
     setValidationError(null);
     focusDescriptionAfterTagUpdate();
   }
@@ -1643,6 +1773,7 @@ export function ActiveTimerEditSheet({
     descriptionInputRef.current?.blur();
     timeInputRef.current?.blur();
     endTimeInputRef.current?.blur();
+    setHashtagEntryRequested(false);
     setDatePickerOpen(false);
     dispatchSheetEvent({
       type: "background_interaction",
@@ -1790,6 +1921,7 @@ export function ActiveTimerEditSheet({
               backdropAccessibilityLabel={cancelLabel}
               backdropStyle={styles.sheetBackdrop}
               disabled={busy || datePickerOpen}
+              dismissGestureRef={sheetDismissGestureRef}
               handleStyle={styles.sheetHandle}
               keyboardInset={keyboardInset}
               onDismiss={(dismissedPresentationId) => {
@@ -1897,9 +2029,11 @@ export function ActiveTimerEditSheet({
                 keyboardShouldPersistTaps="handled"
                 onLayout={(event) => {
                   const { height, width, x, y } = event.nativeEvent.layout;
+                  setContentViewportHeight(height);
                   scrollViewportLayoutRef.current = { height, width, x, y };
                   scheduleGeometryMeasurement();
                 }}
+                onContentSizeChange={(_width, height) => setContentHeight(height)}
                 onScroll={(event) => {
                   const { x, y } = event.nativeEvent.contentOffset;
                   contentScrollOffsetRef.current = { x, y };
@@ -1941,6 +2075,9 @@ export function ActiveTimerEditSheet({
                       editable={!busy}
                       onBlur={() => {
                         if (suppressDescriptionBlurDispatchRef.current) return;
+                        if (tagFocusFrameRef.current === null) {
+                          setHashtagEntryRequested(false);
+                        }
                         dispatchSheetEvent({
                           type: "description_blurred",
                           presentationId: presentation.id
@@ -1950,12 +2087,28 @@ export function ActiveTimerEditSheet({
                       onPressIn={() => {
                         if (!busy) descriptionInputRef.current?.focus();
                       }}
-                      onSelectionChange={(event) => setDescriptionSelection(event.nativeEvent.selection)}
+                      onSelectionChange={(event) => {
+                        const nextSelection = event.nativeEvent.selection;
+                        setDescriptionSelection(nextSelection);
+                        setHashtagEntryRequested(Boolean(
+                          nextSelection.start === nextSelection.end &&
+                          findActiveHashtag(description, nextSelection.end)
+                        ));
+                      }}
                       selection={descriptionSelection}
                       style={[styles.textInput, styles.activeEditDescriptionInput]}
                       value={description}
                       onChangeText={(value) => {
+                        const nextSelection = selectionAfterDescriptionChange({
+                          nextText: value,
+                          previousSelection: descriptionSelection,
+                          previousText: description
+                        });
                         setDescription(value);
+                        setDescriptionSelection(nextSelection);
+                        setHashtagEntryRequested(Boolean(
+                          findActiveHashtag(value, nextSelection.end)
+                        ));
                         dispatchSheetEvent({
                           type: "description_query_changed",
                           presentationId: presentation.id
@@ -2231,12 +2384,13 @@ export function ActiveTimerEditSheet({
                   presentationId={presentation.id}
                   reduceMotion={reduceMotion}
                   revision={draftRevision}
+                  sheetDismissGestureRef={sheetDismissGestureRef}
                   startMs={parsedStart.date?.getTime() ?? draftStartMs}
                   styles={styles}
                   theme={theme}
                 />
 
-                {canDelete ? (
+                {showDeleteButton ? (
                   <Pressable
                     accessibilityLabel="Delete entry"
                     accessibilityRole="button"

@@ -7,6 +7,10 @@ const componentSource = readFileSync(
   fileURLToPath(new URL("../components/TimeEntryDurationDial.tsx", import.meta.url)),
   "utf8"
 );
+const swipeSheetSource = readFileSync(
+  fileURLToPath(new URL("../components/SwipeDismissSheet.tsx", import.meta.url)),
+  "utf8"
+);
 const expoViewSource = readFileSync(`${moduleRoot}ios/DayframeDurationDialExpoView.swift`, "utf8");
 const coreSource = readFileSync(`${moduleRoot}ios/DayframeDurationDialCore.swift`, "utf8");
 
@@ -32,7 +36,9 @@ describe("native duration dial contract", () => {
   });
 
   it("coordinates the native dial against the sheet pan without JS-frame dragging", () => {
-    expect(componentSource).toContain("Gesture.Native().disallowInterruption(true)");
+    expect(componentSource).toContain(".disallowInterruption(true)");
+    expect(componentSource).toContain(".blocksExternalGesture(sheetDismissGestureRef)");
+    expect(swipeSheetSource).toContain("pan.withRef(dismissGestureRef)");
     expect(componentSource).toContain("<GestureDetector gesture={nativeDialGesture}>");
     expect(expoViewSource).toContain("disableAncestorScrolling()");
     expect(expoViewSource).not.toMatch(/URLSession|fetch\(|axios|WebSocket/);

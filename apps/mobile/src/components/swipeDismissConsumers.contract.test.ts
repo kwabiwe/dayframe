@@ -30,7 +30,9 @@ describe("shared swipe-dismiss ownership integration", () => {
   });
 
   it("routes Done and successful destructive actions through coordinated exit", () => {
-    expect(editSource).toContain("if (accepted && ok) requestCoordinatedDismiss()");
+    expect(editSource).toContain(
+      "if (accepted && ok) requestCoordinatedDismiss({ bypassDiscardConfirmation: true })"
+    );
     expect(editSource).toContain("sheetRef.current?.dismiss()");
     expect(editSource).toContain("onCancel(dismissedPresentationId)");
     expect(editSource).toContain("onRequestClose={handleUserRequestClose}");
@@ -41,6 +43,22 @@ describe("shared swipe-dismiss ownership integration", () => {
     expect(userCloseSource).toContain("if (datePickerOpen)");
     expect(userCloseSource).toContain('type: "date_picker_closed"');
     expect(userCloseSource).toContain("if (busy) return;");
+    expect(userCloseSource).toContain("requestUserDismiss()");
+  });
+
+  it("vetoes dirty user dismissals until the explicit Discard action authorizes one exit", () => {
+    expect(editSource).toContain('"Discard changes?"');
+    expect(editSource).toContain('text: "Discard"');
+    expect(editSource).toContain("draftHasUnsavedChanges");
+    expect(editSource).toContain("discardBypassPresentationIdRef.current");
+    expect(editSource).toContain("presentDiscardConfirmation();\n      return false;");
+  });
+
+  it("keeps Delete reachable through measured overflow without permanently scrolling every sheet", () => {
+    expect(editSource).toContain("const showDeleteButton = canDelete || isAddMode");
+    expect(editSource).toContain("shouldScrollTimeEntrySheetContent({");
+    expect(editSource).toContain("onContentSizeChange={(_width, height) => setContentHeight(height)}");
+    expect(editSource).toContain("{showDeleteButton ? (");
   });
 
   it("does not reset drag translation before the dismissal callback", () => {

@@ -231,11 +231,13 @@ describe("native Calendar production contract", () => {
     expect(handler).not.toContain("setActiveEditVisible");
     expect(handler).not.toContain("startTimer");
     expect(handler).not.toContain("stopTimer");
-    expect(plusHandler).toContain("latestData.current?.activeEntry?.startedAt");
-    expect(plusHandler).toContain("presentManualEntry(createManualDraftEntry(");
+    expect(plusHandler).toContain("presentManualEntry(createManualDraftEntry(Date.now()))");
+    expect(plusHandler).not.toContain("latestData.current?.activeEntry?.startedAt");
     expect(plusHandler).not.toContain("stopTimer");
     expect(dashboard).toContain("manualEntrySavingRef.current = true");
     expect(dashboard).toContain("await createManualTimeEntry({");
     expect(dashboard).toContain("await load({ silent: true })");
+    expect(dashboard).toContain("const startedAt = new Date(nowMs - 30 * 60 * 1000)");
+    expect(dashboard).toContain("durationSeconds: 30 * 60");
   });
 });
