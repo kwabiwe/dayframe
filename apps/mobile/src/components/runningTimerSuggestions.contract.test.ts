@@ -44,6 +44,8 @@ describe("time-entry sheet historical Suggestions contract", () => {
     expect(overlaySource).toContain("opacity: paintableContent ? progress : 0");
     expect(overlaySource).toContain("const retainedRenderedHeight");
     expect(overlaySource).toContain("recordHistoricalSuggestionsOverlayContinuity(");
+    expect(overlaySource).toContain("if (!geometry || geometry.maxHeight <= 0) return null;");
+    expect(overlaySource).not.toContain("if (!mounted || !geometry");
     expect(overlaySource).toContain("pointerEvents={containerVisible ? \"auto\" : \"none\"}");
     expect(overlaySource).toContain("onRenderStateChangeRef.current({");
     expect(overlaySource).toContain("historical-suggestions-content-${contentKey}");

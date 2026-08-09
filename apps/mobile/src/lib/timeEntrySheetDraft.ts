@@ -32,18 +32,21 @@ export function timeEntrySheetDraftHasChanges({
 export function shouldScrollTimeEntrySheetContent({
   contentHeight,
   fontScale,
+  keyboardInset,
   viewportHeight,
   windowHeight
 }: {
   contentHeight: number;
   fontScale: number;
+  keyboardInset: number;
   viewportHeight: number;
   windowHeight: number;
 }) {
   const compactOrAccessible = windowHeight < 780 || fontScale >= 1.3;
+  const keyboardOccludesContent = keyboardInset > 0;
   const measuredOverflow = contentHeight > 0 && viewportHeight > 0 &&
     contentHeight > viewportHeight + 1;
-  return compactOrAccessible || measuredOverflow;
+  return compactOrAccessible || keyboardOccludesContent || measuredOverflow;
 }
 
 export function selectionAfterDescriptionChange({

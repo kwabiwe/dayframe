@@ -55,6 +55,42 @@ final class DayframeSheetQATests: XCTestCase {
     }
   }
 
+  func testTagReliabilityFlow() {
+    reporter.record("test_started", step: "tag_reliability", success: true)
+    do {
+      app.launch()
+      try require(app.state == .runningForeground, "Dayframe did not reach the foreground.")
+      try runTagFlow()
+      reporter.record("test_finished", step: "tag_reliability", success: true)
+    } catch {
+      reporter.record(
+        "test_finished",
+        step: "tag_reliability",
+        success: false,
+        message: String(describing: error)
+      )
+      XCTFail(String(describing: error))
+    }
+  }
+
+  func testRunningDeleteReachabilityFlow() {
+    reporter.record("test_started", step: "running_delete_reachability", success: true)
+    do {
+      app.launch()
+      try require(app.state == .runningForeground, "Dayframe did not reach the foreground.")
+      _ = try deleteFixture("existing", step: "running_delete_reachability", iteration: nil)
+      reporter.record("test_finished", step: "running_delete_reachability", success: true)
+    } catch {
+      reporter.record(
+        "test_finished",
+        step: "running_delete_reachability",
+        success: false,
+        message: String(describing: error)
+      )
+      XCTFail(String(describing: error))
+    }
+  }
+
   private func runConfiguredFlow() throws {
     switch configuration.flow {
     case .smoke:
@@ -75,6 +111,8 @@ final class DayframeSheetQATests: XCTestCase {
       try runJourneyFlows()
     case .keyboard:
       try runKeyboardFlow()
+    case .tags:
+      try repeatFlow("tags", count: configuration.iterations, body: runTagFlow)
     case .swipe:
       try runSwipeFlow()
     case .gestures:
@@ -98,6 +136,7 @@ final class DayframeSheetQATests: XCTestCase {
     case .all:
       try runJourneyFlows()
       try runKeyboardFlow()
+      try runTagFlow()
       try runSwipeFlow()
       try runMutationFailureFlows()
       try runStressFlow()
@@ -487,6 +526,127 @@ final class DayframeSheetQATests: XCTestCase {
     try verifyPinnedActionsDuringScrolledSuggestionGeometry(iteration: iteration)
     try performBackgroundForegroundRecovery(iteration: iteration)
     try dismissWithDone(step: "keyboard_flow_exit", iteration: iteration)
+  }
+
+  private func runTagFlow(iteration: Int? = nil) throws {
+    _ = try openHarness(fixture: "existing-blank", count: 6)
+    let initial = try waitForSheet("tag fixture without implicit keyboard") { state in
+      SheetQAValue.string(state, "sheetPhase") == "presented"
+        && SheetQAValue.string(state, "keyboardPhase") == "hidden"
+    }
+    let field = element(SheetQAIdentifiers.description)
+    try require(field.exists && field.isHittable, "Tag fixture Description was not hittable.", state: initial)
+    field.tap()
+    _ = try waitForSheet("tag fixture explicit focus") { state in
+      SheetQAValue.string(state, "keyboardPhase") == "visible"
+        && SheetQAValue.bool(state, "descriptionFocused") == true
+    }
+    try requireSoftwareKeyboard("typed hashtag")
+
+    field.typeText("#")
+    let typed = try waitForSheet("typed hashtag chooser") { state in
+      SheetQAValue.string(state, "keyboardPhase") == "visible"
+        && SheetQAValue.bool(state, "descriptionFocused") == true
+        && SheetQAValue.bool(state, "hashtagPanelVisible") == true
+        && SheetQAValue.bool(state, "tagSessionActiveHashtag") == true
+        && SheetQAValue.isNull(state, "tagFocusRequestId")
+    }
+    try require(
+      elementWithLabel("Existing tag, A24").exists,
+      "Typed hashtag did not expose the A24 tag row.",
+      state: typed
+    )
+    try assertContinuousDescriptionKeyboard(
+      duration: 0.8,
+      context: "typed hashtag chooser",
+      state: typed
+    )
+
+    field.typeText(XCUIKeyboardKey.delete.rawValue)
+    let deleted = try waitForSheet("typed hashtag deletion") { state in
+      SheetQAValue.string(state, "keyboardPhase") == "visible"
+        && SheetQAValue.bool(state, "descriptionFocused") == true
+        && SheetQAValue.bool(state, "hashtagPanelVisible") == false
+        && SheetQAValue.bool(state, "tagSessionActiveHashtag") == false
+        && SheetQAValue.isNull(state, "tagFocusRequestId")
+    }
+    try assertContinuousDescriptionKeyboard(
+      duration: 0.8,
+      context: "typed hashtag deletion",
+      state: deleted
+    )
+
+    let closeSuggestions = elementWithLabel("Close Suggestions")
+    if closeSuggestions.waitForExistence(timeout: 2) {
+      closeSuggestions.tap()
+      _ = try waitForSheet("historical Suggestions closed before Add a tag") { state in
+        SheetQAValue.string(state, "suggestionsPhase") == "closed"
+          && SheetQAValue.string(state, "keyboardPhase") == "visible"
+      }
+    }
+    let addTag = elementWithLabel("Add a tag")
+    try require(addTag.exists && addTag.isHittable, "Add a tag was not hittable.", state: deleted)
+    addTag.tap()
+    let shortcut = try waitForSheet("Add a tag chooser") { state in
+      SheetQAValue.string(state, "keyboardPhase") == "visible"
+        && SheetQAValue.bool(state, "descriptionFocused") == true
+        && SheetQAValue.bool(state, "hashtagPanelVisible") == true
+        && SheetQAValue.bool(state, "tagSessionActiveHashtag") == true
+        && SheetQAValue.isNull(state, "tagFocusRequestId")
+    }
+    try assertContinuousDescriptionKeyboard(
+      duration: 0.8,
+      context: "Add a tag chooser",
+      state: shortcut
+    )
+    reporter.record(
+      "checkpoint",
+      step: "tag_keyboard_continuity",
+      iteration: iteration,
+      success: true,
+      state: shortcut
+    )
+    field.typeText(XCUIKeyboardKey.delete.rawValue)
+    let shortcutCleared = try waitForSheet("Add a tag hashtag deletion") { state in
+      SheetQAValue.string(state, "keyboardPhase") == "visible"
+        && SheetQAValue.bool(state, "descriptionFocused") == true
+        && SheetQAValue.bool(state, "hashtagPanelVisible") == false
+        && SheetQAValue.bool(state, "tagSessionActiveHashtag") == false
+        && SheetQAValue.isNull(state, "tagFocusRequestId")
+    }
+    try assertContinuousDescriptionKeyboard(
+      duration: 0.8,
+      context: "Add a tag hashtag deletion",
+      state: shortcutCleared
+    )
+    try tap(SheetQAIdentifiers.hero)
+    _ = try waitForSheet("tag flow explicit focus release") { state in
+      SheetQAValue.string(state, "keyboardPhase") == "hidden"
+        && SheetQAValue.bool(state, "descriptionFocused") == false
+        && SheetQAValue.bool(state, "hashtagPanelVisible") == false
+        && SheetQAValue.bool(state, "tagSessionActiveHashtag") == false
+    }
+    try dismissWithCommittedSwipe(step: "tag_flow_exit", iteration: iteration)
+  }
+
+  private func assertContinuousDescriptionKeyboard(
+    duration: TimeInterval,
+    context: String,
+    state initial: SheetQAJSON
+  ) throws {
+    let deadline = Date().addingTimeInterval(duration)
+    var latest = initial
+    while Date() < deadline {
+      latest = try sheetState()
+      try require(
+        app.keyboards.firstMatch.exists
+          && SheetQAValue.string(latest, "keyboardPhase") == "visible"
+          && SheetQAValue.bool(latest, "descriptionFocused") == true,
+        "Description keyboard continuity broke during \(context).",
+        state: latest
+      )
+      pollRunLoop()
+    }
   }
 
   private func verifyPinnedActionsDuringScrolledSuggestionGeometry(iteration: Int?) throws {

@@ -113,6 +113,8 @@ const KEYBOARD_CONFIRMATION_TIMEOUT_MS = 700;
 const KEYBOARD_CONFIRMATION_MAX_RETRIES = 3;
 const KEYBOARD_CONFIRMATION_REFOCUS_DELAY_MS = 120;
 const KEYBOARD_CONFIRMATION_SUPPRESSION_SETTLE_MS = 300;
+const DESCRIPTION_SELECTION_SYNC_TIMEOUT_MS = 500;
+const TAG_FOCUS_CONTINUITY_GRACE_MS = 500;
 
 type Category = MobileBootstrap["categories"][number];
 type EditSheetMode = "running" | "entry" | "add";
@@ -189,10 +191,10 @@ export function ActiveTimerEditSheet({
   const [datePickerTarget, setDatePickerTarget] = useState<"start" | "end">("start");
   const [pickerStartAt, setPickerStartAt] = useState<Date | null>(null);
   const [descriptionSelection, setDescriptionSelection] = useState({ start: 0, end: 0 });
+  const [descriptionSelectionOverride, setDescriptionSelectionOverride] =
+    useState<DescriptionSelection | undefined>(undefined);
   const [selectedTagNames, setSelectedTagNames] = useState<string[]>([]);
-  const [hashtagPanelMounted, setHashtagPanelMounted] = useState(false);
   const [tagSession, setTagSession] = useState(() => createTimeEntrySheetTagSession());
-  const [highlightedTagAction, setHighlightedTagAction] = useState<string | null>(null);
   const [contentHeight, setContentHeight] = useState(0);
   const [contentViewportHeight, setContentViewportHeight] = useState(0);
   const [draftBaseline, setDraftBaseline] = useState<TimeEntrySheetDraftSnapshot | null>(null);
@@ -238,9 +240,11 @@ export function ActiveTimerEditSheet({
   const descriptionSelectionRef = useRef<DescriptionSelection>({ start: 0, end: 0 });
   const pendingDescriptionSelectionSyncRef =
     useRef<PendingDescriptionSelectionSync | null>(null);
-  const selectionSyncFrameRef = useRef<number | null>(null);
+  const selectionOverrideFrameRef = useRef<number | null>(null);
+  const selectionSyncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tagSessionRef = useRef(tagSession);
   tagSessionRef.current = tagSession;
+  const tagFocusContinuityRef = useRef({ presentationId: 0, until: 0 });
   const contentScrollRef = useRef<ScrollView>(null);
   const sheetRootLayoutRef = useRef<MeasuredRect | null>(null);
   const scrollViewportLayoutRef = useRef<MeasuredRect | null>(null);
@@ -293,6 +297,7 @@ export function ActiveTimerEditSheet({
   const [staleCallbackCount, setStaleCallbackCount] = useState(0);
   const [interactiveKeyboardFrameCount, setInteractiveKeyboardFrameCount] = useState(0);
   const [keyboardConfirmationRetryCount, setKeyboardConfirmationRetryCount] = useState(0);
+  const [tagBlurRecoveryCount, setTagBlurRecoveryCount] = useState(0);
   const [swipeStartedCount, setSwipeStartedCount] = useState(0);
   const [swipeCancelledCount, setSwipeCancelledCount] = useState(0);
   const [lastSwipeStartedPresentationId, setLastSwipeStartedPresentationId] =
@@ -414,6 +419,30 @@ export function ActiveTimerEditSheet({
     }, KEYBOARD_CONFIRMATION_TIMEOUT_MS);
   }, [clearKeyboardConfirmationWatchdog, synchronizeVisibleKeyboardMetrics]);
   const transitionTagSession = useCallback((event: TimeEntrySheetTagSessionEvent) => {
+    const previous = tagSessionRef.current;
+    if (event.type === "presentation_opened" || event.type === "cancelled") {
+      tagFocusContinuityRef.current = { presentationId: event.presentationId, until: 0 };
+    } else if (event.type === "hashtag_changed") {
+      if (event.active) {
+        tagFocusContinuityRef.current = {
+          presentationId: event.presentationId,
+          until: Number.POSITIVE_INFINITY
+        };
+      } else if (
+        previous.activeHashtag ||
+        tagFocusContinuityRef.current.until === Number.POSITIVE_INFINITY
+      ) {
+        tagFocusContinuityRef.current = {
+          presentationId: event.presentationId,
+          until: Date.now() + TAG_FOCUS_CONTINUITY_GRACE_MS
+        };
+      }
+    } else if (event.type === "hashtag_consumed") {
+      tagFocusContinuityRef.current = {
+        presentationId: event.presentationId,
+        until: Date.now() + TAG_FOCUS_CONTINUITY_GRACE_MS
+      };
+    }
     const next = timeEntrySheetTagSessionReducer(tagSessionRef.current, event);
     tagSessionRef.current = next;
     setTagSession(next);
@@ -472,11 +501,16 @@ export function ActiveTimerEditSheet({
       cancelAnimationFrame(geometryFrameRef.current);
       geometryFrameRef.current = null;
     }
-    if (selectionSyncFrameRef.current !== null) {
-      cancelAnimationFrame(selectionSyncFrameRef.current);
-      selectionSyncFrameRef.current = null;
+    if (selectionOverrideFrameRef.current !== null) {
+      cancelAnimationFrame(selectionOverrideFrameRef.current);
+      selectionOverrideFrameRef.current = null;
+    }
+    if (selectionSyncTimeoutRef.current !== null) {
+      clearTimeout(selectionSyncTimeoutRef.current);
+      selectionSyncTimeoutRef.current = null;
     }
     pendingDescriptionSelectionSyncRef.current = null;
+    setDescriptionSelectionOverride(undefined);
     clearKeyboardConfirmationWatchdog();
     keyboardConfirmationRetryCountRef.current = 0;
     suppressDescriptionBlurDispatchRef.current = false;
@@ -612,7 +646,6 @@ export function ActiveTimerEditSheet({
     setStartTimeEdited(false);
     setDatePickerOpen(false);
     setValidationError(null);
-    setHashtagPanelMounted(false);
     hashtagPanelProgress.setValue(0);
   }, [hashtagPanelProgress, presentation.id, visible]);
 
@@ -728,8 +761,11 @@ export function ActiveTimerEditSheet({
     if (geometryFrameRef.current !== null) cancelAnimationFrame(geometryFrameRef.current);
     if (focusFrameRef.current !== null) cancelAnimationFrame(focusFrameRef.current);
     if (tagFocusFrameRef.current !== null) cancelAnimationFrame(tagFocusFrameRef.current);
-    if (selectionSyncFrameRef.current !== null) {
-      cancelAnimationFrame(selectionSyncFrameRef.current);
+    if (selectionOverrideFrameRef.current !== null) {
+      cancelAnimationFrame(selectionOverrideFrameRef.current);
+    }
+    if (selectionSyncTimeoutRef.current !== null) {
+      clearTimeout(selectionSyncTimeoutRef.current);
     }
     if (keyboardConfirmationTimeoutRef.current !== null) {
       clearTimeout(keyboardConfirmationTimeoutRef.current);
@@ -848,7 +884,6 @@ export function ActiveTimerEditSheet({
       setSheetHeightAnimating(false);
       keyboardLift.setValue(0);
       hashtagPanelProgress.setValue(0);
-      setHashtagPanelMounted(false);
       return undefined;
     }
 
@@ -1162,10 +1197,8 @@ export function ActiveTimerEditSheet({
   }, [activeHashtag, presentation.id, transitionTagSession, visible]);
 
   useEffect(() => {
-    if (hashtagPanelVisible) setHashtagPanelMounted(true);
     if (reduceMotion) {
       hashtagPanelProgress.setValue(hashtagPanelVisible ? 1 : 0);
-      if (!hashtagPanelVisible) setHashtagPanelMounted(false);
       return undefined;
     }
     hashtagPanelProgress.stopAnimation();
@@ -1175,9 +1208,7 @@ export function ActiveTimerEditSheet({
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true
     });
-    animation.start(({ finished }) => {
-      if (finished && !hashtagPanelVisible) setHashtagPanelMounted(false);
-    });
+    animation.start();
     return () => animation.stop();
   }, [hashtagPanelProgress, hashtagPanelVisible, reduceMotion]);
 
@@ -1186,7 +1217,6 @@ export function ActiveTimerEditSheet({
     if (focusRequestId === null || !visible) return undefined;
     const focusPresentationId = presentation.id;
     let attemptsRemaining = 3;
-    let ownsBlurSuppression = false;
 
     const scheduleAttempt = () => {
       tagFocusFrameRef.current = requestAnimationFrame(() => {
@@ -1206,8 +1236,11 @@ export function ActiveTimerEditSheet({
 
         const input = descriptionInputRef.current;
         if (!input) return;
-        const keyboardVisible = (Keyboard.metrics()?.height ?? 0) > 0;
-        if (input.isFocused() && keyboardVisible) {
+        if (input.isFocused()) {
+          // Do not use transient Keyboard.metrics() absence as permission to
+          // resign first responder. During a TextInput/overlay commit iOS can
+          // briefly report no metrics while the keyboard is still onscreen;
+          // the former forced blur/refocus made that bookkeeping gap visible.
           transitionTagSession({
             type: "description_focused",
             presentationId: focusPresentationId
@@ -1216,31 +1249,6 @@ export function ActiveTimerEditSheet({
         }
 
         attemptsRemaining -= 1;
-        if (input.isFocused() && attemptsRemaining === 0) {
-          // A focused TextInput with no keyboard is the UIKit responder race
-          // reported on device. Re-establish first responder once, after the
-          // pending press/blur hand-off has settled.
-          if (!suppressDescriptionBlurDispatchRef.current) {
-            suppressDescriptionBlurDispatchRef.current = true;
-            ownsBlurSuppression = true;
-          }
-          input.blur();
-          tagFocusFrameRef.current = requestAnimationFrame(() => {
-            tagFocusFrameRef.current = null;
-            if (ownsBlurSuppression) {
-              suppressDescriptionBlurDispatchRef.current = false;
-              ownsBlurSuppression = false;
-            }
-            if (
-              tagSessionRef.current.focusRequestId === focusRequestId &&
-              presentationRef.current.id === focusPresentationId
-            ) {
-              descriptionInputRef.current?.focus();
-            }
-          });
-          return;
-        }
-
         input.focus();
         if (
           attemptsRemaining > 0 &&
@@ -1257,12 +1265,6 @@ export function ActiveTimerEditSheet({
         cancelAnimationFrame(tagFocusFrameRef.current);
         tagFocusFrameRef.current = null;
       }
-      // If a state transition cancels the forced-refocus frame between blur and
-      // refocus, never leave future genuine blur events suppressed.
-      if (ownsBlurSuppression) {
-        suppressDescriptionBlurDispatchRef.current = false;
-        ownsBlurSuppression = false;
-      }
     };
   }, [
     presentation.id,
@@ -1271,10 +1273,6 @@ export function ActiveTimerEditSheet({
     transitionTagSession,
     visible
   ]);
-
-  useEffect(() => {
-    setHighlightedTagAction(matchingTags[0]?.id ?? (createTagName ? "create" : null));
-  }, [activeHashtag?.query, createTagName, matchingTags]);
 
   const parsedStart = useMemo(() => {
     const result = mergeTimeEntryDialLocalDateTime({
@@ -1336,15 +1334,27 @@ export function ActiveTimerEditSheet({
   const sheetContentScrollable = shouldScrollTimeEntrySheetContent({
     contentHeight,
     fontScale: windowDimensions.fontScale,
+    keyboardInset,
     viewportHeight: contentViewportHeight,
     windowHeight: windowDimensions.height
   });
+  // A bottom destructive action must always remain reachable even if the
+  // first measurement says the form fits. With bounce disabled, enabling the
+  // scroll view does not move a genuinely fitting layout, but it avoids the
+  // iPhone-size-dependent dead end where Delete exists below the dial while a
+  // stale/equal content measurement leaves scrolling disabled.
+  const sheetContentScrollEnabled = showDeleteButton || sheetContentScrollable;
   useEffect(() => {
-    if (sheetContentScrollable) return;
     contentScrollOffsetRef.current = { x: 0, y: 0 };
     contentScrollRef.current?.scrollTo({ x: 0, y: 0, animated: false });
     scheduleGeometryMeasurement();
-  }, [presentation.id, scheduleGeometryMeasurement, sheetContentScrollable]);
+  }, [presentation.id, scheduleGeometryMeasurement]);
+  useEffect(() => {
+    if (sheetContentScrollEnabled) return;
+    contentScrollOffsetRef.current = { x: 0, y: 0 };
+    contentScrollRef.current?.scrollTo({ x: 0, y: 0, animated: false });
+    scheduleGeometryMeasurement();
+  }, [scheduleGeometryMeasurement, sheetContentScrollEnabled]);
   const pendingCallerDismissRequestId = pendingTimeEntrySheetDismissRequestId({
     dismissRequestId,
     handledDismissRequestId: handledDismissRequestIdRef.current,
@@ -1434,6 +1444,7 @@ export function ActiveTimerEditSheet({
     inputFocusCount,
     interactiveKeyboardFrameCount,
     keyboardConfirmationRetryCount,
+    tagBlurRecoveryCount,
     swipeStartedCount,
     swipeCancelledCount,
     lastSwipeStartedPresentationId,
@@ -1446,6 +1457,16 @@ export function ActiveTimerEditSheet({
     reduceMotion,
     ready: qaReady,
     keyboardInset,
+    contentHeight,
+    contentViewportHeight,
+    sheetContentScrollable,
+    sheetContentScrollEnabled,
+    hashtagPanelMounted: true,
+    hashtagPanelVisible,
+    tagSessionActiveHashtag: tagSession.activeHashtag,
+    tagFocusRequestId: tagSession.focusRequestId,
+    descriptionFocused: sheetState.descriptionFocused,
+    descriptionSelection,
     keyboardTop: keyboardTopRef.current,
     keyboardTopLocal: keyboardLayout.keyboardOpen ? telemetryOverlayBottomBoundary : null,
     geometryCoordinateSpace: "sheet_local",
@@ -1805,15 +1826,34 @@ export function ActiveTimerEditSheet({
     pendingDescriptionSelectionSyncRef.current = synchronizeNativeSelection
       ? createPendingDescriptionSelectionSync(previousSelection, nextSelection)
       : null;
-    if (selectionSyncFrameRef.current !== null) {
-      cancelAnimationFrame(selectionSyncFrameRef.current);
-      selectionSyncFrameRef.current = null;
+    if (selectionOverrideFrameRef.current !== null) {
+      cancelAnimationFrame(selectionOverrideFrameRef.current);
+      selectionOverrideFrameRef.current = null;
+    }
+    if (selectionSyncTimeoutRef.current !== null) {
+      clearTimeout(selectionSyncTimeoutRef.current);
+      selectionSyncTimeoutRef.current = null;
+    }
+    if (synchronizeNativeSelection) {
+      setDescriptionSelectionOverride(nextSelection);
+      // Supply a controlled selection for one committed frame only. Native
+      // typing owns the caret after that; keeping `selection` controlled on
+      // every key can perturb iOS first-responder and keyboard continuity.
+      selectionOverrideFrameRef.current = requestAnimationFrame(() => {
+        selectionOverrideFrameRef.current = null;
+        setDescriptionSelectionOverride(undefined);
+      });
+    } else {
+      setDescriptionSelectionOverride(undefined);
     }
     if (pendingDescriptionSelectionSyncRef.current) {
-      selectionSyncFrameRef.current = requestAnimationFrame(() => {
-        selectionSyncFrameRef.current = null;
+      // UIKit selection acknowledgements can arrive well after one frame.
+      // Keep rejecting the exact old-caret echo for a bounded interval while
+      // accepting any genuinely different user caret immediately.
+      selectionSyncTimeoutRef.current = setTimeout(() => {
+        selectionSyncTimeoutRef.current = null;
         pendingDescriptionSelectionSyncRef.current = null;
-      });
+      }, DESCRIPTION_SELECTION_SYNC_TIMEOUT_MS);
     }
     descriptionValueRef.current = nextText;
     descriptionSelectionRef.current = nextSelection;
@@ -2196,7 +2236,7 @@ export function ActiveTimerEditSheet({
                 bounces={sheetContentScrollable}
                 contentContainerStyle={[
                   styles.activeEditContent,
-                  sheetContentScrollable && keyboardLayout.keyboardOpen
+                  sheetContentScrollEnabled && keyboardLayout.keyboardOpen
                     ? { paddingBottom: keyboardLayout.contentPaddingBottom }
                     : null
                 ]}
@@ -2215,7 +2255,7 @@ export function ActiveTimerEditSheet({
                   scheduleGeometryMeasurement();
                 }}
                 scrollEventThrottle={16}
-                scrollEnabled={sheetContentScrollable}
+                scrollEnabled={sheetContentScrollEnabled}
                 showsVerticalScrollIndicator={false}
                 style={[
                   styles.activeEditScroller,
@@ -2225,7 +2265,7 @@ export function ActiveTimerEditSheet({
               >
                 <View style={[
                   styles.activeEditSection,
-                  hashtagPanelMounted ? styles.activeEditTagSectionOpen : null
+                  hashtagPanelVisible ? styles.activeEditTagSectionOpen : null
                 ]} onLayout={(event) => {
                   const { height, width, x, y } = event.nativeEvent.layout;
                   descriptionSectionLayoutRef.current = { height, width, x, y };
@@ -2250,6 +2290,32 @@ export function ActiveTimerEditSheet({
                       editable={!busy}
                       onBlur={() => {
                         if (suppressDescriptionBlurDispatchRef.current) return;
+                        const continuity = tagFocusContinuityRef.current;
+                        if (
+                          visible &&
+                          continuity.presentationId === presentation.id &&
+                          continuity.until >= Date.now() &&
+                          sheetStateRef.current.appState === "active" &&
+                          sheetStateRef.current.sheetPhase === "presented" &&
+                          sheetStateRef.current.surface === "form"
+                        ) {
+                          // UIKit can transiently resign first responder while
+                          // the two Description-local overlays exchange
+                          // visibility. Reacquire synchronously at the native
+                          // event boundary so the software keyboard never gets
+                          // a frame in which no text responder owns it.
+                          setTagBlurRecoveryCount((count) => count + 1);
+                          descriptionInputRef.current?.focus();
+                          transitionTagSession({
+                            type: "description_focused",
+                            presentationId: presentation.id
+                          });
+                          dispatchSheetEvent({
+                            type: "description_focused",
+                            presentationId: presentation.id
+                          });
+                          return;
+                        }
                         transitionTagSession({
                           type: "description_blurred",
                           presentationId: presentation.id
@@ -2273,7 +2339,19 @@ export function ActiveTimerEditSheet({
                         if (!resolution.accepted) {
                           descriptionSelectionRef.current = resolution.selection;
                           setDescriptionSelection(resolution.selection);
+                          setDescriptionSelectionOverride(resolution.selection);
+                          if (selectionOverrideFrameRef.current !== null) {
+                            cancelAnimationFrame(selectionOverrideFrameRef.current);
+                          }
+                          selectionOverrideFrameRef.current = requestAnimationFrame(() => {
+                            selectionOverrideFrameRef.current = null;
+                            setDescriptionSelectionOverride(undefined);
+                          });
                           return;
+                        }
+                        if (resolution.pending === null && selectionSyncTimeoutRef.current !== null) {
+                          clearTimeout(selectionSyncTimeoutRef.current);
+                          selectionSyncTimeoutRef.current = null;
                         }
                         descriptionSelectionRef.current = resolution.selection;
                         setDescriptionSelection(resolution.selection);
@@ -2290,7 +2368,7 @@ export function ActiveTimerEditSheet({
                           requestFocus: false
                         });
                       }}
-                      selection={descriptionSelection}
+                      selection={descriptionSelectionOverride}
                       style={[styles.textInput, styles.activeEditDescriptionInput]}
                       value={description}
                       onChangeText={(value) => {
@@ -2301,7 +2379,7 @@ export function ActiveTimerEditSheet({
                           previousSelection,
                           previousText
                         });
-                        commitDescriptionEditorState(value, nextSelection, true);
+                        commitDescriptionEditorState(value, nextSelection, false);
                         transitionTagSession({
                           type: "hashtag_changed",
                           active: Boolean(findActiveHashtag(value, nextSelection.end)),
@@ -2321,57 +2399,50 @@ export function ActiveTimerEditSheet({
                       showSoftInputOnFocus
                       testID="time-entry-description"
                     />
-                    {hashtagPanelMounted ? (
-                      <Animated.View
-                        accessibilityLabel="Tag suggestions"
-                        style={[styles.tagAutocompletePanel, hashtagPanelAnimatedStyle]}
+                    <Animated.View
+                      accessibilityElementsHidden={!hashtagPanelVisible}
+                      accessibilityLabel="Tag suggestions"
+                      importantForAccessibility={hashtagPanelVisible ? "auto" : "no-hide-descendants"}
+                      pointerEvents={hashtagPanelVisible ? "auto" : "none"}
+                      style={[styles.tagAutocompletePanel, hashtagPanelAnimatedStyle]}
+                    >
+                      <View style={styles.tagAutocompleteHeader}>
+                        <Text style={styles.tagAutocompleteTitle}>TAGS</Text>
+                      </View>
+                      <View pointerEvents="none" style={styles.tagAutocompleteDivider} />
+                      <ScrollView
+                        keyboardShouldPersistTaps="always"
+                        nestedScrollEnabled
+                        showsVerticalScrollIndicator={false}
+                        style={styles.tagAutocompleteList}
                       >
-                        <View style={styles.tagAutocompleteHeader}>
-                          <Text style={styles.tagAutocompleteTitle}>TAGS</Text>
-                        </View>
-                        <View pointerEvents="none" style={styles.tagAutocompleteDivider} />
-                        <ScrollView
-                          keyboardShouldPersistTaps="always"
-                          nestedScrollEnabled
-                          showsVerticalScrollIndicator={false}
-                          style={styles.tagAutocompleteList}
-                        >
-                          {matchingTags.map((tag, index) => (
-                            <HashtagSuggestionRow
-                              key={tag.id}
-                              accessibilityLabel={`${selectedNormalizedTagNames.has(tag.normalizedName) ? "Remove selected" : "Existing"} tag, ${tag.name}`}
-                              disabled={busy}
-                              highlighted={highlightedTagAction === tag.id}
-                              isFirst={index === 0}
-                              label={tag.name}
-                              onHighlight={() => setHighlightedTagAction(tag.id)}
-                              onPress={() => selectHashtag(tag.name)}
-                              reduceMotion={reduceMotion}
-                              styles={styles}
-                              theme={theme}
-                            />
-                          ))}
-                          {createTagName ? (
-                            <HashtagSuggestionRow
-                              accessibilityLabel={`Create new tag, ${createTagName}`}
-                              create
-                              disabled={busy}
-                              highlighted={highlightedTagAction === "create"}
-                              isFirst={matchingTags.length === 0}
-                              label={`Create “${createTagName}”`}
-                              onHighlight={() => setHighlightedTagAction("create")}
-                              onPress={() => selectHashtag(createTagName)}
-                              reduceMotion={reduceMotion}
-                              styles={styles}
-                              theme={theme}
-                            />
-                          ) : null}
-                          {matchingTags.length === 0 && !createTagName ? (
-                            <Text style={styles.tagSuggestionEmptyText}>Type a name to search or create</Text>
-                          ) : null}
-                        </ScrollView>
-                      </Animated.View>
-                    ) : null}
+                        {matchingTags.map((tag, index) => (
+                          <HashtagSuggestionRow
+                            key={tag.id}
+                            accessibilityLabel={`${selectedNormalizedTagNames.has(tag.normalizedName) ? "Remove selected" : "Existing"} tag, ${tag.name}`}
+                            disabled={busy}
+                            isFirst={index === 0}
+                            label={tag.name}
+                            onPress={() => selectHashtag(tag.name)}
+                            styles={styles}
+                          />
+                        ))}
+                        {createTagName ? (
+                          <HashtagSuggestionRow
+                            accessibilityLabel={`Create new tag, ${createTagName}`}
+                            create
+                            disabled={busy}
+                            isFirst={matchingTags.length === 0}
+                            label={`Create “${createTagName}”`}
+                            onPress={() => selectHashtag(createTagName)}
+                            styles={styles}
+                          />
+                        ) : null}
+                        {matchingTags.length === 0 && !createTagName ? (
+                          <Text style={styles.tagSuggestionEmptyText}>Type a name to search or create</Text>
+                        ) : null}
+                      </ScrollView>
+                    </Animated.View>
                   </View>
                   <View
                     accessibilityElementsHidden={suggestionsObscureFormAccessibility}
@@ -2716,69 +2787,38 @@ function HashtagSuggestionRow({
   accessibilityLabel,
   create = false,
   disabled,
-  highlighted,
   isFirst,
   label,
-  onHighlight,
   onPress,
-  reduceMotion,
-  styles,
-  theme
+  styles
 }: {
   accessibilityLabel: string;
   create?: boolean;
   disabled: boolean;
-  highlighted: boolean;
   isFirst: boolean;
   label: string;
-  onHighlight: () => void;
   onPress: () => void;
-  reduceMotion: boolean;
   styles: MobileStyles;
-  theme: MobileTheme;
 }) {
-  const highlightProgress = useRef(new Animated.Value(highlighted ? 1 : 0)).current;
-
-  useEffect(() => {
-    highlightProgress.stopAnimation();
-    if (reduceMotion) {
-      highlightProgress.setValue(highlighted ? 1 : 0);
-      return;
-    }
-    Animated.timing(highlightProgress, {
-      toValue: highlighted ? 1 : 0,
-      duration: 120,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false
-    }).start();
-  }, [highlightProgress, highlighted, reduceMotion]);
-
   return (
-    <Animated.View style={{
-      backgroundColor: highlightProgress.interpolate({
-        inputRange: [0, 1],
-        outputRange: ["transparent", theme.surfaceMuted]
-      })
-    }}>
-      <Pressable
-        accessibilityLabel={accessibilityLabel}
-        accessibilityRole="button"
-        disabled={disabled}
-        onPress={onPress}
-        onPressIn={onHighlight}
-        style={[
+    <Pressable
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="button"
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
           styles.tagSuggestionRow,
+          pressed && !disabled ? styles.buttonPressed : null,
           disabled ? styles.buttonDisabled : null
-        ]}
-      >
-        {!isFirst ? (
-          <View pointerEvents="none" style={styles.tagSuggestionDivider} />
-        ) : null}
-        <Text style={create ? styles.tagSuggestionCreateText : styles.tagSuggestionText} numberOfLines={1}>
-          {create ? "+ " : ""}{label}
-        </Text>
-      </Pressable>
-    </Animated.View>
+      ]}
+    >
+      {!isFirst ? (
+        <View pointerEvents="none" style={styles.tagSuggestionDivider} />
+      ) : null}
+      <Text style={create ? styles.tagSuggestionCreateText : styles.tagSuggestionText} numberOfLines={1}>
+        {create ? "+ " : ""}{label}
+      </Text>
+    </Pressable>
   );
 }
 

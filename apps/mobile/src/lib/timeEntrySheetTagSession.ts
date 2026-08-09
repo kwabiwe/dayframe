@@ -64,7 +64,11 @@ export function timeEntrySheetTagSessionReducer(
       if (!event.active) {
         return {
           ...state,
-          activeHashtag: false
+          activeHashtag: false,
+          focusRequestId: null,
+          lastFocusRequestId: state.focusRequestId === null
+            ? state.lastFocusRequestId
+            : state.lastFocusRequestId + 1
         };
       }
       if (!event.requestFocus) {
