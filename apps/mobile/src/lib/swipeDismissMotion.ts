@@ -23,6 +23,17 @@ export type SwipeDismissCoordinator = {
   hide: () => void;
 };
 
+export type SwipeGestureSettlementOwnership = {
+  activePresentationId: number;
+  committedPresentationId: number | null;
+  coordinatorCanSettle: boolean;
+  dismissCommitted: boolean;
+  dismissRequestPresentationId: number | null;
+  gesturePresentationId: number;
+  presentationCanSettle: boolean;
+  visible: boolean;
+};
+
 export type SwipeSheetPresentationPlan = {
   animatePresenceTo: number;
   animateTranslationTo: number;
@@ -34,6 +45,28 @@ export type SwipeSheetPresentationPlan = {
 export type SwipeSheetExitPlan = {
   fadeOnly: boolean;
   translationTarget: number;
+};
+
+export type SwipeSheetPresentationMode = "fade" | "slide";
+export type SwipeSheetPresentationBeginResult =
+  | "start"
+  | "restart_for_motion_mode"
+  | "unchanged";
+export type SwipeSheetPresentationCompletion =
+  | "accepted"
+  | "duplicate"
+  | "dismissed"
+  | "stale";
+
+export type SwipeSheetPresentationCoordinator = {
+  begin: (
+    presentationId: number,
+    mode: SwipeSheetPresentationMode
+  ) => SwipeSheetPresentationBeginResult;
+  commitDismiss: (presentationId: number) => boolean;
+  complete: (presentationId: number) => SwipeSheetPresentationCompletion;
+  canSettle: (presentationId: number) => boolean;
+  hide: () => void;
 };
 
 export function dismissDistanceForSheet(sheetHeight: number) {
@@ -71,6 +104,25 @@ export function shouldDismissSwipe({
   }
   return projectedSwipeEndpoint(downwardTravel, velocityY) >=
     dismissDistanceForSheet(sheetHeight);
+}
+
+export function canSettleSwipeGesture({
+  activePresentationId,
+  committedPresentationId,
+  coordinatorCanSettle,
+  dismissCommitted,
+  dismissRequestPresentationId,
+  gesturePresentationId,
+  presentationCanSettle,
+  visible
+}: SwipeGestureSettlementOwnership) {
+  return visible &&
+    gesturePresentationId === activePresentationId &&
+    committedPresentationId === null &&
+    dismissRequestPresentationId !== gesturePresentationId &&
+    !dismissCommitted &&
+    coordinatorCanSettle &&
+    presentationCanSettle;
 }
 
 export function backdropProgressForTranslation(translationY: number, exitTarget: number) {
@@ -150,6 +202,63 @@ export function createSwipeDismissCoordinator(onDismiss: () => void): SwipeDismi
     },
     hide() {
       state = "idle";
+    }
+  };
+}
+
+/**
+ * Owns exactly-once presentation completion separately from dismissal. A
+ * gesture may interrupt the entrance animation and later settle at rest, while
+ * an asynchronous Reduce Motion preference may restart that same entrance in
+ * another mode. Both paths complete through this one generation gate.
+ */
+export function createSwipeSheetPresentationCoordinator():
+SwipeSheetPresentationCoordinator {
+  let presentationId: number | null = null;
+  let mode: SwipeSheetPresentationMode | null = null;
+  let phase: "hidden" | "entering" | "presented" | "dismissing" = "hidden";
+
+  return {
+    begin(nextPresentationId, nextMode) {
+      if (presentationId !== nextPresentationId) {
+        presentationId = nextPresentationId;
+        mode = nextMode;
+        phase = "entering";
+        return "start";
+      }
+      if (phase === "entering" && mode !== nextMode) {
+        mode = nextMode;
+        return "restart_for_motion_mode";
+      }
+      return "unchanged";
+    },
+    commitDismiss(committedPresentationId) {
+      if (
+        presentationId !== committedPresentationId ||
+        (phase !== "entering" && phase !== "presented")
+      ) {
+        return false;
+      }
+      phase = "dismissing";
+      return true;
+    },
+    complete(completedPresentationId) {
+      if (presentationId !== completedPresentationId || phase === "hidden") {
+        return "stale";
+      }
+      if (phase === "dismissing") return "dismissed";
+      if (phase === "presented") return "duplicate";
+      phase = "presented";
+      return "accepted";
+    },
+    canSettle(settledPresentationId) {
+      return presentationId === settledPresentationId &&
+        (phase === "entering" || phase === "presented");
+    },
+    hide() {
+      presentationId = null;
+      mode = null;
+      phase = "hidden";
     }
   };
 }

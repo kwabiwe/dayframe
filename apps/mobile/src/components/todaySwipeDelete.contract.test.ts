@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { HISTORY_DELETION_UNDO_MS } from "../lib/historyDeletion";
+import { DELETION_UNDO_MS } from "../lib/historyDeletion";
 
 const dashboardSource = readFileSync(
   fileURLToPath(new URL("./DayframeDashboard.tsx", import.meta.url)),
@@ -52,15 +52,191 @@ describe("Today history swipe-to-delete contract", () => {
   it("keeps replay functional as an explicit switch while another timer runs", () => {
     expect(dashboardSource).toContain("Switch the running timer to ${title}");
     expect(dashboardSource).toContain("const canReplay = Boolean(entry.categoryId || entry.description?.trim())");
-    expect(dashboardSource).toContain("latestData.current?.activeEntry && !categoryId && !description.trim()");
+    expect(dashboardSource).toContain("!isActiveEntryPendingDeletion()");
   });
 
   it("allows immediate grouped deletion with a temporary undo action", () => {
     expect(dashboardSource).toContain("onDeleteEntries(group.entries.map");
     expect(dashboardSource).toContain("time entries deleted");
-    expect(dashboardSource).toContain("undoHistoryDeletion");
-    expect(HISTORY_DELETION_UNDO_MS).toBe(5_000);
-    expect(dashboardSource).toContain("createHistoryDeletionCoordinator");
+    expect(dashboardSource).toContain("undoDeletion");
+    expect(DELETION_UNDO_MS).toBe(5_000);
+    expect(dashboardSource).toContain("createDeletionCoordinator");
+    expect(dashboardSource).toContain("coordinator.prepare(entries, snapshot)");
+    expect(dashboardSource).toContain("coordinator.activate(prepared.token)");
+  });
+
+  it("uses the shared tombstone filter for refresh and optimistic state", () => {
+    expect(dashboardSource).toContain("filterPendingDeletedTimeEntries(");
+    expect(dashboardSource).toContain("deletionCoordinator.current?.pendingEntryIds()");
+    expect(dashboardSource).toContain("registerPendingId(");
+    expect(dashboardSource).toContain("reconcileForeground()");
+  });
+
+  it("commits pending active deletion when bootstrap or Shortcut sync reveals another timer", () => {
+    const loadSource = dashboardSource.slice(
+      dashboardSource.indexOf("const load = useCallback"),
+      dashboardSource.indexOf("loadRef.current = load")
+    );
+
+    expect(dashboardSource).toContain("function reconcilePendingActiveDeletionWithExternalActiveEntry(");
+    expect(dashboardSource).toContain("coordinator.reconcileExternalActiveEntry({");
+    expect(dashboardSource).toContain("deferredExternalActiveEntryIds()");
+    expect(loadSource).toContain("await syncQueueWithTimerReconciliation()");
+    expect(loadSource).toContain(
+      "reconcilePendingActiveDeletionAfterQueueBarrier(\n        bootstrap.activeEntry?.id ?? null"
+    );
+    expect(loadSource.indexOf("reconcilePendingActiveDeletionAfterQueueBarrier(")).toBeGreaterThan(
+      loadSource.indexOf("await syncQueueWithTimerReconciliation()")
+    );
+    expect(dashboardSource).toContain("await resolveTimerEntryIdAfterQueueBarrier(localId)");
+  });
+
+  it("prepares sheet deletion immediately but activates Undo only after visual exit", () => {
+    const prepareSource = dashboardSource.slice(
+      dashboardSource.indexOf("function prepareSheetDeletion("),
+      dashboardSource.indexOf("function activateSheetDeletion(")
+    );
+    const activeExitSource = dashboardSource.slice(
+      dashboardSource.indexOf("function completeActiveEditorExit("),
+      dashboardSource.indexOf("function completeManualEntryExit(")
+    );
+    const completedExitSource = dashboardSource.slice(
+      dashboardSource.indexOf("function completeCalendarEntryExit("),
+      dashboardSource.indexOf("function nextTimerMutationVersion(")
+    );
+
+    expect(prepareSource).toContain("coordinator.prepare([entry], snapshot)");
+    expect(prepareSource).toContain("filterPendingDeletedTimeEntries(");
+    expect(prepareSource).not.toContain(".activate(");
+    expect(activeExitSource).toContain("activateSheetDeletion(activeSheetDeletionToken, presentationId)");
+    expect(completedExitSource).toContain("activateSheetDeletion(calendarSheetDeletionToken, presentationId)");
+  });
+
+  it("keeps editor snapshots and elapsed presentation alive through coordinated exit", () => {
+    expect(dashboardSource).toContain("if (activeEditPresentation) return undefined");
+    expect(dashboardSource).toContain("entry={activeEntryForDisplay ?? presentedActiveEntry}");
+    expect(dashboardSource).toContain("elapsedSeconds={displayedActiveDurationSeconds}");
+    expect(dashboardSource).not.toContain("if (!activeEntryForDisplay && activeEditVisible)");
+  });
+
+  it("commits an undoable active deletion before starting or switching timers", () => {
+    const startSource = dashboardSource.slice(
+      dashboardSource.indexOf("async function startTaskWith("),
+      dashboardSource.indexOf("async function saveActiveTimerEdit(")
+    );
+    expect(startSource).toContain("commitPendingActiveDeletionBeforeTimerStart()");
+    expect(dashboardSource).toContain("coordinator.commit(pending.token)");
+    expect(dashboardSource).toContain("restoreFailedDeletionSafely(");
+  });
+
+  it("synchronously gates same-tick blank Play before creating its canonical optimistic start", () => {
+    const startSource = dashboardSource.slice(
+      dashboardSource.indexOf("async function startTask("),
+      dashboardSource.indexOf("function startBlankTask()")
+    );
+    const canonicalStartSource = dashboardSource.slice(
+      dashboardSource.indexOf("async function startTaskWith("),
+      dashboardSource.indexOf("function rejectOptimisticTimerStart(")
+    );
+    const stateUpdateSource = dashboardSource.slice(
+      dashboardSource.indexOf("function updateDashboardData("),
+      dashboardSource.indexOf("function createSheetPresentation(")
+    );
+
+    expect(startSource).toContain("blankTimerStartGate.current.current()");
+    expect(startSource).toContain("const blankStartToken = blankTimerStartGate.current.claim()");
+    expect(startSource.indexOf("blankTimerStartGate.current.claim()")).toBeLessThan(
+      startSource.indexOf("await startTaskWith(")
+    );
+    expect(canonicalStartSource).toContain("blankTimerStartGate.current.bindEntry(");
+    expect(stateUpdateSource.indexOf("latestData.current = next")).toBeLessThan(
+      stateUpdateSource.indexOf("setData(next)")
+    );
+  });
+
+  it("invalidates deletion and dependent optimistic work when start permanently fails", () => {
+    const rejectionSource = dashboardSource.slice(
+      dashboardSource.indexOf("function rejectOptimisticTimerStart("),
+      dashboardSource.indexOf("async function saveActiveTimerEdit(")
+    );
+    const saveSource = dashboardSource.slice(
+      dashboardSource.indexOf("async function saveTimeEntryOptimistically("),
+      dashboardSource.indexOf("async function deleteCalendarEntry(")
+    );
+    const stopSource = dashboardSource.slice(
+      dashboardSource.indexOf("async function stopActiveTimer("),
+      dashboardSource.indexOf("async function deleteActiveTimer(")
+    );
+
+    expect(rejectionSource).toContain("invalidatePendingEntry(optimisticId)");
+    expect(rejectionSource).toContain("nextTimerMutationVersion(optimisticId)");
+    expect(rejectionSource).toContain("rollbackRejectedOptimisticTimerStart(");
+    expect(rejectionSource).toContain("rejectedOptimisticStartExit.current.schedule(");
+    expect(rejectionSource).toContain("setActiveEditDismissRequestId(failedPresentation.id)");
+    expect(rejectionSource).not.toContain("setActiveEditPresentation(null)");
+    expect(saveSource).toContain("requireQueuedTimerStartUpdate(");
+    expect(saveSource).toContain("createMutationAcceptance(");
+    expect(saveSource).toContain("return acceptance.result(completion)");
+    expect(stopSource).toContain("requireQueuedTimerStartUpdate(");
+    expect(stopSource).toContain("shouldAwaitTimerMutationAcceptance(");
+    expect(stopSource).toContain("acceptance.fail()");
+    expect(stopSource).toContain("return acceptance.result(completion)");
+    expect(dashboardSource).toContain("rollbackOptimisticTimeEntryPatch(");
+    expect(dashboardSource).toContain("rollbackOptimisticStopSafely(");
+    expect(dashboardSource).not.toContain("updateDashboardData(() => previousData)");
+  });
+
+  it("serializes queue sync with accepted suggestion, Stop and deletion persistence", () => {
+    const syncSource = dashboardSource.slice(
+      dashboardSource.indexOf("async function syncQueueWithTimerReconciliation()"),
+      dashboardSource.indexOf("const syncQueuedEvents = useCallback")
+    );
+    const mutationQueueSource = dashboardSource.slice(
+      dashboardSource.indexOf("function serializeTimerPersistence"),
+      dashboardSource.indexOf("const syncQueuedEventsAndReload")
+    );
+
+    expect(syncSource).toContain("return serializeTimerPersistence(");
+    expect(mutationQueueSource).toContain("timerMutationQueue.current.enqueue(operation)");
+    expect(mutationQueueSource).toContain("serializeTimerPersistence(operation)");
+    expect(dashboardSource).toContain("resolveTimerEntryIdAfterQueueBarrier(entryId)");
+  });
+
+  it("keeps the blank Play generation gated across RAF until the sheet is presented", () => {
+    const startSource = dashboardSource.slice(
+      dashboardSource.indexOf("async function startTask("),
+      dashboardSource.indexOf("function startBlankTask()")
+    );
+    const presentationSource = dashboardSource.slice(
+      dashboardSource.indexOf("function completeActiveEditorPresentation("),
+      dashboardSource.indexOf("function completeManualEntryExit(")
+    );
+    const frameSource = startSource.slice(
+      startSource.indexOf("activeEditorOpenFrame.current = requestAnimationFrame"),
+      startSource.indexOf("return true;")
+    );
+
+    expect(startSource).toContain('presentActiveEditor("blank_timer_started", true)');
+    expect(frameSource).not.toContain("blankTimerStartGate.current.release(blankStartToken)");
+    expect(presentationSource).toContain('presentation.reason !== "blank_timer_started"');
+    expect(presentationSource).toContain("blankTimerStartGate.current.release(blankStart.token)");
+    expect(dashboardSource).toContain("onPresented={completeActiveEditorPresentation}");
+    expect(dashboardSource).toContain('accessibilityLabel="Start task"');
+  });
+
+  it("limits conservative disposal to account/provider boundaries", () => {
+    const accountBoundarySource = dashboardSource.slice(
+      dashboardSource.indexOf("const transitionToSignedOut"),
+      dashboardSource.indexOf("useEffect(() => subscribeMobileSignedOut")
+    );
+    const activeExitSource = dashboardSource.slice(
+      dashboardSource.indexOf("function completeActiveEditorExit("),
+      dashboardSource.indexOf("function completeManualEntryExit(")
+    );
+
+    expect(accountBoundarySource).toContain("deletionCoordinator.current?.dispose()");
+    expect(activeExitSource).toContain("activateSheetDeletion(");
+    expect(activeExitSource).not.toContain(".dispose()");
   });
 
   it("uses one local Reanimated owner for presence and surrounding reflow", () => {

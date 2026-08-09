@@ -41,7 +41,11 @@ describe("mobile Review action contracts", () => {
     expect(menuSource).toContain("onClosed(completed.id)");
     expect(menuSource).not.toContain("setTimeout");
     expect(editSheetSource).toContain("onShow={handleModalShow}");
-    expect(editSheetSource).toContain("AccessibilityInfo.setAccessibilityFocus");
+    expect(editSheetSource).toContain("descriptionInputRef.current?.focus()");
+    expect(reviewSource).toContain("onPresented={finishEditHandover}");
+    expect(reviewSource).toContain('reason: "review_edit"');
+    expect(reviewSource).toContain("historicalEntries={reviewPeerEntries(data)}");
+    expect(editSheetSource).not.toContain("focusDescriptionOnShow");
   });
 
   it("keeps Review cards pending until server acknowledgement and reconciles stale bootstrap data", () => {

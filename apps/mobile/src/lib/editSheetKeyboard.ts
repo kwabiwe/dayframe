@@ -44,22 +44,22 @@ export function keyboardInsetFromScreenY({
 }
 
 export function editSheetKeyboardLayout({
-  bottomInset,
+  bottomInset: _bottomInset,
   keyboardInset,
   topInset,
   windowHeight
 }: EditSheetKeyboardLayoutInput): EditSheetKeyboardLayout {
   const keyboardOpen = keyboardInset > 0;
-  const bottomLift = keyboardOpen ? Math.max(0, keyboardInset - bottomInset) : 0;
   const topSafeGap = Math.max(topInset + DEFAULT_TOP_GAP, DEFAULT_MIN_TOP_GAP);
-  const availableHeight = Math.max(0, windowHeight - topSafeGap - bottomLift);
   const sheetMaxHeight = Math.max(0, windowHeight - topSafeGap);
 
   return {
-    bottomLift,
-    contentPaddingBottom: keyboardOpen ? DEFAULT_KEYBOARD_CONTENT_PADDING : DEFAULT_CONTENT_PADDING,
+    bottomLift: 0,
+    contentPaddingBottom: keyboardOpen
+      ? keyboardInset + DEFAULT_KEYBOARD_CONTENT_PADDING
+      : DEFAULT_CONTENT_PADDING,
     keyboardOpen,
-    sheetHeight: keyboardOpen ? availableHeight : null,
+    sheetHeight: sheetMaxHeight,
     sheetMaxHeight,
     topSafeGap
   };

@@ -760,7 +760,7 @@ function createStyles(theme: MobileTheme) {
       gap: 5
     },
     activeTimerActions: {
-      flexDirection: "row",
+      flexDirection: "column",
       alignItems: "center",
       gap: 8
     },
@@ -2003,85 +2003,15 @@ function createStyles(theme: MobileTheme) {
       shadowOffset: { width: 0, height: -8 },
       elevation: 8
     },
-    sheetDeleteConfirmationOverlay: {
-      position: "absolute",
-      top: 0,
-      right: 0,
-      bottom: 0,
-      left: 0,
-      zIndex: 10,
-      alignItems: "center",
-      justifyContent: "center",
-      paddingHorizontal: 20,
-      backgroundColor: theme.overlay,
-      borderTopLeftRadius: 24,
-      borderTopRightRadius: 24
+    activeEditBody: {
+      position: "relative",
+      flexShrink: 1,
+      minHeight: 0,
+      gap: 8
     },
-    deleteConfirmationModalRoot: {
-      flex: 1
-    },
-    screenDeleteConfirmationOverlay: {
-      borderTopLeftRadius: 0,
-      borderTopRightRadius: 0
-    },
-    sheetDeleteConfirmationCard: {
-      width: "100%",
-      maxWidth: 360,
-      borderRadius: 20,
-      backgroundColor: theme.surfaceRaised,
-      padding: 18,
-      gap: 12,
-      shadowColor: theme.shadow,
-      shadowOpacity: 1,
-      shadowRadius: 18,
-      shadowOffset: { width: 0, height: 8 },
-      elevation: 10
-    },
-    sheetDeleteConfirmationTitle: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 18,
-      fontWeight: "700"
-    },
-    sheetDeleteConfirmationText: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 14,
-      lineHeight: 20
-    },
-    sheetDeleteConfirmationActions: {
-      flexDirection: "row",
-      justifyContent: "flex-end",
-      gap: 8,
-      paddingTop: 4
-    },
-    sheetDeleteConfirmationCancel: {
-      minHeight: 44,
-      borderRadius: 999,
-      backgroundColor: theme.surfaceMuted,
-      paddingHorizontal: 18,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    sheetDeleteConfirmationCancelText: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 13,
-      fontWeight: "600"
-    },
-    sheetDeleteConfirmationDelete: {
-      minHeight: 44,
-      borderRadius: 999,
-      backgroundColor: theme.danger,
-      paddingHorizontal: 18,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    sheetDeleteConfirmationDeleteText: {
-      color: theme.onDanger,
-      fontFamily: monoFont,
-      fontSize: 13,
-      fontWeight: "700"
+    activeEditBodyKeyboard: {
+      flex: 1,
+      minHeight: 0
     },
     sheetHandle: {
       alignSelf: "center",
@@ -2170,6 +2100,8 @@ function createStyles(theme: MobileTheme) {
       backgroundColor: theme.accent
     },
     activeEditScroller: {
+      position: "relative",
+      zIndex: 0,
       flexShrink: 1,
       minHeight: 0
     },
@@ -2181,6 +2113,9 @@ function createStyles(theme: MobileTheme) {
       gap: 10,
       paddingBottom: 8
     },
+    activeEditObscuredContent: {
+      gap: 10
+    },
     activeEditDeleteButton: {
       alignSelf: "center",
       minHeight: 44,
@@ -2190,9 +2125,42 @@ function createStyles(theme: MobileTheme) {
       marginTop: 2
     },
     activeEditDeleteText: {
-      color: theme.dangerText,
+      color: theme.accentText,
       fontFamily: monoFont,
       fontSize: 13,
+      fontWeight: "600"
+    },
+    durationDialSection: {
+      alignItems: "stretch",
+      gap: 8
+    },
+    durationDialNativeView: {
+      alignSelf: "center",
+      width: "100%",
+      maxWidth: 340,
+      height: 286,
+      backgroundColor: "transparent",
+      overflow: "visible"
+    },
+    durationDialQuickActions: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8
+    },
+    durationDialAction: {
+      minHeight: 44,
+      borderRadius: 999,
+      backgroundColor: theme.surfaceMuted,
+      paddingHorizontal: 13,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    durationDialActionText: {
+      color: theme.accentText,
+      fontFamily: monoFont,
+      fontSize: 12,
       fontWeight: "600"
     },
     activeEditHeroRow: {
@@ -2200,6 +2168,9 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       justifyContent: "space-between",
       gap: 12
+    },
+    activeEditPinnedHeroRow: {
+      flexShrink: 0
     },
     activeEditElapsedStack: {
       flex: 1,
@@ -2236,13 +2207,60 @@ function createStyles(theme: MobileTheme) {
       borderRadius: 16,
       overflow: "hidden"
     },
+    historicalSuggestionsOverlay: {
+      position: "absolute",
+      zIndex: 100,
+      elevation: 24,
+      backgroundColor: "transparent",
+      shadowColor: theme.shadow,
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 1,
+      shadowRadius: 18
+    },
+    historicalSuggestionsSurface: {
+      flex: 1,
+      minHeight: 0,
+      backgroundColor: theme.surfaceRaised,
+      borderLeftWidth: 1,
+      borderRightWidth: 1,
+      borderBottomWidth: 1,
+      borderTopWidth: 0,
+      borderColor: theme.borderStrong,
+      borderBottomLeftRadius: 14,
+      borderBottomRightRadius: 14,
+      overflow: "hidden"
+    },
+    historicalSuggestionsHeader: {
+      minHeight: 44,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingLeft: 12
+    },
+    historicalSuggestionsDivider: {
+      height: 1,
+      marginHorizontal: 12,
+      backgroundColor: theme.border
+    },
+    historicalSuggestionsCloseButton: {
+      width: 44,
+      height: 44,
+      borderRadius: 999,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    historicalSuggestionsList: {
+      backgroundColor: "transparent",
+      flex: 1,
+      flexShrink: 1,
+      minHeight: 0
+    },
     taskSuggestionsTitle: {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 11,
       fontWeight: "600",
       letterSpacing: 0.4,
-      paddingHorizontal: 12,
       paddingVertical: 8
     },
     taskSuggestionsList: {
@@ -2250,37 +2268,49 @@ function createStyles(theme: MobileTheme) {
       borderTopColor: theme.border
     },
     taskSuggestionRow: {
-      minHeight: 44,
+      minHeight: 46,
+      backgroundColor: "transparent",
       paddingHorizontal: 12,
-      paddingVertical: 6,
+      paddingVertical: 8,
       flexDirection: "row",
       alignItems: "center",
       gap: 10
     },
     taskSuggestionRowDivider: {
-      borderTopWidth: 1,
-      borderTopColor: theme.border
+      position: "absolute",
+      top: 0,
+      left: 12,
+      right: 12,
+      height: 1,
+      backgroundColor: theme.border
     },
     taskSuggestionTextStack: {
       flex: 1,
       minWidth: 0,
       flexDirection: "row",
       alignItems: "center",
-      gap: 7
+      gap: 8
     },
     taskSuggestionTitle: {
       color: theme.textPrimary,
       fontFamily: monoFont,
-      fontSize: 12,
+      fontSize: 13,
       fontWeight: "500",
-      flexShrink: 1,
+      flex: 1,
+      flexShrink: 4,
       minWidth: 0
+    },
+    taskSuggestionMetadataLine: {
+      minWidth: 0,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8
     },
     taskSuggestionMetaRow: {
       flexDirection: "row",
       alignItems: "center",
       gap: 5,
-      flexShrink: 2,
+      flexShrink: 0,
       minWidth: 0
     },
     taskSuggestionMeta: {
@@ -2288,15 +2318,16 @@ function createStyles(theme: MobileTheme) {
       fontFamily: monoFont,
       fontSize: 11,
       fontWeight: "400",
-      flexShrink: 1
+      flexShrink: 1,
+      maxWidth: 112
     },
     taskSuggestionTags: {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 11,
       fontWeight: "400",
-      flexShrink: 2,
-      minWidth: 0
+      flexShrink: 1,
+      maxWidth: 96
     },
     activeEditDescriptionInput: {
       minHeight: 48
@@ -2418,25 +2449,25 @@ function createStyles(theme: MobileTheme) {
       fontWeight: "400"
     },
     activeEditCategoryViewport: {
-      height: 48,
+      height: 36,
       overflow: "hidden"
     },
     activeEditCategoryScroll: {
-      height: 48,
+      height: 36,
       flexGrow: 0
     },
     activeEditCategoryScroller: {
-      minHeight: 48,
+      minHeight: 36,
       alignItems: "center",
       gap: 8,
       paddingRight: 4
     },
     activeEditCategoryChip: {
-      minHeight: 44,
+      minHeight: 32,
       backgroundColor: theme.surfaceMuted,
       borderRadius: 999,
       paddingHorizontal: 11,
-      paddingVertical: 4,
+      paddingVertical: 2,
       flexDirection: "row",
       alignItems: "center",
       gap: 7
@@ -2458,6 +2489,83 @@ function createStyles(theme: MobileTheme) {
       flexDirection: "row",
       alignItems: "center",
       gap: 8
+    },
+    activeEditTimeGroups: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 10
+    },
+    activeEditTimeGroupsStacked: {
+      flexDirection: "column"
+    },
+    activeEditTimeGroup: {
+      flex: 1,
+      minWidth: 0,
+      gap: 6
+    },
+    activeEditCompactTimeRow: {
+      minWidth: 0,
+      minHeight: 44,
+      backgroundColor: theme.surfaceMuted,
+      borderRadius: 12,
+      overflow: "hidden",
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 0
+    },
+    activeEditCompactDate: {
+      flex: 1,
+      minWidth: 0,
+      minHeight: 44,
+      borderRadius: 0,
+      backgroundColor: "transparent",
+      paddingHorizontal: 9,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    activeEditCompactDateText: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "600"
+    },
+    activeEditCompactTimeInput: {
+      width: 72,
+      minHeight: 44,
+      backgroundColor: "transparent",
+      borderRadius: 0,
+      paddingHorizontal: 6,
+      paddingVertical: 0,
+      color: theme.accentText,
+      fontFamily: monoFont,
+      fontSize: 15,
+      fontWeight: "600",
+      fontVariant: ["tabular-nums"],
+      textAlign: "center"
+    },
+    activeEditRunningEndSummary: {
+      minHeight: 44,
+      borderRadius: 12,
+      backgroundColor: theme.surfaceMuted,
+      paddingHorizontal: 9,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 6
+    },
+    activeEditTimeDivider: {
+      width: 1,
+      height: 22,
+      flexShrink: 0,
+      backgroundColor: theme.border
+    },
+    activeEditRunningEndTime: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 15,
+      fontWeight: "600",
+      fontVariant: ["tabular-nums"],
+      paddingLeft: 3
     },
     activeEditDateInput: {
       flex: 1.25,

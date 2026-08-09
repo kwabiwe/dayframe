@@ -41,10 +41,11 @@ describe("mobile tag interaction contract", () => {
     expect(sheet).toContain("tagNames: appliedTagNames");
   });
 
-  it("rolls a failed optimistic save back to the exact pre-edit dashboard snapshot", () => {
+  it("rolls back exact edited fields without erasing newer dashboard state", () => {
     expect(dashboard).toContain("const previousData = latestData.current");
-    expect(dashboard).toContain("latestData.current = previousData");
-    expect(dashboard).toContain("setData(previousData)");
+    expect(dashboard).toContain("rollbackOptimisticTimeEntryPatch(");
+    expect(dashboard).not.toContain("updateDashboardData(() => previousData)");
+    expect(dashboard).not.toContain("setData(previousData)");
     expect(dashboard).not.toContain("ActivityIndicator");
   });
 });

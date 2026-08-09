@@ -44,7 +44,7 @@ import {
   localPresenceEntering,
   localPresenceExiting,
   scheduleLayoutTransition,
-  useReduceMotionPreference
+  useResolvedReduceMotionPreference
 } from "@/lib/motion";
 import {
   REVIEW_COPY,
@@ -53,6 +53,7 @@ import {
   canRunReviewMenuAction,
   hasSuggestedTimeWindow,
   hasV2LocationEvidence,
+  isCurrentReviewEditPresentation,
   isOneOffLocationReviewItem,
   isOpenReviewItem,
   isReviewNeededEntry,
@@ -74,6 +75,7 @@ import {
   type ReviewItemSyncState,
   type ReviewSyncDiagnostics
 } from "@/lib/reviewSyncStore";
+import type { TimeEntrySheetPresentation } from "@/lib/timeEntrySheetPresentation";
 
 type ReviewEditTarget =
   | {
@@ -106,10 +108,14 @@ const HEALTH_REPROCESS_TIMEOUT_MS = 45_000;
 
 export default function ReviewScreen() {
   const { reloadThemePreference, styles, theme } = useMobileTheme();
-  const reduceMotion = useReduceMotionPreference();
+  const {
+    reduceMotion,
+    resolved: reduceMotionPreferenceResolved
+  } = useResolvedReduceMotionPreference();
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [editTarget, setEditTarget] = useState<ReviewEditTarget | null>(null);
+  const [editPresentation, setEditPresentation] = useState<TimeEntrySheetPresentation | null>(null);
   const [editSaving, setEditSaving] = useState(false);
   const [showReviewInfo, setShowReviewInfo] = useState(false);
   const [reviewMenuState, setReviewMenuState] = useState(CLOSED_REVIEW_MENU_STATE);
@@ -130,6 +136,8 @@ export default function ReviewScreen() {
   });
   const dataRef = useRef<MobileBootstrap | null>(null);
   const editTargetRef = useRef<ReviewEditTarget | null>(null);
+  const editPresentationRef = useRef<TimeEntrySheetPresentation | null>(null);
+  const editPresentationSequence = useRef(0);
   const appStateRef = useRef(AppState.currentState);
   const screenFocusedRef = useRef(false);
   const refreshInFlight = useRef(false);
@@ -148,6 +156,26 @@ export default function ReviewScreen() {
     reviewMenuStateRef.current = nextState;
     setReviewMenuState(nextState);
   }, []);
+
+  const commitEditPresentation = useCallback(
+    (nextPresentation: TimeEntrySheetPresentation | null) => {
+      editPresentationRef.current = nextPresentation;
+      setEditPresentation(nextPresentation);
+    },
+    []
+  );
+
+  const beginEditPresentation = useCallback((requestDescriptionFocus: boolean) => {
+    editPresentationSequence.current += 1;
+    const nextPresentation: TimeEntrySheetPresentation = {
+      id: editPresentationSequence.current,
+      reason: "review_edit",
+      requestDescriptionFocus,
+      allowSuggestionsOnFocus: true
+    };
+    commitEditPresentation(nextPresentation);
+    return nextPresentation;
+  }, [commitEditPresentation]);
 
   const commitEditTarget = useCallback((nextTarget: ReviewEditTarget | null) => {
     editTargetRef.current = nextTarget;
@@ -169,7 +197,7 @@ export default function ReviewScreen() {
       currentEditTarget?.kind === "reviewItem" &&
       !openItemIds.includes(currentEditTarget.item.id)
     ) {
-      commitEditTarget(null);
+      if (!editPresentationRef.current) commitEditTarget(null);
     }
   }, [applyReviewMenuEvent, commitEditTarget]);
 
@@ -196,8 +224,9 @@ export default function ReviewScreen() {
       currentEditTarget.handoverToken === pendingAction.token
     ) {
       commitEditTarget(null);
+      commitEditPresentation(null);
     }
-  }, [applyReviewMenuEvent, commitEditTarget]);
+  }, [applyReviewMenuEvent, commitEditPresentation, commitEditTarget]);
 
   const load = useCallback(async (options?: ReviewLoadOptions) => {
     if (refreshInFlight.current) {
@@ -513,10 +542,14 @@ export default function ReviewScreen() {
       entry: draftEntry,
       handoverToken
     });
+    beginEditPresentation(true);
     return true;
   }
 
-  function finishEditHandover() {
+  function finishEditHandover(presentationId: number) {
+    if (!isCurrentReviewEditPresentation(editPresentationRef.current?.id ?? null, presentationId)) {
+      return;
+    }
     const currentEditTarget = editTargetRef.current;
     if (currentEditTarget?.kind !== "reviewItem") return;
     applyReviewMenuEvent({
@@ -526,7 +559,10 @@ export default function ReviewScreen() {
     });
   }
 
-  function cancelEdit() {
+  function cancelEdit(presentationId: number) {
+    if (!isCurrentReviewEditPresentation(editPresentationRef.current?.id ?? null, presentationId)) {
+      return;
+    }
     const currentEditTarget = editTargetRef.current;
     if (currentEditTarget?.kind === "reviewItem") {
       applyReviewMenuEvent({
@@ -536,10 +572,12 @@ export default function ReviewScreen() {
       });
     }
     commitEditTarget(null);
+    commitEditPresentation(null);
   }
 
   function beginReviewNeededEntryEdit(entry: MobileTimeEntry) {
     commitEditTarget({ kind: "entry", entry });
+    beginEditPresentation(false);
   }
 
   async function saveEdit(entryId: string, patch: TimeEntryUpdatePatch) {
@@ -754,23 +792,26 @@ export default function ReviewScreen() {
         visible={reviewMenuState.openItemId != null}
       />
 
-      <ActiveTimerEditSheet
-        categories={data?.categories ?? []}
-        elapsedSeconds={editingEntry ? entryDurationSeconds(editingEntry, now) : 0}
-        entry={editingEntry}
-        focusDescriptionOnShow={editTarget?.kind === "reviewItem"}
-        lastStoppedAt={null}
-        mode="entry"
-        onCancel={cancelEdit}
-        onPresented={finishEditHandover}
-        onSave={saveEdit}
-        peerEntries={reviewPeerEntries(data)}
-        saving={editSaving}
-        stopping={false}
-        styles={styles}
-        theme={theme}
-        visible={Boolean(editingEntry)}
-      />
+      {editPresentation && reduceMotionPreferenceResolved ? (
+        <ActiveTimerEditSheet
+          categories={data?.categories ?? []}
+          elapsedSeconds={editingEntry ? entryDurationSeconds(editingEntry, now) : 0}
+          entry={editingEntry}
+          historicalEntries={reviewPeerEntries(data)}
+          lastStoppedAt={null}
+          mode="entry"
+          onCancel={cancelEdit}
+          onPresented={finishEditHandover}
+          onSave={saveEdit}
+          presentation={editPresentation}
+          reduceMotion={reduceMotion}
+          saving={editSaving}
+          stopping={false}
+          styles={styles}
+          theme={theme}
+          visible={Boolean(editingEntry)}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }

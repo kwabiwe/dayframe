@@ -62,7 +62,11 @@ import {
   login,
   queueStopTimer,
   readQueue,
+  readTimerEntryIdCorrelations,
+  recordTimerEntryIdCorrelation,
   removeQueuedEvent,
+  removeTimerEntryIdCorrelation,
+  resolveTimerEntryIdAfterQueueBarrier,
   signup,
   startTimer,
   stopTimer,
@@ -70,6 +74,7 @@ import {
   updateQueuedTimerStart,
   updateTimeEntry,
   type MobileBootstrap,
+  type SyncQueueResult,
   type TimeEntryUpdatePatch
 } from "@/lib/api";
 import { handleDayframeUrl } from "@/lib/deepLinks";
@@ -95,7 +100,12 @@ import {
 } from "@/lib/health";
 import { syncLiveActivityForEntry } from "@/lib/liveActivity";
 import {
-  createHistoryDeletionCoordinator
+  type TimeEntrySheetOpenReason,
+  type TimeEntrySheetPresentation
+} from "@/lib/timeEntrySheetPresentation";
+import {
+  createDeletionCoordinator,
+  type PendingDeletion
 } from "@/lib/historyDeletion";
 import {
   buildHistoryDaySections,
@@ -131,6 +141,7 @@ import {
   localPresenceExiting,
   scheduleLayoutTransition,
   useReduceMotionPreference,
+  useResolvedReduceMotionPreference,
   useReduceTransparencyPreference
 } from "@/lib/motion";
 import {
@@ -138,7 +149,14 @@ import {
   activeTimerPresentation,
   applySuggestionToRunningTimer,
   buildMobileQuickActions,
+  createBlankTimerStartGate,
+  createGenerationScopedExitCoordinator,
+  createMutationAcceptance,
+  createOptimisticTimerStartReconciler,
+  createSerializedMutationQueue,
+  createSupersededStopRollbackTracker,
   displayTimerDescription,
+  filterPendingDeletedTimeEntries,
   mobileTimeEntryById,
   optimisticDeleteTimeEntry,
   optimisticPatchTimeEntry,
@@ -147,6 +165,14 @@ import {
   optimisticStopActiveTimer,
   OPTIMISTIC_TIMER_ID_PREFIX,
   replaceOptimisticTimeEntryId,
+  requireQueuedTimerStartRemoval,
+  requireQueuedTimerStartUpdate,
+  restoreDeletedTimeEntriesSafely,
+  restoreFailedDeletionSafely,
+  rollbackOptimisticStopSafely,
+  rollbackOptimisticTimeEntryPatch,
+  rollbackRejectedOptimisticTimerStart,
+  shouldAwaitTimerMutationAcceptance,
   sortMobileCategoriesByUsage
 } from "@/lib/timerPresentation";
 
@@ -154,6 +180,11 @@ type TimeEntry = MobileBootstrap["entries"][number];
 type AuthView = "login" | "signup";
 type AuthState = "checking" | "authenticated" | "signedOut";
 type DashboardLoadOptions = { silent?: boolean; visibleRefresh?: boolean };
+type RejectedOptimisticStart = {
+  error: unknown;
+  optimisticId: string;
+  previousData: MobileBootstrap | null;
+};
 export type DayframeDashboardTab = "timer" | "calendar" | "reports";
 
 function StagingBadge({ styles }: { styles: MobileStyles }) {
@@ -191,6 +222,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [selectedDayKey, setSelectedDayKey] = useState(() => formatDateKey(new Date()));
   const [reportRange, setReportRange] = useState<ReportRange>("today");
   const [calendarEditEntry, setCalendarEditEntry] = useState<NativeCalendarEntry | null>(null);
+  const [calendarEditPresentation, setCalendarEditPresentation] = useState<TimeEntrySheetPresentation | null>(null);
   const [calendarTransitionDirection, setCalendarTransitionDirection] = useState(1);
   const [reportChartView, setReportChartView] = useState<ReportChartView>("pie");
   const [authView, setAuthView] = useState<AuthView>("login");
@@ -203,17 +235,21 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [authNotice, setAuthNotice] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [manualDraftEntry, setManualDraftEntry] = useState<TimeEntry | null>(null);
+  const [manualEntryPresentation, setManualEntryPresentation] = useState<TimeEntrySheetPresentation | null>(null);
   const [manualEntrySaving, setManualEntrySaving] = useState(false);
   const manualEntrySavingRef = useRef(false);
   const authSubmittingRef = useRef(false);
-  const [activeEditVisible, setActiveEditVisible] = useState(false);
+  const [activeEditPresentation, setActiveEditPresentation] = useState<TimeEntrySheetPresentation | null>(null);
+  const [activeEditDismissRequestId, setActiveEditDismissRequestId] = useState<number | null>(null);
   const [presentedActiveEntry, setPresentedActiveEntry] = useState<TimeEntry | null>(null);
-  const [pendingHistoryDeletion, setPendingHistoryDeletion] = useState<{
-    entries: TimeEntry[];
-    snapshot: MobileBootstrap | null;
-    token: number;
-  } | null>(null);
-  const reduceMotion = useReduceMotionPreference();
+  const [pendingDeletion, setPendingDeletion] = useState<PendingDeletion<
+    TimeEntry,
+    MobileBootstrap | null
+  > | null>(null);
+  const {
+    reduceMotion,
+    resolved: reduceMotionPreferenceResolved
+  } = useResolvedReduceMotionPreference();
   const reduceTransparency = useReduceTransparencyPreference();
   const refreshInFlight = useRef(false);
   const refreshQueued = useRef(false);
@@ -222,20 +258,34 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const latestData = useRef<MobileBootstrap | null>(null);
   const liveActivityReconciliationDeferred = useRef(false);
   const optimisticTimerIds = useRef(new Map<string, string>());
+  const timerIdCorrelationsLoaded = useRef(false);
   const optimisticTimerSequence = useRef(0);
+  const optimisticTimerStartReconciler = useRef(createOptimisticTimerStartReconciler());
+  const supersededStopRollbackTracker = useRef(createSupersededStopRollbackTracker());
+  const rejectedOptimisticStartExit = useRef(
+    createGenerationScopedExitCoordinator<RejectedOptimisticStart>()
+  );
+  const sheetPresentationSequence = useRef(0);
+  const activeEditPresentationRef = useRef<TimeEntrySheetPresentation | null>(null);
+  const calendarEditPresentationRef = useRef<TimeEntrySheetPresentation | null>(null);
+  const manualEntryPresentationRef = useRef<TimeEntrySheetPresentation | null>(null);
   const pendingNativeShortcutLocalIds = useRef<Set<string>>(new Set());
-  const timerMutationChain = useRef<Promise<void>>(Promise.resolve());
+  const timerMutationQueue = useRef(createSerializedMutationQueue());
   const timerMutationCount = useRef(0);
   const dashboardMutationRevision = useRef(0);
   const loadRef = useRef<(options?: DashboardLoadOptions) => Promise<void>>(async () => undefined);
   const timerMutationVersions = useRef(new Map<string, number>());
   const timerStateRef = useRef<TimerStateFingerprint | null>(null);
   const timerStatePollInFlight = useRef(false);
-  const historyDeletionCoordinator = useRef<ReturnType<typeof createHistoryDeletionCoordinator<
+  const deletionCoordinator = useRef<ReturnType<typeof createDeletionCoordinator<
     TimeEntry,
     MobileBootstrap | null
   >> | null>(null);
+  const activeSheetDeletionToken = useRef<{ presentationId: number; token: number } | null>(null);
+  const calendarSheetDeletionToken = useRef<{ presentationId: number; token: number } | null>(null);
   const activeEditorOpenFrame = useRef<number | null>(null);
+  const activeEditorEntryId = useRef<string | null>(null);
+  const blankTimerStartGate = useRef(createBlankTimerStartGate());
   const entrance = useRef(new Animated.Value(0)).current;
   const activeTimerExpansion = useRef(new Animated.Value(0)).current;
   const authNameRef = useRef<TextInput>(null);
@@ -244,6 +294,26 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const authPasswordRef = useRef<TextInput>(null);
 
   const transitionToSignedOut = useCallback(() => {
+    if (activeEditorOpenFrame.current !== null) {
+      cancelAnimationFrame(activeEditorOpenFrame.current);
+      activeEditorOpenFrame.current = null;
+    }
+    const blankStart = blankTimerStartGate.current.current();
+    if (blankStart) blankTimerStartGate.current.release(blankStart.token);
+    deletionCoordinator.current?.dispose();
+    deletionCoordinator.current = null;
+    activeSheetDeletionToken.current = null;
+    calendarSheetDeletionToken.current = null;
+    activeEditPresentationRef.current = null;
+    activeEditorEntryId.current = null;
+    optimisticTimerIds.current.clear();
+    optimisticTimerStartReconciler.current.clear();
+    supersededStopRollbackTracker.current.clear();
+    rejectedOptimisticStartExit.current =
+      createGenerationScopedExitCoordinator<RejectedOptimisticStart>();
+    timerIdCorrelationsLoaded.current = false;
+    calendarEditPresentationRef.current = null;
+    manualEntryPresentationRef.current = null;
     dashboardMutationRevision.current += 1;
     refreshQueued.current = false;
     latestData.current = null;
@@ -257,10 +327,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     setAuthError(null);
     setAuthNotice(null);
     setAuthView("login");
-    setActiveEditVisible(false);
+    setActiveEditPresentation(null);
+    setActiveEditDismissRequestId(null);
     setPresentedActiveEntry(null);
     setManualDraftEntry(null);
+    setManualEntryPresentation(null);
     setCalendarEditEntry(null);
+    setCalendarEditPresentation(null);
+    setPendingDeletion(null);
     setAuthState("signedOut");
   }, []);
 
@@ -276,6 +350,76 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     setReportChartView(nextView);
   }, [reduceMotion]);
 
+  async function hydrateTimerEntryIdCorrelations() {
+    if (timerIdCorrelationsLoaded.current) return;
+    const correlations = await readTimerEntryIdCorrelations();
+    for (const [localId, timeEntryId] of correlations) {
+      optimisticTimerIds.current.set(localId, timeEntryId);
+    }
+    timerIdCorrelationsLoaded.current = true;
+  }
+
+  function settleOptimisticTimerStart(
+    optimisticId: string,
+    phase: "persisted" | "queued" | "rejected"
+  ) {
+    const deferredExternalActiveEntryId =
+      optimisticTimerStartReconciler.current.settle(optimisticId, phase);
+    if (deferredExternalActiveEntryId) {
+      reconcilePendingActiveDeletionWithExternalActiveEntry(
+        deferredExternalActiveEntryId
+      );
+    }
+  }
+
+  function applyTimerEntryIdCorrelation(localId: string, timeEntryId: string) {
+    supersededStopRollbackTracker.current.settle(localId);
+    optimisticTimerIds.current.set(localId, timeEntryId);
+    const pending = deletionCoordinator.current?.current();
+    if (pending?.entryIds.includes(localId)) {
+      deletionCoordinator.current?.registerPendingId(pending.token, timeEntryId);
+    }
+    if (mobileTimeEntryById(latestData.current, localId) || pending) {
+      updateDashboardData((current) =>
+        mobileTimeEntryById(current, localId)
+          ? replaceOptimisticTimeEntryId(current, localId, timeEntryId)
+          : current
+      );
+    }
+    settleOptimisticTimerStart(localId, "persisted");
+  }
+
+  async function syncQueueWithTimerReconciliation() {
+    return serializeTimerPersistence(async (): Promise<SyncQueueResult> => {
+      // Read the queue only after earlier mutations finish. A deletion that
+      // follows this sync therefore cannot remove a local start while its POST
+      // is still capable of creating an untracked canonical timer.
+      const queuedTimerStartIds = (await readQueue())
+        .filter((event) =>
+          event.type === "timer_start" && event.localId.startsWith(OPTIMISTIC_TIMER_ID_PREFIX)
+        )
+        .map((event) => event.localId);
+      const syncingIds = queuedTimerStartIds.filter((entryId) =>
+        optimisticTimerStartReconciler.current.beginQueueSync(entryId)
+      );
+      try {
+        const result = await syncQueue();
+        const correlatedIds = new Set<string>();
+        for (const correlation of result.timerEntryIdCorrelations) {
+          correlatedIds.add(correlation.localId);
+          applyTimerEntryIdCorrelation(correlation.localId, correlation.timeEntryId);
+        }
+        for (const entryId of syncingIds) {
+          if (!correlatedIds.has(entryId)) settleOptimisticTimerStart(entryId, "queued");
+        }
+        return result;
+      } catch (error) {
+        for (const entryId of syncingIds) settleOptimisticTimerStart(entryId, "queued");
+        throw error;
+      }
+    });
+  }
+
   const syncQueuedEvents = useCallback(async () => {
     if (queueSyncInFlight.current) return null;
     queueSyncInFlight.current = true;
@@ -284,7 +428,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       for (const localId of nativeDrain.transferredLocalIds) {
         pendingNativeShortcutLocalIds.current.add(localId);
       }
-      const syncResult = await syncQueue();
+      const syncResult = await syncQueueWithTimerReconciliation();
       for (const localId of syncResult.synced) {
         pendingNativeShortcutLocalIds.current.delete(localId);
       }
@@ -300,6 +444,53 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     }
   }, []);
 
+  function reconcilePendingActiveDeletionWithExternalActiveEntry(
+    externalActiveEntryId: string | null
+  ) {
+    const coordinator = deletionCoordinator.current;
+    if (!coordinator) return new Set<string>();
+    const pending = coordinator.current();
+    const pendingEntryIds = coordinator.pendingEntryIds();
+    if (optimisticTimerStartReconciler.current.deferExternalActiveEntry({
+      deletedActiveEntryId: pending?.snapshot?.activeEntry?.id ?? null,
+      externalActiveEntryId,
+      pendingEntryIds
+    })) {
+      return new Set([
+        ...pendingEntryIds,
+        ...optimisticTimerStartReconciler.current.deferredExternalActiveEntryIds()
+      ]);
+    }
+    return coordinator.reconcileExternalActiveEntry({
+      deletedActiveEntryId: pending?.snapshot?.activeEntry?.id ?? null,
+      externalActiveEntryId
+    }).pendingEntryIds;
+  }
+
+  async function reconcilePendingActiveDeletionAfterQueueBarrier(
+    externalActiveEntryId: string | null
+  ) {
+    const pending = deletionCoordinator.current?.current();
+    if (pending) {
+      for (const localId of pending.entryIds) {
+        if (!localId.startsWith(OPTIMISTIC_TIMER_ID_PREFIX)) continue;
+        const durableId = optimisticTimerIds.current.get(localId) ??
+          await resolveTimerEntryIdAfterQueueBarrier(localId);
+        const currentPending = deletionCoordinator.current?.current();
+        if (
+          durableId &&
+          currentPending?.token === pending.token &&
+          !deletionCoordinator.current?.pendingEntryIds().has(durableId)
+        ) {
+          applyTimerEntryIdCorrelation(localId, durableId);
+        }
+      }
+    }
+    return reconcilePendingActiveDeletionWithExternalActiveEntry(
+      externalActiveEntryId
+    );
+  }
+
   const load = useCallback(async (options?: DashboardLoadOptions) => {
     if (refreshInFlight.current || timerMutationCount.current > 0) {
       refreshQueued.current = true;
@@ -310,6 +501,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     if (options?.visibleRefresh) setRefreshing(true);
     try {
       const date = formatDateKey(new Date());
+      await hydrateTimerEntryIdCorrelations();
       let bootstrap = await fetchBootstrap({ date });
       const nativeDrain = await drainNativeShortcutQueue();
       for (const localId of nativeDrain.transferredLocalIds) {
@@ -317,7 +509,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       }
       if (nativeDrain.transferredCount > 0 || pendingNativeShortcutLocalIds.current.size > 0) {
         liveActivityReconciliationDeferred.current = true;
-        const syncResult = await syncQueue();
+        const syncResult = await syncQueueWithTimerReconciliation();
         for (const localId of syncResult.synced) {
           pendingNativeShortcutLocalIds.current.delete(localId);
         }
@@ -330,6 +522,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         const pendingQueue = await readQueue().catch(() => []);
         liveActivityReconciliationDeferred.current = pendingQueue.some((event) => event.source === "shortcut");
       }
+      const pendingDeletionIds = await reconcilePendingActiveDeletionAfterQueueBarrier(
+        bootstrap.activeEntry?.id ?? null
+      );
+      bootstrap = filterPendingDeletedTimeEntries(bootstrap, pendingDeletionIds) as MobileBootstrap;
       if (!shouldApplyDashboardRefresh({
         startedRevision: refreshRevision,
         currentRevision: dashboardMutationRevision.current,
@@ -374,11 +570,96 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     update: (current: MobileBootstrap | null) => MobileBootstrap | null
   ) {
     dashboardMutationRevision.current += 1;
-    setData((current) => {
-      const next = update(current);
-      latestData.current = next;
-      return next;
-    });
+    const next = filterPendingDeletedTimeEntries(
+      update(latestData.current),
+      deletionCoordinator.current?.pendingEntryIds() ?? new Set()
+    );
+    // Mutation handlers share this ref as their canonical synchronous view.
+    // React may batch two Play callbacks before committing component state.
+    latestData.current = next;
+    setData(next);
+  }
+
+  function createSheetPresentation(
+    reason: TimeEntrySheetOpenReason,
+    requestDescriptionFocus: boolean
+  ): TimeEntrySheetPresentation {
+    const presentation = {
+      allowSuggestionsOnFocus: true,
+      id: ++sheetPresentationSequence.current,
+      reason,
+      requestDescriptionFocus
+    };
+    return presentation;
+  }
+
+  function presentActiveEditor(
+    reason: Extract<TimeEntrySheetOpenReason, "blank_timer_started" | "existing_active_timer">,
+    requestDescriptionFocus = false
+  ) {
+    if (rejectedOptimisticStartExit.current.current()) return;
+    const entry = latestData.current?.activeEntry;
+    activeEditorEntryId.current = entry?.id ?? null;
+    if (entry) setPresentedActiveEntry(entry);
+    const presentation = createSheetPresentation(reason, requestDescriptionFocus);
+    activeEditPresentationRef.current = presentation;
+    setActiveEditDismissRequestId(null);
+    setActiveEditPresentation(presentation);
+  }
+
+  function presentManualEntry(entry: TimeEntry) {
+    const presentation = createSheetPresentation("add_past_time", true);
+    manualEntryPresentationRef.current = presentation;
+    setManualDraftEntry(entry);
+    setManualEntryPresentation(presentation);
+  }
+
+  function presentCompletedEntry(entry: NativeCalendarEntry) {
+    const presentation = createSheetPresentation("completed_entry", false);
+    calendarEditPresentationRef.current = presentation;
+    setCalendarEditEntry(entry);
+    setCalendarEditPresentation(presentation);
+  }
+
+  function completeActiveEditorExit(presentationId: number) {
+    const rejectedStart = rejectedOptimisticStartExit.current.complete(presentationId);
+    if (activeEditPresentationRef.current?.id === presentationId) {
+      const blankStart = blankTimerStartGate.current.current();
+      if (blankStart) blankTimerStartGate.current.release(blankStart.token);
+      activateSheetDeletion(activeSheetDeletionToken, presentationId);
+      activeEditPresentationRef.current = null;
+      activeEditorEntryId.current = null;
+      setActiveEditPresentation((current) => current?.id === presentationId ? null : current);
+    }
+    setActiveEditDismissRequestId((current) => current === presentationId ? null : current);
+    if (rejectedStart) finalizeRejectedOptimisticStart(rejectedStart);
+  }
+
+  function completeActiveEditorPresentation(presentationId: number) {
+    const presentation = activeEditPresentationRef.current;
+    if (
+      presentation?.id !== presentationId ||
+      presentation.reason !== "blank_timer_started"
+    ) {
+      return;
+    }
+    const blankStart = blankTimerStartGate.current.current();
+    if (blankStart) blankTimerStartGate.current.release(blankStart.token);
+  }
+
+  function completeManualEntryExit(presentationId: number) {
+    if (manualEntryPresentationRef.current?.id !== presentationId) return;
+    manualEntryPresentationRef.current = null;
+    setManualEntryPresentation((current) => current?.id === presentationId ? null : current);
+    setManualDraftEntry(null);
+  }
+
+  function completeCalendarEntryExit(presentationId: number) {
+    if (calendarEditPresentationRef.current?.id !== presentationId) return;
+    activateSheetDeletion(calendarSheetDeletionToken, presentationId);
+    calendarEditPresentationRef.current = null;
+    setCalendarEditPresentation((current) => current?.id === presentationId ? null : current);
+    setCalendarEditEntry(null);
   }
 
   function nextTimerMutationVersion(entryId: string) {
@@ -396,13 +677,21 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     return optimisticTimerIds.current.get(entryId) ?? null;
   }
 
+  async function resolvePersistedTimerEntryId(entryId: string) {
+    const knownId = persistedTimerEntryId(entryId);
+    if (knownId || !entryId.startsWith(OPTIMISTIC_TIMER_ID_PREFIX)) return knownId;
+    const durableId = await resolveTimerEntryIdAfterQueueBarrier(entryId);
+    if (durableId) applyTimerEntryIdCorrelation(entryId, durableId);
+    return durableId;
+  }
+
+  function serializeTimerPersistence<Result>(operation: () => Promise<Result>) {
+    return timerMutationQueue.current.enqueue(operation);
+  }
+
   function enqueueTimerMutation(operation: () => Promise<void>) {
     timerMutationCount.current += 1;
-    const run = timerMutationChain.current
-      .catch(() => undefined)
-      .then(operation)
-      .catch(() => undefined);
-    timerMutationChain.current = run;
+    const run = serializeTimerPersistence(operation).catch(() => undefined);
     void run.finally(() => {
       timerMutationCount.current = Math.max(0, timerMutationCount.current - 1);
       if (timerMutationCount.current === 0) {
@@ -410,6 +699,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         void loadRef.current({ silent: true });
       }
     });
+    return run;
   }
 
   const syncQueuedEventsAndReload = useCallback(async () => {
@@ -419,11 +709,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       await load({ silent: true });
     } catch (error) {
       if (error instanceof AuthRequiredError) {
-        setData(null);
-        setAuthState("signedOut");
+        transitionToSignedOut();
       }
     }
-  }, [authState, load, syncQueuedEvents]);
+  }, [authState, load, syncQueuedEvents, transitionToSignedOut]);
 
   const syncHealthKitAndReload = useCallback(async (reason: "foreground" | "observer" = "foreground") => {
     if (authState !== "authenticated" || healthAutoSyncInFlight.current) return;
@@ -443,15 +732,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       await load({ silent: true });
     } catch (error) {
       if (error instanceof AuthRequiredError) {
-        setData(null);
-        setAuthState("signedOut");
+        transitionToSignedOut();
         return;
       }
       console.warn(friendlyHealthKitError(error, "sync Apple Health"));
     } finally {
       healthAutoSyncInFlight.current = false;
     }
-  }, [authState, load, syncQueuedEvents]);
+  }, [authState, load, syncQueuedEvents, transitionToSignedOut]);
 
   useEffect(() => {
     if (reduceMotion) {
@@ -468,16 +756,30 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }, [entrance, reduceMotion]);
 
   useEffect(() => () => {
-    if (activeEditorOpenFrame.current !== null) cancelAnimationFrame(activeEditorOpenFrame.current);
-    historyDeletionCoordinator.current?.dispose();
+    if (activeEditorOpenFrame.current !== null) {
+      cancelAnimationFrame(activeEditorOpenFrame.current);
+      activeEditorOpenFrame.current = null;
+    }
+    const blankStart = blankTimerStartGate.current.current();
+    if (blankStart) blankTimerStartGate.current.release(blankStart.token);
+    // A provider teardown cannot safely finish an account-scoped mutation. Treat
+    // outstanding Undo work as cancelled so the server copy remains recoverable.
+    deletionCoordinator.current?.dispose();
   }, []);
 
   useEffect(() => {
     const openDashboard = async () => {
       const cached = await loadCachedDashboardBootstrap().catch(() => null);
       if (cached && !latestData.current) {
-        latestData.current = cached.bootstrap;
-        setData(cached.bootstrap);
+        const pendingDeletionIds = await reconcilePendingActiveDeletionAfterQueueBarrier(
+          cached.bootstrap.activeEntry?.id ?? null
+        );
+        const filtered = filterPendingDeletedTimeEntries(
+          cached.bootstrap,
+          pendingDeletionIds
+        );
+        latestData.current = filtered;
+        setData(filtered);
       }
       await loadRef.current();
     };
@@ -570,7 +872,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       ) return;
       timerStatePollInFlight.current = true;
       try {
-        const next = await fetchTimerState();
+        const fetched = await fetchTimerState();
+        const tombstones = await reconcilePendingActiveDeletionAfterQueueBarrier(
+          fetched.activeEntryId
+        );
+        const next = fetched.activeEntryId && tombstones.has(fetched.activeEntryId)
+          ? { ...fetched, activeEntryId: null }
+          : fetched;
         const changed = timerStateChanged(timerStateRef.current, next);
         timerStateRef.current = next;
         consecutiveFailures = 0;
@@ -578,8 +886,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       } catch (error) {
         if (error instanceof AuthRequiredError) {
           cancelled = true;
-          setData(null);
-          setAuthState("signedOut");
+          transitionToSignedOut();
           return;
         }
         consecutiveFailures += 1;
@@ -603,11 +910,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       if (timeout) clearTimeout(timeout);
       subscription.remove();
     };
-  }, [authState]);
+  }, [authState, transitionToSignedOut]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active" && authState === "authenticated") {
+        deletionCoordinator.current?.reconcileForeground();
         void syncHealthKitAndReload("foreground");
         void syncQueuedEventsAndReload();
       }
@@ -637,9 +945,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   useEffect(() => {
     if (activeEntryForDisplay) {
+      activeEditorEntryId.current = activeEditPresentationRef.current
+        ? activeEntryForDisplay.id
+        : activeEditorEntryId.current;
       setPresentedActiveEntry(activeEntryForDisplay);
       return undefined;
     }
+
+    if (activeEditPresentation) return undefined;
 
     if (reduceMotion) {
       setPresentedActiveEntry(null);
@@ -650,7 +963,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       setPresentedActiveEntry(null);
     }, MOBILE_MOTION.layout + 80);
     return () => clearTimeout(timeout);
-  }, [activeEntryForDisplay, reduceMotion]);
+  }, [activeEditPresentation, activeEntryForDisplay, reduceMotion]);
 
   useEffect(() => {
     const toValue = hasLiveActiveTimer ? 1 : 0;
@@ -755,45 +1068,52 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     () => buildReports(data, reportRange, todayKey, now, theme.mode),
     [data, now, reportRange, theme.mode, todayKey]
   );
-  const compactTaskSuggestions = useMemo(
-    () => (data?.taskSuggestions ?? []).slice(0, 6),
-    [data?.taskSuggestions]
-  );
-  useEffect(() => {
-    if (!activeEntryForDisplay && activeEditVisible) {
-      setActiveEditVisible(false);
-    }
-  }, [activeEditVisible, activeEntryForDisplay]);
-
   useEffect(() => {
     if (liveActivityReconciliationDeferred.current) return;
     void syncLiveActivityForEntry(data?.activeEntry ?? null);
   }, [data]);
 
   async function startTask(categoryId?: string | null, description = "", tagNames: string[] = []) {
-    if (latestData.current?.activeEntry && !categoryId && !description.trim()) {
-      setActiveEditVisible(true);
+    const isBlankStart = !categoryId && !description.trim();
+    if (isBlankStart && blankTimerStartGate.current.current()) return false;
+    if (
+      latestData.current?.activeEntry &&
+      !isActiveEntryPendingDeletion() &&
+      isBlankStart
+    ) {
+      presentActiveEditor("existing_active_timer");
       return false;
     }
-    if (!categoryId && !description.trim()) {
-      const ok = await startTaskWith(
-        {
-          categoryId: null,
-          description: null,
-          startedAt: null
-        },
-        { animateLayout: false }
-      );
-      if (ok) {
+    if (isBlankStart) {
+      const blankStartToken = blankTimerStartGate.current.claim();
+      if (blankStartToken === null) return false;
+      try {
+        const accepted = await startTaskWith(
+          {
+            categoryId: null,
+            description: null,
+            startedAt: null
+          },
+          { animateLayout: false, blankStartToken }
+        );
+        const currentClaim = blankTimerStartGate.current.current();
+        if (!accepted || currentClaim?.token !== blankStartToken) {
+          blankTimerStartGate.current.release(blankStartToken);
+          return false;
+        }
         if (activeEditorOpenFrame.current !== null) {
           cancelAnimationFrame(activeEditorOpenFrame.current);
         }
         activeEditorOpenFrame.current = requestAnimationFrame(() => {
           activeEditorOpenFrame.current = null;
-          setActiveEditVisible(true);
+          if (blankTimerStartGate.current.current()?.token !== blankStartToken) return;
+          presentActiveEditor("blank_timer_started", true);
         });
+        return true;
+      } catch (error) {
+        blankTimerStartGate.current.release(blankStartToken);
+        throw error;
       }
-      return ok;
     }
     return startTaskWith({
       categoryId: categoryId ?? null,
@@ -808,11 +1128,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   function openManualEntry() {
-    if (latestData.current?.activeEntry) {
-      setActiveEditVisible(true);
-      return;
-    }
-    setManualDraftEntry(createManualDraftEntry(recentStoppedAt, now));
+    const activeStartedAt = latestData.current?.activeEntry?.startedAt;
+    const draftEndMs = activeStartedAt ? Date.parse(activeStartedAt) : now;
+    presentManualEntry(createManualDraftEntry(
+      recentStoppedAt,
+      Number.isFinite(draftEndMs) ? draftEndMs : now
+    ));
   }
 
   function openCalendarManualEntry(dayKey: string, startMinute: number) {
@@ -826,7 +1147,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       if (!result.ignored) Alert.alert("Unable to add time", result.error);
       return;
     }
-    setManualDraftEntry(result.entry);
+    presentManualEntry(result.entry);
   }
 
   async function saveManualEntry(_entryId: string, patch: TimeEntryUpdatePatch) {
@@ -845,9 +1166,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       return true;
     } catch (error) {
       if (error instanceof AuthRequiredError) {
-        latestData.current = null;
-        setAuthState("signedOut");
-        setData(null);
+        transitionToSignedOut();
         return false;
       }
       Alert.alert(
@@ -866,14 +1185,23 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     if (!activeEntry || activeEntry.id !== entryId) return false;
     const patch: TimeEntryUpdatePatch = {
       categoryId: suggestion.categoryId,
-      description: suggestion.description
+      description: suggestion.description,
+      tagNames: suggestion.tagNames
     };
     const previousData = latestData.current;
+    // The sheet applies suggestion fields immediately, but waits on this
+    // result before announcing success; a post-start PATCH failure therefore
+    // drives its generation-scoped field rollback instead of a false success.
+    const acceptance = createMutationAcceptance(true);
     const version = nextTimerMutationVersion(entryId);
     updateDashboardData((current) => optimisticPatchTimeEntry(current, entryId, patch));
-    enqueueTimerMutation(async () => {
+    const completion = enqueueTimerMutation(async () => {
       try {
-        const persistedId = persistedTimerEntryId(entryId);
+        if (!optimisticTimerStartReconciler.current.canRunDependentMutation(entryId)) {
+          acceptance.fail();
+          return;
+        }
+        const persistedId = await resolvePersistedTimerEntryId(entryId);
         if (persistedId) {
           await applySuggestionToRunningTimer({
             entryId: persistedId,
@@ -881,17 +1209,21 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             updateEntry: updateTimeEntry
           });
         } else {
-          await updateQueuedTimerStart(entryId, patch);
+          await requireQueuedTimerStartUpdate(() => updateQueuedTimerStart(entryId, patch));
         }
       } catch (error) {
+        acceptance.fail();
         if (isCurrentTimerMutation(entryId, version)) {
-          latestData.current = previousData;
-          setData(previousData);
+          updateDashboardData((current) => rollbackOptimisticTimeEntryPatch(
+            current,
+            previousData,
+            entryId,
+            patch,
+            optimisticTimerIds.current
+          ));
         }
         if (error instanceof AuthRequiredError) {
-          latestData.current = null;
-          setAuthState("signedOut");
-          setData(null);
+          transitionToSignedOut();
           return;
         }
         Alert.alert(
@@ -902,7 +1234,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         );
       }
     });
-    return true;
+    return acceptance.result(completion);
   }
 
   async function startTaskWith(input: {
@@ -910,7 +1242,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     description?: string | null;
     startedAt?: string | null;
     tagNames?: string[];
-  }, options: { animateLayout?: boolean } = {}) {
+  }, options: { animateLayout?: boolean; blankStartToken?: number } = {}) {
+    if (!latestData.current) return false;
+    commitPendingActiveDeletionBeforeTimerStart();
     const trimmedDescription = input.description?.trim() ?? "";
     const startedAt = input.startedAt ?? new Date().toISOString();
     optimisticTimerSequence.current += 1;
@@ -925,6 +1259,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       }),
       id: optimisticId
     };
+    if (
+      options.blankStartToken !== undefined &&
+      !blankTimerStartGate.current.bindEntry(options.blankStartToken, optimisticId)
+    ) {
+      return false;
+    }
+    optimisticTimerStartReconciler.current.begin(optimisticId);
     const previousData = latestData.current;
     nextTimerMutationVersion(optimisticId);
     updateDashboardData((current) => optimisticStartTimer(current, pendingEntry));
@@ -938,74 +1279,171 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           input.startedAt ?? undefined,
           input.tagNames
         );
-        if (result.timeEntryId) {
-          optimisticTimerIds.current.set(optimisticId, result.timeEntryId);
-          updateDashboardData((current) =>
-            replaceOptimisticTimeEntryId(current, optimisticId, result.timeEntryId as string)
-          );
+        if (!result.timeEntryId) {
+          throw new Error("The timer start did not return a time entry.");
         }
+        await recordTimerEntryIdCorrelation(optimisticId, result.timeEntryId).catch(() => false);
+        applyTimerEntryIdCorrelation(optimisticId, result.timeEntryId);
       } catch (error) {
         if (error instanceof AuthRequiredError) {
-          latestData.current = null;
-          setAuthState("signedOut");
-          setData(null);
+          transitionToSignedOut();
           return;
         }
+        if (optimisticTimerStartReconciler.current.phase(optimisticId) === "persisted") return;
         if (!isNetworkTimerError(error)) {
-          latestData.current = previousData;
-          setData(previousData);
-          Alert.alert("Timer not started", error instanceof Error ? error.message : "Unable to start this timer.");
+          rejectOptimisticTimerStart(optimisticId, previousData, error);
           return;
         }
         const queuedEntry = mobileTimeEntryById(latestData.current, optimisticId) ?? pendingEntry;
-        await enqueueEvent({
-          localId: optimisticId,
-          source: "mobile_app",
-          type: "timer_start",
-          occurredAt: new Date(queuedEntry.startedAt),
-          categoryId: queuedEntry.categoryId ?? undefined,
-          description: queuedEntry.description?.trim() || undefined,
-          rawPayload: {
-            origin: "mobile_custom_start_fallback",
-            startedAt: queuedEntry.startedAt,
-            tagNames: queuedEntry.tagNames ?? queuedEntry.tags?.map((tag) => tag.name) ?? []
+        try {
+          const queue = await enqueueEvent({
+            localId: optimisticId,
+            source: "mobile_app",
+            type: "timer_start",
+            occurredAt: new Date(queuedEntry.startedAt),
+            categoryId: queuedEntry.categoryId ?? undefined,
+            description: queuedEntry.description?.trim() || undefined,
+            rawPayload: {
+              origin: "mobile_custom_start_fallback",
+              startedAt: queuedEntry.startedAt,
+              tagNames: queuedEntry.tagNames ?? queuedEntry.tags?.map((tag) => tag.name) ?? []
+            }
+          });
+          if (!queue.some((item) => item.localId === optimisticId && item.type === "timer_start")) {
+            throw new Error("The offline timer start could not be queued.");
           }
-        });
+          settleOptimisticTimerStart(optimisticId, "queued");
+        } catch (queueError) {
+          rejectOptimisticTimerStart(optimisticId, previousData, queueError);
+        }
       }
     });
     return true;
   }
 
+  function rejectOptimisticTimerStart(
+    optimisticId: string,
+    previousData: MobileBootstrap | null,
+    error: unknown
+  ) {
+    const rollbackSnapshot = supersededStopRollbackTracker.current.consume(
+      optimisticId,
+      previousData
+    );
+    const pending = deletionCoordinator.current?.current();
+    if (pending?.entryIds.includes(optimisticId)) {
+      clearSheetDeletionToken(pending.token);
+      deletionCoordinator.current?.invalidatePendingEntry(optimisticId);
+    }
+
+    // Any queued Save/Stop/Delete work captured an older generation and must
+    // not restore or mutate an optimistic timer whose start never existed.
+    nextTimerMutationVersion(optimisticId);
+    optimisticTimerIds.current.delete(optimisticId);
+    settleOptimisticTimerStart(optimisticId, "rejected");
+
+    const blankStart = blankTimerStartGate.current.current();
+    if (blankStart?.entryId === optimisticId) {
+      if (activeEditorOpenFrame.current !== null) {
+        cancelAnimationFrame(activeEditorOpenFrame.current);
+        activeEditorOpenFrame.current = null;
+      }
+      blankTimerStartGate.current.release(blankStart.token);
+    }
+
+    const failedPresentation = activeEditPresentationRef.current;
+    if (failedPresentation && activeEditorEntryId.current === optimisticId) {
+      const scheduled = rejectedOptimisticStartExit.current.schedule(
+        failedPresentation.id,
+        { error, optimisticId, previousData: rollbackSnapshot }
+      );
+      if (
+        scheduled ||
+        rejectedOptimisticStartExit.current.current()?.presentationId === failedPresentation.id
+      ) {
+        setActiveEditDismissRequestId(failedPresentation.id);
+        return;
+      }
+    }
+
+    finalizeRejectedOptimisticStart({
+      error,
+      optimisticId,
+      previousData: rollbackSnapshot
+    });
+  }
+
+  function finalizeRejectedOptimisticStart({
+    error,
+    optimisticId,
+    previousData
+  }: RejectedOptimisticStart) {
+    updateDashboardData((current) => rollbackRejectedOptimisticTimerStart(
+      current,
+      previousData,
+      optimisticId
+    ));
+    Alert.alert(
+      "Timer not started",
+      error instanceof Error ? error.message : "Unable to start this timer."
+    );
+    setPresentedActiveEntry((current) => current?.id === optimisticId ? null : current);
+  }
+
   async function saveActiveTimerEdit(entryId: string, patch: TimeEntryUpdatePatch) {
-    return saveTimeEntryOptimistically(entryId, patch, "Timer not saved");
+    return saveTimeEntryOptimistically(
+      entryId,
+      patch,
+      "Timer not saved",
+      { awaitPersistence: true }
+    );
   }
 
   async function saveCalendarEntryEdit(entryId: string, patch: TimeEntryUpdatePatch) {
-    return saveTimeEntryOptimistically(entryId, patch, "Entry not saved");
+    return saveTimeEntryOptimistically(
+      entryId,
+      patch,
+      "Entry not saved",
+      { awaitPersistence: true }
+    );
   }
 
   async function saveTimeEntryOptimistically(
     entryId: string,
     patch: TimeEntryUpdatePatch,
-    errorTitle: string
+    errorTitle: string,
+    options: { awaitPersistence?: boolean } = {}
   ) {
     const previousData = latestData.current;
+    const waitsForOptimisticStart = entryId.startsWith(OPTIMISTIC_TIMER_ID_PREFIX) &&
+      !persistedTimerEntryId(entryId);
+    const acceptance = createMutationAcceptance(
+      Boolean(options.awaitPersistence || waitsForOptimisticStart)
+    );
     const version = nextTimerMutationVersion(entryId);
     updateDashboardData((current) => optimisticPatchTimeEntry(current, entryId, patch));
-    enqueueTimerMutation(async () => {
+    const completion = enqueueTimerMutation(async () => {
       try {
-        const persistedId = persistedTimerEntryId(entryId);
+        if (!optimisticTimerStartReconciler.current.canRunDependentMutation(entryId)) {
+          acceptance.fail();
+          return;
+        }
+        const persistedId = await resolvePersistedTimerEntryId(entryId);
         if (persistedId) await updateTimeEntry(persistedId, patch);
-        else await updateQueuedTimerStart(entryId, patch);
+        else await requireQueuedTimerStartUpdate(() => updateQueuedTimerStart(entryId, patch));
       } catch (error) {
+        acceptance.fail();
         if (isCurrentTimerMutation(entryId, version)) {
-          latestData.current = previousData;
-          setData(previousData);
+          updateDashboardData((current) => rollbackOptimisticTimeEntryPatch(
+            current,
+            previousData,
+            entryId,
+            patch,
+            optimisticTimerIds.current
+          ));
         }
         if (error instanceof AuthRequiredError) {
-          latestData.current = null;
-          setAuthState("signedOut");
-          setData(null);
+          transitionToSignedOut();
           return;
         }
         Alert.alert(
@@ -1016,11 +1454,18 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         );
       }
     });
-    return true;
+    return acceptance.result(completion);
   }
 
   async function deleteCalendarEntry(entryId: string) {
-    return deleteTimeEntryOptimistically(entryId, "Entry not deleted");
+    const presentationId = calendarEditPresentationRef.current?.id;
+    if (!presentationId) return false;
+    return prepareSheetDeletion(
+      entryId,
+      calendarEditEntry,
+      calendarSheetDeletionToken,
+      presentationId
+    );
   }
 
   const shiftSelectedCalendarDay = useCallback((days: number) => {
@@ -1045,128 +1490,170 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     const activeEntry = latestData.current?.activeEntry;
     if (!activeEntry) return false;
     const previousData = latestData.current;
+    const acceptance = createMutationAcceptance(
+      shouldAwaitTimerMutationAcceptance(
+        optimisticTimerStartReconciler.current.phase(activeEntry.id)
+      )
+    );
     const version = nextTimerMutationVersion(activeEntry.id);
     updateDashboardData((current) => optimisticStopActiveTimer(current, new Date().toISOString()));
     scheduleLayoutTransition(reduceMotion);
-    enqueueTimerMutation(async () => {
+    const completion = enqueueTimerMutation(async () => {
       try {
-        const persistedId = persistedTimerEntryId(activeEntry.id);
+        if (!optimisticTimerStartReconciler.current.canRunDependentMutation(activeEntry.id)) {
+          acceptance.fail();
+          return;
+        }
+        const persistedId = await resolvePersistedTimerEntryId(activeEntry.id);
         if (activeEntry.id.startsWith(OPTIMISTIC_TIMER_ID_PREFIX) && !persistedId) {
+          await requireQueuedTimerStartUpdate(() => updateQueuedTimerStart(activeEntry.id, {}));
           await queueStopTimer();
         } else {
           await stopTimer();
         }
       } catch (error) {
         if (error instanceof AuthRequiredError) {
-          latestData.current = null;
-          setActiveEditVisible(false);
-          setAuthState("signedOut");
-          setData(null);
+          acceptance.fail();
+          transitionToSignedOut();
           return;
         }
         if (isNetworkTimerError(error)) {
-          await queueStopTimer();
-          return;
+          try {
+            await queueStopTimer();
+            return;
+          } catch (queueError) {
+            error = queueError;
+          }
         }
+        acceptance.fail();
         if (isCurrentTimerMutation(activeEntry.id, version)) {
-          latestData.current = previousData;
-          setData(previousData);
+          const newerActiveEntry = latestData.current?.activeEntry ?? null;
+          const newerStartPhase = newerActiveEntry
+            ? optimisticTimerStartReconciler.current.phase(newerActiveEntry.id)
+            : null;
+          if (
+            newerActiveEntry &&
+            newerActiveEntry.id !== activeEntry.id &&
+            (newerStartPhase === "starting" ||
+              newerStartPhase === "syncing" ||
+              newerStartPhase === "queued")
+          ) {
+            supersededStopRollbackTracker.current.capture(
+              newerActiveEntry.id,
+              previousData
+            );
+          }
+          updateDashboardData((current) => rollbackOptimisticStopSafely(
+            current,
+            previousData,
+            activeEntry.id,
+            optimisticTimerIds.current
+          ));
         }
         Alert.alert("Timer not stopped", error instanceof Error ? error.message : "Unable to stop this timer.");
       }
     });
-    return true;
+    return acceptance.result(completion);
   }
 
   async function deleteActiveTimer(entryId: string) {
+    const presentationId = activeEditPresentationRef.current?.id;
+    if (!presentationId) return false;
     scheduleLayoutTransition(reduceMotion);
-    return deleteTimeEntryOptimistically(entryId, "Timer not deleted");
+    return prepareSheetDeletion(
+      entryId,
+      presentedActiveEntry,
+      activeSheetDeletionToken,
+      presentationId
+    );
   }
 
-  async function deleteTimeEntryOptimistically(entryId: string, errorTitle: string) {
-    const previousData = latestData.current;
-    const version = nextTimerMutationVersion(entryId);
-    updateDashboardData((current) => optimisticDeleteTimeEntry(current, entryId));
-    enqueueTimerMutation(async () => {
-      try {
-        const persistedId = persistedTimerEntryId(entryId);
-        if (persistedId) await deleteTimeEntry(persistedId);
-        else await removeQueuedEvent(entryId);
-      } catch (error) {
-        if (isCurrentTimerMutation(entryId, version)) {
-          latestData.current = previousData;
-          setData(previousData);
-        }
-        if (error instanceof AuthRequiredError) {
-          latestData.current = null;
-          setAuthState("signedOut");
-          setData(null);
-          return;
-        }
-        Alert.alert(errorTitle, error instanceof Error ? error.message : "Unable to delete this entry.");
-      }
-    });
-    return true;
-  }
-
-  function commitHistoryDeletion(entries: TimeEntry[], snapshot: MobileBootstrap | null) {
+  function commitDeletion(entries: TimeEntry[], snapshot: MobileBootstrap | null) {
     const versions = new Map(entries.map((entry) => [entry.id, nextTimerMutationVersion(entry.id)]));
     enqueueTimerMutation(async () => {
-      try {
-        for (const entry of entries) {
-          const persistedId = persistedTimerEntryId(entry.id);
-          if (persistedId) await deleteTimeEntry(persistedId);
-          else await removeQueuedEvent(entry.id);
+      const failed: Array<{ entry: TimeEntry; error: unknown }> = [];
+      for (const entry of entries) {
+        try {
+          const persistedId = await resolvePersistedTimerEntryId(entry.id);
+          if (persistedId) {
+            await deleteTimeEntry(persistedId);
+            if (entry.id.startsWith(OPTIMISTIC_TIMER_ID_PREFIX)) {
+              optimisticTimerIds.current.delete(entry.id);
+              await removeTimerEntryIdCorrelation(entry.id).catch(() => false);
+            }
+          } else {
+            await requireQueuedTimerStartRemoval(() => removeQueuedEvent(entry.id));
+          }
+        } catch (error) {
+          if (error instanceof AuthRequiredError) {
+            transitionToSignedOut();
+            return;
+          }
+          failed.push({ entry, error });
         }
-      } catch (error) {
-        const currentIds = entries
+      }
+      if (failed.length > 0) {
+        const actionableFailures = failed
+          .map(({ entry }) => entry)
           .filter((entry) => isCurrentTimerMutation(entry.id, versions.get(entry.id) as number))
-          .map((entry) => entry.id);
-        updateDashboardData((current) => optimisticRestoreTimeEntries(current, snapshot, currentIds));
-        if (error instanceof AuthRequiredError) {
-          latestData.current = null;
-          setAuthState("signedOut");
-          setData(null);
-          return;
-        }
+        const currentIds = actionableFailures.map((entry) => entry.id);
+        if (currentIds.length === 0) return;
+        updateDashboardData((current) => restoreFailedDeletionSafely(
+          current,
+          snapshot,
+          currentIds,
+          optimisticTimerIds.current
+        ));
+        const firstError = failed.find(({ entry }) => currentIds.includes(entry.id))?.error;
         Alert.alert(
-          entries.length > 1 ? "Entries not deleted" : "Entry not deleted",
-          error instanceof Error ? error.message : "Unable to delete the selected time entries."
+          currentIds.length > 1 ? "Entries not deleted" : "Entry not deleted",
+          firstError instanceof Error
+            ? firstError.message
+            : "Unable to delete the selected time entries."
         );
         AccessibilityInfo.announceForAccessibility(
-          entries.length > 1 ? "Time entries restored because deletion failed." : "Time entry restored because deletion failed."
+          currentIds.length > 1
+            ? "Time entries restored because deletion failed."
+            : "Time entry restored because deletion failed."
         );
       }
     });
   }
 
-  function getHistoryDeletionCoordinator() {
-    if (!historyDeletionCoordinator.current) {
-      historyDeletionCoordinator.current = createHistoryDeletionCoordinator<
+  function getDeletionCoordinator() {
+    if (!deletionCoordinator.current) {
+      deletionCoordinator.current = createDeletionCoordinator<
         TimeEntry,
         MobileBootstrap | null
       >({
-        onCommit: ({ entries, snapshot }) => commitHistoryDeletion(entries, snapshot),
-        onPendingChange: setPendingHistoryDeletion,
+        onCommit: ({ entries, snapshot, token }) => {
+          clearSheetDeletionToken(token);
+          commitDeletion(entries, snapshot);
+        },
+        onPendingChange: setPendingDeletion,
         onRestore: ({ entries, snapshot }) => {
-          updateDashboardData((current) => optimisticRestoreTimeEntries(
+          updateDashboardData((current) => restoreDeletedTimeEntriesSafely(
             current,
             snapshot,
-            entries.map((entry) => entry.id)
+            entries.map((entry) => entry.id),
+            optimisticTimerIds.current
           ));
         }
       });
     }
-    return historyDeletionCoordinator.current;
+    return deletionCoordinator.current;
   }
 
   function scheduleHistoryDeletion(entries: TimeEntry[]) {
     const snapshot = latestData.current;
-    const entryIds = entries.map((entry) => entry.id);
-    const optimisticData = entryIds.reduce(optimisticDeleteTimeEntry, snapshot);
-    latestData.current = optimisticData;
-    setData(optimisticData);
-    getHistoryDeletionCoordinator().begin(entries, snapshot);
+    const coordinator = getDeletionCoordinator();
+    const prepared = coordinator.prepare(entries, snapshot);
+    if (!prepared) return;
+    updateDashboardData((current) => filterPendingDeletedTimeEntries(
+      current,
+      coordinator.pendingEntryIds()
+    ));
+    coordinator.activate(prepared.token);
     AccessibilityInfo.announceForAccessibility(
       entries.length > 1
         ? `${entries.length} time entries deleted. Undo available for five seconds.`
@@ -1174,13 +1661,80 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     );
   }
 
-  function undoHistoryDeletion() {
-    if (!pendingHistoryDeletion) return;
-    if (getHistoryDeletionCoordinator().undo(pendingHistoryDeletion.token)) {
+  function undoDeletion() {
+    if (!pendingDeletion || pendingDeletion.phase !== "active") return;
+    if (getDeletionCoordinator().undo(pendingDeletion.token)) {
       AccessibilityInfo.announceForAccessibility(
-        pendingHistoryDeletion.entries.length > 1 ? "Time entries restored." : "Time entry restored."
+        pendingDeletion.entries.length > 1 ? "Time entries restored." : "Time entry restored."
       );
     }
+  }
+
+  function prepareSheetDeletion(
+    entryId: string,
+    presentedEntry: TimeEntry | null,
+    tokenRef: { current: { presentationId: number; token: number } | null },
+    presentationId: number
+  ) {
+    if (tokenRef.current !== null) return false;
+    const snapshot = latestData.current;
+    const entry = mobileTimeEntryById(snapshot, entryId) ?? (
+      presentedEntry?.id === entryId ? presentedEntry : null
+    );
+    if (!entry) return false;
+
+    const coordinator = getDeletionCoordinator();
+    const prepared = coordinator.prepare([entry], snapshot);
+    if (!prepared) return false;
+    tokenRef.current = { presentationId, token: prepared.token };
+    updateDashboardData((current) => filterPendingDeletedTimeEntries(
+      current,
+      coordinator.pendingEntryIds()
+    ));
+    return true;
+  }
+
+  function activateSheetDeletion(
+    tokenRef: { current: { presentationId: number; token: number } | null },
+    presentationId: number
+  ) {
+    const pendingSheetDeletion = tokenRef.current;
+    if (pendingSheetDeletion?.presentationId !== presentationId) return;
+    tokenRef.current = null;
+    if (!getDeletionCoordinator().activate(pendingSheetDeletion.token)) return;
+    const active = getDeletionCoordinator().current();
+    AccessibilityInfo.announceForAccessibility(
+      active && active.entries.length > 1
+        ? `${active.entries.length} time entries deleted. Undo available for five seconds.`
+        : "Time entry deleted. Undo available for five seconds."
+    );
+  }
+
+  function clearSheetDeletionToken(token: number) {
+    if (activeSheetDeletionToken.current?.token === token) {
+      activeSheetDeletionToken.current = null;
+    }
+    if (calendarSheetDeletionToken.current?.token === token) {
+      calendarSheetDeletionToken.current = null;
+    }
+  }
+
+  function commitPendingActiveDeletionBeforeTimerStart() {
+    const coordinator = deletionCoordinator.current;
+    const pending = coordinator?.current();
+    if (coordinator && pending && isActiveEntryPendingDeletion()) {
+      coordinator.commit(pending.token);
+    }
+  }
+
+  function isActiveEntryPendingDeletion() {
+    const pending = deletionCoordinator.current?.current();
+    const deletedActiveId = pending?.snapshot?.activeEntry?.id;
+    return Boolean(
+      pending &&
+      deletedActiveId &&
+      pending.entryIds.includes(deletedActiveId)
+    );
   }
 
   async function submitAuth() {
@@ -1431,7 +1985,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   accessibilityLabel={hasLiveActiveTimer ? "Edit running timer" : undefined}
                   accessibilityRole={hasLiveActiveTimer ? "button" : undefined}
                   disabled={!hasLiveActiveTimer}
-                  onPress={() => setActiveEditVisible(true)}
+                  onPress={() => presentActiveEditor("existing_active_timer")}
                   style={({ pressed }) => [
                     styles.timerPanel,
                     pressed && hasLiveActiveTimer ? styles.buttonPressed : null
@@ -1481,6 +2035,18 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                           void stopActiveTimer();
                         }}
                       />
+                      <Pressable
+                        accessibilityLabel="Add past time"
+                        accessibilityRole="button"
+                        onPress={(event) => {
+                          event.stopPropagation();
+                          openManualEntry();
+                        }}
+                        style={pressable(styles.addPastTimeButton, styles.buttonPressed)}
+                        testID="active-timer-add-past-time"
+                      >
+                        <PlusGlyph color={theme.accentText} />
+                      </Pressable>
                     </Animated.View>
                   </View>
                 </Pressable>
@@ -1568,10 +2134,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               onDeleteEntries={scheduleHistoryDeletion}
               onOpenEntry={(entry) => {
                 if (!entry.stoppedAt) {
-                  setActiveEditVisible(true);
+                  presentActiveEditor("existing_active_timer");
                   return;
                 }
-                setCalendarEditEntry({ ...entry, isActive: false });
+                presentCompletedEntry({ ...entry, isActive: false });
               }}
               onOpenReview={() => router.push("/review")}
               onReplayEntry={(entry) => {
@@ -1603,10 +2169,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           nativeCalendarBridge.actionEntries,
           {
             onOpenActive: () => {
+              calendarEditPresentationRef.current = null;
               setCalendarEditEntry(null);
-              setActiveEditVisible(true);
+              setCalendarEditPresentation(null);
+              presentActiveEditor("existing_active_timer");
             },
-            onOpenCompleted: setCalendarEditEntry,
+            onOpenCompleted: presentCompletedEntry,
             onOpenReview: () => router.push("/review")
           }
         );
@@ -1720,9 +2288,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   return (
     <DashboardContext.Provider value={{ renderTab: renderDashboardTab }}>
       {children}
-      {pendingHistoryDeletion ? (
+      {pendingDeletion?.phase === "active" ? (
         <Reanimated.View
-          key={pendingHistoryDeletion.token}
+          key={pendingDeletion.token}
           accessibilityLiveRegion="polite"
           entering={localPresenceEntering(reduceMotion, "rise")}
           exiting={localPresenceExiting(reduceMotion)}
@@ -1730,79 +2298,82 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           style={styles.historyDeleteUndoToast}
         >
           <Text style={styles.historyDeleteUndoText}>
-            {pendingHistoryDeletion.entries.length === 1
+            {pendingDeletion.entries.length === 1
               ? "Time entry deleted"
-              : `${pendingHistoryDeletion.entries.length} time entries deleted`}
+              : `${pendingDeletion.entries.length} time entries deleted`}
           </Text>
           <Pressable
             accessibilityLabel="Undo deleting time entries"
             accessibilityRole="button"
-            onPress={undoHistoryDeletion}
+            onPress={undoDeletion}
             style={({ pressed }) => [styles.historyDeleteUndoButton, pressed ? styles.buttonPressed : null]}
           >
             <Text style={styles.historyDeleteUndoButtonText}>Undo</Text>
           </Pressable>
         </Reanimated.View>
       ) : null}
-      <ActiveTimerEditSheet
+      {manualEntryPresentation && reduceMotionPreferenceResolved ? <ActiveTimerEditSheet
         categories={sortedCategories}
         descriptionPlaceholder="What have you been working on?"
         elapsedSeconds={manualDraftEntry?.durationSeconds ?? 0}
         entry={manualDraftEntry}
+        historicalEntries={historySourceEntries}
         lastStoppedAt={recentStoppedAt}
         mode="add"
-        onCancel={() => {
-          setManualDraftEntry(null);
-        }}
+        onCancel={completeManualEntryExit}
         onSave={saveManualEntry}
-        peerEntries={historySourceEntries}
+        presentation={manualEntryPresentation}
+        reduceMotion={reduceMotion}
         saving={manualEntrySaving}
         stopping={false}
         styles={styles}
         tags={data?.tags ?? []}
         theme={theme}
-        visible={Boolean(manualDraftEntry)}
-      />
-      <ActiveTimerEditSheet
+        visible={Boolean(manualDraftEntry && manualEntryPresentation)}
+      /> : null}
+      {activeEditPresentation && reduceMotionPreferenceResolved ? <ActiveTimerEditSheet
         categories={sortedCategories}
-        elapsedSeconds={activeDurationSeconds}
-        entry={activeEntryForDisplay ?? null}
+        dismissRequestId={activeEditDismissRequestId}
+        elapsedSeconds={displayedActiveDurationSeconds}
+        entry={activeEntryForDisplay ?? presentedActiveEntry}
+        historicalEntries={historySourceEntries}
         lastStoppedAt={recentStoppedAt}
         onApplySuggestion={applyRunningTimerSuggestion}
-        onCancel={() => {
-          setActiveEditVisible(false);
-        }}
+        onCancel={completeActiveEditorExit}
         onDelete={deleteActiveTimer}
+        onPresented={completeActiveEditorPresentation}
         onSave={saveActiveTimerEdit}
         onStop={stopActiveTimer}
-        peerEntries={historySourceEntries}
+        presentation={activeEditPresentation}
+        reduceMotion={reduceMotion}
         deleting={false}
         saving={false}
         stopping={false}
         styles={styles}
-        suggestions={compactTaskSuggestions}
         tags={data?.tags ?? []}
         theme={theme}
-        visible={activeEditVisible}
-      />
-      <ActiveTimerEditSheet
+        visible={Boolean(activeEditPresentation)}
+      /> : null}
+      {calendarEditPresentation && reduceMotionPreferenceResolved ? <ActiveTimerEditSheet
         categories={sortedCategories}
         elapsedSeconds={calendarEditEntry ? entryDurationSeconds(calendarEditEntry, now) : 0}
         entry={calendarEditEntry}
+        historicalEntries={historySourceEntries}
         lastStoppedAt={null}
         mode="entry"
-        onCancel={() => setCalendarEditEntry(null)}
+        onCancel={completeCalendarEntryExit}
         onDelete={deleteCalendarEntry}
         onSave={saveCalendarEntryEdit}
-        peerEntries={historySourceEntries}
+        presentation={calendarEditPresentation}
+        reduceMotion={reduceMotion}
         deleting={false}
         saving={false}
         stopping={false}
         styles={styles}
         tags={data?.tags ?? []}
         theme={theme}
-        visible={Boolean(calendarEditEntry)}
-      />
+        visible={Boolean(calendarEditEntry && calendarEditPresentation)}
+      /> : null}
     </DashboardContext.Provider>
   );
 }

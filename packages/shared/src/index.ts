@@ -696,6 +696,18 @@ export type RecentActivitySuggestion = {
   tagNames: string[];
 };
 
+export type HistoricalSuggestionSearchOptions = {
+  query: string;
+  currentEntryId?: string | null;
+  contextDate?: Date | string;
+  limit?: number;
+};
+
+export type HistoricalSuggestionPatch = Pick<
+  RecentActivitySuggestion,
+  "description" | "categoryId" | "tagNames"
+>;
+
 export type CategoryUsageRank = {
   categoryId: string;
   lastSeenAt: string;
@@ -774,6 +786,285 @@ export function buildRecentActivitySuggestions(
     .map((suggestion) => scoreRecentActivitySuggestion(suggestion, contextMs));
 
   return compactRecentActivitySuggestionOrder(scored).slice(0, limit);
+}
+
+const DEFAULT_HISTORICAL_SUGGESTION_LIMIT = 12;
+const MAX_HISTORICAL_SUGGESTION_LIMIT = 50;
+
+type HistoricalSuggestionCandidate = {
+  categoryColor: string | null;
+  categoryId: string | null;
+  categoryName: string | null;
+  description: string;
+  descriptionKey: string;
+  durationSeconds: number;
+  entryId: string | null;
+  presentationKey: string;
+  startedAtMs: number;
+  stoppedAt: string;
+  stoppedAtMs: number;
+  tagKeys: string[];
+  tagNames: string[];
+};
+
+type HistoricalScoredRecentActivitySuggestion = ScoredRecentActivitySuggestion & {
+  historicalPresentationKey: string;
+};
+
+/**
+ * Searches genuine completed history without relying on the compact bootstrap
+ * suggestion cap. Results are semantic variants: identical Description,
+ * category and tag combinations aggregate, while different category/tag
+ * metadata remains separately selectable.
+ */
+export function buildHistoricalEntrySuggestions(
+  entries: RecentActivityEntry[],
+  options: HistoricalSuggestionSearchOptions = { query: "" }
+): RecentActivitySuggestion[] {
+  const limit = historicalSuggestionLimit(options.limit);
+  if (limit === 0 || !Array.isArray(entries)) return [];
+
+  const currentEntryId = typeof options.currentEntryId === "string"
+    ? options.currentEntryId
+    : null;
+  const candidates = entries
+    .map((entry) => historicalSuggestionCandidate(entry, currentEntryId))
+    .filter((candidate): candidate is HistoricalSuggestionCandidate => candidate !== null);
+  if (candidates.length === 0) return [];
+
+  const contextMs = historicalSuggestionContextMs(options.contextDate, candidates);
+  const contextDate = new Date(contextMs);
+  const contextBucket = timeOfDayBucket(contextDate);
+  const contextDay = contextDate.getDay();
+  const contextDayKind = dayKind(contextDate);
+  const aggregates = new Map<string, HistoricalScoredRecentActivitySuggestion>();
+
+  for (const candidate of candidates) {
+    const key = historicalSuggestionKey(candidate);
+    const startedAt = new Date(candidate.startedAtMs);
+    const lastSeenInRecentWindow = (
+      contextMs - candidate.stoppedAtMs >= 0 &&
+      contextMs - candidate.stoppedAtMs <= 14 * 86_400_000
+    );
+    const current = aggregates.get(key);
+
+    if (!current) {
+      aggregates.set(key, {
+        categoryColor: candidate.categoryColor,
+        categoryId: candidate.categoryId,
+        categoryName: candidate.categoryName,
+        dayKindMatches: dayKind(startedAt) === contextDayKind ? 1 : 0,
+        dayMatches: startedAt.getDay() === contextDay ? 1 : 0,
+        description: candidate.description,
+        key,
+        lastSeenAt: candidate.stoppedAt,
+        recentWindowCount: lastSeenInRecentWindow ? 1 : 0,
+        score: 0,
+        section: "recent",
+        tagNames: candidate.tagNames,
+        timeBucketMatches: timeOfDayBucket(startedAt) === contextBucket ? 1 : 0,
+        totalSeconds: candidate.durationSeconds,
+        useCount: 1,
+        historicalPresentationKey: candidate.presentationKey
+      });
+      continue;
+    }
+
+    current.useCount += 1;
+    current.totalSeconds += candidate.durationSeconds;
+    current.recentWindowCount += lastSeenInRecentWindow ? 1 : 0;
+    current.timeBucketMatches += timeOfDayBucket(startedAt) === contextBucket ? 1 : 0;
+    current.dayMatches += startedAt.getDay() === contextDay ? 1 : 0;
+    current.dayKindMatches += dayKind(startedAt) === contextDayKind ? 1 : 0;
+
+    const currentLastSeenMs = Date.parse(current.lastSeenAt);
+    if (
+      candidate.stoppedAtMs > currentLastSeenMs ||
+      (
+        candidate.stoppedAtMs === currentLastSeenMs &&
+        stableTextCompare(candidate.presentationKey, current.historicalPresentationKey) < 0
+      )
+    ) {
+      current.categoryColor = candidate.categoryColor;
+      current.categoryName = candidate.categoryName;
+      current.description = candidate.description;
+      current.lastSeenAt = candidate.stoppedAt;
+      current.tagNames = candidate.tagNames;
+      current.historicalPresentationKey = candidate.presentationKey;
+    }
+  }
+
+  const query = normalizeHistoricalSearchText(options.query);
+  return [...aggregates.values()]
+    .map((aggregate) => scoreRecentActivitySuggestion(aggregate, contextMs))
+    .map((suggestion) => ({
+      suggestion,
+      tier: historicalSuggestionMatchTier(
+        normalizeHistoricalSearchText(suggestion.description),
+        query
+      )
+    }))
+    .filter((result) => query.length === 0 || result.tier !== null)
+    .sort((left, right) =>
+      (left.tier ?? 0) - (right.tier ?? 0) ||
+      right.suggestion.score - left.suggestion.score ||
+      right.suggestion.useCount - left.suggestion.useCount ||
+      Date.parse(right.suggestion.lastSeenAt) - Date.parse(left.suggestion.lastSeenAt) ||
+      right.suggestion.totalSeconds - left.suggestion.totalSeconds ||
+      stableTextCompare(left.suggestion.key, right.suggestion.key)
+    )
+    .slice(0, limit)
+    .map(({ suggestion }) => suggestion);
+}
+
+/** Creates the complete and intentionally narrow mutation for a selection. */
+export function historicalSuggestionPatch(
+  suggestion: Pick<RecentActivitySuggestion, "description" | "categoryId" | "tagNames">
+): HistoricalSuggestionPatch {
+  return {
+    description: suggestion.description,
+    categoryId: suggestion.categoryId,
+    tagNames: [...suggestion.tagNames]
+  };
+}
+
+function historicalSuggestionCandidate(
+  entry: RecentActivityEntry,
+  currentEntryId: string | null
+): HistoricalSuggestionCandidate | null {
+  if (!entry || typeof entry !== "object") return null;
+  if (currentEntryId !== null && entry.id === currentEntryId) return null;
+  if (!isManualLearningEntryEligible(entry)) return null;
+
+  const description = normalizeHistoricalDisplayText(entry.description);
+  if (!description || normalizeHistoricalSearchText(description) === "start activity") return null;
+
+  const startedAtMs = Date.parse(typeof entry.startedAt === "string" ? entry.startedAt : "");
+  const stoppedAtMs = Date.parse(typeof entry.stoppedAt === "string" ? entry.stoppedAt : "");
+  if (!Number.isFinite(startedAtMs) || !Number.isFinite(stoppedAtMs) || stoppedAtMs <= startedAtMs) {
+    return null;
+  }
+
+  const categoryId = normalizedOptionalHistoricalText(entry.categoryId);
+  const categoryName = normalizeHistoricalDisplayText(entry.categoryName);
+  const categoryColor = normalizedOptionalHistoricalText(entry.categoryColor);
+  const tags = historicalSuggestionTags(entry.tagNames);
+  const durationSeconds = (
+    typeof entry.durationSeconds === "number" &&
+    Number.isFinite(entry.durationSeconds) &&
+    entry.durationSeconds >= 0
+  )
+    ? Math.floor(entry.durationSeconds)
+    : Math.max(0, Math.floor((stoppedAtMs - startedAtMs) / 1000));
+  const entryId = normalizedOptionalHistoricalText(entry.id);
+  const stoppedAt = new Date(stoppedAtMs).toISOString();
+  const presentationKey = JSON.stringify([
+    description,
+    categoryName,
+    categoryColor,
+    tags.names,
+    entryId
+  ]);
+
+  return {
+    categoryColor,
+    categoryId,
+    categoryName,
+    description,
+    descriptionKey: normalizeHistoricalSearchText(description),
+    durationSeconds,
+    entryId,
+    presentationKey,
+    startedAtMs,
+    stoppedAt,
+    stoppedAtMs,
+    tagKeys: tags.keys,
+    tagNames: tags.names
+  };
+}
+
+function historicalSuggestionContextMs(
+  value: Date | string | undefined,
+  candidates: HistoricalSuggestionCandidate[]
+) {
+  const requestedContextMs = value instanceof Date
+    ? value.getTime()
+    : typeof value === "string"
+      ? Date.parse(value)
+      : NaN;
+  if (Number.isFinite(requestedContextMs)) return requestedContextMs;
+  return candidates.reduce(
+    (latest, candidate) => Math.max(latest, candidate.stoppedAtMs),
+    0
+  );
+}
+
+function historicalSuggestionLimit(value: number | undefined) {
+  if (value === undefined) return DEFAULT_HISTORICAL_SUGGESTION_LIMIT;
+  if (!Number.isFinite(value)) return DEFAULT_HISTORICAL_SUGGESTION_LIMIT;
+  return Math.min(MAX_HISTORICAL_SUGGESTION_LIMIT, Math.max(0, Math.floor(value)));
+}
+
+function historicalSuggestionKey(candidate: HistoricalSuggestionCandidate) {
+  return `historical:${JSON.stringify([
+    candidate.descriptionKey,
+    candidate.categoryId,
+    candidate.tagKeys
+  ])}`;
+}
+
+function historicalSuggestionMatchTier(description: string, query: string) {
+  if (!query) return null;
+  if (description === query) return 0;
+  if (description.startsWith(query)) return 1;
+  let index = description.indexOf(query);
+  if (index < 0) return null;
+  while (index >= 0) {
+    if (index > 0 && !isHistoricalWordCharacter(description[index - 1] ?? "")) return 2;
+    index = description.indexOf(query, index + 1);
+  }
+  return 3;
+}
+
+function historicalSuggestionTags(value: string[] | undefined) {
+  if (!Array.isArray(value)) return { keys: [], names: [] };
+  const namesByKey = new Map<string, string>();
+  for (const item of value) {
+    const name = normalizeHistoricalDisplayText(item);
+    if (!name) continue;
+    const key = normalizeHistoricalSearchText(name);
+    const current = namesByKey.get(key);
+    if (!current || stableTextCompare(name, current) < 0) namesByKey.set(key, name);
+  }
+  const keys = [...namesByKey.keys()].sort(stableTextCompare);
+  return {
+    keys,
+    names: keys.map((key) => namesByKey.get(key) as string)
+  };
+}
+
+function normalizeHistoricalDisplayText(value: unknown) {
+  if (typeof value !== "string") return null;
+  const normalized = value.normalize("NFKC").replace(/\s+/gu, " ").trim();
+  return normalized || null;
+}
+
+function normalizedOptionalHistoricalText(value: unknown) {
+  return normalizeHistoricalDisplayText(value);
+}
+
+function normalizeHistoricalSearchText(value: unknown) {
+  return normalizeHistoricalDisplayText(value)?.toLowerCase() ?? "";
+}
+
+function isHistoricalWordCharacter(value: string) {
+  return /[\p{L}\p{N}]/u.test(value);
+}
+
+function stableTextCompare(left: string, right: string) {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
 }
 
 export function buildCategoryUsageRanks(
@@ -956,7 +1247,8 @@ function compactRecentActivitySuggestionOrder(
     b.useCount - a.useCount ||
     b.totalSeconds - a.totalSeconds ||
     Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt) ||
-    a.description.localeCompare(b.description)
+    a.description.localeCompare(b.description) ||
+    stableTextCompare(a.key, b.key)
   );
 }
 
