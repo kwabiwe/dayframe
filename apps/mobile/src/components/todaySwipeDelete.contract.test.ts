@@ -114,8 +114,10 @@ describe("Today history swipe-to-delete contract", () => {
 
   it("keeps editor snapshots and elapsed presentation alive through coordinated exit", () => {
     expect(dashboardSource).toContain("if (activeEditPresentation) return undefined");
-    expect(dashboardSource).toContain("entry={activeEntryForDisplay ?? presentedActiveEntry}");
+    expect(dashboardSource).toContain("entry={retainedActiveEntryForSheet}");
     expect(dashboardSource).toContain("elapsedSeconds={displayedActiveDurationSeconds}");
+    expect(dashboardSource).toContain("dashboardActiveTimerEntry({");
+    expect(dashboardSource).toContain("pendingDeletionEntryIds");
     expect(dashboardSource).not.toContain("if (!activeEntryForDisplay && activeEditVisible)");
   });
 

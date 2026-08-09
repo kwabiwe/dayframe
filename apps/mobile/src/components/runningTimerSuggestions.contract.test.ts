@@ -31,7 +31,8 @@ describe("time-entry sheet historical Suggestions contract", () => {
     expect(pinnedRunningHeroIndex).toBeLessThan(formIndex);
     expect(themeSource).toMatch(/historicalSuggestionsOverlay:\s*\{[\s\S]*?position: "absolute"/);
     expect(themeSource).toMatch(/historicalSuggestionsOverlay:\s*\{[\s\S]*?backgroundColor: "transparent"/);
-    expect(themeSource).toMatch(/historicalSuggestionsSurface:\s*\{[\s\S]*?backgroundColor: theme\.surfaceRaised[\s\S]*?borderBottomLeftRadius: 14[\s\S]*?borderBottomRightRadius: 14[\s\S]*?overflow: "hidden"/);
+    expect(themeSource).toMatch(/historicalSuggestionsSurface:\s*\{[\s\S]*?backgroundColor: theme\.surfaceRaised[\s\S]*?borderWidth: 1[\s\S]*?borderColor: theme\.borderStrong[\s\S]*?borderRadius: 14[\s\S]*?overflow: "hidden"/);
+    expect(themeSource).toMatch(/historicalSuggestionsHeader:\s*\{[\s\S]*?backgroundColor: theme\.surfaceMuted/);
     expect(themeSource).toMatch(/historicalSuggestionsList:\s*\{[\s\S]*?backgroundColor: "transparent"[\s\S]*?flexShrink: 1[\s\S]*?minHeight: 0/);
     expect(themeSource).not.toContain("historicalSuggestionsBackground");
     expect(themeSource).toMatch(/activeEditBodyKeyboard:\s*\{[\s\S]*?flex: 1[\s\S]*?minHeight: 0/);
@@ -111,7 +112,7 @@ describe("time-entry sheet historical Suggestions contract", () => {
     expect(editSheetSource).toContain("historicalSuggestionResultSignature");
     expect(editSheetSource).not.toContain("[historicalSuggestions.length");
     expect(editSheetSource).toContain("historicalSuggestionPatch(suggestion)");
-    expect(editSheetSource).toContain("setDescription(patch.description)");
+    expect(editSheetSource).toContain("commitDescriptionEditorState(\n      patch.description");
     expect(editSheetSource).toContain("setSelectedCategoryId(patch.categoryId)");
     expect(editSheetSource).toContain("setSelectedTagNames(patch.tagNames)");
     expect(editSheetSource).toContain(
@@ -176,7 +177,9 @@ describe("time-entry sheet historical Suggestions contract", () => {
     expect(editSheetSource).not.toContain(removedPromptName);
     expect(editSheetSource).toContain("const token = beginMutation(\"deleting\")");
     expect(editSheetSource).toContain("resolveMutation(() => onDelete(entry.id))");
-    expect(editSheetSource).toContain("if (accepted && ok) requestCoordinatedDismiss()");
+    expect(editSheetSource).toContain(
+      "if (accepted && ok) requestCoordinatedDismiss({ bypassDiscardConfirmation: true })"
+    );
     expect(editSheetSource).toContain("onRequestClose={handleUserRequestClose}");
     expect(editSheetSource).toContain("dismissRequestId?: number | null");
     expect(editSheetSource).toContain("pendingTimeEntrySheetDismissRequestId({");

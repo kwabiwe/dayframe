@@ -76,7 +76,7 @@ describe("active timer category scroll contract", () => {
     expect(timerSheetSource).toContain("nestedScrollEnabled");
     expect(timerSheetSource).toContain("showsVerticalScrollIndicator={false}");
     expect(themeSource).toContain("activeEditCategoryViewport: {");
-    expect(themeSource).toContain("height: 48");
-    expect(themeSource).toContain("minHeight: 44");
+    expect(themeSource).toContain("height: 36");
+    expect(themeSource).toContain("minHeight: 32");
   });
 });

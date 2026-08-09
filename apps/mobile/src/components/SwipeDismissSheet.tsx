@@ -6,6 +6,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  type MutableRefObject,
   type ReactNode
 } from "react";
 import {
@@ -17,7 +18,11 @@ import {
   useWindowDimensions,
   View
 } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import {
+  Gesture,
+  GestureDetector,
+  type GestureType
+} from "react-native-gesture-handler";
 import Reanimated, {
   cancelAnimation,
   runOnJS,
@@ -63,6 +68,7 @@ type SwipeDismissSheetProps = {
   backdropStyle: StyleProp<ViewStyle>;
   children: ReactNode;
   disabled?: boolean;
+  dismissGestureRef?: MutableRefObject<GestureType | undefined>;
   handleStyle: StyleProp<ViewStyle>;
   keyboardInset?: number;
   onDismiss: (presentationId: number) => void;
@@ -87,6 +93,7 @@ function SwipeDismissSheet({
   backdropStyle,
   children,
   disabled = false,
+  dismissGestureRef,
   handleStyle,
   keyboardInset = 0,
   onDismiss,
@@ -416,7 +423,8 @@ function SwipeDismissSheet({
     visible
   ]);
 
-  const gesture = useMemo(() => Gesture.Pan()
+  const gesture = useMemo(() => {
+    const pan = Gesture.Pan()
     .enabled(!disabled && visible)
     .activeOffsetY(SWIPE_DISMISS_MOTION.activeOffsetY)
     .failOffsetX([
@@ -502,8 +510,11 @@ function SwipeDismissSheet({
         gestureState.value = "idle";
         runOnJS(notifyGestureSettledAtRest)(presentationId);
       });
-    }), [
+    });
+    return dismissGestureRef ? pan.withRef(dismissGestureRef) : pan;
+  }, [
     disabled,
+    dismissGestureRef,
     dismissCommitted,
     commitDismiss,
     gestureOriginY,

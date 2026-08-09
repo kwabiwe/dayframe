@@ -2221,13 +2221,9 @@ function createStyles(theme: MobileTheme) {
       flex: 1,
       minHeight: 0,
       backgroundColor: theme.surfaceRaised,
-      borderLeftWidth: 1,
-      borderRightWidth: 1,
-      borderBottomWidth: 1,
-      borderTopWidth: 0,
+      borderWidth: 1,
       borderColor: theme.borderStrong,
-      borderBottomLeftRadius: 14,
-      borderBottomRightRadius: 14,
+      borderRadius: 14,
       overflow: "hidden"
     },
     historicalSuggestionsHeader: {
@@ -2235,7 +2231,8 @@ function createStyles(theme: MobileTheme) {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
-      paddingLeft: 12
+      paddingLeft: 12,
+      backgroundColor: theme.surfaceMuted
     },
     historicalSuggestionsDivider: {
       height: 1,
@@ -2342,7 +2339,9 @@ function createStyles(theme: MobileTheme) {
       left: 0,
       right: 0,
       zIndex: 30,
-      backgroundColor: theme.mode === "dark" ? theme.borderStrong : theme.surfaceMuted,
+      backgroundColor: theme.surfaceRaised,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
       borderRadius: 14,
       overflow: "hidden",
       shadowColor: theme.shadow,
@@ -2351,18 +2350,25 @@ function createStyles(theme: MobileTheme) {
       shadowRadius: 12,
       elevation: 8
     },
+    tagAutocompleteHeader: {
+      minHeight: 36,
+      justifyContent: "center",
+      backgroundColor: theme.surfaceMuted
+    },
     tagAutocompleteTitle: {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 11,
       fontWeight: "600",
       letterSpacing: 0.4,
-      paddingHorizontal: 12,
-      paddingVertical: 8
+      paddingHorizontal: 12
+    },
+    tagAutocompleteDivider: {
+      height: 1,
+      marginHorizontal: 12,
+      backgroundColor: theme.border
     },
     tagAutocompleteList: {
-      borderTopWidth: 1,
-      borderTopColor: theme.border,
       maxHeight: 264
     },
     tagSuggestionRow: {
@@ -2372,8 +2378,12 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center"
     },
     tagSuggestionDivider: {
-      borderTopWidth: 1,
-      borderTopColor: theme.border
+      position: "absolute",
+      top: 0,
+      left: 12,
+      right: 12,
+      height: 1,
+      backgroundColor: theme.border
     },
     tagSuggestionText: {
       flex: 1,
