@@ -155,6 +155,7 @@ import {
   createOptimisticTimerStartReconciler,
   createSerializedMutationQueue,
   createSupersededStopRollbackTracker,
+  dashboardActiveTimerEntry,
   displayTimerDescription,
   filterPendingDeletedTimeEntries,
   mobileTimeEntryById,
@@ -999,10 +1000,16 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       }
     ]
   };
-  const displayedActiveEntry = activeEntryForDisplay ?? presentedActiveEntry;
-  const displayedActiveDurationSeconds = displayedActiveEntry && activeEntryForDisplay
+  const retainedActiveEntryForSheet = activeEntryForDisplay ?? presentedActiveEntry;
+  const pendingDeletionEntryIds = new Set(pendingDeletion?.entryIds ?? []);
+  const displayedActiveEntry = dashboardActiveTimerEntry({
+    activeEntry: activeEntryForDisplay,
+    pendingDeletionEntryIds,
+    presentedEntry: presentedActiveEntry
+  });
+  const displayedActiveDurationSeconds = retainedActiveEntryForSheet && activeEntryForDisplay
     ? activeDurationSeconds
-    : activeTimerElapsedSeconds(displayedActiveEntry, now);
+    : activeTimerElapsedSeconds(retainedActiveEntryForSheet, now);
   const todayKey = useMemo(() => formatDateKey(new Date(now)), [now]);
   const historySourceEntries = useMemo(() => {
     if (!data) return [];
@@ -2330,7 +2337,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         categories={sortedCategories}
         dismissRequestId={activeEditDismissRequestId}
         elapsedSeconds={displayedActiveDurationSeconds}
-        entry={activeEntryForDisplay ?? presentedActiveEntry}
+        entry={retainedActiveEntryForSheet}
         historicalEntries={historySourceEntries}
         lastStoppedAt={recentStoppedAt}
         onApplySuggestion={applyRunningTimerSuggestion}

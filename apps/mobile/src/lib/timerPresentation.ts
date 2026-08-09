@@ -256,6 +256,20 @@ export function activeTimerPresentation(entry: ActiveTimerEntry) {
   };
 }
 
+export function dashboardActiveTimerEntry<Entry extends { id: string }>({
+  activeEntry,
+  pendingDeletionEntryIds,
+  presentedEntry
+}: {
+  activeEntry: Entry | null;
+  pendingDeletionEntryIds: ReadonlySet<string>;
+  presentedEntry: Entry | null;
+}) {
+  const candidate = activeEntry ?? presentedEntry;
+  if (!candidate || pendingDeletionEntryIds.has(candidate.id)) return null;
+  return candidate;
+}
+
 export function activeTimerElapsedSeconds(
   entry: ActiveTimerElapsedEntry | null | undefined,
   nowMs: number

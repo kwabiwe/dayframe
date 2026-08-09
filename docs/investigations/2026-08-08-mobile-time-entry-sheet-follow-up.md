@@ -13,7 +13,11 @@ The requested fixes are limited to the shared iOS time-entry sheets:
 - restore a reachable Delete action without compressing the standard layout;
 - confirm before discarding genuinely edited drafts;
 - default Add Past Time to 30 minutes ending now;
-- restore tag suggestions from both Add a tag and a manually typed `#`.
+- restore tag suggestions from both Add a tag and a manually typed `#`;
+- harden the chooser after physical-device testing exposed late native
+  selection/blur events;
+- remove the transient blank active-timer card after Delete; and
+- unify the Tags and Suggestions panel framing.
 
 ## Findings
 
@@ -69,7 +73,7 @@ substitute a recent stop for Start. It now captures `Date.now()` at the tap,
 sets End to that instant and Start to exactly 30 minutes earlier. The existing
 Set to last stop time quick action remains available.
 
-### Tag suggestions
+### Tag suggestions and keyboard reliability
 
 Two interacting causes were present:
 
@@ -80,9 +84,46 @@ Two interacting causes were present:
    reducer focus. A blur/refocus event coalesced by UIKit could therefore leave
    the command visible without mounting its suggestions.
 
-The text-change path now derives the new caret from the text delta, while an
-explicit hashtag-entry intent bridges the short native focus handoff. Blur,
-background interaction and selection clear that intent deterministically.
+The first follow-up derived the new caret from the text delta and bridged the
+short native focus handoff with a Boolean intent. Physical-device testing then
+showed two remaining ordering failures:
+
+1. a delayed native selection event could echo the old caret after React had
+   already committed the new text/caret, making the active hashtag disappear;
+2. UIKit could deliver blur after Add a tag's press callback, clearing the
+   Boolean intent before the chooser/focus handoff settled.
+
+The final fix keeps authoritative Description text and selection in synchronous
+refs, rejects only the known stale caret echo, and owns tag entry with a
+presentation-scoped reducer plus monotonic focus request IDs. An unexpected
+blur while a hashtag is active requests a newer bounded focus recovery instead
+of clearing the chooser. Recovery verifies both native focus and visible
+keyboard metrics, retries for at most three frames, and performs one guarded
+blur/refocus only for the focused-without-keyboard responder race. Explicit
+background/dismiss/cancel paths invalidate pending requests, and cancellation
+also releases any temporary blur suppression.
+
+### Deleted active-timer flash
+
+Optimistic Delete correctly removed `data.activeEntry`, but
+`presentedActiveEntry` deliberately retained the old entry until the editor's
+coordinated exit completed. Today reused that presentation snapshot for the
+dashboard card, so it briefly rendered the retained blank timer as `Add a task
+description` before the delayed cleanup.
+
+The dashboard and sheet now have separate presentation inputs. The sheet keeps
+the retained entry and elapsed value for a coherent exit, while a pure
+dashboard selector immediately excludes any entry whose ID belongs to the
+pending deletion. The idle Today state is therefore already behind the exiting
+sheet, with no intermediate blank card.
+
+### Tags and Suggestions visual language
+
+Both overlays now use the same compact framed surface: raised neutral body,
+one-point strong outline, 14-point corners, filled muted heading, and inset
+one-point dividers that stop 12 points from each side. The change uses the
+existing semantic theme roles in both appearances and preserves each overlay's
+current geometry and scrolling behavior.
 
 ## Motion and gesture contract
 
@@ -91,15 +132,16 @@ background interaction and selection clear that intent deterministically.
 | Drag Play, Stop or range dot | Native duration dial | Direct manipulation remains native; the sheet pan must wait and never translate. |
 | Swipe non-control sheet background/handle | `SwipeDismissSheet` | Existing threshold, keyboard handoff, return spring and committed exit remain unchanged. |
 | Dirty swipe dismissal | Sheet draft guard + native alert | The sheet returns to rest; one alert offers Keep editing or Discard. |
-| Tag chooser | Description field | Existing 140 ms bounded entrance remains; Reduce Motion uses the existing no-translation path. |
+| Tag chooser | Description field + tag-session reducer | Existing 140 ms bounded entrance remains; focus recovery is request-scoped and cancelled on exit; Reduce Motion uses the existing no-translation path. |
+| Delete active timer | Dashboard + coordinated sheet exit | Today switches directly to idle while the sheet retains its snapshot only for exit; no blank active card is mounted between those states. |
 | Content overflow | Form `ScrollView` | No animation or geometry change when content fits; scrolling is enabled only when compact, accessible or measured overflow requires it. |
 
 ## Validation
 
 | Check | Result |
 | --- | --- |
-| Focused gesture/draft/tag/Add tests | Pass: 39 tests across 5 files |
-| Full mobile test suite | Pass: 61 files / 601 tests |
+| Focused gesture/draft/tag/Add/delete tests | Pass: 128 tests across 6 files |
+| Full mobile test suite | Pass: 62 files / 608 tests |
 | Mobile TypeScript typecheck | Pass |
 | `git diff --check` | Pass |
 | Simulator/XCUITest/animation stress | Not run; explicitly outside the requested follow-up workflow |

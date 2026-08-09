@@ -27,15 +27,21 @@ describe("mobile tag interaction contract", () => {
     expect(sheet).toContain("accessibilityLabel=\"Add a tag\"");
     expect(sheet).toContain("insertHashtagStarter");
     expect(sheet).toContain("selectionAfterDescriptionChange");
-    expect(sheet).toContain("setHashtagEntryRequested(true)");
+    expect(sheet).toContain("timeEntrySheetTagSessionReducer");
+    expect(sheet).toContain('type: "description_blurred"');
+    expect(sheet).toContain("pendingDescriptionSelectionSyncRef.current");
+    expect(sheet).toContain("descriptionValueRef.current");
     expect(sheet).toContain("consumeActiveHashtag");
     expect(sheet).toContain("setSelectedTagNames");
     expect(sheet).not.toContain("descriptionWithTagTokens");
     expect(sheet).not.toContain("Type # to add a tag");
   });
 
-  it("uses a contrasting chooser, solid icon, and draft-only tag removal", () => {
-    expect(theme).toContain('backgroundColor: theme.mode === "dark" ? theme.borderStrong : theme.surfaceMuted');
+  it("uses the shared framed chooser language, solid icon, and draft-only tag removal", () => {
+    expect(theme).toMatch(/tagAutocompletePanel:\s*\{[\s\S]*?backgroundColor: theme\.surfaceRaised[\s\S]*?borderWidth: 1[\s\S]*?borderColor: theme\.borderStrong[\s\S]*?borderRadius: 14/);
+    expect(theme).toMatch(/tagAutocompleteHeader:\s*\{[\s\S]*?backgroundColor: theme\.surfaceMuted/);
+    expect(theme).toMatch(/tagSuggestionDivider:\s*\{[\s\S]*?left: 12[\s\S]*?right: 12/);
+    expect(sheet).toContain("styles.tagAutocompleteDivider");
     expect(metadata).toContain('fill={color}');
     expect(metadata).toContain('fillRule="evenodd"');
     expect(metadata).toContain('accessibilityLabel={`Remove tag ${tagName}`}');

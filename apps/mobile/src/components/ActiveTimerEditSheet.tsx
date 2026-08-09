@@ -93,6 +93,15 @@ import {
   timeEntrySheetDraftHasChanges,
   type TimeEntrySheetDraftSnapshot
 } from "@/lib/timeEntrySheetDraft";
+import {
+  createPendingDescriptionSelectionSync,
+  createTimeEntrySheetTagSession,
+  resolveDescriptionSelectionEvent,
+  timeEntrySheetTagSessionReducer,
+  type DescriptionSelection,
+  type PendingDescriptionSelectionSync,
+  type TimeEntrySheetTagSessionEvent
+} from "@/lib/timeEntrySheetTagSession";
 
 const HISTORICAL_SUGGESTION_LIMIT = 12;
 const HISTORICAL_OVERLAY_MAX_HEIGHT = 384;
@@ -182,7 +191,7 @@ export function ActiveTimerEditSheet({
   const [descriptionSelection, setDescriptionSelection] = useState({ start: 0, end: 0 });
   const [selectedTagNames, setSelectedTagNames] = useState<string[]>([]);
   const [hashtagPanelMounted, setHashtagPanelMounted] = useState(false);
-  const [hashtagEntryRequested, setHashtagEntryRequested] = useState(false);
+  const [tagSession, setTagSession] = useState(() => createTimeEntrySheetTagSession());
   const [highlightedTagAction, setHighlightedTagAction] = useState<string | null>(null);
   const [contentHeight, setContentHeight] = useState(0);
   const [contentViewportHeight, setContentViewportHeight] = useState(0);
@@ -225,6 +234,13 @@ export function ActiveTimerEditSheet({
   ) => void>(() => undefined);
   const hashtagPanelProgress = useRef(new Animated.Value(0)).current;
   const descriptionInputRef = useRef<TextInput>(null);
+  const descriptionValueRef = useRef("");
+  const descriptionSelectionRef = useRef<DescriptionSelection>({ start: 0, end: 0 });
+  const pendingDescriptionSelectionSyncRef =
+    useRef<PendingDescriptionSelectionSync | null>(null);
+  const selectionSyncFrameRef = useRef<number | null>(null);
+  const tagSessionRef = useRef(tagSession);
+  tagSessionRef.current = tagSession;
   const contentScrollRef = useRef<ScrollView>(null);
   const sheetRootLayoutRef = useRef<MeasuredRect | null>(null);
   const scrollViewportLayoutRef = useRef<MeasuredRect | null>(null);
@@ -235,7 +251,6 @@ export function ActiveTimerEditSheet({
   const endTimeInputRef = useRef<TextInput>(null);
   const focusFrameRef = useRef<number | null>(null);
   const tagFocusFrameRef = useRef<number | null>(null);
-  const tagFocusRequestSequenceRef = useRef(0);
   const geometryFrameRef = useRef<number | null>(null);
   const geometryCacheRef = useRef(createTimeEntrySheetGeometryCache());
   const geometryEnvironmentRef = useRef({
@@ -353,7 +368,9 @@ export function ActiveTimerEditSheet({
   const armKeyboardConfirmationWatchdog = useCallback((sessionToken: number) => {
     clearKeyboardConfirmationWatchdog();
     if (
-      !presentationRef.current.requestDescriptionFocus ||
+      (!presentationRef.current.requestDescriptionFocus &&
+        !tagSessionRef.current.activeHashtag &&
+        tagSessionRef.current.focusRequestId === null) ||
       keyboardConfirmationRetryCountRef.current >= KEYBOARD_CONFIRMATION_MAX_RETRIES
     ) {
       return;
@@ -396,13 +413,19 @@ export function ActiveTimerEditSheet({
       }, KEYBOARD_CONFIRMATION_REFOCUS_DELAY_MS);
     }, KEYBOARD_CONFIRMATION_TIMEOUT_MS);
   }, [clearKeyboardConfirmationWatchdog, synchronizeVisibleKeyboardMetrics]);
-  const cancelPendingTagFocus = useCallback(() => {
-    tagFocusRequestSequenceRef.current += 1;
+  const transitionTagSession = useCallback((event: TimeEntrySheetTagSessionEvent) => {
+    const next = timeEntrySheetTagSessionReducer(tagSessionRef.current, event);
+    tagSessionRef.current = next;
+    setTagSession(next);
+    return next;
+  }, []);
+  const cancelPendingTagFocus = useCallback((presentationId = presentationRef.current.id) => {
     if (tagFocusFrameRef.current !== null) {
       cancelAnimationFrame(tagFocusFrameRef.current);
       tagFocusFrameRef.current = null;
     }
-  }, []);
+    transitionTagSession({ type: "cancelled", presentationId });
+  }, [transitionTagSession]);
   if (currentEntry) {
     presentedEntryRef.current = currentEntry;
   } else if (!visible) {
@@ -444,17 +467,22 @@ export function ActiveTimerEditSheet({
       focusFrameRef.current = null;
     }
     cancelPendingTagFocus();
+    transitionTagSession({ type: "presentation_opened", presentationId: presentation.id });
     if (geometryFrameRef.current !== null) {
       cancelAnimationFrame(geometryFrameRef.current);
       geometryFrameRef.current = null;
     }
+    if (selectionSyncFrameRef.current !== null) {
+      cancelAnimationFrame(selectionSyncFrameRef.current);
+      selectionSyncFrameRef.current = null;
+    }
+    pendingDescriptionSelectionSyncRef.current = null;
     clearKeyboardConfirmationWatchdog();
     keyboardConfirmationRetryCountRef.current = 0;
     suppressDescriptionBlurDispatchRef.current = false;
     setDraftBaseline(null);
     discardPromptPresentationIdRef.current = null;
     discardBypassPresentationIdRef.current = null;
-    setHashtagEntryRequested(false);
     if (!visible) {
       if (sheetStateRef.current.presentation?.id === presentation.id) {
         dispatchSheetEvent({ type: "externally_hidden", presentationId: presentation.id });
@@ -523,6 +551,7 @@ export function ActiveTimerEditSheet({
     clearKeyboardConfirmationWatchdog,
     presentation.id,
     recordStaleCallback,
+    transitionTagSession,
     visible
   ]);
 
@@ -544,12 +573,12 @@ export function ActiveTimerEditSheet({
     const hydratedDateText = formatDateInput(startedAt);
     const hydratedTimeText = formatTimeInput(startedAt);
     const hydratedTagNames = snapshot.tags.map((tag) => tag.name);
-    setDescription(hydratedDescription);
+    commitDescriptionEditorState(
+      hydratedDescription,
+      { start: hydratedDescription.length, end: hydratedDescription.length },
+      false
+    );
     setSelectedTagNames(hydratedTagNames);
-    setDescriptionSelection({
-      start: hydratedDescription.length,
-      end: hydratedDescription.length
-    });
     setSelectedCategoryId(snapshot.categoryId);
     setDateText(hydratedDateText);
     setTimeText(hydratedTimeText);
@@ -584,7 +613,6 @@ export function ActiveTimerEditSheet({
     setDatePickerOpen(false);
     setValidationError(null);
     setHashtagPanelMounted(false);
-    setHashtagEntryRequested(false);
     hashtagPanelProgress.setValue(0);
   }, [hashtagPanelProgress, presentation.id, visible]);
 
@@ -700,6 +728,9 @@ export function ActiveTimerEditSheet({
     if (geometryFrameRef.current !== null) cancelAnimationFrame(geometryFrameRef.current);
     if (focusFrameRef.current !== null) cancelAnimationFrame(focusFrameRef.current);
     if (tagFocusFrameRef.current !== null) cancelAnimationFrame(tagFocusFrameRef.current);
+    if (selectionSyncFrameRef.current !== null) {
+      cancelAnimationFrame(selectionSyncFrameRef.current);
+    }
     if (keyboardConfirmationTimeoutRef.current !== null) {
       clearTimeout(keyboardConfirmationTimeoutRef.current);
       keyboardConfirmationTimeoutRef.current = null;
@@ -1053,7 +1084,11 @@ export function ActiveTimerEditSheet({
       });
       setFocusCommandCount((count) => count + 1);
       if (presentationRef.current.reason === "blank_timer_started") {
-        setDescriptionSelection({ start: 0, end: 0 });
+        commitDescriptionEditorState(
+          descriptionValueRef.current,
+          { start: 0, end: 0 },
+          true
+        );
       }
       descriptionInputRef.current?.focus();
     });
@@ -1090,7 +1125,7 @@ export function ActiveTimerEditSheet({
     }
   }, [activeHashtag, exactTagMatch]);
   const hashtagPanelVisible = Boolean(activeHashtag) && (
-    sheetState.descriptionFocused || hashtagEntryRequested
+    sheetState.descriptionFocused || tagSession.activeHashtag
   );
   const selectedNormalizedTagNames = useMemo(
     () => new Set(selectedTagNames.map((name) => normalizeTagName(name).normalizedName)),
@@ -1113,12 +1148,18 @@ export function ActiveTimerEditSheet({
 
   useEffect(() => {
     if (!visible) return;
+    transitionTagSession({
+      type: "hashtag_changed",
+      active: Boolean(activeHashtag),
+      presentationId: presentation.id,
+      requestFocus: false
+    });
     dispatchSheetEvent({
       type: "hashtag_query_changed",
       presentationId: presentation.id,
       active: Boolean(activeHashtag)
     });
-  }, [activeHashtag, presentation.id, visible]);
+  }, [activeHashtag, presentation.id, transitionTagSession, visible]);
 
   useEffect(() => {
     if (hashtagPanelVisible) setHashtagPanelMounted(true);
@@ -1139,6 +1180,97 @@ export function ActiveTimerEditSheet({
     });
     return () => animation.stop();
   }, [hashtagPanelProgress, hashtagPanelVisible, reduceMotion]);
+
+  useEffect(() => {
+    const focusRequestId = tagSession.focusRequestId;
+    if (focusRequestId === null || !visible) return undefined;
+    const focusPresentationId = presentation.id;
+    let attemptsRemaining = 3;
+    let ownsBlurSuppression = false;
+
+    const scheduleAttempt = () => {
+      tagFocusFrameRef.current = requestAnimationFrame(() => {
+        tagFocusFrameRef.current = null;
+        const classification = classifyTimeEntrySheetDeferredFocus({
+          currentPresentationId: presentationRef.current.id,
+          currentSequence: tagSessionRef.current.focusRequestId ?? -1,
+          requestPresentationId: focusPresentationId,
+          requestSequence: focusRequestId,
+          state: sheetStateRef.current
+        });
+        if (classification === "stale") {
+          recordStaleCallback();
+          return;
+        }
+        if (classification !== "accepted" || mutationGateRef.current !== null) return;
+
+        const input = descriptionInputRef.current;
+        if (!input) return;
+        const keyboardVisible = (Keyboard.metrics()?.height ?? 0) > 0;
+        if (input.isFocused() && keyboardVisible) {
+          transitionTagSession({
+            type: "description_focused",
+            presentationId: focusPresentationId
+          });
+          return;
+        }
+
+        attemptsRemaining -= 1;
+        if (input.isFocused() && attemptsRemaining === 0) {
+          // A focused TextInput with no keyboard is the UIKit responder race
+          // reported on device. Re-establish first responder once, after the
+          // pending press/blur hand-off has settled.
+          if (!suppressDescriptionBlurDispatchRef.current) {
+            suppressDescriptionBlurDispatchRef.current = true;
+            ownsBlurSuppression = true;
+          }
+          input.blur();
+          tagFocusFrameRef.current = requestAnimationFrame(() => {
+            tagFocusFrameRef.current = null;
+            if (ownsBlurSuppression) {
+              suppressDescriptionBlurDispatchRef.current = false;
+              ownsBlurSuppression = false;
+            }
+            if (
+              tagSessionRef.current.focusRequestId === focusRequestId &&
+              presentationRef.current.id === focusPresentationId
+            ) {
+              descriptionInputRef.current?.focus();
+            }
+          });
+          return;
+        }
+
+        input.focus();
+        if (
+          attemptsRemaining > 0 &&
+          tagSessionRef.current.focusRequestId === focusRequestId
+        ) {
+          scheduleAttempt();
+        }
+      });
+    };
+
+    scheduleAttempt();
+    return () => {
+      if (tagFocusFrameRef.current !== null) {
+        cancelAnimationFrame(tagFocusFrameRef.current);
+        tagFocusFrameRef.current = null;
+      }
+      // If a state transition cancels the forced-refocus frame between blur and
+      // refocus, never leave future genuine blur events suppressed.
+      if (ownsBlurSuppression) {
+        suppressDescriptionBlurDispatchRef.current = false;
+        ownsBlurSuppression = false;
+      }
+    };
+  }, [
+    presentation.id,
+    recordStaleCallback,
+    tagSession.focusRequestId,
+    transitionTagSession,
+    visible
+  ]);
 
   useEffect(() => {
     setHighlightedTagAction(matchingTags[0]?.id ?? (createTagName ? "create" : null));
@@ -1579,16 +1711,20 @@ export function ActiveTimerEditSheet({
   async function applyHistoricalSuggestion(suggestion: RecentActivitySuggestion) {
     if (busy || !entry) return;
     const patch = historicalSuggestionPatch(suggestion);
-    const previousDescription = description;
+    const previousDescription = descriptionValueRef.current;
     const previousCategoryId = selectedCategoryId;
     const previousTagNames = [...selectedTagNames];
-    const previousSelection = descriptionSelection;
+    const previousSelection = descriptionSelectionRef.current;
     const requiresPersistence = isRunningMode && Boolean(onApplySuggestion);
     suggestionMutationSequenceRef.current += 1;
     const suggestionMutationSequence = suggestionMutationSequenceRef.current;
     dispatchSheetEvent({ type: "suggestion_selected", presentationId: presentation.id });
-    setDescription(patch.description);
-    setDescriptionSelection({ start: patch.description.length, end: patch.description.length });
+    cancelPendingTagFocus();
+    commitDescriptionEditorState(
+      patch.description,
+      { start: patch.description.length, end: patch.description.length },
+      true
+    );
     setSelectedCategoryId(patch.categoryId);
     setSelectedTagNames(patch.tagNames);
     setValidationError(null);
@@ -1614,12 +1750,17 @@ export function ActiveTimerEditSheet({
     } else if (accepted) {
       // Keep subsequent typing/focus live while persistence is in flight. Only
       // restore fields that still contain this exact optimistic suggestion.
-      setDescription((current) => current === patch.description ? previousDescription : current);
-      setDescriptionSelection((current) => (
-        current.start === patch.description.length && current.end === patch.description.length
-          ? previousSelection
-          : current
-      ));
+      if (descriptionValueRef.current === patch.description) {
+        const currentSelection = descriptionSelectionRef.current;
+        const selectionStillMatches =
+          currentSelection.start === patch.description.length &&
+          currentSelection.end === patch.description.length;
+        commitDescriptionEditorState(
+          previousDescription,
+          selectionStillMatches ? previousSelection : currentSelection,
+          true
+        );
+      }
       setSelectedCategoryId((current) => current === patch.categoryId ? previousCategoryId : current);
       setSelectedTagNames((current) => (
         current.join("\u0000") === patch.tagNames.join("\u0000") ? previousTagNames : current
@@ -1655,6 +1796,31 @@ export function ActiveTimerEditSheet({
     setValidationError(null);
   }
 
+  function commitDescriptionEditorState(
+    nextText: string,
+    nextSelection: DescriptionSelection,
+    synchronizeNativeSelection: boolean
+  ) {
+    const previousSelection = descriptionSelectionRef.current;
+    pendingDescriptionSelectionSyncRef.current = synchronizeNativeSelection
+      ? createPendingDescriptionSelectionSync(previousSelection, nextSelection)
+      : null;
+    if (selectionSyncFrameRef.current !== null) {
+      cancelAnimationFrame(selectionSyncFrameRef.current);
+      selectionSyncFrameRef.current = null;
+    }
+    if (pendingDescriptionSelectionSyncRef.current) {
+      selectionSyncFrameRef.current = requestAnimationFrame(() => {
+        selectionSyncFrameRef.current = null;
+        pendingDescriptionSelectionSyncRef.current = null;
+      });
+    }
+    descriptionValueRef.current = nextText;
+    descriptionSelectionRef.current = nextSelection;
+    setDescription(nextText);
+    setDescriptionSelection(nextSelection);
+  }
+
   function focusDescriptionField() {
     if (!sheetStateRef.current.focusOwnershipReady) {
       descriptionInputRef.current?.blur();
@@ -1679,39 +1845,33 @@ export function ActiveTimerEditSheet({
     }
     setDatePickerOpen(false);
     setInputFocusCount((count) => count + 1);
-    setHashtagEntryRequested(Boolean(
-      findActiveHashtag(description, descriptionSelection.end)
+    const hasActiveHashtag = Boolean(findActiveHashtag(
+      descriptionValueRef.current,
+      descriptionSelectionRef.current.end
     ));
+    transitionTagSession({
+      type: "hashtag_changed",
+      active: hasActiveHashtag,
+      presentationId: presentation.id,
+      requestFocus: false
+    });
+    transitionTagSession({
+      type: "description_focused",
+      presentationId: presentation.id
+    });
     dispatchSheetEvent({ type: "date_picker_closed", presentationId: presentation.id });
     dispatchSheetEvent({ type: "description_focused", presentationId: presentation.id });
     scheduleGeometryMeasurement();
     armKeyboardConfirmationWatchdog(sessionToken);
   }
 
-  function focusDescriptionAfterTagUpdate() {
-    cancelPendingTagFocus();
-    const tagPresentationId = presentation.id;
-    const tagFocusRequestSequence = tagFocusRequestSequenceRef.current;
-    tagFocusFrameRef.current = requestAnimationFrame(() => {
-      tagFocusFrameRef.current = null;
-      const classification = classifyTimeEntrySheetDeferredFocus({
-        currentPresentationId: presentationRef.current.id,
-        currentSequence: tagFocusRequestSequenceRef.current,
-        requestPresentationId: tagPresentationId,
-        requestSequence: tagFocusRequestSequence,
-        state: sheetStateRef.current
-      });
-      if (classification === "stale") {
-        recordStaleCallback();
-        return;
-      }
-      if (classification !== "accepted" || mutationGateRef.current !== null) return;
-      descriptionInputRef.current?.focus();
-    });
-  }
-
   function selectHashtag(tagName: string) {
-    if (!activeHashtag) return;
+    const currentText = descriptionValueRef.current;
+    const currentSelection = descriptionSelectionRef.current;
+    const currentActiveHashtag = currentSelection.start === currentSelection.end
+      ? findActiveHashtag(currentText, currentSelection.end)
+      : null;
+    if (!currentActiveHashtag) return;
     const normalized = normalizeTagName(tagName);
     const existing = tags.find((tag) => tag.normalizedName === normalized.normalizedName);
     if (selectedNormalizedTagNames.has(normalized.normalizedName)) {
@@ -1721,31 +1881,46 @@ export function ActiveTimerEditSheet({
     } else {
       setSelectedTagNames((current) => [...current, existing?.name ?? normalized.name]);
     }
-    const replacement = consumeActiveHashtag(description, activeHashtag);
-    setDescription(replacement.text);
-    setDescriptionSelection({ start: replacement.caret, end: replacement.caret });
-    setHashtagEntryRequested(false);
+    const replacement = consumeActiveHashtag(currentText, currentActiveHashtag);
+    commitDescriptionEditorState(
+      replacement.text,
+      { start: replacement.caret, end: replacement.caret },
+      true
+    );
+    transitionTagSession({ type: "hashtag_consumed", presentationId: presentation.id });
     dispatchSheetEvent({ type: "suggestion_selected", presentationId: presentation.id });
     setValidationError(null);
-    focusDescriptionAfterTagUpdate();
   }
 
   function startTagEntry() {
     if (busy) return;
     setDatePickerOpen(false);
     dispatchSheetEvent({ type: "date_picker_closed", presentationId: presentation.id });
-    const currentActive = findActiveHashtag(description, descriptionSelection.end);
-    if (currentActive && descriptionSelection.start === descriptionSelection.end) {
-      setHashtagEntryRequested(true);
-      focusDescriptionAfterTagUpdate();
+    const currentText = descriptionValueRef.current;
+    const currentSelection = descriptionSelectionRef.current;
+    const currentActive = findActiveHashtag(currentText, currentSelection.end);
+    if (currentActive && currentSelection.start === currentSelection.end) {
+      transitionTagSession({
+        type: "hashtag_changed",
+        active: true,
+        presentationId: presentation.id,
+        requestFocus: true
+      });
       return;
     }
-    const next = insertHashtagStarter(description, descriptionSelection);
-    setDescription(next.text);
-    setDescriptionSelection({ start: next.caret, end: next.caret });
-    setHashtagEntryRequested(true);
+    const next = insertHashtagStarter(currentText, currentSelection);
+    commitDescriptionEditorState(
+      next.text,
+      { start: next.caret, end: next.caret },
+      true
+    );
+    transitionTagSession({
+      type: "hashtag_changed",
+      active: true,
+      presentationId: presentation.id,
+      requestFocus: true
+    });
     setValidationError(null);
-    focusDescriptionAfterTagUpdate();
   }
 
   function updateStoppedTimeText(value: string) {
@@ -1770,10 +1945,10 @@ export function ActiveTimerEditSheet({
   }
 
   function dismissTransientEditingSurfaces() {
+    cancelPendingTagFocus();
     descriptionInputRef.current?.blur();
     timeInputRef.current?.blur();
     endTimeInputRef.current?.blur();
-    setHashtagEntryRequested(false);
     setDatePickerOpen(false);
     dispatchSheetEvent({
       type: "background_interaction",
@@ -2075,9 +2250,10 @@ export function ActiveTimerEditSheet({
                       editable={!busy}
                       onBlur={() => {
                         if (suppressDescriptionBlurDispatchRef.current) return;
-                        if (tagFocusFrameRef.current === null) {
-                          setHashtagEntryRequested(false);
-                        }
+                        transitionTagSession({
+                          type: "description_blurred",
+                          presentationId: presentation.id
+                        });
                         dispatchSheetEvent({
                           type: "description_blurred",
                           presentationId: presentation.id
@@ -2088,27 +2264,50 @@ export function ActiveTimerEditSheet({
                         if (!busy) descriptionInputRef.current?.focus();
                       }}
                       onSelectionChange={(event) => {
-                        const nextSelection = event.nativeEvent.selection;
-                        setDescriptionSelection(nextSelection);
-                        setHashtagEntryRequested(Boolean(
-                          nextSelection.start === nextSelection.end &&
-                          findActiveHashtag(description, nextSelection.end)
-                        ));
+                        const resolution = resolveDescriptionSelectionEvent({
+                          nextSelection: event.nativeEvent.selection,
+                          pending: pendingDescriptionSelectionSyncRef.current,
+                          textLength: descriptionValueRef.current.length
+                        });
+                        pendingDescriptionSelectionSyncRef.current = resolution.pending;
+                        if (!resolution.accepted) {
+                          descriptionSelectionRef.current = resolution.selection;
+                          setDescriptionSelection(resolution.selection);
+                          return;
+                        }
+                        descriptionSelectionRef.current = resolution.selection;
+                        setDescriptionSelection(resolution.selection);
+                        transitionTagSession({
+                          type: "hashtag_changed",
+                          active: Boolean(
+                            resolution.selection.start === resolution.selection.end &&
+                            findActiveHashtag(
+                              descriptionValueRef.current,
+                              resolution.selection.end
+                            )
+                          ),
+                          presentationId: presentation.id,
+                          requestFocus: false
+                        });
                       }}
                       selection={descriptionSelection}
                       style={[styles.textInput, styles.activeEditDescriptionInput]}
                       value={description}
                       onChangeText={(value) => {
+                        const previousText = descriptionValueRef.current;
+                        const previousSelection = descriptionSelectionRef.current;
                         const nextSelection = selectionAfterDescriptionChange({
                           nextText: value,
-                          previousSelection: descriptionSelection,
-                          previousText: description
+                          previousSelection,
+                          previousText
                         });
-                        setDescription(value);
-                        setDescriptionSelection(nextSelection);
-                        setHashtagEntryRequested(Boolean(
-                          findActiveHashtag(value, nextSelection.end)
-                        ));
+                        commitDescriptionEditorState(value, nextSelection, true);
+                        transitionTagSession({
+                          type: "hashtag_changed",
+                          active: Boolean(findActiveHashtag(value, nextSelection.end)),
+                          presentationId: presentation.id,
+                          requestFocus: false
+                        });
                         dispatchSheetEvent({
                           type: "description_query_changed",
                           presentationId: presentation.id
@@ -2127,7 +2326,10 @@ export function ActiveTimerEditSheet({
                         accessibilityLabel="Tag suggestions"
                         style={[styles.tagAutocompletePanel, hashtagPanelAnimatedStyle]}
                       >
-                        <Text style={styles.tagAutocompleteTitle}>TAGS</Text>
+                        <View style={styles.tagAutocompleteHeader}>
+                          <Text style={styles.tagAutocompleteTitle}>TAGS</Text>
+                        </View>
+                        <View pointerEvents="none" style={styles.tagAutocompleteDivider} />
                         <ScrollView
                           keyboardShouldPersistTaps="always"
                           nestedScrollEnabled
@@ -2566,10 +2768,12 @@ function HashtagSuggestionRow({
         onPressIn={onHighlight}
         style={[
           styles.tagSuggestionRow,
-          !isFirst ? styles.tagSuggestionDivider : null,
           disabled ? styles.buttonDisabled : null
         ]}
       >
+        {!isFirst ? (
+          <View pointerEvents="none" style={styles.tagSuggestionDivider} />
+        ) : null}
         <Text style={create ? styles.tagSuggestionCreateText : styles.tagSuggestionText} numberOfLines={1}>
           {create ? "+ " : ""}{label}
         </Text>

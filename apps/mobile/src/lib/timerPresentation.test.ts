@@ -10,6 +10,7 @@ import {
   createOptimisticTimerStartReconciler,
   createSerializedMutationQueue,
   createSupersededStopRollbackTracker,
+  dashboardActiveTimerEntry,
   displayTimerDescription,
   filterPendingDeletedTimeEntries,
   MISSING_QUEUED_TIMER_DELETE_MESSAGE,
@@ -64,6 +65,20 @@ describe("mobile timer presentation", () => {
 
   it("hides the old mobile start-activity placeholder", () => {
     expect(displayTimerDescription({ description: "Start activity" })).toBeNull();
+  });
+
+  it("does not expose a presentation-retained deleted timer to the Today card", () => {
+    const retained = { id: "entry-running" };
+    expect(dashboardActiveTimerEntry({
+      activeEntry: null,
+      pendingDeletionEntryIds: new Set([retained.id]),
+      presentedEntry: retained
+    })).toBeNull();
+    expect(dashboardActiveTimerEntry({
+      activeEntry: null,
+      pendingDeletionEntryIds: new Set(),
+      presentedEntry: retained
+    })).toBe(retained);
   });
 
   it("uses the same exact active timestamp for the card and running edit sheet", () => {
