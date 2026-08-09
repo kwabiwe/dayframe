@@ -149,3 +149,32 @@ current geometry and scrolling behavior.
 Physical-device acceptance remains appropriate for the exact dial-versus-sheet
 gesture overlap, Delete reachability, native discard alert and keyboard/tag
 chooser behavior.
+
+## Merge and TestFlight release
+
+On 2026-08-09, PR #161 was merged first with merge commit `33a9d95`, then PR
+#162 was retargeted from the PR #161 branch to `main`, marked ready and merged
+with merge commit `91380dc`. GitHub reported both pull requests clean and
+mergeable with all checks passing; no open pull requests remained after the
+sequence. Vercel also completed the production deployment for `91380dc`.
+
+The exact merged source at `91380dc` passed the following post-merge checks:
+
+- 172 test files / 1,463 tests across mobile, web and shared workspaces;
+- all TypeScript typechecks and lint, including the iOS configuration check;
+- the brand-assets check and `git diff --check`; and
+- a production web build using Webpack.
+
+The standard Turbopack command encountered its known clean-worktree limitation
+because the worktree's root `node_modules` symlink resolves outside the
+filesystem root. This was an environment-only panic; the supported production
+Webpack build completed successfully from the same source.
+
+TestFlight `0.1.0 (87)` was archived with build number 87 and the production API
+base `https://dayframe-web.vercel.app`, exported with App Store distribution
+profiles, and uploaded under delivery/build ID
+`74bc9ab3-acb0-46da-8f13-820547f81806`. App Store Connect reports `VALID`,
+export compliance false and `IN_BETA_TESTING` through the internal
+`Internal Health Debug` group. The app and Live Activity extension both carry
+build 87, `get-task-allow=false` and `beta-reports-active=true`; en-GB testing
+notes describe the time-entry, tag, deletion-flash and panel-style changes.
