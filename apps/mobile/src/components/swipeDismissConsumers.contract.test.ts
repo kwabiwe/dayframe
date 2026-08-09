@@ -57,6 +57,8 @@ describe("shared swipe-dismiss ownership integration", () => {
   it("keeps Delete reachable through measured overflow without permanently scrolling every sheet", () => {
     expect(editSource).toContain("const showDeleteButton = canDelete || isAddMode");
     expect(editSource).toContain("shouldScrollTimeEntrySheetContent({");
+    expect(editSource).toContain("const sheetContentScrollEnabled = showDeleteButton || sheetContentScrollable");
+    expect(editSource).toContain("scrollEnabled={sheetContentScrollEnabled}");
     expect(editSource).toContain("onContentSizeChange={(_width, height) => setContentHeight(height)}");
     expect(editSource).toContain("{showDeleteButton ? (");
   });

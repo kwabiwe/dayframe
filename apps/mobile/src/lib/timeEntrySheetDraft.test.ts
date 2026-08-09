@@ -47,20 +47,30 @@ describe("time-entry sheet draft helpers", () => {
     expect(shouldScrollTimeEntrySheetContent({
       contentHeight: 700,
       fontScale: 1,
+      keyboardInset: 0,
       viewportHeight: 701,
       windowHeight: 844
     })).toBe(false);
     expect(shouldScrollTimeEntrySheetContent({
       contentHeight: 702,
       fontScale: 1,
+      keyboardInset: 0,
       viewportHeight: 700,
       windowHeight: 844
     })).toBe(true);
     expect(shouldScrollTimeEntrySheetContent({
       contentHeight: 600,
       fontScale: 1.3,
+      keyboardInset: 0,
       viewportHeight: 700,
       windowHeight: 844
+    })).toBe(true);
+    expect(shouldScrollTimeEntrySheetContent({
+      contentHeight: 600,
+      fontScale: 1,
+      keyboardInset: 320,
+      viewportHeight: 700,
+      windowHeight: 874
     })).toBe(true);
   });
 

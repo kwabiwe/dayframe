@@ -50,6 +50,28 @@ describe("time-entry sheet tag session", () => {
     expect(state.focusRequestId).not.toBeNull();
   });
 
+  it("cancels an in-flight recovery as soon as the hashtag is deleted", () => {
+    let state = createTimeEntrySheetTagSession(10);
+    state = timeEntrySheetTagSessionReducer(state, {
+      type: "hashtag_changed",
+      active: true,
+      presentationId: 10,
+      requestFocus: true
+    });
+    const requestId = state.focusRequestId;
+
+    state = timeEntrySheetTagSessionReducer(state, {
+      type: "hashtag_changed",
+      active: false,
+      presentationId: 10,
+      requestFocus: false
+    });
+
+    expect(state.activeHashtag).toBe(false);
+    expect(state.focusRequestId).toBeNull();
+    expect(state.lastFocusRequestId).toBeGreaterThan(requestId ?? 0);
+  });
+
   it("keeps Description focus after consuming a tag and cancels stale recovery", () => {
     let state = createTimeEntrySheetTagSession(11);
     state = timeEntrySheetTagSessionReducer(state, {

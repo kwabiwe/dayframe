@@ -235,7 +235,12 @@ export function HistoricalSuggestionsOverlay({
     visible
   ]);
 
-  if (!mounted || !geometry || geometry.maxHeight <= 0) return null;
+  // Keep the native overlay subtree resident once Description geometry is
+  // available. UIKit can otherwise resign the adjacent TextInput while this
+  // absolute ScrollView subtree is inserted/removed during the `#` hand-off.
+  // Hidden state is already non-interactive and accessibility-hidden above;
+  // `mounted` remains the motion-state input, not a native-tree switch.
+  if (!geometry || geometry.maxHeight <= 0) return null;
 
   // Keep an invisible max-height measurement host until both intrinsic pieces
   // report for the current content generation. Only the resolved, bounded

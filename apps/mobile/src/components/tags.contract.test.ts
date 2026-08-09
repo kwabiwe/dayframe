@@ -37,11 +37,29 @@ describe("mobile tag interaction contract", () => {
     expect(sheet).not.toContain("Type # to add a tag");
   });
 
+  it("never resigns Description during tag focus recovery and leaves native typing caret-owned", () => {
+    const recovery = sheet.slice(
+      sheet.indexOf("const focusRequestId = tagSession.focusRequestId"),
+      sheet.indexOf("const parsedStart = useMemo")
+    );
+    expect(recovery).toContain("if (input.isFocused())");
+    expect(recovery).toContain("input.focus()");
+    expect(recovery).not.toContain("input.blur()");
+    expect(sheet).toContain("continuity.until >= Date.now()");
+    expect(sheet).toContain("descriptionInputRef.current?.focus();");
+    expect(sheet).toContain("selection={descriptionSelectionOverride}");
+    expect(sheet).toContain("commitDescriptionEditorState(value, nextSelection, false)");
+  });
+
   it("uses the shared framed chooser language, solid icon, and draft-only tag removal", () => {
     expect(theme).toMatch(/tagAutocompletePanel:\s*\{[\s\S]*?backgroundColor: theme\.surfaceRaised[\s\S]*?borderWidth: 1[\s\S]*?borderColor: theme\.borderStrong[\s\S]*?borderRadius: 14/);
     expect(theme).toMatch(/tagAutocompleteHeader:\s*\{[\s\S]*?backgroundColor: theme\.surfaceMuted/);
     expect(theme).toMatch(/tagSuggestionDivider:\s*\{[\s\S]*?left: 12[\s\S]*?right: 12/);
     expect(sheet).toContain("styles.tagAutocompleteDivider");
+    expect(sheet).not.toContain("{hashtagPanelMounted ? (");
+    expect(sheet).toContain('pointerEvents={hashtagPanelVisible ? "auto" : "none"}');
+    expect(sheet).not.toContain("highlightedTagAction");
+    expect(sheet).not.toContain('outputRange: ["transparent", theme.surfaceMuted]');
     expect(metadata).toContain('fill={color}');
     expect(metadata).toContain('fillRule="evenodd"');
     expect(metadata).toContain('accessibilityLabel={`Remove tag ${tagName}`}');
