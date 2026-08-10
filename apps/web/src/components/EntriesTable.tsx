@@ -22,6 +22,7 @@ import { IconButton } from "@/components/ui/Primitives";
 import { timeEntryCategoryColor, timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
 import type { CategoryRow, TagRow, TimeEntryRow } from "@/lib/queries";
 import {
+  dateTimeLocal,
   formatDate,
   formatDuration,
   formatTime
@@ -170,8 +171,7 @@ export function EntriesTable({
 
   function beginInlineEdit(
     entry: TimeEntryRow,
-    field: TimelineInlineEditField,
-    input: HTMLInputElement
+    field: TimelineInlineEditField
   ) {
     const current = inlineEditorRef.current;
     if (current?.entryId === entry.id && current.field === field) return;
@@ -186,11 +186,6 @@ export function EntriesTable({
     inlineEditorRef.current = next;
     setInlineEditor(next);
     setActionError(null);
-    window.requestAnimationFrame(() => {
-      if (!input.isConnected) return;
-      input.focus({ preventScroll: true });
-      input.select();
-    });
   }
 
   function cancelInlineEdit(entryId: string) {
@@ -294,7 +289,7 @@ export function EntriesTable({
     const active = inlineEditorRef.current?.entryId === entry.id && inlineEditorRef.current.field === field;
     if (!active && (event.key === "Enter" || event.key === "F2")) {
       event.preventDefault();
-      beginInlineEdit(entry, field, event.currentTarget);
+      beginInlineEdit(entry, field);
       return;
     }
     if (!active) return;
@@ -330,7 +325,7 @@ export function EntriesTable({
           }}
           onChange={(event) => updateInlineDescription(entry.id, event.target.value)}
           onClick={(event) => {
-            if (canInlineEdit && !editor) beginInlineEdit(entry, "description", event.currentTarget);
+            if (canInlineEdit && !editor) beginInlineEdit(entry, "description");
           }}
           onKeyDown={(event) => {
             if (canInlineEdit) handleInlineKeyDown(event, entry, "description");
@@ -360,25 +355,39 @@ export function EntriesTable({
       const returnFocus = event.currentTarget.querySelector<HTMLInputElement>("input");
       void commitInlineEdit(entry, returnFocus);
     };
-    const timeInput = (edge: TimelineInlineTimeEdge, value: string) => (
-      <input
-        aria-label={`${edge === "start" ? "Start" : "Finish"} time for ${timeEntryTitle(entry)}. Click to edit inline. Double-click to open the full editor.`}
-        className="timeline-inline-time-input"
-        data-inline-entry-id={entry.id}
-        data-inline-field="time"
-        inputMode="numeric"
-        maxLength={5}
-        onChange={(event) => updateInlineTime(entry, edge, event.target.value)}
-        onClick={(event) => {
-          if (!editor) beginInlineEdit(entry, "time", event.currentTarget);
-        }}
-        onKeyDown={(event) => handleInlineKeyDown(event, entry, "time")}
-        readOnly={!editor || editor.isSaving}
-        value={editor
-          ? edge === "start" ? editor.draft.startedAtTime : editor.draft.stoppedAtTime
-          : value}
-      />
-    );
+    const timeInput = (edge: TimelineInlineTimeEdge, instant: string) => {
+      const pickerValue = editor
+        ? edge === "start"
+          ? `${editor.draft.startedAtDate}T${editor.draft.startedAtTime}`
+          : `${editor.draft.stoppedAtDate}T${editor.draft.stoppedAtTime}`
+        : dateTimeLocal(instant);
+      const visibleTime = editor
+        ? edge === "start" ? editor.draft.startedAtTime : editor.draft.stoppedAtTime
+        : formatTime(instant);
+      return (
+        <span className="timeline-inline-time-control">
+          <span aria-hidden="true" className="timeline-inline-time-value">{visibleTime}</span>
+          <input
+            aria-label={`${edge === "start" ? "Start" : "Finish"} date and time for ${timeEntryTitle(entry)}`}
+            className="timeline-inline-time-input"
+            data-inline-entry-id={entry.id}
+            data-inline-field="time"
+            disabled={editor?.isSaving}
+            max={dateTimeLocal(capturedNow)}
+            onChange={(event) => updateInlineTime(entry, edge, event.target.value)}
+            onClick={() => {
+              if (!editor) beginInlineEdit(entry, "time");
+            }}
+            onFocus={() => {
+              if (!editor) beginInlineEdit(entry, "time");
+            }}
+            onKeyDown={(event) => handleInlineKeyDown(event, entry, "time")}
+            type="datetime-local"
+            value={pickerValue}
+          />
+        </span>
+      );
+    };
     return (
       <span
         className={`timeline-inline-time${editor ? " is-editing" : ""}`}
@@ -390,10 +399,10 @@ export function EntriesTable({
         }}
         title="Click to edit. Double-click for the full editor."
       >
-        {timeInput("start", formatTime(interval.startedAt))}
+        {timeInput("start", interval.startedAt)}
         <span aria-hidden="true">–</span>
         {interval.stoppedAt
-          ? timeInput("finish", formatTime(interval.stoppedAt))
+          ? timeInput("finish", interval.stoppedAt)
           : <span className="timeline-inline-running">Running</span>}
       </span>
     );
@@ -404,6 +413,13 @@ export function EntriesTable({
     if (editor?.error) return <span className="timeline-inline-edit-error" role="alert">{editor.error}</span>;
     if (editor?.isSaving) return <span className="sr-only" role="status">Saving entry</span>;
     return null;
+  }
+
+  function renderDuration(entry: TimeEntryRow, fallbackSeconds: number) {
+    const editor = inlineEditor?.entryId === entry.id && inlineEditor.field === "time"
+      ? inlineEditor
+      : null;
+    return formatDuration(editor?.draft.durationSeconds ?? fallbackSeconds);
   }
 
   return (
@@ -457,7 +473,7 @@ export function EntriesTable({
                   ) : null}
                 <tr
                   className={[
-                    "motion-row border-b border-[var(--line)] align-top last:border-b-0 hover:bg-[var(--surface-strong)]",
+                    "motion-row border-b border-[var(--line)] align-middle last:border-b-0 hover:bg-[var(--surface-strong)]",
                     highlightedEntryId === entry.id && !isGrouped ? "timeline-entry-highlight" : ""
                   ].join(" ")}
                   id={!isGrouped ? `timeline-entry-${entry.id}` : undefined}
@@ -525,7 +541,7 @@ export function EntriesTable({
                       : renderInlineTime(entry, displayInterval)}
                   </td>
                   <td className="tabular px-3 py-3 font-semibold text-[var(--accent-text)]">
-                    {formatDuration(group.totalSeconds)}
+                    {renderDuration(entry, group.totalSeconds)}
                   </td>
                   <td className="px-3 py-3">
                     <div className="flex gap-2">
@@ -557,7 +573,7 @@ export function EntriesTable({
                   const highlighted = highlightedEntryId === occurrence.id;
                   return (
                     <tr
-                      className={`timeline-occurrence-row motion-row border-b border-[var(--line)] align-top${highlighted ? " timeline-entry-highlight" : ""}`}
+                      className={`timeline-occurrence-row motion-row border-b border-[var(--line)] align-middle${highlighted ? " timeline-entry-highlight" : ""}`}
                       id={`timeline-entry-${occurrence.id}`}
                       key={occurrence.id}
                     >
@@ -599,7 +615,7 @@ export function EntriesTable({
                         {renderInlineTime(occurrence, occurrenceInterval)}
                       </td>
                       <td className="tabular px-3 py-3 font-semibold text-[var(--accent-text)]">
-                        {formatDuration(intervalSeconds(occurrenceInterval, capturedNow))}
+                        {renderDuration(occurrence, intervalSeconds(occurrenceInterval, capturedNow))}
                       </td>
                       <td className="px-3 py-3">
                         <EntryActionsMenu

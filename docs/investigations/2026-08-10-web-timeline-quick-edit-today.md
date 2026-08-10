@@ -8,9 +8,9 @@
 
 ## Interaction contract
 
-- Trigger: one click on an exact entry's Description or Start/Finish time enters inline editing; Enter or focus departure saves, Escape cancels, and double-click opens the existing full editor.
+- Trigger: one click on an exact entry's Description enters borderless inline editing without selecting its text. Clicking Start or Finish opens the browser date/time picker; focus departure saves, Escape cancels, and double-click opens the existing full editor.
 - Owner: `EntriesTable` owns one inline-edit session. The existing `TimeEntryQuickEditorModal` remains the sole full-editor owner.
-- Entrance/update/exit: the same input nodes stay mounted and the table geometry stays fixed. Editing changes fill/border state without decorative movement. Success returns to read-only text in place; validation or network failure keeps the editor open with an inline error.
+- Entrance/update/exit: the same input nodes stay mounted and the table geometry stays fixed. Description, Category, Tags, Time, Duration, and Actions keep one vertically centred row with stable metadata columns. Description remains borderless in every focus state. Success returns to read-only text in place; validation or network failure keeps the editor open with an inline error.
 - Surrounding layout: no row insertion, removal, reordering, or animated reflow. Aggregate group rows never become inline editors; expanded occurrences are exact-entry targets.
 - Interruption: a newer inline session has a monotonic session ID, so an older async completion cannot close or overwrite it. Double-click cancels the inline session before opening the full editor.
 - Async outcome: saves use the existing compact-editor plan and mutation routes. Successful saves refresh canonical data; failures preserve the draft and focus. There is no optimistic row mutation or Undo path.
@@ -26,7 +26,7 @@
 
 ## Focused verification
 
-- Pure inline-edit plan tests: Description, Start-owned duration preservation, Finish-owned duration recalculation, and invalid input.
+- Pure inline-edit plan tests: Description, fixed-Finish Start changes, fixed-Start Finish changes, recalculated Duration, and invalid picker input.
 - Timeline date tests: previous-Today rollover, historical-date preservation, no same-day reset, local `Today` label, existing DST range coverage.
 - Source contracts: exact-entry/group ownership and focus/visibility rollover wiring.
 - Web TypeScript and `git diff --check`.

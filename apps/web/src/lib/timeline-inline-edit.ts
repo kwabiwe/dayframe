@@ -8,7 +8,6 @@ import {
   type CalendarEntryCompactDraft,
   type CalendarEntryCompactSavePlan
 } from "@/lib/calendar-entry-compact-editor";
-import { maskTimeInput } from "@/lib/calendar-grid";
 import type { TimeEntryRow } from "@/lib/queries";
 
 export type TimelineInlineEditField = "description" | "time";
@@ -48,15 +47,19 @@ export function updateTimelineInlineTime(
   edge: TimelineInlineTimeEdge,
   rawValue: string
 ): TimelineInlineEditDraft {
-  const key = edge === "start" ? "startedAtTime" : "stoppedAtTime";
-  const owner = edge;
-  const value = maskTimeInput(rawValue);
+  const [date = "", time = ""] = rawValue.split("T");
+  const dateKey = edge === "start" ? "startedAtDate" : "stoppedAtDate";
+  const timeKey = edge === "start" ? "startedAtTime" : "stoppedAtTime";
+  // Inline List editing treats both timestamps as fixed edges: moving either
+  // edge recalculates Duration instead of moving the opposite edge.
+  const owner = entry.stoppedAt ? "finish" : "start";
   const nextDraft: CalendarEntryCompactDraft = {
     ...edit.draft,
-    [key]: value,
+    [dateKey]: date,
+    [timeKey]: time,
     temporalOwner: owner
   };
-  const synchronized = isCompleteCalendarEntryCompactTimeInput(value)
+  const synchronized = /^\d{4}-\d{2}-\d{2}$/.test(date) && isCompleteCalendarEntryCompactTimeInput(time)
     ? trySynchronizeCalendarEntryCompactDraft({
         draft: nextDraft,
         originalStartedAt: entry.startedAt,
@@ -68,7 +71,7 @@ export function updateTimelineInlineTime(
   return {
     ...edit,
     draft: synchronized ?? nextDraft,
-    dirty: { ...edit.dirty, [key]: true }
+    dirty: { ...edit.dirty, [dateKey]: true, [timeKey]: true }
   };
 }
 

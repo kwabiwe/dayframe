@@ -19,21 +19,21 @@ describe("Timeline inline entry editing", () => {
       .toEqual({ description: "Planning" });
   });
 
-  it("keeps duration stable when Start owns an inline time edit", () => {
+  it("keeps Finish fixed and recalculates Duration when Start changes", () => {
     const entry = timeEntry();
     const edit = updateTimelineInlineTime(
       createTimelineInlineEditDraft(entry, "time"),
       entry,
       "start",
-      "0830"
+      "2026-08-10T08:30"
     );
     const plan = buildTimelineInlineSavePlan(edit, entry, localDate("2026-08-11T00:00"));
 
     expect(edit.draft.startedAtTime).toBe("08:30");
-    expect(edit.draft.stoppedAtTime).toBe("09:30");
+    expect(edit.draft.stoppedAtTime).toBe("10:00");
+    expect(edit.draft.duration).toBe("01:30");
     expect(plan.payload).toEqual({
-      startedAt: localIso("2026-08-10T08:30"),
-      stoppedAt: localIso("2026-08-10T09:30")
+      startedAt: localIso("2026-08-10T08:30")
     });
   });
 
@@ -43,7 +43,7 @@ describe("Timeline inline entry editing", () => {
       createTimelineInlineEditDraft(entry, "time"),
       entry,
       "finish",
-      "10:15"
+      "2026-08-10T10:15"
     );
     const plan = buildTimelineInlineSavePlan(edit, entry, localDate("2026-08-11T00:00"));
 
@@ -52,16 +52,16 @@ describe("Timeline inline entry editing", () => {
     expect(plan.payload).toEqual({ stoppedAt: localIso("2026-08-10T10:15") });
   });
 
-  it("retains incomplete input and rejects it at commit time", () => {
+  it("retains an incomplete picker value and rejects it at commit time", () => {
     const entry = timeEntry();
     const edit = updateTimelineInlineTime(
       createTimelineInlineEditDraft(entry, "time"),
       entry,
       "finish",
-      "9:"
+      "2026-08-10T"
     );
 
-    expect(edit.draft.stoppedAtTime).toBe("9:");
+    expect(edit.draft.stoppedAtTime).toBe("");
     expect(() => buildTimelineInlineSavePlan(edit, entry, localDate("2026-08-11T00:00")))
       .toThrow("Enter a valid finish date and time.");
   });

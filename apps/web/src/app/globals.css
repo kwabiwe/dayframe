@@ -915,7 +915,7 @@ textarea.ui-control {
 .timeline-task-cell {
   display: grid;
   grid-template-columns: auto auto minmax(0, 1fr);
-  align-items: start;
+  align-items: center;
   gap: 8px;
 }
 
@@ -974,6 +974,10 @@ textarea.ui-control {
   gap: 2px;
 }
 
+.timeline-list-table tbody > tr:not(.timeline-list-day-heading) > td {
+  vertical-align: middle;
+}
+
 .timeline-task-title {
   overflow-wrap: anywhere;
   color: var(--foreground);
@@ -990,8 +994,8 @@ textarea.ui-control {
 .timeline-inline-time-input {
   box-sizing: border-box;
   appearance: none;
-  border: var(--web-control-border-width) solid transparent;
-  border-radius: 6px;
+  border: 0;
+  border-radius: 0;
   background: transparent;
   color: inherit;
   font: inherit;
@@ -1002,7 +1006,8 @@ textarea.ui-control {
 .timeline-inline-description-input {
   width: 100%;
   min-width: 0;
-  padding: 2px 4px;
+  min-height: 28px;
+  padding: 0;
   text-overflow: ellipsis;
 }
 
@@ -1018,15 +1023,12 @@ textarea.ui-control {
   background: var(--surface-muted);
 }
 
-.timeline-inline-description.is-editing .timeline-inline-description-input,
-.timeline-inline-time.is-editing .timeline-inline-time-input {
-  border-color: var(--control-border);
-  background: var(--surface-inset);
+.timeline-inline-description.is-editing .timeline-inline-description-input {
+  background: transparent;
 }
 
-.timeline-inline-description-input:focus-visible,
-.timeline-inline-time-input:focus-visible {
-  border-color: var(--web-focus-border);
+.timeline-inline-description-input:focus-visible {
+  outline: 0;
 }
 
 .timeline-inline-time {
@@ -1037,12 +1039,26 @@ textarea.ui-control {
   white-space: nowrap;
 }
 
-.timeline-inline-time-input {
-  width: 5.75ch;
+.timeline-inline-time-control {
+  position: relative;
+  display: inline-grid;
+  min-height: 28px;
   min-width: 5.75ch;
-  padding: 2px 3px;
+  place-items: center;
+}
+
+.timeline-inline-time-value {
   font-variant-numeric: tabular-nums;
-  text-align: center;
+}
+
+.timeline-inline-time-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0;
 }
 
 .timeline-inline-running {
@@ -9731,8 +9747,9 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .timeline-task-primary-line {
-  display: flex;
+  display: grid;
   min-width: 0;
+  grid-template-columns: minmax(0, 1fr) max-content max-content;
   align-items: baseline;
   gap: 8px;
   overflow: hidden;
@@ -9754,18 +9771,6 @@ dialog.ui-dialog.manual-entry-dialog {
 .tag-metadata.is-compact {
   font-size: 11px;
   font-weight: 600;
-}
-
-@container (max-width: 430px) {
-  .timeline-task-primary-line {
-    flex-wrap: wrap;
-    row-gap: 2px;
-    white-space: normal;
-  }
-
-  .timeline-task-primary-line .timeline-task-title {
-    flex: 1 1 100%;
-  }
 }
 
 .inline-tag-input-anchor {
