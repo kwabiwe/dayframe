@@ -54,7 +54,9 @@ describe("time-entry sheet historical Suggestions contract", () => {
     expect(overlaySource).not.toContain("OVERLAY_HEADER_HEIGHT");
     expect(editSheetSource).not.toMatch(/Animated\.timing\([^)]*height/);
     expect(editSheetSource).toContain("resolveTimeEntrySheetLocalGeometry");
-    expect(editSheetSource).toContain("contentScrollOffsetRef.current = { x, y }");
+    expect(editSheetSource).toContain("contentOffset: contentScrollOffsetRef.current");
+    expect(editSheetSource).toContain('testID="time-entry-sheet-form"');
+    expect(editSheetSource).not.toContain("scrollEnabled={false}");
     expect(editSheetSource).toContain("localGeometry.overlayBottomBoundary - keyboardInsetRef.current");
     expect(editSheetSource).toContain("topBoundary: localGeometry.overlayTopBoundary");
     expect(editSheetSource).not.toContain("measureInWindow");
@@ -110,6 +112,7 @@ describe("time-entry sheet historical Suggestions contract", () => {
     expect(editSheetSource).toContain("tagNames: candidate.tagNames ?? candidate.tags?.map");
     expect(editSheetSource).toContain("currentEntryId: entry?.id ?? null");
     expect(editSheetSource).toContain("query: description");
+    expect(editSheetSource).toContain("queryActive: value.trim().length > 0");
     expect(editSheetSource).toContain("const HISTORICAL_SUGGESTION_LIMIT = 12");
     expect(editSheetSource).toContain("historicalSuggestionResultSignature");
     expect(editSheetSource).not.toContain("[historicalSuggestions.length");
@@ -189,7 +192,7 @@ describe("time-entry sheet historical Suggestions contract", () => {
       "handledDismissRequestIdRef.current = pendingCallerDismissRequestId"
     );
     expect(swipeSource).toContain("disabled={disabled}");
-    expect(swipeSource).toContain("onPress={disabled ? undefined : requestDismiss}");
+    expect(swipeSource).toContain("onPress={disabled ? undefined : requestBackdropDismiss}");
     expect(editSheetSource).toContain("presentationRef.current.id !== focusPresentationId");
     expect(editSheetSource).toContain("animationPresentationId !== presentationRef.current.id");
   });

@@ -86,7 +86,7 @@ export type TimeEntrySheetEvent =
   | { type: "description_focus_effect_started"; presentationId: number }
   | { type: "description_focused"; presentationId: number }
   | { type: "description_blurred"; presentationId: number }
-  | { type: "description_query_changed"; presentationId: number }
+  | { type: "description_query_changed"; presentationId: number; queryActive?: boolean }
   | { type: "hashtag_query_changed"; presentationId: number; active: boolean }
   | { type: "suggestion_results_changed"; presentationId: number; count: number }
   | { type: "suggestions_animation_finished"; presentationId: number; direction: "open" | "close" }
@@ -253,7 +253,7 @@ export function timeEntrySheetReducer(
         suggestionsPhase: state.suggestionsPhase === "visible"
           ? "updating"
           : state.suggestionsPhase,
-        suggestionsSuppressed: false
+        suggestionsSuppressed: event.queryActive === false
       };
       break;
     case "hashtag_query_changed":

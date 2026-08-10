@@ -22,7 +22,7 @@ describe("shared swipe-dismiss ownership integration", () => {
 
   it("keeps the backdrop inside the shared transition owner", () => {
     expect(sheetSource).toContain("backdropProgressForTranslation");
-    expect(sheetSource).toContain("onPress={disabled ? undefined : requestDismiss}");
+    expect(sheetSource).toContain("onPress={disabled ? undefined : requestBackdropDismiss}");
     expect(sheetSource).toContain("disabled={disabled}");
     for (const source of consumerSources) {
       expect(source).toContain("backdropStyle={styles.sheetBackdrop}");
@@ -54,12 +54,13 @@ describe("shared swipe-dismiss ownership integration", () => {
     expect(editSource).toContain("presentDiscardConfirmation();\n      return false;");
   });
 
-  it("keeps Delete reachable through measured overflow without permanently scrolling every sheet", () => {
+  it("keeps Delete in a fixed density-adaptive sheet without form scrolling", () => {
     expect(editSource).toContain("const showDeleteButton = canDelete || isAddMode");
-    expect(editSource).toContain("shouldScrollTimeEntrySheetContent({");
-    expect(editSource).toContain("const sheetContentScrollEnabled = showDeleteButton || sheetContentScrollable");
-    expect(editSource).toContain("scrollEnabled={sheetContentScrollEnabled}");
-    expect(editSource).toContain("onContentSizeChange={(_width, height) => setContentHeight(height)}");
+    expect(editSource).toContain("timeEntrySheetLayoutDensity({");
+    expect(editSource).toContain('testID="time-entry-sheet-form"');
+    expect(editSource).not.toContain("scrollEnabled={false}");
+    expect(editSource).not.toContain("shouldScrollTimeEntrySheetContent({");
+    expect(editSource).not.toContain("onContentSizeChange=");
     expect(editSource).toContain("{showDeleteButton ? (");
   });
 
@@ -94,7 +95,9 @@ describe("shared swipe-dismiss ownership integration", () => {
     expect(sheetSource.match(/notifyGestureSettledAtRest/g)?.length).toBeGreaterThanOrEqual(5);
     expect(sheetSource).toContain("cancelAnimation(translationY);");
     expect(sheetSource).toContain("cancelAnimation(presence);");
-    expect(sheetSource).toContain("approveDismissStart(committedPresentationId)");
+    expect(sheetSource).toContain("approveDismissStart(committedPresentationId, gestureOwned)");
+    expect(sheetSource).toContain("gestureOwned && disabledRef.current");
+    expect(sheetSource).toContain("if (disabledRef.current) return;");
     expect(sheetSource).toContain("dismissRequestInFlightRef.current");
     expect(sheetSource).toContain('presentationAction === "unchanged"');
     expect(editSource).toContain("if (mutationGateRef.current !== null) return false;");

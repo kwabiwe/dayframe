@@ -182,6 +182,11 @@ export type MobileCategoryResponse = {
   category: MobileBootstrap["categories"][number];
 };
 
+export type MobileTagResponse = {
+  ok: true;
+  tag: MobileTag;
+};
+
 export type MobilePlace = MobileBootstrap["places"][number];
 export type MobileLearnedPlace = NonNullable<MobileBootstrap["learnedPlaces"]>[number];
 
@@ -1009,6 +1014,23 @@ export async function createCategory(
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to create category"));
+  return readJsonResponse(response);
+}
+
+export async function createTag(name: string): Promise<MobileTagResponse> {
+  const response = await fetch(`${DAYFRAME_API_BASE}/api/tags`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify({ name })
+  });
+  if (response.status === 401) {
+    await clearSessionToken();
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to create tag"));
   return readJsonResponse(response);
 }
 

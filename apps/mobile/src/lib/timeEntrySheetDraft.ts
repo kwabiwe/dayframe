@@ -29,24 +29,18 @@ export function timeEntrySheetDraftHasChanges({
     ));
 }
 
-export function shouldScrollTimeEntrySheetContent({
-  contentHeight,
+export type TimeEntrySheetLayoutDensity = "regular" | "compact" | "condensed";
+
+export function timeEntrySheetLayoutDensity({
   fontScale,
-  keyboardInset,
-  viewportHeight,
   windowHeight
 }: {
-  contentHeight: number;
   fontScale: number;
-  keyboardInset: number;
-  viewportHeight: number;
   windowHeight: number;
-}) {
-  const compactOrAccessible = windowHeight < 780 || fontScale >= 1.3;
-  const keyboardOccludesContent = keyboardInset > 0;
-  const measuredOverflow = contentHeight > 0 && viewportHeight > 0 &&
-    contentHeight > viewportHeight + 1;
-  return compactOrAccessible || keyboardOccludesContent || measuredOverflow;
+}): TimeEntrySheetLayoutDensity {
+  if (windowHeight < 700 || fontScale >= 1.6) return "condensed";
+  if (windowHeight < 780 || fontScale >= 1.3) return "compact";
+  return "regular";
 }
 
 export function selectionAfterDescriptionChange({

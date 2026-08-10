@@ -54,6 +54,7 @@ import {
 import {
   AuthRequiredError,
   createManualTimeEntry,
+  createTag,
   deleteTimeEntry,
   enqueueEvent,
   fetchBootstrap,
@@ -84,6 +85,7 @@ import { shouldApplyDashboardRefresh } from "@/lib/dashboardRefresh";
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
 import { configureLocationIntelligence } from "@/lib/location/runtime";
 import { recordLocationStoreError } from "@/lib/location/store";
+import { mergePersistedMobileTag } from "@/lib/mobileTags";
 import {
   cacheDashboardBootstrap,
   loadCachedDashboardBootstrap
@@ -1179,6 +1181,17 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     } finally {
       manualEntrySavingRef.current = false;
       setManualEntrySaving(false);
+    }
+  }
+
+  async function createTimerSheetTag(name: string) {
+    try {
+      const response = await createTag(name);
+      updateDashboardData((current) => mergePersistedMobileTag(current, response.tag));
+      return response.tag;
+    } catch (error) {
+      if (error instanceof AuthRequiredError) transitionToSignedOut();
+      return null;
     }
   }
 
@@ -2323,6 +2336,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         lastStoppedAt={recentStoppedAt}
         mode="add"
         onCancel={completeManualEntryExit}
+        onCreateTag={createTimerSheetTag}
         onSave={saveManualEntry}
         presentation={manualEntryPresentation}
         reduceMotion={reduceMotion}
@@ -2342,6 +2356,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         lastStoppedAt={recentStoppedAt}
         onApplySuggestion={applyRunningTimerSuggestion}
         onCancel={completeActiveEditorExit}
+        onCreateTag={createTimerSheetTag}
         onDelete={deleteActiveTimer}
         onPresented={completeActiveEditorPresentation}
         onSave={saveActiveTimerEdit}
@@ -2364,6 +2379,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         lastStoppedAt={null}
         mode="entry"
         onCancel={completeCalendarEntryExit}
+        onCreateTag={createTimerSheetTag}
         onDelete={deleteCalendarEntry}
         onSave={saveCalendarEntryEdit}
         presentation={calendarEditPresentation}

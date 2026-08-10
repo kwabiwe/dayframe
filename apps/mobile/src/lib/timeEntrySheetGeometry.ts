@@ -332,7 +332,8 @@ export function timeEntrySheetVisualReadiness({
       overlayGeometry.maxHeight > 0 &&
       overlayContentMeasured &&
       overlayContainerVisible &&
-      finite(overlayRenderedHeight) > 0;
+      finite(overlayRenderedHeight) > 0 &&
+      finite(overlayRenderedHeight) <= finite(overlayGeometry.maxHeight);
   }
   return suggestionsPhase === "closed";
 }

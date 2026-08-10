@@ -111,6 +111,17 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
     updateAccessibilityHandles()
   }
 
+  override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+    guard super.point(inside: point, with: event), let record else { return false }
+    return DayframeDurationDialCore.ownsTouch(
+      x: Double(point.x),
+      y: Double(point.y),
+      width: Double(bounds.width),
+      height: Double(bounds.height),
+      includesRangeHandle: record.mode != "running"
+    )
+  }
+
   override func draw(_ rect: CGRect) {
     guard let record, let context = UIGraphicsGetCurrentContext() else { return }
     context.clear(rect)

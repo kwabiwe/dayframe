@@ -28,6 +28,7 @@ import {
 } from "@/components/OverflowMenu";
 import {
   AuthRequiredError,
+  createTag,
   fetchBootstrap,
   updateTimeEntry,
   type HealthReviewReprocessResult,
@@ -39,6 +40,7 @@ import {
 import { DAYFRAME_API_BASE } from "@/lib/config";
 import { reprocessExistingHealthReviewItems } from "@/lib/health";
 import { pressable, useMobileTheme } from "@/lib/mobileTheme";
+import { mergePersistedMobileTag } from "@/lib/mobileTags";
 import {
   localLayoutTransition,
   localPresenceEntering,
@@ -642,6 +644,17 @@ export default function ReviewScreen() {
     }
   }
 
+  async function createTimerSheetTag(name: string) {
+    try {
+      const response = await createTag(name);
+      commitData(mergePersistedMobileTag(dataRef.current, response.tag));
+      return response.tag;
+    } catch (error) {
+      if (error instanceof AuthRequiredError) router.replace("/");
+      return null;
+    }
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.settingsFloatingHeader}>
@@ -801,6 +814,7 @@ export default function ReviewScreen() {
           lastStoppedAt={null}
           mode="entry"
           onCancel={cancelEdit}
+          onCreateTag={createTimerSheetTag}
           onPresented={finishEditHandover}
           onSave={saveEdit}
           presentation={editPresentation}
@@ -808,6 +822,7 @@ export default function ReviewScreen() {
           saving={editSaving}
           stopping={false}
           styles={styles}
+          tags={data?.tags ?? []}
           theme={theme}
           visible={Boolean(editingEntry)}
         />

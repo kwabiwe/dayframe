@@ -302,7 +302,6 @@ export function HistoricalSuggestionsOverlay({
             <CloseGlyph color={theme.textSecondary} />
           </Pressable>
         </View>
-        <View pointerEvents="none" style={styles.historicalSuggestionsDivider} />
         <ScrollView
           accessibilityLabel="Historical Suggestions results"
           keyboardShouldPersistTaps="always"

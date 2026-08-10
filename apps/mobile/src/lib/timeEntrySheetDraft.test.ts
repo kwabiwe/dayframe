@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   selectionAfterDescriptionChange,
-  shouldScrollTimeEntrySheetContent,
+  timeEntrySheetLayoutDensity,
   timeEntrySheetDraftHasChanges,
   type TimeEntrySheetDraftSnapshot
 } from "./timeEntrySheetDraft";
@@ -43,35 +43,23 @@ describe("time-entry sheet draft helpers", () => {
     })).toBe(true);
   });
 
-  it("enables bounded form scrolling only for compact, accessible, or overflowing layouts", () => {
-    expect(shouldScrollTimeEntrySheetContent({
-      contentHeight: 700,
+  it("selects fixed-layout density from available height and Dynamic Type", () => {
+    expect(timeEntrySheetLayoutDensity({
       fontScale: 1,
-      keyboardInset: 0,
-      viewportHeight: 701,
       windowHeight: 844
-    })).toBe(false);
-    expect(shouldScrollTimeEntrySheetContent({
-      contentHeight: 702,
+    })).toBe("regular");
+    expect(timeEntrySheetLayoutDensity({
       fontScale: 1,
-      keyboardInset: 0,
-      viewportHeight: 700,
-      windowHeight: 844
-    })).toBe(true);
-    expect(shouldScrollTimeEntrySheetContent({
-      contentHeight: 600,
+      windowHeight: 740
+    })).toBe("compact");
+    expect(timeEntrySheetLayoutDensity({
       fontScale: 1.3,
-      keyboardInset: 0,
-      viewportHeight: 700,
       windowHeight: 844
-    })).toBe(true);
-    expect(shouldScrollTimeEntrySheetContent({
-      contentHeight: 600,
-      fontScale: 1,
-      keyboardInset: 320,
-      viewportHeight: 700,
-      windowHeight: 874
-    })).toBe(true);
+    })).toBe("compact");
+    expect(timeEntrySheetLayoutDensity({
+      fontScale: 1.6,
+      windowHeight: 844
+    })).toBe("condensed");
   });
 
   it("tracks the native caret after inserting or deleting text", () => {
