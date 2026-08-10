@@ -5,6 +5,7 @@ import {
   resetTimelineState,
   resolveTimelineRanges,
   shiftTimelineState,
+  shouldAdvanceStaleTimelineToToday,
   timelineHref,
   timelinePreferenceCookieValue,
   timelinePreferenceFromCookieValue,
@@ -221,6 +222,25 @@ describe("Timeline local calendar ranges", () => {
     ).date).toBe("2026-07-23");
   });
 
+  it("advances only a stale view that had been showing the previous Today", () => {
+    const nextDay = localDate(2026, 7, 24, 8);
+    expect(shouldAdvanceStaleTimelineToToday(
+      { date: "2026-07-23", scope: "day", view: "list" },
+      "2026-07-23",
+      nextDay
+    )).toBe(true);
+    expect(shouldAdvanceStaleTimelineToToday(
+      { date: "2026-07-20", scope: "day", view: "list" },
+      "2026-07-23",
+      nextDay
+    )).toBe(false);
+    expect(shouldAdvanceStaleTimelineToToday(
+      { date: "2026-07-23", scope: "day", view: "list" },
+      "2026-07-23",
+      now
+    )).toBe(false);
+  });
+
   it("uses calendar arithmetic for the Europe/London spring-forward day and week", () => {
     const day = resolveTimelineRanges({ date: "2026-03-29", scope: "day", view: "calendar" });
     const week = resolveTimelineRanges({ date: "2026-03-29", scope: "week", view: "calendar" });
@@ -244,6 +264,14 @@ describe("Timeline local calendar ranges", () => {
 });
 
 describe("Timeline period labels", () => {
+  it("labels the current local Day as Today", () => {
+    expect(formatTimelinePeriodLabel("day", resolveTimelineRanges({
+      date: "2026-07-23",
+      scope: "day",
+      view: "list"
+    }), now)).toBe("Today");
+  });
+
   it("uses approved abbreviated day and same-year week formats", () => {
     expect(formatTimelinePeriodLabel("day", resolveTimelineRanges({
       date: "2026-07-31",

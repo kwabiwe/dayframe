@@ -1,6 +1,16 @@
 "use client";
 
-import { Fragment, type UIEvent, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import {
+  Fragment,
+  type FocusEvent as ReactFocusEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type UIEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition
+} from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Ellipsis, Pencil, Play, Trash2 } from "lucide-react";
@@ -18,7 +28,23 @@ import {
 } from "@/lib/format";
 import { timelineEntryDisplayInterval } from "@/lib/timeline-calculations";
 import { groupTimelineEntriesByDay } from "@/lib/timeline-entry-groups";
+import {
+  buildTimelineInlineSavePlan,
+  createTimelineInlineEditDraft,
+  updateTimelineInlineDescription,
+  updateTimelineInlineTime,
+  type TimelineInlineEditDraft,
+  type TimelineInlineEditField,
+  type TimelineInlineTimeEdge
+} from "@/lib/timeline-inline-edit";
 import type { DateRange } from "@/lib/time-entry-overlap";
+
+type TimelineInlineEditorState = TimelineInlineEditDraft & {
+  entryId: string;
+  error: string | null;
+  isSaving: boolean;
+  sessionId: number;
+};
 
 export function EntriesTable({
   entries,
@@ -53,11 +79,18 @@ export function EntriesTable({
   } = useAppShellRuntime();
   const [isPending, startTransition] = useTransition();
   const [editingEntry, setEditingEntry] = useState<TimeEntryRow | null>(null);
+  const [inlineEditor, setInlineEditor] = useState<TimelineInlineEditorState | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [continuingEntryId, setContinuingEntryId] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
   const listScrollRef = useRef<HTMLDivElement | null>(null);
+  const inlineEditorRef = useRef<TimelineInlineEditorState | null>(null);
+  const inlineSessionRef = useRef(0);
   const highlightedEntryId = searchParams.get("entry");
+
+  useEffect(() => {
+    inlineEditorRef.current = inlineEditor;
+  }, [inlineEditor]);
 
   const overlapAnalysis = useMemo(
     () => analyzeTimeIntervals(
@@ -133,6 +166,244 @@ export function EntriesTable({
     } finally {
       setContinuingEntryId(null);
     }
+  }
+
+  function beginInlineEdit(
+    entry: TimeEntryRow,
+    field: TimelineInlineEditField,
+    input: HTMLInputElement
+  ) {
+    const current = inlineEditorRef.current;
+    if (current?.entryId === entry.id && current.field === field) return;
+    if (isPending || current?.isSaving || (isTimerBusy && !entry.stoppedAt)) return;
+    const next: TimelineInlineEditorState = {
+      ...createTimelineInlineEditDraft(entry, field),
+      entryId: entry.id,
+      error: null,
+      isSaving: false,
+      sessionId: ++inlineSessionRef.current
+    };
+    inlineEditorRef.current = next;
+    setInlineEditor(next);
+    setActionError(null);
+    window.requestAnimationFrame(() => {
+      if (!input.isConnected) return;
+      input.focus({ preventScroll: true });
+      input.select();
+    });
+  }
+
+  function cancelInlineEdit(entryId: string) {
+    if (inlineEditorRef.current?.entryId !== entryId) return;
+    inlineEditorRef.current = null;
+    setInlineEditor(null);
+  }
+
+  function openFullEditor(entry: TimeEntryRow) {
+    inlineEditorRef.current = null;
+    setInlineEditor(null);
+    setEditingEntry(entry);
+  }
+
+  function updateInlineDescription(entryId: string, description: string) {
+    setInlineEditor((current) => {
+      if (!current || current.entryId !== entryId || current.field !== "description" || current.isSaving) {
+        return current;
+      }
+      const updated = updateTimelineInlineDescription(current, description);
+      const next: TimelineInlineEditorState = {
+        ...current,
+        ...updated,
+        error: null
+      };
+      inlineEditorRef.current = next;
+      return next;
+    });
+  }
+
+  function updateInlineTime(entry: TimeEntryRow, edge: TimelineInlineTimeEdge, value: string) {
+    setInlineEditor((current) => {
+      if (!current || current.entryId !== entry.id || current.field !== "time" || current.isSaving) {
+        return current;
+      }
+      const updated = updateTimelineInlineTime(current, entry, edge, value);
+      const next: TimelineInlineEditorState = {
+        ...current,
+        ...updated,
+        error: null
+      };
+      inlineEditorRef.current = next;
+      return next;
+    });
+  }
+
+  async function commitInlineEdit(entry: TimeEntryRow, returnFocus?: HTMLElement | null) {
+    const current = inlineEditorRef.current;
+    if (!current || current.entryId !== entry.id || current.isSaving) return;
+
+    let plan;
+    try {
+      plan = buildTimelineInlineSavePlan(current, entry, capturedNow);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Check the time values.";
+      const next = { ...current, error: message };
+      inlineEditorRef.current = next;
+      setInlineEditor(next);
+      window.requestAnimationFrame(() => returnFocus?.focus({ preventScroll: true }));
+      return;
+    }
+
+    if (!Object.keys(plan.payload).length) {
+      cancelInlineEdit(entry.id);
+      return;
+    }
+
+    const saving = { ...current, error: null, isSaving: true };
+    inlineEditorRef.current = saving;
+    setInlineEditor(saving);
+    const outcome = entry.stoppedAt
+      ? await saveTimeEntryQuickEdit(entry.id, plan)
+      : await updateActiveEntryFromCalendar({ plan });
+    const latest = inlineEditorRef.current;
+
+    if (!outcome.ok) {
+      if (latest?.sessionId !== current.sessionId) {
+        setActionError(outcome.error);
+        return;
+      }
+      const failed = { ...saving, error: outcome.error, isSaving: false };
+      inlineEditorRef.current = failed;
+      setInlineEditor(failed);
+      window.requestAnimationFrame(() => returnFocus?.focus({ preventScroll: true }));
+      return;
+    }
+
+    if (latest?.sessionId === current.sessionId) {
+      inlineEditorRef.current = null;
+      setInlineEditor(null);
+    }
+    await onChanged?.();
+    startTransition(() => router.refresh());
+  }
+
+  function handleInlineKeyDown(
+    event: ReactKeyboardEvent<HTMLInputElement>,
+    entry: TimeEntryRow,
+    field: TimelineInlineEditField
+  ) {
+    const active = inlineEditorRef.current?.entryId === entry.id && inlineEditorRef.current.field === field;
+    if (!active && (event.key === "Enter" || event.key === "F2")) {
+      event.preventDefault();
+      beginInlineEdit(entry, field, event.currentTarget);
+      return;
+    }
+    if (!active) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelInlineEdit(entry.id);
+    } else if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+      void commitInlineEdit(entry, event.currentTarget);
+    }
+  }
+
+  function renderInlineDescription(entry: TimeEntryRow, canInlineEdit = true) {
+    const editor = inlineEditor?.entryId === entry.id && inlineEditor.field === "description"
+      ? inlineEditor
+      : null;
+    return (
+      <span
+        className={`timeline-inline-description${editor ? " is-editing" : ""}`}
+        onDoubleClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openFullEditor(entry);
+        }}
+      >
+        <input
+          aria-label={`${timeEntryTitle(entry)} description. ${canInlineEdit ? "Click to edit inline. " : ""}Double-click to open the full editor.`}
+          className="timeline-task-title timeline-inline-description-input"
+          data-inline-entry-id={entry.id}
+          data-inline-field="description"
+          onBlur={(event) => {
+            if (editor) void commitInlineEdit(entry, event.currentTarget);
+          }}
+          onChange={(event) => updateInlineDescription(entry.id, event.target.value)}
+          onClick={(event) => {
+            if (canInlineEdit && !editor) beginInlineEdit(entry, "description", event.currentTarget);
+          }}
+          onKeyDown={(event) => {
+            if (canInlineEdit) handleInlineKeyDown(event, entry, "description");
+            else if (event.key === "Enter" || event.key === "F2") {
+              event.preventDefault();
+              openFullEditor(entry);
+            }
+          }}
+          placeholder="Untitled task"
+          readOnly={!editor || editor.isSaving}
+          title={canInlineEdit ? "Click to edit. Double-click for the full editor." : "Double-click for the full editor."}
+          value={editor ? editor.draft.description : timeEntryTitle(entry)}
+        />
+      </span>
+    );
+  }
+
+  function renderInlineTime(
+    entry: TimeEntryRow,
+    interval: { startedAt: string; stoppedAt: string | null }
+  ) {
+    const editor = inlineEditor?.entryId === entry.id && inlineEditor.field === "time"
+      ? inlineEditor
+      : null;
+    const handleBlur = (event: ReactFocusEvent<HTMLSpanElement>) => {
+      if (!editor || event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+      const returnFocus = event.currentTarget.querySelector<HTMLInputElement>("input");
+      void commitInlineEdit(entry, returnFocus);
+    };
+    const timeInput = (edge: TimelineInlineTimeEdge, value: string) => (
+      <input
+        aria-label={`${edge === "start" ? "Start" : "Finish"} time for ${timeEntryTitle(entry)}. Click to edit inline. Double-click to open the full editor.`}
+        className="timeline-inline-time-input"
+        data-inline-entry-id={entry.id}
+        data-inline-field="time"
+        inputMode="numeric"
+        maxLength={5}
+        onChange={(event) => updateInlineTime(entry, edge, event.target.value)}
+        onClick={(event) => {
+          if (!editor) beginInlineEdit(entry, "time", event.currentTarget);
+        }}
+        onKeyDown={(event) => handleInlineKeyDown(event, entry, "time")}
+        readOnly={!editor || editor.isSaving}
+        value={editor
+          ? edge === "start" ? editor.draft.startedAtTime : editor.draft.stoppedAtTime
+          : value}
+      />
+    );
+    return (
+      <span
+        className={`timeline-inline-time${editor ? " is-editing" : ""}`}
+        onBlur={handleBlur}
+        onDoubleClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openFullEditor(entry);
+        }}
+        title="Click to edit. Double-click for the full editor."
+      >
+        {timeInput("start", formatTime(interval.startedAt))}
+        <span aria-hidden="true">–</span>
+        {interval.stoppedAt
+          ? timeInput("finish", formatTime(interval.stoppedAt))
+          : <span className="timeline-inline-running">Running</span>}
+      </span>
+    );
+  }
+
+  function renderInlineStatus(entry: TimeEntryRow) {
+    const editor = inlineEditor?.entryId === entry.id ? inlineEditor : null;
+    if (editor?.error) return <span className="timeline-inline-edit-error" role="alert">{editor.error}</span>;
+    if (editor?.isSaving) return <span className="sr-only" role="status">Saving entry</span>;
+    return null;
   }
 
   return (
@@ -216,10 +487,11 @@ export function EntriesTable({
                       />
                       <span className="timeline-task-details">
                         <span className="timeline-task-primary-line">
-                          <span className="timeline-task-title">{timeEntryTitle(entry)}</span>
+                          {renderInlineDescription(entry, !isGrouped)}
                           <span className="timeline-task-meta">{timeEntryCategoryLabel(entry)}</span>
                           <TagMetadata compact tagNames={entry.tagNames} />
                         </span>
+                        {renderInlineStatus(entry)}
                         {overlappingOccurrences.length > 0 ? (
                           <span
                             className="overlap-marker"
@@ -241,8 +513,16 @@ export function EntriesTable({
                   </td>
                   <td className="tabular px-3 py-3">
                     {isGrouped
-                      ? `${group.entries.length} occurrences`
-                      : <>{formatTime(displayInterval.startedAt)} - {displayInterval.stoppedAt ? formatTime(displayInterval.stoppedAt) : "Running"}</>}
+                      ? (
+                          <span
+                            className="timeline-group-time-summary"
+                            onDoubleClick={() => openFullEditor(entry)}
+                            title="Double-click to edit the latest occurrence"
+                          >
+                            {group.entries.length} occurrences
+                          </span>
+                        )
+                      : renderInlineTime(entry, displayInterval)}
                   </td>
                   <td className="tabular px-3 py-3 font-semibold text-[var(--accent-text)]">
                     {formatDuration(group.totalSeconds)}
@@ -267,7 +547,7 @@ export function EntriesTable({
                         onDelete={() => {
                           onDeleteEntries(isGrouped ? group.entries : [entry]);
                         }}
-                        onEdit={() => setEditingEntry(entry)}
+                        onEdit={() => openFullEditor(entry)}
                       />
                     </div>
                   </td>
@@ -290,10 +570,11 @@ export function EntriesTable({
                           />
                           <span className="timeline-task-details">
                             <span className="timeline-task-primary-line">
-                              <span className="timeline-task-title">{timeEntryTitle(occurrence)}</span>
+                              {renderInlineDescription(occurrence)}
                               <span className="timeline-task-meta">{timeEntryCategoryLabel(occurrence)}</span>
                               <TagMetadata compact tagNames={occurrence.tagNames} />
                             </span>
+                            {renderInlineStatus(occurrence)}
                             {(overlapById.get(occurrence.id)?.overlapCount ?? 0) > 0 ? (
                               <span
                                 className="overlap-marker"
@@ -315,7 +596,7 @@ export function EntriesTable({
                         </div>
                       </td>
                       <td className="tabular px-3 py-3">
-                        {formatTime(occurrenceInterval.startedAt)} - {occurrenceInterval.stoppedAt ? formatTime(occurrenceInterval.stoppedAt) : "Running"}
+                        {renderInlineTime(occurrence, occurrenceInterval)}
                       </td>
                       <td className="tabular px-3 py-3 font-semibold text-[var(--accent-text)]">
                         {formatDuration(intervalSeconds(occurrenceInterval, capturedNow))}
@@ -328,7 +609,7 @@ export function EntriesTable({
                           onDelete={() => {
                             onDeleteEntries([occurrence]);
                           }}
-                          onEdit={() => setEditingEntry(occurrence)}
+                          onEdit={() => openFullEditor(occurrence)}
                         />
                       </td>
                     </tr>

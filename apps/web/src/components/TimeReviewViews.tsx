@@ -52,8 +52,10 @@ import { entryOverlapSeconds } from "@/lib/time-entry-overlap";
 import {
   TIMELINE_PREFERENCE_COOKIE,
   formatTimelinePeriodLabel,
+  resetTimelineState,
   resolveTimelineRanges,
   shiftTimelineState,
+  shouldAdvanceStaleTimelineToToday,
   timelineHref,
   timelinePreferenceCookieValue,
   updateTimelinePreference,
@@ -175,6 +177,9 @@ export function TimeReviewViews({
     timesheet: { left: 0, top: 0 }
   });
   const activeScrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const timelineStateRef = useRef(state);
+  const navigateRef = useRef<(overrides: Partial<TimelineState>) => Promise<void>>(async () => undefined);
+  const todayKeyRef = useRef(toTimelineDateKey(new Date()));
 
   const refreshData = useCallback(async () => {
     await refresh();
@@ -243,6 +248,54 @@ export function TimeReviewViews({
     persistPreference(nextState);
   }
 
+  useLayoutEffect(() => {
+    timelineStateRef.current = state;
+    navigateRef.current = navigate;
+  });
+
+  useEffect(() => {
+    let rolloverTimeout: number | null = null;
+
+    const scheduleRollover = () => {
+      if (rolloverTimeout !== null) window.clearTimeout(rolloverTimeout);
+      const now = new Date();
+      const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      rolloverTimeout = window.setTimeout(reconcileToday, Math.max(250, nextMidnight.getTime() - now.getTime() + 100));
+    };
+
+    const reconcileToday = () => {
+      if (document.visibilityState !== "visible") {
+        scheduleRollover();
+        return;
+      }
+      const now = new Date();
+      const previousTodayKey = todayKeyRef.current;
+      const currentTodayKey = toTimelineDateKey(now);
+      if (currentTodayKey !== previousTodayKey) {
+        todayKeyRef.current = currentTodayKey;
+        setPresentationNow(now.getTime());
+        const currentState = timelineStateRef.current;
+        if (shouldAdvanceStaleTimelineToToday(currentState, previousTodayKey, now)) {
+          void navigateRef.current(resetTimelineState(currentState, now));
+        }
+      }
+      scheduleRollover();
+    };
+
+    const handleFocus = () => reconcileToday();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") reconcileToday();
+    };
+    scheduleRollover();
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      if (rolloverTimeout !== null) window.clearTimeout(rolloverTimeout);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
+
   function updateView(view: TimelineView) {
     if (isDateLoading) return;
     navigate({
@@ -297,8 +350,8 @@ export function TimeReviewViews({
     })),
     { range: ranges.week, now: capturedNow }
   );
-  const periodLabel = formatTimelinePeriodLabel(state.scope, ranges);
-  const todayKey = toTimelineDateKey(new Date());
+  const periodLabel = formatTimelinePeriodLabel(state.scope, ranges, capturedNow);
+  const todayKey = toTimelineDateKey(capturedNow);
   const dayReportFrom = toTimelineDateKey(ranges.day.start);
   const dayReportTo = toTimelineDateKey(addDays(ranges.day.end, -1));
   const weekReportFrom = toTimelineDateKey(ranges.week.start);

@@ -980,6 +980,89 @@ textarea.ui-control {
   font-weight: 650;
 }
 
+.timeline-inline-description {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.timeline-inline-description-input,
+.timeline-inline-time-input {
+  box-sizing: border-box;
+  appearance: none;
+  border: var(--web-control-border-width) solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  outline: 0;
+}
+
+.timeline-inline-description-input {
+  width: 100%;
+  min-width: 0;
+  padding: 2px 4px;
+  text-overflow: ellipsis;
+}
+
+.timeline-inline-description-input[readonly],
+.timeline-inline-time-input[readonly],
+.timeline-group-time-summary {
+  cursor: text;
+}
+
+.timeline-inline-description-input[readonly]:hover,
+.timeline-inline-time-input[readonly]:hover,
+.timeline-group-time-summary:hover {
+  background: var(--surface-muted);
+}
+
+.timeline-inline-description.is-editing .timeline-inline-description-input,
+.timeline-inline-time.is-editing .timeline-inline-time-input {
+  border-color: var(--control-border);
+  background: var(--surface-inset);
+}
+
+.timeline-inline-description-input:focus-visible,
+.timeline-inline-time-input:focus-visible {
+  border-color: var(--web-focus-border);
+}
+
+.timeline-inline-time {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.timeline-inline-time-input {
+  width: 5.75ch;
+  min-width: 5.75ch;
+  padding: 2px 3px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.timeline-inline-running {
+  min-width: 5.75ch;
+}
+
+.timeline-group-time-summary {
+  display: inline-block;
+  border-radius: 6px;
+  padding: 2px 4px;
+}
+
+.timeline-inline-edit-error {
+  display: block;
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
 .timeline-task-meta {
   color: var(--muted);
   font-size: 12px;

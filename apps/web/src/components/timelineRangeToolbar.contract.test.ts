@@ -46,6 +46,15 @@ describe("Timeline range and toolbar contract", () => {
     expect(runtime).toContain("Couldn’t load that period. Your current view is unchanged.");
   });
 
+  it("advances a stale previous-Today view after local midnight without resetting historical browsing", () => {
+    expect(timeline).toContain("shouldAdvanceStaleTimelineToToday");
+    expect(timeline).toContain("todayKeyRef");
+    expect(timeline).toContain('window.addEventListener("focus", handleFocus)');
+    expect(timeline).toContain('document.addEventListener("visibilitychange", handleVisibilityChange)');
+    expect(timeline).toContain("resetTimelineState(currentState, now)");
+    expect(timeline).toContain("formatTimelinePeriodLabel(state.scope, ranges, capturedNow)");
+  });
+
   it("gives all views the same clipped period data while limiting covered copy to Timesheet", () => {
     expect(timeline).toContain("clipTimelineEntries(mergeTimelineEntries(");
     expect(timeline).toContain("data.dayEntries");
