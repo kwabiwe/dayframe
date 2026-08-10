@@ -985,8 +985,14 @@ textarea.ui-control {
 }
 
 .timeline-inline-description {
-  display: flex;
+  display: grid;
   min-width: 0;
+  max-width: 100%;
+  flex: 0 1 auto;
+  transition: flex-grow 180ms ease;
+}
+
+.timeline-inline-description.is-editing {
   flex: 1 1 auto;
 }
 
@@ -1004,11 +1010,22 @@ textarea.ui-control {
 }
 
 .timeline-inline-description-input {
+  grid-area: 1 / 1;
   width: 100%;
   min-width: 0;
   min-height: 28px;
   padding: 0;
   text-overflow: ellipsis;
+}
+
+.timeline-inline-description-measure {
+  grid-area: 1 / 1;
+  min-width: 0;
+  min-height: 28px;
+  overflow: hidden;
+  padding-right: 1px;
+  visibility: hidden;
+  white-space: pre;
 }
 
 .timeline-inline-description-input[readonly],
@@ -1041,24 +1058,54 @@ textarea.ui-control {
 
 .timeline-inline-time-control {
   position: relative;
-  display: inline-grid;
+  display: inline-flex;
   min-height: 28px;
-  min-width: 5.75ch;
-  place-items: center;
-}
-
-.timeline-inline-time-value {
-  font-variant-numeric: tabular-nums;
+  align-items: center;
+  gap: 1px;
 }
 
 .timeline-inline-time-input {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  min-width: 0;
+  width: 5.75ch;
+  min-width: 5.75ch;
+  min-height: 28px;
+  padding: 0 2px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.timeline-inline-time.is-editing .timeline-inline-time-input {
+  background: var(--surface-muted);
+}
+
+.timeline-inline-time-input:focus {
+  border: 0;
+  background: var(--surface-muted);
+}
+
+.timeline-inline-date-picker {
+  display: inline-grid;
+  flex: 0 0 auto;
+}
+
+.timeline-inline-date-trigger {
+  width: 24px;
+  min-width: 24px;
+  min-height: 28px;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
   padding: 0;
-  cursor: pointer;
-  opacity: 0;
+  color: var(--muted);
+}
+
+.timeline-inline-date-trigger:hover,
+.timeline-inline-date-trigger[aria-expanded="true"] {
+  background: var(--surface-muted);
+  color: var(--foreground);
+}
+
+.timeline-inline-date-picker-panel {
+  z-index: 140;
 }
 
 .timeline-inline-running {
@@ -9714,6 +9761,7 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .timeline-list-table {
   --timeline-list-column-header-height: 40px;
+  min-width: 760px;
   table-layout: fixed;
 }
 
@@ -9747,9 +9795,8 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .timeline-task-primary-line {
-  display: grid;
+  display: flex;
   min-width: 0;
-  grid-template-columns: minmax(0, 1fr) max-content max-content;
   align-items: baseline;
   gap: 8px;
   overflow: hidden;
@@ -9766,6 +9813,12 @@ dialog.ui-dialog.manual-entry-dialog {
 .timeline-task-primary-line .timeline-task-meta,
 .timeline-task-primary-line .tag-metadata {
   flex: 0 0 auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .timeline-inline-description {
+    transition: none;
+  }
 }
 
 .tag-metadata.is-compact {

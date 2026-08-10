@@ -16,6 +16,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Ellipsis, Pencil, Play, Trash2 } from "lucide-react";
 import { analyzeTimeIntervals, type TimeIntervalAnalysisEntry } from "@dayframe/shared";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
+import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { saveTimeEntryQuickEdit, TimeEntryQuickEditorModal } from "@/components/TimeEntryQuickEditor";
 import { TagMetadata } from "@/components/TagMetadata";
 import { IconButton } from "@/components/ui/Primitives";
@@ -32,6 +33,7 @@ import { groupTimelineEntriesByDay } from "@/lib/timeline-entry-groups";
 import {
   buildTimelineInlineSavePlan,
   createTimelineInlineEditDraft,
+  updateTimelineInlineDate,
   updateTimelineInlineDescription,
   updateTimelineInlineTime,
   type TimelineInlineEditDraft,
@@ -86,6 +88,7 @@ export function EntriesTable({
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
   const listScrollRef = useRef<HTMLDivElement | null>(null);
   const inlineEditorRef = useRef<TimelineInlineEditorState | null>(null);
+  const openInlineDatePickerRef = useRef<string | null>(null);
   const inlineSessionRef = useRef(0);
   const highlightedEntryId = searchParams.get("entry");
 
@@ -171,13 +174,14 @@ export function EntriesTable({
 
   function beginInlineEdit(
     entry: TimeEntryRow,
-    field: TimelineInlineEditField
+    field: TimelineInlineEditField,
+    displayInterval?: { startedAt: string; stoppedAt: string | null }
   ) {
     const current = inlineEditorRef.current;
     if (current?.entryId === entry.id && current.field === field) return;
     if (isPending || current?.isSaving || (isTimerBusy && !entry.stoppedAt)) return;
     const next: TimelineInlineEditorState = {
-      ...createTimelineInlineEditDraft(entry, field),
+      ...createTimelineInlineEditDraft(entry, field, displayInterval),
       entryId: entry.id,
       error: null,
       isSaving: false,
@@ -190,11 +194,13 @@ export function EntriesTable({
 
   function cancelInlineEdit(entryId: string) {
     if (inlineEditorRef.current?.entryId !== entryId) return;
+    openInlineDatePickerRef.current = null;
     inlineEditorRef.current = null;
     setInlineEditor(null);
   }
 
   function openFullEditor(entry: TimeEntryRow) {
+    openInlineDatePickerRef.current = null;
     inlineEditorRef.current = null;
     setInlineEditor(null);
     setEditingEntry(entry);
@@ -222,6 +228,22 @@ export function EntriesTable({
         return current;
       }
       const updated = updateTimelineInlineTime(current, entry, edge, value);
+      const next: TimelineInlineEditorState = {
+        ...current,
+        ...updated,
+        error: null
+      };
+      inlineEditorRef.current = next;
+      return next;
+    });
+  }
+
+  function updateInlineDate(entry: TimeEntryRow, edge: TimelineInlineTimeEdge, value: string) {
+    setInlineEditor((current) => {
+      if (!current || current.entryId !== entry.id || current.field !== "time" || current.isSaving) {
+        return current;
+      }
+      const updated = updateTimelineInlineDate(current, entry, edge, value);
       const next: TimelineInlineEditorState = {
         ...current,
         ...updated,
@@ -284,12 +306,13 @@ export function EntriesTable({
   function handleInlineKeyDown(
     event: ReactKeyboardEvent<HTMLInputElement>,
     entry: TimeEntryRow,
-    field: TimelineInlineEditField
+    field: TimelineInlineEditField,
+    displayInterval?: { startedAt: string; stoppedAt: string | null }
   ) {
     const active = inlineEditorRef.current?.entryId === entry.id && inlineEditorRef.current.field === field;
     if (!active && (event.key === "Enter" || event.key === "F2")) {
       event.preventDefault();
-      beginInlineEdit(entry, field);
+      beginInlineEdit(entry, field, displayInterval);
       return;
     }
     if (!active) return;
@@ -306,6 +329,7 @@ export function EntriesTable({
     const editor = inlineEditor?.entryId === entry.id && inlineEditor.field === "description"
       ? inlineEditor
       : null;
+    const value = editor ? editor.draft.description : timeEntryTitle(entry);
     return (
       <span
         className={`timeline-inline-description${editor ? " is-editing" : ""}`}
@@ -315,6 +339,9 @@ export function EntriesTable({
           openFullEditor(entry);
         }}
       >
+        <span aria-hidden="true" className="timeline-inline-description-measure timeline-task-title">
+          {value || "Untitled task"}
+        </span>
         <input
           aria-label={`${timeEntryTitle(entry)} description. ${canInlineEdit ? "Click to edit inline. " : ""}Double-click to open the full editor.`}
           className="timeline-task-title timeline-inline-description-input"
@@ -337,7 +364,7 @@ export function EntriesTable({
           placeholder="Untitled task"
           readOnly={!editor || editor.isSaving}
           title={canInlineEdit ? "Click to edit. Double-click for the full editor." : "Double-click for the full editor."}
-          value={editor ? editor.draft.description : timeEntryTitle(entry)}
+          value={value}
         />
       </span>
     );
@@ -352,38 +379,61 @@ export function EntriesTable({
       : null;
     const handleBlur = (event: ReactFocusEvent<HTMLSpanElement>) => {
       if (!editor || event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+      if (openInlineDatePickerRef.current?.startsWith(`${entry.id}:`)) return;
       const returnFocus = event.currentTarget.querySelector<HTMLInputElement>("input");
       void commitInlineEdit(entry, returnFocus);
     };
     const timeInput = (edge: TimelineInlineTimeEdge, instant: string) => {
-      const pickerValue = editor
-        ? edge === "start"
-          ? `${editor.draft.startedAtDate}T${editor.draft.startedAtTime}`
-          : `${editor.draft.stoppedAtDate}T${editor.draft.stoppedAtTime}`
-        : dateTimeLocal(instant);
-      const visibleTime = editor
+      const value = editor
         ? edge === "start" ? editor.draft.startedAtTime : editor.draft.stoppedAtTime
         : formatTime(instant);
+      const date = editor
+        ? edge === "start" ? editor.draft.startedAtDate : editor.draft.stoppedAtDate
+        : dateTimeLocal(instant).slice(0, 10);
+      const pickerKey = `${entry.id}:${edge}`;
       return (
         <span className="timeline-inline-time-control">
-          <span aria-hidden="true" className="timeline-inline-time-value">{visibleTime}</span>
           <input
-            aria-label={`${edge === "start" ? "Start" : "Finish"} date and time for ${timeEntryTitle(entry)}`}
+            aria-label={`${edge === "start" ? "Start" : "Finish"} time for ${timeEntryTitle(entry)}`}
             className="timeline-inline-time-input"
             data-inline-entry-id={entry.id}
             data-inline-field="time"
             disabled={editor?.isSaving}
-            max={dateTimeLocal(capturedNow)}
             onChange={(event) => updateInlineTime(entry, edge, event.target.value)}
             onClick={() => {
-              if (!editor) beginInlineEdit(entry, "time");
+              if (!editor) beginInlineEdit(entry, "time", interval);
             }}
             onFocus={() => {
-              if (!editor) beginInlineEdit(entry, "time");
+              if (!editor) beginInlineEdit(entry, "time", interval);
             }}
-            onKeyDown={(event) => handleInlineKeyDown(event, entry, "time")}
-            type="datetime-local"
-            value={pickerValue}
+            onKeyDown={(event) => handleInlineKeyDown(event, entry, "time", interval)}
+            inputMode="numeric"
+            maxLength={5}
+            readOnly={!editor || editor.isSaving}
+            type="text"
+            value={value}
+          />
+          <DatePickerPopover
+            ariaLabel={`Choose ${edge === "start" ? "Start" : "Finish"} date, currently ${formatDate(`${date}T12:00:00`)}`}
+            className="timeline-inline-date-picker"
+            disabled={editor?.isSaving}
+            iconOnly
+            label={formatDate(`${date}T12:00:00`)}
+            onChange={(nextDate) => updateInlineDate(entry, edge, nextDate)}
+            onOpenChange={(open) => {
+              if (open) {
+                openInlineDatePickerRef.current = pickerKey;
+                if (!editor) beginInlineEdit(entry, "time", interval);
+              } else if (openInlineDatePickerRef.current === pickerKey) {
+                openInlineDatePickerRef.current = null;
+              }
+            }}
+            panelClassName="timeline-inline-date-picker-panel"
+            panelLabel={`Choose ${edge === "start" ? "Start" : "Finish"} date`}
+            portal
+            today={dateTimeLocal(capturedNow).slice(0, 10)}
+            triggerClassName="timeline-inline-date-trigger"
+            value={date}
           />
         </span>
       );
@@ -393,6 +443,7 @@ export function EntriesTable({
         className={`timeline-inline-time${editor ? " is-editing" : ""}`}
         onBlur={handleBlur}
         onDoubleClick={(event) => {
+          if ((event.target as HTMLElement).closest(".timeline-inline-date-picker")) return;
           event.preventDefault();
           event.stopPropagation();
           openFullEditor(entry);
@@ -541,7 +592,7 @@ export function EntriesTable({
                       : renderInlineTime(entry, displayInterval)}
                   </td>
                   <td className="tabular px-3 py-3 font-semibold text-[var(--accent-text)]">
-                    {renderDuration(entry, group.totalSeconds)}
+                    {isGrouped ? formatDuration(group.totalSeconds) : renderDuration(entry, group.totalSeconds)}
                   </td>
                   <td className="px-3 py-3">
                     <div className="flex gap-2">

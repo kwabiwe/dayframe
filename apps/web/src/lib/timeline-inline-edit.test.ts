@@ -3,6 +3,7 @@ import type { TimeEntryRow } from "@/lib/queries";
 import {
   buildTimelineInlineSavePlan,
   createTimelineInlineEditDraft,
+  updateTimelineInlineDate,
   updateTimelineInlineDescription,
   updateTimelineInlineTime
 } from "./timeline-inline-edit";
@@ -25,7 +26,7 @@ describe("Timeline inline entry editing", () => {
       createTimelineInlineEditDraft(entry, "time"),
       entry,
       "start",
-      "2026-08-10T08:30"
+      "08:30"
     );
     const plan = buildTimelineInlineSavePlan(edit, entry, localDate("2026-08-11T00:00"));
 
@@ -43,7 +44,7 @@ describe("Timeline inline entry editing", () => {
       createTimelineInlineEditDraft(entry, "time"),
       entry,
       "finish",
-      "2026-08-10T10:15"
+      "10:15"
     );
     const plan = buildTimelineInlineSavePlan(edit, entry, localDate("2026-08-11T00:00"));
 
@@ -58,16 +59,64 @@ describe("Timeline inline entry editing", () => {
       createTimelineInlineEditDraft(entry, "time"),
       entry,
       "finish",
-      "2026-08-10T"
+      ""
     );
 
     expect(edit.draft.stoppedAtTime).toBe("");
     expect(() => buildTimelineInlineSavePlan(edit, entry, localDate("2026-08-11T00:00")))
       .toThrow("Enter a valid finish date and time.");
   });
+
+  it("opens a clipped cross-day interval without changing its time or duration", () => {
+    const entry = timeEntry({
+      startedAt: localIso("2026-08-02T17:33"),
+      stoppedAt: localIso("2026-08-03T17:42"),
+      durationSeconds: 86_940
+    });
+    const edit = createTimelineInlineEditDraft(entry, "time", {
+      startedAt: localIso("2026-08-02T17:33"),
+      stoppedAt: localIso("2026-08-03T00:00")
+    });
+
+    expect(edit.draft.startedAtTime).toBe("17:33");
+    expect(edit.draft.stoppedAtTime).toBe("00:00");
+    expect(edit.draft.duration).toBe("06:27");
+    expect(buildTimelineInlineSavePlan(edit, entry, localDate("2026-08-04T00:00")).payload)
+      .toEqual({});
+  });
+
+  it("emits no patch after a clipped time is changed and restored", () => {
+    const entry = timeEntry({
+      startedAt: localIso("2026-08-02T17:33"),
+      stoppedAt: localIso("2026-08-03T17:42"),
+      durationSeconds: 86_940
+    });
+    const opened = createTimelineInlineEditDraft(entry, "time", {
+      startedAt: localIso("2026-08-02T17:33"),
+      stoppedAt: localIso("2026-08-03T00:00")
+    });
+    const changed = updateTimelineInlineTime(opened, entry, "finish", "00:15");
+    const restored = updateTimelineInlineTime(changed, entry, "finish", "00:00");
+
+    expect(buildTimelineInlineSavePlan(restored, entry, localDate("2026-08-04T00:00")).payload)
+      .toEqual({});
+  });
+
+  it("updates the displayed date independently through the themed picker", () => {
+    const entry = timeEntry();
+    const edit = updateTimelineInlineDate(
+      createTimelineInlineEditDraft(entry, "time"),
+      entry,
+      "finish",
+      "2026-08-11"
+    );
+
+    expect(edit.draft.stoppedAtDate).toBe("2026-08-11");
+    expect(edit.draft.duration).toBe("25:00");
+  });
 });
 
-function timeEntry(): TimeEntryRow {
+function timeEntry(overrides: Partial<TimeEntryRow> = {}): TimeEntryRow {
   return {
     id: "22222222-2222-4222-8222-222222222222",
     projectId: null,
@@ -88,7 +137,8 @@ function timeEntry(): TimeEntryRow {
     updatedAt: localIso("2026-08-10T10:01"),
     durationSeconds: 3_600,
     tagNames: [],
-    tags: []
+    tags: [],
+    ...overrides
   };
 }
 
