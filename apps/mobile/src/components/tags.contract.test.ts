@@ -54,6 +54,15 @@ describe("mobile tag interaction contract", () => {
     expect(sheet).toContain("commitDescriptionEditorState(value, nextSelection, false)");
   });
 
+  it("keeps Add a tag and hashtag removal on the existing keyboard responder", () => {
+    expect(sheet).toContain('keyboardDismissMode="none"');
+    expect(sheet).toContain('keyboardShouldPersistTaps="always"');
+    expect(sheet).toContain("onPressIn={beginTagEntryPress}");
+    expect(sheet).toContain("const requestFocus = !descriptionInputRef.current?.isFocused()");
+    expect(sheet).toMatch(/if \(nextInset > 0\) \{[\s\S]*?clearKeyboardConfirmationWatchdog\(\);/);
+    expect(sheet).toMatch(/event\.type === "hashtag_changed"[\s\S]*?clearKeyboardConfirmationWatchdog\(\);/);
+  });
+
   it("uses the shared framed chooser language, solid icon, and draft-only tag removal", () => {
     expect(theme).toMatch(/tagAutocompletePanel:\s*\{[\s\S]*?backgroundColor: theme\.surfaceRaised[\s\S]*?borderWidth: 1[\s\S]*?borderColor: theme\.borderStrong[\s\S]*?borderRadius: 14/);
     expect(theme).toMatch(/tagAutocompleteHeader:\s*\{[\s\S]*?backgroundColor: theme\.surfaceMuted/);

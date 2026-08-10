@@ -434,6 +434,12 @@ export function ActiveTimerEditSheet({
         previous.activeHashtag ||
         tagFocusContinuityRef.current.until === Number.POSITIVE_INFINITY
       ) {
+        // A real keyboard frame already confirmed this responder session. Do
+        // not let its startup watchdog fire while removing `#` commits the
+        // closing tag overlay; iOS can briefly omit Keyboard.metrics() during
+        // that commit and the watchdog's recovery blur would visibly cycle the
+        // keyboard even though Description never lost focus.
+        clearKeyboardConfirmationWatchdog();
         tagFocusContinuityRef.current = {
           presentationId: event.presentationId,
           until: Date.now() + TAG_FOCUS_CONTINUITY_GRACE_MS
@@ -449,7 +455,7 @@ export function ActiveTimerEditSheet({
     tagSessionRef.current = next;
     setTagSession(next);
     return next;
-  }, []);
+  }, [clearKeyboardConfirmationWatchdog]);
   const cancelPendingTagFocus = useCallback((presentationId = presentationRef.current.id) => {
     if (tagFocusFrameRef.current !== null) {
       cancelAnimationFrame(tagFocusFrameRef.current);
@@ -956,6 +962,13 @@ export function ActiveTimerEditSheet({
         screenHeight,
         windowHeight
       });
+      if (nextInset > 0) {
+        // Once UIKit has supplied a positive keyboard frame there is nothing
+        // left for the bounded first-focus recovery to prove. Cancelling it
+        // here prevents a later tag-panel render from being mistaken for the
+        // original missing-keyboard race.
+        clearKeyboardConfirmationWatchdog();
+      }
       const previousInset = keyboardInsetRef.current;
       const interactive = Boolean(
         Platform.OS === "ios" &&
@@ -1027,6 +1040,7 @@ export function ActiveTimerEditSheet({
       didHideSubscription?.remove();
     };
   }, [
+    clearKeyboardConfirmationWatchdog,
     hashtagPanelProgress,
     insets.bottom,
     insets.top,
@@ -1964,6 +1978,7 @@ export function ActiveTimerEditSheet({
     if (busy) return;
     setDatePickerOpen(false);
     dispatchSheetEvent({ type: "date_picker_closed", presentationId: presentation.id });
+    const requestFocus = !descriptionInputRef.current?.isFocused();
     const currentText = descriptionValueRef.current;
     const currentSelection = descriptionSelectionRef.current;
     const currentActive = findActiveHashtag(currentText, currentSelection.end);
@@ -1972,7 +1987,7 @@ export function ActiveTimerEditSheet({
         type: "hashtag_changed",
         active: true,
         presentationId: presentation.id,
-        requestFocus: true
+        requestFocus
       });
       return;
     }
@@ -1986,9 +2001,21 @@ export function ActiveTimerEditSheet({
       type: "hashtag_changed",
       active: true,
       presentationId: presentation.id,
-      requestFocus: true
+      requestFocus
     });
     setValidationError(null);
+  }
+
+  function beginTagEntryPress() {
+    if (busy || !descriptionInputRef.current?.isFocused()) return;
+    // Pressable's onPress arrives after UIKit has already resolved the touch
+    // target. Arm the continuity window at touch-down so tapping Add a tag can
+    // never create an unowned-responder frame before `#` is inserted.
+    clearKeyboardConfirmationWatchdog();
+    tagFocusContinuityRef.current = {
+      presentationId: presentation.id,
+      until: Date.now() + TAG_FOCUS_CONTINUITY_GRACE_MS
+    };
   }
 
   function updateStoppedTimeText(value: string) {
@@ -2283,8 +2310,8 @@ export function ActiveTimerEditSheet({
                   layoutDensity === "compact" ? styles.activeEditContentCompact : null,
                   layoutDensity === "condensed" ? styles.activeEditContentCondensed : null
                 ]}
-                keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="none"
+                keyboardShouldPersistTaps="always"
                 onLayout={(event) => {
                   const { height, width, x, y } = event.nativeEvent.layout;
                   scrollViewportLayoutRef.current = { height, width, x, y };
@@ -2500,6 +2527,7 @@ export function ActiveTimerEditSheet({
                       disabled={busy}
                       hitSlop={8}
                       onPress={startTagEntry}
+                      onPressIn={beginTagEntryPress}
                       style={({ pressed }) => [
                         styles.tagAddButton,
                         pressed && !busy ? styles.buttonPressed : null,
