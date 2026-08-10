@@ -445,6 +445,39 @@ describe("time-entry sheet Suggestions and picker precedence", () => {
     expect(state.suggestionsPhase).toBe("opening");
   });
 
+  it("keeps Suggestions closed when deleting the only hashtag leaves Description empty", () => {
+    let state = focusedWithResults();
+    state = timeEntrySheetReducer(state, {
+      type: "suggestions_animation_finished",
+      presentationId: 12,
+      direction: "open"
+    });
+    state = timeEntrySheetReducer(state, {
+      type: "hashtag_query_changed",
+      presentationId: 12,
+      active: true
+    });
+    state = timeEntrySheetReducer(state, {
+      type: "description_query_changed",
+      presentationId: 12,
+      queryActive: false
+    });
+    state = timeEntrySheetReducer(state, {
+      type: "hashtag_query_changed",
+      presentationId: 12,
+      active: false
+    });
+    state = timeEntrySheetReducer(state, {
+      type: "suggestion_results_changed",
+      presentationId: 12,
+      count: 8
+    });
+
+    expect(historicalSuggestionsVisibleTarget(state)).toBe(false);
+    expect(state.suggestionsPhase).toBe("closing");
+    expect(state.descriptionFocused).toBe(true);
+  });
+
   it("settles visible to updating to visible for same-count and rapid query results", () => {
     let state = focusedWithResults();
     state = timeEntrySheetReducer(state, {

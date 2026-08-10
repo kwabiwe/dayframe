@@ -10,6 +10,7 @@ import {
   type PendingDeletion
 } from "@/lib/historyDeletion";
 import { useMobileTheme } from "@/lib/mobileTheme";
+import { mergePersistedMobileTag } from "@/lib/mobileTags";
 import {
   localLayoutTransition,
   localPresenceEntering,
@@ -36,6 +37,7 @@ type MutationFailureMode = "save" | "stop" | "suggestion" | null;
 
 const startedAt = "2026-08-07T17:00:00.000Z";
 const stoppedAt = "2026-08-07T18:15:00.000Z";
+const runningStartedAt = new Date(Date.now() - 4_321 * 1_000).toISOString();
 
 const categories = [
   { id: "cat-focus", name: "Focus", color: "coral", isPinned: true },
@@ -116,6 +118,10 @@ function SheetQaHarness() {
   const [secondDeletionCount, setSecondDeletionCount] = useState(0);
   const [mutationFailureMode, setMutationFailureMode] = useState<MutationFailureMode>(requestedFailure);
   const [mutationFailureCount, setMutationFailureCount] = useState(0);
+  const [tagCreateCount, setTagCreateCount] = useState(0);
+  const runningLastStoppedAtRef = useRef(
+    new Date(Date.now() - 90 * 60 * 1_000).toISOString()
+  );
   const persistedIdsRef = useRef(new Map<string, string>());
   const sheetDeletionRef = useRef<{ presentationId: number; token: number } | null>(null);
   const nextPresentationIdRef = useRef(0);
@@ -217,6 +223,7 @@ function SheetQaHarness() {
     setSecondDeletionCount(0);
     setMutationFailureMode(failureMode);
     setMutationFailureCount(0);
+    setTagCreateCount(0);
     nextPresentationIdRef.current += 1;
     setPresentationId(nextPresentationIdRef.current);
     setVisible(true);
@@ -343,6 +350,8 @@ function SheetQaHarness() {
     secondDeletionCount,
     mutationFailureMode,
     mutationFailureCount,
+    tagCreateCount,
+    tagNames: (data.tags ?? []).map((tag) => tag.name),
     reduceMotion,
     fontScale: PixelRatio.getFontScale(),
     theme: theme.mode
@@ -484,7 +493,9 @@ function SheetQaHarness() {
         elapsedSeconds={elapsedSeconds}
         entry={entry}
         historicalEntries={historicalEntries}
-        lastStoppedAt="2026-08-07T16:45:00.000Z"
+        lastStoppedAt={mode === "running"
+          ? runningLastStoppedAtRef.current
+          : "2026-08-07T16:45:00.000Z"}
         mode={mode}
         onApplySuggestion={async (_entryId, suggestion) => {
           if (mutationFailureMode === "suggestion") {
@@ -499,6 +510,23 @@ function SheetQaHarness() {
           return true;
         }}
         onCancel={completeSheetExit}
+        onCreateTag={async (name) => {
+          const persistedName = name.trim();
+          const normalizedName = persistedName.toLowerCase();
+          const tag = {
+            id: `qa-tag-${normalizedName}`,
+            name: persistedName,
+            normalizedName,
+            usageCount: 0
+          };
+          serverBootstrapRef.current = mergePersistedMobileTag(
+            serverBootstrapRef.current,
+            tag
+          ) ?? serverBootstrapRef.current;
+          commitData((current) => mergePersistedMobileTag(current, tag) ?? current);
+          setTagCreateCount((count) => count + 1);
+          return tag;
+        }}
         onDelete={async (entryId) => prepareSheetDeletion(entryId)}
         onSave={async (_entryId, patch) => {
           if (mutationFailureMode === "save") {
@@ -528,7 +556,7 @@ function SheetQaHarness() {
         saving={false}
         stopping={false}
         styles={styles}
-        tags={tags}
+        tags={data.tags ?? []}
         theme={theme}
         visible={visible}
       /> : null}
@@ -600,7 +628,7 @@ function fixtureEntry(key: FixtureKey): MobileTimeEntry {
     confidence: "high",
     reviewStatus: key === "review" ? "needs_review" : "confirmed",
     description,
-    startedAt,
+    startedAt: isRunning ? runningStartedAt : startedAt,
     stoppedAt: isRunning ? null : stoppedAt,
     durationSeconds: isRunning ? 4_321 : 4_500,
     tagNames: [],

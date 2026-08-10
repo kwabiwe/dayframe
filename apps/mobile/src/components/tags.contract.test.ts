@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 const sheet = readFileSync(fileURLToPath(new URL("./ActiveTimerEditSheet.tsx", import.meta.url)), "utf8");
 const dashboard = readFileSync(fileURLToPath(new URL("./DayframeDashboard.tsx", import.meta.url)), "utf8");
 const metadata = readFileSync(fileURLToPath(new URL("./TagMetadata.tsx", import.meta.url)), "utf8");
+const api = readFileSync(fileURLToPath(new URL("../lib/api.ts", import.meta.url)), "utf8");
 const theme = readFileSync(fileURLToPath(new URL("../lib/mobileTheme.ts", import.meta.url)), "utf8");
 
 describe("mobile tag interaction contract", () => {
@@ -16,10 +17,12 @@ describe("mobile tag interaction contract", () => {
     expect(sheet).toContain("keyboardShouldPersistTaps=\"always\"");
   });
 
-  it("distinguishes existing and create actions for VoiceOver and never persists from selection alone", () => {
+  it("distinguishes existing and create actions and persists new tags immediately", () => {
     expect(sheet).toContain("Existing\"} tag,");
     expect(sheet).toContain("Create new tag,");
-    expect(sheet).not.toContain("createTag(");
+    expect(sheet).toContain("await onCreateTag(normalized.name)");
+    expect(dashboard).toContain("createTimerSheetTag");
+    expect(api).toContain('fetch(`${DAYFRAME_API_BASE}/api/tags`');
     expect(sheet).toContain("tagNames: appliedTagNames");
   });
 
@@ -55,7 +58,8 @@ describe("mobile tag interaction contract", () => {
     expect(theme).toMatch(/tagAutocompletePanel:\s*\{[\s\S]*?backgroundColor: theme\.surfaceRaised[\s\S]*?borderWidth: 1[\s\S]*?borderColor: theme\.borderStrong[\s\S]*?borderRadius: 14/);
     expect(theme).toMatch(/tagAutocompleteHeader:\s*\{[\s\S]*?backgroundColor: theme\.surfaceMuted/);
     expect(theme).toMatch(/tagSuggestionDivider:\s*\{[\s\S]*?left: 12[\s\S]*?right: 12/);
-    expect(sheet).toContain("styles.tagAutocompleteDivider");
+    expect(sheet).not.toContain("styles.tagAutocompleteDivider");
+    expect(theme).not.toContain("tagAutocompleteDivider:");
     expect(sheet).not.toContain("{hashtagPanelMounted ? (");
     expect(sheet).toContain('pointerEvents={hashtagPanelVisible ? "auto" : "none"}');
     expect(sheet).not.toContain("highlightedTagAction");

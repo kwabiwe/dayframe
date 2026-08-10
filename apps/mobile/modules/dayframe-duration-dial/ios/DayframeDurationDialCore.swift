@@ -44,6 +44,21 @@ enum DayframeDurationDialCore {
     return 1
   }
 
+  static func ownsTouch(
+    x: Double,
+    y: Double,
+    width: Double,
+    height: Double,
+    includesRangeHandle: Bool
+  ) -> Bool {
+    guard x.isFinite, y.isFinite, width.isFinite, height.isFinite,
+          width > 0, height > 0 else { return false }
+    let baseRadius = min(width, height) * 0.34
+    let handleOffset = includesRangeHandle ? 34.0 : 0.0
+    let accessibilityRadius = baseRadius + handleOffset + 22.0
+    return hypot(x - width / 2, y - height / 2) <= accessibilityRadius
+  }
+
   private static func crossesMultiple(lower: Int, upper: Int, multiple: Int) -> Bool {
     guard multiple > 0 else { return false }
     let first = Int(ceil(Double(lower) / Double(multiple))) * multiple

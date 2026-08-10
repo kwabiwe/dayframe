@@ -89,7 +89,7 @@ import {
 } from "@/lib/timeEntryDurationDial";
 import {
   selectionAfterDescriptionChange,
-  shouldScrollTimeEntrySheetContent,
+  timeEntrySheetLayoutDensity,
   timeEntrySheetDraftHasChanges,
   type TimeEntrySheetDraftSnapshot
 } from "@/lib/timeEntrySheetDraft";
@@ -129,6 +129,7 @@ type ActiveTimerEditSheetProps = {
   historicalEntries?: MobileTimeEntry[];
   lastStoppedAt: string | null;
   onCancel: (presentationId: number) => void;
+  onCreateTag: (name: string) => Promise<MobileTag | null>;
   onDelete?: (entryId: string) => Promise<boolean>;
   onPresented?: (presentationId: number) => void;
   onApplySuggestion?: (entryId: string, suggestion: RecentActivitySuggestion) => Promise<boolean>;
@@ -157,6 +158,7 @@ export function ActiveTimerEditSheet({
   lastStoppedAt,
   mode = "running",
   onCancel,
+  onCreateTag,
   onDelete,
   onPresented,
   onApplySuggestion,
@@ -188,6 +190,7 @@ export function ActiveTimerEditSheet({
   const [sheetHeightAnimating, setSheetHeightAnimating] = useState(false);
   const [startTimeEdited, setStartTimeEdited] = useState(false);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const [datePickerDismissGuarded, setDatePickerDismissGuarded] = useState(false);
   const [datePickerTarget, setDatePickerTarget] = useState<"start" | "end">("start");
   const [pickerStartAt, setPickerStartAt] = useState<Date | null>(null);
   const [descriptionSelection, setDescriptionSelection] = useState({ start: 0, end: 0 });
@@ -195,8 +198,6 @@ export function ActiveTimerEditSheet({
     useState<DescriptionSelection | undefined>(undefined);
   const [selectedTagNames, setSelectedTagNames] = useState<string[]>([]);
   const [tagSession, setTagSession] = useState(() => createTimeEntrySheetTagSession());
-  const [contentHeight, setContentHeight] = useState(0);
-  const [contentViewportHeight, setContentViewportHeight] = useState(0);
   const [draftBaseline, setDraftBaseline] = useState<TimeEntrySheetDraftSnapshot | null>(null);
   const [sheetState, dispatchSheetEvent] = useReducer(
     timeEntrySheetReducer,
@@ -245,7 +246,6 @@ export function ActiveTimerEditSheet({
   const tagSessionRef = useRef(tagSession);
   tagSessionRef.current = tagSession;
   const tagFocusContinuityRef = useRef({ presentationId: 0, until: 0 });
-  const contentScrollRef = useRef<ScrollView>(null);
   const sheetRootLayoutRef = useRef<MeasuredRect | null>(null);
   const scrollViewportLayoutRef = useRef<MeasuredRect | null>(null);
   const descriptionSectionLayoutRef = useRef<MeasuredRect | null>(null);
@@ -256,6 +256,7 @@ export function ActiveTimerEditSheet({
   const focusFrameRef = useRef<number | null>(null);
   const tagFocusFrameRef = useRef<number | null>(null);
   const geometryFrameRef = useRef<number | null>(null);
+  const datePickerDismissGuardFrameRef = useRef<number | null>(null);
   const geometryCacheRef = useRef(createTimeEntrySheetGeometryCache());
   const geometryEnvironmentRef = useRef({
     presentationId: presentation.id,
@@ -278,6 +279,7 @@ export function ActiveTimerEditSheet({
   const keyboardTopRef = useRef<number | null>(null);
   const operationTokenRef = useRef(0);
   const suggestionMutationSequenceRef = useRef(0);
+  const tagCreationSequenceRef = useRef(0);
   const mutationGateRef = useRef<{ presentationId: number; token: number } | null>(null);
   const handledDismissRequestIdRef = useRef<number | null>(null);
   const [overlayGeometry, setOverlayGeometry] = useState<HistoricalSuggestionsOverlayGeometry | null>(null);
@@ -491,6 +493,7 @@ export function ActiveTimerEditSheet({
   };
 
   useLayoutEffect(() => {
+    tagCreationSequenceRef.current += 1;
     if (focusFrameRef.current !== null) {
       cancelAnimationFrame(focusFrameRef.current);
       focusFrameRef.current = null;
@@ -535,7 +538,6 @@ export function ActiveTimerEditSheet({
     descriptionInputRef.current?.blur();
     timeInputRef.current?.blur();
     Keyboard.dismiss();
-    contentScrollRef.current?.scrollTo({ animated: false, y: 0 });
     contentScrollOffsetRef.current = { x: 0, y: 0 };
     pendingKeyboardUpdate.current = null;
     keyboardMotionFrozen.current = false;
@@ -759,6 +761,9 @@ export function ActiveTimerEditSheet({
 
   useEffect(() => () => {
     if (geometryFrameRef.current !== null) cancelAnimationFrame(geometryFrameRef.current);
+    if (datePickerDismissGuardFrameRef.current !== null) {
+      cancelAnimationFrame(datePickerDismissGuardFrameRef.current);
+    }
     if (focusFrameRef.current !== null) cancelAnimationFrame(focusFrameRef.current);
     if (tagFocusFrameRef.current !== null) cancelAnimationFrame(tagFocusFrameRef.current);
     if (selectionOverrideFrameRef.current !== null) {
@@ -1331,30 +1336,10 @@ export function ActiveTimerEditSheet({
     height: keyboardLayout.sheetHeight,
     maxHeight: keyboardLayout.sheetMaxHeight
   };
-  const sheetContentScrollable = shouldScrollTimeEntrySheetContent({
-    contentHeight,
+  const layoutDensity = timeEntrySheetLayoutDensity({
     fontScale: windowDimensions.fontScale,
-    keyboardInset,
-    viewportHeight: contentViewportHeight,
     windowHeight: windowDimensions.height
   });
-  // A bottom destructive action must always remain reachable even if the
-  // first measurement says the form fits. With bounce disabled, enabling the
-  // scroll view does not move a genuinely fitting layout, but it avoids the
-  // iPhone-size-dependent dead end where Delete exists below the dial while a
-  // stale/equal content measurement leaves scrolling disabled.
-  const sheetContentScrollEnabled = showDeleteButton || sheetContentScrollable;
-  useEffect(() => {
-    contentScrollOffsetRef.current = { x: 0, y: 0 };
-    contentScrollRef.current?.scrollTo({ x: 0, y: 0, animated: false });
-    scheduleGeometryMeasurement();
-  }, [presentation.id, scheduleGeometryMeasurement]);
-  useEffect(() => {
-    if (sheetContentScrollEnabled) return;
-    contentScrollOffsetRef.current = { x: 0, y: 0 };
-    contentScrollRef.current?.scrollTo({ x: 0, y: 0, animated: false });
-    scheduleGeometryMeasurement();
-  }, [scheduleGeometryMeasurement, sheetContentScrollEnabled]);
   const pendingCallerDismissRequestId = pendingTimeEntrySheetDismissRequestId({
     dismissRequestId,
     handledDismissRequestId: handledDismissRequestIdRef.current,
@@ -1388,7 +1373,8 @@ export function ActiveTimerEditSheet({
     overlayMeasuredForCurrentContent &&
     overlayRenderState?.contentMeasured &&
     overlayRenderState.containerVisible &&
-    overlayRenderState.renderedHeight > 0
+    overlayRenderState.renderedHeight > 0 &&
+    overlayRenderState.renderedHeight <= overlayGeometry.maxHeight
   );
   const visualStateReady = timeEntrySheetVisualReadiness({
     baseSheetRect: telemetryBaseRect,
@@ -1457,10 +1443,8 @@ export function ActiveTimerEditSheet({
     reduceMotion,
     ready: qaReady,
     keyboardInset,
-    contentHeight,
-    contentViewportHeight,
-    sheetContentScrollable,
-    sheetContentScrollEnabled,
+    formScrollEnabled: false,
+    layoutDensity,
     hashtagPanelMounted: true,
     hashtagPanelVisible,
     tagSessionActiveHashtag: tagSession.activeHashtag,
@@ -1905,7 +1889,7 @@ export function ActiveTimerEditSheet({
     armKeyboardConfirmationWatchdog(sessionToken);
   }
 
-  function selectHashtag(tagName: string) {
+  async function selectHashtag(tagName: string) {
     const currentText = descriptionValueRef.current;
     const currentSelection = descriptionSelectionRef.current;
     const currentActiveHashtag = currentSelection.start === currentSelection.end
@@ -1914,7 +1898,9 @@ export function ActiveTimerEditSheet({
     if (!currentActiveHashtag) return;
     const normalized = normalizeTagName(tagName);
     const existing = tags.find((tag) => tag.normalizedName === normalized.normalizedName);
-    if (selectedNormalizedTagNames.has(normalized.normalizedName)) {
+    const wasSelected = selectedNormalizedTagNames.has(normalized.normalizedName);
+    const shouldPersistNewTag = !existing && !wasSelected;
+    if (wasSelected) {
       setSelectedTagNames((current) => current.filter(
         (name) => normalizeTagName(name).normalizedName !== normalized.normalizedName
       ));
@@ -1930,6 +1916,48 @@ export function ActiveTimerEditSheet({
     transitionTagSession({ type: "hashtag_consumed", presentationId: presentation.id });
     dispatchSheetEvent({ type: "suggestion_selected", presentationId: presentation.id });
     setValidationError(null);
+
+    if (!shouldPersistNewTag) return;
+    tagCreationSequenceRef.current += 1;
+    const creationSequence = tagCreationSequenceRef.current;
+    const createdTag = await onCreateTag(normalized.name);
+    if (
+      creationSequence !== tagCreationSequenceRef.current ||
+      presentation.id !== presentationRef.current.id ||
+      !visible
+    ) return;
+    if (createdTag) {
+      setSelectedTagNames((current) => current.map((name) => (
+        normalizeTagName(name).normalizedName === normalized.normalizedName
+          ? createdTag.name
+          : name
+      )));
+      return;
+    }
+
+    setSelectedTagNames((current) => current.filter(
+      (name) => normalizeTagName(name).normalizedName !== normalized.normalizedName
+    ));
+    if (
+      descriptionValueRef.current === replacement.text &&
+      descriptionSelectionRef.current.start === replacement.caret &&
+      descriptionSelectionRef.current.end === replacement.caret
+    ) {
+      commitDescriptionEditorState(currentText, currentSelection, true);
+      transitionTagSession({
+        type: "hashtag_changed",
+        active: true,
+        presentationId: presentation.id,
+        requestFocus: true
+      });
+      dispatchSheetEvent({
+        type: "description_query_changed",
+        presentationId: presentation.id,
+        queryActive: currentText.trim().length > 0
+      });
+    }
+    setValidationError("Tag was not created. Check your connection and try again.");
+    AccessibilityInfo.announceForAccessibility("Tag was not created. Try again.");
   }
 
   function startTagEntry() {
@@ -1997,7 +2025,25 @@ export function ActiveTimerEditSheet({
     Keyboard.dismiss();
   }
 
+  function closeDatePickerAfterTouch() {
+    setDatePickerOpen(false);
+    dispatchSheetEvent({ type: "date_picker_closed", presentationId: presentation.id });
+    setDatePickerDismissGuarded(true);
+    if (datePickerDismissGuardFrameRef.current !== null) {
+      cancelAnimationFrame(datePickerDismissGuardFrameRef.current);
+    }
+    // Keep the underlying pan disabled until the selecting touch has finished
+    // propagating through React Native's gesture graph.
+    datePickerDismissGuardFrameRef.current = requestAnimationFrame(() => {
+      datePickerDismissGuardFrameRef.current = requestAnimationFrame(() => {
+        datePickerDismissGuardFrameRef.current = null;
+        setDatePickerDismissGuarded(false);
+      });
+    });
+  }
+
   function openStartPicker() {
+    setDatePickerDismissGuarded(false);
     dismissTransientEditingSurfaces();
     dispatchSheetEvent({ type: "date_picker_requested", presentationId: presentation.id });
     const currentStart = parsedStart.date ?? fallbackStartAt();
@@ -2008,6 +2054,7 @@ export function ActiveTimerEditSheet({
   }
 
   function openEndPicker() {
+    setDatePickerDismissGuarded(false);
     dismissTransientEditingSurfaces();
     dispatchSheetEvent({ type: "date_picker_requested", presentationId: presentation.id });
     const currentEnd = parsedStop.date ?? parsedStart.date ?? fallbackStartAt();
@@ -2033,8 +2080,7 @@ export function ActiveTimerEditSheet({
       setDraftRevision((current) => current + 1);
       setPickerStartAt(parsedDate);
       setStoppedDateText(formatDateInput(parsedDate));
-      setDatePickerOpen(false);
-      dispatchSheetEvent({ type: "date_picker_closed", presentationId: presentation.id });
+      closeDatePickerAfterTouch();
       setValidationError(null);
       return;
     }
@@ -2054,8 +2100,7 @@ export function ActiveTimerEditSheet({
     setPickerStartAt(parsedDate);
     setDateText(formatDateInput(parsedDate));
     if (isRunningMode) setStartTimeEdited(true);
-    setDatePickerOpen(false);
-    dispatchSheetEvent({ type: "date_picker_closed", presentationId: presentation.id });
+    closeDatePickerAfterTouch();
     setValidationError(null);
   }
 
@@ -2135,7 +2180,7 @@ export function ActiveTimerEditSheet({
               accessibilityLabel={isRunningMode ? "Edit timer" : sheetTitle}
               backdropAccessibilityLabel={cancelLabel}
               backdropStyle={styles.sheetBackdrop}
-              disabled={busy || datePickerOpen}
+              disabled={busy || datePickerOpen || datePickerDismissGuarded}
               dismissGestureRef={sheetDismissGestureRef}
               handleStyle={styles.sheetHandle}
               keyboardInset={keyboardInset}
@@ -2231,31 +2276,21 @@ export function ActiveTimerEditSheet({
               {isRunningMode ? timeEntryHero : null}
 
               <ScrollView
-                ref={contentScrollRef}
-                alwaysBounceVertical={sheetContentScrollable}
-                bounces={sheetContentScrollable}
+                alwaysBounceVertical={false}
+                bounces={false}
                 contentContainerStyle={[
                   styles.activeEditContent,
-                  sheetContentScrollEnabled && keyboardLayout.keyboardOpen
-                    ? { paddingBottom: keyboardLayout.contentPaddingBottom }
-                    : null
+                  layoutDensity === "compact" ? styles.activeEditContentCompact : null,
+                  layoutDensity === "condensed" ? styles.activeEditContentCondensed : null
                 ]}
                 keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
                 keyboardShouldPersistTaps="handled"
                 onLayout={(event) => {
                   const { height, width, x, y } = event.nativeEvent.layout;
-                  setContentViewportHeight(height);
                   scrollViewportLayoutRef.current = { height, width, x, y };
                   scheduleGeometryMeasurement();
                 }}
-                onContentSizeChange={(_width, height) => setContentHeight(height)}
-                onScroll={(event) => {
-                  const { x, y } = event.nativeEvent.contentOffset;
-                  contentScrollOffsetRef.current = { x, y };
-                  scheduleGeometryMeasurement();
-                }}
-                scrollEventThrottle={16}
-                scrollEnabled={sheetContentScrollEnabled}
+                scrollEnabled={false}
                 showsVerticalScrollIndicator={false}
                 style={[
                   styles.activeEditScroller,
@@ -2265,6 +2300,8 @@ export function ActiveTimerEditSheet({
               >
                 <View style={[
                   styles.activeEditSection,
+                  layoutDensity === "compact" ? styles.activeEditSectionCompact : null,
+                  layoutDensity === "condensed" ? styles.activeEditSectionCondensed : null,
                   hashtagPanelVisible ? styles.activeEditTagSectionOpen : null
                 ]} onLayout={(event) => {
                   const { height, width, x, y } = event.nativeEvent.layout;
@@ -2388,7 +2425,8 @@ export function ActiveTimerEditSheet({
                         });
                         dispatchSheetEvent({
                           type: "description_query_changed",
-                          presentationId: presentation.id
+                          presentationId: presentation.id,
+                          queryActive: value.trim().length > 0
                         });
                         setValidationError(null);
                       }}
@@ -2409,7 +2447,6 @@ export function ActiveTimerEditSheet({
                       <View style={styles.tagAutocompleteHeader}>
                         <Text style={styles.tagAutocompleteTitle}>TAGS</Text>
                       </View>
-                      <View pointerEvents="none" style={styles.tagAutocompleteDivider} />
                       <ScrollView
                         keyboardShouldPersistTaps="always"
                         nestedScrollEnabled
@@ -2423,7 +2460,9 @@ export function ActiveTimerEditSheet({
                             disabled={busy}
                             isFirst={index === 0}
                             label={tag.name}
-                            onPress={() => selectHashtag(tag.name)}
+                            onPress={() => {
+                              void selectHashtag(tag.name);
+                            }}
                             styles={styles}
                           />
                         ))}
@@ -2434,7 +2473,9 @@ export function ActiveTimerEditSheet({
                             disabled={busy}
                             isFirst={matchingTags.length === 0}
                             label={`Create “${createTagName}”`}
-                            onPress={() => selectHashtag(createTagName)}
+                            onPress={() => {
+                              void selectHashtag(createTagName);
+                            }}
                             styles={styles}
                           />
                         ) : null}
@@ -2490,10 +2531,18 @@ export function ActiveTimerEditSheet({
                   importantForAccessibility={
                     suggestionsObscureFormAccessibility ? "no-hide-descendants" : "auto"
                   }
-                  style={styles.activeEditObscuredContent}
+                  style={[
+                    styles.activeEditObscuredContent,
+                    layoutDensity === "compact" ? styles.activeEditObscuredContentCompact : null,
+                    layoutDensity === "condensed" ? styles.activeEditObscuredContentCondensed : null
+                  ]}
                   testID="time-entry-sheet-obscured-form-content"
                 >
-                <View style={styles.activeEditSection}>
+                <View style={[
+                  styles.activeEditSection,
+                  layoutDensity === "compact" ? styles.activeEditSectionCompact : null,
+                  layoutDensity === "condensed" ? styles.activeEditSectionCondensed : null
+                ]}>
                   <Text style={styles.activeEditSectionLabel}>Category</Text>
                   <View style={styles.activeEditCategoryViewport}>
                     <ScrollView
@@ -2535,7 +2584,11 @@ export function ActiveTimerEditSheet({
                   </View>
                 </View>
 
-                <View style={styles.activeEditSection}>
+                <View style={[
+                  styles.activeEditSection,
+                  layoutDensity === "compact" ? styles.activeEditSectionCompact : null,
+                  layoutDensity === "condensed" ? styles.activeEditSectionCondensed : null
+                ]}>
                   <View style={[
                     styles.activeEditTimeGroups,
                     windowDimensions.fontScale >= 1.6 ? styles.activeEditTimeGroupsStacked : null
@@ -2650,6 +2703,7 @@ export function ActiveTimerEditSheet({
                   disabled={busy}
                   endMs={parsedStop.date?.getTime() ?? draftEndMs}
                   lastStoppedAt={lastStoppedAt}
+                  layoutDensity={layoutDensity}
                   mode={isRunningMode ? "running" : "stopped"}
                   nowMs={dialNowMs}
                   onChange={applyDialInterval}
@@ -2739,11 +2793,7 @@ export function ActiveTimerEditSheet({
         </View>
         <FloatingDatePicker
           onClose={() => {
-            setDatePickerOpen(false);
-            dispatchSheetEvent({
-              type: "date_picker_closed",
-              presentationId: presentation.id
-            });
+            closeDatePickerAfterTouch();
           }}
           onSelect={selectDate}
           selectedDate={pickerDate}

@@ -231,23 +231,23 @@ final class DayframeSheetQATests: XCTestCase {
       state: queried
     )
     field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 3))
-    let longResults = try waitForSheet("long Suggestions restored") { state in
+    let clearedQuery = try waitForSheet("empty query keeps Suggestions closed") { state in
       SheetQAValue.string(state, "keyboardPhase") == "visible"
-        && SheetQAValue.string(state, "suggestionsPhase") == "visible"
-        && SheetQAValue.bool(state, "suggestionsAreVisiblyRenderable") == true
-        && SheetQAValue.int(state, "overlayMeasuredSuggestionCount") == 12
+        && SheetQAValue.bool(state, "descriptionFocused") == true
+        && SheetQAValue.string(state, "suggestionsPhase") == "closed"
+        && SheetQAValue.bool(state, "suggestionsAreVisiblyRenderable") == false
     }
-    let longResultsSheet = try requiredRect(longResults, key: "sheetRect")
-    let longResultsDescription = try requiredRect(longResults, key: "descriptionRect")
+    let clearedQuerySheet = try requiredRect(clearedQuery, key: "sheetRect")
+    let clearedQueryDescription = try requiredRect(clearedQuery, key: "descriptionRect")
     try require(
-      initialSheet.isWithin(1, of: longResultsSheet),
-      "Restoring the long Suggestions result set changed live sheet geometry by more than one point.",
-      state: longResults
+      initialSheet.isWithin(1, of: clearedQuerySheet),
+      "Clearing the Suggestion query changed live sheet geometry by more than one point.",
+      state: clearedQuery
     )
     try require(
-      initialDescription.isWithin(1, of: longResultsDescription),
-      "Restoring the long Suggestions result set moved Description by more than one point.",
-      state: longResults
+      initialDescription.isWithin(1, of: clearedQueryDescription),
+      "Clearing the Suggestion query moved Description by more than one point.",
+      state: clearedQuery
     )
     field.typeText("bau")
     _ = try waitForSheet("Bauhaus query restored for selection") { state in
@@ -291,8 +291,8 @@ final class DayframeSheetQATests: XCTestCase {
         "initialDescriptionRect": initialDescription.json,
         "queriedSheetRect": queriedSheet.json,
         "queriedDescriptionRect": queriedDescription.json,
-        "longResultsSheetRect": longResultsSheet.json,
-        "longResultsDescriptionRect": longResultsDescription.json
+        "clearedQuerySheetRect": clearedQuerySheet.json,
+        "clearedQueryDescriptionRect": clearedQueryDescription.json
       ]
     )
     try stopRunningTimer(step: "blank_suggestion_stop", iteration: iteration)
@@ -306,6 +306,7 @@ final class DayframeSheetQATests: XCTestCase {
         && SheetQAValue.string(state, "suggestionsPhase") == "closed"
     }
     try assertPresentedSheet(initial, harness: harness, reason: "existing_active_timer")
+    try assertRunningTimerLayout(state: initial)
     try require(SheetQAValue.int(initial, "focusCommandCount") == 0, "Existing blank timer auto-focused Description.", state: initial)
     try require(SheetQAValue.int(initial, "inputFocusCount") == 0, "Existing blank timer emitted an input focus event.", state: initial)
     reporter.record("checkpoint", step: "existing_blank_no_autofocus", iteration: iteration, success: true, state: initial)
@@ -342,21 +343,20 @@ final class DayframeSheetQATests: XCTestCase {
     let focusedSheet = try requiredRect(focused, key: "sheetRect")
     let focusedDescription = try requiredRect(focused, key: "descriptionRect")
     try replaceDescription(with: "")
-    let suggestions = try waitForSheet("described existing timer empty-query Suggestions") { state in
-      SheetQAValue.string(state, "suggestionsPhase") == "visible"
-        && self.suggestionsAreVisiblyRenderable(state)
+    let suggestions = try waitForSheet("described existing timer empty query") { state in
+      SheetQAValue.string(state, "keyboardPhase") == "visible"
+        && SheetQAValue.string(state, "suggestionsPhase") == "closed"
     }
-    try assertSuggestionsOverlayVisible(suggestions, context: "Existing described explicit focus")
     let suggestionSheet = try requiredRect(suggestions, key: "sheetRect")
     let suggestionDescription = try requiredRect(suggestions, key: "descriptionRect")
     try require(
       focusedSheet.isWithin(1, of: suggestionSheet),
-      "Opening Suggestions changed existing-timer live sheet geometry by more than one point.",
+      "Clearing Description changed existing-timer live sheet geometry by more than one point.",
       state: suggestions
     )
     try require(
       focusedDescription.isWithin(1, of: suggestionDescription),
-      "Opening Suggestions moved existing-timer Description by more than one point.",
+      "Clearing Description moved the existing-timer Description by more than one point.",
       state: suggestions
     )
     reporter.record("checkpoint", step: "existing_described_explicit_focus", iteration: iteration, success: true, state: suggestions)
@@ -370,6 +370,7 @@ final class DayframeSheetQATests: XCTestCase {
         && SheetQAValue.string(state, "keyboardPhase") == "hidden"
     }
     try assertPresentedSheet(initial, harness: harness, reason: "completed_entry")
+    try assertStoppedTimerLayout(state: initial, expectsDelete: true)
     try require(SheetQAValue.int(initial, "focusCommandCount") == 0, "Completed edit auto-focused Description.", state: initial)
     let temporalBefore = try temporalSnapshot()
     try tap(SheetQAIdentifiers.description)
@@ -437,6 +438,31 @@ final class DayframeSheetQATests: XCTestCase {
       preservedTime == originalTime,
       "Selecting a new Add past time date changed the time from \(originalTime) to \(preservedTime ?? "<nil>")."
     )
+    var endTimeField = element(SheetQAIdentifiers.endTime)
+    try waitForElement(endTimeField, description: "Add past time end-time field")
+    guard let originalEndTime = elementValue(endTimeField), !originalEndTime.isEmpty else {
+      throw SheetQAFailure("Add past time did not expose a readable end-time value.")
+    }
+    try tap(SheetQAIdentifiers.endDate, scrollIn: SheetQAIdentifiers.sheetForm)
+    let endPicker = elementWithLabel("Choose a date")
+    try waitForElement(endPicker, description: "Add past time end-date picker")
+    let endPreviousMonth = elementWithLabel("Previous month")
+    try require(endPreviousMonth.exists && endPreviousMonth.isHittable, "End date picker's Previous month action was not hittable.")
+    endPreviousMonth.tap()
+    let endJulyFifteenth = try waitForElementMatchingLabel(
+      containsAll: ["15", "July", "2026"],
+      type: .button,
+      description: "15 July 2026 end-date-picker day"
+    )
+    endJulyFifteenth.tap()
+    try waitForElementToDisappear(endPicker, description: "end date picker after selecting 15 July")
+    endTimeField = element(SheetQAIdentifiers.endTime)
+    try waitForElement(endTimeField, description: "Add past time end-time field after date selection")
+    try require(
+      elementValue(endTimeField) == originalEndTime,
+      "Selecting a new Add past time end date changed its time."
+    )
+
     try tap(SheetQAIdentifiers.startTime, scrollIn: SheetQAIdentifiers.sheetForm)
     try replaceFieldValue(timeField, with: "16:30")
     try waitForElementValue(timeField, equals: "16:30", description: "edited Add past time start time")
@@ -448,6 +474,7 @@ final class DayframeSheetQATests: XCTestCase {
     _ = try waitForSheet("Add past time keyboard dismissal") { state in
       SheetQAValue.string(state, "keyboardPhase") == "hidden"
     }
+    try assertStoppedTimerLayout(state: try sheetState(), expectsDelete: true)
     let temporalBeforeSuggestion = try temporalSnapshot()
     try bringDescriptionIntoView()
     let selected = try selectBauhausSuggestion()
@@ -516,14 +543,19 @@ final class DayframeSheetQATests: XCTestCase {
     try assertSuggestionsOverlayVisible(opened, context: "Keyboard drag starting state")
     reporter.record(
       "expected_transition_started",
-      step: "keyboard_drag_start",
+      step: "keyboard_dismissal_start",
       iteration: iteration,
       success: true,
       state: opened,
       details: ["expectedTransition": true]
     )
     _ = try performKeyboardDragAndReopen(stepPrefix: "keyboard", iteration: iteration)
-    try verifyPinnedActionsDuringScrolledSuggestionGeometry(iteration: iteration)
+    try tap("historical-suggestions-close")
+    _ = try waitForSheet("fixed form after keyboard dismissal") { state in
+      SheetQAValue.string(state, "keyboardPhase") == "hidden"
+        && SheetQAValue.string(state, "suggestionsPhase") == "closed"
+    }
+    try verifyFixedFormGeometry(iteration: iteration)
     try performBackgroundForegroundRecovery(iteration: iteration)
     try dismissWithDone(step: "keyboard_flow_exit", iteration: iteration)
   }
@@ -569,6 +601,7 @@ final class DayframeSheetQATests: XCTestCase {
         && SheetQAValue.bool(state, "hashtagPanelVisible") == false
         && SheetQAValue.bool(state, "tagSessionActiveHashtag") == false
         && SheetQAValue.isNull(state, "tagFocusRequestId")
+        && SheetQAValue.string(state, "suggestionsPhase") == "closed"
     }
     try assertContinuousDescriptionKeyboard(
       duration: 0.8,
@@ -613,11 +646,45 @@ final class DayframeSheetQATests: XCTestCase {
         && SheetQAValue.bool(state, "hashtagPanelVisible") == false
         && SheetQAValue.bool(state, "tagSessionActiveHashtag") == false
         && SheetQAValue.isNull(state, "tagFocusRequestId")
+        && SheetQAValue.string(state, "suggestionsPhase") == "closed"
     }
     try assertContinuousDescriptionKeyboard(
       duration: 0.8,
       context: "Add a tag hashtag deletion",
       state: shortcutCleared
+    )
+    field.typeText("bau")
+    _ = try waitForSheet("matching Suggestions after tag exit") { state in
+      SheetQAValue.string(state, "keyboardPhase") == "visible"
+        && SheetQAValue.bool(state, "descriptionFocused") == true
+        && SheetQAValue.string(state, "suggestionsPhase") == "visible"
+        && SheetQAValue.int(state, "overlayMeasuredSuggestionCount") == 1
+        && self.suggestionsAreVisiblyRenderable(state)
+    }
+    field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 3))
+    _ = try waitForSheet("matching Suggestions cleared") { state in
+      SheetQAValue.string(state, "keyboardPhase") == "visible"
+        && SheetQAValue.string(state, "suggestionsPhase") == "closed"
+    }
+    addTag.tap()
+    _ = try waitForSheet("new tag chooser") { state in
+      SheetQAValue.bool(state, "hashtagPanelVisible") == true
+        && SheetQAValue.string(state, "keyboardPhase") == "visible"
+    }
+    field.typeText("Persisted")
+    let createPersisted = elementWithLabel("Create new tag, Persisted")
+    try waitForElement(createPersisted, description: "Create Persisted tag row")
+    createPersisted.tap()
+    let persisted = try waitForHarness("new tag immediate persistence") { state in
+      SheetQAValue.int(state, "tagCreateCount") == 1
+        && (state["tagNames"] as? [String])?.contains("Persisted") == true
+    }
+    reporter.record(
+      "checkpoint",
+      step: "tag_created_before_entry_save",
+      iteration: iteration,
+      success: true,
+      state: persisted
     )
     try tap(SheetQAIdentifiers.hero)
     _ = try waitForSheet("tag flow explicit focus release") { state in
@@ -626,7 +693,34 @@ final class DayframeSheetQATests: XCTestCase {
         && SheetQAValue.bool(state, "hashtagPanelVisible") == false
         && SheetQAValue.bool(state, "tagSessionActiveHashtag") == false
     }
-    try dismissWithCommittedSwipe(step: "tag_flow_exit", iteration: iteration)
+    try performCommittedSwipe()
+    let discard = app.alerts["Discard changes?"].buttons["Discard"].firstMatch
+    try waitForElement(discard, description: "Discard dirty tag draft confirmation")
+    discard.tap()
+    let discarded = try waitForHarness("tag draft discarded") { state in
+      SheetQAValue.bool(state, "visible") == false
+        && SheetQAValue.int(state, "tagCreateCount") == 1
+        && (state["tagNames"] as? [String])?.contains("Persisted") == true
+    }
+    reporter.record(
+      "checkpoint",
+      step: "tag_survived_entry_discard",
+      iteration: iteration,
+      success: true,
+      state: discarded
+    )
+    try tap(SheetQAIdentifiers.refresh)
+    let refreshed = try waitForHarness("persisted tag bootstrap refresh") { state in
+      SheetQAValue.int(state, "refreshCount") == 1
+        && (state["tagNames"] as? [String])?.contains("Persisted") == true
+    }
+    reporter.record(
+      "checkpoint",
+      step: "tag_survived_bootstrap_refresh",
+      iteration: iteration,
+      success: true,
+      state: refreshed
+    )
   }
 
   private func assertContinuousDescriptionKeyboard(
@@ -649,76 +743,43 @@ final class DayframeSheetQATests: XCTestCase {
     }
   }
 
-  private func verifyPinnedActionsDuringScrolledSuggestionGeometry(iteration: Int?) throws {
+  private func verifyFixedFormGeometry(iteration: Int?) throws {
     let before = try sheetState()
     let presentationID = try requiredInt(before, key: "presentationId")
+    let form = element(SheetQAIdentifiers.sheetForm)
+    try require(form.exists && form.isHittable, "Fixed sheet form was not hittable.", state: before)
+    let beforeFrame = form.frame
     reporter.record(
       "expected_transition_started",
-      step: "suggestions_anchor_scroll_start",
+      step: "fixed_form_swipe_start",
       iteration: iteration,
       success: true,
       state: before,
       details: ["expectedTransition": true]
     )
-
-    let form = element(SheetQAIdentifiers.sheetForm)
-    try require(form.exists && form.isHittable, "Sheet form was not hittable for the pinned-action scroll check.", state: before)
     form.swipeUp(velocity: .slow)
-    let constrained = try waitForSheet("Description scrolled above the pinned-action boundary") { state in
-      guard
-        SheetQAValue.int(state, "presentationId") == presentationID,
-        let description = SheetQARect(state["descriptionRect"]),
-        let topBoundary = SheetQAValue.double(state, "overlayTopBoundary"),
-        let geometry = state["overlayGeometry"] as? SheetQAJSON,
-        let maxHeight = SheetQAValue.double(geometry, "maxHeight")
-      else {
-        return false
-      }
-      return description.y + description.height + 6 < topBoundary + 0.5
-        && maxHeight == 0
-        && SheetQAValue.bool(state, "overlayContainerVisible") == false
-        && SheetQAValue.bool(state, "obscuredFormAccessibilityHidden") == false
-    }
+    pollRunLoop()
+    let constrained = try sheetState()
     try require(
-      element(SheetQAIdentifiers.done).exists && element(SheetQAIdentifiers.done).isHittable,
-      "Scrolling Description above its overlay boundary obscured the pinned Done action.",
+      SheetQAValue.int(constrained, "presentationId") == presentationID
+        && SheetQAValue.bool(constrained, "formScrollEnabled") == false,
+      "A vertical swipe changed the fixed form's presentation or scroll contract.",
       state: constrained
     )
     try require(
-      element(SheetQAIdentifiers.stop).exists && element(SheetQAIdentifiers.stop).isHittable,
-      "Scrolling Description above its overlay boundary obscured the pinned Stop action.",
-      state: constrained
-    )
-    try require(
-      element(SheetQAIdentifiers.startDate).exists,
-      "A non-renderable Suggestions overlay left the post-Description form hidden from accessibility.",
+      abs(form.frame.origin.x - beforeFrame.origin.x) <= 1
+        && abs(form.frame.origin.y - beforeFrame.origin.y) <= 1
+        && abs(form.frame.width - beforeFrame.width) <= 1
+        && abs(form.frame.height - beforeFrame.height) <= 1,
+      "A vertical swipe moved the fixed timer form.",
       state: constrained
     )
     reporter.record(
       "checkpoint",
-      step: "suggestions_hidden_above_pinned_actions",
+      step: "fixed_form_did_not_scroll",
       iteration: iteration,
       success: true,
       state: constrained
-    )
-
-    try bringDescriptionIntoView()
-    let description = element(SheetQAIdentifiers.description)
-    description.tap()
-    let restored = try waitForSheet("Suggestions restored below pinned actions") { state in
-      SheetQAValue.int(state, "presentationId") == presentationID
-        && SheetQAValue.bool(state, "ready") == true
-        && SheetQAValue.string(state, "keyboardPhase") == "visible"
-        && SheetQAValue.string(state, "suggestionsPhase") == "visible"
-        && self.suggestionsAreVisiblyRenderable(state)
-    }
-    try assertSuggestionsOverlayVisible(restored, context: "Pinned-action scroll restoration")
-    reporter.record(
-      "checkpoint",
-      step: "suggestions_restored_below_pinned_actions",
-      iteration: iteration,
-      success: true,
-      state: restored
     )
   }
 
@@ -1394,6 +1455,11 @@ final class DayframeSheetQATests: XCTestCase {
       state: sheet
     )
     try require(sheet["overlayGeometry"] is SheetQAJSON, "Historical overlay geometry was absent.", state: sheet)
+    try require(
+      SheetQAValue.bool(sheet, "formScrollEnabled") == false,
+      "Timer sheet enabled vertical form scrolling.",
+      state: sheet
+    )
     if suggestionsExpectedOnPresentation(reason: reason) {
       try require(
         SheetQAValue.string(sheet, "suggestionsPhase") == "visible",
@@ -1405,6 +1471,58 @@ final class DayframeSheetQATests: XCTestCase {
       try assertSuggestionsOverlayVisible(sheet, context: reason)
     }
     try assertGuardrailTelemetry(sheet)
+  }
+
+  private func assertRunningTimerLayout(state: SheetQAJSON) throws {
+    let sheet = element(SheetQAIdentifiers.sheet)
+    let start = element(SheetQAIdentifiers.startTime)
+    let setLastStop = element(SheetQAIdentifiers.setLastStopTime)
+    let dial = element(SheetQAIdentifiers.durationDial)
+    let delete = element(SheetQAIdentifiers.delete)
+    for (candidate, description) in [
+      (sheet, "running timer sheet"),
+      (start, "running Start field"),
+      (setLastStop, "SET TO LAST STOP TIME action"),
+      (dial, "running duration dial"),
+      (delete, "running Delete entry action")
+    ] {
+      try waitForElement(candidate, description: description)
+    }
+    try require(setLastStop.label == "SET TO LAST STOP TIME", "Running last-stop action was not capitalised.", state: state)
+    try require(setLastStop.frame.minY >= start.frame.maxY - 1, "Running last-stop action was not beneath Start.", state: state)
+    try require(!element(SheetQAIdentifiers.roundStopTime).exists, "Running sheet exposed ROUND STOP TIME.", state: state)
+    try require(!element(SheetQAIdentifiers.roundDuration).exists, "Running sheet exposed Round duration.", state: state)
+    try require(delete.frame.minY >= dial.frame.maxY - 1, "Running Delete entry was not below the dial.", state: state)
+    try require(sheet.frame.contains(delete.frame), "Running Delete entry was outside the single-screen sheet.", state: state)
+  }
+
+  private func assertStoppedTimerLayout(state: SheetQAJSON, expectsDelete: Bool) throws {
+    let sheet = element(SheetQAIdentifiers.sheet)
+    let end = element("time-entry-end-time")
+    let roundStop = element(SheetQAIdentifiers.roundStopTime)
+    let dial = element(SheetQAIdentifiers.durationDial)
+    let roundDuration = element(SheetQAIdentifiers.roundDuration)
+    for (candidate, description) in [
+      (sheet, "stopped timer sheet"),
+      (end, "stopped End field"),
+      (roundStop, "ROUND STOP TIME action"),
+      (dial, "stopped duration dial"),
+      (roundDuration, "Round duration action")
+    ] {
+      try waitForElement(candidate, description: description)
+    }
+    try require(roundStop.label == "ROUND STOP TIME", "Stopped last-stop action retained button-style sentence casing.", state: state)
+    try require(roundStop.frame.minY >= end.frame.maxY - 1, "ROUND STOP TIME was not beneath End.", state: state)
+    try require(dial.frame.contains(roundDuration.frame), "Round duration was not inside the dial.", state: state)
+    try require(sheet.frame.contains(roundStop.frame) && sheet.frame.contains(roundDuration.frame), "Stopped timer controls escaped the single-screen sheet.", state: state)
+    let delete = element(SheetQAIdentifiers.delete)
+    if expectsDelete {
+      try waitForElement(delete, description: "stopped-sheet Delete entry action")
+      try require(delete.frame.minY >= dial.frame.maxY - 1, "Stopped-sheet Delete entry was not below the dial.", state: state)
+      try require(sheet.frame.contains(delete.frame), "Stopped-sheet Delete entry was outside the single-screen sheet.", state: state)
+    } else {
+      try require(!delete.exists, "Add Past Time unexpectedly exposed Delete entry.", state: state)
+    }
   }
 
   private func dismissWithDone(step: String, iteration: Int? = nil) throws {
@@ -1555,8 +1673,6 @@ final class DayframeSheetQATests: XCTestCase {
     let beforeSheet = try sheetState()
     let interactiveFramesBefore = try requiredInt(beforeSheet, key: "interactiveKeyboardFrameCount")
     let inputFocusCountBefore = try requiredInt(beforeSheet, key: "inputFocusCount")
-    let form = element(SheetQAIdentifiers.sheetForm)
-    try require(form.exists && form.isHittable, "Sheet form was not hittable for interactive keyboard dismissal.")
     let descriptionField = element(SheetQAIdentifiers.description)
     try waitForElement(descriptionField, description: "Description field for interactive keyboard dismissal")
     let descriptionFrame = descriptionField.frame
@@ -1584,23 +1700,20 @@ final class DayframeSheetQATests: XCTestCase {
     }
     var automationMode = "interactive_keyboard_frames"
     if partial == nil {
-      // XCUITest does not expose an API for holding two independent fingers or
-      // pausing a UIScrollView drag mid-flight. On runtimes where its synthetic
-      // coordinate drag produces no keyboard frame notifications, exercise the
-      // nearest real Simulator gesture and prove the exact in-flight ordering in
-      // the reducer suite instead of fabricating native telemetry.
-      form.swipeDown(velocity: .slow)
+      // The fixed, non-scrolling form intentionally no longer owns interactive
+      // keyboard dismissal. Exercise the visible Suggestions close surface.
+      try tap("historical-suggestions-close")
       partial = try observeSheet(timeout: 2) { state in
         SheetQAValue.int(state, "presentationId") == presentationID
           && SheetQAValue.string(state, "keyboardPhase") == "hidden"
       }
-      automationMode = "xcui_full_swipe_down_fallback"
+      automationMode = "outside_tap_fallback"
     }
     if partial == nil {
       let keyboardDone = app.keyboards.buttons["Done"].firstMatch
       try require(
         keyboardDone.exists && keyboardDone.isHittable,
-        "XCUI keyboard drag and swipe fallback did not dismiss the keyboard, and Done was unavailable."
+        "XCUI keyboard drag and outside-tap fallback did not dismiss the keyboard, and Done was unavailable."
       )
       keyboardDone.tap()
       partial = try waitForSheet("keyboard dismissal fallback") { state in

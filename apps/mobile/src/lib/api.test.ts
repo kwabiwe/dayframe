@@ -55,6 +55,7 @@ const {
   createCategory,
   createManualTimeEntry,
   createPlace,
+  createTag,
   deleteTimeEntry,
   deletePlace,
   dismissReviewItem,
@@ -1100,6 +1101,30 @@ describe("mobile API client", () => {
           color: "lime",
           isPinned: true
         })
+      })
+    );
+  });
+
+  it("creates tags immediately through the hosted API", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({
+      ok: true,
+      tag: {
+        id: "50000000-0000-4000-8000-000000000001",
+        name: "Planning",
+        normalizedName: "planning"
+      }
+    }, 201)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await createTag("Planning");
+
+    expect(result.tag.normalizedName).toBe("planning");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/tags",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ name: "Planning" })
       })
     );
   });

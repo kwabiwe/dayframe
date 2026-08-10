@@ -2113,8 +2113,22 @@ function createStyles(theme: MobileTheme) {
       gap: 10,
       paddingBottom: 8
     },
+    activeEditContentCompact: {
+      gap: 7,
+      paddingBottom: 2
+    },
+    activeEditContentCondensed: {
+      gap: 5,
+      paddingBottom: 0
+    },
     activeEditObscuredContent: {
       gap: 10
+    },
+    activeEditObscuredContentCompact: {
+      gap: 7
+    },
+    activeEditObscuredContentCondensed: {
+      gap: 5
     },
     activeEditDeleteButton: {
       alignSelf: "center",
@@ -2131,8 +2145,9 @@ function createStyles(theme: MobileTheme) {
       fontWeight: "600"
     },
     durationDialSection: {
+      position: "relative",
       alignItems: "stretch",
-      gap: 8
+      minHeight: 0
     },
     durationDialNativeView: {
       alignSelf: "center",
@@ -2142,25 +2157,67 @@ function createStyles(theme: MobileTheme) {
       backgroundColor: "transparent",
       overflow: "visible"
     },
-    durationDialQuickActions: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 8
+    durationDialNativeViewCompact: {
+      height: 236
     },
-    durationDialAction: {
+    durationDialNativeViewCondensed: {
+      height: 164
+    },
+    durationDialFieldActions: {
+      position: "absolute",
+      top: 0,
+      left: 0,
+      right: 0,
+      flexDirection: "row",
+      zIndex: 3,
+      elevation: 3
+    },
+    durationDialFieldActionStart: {
+      flex: 1,
+      minWidth: 0,
+      alignItems: "flex-start"
+    },
+    durationDialFieldActionEnd: {
+      flex: 1,
+      minWidth: 0,
+      alignItems: "flex-end"
+    },
+    durationDialFieldAction: {
       minHeight: 44,
-      borderRadius: 999,
-      backgroundColor: theme.surfaceMuted,
-      paddingHorizontal: 13,
+      maxWidth: "100%",
+      paddingHorizontal: 4,
       alignItems: "center",
       justifyContent: "center"
     },
-    durationDialActionText: {
+    durationDialFieldActionText: {
       color: theme.accentText,
       fontFamily: monoFont,
-      fontSize: 12,
+      fontSize: 10,
+      fontWeight: "600",
+      textAlign: "center"
+    },
+    durationDialInnerAction: {
+      position: "absolute",
+      top: "50%",
+      left: 0,
+      right: 0,
+      paddingTop: 18,
+      alignItems: "center",
+      zIndex: 4,
+      elevation: 4
+    },
+    durationDialInnerActionButton: {
+      minHeight: 36,
+      borderRadius: 999,
+      backgroundColor: theme.surfaceMuted,
+      paddingHorizontal: 12,
+      alignItems: "center",
+      justifyContent: "center"
+    },
+    durationDialInnerActionText: {
+      color: theme.accentText,
+      fontFamily: monoFont,
+      fontSize: 10,
       fontWeight: "600"
     },
     activeEditHeroRow: {
@@ -2192,6 +2249,12 @@ function createStyles(theme: MobileTheme) {
     },
     activeEditSection: {
       gap: 8
+    },
+    activeEditSectionCompact: {
+      gap: 6
+    },
+    activeEditSectionCondensed: {
+      gap: 4
     },
     activeEditTagSectionOpen: {
       zIndex: 20
@@ -2233,11 +2296,6 @@ function createStyles(theme: MobileTheme) {
       justifyContent: "space-between",
       paddingLeft: 12,
       backgroundColor: theme.surfaceMuted
-    },
-    historicalSuggestionsDivider: {
-      height: 1,
-      marginHorizontal: 12,
-      backgroundColor: theme.border
     },
     historicalSuggestionsCloseButton: {
       width: 44,
@@ -2362,11 +2420,6 @@ function createStyles(theme: MobileTheme) {
       fontWeight: "600",
       letterSpacing: 0.4,
       paddingHorizontal: 12
-    },
-    tagAutocompleteDivider: {
-      height: 1,
-      marginHorizontal: 12,
-      backgroundColor: theme.border
     },
     tagAutocompleteList: {
       maxHeight: 264

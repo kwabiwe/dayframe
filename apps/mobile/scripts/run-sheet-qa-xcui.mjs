@@ -35,6 +35,7 @@ const validFlows = new Set([
   "review",
   "journeys",
   "keyboard",
+  "tags",
   "swipe",
   "gestures",
   "failures",

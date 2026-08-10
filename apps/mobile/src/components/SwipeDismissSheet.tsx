@@ -130,6 +130,7 @@ function SwipeDismissSheet({
   const onPresentedRef = useRef(onPresented);
   const onStaleCallbackRef = useRef(onStaleCallback);
   const activePresentationIdRef = useRef(presentationId);
+  const disabledRef = useRef(disabled);
   const committedPresentationIdRef = useRef<number | null>(null);
   const dismissRequestInFlightRef = useRef<number | null>(null);
   const visiblePresentationRef = useRef<number | null>(null);
@@ -154,6 +155,7 @@ function SwipeDismissSheet({
   onPresentedRef.current = onPresented;
   onStaleCallbackRef.current = onStaleCallback;
   activePresentationIdRef.current = presentationId;
+  disabledRef.current = disabled;
   visibleRef.current = visible;
 
   useEffect(() => {
@@ -183,8 +185,12 @@ function SwipeDismissSheet({
     return true;
   }, []);
 
-  const approveDismissStart = useCallback((committedPresentationId: number) => {
+  const approveDismissStart = useCallback((
+    committedPresentationId: number,
+    gestureOwned: boolean
+  ) => {
     if (
+      (gestureOwned && disabledRef.current) ||
       committedPresentationId !== activePresentationIdRef.current ||
       !visibleRef.current
     ) {
@@ -269,7 +275,7 @@ function SwipeDismissSheet({
     }
     if (dismissRequestInFlightRef.current === committedPresentationId) return;
     dismissRequestInFlightRef.current = committedPresentationId;
-    if (!approveDismissStart(committedPresentationId)) {
+    if (!approveDismissStart(committedPresentationId, gestureOwned)) {
       dismissRequestInFlightRef.current = null;
       if (!gestureOwned) return;
       dismissCommitted.value = false;
@@ -345,6 +351,11 @@ function SwipeDismissSheet({
     presentationId,
     visible
   ]);
+
+  const requestBackdropDismiss = useCallback(() => {
+    if (disabledRef.current) return;
+    requestDismiss();
+  }, [requestDismiss]);
 
   useImperativeHandle(ref, () => ({ dismiss: requestDismiss }), [requestDismiss]);
 
@@ -554,7 +565,7 @@ function SwipeDismissSheet({
           accessibilityRole="button"
           accessibilityState={{ disabled }}
           disabled={disabled}
-          onPress={disabled ? undefined : requestDismiss}
+          onPress={disabled ? undefined : requestBackdropDismiss}
           style={BACKDROP_PRESSABLE_STYLE}
         />
       </Reanimated.View>
@@ -580,7 +591,7 @@ function SwipeDismissSheet({
               accessibilityLabel="Dismiss sheet"
               accessibilityRole="button"
               accessibilityState={{ disabled }}
-              onAccessibilityTap={disabled ? undefined : requestDismiss}
+              onAccessibilityTap={disabled ? undefined : requestBackdropDismiss}
               style={HANDLE_TOUCH_STYLE}
               testID={testID ? `${testID}-handle` : undefined}
             >

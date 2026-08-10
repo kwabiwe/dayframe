@@ -246,6 +246,10 @@ describe("sheet visual readiness", () => {
       ...readyGeometry,
       overlayRenderedHeight: 0
     })).toBe(false);
+    expect(timeEntrySheetVisualReadiness({
+      ...readyGeometry,
+      overlayRenderedHeight: readyGeometry.overlayGeometry.maxHeight + 1
+    })).toBe(false);
   });
 
   it("accepts an unfocused presentation only after Suggestions close", () => {
