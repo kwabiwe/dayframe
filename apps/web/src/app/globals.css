@@ -985,14 +985,18 @@ textarea.ui-control {
 }
 
 .timeline-inline-description {
-  display: grid;
+  position: relative;
+  display: inline-block;
+  width: max-content;
   min-width: 0;
   max-width: 100%;
   flex: 0 1 auto;
+  overflow: hidden;
   transition: flex-grow 180ms ease;
 }
 
 .timeline-inline-description.is-editing {
+  width: auto;
   flex: 1 1 auto;
 }
 
@@ -1010,7 +1014,8 @@ textarea.ui-control {
 }
 
 .timeline-inline-description-input {
-  grid-area: 1 / 1;
+  position: absolute;
+  inset: 0;
   width: 100%;
   min-width: 0;
   min-height: 28px;
@@ -1019,7 +1024,7 @@ textarea.ui-control {
 }
 
 .timeline-inline-description-measure {
-  grid-area: 1 / 1;
+  display: block;
   min-width: 0;
   min-height: 28px;
   overflow: hidden;
@@ -1061,16 +1066,15 @@ textarea.ui-control {
   display: inline-flex;
   min-height: 28px;
   align-items: center;
-  gap: 1px;
 }
 
 .timeline-inline-time-input {
-  width: 5.75ch;
-  min-width: 5.75ch;
+  width: 5ch;
+  min-width: 5ch;
   min-height: 28px;
-  padding: 0 2px;
+  padding: 0;
   font-variant-numeric: tabular-nums;
-  text-align: center;
+  text-align: left;
 }
 
 .timeline-inline-time.is-editing .timeline-inline-time-input {
@@ -1083,25 +1087,7 @@ textarea.ui-control {
 }
 
 .timeline-inline-date-picker {
-  display: inline-grid;
-  flex: 0 0 auto;
-}
-
-.timeline-inline-date-trigger {
-  width: 24px;
-  min-width: 24px;
-  min-height: 28px;
-  justify-content: center;
-  border: 0;
-  border-radius: 6px;
-  padding: 0;
-  color: var(--muted);
-}
-
-.timeline-inline-date-trigger:hover,
-.timeline-inline-date-trigger[aria-expanded="true"] {
-  background: var(--surface-muted);
-  color: var(--foreground);
+  display: contents;
 }
 
 .timeline-inline-date-picker-panel {

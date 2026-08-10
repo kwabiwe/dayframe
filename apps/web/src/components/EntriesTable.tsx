@@ -49,6 +49,89 @@ type TimelineInlineEditorState = TimelineInlineEditDraft & {
   sessionId: number;
 };
 
+function TimelineInlineTimeControl({
+  date,
+  disabled,
+  edge,
+  entryId,
+  entryTitle,
+  onBeginEdit,
+  onDateChange,
+  onKeyDown,
+  onPickerOpenChange,
+  onTimeChange,
+  today,
+  value,
+  readOnly
+}: {
+  date: string;
+  disabled?: boolean;
+  edge: TimelineInlineTimeEdge;
+  entryId: string;
+  entryTitle: string;
+  onBeginEdit: () => void;
+  onDateChange: (date: string) => void;
+  onKeyDown: (event: ReactKeyboardEvent<HTMLInputElement>) => void;
+  onPickerOpenChange: (open: boolean) => void;
+  onTimeChange: (time: string) => void;
+  readOnly: boolean;
+  today: string;
+  value: string;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const edgeLabel = edge === "start" ? "Start" : "Finish";
+
+  function updateDatePickerOpen(open: boolean) {
+    setDatePickerOpen(open);
+    onPickerOpenChange(open);
+  }
+
+  return (
+    <span className="timeline-inline-time-control">
+      <input
+        aria-expanded={datePickerOpen}
+        aria-haspopup="dialog"
+        aria-label={`${edgeLabel} time for ${entryTitle}`}
+        className="timeline-inline-time-input"
+        data-inline-entry-id={entryId}
+        data-inline-field="time"
+        disabled={disabled}
+        inputMode="numeric"
+        maxLength={5}
+        onChange={(event) => onTimeChange(event.target.value)}
+        onClick={() => {
+          onBeginEdit();
+          updateDatePickerOpen(true);
+        }}
+        onFocus={onBeginEdit}
+        onKeyDown={onKeyDown}
+        readOnly={readOnly}
+        ref={inputRef}
+        title={`Edit ${edgeLabel.toLowerCase()} time and choose its date`}
+        type="text"
+        value={value}
+      />
+      <DatePickerPopover
+        anchorRef={inputRef}
+        ariaLabel={`Choose ${edgeLabel} date, currently ${formatDate(`${date}T12:00:00`)}`}
+        className="timeline-inline-date-picker"
+        disabled={disabled}
+        label={formatDate(`${date}T12:00:00`)}
+        onChange={onDateChange}
+        onOpenChange={updateDatePickerOpen}
+        open={datePickerOpen}
+        panelClassName="timeline-inline-date-picker-panel"
+        panelLabel={`Choose ${edgeLabel} date`}
+        portal
+        showTrigger={false}
+        today={today}
+        value={date}
+      />
+    </span>
+  );
+}
+
 export function EntriesTable({
   entries,
   categories,
@@ -392,50 +475,30 @@ export function EntriesTable({
         : dateTimeLocal(instant).slice(0, 10);
       const pickerKey = `${entry.id}:${edge}`;
       return (
-        <span className="timeline-inline-time-control">
-          <input
-            aria-label={`${edge === "start" ? "Start" : "Finish"} time for ${timeEntryTitle(entry)}`}
-            className="timeline-inline-time-input"
-            data-inline-entry-id={entry.id}
-            data-inline-field="time"
-            disabled={editor?.isSaving}
-            onChange={(event) => updateInlineTime(entry, edge, event.target.value)}
-            onClick={() => {
+        <TimelineInlineTimeControl
+          date={date}
+          disabled={editor?.isSaving}
+          edge={edge}
+          entryId={entry.id}
+          entryTitle={timeEntryTitle(entry)}
+          onBeginEdit={() => {
+            if (!editor) beginInlineEdit(entry, "time", interval);
+          }}
+          onDateChange={(nextDate) => updateInlineDate(entry, edge, nextDate)}
+          onKeyDown={(event) => handleInlineKeyDown(event, entry, "time", interval)}
+          onPickerOpenChange={(open) => {
+            if (open) {
+              openInlineDatePickerRef.current = pickerKey;
               if (!editor) beginInlineEdit(entry, "time", interval);
-            }}
-            onFocus={() => {
-              if (!editor) beginInlineEdit(entry, "time", interval);
-            }}
-            onKeyDown={(event) => handleInlineKeyDown(event, entry, "time", interval)}
-            inputMode="numeric"
-            maxLength={5}
-            readOnly={!editor || editor.isSaving}
-            type="text"
-            value={value}
-          />
-          <DatePickerPopover
-            ariaLabel={`Choose ${edge === "start" ? "Start" : "Finish"} date, currently ${formatDate(`${date}T12:00:00`)}`}
-            className="timeline-inline-date-picker"
-            disabled={editor?.isSaving}
-            iconOnly
-            label={formatDate(`${date}T12:00:00`)}
-            onChange={(nextDate) => updateInlineDate(entry, edge, nextDate)}
-            onOpenChange={(open) => {
-              if (open) {
-                openInlineDatePickerRef.current = pickerKey;
-                if (!editor) beginInlineEdit(entry, "time", interval);
-              } else if (openInlineDatePickerRef.current === pickerKey) {
-                openInlineDatePickerRef.current = null;
-              }
-            }}
-            panelClassName="timeline-inline-date-picker-panel"
-            panelLabel={`Choose ${edge === "start" ? "Start" : "Finish"} date`}
-            portal
-            today={dateTimeLocal(capturedNow).slice(0, 10)}
-            triggerClassName="timeline-inline-date-trigger"
-            value={date}
-          />
-        </span>
+            } else if (openInlineDatePickerRef.current === pickerKey) {
+              openInlineDatePickerRef.current = null;
+            }
+          }}
+          onTimeChange={(nextTime) => updateInlineTime(entry, edge, nextTime)}
+          readOnly={!editor || editor.isSaving}
+          today={dateTimeLocal(capturedNow).slice(0, 10)}
+          value={value}
+        />
       );
     };
     return (
@@ -443,7 +506,6 @@ export function EntriesTable({
         className={`timeline-inline-time${editor ? " is-editing" : ""}`}
         onBlur={handleBlur}
         onDoubleClick={(event) => {
-          if ((event.target as HTMLElement).closest(".timeline-inline-date-picker")) return;
           event.preventDefault();
           event.stopPropagation();
           openFullEditor(entry);
