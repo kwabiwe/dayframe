@@ -32,7 +32,8 @@ describe("fixed timer-sheet layout contract", () => {
 
   it("uses responsive fixed geometry and leaves the timer form non-scrolling", () => {
     expect(sheet).toContain("timeEntrySheetLayoutDensity({");
-    expect(sheet).toContain("scrollEnabled={false}");
+    expect(sheet).toContain('testID="time-entry-sheet-form"');
+    expect(sheet).not.toContain("scrollEnabled={false}");
     expect(theme).toContain("durationDialNativeViewCompact");
     expect(theme).toContain("durationDialNativeViewCondensed");
   });
@@ -42,5 +43,6 @@ describe("fixed timer-sheet layout contract", () => {
     expect(nativeDial).toContain("DayframeDurationDialCore.ownsTouch(");
     expect(nativeDial).toContain('includesRangeHandle: record.mode != "running"');
     expect(dial).toContain("blocksExternalGesture(sheetDismissGestureRef)");
+    expect(dial).toContain('pointerEvents="box-none"');
   });
 });

@@ -569,10 +569,11 @@ final class DayframeSheetQATests: XCTestCase {
     let field = element(SheetQAIdentifiers.description)
     try require(field.exists && field.isHittable, "Tag fixture Description was not hittable.", state: initial)
     field.tap()
-    _ = try waitForSheet("tag fixture explicit focus") { state in
+    let focused = try waitForSheet("tag fixture explicit focus") { state in
       SheetQAValue.string(state, "keyboardPhase") == "visible"
         && SheetQAValue.bool(state, "descriptionFocused") == true
     }
+    let tagBlurRecoveryBaseline = try requiredInt(focused, key: "tagBlurRecoveryCount")
     try requireSoftwareKeyboard("typed hashtag")
 
     field.typeText("#")
@@ -586,6 +587,11 @@ final class DayframeSheetQATests: XCTestCase {
     try require(
       elementWithLabel("Existing tag, A24").exists,
       "Typed hashtag did not expose the A24 tag row.",
+      state: typed
+    )
+    try require(
+      SheetQAValue.int(typed, "tagBlurRecoveryCount") == tagBlurRecoveryBaseline,
+      "Typing # caused Description to blur and recover.",
       state: typed
     )
     try assertContinuousDescriptionKeyboard(
@@ -606,6 +612,11 @@ final class DayframeSheetQATests: XCTestCase {
     try assertContinuousDescriptionKeyboard(
       duration: 0.8,
       context: "typed hashtag deletion",
+      state: deleted
+    )
+    try require(
+      SheetQAValue.int(deleted, "tagBlurRecoveryCount") == tagBlurRecoveryBaseline,
+      "Deleting the typed # caused Description to blur and recover.",
       state: deleted
     )
 
@@ -632,6 +643,11 @@ final class DayframeSheetQATests: XCTestCase {
       context: "Add a tag chooser",
       state: shortcut
     )
+    try require(
+      SheetQAValue.int(shortcut, "tagBlurRecoveryCount") == tagBlurRecoveryBaseline,
+      "Add a tag caused Description to blur and recover.",
+      state: shortcut
+    )
     reporter.record(
       "checkpoint",
       step: "tag_keyboard_continuity",
@@ -653,6 +669,35 @@ final class DayframeSheetQATests: XCTestCase {
       context: "Add a tag hashtag deletion",
       state: shortcutCleared
     )
+    try require(
+      SheetQAValue.int(shortcutCleared, "tagBlurRecoveryCount") == tagBlurRecoveryBaseline,
+      "Deleting the Add a tag # caused Description to blur and recover.",
+      state: shortcutCleared
+    )
+
+    let upperDismissArea = element(SheetQAIdentifiers.upperDismissArea)
+    try require(
+      upperDismissArea.exists && upperDismissArea.isHittable,
+      "Visible upper empty space was not available for keyboard dismissal.",
+      state: shortcutCleared
+    )
+    upperDismissArea.tap()
+    let emptySpaceDismissed = try waitForSheet("upper empty-space keyboard dismissal") { state in
+      SheetQAValue.string(state, "keyboardPhase") == "hidden"
+        && SheetQAValue.bool(state, "descriptionFocused") == false
+    }
+    reporter.record(
+      "checkpoint",
+      step: "empty_space_keyboard_dismissal",
+      iteration: iteration,
+      success: true,
+      state: emptySpaceDismissed
+    )
+    field.tap()
+    _ = try waitForSheet("Description refocused after empty-space dismissal") { state in
+      SheetQAValue.string(state, "keyboardPhase") == "visible"
+        && SheetQAValue.bool(state, "descriptionFocused") == true
+    }
     field.typeText("bau")
     _ = try waitForSheet("matching Suggestions after tag exit") { state in
       SheetQAValue.string(state, "keyboardPhase") == "visible"

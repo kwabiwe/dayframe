@@ -134,7 +134,11 @@ export function TimeEntryDurationDial({
     effectiveEndMs - lastStopMs <= TIME_ENTRY_DIAL_MAX_DURATION_MS;
 
   return (
-    <View style={styles.durationDialSection} testID="time-entry-duration-dial-section">
+    <View
+      pointerEvents="box-none"
+      style={styles.durationDialSection}
+      testID="time-entry-duration-dial-section"
+    >
       <View pointerEvents="box-none" style={styles.durationDialFieldActions}>
         <View style={styles.durationDialFieldActionStart}>
           {lastStopAllowed ? (

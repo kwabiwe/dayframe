@@ -2302,34 +2302,37 @@ export function ActiveTimerEditSheet({
 
               {isRunningMode ? timeEntryHero : null}
 
-              <ScrollView
-                alwaysBounceVertical={false}
-                bounces={false}
-                contentContainerStyle={[
-                  styles.activeEditContent,
-                  layoutDensity === "compact" ? styles.activeEditContentCompact : null,
-                  layoutDensity === "condensed" ? styles.activeEditContentCondensed : null
-                ]}
-                keyboardDismissMode="none"
-                keyboardShouldPersistTaps="always"
+              <Pressable
+                accessible={false}
                 onLayout={(event) => {
                   const { height, width, x, y } = event.nativeEvent.layout;
                   scrollViewportLayoutRef.current = { height, width, x, y };
                   scheduleGeometryMeasurement();
                 }}
-                scrollEnabled={false}
-                showsVerticalScrollIndicator={false}
+                onPress={dismissTransientEditingSurfaces}
                 style={[
                   styles.activeEditScroller,
                   keyboardLayout.keyboardOpen ? styles.activeEditScrollerKeyboard : null
                 ]}
                 testID="time-entry-sheet-form"
               >
-                <View style={[
+                <View
+                  pointerEvents="box-none"
+                  style={[
+                    styles.activeEditContent,
+                    layoutDensity === "compact" ? styles.activeEditContentCompact : null,
+                    layoutDensity === "condensed" ? styles.activeEditContentCondensed : null
+                  ]}
+                  testID="time-entry-sheet-form-background"
+                >
+                <View pointerEvents="box-none" style={[
                   styles.activeEditSection,
                   layoutDensity === "compact" ? styles.activeEditSectionCompact : null,
                   layoutDensity === "condensed" ? styles.activeEditSectionCondensed : null,
-                  hashtagPanelVisible ? styles.activeEditTagSectionOpen : null
+                  // Keep the focused TextInput's native stacking context stable.
+                  // Toggling an ancestor zIndex makes Fabric reorder this subtree,
+                  // which resigns first responder while Tags opens or closes.
+                  styles.activeEditTagSectionLayer
                 ]} onLayout={(event) => {
                   const { height, width, x, y } = event.nativeEvent.layout;
                   descriptionSectionLayoutRef.current = { height, width, x, y };
@@ -2363,11 +2366,10 @@ export function ActiveTimerEditSheet({
                           sheetStateRef.current.sheetPhase === "presented" &&
                           sheetStateRef.current.surface === "form"
                         ) {
-                          // UIKit can transiently resign first responder while
-                          // the two Description-local overlays exchange
-                          // visibility. Reacquire synchronously at the native
-                          // event boundary so the software keyboard never gets
-                          // a frame in which no text responder owns it.
+                          // This is a last-resort continuity guard. Normal tag
+                          // transitions keep the Description subtree and its
+                          // stacking context stable, so QA requires this path
+                          // to remain unused while # is inserted or deleted.
                           setTagBlurRecoveryCount((count) => count + 1);
                           descriptionInputRef.current?.focus();
                           transitionTagSession({
@@ -2559,6 +2561,7 @@ export function ActiveTimerEditSheet({
                   importantForAccessibility={
                     suggestionsObscureFormAccessibility ? "no-hide-descendants" : "auto"
                   }
+                  pointerEvents="box-none"
                   style={[
                     styles.activeEditObscuredContent,
                     layoutDensity === "compact" ? styles.activeEditObscuredContentCompact : null,
@@ -2566,7 +2569,7 @@ export function ActiveTimerEditSheet({
                   ]}
                   testID="time-entry-sheet-obscured-form-content"
                 >
-                <View style={[
+                <View pointerEvents="box-none" style={[
                   styles.activeEditSection,
                   layoutDensity === "compact" ? styles.activeEditSectionCompact : null,
                   layoutDensity === "condensed" ? styles.activeEditSectionCondensed : null
@@ -2612,16 +2615,16 @@ export function ActiveTimerEditSheet({
                   </View>
                 </View>
 
-                <View style={[
+                <View pointerEvents="box-none" style={[
                   styles.activeEditSection,
                   layoutDensity === "compact" ? styles.activeEditSectionCompact : null,
                   layoutDensity === "condensed" ? styles.activeEditSectionCondensed : null
                 ]}>
-                  <View style={[
+                  <View pointerEvents="box-none" style={[
                     styles.activeEditTimeGroups,
                     windowDimensions.fontScale >= 1.6 ? styles.activeEditTimeGroupsStacked : null
                   ]}>
-                    <View style={styles.activeEditTimeGroup}>
+                    <View pointerEvents="box-none" style={styles.activeEditTimeGroup}>
                       <Text style={styles.activeEditSectionLabel}>Start</Text>
                       <View style={styles.activeEditCompactTimeRow}>
                         <Pressable
@@ -2666,7 +2669,7 @@ export function ActiveTimerEditSheet({
                         />
                       </View>
                     </View>
-                    <View style={styles.activeEditTimeGroup}>
+                    <View pointerEvents="box-none" style={styles.activeEditTimeGroup}>
                       <Text style={styles.activeEditSectionLabel}>End</Text>
                       {hasStoppedTime ? (
                         <View style={styles.activeEditCompactTimeRow}>
@@ -2765,7 +2768,8 @@ export function ActiveTimerEditSheet({
                   </Pressable>
                 ) : null}
                 </View>
-              </ScrollView>
+                </View>
+              </Pressable>
               <HistoricalSuggestionsOverlay
                 contentKey={historicalSuggestionResultSignature}
                 disabled={busy}

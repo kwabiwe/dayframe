@@ -2256,7 +2256,7 @@ function createStyles(theme: MobileTheme) {
     activeEditSectionCondensed: {
       gap: 4
     },
-    activeEditTagSectionOpen: {
+    activeEditTagSectionLayer: {
       zIndex: 20
     },
     activeEditSectionLabel: {

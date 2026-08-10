@@ -9,6 +9,7 @@ enum SheetQAIdentifiers {
   static let sheetState = "sheet-qa-state"
   static let sheet = "time-entry-sheet"
   static let sheetHandle = "time-entry-sheet-handle"
+  static let upperDismissArea = "time-entry-sheet-upper-dismiss-area"
   static let sheetForm = "time-entry-sheet-form"
   static let elapsed = "time-entry-sheet-elapsed"
   static let hero = "time-entry-sheet-hero"
@@ -250,7 +251,8 @@ final class SheetQANDJSONReporter {
         "overlayUpdateVisibilityDropCount",
         "swipeCancelledCount",
         "swipeStartedCount",
-        "staleCallbackCount"
+        "staleCallbackCount",
+        "tagBlurRecoveryCount"
       ]
       var counters: SheetQAJSON = [:]
       for key in cumulativeCounterKeys {

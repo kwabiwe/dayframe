@@ -55,7 +55,8 @@ describe("time-entry sheet historical Suggestions contract", () => {
     expect(editSheetSource).not.toMatch(/Animated\.timing\([^)]*height/);
     expect(editSheetSource).toContain("resolveTimeEntrySheetLocalGeometry");
     expect(editSheetSource).toContain("contentOffset: contentScrollOffsetRef.current");
-    expect(editSheetSource).toContain("scrollEnabled={false}");
+    expect(editSheetSource).toContain('testID="time-entry-sheet-form"');
+    expect(editSheetSource).not.toContain("scrollEnabled={false}");
     expect(editSheetSource).toContain("localGeometry.overlayBottomBoundary - keyboardInsetRef.current");
     expect(editSheetSource).toContain("topBoundary: localGeometry.overlayTopBoundary");
     expect(editSheetSource).not.toContain("measureInWindow");

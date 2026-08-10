@@ -55,12 +55,24 @@ describe("mobile tag interaction contract", () => {
   });
 
   it("keeps Add a tag and hashtag removal on the existing keyboard responder", () => {
-    expect(sheet).toContain('keyboardDismissMode="none"');
-    expect(sheet).toContain('keyboardShouldPersistTaps="always"');
     expect(sheet).toContain("onPressIn={beginTagEntryPress}");
     expect(sheet).toContain("const requestFocus = !descriptionInputRef.current?.isFocused()");
+    expect(sheet).toContain("styles.activeEditTagSectionLayer");
+    expect(sheet).not.toContain("hashtagPanelVisible ? styles.activeEditTagSection");
+    expect(sheet).not.toContain('keyboardDismissMode="none"');
+    expect(sheet).not.toContain("scrollEnabled={false}");
+    expect(theme).toMatch(/activeEditTagSectionLayer:\s*\{[\s\S]*?zIndex: 20/);
     expect(sheet).toMatch(/if \(nextInset > 0\) \{[\s\S]*?clearKeyboardConfirmationWatchdog\(\);/);
     expect(sheet).toMatch(/event\.type === "hashtag_changed"[\s\S]*?clearKeyboardConfirmationWatchdog\(\);/);
+  });
+
+  it("dismisses the keyboard for unhandled taps in fixed-form empty space", () => {
+    expect(sheet).toMatch(/<Pressable[\s\S]*?onPress=\{dismissTransientEditingSurfaces\}[\s\S]*?testID="time-entry-sheet-form"/);
+    expect(sheet).toContain('testID="time-entry-sheet-content"');
+    expect(sheet).toContain('pointerEvents="box-none"');
+    expect(sheet).not.toContain('testID="time-entry-sheet-empty-space-dismiss"');
+    expect(theme).not.toContain("activeEditEmptySpaceDismissLayer:");
+    expect(sheet).toContain('testID="time-entry-sheet-upper-dismiss-area"');
   });
 
   it("uses the shared framed chooser language, solid icon, and draft-only tag removal", () => {

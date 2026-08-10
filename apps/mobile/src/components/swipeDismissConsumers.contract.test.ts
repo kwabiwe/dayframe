@@ -57,7 +57,8 @@ describe("shared swipe-dismiss ownership integration", () => {
   it("keeps Delete in a fixed density-adaptive sheet without form scrolling", () => {
     expect(editSource).toContain("const showDeleteButton = canDelete || isAddMode");
     expect(editSource).toContain("timeEntrySheetLayoutDensity({");
-    expect(editSource).toContain("scrollEnabled={false}");
+    expect(editSource).toContain('testID="time-entry-sheet-form"');
+    expect(editSource).not.toContain("scrollEnabled={false}");
     expect(editSource).not.toContain("shouldScrollTimeEntrySheetContent({");
     expect(editSource).not.toContain("onContentSizeChange=");
     expect(editSource).toContain("{showDeleteButton ? (");
