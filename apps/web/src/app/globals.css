@@ -7498,10 +7498,24 @@ kbd {
 }
 
 .category-picker-create-option {
-  margin-top: 4px;
+  position: relative;
+  margin-top: 11px;
   color: var(--accent-text);
-  box-shadow: inset 0 1px 0 var(--line);
+  box-shadow: none;
+  font-size: 14px;
   font-weight: 650;
+  line-height: 1.35;
+}
+
+.category-picker-create-option::before {
+  position: absolute;
+  top: -7px;
+  right: 12px;
+  left: 12px;
+  height: 1px;
+  background: var(--line);
+  content: "";
+  pointer-events: none;
 }
 
 .category-picker-create-form {
@@ -7509,10 +7523,13 @@ kbd {
   min-width: 0;
   gap: 8px;
   padding: 8px;
+  font-size: 14px;
 }
 
 .category-picker-create-form > strong {
-  font-size: 0.86rem;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.35;
 }
 
 .category-picker-create-name-field {
@@ -7522,8 +7539,9 @@ kbd {
 
 .category-picker-create-name-field > label {
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 12px;
   font-weight: 650;
+  line-height: 1.35;
 }
 
 .category-picker-create-name-control {
@@ -7645,6 +7663,7 @@ kbd {
   padding: 0 10px 0 2px;
   color: var(--foreground);
   font: inherit;
+  font-weight: 400;
 }
 
 .category-picker-create-form input:focus {
@@ -7685,8 +7704,10 @@ kbd {
   background: var(--surface-muted);
   padding: 0 12px;
   color: var(--foreground);
-  font: inherit;
+  font-family: inherit;
+  font-size: 14px;
   font-weight: 650;
+  line-height: 1.35;
 }
 
 .category-picker-create-form .category-picker-create-actions button.is-primary {
@@ -9169,7 +9190,7 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .calendar-compact-icon-action:focus-visible,
-.calendar-compact-category-menu button:focus-visible,
+.calendar-compact-category-menu .category-picker-options > button:focus-visible,
 .calendar-compact-save:focus-visible,
 .calendar-compact-cancel:focus-visible,
 .calendar-compact-discard-back:focus-visible,
@@ -9248,7 +9269,7 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .category-picker-trigger-value span:last-child,
-.calendar-compact-category-menu button > span:nth-child(2) {
+.calendar-compact-category-menu .category-picker-options > button > span:nth-child(2) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -9292,7 +9313,7 @@ dialog.ui-dialog.manual-entry-dialog {
   overscroll-behavior: contain;
 }
 
-.calendar-compact-category-menu button {
+.calendar-compact-category-menu .category-picker-options > button {
   display: grid;
   width: 100%;
   min-height: 44px;
@@ -9307,21 +9328,13 @@ dialog.ui-dialog.manual-entry-dialog {
   text-align: left;
 }
 
-.calendar-compact-category-menu button:hover,
-.calendar-compact-category-menu button.is-active {
+.calendar-compact-category-menu .category-picker-options > button:hover,
+.calendar-compact-category-menu .category-picker-options > button.is-active {
   background: var(--surface-muted);
 }
 
-.calendar-compact-category-menu button > svg {
+.calendar-compact-category-menu .category-picker-options > button > svg {
   color: var(--accent-text);
-}
-
-.calendar-compact-category-menu .category-picker-create-option {
-  color: var(--accent-text);
-}
-
-.calendar-compact-category-menu .category-picker-create-form {
-  padding: 6px;
 }
 
 .calendar-compact-temporal-fields {
