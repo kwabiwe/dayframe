@@ -34,6 +34,9 @@ describe("CategoryPicker", () => {
     await user.click(screen.getByRole("option", { name: "Create new category" }));
     const dialog = screen.getByRole("dialog", { name: "Create new category" });
     const input = within(dialog).getByRole("textbox", { name: "Name" });
+    const colorTrigger = within(dialog).getByRole("button", { name: /Choose category colour/ });
+    expect(input.closest(".category-picker-create-name-control")?.contains(colorTrigger)).toBe(true);
+    expect(within(dialog).queryByText("Colour")).toBeNull();
     await user.click(within(dialog).getByRole("button", { name: "Create" }));
     expect((await within(dialog).findByRole("alert")).textContent).toContain("Enter a category name.");
     expect(create).not.toHaveBeenCalled();

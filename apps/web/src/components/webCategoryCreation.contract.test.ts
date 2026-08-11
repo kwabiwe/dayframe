@@ -59,4 +59,12 @@ describe("web contextual category creation contract", () => {
     expect(styles).toMatch(/\.calendar-compact-category-dot\s*\{[^}]*border:\s*0;[^}]*box-shadow:\s*none;/s);
     expect(styles).toMatch(/\.category-picker-color-swatch\s*\{[^}]*border:\s*0;[^}]*box-shadow:\s*none;/s);
   });
+
+  it("embeds the colour-dot action inside the category name compound control", () => {
+    expect(picker).toContain('className="category-picker-create-name-control"');
+    expect(picker).toContain('className="category-picker-color-trigger"');
+    expect(picker).not.toContain('className="category-picker-create-color-field"');
+    expect(styles).toContain("grid-template-columns: 44px minmax(0, 1fr)");
+    expect(styles).toContain(".category-picker-create-name-control:focus-within");
+  });
 });

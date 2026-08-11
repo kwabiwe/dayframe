@@ -119,6 +119,7 @@ export function CategoryPicker({
     }
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
+      if (event.defaultPrevented || pickerContains(event.target)) return;
       event.preventDefault();
       if (isCreateBusy) return;
       if (isColorMenuOpen) closeColorMenu(true);
@@ -590,46 +591,44 @@ export function CategoryPicker({
             role="dialog"
           >
             <strong>Create new category</strong>
-            <label>
-              <span>Name</span>
-              <input
-                aria-describedby={createError ? `${menuId}-create-error` : undefined}
-                aria-invalid={createError ? "true" : undefined}
-                autoComplete="off"
-                disabled={isCreateBusy}
-                onChange={(event) => {
-                  setCreateName(event.target.value);
-                  setCreateError(null);
-                }}
-                onKeyDown={createInputKeyDown}
-                placeholder="Category name"
-                ref={nameInputRef}
-                value={createName}
-              />
-            </label>
-            <div className="category-picker-create-color-field">
-              <span>Colour</span>
-              <button
-                aria-expanded={isColorMenuOpen}
-                aria-haspopup="listbox"
-                aria-label={`Choose category colour, currently ${effectiveCreateColorOption.label}`}
-                className="category-picker-color-trigger"
-                disabled={isCreateBusy}
-                onClick={() => {
-                  if (isColorMenuOpen) closeColorMenu(true);
-                  else openColorMenu();
-                }}
-                ref={colorTriggerRef}
-                type="button"
-              >
-                <span
-                  aria-hidden="true"
-                  className="category-picker-color-swatch"
-                  style={{ background: effectiveCreateColorOption.hex }}
+            <div className="category-picker-create-name-field">
+              <label htmlFor={`${menuId}-create-name`}>Name</label>
+              <div className="category-picker-create-name-control">
+                <input
+                  aria-describedby={createError ? `${menuId}-create-error` : undefined}
+                  aria-invalid={createError ? "true" : undefined}
+                  autoComplete="off"
+                  disabled={isCreateBusy}
+                  id={`${menuId}-create-name`}
+                  onChange={(event) => {
+                    setCreateName(event.target.value);
+                    setCreateError(null);
+                  }}
+                  onKeyDown={createInputKeyDown}
+                  placeholder="Category name"
+                  ref={nameInputRef}
+                  value={createName}
                 />
-                <span>{effectiveCreateColorOption.label}</span>
-                <ChevronDown aria-hidden="true" size={15} />
-              </button>
+                <button
+                  aria-expanded={isColorMenuOpen}
+                  aria-haspopup="listbox"
+                  aria-label={`Choose category colour, currently ${effectiveCreateColorOption.label}`}
+                  className="category-picker-color-trigger"
+                  disabled={isCreateBusy}
+                  onClick={() => {
+                    if (isColorMenuOpen) closeColorMenu(true);
+                    else openColorMenu();
+                  }}
+                  ref={colorTriggerRef}
+                  type="button"
+                >
+                  <span
+                    aria-hidden="true"
+                    className="category-picker-color-swatch"
+                    style={{ background: effectiveCreateColorOption.hex }}
+                  />
+                </button>
+              </div>
             </div>
             <p
               aria-live="assertive"

@@ -7515,43 +7515,49 @@ kbd {
   font-size: 0.86rem;
 }
 
-.category-picker-create-form > label {
+.category-picker-create-name-field {
   display: grid;
   gap: 5px;
 }
 
-.category-picker-create-form > label > span {
+.category-picker-create-name-field > label {
   color: var(--muted);
   font-size: 0.72rem;
   font-weight: 650;
 }
 
-.category-picker-create-color-field {
+.category-picker-create-name-control {
   display: grid;
-  gap: 5px;
+  box-sizing: border-box;
+  grid-template-columns: 44px minmax(0, 1fr);
+  border: 2px solid transparent;
+  border-radius: var(--web-radius-control);
+  background: var(--surface-inset);
+  overflow: hidden;
 }
 
-.category-picker-create-color-field > span {
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 650;
+.category-picker-create-name-control:focus-within {
+  border-color: var(--web-focus-border);
+}
+
+.category-picker-create-name-control:has(input[aria-invalid="true"]):focus-within {
+  border-color: var(--web-focus-border);
+  box-shadow: inset 0 -2px 0 var(--danger);
 }
 
 .category-picker-create-form .category-picker-color-trigger {
   display: grid;
-  box-sizing: border-box;
-  width: 100%;
+  width: 44px;
+  height: 44px;
   min-height: 44px;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  border: 2px solid transparent;
-  border-radius: var(--web-radius-control);
-  background: var(--surface-inset);
-  padding: 0 10px;
+  grid-column: 1;
+  grid-row: 1;
+  place-items: center;
+  border: 0;
+  border-radius: calc(var(--web-radius-control) - 2px);
+  background: transparent;
+  padding: 0;
   color: var(--foreground);
-  font: inherit;
-  text-align: left;
 }
 
 .category-picker-create-form .category-picker-color-trigger:hover,
@@ -7560,8 +7566,8 @@ kbd {
 }
 
 .category-picker-create-form .category-picker-color-trigger:focus-visible {
-  border-color: var(--web-focus-border);
-  outline: 0;
+  outline: 2px solid var(--focus);
+  outline-offset: -3px;
 }
 
 .category-picker-color-swatch {
@@ -7631,22 +7637,22 @@ kbd {
   width: 100%;
   min-width: 0;
   min-height: 44px;
-  border: 2px solid transparent;
-  border-radius: var(--web-radius-control);
-  background: var(--surface-inset);
-  padding: 0 10px;
+  grid-column: 2;
+  grid-row: 1;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0 10px 0 2px;
   color: var(--foreground);
   font: inherit;
 }
 
 .category-picker-create-form input:focus {
-  border-color: var(--web-focus-border);
   outline: 0;
 }
 
 .category-picker-create-form input[aria-invalid="true"]:focus {
-  border-color: var(--web-focus-border);
-  box-shadow: inset 0 -2px 0 var(--danger);
+  box-shadow: none;
 }
 
 .category-picker-create-error {
