@@ -49,6 +49,8 @@ describe("Timeline range and toolbar contract", () => {
   it("advances a stale previous-Today view after local midnight without resetting historical browsing", () => {
     expect(timeline).toContain("shouldAdvanceStaleTimelineToToday");
     expect(timeline).toContain("todayKeyRef");
+    expect(timeline).toContain("window.sessionStorage.getItem(TIMELINE_TODAY_SESSION_KEY)");
+    expect(timeline).toContain("window.sessionStorage.setItem(TIMELINE_TODAY_SESSION_KEY, todayKey)");
     expect(timeline).toContain('window.addEventListener("focus", handleFocus)');
     expect(timeline).toContain('document.addEventListener("visibilitychange", handleVisibilityChange)');
     expect(timeline).toContain("resetTimelineState(currentState, now)");

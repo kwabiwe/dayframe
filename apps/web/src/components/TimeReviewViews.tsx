@@ -106,6 +106,23 @@ const calendarZooms = {
   quarter: { label: "15m", intervalMinutes: 15, pixelsPerHour: 128 }
 } as const;
 const calendarAxisLabelHeight = 22;
+const TIMELINE_TODAY_SESSION_KEY = "dayframe.timeline.today-key";
+
+function readTimelineTodaySessionKey() {
+  try {
+    return window.sessionStorage.getItem(TIMELINE_TODAY_SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeTimelineTodaySessionKey(todayKey: string) {
+  try {
+    window.sessionStorage.setItem(TIMELINE_TODAY_SESSION_KEY, todayKey);
+  } catch {
+    return;
+  }
+}
 
 type CalendarResizeEdge = "start" | "end";
 type CalendarZoom = keyof typeof calendarZooms;
@@ -271,8 +288,9 @@ export function TimeReviewViews({
       const now = new Date();
       const previousTodayKey = todayKeyRef.current;
       const currentTodayKey = toTimelineDateKey(now);
+      todayKeyRef.current = currentTodayKey;
+      writeTimelineTodaySessionKey(currentTodayKey);
       if (currentTodayKey !== previousTodayKey) {
-        todayKeyRef.current = currentTodayKey;
         setPresentationNow(now.getTime());
         const currentState = timelineStateRef.current;
         if (shouldAdvanceStaleTimelineToToday(currentState, previousTodayKey, now)) {
@@ -286,7 +304,9 @@ export function TimeReviewViews({
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") reconcileToday();
     };
-    scheduleRollover();
+    const storedTodayKey = readTimelineTodaySessionKey();
+    if (storedTodayKey) todayKeyRef.current = storedTodayKey;
+    reconcileToday();
     window.addEventListener("focus", handleFocus);
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {

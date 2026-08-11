@@ -2,10 +2,22 @@
 
 import type { CSSProperties, RefObject } from "react";
 import { CalendarDays } from "lucide-react";
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/Primitives";
 import { DayframeCalendar } from "@/components/DayframeCalendar";
+
+function subscribeToClientEnvironment() {
+  return () => undefined;
+}
+
+function getClientPortalTarget() {
+  return document.body;
+}
+
+function getServerPortalTarget() {
+  return null;
+}
 
 export function DatePickerPopover({
   anchorRef,
@@ -17,6 +29,7 @@ export function DatePickerPopover({
   onChange,
   onOpenChange,
   open: controlledOpen,
+  panelId: controlledPanelId,
   panelClassName = "",
   panelLabel = "Choose date",
   portal = false,
@@ -34,6 +47,7 @@ export function DatePickerPopover({
   onChange: (date: string) => void;
   onOpenChange?: (open: boolean) => void;
   open?: boolean;
+  panelId?: string;
   panelClassName?: string;
   panelLabel?: string;
   portal?: boolean;
@@ -45,10 +59,17 @@ export function DatePickerPopover({
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = controlledOpen ?? uncontrolledOpen;
   const effectiveOpen = open && !disabled;
-  const panelId = useId();
+  const generatedPanelId = useId();
+  const panelId = controlledPanelId ?? generatedPanelId;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const clientPortalTarget = useSyncExternalStore(
+    subscribeToClientEnvironment,
+    getClientPortalTarget,
+    getServerPortalTarget
+  );
+  const portalTarget = portal ? clientPortalTarget : null;
   const [portalPosition, setPortalPosition] = useState<CSSProperties | null>(null);
   const selected = new Date(`${value}T12:00:00`);
   const [view, setView] = useState({ year: selected.getFullYear(), month: selected.getMonth() + 1 });
@@ -172,7 +193,7 @@ export function DatePickerPopover({
           {iconOnly ? null : <strong aria-atomic="true" aria-live="polite">{label}</strong>}
         </button>
       ) : null}
-      {portal ? (typeof document === "undefined" ? null : createPortal(panel, document.body)) : panel}
+      {portal ? (portalTarget ? createPortal(panel, portalTarget) : null) : panel}
     </div>
   );
 }

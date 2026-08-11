@@ -13,7 +13,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Ellipsis, Pencil, Play, Trash2 } from "lucide-react";
+import { Ellipsis, Minus, Pencil, Play, Trash2 } from "lucide-react";
 import { analyzeTimeIntervals, type TimeIntervalAnalysisEntry } from "@dayframe/shared";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
@@ -81,6 +81,7 @@ function TimelineInlineTimeControl({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const edgeLabel = edge === "start" ? "Start" : "Finish";
+  const panelId = `timeline-inline-date-${entryId}-${edge}`;
 
   function updateDatePickerOpen(open: boolean) {
     setDatePickerOpen(open);
@@ -90,6 +91,7 @@ function TimelineInlineTimeControl({
   return (
     <span className="timeline-inline-time-control">
       <input
+        aria-controls={panelId}
         aria-expanded={datePickerOpen}
         aria-haspopup="dialog"
         aria-label={`${edgeLabel} time for ${entryTitle}`}
@@ -108,6 +110,7 @@ function TimelineInlineTimeControl({
         onKeyDown={onKeyDown}
         readOnly={readOnly}
         ref={inputRef}
+        role="combobox"
         title={`Edit ${edgeLabel.toLowerCase()} time and choose its date`}
         type="text"
         value={value}
@@ -121,6 +124,7 @@ function TimelineInlineTimeControl({
         onChange={onDateChange}
         onOpenChange={updateDatePickerOpen}
         open={datePickerOpen}
+        panelId={panelId}
         panelClassName="timeline-inline-date-picker-panel"
         panelLabel={`Choose ${edgeLabel} date`}
         portal
@@ -171,7 +175,7 @@ export function EntriesTable({
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
   const listScrollRef = useRef<HTMLDivElement | null>(null);
   const inlineEditorRef = useRef<TimelineInlineEditorState | null>(null);
-  const openInlineDatePickerRef = useRef<string | null>(null);
+  const [openInlineDatePickerKey, setOpenInlineDatePickerKey] = useState<string | null>(null);
   const inlineSessionRef = useRef(0);
   const highlightedEntryId = searchParams.get("entry");
 
@@ -277,13 +281,13 @@ export function EntriesTable({
 
   function cancelInlineEdit(entryId: string) {
     if (inlineEditorRef.current?.entryId !== entryId) return;
-    openInlineDatePickerRef.current = null;
+    setOpenInlineDatePickerKey(null);
     inlineEditorRef.current = null;
     setInlineEditor(null);
   }
 
   function openFullEditor(entry: TimeEntryRow) {
-    openInlineDatePickerRef.current = null;
+    setOpenInlineDatePickerKey(null);
     inlineEditorRef.current = null;
     setInlineEditor(null);
     setEditingEntry(entry);
@@ -434,7 +438,7 @@ export function EntriesTable({
             if (editor) void commitInlineEdit(entry, event.currentTarget);
           }}
           onChange={(event) => updateInlineDescription(entry.id, event.target.value)}
-          onClick={(event) => {
+          onClick={() => {
             if (canInlineEdit && !editor) beginInlineEdit(entry, "description");
           }}
           onKeyDown={(event) => {
@@ -462,7 +466,7 @@ export function EntriesTable({
       : null;
     const handleBlur = (event: ReactFocusEvent<HTMLSpanElement>) => {
       if (!editor || event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-      if (openInlineDatePickerRef.current?.startsWith(`${entry.id}:`)) return;
+      if (openInlineDatePickerKey?.startsWith(`${entry.id}:`)) return;
       const returnFocus = event.currentTarget.querySelector<HTMLInputElement>("input");
       void commitInlineEdit(entry, returnFocus);
     };
@@ -488,10 +492,10 @@ export function EntriesTable({
           onKeyDown={(event) => handleInlineKeyDown(event, entry, "time", interval)}
           onPickerOpenChange={(open) => {
             if (open) {
-              openInlineDatePickerRef.current = pickerKey;
+              setOpenInlineDatePickerKey(pickerKey);
               if (!editor) beginInlineEdit(entry, "time", interval);
-            } else if (openInlineDatePickerRef.current === pickerKey) {
-              openInlineDatePickerRef.current = null;
+            } else if (openInlineDatePickerKey === pickerKey) {
+              setOpenInlineDatePickerKey(null);
             }
           }}
           onTimeChange={(nextTime) => updateInlineTime(entry, edge, nextTime)}
@@ -513,7 +517,9 @@ export function EntriesTable({
         title="Click to edit. Double-click for the full editor."
       >
         {timeInput("start", interval.startedAt)}
-        <span aria-hidden="true">–</span>
+        <span aria-hidden="true" className="timeline-inline-time-separator">
+          <Minus size={12} strokeWidth={1.5} />
+        </span>
         {interval.stoppedAt
           ? timeInput("finish", interval.stoppedAt)
           : <span className="timeline-inline-running">Running</span>}
@@ -561,6 +567,7 @@ export function EntriesTable({
             </tr>
           </thead>
           <tbody>
+            {/* eslint-disable-next-line react-hooks/refs -- nested row callbacks read refs only after user interaction */}
             {grouped.map((group, index) => {
               const entry = group.representative;
               const displayInterval = timelineEntryDisplayInterval(entry, displayRange, capturedNow);
@@ -641,8 +648,9 @@ export function EntriesTable({
                     </div>
                   </td>
                   <td className="tabular px-3 py-3">
-                    {isGrouped
-                      ? (
+                    <div className="timeline-list-time-content">
+                      {isGrouped
+                        ? (
                           <span
                             className="timeline-group-time-summary"
                             onDoubleClick={() => openFullEditor(entry)}
@@ -651,13 +659,16 @@ export function EntriesTable({
                             {group.entries.length} occurrences
                           </span>
                         )
-                      : renderInlineTime(entry, displayInterval)}
+                        : renderInlineTime(entry, displayInterval)}
+                    </div>
                   </td>
                   <td className="tabular px-3 py-3 font-semibold text-[var(--accent-text)]">
-                    {isGrouped ? formatDuration(group.totalSeconds) : renderDuration(entry, group.totalSeconds)}
+                    <div className="timeline-list-duration-content">
+                      {isGrouped ? formatDuration(group.totalSeconds) : renderDuration(entry, group.totalSeconds)}
+                    </div>
                   </td>
                   <td className="px-3 py-3">
-                    <div className="flex gap-2">
+                    <div className="timeline-list-actions">
                       <IconButton
                         disabled={isPending || Boolean(continuingEntryId)}
                         label={!entry.stoppedAt
@@ -725,21 +736,27 @@ export function EntriesTable({
                         </div>
                       </td>
                       <td className="tabular px-3 py-3">
-                        {renderInlineTime(occurrence, occurrenceInterval)}
+                        <div className="timeline-list-time-content">
+                          {renderInlineTime(occurrence, occurrenceInterval)}
+                        </div>
                       </td>
                       <td className="tabular px-3 py-3 font-semibold text-[var(--accent-text)]">
-                        {renderDuration(occurrence, intervalSeconds(occurrenceInterval, capturedNow))}
+                        <div className="timeline-list-duration-content">
+                          {renderDuration(occurrence, intervalSeconds(occurrenceInterval, capturedNow))}
+                        </div>
                       </td>
                       <td className="px-3 py-3">
-                        <EntryActionsMenu
-                          deleteLabel="Delete"
-                          editLabel="Edit"
-                          label={`More actions for ${timeEntryTitle(occurrence)} occurrence`}
-                          onDelete={() => {
-                            onDeleteEntries([occurrence]);
-                          }}
-                          onEdit={() => openFullEditor(occurrence)}
-                        />
+                        <div className="timeline-list-actions">
+                          <EntryActionsMenu
+                            deleteLabel="Delete"
+                            editLabel="Edit"
+                            label={`More actions for ${timeEntryTitle(occurrence)} occurrence`}
+                            onDelete={() => {
+                              onDeleteEntries([occurrence]);
+                            }}
+                            onEdit={() => openFullEditor(occurrence)}
+                          />
+                        </div>
                       </td>
                     </tr>
                   );

@@ -914,6 +914,7 @@ textarea.ui-control {
 
 .timeline-task-cell {
   display: grid;
+  min-height: var(--web-control-height);
   grid-template-columns: auto auto minmax(0, 1fr);
   align-items: center;
   gap: 8px;
@@ -1059,12 +1060,14 @@ textarea.ui-control {
 
 .timeline-inline-time {
   display: inline-flex;
-  height: 28px;
-  min-height: 28px;
+  height: var(--web-control-height);
+  min-height: var(--web-control-height);
   align-items: center;
-  gap: 3px;
+  gap: 0;
+  border: 0;
   border-radius: 8px;
-  padding: 0 4px;
+  padding: 0 8px;
+  box-shadow: none;
   white-space: nowrap;
 }
 
@@ -1074,31 +1077,38 @@ textarea.ui-control {
   background: var(--surface-muted);
 }
 
-.timeline-inline-time:has(.timeline-inline-time-input:focus-visible) {
-  box-shadow: inset 0 0 0 2px var(--focus);
-}
-
 .timeline-inline-time-control {
   position: relative;
   display: inline-flex;
-  height: 28px;
-  min-height: 28px;
+  height: var(--web-control-height);
+  min-height: var(--web-control-height);
   align-items: center;
 }
 
 .timeline-inline-time-input {
   width: 5ch;
-  height: 28px;
+  height: var(--web-control-height);
   min-width: 5ch;
-  min-height: 28px;
+  min-height: var(--web-control-height);
   padding: 0;
   font-variant-numeric: tabular-nums;
-  text-align: left;
+  line-height: 1;
+  text-align: center;
 }
 
 .timeline-inline-time-input:focus {
   border: 0;
   background: transparent;
+  box-shadow: none;
+}
+
+.timeline-inline-time-separator {
+  display: inline-flex;
+  width: 16px;
+  height: var(--web-control-height);
+  flex: 0 0 16px;
+  align-items: center;
+  justify-content: center;
 }
 
 .timeline-inline-date-picker {
@@ -1112,8 +1122,9 @@ textarea.ui-control {
 .timeline-inline-running {
   display: inline-flex;
   min-width: 5.75ch;
-  height: 28px;
+  height: var(--web-control-height);
   align-items: center;
+  justify-content: center;
 }
 
 .timeline-group-time-summary {
@@ -1122,6 +1133,18 @@ textarea.ui-control {
   align-items: center;
   border-radius: 6px;
   padding: 2px 4px;
+}
+
+.timeline-list-time-content,
+.timeline-list-duration-content,
+.timeline-list-actions {
+  display: flex;
+  min-height: var(--web-control-height);
+  align-items: center;
+}
+
+.timeline-list-actions {
+  gap: 8px;
 }
 
 .timeline-inline-edit-error {
