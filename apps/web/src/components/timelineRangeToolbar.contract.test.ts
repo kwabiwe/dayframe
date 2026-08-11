@@ -131,6 +131,8 @@ describe("Timeline range and toolbar contract", () => {
     expect(timeline).toContain('className="timeline-timesheet-workspace"');
     expect(timeline).not.toContain("Timesheet totals count every entry in full.");
     expect(styles).toMatch(/\.swiss-timeline-surface \.timeline-range-toolbar \{[^}]*grid-template-columns: max-content max-content minmax\(0, 1fr\);/);
+    expect(styles).toMatch(/\.swiss-timeline-surface \.timeline-range-navigation \{[^}]*grid-template-columns: var\(--web-icon-button-size\) 160px var\(--web-icon-button-size\);/s);
+    expect(styles).toMatch(/\.swiss-timeline-surface \.timeline-date-picker \{[^}]*justify-self: stretch;/s);
     expect(styles).toMatch(/@media \(max-width: 760px\)[\s\S]*\.swiss-timeline-surface \.timeline-range-toolbar \{[^}]*grid-template-columns: minmax\(0, 1fr\);/);
     expect(styles).toMatch(/\.timeline-range-controls \.ui-segmented-control \{[^}]*width: 100%;/);
   });

@@ -25,11 +25,12 @@
 - If the selected date equals the previous Today, the existing URL/date-loading path advances it to the new Today.
 - A deliberately selected historical date remains selected.
 - Day labels use `Today` only when their resolved local date equals the current local date; Week labels keep their explicit range.
+- Timeline's header date picker uses the shared centred, viewport-clamped portal so the shorter `Today` label cannot pull the calendar under the shell's clipped edge or leave it offset to one side. Inline time calendars retain start-edge anchoring. The desktop date lane remains `160px`, preserving the same arrow cadence for `Today` and a full date.
 
 ## Focused verification
 
 - Pure inline-edit plan tests: Description, fixed-Finish Start changes, fixed-Start Finish changes, recalculated Duration, themed-picker date changes, invalid input, and no-op clipped cross-day entry focus.
-- Anchored-picker DOM and row-layout contracts: hydration-stable portal mounting, input-triggered themed calendar without a visible icon trigger, Escape focus return, intrinsic idle Description width, shared responsive control-height centres across mixed row content, a single borderless rounded shell over separate side-by-side time inputs, equal inline padding, a centred separator, Description-only reflow, and Reduce Motion fallback.
+- Anchored-picker DOM and row-layout contracts: hydration-stable portal mounting, input-triggered themed calendar without a visible icon trigger, viewport-clamped header anchoring, stable arrow spacing for `Today`, Escape focus return, intrinsic idle Description width, shared responsive control-height centres across mixed row content, a single borderless rounded shell over separate side-by-side time inputs, equal inline padding, a centred separator, explicit border/outline/shadow suppression on focused time fields, Description-only reflow, and Reduce Motion fallback.
 - Timeline date tests: previous-Today rollover, historical-date preservation, no same-day reset, local `Today` label, existing DST range coverage.
 - Source contracts: exact-entry/group ownership and focus/visibility rollover wiring.
 - Web TypeScript and `git diff --check`.

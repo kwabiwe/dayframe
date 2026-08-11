@@ -398,6 +398,8 @@ export function TimeReviewViews({
             disabled={isDateLoading}
             label={periodLabel}
             onChange={(date) => void navigate({ date })}
+            portal
+            portalAlign="center"
             today={todayKey}
             value={state.date}
           />

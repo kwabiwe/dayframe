@@ -30,6 +30,7 @@ export function DatePickerPopover({
   onOpenChange,
   open: controlledOpen,
   panelId: controlledPanelId,
+  portalAlign = "start",
   panelClassName = "",
   panelLabel = "Choose date",
   portal = false,
@@ -48,6 +49,7 @@ export function DatePickerPopover({
   onOpenChange?: (open: boolean) => void;
   open?: boolean;
   panelId?: string;
+  portalAlign?: "center" | "start";
   panelClassName?: string;
   panelLabel?: string;
   portal?: boolean;
@@ -126,8 +128,11 @@ export function DatePickerPopover({
       const panelRect = panel.getBoundingClientRect();
       const width = Math.min(280, viewportWidth - margin * 2);
       const height = panelRect.height;
+      const preferredLeft = portalAlign === "center"
+        ? triggerRect.left + (triggerRect.width - width) / 2
+        : triggerRect.left;
       const left = Math.min(
-        Math.max(viewportLeft + margin, triggerRect.left),
+        Math.max(viewportLeft + margin, preferredLeft),
         Math.max(viewportLeft + margin, viewportLeft + viewportWidth - width - margin)
       );
       const below = triggerRect.bottom + gap;
@@ -147,7 +152,7 @@ export function DatePickerPopover({
       window.visualViewport?.removeEventListener("resize", updatePosition);
       window.visualViewport?.removeEventListener("scroll", updatePosition);
     };
-  }, [anchorRef, effectiveOpen, portal]);
+  }, [anchorRef, effectiveOpen, portal, portalAlign]);
 
   function choose(date: string) {
     if (disabled || !date) return;

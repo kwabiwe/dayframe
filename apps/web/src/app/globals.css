@@ -1059,6 +1059,7 @@ textarea.ui-control {
 }
 
 .timeline-inline-time {
+  box-sizing: border-box;
   display: inline-flex;
   height: var(--web-control-height);
   min-height: var(--web-control-height);
@@ -1066,6 +1067,7 @@ textarea.ui-control {
   gap: 0;
   border: 0;
   border-radius: 8px;
+  outline: 0;
   padding: 0 8px;
   box-shadow: none;
   white-space: nowrap;
@@ -1099,6 +1101,14 @@ textarea.ui-control {
 .timeline-inline-time-input:focus {
   border: 0;
   background: transparent;
+  outline: 0;
+  box-shadow: none;
+}
+
+.timeline-inline-time:has(.timeline-inline-time-input:focus-visible),
+.timeline-inline-time .timeline-inline-time-input:focus-visible {
+  border: 0;
+  outline: 0;
   box-shadow: none;
 }
 
@@ -9662,11 +9672,15 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .swiss-timeline-surface .timeline-range-navigation {
   width: max-content;
-  grid-template-columns: var(--web-icon-button-size) max-content var(--web-icon-button-size);
+  grid-template-columns: var(--web-icon-button-size) 160px var(--web-icon-button-size);
+}
+
+.swiss-timeline-surface .timeline-date-picker {
+  justify-self: stretch;
 }
 
 .swiss-timeline-surface .timeline-period-trigger {
-  width: auto;
+  width: 100%;
   padding-inline: 8px;
 }
 

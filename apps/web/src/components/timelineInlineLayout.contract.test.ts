@@ -29,11 +29,11 @@ describe("Timeline inline row layout contract", () => {
     expect(entries).toContain('className="timeline-inline-time-input"');
     expect(entries).toContain('className="timeline-inline-time-separator"');
     expect(entries).not.toContain("timeline-inline-date-trigger");
-    expect(styles).toMatch(/\.timeline-inline-time \{[^}]*height: var\(--web-control-height\);[^}]*align-items: center;[^}]*border: 0;[^}]*border-radius: 8px;[^}]*padding: 0 8px;[^}]*box-shadow: none;/s);
+    expect(styles).toMatch(/\.timeline-inline-time \{[^}]*box-sizing: border-box;[^}]*height: var\(--web-control-height\);[^}]*align-items: center;[^}]*border: 0;[^}]*border-radius: 8px;[^}]*outline: 0;[^}]*padding: 0 8px;[^}]*box-shadow: none;/s);
     expect(styles).toMatch(/\.timeline-inline-time:hover,[\s\S]*\.timeline-inline-time:focus-within \{[^}]*background: var\(--surface-muted\);/s);
-    expect(styles).not.toContain(".timeline-inline-time:has(.timeline-inline-time-input:focus-visible)");
+    expect(styles).toMatch(/\.timeline-inline-time:has\(\.timeline-inline-time-input:focus-visible\),[\s\S]*\.timeline-inline-time \.timeline-inline-time-input:focus-visible \{[^}]*border: 0;[^}]*outline: 0;[^}]*box-shadow: none;/s);
     expect(styles).toMatch(/\.timeline-inline-time-input \{[^}]*width: 5ch;[^}]*height: var\(--web-control-height\);[^}]*padding: 0;[^}]*text-align: center;/s);
-    expect(styles).toMatch(/\.timeline-inline-time-input:focus \{[^}]*background: transparent;[^}]*box-shadow: none;/s);
+    expect(styles).toMatch(/\.timeline-inline-time-input:focus \{[^}]*border: 0;[^}]*background: transparent;[^}]*outline: 0;[^}]*box-shadow: none;/s);
     expect(styles).toMatch(/\.timeline-inline-time-separator \{[^}]*width: 16px;[^}]*height: var\(--web-control-height\);[^}]*align-items: center;[^}]*justify-content: center;/s);
     expect(styles).toMatch(/\.timeline-list-time-content,[\s\S]*\.timeline-list-actions \{[^}]*min-height: var\(--web-control-height\);[^}]*align-items: center;/s);
     expect(styles).toMatch(/\.timeline-inline-date-picker \{[^}]*display: contents;/s);
