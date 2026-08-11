@@ -144,8 +144,22 @@ export function resetTimelineState(state: TimelineState, now = new Date()): Time
   };
 }
 
-export function formatTimelinePeriodLabel(scope: TimelineScope, ranges: TimelineRanges) {
+export function shouldAdvanceStaleTimelineToToday(
+  state: TimelineState,
+  previousTodayKey: string,
+  now = new Date()
+) {
+  const currentTodayKey = toTimelineDateKey(startOfLocalDay(now));
+  return currentTodayKey !== previousTodayKey && state.date === previousTodayKey;
+}
+
+export function formatTimelinePeriodLabel(
+  scope: TimelineScope,
+  ranges: TimelineRanges,
+  now = new Date()
+) {
   if (scope === "day") {
+    if (toTimelineDateKey(ranges.day.start) === toTimelineDateKey(startOfLocalDay(now))) return "Today";
     return new Intl.DateTimeFormat("en-GB", {
       weekday: "short",
       day: "numeric",

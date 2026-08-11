@@ -46,6 +46,17 @@ describe("Timeline range and toolbar contract", () => {
     expect(runtime).toContain("Couldn’t load that period. Your current view is unchanged.");
   });
 
+  it("advances a stale previous-Today view after local midnight without resetting historical browsing", () => {
+    expect(timeline).toContain("shouldAdvanceStaleTimelineToToday");
+    expect(timeline).toContain("todayKeyRef");
+    expect(timeline).toContain("window.sessionStorage.getItem(TIMELINE_TODAY_SESSION_KEY)");
+    expect(timeline).toContain("window.sessionStorage.setItem(TIMELINE_TODAY_SESSION_KEY, todayKey)");
+    expect(timeline).toContain('window.addEventListener("focus", handleFocus)');
+    expect(timeline).toContain('document.addEventListener("visibilitychange", handleVisibilityChange)');
+    expect(timeline).toContain("resetTimelineState(currentState, now)");
+    expect(timeline).toContain("formatTimelinePeriodLabel(state.scope, ranges, capturedNow)");
+  });
+
   it("gives all views the same clipped period data while limiting covered copy to Timesheet", () => {
     expect(timeline).toContain("clipTimelineEntries(mergeTimelineEntries(");
     expect(timeline).toContain("data.dayEntries");
@@ -120,6 +131,8 @@ describe("Timeline range and toolbar contract", () => {
     expect(timeline).toContain('className="timeline-timesheet-workspace"');
     expect(timeline).not.toContain("Timesheet totals count every entry in full.");
     expect(styles).toMatch(/\.swiss-timeline-surface \.timeline-range-toolbar \{[^}]*grid-template-columns: max-content max-content minmax\(0, 1fr\);/);
+    expect(styles).toMatch(/\.swiss-timeline-surface \.timeline-range-navigation \{[^}]*grid-template-columns: var\(--web-icon-button-size\) max-content var\(--web-icon-button-size\);/s);
+    expect(styles).toMatch(/\.swiss-timeline-surface \.timeline-date-picker \{[^}]*min-width: 120px;[^}]*justify-self: stretch;/s);
     expect(styles).toMatch(/@media \(max-width: 760px\)[\s\S]*\.swiss-timeline-surface \.timeline-range-toolbar \{[^}]*grid-template-columns: minmax\(0, 1fr\);/);
     expect(styles).toMatch(/\.timeline-range-controls \.ui-segmented-control \{[^}]*width: 100%;/);
   });

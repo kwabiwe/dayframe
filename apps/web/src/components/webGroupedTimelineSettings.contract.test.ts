@@ -35,6 +35,22 @@ describe("grouped Timeline and Settings follow-up contracts", () => {
     expect(deleteHook).toContain('clientFetch("/api/time-entries/batch-delete"');
   });
 
+  it("keeps exact-entry quick editing and saves aggregate descriptions as one atomic group", () => {
+    expect(entries).toContain("createTimelineInlineEditDraft");
+    expect(entries).toContain("buildTimelineInlineSavePlan");
+    expect(entries).toContain("updateTimelineInlineDescription");
+    expect(entries).toContain("updateTimelineInlineTime");
+    expect(entries).toContain("onDoubleClick");
+    expect(entries).toContain("renderInlineDescription(entry, groupEditTarget)");
+    expect(entries).toContain("renderInlineDescription(occurrence)");
+    expect(entries).toContain('clientFetch("/api/time-entries/batch-description"');
+    expect(entries).toContain('kind: "group"');
+    expect(entries).toContain("current.target.entryIds");
+    expect(entries).toContain("setOptimisticDescriptions");
+    expect(entries).toContain("timelineEntryGroupKey");
+    expect(entries).toContain("Double-click to edit the latest occurrence");
+  });
+
   it("offers the previous stop in the running start editor", () => {
     expect(timer).toContain("Set to last stop time");
     expect(timer).toContain("lastStoppedAt");

@@ -913,7 +913,10 @@ textarea.ui-control {
 }
 
 .timeline-task-cell {
+  --timeline-task-primary-height: var(--web-control-height);
+  --timeline-task-text-line-height: 16px;
   display: grid;
+  min-height: var(--timeline-task-primary-height);
   grid-template-columns: auto auto minmax(0, 1fr);
   align-items: start;
   gap: 8px;
@@ -927,6 +930,8 @@ textarea.ui-control {
   display: inline-grid;
   min-width: 28px;
   height: 28px;
+  margin-top: calc((var(--timeline-task-primary-height) - 28px) / 2);
+  align-self: start;
   place-items: center;
   border: 0;
   border-radius: 999px;
@@ -950,7 +955,8 @@ textarea.ui-control {
 .timeline-task-category-dot {
   width: 12px;
   height: 12px;
-  margin-top: 4px;
+  margin: calc((var(--timeline-task-primary-height) - 12px) / 2) 0 0;
+  align-self: start;
   border: 0;
   border-radius: 999px;
 }
@@ -971,13 +977,229 @@ textarea.ui-control {
 .timeline-task-details {
   display: grid;
   min-width: 0;
+  align-self: start;
   gap: 2px;
+}
+
+.timeline-list-table tbody > tr:not(.timeline-list-day-heading) > td {
+  vertical-align: middle;
+}
+
+.timeline-list-table tbody > tr:not(.timeline-list-day-heading) > td:first-child {
+  vertical-align: top;
 }
 
 .timeline-task-title {
   overflow-wrap: anywhere;
   color: var(--foreground);
   font-weight: 650;
+}
+
+.timeline-inline-description {
+  position: relative;
+  display: inline-flex;
+  width: max-content;
+  height: var(--timeline-task-primary-height);
+  min-width: 0;
+  max-width: 100%;
+  flex: 0 1 auto;
+  align-items: center;
+  overflow: hidden;
+  transition: flex-grow 180ms ease;
+}
+
+.timeline-inline-description.is-editing {
+  width: auto;
+  flex: 1 1 auto;
+}
+
+.timeline-inline-description-input,
+.timeline-inline-time-input {
+  box-sizing: border-box;
+  appearance: none;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  outline: 0;
+}
+
+.timeline-inline-description-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: var(--timeline-task-primary-height);
+  min-width: 0;
+  min-height: var(--timeline-task-primary-height);
+  padding: calc((var(--timeline-task-primary-height) - var(--timeline-task-text-line-height)) / 2) 0;
+  line-height: var(--timeline-task-text-line-height);
+  text-overflow: ellipsis;
+}
+
+.timeline-inline-description-measure {
+  display: inline-flex;
+  height: var(--timeline-task-primary-height);
+  min-width: 0;
+  align-items: center;
+  overflow: hidden;
+  padding-right: 1px;
+  visibility: visible;
+  white-space: pre;
+  line-height: var(--timeline-task-text-line-height);
+}
+
+.timeline-inline-description.is-editing .timeline-inline-description-measure {
+  visibility: hidden;
+}
+
+.timeline-inline-description:not(.is-editing) .timeline-inline-description-input[readonly] {
+  color: transparent;
+  caret-color: transparent;
+}
+
+.timeline-inline-description:not(.is-editing) .timeline-inline-description-input[readonly]::placeholder {
+  color: transparent;
+}
+
+.timeline-inline-description-input[readonly],
+.timeline-inline-time-input[readonly],
+.timeline-group-time-summary {
+  cursor: text;
+}
+
+.timeline-inline-description:has(.timeline-inline-description-input[readonly]):hover,
+.timeline-group-time-summary:hover {
+  background: var(--surface-muted);
+}
+
+.timeline-inline-description.is-editing .timeline-inline-description-input {
+  background: transparent;
+}
+
+.timeline-inline-description-input:focus-visible {
+  outline: 0;
+}
+
+.timeline-inline-time {
+  box-sizing: border-box;
+  display: inline-grid;
+  width: max-content;
+  max-width: 100%;
+  height: var(--web-control-height);
+  min-height: var(--web-control-height);
+  grid-template-columns: 5ch 16px 5ch;
+  align-items: center;
+  gap: 0;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 8px;
+  outline: 0;
+  padding: 0 8px;
+  box-shadow: none;
+  white-space: nowrap;
+}
+
+.timeline-inline-time.is-running {
+  grid-template-columns: 5ch 16px 5.75ch;
+}
+
+.timeline-inline-time:hover,
+.timeline-inline-time.is-editing,
+.timeline-inline-time:focus-within {
+  background: var(--surface-muted);
+}
+
+.timeline-inline-time-control {
+  position: relative;
+  display: inline-flex;
+  width: 5ch;
+  height: var(--web-control-height);
+  min-width: 0;
+  min-height: var(--web-control-height);
+  align-items: center;
+}
+
+.timeline-inline-time-input {
+  width: 100%;
+  height: var(--web-control-height);
+  min-width: 0;
+  min-height: var(--web-control-height);
+  padding: 0;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-align: center;
+}
+
+.timeline-inline-time-input:focus {
+  border: 0;
+  background: transparent;
+  outline: 0;
+  box-shadow: none;
+}
+
+.timeline-inline-time:has(.timeline-inline-time-input:focus-visible),
+.timeline-inline-time .timeline-inline-time-input:focus-visible {
+  border: 0;
+  outline: 0;
+  box-shadow: none;
+}
+
+.timeline-inline-time-separator {
+  display: inline-flex;
+  width: 16px;
+  height: var(--web-control-height);
+  flex: 0 0 16px;
+  align-items: center;
+  justify-content: center;
+}
+
+/* The later shared picker grid must not give triggerless inline wrappers a box. */
+.swiss-timeline-surface .timeline-inline-time-control > .timeline-inline-date-picker {
+  display: contents;
+  min-width: 0;
+}
+
+.timeline-inline-date-picker-panel {
+  z-index: 140;
+}
+
+.timeline-inline-running {
+  display: inline-flex;
+  min-width: 5.75ch;
+  height: var(--web-control-height);
+  align-items: center;
+  justify-content: center;
+}
+
+.timeline-group-time-summary {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  border-radius: 6px;
+  padding: 2px 4px;
+}
+
+.timeline-list-time-content,
+.timeline-list-duration-content,
+.timeline-list-actions {
+  display: flex;
+  min-width: 0;
+  min-height: var(--web-control-height);
+  align-items: center;
+}
+
+.timeline-list-actions {
+  gap: 8px;
+}
+
+.timeline-inline-edit-error {
+  display: block;
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
 }
 
 .timeline-task-meta {
@@ -9490,8 +9712,13 @@ dialog.ui-dialog.manual-entry-dialog {
   grid-template-columns: var(--web-icon-button-size) max-content var(--web-icon-button-size);
 }
 
+.swiss-timeline-surface .timeline-date-picker {
+  min-width: 120px;
+  justify-self: stretch;
+}
+
 .swiss-timeline-surface .timeline-period-trigger {
-  width: auto;
+  width: 100%;
   padding-inline: 8px;
 }
 
@@ -9615,7 +9842,9 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .timeline-list-table {
   --timeline-list-column-header-height: 40px;
+  min-width: 760px;
   table-layout: fixed;
+  view-transition-name: timeline-list-groups;
 }
 
 .timeline-list-table th {
@@ -9649,6 +9878,8 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .timeline-task-primary-line {
   display: flex;
+  height: var(--timeline-task-primary-height);
+  min-height: var(--timeline-task-primary-height);
   min-width: 0;
   align-items: baseline;
   gap: 8px;
@@ -9665,24 +9896,38 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .timeline-task-primary-line .timeline-task-meta,
 .timeline-task-primary-line .tag-metadata {
+  display: inline-flex;
+  height: auto;
+  min-height: 0;
   flex: 0 0 auto;
+  align-items: baseline;
+  line-height: var(--timeline-task-text-line-height);
+}
+
+.timeline-task-details > .overlap-marker {
+  margin-top: 0;
+}
+
+::view-transition-old(timeline-list-groups),
+::view-transition-new(timeline-list-groups) {
+  animation-duration: 180ms;
+  animation-timing-function: ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .timeline-inline-description {
+    transition: none;
+  }
+
+  ::view-transition-old(timeline-list-groups),
+  ::view-transition-new(timeline-list-groups) {
+    animation-duration: 0s;
+  }
 }
 
 .tag-metadata.is-compact {
   font-size: 11px;
   font-weight: 600;
-}
-
-@container (max-width: 430px) {
-  .timeline-task-primary-line {
-    flex-wrap: wrap;
-    row-gap: 2px;
-    white-space: normal;
-  }
-
-  .timeline-task-primary-line .timeline-task-title {
-    flex: 1 1 100%;
-  }
 }
 
 .inline-tag-input-anchor {

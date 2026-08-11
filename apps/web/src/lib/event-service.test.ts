@@ -39,6 +39,7 @@ const {
   updateLearnedPlaceStatus,
   updateCategory,
   updateTimeEntry,
+  updateTimeEntryDescriptions,
   updatePlace
 } = await import("./event-service");
 
@@ -2938,6 +2939,104 @@ describe("time entry deletion", () => {
       .rejects.toBeInstanceOf(TimeEntryNotFoundError);
     expect(client.query).toHaveBeenCalledWith("rollback");
     expect(client.query.mock.calls.some(([statement]) => String(statement).startsWith("delete from"))).toBe(false);
+  });
+});
+
+describe("grouped time entry descriptions", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it("updates every completed scoped entry in one transaction", async () => {
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({
+          rows: [
+            { id: "entry-1", stoppedAt: "2026-08-11T09:00:00.000Z" },
+            { id: "entry-2", stoppedAt: "2026-08-11T10:00:00.000Z" }
+          ]
+        })
+        .mockResolvedValueOnce({ rows: [{ id: "entry-1" }, { id: "entry-2" }] })
+        .mockResolvedValueOnce({ rows: [] }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(updateTimeEntryDescriptions(["entry-1", "entry-2"], "Planning", session))
+      .resolves.toEqual({ ids: ["entry-1", "entry-2"], updatedCount: 2 });
+    expect(client.query).toHaveBeenCalledWith(
+      expect.stringContaining("set description = $2"),
+      [["entry-1", "entry-2"], "Planning", session.workspaceId, session.userId]
+    );
+    expect(client.query).toHaveBeenCalledWith("commit");
+    expect(client.release).toHaveBeenCalled();
+  });
+
+  it("rolls back without updating when an entry is outside the session scope", async () => {
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{ id: "entry-1", stoppedAt: "2026-08-11T09:00:00.000Z" }] })
+        .mockResolvedValueOnce({ rows: [] }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(updateTimeEntryDescriptions(["entry-1", "entry-2"], "Planning", session))
+      .rejects.toBeInstanceOf(TimeEntryNotFoundError);
+    expect(client.query).toHaveBeenCalledWith("rollback");
+    expect(client.query.mock.calls.some(([statement]) => String(statement).includes("set description"))).toBe(false);
+  });
+
+  it("rolls back without updating when the group includes a running entry", async () => {
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({
+          rows: [
+            { id: "entry-1", stoppedAt: "2026-08-11T09:00:00.000Z" },
+            { id: "entry-2", stoppedAt: null }
+          ]
+        })
+        .mockResolvedValueOnce({ rows: [] }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(updateTimeEntryDescriptions(["entry-1", "entry-2"], null, session))
+      .rejects.toEqual(expect.objectContaining({
+        name: "TimeEntryValidationError",
+        message: "Grouped descriptions can only update completed entries."
+      }));
+    expect(client.query).toHaveBeenCalledWith("rollback");
+    expect(client.query.mock.calls.some(([statement]) => String(statement).includes("set description"))).toBe(false);
+  });
+
+  it("rolls back if the guarded update does not return the complete locked group", async () => {
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({
+          rows: [
+            { id: "entry-1", stoppedAt: "2026-08-11T09:00:00.000Z" },
+            { id: "entry-2", stoppedAt: "2026-08-11T10:00:00.000Z" }
+          ]
+        })
+        .mockResolvedValueOnce({ rows: [{ id: "entry-1" }] })
+        .mockResolvedValueOnce({ rows: [] }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(updateTimeEntryDescriptions(["entry-1", "entry-2"], "Planning", session))
+      .rejects.toBeInstanceOf(TimeEntryNotFoundError);
+    expect(client.query).toHaveBeenCalledWith("rollback");
+    expect(client.query).not.toHaveBeenCalledWith("commit");
+  });
+
+  it("rejects a duplicate-only target before opening a transaction", async () => {
+    await expect(updateTimeEntryDescriptions(["entry-1", "entry-1"], "Planning", session))
+      .rejects.toEqual(expect.objectContaining({ message: "Choose at least two grouped entries." }));
+    expect(mocks.pool.connect).not.toHaveBeenCalled();
   });
 });
 

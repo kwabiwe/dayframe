@@ -1,13 +1,26 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import type { CSSProperties, RefObject } from "react";
 import { CalendarDays } from "lucide-react";
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/Primitives";
 import { DayframeCalendar } from "@/components/DayframeCalendar";
 
+function subscribeToClientEnvironment() {
+  return () => undefined;
+}
+
+function getClientPortalTarget() {
+  return document.body;
+}
+
+function getServerPortalTarget() {
+  return null;
+}
+
 export function DatePickerPopover({
+  anchorRef,
   ariaLabel,
   className = "",
   disabled = false,
@@ -15,13 +28,18 @@ export function DatePickerPopover({
   label,
   onChange,
   onOpenChange,
+  open: controlledOpen,
+  panelId: controlledPanelId,
+  portalAlign = "start",
   panelClassName = "",
   panelLabel = "Choose date",
   portal = false,
+  showTrigger = true,
   today,
   triggerClassName = "",
   value
 }: {
+  anchorRef?: RefObject<HTMLElement | null>;
   ariaLabel?: string;
   className?: string;
   disabled?: boolean;
@@ -29,27 +47,39 @@ export function DatePickerPopover({
   label: string;
   onChange: (date: string) => void;
   onOpenChange?: (open: boolean) => void;
+  open?: boolean;
+  panelId?: string;
+  portalAlign?: "center" | "start";
   panelClassName?: string;
   panelLabel?: string;
   portal?: boolean;
+  showTrigger?: boolean;
   today: string;
   triggerClassName?: string;
   value: string;
 }) {
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
   const effectiveOpen = open && !disabled;
-  const panelId = useId();
+  const generatedPanelId = useId();
+  const panelId = controlledPanelId ?? generatedPanelId;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const clientPortalTarget = useSyncExternalStore(
+    subscribeToClientEnvironment,
+    getClientPortalTarget,
+    getServerPortalTarget
+  );
+  const portalTarget = portal ? clientPortalTarget : null;
   const [portalPosition, setPortalPosition] = useState<CSSProperties | null>(null);
   const selected = new Date(`${value}T12:00:00`);
   const [view, setView] = useState({ year: selected.getFullYear(), month: selected.getMonth() + 1 });
 
   const updateOpen = useCallback((next: boolean) => {
-    setOpen(next);
+    if (controlledOpen === undefined) setUncontrolledOpen(next);
     onOpenChange?.(next);
-  }, [onOpenChange]);
+  }, [controlledOpen, onOpenChange]);
 
   useEffect(() => {
     if (!disabled || !open) return undefined;
@@ -62,7 +92,8 @@ export function DatePickerPopover({
     function closeOnOutside(event: MouseEvent) {
       if (
         !rootRef.current?.contains(event.target as Node) &&
-        !panelRef.current?.contains(event.target as Node)
+        !panelRef.current?.contains(event.target as Node) &&
+        !anchorRef?.current?.contains(event.target as Node)
       ) updateOpen(false);
     }
     function closeOnEscape(event: KeyboardEvent) {
@@ -70,7 +101,7 @@ export function DatePickerPopover({
       event.preventDefault();
       event.stopImmediatePropagation();
       updateOpen(false);
-      triggerRef.current?.focus();
+      (anchorRef?.current ?? triggerRef.current)?.focus();
     }
     document.addEventListener("mousedown", closeOnOutside);
     document.addEventListener("keydown", closeOnEscape);
@@ -78,12 +109,12 @@ export function DatePickerPopover({
       document.removeEventListener("mousedown", closeOnOutside);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [effectiveOpen, updateOpen]);
+  }, [anchorRef, effectiveOpen, updateOpen]);
 
   useLayoutEffect(() => {
     if (!effectiveOpen || !portal) return undefined;
     function updatePosition() {
-      const trigger = triggerRef.current;
+      const trigger = anchorRef?.current ?? triggerRef.current;
       const panel = panelRef.current;
       if (!trigger || !panel) return;
       const margin = 12;
@@ -97,8 +128,11 @@ export function DatePickerPopover({
       const panelRect = panel.getBoundingClientRect();
       const width = Math.min(280, viewportWidth - margin * 2);
       const height = panelRect.height;
+      const preferredLeft = portalAlign === "center"
+        ? triggerRect.left + (triggerRect.width - width) / 2
+        : triggerRect.left;
       const left = Math.min(
-        Math.max(viewportLeft + margin, triggerRect.left),
+        Math.max(viewportLeft + margin, preferredLeft),
         Math.max(viewportLeft + margin, viewportLeft + viewportWidth - width - margin)
       );
       const below = triggerRect.bottom + gap;
@@ -118,13 +152,13 @@ export function DatePickerPopover({
       window.visualViewport?.removeEventListener("resize", updatePosition);
       window.visualViewport?.removeEventListener("scroll", updatePosition);
     };
-  }, [effectiveOpen, portal]);
+  }, [anchorRef, effectiveOpen, portal, portalAlign]);
 
   function choose(date: string) {
     if (disabled || !date) return;
     onChange(date);
     updateOpen(false);
-    triggerRef.current?.focus();
+    (anchorRef?.current ?? triggerRef.current)?.focus();
   }
 
   const panel = (
@@ -147,22 +181,24 @@ export function DatePickerPopover({
 
   return (
     <div className={`timeline-date-picker${className ? ` ${className}` : ""}`} ref={rootRef}>
-      <button
-        aria-label={ariaLabel ?? (iconOnly ? `Choose date, currently ${label}` : undefined)}
-        aria-controls={panelId}
-        aria-expanded={effectiveOpen}
-        aria-haspopup="dialog"
-        className={`timeline-period-trigger${iconOnly ? " is-icon-only" : ""}${triggerClassName ? ` ${triggerClassName}` : ""}`}
-        disabled={disabled}
-        onClick={() => updateOpen(!open)}
-        ref={triggerRef}
-        title={iconOnly ? (ariaLabel ?? `Choose date, currently ${label}`) : undefined}
-        type="button"
-      >
-        <CalendarDays aria-hidden="true" size={16} />
-        {iconOnly ? null : <strong aria-atomic="true" aria-live="polite">{label}</strong>}
-      </button>
-      {portal ? (typeof document === "undefined" ? null : createPortal(panel, document.body)) : panel}
+      {showTrigger ? (
+        <button
+          aria-label={ariaLabel ?? (iconOnly ? `Choose date, currently ${label}` : undefined)}
+          aria-controls={panelId}
+          aria-expanded={effectiveOpen}
+          aria-haspopup="dialog"
+          className={`timeline-period-trigger${iconOnly ? " is-icon-only" : ""}${triggerClassName ? ` ${triggerClassName}` : ""}`}
+          disabled={disabled}
+          onClick={() => updateOpen(!open)}
+          ref={triggerRef}
+          title={iconOnly ? (ariaLabel ?? `Choose date, currently ${label}`) : undefined}
+          type="button"
+        >
+          <CalendarDays aria-hidden="true" size={16} />
+          {iconOnly ? null : <strong aria-atomic="true" aria-live="polite">{label}</strong>}
+        </button>
+      ) : null}
+      {portal ? (portalTarget ? createPortal(panel, portalTarget) : null) : panel}
     </div>
   );
 }
