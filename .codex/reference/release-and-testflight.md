@@ -27,47 +27,36 @@ A Dayframe fix may span several independently deployed surfaces:
 
 Do not conclude a fix failed until all relevant surfaces are checked.
 
-## Current Internal TestFlight Lane
+## Last Recorded Internal TestFlight Release
 
-As of 2026-07-19, Dayframe uses this internal release lane:
+The lane configuration is stable, but the build record is only a dated repository fact. `docs/feature-fix-tracker.md` must say when main contains later mobile code.
 
 - App: Dayframe Time Tracker
 - App Store Connect app id: `6787881096`
 - Bundle id: `com.layereight.dayframe`
 - Team: `65M773ZG6M`
 - Version: `0.1.0`
-- Latest verified build: `0.1.0 (80)`
+- Last repository-recorded verified build: `0.1.0 (87)` (2026-08-09)
 - Group: `Internal Health Debug`
-- Latest delivery/build ID: `c85104d0-ab2f-4acb-9383-e59398d2b05d`
-- Current release rule: implementation PRs are not done until the merged code is in a verified internal TestFlight build.
+- Delivery/build ID: `74bc9ab3-acb0-46da-8f13-820547f81806`
+- Archived commit: `91380dc`
+- Release rule: mobile/native/runtime-configuration changes require a verified internal build before their device behavior is called released. Web-only work does not require a TestFlight build unless it changes a mobile-consumed contract or the user defines TestFlight as the success criterion.
 
 Docs-only or planning-only PRs do not require a TestFlight build unless they change build, release, signing, environment, or runtime configuration.
 
-### Builds 78-80 release history
-
-| Build | Merged scope | Commit | Delivery/build ID | Verified state |
-| --- | --- | --- | --- | --- |
-| `0.1.0 (78)` | PR #138: running-sheet `Done` alignment and keyboard/Suggestions continuity | `e71dda9` | `7b34be3b-c828-4e97-ab97-2ee1e0424e36` | `VALID`, export compliance false, en-GB notes set, `IN_BETA_TESTING` through `Internal Health Debug` |
-| `0.1.0 (79)` | PR #140: three-second lightweight cross-device timer reconciliation | `a86a8f5` | `c9aafbef-7d2f-43c6-a667-c48f4b501eb7` | `VALID`, export compliance false, en-GB notes set, `IN_BETA_TESTING` through `Internal Health Debug` |
-| `0.1.0 (80)` | PR #142: final outer-sheet action alignment and Suggestions session suppression | `5200eb9` | `c85104d0-ab2f-4acb-9383-e59398d2b05d` | `VALID`, export compliance false, `IN_BETA_TESTING` through `Internal Health Debug` |
-
-All three archives used API base `https://dayframe-web.vercel.app`. Build 80
-supersedes 78 for the running-sheet action and motion behavior; build 79 remains
-the release record for the timer-sync/egress change. PR #145 merged after build
-80 and changes the mobile tag-creation path, so its mobile behavior first
-requires build 81.
+Build 87 is recorded as `VALID`, export compliance false, en-GB notes set, and `IN_BETA_TESTING` through `Internal Health Debug`, with production API base `https://dayframe-web.vercel.app`. Earlier per-build history remains available in Git history and dated investigations rather than this procedure.
 
 Swift/SwiftUI native-view changes require a new binary. JavaScript/OTA or Vercel deployment evidence cannot prove that an updated native Calendar module is present.
 
 ## PR Success Lane
 
-For any Dayframe implementation PR that changes shipped app, API, database, mobile, sync, or release behavior, success means:
+For any Dayframe implementation PR that changes shipped app, API, database, mobile, sync, or release behavior, the repository/PR lane means:
 
 1. Sync local `main` with `origin/main`.
 2. Check repo status is clean.
 3. Check memory, tracker, GitHub PRs/issues, and latest TestFlight state.
 4. Confirm PR scope from `docs/feature-fix-tracker.md`.
-5. Create a focused `agent/<short-pr-scope>` branch.
+5. Create a focused branch using the active Codex/client branch-prefix convention.
 6. Implement the change narrowly.
 7. Add or update regression tests for the changed behavior.
 8. Update `docs/feature-fix-tracker.md` in the PR.
@@ -76,24 +65,28 @@ For any Dayframe implementation PR that changes shipped app, API, database, mobi
    - `npm run typecheck`
    - `npm run lint`
    - `npm run build`
+   - `npm run check:docs`
    - `git diff --check`
 10. Commit, push, and open the PR with summary and validation notes.
 11. Wait for GitHub/Vercel checks; fix failures and rerun validation if needed.
 12. Merge to `main` and sync local `main`.
 13. Update the tracker after merge if the merged PR number/status/build evidence changed.
-14. Run `npm run testflight:preflight`.
-15. Temporarily increment the iOS build number for release.
-16. Archive with full Xcode from merged `main`.
-17. Export and upload the `.ipa` to App Store Connect.
-18. Wait for Apple processing to become `VALID`.
-19. Set export compliance/encryption answer.
-20. Add/update TestFlight notes.
-21. Assign or verify the internal testing group.
-22. Verify TestFlight state is `IN_BETA_TESTING`.
-23. Restore the repo iOS build number back to its default if it was changed only for upload.
-24. Tell KB the exact build number, delivery UUID, verification state, and what changed.
 
-Docs-only PR success is narrower: clean branch, docs-only diff, `git diff --check`, PR opened, checks observed, merged, and local `main` synced.
+If mobile/native/runtime configuration changed or TestFlight is an explicit success criterion, continue with the release lane:
+
+1. Run `npm run testflight:preflight`.
+2. Temporarily increment the iOS build number for release.
+3. Archive with full Xcode from merged `main`.
+4. Export and upload the `.ipa` to App Store Connect.
+5. Wait for Apple processing to become `VALID`.
+6. Set export compliance/encryption answer.
+7. Add/update TestFlight notes.
+8. Assign or verify the internal testing group.
+9. Verify TestFlight state is `IN_BETA_TESTING`.
+10. Restore the repo iOS build number back to its default if it was changed only for upload.
+11. Tell KB the exact build number, delivery UUID, verification state, and what changed.
+
+Otherwise record TestFlight as not applicable. Docs-only PR success is narrower: clean branch, docs-only diff, `npm run check:docs`, `git diff --check`, PR opened, checks observed, merged, and local `main` synced.
 
 ## TestFlight Build Identity
 

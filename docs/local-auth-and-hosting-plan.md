@@ -13,11 +13,13 @@ DAYFRAME_AUTH_MODE=provider
 Local auth uses the existing Postgres database for users, workspaces and sessions.
 
 ```bash
-cp .env.example .env
+cp apps/web/.env.example apps/web/.env.local
 DAYFRAME_AUTH_MODE=local npm run db:up
 DAYFRAME_AUTH_MODE=local npm run db:setup
 DAYFRAME_AUTH_MODE=local npm run dev:web
 ```
+
+Next.js loads `apps/web/.env.local`; copying only the repository-level `.env.example` does not configure the web workspace. Put persistent local auth variables in the app-scoped file or export them in the invoking shell.
 
 Open `http://localhost:3000`. Logged-out users are redirected to `/login`.
 
@@ -51,6 +53,8 @@ Signup creates:
 Web sessions use an HTTP-only `dayframe_session` cookie. Mobile sessions use the same app session token as a bearer token stored in Expo SecureStore.
 
 Sessions are stored in `auth_sessions` with hashed tokens only, expiry, optional user agent, `last_used_at` and `revoked_at`.
+
+The absolute session TTL defaults to 30 days. `DAYFRAME_SESSION_TTL_SECONDS` may override it with a whole number from 60 seconds through 365 days; cookie `maxAge` and database expiry use the same resolved value. Sliding renewal is not implemented and requires a separate security/product decision.
 
 To revoke all local sessions:
 

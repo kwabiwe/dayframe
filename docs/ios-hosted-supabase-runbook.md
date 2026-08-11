@@ -30,20 +30,9 @@ Never put the Supabase service-role key in the iOS app, EAS public env, screensh
 
 ## Vercel Environment
 
-Set these for Production and Preview:
+`docs/vercel-supabase-hosting.md` is the canonical Vercel environment inventory. Do not maintain a second partial list here. iOS depends on that runbook's provider-auth/database/signup settings plus the server-only Geoapify, session TTL, rollout, APNs, and cron variables when their features are enabled.
 
-```bash
-DAYFRAME_AUTH_MODE=provider
-DATABASE_URL=postgres://postgres.[project-ref]:[password]@[pooler-host]:6543/postgres
-NEXT_PUBLIC_SUPABASE_URL=https://[project-ref].supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
-DAYFRAME_ALLOWED_SIGNUP_EMAILS=you@example.com,friend@example.com
-DAYFRAME_SIGNUPS_ENABLED=false
-```
-
-If the Supabase project still uses legacy keys, `NEXT_PUBLIC_SUPABASE_ANON_KEY` can be used as a fallback. Prefer the publishable key for new projects.
-
-Use the Supabase pooler connection string that succeeds in Vercel. Do not add an SSL-mode query parameter when the deployed pooler URL only works without it.
+Preview must use the staging Supabase project and `NEXT_PUBLIC_DAYFRAME_DEPLOYMENT_ENV=staging`; production must use production Supabase and omit the staging marker. Use the Supabase pooler connection string that succeeds in Vercel. If the project still uses legacy API keys, `NEXT_PUBLIC_SUPABASE_ANON_KEY` remains a fallback, but new projects should use the publishable key.
 
 ## EAS Environment
 

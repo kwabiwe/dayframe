@@ -6,7 +6,7 @@ Dayframe is a personal time-intelligence app. It combines fast manual task track
 
 The core invariant is **event-first tracking**: mobile/web/health/location signals become `activity_events` before they become `time_entries`. High-confidence explicit actions may create entries immediately. Ambiguous signals should become `review_items`.
 
-Use `docs/PRD.md` for product direction, then check `docs/feature-fix-tracker.md` for the current shipped/watch state before deciding what is next. Use `docs/vercel-supabase-hosting.md` for hosted auth/deployment context.
+Use `docs/PRD.md` for product direction, `docs/architecture.md` for runtime/data ownership, and `docs/feature-fix-tracker.md` for current shipped/watch/decision state before deciding what is next. Use `docs/documentation-governance.md` to resolve conflicting guidance and `docs/vercel-supabase-hosting.md` for hosted auth/deployment context. Dated files under `docs/investigations/` are evidence/history, not current product or delivery state.
 
 ## Tech Stack
 
@@ -23,7 +23,8 @@ Setup:
 
 ```bash
 npm install
-cp .env.example .env
+cp apps/web/.env.example apps/web/.env.local
+cp apps/mobile/.env.example apps/mobile/.env
 npm run db:up
 npm run db:setup
 ```
@@ -43,6 +44,7 @@ npm run lint
 npm run typecheck
 npm run test
 npm run build
+npm run check:docs
 ```
 
 Database/export:
@@ -111,7 +113,7 @@ npm run export:workspace -- ./dayframe-backup.json
 
 ## Database Patterns
 
-- Local schema lives in `packages/db/migrations/001_init.sql`.
+- Local schema history lives in the ordered files under `packages/db/migrations`; setup applies every SQL migration in filename order before seed data.
 - Hosted Supabase security/RLS additions live in `supabase/migrations`.
 - Tables with user data should include `workspace_id`; most event/entry tables also include `user_id`.
 - Use transactions when an operation writes events plus derived entries/review items.
@@ -137,6 +139,7 @@ npm run lint
 npm run typecheck
 npm run test
 npm run build
+npm run check:docs
 ```
 
 - For mobile/native changes, also run the mobile typecheck and, when feasible, an iOS simulator build.
@@ -155,10 +158,13 @@ npm run build
 - Do not claim scripts passed if they were not run.
 - Before diagnosing screenshots or production regressions, use `.codex/reference/debugging-playbook.md` to verify build, deployment, schema, and runtime state before changing code.
 - When a bug exposes a missing recurring guardrail, update the relevant `.codex/reference/` doc or investigation note as part of the fix.
+- Before every PR, classify documentation impact using `docs/documentation-governance.md`. Update the canonical source in the same PR or state why no documentation change is needed; do not leave merged work marked `In progress` in the tracker.
 
 ## Important Files
 
 - `docs/PRD.md`: product requirements and MVP scope.
+- `docs/architecture.md`: canonical runtime, data, authentication, mobile ownership, and deployment boundaries.
+- `docs/documentation-governance.md`: canonical document ownership and pre-PR documentation impact gate.
 - `docs/brand-style-guide.md`: canonical logo usage, Midnight Core tokens, typography, component states, charts, and accessibility.
 - `docs/vercel-supabase-hosting.md`: staging/production hosting, auth, Preview and alias-promotion runbook.
 - `docs/dayframe-regression-checklist.md`: feature checklist to avoid regressions.

@@ -11,6 +11,7 @@ npm run lint
 npm run typecheck
 npm run test
 npm run build
+npm run check:docs
 npm run check:brand-assets
 git diff --check
 ```
@@ -275,7 +276,7 @@ Manual evidence in System, Light and Dark:
 - Meaningful lock-ups expose one accessible name and decorative artwork exposes none.
 - Primary, secondary, destructive, selected, disabled, loading, empty and error states remain distinguishable.
 - Charts retain exact totals, labels and non-colour cues.
-- Categories creation keeps its focused name field, all 12 perceptually distinct swatches, pin state and actions above the iOS keyboard; selected-state labels remain usable with Dynamic Type and VoiceOver.
+- Categories creation keeps its focused name field, all 30 shared swatches in the canonical five-column order, pin state and actions above the iOS keyboard; selected-state labels remain usable with Dynamic Type and VoiceOver.
 - Web is checked at desktop, tablet and phone widths; iOS is checked with Dynamic Type, VoiceOver, Reduce Motion and Reduce Transparency.
 
 ## Auth, Workspace, And Deployment
@@ -307,6 +308,7 @@ Required checks:
 For docs-only PRs:
 
 - Confirm the diff only changes docs/planning/reference files.
+- Run `npm run check:docs`.
 - Run `git diff --check`.
 - Open the PR, observe GitHub/Vercel checks, merge, and sync local `main`.
 

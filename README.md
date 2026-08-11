@@ -1,47 +1,58 @@
 # Dayframe
 
-Dayframe is a first working version of a customizable time intelligence product. It combines fast task tracking with an Expo iOS app that can capture manual actions, quick actions, NFC/Shortcut-style events, geofence events and unknown stays.
+Dayframe is a personal time-intelligence app with a Next.js web interface and an Expo iOS app. It combines fast manual tracking with privacy-conscious HealthKit, location, Shortcuts/App Intent, and offline capture.
 
-The core rule is event-first: every signal becomes an `activity_events` row before it can become a `time_entries` row. High-confidence explicit actions can create entries immediately. Ambiguous signals go to `review_items`.
+The core invariant is event-first tracking: newly captured signals become `activity_events` before they derive `time_entries`. Explicit actions and separately approved high-confidence automation may create entries immediately; ambiguous signals become `review_items`.
 
-## Monorepo
+## Start here
 
-- `apps/web`: Next.js App Router, TypeScript, Tailwind, Postgres-backed API routes and operational UI.
-- `apps/mobile`: Expo Router React Native app, TypeScript, iOS prebuild, offline event queue, quick actions, geofence/deep-link hooks.
-- `packages/shared`: Zod schemas, shared types, event normalization and timer state-machine tests.
-- `packages/db`: Postgres/PostGIS migration, seed data and setup script.
+- Product intent: [`docs/PRD.md`](docs/PRD.md)
+- Runtime and data ownership: [`docs/architecture.md`](docs/architecture.md)
+- Current shipped/watch/decision state: [`docs/feature-fix-tracker.md`](docs/feature-fix-tracker.md)
+- Documentation ownership: [`docs/documentation-governance.md`](docs/documentation-governance.md)
+- Brand and UI system: [`docs/brand-style-guide.md`](docs/brand-style-guide.md)
+- Hosted deployment: [`docs/vercel-supabase-hosting.md`](docs/vercel-supabase-hosting.md)
+- Regression contract: [`docs/dayframe-regression-checklist.md`](docs/dayframe-regression-checklist.md)
+
+Dated files under `docs/investigations/` are evidence/history, not current product or delivery state.
+
+## Repository
+
+- `apps/web`: Next.js App Router UI and authenticated API routes.
+- `apps/mobile`: Expo Router iOS app, offline stores, HealthKit/location adapters, and targeted native modules.
+- `packages/shared`: shared schemas, normalization, palette/theme, timer, tag, time-interval, and Location V2 contracts.
+- `packages/db`: ordered local Postgres/PostGIS migrations, seed, setup, and export scripts.
+- `supabase/migrations`: ordered hosted Supabase migrations and RLS/security additions.
+
+Exact dependency versions live in the package manifests and lockfile; documentation should not duplicate a “current version” snapshot.
 
 ## Requirements
 
-- Node.js and npm.
+- Node.js and npm compatible with the checked-in lockfile.
 - Docker Desktop for local Postgres/PostGIS.
-- Xcode for iOS. This workspace was verified with Xcode 26.6 at `/Applications/Xcode.app/Contents/Developer`.
-- CocoaPods for native iOS dependencies. `npm run ios:prebuild` installed it through Homebrew on this machine.
+- Full Xcode plus CocoaPods for native iOS work.
+- A physical iPhone for HealthKit, background location, App Intent/Live Activity, signed entitlement, and direct-manipulation acceptance checks.
 
-## Setup
+## Local setup
+
+Next.js loads environment files from `apps/web`; the repository-level template is a reference for CLI/local-service variables and is not loaded automatically by the workspace command.
 
 ```bash
 npm install
-cp .env.example .env
+cp apps/web/.env.example apps/web/.env.local
+cp apps/mobile/.env.example apps/mobile/.env
 npm run db:up
 npm run db:setup
 ```
 
-Run the web app:
+Start web and mobile development:
 
 ```bash
 npm run dev:web
-```
-
-Open [http://localhost:3000](http://localhost:3000).
-
-Run the mobile app:
-
-```bash
 npm run dev:mobile
 ```
 
-For iOS simulator/native Xcode work:
+Open web at [http://localhost:3000](http://localhost:3000). For iOS simulator/native work:
 
 ```bash
 npm run ios:prebuild
@@ -49,152 +60,81 @@ npm run ios:xcode
 npm run ios
 ```
 
-`npm run ios` is the safest local simulator path because it builds, installs and opens the app with the correct Metro development URL. If you want to use Xcode directly, run `npm run ios:xcode` instead of opening the workspace by hand; the helper starts Metro before opening Xcode. A Debug build launched without Metro shows React Native's "No script URL provided" red screen because there is no embedded JavaScript bundle in Debug.
+`npm run ios` builds, installs, and launches against Metro. For a physical iPhone talking to the local Mac, set `EXPO_PUBLIC_DAYFRAME_API_BASE` in `apps/mobile/.env` to the Mac's LAN URL rather than `localhost`.
 
-`apps/mobile/ios/Dayframe.xcworkspace` is generated and ready for Xcode. The helper script prints the active Xcode developer directory and version before opening the workspace/project.
+Local auth modes and first-user setup are documented in [`docs/local-auth-and-hosting-plan.md`](docs/local-auth-and-hosting-plan.md). Hosted provider auth is documented in [`docs/vercel-supabase-hosting.md`](docs/vercel-supabase-hosting.md).
 
-For a physical iPhone, set `EXPO_PUBLIC_DAYFRAME_API_BASE` in `apps/mobile/.env` to your Mac's LAN URL instead of `localhost`.
+## Current product surfaces
 
-## Demo Data
+Web includes:
 
-Seed data is fictional and generic:
+- one persistent shell-owned timer shared by Dashboard and Timeline;
+- Calendar, List, and Timesheet Timeline views;
+- Calendar click-to-create, eligible pointer resize, and the shared compact entry editor;
+- grouped List editing, intentional-overlap handling, deletion with Undo, reports, search, Review, Categories, Tags, Places, Settings, and export;
+- Supabase provider auth with Dayframe app sessions and workspace/user scoping.
 
-- Workspaces: Personal, Freelance Studio.
-- Categories: Work, Admin, Personal, Health, Family, Learning, Rest, Travel, Client Work.
-- Legacy clients/projects remain in seed data only for compatibility and migration testing.
-- Tags: billable, manual, automated, needs-review, nfc, geofence, health, calendar.
-- Places: Home, Office, Gym, School, Town Centre, Coffee Shop.
-- Rules: Gym and School create suggestions, Town Centre creates review, NFC Start Chores starts a timer.
+iOS includes:
 
-## Design System
+- Today, native Calendar, and Reports tabs;
+- optimistic start/stop/edit/delete and shared time-entry sheets;
+- offline activity-event fallback and a separate durable Review outbox;
+- HealthKit sleep/workout import;
+- geofence and Location V2 evidence capture;
+- Apple Shortcuts/App Intents, Live Activity, and cross-device timer reconciliation.
 
-Dayframe uses the Midnight Core visual system: a near-black midnight-navy canvas, layered neutral surfaces, compact rounded controls, restrained elevation and coral for primary action and active state. The light theme is a designed neutral companion rather than an inversion. UI typography remains system-first, with tabular numerals for timers and reports; the outlined Dayframe wordmark needs no font file.
+Native SwiftUI/UIKit surfaces receive serializable presentation state from React Native and emit semantic actions. React remains the owner of authentication, bootstrap data, routing, API mutations, timer truth, offline reconciliation, and sheets.
 
-Shared semantic tokens cover backgrounds, inset/raised/muted surfaces, borders, primary/secondary/muted text, accent states, focus, success, warning, danger, info, chart tracks, overlays, disabled content and shadows. Theme mode defaults to the browser/device system setting. Web and iOS users can choose System, Light or Dark in Settings.
+## Design system
 
-The approved entity/chart palette is shared from `packages/shared` and uses palette keys instead of arbitrary user-selected hex values:
+Dayframe uses Midnight Core: a midnight-navy dark canvas, a designed neutral light companion, restrained fill-led surfaces, coral primary/active states, system typography, and neutral-grey web focus.
 
-`lime`, `teal`, `sky`, `blue`, `violet`, `rose`, `amber`, `orange`, `red`, `steel`, `moss`, `graphite`.
+Category identity uses the shared 30-colour palette and stable storage keys in `packages/shared/src/palette.ts`. Picker presentation is separate from deterministic fallback order. Tags are user-facing metadata, not category colours, and projects/clients remain legacy compatibility data rather than primary UX.
 
-The stable `lime` key displays as Mint in Midnight Core; key names and deterministic mappings remain unchanged for storage and API compatibility. Categories and tags are created with a swatch selector on web. Legacy clients/projects can still be created for compatibility and migration testing. The API normalizes submitted colors to approved palette keys, and legacy seeded hex values are still resolved into approved colors for compatibility. New seed data stores palette keys directly.
+Motion is part of the feature contract. Navigation, sheets, gestures, layout reflow, status feedback, Undo, and failure rollback follow [`.codex/reference/motion.md`](.codex/reference/motion.md).
 
-Charts use the same palette resolver on web and mobile. If a report/source/place does not have a stored color, Dayframe cycles through the palette deterministically from the row name so chart colors remain stable. The dashboard time-spent chart and mobile activity summary both render circular donut charts. Web reports use animated bar widths and category-aware timeline marks. The mobile activity summary uses `react-native-svg` to render a donut chart split by category.
+## Data, privacy, and rollout
 
-Motion is intentionally restrained: panels ease in, buttons show press feedback, timer state color changes are immediate, report bars animate their widths, and the mobile donut draws once when the summary period first appears.
+- Web/mobile app APIs require Dayframe sessions; integration tokens are separate and scoped.
+- Health and precise location data must not be sent to analytics or ordinary logs.
+- Exact Location V2 evidence is user-owned, retained temporarily, exported/deletable, and summarized without coordinates in `activity_events`.
+- General event capture, offline Review mutations, and Location V2 evidence use separate durable owners.
+- Location V2 supports `v1`, `v2_shadow`, `v2_review`, and narrow `v2_enabled`; the checked-in fallback remains `v2_shadow`.
+- Full account/workspace deletion and backup-retention semantics are not complete. See the decision register in the feature tracker.
 
-See [the Dayframe brand and style guide](docs/brand-style-guide.md) for canonical artwork, wordmark variants, exact tokens, accessibility guidance and platform usage.
+Production retention and Live Activity retries use protected Vercel cron routes. Staging and production lane details live in the hosting runbook.
 
-## Time Review Views
+## API entry points
 
-The web Timeline page has three Dayframe review modes:
+Primary authenticated routes include:
 
-- Calendar: a week/day grid with time blocks placed by start and stop time, daily totals and category color accents.
-- List: a chronological, grouped list of entries with filters for category, tag, source, confidence and review state. Entries can be edited, continued or deleted inline.
-- Timesheet: a weekly table grouped by category/activity, with days as columns, cell totals and weekly totals.
+- `GET /api/bootstrap`
+- `POST /api/events`
+- `POST /api/time-entries`
+- `PATCH|DELETE /api/time-entries/:id`
+- `POST /api/review/:id`
+- `POST|DELETE /api/location/evidence`
+- `GET /api/review/:id/location-evidence`
+- `GET /api/export`
 
-The selected review mode is stored locally in the browser. Calendar drag and resize are not implemented in v1; click/inspect and List editing are the current editing path.
+The read-only private integration API is documented in [`docs/integration-api.md`](docs/integration-api.md).
 
-## Event Flow
+## Validation
 
-1. Web, mobile, NFC, Shortcut, geofence, calendar and health signals post to `/api/events`.
-2. The API inserts `activity_events`.
-3. `packages/shared` normalizes the event into a candidate activity.
-4. Explicit starts close the previous active timer and create a new `time_entries` row.
-5. Broad geofences, Home, unknown stays and calendar hints create `review_items`.
-6. Review actions can accept, ignore once, always ignore a source, or create a rule.
-
-## API Routes
-
-- `GET /api/bootstrap`: app bootstrap data for web/mobile.
-- `POST /api/events`: event-first signal ingestion.
-- `POST /api/time-entries`: start, stop or create manual entries.
-- `PATCH /api/time-entries/:id`: edit an entry.
-- `DELETE /api/time-entries/:id`: delete an entry.
-- `POST /api/entities`: create categories, tags, places, rules and legacy compatibility entities.
-- `POST /api/review/:id`: accept, ignore or create a rule from a review item.
-- `POST /api/location/evidence`: authenticated, bounded, idempotent upload of temporary ordered location evidence. The permanent activity event stores only a coordinate-free batch summary.
-- `DELETE /api/location/evidence`: delete the authenticated user's retained raw location evidence while preserving derived entries and segments.
-- `GET /api/review/:id/location-evidence`: private, `no-store` `LocationReviewEvidenceDto` used by both mobile and web maps.
-- `POST /api/review/:id` also accepts atomic location actions: `edit_and_confirm`, `change_place`, `record_once`, `save_place_and_confirm`, `split`, and `merge`.
-- `GET /api/export?kind=workspace_json`: workspace backup JSON.
-- `GET /api/export?kind=time_entries_csv`: time-entry CSV export.
-
-## Production Readiness Foundations
-
-This repo now has explicit local-dev auth/session configuration, scoped ingest-token foundations, geofence exit handling and HealthKit sleep/workout adapters for native iOS builds. See [docs/production-readiness.md](docs/production-readiness.md) for setup, scope and remaining work.
-
-For DB-backed local login/signup sessions, use `DAYFRAME_AUTH_MODE=local` and see [docs/local-auth-and-hosting-plan.md](docs/local-auth-and-hosting-plan.md).
-
-For hosted Vercel/Supabase setup, use `DAYFRAME_AUTH_MODE=provider` and see [docs/vercel-supabase-hosting.md](docs/vercel-supabase-hosting.md). Production uses `dayframe-web.vercel.app` with production Supabase. Each PR receives a Vercel Preview backed by the separate staging Supabase project; the PR selected for hands-on testing is manually promoted to `dayframe-staging.vercel.app` before merge. Mobile preview builds use staging while production/TestFlight builds use production.
-
-Useful commands:
+For broad changes:
 
 ```bash
-npm run export:workspace -- ./dayframe-backup.json
-```
-
-## Privacy Model
-
-- Ordinary event payloads are stored in `activity_events.raw_payload`; Location Intelligence V2 batch and segment events deliberately exclude coordinates and route traces.
-- Exact ordered evidence is user-owned in `location_evidence`, protected by explicit workspace/user filters and Supabase RLS, and removed after its seven-day retention window. Evidence-to-segment links cascade on deletion; derived stays, commutes, reviews, confirmed entries, saved places, and accepted learned places may remain.
-- Mobile persists evidence before networking in an account-isolated Expo SQLite WAL journal. A bounded outbox uploads at most 100 items per batch with idempotent acknowledgements and retry backoff.
-- Disabling location intelligence stops standard updates, geofences, native visit monitoring, and significant-change monitoring. The Settings deletion control removes retained evidence locally and on the server.
-- Home does not auto-start by default.
-- Broad places create review items unless the user defines a rule.
-- Export includes retained exact evidence as GeoJSON longitude/latitude coordinates plus derived location segments and correction feedback. Account/workspace deletion remains a broader product follow-up.
-
-## Location Intelligence V2
-
-The V2 engine (`location-v2.0`) consumes an ordered journal from Expo standard updates, geofence transitions, native `CLVisit`, significant-change, provider, pause, and resume signals. It deterministically builds contiguous stay and commute segments, represents uncertain boundaries explicitly, matches against the complete saved-place catalogue, and replays canonically on the server. It never treats recurrence at the same coordinate as proof of uninterrupted presence.
-
-Rollout is server-controlled by `DAYFRAME_LOCATION_ROLLOUT_MODE` and defaults to `v2_shadow`. The supported modes are `v1` (previous production behaviour), `v2_shadow` (capture/replay only while V1 remains active), `v2_review` (V2 review items with competing V1 location semantics suppressed), and the later high-confidence gate `v2_enabled`. A client must acknowledge the same semantic mode before the server records a cutover; segments that started in shadow cannot be backfilled into user-visible history. Return the server to `v2_shadow` or `v1` before rolling back code; user-confirmed V2 entries remain ordinary event-first time entries.
-
-Vercel Cron invokes `GET /api/cron/location-retention` daily at `03:17 UTC`
-and the bounded Live Activity outbox sweep at `03:47 UTC`. The production
-environment must provide `CRON_SECRET`; both routes accept only the matching
-bearer token and return `no-store`. Retention uses the database service role for
-bounded cleanup, while Live Activity delivery processes a leased outbox batch
-and records sanitized APNs diagnostics. Verify the secret, schedules, and Vercel
-invocation logs after deployment. Do not expose either route without its secret
-or grant retention execution to authenticated users.
-
-Web evidence maps use MapLibre. Set `NEXT_PUBLIC_DAYFRAME_MAP_STYLE_URL` to a production style whose tile, glyph, sprite, and attribution terms you are authorised to use. With no value, Dayframe uses a private tile-free canvas that still renders the supplied evidence layers; no public demo tile service is hardcoded. If a CSP is introduced, allow only the selected provider's exact `connect-src`/`img-src` hosts plus the worker/blob requirements documented by that provider.
-
-iOS background delivery is opportunistic. Visits are retrospective and neither Dayframe nor Core Location guarantees continuous delivery after explicit force-quit, with Background App Refresh disabled, or after permission/service changes. See [.codex/reference/location-learning.md](.codex/reference/location-learning.md) and the [V2 investigation](docs/investigations/2026-07-20-location-intelligence-v2.md).
-
-## Verification
-
-```bash
+npm run check:docs
+npm run lint
 npm run typecheck
-npm test
-npm run build -w @dayframe/web
-npm run validate:location-v2-sqlite
-# DATABASE_URL must point to a disposable local database ending in _test
-DATABASE_URL=postgres://.../dayframe_v2_test npm run validate:location-v2-db
-cd apps/mobile && npx expo install --check
+npm run test
+npm run build
+npm run check:brand-assets
+git diff --check
 ```
 
-Database:
+Use [`.codex/reference/validation-matrix.md`](.codex/reference/validation-matrix.md) to select focused database, SQLite, web, native build, staging, and physical-device checks. Do not treat simulator/source tests as proof of physical HealthKit, location, Live Activity, keyboard, or gesture behavior.
 
-```bash
-npm run db:up
-npm run db:setup
-```
+## Known product decisions
 
-Mobile-to-web sync path:
-
-1. Start the web app on port 3000.
-2. Start the Expo app.
-3. Tap a quick action in mobile.
-4. The mobile queue posts to `/api/events`.
-5. The web dashboard/timeline picks up the new active or stopped timer without a manual refresh.
-
-## Known Limitations
-
-- No billing or team management.
-- Review split/merge and saved-place correction flows are documented but not fully implemented.
-- Calendar drag/drop and resize are not implemented yet; use the List view to edit start and stop times.
-- HealthKit sleep and workout imports are implemented behind a native iOS adapter; they require a development build/device and still route through activity events/review.
-- NFC is represented as an event/deep-link pathway; full native NFC scanning should be added with a development build.
-- Local demo auth uses fixed demo user/workspace IDs.
-- Docker Desktop must be running before `npm run db:up`.
+The feature tracker holds the active decision register. Current decisions include the production Location V2 mode, automation-accuracy measurement, full deletion/retention semantics, a separate staging iOS identity, native NFC beyond Shortcuts, and wider beta/App Store criteria.

@@ -8,7 +8,7 @@ The core value proposition is to reduce manual time-tracking friction without lo
 
 The MVP goal is to make Dayframe reliable for personal use and a small friends beta: hosted on Vercel, backed by Supabase Postgres/Auth, iOS-only for mobile, offline-capable for hours or days, and privacy-conscious around health and precise location data.
 
-Current reality as of 2026-07-19: Dayframe is in an active internal TestFlight lane, with build `0.1.0 (58)` verified for KB testing after PR #85. Reusable Tags span hosted storage, web/API, offline-capable mobile entry, native Calendar presentation, clean Description/tag state separation, a mobile `Add a tag` shortcut, a web tag picker, higher-contrast mobile autocomplete, solid tag iconography, and draft-only tap-to-remove editing. Build 58 replaces the stale nested native Calendar model boundary identified in build 57; day taps, day/week swipes, and visible tracked-entry refresh are now under physical-iPhone `Watch` verification. The tracker in `docs/feature-fix-tracker.md` is the source of truth for what is `Done`, still under `Watch`, or actively `In progress`.
+This PRD is deliberately stable product intent. `docs/feature-fix-tracker.md` is the source of truth for delivery, release, Watch, and decision state; `docs/architecture.md` is the source of truth for runtime/data ownership. Do not copy build numbers or active-branch snapshots into this document.
 
 ## 2. Mission
 
@@ -55,7 +55,7 @@ Core Functionality:
 - ✅ Auto-start for trusted places only.
 - ✅ Conservative suggestions for broad/ambiguous places.
 - ✅ HealthKit summaries for sleep and workouts/walks as automatic entries or reviewable high-confidence events, with real-device background behavior and mapping defaults still watched after TestFlight validation.
-- ⚠️ Mobile offline queue exists, but failed-queue recovery, diagnostics, retry visibility, and conflict recovery still need hardening.
+- ✅ Mobile activity-event fallback and offline Review mutation queues include durable storage, bounded retry, diagnostics, and idempotency. Real-device background/reconnect/conflict behaviour remains under Watch.
 - ⚠️ Time-entry edit/delete/export paths exist, but full account/workspace deletion and stronger privacy controls for raw Health/location payloads remain future work.
 
 Technical:
@@ -71,8 +71,8 @@ Integration:
 
 - ✅ iOS HealthKit sleep and walking/workout summaries.
 - ✅ iOS geofence monitoring for known places.
-- 🚧 Location Intelligence V2 adds an ordered, temporary evidence journal; deterministic contiguous stay/commute segmentation; native iOS visit/significant-change anchors; private map review; and atomic correction actions. Its server-controlled rollout progresses from `v1` to the safe default `v2_shadow`, then `v2_review`, with `v2_enabled` reserved for separately approved high-confidence behaviour. It remains rollout-gated until migration, hosted deployment, TestFlight, and the physical-device matrix are verified.
-- ✅ Anonymized automation accuracy analytics.
+- ✅ Location Intelligence V2 implements an ordered temporary evidence journal, deterministic stay/commute segmentation, native iOS visit/significant-change anchors, private map review, and atomic correction actions. Its live server mode remains rollout-gated: the repository fails closed to `v2_shadow`, while `v2_review` and narrow `v2_enabled` require separately recorded operational approval and evidence.
+- ❓ Automation outcome measurement is a decision item. Review outcomes are stored, but no dedicated anonymized analytics product or telemetry contract is approved.
 
 Deployment:
 
@@ -113,8 +113,8 @@ Deployment:
 7. As a user reviewing time, I want Calendar, List, and Timesheet views, so that I can edit precise entries and understand daily/weekly totals.
    - Example: Resize/edit a time block, delete an accidental entry, and review weekly totals by category.
 
-8. As the product owner, I want anonymized automation accuracy metrics, so that I can improve rules without collecting unnecessary personal detail.
-   - Example: Track accepted vs ignored suggestions by source type, not raw coordinates.
+8. As the product owner, I want an explainable way to assess automation quality without exposing sensitive context.
+   - Example: An owner-only accepted/ignored report may be appropriate, but external telemetry requires a separate privacy decision.
 
 9. As an iOS user, I want navigation, gestures, sheets, list changes, and action feedback to transition consistently, so that every state change feels connected and understandable rather than jumpy.
    - Example: Swiping to delete an entry moves continuously into an animated list reflow and Undo state, including dismissal, restoration, failure, and Reduce Motion behaviour.
@@ -126,7 +126,7 @@ High-level architecture:
 - `apps/mobile`: Expo/React Native iOS app for manual timers, geofences, HealthKit import, offline queue, and sync, with targeted Swift/SwiftUI native modules where a platform interaction needs native ownership.
 - `apps/web`: Next.js App Router web app and API routes for timer/review/reporting/auth.
 - `packages/shared`: shared schemas, event normalization, palette/types, and state-machine behavior.
-- `packages/db`: Postgres/PostGIS migrations, seed/setup scripts, import/export utilities.
+- `packages/db`: ordered Postgres/PostGIS migrations, seed/setup scripts, import/export utilities.
 - `supabase/migrations`: hosted Supabase-specific RLS and production policies.
 
 Key patterns:
@@ -161,7 +161,7 @@ Automation:
 - Geofence enter/exit event capture.
 - Broad/unknown place review suggestions.
 - HealthKit sleep and workout/walk summary import.
-- Automation accuracy metrics based on accepted/ignored outcomes.
+- Stored Review outcomes that can support a future owner-approved quality report or privacy-reviewed analytics design.
 
 Privacy/data controls:
 
@@ -173,8 +173,8 @@ Privacy/data controls:
 
 Web:
 
-- Next.js 16.2.9 App Router
-- React 19.2.x
+- Next.js App Router
+- React
 - TypeScript
 - Tailwind CSS
 - `pg`
@@ -183,8 +183,8 @@ Web:
 
 Mobile:
 
-- Expo 56
-- React Native 0.85
+- Expo
+- React Native
 - Expo Router
 - Expo Router Native Tabs backed by the iOS system tab controller
 - Expo SecureStore
@@ -204,7 +204,9 @@ Optional/future:
 
 - Supabase Realtime or another realtime channel for active timer updates.
 - Sentry with PII scrubbing.
-- Privacy-friendly analytics for automation accuracy.
+- An owner-approved automation-quality report or privacy-reviewed analytics design.
+
+Exact dependency versions live in the package manifests and lockfile rather than this PRD.
 
 ## 9. Security & Configuration
 
@@ -313,7 +315,7 @@ Functional requirements:
 - ✅ User can sign up/log in through hosted Supabase Auth.
 - ✅ Only allowlisted beta users can create accounts.
 - ✅ Web and mobile share active timer state.
-- ⚠️ Mobile can queue events offline and sync later, but failed queue recovery and diagnostics need hardening before wider beta confidence.
+- ✅ Mobile can queue events offline and sync later with retry and diagnostics; real-device reconnect/background/conflict behaviour remains under Watch before wider beta confidence.
 - ✅ Trusted places can auto-start entries.
 - ✅ Ambiguous location events appear in review.
 - ✅ HealthKit sleep and workouts/walks appear as time entries or high-confidence review items; duplicate/overlapping Sleep remains a tracked investigation.
@@ -388,9 +390,9 @@ Deliverables:
 - ✅ Broad/unknown geofence review suggestions.
 - ✅ Learned-location evidence separates repeat place suggestions, significant one-off stays, and weak/pass-through noise.
 - ✅ Learned-place details cache readable address/POI resolution and keep coordinates secondary.
-- 🚧 `location-v2.0` fixes temporal continuity by closing stays on accepted intervening-place evidence, sustained exits, or explicit gaps; preserves short saved-place endpoints; derives journeys from movement evidence; and exposes uncertainty instead of fabricating exact boundaries.
-- 🚧 Mobile and web consume one user-scoped `LocationReviewEvidenceDto` for map plus textual review, with atomic confirm, split, merge, place correction, record-once, and save-place actions. Physical iPhone reliability and battery measurement are mandatory before the rollout is considered settled.
-- 🚧 V2 rollout is server-authoritative: `v2_shadow` captures and replays without user-visible V2 semantics; `v2_review` permits review items only after a same-mode client acknowledgement; and `v2_enabled` automatically confirms only completed, strong saved/approved-place stays with bounded continuity and no confirmed-time overlap. Commutes, unknown/ambiguous matches, weak evidence, uncertain gaps, missing approved-place linkage, and overlaps remain Review-first. Shadow-era segments cannot be backfilled at cutover.
+- ✅ `location-v2.0` closes stays on accepted intervening-place evidence, sustained exits, or explicit gaps; preserves short saved-place endpoints; derives journeys from movement evidence; and exposes uncertainty instead of fabricating exact boundaries.
+- ✅ Mobile and web consume one user-scoped `LocationReviewEvidenceDto` for map plus textual review, with atomic confirm, split, merge, place correction, record-once, and save-place actions. Physical iPhone reliability and battery measurement are still mandatory before the rollout is considered settled.
+- ⚠️ V2 rollout is server-authoritative: `v2_shadow` captures and replays without user-visible V2 semantics; `v2_review` permits review items only after a same-mode client acknowledgement; and `v2_enabled` automatically confirms only completed, strong saved/approved-place stays with bounded continuity and no confirmed-time overlap. Commutes, unknown/ambiguous matches, weak evidence, uncertain gaps, missing approved-place linkage, and overlaps remain Review-first. Shadow-era segments cannot be backfilled at cutover.
 - ⚠️ Export path exists; account/workspace deletion and raw sensitive payload hard-deletion are still future work.
 
 Validation:
@@ -408,16 +410,17 @@ Goal: make the product comfortable for daily personal use and friends beta.
 Deliverables:
 
 - ✅ Review inbox improvements.
-- ✅ Reports and automation accuracy metrics.
+- ✅ Reports.
+- ❓ Automation accuracy measurement remains a decision item; stored outcomes are not the same as a shipped analytics surface.
 - ⚠️ Settings for permissions and export exist; deletion/privacy controls still need the next-phase work tracked in `docs/feature-fix-tracker.md`.
-- ✅ Internal TestFlight build workflow is active and verified through `0.1.0 (58)`.
-- ⚠️ Native SwiftUI Calendar touch/data recovery is shipped in TestFlight build `0.1.0 (58)` and remains under physical-iPhone Watch for day taps/day swipes/week swipes, visible tracked-entry refresh, pinch/vertical pan, and accessibility settings.
+- ✅ Internal TestFlight build workflow is active; exact release evidence lives in the tracker and release reference.
+- ⚠️ Native SwiftUI/UIKit Calendar behavior remains under physical-iPhone Watch for creation, taps, day/week navigation, refresh, pinch/vertical pan, and accessibility settings.
 
 Validation:
 
 - Owner can use Dayframe for two weeks without data loss.
-- Friends can sign in and test without developer help once the preview/pre-prod lane and wider-beta invite path are ready.
-- Accuracy metrics show accepted/ignored suggestion rates.
+- Friends can sign in and test without developer help once the wider-beta invite/support path is approved; the isolated hosted Preview lane already exists.
+- If automation-quality measurement is approved, it reports accepted/ignored outcomes without raw Health or location context.
 
 ## 13. Future Considerations
 
@@ -426,7 +429,7 @@ Validation:
 - Realtime sync through Supabase Realtime/WebSocket/SSE.
 - More advanced rule learning from accepted/ignored suggestions.
 - Account deletion UI with full raw health/location deletion.
-- Dayframe preview/pre-production lane with separate staging app/environment/TestFlight path.
+- A separate staging iOS bundle/App Group/Keychain/APNs identity; the hosted staging environment already exists.
 - App Store release if sideloading is no longer sufficient.
 
 ## 14. Risks & Mitigations
@@ -451,6 +454,9 @@ Validation:
 Related documents:
 
 - `README.md`
+- `docs/architecture.md`
+- `docs/documentation-governance.md`
+- `docs/feature-fix-tracker.md`
 - `docs/production-readiness.md`
 - `docs/local-auth-and-hosting-plan.md`
 - `docs/vercel-supabase-hosting.md`

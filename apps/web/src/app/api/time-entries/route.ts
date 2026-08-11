@@ -13,12 +13,17 @@ import { notifyLiveActivitiesBestEffort } from "@/lib/live-activity-push";
 export async function POST(request: Request) {
   try {
     const session = await resolveRequestSession(request);
-    const body = await request.json();
+    const body = await parseJsonBody(request);
+    const modeResult = z.enum(["start", "stop", "manual", "split"]).safeParse(body.mode);
+    if (!modeResult.success) {
+      throw new BadRequestError("mode must be one of start, stop, manual, or split.");
+    }
+    const mode = modeResult.data;
     const eventSource = body.source === "mobile_app" ? "mobile_app" : "manual_app";
     const origin = eventSource === "mobile_app" ? "mobile_timer" : "web_timer";
     const tagNames = optionalTagNames(body.tagNames);
 
-    if (body.mode === "manual") {
+    if (mode === "manual") {
       const now = new Date();
       const { startedAt, stoppedAt } = validateManualTimeEntryWindow({
         now,
@@ -41,7 +46,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true }, { status: 201 });
     }
 
-    if (body.mode === "stop") {
+    if (mode === "stop") {
       const result = await processActivityEvent(
         {
           source: eventSource,
@@ -55,7 +60,7 @@ export async function POST(request: Request) {
       return NextResponse.json(result, { status: 201 });
     }
 
-    if (body.mode === "split") {
+    if (mode === "split") {
       await splitActiveEntry(session);
       await notifyLiveActivitiesBestEffort(session);
       return NextResponse.json({ ok: true }, { status: 201 });
@@ -116,6 +121,19 @@ class BadRequestError extends Error {
 
 function optionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+async function parseJsonBody(request: Request): Promise<Record<string, unknown>> {
+  let value: unknown;
+  try {
+    value = await request.json();
+  } catch {
+    throw new BadRequestError("Request body must be valid JSON.");
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new BadRequestError("Request body must be a JSON object.");
+  }
+  return value as Record<string, unknown>;
 }
 
 function requiredString(value: unknown, field: string) {
