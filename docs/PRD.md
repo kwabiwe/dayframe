@@ -97,6 +97,7 @@ Deployment:
 
 2. As a user entering work context, I want to type an optional task description and choose an optional category, so that the final time entry has useful context.
    - Example: Type "Draft Supabase auth plan", choose "Work", stop timer later, and keep that description.
+   - On web, the idle/running timer, Add Time, Timeline List entry editor, and Calendar create/edit category pickers can create a category in place. Creation is an independent catalogue write: it assigns an automatic Dayframe colour, leaves the category unpinned, selects it in the current draft, and never submits, dismisses, starts, stops, restarts, or otherwise mutates the surrounding entry. The category remains available after the entry draft is discarded.
 
 3. As a user moving between trusted places, I want Dayframe to auto-start known activities only for trusted locations, so that routine places save effort without creating noisy entries.
    - Example: Arriving at Gym starts a Gym/Health entry if explicitly configured as trusted.
@@ -146,6 +147,7 @@ Manual timer:
 - Live ticking duration.
 - Description can be edited while running.
 - Optional task description and category selection.
+- Contextual web category creation from timer, Add Time, Timeline List, and Calendar create/edit pickers without leaving or submitting the current draft.
 - Active timer sync across interfaces.
 
 Timeline/review:
@@ -265,6 +267,9 @@ Core app:
 
 - `GET /api/bootstrap`
   - Returns active timer, entries, categories, places, review items, stats, dashboard data, and legacy project/client compatibility data.
+
+- `POST /api/categories`
+  - Creates one workspace-scoped category. Name-only callers receive a deterministic Dayframe palette colour and an unpinned category; active names are unique case-insensitively within the workspace.
 
 - `POST /api/time-entries`
   - Modes: start, stop, manual entry creation.

@@ -10,6 +10,10 @@ const tagSource = readFileSync(
   fileURLToPath(new URL("./InlineTagInput.tsx", import.meta.url)),
   "utf8"
 );
+const categorySource = readFileSync(
+  fileURLToPath(new URL("./CategoryPicker.tsx", import.meta.url)),
+  "utf8"
+);
 const styles = readFileSync(
   fileURLToPath(new URL("../app/globals.css", import.meta.url)),
   "utf8"
@@ -23,7 +27,7 @@ describe("persistent timer floating surfaces", () => {
     expect(timerSource).toContain(
       "ui-floating-surface swiss-task-suggestions"
     );
-    expect(timerSource).toContain(
+    expect(categorySource).toContain(
       "ui-floating-surface swiss-category-menu"
     );
     expect(tagSource).toContain(

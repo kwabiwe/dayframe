@@ -24,12 +24,16 @@ vi.mock("@/lib/queries", () => ({
 }));
 
 vi.mock("@/lib/event-service", () => ({
+  CategoryConflictError: class CategoryConflictError extends Error {
+    status = 409;
+  },
   createCategory: mocks.createCategory,
   updateCategory: mocks.updateCategory,
   archiveCategory: mocks.archiveCategory
 }));
 
 const { missingRequiredColumnError } = await import("@/lib/db");
+const { CategoryConflictError } = await import("@/lib/event-service");
 const { DELETE, GET, PATCH, POST } = await import("./route");
 
 describe("/api/categories", () => {
@@ -61,6 +65,27 @@ describe("/api/categories", () => {
       { name: "Focus", color: "lime", isPinned: true },
       session
     );
+  });
+
+  it("creates picker categories without colour or pin controls", async () => {
+    mocks.createCategory.mockResolvedValueOnce({ id: categoryId(), name: "Writing", color: "blue", isPinned: false });
+
+    const response = await POST(jsonRequest({ name: "  Writing  " }));
+
+    expect(response.status).toBe(201);
+    expect(mocks.createCategory).toHaveBeenCalledWith({ name: "Writing" }, session);
+  });
+
+  it("rejects blank and duplicate category names with actionable errors", async () => {
+    const blank = await POST(jsonRequest({ name: "   " }));
+    expect(blank.status).toBe(400);
+    await expect(blank.json()).resolves.toMatchObject({ error: "Category name is required." });
+    expect(mocks.createCategory).not.toHaveBeenCalled();
+
+    mocks.createCategory.mockRejectedValueOnce(new CategoryConflictError("A category with that name already exists."));
+    const duplicate = await POST(jsonRequest({ name: "focus" }));
+    expect(duplicate.status).toBe(409);
+    await expect(duplicate.json()).resolves.toMatchObject({ error: "A category with that name already exists." });
   });
 
   it("edits category name, colour and pin state", async () => {

@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { ZodError, z } from "zod";
-import { archiveCategory, createCategory, updateCategory } from "@/lib/event-service";
+import {
+  archiveCategory,
+  CategoryConflictError,
+  createCategory,
+  updateCategory
+} from "@/lib/event-service";
 import { authErrorResponse } from "@/lib/api-errors";
 import { isMissingRequiredColumnError } from "@/lib/db";
 import { resolveRequestSession } from "@/lib/ingest-auth";
@@ -44,8 +49,11 @@ export async function POST(request: Request) {
     if (response) return response;
     const schemaResponse = schemaErrorResponse(error);
     if (schemaResponse) return schemaResponse;
+    if (error instanceof CategoryConflictError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     if (error instanceof ZodError) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+      return NextResponse.json({ error: error.issues[0]?.message ?? "Invalid category." }, { status: 400 });
     }
     throw error;
   }

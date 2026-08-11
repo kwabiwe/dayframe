@@ -587,6 +587,7 @@ export function CalendarReview({
   const router = useRouter();
   const {
     clearTimerError,
+    createCategory,
     createManualEntry,
     isTimerBusy,
     startEntryAgain,
@@ -1371,6 +1372,7 @@ export function CalendarReview({
           focusOnOpen={visibleSelectedTarget.focusOnOpen}
           isTimerBusy={isTimerBusy}
           mode="entry"
+          onCreateCategory={createCategory}
           onDelete={() => deleteCalendarEntry(selectedEntry)}
           onDismiss={({ restoreFocus }) => dismissCalendarEditor(visibleSelectedTarget, restoreFocus)}
           onOutsidePointerDown={(pointer) => consumeCalendarEditorPointer(visibleSelectedTarget, pointer)}
@@ -1391,6 +1393,7 @@ export function CalendarReview({
           focusOnOpen
           isTimerBusy={isTimerBusy}
           mode="create"
+          onCreateCategory={createCategory}
           onDismiss={({ restoreFocus }) => dismissCalendarEditor(visibleSelectedTarget, restoreFocus)}
           onDraftChange={(plan) => updateCalendarCreateDraft(visibleSelectedTarget, plan)}
           onOutsidePointerDown={(pointer) => consumeCalendarEditorPointer(visibleSelectedTarget, pointer)}
