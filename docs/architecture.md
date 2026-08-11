@@ -34,7 +34,7 @@ The primary services are:
 
 - `apps/web/src/lib/event-service.ts` for event processing and manual/timer derivation;
 - `apps/web/src/lib/review-mutation-service.ts` for ordinary Review terminal actions;
-- `apps/web/src/lib/location/location-ingest-service.ts` and `location-review-service.ts` for Location V2 evidence and corrections;
+- `apps/web/src/lib/location/location-ingest-service.ts` and `location-review-service.ts` for Location V2 evidence, retained-evidence replay, and corrections;
 - `apps/web/src/app/api/time-entries/**` and `apps/web/src/app/api/events/route.ts` for app-facing writes.
 
 ## Authentication and scoping
@@ -57,7 +57,7 @@ Offline storage is intentionally split by responsibility:
 
 - `apps/mobile/src/lib/api.ts`: general activity-event queue and timer fallback;
 - `apps/mobile/src/lib/reviewSyncStore.ts`: account-scoped downloaded Review state and terminal Review outbox;
-- `apps/mobile/src/lib/location/store.ts`: protected Location V2 evidence journal and upload outbox;
+- `apps/mobile/src/lib/location/store.ts`: protected Location V2 evidence journal, upload outbox, and bounded server-replay coordinator;
 - native App Group/Keychain storage: bounded Live Activity/App Intent hand-off data.
 
 These stores are not interchangeable. Detailed Location actions remain connectivity-dependent, and iOS does not promise background drain after an explicit force-quit.
@@ -66,6 +66,7 @@ These stores are not interchangeable. Detailed Location actions remain connectiv
 
 - HealthKit and precise location are sensitive and must not enter analytics, ordinary logs, screenshots, or committed fixtures.
 - Location V2 stores exact evidence in user-owned `location_evidence`; coordinate-free summaries enter `activity_events`.
+- Mobile reprocesses its local journal against current time and calls the private authenticated `/api/location/replay` route after foregrounding or a bounded periodic interval. The route reuses the same owner lock, deterministic engine, semantic cutover, and event-first transaction as evidence ingestion, so the ten-minute finalisation lag does not depend on a later location sample.
 - Retained exact location evidence is exported and deletable. Production retention is enforced through the protected Vercel cron route.
 - Health imports store only the data needed for sleep/workout reconciliation and Review. Debug export remains bounded and local to the user action.
 - Full account/workspace deletion and backup-retention semantics are still a product decision; do not imply they are complete.

@@ -130,6 +130,23 @@ export const LocationEvidenceBatchRequestSchema = z
     }))
   }));
 
+export const LocationReplayRequestSchema = z.object({
+  deviceId: boundedId,
+  algorithmVersion: z.string().trim().min(1).max(40),
+  rolloutMode: LocationRolloutModeRequestSchema.default("v2_shadow"),
+  semanticModeAcknowledgedAt: z.string().datetime({ offset: true }).optional()
+}).strict();
+
+export const LocationReplayResponseSchema = z.object({
+  ok: z.literal(true),
+  replayVersion: z.string(),
+  rolloutMode: LocationRolloutModeSchema,
+  clientAcknowledgedMode: z.boolean(),
+  finalisedSegmentCount: z.number().int().nonnegative(),
+  semanticSegmentCount: z.number().int().nonnegative(),
+  warnings: z.array(z.string())
+}).strict();
+
 export const ReviewEntryEditSchema = z
   .object({
     categoryId: z.string().uuid().nullable().optional(),
@@ -180,6 +197,8 @@ export const LocationReviewActionSchema = z.discriminatedUnion("action", [
 
 export type LocationEvidenceBatchRequest = z.output<typeof LocationEvidenceBatchRequestSchema>;
 export type LocationEvidenceUploadItem = z.input<typeof LocationEvidenceUploadItemSchema>;
+export type LocationReplayRequest = z.output<typeof LocationReplayRequestSchema>;
+export type LocationReplayResponse = z.output<typeof LocationReplayResponseSchema>;
 export type LocationRolloutMode = z.infer<typeof LocationRolloutModeSchema>;
 export type LocationReviewAction = z.output<typeof LocationReviewActionSchema>;
 export type ReviewEntryEdit = z.output<typeof ReviewEntryEditSchema>;

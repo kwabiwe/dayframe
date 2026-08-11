@@ -948,6 +948,11 @@ export default function SettingsScreen() {
         rejectedEvidenceCounts: local.rejectedEvidenceCounts,
         lastUploadAt: local.lastUploadAt,
         lastServerReplayVersion: local.lastServerReplayVersion,
+        lastServerReplayAt: local.lastServerReplayAt,
+        lastServerReplayStatus: local.lastServerReplayStatus,
+        lastServerReplayFinalisedCount: local.lastServerReplayFinalisedCount,
+        lastServerReplaySemanticCount: local.lastServerReplaySemanticCount,
+        lastServerReplayError: local.lastServerReplayError,
         lastUploadError: local.lastUploadError,
         droppedEvidenceCount: local.droppedEvidenceCount,
         retentionCleanupDeletedCount: local.retentionCleanupDeletedCount,
@@ -1826,6 +1831,11 @@ export default function SettingsScreen() {
                 </Text>
                 {locationV2Diagnostics?.lastUploadAt ? (
                   <Text style={styles.muted}>Last evidence sync {formatQueueTime(locationV2Diagnostics.lastUploadAt)}</Text>
+                ) : null}
+                {locationV2Diagnostics?.lastServerReplayAt ? (
+                  <Text style={styles.muted}>
+                    Last location review check {formatQueueTime(locationV2Diagnostics.lastServerReplayAt)} · {locationV2Diagnostics.lastServerReplayFinalisedCount} finalised
+                  </Text>
                 ) : null}
                 <Text style={styles.muted}>
                   Foreground access: {formatPermissionStatus(locationDiagnostics?.foregroundPermission ?? "unknown")} · Background access: {backgroundAccessSummary}

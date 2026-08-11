@@ -11,8 +11,10 @@ import {
   configureLocationAccount,
   getLocationRolloutMode,
   persistLocationEvidence,
+  processPendingLocationEvidence,
   syncLocationEvidence
 } from "./store";
+import { MAX_LOCATION_NATIVE_DRAIN_PASSES } from "./uploadPolicy";
 
 const DEVICE_ID_KEY = "dayframe.location.deviceId.v2";
 const LAST_ACCOUNT_KEY = "dayframe.location.lastAccount.v2";
@@ -73,8 +75,16 @@ export async function configureLocationIntelligence(bootstrap: MobileBootstrap) 
     await clearNativeLocationSignals().catch(() => undefined);
     return;
   }
-  await drainNativeLocationSignals();
+  await drainNativeLocationSignalsInBatches();
+  await processPendingLocationEvidence();
   void syncLocationEvidence();
+}
+
+export async function syncLocationIntelligenceOnForeground() {
+  if (await getLocationRolloutMode() === "v1") return { synced: false, reason: "v1" as const };
+  await drainNativeLocationSignalsInBatches();
+  await processPendingLocationEvidence();
+  return syncLocationEvidence({ forceReplay: true });
 }
 
 export async function startNativeLocationIntelligence() {
@@ -98,13 +108,13 @@ export async function getNativeLocationIntelligenceStatus() {
   return native.getStatus();
 }
 
-export async function drainNativeLocationSignals() {
+export async function drainNativeLocationSignals(limit = 100) {
   const context = await activeLocationCaptureContext();
   if (!context.deviceId || !context.timeZone) return { transferredCount: 0, pendingAccount: true };
   const deviceId = context.deviceId;
   const timeZone = context.timeZone;
   const native = await import("../../../modules/dayframe-location-visits");
-  const signals = await native.drainSignals(100);
+  const signals = await native.drainSignals(limit);
   if (signals.length === 0) return { transferredCount: 0, pendingAccount: false };
   const receivedAt = new Date().toISOString();
   const evidence = signals.map((signal) => {
@@ -136,4 +146,16 @@ export async function drainNativeLocationSignals() {
   await persistLocationEvidence(evidence);
   await native.clearSignals(signals.map((signal) => signal.id));
   return { transferredCount: evidence.length, pendingAccount: false };
+}
+
+export async function drainNativeLocationSignalsInBatches() {
+  let transferredCount = 0;
+  for (let pass = 0; pass < MAX_LOCATION_NATIVE_DRAIN_PASSES; pass += 1) {
+    const result = await drainNativeLocationSignals(100);
+    transferredCount += result.transferredCount;
+    if (result.pendingAccount || result.transferredCount < 100) {
+      return { transferredCount, pendingAccount: result.pendingAccount };
+    }
+  }
+  return { transferredCount, pendingAccount: false };
 }

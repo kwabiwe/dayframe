@@ -6,6 +6,8 @@ Use this when changing Expo background sampling, learned-place events, `learned_
 
 `packages/shared/src/location/` owns the deterministic `location-v2.0` evidence, matching, segmentation, commute, DTO, and fixture contracts. Thresholds live only in `LOCATION_ENGINE_V2_CONFIG`. Both the account-isolated mobile SQLite journal and the server replay service call the same pure engine. V1 learned-cluster classification below remains compatibility behavior during shadow rollout; do not mix its recurrence counters into V2 temporal continuity.
 
+Finalisation is time-driven as well as evidence-driven. After the ten-minute lag, mobile must re-run its local journal with current time and call the authenticated retained-evidence replay route even when there is no new upload. Evidence ingest and explicit replay must share one transaction, owner advisory lock, rollout acknowledgement/cutover check, semantic emitter, and idempotency path; never create a second replay implementation that can diverge.
+
 Evidence sources are Expo standard locations and geofences plus the local `dayframe-location-visits` module's `CLVisit`, significant-change, provider, pause, and resume signals. Native callbacks persist a bounded protected Application Support queue and perform no networking. JavaScript clears a native signal only after inserting it durably into SQLite. The complete saved/accepted-learned place catalogue is passed to matching even though iOS registers no more than 20 geofence regions.
 
 Initial capture profile:
@@ -50,6 +52,8 @@ Temporal invariants:
 ## Storage, privacy, and rollout
 
 Mobile uses `dayframe-location-v2.db` with WAL, foreign keys, a 5s busy timeout, and evidence/outbox/account/state/segment tables. All mutations run through one rejection-safe serial queue. Seven-day cleanup expires local raw evidence intentionally, including unsent evidence, to enforce the privacy boundary; row-count cleanup may remove only acknowledged or permanently rejected rows and must never evict pending uploads. Logout and account changes clear native signals plus the previous account's journal, outbox, state, and context before another account is bound. HTTP `401/403` clears the app session, `413` shrinks/requeues a batch, `400/422` rejects only the permanently invalid items, and retryable failures use bounded exponential backoff with jitter.
+
+One synchronisation pass drains at most five native chunks of 100 signals and uploads at most five ready batches in order. Permanent invalid batches may be skipped so later evidence can proceed; payload resizing, retryable transport/server failure, and authentication failure stop the pass. Foreground replay bypasses the ordinary five-minute replay throttle, concurrent requests coalesce, and diagnostics store only high-level counts, status, version, and timestamps.
 
 Server ingestion creates one coordinate-free `activity_events` batch summary, stores exact evidence in user-owned `location_evidence`, then replays segments in the same transaction. Evidence APIs require both workspace and user ownership and return `private, no-store`; raw evidence is never logged. Deletion removes exact evidence and cascading lineage while preserving derived summaries and entries.
 
