@@ -3,7 +3,8 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronDown, Play, Trash2, X } from "lucide-react";
+import { Play, Trash2, X } from "lucide-react";
+import { CategoryPicker, type CreateCategoryOutcome } from "@/components/CategoryPicker";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { InlineTagInput } from "@/components/InlineTagInput";
 import { OverlapNotice } from "@/components/OverlapNotice";
@@ -42,6 +43,7 @@ type TimeEntryQuickEditorBaseProps = {
   capturedNow: Date;
   categories: CategoryRow[];
   isTimerBusy: boolean;
+  onCreateCategory?: (name: string) => Promise<CreateCategoryOutcome>;
   onDismiss: (options: { restoreFocus: boolean }) => void;
   peerEntries: OverlapPeerEntry[];
   tags: TagRow[];
@@ -79,7 +81,6 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
   const [openDatePicker, setOpenDatePicker] = useState<"start" | "finish" | null>(null);
   const [tagPanelOpen, setTagPanelOpen] = useState(false);
   const [dismissTagPanelsSignal, setDismissTagPanelsSignal] = useState(0);
-  const [categoryIndex, setCategoryIndex] = useState(0);
   const [isBusy, setIsBusy] = useState(false);
   const [busyAction, setBusyAction] = useState<TimeEntryQuickEditorBusyAction | null>(null);
   const [discardPrompt, setDiscardPrompt] = useState(false);
@@ -105,10 +106,6 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
   const onDraftChangeRef = useRef(onCreateDraftChange);
   const previousStoppedAtRef = useRef(entry?.stoppedAt ?? null);
   const selectedCategory = props.categories.find((category) => category.id === draft.categoryId) ?? null;
-  const categoryOptions = useMemo(
-    () => [null, ...props.categories] as Array<CategoryRow | null>,
-    [props.categories]
-  );
   const preview = useMemo(() => {
     try {
       return {
@@ -447,32 +444,6 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     }
   }
 
-  function openCategoryMenu() {
-    if (busyRef.current) return;
-    const selectedIndex = categoryOptions.findIndex((category) => (category?.id ?? "") === draft.categoryId);
-    setCategoryIndex(Math.max(0, selectedIndex));
-    setIsCategoryOpen((open) => !open);
-  }
-
-  function handleCategoryKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
-    if (busyRef.current) return;
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      const direction = event.key === "ArrowDown" ? 1 : -1;
-      setCategoryIndex((current) => (current + direction + categoryOptions.length) % categoryOptions.length);
-      setIsCategoryOpen(true);
-    } else if (event.key === "Home" || event.key === "End") {
-      event.preventDefault();
-      setCategoryIndex(event.key === "Home" ? 0 : categoryOptions.length - 1);
-      setIsCategoryOpen(true);
-    } else if ((event.key === "Enter" || event.key === " ") && isCategoryOpen) {
-      event.preventDefault();
-      const category = categoryOptions[categoryIndex];
-      updateField("categoryId", category?.id ?? "");
-      setIsCategoryOpen(false);
-    }
-  }
-
   const title = entry
     ? entry.description?.trim() || entry.categoryName?.trim() || "Untitled entry"
     : draft.description.trim() || selectedCategory?.name || "Uncategorized";
@@ -507,8 +478,6 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     busyAction,
     cancelDiscardPrompt,
     categoryButtonRef,
-    categoryIndex,
-    categoryOptions,
     commitTemporalField,
     confirmDiscard,
     controlsDisabled,
@@ -522,7 +491,6 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     feedbackMode,
     finishDayOffset,
     finishIsInvalid,
-    handleCategoryKeyDown,
     handleDescriptionEnter,
     hasUnsavedChanges,
     isBusy,
@@ -530,13 +498,10 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     isEntered,
     isExiting,
     isRunning,
-    openCategoryMenu,
     panelRef,
     preview,
     save,
     saveBlockedByTimer,
-    selectedCategory,
-    setCategoryIndex,
     setIsCategoryOpen,
     setOpenDatePicker,
     setTagPanelOpen,
@@ -568,8 +533,6 @@ export function TimeEntryQuickEditorPanel({
   const {
     busyAction,
     categoryButtonRef,
-    categoryIndex,
-    categoryOptions,
     commitTemporalField,
     controlsDisabled,
     descriptionRef,
@@ -586,7 +549,6 @@ export function TimeEntryQuickEditorPanel({
     panelRef,
     preview,
     saveBlockedByTimer,
-    selectedCategory,
     startIsInvalid,
     temporalErrorId,
     today,
@@ -705,58 +667,20 @@ export function TimeEntryQuickEditorPanel({
           />
         </div>
 
-        <div className="calendar-compact-category-field">
-          <span className="calendar-compact-field-label">Category</span>
-          <button
-            ref={categoryButtonRef}
-            type="button"
-            aria-expanded={isCategoryOpen}
-            aria-haspopup="listbox"
-            disabled={controlsDisabled}
-            onClick={controller.openCategoryMenu}
-            onKeyDown={controller.handleCategoryKeyDown}
-          >
-            <span
-              className="calendar-compact-category-dot"
-              style={{ background: selectedCategory?.color ?? "var(--muted)" }}
-              aria-hidden="true"
-            />
-            <span>{selectedCategory?.name ?? "Uncategorized"}</span>
-            <ChevronDown size={15} aria-hidden="true" />
-          </button>
-          {isCategoryOpen ? (
-            <div className="calendar-compact-category-menu" role="listbox" aria-label="Categories">
-              {categoryOptions.map((category, index) => {
-                const value = category?.id ?? "";
-                const selected = value === draft.categoryId;
-                return (
-                  <button
-                    key={category?.id ?? "uncategorized"}
-                    type="button"
-                    role="option"
-                    aria-selected={selected}
-                    className={index === categoryIndex ? "is-active" : ""}
-                    disabled={controlsDisabled}
-                    onMouseEnter={() => controller.setCategoryIndex(index)}
-                    onClick={() => {
-                      controller.updateField("categoryId", value);
-                      controller.setIsCategoryOpen(false);
-                      categoryButtonRef.current?.focus();
-                    }}
-                  >
-                    <span
-                      className="calendar-compact-category-dot"
-                      style={{ background: category?.color ?? "var(--muted)" }}
-                      aria-hidden="true"
-                    />
-                    <span>{category?.name ?? "Uncategorized"}</span>
-                    {selected ? <Check size={15} aria-hidden="true" /> : null}
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
-        </div>
+        <CategoryPicker
+          categories={props.categories}
+          disabled={controlsDisabled}
+          label="Category"
+          menuId="time-entry-quick-category-menu"
+          onCreateCategory={props.onCreateCategory}
+          onOpenChange={controller.setIsCategoryOpen}
+          onSelect={(categoryId) => controller.updateField("categoryId", categoryId)}
+          open={isCategoryOpen}
+          portal={Boolean(props.onCreateCategory)}
+          selectedId={draft.categoryId}
+          triggerRef={categoryButtonRef}
+          variant="quick"
+        />
 
         <div className="calendar-compact-temporal-fields">
           <div className="calendar-compact-moment-field">

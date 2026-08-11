@@ -41,8 +41,9 @@ describe("web manual entry and Timeline control refinement", () => {
 
   it("reuses the timer Category treatment and borderless date-time controls", () => {
     const manual = timer.slice(timer.indexOf("function ManualEntryDialog"));
-    expect(manual).toContain('className="swiss-category-field manual-entry-category"');
-    expect(manual).toContain("<CategoryOption");
+    expect(manual).toContain("<CategoryPicker");
+    expect(manual).toContain('className="manual-entry-category"');
+    expect(manual).toContain('variant="timer"');
     expect(manual).not.toContain("<SelectField");
     expect(manual).toContain("<DayframeDateTimePicker");
     expect(timer).not.toContain('type="datetime-local"');

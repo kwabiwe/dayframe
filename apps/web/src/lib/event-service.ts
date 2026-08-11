@@ -57,6 +57,15 @@ import {
 
 export type { AutomaticLoggingCategoryKind } from "./automatic-category-service";
 
+export class CategoryConflictError extends Error {
+  status = 409;
+
+  constructor(message = "A category with that name already exists.") {
+    super(message);
+    this.name = "CategoryConflictError";
+  }
+}
+
 type CategoryRowLike = {
   id: string;
   name: string;
@@ -912,9 +921,26 @@ export async function createCategory(
 ) {
   const name = normalizeName(input.name, "New category");
   const color = normalizePaletteKey(input.color, name);
+  const client = await pool.connect();
 
   try {
-    const result = await query<{
+    await client.query("begin");
+    await client.query(
+      "select id from workspaces where id = $1 for update",
+      [session.workspaceId]
+    );
+    const duplicate = await client.query<{ id: string }>(
+      `select id
+       from categories
+       where workspace_id = $1
+         and is_archived = false
+         and lower(btrim(name)) = lower($2)
+       limit 1`,
+      [session.workspaceId, name]
+    );
+    if (duplicate.rows[0]) throw new CategoryConflictError();
+
+    const result = await client.query<{
       id: string;
       name: string;
       color: string;
@@ -931,10 +957,14 @@ export async function createCategory(
       ]
     );
 
+    await client.query("commit");
     return result.rows[0];
   } catch (error) {
+    await client.query("rollback");
     if (isUndefinedColumnError(error, "is_pinned")) throw missingCategoryPinColumnError(error);
     throw error;
+  } finally {
+    client.release();
   }
 }
 

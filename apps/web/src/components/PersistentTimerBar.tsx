@@ -10,8 +10,9 @@ import type {
 } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { normalizeTagName, paletteCssColorFor } from "@dayframe/shared";
-import { CalendarDays, CheckCircle2, ChevronDown, Clock3, Ellipsis, Play, Plus, Square, Trash2 } from "lucide-react";
+import { CalendarDays, Clock3, Ellipsis, Play, Plus, Square, Trash2 } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
+import { CategoryPicker, type CreateCategoryOutcome } from "@/components/CategoryPicker";
 import { InlineTagInput } from "@/components/InlineTagInput";
 import { DayframeDateTimePicker } from "@/components/DayframeDateTimePicker";
 import { OverlapNotice } from "@/components/OverlapNotice";
@@ -29,6 +30,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const {
     clearTimerError,
     closeManualEntry,
+    createCategory,
     createManualEntry,
     deleteActiveTimer,
     isManualEntryOpen,
@@ -52,8 +54,6 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const [startTimeDraft, setStartTimeDraft] = useState("");
   const [startEditError, setStartEditError] = useState<string | null>(null);
   const [now, setNow] = useState(0);
-  const categoryMenuRef = useRef<HTMLDivElement | null>(null);
-  const categoryTriggerRef = useRef<HTMLButtonElement | null>(null);
   const descriptionInputRef = useRef<HTMLInputElement | null>(null);
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
   const startDateInputRef = useRef<HTMLInputElement | null>(null);
@@ -65,9 +65,6 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
 
   const active = data?.activeEntry ?? null;
   const selectedCategory = data?.categories.find((category) => category.id === timerDraft.categoryId) ?? null;
-  const selectedCategoryName = timerDraft.categoryId
-    ? selectedCategory?.name ?? active?.categoryName ?? "Category"
-    : "Uncategorized";
   const activeStartedAtMs = active ? new Date(active.startedAt).getTime() : 0;
   const lastStoppedAt = useMemo(() => {
     if (!data) return null;
@@ -124,19 +121,12 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   }, [active, timerDraft, updateActiveDetails]);
 
   useEffect(() => {
-    if (!categoryMenuOpen && !suggestionsOpen) return undefined;
+    if (!suggestionsOpen) return undefined;
     function close(event: MouseEvent) {
-      if (!categoryMenuRef.current?.contains(event.target as Node)) setCategoryMenuOpen(false);
       if (!suggestionsRef.current?.contains(event.target as Node)) setSuggestionsOpen(false);
     }
     function closeWithKeyboard(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
-      if (categoryMenuOpen) {
-        event.preventDefault();
-        setCategoryMenuOpen(false);
-        categoryTriggerRef.current?.focus();
-        return;
-      }
       if (suggestionsOpen) setSuggestionsOpen(false);
     }
     document.addEventListener("mousedown", close);
@@ -145,7 +135,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       document.removeEventListener("mousedown", close);
       document.removeEventListener("keydown", closeWithKeyboard);
     };
-  }, [categoryMenuOpen, suggestionsOpen]);
+  }, [suggestionsOpen]);
 
   useEffect(() => {
     if (!startEditorOpen) return undefined;
@@ -188,41 +178,6 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   }, [timerActionsOpen]);
 
   if (!data) return null;
-
-  function chooseCategory(categoryId: string) {
-    setTimerDraft((current) => ({ ...current, categoryId }));
-    setCategoryMenuOpen(false);
-    setSuggestionsOpen(false);
-    window.requestAnimationFrame(() => categoryTriggerRef.current?.focus());
-  }
-
-  function focusCategoryOption(position: "first" | "last" | "selected") {
-    window.requestAnimationFrame(() => {
-      const options = [...(categoryMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [])];
-      if (!options.length) return;
-      const target = position === "selected"
-        ? options.find((option) => option.getAttribute("aria-selected") === "true") ?? options[0]
-        : position === "last"
-          ? options.at(-1)
-          : options[0];
-      target?.focus();
-    });
-  }
-
-  function moveCategoryFocus(event: ReactKeyboardEvent<HTMLDivElement>) {
-    const options = [...(categoryMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [])];
-    if (!options.length) return;
-    const currentIndex = options.indexOf(document.activeElement as HTMLButtonElement);
-    let nextIndex: number | null = null;
-    if (event.key === "ArrowDown") nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % options.length;
-    if (event.key === "ArrowUp") nextIndex = currentIndex < 0 ? options.length - 1 : (currentIndex - 1 + options.length) % options.length;
-    if (event.key === "Home") nextIndex = 0;
-    if (event.key === "End") nextIndex = options.length - 1;
-    if (nextIndex !== null) {
-      event.preventDefault();
-      options[nextIndex]?.focus();
-    }
-  }
 
   async function submitTimer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -345,74 +300,23 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
           ) : null}
         </div>
 
-        <div
-          className="swiss-category-field swiss-timer-category-control"
-          ref={categoryMenuRef}
-          onBlur={(event) => {
-            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setCategoryMenuOpen(false);
+        <CategoryPicker
+          ariaLabelledBy="persistent-timer-category-label"
+          categories={data.categories}
+          className="swiss-timer-category-control"
+          menuId="persistent-timer-category-menu"
+          onBeforeOpen={() => setSuggestionsOpen(false)}
+          onCreateCategory={createCategory}
+          onOpenChange={setCategoryMenuOpen}
+          onSelect={(categoryId) => {
+            setTimerDraft((current) => ({ ...current, categoryId }));
+            setSuggestionsOpen(false);
           }}
-        >
-          <button
-            className="swiss-category-trigger"
-            type="button"
-            aria-haspopup="listbox"
-            aria-expanded={categoryMenuOpen}
-            aria-controls="persistent-timer-category-menu"
-            aria-labelledby="persistent-timer-category-label persistent-timer-category-value"
-            ref={categoryTriggerRef}
-            onClick={() => {
-              setSuggestionsOpen(false);
-              setCategoryMenuOpen((current) => !current);
-            }}
-            onKeyDown={(event) => {
-              if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-              event.preventDefault();
-              setSuggestionsOpen(false);
-              setCategoryMenuOpen(true);
-              focusCategoryOption(event.key === "ArrowUp" ? "last" : "selected");
-            }}
-          >
-            <span className="swiss-category-trigger-value">
-              <span
-                className={["swiss-focus-dot", selectedCategory ? "" : "is-muted"].filter(Boolean).join(" ")}
-                style={{
-                  backgroundColor: selectedCategory
-                    ? paletteCssColorFor(selectedCategory.color, selectedCategory.name)
-                    : "transparent"
-                }}
-              />
-              <span id="persistent-timer-category-value">{selectedCategoryName}</span>
-            </span>
-            <ChevronDown size={16} aria-hidden="true" />
-          </button>
-          <div
-            aria-hidden={!categoryMenuOpen}
-            aria-label="Categories"
-            className={`ui-floating-surface swiss-category-menu${categoryMenuOpen ? " is-open" : ""}`}
-            id="persistent-timer-category-menu"
-            inert={!categoryMenuOpen}
-            onKeyDown={moveCategoryFocus}
-            role="listbox"
-          >
-              <CategoryOption
-                categoryId=""
-                color={null}
-                isSelected={!timerDraft.categoryId}
-                label="Uncategorized"
-                onSelect={chooseCategory}
-              />
-              {data.categories.map((category) => (
-                <CategoryOption
-                  key={category.id}
-                  categoryId={category.id}
-                  color={paletteCssColorFor(category.color, category.name)}
-                  isSelected={category.id === timerDraft.categoryId}
-                  label={category.name}
-                  onSelect={chooseCategory}
-                />
-              ))}
-          </div>
-        </div>
+          open={categoryMenuOpen}
+          portal
+          selectedId={timerDraft.categoryId}
+          variant="timer"
+        />
 
         <div className="swiss-timer-time-control" ref={startEditorRef}>
           {active ? (
@@ -636,40 +540,11 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
           data={data}
           isBusy={isTimerBusy}
           onClose={closeManualEntry}
+          onCreateCategory={createCategory}
           onCreate={createManualEntry}
         />
       ) : null}
     </section>
-  );
-}
-
-function CategoryOption({
-  categoryId,
-  color,
-  isSelected,
-  label,
-  onSelect
-}: {
-  categoryId: string;
-  color: string | null;
-  isSelected: boolean;
-  label: string;
-  onSelect: (categoryId: string) => void;
-}) {
-  return (
-    <button
-      className={["swiss-category-option", color ? "" : "is-muted", isSelected ? "is-selected" : ""]
-        .filter(Boolean)
-        .join(" ")}
-      type="button"
-      role="option"
-      aria-selected={isSelected}
-      onClick={() => onSelect(categoryId)}
-    >
-      <span className={["swiss-focus-dot", color ? "" : "is-muted"].filter(Boolean).join(" ")} style={color ? { backgroundColor: color } : undefined} />
-      <span>{label}</span>
-      {isSelected ? <CheckCircle2 size={14} aria-hidden="true" /> : null}
-    </button>
   );
 }
 
@@ -726,11 +601,13 @@ function ManualEntryDialog({
   data,
   isBusy,
   onClose,
+  onCreateCategory,
   onCreate
 }: {
   data: BootstrapData;
   isBusy: boolean;
   onClose: () => void;
+  onCreateCategory: (name: string) => Promise<CreateCategoryOutcome>;
   onCreate: (input: {
     categoryId?: string;
     description?: string;
@@ -749,9 +626,6 @@ function ManualEntryDialog({
   const descriptionInputRef = useRef<HTMLInputElement | null>(null);
   const descriptionRootRef = useRef<HTMLDivElement | null>(null);
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
-  const categoryMenuRef = useRef<HTMLDivElement | null>(null);
-  const categoryTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const selectedCategory = data.categories.find((category) => category.id === categoryId) ?? null;
   const defaults = useMemo(() => manualEntryDefaults(data.dateRange.selectedDate), [data.dateRange.selectedDate]);
   const [startedAtDraft, setStartedAtDraft] = useState(defaults.start);
   const [stoppedAtDraft, setStoppedAtDraft] = useState(defaults.finish);
@@ -773,38 +647,6 @@ function ManualEntryDialog({
     document.addEventListener("mousedown", closeOnOutside);
     return () => document.removeEventListener("mousedown", closeOnOutside);
   }, [suggestionsOpen]);
-
-  useEffect(() => {
-    if (!categoryMenuOpen) return undefined;
-    function closeOnOutside(event: MouseEvent) {
-      if (!categoryMenuRef.current?.contains(event.target as Node)) setCategoryMenuOpen(false);
-    }
-    function closeOnEscape(event: globalThis.KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      setCategoryMenuOpen(false);
-      categoryTriggerRef.current?.focus();
-    }
-    document.addEventListener("mousedown", closeOnOutside);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("mousedown", closeOnOutside);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [categoryMenuOpen]);
-
-  function chooseManualCategory(nextCategoryId: string) {
-    setCategoryId(nextCategoryId);
-    setCategoryMenuOpen(false);
-    window.requestAnimationFrame(() => categoryTriggerRef.current?.focus());
-  }
-
-  function focusManualCategoryOption(direction: "first" | "last") {
-    window.requestAnimationFrame(() => {
-      const options = [...(categoryMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [])];
-      (direction === "last" ? options.at(-1) : options[0])?.focus();
-    });
-  }
 
   function chooseSuggestion(suggestion: BootstrapData["taskSuggestions"][number]) {
     setDescription(suggestion.description);
@@ -862,83 +704,20 @@ function ManualEntryDialog({
     >
       <form id={formId} className="swiss-form-grid" onSubmit={submit}>
         <Field htmlFor="manual-entry-category" label="Category">
-          <div className="swiss-category-field manual-entry-category" ref={categoryMenuRef}>
-            <button
-              aria-controls="manual-entry-category-menu"
-              aria-expanded={categoryMenuOpen}
-              aria-haspopup="listbox"
-              className="swiss-category-trigger"
-              id="manual-entry-category"
-              onClick={() => {
-                setSuggestionsOpen(false);
-                setCategoryMenuOpen((open) => !open);
-              }}
-              onKeyDown={(event) => {
-                if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-                event.preventDefault();
-                setSuggestionsOpen(false);
-                setCategoryMenuOpen(true);
-                focusManualCategoryOption(event.key === "ArrowUp" ? "last" : "first");
-              }}
-              ref={categoryTriggerRef}
-              type="button"
-            >
-              <span className="swiss-category-trigger-value">
-                <span
-                  className={`swiss-focus-dot${selectedCategory ? "" : " is-muted"}`}
-                  style={{
-                    backgroundColor: selectedCategory
-                      ? paletteCssColorFor(selectedCategory.color, selectedCategory.name)
-                      : "transparent"
-                  }}
-                />
-                <span>{selectedCategory?.name ?? "Uncategorized"}</span>
-              </span>
-              <ChevronDown aria-hidden="true" size={16} />
-            </button>
-            <div
-              aria-hidden={!categoryMenuOpen}
-              aria-label="Categories"
-              className={`ui-floating-surface swiss-category-menu${categoryMenuOpen ? " is-open" : ""}`}
-              id="manual-entry-category-menu"
-              inert={!categoryMenuOpen}
-              onKeyDown={(event) => {
-                const options = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="option"]')];
-                const index = options.indexOf(document.activeElement as HTMLButtonElement);
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  setCategoryMenuOpen(false);
-                  categoryTriggerRef.current?.focus();
-                } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-                  event.preventDefault();
-                  const delta = event.key === "ArrowDown" ? 1 : -1;
-                  options[(index + delta + options.length) % options.length]?.focus();
-                } else if (event.key === "Home" || event.key === "End") {
-                  event.preventDefault();
-                  (event.key === "Home" ? options[0] : options.at(-1))?.focus();
-                }
-              }}
-              role="listbox"
-            >
-              <CategoryOption
-                categoryId=""
-                color={null}
-                isSelected={!categoryId}
-                label="Uncategorized"
-                onSelect={chooseManualCategory}
-              />
-              {data.categories.map((category) => (
-                <CategoryOption
-                  categoryId={category.id}
-                  color={paletteCssColorFor(category.color, category.name)}
-                  isSelected={category.id === categoryId}
-                  key={category.id}
-                  label={category.name}
-                  onSelect={chooseManualCategory}
-                />
-              ))}
-            </div>
-          </div>
+          <CategoryPicker
+            categories={data.categories}
+            className="manual-entry-category"
+            menuId="manual-entry-category-menu"
+            onBeforeOpen={() => setSuggestionsOpen(false)}
+            onCreateCategory={onCreateCategory}
+            onOpenChange={setCategoryMenuOpen}
+            onSelect={setCategoryId}
+            open={categoryMenuOpen}
+            portal
+            selectedId={categoryId}
+            triggerId="manual-entry-category"
+            variant="timer"
+          />
         </Field>
         <Field className="swiss-form-wide" htmlFor="manual-entry-description" label="Description">
           <div className="manual-entry-description" ref={descriptionRootRef}>

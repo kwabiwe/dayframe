@@ -22,6 +22,8 @@ vi.mock("./queries", () => ({
 }));
 
 const {
+  CategoryConflictError,
+  createCategory,
   createPlace,
   createPlaceFromLearnedPlace,
   createManualEntry,
@@ -59,6 +61,54 @@ describe("category persistence", () => {
       places: [],
       automationRules: []
     });
+  });
+
+  it("creates an unpinned category with an automatic Dayframe colour after a scoped duplicate check", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        if (statement.includes("from categories")) return { rows: [] };
+        if (statement.includes("insert into categories")) {
+          return {
+            rows: [{ id: categoryId(), name: values?.[1], color: values?.[2], isPinned: values?.[3] }]
+          };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const category = await createCategory({ name: "  Writing  " }, session);
+
+    expect(category).toMatchObject({ name: "Writing", isPinned: false });
+    expect(typeof category.color).toBe("string");
+    expect(client.query).toHaveBeenCalledWith(
+      "select id from workspaces where id = $1 for update",
+      [session.workspaceId]
+    );
+    expect(client.query).toHaveBeenCalledWith(
+      expect.stringContaining("lower(btrim(name)) = lower($2)"),
+      [session.workspaceId, "Writing"]
+    );
+    expect(client.query).toHaveBeenCalledWith("commit");
+    expect(client.release).toHaveBeenCalledOnce();
+  });
+
+  it("rejects an active category name case-insensitively before insert", async () => {
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes("from categories")) return { rows: [{ id: categoryId() }] };
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(createCategory({ name: "focus" }, session)).rejects.toBeInstanceOf(CategoryConflictError);
+
+    expect(client.query.mock.calls.some(([statement]) => String(statement).includes("insert into categories"))).toBe(false);
+    expect(client.query).toHaveBeenCalledWith("rollback");
+    expect(client.release).toHaveBeenCalledOnce();
   });
 
   it("stops the active timer once when a Live Activity event is retried", async () => {

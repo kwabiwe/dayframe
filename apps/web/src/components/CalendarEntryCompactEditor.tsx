@@ -3,6 +3,7 @@
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import type { CreateCategoryOutcome } from "@/components/CategoryPicker";
 import {
   TimeEntryQuickEditorPanel,
   useTimeEntryQuickEditor,
@@ -26,6 +27,7 @@ type CalendarEntryCompactEditorSharedProps = {
   categories: CategoryRow[];
   focusOnOpen: boolean;
   isTimerBusy: boolean;
+  onCreateCategory?: (name: string) => Promise<CreateCategoryOutcome>;
   onDismiss: (options: { restoreFocus: boolean }) => void;
   onOutsidePointerDown?: (pointer: { pointerId: number; pointerDownTimeStamp: number }) => void;
   peerEntries: TimeEntryRow[];

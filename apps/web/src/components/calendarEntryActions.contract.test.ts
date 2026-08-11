@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 const timeline = source("./TimeReviewViews.tsx");
 const anchored = source("./CalendarEntryCompactEditor.tsx");
 const quick = source("./TimeEntryQuickEditor.tsx");
+const categoryPicker = source("./CategoryPicker.tsx");
 const entries = source("./EntriesTable.tsx");
 const reports = source("./ReportDetailsTable.tsx");
 const styles = source("../app/globals.css");
@@ -34,7 +35,9 @@ describe("shared web time-entry quick editor", () => {
   it("renders tags, compact category selection, icon-only dates and local day offsets", () => {
     expect(quick).toContain("<InlineTagInput");
     expect(quick).toContain("selectedTagNames={draft.tagNames}");
-    expect(quick).toContain('role="listbox" aria-label="Categories"');
+    expect(quick).toContain("<CategoryPicker");
+    expect(categoryPicker).toContain('role="listbox"');
+    expect(categoryPicker).toContain('aria-label="Categories"');
     expect(quick.match(/iconOnly/g)).toHaveLength(2);
     expect(quick).toContain("calendarEntryLocalDayOffset");
     expect(quick).toContain("calendar-compact-day-offset");

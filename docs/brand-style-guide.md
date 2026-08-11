@@ -193,6 +193,27 @@ The product UI uses system fonts. On iOS use San Francisco through React Native�
 
 Use `font-variant-numeric: tabular-nums` on timers, durations, clock labels and report figures. Do not force monospace typography across the interface. Allow Dynamic Type to grow without clipping; labels may wrap before touch targets shrink.
 
+## Interface consistency
+
+Shared components own their internal typography, spacing, anatomy and states. A host may position or size a component's outer surface, but it must not apply broad descendant selectors that restyle nested fields or actions. Select the component's explicit role classes or its direct option rows instead. This keeps the same feature identical in the timer, dialogs and compact editors.
+
+For compact embedded web forms, use these fixed semantic roles rather than nearby `rem` values:
+
+| Role | Size | Weight | Line height |
+| --- | ---: | ---: | ---: |
+| Embedded form heading | 14 px | 650 | 1.35 |
+| Field label | 12 px | 650 | 1.35 |
+| Input, option and body | 14 px | 400–500 | 1.45 |
+| Button and menu action | 14 px | 650 | 1.35 |
+
+Use sentence case for headings and actions. Preserve hierarchy through role, weight and colour; do not invent a one-off font size inside one host of a shared component.
+
+Compound web fields reserve one 2 px perimeter and 12 px of content inset. A leading icon or colour action keeps at least a 44 × 44 px target while its visual mark remains independently sized. For the contextual category-create field, the visible swatch is 20 px: centred in the 44 px leading target, its edge is 14 px and its centre is 24 px from the field's outer edge. Category markers in closed fields and option rows remain compact, circular, borderless and shadowless.
+
+List separators and rounded actions are separate layers. Use a 1 px semantic `border` line inset 12 px from the option surface, with 6 px of clear space before the independently rounded action row. Do not use a rounded button's border or inset shadow as the divider. Hover, selection and neutral keyboard focus remain independent states, and host-specific styles must not change the shared control's internal geometry.
+
+At narrow widths, keep the same type roles, insets and minimum targets. Clamp the floating surface to the viewport and scroll its bounded content rather than compressing its component anatomy or making the surrounding editor scroll.
+
 ## Supporting system
 
 ### Spacing and shape

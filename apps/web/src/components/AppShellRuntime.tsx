@@ -6,10 +6,11 @@ import {
   TIMER_STATE_RECONCILE_INTERVAL_MS,
   timerStateChanged,
   timerStatePollDelay,
+  type DayframePaletteKey,
   type TimerStateFingerprint
 } from "@dayframe/shared";
 import { clientFetch } from "@/lib/client-auth-fetch";
-import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
+import type { BootstrapData, CategoryRow, TimeEntryRow } from "@/lib/queries";
 import { timelineStateFromSearchParams } from "@/lib/timeline-view";
 import {
   applyAuthoritativeActiveEntryVersion,
@@ -34,6 +35,9 @@ import {
 
 type MutationOutcome = { ok: true } | { ok: false; error: string };
 type DateLoadOutcome = { ok: true } | { ok: false; error: string };
+type CategoryMutationOutcome =
+  | { ok: true; category: CategoryRow }
+  | { ok: false; error: string };
 
 type ManualEntryInput = {
   categoryId?: string;
@@ -47,6 +51,7 @@ type RuntimeContext = {
   clearDateLoadError: () => void;
   clearTimerError: () => void;
   closeManualEntry: () => void;
+  createCategory: (name: string, color?: DayframePaletteKey) => Promise<CategoryMutationOutcome>;
   createManualEntry: (input: ManualEntryInput) => Promise<MutationOutcome>;
   deleteActiveTimer: () => Promise<MutationOutcome>;
   data: BootstrapData | null;
@@ -543,6 +548,39 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     return result.ran ? result.value : { ok: false, error: "A timer update is already in progress." };
   }, [refresh]);
 
+  const createCategory = useCallback(async (
+    name: string,
+    color?: DayframePaletteKey
+  ): Promise<CategoryMutationOutcome> => {
+    try {
+      const response = await clientFetch("/api/categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, color })
+      });
+      if (!response.ok) {
+        return {
+          ok: false,
+          error: await responseError(response, `Unable to create category: ${response.status}`)
+        };
+      }
+      const payload = (await response.json()) as { category?: CategoryRow };
+      if (!payload.category) {
+        return { ok: false, error: "The category was created, but its details could not be loaded. Refresh and try again." };
+      }
+      const current = dataRef.current;
+      if (current) {
+        const categories = current.categories.some((category) => category.id === payload.category!.id)
+          ? current.categories
+          : [...current.categories, payload.category].sort(compareCategories);
+        commitData({ ...current, categories }, "optimistic");
+      }
+      return { ok: true, category: payload.category };
+    } catch {
+      return { ok: false, error: "Unable to create this category. Check your connection and try again." };
+    }
+  }, [commitData]);
+
   const toggleTimer = useCallback(() => (
     dataRef.current?.activeEntry ? stopTimer() : startTimer()
   ), [startTimer, stopTimer]);
@@ -553,6 +591,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     clearDateLoadError: () => setDateLoadError(null),
     clearTimerError: () => setTimerError(null),
     closeManualEntry: () => setIsManualEntryOpen(false),
+    createCategory,
     createManualEntry,
     deleteActiveTimer,
     data: selectedData,
@@ -577,6 +616,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     updateActiveEntryFromCalendar,
     updateActiveStartTime
   }), [
+    createCategory,
     createManualEntry,
     deleteActiveTimer,
     data,
@@ -664,4 +704,9 @@ async function responseError(response: Response, fallback: string) {
 
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
+}
+
+function compareCategories(left: CategoryRow, right: CategoryRow) {
+  if (left.isPinned !== right.isPinned) return left.isPinned ? -1 : 1;
+  return left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
 }

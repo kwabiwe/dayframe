@@ -10,6 +10,7 @@ const shell = source("./AppShell.tsx");
 const dashboard = source("./DashboardRealtime.tsx");
 const timeline = source("./TimeReviewViews.tsx");
 const timer = source("./PersistentTimerBar.tsx");
+const categoryPicker = source("./CategoryPicker.tsx");
 const inlineTags = source("./InlineTagInput.tsx");
 const entries = source("./EntriesTable.tsx");
 const entriesRedirect = source("../app/entries/page.tsx");
@@ -52,7 +53,8 @@ describe("persistent timer shell contract", () => {
 
     expect(compoundControl).toContain('className={`inline-tag-picker-trigger');
     expect(timer).toContain('className="swiss-timer-field-label swiss-timer-description-label"');
-    expect(timer).toContain('aria-labelledby="persistent-timer-category-label persistent-timer-category-value"');
+    expect(timer).toContain('ariaLabelledBy="persistent-timer-category-label"');
+    expect(categoryPicker).toContain("aria-labelledby={ariaLabelledBy}");
     expect(timer).toContain('aria-label="Timer is idle. Elapsed time 00:00."');
     expect(timer).toContain('aria-label={active ? "Stop timer" : "Start timer"}');
     expect(timer).toContain("disabled={isTimerBusy}");

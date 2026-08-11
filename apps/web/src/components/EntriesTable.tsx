@@ -214,6 +214,7 @@ export function EntriesTable({
   const searchParams = useSearchParams();
   const {
     clearTimerError,
+    createCategory,
     isTimerBusy,
     startEntryAgain,
     updateActiveEntryFromCalendar
@@ -918,6 +919,7 @@ export function EntriesTable({
           entry={editingEntry}
           isTimerBusy={isTimerBusy}
           onClose={() => setEditingEntry(null)}
+          onCreateCategory={createCategory}
           onDelete={() => {
             const entry = editingEntry;
             setEditingEntry(null);
