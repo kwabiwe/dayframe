@@ -51,6 +51,9 @@ describe("persistent timer floating surfaces", () => {
     expect(styles).toMatch(
       /\.swiss-category-menu\s*\{[^}]*overflow-y:\s*auto;/s
     );
+    expect(styles).toMatch(
+      /\.category-picker-menu\.is-portalled\s*\{[^}]*position:\s*fixed;[^}]*max-height:\s*min\(220px, calc\(100dvh - 24px\)\);[^}]*overflow-y:\s*auto;/s
+    );
   });
 
   it("keeps the start editor anchored and non-modal with focus recovery", () => {

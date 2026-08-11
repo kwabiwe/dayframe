@@ -313,6 +313,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
             setSuggestionsOpen(false);
           }}
           open={categoryMenuOpen}
+          portal
           selectedId={timerDraft.categoryId}
           variant="timer"
         />
@@ -712,6 +713,7 @@ function ManualEntryDialog({
             onOpenChange={setCategoryMenuOpen}
             onSelect={setCategoryId}
             open={categoryMenuOpen}
+            portal
             selectedId={categoryId}
             triggerId="manual-entry-category"
             variant="timer"

@@ -9163,6 +9163,20 @@ dialog.ui-dialog.manual-entry-dialog {
   box-shadow: var(--shadow-raised);
 }
 
+.category-picker-menu.is-portalled {
+  position: fixed;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  left: auto;
+  z-index: 120;
+  width: auto;
+  max-width: calc(100vw - 24px);
+  max-height: min(220px, calc(100dvh - 24px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .calendar-compact-category-menu button {
   display: grid;
   width: 100%;

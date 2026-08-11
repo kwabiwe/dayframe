@@ -12,6 +12,7 @@ const timer = source("./PersistentTimerBar.tsx");
 const timeline = source("./TimeReviewViews.tsx");
 const entries = source("./EntriesTable.tsx");
 const reports = source("./ReportDetailsTable.tsx");
+const quickEditor = source("./TimeEntryQuickEditor.tsx");
 
 describe("web contextual category creation contract", () => {
   it("offers creation in timer, Add Time, List, and Calendar create/edit pickers only", () => {
@@ -19,6 +20,15 @@ describe("web contextual category creation contract", () => {
     expect(entries).toContain("onCreateCategory={createCategory}");
     expect(timeline.match(/onCreateCategory=\{createCategory\}/g)).toHaveLength(2);
     expect(reports).not.toContain("onCreateCategory");
+  });
+
+  it("portals every create-enabled picker while leaving Reports in its existing flow", () => {
+    expect(timer.match(/onCreateCategory=\{createCategory\}[\s\S]*?portal/g)).toHaveLength(2);
+    expect(quickEditor).toContain("portal={Boolean(props.onCreateCategory)}");
+    expect(picker).toContain("createPortal(menu, portalTarget)");
+    expect(picker).toContain('triggerRef.current?.closest("dialog") ?? document.body');
+    expect(reports).not.toContain("onCreateCategory");
+    expect(reports).not.toContain("portal");
   });
 
   it("publishes a name-only category mutation without submitting a surrounding form", () => {

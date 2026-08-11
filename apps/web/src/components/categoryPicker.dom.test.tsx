@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { useState, type FormEvent } from "react";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CategoryRow } from "@/lib/queries";
@@ -103,15 +103,76 @@ describe("CategoryPicker", () => {
     await user.click(secondTrigger);
     expect(screen.getByRole("option", { name: "Writing" })).not.toBeNull();
   });
+
+  it("portals the menu to the body without losing panel-aware focus and outside-click handling", async () => {
+    render(<PickerHarness create={vi.fn()} portal />);
+    const user = userEvent.setup();
+    const trigger = screen.getByRole("button", { name: /Uncategorized/ });
+    const field = screen.getByTestId("first-picker");
+
+    await user.click(trigger);
+    const menu = document.getElementById("first-category-menu");
+    expect(menu?.parentElement).toBe(document.body);
+    expect(field.contains(menu)).toBe(false);
+    expect(menu?.classList.contains("time-entry-quick-editor-nested-surface")).toBe(true);
+
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole("option", { name: "Uncategorized" }));
+    await user.keyboard("{End}");
+    expect(document.activeElement).toBe(screen.getByRole("option", { name: "Create new category" }));
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "After picker" }));
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+
+    await user.click(trigger);
+
+    const work = screen.getByRole("option", { name: "Work" });
+    work.focus();
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.mouseDown(work);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+
+    fireEvent.mouseDown(document.body);
+    await waitFor(() => expect(trigger.getAttribute("aria-expanded")).toBe("false"));
+  });
+
+  it("portals into the nearest native dialog and owns Escape before the outer editor", async () => {
+    const onOuterKeyDown = vi.fn();
+    render(<PickerHarness create={vi.fn()} nativeDialog onOuterKeyDown={onOuterKeyDown} portal />);
+    const user = userEvent.setup();
+    const outerDialog = screen.getByRole("dialog", { name: "Add Time" });
+    const trigger = screen.getByRole("button", { name: /Uncategorized/ });
+
+    await user.click(trigger);
+    const menu = document.getElementById("first-category-menu");
+    expect(menu?.parentElement).toBe(outerDialog);
+    expect(screen.getByTestId("first-picker").contains(menu)).toBe(false);
+
+    await user.click(screen.getByRole("option", { name: "Create new category" }));
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("option", { name: "Create new category" })));
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(onOuterKeyDown).not.toHaveBeenCalled();
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(trigger.getAttribute("aria-expanded")).toBe("false"));
+    expect(onOuterKeyDown).not.toHaveBeenCalled();
+  });
 });
 
 function PickerHarness({
   create,
+  nativeDialog = false,
   onSubmit,
+  onOuterKeyDown,
+  portal = false,
   secondPicker = false
 }: {
   create: (name: string) => Promise<CreateCategoryOutcome>;
+  nativeDialog?: boolean;
   onSubmit?: (event: FormEvent) => void;
+  onOuterKeyDown?: () => void;
+  portal?: boolean;
   secondPicker?: boolean;
 }) {
   const [categories, setCategories] = useState([workCategory]);
@@ -126,7 +187,7 @@ function PickerHarness({
     return outcome;
   }
 
-  return (
+  const form = (
     <form onSubmit={onSubmit}>
       <label>Description<input aria-label="Description" /></label>
       <label>Tags<input aria-label="Tags" /></label>
@@ -140,10 +201,12 @@ function PickerHarness({
           onOpenChange={setFirstOpen}
           onSelect={setFirstSelectedId}
           open={firstOpen}
+          portal={portal}
           selectedId={firstSelectedId}
           variant="timer"
         />
       </div>
+      <button type="button">After picker</button>
       {secondPicker ? (
         <div data-testid="second-picker">
           <CategoryPicker
@@ -153,6 +216,7 @@ function PickerHarness({
             onOpenChange={setSecondOpen}
             onSelect={setSecondSelectedId}
             open={secondOpen}
+            portal={portal}
             selectedId={secondSelectedId}
             variant="quick"
           />
@@ -160,4 +224,8 @@ function PickerHarness({
       ) : null}
     </form>
   );
+
+  return nativeDialog ? (
+    <dialog aria-label="Add Time" onKeyDown={onOuterKeyDown} open>{form}</dialog>
+  ) : form;
 }

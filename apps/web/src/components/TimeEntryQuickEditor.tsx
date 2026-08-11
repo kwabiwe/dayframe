@@ -676,6 +676,7 @@ export function TimeEntryQuickEditorPanel({
           onOpenChange={controller.setIsCategoryOpen}
           onSelect={(categoryId) => controller.updateField("categoryId", categoryId)}
           open={isCategoryOpen}
+          portal={Boolean(props.onCreateCategory)}
           selectedId={draft.categoryId}
           triggerRef={categoryButtonRef}
           variant="quick"
