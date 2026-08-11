@@ -81,7 +81,8 @@ describe("web manual entry and Timeline control refinement", () => {
     expect(datePicker).toContain('portalAlign?: "center" | "start"');
     expect(datePicker).toContain('triggerRect.left + (triggerRect.width - width) / 2');
     expect(styles).toMatch(/\.timeline-range-navigation \{[^}]*grid-template-columns: var\(--web-icon-button-size\) minmax\(160px, 1fr\) var\(--web-icon-button-size\);/s);
-    expect(styles).toMatch(/\.swiss-timeline-surface \.timeline-range-navigation \{[^}]*grid-template-columns: var\(--web-icon-button-size\) 160px var\(--web-icon-button-size\);/s);
+    expect(styles).toMatch(/\.swiss-timeline-surface \.timeline-range-navigation \{[^}]*grid-template-columns: var\(--web-icon-button-size\) max-content var\(--web-icon-button-size\);/s);
+    expect(styles).toMatch(/\.swiss-timeline-surface \.timeline-date-picker \{[^}]*min-width: 120px;/s);
   });
 
   it("keeps Calendar zoom visible and removes redundant instruction copy", () => {

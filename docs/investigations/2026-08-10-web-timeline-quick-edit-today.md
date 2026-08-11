@@ -25,7 +25,8 @@
 - If the selected date equals the previous Today, the existing URL/date-loading path advances it to the new Today.
 - A deliberately selected historical date remains selected.
 - Day labels use `Today` only when their resolved local date equals the current local date; Week labels keep their explicit range.
-- Timeline's header date picker uses the shared centred, viewport-clamped portal so the shorter `Today` label cannot pull the calendar under the shell's clipped edge or leave it offset to one side. Inline time calendars retain start-edge anchoring. The desktop date lane remains `160px`, preserving the same arrow cadence for `Today` and a full date.
+- Timeline's header date picker uses the shared centred, viewport-clamped portal so the shorter `Today` label cannot pull the calendar under the shell's clipped edge or leave it offset to one side. Inline time calendars retain start-edge anchoring. The desktop date lane is intrinsic for full day/week labels with a `120px` minimum, so Week copy is never clipped while `Today` retains balanced padding.
+- Timeline List rows use the responsive control height as one primary alignment plane. On desktop the 28px occurrence count and 12px category dot are offset by `(38px - size) / 2`; the same formula adapts to the 44px phone control height. Description, category, tags, Time, Duration and Actions share that centre. Overlap warnings render below the primary plane and cannot re-centre the dot, count or other columns.
 
 ## Focused verification
 

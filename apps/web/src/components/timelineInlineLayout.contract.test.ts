@@ -12,14 +12,17 @@ const styles = source("../app/globals.css");
 describe("Timeline inline row layout contract", () => {
   it("keeps every task-row element vertically centred while Description owns the only expanding lane", () => {
     expect(styles).toMatch(/\.timeline-inline-description \{[^}]*width: max-content;[^}]*flex: 0 1 auto;/s);
-    expect(styles).toMatch(/\.timeline-inline-description \{[^}]*height: 28px;[^}]*align-items: center;/s);
+    expect(styles).toMatch(/\.timeline-inline-description \{[^}]*height: var\(--timeline-task-primary-height\);[^}]*align-items: center;/s);
     expect(styles).toMatch(/\.timeline-inline-description-input \{[^}]*position: absolute;[^}]*inset: 0;[^}]*width: 100%;/s);
     expect(styles).toMatch(/\.timeline-inline-description\.is-editing \{[^}]*width: auto;[^}]*flex: 1 1 auto;/s);
-    expect(styles).toMatch(/\.timeline-task-cell \{[^}]*min-height: var\(--web-control-height\);[^}]*align-items: center;/s);
-    expect(styles).toMatch(/\.timeline-task-category-dot \{[^}]*margin: 0;[^}]*align-self: center;/s);
-    expect(styles).toMatch(/\.timeline-task-primary-line \{[^}]*display: flex;[^}]*min-height: 28px;[^}]*align-items: center;[^}]*gap: 8px;/s);
-    expect(styles).toMatch(/\.timeline-task-primary-line \.timeline-task-meta,[\s\S]*\.timeline-task-primary-line \.tag-metadata \{[^}]*min-height: 28px;[^}]*align-items: center;/s);
-    expect(styles).toMatch(/\.timeline-list-table tbody > tr:not\(\.timeline-list-day-heading\) > td \{[^}]*vertical-align: middle;/s);
+    expect(styles).toMatch(/\.timeline-task-cell \{[^}]*--timeline-task-primary-height: var\(--web-control-height\);[^}]*min-height: var\(--timeline-task-primary-height\);[^}]*align-items: start;/s);
+    expect(styles).toMatch(/\.timeline-group-count \{[^}]*height: 28px;[^}]*margin-top: calc\(\(var\(--timeline-task-primary-height\) - 28px\) \/ 2\);[^}]*align-self: start;/s);
+    expect(styles).toMatch(/\.timeline-task-category-dot \{[^}]*height: 12px;[^}]*margin: calc\(\(var\(--timeline-task-primary-height\) - 12px\) \/ 2\) 0 0;[^}]*align-self: start;/s);
+    expect(styles).toMatch(/\.timeline-task-primary-line \{[^}]*display: flex;[^}]*height: var\(--timeline-task-primary-height\);[^}]*align-items: center;[^}]*gap: 8px;/s);
+    expect(styles).toMatch(/\.timeline-task-primary-line \.timeline-task-meta,[\s\S]*\.timeline-task-primary-line \.tag-metadata \{[^}]*height: var\(--timeline-task-primary-height\);[^}]*align-items: center;[^}]*line-height: var\(--timeline-task-text-line-height\);/s);
+    expect(styles).toMatch(/\.timeline-inline-description-input \{[^}]*height: var\(--timeline-task-primary-height\);[^}]*padding: calc\(\(var\(--timeline-task-primary-height\) - var\(--timeline-task-text-line-height\)\) \/ 2\) 0;[^}]*line-height: var\(--timeline-task-text-line-height\);/s);
+    expect(styles).toMatch(/\.timeline-list-table tbody > tr:not\(\.timeline-list-day-heading\) > td \{[^}]*vertical-align: top;/s);
+    expect(styles).toMatch(/\.timeline-task-details > \.overlap-marker \{[^}]*margin-top: 0;/s);
     expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*\.timeline-inline-description \{[^}]*transition: none;/s);
   });
 

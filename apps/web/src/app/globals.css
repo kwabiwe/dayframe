@@ -913,10 +913,12 @@ textarea.ui-control {
 }
 
 .timeline-task-cell {
+  --timeline-task-primary-height: var(--web-control-height);
+  --timeline-task-text-line-height: 16px;
   display: grid;
-  min-height: var(--web-control-height);
+  min-height: var(--timeline-task-primary-height);
   grid-template-columns: auto auto minmax(0, 1fr);
-  align-items: center;
+  align-items: start;
   gap: 8px;
 }
 
@@ -928,6 +930,8 @@ textarea.ui-control {
   display: inline-grid;
   min-width: 28px;
   height: 28px;
+  margin-top: calc((var(--timeline-task-primary-height) - 28px) / 2);
+  align-self: start;
   place-items: center;
   border: 0;
   border-radius: 999px;
@@ -951,8 +955,8 @@ textarea.ui-control {
 .timeline-task-category-dot {
   width: 12px;
   height: 12px;
-  margin: 0;
-  align-self: center;
+  margin: calc((var(--timeline-task-primary-height) - 12px) / 2) 0 0;
+  align-self: start;
   border: 0;
   border-radius: 999px;
 }
@@ -973,11 +977,12 @@ textarea.ui-control {
 .timeline-task-details {
   display: grid;
   min-width: 0;
+  align-self: start;
   gap: 2px;
 }
 
 .timeline-list-table tbody > tr:not(.timeline-list-day-heading) > td {
-  vertical-align: middle;
+  vertical-align: top;
 }
 
 .timeline-task-title {
@@ -990,7 +995,7 @@ textarea.ui-control {
   position: relative;
   display: inline-flex;
   width: max-content;
-  height: 28px;
+  height: var(--timeline-task-primary-height);
   min-width: 0;
   max-width: 100%;
   flex: 0 1 auto;
@@ -1021,22 +1026,24 @@ textarea.ui-control {
   position: absolute;
   inset: 0;
   width: 100%;
-  height: 28px;
+  height: var(--timeline-task-primary-height);
   min-width: 0;
-  min-height: 28px;
-  padding: 0;
+  min-height: var(--timeline-task-primary-height);
+  padding: calc((var(--timeline-task-primary-height) - var(--timeline-task-text-line-height)) / 2) 0;
+  line-height: var(--timeline-task-text-line-height);
   text-overflow: ellipsis;
 }
 
 .timeline-inline-description-measure {
   display: inline-flex;
-  height: 28px;
+  height: var(--timeline-task-primary-height);
   min-width: 0;
   align-items: center;
   overflow: hidden;
   padding-right: 1px;
   visibility: hidden;
   white-space: pre;
+  line-height: var(--timeline-task-text-line-height);
 }
 
 .timeline-inline-description-input[readonly],
@@ -9672,10 +9679,11 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .swiss-timeline-surface .timeline-range-navigation {
   width: max-content;
-  grid-template-columns: var(--web-icon-button-size) 160px var(--web-icon-button-size);
+  grid-template-columns: var(--web-icon-button-size) max-content var(--web-icon-button-size);
 }
 
 .swiss-timeline-surface .timeline-date-picker {
+  min-width: 120px;
   justify-self: stretch;
 }
 
@@ -9839,7 +9847,8 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .timeline-task-primary-line {
   display: flex;
-  min-height: 28px;
+  height: var(--timeline-task-primary-height);
+  min-height: var(--timeline-task-primary-height);
   min-width: 0;
   align-items: center;
   gap: 8px;
@@ -9857,9 +9866,15 @@ dialog.ui-dialog.manual-entry-dialog {
 .timeline-task-primary-line .timeline-task-meta,
 .timeline-task-primary-line .tag-metadata {
   display: inline-flex;
-  min-height: 28px;
+  height: var(--timeline-task-primary-height);
+  min-height: var(--timeline-task-primary-height);
   flex: 0 0 auto;
   align-items: center;
+  line-height: var(--timeline-task-text-line-height);
+}
+
+.timeline-task-details > .overlap-marker {
+  margin-top: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {
