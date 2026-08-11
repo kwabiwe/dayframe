@@ -161,31 +161,21 @@ Eight-digit HEX values below include alpha as the last two digits. RGB entries f
 
 ### Category and chart palette
 
-Palette keys are storage and API compatibility values. Never rename them or replace stored keys with display HEX values. `lime` intentionally displays as Mint in Midnight Core. Legacy HEX values continue to resolve to their existing keys.
+The executable source of truth for category/chart keys, labels, HEX values, legacy resolution, deterministic fallback order, and picker order is `packages/shared/src/palette.ts`. Do not duplicate a second static HEX table in documentation; shared tests assert the complete 30-key contract and exact ordering.
 
-| Stable key | Display name | Dark HEX / RGB | Light HEX / RGB |
-| --- | --- | --- | --- |
-| `lime` | Mint | `#3ED598` / `62, 213, 152` | `#23A65C` / `35, 166, 92` |
-| `teal` | Teal | `#12B8B0` / `18, 184, 176` | `#008A83` / `0, 138, 131` |
-| `sky` | Sky | `#71C5F4` / `113, 197, 244` | `#269ED1` / `38, 158, 209` |
-| `blue` | Blue | `#416FE3` / `65, 111, 227` | `#3154C8` / `49, 84, 200` |
-| `violet` | Violet | `#8D63E6` / `141, 99, 230` | `#7A45C7` / `122, 69, 199` |
-| `rose` | Rose | `#DF5FA8` / `223, 95, 168` | `#C83C83` / `200, 60, 131` |
-| `amber` | Amber | `#F2C14E` / `242, 193, 78` | `#C89100` / `200, 145, 0` |
-| `orange` | Orange | `#D98235` / `217, 130, 53` | `#C7651A` / `199, 101, 26` |
-| `red` | Coral | `#FF6248` / `255, 98, 72` | `#F45D43` / `244, 93, 67` |
-| `steel` | Steel | `#9AA8BC` / `154, 168, 188` | `#738196` / `115, 129, 150` |
-| `moss` | Moss | `#8FA84A` / `143, 168, 74` | `#6F8425` / `111, 132, 37` |
-| `graphite` | Graphite | `#4C586C` / `76, 88, 108` | `#3E4859` / `62, 72, 89` |
+Palette keys are storage/API compatibility values. Never rename them or replace stored keys with display HEX values. Legacy Midnight Core, Soft Pop, seeded, and imported HEX values continue to resolve to their intended current keys.
 
-The five lead chart colours are Coral, Violet, Amber, Mint and Blue. Preserve deterministic ordering in existing data logic. All 12 display colours must remain perceptually distinct in each appearance; the shared tests enforce a minimum pairwise OKLab distance while legacy display HEX values continue resolving to their stable keys. Category colour should normally appear as a dot, rail, border or chart mark beside `textPrimary`; do not assume palette colours are accessible body-text colours or fill bright blocks with white text without measuring contrast.
+The current picker contains 30 choices in two five-column blocks. Each column is a hue family and each family runs light-to-dark. The first block contains green/yellow/orange/red/purple families; the second contains blue/sky/lime/pink/grey families. Picker presentation order is deliberately separate from `DAYFRAME_PALETTE`'s stable deterministic fallback order.
 
-Category pickers present all 30 current shade choices in one shared order on web
-and iOS. The five-column layout forms two blocks of five hue families, with
-each family running light-to-dark down its column. Picker presentation order is
-separate from the stable deterministic fallback order: changing visual layout
-must never rename keys, change HEX values, rewrite stored category colours, or
-change fallback assignments for existing data.
+Changing the picker must preserve all of these independently:
+
+- 30 unique keys and HEX values;
+- `DAYFRAME_PALETTE` fallback order for existing deterministic chart/category assignment;
+- `DAYFRAME_PALETTE_PICKER_KEYS` five-column visual order;
+- legacy key/HEX normalization without rewriting stored category assignments;
+- identical shared values on web and iOS.
+
+Category colour should normally appear as a dot, border, fill, hatch, or chart mark beside semantic text. Do not assume a palette colour is accessible body text or place white/black text over a bright swatch without measuring contrast. Colour remains supplementary to labels, values, state text, and non-colour markers.
 
 ## Typography
 

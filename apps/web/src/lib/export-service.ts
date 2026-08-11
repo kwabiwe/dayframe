@@ -1,7 +1,19 @@
 import { query } from "./db";
 import { type RequestSession } from "./session";
 
-export type ExportKind = "workspace_json" | "time_entries_csv" | "time_entries_json" | "activity_events_json" | "review_items_json";
+export const EXPORT_KINDS = [
+  "workspace_json",
+  "time_entries_csv",
+  "time_entries_json",
+  "activity_events_json",
+  "review_items_json"
+] as const;
+
+export type ExportKind = (typeof EXPORT_KINDS)[number];
+
+export function isExportKind(value: string): value is ExportKind {
+  return EXPORT_KINDS.some((kind) => kind === value);
+}
 
 export async function buildWorkspaceExport(session: RequestSession) {
   const [

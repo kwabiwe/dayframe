@@ -169,7 +169,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Categories, Tags, Reports, Places, Review Inbox, Settings, Search, Profile, workspace switching, Appearance, and Help remain navigable on desktop and mobile web.
 - Dashboard and Timeline share one shell-owned timer. Timer state, details and start-time edits survive navigation in both directions; one user action emits one mutation and failed optimistic mutations roll back.
 - Legacy `/entries` redirects to Timeline List and `/automation` redirects to Places. The normal Timeline List omits Source, Confidence and Review diagnostics.
-- On iOS Categories, focusing `New category` reveals one in-place creation editor above the keyboard with its name field, all 12 colour choices, pin state, Cancel and Create controls visible; creation uses the selected colour, while Cancel and failure preserve the documented state behavior.
+- On iOS Categories, focusing `New category` reveals one in-place creation editor above the keyboard with its name field, all 30 colour choices in the shared five-column hue-family order, pin state, Cancel and Create controls visible; creation uses the selected colour, while Cancel and failure preserve the documented state behavior.
 - Review Inbox actions remain normal sized, readable, and do not overlay item content.
 
 ## Visual System

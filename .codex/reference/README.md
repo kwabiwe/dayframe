@@ -1,20 +1,33 @@
-# On-Demand Context
+# On-Demand Agent Context
 
-Put detailed reference docs here when they are useful only for certain kinds of work.
+`AGENTS.md` contains short rules that apply to every task. Load only the relevant references below for deeper feature contracts.
 
-Keep global rules in `AGENTS.md` short. Put deeper material here and link to it from global rules.
+Canonical repository documents:
 
-Suggested files:
+- `docs/PRD.md`: stable product intent and scope.
+- `docs/architecture.md`: runtime, data, authentication, storage, native-boundary, and deployment ownership.
+- `docs/feature-fix-tracker.md`: current Done/Watch/Release pending/Decision state.
+- `docs/documentation-governance.md`: document ownership, conflict resolution, and the pre-PR documentation gate.
+- `docs/brand-style-guide.md`: brand assets, semantic visual tokens, accessibility, and platform design language.
+- `docs/dayframe-regression-checklist.md`: user-visible behavior that must not regress.
+- `docs/vercel-supabase-hosting.md`: hosted environment and staging/production operations.
 
-- `components.md` for frontend component patterns
-- `api.md` for API route and service patterns
-- `style.md` for visual design and styling rules
-- `testing.md` for validation and regression testing rules
-- `database.md` for schema, migration, and query patterns
-- `product-model.md` for category/task-first product rules
-- `mobile-permissions.md` for iOS permission state and placement rules
-- `debugging-playbook.md` for screenshot, production, and regression triage before coding
-- `health-review-pipeline.md` for HealthKit, Review, auto-log, Confirm, Dismiss, and diagnostics work
-- `release-and-testflight.md` for TestFlight, Vercel, Supabase, and runtime version checks
-- `validation-matrix.md` for selecting test commands and manual evidence by feature area
-- `process-improvement.md` for lightweight self-review and guardrail updates after regressions
+On-demand references:
+
+- `components.md`: frontend component and native-view boundary patterns.
+- `api.md`: API route and service patterns.
+- `style.md`: visual implementation rules.
+- `testing.md`: testing principles; command/evidence selection remains canonical in `validation-matrix.md`.
+- `database.md`: schema, migration, query, and RLS rules.
+- `product-model.md`: category/task-first product rules.
+- `mobile-permissions.md`: iOS permission states and placement.
+- `debugging-playbook.md`: screenshot, production, and regression triage before coding.
+- `health-review-pipeline.md`: HealthKit, Review, auto-log, Confirm/Dismiss, and diagnostics.
+- `location-learning.md`: Location V2 evidence, segmentation, rollout, privacy, and Review policy.
+- `offline-review-mutations.md`: durable Review terminal-action outbox.
+- `motion.md`: motion ownership, continuity, accessibility, and PR evidence.
+- `release-and-testflight.md`: TestFlight, Vercel, Supabase, and runtime version checks.
+- `validation-matrix.md`: canonical validation commands and manual evidence by feature area.
+- `process-improvement.md`: lightweight retrospective and guardrail updates.
+
+Dated files under `docs/investigations/` preserve issue evidence and closure criteria. They must not override the PRD, architecture, feature tracker, or these promoted reference contracts after their PR merges.

@@ -10,6 +10,8 @@ Use this when adding or changing API routes, server actions, controllers, servic
 - Keep secrets server-side.
 - Timer, event, and entry routes must resolve a `RequestSession` before reading or writing workspace data.
 - User-facing timer APIs must support category/task-first flows and must not require projects unless the product model explicitly changes.
+- Discriminated request modes are closed sets. Unknown `/api/time-entries` modes must return `400`; they must never fall through to timer start or another mutation.
+- Query enums such as export `kind` return a structured `400` when unsupported rather than reaching a service default and surfacing a `500`.
 
 ## Data Access
 
@@ -37,6 +39,7 @@ When changing `/api/time-entries`, `/api/events`, session handling, or mobile sy
 ## Review Checklist
 
 - [ ] Input validation covers required fields and edge cases.
+- [ ] Unknown discriminators, malformed JSON, and unsupported query enums are client errors with no mutation.
 - [ ] Auth checks happen before data access.
 - [ ] Errors are useful without leaking sensitive details.
 - [ ] Tests cover success, validation failure, unauthorized access, and the timer regression matrix where relevant.

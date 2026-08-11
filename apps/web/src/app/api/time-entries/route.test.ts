@@ -63,6 +63,30 @@ describe("POST /api/time-entries", () => {
     );
   });
 
+  it("rejects an unknown mode instead of treating it as a timer start", async () => {
+    const response = await POST(jsonRequest({ mode: "restart" }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "mode must be one of start, stop, manual, or split."
+    });
+    expect(mocks.processActivityEvent).not.toHaveBeenCalled();
+    expect(mocks.createManualEntry).not.toHaveBeenCalled();
+    expect(mocks.splitActiveEntry).not.toHaveBeenCalled();
+  });
+
+  it("returns a client error for malformed JSON", async () => {
+    const response = await POST(new Request("https://dayframe.test/api/time-entries", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{"
+    }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "Request body must be valid JSON." });
+    expect(mocks.processActivityEvent).not.toHaveBeenCalled();
+  });
+
   it("omits blank descriptions for category-only starts", async () => {
     const response = await POST(jsonRequest({ mode: "start", categoryId: categoryId(), description: "   " }));
 

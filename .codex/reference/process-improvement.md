@@ -21,6 +21,7 @@ Do not update docs for one-off trivia, temporary command output, or secrets.
 ## Where Lessons Go
 
 - `AGENTS.md`: short, high-value rules that should always be loaded.
+- `docs/documentation-governance.md`: canonical ownership and pre-PR documentation impact rules.
 - `.codex/reference/*.md`: detailed guidance loaded only when relevant.
 - `docs/investigations/*.md`: active issue notes and evidence trails.
 - Tests: executable guardrails for regressions.
@@ -37,6 +38,7 @@ After each focused PR:
 3. Add that check to tests or `validation-matrix.md`.
 4. Add one concise note to the relevant reference doc if needed.
 5. Keep the investigation note current until the issue is closed.
+6. Run `npm run check:docs` and ensure the feature tracker no longer describes merged work as active.
 
 After every 3 to 5 Dayframe changes, do a short process review:
 

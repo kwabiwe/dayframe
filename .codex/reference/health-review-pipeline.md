@@ -30,17 +30,16 @@ Do not patch one step without checking the adjacent step on either side.
 
 Automatic Health sync needs both JS wiring and native launch wiring: after Health permission is granted, Dayframe should configure/enable background delivery for sleep and workouts, subscribe to observer changes while JS is running, and keep `BackgroundDeliveryManager.shared.setupBackgroundObservers()` in AppDelegate so cold-launch delivery works.
 
-Current state as of internal TestFlight `0.1.0 (13)`:
+Current implementation contract:
 
-- PR #35 added foreground sync, HealthKit observer callbacks, and AppDelegate background-delivery setup for sleep/workout changes. Keep this at `Watch` until more real-device background behavior is observed.
-- PR #36 added a compact Apple Health settings surface for sleep/workout category and description defaults.
-- New HealthKit imports and Health Review reprocess both apply the Health mapping defaults.
-- Sleep should route to a user-facing `Sleep` category by default; workouts can remain under `Health` unless the user changes the mapping.
-- New grouped Sleep imports reconcile same-source revisions into one logical session. Historical duplicate rows still require row-level production evidence before any merge/delete cleanup.
+- Foreground sync, HealthKit observer callbacks, and AppDelegate background-delivery setup cover sleep/workout changes; real-device background delivery remains under Watch.
+- Apple Health settings own sleep/workout category and description defaults, and both new imports and Review reprocess apply them.
+- Sleep routes to a user-facing `Sleep` category by default; workouts remain under `Health` unless the user changes the mapping.
+- Grouped Sleep imports reconcile same-source revisions into one logical untouched Health-derived entry. Historical duplicate rows still require row-level production evidence before any merge/delete cleanup.
 
 ## Health Debug Export
 
-TestFlight build `0.1.0 (1)` added a bounded Health debug export in Settings. Later builds kept using this export while Health sync, backlog cleanup, and mapping defaults were hardened.
+Dayframe includes a bounded Health debug export in Settings for evidence-led investigation of Health sync, backlog, and mapping behavior.
 
 Expected path:
 

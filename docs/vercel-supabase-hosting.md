@@ -16,6 +16,8 @@ Provide these values from Supabase and Vercel when you want the hosted deploymen
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`: legacy Supabase anon JWT fallback if your project still uses legacy API keys.
 - `DATABASE_URL`: Supabase Postgres pooled connection string. Use the pooler URL as provided by Supabase; do not add an SSL-mode query parameter if that prevents the Vercel deployment from connecting.
 - `DAYFRAME_ALLOWED_SIGNUP_EMAILS`: comma-separated emails allowed to create accounts.
+- `DAYFRAME_SESSION_TTL_SECONDS`: optional absolute app-session TTL, 60 seconds through 365 days; defaults to 30 days and applies equally to cookie and database expiry.
+- `DAYFRAME_LOCATION_ROLLOUT_MODE`: server-authoritative `v1`, `v2_shadow`, `v2_review`, or `v2_enabled`; keep the fail-closed `v2_shadow` value unless the tracker decision/evidence explicitly approves another mode.
 - `GEOAPIFY_API_KEY`: server-only Geoapify key used by the authenticated web
   place-search route. Never expose it through a `NEXT_PUBLIC_` variable.
 - `EXPO_PUBLIC_DAYFRAME_API_BASE`: hosted Vercel URL for mobile builds.
@@ -63,6 +65,10 @@ NEXT_PUBLIC_SUPABASE_URL=...
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
 DAYFRAME_ALLOWED_SIGNUP_EMAILS=you@example.com,friend@example.com
 DAYFRAME_SIGNUPS_ENABLED=false
+DAYFRAME_SESSION_TTL_SECONDS=2592000
+DAYFRAME_LOCATION_ROLLOUT_MODE=v2_shadow
+# Preview only; omit in Production.
+NEXT_PUBLIC_DAYFRAME_DEPLOYMENT_ENV=staging
 GEOAPIFY_API_KEY=...
 APNS_KEY_ID=...
 APNS_TEAM_ID=...

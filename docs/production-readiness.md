@@ -103,9 +103,9 @@ npm run export:workspace -- ./dayframe-backup.json
 
 Deletion/privacy groundwork remains: implement safe user/workspace deletion with raw location and health payload hard-deletion before using Dayframe as a sole system of record.
 
-## Current Internal Beta State
+## Delivery State
 
-As of 2026-07-19, the active internal TestFlight lane has verified build `0.1.0 (58)` in `Internal Health Debug`. The native Calendar touch/data recovery is shipped and under physical-iPhone `Watch`; the tracker records that acceptance work alongside the remaining `Planned` and `Future` items.
+Release and Watch state changes more quickly than this operational checklist. Use `docs/feature-fix-tracker.md` for the repository/TestFlight snapshot and decision register, and `.codex/reference/release-and-testflight.md` for the release procedure. Do not infer that code on main is present in the last recorded mobile binary or production deployment.
 
 ## Remaining Before Wider Daily Beta Use
 
@@ -114,5 +114,5 @@ As of 2026-07-19, the active internal TestFlight lane has verified build `0.1.0 
 - Add safe account deletion, workspace deletion, and stronger privacy controls for raw Health/location payloads and integration tokens.
 - Add token management UI before Home Assistant or other local bridge inputs are promoted beyond manual/local setup.
 - Add the Home Assistant/Cockpit bridge only after ingestion contracts and token controls are stable.
-- Add richer report filtering, larger-data performance checks, backup verification, and restore/import confidence.
+- Add larger-data performance checks, backup verification, and restore/import confidence; the current report filters are already implemented.
 - Keep HealthKit background sync and Health mapping defaults at `Watch` until KB validates real-device behavior over normal daily use.

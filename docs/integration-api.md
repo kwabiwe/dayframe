@@ -40,7 +40,7 @@ Returns:
     "category": {
       "id": "20000000-0000-4000-8000-000000000001",
       "name": "Family",
-      "color": "#ff453a"
+      "color": "rose"
     },
     "place": null,
     "tags": [],
@@ -96,7 +96,7 @@ Returns:
       "category": {
         "id": "20000000-0000-4000-8000-000000000001",
         "name": "Coding",
-        "color": "#ff453a"
+        "color": "rose"
       },
       "place": null,
       "tags": ["Cubic"],
@@ -111,3 +111,5 @@ Returns:
 This is a read-only integration surface. Use the normal authenticated app APIs
 for user-driven edits; do not expose integration bearer tokens to browser or
 mobile client code.
+
+`category.color` and legacy `project.color` are stored compatibility strings. Current category rows normally return a stable key from `packages/shared/src/palette.ts`; older rows may still return a legacy HEX value, so clients should use Dayframe's shared resolver rather than assume one representation.

@@ -44,8 +44,9 @@ Before deployment or hosted smoke-test signoff, verify the hosted Supabase schem
 
 ## Repository Text Checks
 
-Run a repository search before signoff:
+Run `npm run check:docs` and a repository search before signoff:
 
+- Local Markdown links, documented root npm scripts, migration references, canonical environment keys, and stale snapshot phrases remain aligned.
 - No legacy third-party timer-brand product copy, scripts, env vars, imports, tests, or seeds.
 - No non-iOS mobile support copy or config unless it is explicitly reintroduced.
 - No production/native mobile localhost fallback.
@@ -73,3 +74,4 @@ For any app chrome, navigation, account, workspace, settings, or floating-surfac
 - [ ] App-shell and floating-surface changes include mobile overlay checks.
 - [ ] Core timer changes include start/stop/manual-entry regression checks.
 - [ ] Hosted migration-dependent changes include hosted schema verification notes.
+- [ ] Canonical docs and delivery state were updated, or the PR explains why documentation is unaffected.

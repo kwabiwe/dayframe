@@ -31,7 +31,7 @@ Use this when implementing visual UI.
 ## Colour And Components
 
 - Consume semantic theme tokens from `packages/shared`; do not scatter raw Midnight Core HEX values through route components.
-- Preserve palette keys and deterministic category/chart mapping. `lime` remains the stored key even though its Midnight Core display name is Mint.
+- Preserve the 30 shared palette keys, exact HEX values, deterministic fallback order, separate five-column picker order, and legacy normalization in `packages/shared/src/palette.ts`.
 - Use coral for primary action and active state, `danger` for destructive action and category colours for data identity.
 - Pair category colours with labels, dots, rails or borders. Never rely on colour alone or assume a palette colour is accessible body text.
 - Use a 44 px/pt minimum interactive target and visible focus/selected states. Both platforms should prefer fill, spacing, and hairline dividers over default outlines; retain lines for focus, validation, essential control boundaries, calendar grids and semantic data structure.
