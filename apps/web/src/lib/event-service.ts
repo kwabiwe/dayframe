@@ -1575,6 +1575,51 @@ export async function deleteTimeEntries(ids: string[], session: RequestSession =
   }
 }
 
+export async function updateTimeEntryDescriptions(
+  ids: string[],
+  description: string | null,
+  session: RequestSession = getDevSession()
+) {
+  const uniqueIds = [...new Set(ids)];
+  if (uniqueIds.length < 2) {
+    throw new TimeEntryValidationError("Choose at least two grouped entries.");
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const existing = await client.query<{ id: string; stoppedAt: string | Date | null }>(
+      `select id, stopped_at as "stoppedAt"
+       from time_entries
+       where id = any($1::uuid[]) and workspace_id = $2 and user_id = $3
+       for update`,
+      [uniqueIds, session.workspaceId, session.userId]
+    );
+    if (existing.rows.length !== uniqueIds.length) throw new TimeEntryNotFoundError();
+    if (existing.rows.some((entry) => entry.stoppedAt === null)) {
+      throw new TimeEntryValidationError("Grouped descriptions can only update completed entries.");
+    }
+
+    const updated = await client.query<{ id: string }>(
+      `update time_entries
+       set description = $2,
+           user_edited_at = now(),
+           updated_at = now()
+       where id = any($1::uuid[]) and workspace_id = $3 and user_id = $4
+       returning id`,
+      [uniqueIds, description, session.workspaceId, session.userId]
+    );
+    if (updated.rows.length !== uniqueIds.length) throw new TimeEntryNotFoundError();
+    await client.query("commit");
+    return { ids: updated.rows.map((row) => row.id), updatedCount: updated.rows.length };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function splitActiveEntry(session: RequestSession = getDevSession()) {
   const client = await pool.connect();
   try {

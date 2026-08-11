@@ -982,6 +982,10 @@ textarea.ui-control {
 }
 
 .timeline-list-table tbody > tr:not(.timeline-list-day-heading) > td {
+  vertical-align: middle;
+}
+
+.timeline-list-table tbody > tr:not(.timeline-list-day-heading) > td:first-child {
   vertical-align: top;
 }
 
@@ -1041,9 +1045,22 @@ textarea.ui-control {
   align-items: center;
   overflow: hidden;
   padding-right: 1px;
-  visibility: hidden;
+  visibility: visible;
   white-space: pre;
   line-height: var(--timeline-task-text-line-height);
+}
+
+.timeline-inline-description.is-editing .timeline-inline-description-measure {
+  visibility: hidden;
+}
+
+.timeline-inline-description:not(.is-editing) .timeline-inline-description-input[readonly] {
+  color: transparent;
+  caret-color: transparent;
+}
+
+.timeline-inline-description:not(.is-editing) .timeline-inline-description-input[readonly]::placeholder {
+  color: transparent;
 }
 
 .timeline-inline-description-input[readonly],
@@ -1052,7 +1069,7 @@ textarea.ui-control {
   cursor: text;
 }
 
-.timeline-inline-description-input[readonly]:hover,
+.timeline-inline-description:has(.timeline-inline-description-input[readonly]):hover,
 .timeline-group-time-summary:hover {
   background: var(--surface-muted);
 }
@@ -1067,17 +1084,25 @@ textarea.ui-control {
 
 .timeline-inline-time {
   box-sizing: border-box;
-  display: inline-flex;
+  display: inline-grid;
+  width: max-content;
+  max-width: 100%;
   height: var(--web-control-height);
   min-height: var(--web-control-height);
+  grid-template-columns: 5ch 16px 5ch;
   align-items: center;
   gap: 0;
+  flex: 0 0 auto;
   border: 0;
   border-radius: 8px;
   outline: 0;
   padding: 0 8px;
   box-shadow: none;
   white-space: nowrap;
+}
+
+.timeline-inline-time.is-running {
+  grid-template-columns: 5ch 16px 5.75ch;
 }
 
 .timeline-inline-time:hover,
@@ -1089,15 +1114,17 @@ textarea.ui-control {
 .timeline-inline-time-control {
   position: relative;
   display: inline-flex;
+  width: 5ch;
   height: var(--web-control-height);
+  min-width: 0;
   min-height: var(--web-control-height);
   align-items: center;
 }
 
 .timeline-inline-time-input {
-  width: 5ch;
+  width: 100%;
   height: var(--web-control-height);
-  min-width: 5ch;
+  min-width: 0;
   min-height: var(--web-control-height);
   padding: 0;
   font-variant-numeric: tabular-nums;
@@ -1128,8 +1155,10 @@ textarea.ui-control {
   justify-content: center;
 }
 
-.timeline-inline-date-picker {
+/* The later shared picker grid must not give triggerless inline wrappers a box. */
+.swiss-timeline-surface .timeline-inline-time-control > .timeline-inline-date-picker {
   display: contents;
+  min-width: 0;
 }
 
 .timeline-inline-date-picker-panel {
@@ -1156,6 +1185,7 @@ textarea.ui-control {
 .timeline-list-duration-content,
 .timeline-list-actions {
   display: flex;
+  min-width: 0;
   min-height: var(--web-control-height);
   align-items: center;
 }
@@ -9814,6 +9844,7 @@ dialog.ui-dialog.manual-entry-dialog {
   --timeline-list-column-header-height: 40px;
   min-width: 760px;
   table-layout: fixed;
+  view-transition-name: timeline-list-groups;
 }
 
 .timeline-list-table th {
@@ -9850,7 +9881,7 @@ dialog.ui-dialog.manual-entry-dialog {
   height: var(--timeline-task-primary-height);
   min-height: var(--timeline-task-primary-height);
   min-width: 0;
-  align-items: center;
+  align-items: baseline;
   gap: 8px;
   overflow: hidden;
   white-space: nowrap;
@@ -9866,10 +9897,10 @@ dialog.ui-dialog.manual-entry-dialog {
 .timeline-task-primary-line .timeline-task-meta,
 .timeline-task-primary-line .tag-metadata {
   display: inline-flex;
-  height: var(--timeline-task-primary-height);
-  min-height: var(--timeline-task-primary-height);
+  height: auto;
+  min-height: 0;
   flex: 0 0 auto;
-  align-items: center;
+  align-items: baseline;
   line-height: var(--timeline-task-text-line-height);
 }
 
@@ -9877,9 +9908,20 @@ dialog.ui-dialog.manual-entry-dialog {
   margin-top: 0;
 }
 
+::view-transition-old(timeline-list-groups),
+::view-transition-new(timeline-list-groups) {
+  animation-duration: 180ms;
+  animation-timing-function: ease-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .timeline-inline-description {
     transition: none;
+  }
+
+  ::view-transition-old(timeline-list-groups),
+  ::view-transition-new(timeline-list-groups) {
+    animation-duration: 0s;
   }
 }
 

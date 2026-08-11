@@ -11,7 +11,7 @@ import {
   useState,
   useTransition
 } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Ellipsis, Minus, Pencil, Play, Trash2 } from "lucide-react";
 import { analyzeTimeIntervals, type TimeIntervalAnalysisEntry } from "@dayframe/shared";
@@ -20,6 +20,7 @@ import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { saveTimeEntryQuickEdit, TimeEntryQuickEditorModal } from "@/components/TimeEntryQuickEditor";
 import { TagMetadata } from "@/components/TagMetadata";
 import { IconButton } from "@/components/ui/Primitives";
+import { clientFetch } from "@/lib/client-auth-fetch";
 import { timeEntryCategoryColor, timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
 import type { CategoryRow, TagRow, TimeEntryRow } from "@/lib/queries";
 import {
@@ -29,7 +30,7 @@ import {
   formatTime
 } from "@/lib/format";
 import { timelineEntryDisplayInterval } from "@/lib/timeline-calculations";
-import { groupTimelineEntriesByDay } from "@/lib/timeline-entry-groups";
+import { groupTimelineEntriesByDay, timelineEntryGroupKey } from "@/lib/timeline-entry-groups";
 import {
   buildTimelineInlineSavePlan,
   createTimelineInlineEditDraft,
@@ -47,7 +48,57 @@ type TimelineInlineEditorState = TimelineInlineEditDraft & {
   error: string | null;
   isSaving: boolean;
   sessionId: number;
+  target: TimelineInlineEditTarget;
 };
+
+type TimelineInlineEditTarget = {
+  day: string | null;
+  entryIds: string[];
+  groupKey: string | null;
+  kind: "entry" | "group";
+};
+
+type ViewTransitionDocument = Document & {
+  startViewTransition?: (update: () => void) => unknown;
+};
+
+type OptimisticDescription = {
+  description: string | null;
+  sourceDescription: string | null;
+  sourceUpdatedAt: string;
+};
+
+async function saveGroupedTimeEntryDescription(entryIds: string[], description: string | null) {
+  try {
+    const response = await clientFetch("/api/time-entries/batch-description", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: entryIds, description })
+    });
+    if (!response.ok) {
+      let message = `Unable to update this group: ${response.status}`;
+      try {
+        const payload = (await response.json()) as { error?: string };
+        message = payload.error ?? message;
+      } catch {
+        // Keep the status fallback when the response is not JSON.
+      }
+      return { ok: false, error: message } as const;
+    }
+    return { ok: true } as const;
+  } catch {
+    return { ok: false, error: "Unable to update this group. Check your connection and try again." } as const;
+  }
+}
+
+function applyTimelineRegroup(update: () => void) {
+  const documentWithTransitions = document as ViewTransitionDocument;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || !documentWithTransitions.startViewTransition) {
+    update();
+    return;
+  }
+  documentWithTransitions.startViewTransition(() => flushSync(update));
+}
 
 function TimelineInlineTimeControl({
   date,
@@ -170,6 +221,8 @@ export function EntriesTable({
   const [isPending, startTransition] = useTransition();
   const [editingEntry, setEditingEntry] = useState<TimeEntryRow | null>(null);
   const [inlineEditor, setInlineEditor] = useState<TimelineInlineEditorState | null>(null);
+  const [inlineStatus, setInlineStatus] = useState<string | null>(null);
+  const [optimisticDescriptions, setOptimisticDescriptions] = useState<Map<string, OptimisticDescription>>(() => new Map());
   const [actionError, setActionError] = useState<string | null>(null);
   const [continuingEntryId, setContinuingEntryId] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
@@ -183,9 +236,21 @@ export function EntriesTable({
     inlineEditorRef.current = inlineEditor;
   }, [inlineEditor]);
 
+  const displayedEntries = useMemo(() => {
+    if (!optimisticDescriptions.size) return entries;
+    return entries.map((entry) => {
+      const optimistic = optimisticDescriptions.get(entry.id);
+      return optimistic &&
+        entry.description === optimistic.sourceDescription &&
+        entry.updatedAt === optimistic.sourceUpdatedAt
+        ? { ...entry, description: optimistic.description }
+        : entry;
+    });
+  }, [entries, optimisticDescriptions]);
+
   const overlapAnalysis = useMemo(
     () => analyzeTimeIntervals(
-      entries.map((entry) => ({
+      displayedEntries.map((entry) => ({
         id: entry.id,
         startedAt: entry.startedAt,
         stoppedAt: entry.stoppedAt
@@ -195,7 +260,7 @@ export function EntriesTable({
         now: capturedNow
       }
     ),
-    [capturedNow, displayRange, entries]
+    [capturedNow, displayRange, displayedEntries]
   );
   const overlapById = useMemo(
     () => new Map(overlapAnalysis.entries.map((entry) => [entry.id, entry])),
@@ -203,7 +268,7 @@ export function EntriesTable({
   );
   const grouped = useMemo(() => {
     return groupTimelineEntriesByDay(
-      entries,
+      displayedEntries,
       (entry) => formatDate(timelineEntryDisplayInterval(entry, displayRange, capturedNow).startedAt)
     ).map((group) => ({
       ...group,
@@ -213,7 +278,7 @@ export function EntriesTable({
         0
       )
     }));
-  }, [capturedNow, displayRange, entries]);
+  }, [capturedNow, displayRange, displayedEntries]);
 
   useEffect(() => {
     if (!highlightedEntryId) return;
@@ -262,7 +327,13 @@ export function EntriesTable({
   function beginInlineEdit(
     entry: TimeEntryRow,
     field: TimelineInlineEditField,
-    displayInterval?: { startedAt: string; stoppedAt: string | null }
+    displayInterval?: { startedAt: string; stoppedAt: string | null },
+    target: TimelineInlineEditTarget = {
+      day: null,
+      entryIds: [entry.id],
+      groupKey: null,
+      kind: "entry"
+    }
   ) {
     const current = inlineEditorRef.current;
     if (current?.entryId === entry.id && current.field === field) return;
@@ -272,11 +343,13 @@ export function EntriesTable({
       entryId: entry.id,
       error: null,
       isSaving: false,
-      sessionId: ++inlineSessionRef.current
+      sessionId: ++inlineSessionRef.current,
+      target
     };
     inlineEditorRef.current = next;
     setInlineEditor(next);
     setActionError(null);
+    setInlineStatus(null);
   }
 
   function cancelInlineEdit(entryId: string) {
@@ -365,9 +438,13 @@ export function EntriesTable({
     const saving = { ...current, error: null, isSaving: true };
     inlineEditorRef.current = saving;
     setInlineEditor(saving);
-    const outcome = entry.stoppedAt
-      ? await saveTimeEntryQuickEdit(entry.id, plan)
-      : await updateActiveEntryFromCalendar({ plan });
+    const groupedDescription = current.target.kind === "group";
+    const nextDescription = plan.payload.description ?? null;
+    const outcome = groupedDescription
+      ? await saveGroupedTimeEntryDescription(current.target.entryIds, nextDescription)
+      : entry.stoppedAt
+        ? await saveTimeEntryQuickEdit(entry.id, plan)
+        : await updateActiveEntryFromCalendar({ plan });
     const latest = inlineEditorRef.current;
 
     if (!outcome.ok) {
@@ -382,6 +459,42 @@ export function EntriesTable({
       return;
     }
 
+    if (latest?.sessionId === current.sessionId && groupedDescription) {
+      const nextGroupKey = current.target.day
+        ? `${current.target.day}:${timelineEntryGroupKey({ ...entry, description: nextDescription })}`
+        : null;
+      inlineEditorRef.current = null;
+      applyTimelineRegroup(() => {
+        setInlineEditor(null);
+        setOptimisticDescriptions((descriptions) => {
+          const next = new Map(descriptions);
+          for (const entryId of current.target.entryIds) {
+            const source = entries.find((candidate) => candidate.id === entryId);
+            if (!source) continue;
+            next.set(entryId, {
+              description: nextDescription,
+              sourceDescription: source.description,
+              sourceUpdatedAt: source.updatedAt
+            });
+          }
+          return next;
+        });
+        if (current.target.groupKey && nextGroupKey) {
+          setExpandedGroups((expanded) => {
+            const next = new Set(expanded);
+            const preserveExpansion = next.delete(current.target.groupKey!);
+            if (preserveExpansion) next.add(nextGroupKey);
+            return next;
+          });
+        }
+      });
+      setInlineStatus(`Updated ${current.target.entryIds.length} grouped entries.`);
+      await onChanged?.();
+      if (nextGroupKey) focusGroupedDescription(nextGroupKey);
+      startTransition(() => router.refresh());
+      return;
+    }
+
     if (latest?.sessionId === current.sessionId) {
       inlineEditorRef.current = null;
       setInlineEditor(null);
@@ -390,16 +503,26 @@ export function EntriesTable({
     startTransition(() => router.refresh());
   }
 
+  function focusGroupedDescription(groupKey: string) {
+    window.requestAnimationFrame(() => {
+      const row = Array.from(document.querySelectorAll<HTMLTableRowElement>("[data-timeline-group-key]"))
+        .find((candidate) => candidate.dataset.timelineGroupKey === groupKey);
+      row?.querySelector<HTMLInputElement>(".timeline-inline-description-input")
+        ?.focus({ preventScroll: true });
+    });
+  }
+
   function handleInlineKeyDown(
     event: ReactKeyboardEvent<HTMLInputElement>,
     entry: TimeEntryRow,
     field: TimelineInlineEditField,
-    displayInterval?: { startedAt: string; stoppedAt: string | null }
+    displayInterval?: { startedAt: string; stoppedAt: string | null },
+    target?: TimelineInlineEditTarget
   ) {
     const active = inlineEditorRef.current?.entryId === entry.id && inlineEditorRef.current.field === field;
     if (!active && (event.key === "Enter" || event.key === "F2")) {
       event.preventDefault();
-      beginInlineEdit(entry, field, displayInterval);
+      beginInlineEdit(entry, field, displayInterval, target);
       return;
     }
     if (!active) return;
@@ -412,7 +535,14 @@ export function EntriesTable({
     }
   }
 
-  function renderInlineDescription(entry: TimeEntryRow, canInlineEdit = true) {
+  function renderInlineDescription(entry: TimeEntryRow, target?: TimelineInlineEditTarget) {
+    const editTarget = target ?? {
+      day: null,
+      entryIds: [entry.id],
+      groupKey: null,
+      kind: "entry" as const
+    };
+    const isGroupedTarget = editTarget.kind === "group";
     const editor = inlineEditor?.entryId === entry.id && inlineEditor.field === "description"
       ? inlineEditor
       : null;
@@ -423,15 +553,22 @@ export function EntriesTable({
         onDoubleClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
-          openFullEditor(entry);
+          if (isGroupedTarget) {
+            if (!editor) beginInlineEdit(entry, "description", undefined, editTarget);
+          } else {
+            openFullEditor(entry);
+          }
         }}
       >
         <span aria-hidden="true" className="timeline-inline-description-measure timeline-task-title">
           {value || "Untitled task"}
         </span>
         <input
-          aria-label={`${timeEntryTitle(entry)} description. ${canInlineEdit ? "Click to edit inline. " : ""}Double-click to open the full editor.`}
+          aria-label={isGroupedTarget
+            ? `${timeEntryTitle(entry)} shared description for ${editTarget.entryIds.length} grouped entries. Click to edit all occurrences.`
+            : `${timeEntryTitle(entry)} description. Click to edit inline. Double-click to open the full editor.`}
           className="timeline-task-title timeline-inline-description-input"
+          data-inline-edit-scope={editTarget.kind}
           data-inline-entry-id={entry.id}
           data-inline-field="description"
           onBlur={(event) => {
@@ -439,18 +576,14 @@ export function EntriesTable({
           }}
           onChange={(event) => updateInlineDescription(entry.id, event.target.value)}
           onClick={() => {
-            if (canInlineEdit && !editor) beginInlineEdit(entry, "description");
+            if (!editor) beginInlineEdit(entry, "description", undefined, editTarget);
           }}
           onKeyDown={(event) => {
-            if (canInlineEdit) handleInlineKeyDown(event, entry, "description");
-            else if (event.key === "Enter" || event.key === "F2") {
-              event.preventDefault();
-              openFullEditor(entry);
-            }
+            handleInlineKeyDown(event, entry, "description", undefined, editTarget);
           }}
           placeholder="Untitled task"
           readOnly={!editor || editor.isSaving}
-          title={canInlineEdit ? "Click to edit. Double-click for the full editor." : "Double-click for the full editor."}
+          title={isGroupedTarget ? `Click to edit all ${editTarget.entryIds.length} occurrences.` : "Click to edit. Double-click for the full editor."}
           value={value}
         />
       </span>
@@ -507,7 +640,7 @@ export function EntriesTable({
     };
     return (
       <span
-        className={`timeline-inline-time${editor ? " is-editing" : ""}`}
+        className={`timeline-inline-time${editor ? " is-editing" : ""}${interval.stoppedAt ? "" : " is-running"}`}
         onBlur={handleBlur}
         onDoubleClick={(event) => {
           event.preventDefault();
@@ -530,7 +663,9 @@ export function EntriesTable({
   function renderInlineStatus(entry: TimeEntryRow) {
     const editor = inlineEditor?.entryId === entry.id ? inlineEditor : null;
     if (editor?.error) return <span className="timeline-inline-edit-error" role="alert">{editor.error}</span>;
-    if (editor?.isSaving) return <span className="sr-only" role="status">Saving entry</span>;
+    if (editor?.isSaving) {
+      return <span className="sr-only" role="status">{editor.target.kind === "group" ? "Saving grouped entries" : "Saving entry"}</span>;
+    }
     return null;
   }
 
@@ -548,6 +683,7 @@ export function EntriesTable({
           {actionError}
         </p>
       ) : null}
+      {inlineStatus ? <p className="sr-only" aria-live="polite" role="status">{inlineStatus}</p> : null}
 
       <div
         className="timeline-list-scroll"
@@ -581,7 +717,14 @@ export function EntriesTable({
               const overlappingOccurrences = group.entries.filter(
                 (occurrence) => (overlapById.get(occurrence.id)?.overlapCount ?? 0) > 0
               );
-
+              const groupEditTarget: TimelineInlineEditTarget | undefined = isGrouped
+                ? {
+                    day: group.day,
+                    entryIds: group.entries.map((occurrence) => occurrence.id),
+                    groupKey: group.key,
+                    kind: "group"
+                  }
+                : undefined;
               return (
                 <Fragment key={group.key}>
                   {shouldShowDate ? (
@@ -596,6 +739,7 @@ export function EntriesTable({
                     "motion-row border-b border-[var(--line)] align-middle last:border-b-0 hover:bg-[var(--surface-strong)]",
                     highlightedEntryId === entry.id && !isGrouped ? "timeline-entry-highlight" : ""
                   ].join(" ")}
+                  data-timeline-group-key={group.key}
                   id={!isGrouped ? `timeline-entry-${entry.id}` : undefined}
                 >
                   <td className="px-3 py-3 font-medium">
@@ -623,7 +767,7 @@ export function EntriesTable({
                       />
                       <span className="timeline-task-details">
                         <span className="timeline-task-primary-line">
-                          {renderInlineDescription(entry, !isGrouped)}
+                          {renderInlineDescription(entry, groupEditTarget)}
                           <span className="timeline-task-meta">{timeEntryCategoryLabel(entry)}</span>
                           <TagMetadata compact tagNames={entry.tagNames} />
                         </span>
@@ -633,10 +777,10 @@ export function EntriesTable({
                             className="overlap-marker"
                             aria-label={isGrouped
                               ? `${overlappingOccurrences.length} entries in this group overlap other entries`
-                              : overlapMarkerDescription(entry, overlapById.get(entry.id), entries)}
+                              : overlapMarkerDescription(entry, overlapById.get(entry.id), displayedEntries)}
                             title={isGrouped
                               ? `${overlappingOccurrences.length} entries in this group overlap other entries`
-                              : overlapMarkerDescription(entry, overlapById.get(entry.id), entries)}
+                              : overlapMarkerDescription(entry, overlapById.get(entry.id), displayedEntries)}
                           >
                             {isGrouped
                               ? `${overlappingOccurrences.length} overlapping`
@@ -721,12 +865,12 @@ export function EntriesTable({
                                 aria-label={overlapMarkerDescription(
                                   occurrence,
                                   overlapById.get(occurrence.id),
-                                  entries
+                                  displayedEntries
                                 )}
                                 title={overlapMarkerDescription(
                                   occurrence,
                                   overlapById.get(occurrence.id),
-                                  entries
+                                  displayedEntries
                                 )}
                               >
                                 Overlap · {formatDuration(overlapById.get(occurrence.id)?.overlapSeconds ?? 0)}
