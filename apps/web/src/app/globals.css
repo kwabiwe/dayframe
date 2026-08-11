@@ -950,7 +950,8 @@ textarea.ui-control {
 .timeline-task-category-dot {
   width: 12px;
   height: 12px;
-  margin-top: 4px;
+  margin: 0;
+  align-self: center;
   border: 0;
   border-radius: 999px;
 }
@@ -986,11 +987,13 @@ textarea.ui-control {
 
 .timeline-inline-description {
   position: relative;
-  display: inline-block;
+  display: inline-flex;
   width: max-content;
+  height: 28px;
   min-width: 0;
   max-width: 100%;
   flex: 0 1 auto;
+  align-items: center;
   overflow: hidden;
   transition: flex-grow 180ms ease;
 }
@@ -1017,6 +1020,7 @@ textarea.ui-control {
   position: absolute;
   inset: 0;
   width: 100%;
+  height: 28px;
   min-width: 0;
   min-height: 28px;
   padding: 0;
@@ -1024,9 +1028,10 @@ textarea.ui-control {
 }
 
 .timeline-inline-description-measure {
-  display: block;
+  display: inline-flex;
+  height: 28px;
   min-width: 0;
-  min-height: 28px;
+  align-items: center;
   overflow: hidden;
   padding-right: 1px;
   visibility: hidden;
@@ -1040,7 +1045,6 @@ textarea.ui-control {
 }
 
 .timeline-inline-description-input[readonly]:hover,
-.timeline-inline-time-input[readonly]:hover,
 .timeline-group-time-summary:hover {
   background: var(--surface-muted);
 }
@@ -1055,21 +1059,36 @@ textarea.ui-control {
 
 .timeline-inline-time {
   display: inline-flex;
+  height: 28px;
   min-height: 28px;
   align-items: center;
   gap: 3px;
+  border-radius: 8px;
+  padding: 0 4px;
   white-space: nowrap;
+}
+
+.timeline-inline-time:hover,
+.timeline-inline-time.is-editing,
+.timeline-inline-time:focus-within {
+  background: var(--surface-muted);
+}
+
+.timeline-inline-time:has(.timeline-inline-time-input:focus-visible) {
+  box-shadow: inset 0 0 0 2px var(--focus);
 }
 
 .timeline-inline-time-control {
   position: relative;
   display: inline-flex;
+  height: 28px;
   min-height: 28px;
   align-items: center;
 }
 
 .timeline-inline-time-input {
   width: 5ch;
+  height: 28px;
   min-width: 5ch;
   min-height: 28px;
   padding: 0;
@@ -1077,13 +1096,9 @@ textarea.ui-control {
   text-align: left;
 }
 
-.timeline-inline-time.is-editing .timeline-inline-time-input {
-  background: var(--surface-muted);
-}
-
 .timeline-inline-time-input:focus {
   border: 0;
-  background: var(--surface-muted);
+  background: transparent;
 }
 
 .timeline-inline-date-picker {
@@ -1095,11 +1110,16 @@ textarea.ui-control {
 }
 
 .timeline-inline-running {
+  display: inline-flex;
   min-width: 5.75ch;
+  height: 28px;
+  align-items: center;
 }
 
 .timeline-group-time-summary {
-  display: inline-block;
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
   border-radius: 6px;
   padding: 2px 4px;
 }
@@ -9782,8 +9802,9 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .timeline-task-primary-line {
   display: flex;
+  min-height: 28px;
   min-width: 0;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   overflow: hidden;
   white-space: nowrap;
@@ -9798,7 +9819,10 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .timeline-task-primary-line .timeline-task-meta,
 .timeline-task-primary-line .tag-metadata {
+  display: inline-flex;
+  min-height: 28px;
   flex: 0 0 auto;
+  align-items: center;
 }
 
 @media (prefers-reduced-motion: reduce) {
