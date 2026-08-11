@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { DayframePaletteKey } from "@dayframe/shared";
 import type { CategoryRow } from "@/lib/queries";
 import { CategoryPicker, type CreateCategoryOutcome } from "./CategoryPicker";
 
@@ -24,7 +25,7 @@ describe("CategoryPicker", () => {
   afterEach(() => cleanup());
 
   it("prevents blank and duplicate names and gives Escape back to the picker before closing it", async () => {
-    const create = vi.fn<(name: string) => Promise<CreateCategoryOutcome>>();
+    const create = vi.fn<(name: string, color?: DayframePaletteKey) => Promise<CreateCategoryOutcome>>();
     render(<PickerHarness create={create} />);
     const user = userEvent.setup();
     const trigger = screen.getByRole("button", { name: /Uncategorized/ });
@@ -50,6 +51,8 @@ describe("CategoryPicker", () => {
     const reopenedDialog = screen.getByRole("dialog", { name: "Create new category" });
     await waitFor(() => expect(document.activeElement).toBe(within(reopenedDialog).getByRole("textbox", { name: "Name" })));
     await user.tab();
+    expect(document.activeElement).toBe(within(reopenedDialog).getByRole("button", { name: /Choose category colour/ }));
+    await user.tab();
     expect(document.activeElement).toBe(within(reopenedDialog).getByRole("button", { name: "Cancel" }));
     await user.keyboard("{Escape}");
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("option", { name: "Create new category" })));
@@ -60,7 +63,7 @@ describe("CategoryPicker", () => {
   });
 
   it("preserves the surrounding draft after failure, retries, selects the category, and publishes it to another picker", async () => {
-    const create = vi.fn<(name: string) => Promise<CreateCategoryOutcome>>()
+    const create = vi.fn<(name: string, color?: DayframePaletteKey) => Promise<CreateCategoryOutcome>>()
       .mockResolvedValueOnce({ ok: false, error: "Category creation failed. Try again." })
       .mockResolvedValueOnce({ ok: true, category: writingCategory });
     const submit = vi.fn((event: FormEvent) => event.preventDefault());
@@ -95,13 +98,73 @@ describe("CategoryPicker", () => {
 
     await user.keyboard("{Enter}");
     await waitFor(() => expect(firstTrigger.textContent).toContain("Writing"));
-    expect(create).toHaveBeenNthCalledWith(1, "Writing");
-    expect(create).toHaveBeenNthCalledWith(2, "Writing");
+    expect(create).toHaveBeenNthCalledWith(1, "Writing", undefined);
+    expect(create).toHaveBeenNthCalledWith(2, "Writing", undefined);
     expect(submit).not.toHaveBeenCalled();
 
     const secondTrigger = screen.getByTestId("second-picker").querySelector("button") as HTMLButtonElement;
     await user.click(secondTrigger);
     expect(screen.getByRole("option", { name: "Writing" })).not.toBeNull();
+  });
+
+  it("lets the user choose a shared palette colour, preserves it after failure, and stages Escape locally", async () => {
+    const create = vi.fn<(name: string, color?: DayframePaletteKey) => Promise<CreateCategoryOutcome>>()
+      .mockResolvedValueOnce({ ok: false, error: "Category creation failed. Try again." })
+      .mockResolvedValueOnce({
+        ok: true,
+        category: { ...writingCategory, color: "blue" }
+      });
+    render(<PickerHarness create={create} portal />);
+    const user = userEvent.setup();
+    const trigger = screen.getByRole("button", { name: /Uncategorized/ });
+
+    await user.click(trigger);
+    await user.click(screen.getByRole("option", { name: "Create new category" }));
+    const dialog = screen.getByRole("dialog", { name: "Create new category" });
+    const input = within(dialog).getByRole("textbox", { name: "Name" });
+    await user.type(input, "Deep Work");
+    const colorTrigger = within(dialog).getByRole("button", { name: /Choose category colour/ });
+    await user.click(colorTrigger);
+
+    const colorMenu = screen.getByRole("listbox", { name: "Category colour" });
+    expect(colorMenu.parentElement).toBe(document.body);
+    expect(within(colorMenu).getAllByRole("option")).toHaveLength(30);
+    const blue = colorMenu.querySelector<HTMLButtonElement>('[data-color="blue"]');
+    expect(blue).not.toBeNull();
+    await user.click(blue!);
+    await waitFor(() => expect(document.activeElement).toBe(colorTrigger));
+    expect(colorTrigger.getAttribute("aria-label")).toContain("currently Blue");
+
+    await user.click(within(dialog).getByRole("button", { name: "Create" }));
+    expect((await within(dialog).findByRole("alert")).textContent).toContain("Category creation failed");
+    expect((input as HTMLInputElement).value).toBe("Deep Work");
+    expect(colorTrigger.getAttribute("aria-label")).toContain("currently Blue");
+    expect(create).toHaveBeenNthCalledWith(1, "Deep Work", "blue");
+
+    await user.click(colorTrigger);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("listbox", { name: "Category colour" })).toBeNull());
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("dialog", { name: "Create new category" })).not.toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(colorTrigger));
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("option", { name: "Create new category" })));
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(trigger.getAttribute("aria-expanded")).toBe("false"));
+  });
+
+  it("renders the selected category colour as a real dot in compact picker triggers", () => {
+    render(<PickerHarness create={vi.fn()} initialSecondSelectedId={workCategory.id} secondPicker />);
+    const trigger = screen.getByTestId("second-picker").querySelector<HTMLButtonElement>('button[aria-haspopup]');
+    const value = trigger?.querySelector(".category-picker-trigger-value");
+    const dot = value?.querySelector<HTMLElement>(".calendar-compact-category-dot");
+
+    expect(value).not.toBeNull();
+    expect(value?.textContent).toContain("Work");
+    expect(dot).not.toBeNull();
+    expect(dot?.getAttribute("aria-hidden")).toBe("true");
   });
 
   it("portals the menu to the body without losing panel-aware focus and outside-click handling", async () => {
@@ -162,13 +225,15 @@ describe("CategoryPicker", () => {
 
 function PickerHarness({
   create,
+  initialSecondSelectedId = "",
   nativeDialog = false,
   onSubmit,
   onOuterKeyDown,
   portal = false,
   secondPicker = false
 }: {
-  create: (name: string) => Promise<CreateCategoryOutcome>;
+  create: (name: string, color?: DayframePaletteKey) => Promise<CreateCategoryOutcome>;
+  initialSecondSelectedId?: string;
   nativeDialog?: boolean;
   onSubmit?: (event: FormEvent) => void;
   onOuterKeyDown?: () => void;
@@ -177,12 +242,12 @@ function PickerHarness({
 }) {
   const [categories, setCategories] = useState([workCategory]);
   const [firstSelectedId, setFirstSelectedId] = useState("");
-  const [secondSelectedId, setSecondSelectedId] = useState("");
+  const [secondSelectedId, setSecondSelectedId] = useState(initialSecondSelectedId);
   const [firstOpen, setFirstOpen] = useState(false);
   const [secondOpen, setSecondOpen] = useState(false);
 
-  async function createAndPublish(name: string) {
-    const outcome = await create(name);
+  async function createAndPublish(name: string, color?: DayframePaletteKey) {
+    const outcome = await create(name, color);
     if (outcome.ok) setCategories((current) => [...current, outcome.category]);
     return outcome;
   }

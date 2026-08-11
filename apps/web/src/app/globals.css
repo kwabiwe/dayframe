@@ -7526,6 +7526,106 @@ kbd {
   font-weight: 650;
 }
 
+.category-picker-create-color-field {
+  display: grid;
+  gap: 5px;
+}
+
+.category-picker-create-color-field > span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.category-picker-create-form .category-picker-color-trigger {
+  display: grid;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 2px solid transparent;
+  border-radius: var(--web-radius-control);
+  background: var(--surface-inset);
+  padding: 0 10px;
+  color: var(--foreground);
+  font: inherit;
+  text-align: left;
+}
+
+.category-picker-create-form .category-picker-color-trigger:hover,
+.category-picker-create-form .category-picker-color-trigger[aria-expanded="true"] {
+  background: var(--surface-muted);
+}
+
+.category-picker-create-form .category-picker-color-trigger:focus-visible {
+  border-color: var(--web-focus-border);
+  outline: 0;
+}
+
+.category-picker-color-swatch {
+  display: block;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 999px;
+  box-shadow: none;
+}
+
+.category-picker-color-menu {
+  position: fixed;
+  z-index: 121;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(44px, 1fr));
+  gap: 4px;
+  max-width: calc(100vw - 24px);
+  max-height: min(320px, calc(100dvh - 24px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px;
+}
+
+.category-picker-color-menu > button {
+  position: relative;
+  display: grid;
+  width: 100%;
+  min-width: 44px;
+  min-height: 44px;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--foreground);
+}
+
+.category-picker-color-menu > button:hover,
+.category-picker-color-menu > button:focus-visible,
+.category-picker-color-menu > button[aria-selected="true"] {
+  background: var(--surface-muted);
+}
+
+.category-picker-color-menu > button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.category-picker-color-menu > button .category-picker-color-swatch {
+  width: 26px;
+  height: 26px;
+}
+
+.category-picker-color-menu > button > svg {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--foreground);
+}
+
 .category-picker-create-form input {
   box-sizing: border-box;
   width: 100%;
@@ -9127,14 +9227,21 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .calendar-compact-category-field > button {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   padding: 0 10px;
   text-align: left;
 }
 
-.calendar-compact-category-field > button > span:nth-child(2),
+.category-picker-trigger-value {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.category-picker-trigger-value span:last-child,
 .calendar-compact-category-menu button > span:nth-child(2) {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -9144,8 +9251,10 @@ dialog.ui-dialog.manual-entry-dialog {
 .calendar-compact-category-dot {
   width: 9px;
   height: 9px;
+  flex: 0 0 auto;
+  border: 0;
   border-radius: 999px;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 15%, transparent);
+  box-shadow: none;
 }
 
 .calendar-compact-category-menu {

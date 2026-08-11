@@ -7,6 +7,7 @@ function source(relativePath: string) {
 }
 
 const picker = source("./CategoryPicker.tsx");
+const styles = source("../app/globals.css");
 const runtime = source("./AppShellRuntime.tsx");
 const timer = source("./PersistentTimerBar.tsx");
 const timeline = source("./TimeReviewViews.tsx");
@@ -31,11 +32,13 @@ describe("web contextual category creation contract", () => {
     expect(reports).not.toContain("portal");
   });
 
-  it("publishes a name-only category mutation without submitting a surrounding form", () => {
+  it("publishes an optional palette colour without submitting a surrounding form", () => {
     expect(runtime).toContain('clientFetch("/api/categories"');
-    expect(runtime).toContain("body: JSON.stringify({ name })");
+    expect(runtime).toContain("body: JSON.stringify({ name, color })");
     expect(runtime).toContain("commitData({ ...current, categories }, \"optimistic\")");
-    expect(picker).toContain("onCreateCategory(name)");
+    expect(picker).toContain("onCreateCategory(name, createColor ?? undefined)");
+    expect(picker).toContain("DAYFRAME_PALETTE_PICKER.map");
+    expect(picker).toContain("paletteKeyFor(undefined, createName.trim())");
     expect(picker).toContain(">Cancel</button>");
     expect(picker).toContain('type="button"');
     expect(picker).not.toContain("<form");
@@ -48,5 +51,12 @@ describe("web contextual category creation contract", () => {
     expect(picker).toContain('event.key === "Enter"');
     expect(picker).toContain('event.key !== "Escape"');
     expect(picker).toContain("nameInputRef.current?.focus()");
+  });
+
+  it("uses borderless colour dots in both trigger variants and picker options", () => {
+    expect(picker).toContain('className={variant === "timer" ? "swiss-category-trigger-value" : "category-picker-trigger-value"}');
+    expect(picker).toContain('"calendar-compact-category-dot"');
+    expect(styles).toMatch(/\.calendar-compact-category-dot\s*\{[^}]*border:\s*0;[^}]*box-shadow:\s*none;/s);
+    expect(styles).toMatch(/\.category-picker-color-swatch\s*\{[^}]*border:\s*0;[^}]*box-shadow:\s*none;/s);
   });
 });

@@ -6,6 +6,7 @@ import {
   TIMER_STATE_RECONCILE_INTERVAL_MS,
   timerStateChanged,
   timerStatePollDelay,
+  type DayframePaletteKey,
   type TimerStateFingerprint
 } from "@dayframe/shared";
 import { clientFetch } from "@/lib/client-auth-fetch";
@@ -50,7 +51,7 @@ type RuntimeContext = {
   clearDateLoadError: () => void;
   clearTimerError: () => void;
   closeManualEntry: () => void;
-  createCategory: (name: string) => Promise<CategoryMutationOutcome>;
+  createCategory: (name: string, color?: DayframePaletteKey) => Promise<CategoryMutationOutcome>;
   createManualEntry: (input: ManualEntryInput) => Promise<MutationOutcome>;
   deleteActiveTimer: () => Promise<MutationOutcome>;
   data: BootstrapData | null;
@@ -547,12 +548,15 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     return result.ran ? result.value : { ok: false, error: "A timer update is already in progress." };
   }, [refresh]);
 
-  const createCategory = useCallback(async (name: string): Promise<CategoryMutationOutcome> => {
+  const createCategory = useCallback(async (
+    name: string,
+    color?: DayframePaletteKey
+  ): Promise<CategoryMutationOutcome> => {
     try {
       const response = await clientFetch("/api/categories", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name })
+        body: JSON.stringify({ name, color })
       });
       if (!response.ok) {
         return {

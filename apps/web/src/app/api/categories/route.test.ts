@@ -67,13 +67,22 @@ describe("/api/categories", () => {
     );
   });
 
-  it("creates picker categories without colour or pin controls", async () => {
+  it("keeps the automatic colour and unpinned default when picker colour is untouched", async () => {
     mocks.createCategory.mockResolvedValueOnce({ id: categoryId(), name: "Writing", color: "blue", isPinned: false });
 
     const response = await POST(jsonRequest({ name: "  Writing  " }));
 
     expect(response.status).toBe(201);
     expect(mocks.createCategory).toHaveBeenCalledWith({ name: "Writing" }, session);
+  });
+
+  it("creates an unpinned picker category with an explicitly chosen palette colour", async () => {
+    mocks.createCategory.mockResolvedValueOnce({ id: categoryId(), name: "Writing", color: "sky", isPinned: false });
+
+    const response = await POST(jsonRequest({ name: "  Writing  ", color: "sky" }));
+
+    expect(response.status).toBe(201);
+    expect(mocks.createCategory).toHaveBeenCalledWith({ name: "Writing", color: "sky" }, session);
   });
 
   it("rejects blank and duplicate category names with actionable errors", async () => {
