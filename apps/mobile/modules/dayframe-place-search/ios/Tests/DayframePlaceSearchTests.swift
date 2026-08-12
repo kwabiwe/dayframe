@@ -1,8 +1,90 @@
 import XCTest
+import MapKit
 @testable import DayframePlaceSearch
 
 @MainActor
 final class DayframePlaceSearchTests: XCTestCase {
+  func testNearbySearchReturnsTopThreeDeduplicatedInProviderOrder() {
+    let values = [
+      nearby("Vue", distance: 140, relevance: 0),
+      nearby("Wagamama", distance: 90, relevance: 1),
+      nearby("vue", distance: 145, relevance: 2),
+      nearby("Next", distance: 120, relevance: 3),
+      nearby("Lakeside", distance: 60, relevance: 4)
+    ]
+
+    XCTAssertEqual(
+      NearbyPointOfInterestCoordinator.normalized(values).map(\.name),
+      ["Vue", "Wagamama", "Next"]
+    )
+  }
+
+  func testNearbyOrderingUsesDistanceAsTieBreaker() {
+    let values = [
+      nearby("Farther", distance: 250, relevance: 0),
+      nearby("Nearer", distance: 80, relevance: 0)
+    ]
+    XCTAssertEqual(
+      NearbyPointOfInterestCoordinator.normalized(values).map(\.name),
+      ["Nearer", "Farther"]
+    )
+  }
+
+  func testNearbySearchPropagatesRequestAndResults() async throws {
+    let searcher = FakeNearbySearcher()
+    let coordinator = NearbyPointOfInterestCoordinator(searcher: searcher)
+    let task = Task {
+      try await coordinator.search(
+        requestId: "nearby-1",
+        latitude: 51.5,
+        longitude: 0.4,
+        radiusMeters: 750
+      )
+    }
+    await Task.yield()
+    XCTAssertEqual(searcher.radiusMeters, 750)
+    searcher.complete(.success([nearby("Cinema", distance: 100, relevance: 0)]))
+    let result = try await task.value
+    XCTAssertEqual(result.map(\.name), ["Cinema"])
+  }
+
+  func testNearbyCancellationRejectsPendingRequest() async {
+    let searcher = FakeNearbySearcher()
+    let coordinator = NearbyPointOfInterestCoordinator(searcher: searcher)
+    let task = Task {
+      try await coordinator.search(
+        requestId: "nearby-1",
+        latitude: 51.5,
+        longitude: 0.4,
+        radiusMeters: 750
+      )
+    }
+    await Task.yield()
+    coordinator.cancel()
+    await XCTAssertThrowsErrorAsync(try await task.value) { error in
+      XCTAssertEqual(error as? PlaceSearchCoordinatorError, .cancelled)
+    }
+    XCTAssertGreaterThanOrEqual(searcher.cancelCount, 2)
+  }
+
+  func testNearbyFailureIsStable() async {
+    let searcher = FakeNearbySearcher()
+    let coordinator = NearbyPointOfInterestCoordinator(searcher: searcher)
+    let task = Task {
+      try await coordinator.search(
+        requestId: "nearby-1",
+        latitude: 51.5,
+        longitude: 0.4,
+        radiusMeters: 750
+      )
+    }
+    await Task.yield()
+    searcher.complete(.failure(.networkUnavailable))
+    await XCTAssertThrowsErrorAsync(try await task.value) { error in
+      XCTAssertEqual(error as? PlaceSearchCoordinatorError, .networkUnavailable)
+    }
+  }
+
   func testRequestIdPropagationAndSerializableSuggestionDTO() {
     let harness = Harness(ids: ["opaque-1"])
     var received: (String, [PlaceSearchSuggestionValue])?
@@ -133,6 +215,32 @@ final class DayframePlaceSearchTests: XCTestCase {
 }
 
 @MainActor
+private final class FakeNearbySearcher: NearbyPointOfInterestSearching {
+  var radiusMeters: Double?
+  var cancelCount = 0
+  private var completion: ((Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>) -> Void)?
+
+  func search(
+    center: CLLocationCoordinate2D,
+    radiusMeters: CLLocationDistance,
+    completion: @escaping (Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>) -> Void
+  ) {
+    self.radiusMeters = radiusMeters
+    self.completion = completion
+  }
+
+  func cancel() {
+    cancelCount += 1
+  }
+
+  func complete(_ result: Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>) {
+    let completion = completion
+    self.completion = nil
+    completion?(result)
+  }
+}
+
+@MainActor
 private final class Harness {
   let source = FakeCompletionSource()
   let resolver: FakeResultResolver
@@ -198,6 +306,21 @@ private final class FakeResultResolver: PlaceSearchResultResolving {
 
 private func completion(_ title: String, _ subtitle: String? = nil) -> PlaceSearchCompletionValue {
   PlaceSearchCompletionValue(title: title, subtitle: subtitle, payload: NSObject())
+}
+
+private func nearby(
+  _ name: String,
+  distance: Int,
+  relevance: Int
+) -> NearbyPointOfInterestValue {
+  NearbyPointOfInterestValue(
+    name: name,
+    formattedAddress: nil,
+    latitude: 51.5,
+    longitude: 0.4,
+    distanceMeters: distance,
+    relevanceIndex: relevance
+  )
 }
 
 private func XCTAssertThrowsErrorAsync<T>(

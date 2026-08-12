@@ -26,6 +26,7 @@ Before declaring hosted auth/timer/event changes ready, verify:
 - Add regression coverage for start, stop, manual entry, duplicate `clientEventId`, and cross-workspace isolation.
 - User-created overlaps require no exclusion constraint or overlap-uniqueness index on `time_entries`. Technical uniqueness belongs to source identifiers such as client event IDs, external Health samples, location segments, and Review mutation receipts.
 - `time_entries.user_edited_at` is the protection boundary for automatic Health sleep reconciliation. Every explicit entry update must set it; automatic same-source sleep-window extension may update only rows where it is null and must preserve the stable entry id and metadata.
+- `time_entries.place_label` is the bounded one-time location name for a confirmed unknown visit. The database check permits `place_id` or a trimmed 1–120-character `place_label`, never both. Explicit saved-place edits clear `place_label`; ordinary time/category/description/tag edits preserve it. Deploy `supabase/migrations/202608120001_time_entry_place_label.sql` before code that selects or writes this column.
 - Deploy `supabase/migrations/202608010001_health_sleep_session_reconciliation.sql` before server code that queries `user_edited_at`. Its historical backfill intentionally protects all previously changed Health sleep rows. It does not merge or delete historical duplicates.
 - Reporting coverage must clip intervals to the requested range and use a gaps-and-islands union. Do not infer covered time by subtracting pairwise intersections.
 

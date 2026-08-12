@@ -59,6 +59,7 @@ export type NativeCalendarPresentationEntry = {
   offsetFraction: number;
   overlapCount: number;
   overlapSeconds: number;
+  placeText: string | null;
   startedAtMs: number;
   startsBeforeDay: boolean;
   stoppedAtMs: number | null;
@@ -74,7 +75,7 @@ export type NativeCalendarPresentation = {
   dayStartMs: number;
   emptyState: string;
   entries: NativeCalendarPresentationEntry[];
-  modelVersion: 3;
+  modelVersion: 4;
   nowMs: number;
   reduceMotion: boolean;
   reduceTransparency: boolean;
@@ -188,7 +189,7 @@ export function buildNativeCalendarBridgeState({
         layoutById.get(entry.id),
         analysisById.get(entry.id)
       )),
-      modelVersion: 3,
+      modelVersion: 4,
       nowMs: now,
       reduceMotion,
       reduceTransparency,
@@ -279,7 +280,7 @@ function serializeCalendarEntry(
   return {
     actionId,
     actionKind,
-    accessibilityLabel: `${reviewNeeded ? REVIEW_COPY.needsReview : entry.isActive ? "Edit running timer" : "Open time block"}: ${title}${tagText ? `. Tags: ${tagText}` : ""}${analysis?.overlapCount ? `. Overlaps ${analysis.overlapCount} other ${analysis.overlapCount === 1 ? "entry" : "entries"}.` : ""}`,
+    accessibilityLabel: `${reviewNeeded ? REVIEW_COPY.needsReview : entry.isActive ? "Edit running timer" : "Open time block"}: ${title}${entry.placeName ? `. Place: ${entry.placeName}` : ""}${tagText ? `. Tags: ${tagText}` : ""}${analysis?.overlapCount ? `. Overlaps ${analysis.overlapCount} other ${analysis.overlapCount === 1 ? "entry" : "entries"}.` : ""}`,
     color,
     continuesIntoNextDay: continuation.continuesIntoNextDay,
     entryId: entry.id,
@@ -293,6 +294,7 @@ function serializeCalendarEntry(
     offsetFraction: layout?.offsetFraction ?? 0,
     overlapCount: analysis?.overlapCount ?? 0,
     overlapSeconds: analysis?.overlapSeconds ?? 0,
+    placeText: entry.placeName,
     startedAtMs: Number.isFinite(startedAtMs) ? startedAtMs : dayStart.getTime(),
     startsBeforeDay: continuation.startsBeforeDay,
     stoppedAtMs: stoppedAtMs !== null && Number.isFinite(stoppedAtMs) ? stoppedAtMs : null,

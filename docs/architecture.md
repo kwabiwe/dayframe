@@ -27,6 +27,7 @@ Every newly captured signal must have an `activity_events` record before it crea
 - Explicit user actions and separately approved high-confidence automation may derive a time entry immediately.
 - Ambiguous Health/location/automation signals derive an open `review_items` record.
 - Confirming a Review item derives or reuses a time entry from its existing source event.
+- A reviewed unknown visit may give the derived entry either a workspace saved-place `place_id` or a user-selected one-time `place_label`, never both. Read models expose the resolved `placeName` plus `placeKind`; edits preserve the one-time label unless place selection is explicitly changed.
 - Editing or deleting an existing time entry is a mutation of already-derived user data; it does not invent a new capture signal.
 - Technical idempotency uses source identifiers such as `client_event_id`, Health sample/session identity, Location segment identity, and Review mutation receipts. User-intended time overlaps remain valid.
 
@@ -66,6 +67,7 @@ These stores are not interchangeable. Detailed Location actions remain connectiv
 
 - HealthKit and precise location are sensitive and must not enter analytics, ordinary logs, screenshots, or committed fixtures.
 - Location V2 stores exact evidence in user-owned `location_evidence`; coordinate-free summaries enter `activity_events`.
+- Native Apple nearby/search responses remain transient presentation data. A one-time POI resolution crosses the API boundary as a trimmed name only; no Apple identifier, address, POI coordinate, or raw response is persisted.
 - Mobile reprocesses its local journal against current time and calls the private authenticated `/api/location/replay` route after foregrounding or a bounded periodic interval. The route reuses the same owner lock, deterministic engine, semantic cutover, and event-first transaction as evidence ingestion, so the ten-minute finalisation lag does not depend on a later location sample.
 - Retained exact location evidence is exported and deletable. Production retention is enforced through the protected Vercel cron route.
 - Health imports store only the data needed for sleep/workout reconciliation and Review. Debug export remains bounded and local to the user action.

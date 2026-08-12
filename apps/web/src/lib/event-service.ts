@@ -1480,6 +1480,7 @@ export async function updateTimeEntry(
      set project_id = case when $2 then $3 else project_id end,
          category_id = case when $4 then $5 else category_id end,
          place_id = case when $6 then $7 else place_id end,
+         place_label = case when $6 then null else place_label end,
          description = case when $8 then $9 else description end,
          started_at = case when $10 then $11 else started_at end,
          stopped_at = case when $12 then $13 else stopped_at end,
@@ -1659,6 +1660,7 @@ export async function splitActiveEntry(session: RequestSession = getDevSession()
       projectId: string | null;
       categoryId: string | null;
       placeId: string | null;
+      placeLabel: string | null;
       source: string;
       confidence: string;
       reviewStatus: string;
@@ -1668,6 +1670,7 @@ export async function splitActiveEntry(session: RequestSession = getDevSession()
               project_id as "projectId",
               category_id as "categoryId",
               place_id as "placeId",
+              place_label as "placeLabel",
               source,
               confidence,
               review_status as "reviewStatus",
@@ -1722,6 +1725,7 @@ export async function splitActiveEntry(session: RequestSession = getDevSession()
           project_id,
           category_id,
           place_id,
+          place_label,
           source,
           confidence,
           review_status,
@@ -1729,13 +1733,14 @@ export async function splitActiveEntry(session: RequestSession = getDevSession()
           started_at,
           created_from_event_id
        )
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), $10)`,
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now(), $11)`,
       [
         session.workspaceId,
         session.userId,
         row.projectId,
         row.categoryId,
         row.placeId,
+        row.placeLabel,
         row.source,
         row.confidence,
         row.reviewStatus,

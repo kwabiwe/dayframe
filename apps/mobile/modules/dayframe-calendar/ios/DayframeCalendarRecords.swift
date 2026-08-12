@@ -44,6 +44,7 @@ struct DayframeCalendarEntryRecord: Codable {
   var offsetFraction: Double = 0
   var overlapCount = 0
   var overlapSeconds: Double = 0
+  var placeText: String?
   var startedAtMs: Double = 0
   var startsBeforeDay = false
   var stoppedAtMs: Double?
@@ -59,7 +60,7 @@ struct DayframeCalendarPresentationRecord: Codable {
   var dayStartMs: Double = 0
   var emptyState = "No tracked time for this day."
   var entries: [DayframeCalendarEntryRecord] = []
-  var modelVersion = 3
+  var modelVersion = 4
   var nowMs: Double = 0
   var reduceMotion = false
   var reduceTransparency = false

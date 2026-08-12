@@ -217,6 +217,7 @@ create table if not exists time_entries (
   project_id uuid references projects(id) on delete set null,
   category_id uuid references categories(id) on delete set null,
   place_id uuid references places(id) on delete set null,
+  place_label varchar(120),
   source text not null default 'manual_app',
   confidence text not null default 'high',
   review_status text not null default 'confirmed',
@@ -228,6 +229,10 @@ create table if not exists time_entries (
   updated_at timestamptz not null default now(),
   user_edited_at timestamptz,
   constraint time_entries_stops_after_start check (stopped_at is null or stopped_at > started_at),
+  constraint time_entries_place_identity_check check (
+    not (place_id is not null and place_label is not null)
+    and (place_label is null or length(btrim(place_label)) between 1 and 120)
+  ),
   constraint time_entries_id_workspace_key unique (id, workspace_id)
 );
 
@@ -676,6 +681,12 @@ begin
   end if;
 end
 $$;
+alter table time_entries add column if not exists place_label varchar(120);
+alter table time_entries drop constraint if exists time_entries_place_identity_check;
+alter table time_entries add constraint time_entries_place_identity_check check (
+  not (place_id is not null and place_label is not null)
+  and (place_label is null or length(btrim(place_label)) between 1 and 120)
+);
 alter table automation_rules add column if not exists activity_description text;
 alter table categories add column if not exists is_pinned boolean not null default false;
 alter table health_workouts add column if not exists external_sample_id text;

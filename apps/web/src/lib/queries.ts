@@ -124,6 +124,7 @@ export type TimeEntryRow = {
   categoryColor: string | null;
   placeId: string | null;
   placeName: string | null;
+  placeKind?: "saved" | "one_time" | null;
   source: string;
   confidence: string;
   reviewStatus: string;
@@ -695,7 +696,12 @@ export function buildTimeEntriesQuery(
             cat.name as "categoryName",
             cat.color as "categoryColor",
             pl.id as "placeId",
-            pl.name as "placeName",
+            coalesce(pl.name, te.place_label) as "placeName",
+            case
+              when pl.id is not null then 'saved'
+              when te.place_label is not null then 'one_time'
+              else null
+            end as "placeKind",
             te.source,
             te.confidence,
             te.review_status as "reviewStatus",
@@ -872,7 +878,12 @@ async function getActiveEntry(session: RequestSession) {
             cat.name as "categoryName",
             cat.color as "categoryColor",
             pl.id as "placeId",
-            pl.name as "placeName",
+            coalesce(pl.name, te.place_label) as "placeName",
+            case
+              when pl.id is not null then 'saved'
+              when te.place_label is not null then 'one_time'
+              else null
+            end as "placeKind",
             te.source,
             te.confidence,
             te.review_status as "reviewStatus",

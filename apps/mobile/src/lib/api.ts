@@ -71,6 +71,7 @@ export type MobileTimeEntry = {
   categoryName: string | null;
   categoryColor?: string | null;
   placeName: string | null;
+  placeKind?: "saved" | "one_time" | null;
   source: string;
   confidence: string;
   reviewStatus: string;

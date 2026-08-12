@@ -888,7 +888,7 @@ final class DayframeCalendarCoreTests: XCTestCase {
     let json = """
     {
       "dayEndMs":86400000,"dayStartMs":0,"emptyState":"No tracked time for this day.",
-      "entries":\(entriesJSON),"modelVersion":3,"nowMs":\(nowMs),"reduceMotion":false,
+      "entries":\(entriesJSON),"modelVersion":4,"nowMs":\(nowMs),"reduceMotion":false,
       "reduceTransparency":false,"refreshing":false,"selectedDayKey":"\(selectedDayKey)",
       "selectedDayTitle":"Today","theme":{"accent":"#FF6248","accentSoft":"#33201E",
       "accentText":"#FF8A76","background":"#050914","border":"#2A3345",

@@ -51,6 +51,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         "change_place",
         "change_place_and_confirm",
         "record_once",
+        "record_poi_once",
         "save_place_and_confirm",
         "split",
         "split_and_confirm",

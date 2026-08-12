@@ -2909,7 +2909,7 @@ function HistoryDayCard({
                     <Text style={styles.todayEntryMeta} numberOfLines={1}>
                       {grouped
                         ? historyGroupMeta(entry, group.entries.length)
-                        : `${formatEntryTimeRange(entry, now)}${entry.categoryName ? ` · ${entry.categoryName}` : ""}`}
+                        : `${formatEntryTimeRange(entry, now)}${entry.categoryName ? ` · ${entry.categoryName}` : ""}${entry.placeName ? ` · ${entry.placeName}` : ""}`}
                     </Text>
                     <TagMetadata
                       styles={styles}

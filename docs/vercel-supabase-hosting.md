@@ -34,7 +34,8 @@ Do not paste the Supabase service-role key into chat unless an admin-only backen
 2. Run the base Dayframe migration from `packages/db/migrations/001_init.sql`.
 3. Run every hosted migration in `supabase/migrations/` in timestamp order.
    Live Activity delivery retries require
-   `202608060003_live_activity_delivery_outbox.sql` before the corresponding API
+   `202608060003_live_activity_delivery_outbox.sql` and
+   `202608120001_time_entry_place_label.sql` before the corresponding API
    is deployed.
 4. In Auth settings, choose whether email confirmation is required.
    - For personal sideload/beta testing, disabling confirmation is simplest.

@@ -5,6 +5,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   useWindowDimensions,
@@ -35,10 +36,13 @@ import {
   type LocationReviewNewPlace
 } from "@/lib/locationReviewDraft";
 import {
+  createNativeNearbyPointOfInterestProvider,
   createNativePlaceSearchProvider,
   friendlyPlaceSearchError,
+  NearbyPointOfInterestController,
   PlaceSearchController,
   selectPlaceSearchBias,
+  type NearbyPointOfInterestState,
   type PlaceSearchState
 } from "@/lib/placeSearch";
 import { pressable, useMobileTheme, type MobileTheme } from "@/lib/mobileTheme";
@@ -58,6 +62,13 @@ const emptySearchState: PlaceSearchState = {
   query: "",
   status: "idle",
   suggestions: [],
+  message: null
+};
+
+const emptyNearbyState: NearbyPointOfInterestState = {
+  requestId: null,
+  status: "idle",
+  places: [],
   message: null
 };
 
@@ -83,7 +94,9 @@ export function LocationReviewCorrectionEditor({
   const { styles, theme } = useMobileTheme();
   const editorStyles = useMemo(() => createEditorStyles(theme), [theme]);
   const provider = useMemo(() => createNativePlaceSearchProvider(), []);
+  const nearbyProvider = useMemo(() => createNativeNearbyPointOfInterestProvider(), []);
   const controllerRef = useRef<PlaceSearchController | null>(null);
+  const nearbyControllerRef = useRef<NearbyPointOfInterestController | null>(null);
   const startAt = useMemo(() => new Date(evidence.segment.startedAt), [evidence.segment.startedAt]);
   const stopAt = useMemo(
     () => evidence.segment.stoppedAt ? new Date(evidence.segment.stoppedAt) : null,
@@ -103,6 +116,8 @@ export function LocationReviewCorrectionEditor({
   const [manualPlaceName, setManualPlaceName] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchState, setSearchState] = useState<PlaceSearchState>(emptySearchState);
+  const [nearbyState, setNearbyState] = useState<NearbyPointOfInterestState>(emptyNearbyState);
+  const [saveForFuture, setSaveForFuture] = useState(false);
   const [resolvingSuggestion, setResolvingSuggestion] = useState(false);
   const [advancedExpanded, setAdvancedExpanded] = useState(false);
   const [selectedSplitAt, setSelectedSplitAt] = useState<string | null>(null);
@@ -122,6 +137,18 @@ export function LocationReviewCorrectionEditor({
       controllerRef.current = null;
     };
   }, [provider]);
+
+  useEffect(() => {
+    const centre = pointFromEvidence(evidence);
+    if (!nearbyProvider || evidence.segment.kind !== "stay" || baselinePlaceId || !centre) return;
+    const controller = new NearbyPointOfInterestController(nearbyProvider, setNearbyState);
+    nearbyControllerRef.current = controller;
+    void controller.load(centre);
+    return () => {
+      controller.dispose();
+      nearbyControllerRef.current = null;
+    };
+  }, [baselinePlaceId, evidence, nearbyProvider]);
 
   const selectedCategory = categories.find((category) => category.id === selectedCategoryId) ?? null;
   const activityGlyph = locationActivityGlyphName({
@@ -172,6 +199,7 @@ export function LocationReviewCorrectionEditor({
         longitude: result.longitude
       };
       setNewPlace(resolved);
+      setSaveForFuture(false);
       setSelectedSavedPlaceId(null);
       setSelectedPoint({ latitude: result.latitude, longitude: result.longitude });
       setSearchQuery(result.title);
@@ -184,6 +212,22 @@ export function LocationReviewCorrectionEditor({
     }
   }
 
+  function chooseNearbyPlace(place: NearbyPointOfInterestState["places"][number]) {
+    setNewPlace({
+      name: place.name.trim(),
+      formattedAddress: place.formattedAddress,
+      latitude: place.latitude,
+      longitude: place.longitude
+    });
+    setSaveForFuture(false);
+    setSelectedSavedPlaceId(null);
+    setSelectedPoint({ latitude: place.latitude, longitude: place.longitude });
+    setSearchQuery("");
+    setSearchState(emptySearchState);
+    void controllerRef.current?.cancel();
+    setEditingCentre(false);
+  }
+
   function clearPlaceSearch() {
     setSearchQuery("");
     setNewPlace(null);
@@ -194,6 +238,7 @@ export function LocationReviewCorrectionEditor({
   function chooseSavedPlace(placeId: string | null) {
     setSelectedSavedPlaceId(placeId);
     setNewPlace(null);
+    setSaveForFuture(false);
     setEditingCentre(false);
     clearPlaceSearch();
     const place = evidence.map.nearbySavedPlaces.find((candidate) => candidate.id === placeId);
@@ -216,6 +261,7 @@ export function LocationReviewCorrectionEditor({
       latitude: selectedPoint.latitude,
       longitude: selectedPoint.longitude
     });
+    setSaveForFuture(false);
     setSearchQuery("");
     setSearchState(emptySearchState);
     void controllerRef.current?.cancel();
@@ -255,18 +301,22 @@ export function LocationReviewCorrectionEditor({
     Keyboard.dismiss();
     const edit = parsedEdit();
     if (!edit) return;
-    const action = buildLocationReviewResolutionAction({
-      baselinePlaceId,
-      edit,
-      newPlace,
-      selectedSavedPlaceId
-    });
+    const action: LocationReviewAction = newPlace && !saveForFuture
+      ? { action: "record_poi_once", name: newPlace.name, edit }
+      : buildLocationReviewResolutionAction({
+          baselinePlaceId,
+          edit,
+          newPlace,
+          selectedSavedPlaceId
+        });
     await onResolve(
       action,
       evidence.segment.kind === "commute"
         ? "The commute was recorded."
-        : newPlace
+        : newPlace && saveForFuture
           ? "The place was saved and this visit was recorded."
+          : newPlace
+            ? "The visit was recorded with this place name."
           : "The visit was recorded."
     );
   }
@@ -302,7 +352,7 @@ export function LocationReviewCorrectionEditor({
     : evidence.segment.kind === "commute"
       ? "Record commute"
       : newPlace
-        ? "Save place and record"
+        ? saveForFuture ? "Save place and record" : "Use once and record"
         : selectedSavedPlaceId !== baselinePlaceId
           ? "Use place and record"
           : "Record visit";
@@ -362,7 +412,11 @@ export function LocationReviewCorrectionEditor({
                         <Text style={editorStyles.answerTitle}>{placeAnswer}</Text>
                         {placeDetail ? <Text style={editorStyles.answerMeta}>{placeDetail}</Text> : null}
                         {newPlace ? (
-                          <Text style={editorStyles.answerMeta}>This place will be saved when you record.</Text>
+                          <Text style={editorStyles.answerMeta}>
+                            {saveForFuture
+                              ? "This place will be saved for future visits."
+                              : "This name will be used for this visit only."}
+                          </Text>
                         ) : null}
                       </View>
                     </View>
@@ -399,15 +453,52 @@ export function LocationReviewCorrectionEditor({
                     </View>
                   ) : null}
 
+                  {searchQuery.trim().length < 2 && nearbyState.status !== "idle" ? (
+                    <Reanimated.View
+                      entering={localPresenceEntering(reduceMotion, "rise")}
+                      exiting={localPresenceExiting(reduceMotion)}
+                      layout={localLayoutTransition(reduceMotion)}
+                      style={editorStyles.resultSection}
+                    >
+                      <Text style={editorStyles.fieldLabel}>Nearby places</Text>
+                      {nearbyState.status === "loading" ? (
+                        <Text accessibilityLiveRegion="polite" style={editorStyles.helperText}>Finding nearby places…</Text>
+                      ) : null}
+                      {nearbyState.message ? (
+                        <Text accessibilityLiveRegion="polite" style={editorStyles.helperText}>{nearbyState.message}</Text>
+                      ) : null}
+                      {nearbyState.places.length > 0 ? (
+                        <View accessibilityLabel={`${nearbyState.places.length} nearby places`} style={editorStyles.placeChoices}>
+                          {nearbyState.places.map((place) => (
+                            <PlaceChoice
+                              detail={`${place.distanceMeters} m away`}
+                              key={`${place.name}:${place.latitude}:${place.longitude}`}
+                              name={place.name}
+                              onPress={() => chooseNearbyPlace(place)}
+                              selected={Boolean(
+                                newPlace &&
+                                newPlace.name === place.name &&
+                                newPlace.latitude === place.latitude &&
+                                newPlace.longitude === place.longitude
+                              )}
+                              theme={theme}
+                            />
+                          ))}
+                        </View>
+                      ) : null}
+                    </Reanimated.View>
+                  ) : null}
+
+                  <Text style={editorStyles.fieldLabel}>Search other places</Text>
                   <View style={editorStyles.searchField}>
                     <SearchGlyph color={theme.textSecondary} />
                     <TextInput
-                      accessibilityLabel="Search for a nearby place"
+                      accessibilityLabel="Search other places"
                       autoCapitalize="words"
                       autoCorrect={false}
                       editable={Boolean(provider) && !saving}
                       onChangeText={changeSearchQuery}
-                      placeholder={provider ? "Search nearby address or place" : "Place search unavailable in this build"}
+                      placeholder={provider ? "Search address or place" : "Place search unavailable in this build"}
                       placeholderTextColor={theme.textSecondary}
                       returnKeyType="search"
                       style={editorStyles.searchInput}
@@ -465,6 +556,22 @@ export function LocationReviewCorrectionEditor({
                         </Pressable>
                       ))}
                     </Reanimated.View>
+                  ) : null}
+                  {newPlace ? (
+                    <View style={editorStyles.toggleRow}>
+                      <View style={editorStyles.answerText}>
+                        <Text style={editorStyles.toggleTitle}>Save for future visits</Text>
+                        <Text style={editorStyles.answerMeta}>Creates a saved place that Dayframe can learn from later.</Text>
+                      </View>
+                      <Switch
+                        accessibilityLabel="Save for future visits"
+                        disabled={saving}
+                        onValueChange={setSaveForFuture}
+                        trackColor={{ false: theme.border, true: theme.accentSoft }}
+                        thumbColor={saveForFuture ? theme.accent : theme.textSecondary}
+                        value={saveForFuture}
+                      />
+                    </View>
                   ) : null}
                 </View>
 
@@ -1003,6 +1110,7 @@ function createEditorStyles(theme: MobileTheme) {
     helperText: { color: theme.textSecondary, fontSize: 12, lineHeight: 17 },
     fieldLabel: { color: theme.textSecondary, fontSize: 12, lineHeight: 16, fontWeight: "700" },
     placeChoices: { gap: 7 },
+    resultSection: { gap: 8 },
     searchField: {
       minHeight: 48,
       flexDirection: "row",
@@ -1034,6 +1142,17 @@ function createEditorStyles(theme: MobileTheme) {
     dividerTop: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border },
     suggestionTitle: { color: theme.textPrimary, fontSize: 14, fontWeight: "700", lineHeight: 18 },
     suggestionSubtitle: { color: theme.textSecondary, fontSize: 12, lineHeight: 16 },
+    toggleRow: {
+      minHeight: 56,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      borderRadius: 14,
+      backgroundColor: theme.surfaceMuted,
+      paddingHorizontal: 12,
+      paddingVertical: 8
+    },
+    toggleTitle: { color: theme.textPrimary, fontSize: 14, lineHeight: 18, fontWeight: "700" },
     categoryScroller: { gap: 8, paddingRight: 4 },
     timeGroups: { flexDirection: "row", gap: 10 },
     timeGroupsStacked: { flexDirection: "column" },

@@ -47,6 +47,7 @@ describe("getIntegrationTimeCurrentSnapshot", () => {
             categoryColor: "#ff453a",
             placeId: "30000000-0000-4000-8000-000000000001",
             placeName: "Home",
+            placeKind: "saved",
             source: "mobile_timer",
             confidence: "high",
             reviewStatus: "confirmed",
@@ -84,7 +85,8 @@ describe("getIntegrationTimeCurrentSnapshot", () => {
         },
         place: {
           id: "30000000-0000-4000-8000-000000000001",
-          name: "Home"
+          name: "Home",
+          kind: "saved"
         },
         tags: ["family"],
         updatedAt: "2026-07-12T10:30:00.000Z"
@@ -113,6 +115,40 @@ describe("getIntegrationTimeCurrentSnapshot", () => {
         "Europe/London"
       ]
     );
+  });
+
+  it("exposes one-time locations without a saved-place id", async () => {
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{
+        id: "10000000-0000-4000-8000-000000000003",
+        projectId: null,
+        projectName: null,
+        projectColor: null,
+        clientName: null,
+        categoryId: null,
+        categoryName: null,
+        categoryColor: null,
+        placeId: null,
+        placeName: "Wagamama",
+        placeKind: "one_time",
+        source: "location_learning",
+        confidence: "high",
+        reviewStatus: "confirmed",
+        description: "Dinner",
+        startedAt: "2026-07-12T10:30:00.000Z",
+        stoppedAt: null,
+        updatedAt: "2026-07-12T10:30:00.000Z",
+        tagNames: [],
+        elapsedSeconds: 1800
+      }] })
+      .mockResolvedValueOnce({ rows: [{ todaySeconds: 1800 }] });
+
+    const snapshot = await getIntegrationTimeCurrentSnapshot(session);
+    expect(snapshot.activeEntry?.place).toEqual({
+      id: null,
+      name: "Wagamama",
+      kind: "one_time"
+    });
   });
 
   it("returns isolated cursor-paginated logged entries with complete metadata", async () => {

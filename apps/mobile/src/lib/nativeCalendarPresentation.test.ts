@@ -31,7 +31,7 @@ describe("native Calendar presentation boundary", () => {
       transitionDirection: 1
     });
 
-    expect(state.model.modelVersion).toBe(3);
+    expect(state.model.modelVersion).toBe(4);
     expect(state.model.dayEndMs - state.model.dayStartMs).toBe(24 * 60 * 60 * 1000);
     expect(state.model.totalSeconds).toBe(90 * 60);
     expect(state.model.loggedSeconds).toBe(90 * 60);
@@ -151,6 +151,19 @@ describe("native Calendar presentation boundary", () => {
       actionId: "review-123",
       actionKind: "review",
       entryId: "review:review-123"
+    });
+  });
+
+  it("presents one-time place labels as Calendar locations", () => {
+    const now = localTime(2026, 7, 10, 12, 0);
+    const state = build(now, bootstrap([entry({
+      placeName: "Wagamama",
+      placeKind: "one_time"
+    })]));
+
+    expect(state.model.entries[0]).toMatchObject({
+      placeText: "Wagamama",
+      accessibilityLabel: expect.stringContaining("Place: Wagamama")
     });
   });
 
