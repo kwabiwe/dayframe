@@ -189,6 +189,7 @@ describe("location review confirmation semantics", () => {
       session.userId,
       categoryId,
       placeId,
+      null,
       "high",
       "Training",
       "2026-08-12T08:10:23.126Z",
@@ -196,4 +197,112 @@ describe("location review confirmation semantics", () => {
       "event-1"
     ]);
   });
+
+  it("records a POI name once without provider metadata or a saved place", async () => {
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes("for update of ri, ae nowait")) {
+          return { rows: [lockedStay()] };
+        }
+        if (statement.includes("insert into time_entries")) return { rows: [{ id: "entry-poi" }] };
+        return { rows: [] };
+      })
+    } as unknown as import("pg").PoolClient & { query: ReturnType<typeof vi.fn> };
+
+    await expect(resolveLocationReviewActionWithClient(
+      client,
+      "review-1",
+      { action: "record_poi_once", name: "  Wagamama  " },
+      session
+    )).resolves.toMatchObject({ action: "record_poi_once", entryId: "entry-poi" });
+
+    const insert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into time_entries")
+    );
+    expect(String(insert?.[0])).toContain("place_id, place_label");
+    expect(insert?.[1]).toEqual([
+      session.workspaceId,
+      session.userId,
+      null,
+      null,
+      "Wagamama",
+      "high",
+      "Visit unknown place",
+      "2026-08-12T08:08:23.126Z",
+      "2026-08-12T08:22:30.004Z",
+      "event-1"
+    ]);
+    expect(JSON.stringify(insert?.[1])).not.toContain("latitude");
+  });
+
+  it("treats a repeated one-time POI action as equivalent", async () => {
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes("for update of ri, ae nowait")) {
+          return { rows: [{ ...lockedStay(), status: "accepted" }] };
+        }
+        if (statement.includes("from time_entries")) {
+          return { rows: [{
+            id: "entry-poi",
+            categoryId: null,
+            placeId: null,
+            placeLabel: "Wagamama",
+            description: "Visit unknown place",
+            startedAt: "2026-08-12T08:08:23.126Z",
+            stoppedAt: "2026-08-12T08:22:30.004Z"
+          }] };
+        }
+        if (statement.includes("from time_entry_tags")) return { rows: [] };
+        return { rows: [] };
+      })
+    } as unknown as import("pg").PoolClient;
+
+    await expect(resolveLocationReviewActionWithClient(
+      client,
+      "review-1",
+      { action: "record_poi_once", name: "Wagamama" },
+      session
+    )).resolves.toMatchObject({ alreadyResolved: true, equivalent: true });
+  });
+
+  it("rejects a one-time POI for a commute", async () => {
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes("for update of ri, ae nowait")) {
+          return { rows: [{ ...lockedStay(), segmentKind: "commute" }] };
+        }
+        return { rows: [] };
+      })
+    } as unknown as import("pg").PoolClient;
+
+    await expect(resolveLocationReviewActionWithClient(
+      client,
+      "review-1",
+      { action: "record_poi_once", name: "Station" },
+      session
+    )).rejects.toMatchObject({ code: "invalid_action" });
+  });
 });
+
+function lockedStay() {
+  return {
+    id: "review-1",
+    eventId: "event-1",
+    status: "open",
+    title: "Visit unknown place",
+    confidence: "high",
+    suggestedCategoryId: null,
+    suggestedPlaceId: null,
+    suggestedStartedAt: "2026-08-12T08:08:23.126Z",
+    suggestedStoppedAt: "2026-08-12T08:22:30.004Z",
+    segmentId: "segment-1",
+    segmentKind: "stay",
+    segmentStatus: "review",
+    deviceId: "device-1",
+    algorithmVersion: "location-v2.0",
+    learnedPlaceId: null,
+    placeMatchKind: null,
+    centreLatitude: 51.73,
+    centreLongitude: 0.47
+  };
+}

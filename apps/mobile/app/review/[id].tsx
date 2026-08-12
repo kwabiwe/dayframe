@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -31,9 +31,13 @@ export default function LocationReviewDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const loadGenerationRef = useRef(0);
 
   useEffect(() => {
     void load();
+    return () => {
+      loadGenerationRef.current += 1;
+    };
   }, [id]);
 
   const reviewItem = data?.reviewItems.find((item) => item.id === id);
@@ -44,6 +48,7 @@ export default function LocationReviewDetailScreen() {
 
   async function load() {
     if (!id) return;
+    const generation = ++loadGenerationRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -51,9 +56,11 @@ export default function LocationReviewDetailScreen() {
         fetchLocationReviewEvidence(id),
         fetchBootstrap()
       ]);
+      if (generation !== loadGenerationRef.current) return;
       setEvidence(nextEvidence);
       setData(bootstrap);
     } catch (loadError) {
+      if (generation !== loadGenerationRef.current) return;
       if (loadError instanceof AuthRequiredError) {
         router.replace("/");
         return;
@@ -62,7 +69,7 @@ export default function LocationReviewDetailScreen() {
         "Detailed location evidence needs a connection. Go back to confirm, dismiss or edit the saved Review suggestion."
       );
     } finally {
-      setLoading(false);
+      if (generation === loadGenerationRef.current) setLoading(false);
     }
   }
 

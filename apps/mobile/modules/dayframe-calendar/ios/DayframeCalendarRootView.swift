@@ -545,6 +545,18 @@ private struct DayframeCalendarBlockView: View {
               .lineLimit(metrics.height < DayframeCalendarConstants.metaMinimumHeight + 16 ? 1 : 2)
           }
 
+          if metrics.showMeta, horizontal.showMeta, let placeText = entry.placeText, !placeText.isEmpty {
+            HStack(spacing: 4) {
+              Image(systemName: "mappin.and.ellipse")
+                .font(.caption2)
+                .accessibilityHidden(true)
+              Text(placeText)
+                .font(.caption2)
+                .lineLimit(1)
+            }
+            .foregroundStyle(Color(dayframeCSS: theme.textSecondary))
+          }
+
           if metrics.showMeta, horizontal.showMeta, let tagText = entry.tagText, !tagText.isEmpty {
             HStack(spacing: 4) {
               Image(systemName: "tag.fill")

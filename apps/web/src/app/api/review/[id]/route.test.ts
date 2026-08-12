@@ -112,6 +112,21 @@ describe("POST /api/review/[id]", () => {
     expect(mocks.resolveReviewItem).not.toHaveBeenCalled();
   });
 
+  it("dispatches one-time POI recording through the location resolver", async () => {
+    const action = { action: "record_poi_once" as const, name: "Wagamama" };
+    mocks.resolveLocationReviewAction.mockResolvedValueOnce({
+      ok: true,
+      action: action.action,
+      status: "accepted",
+      entryId: "entry-location-1"
+    });
+
+    const response = await POST(jsonRequest(action), params("review-1"));
+
+    expect(response.status).toBe(200);
+    expect(mocks.resolveLocationReviewAction).toHaveBeenCalledWith("review-1", action, session);
+  });
+
   it("dispatches strict idempotent mobile mutations through one transaction owner", async () => {
     const envelope = {
       clientMutationId: "d87c35ce-2a63-4e44-a8fc-4370f2a5cda4",

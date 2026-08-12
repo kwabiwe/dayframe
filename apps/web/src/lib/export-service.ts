@@ -40,7 +40,7 @@ export async function buildWorkspaceExport(session: RequestSession) {
     table("places", session),
     table("automation_rules", session),
     table("activity_events", session),
-    table("time_entries", session),
+    timeEntriesTable(session),
     table("review_items", session),
     table("health_sleep_segments", session),
     table("stay_segments", session),
@@ -76,7 +76,7 @@ export async function buildJsonExport(kind: ExportKind, session: RequestSession)
     case "workspace_json":
       return buildWorkspaceExport(session);
     case "time_entries_json":
-      return table("time_entries", session);
+      return timeEntriesTable(session);
     case "activity_events_json":
       return table("activity_events", session);
     case "review_items_json":
@@ -96,7 +96,12 @@ export async function buildTimeEntriesCsv(session: RequestSession) {
             p.name as project,
             cl.name as client,
             c.name as category,
-            pl.name as place,
+            coalesce(pl.name, te.place_label) as place,
+            case
+              when pl.id is not null then 'saved'
+              when te.place_label is not null then 'one_time'
+              else null
+            end as place_kind,
             te.source,
             te.confidence,
             te.review_status
@@ -127,6 +132,24 @@ async function table(tableName: string, session: RequestSession) {
   const result = userScoped.has(tableName)
     ? await query(`select * from ${tableName} where workspace_id = $1 and user_id = $2`, [session.workspaceId, session.userId])
     : await query(`select * from ${tableName} where workspace_id = $1`, [session.workspaceId]);
+  return result.rows;
+}
+
+async function timeEntriesTable(session: RequestSession) {
+  const result = await query(
+    `select te.*,
+            coalesce(pl.name, te.place_label) as place_name,
+            case
+              when pl.id is not null then 'saved'
+              when te.place_label is not null then 'one_time'
+              else null
+            end as place_kind
+     from time_entries te
+     left join places pl on pl.id = te.place_id and pl.workspace_id = te.workspace_id
+     where te.workspace_id = $1 and te.user_id = $2
+     order by te.started_at desc, te.id desc`,
+    [session.workspaceId, session.userId]
+  );
   return result.rows;
 }
 

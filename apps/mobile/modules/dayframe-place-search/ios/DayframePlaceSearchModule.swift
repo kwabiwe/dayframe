@@ -22,6 +22,13 @@ private struct PlaceSearchQueryRecord: Record {
   @Field var bias: PlaceSearchBiasRecord?
 }
 
+private struct NearbyPointOfInterestQueryRecord: Record {
+  @Field var requestId: String = ""
+  @Field var latitude: Double = 0
+  @Field var longitude: Double = 0
+  @Field var radiusMeters: Double = 750
+}
+
 private final class PlaceSearchException: GenericException<String>, @unchecked Sendable {
   override var code: String { param }
   override var reason: String { "Place search could not complete." }
@@ -48,6 +55,11 @@ public final class DayframePlaceSearchModule: Module {
     }
     return coordinator
   }()
+
+  @MainActor
+  private lazy var nearbyCoordinator = NearbyPointOfInterestCoordinator(
+    searcher: MapKitNearbyPointOfInterestSearcher()
+  )
 
   public func definition() -> ModuleDefinition {
     Name("DayframePlaceSearch")
@@ -93,9 +105,37 @@ public final class DayframePlaceSearchModule: Module {
       }
     }.runOnQueue(.main)
 
+    AsyncFunction("searchNearby") { (request: NearbyPointOfInterestQueryRecord, promise: Promise) in
+      Task { @MainActor in
+        do {
+          let places = try await self.nearbyCoordinator.search(
+            requestId: request.requestId,
+            latitude: request.latitude,
+            longitude: request.longitude,
+            radiusMeters: request.radiusMeters
+          )
+          promise.resolve([
+            "requestId": request.requestId,
+            "places": places.map(\.dictionary)
+          ])
+        } catch let error as PlaceSearchCoordinatorError {
+          promise.reject(PlaceSearchException(error.rawValue))
+        } catch {
+          promise.reject(PlaceSearchException(PlaceSearchCoordinatorError.searchUnavailable.rawValue))
+        }
+      }
+    }.runOnQueue(.main)
+
+    AsyncFunction("cancelNearby") {
+      Task { @MainActor in
+        self.nearbyCoordinator.cancel()
+      }
+    }.runOnQueue(.main)
+
     OnDestroy {
       Task { @MainActor in
         self.coordinator.cancel()
+        self.nearbyCoordinator.cancel()
       }
     }
   }

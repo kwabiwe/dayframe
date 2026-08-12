@@ -77,11 +77,19 @@ describe("report query architecture", () => {
     expect(statement.text).toContain("filter_tag.id = any(");
     expect(statement.text).toContain("te.place_id = any(");
     expect(statement.text).toContain("te.place_id is null");
+    expect(statement.text).toContain("te.place_label is null");
     expect(statement.text).toContain("te.source = any(");
     expect(statement.text).toContain("position(lower(");
     expect(statement.text).not.toMatch(/ilike/i);
     expect(statement.values).toContainEqual([tagAId, tagBId]);
     expect(statement.values).toContain("%school_");
+  });
+
+  it("groups one-time place labels case-insensitively", () => {
+    const statement = buildReportDataQuery(session, input, input.filters, "2026-07-22T12:00:00.000Z");
+    expect(statement.text).toContain("'one-time:' || lower(regexp_replace(btrim(fe.place_label)");
+    expect(statement.text).toContain("coalesce(pl.name, te.place_label) as place_name");
+    expect(statement.text).toContain("when te.place_label is not null then 'one_time'");
   });
 
   it("does not join tag filters into the matching entry set or multiply durations", () => {

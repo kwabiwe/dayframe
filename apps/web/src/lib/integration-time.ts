@@ -12,6 +12,7 @@ type IntegrationTimeEntryRow = {
   categoryColor: string | null;
   placeId: string | null;
   placeName: string | null;
+  placeKind: "saved" | "one_time" | null;
   source: string;
   confidence: string;
   reviewStatus: string;
@@ -62,8 +63,9 @@ export type IntegrationTimeEntry = {
     color: string | null;
   } | null;
   place: {
-    id: string;
+    id: string | null;
     name: string;
+    kind: "saved" | "one_time";
   } | null;
   tags: string[];
   updatedAt: string;
@@ -107,7 +109,12 @@ export async function getIntegrationTimeCurrentSnapshot(
               cat.name as "categoryName",
               cat.color as "categoryColor",
               pl.id as "placeId",
-              pl.name as "placeName",
+              coalesce(pl.name, te.place_label) as "placeName",
+              case
+                when pl.id is not null then 'saved'
+                when te.place_label is not null then 'one_time'
+                else null
+              end as "placeKind",
               te.source,
               te.confidence,
               te.review_status as "reviewStatus",
@@ -196,10 +203,11 @@ function publicEntry(row: IntegrationTimeEntryRow): IntegrationTimeEntry {
           }
         : null,
     place:
-      row.placeId && row.placeName
+      row.placeName && row.placeKind
         ? {
             id: row.placeId,
-            name: row.placeName
+            name: row.placeName,
+            kind: row.placeKind
           }
         : null,
     tags: row.tagNames,
@@ -227,7 +235,12 @@ export async function getIntegrationTimeEntries(
             cat.name as "categoryName",
             cat.color as "categoryColor",
             pl.id as "placeId",
-            pl.name as "placeName",
+            coalesce(pl.name, te.place_label) as "placeName",
+            case
+              when pl.id is not null then 'saved'
+              when te.place_label is not null then 'one_time'
+              else null
+            end as "placeKind",
             te.source,
             te.confidence,
             te.review_status as "reviewStatus",

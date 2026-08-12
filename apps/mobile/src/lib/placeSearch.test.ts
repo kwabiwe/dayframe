@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
+  NearbyPointOfInterestState,
   PlaceSearchProvider,
   PlaceSearchState,
   PlaceSearchSuggestionsResult
@@ -9,8 +10,10 @@ vi.mock("../../modules/dayframe-place-search", () => ({
   addSuggestionsListener: vi.fn(),
   addSearchErrorListener: vi.fn(),
   cancel: vi.fn(),
+  cancelNearby: vi.fn(),
   isAvailable: () => false,
   resolveSuggestion: vi.fn(),
+  searchNearby: vi.fn(),
   setQuery: vi.fn()
 }));
 
@@ -20,6 +23,7 @@ vi.mock("expo-location", () => ({
 }));
 
 const {
+  NearbyPointOfInterestController,
   PLACE_SEARCH_MAX_LOCATION_AGE_MS,
   PlaceSearchController,
   friendlyPlaceSearchError,
@@ -165,6 +169,74 @@ describe("place search provider", () => {
     expect(friendlyPlaceSearchError({ code: "search_unavailable" })).toContain(
       "Current location"
     );
+  });
+});
+
+describe("nearby point of interest controller", () => {
+  it("loads within 750 metres and caps visible results at three", async () => {
+    const search = vi.fn().mockResolvedValue({
+      requestId: "nearby-1",
+      places: Array.from({ length: 5 }, (_, index) => ({
+        name: `Place ${index}`,
+        formattedAddress: null,
+        latitude: 51.5,
+        longitude: 0.4,
+        distanceMeters: 50 + index
+      }))
+    });
+    const states: NearbyPointOfInterestState[] = [];
+    const controller = new NearbyPointOfInterestController(
+      { search, cancel: vi.fn().mockResolvedValue(undefined) },
+      (state) => states.push(state)
+    );
+
+    await controller.load({ latitude: 51.5, longitude: 0.4 });
+
+    expect(search).toHaveBeenCalledWith(expect.objectContaining({
+      requestId: "nearby-1",
+      radiusMeters: 750
+    }));
+    expect(states.at(-1)).toMatchObject({ status: "results" });
+    expect(states.at(-1)?.places).toHaveLength(3);
+    controller.dispose();
+  });
+
+  it("ignores stale results after cancellation", async () => {
+    let resolveSearch!: (value: { requestId: string; places: [] }) => void;
+    const search = vi.fn().mockImplementation(() => new Promise<{ requestId: string; places: [] }>((resolve) => {
+      resolveSearch = resolve;
+    }));
+    const states: NearbyPointOfInterestState[] = [];
+    const controller = new NearbyPointOfInterestController(
+      { search, cancel: vi.fn().mockResolvedValue(undefined) },
+      (state) => states.push(state)
+    );
+    const pending = controller.load({ latitude: 51.5, longitude: 0.4 });
+    await controller.cancel();
+    resolveSearch({ requestId: "nearby-1", places: [] });
+    await pending;
+    expect(states.at(-1)).toMatchObject({ status: "idle", places: [] });
+    controller.dispose();
+  });
+
+  it("keeps a safe fallback when nearby search fails", async () => {
+    const states: NearbyPointOfInterestState[] = [];
+    const controller = new NearbyPointOfInterestController(
+      {
+        search: vi.fn().mockRejectedValue(Object.assign(new Error("offline"), {
+          code: "network_unavailable"
+        })),
+        cancel: vi.fn().mockResolvedValue(undefined)
+      },
+      (state) => states.push(state)
+    );
+    await controller.load({ latitude: 51.5, longitude: 0.4 });
+    expect(states.at(-1)).toMatchObject({
+      status: "error",
+      places: [],
+      message: expect.stringContaining("search or record this as unknown")
+    });
+    controller.dispose();
   });
 });
 

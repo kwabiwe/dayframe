@@ -439,13 +439,21 @@ export function buildReportDataQuery(
         group by tag.id, tag.name, tag.color
       ),
       place_totals as (
-        select coalesce(fe.place_id::text, 'no-place') as id,
-               coalesce(fe.place_name, 'No place') as name,
+        select case
+                 when fe.place_id is not null then fe.place_id::text
+                 when fe.place_label is not null then 'one-time:' || lower(regexp_replace(btrim(fe.place_label), '[[:space:]]+', ' ', 'g'))
+                 else 'no-place'
+               end as id,
+               min(coalesce(fe.place_name, 'No place')) as name,
                null::text as color,
                sum(fe.clipped_seconds)::int as seconds,
                count(*)::int as entry_count
         from filtered_entries fe
-        group by coalesce(fe.place_id::text, 'no-place'), coalesce(fe.place_name, 'No place')
+        group by case
+          when fe.place_id is not null then fe.place_id::text
+          when fe.place_label is not null then 'one-time:' || lower(regexp_replace(btrim(fe.place_label), '[[:space:]]+', ' ', 'g'))
+          else 'no-place'
+        end
       ),
       source_totals as (
         select fe.source as id,
@@ -620,6 +628,7 @@ export function buildReportDataQuery(
               'categoryColor', pe.category_color,
               'placeId', pe.place_id,
               'placeName', pe.place_name,
+              'placeKind', pe.place_kind,
               'source', pe.source,
               'confidence', pe.confidence,
               'reviewStatus', pe.review_status,
@@ -742,7 +751,7 @@ class ReportSqlBuilder {
     if (selectedPlaceIds.length > 0 || includesNoPlace) {
       const parts: string[] = [];
       if (selectedPlaceIds.length > 0) parts.push(`te.place_id = any(${this.param(selectedPlaceIds)}::uuid[])`);
-      if (includesNoPlace) parts.push(`te.place_id is null`);
+      if (includesNoPlace) parts.push(`te.place_id is null and te.place_label is null`);
       where.push(`(${parts.join(" or ")})`);
     }
 
@@ -761,7 +770,13 @@ class ReportSqlBuilder {
              cat.name as category_name,
              cat.color as category_color,
              te.place_id,
-             pl.name as place_name,
+             te.place_label,
+             coalesce(pl.name, te.place_label) as place_name,
+             case
+               when pl.id is not null then 'saved'
+               when te.place_label is not null then 'one_time'
+               else null
+             end as place_kind,
              te.source,
              te.confidence,
              te.review_status,

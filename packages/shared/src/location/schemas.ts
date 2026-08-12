@@ -180,6 +180,11 @@ export const LocationReviewActionSchema = z.discriminatedUnion("action", [
   }).strict(),
   z.object({ action: z.literal("record_once"), edit: ReviewEntryEditSchema.optional() }).strict(),
   z.object({
+    action: z.literal("record_poi_once"),
+    name: z.string().trim().min(1).max(120),
+    edit: ReviewEntryEditSchema.optional()
+  }).strict(),
+  z.object({
     action: z.literal("save_place_and_confirm"),
     name: z.string().trim().min(1).max(120),
     latitude: z.number().finite().min(-90).max(90),

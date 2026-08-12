@@ -123,6 +123,7 @@ export function groupHistoryDayEntries(entries: HistoryDayEntry[]): HistoryEntry
 function historyEntryGroupKey(entry: MobileTimeEntry) {
   const categoryNameKey = normalizeGroupText(entry.categoryName);
   const descriptionKey = normalizeGroupText(entry.description);
+  const placeKey = normalizeGroupText(entry.placeName);
 
   // A blank uncategorized entry has no useful aggregate identity. Keep it as
   // an individual row so its edit and delete actions remain directly available.
@@ -133,7 +134,7 @@ function historyEntryGroupKey(entry: MobileTimeEntry) {
   const categoryKey = entry.categoryId
     ? `id:${entry.categoryId}`
     : `name:${categoryNameKey || "uncategorized"}`;
-  return `${categoryKey}|description:${descriptionKey || "no-description"}`;
+  return `${categoryKey}|description:${descriptionKey || "no-description"}|place:${placeKey || "no-place"}`;
 }
 
 function normalizeGroupText(value: string | null | undefined) {

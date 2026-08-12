@@ -3181,6 +3181,44 @@ describe("time entry partial timestamp validation", () => {
 describe("time entry tag transactions", () => {
   beforeEach(() => vi.resetAllMocks());
 
+  it("preserves one-time labels for ordinary edits and clears them for explicit saved-place edits", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, _values?: unknown[]) => {
+        if (statement.includes("update time_entries")) {
+          return { rows: [{ id: "entry-1", updatedAt: "2026-08-12T12:00:00.000Z" }] };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+    await updateTimeEntry("entry-1", { description: "Dinner" }, session);
+    const ordinaryUpdate = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("update time_entries")
+    );
+    expect(String(ordinaryUpdate?.[0])).toContain("place_label = case when $6 then null else place_label end");
+    expect(ordinaryUpdate?.[1]?.[5]).toBe(false);
+
+    vi.resetAllMocks();
+    const savedPlaceClient = {
+      query: vi.fn(async (statement: string, _values?: unknown[]) => {
+        if (statement.includes("update time_entries")) {
+          return { rows: [{ id: "entry-1", updatedAt: "2026-08-12T12:01:00.000Z" }] };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(savedPlaceClient);
+    await updateTimeEntry("entry-1", {
+      placeId: "30000000-0000-4000-8000-000000000003"
+    }, session);
+    const savedUpdate = savedPlaceClient.query.mock.calls.find(([statement]) =>
+      String(statement).includes("update time_entries")
+    );
+    expect(savedUpdate?.[1]?.[5]).toBe(true);
+  });
+
   it("saves an overlapping manual edit without querying for a time conflict", async () => {
     const client = {
       query: vi.fn(async (statement: string, values?: unknown[]) => {

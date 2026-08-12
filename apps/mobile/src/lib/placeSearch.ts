@@ -2,14 +2,18 @@ import * as Location from "expo-location";
 import {
   addSearchErrorListener,
   addSuggestionsListener,
+  cancelNearby as cancelNativeNearbySearch,
   cancel as cancelNativeSearch,
   isAvailable as isNativePlaceSearchAvailable,
   resolveSuggestion as resolveNativeSuggestion,
+  searchNearby as searchNativeNearby,
   setQuery as setNativeQuery,
   type PlaceSearchBias,
   type PlaceSearchErrorResult,
   type PlaceSearchSuggestion,
   type PlaceSearchSuggestionsResult,
+  type NearbyPointOfInterest,
+  type NearbyPointOfInterestResult,
   type ResolvedPlaceSearchResult
 } from "../../modules/dayframe-place-search";
 
@@ -18,6 +22,8 @@ export const PLACE_SEARCH_MAX_VISIBLE_RESULTS = 6;
 export const PLACE_SEARCH_DEBOUNCE_MS = 250;
 export const PLACE_SEARCH_MAX_LOCATION_AGE_MS = 24 * 60 * 60 * 1000;
 export const PLACE_SEARCH_REQUIRED_ACCURACY_METERS = 5_000;
+export const NEARBY_POI_RADIUS_METERS = 750;
+export const NEARBY_POI_MAX_VISIBLE_RESULTS = 3;
 
 export type PlaceSearchCoordinate = {
   latitude: number;
@@ -35,6 +41,23 @@ export type PlaceSearchProvider = {
     suggestion: Pick<PlaceSearchSuggestion, "id" | "requestId">
   ): Promise<ResolvedPlaceSearchResult>;
   cancel(): Promise<void>;
+};
+
+export type NearbyPointOfInterestProvider = {
+  search(options: {
+    requestId: string;
+    latitude: number;
+    longitude: number;
+    radiusMeters: number;
+  }): Promise<NearbyPointOfInterestResult>;
+  cancel(): Promise<void>;
+};
+
+export type NearbyPointOfInterestState = {
+  requestId: string | null;
+  status: "idle" | "loading" | "results" | "no-results" | "error";
+  places: NearbyPointOfInterest[];
+  message: string | null;
 };
 
 export type PlaceSearchState = {
@@ -225,6 +248,62 @@ export class PlaceSearchController {
   }
 }
 
+export class NearbyPointOfInterestController {
+  private requestSequence = 0;
+  private disposed = false;
+
+  constructor(
+    private readonly provider: NearbyPointOfInterestProvider,
+    private readonly onStateChange: (state: NearbyPointOfInterestState) => void
+  ) {}
+
+  async load(center: PlaceSearchCoordinate) {
+    if (this.disposed || !isCoordinate(center)) return;
+    const requestId = `nearby-${++this.requestSequence}`;
+    this.onStateChange({ requestId, status: "loading", places: [], message: null });
+    try {
+      const result = await this.provider.search({
+        requestId,
+        latitude: center.latitude,
+        longitude: center.longitude,
+        radiusMeters: NEARBY_POI_RADIUS_METERS
+      });
+      if (this.disposed || result.requestId !== requestId || requestId !== `nearby-${this.requestSequence}`) return;
+      const places = result.places.slice(0, NEARBY_POI_MAX_VISIBLE_RESULTS);
+      this.onStateChange({
+        requestId,
+        status: places.length > 0 ? "results" : "no-results",
+        places,
+        message: places.length > 0 ? null : "No nearby places found. Search for another place below."
+      });
+    } catch (error) {
+      if (this.disposed || requestId !== `nearby-${this.requestSequence}`) return;
+      const message = friendlyPlaceSearchError(error);
+      if (!message) return;
+      this.onStateChange({
+        requestId,
+        status: "error",
+        places: [],
+        message: "Nearby places are unavailable. You can still search or record this as unknown."
+      });
+    }
+  }
+
+  cancel() {
+    if (this.disposed) return Promise.resolve();
+    this.requestSequence += 1;
+    this.onStateChange({ requestId: null, status: "idle", places: [], message: null });
+    return this.provider.cancel();
+  }
+
+  dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.requestSequence += 1;
+    void this.provider.cancel();
+  }
+}
+
 export function createNativePlaceSearchProvider(): PlaceSearchProvider | null {
   if (!isNativePlaceSearchAvailable()) return null;
   return {
@@ -242,6 +321,14 @@ export function createNativePlaceSearchProvider(): PlaceSearchProvider | null {
       requestId
     }),
     cancel: cancelNativeSearch
+  };
+}
+
+export function createNativeNearbyPointOfInterestProvider(): NearbyPointOfInterestProvider | null {
+  if (!isNativePlaceSearchAvailable()) return null;
+  return {
+    search: searchNativeNearby,
+    cancel: cancelNativeNearbySearch
   };
 }
 

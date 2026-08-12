@@ -69,7 +69,7 @@ final class DayframeCalendarExpoView: ExpoView {
     guard let data = modelJSON.data(using: .utf8) else { return }
     do {
       let record = try JSONDecoder().decode(DayframeCalendarPresentationRecord.self, from: data)
-      guard record.modelVersion == 3 else {
+      guard record.modelVersion == 4 else {
         model.reset()
         return
       }

@@ -32,6 +32,11 @@ type LockedReview = {
   centreLongitude: number | null;
 };
 
+type ConfirmedPlaceIdentity = {
+  placeId: string | null;
+  placeLabel: string | null;
+};
+
 export async function resolveLocationReviewAction(
   reviewItemId: string,
   input: unknown,
@@ -142,6 +147,17 @@ async function resolveClosedLocationReview(
       action.action === "change_place_and_confirm" &&
       item.status === "accepted" &&
       await locationEditMatchesExisting(client, item, action.edit ?? {}, session)
+    ) ||
+    (
+      action.action === "record_poi_once" &&
+      item.status === "accepted" &&
+      await locationEditMatchesExisting(
+        client,
+        item,
+        action.edit ?? {},
+        session,
+        { placeId: null, placeLabel: action.name.trim() }
+      )
     );
   if (equivalent) {
     return {
@@ -170,12 +186,14 @@ async function locationEditMatchesExisting(
   client: pg.PoolClient,
   item: LockedReview,
   edit: ReviewEntryEdit,
-  session: RequestSession
+  session: RequestSession,
+  placeIdentity?: ConfirmedPlaceIdentity
 ) {
   const result = await client.query<{
     id: string;
     categoryId: string | null;
     placeId: string | null;
+    placeLabel: string | null;
     description: string | null;
     startedAt: Date | string;
     stoppedAt: Date | string;
@@ -183,6 +201,7 @@ async function locationEditMatchesExisting(
     `select id,
             category_id as "categoryId",
             place_id as "placeId",
+            place_label as "placeLabel",
             description,
             started_at as "startedAt",
             stopped_at as "stoppedAt"
@@ -200,12 +219,16 @@ async function locationEditMatchesExisting(
     item.suggestedCategoryId,
     edit
   );
-  const expectedPlace = Object.prototype.hasOwnProperty.call(edit, "placeId")
-    ? edit.placeId ?? null
-    : item.suggestedPlaceId;
+  const expectedPlace = placeIdentity
+    ? placeIdentity.placeId
+    : Object.prototype.hasOwnProperty.call(edit, "placeId")
+      ? edit.placeId ?? null
+      : item.suggestedPlaceId;
+  const expectedPlaceLabel = placeIdentity ? placeIdentity.placeLabel : null;
   if (
     entry.categoryId !== expectedCategory ||
     entry.placeId !== expectedPlace ||
+    entry.placeLabel !== expectedPlaceLabel ||
     (entry.description ?? "") !== (confirmedLocationDescription(item.segmentKind, item.title, edit) ?? "") ||
     new Date(entry.startedAt).toISOString() !== new Date(edit.startedAt ?? item.suggestedStartedAt).toISOString() ||
     new Date(entry.stoppedAt).toISOString() !== new Date(edit.stoppedAt ?? item.suggestedStoppedAt).toISOString()
@@ -248,6 +271,18 @@ async function performAction(
       return confirmReview(client, item, action.edit, session, "edit_and_confirm");
     case "record_once":
       return confirmReview(client, item, action.edit, session, "record_once");
+    case "record_poi_once":
+      if (item.segmentKind !== "stay") {
+        throw new ReviewResolutionError("invalid_action", "Only a visit can use a one-time place.", { status: 422 });
+      }
+      return confirmReview(
+        client,
+        item,
+        action.edit,
+        session,
+        "record_poi_once",
+        { placeId: null, placeLabel: action.name.trim() }
+      );
     case "save_place_and_confirm":
       return savePlaceAndConfirm(client, item, action, session);
     case "split":
@@ -283,7 +318,7 @@ async function confirmReview(
   edit: ReviewEntryEdit | undefined,
   session: RequestSession,
   action: string,
-  placeIdOverride?: string | null
+  placeIdentity?: ConfirmedPlaceIdentity
 ) {
   const window = editedWindow(item, edit);
   const categoryId = await confirmedLocationCategoryId(
@@ -293,19 +328,26 @@ async function confirmReview(
     item.suggestedCategoryId,
     edit
   );
-  await validateReferences(client, session, categoryId, placeIdOverride ?? edit?.placeId);
+  const placeId = placeIdentity
+    ? placeIdentity.placeId
+    : Object.prototype.hasOwnProperty.call(edit ?? {}, "placeId")
+      ? edit?.placeId ?? null
+      : item.suggestedPlaceId;
+  const placeLabel = placeIdentity?.placeLabel ?? null;
+  await validateReferences(client, session, categoryId, placeId);
   const entry = await client.query<{ id: string }>(
     `insert into time_entries (
-       workspace_id, user_id, category_id, place_id, source, confidence, review_status,
+       workspace_id, user_id, category_id, place_id, place_label, source, confidence, review_status,
        description, started_at, stopped_at, created_from_event_id
-     ) values ($1, $2, $3, $4, 'location_learning', $5, 'confirmed', $6, $7, $8, $9)
+     ) values ($1, $2, $3, $4, $5, 'location_learning', $6, 'confirmed', $7, $8, $9, $10)
      on conflict do nothing
      returning id`,
     [
       session.workspaceId,
       session.userId,
       categoryId,
-      placeIdOverride ?? edit?.placeId ?? item.suggestedPlaceId,
+      placeId,
+      placeLabel,
       item.confidence,
       confirmedLocationDescription(item.segmentKind, item.title, edit),
       window.startedAt,
@@ -418,7 +460,7 @@ async function changePlace(
       action.edit,
       session,
       action.action,
-      action.placeId
+      { placeId: action.placeId, placeLabel: null }
     );
   }
   return { ok: true, action: action.action, status: "open" };
@@ -451,7 +493,14 @@ async function savePlaceAndConfirm(
      ) values ($1, $2, $3, ST_SetSRID(ST_MakePoint($4, $5), 4326)::geography, $6, 1, 'active')`,
     [session.workspaceId, session.userId, place.rows[0].id, action.longitude, action.latitude, Math.min(160, action.radiusMeters)]
   );
-  return confirmReview(client, item, action.edit, session, "save_place_and_confirm", place.rows[0].id);
+  return confirmReview(
+    client,
+    item,
+    action.edit,
+    session,
+    "save_place_and_confirm",
+    { placeId: place.rows[0].id, placeLabel: null }
+  );
 }
 
 async function splitReview(

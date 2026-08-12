@@ -32,6 +32,8 @@ describe("historical global search", () => {
     expect(sql).toContain("r.user_id = $2");
     expect(sql).toContain("r.status = 'open'");
     expect(sql).toContain("order by rank desc");
+    expect(sql).toContain("coalesce(pl.name, te.place_label)");
+    expect(sql).toContain("coalesce(lower(btrim(me.place_label)), '')");
     expect(values).toEqual(["workspace-1", "user-1", "Lakeside visit", 40]);
   });
 

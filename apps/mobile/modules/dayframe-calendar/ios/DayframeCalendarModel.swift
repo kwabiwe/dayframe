@@ -73,6 +73,7 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
   let offsetFraction: Double
   let overlapCount: Int
   let overlapSeconds: Double
+  let placeText: String?
   let startedAtMs: Double
   let startsBeforeDay: Bool
   let stoppedAtMs: Double?
@@ -103,6 +104,7 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
     offsetFraction = record.offsetFraction
     overlapCount = max(0, record.overlapCount)
     overlapSeconds = max(0, record.overlapSeconds)
+    placeText = record.placeText
     startedAtMs = record.startedAtMs
     startsBeforeDay = record.startsBeforeDay
     stoppedAtMs = record.stoppedAtMs
@@ -181,7 +183,7 @@ final class DayframeCalendarViewModel: ObservableObject {
   private var nextCreationSessionToken: UInt64 = 0
 
   func update(_ record: DayframeCalendarPresentationRecord) {
-    guard record.modelVersion == 3 else {
+    guard record.modelVersion == 4 else {
       reset()
       return
     }

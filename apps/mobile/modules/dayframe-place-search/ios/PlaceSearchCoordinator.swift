@@ -46,12 +46,177 @@ struct ResolvedPlaceSearchValue: Equatable {
   let longitude: Double
 }
 
+struct NearbyPointOfInterestValue: Equatable {
+  let name: String
+  let formattedAddress: String?
+  let latitude: Double
+  let longitude: Double
+  let distanceMeters: Int
+  let relevanceIndex: Int
+
+  var dictionary: [String: Any] {
+    [
+      "name": name,
+      "formattedAddress": formattedAddress as Any,
+      "latitude": latitude,
+      "longitude": longitude,
+      "distanceMeters": distanceMeters
+    ]
+  }
+}
+
 enum PlaceSearchCoordinatorError: String, Error, Equatable {
   case searchUnavailable = "search_unavailable"
   case networkUnavailable = "network_unavailable"
   case staleSuggestion = "stale_suggestion"
   case noResolvedResult = "no_resolved_result"
   case cancelled = "cancelled"
+}
+
+@MainActor
+protocol NearbyPointOfInterestSearching: AnyObject {
+  func search(
+    center: CLLocationCoordinate2D,
+    radiusMeters: CLLocationDistance,
+    completion: @escaping (Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>) -> Void
+  )
+  func cancel()
+}
+
+@MainActor
+final class NearbyPointOfInterestCoordinator {
+  private let searcher: NearbyPointOfInterestSearching
+  private var activeRequestId: String?
+  private var pending: (
+    requestId: String,
+    continuation: CheckedContinuation<[NearbyPointOfInterestValue], Error>
+  )?
+
+  init(searcher: NearbyPointOfInterestSearching) {
+    self.searcher = searcher
+  }
+
+  func search(
+    requestId: String,
+    latitude: Double,
+    longitude: Double,
+    radiusMeters: Double
+  ) async throws -> [NearbyPointOfInterestValue] {
+    cancel()
+    guard latitude.isFinite,
+          longitude.isFinite,
+          (-90.0 ... 90.0).contains(latitude),
+          (-180.0 ... 180.0).contains(longitude),
+          radiusMeters.isFinite,
+          radiusMeters > 0 else {
+      throw PlaceSearchCoordinatorError.searchUnavailable
+    }
+
+    activeRequestId = requestId
+    return try await withCheckedThrowingContinuation { continuation in
+      pending = (requestId, continuation)
+      searcher.search(
+        center: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
+        radiusMeters: radiusMeters
+      ) { [weak self] result in
+        guard let self,
+              self.activeRequestId == requestId,
+              self.pending?.requestId == requestId else { return }
+        self.pending = nil
+        self.activeRequestId = nil
+        continuation.resume(with: result.map { Self.normalized($0) }.mapError { $0 as Error })
+      }
+    }
+  }
+
+  func cancel() {
+    searcher.cancel()
+    activeRequestId = nil
+    guard let pending else { return }
+    self.pending = nil
+    pending.continuation.resume(throwing: PlaceSearchCoordinatorError.cancelled)
+  }
+
+  static func normalized(_ values: [NearbyPointOfInterestValue]) -> [NearbyPointOfInterestValue] {
+    var seen = Set<String>()
+    return values
+      .filter { !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+      .sorted {
+        if $0.relevanceIndex != $1.relevanceIndex {
+          return $0.relevanceIndex < $1.relevanceIndex
+        }
+        if $0.distanceMeters != $1.distanceMeters {
+          return $0.distanceMeters < $1.distanceMeters
+        }
+        return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+      }
+      .filter { value in
+        let key = value.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard seen.insert(key).inserted else { return false }
+        return true
+      }
+      .prefix(3)
+      .map { $0 }
+  }
+}
+
+@MainActor
+final class MapKitNearbyPointOfInterestSearcher: NearbyPointOfInterestSearching {
+  private var search: MKLocalSearch?
+
+  func search(
+    center: CLLocationCoordinate2D,
+    radiusMeters: CLLocationDistance,
+    completion: @escaping (Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>) -> Void
+  ) {
+    cancel()
+    let request = MKLocalPointsOfInterestRequest(center: center, radius: radiusMeters)
+    let localSearch = MKLocalSearch(request: request)
+    search = localSearch
+    let origin = CLLocation(latitude: center.latitude, longitude: center.longitude)
+    localSearch.start { [weak self] response, error in
+      guard let self, self.search === localSearch else { return }
+      self.search = nil
+      if let error {
+        completion(.failure(Self.stableError(for: error)))
+        return
+      }
+      let values = (response?.mapItems ?? []).enumerated().compactMap { index, item -> NearbyPointOfInterestValue? in
+        let coordinate = item.placemark.coordinate
+        guard coordinate.latitude.isFinite,
+              coordinate.longitude.isFinite,
+              (-90.0 ... 90.0).contains(coordinate.latitude),
+              (-180.0 ... 180.0).contains(coordinate.longitude),
+              let name = item.name?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !name.isEmpty else { return nil }
+        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        return NearbyPointOfInterestValue(
+          name: name,
+          formattedAddress: item.placemark.title,
+          latitude: coordinate.latitude,
+          longitude: coordinate.longitude,
+          distanceMeters: max(0, Int(origin.distance(from: location).rounded())),
+          relevanceIndex: index
+        )
+      }
+      completion(.success(values))
+    }
+  }
+
+  func cancel() {
+    search?.cancel()
+    search = nil
+  }
+
+  private static func stableError(for error: Error) -> PlaceSearchCoordinatorError {
+    let code = (error as NSError).code
+    if code == NSURLErrorNotConnectedToInternet ||
+      code == NSURLErrorNetworkConnectionLost ||
+      code == NSURLErrorTimedOut {
+      return .networkUnavailable
+    }
+    return .searchUnavailable
+  }
 }
 
 @MainActor

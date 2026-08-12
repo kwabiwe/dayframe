@@ -31,6 +31,8 @@ describe("mobile Review action contracts", () => {
   it("uses the shared mobile back affordance on Location Evidence", () => {
     expect(evidenceSource).toContain("<MobileBackButton");
     expect(evidenceSource).not.toContain(">‹</Text>");
+    expect(evidenceSource).toContain("loadGenerationRef");
+    expect(evidenceSource).toContain("generation !== loadGenerationRef.current");
   });
 
   it("keeps Review cards concise and expresses confidence accessibly", () => {
@@ -71,6 +73,25 @@ describe("mobile Review action contracts", () => {
     expect(evidenceEditorSource).not.toContain("createCategory");
     expect(evidenceEditorSource).not.toContain("resolveLocationReviewItem");
     expect(evidenceSource).toContain("resolveLocationReviewItem(id, action)");
+  });
+
+  it("loads nearby POIs only for unknown visits and keeps typed search as the fallback", () => {
+    expect(evidenceEditorSource).toContain("createNativeNearbyPointOfInterestProvider");
+    expect(evidenceEditorSource).toContain('evidence.segment.kind !== "stay" || baselinePlaceId || !centre');
+    expect(evidenceEditorSource).toContain("void controller.load(centre)");
+    expect(evidenceEditorSource).toContain("Nearby places");
+    expect(evidenceEditorSource).toContain("Search other places");
+    expect(evidenceEditorSource).toContain("searchQuery.trim().length < 2");
+    expect(evidenceEditorSource).toContain("nearbyState.places.map");
+    expect(evidenceEditorSource).toContain("setSelectedPoint({ latitude: place.latitude, longitude: place.longitude })");
+  });
+
+  it("defaults POI selection to one-time recording with an explicit save toggle", () => {
+    expect(evidenceEditorSource).toContain("useState(false)");
+    expect(evidenceEditorSource).toContain('action: "record_poi_once"');
+    expect(evidenceEditorSource).toContain("Save for future visits");
+    expect(evidenceEditorSource).toContain('saveForFuture ? "Save place and record" : "Use once and record"');
+    expect(evidenceEditorSource).toContain("buildLocationReviewResolutionAction");
   });
 
   it("keeps technical map evidence out of the simplified mobile presentation", () => {

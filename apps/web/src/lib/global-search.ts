@@ -41,7 +41,8 @@ export async function searchDayframe(
               cat.name as category_name,
               cat.color as category_color,
               pl.id as place_id,
-              pl.name as place_name,
+              coalesce(pl.name, te.place_label) as place_name,
+              te.place_label,
               coalesce(array_agg(distinct tag.name) filter (where tag.id is not null), array[]::text[]) as tag_names,
               greatest(0, extract(epoch from (coalesce(te.stopped_at, now()) - te.started_at)))::int as duration_seconds
        from time_entries te
@@ -54,10 +55,10 @@ export async function searchDayframe(
          and (
            coalesce(te.description, '') ilike '%' || $3 || '%'
            or coalesce(cat.name, '') ilike '%' || $3 || '%'
-           or coalesce(pl.name, '') ilike '%' || $3 || '%'
+           or coalesce(pl.name, te.place_label, '') ilike '%' || $3 || '%'
            or coalesce(tag.name, '') ilike '%' || $3 || '%'
          )
-       group by te.id, cat.id, cat.name, cat.color, pl.id, pl.name
+       group by te.id, cat.id, cat.name, cat.color, pl.id, pl.name, te.place_label
      ),
      candidates as (
        select 'entry:' || me.id::text as id,
@@ -103,6 +104,7 @@ export async function searchDayframe(
            lower(coalesce(me.description, '')),
            coalesce(me.category_id::text, ''),
            coalesce(me.place_id::text, ''),
+           coalesce(lower(btrim(me.place_label)), ''),
            array_to_string(me.tag_names, '|')
          ) me.*
          from matching_entries me
@@ -111,6 +113,7 @@ export async function searchDayframe(
          order by lower(coalesce(me.description, '')),
                   coalesce(me.category_id::text, ''),
                   coalesce(me.place_id::text, ''),
+                  coalesce(lower(btrim(me.place_label)), ''),
                   array_to_string(me.tag_names, '|'),
                   me.started_at desc
        ) latest

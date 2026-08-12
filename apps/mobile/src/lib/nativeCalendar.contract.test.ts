@@ -209,8 +209,8 @@ describe("native Calendar production contract", () => {
     expect(dashboard).toContain("resolveCalendarManualEntryRequest({");
     expect(dashboard).toContain("onRequestCreateEntry={(event) => {");
     expect(dashboard).toContain('Alert.alert("Unable to add time", result.error)');
-    expect(presentation).toContain("modelVersion: 3");
-    expect(presentation).not.toContain("modelVersion: 4");
+    expect(presentation).toContain("modelVersion: 4");
+    expect(expoView).toContain("record.modelVersion == 4");
     expect(expoView).not.toContain("createManualTimeEntry");
   });
 
