@@ -104,6 +104,7 @@ Deployment:
 
 4. As a privacy-conscious user, I want ambiguous location signals to become review items, so that Dayframe does not silently guess wrong.
    - Example: Town Centre creates a "Review visit" item instead of auto-starting.
+   - Location Evidence should let me answer `Where were you?`, `What did you do?`, and `When?` in one correction flow. I can choose an existing Dayframe place or explicitly search Apple Maps for a new place to save, choose an existing category, and adjust the start/end time before one atomic confirmation.
 
 5. As an iOS user, I want sleep and walk/workout summaries imported from HealthKit, so that health activity appears in my day timeline.
    - Example: Sleep from 23:20 to 06:45 creates a Sleep entry or high-confidence review item.
@@ -396,7 +397,7 @@ Deliverables:
 - ✅ Learned-location evidence separates repeat place suggestions, significant one-off stays, and weak/pass-through noise.
 - ✅ Learned-place details cache readable address/POI resolution and keep coordinates secondary.
 - ✅ `location-v2.0` closes stays on accepted intervening-place evidence, sustained exits, or explicit gaps; preserves short saved-place endpoints; derives journeys from movement evidence; and exposes uncertainty instead of fabricating exact boundaries.
-- ✅ Mobile and web consume one user-scoped `LocationReviewEvidenceDto` for map plus textual review, with atomic confirm, split, merge, place correction, record-once, and save-place actions. Physical iPhone reliability and battery measurement are still mandatory before the rollout is considered settled.
+- ✅ Mobile and web consume one user-scoped `LocationReviewEvidenceDto` for map plus textual review, with atomic confirm, split, merge, place correction, record-once, and save-place actions. Mobile Location Evidence separates Where/What/When correction, reuses the existing Apple MapKit search boundary for explicit new-place lookup, and commits saved-place, activity, category, and time edits together. Physical iPhone reliability and battery measurement are still mandatory before the rollout is considered settled.
 - ⚠️ V2 rollout is server-authoritative: `v2_shadow` captures and replays without user-visible V2 semantics; `v2_review` permits review items only after a same-mode client acknowledgement; and `v2_enabled` automatically confirms only completed, strong saved/approved-place stays with bounded continuity and no confirmed-time overlap. Commutes, unknown/ambiguous matches, weak evidence, uncertain gaps, missing approved-place linkage, and overlaps remain Review-first. Shadow-era segments cannot be backfilled at cutover.
 - ⚠️ Export path exists; account/workspace deletion and raw sensitive payload hard-deletion are still future work.
 

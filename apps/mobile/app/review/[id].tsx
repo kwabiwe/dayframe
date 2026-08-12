@@ -5,20 +5,20 @@ import {
   Pressable,
   ScrollView,
   Text,
-  TextInput,
   View
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { LocationReviewEvidenceDto } from "@dayframe/shared";
 import { DayframeBrand } from "@/components/brand";
-import { LocationEvidenceMap } from "@/components/location/LocationEvidenceMap";
+import { LocationReviewCorrectionEditor } from "@/components/location/LocationReviewCorrectionEditor";
 import { MobileBackButton } from "@/components/MobileBackButton";
 import {
   AuthRequiredError,
   fetchBootstrap,
   fetchLocationReviewEvidence,
   resolveLocationReviewItem,
+  type MobileBootstrap,
   type MobileReviewItem
 } from "@/lib/api";
 import { pressable, useMobileTheme } from "@/lib/mobileTheme";
@@ -27,24 +27,19 @@ export default function LocationReviewDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { styles, theme } = useMobileTheme();
   const [evidence, setEvidence] = useState<LocationReviewEvidenceDto | null>(null);
-  const [reviewItems, setReviewItems] = useState<MobileReviewItem[]>([]);
+  const [data, setData] = useState<MobileBootstrap | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [placeName, setPlaceName] = useState("");
-  const [description, setDescription] = useState("");
-  const [selectedPoint, setSelectedPoint] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [editingCentre, setEditingCentre] = useState(false);
-  const [selectedSavedPlaceId, setSelectedSavedPlaceId] = useState<string | null>(null);
-  const [selectedSplitAt, setSelectedSplitAt] = useState<string | null>(null);
 
   useEffect(() => {
     void load();
   }, [id]);
 
+  const reviewItem = data?.reviewItems.find((item) => item.id === id);
   const adjacentReview = useMemo(
-    () => evidence ? adjacentLocationReview(reviewItems, id, evidence) : undefined,
-    [evidence, id, reviewItems]
+    () => evidence && data ? adjacentLocationReview(data.reviewItems, id, evidence) : undefined,
+    [data, evidence, id]
   );
 
   async function load() {
@@ -57,14 +52,7 @@ export default function LocationReviewDetailScreen() {
         fetchBootstrap()
       ]);
       setEvidence(nextEvidence);
-      setDescription(locationActivityLabel(nextEvidence));
-      setReviewItems(bootstrap.reviewItems);
-      if (nextEvidence.map.centre) {
-        setSelectedPoint({
-          longitude: nextEvidence.map.centre.coordinates[0],
-          latitude: nextEvidence.map.centre.coordinates[1]
-        });
-      }
+      setData(bootstrap);
     } catch (loadError) {
       if (loadError instanceof AuthRequiredError) {
         router.replace("/");
@@ -78,8 +66,11 @@ export default function LocationReviewDetailScreen() {
     }
   }
 
-  async function perform(action: Parameters<typeof resolveLocationReviewItem>[1], successMessage: string) {
-    if (!id) return;
+  async function perform(
+    action: Parameters<typeof resolveLocationReviewItem>[1],
+    successMessage: string
+  ) {
+    if (!id || saving) return;
     setSaving(true);
     try {
       await resolveLocationReviewItem(id, action);
@@ -89,24 +80,13 @@ export default function LocationReviewDetailScreen() {
         router.replace("/");
         return;
       }
-      Alert.alert("Location review", actionError instanceof Error ? actionError.message : "Unable to update this review.");
+      Alert.alert(
+        "Location review",
+        actionError instanceof Error ? actionError.message : "Unable to update this review."
+      );
     } finally {
       setSaving(false);
     }
-  }
-
-  function savePlace() {
-    if (!selectedPoint || !placeName.trim()) {
-      Alert.alert("Save place", "Choose a point on the map and enter a place name.");
-      return;
-    }
-    void perform({
-      action: "save_place_and_confirm",
-      name: placeName.trim(),
-      latitude: selectedPoint.latitude,
-      longitude: selectedPoint.longitude,
-      radiusMeters: 80
-    }, "The place was saved and this visit was recorded.");
   }
 
   return (
@@ -121,200 +101,40 @@ export default function LocationReviewDetailScreen() {
         </View>
       </View>
 
-      <ScrollView style={styles.settingsScrollView} contentContainerStyle={styles.settingsScrollContent}>
-        <View style={styles.contentStack}>
+      {loading ? (
+        <ScrollView
+          style={styles.settingsScrollView}
+          contentContainerStyle={styles.settingsScrollContent}
+        >
           <View style={styles.panel}>
-            <Text style={styles.label}>Location evidence</Text>
-            <Text style={styles.sectionTitle}>{evidence ? locationActivityLabel(evidence) : "Review detected time"}</Text>
-            {evidence ? <Text style={styles.reviewMetaLine}>{formatEvidenceTimeRange(evidence)}</Text> : null}
+            <ActivityIndicator color={theme.accent} />
+            <Text accessibilityLiveRegion="polite" style={styles.muted}>Loading private map evidence…</Text>
           </View>
-
-          {loading ? (
-            <View style={styles.panel}>
-              <ActivityIndicator color={theme.accent} />
-              <Text accessibilityLiveRegion="polite" style={styles.muted}>Loading private map evidence…</Text>
-            </View>
-          ) : error ? (
-            <View style={styles.panel}>
-              <Text accessibilityLiveRegion="assertive" style={styles.reviewMetaLine}>{error}</Text>
-              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={() => void load()}>
-                <Text style={styles.secondaryButtonText}>Try again</Text>
-              </Pressable>
-            </View>
-          ) : evidence ? (
-            <>
-              <View style={styles.panel}>
-                <LocationEvidenceMap
-                  evidence={evidence}
-                  accentColor={theme.accent}
-                  surfaceColor={theme.surfaceMuted}
-                  textColor={theme.textSecondary}
-                  dangerColor={theme.danger}
-                  selectedPoint={selectedPoint}
-                  selectedPointRadiusMeters={evidence.segment.kind === "stay" ? 80 : undefined}
-                  selectedSavedPlaceId={selectedSavedPlaceId}
-                  showDetails={false}
-                  onSelectPoint={editingCentre ? setSelectedPoint : undefined}
-                  onSelectSavedPlace={setSelectedSavedPlaceId}
-                />
-              </View>
-
-              {evidence.map.nearbySavedPlaces.length ? (
-                <View style={styles.panel}>
-                  <Text style={styles.sectionTitle}>Correct the place</Text>
-                  <Text style={styles.muted}>Choose a nearby saved place if Dayframe matched this incorrectly.</Text>
-                  {evidence.map.nearbySavedPlaces.map((place) => (
-                    <Pressable
-                      key={place.id}
-                      accessibilityRole="button"
-                      disabled={saving}
-                      style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                      onPress={() => setSelectedSavedPlaceId(place.id)}
-                    >
-                      <Text style={styles.secondaryButtonText}>{place.name} · {place.distanceMeters} m</Text>
-                    </Pressable>
-                  ))}
-                  {selectedSavedPlaceId ? (
-                    <Pressable
-                      accessibilityRole="button"
-                      disabled={saving}
-                      style={pressable(styles.primaryButton, styles.buttonPressed)}
-                      onPress={() => void perform(
-                        { action: "change_place_and_confirm", placeId: selectedSavedPlaceId, learnedPlaceId: null },
-                        "The visit was recorded with the selected saved place."
-                      )}
-                    >
-                      <Text style={styles.primaryButtonText}>Use place and record</Text>
-                    </Pressable>
-                  ) : null}
-                </View>
-              ) : null}
-
-              {evidence.segment.kind === "stay" ? (
-                <View style={styles.panel}>
-                  <Text style={styles.sectionTitle}>Save this place</Text>
-                  <Text style={styles.muted}>Name this place so Dayframe can recognise it next time.</Text>
-                  <Pressable
-                    accessibilityRole="button"
-                    style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                    onPress={() => setEditingCentre((current) => !current)}
-                  >
-                    <Text style={styles.secondaryButtonText}>{editingCentre ? "Finish moving pin" : "Move map pin"}</Text>
-                  </Pressable>
-                  {editingCentre ? <Text style={styles.muted}>Tap the map to move the pin. Nothing is saved until you confirm below.</Text> : null}
-                  <TextInput
-                    accessibilityLabel="New saved place name"
-                    placeholder="Place name"
-                    placeholderTextColor={theme.textSecondary}
-                    style={styles.textInput}
-                    value={placeName}
-                    onChangeText={setPlaceName}
-                  />
-                  <Pressable
-                    accessibilityRole="button"
-                    disabled={saving || !selectedPoint || !placeName.trim()}
-                    style={({ pressed }) => [
-                      styles.primaryButton,
-                      pressed ? styles.buttonPressed : null,
-                      saving || !selectedPoint || !placeName.trim() ? styles.buttonDisabled : null
-                    ]}
-                    onPress={savePlace}
-                  >
-                    <Text style={styles.primaryButtonText}>Save place and record</Text>
-                  </Pressable>
-                </View>
-              ) : null}
-
-              <View style={styles.panel}>
-                <Text style={styles.sectionTitle}>
-                  {evidence.segment.kind === "commute" ? "Record commute" : "Resolve visit"}
-                </Text>
-                <Text style={styles.label}>Activity</Text>
-                <TextInput
-                  accessibilityLabel="Activity description"
-                  maxLength={500}
-                  placeholder="Activity"
-                  placeholderTextColor={theme.textSecondary}
-                  style={styles.textInput}
-                  value={description}
-                  onChangeText={setDescription}
-                />
-                {evidence.suggestedSplitPoints.map((split) => (
-                  <Pressable
-                    key={split.at}
-                    accessibilityRole="button"
-                    disabled={saving}
-                    style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                    onPress={() => setSelectedSplitAt(split.at)}
-                  >
-                    <Text style={styles.secondaryButtonText}>Split near {formatTime(split.at)}</Text>
-                  </Pressable>
-                ))}
-                {selectedSplitAt ? (
-                  <View style={styles.activeEditSection}>
-                    <Text style={styles.reviewMetaLine}>Before: {formatTime(evidence.segment.startedAt)}–{formatTime(selectedSplitAt)}</Text>
-                    <Text style={styles.reviewMetaLine}>After: {formatTime(selectedSplitAt)}–{evidence.segment.stoppedAt ? formatTime(evidence.segment.stoppedAt) : "ongoing"}</Text>
-                    <Pressable
-                      accessibilityRole="button"
-                      disabled={saving}
-                      style={pressable(styles.primaryButton, styles.buttonPressed)}
-                      onPress={() => void perform(
-                        { action: "split", splitAt: selectedSplitAt },
-                        "The detected time was split into two review items."
-                      )}
-                    >
-                      <Text style={styles.primaryButtonText}>Confirm split</Text>
-                    </Pressable>
-                  </View>
-                ) : null}
-                <Pressable
-                  accessibilityRole="button"
-                  disabled={saving}
-                  style={({ pressed }) => [styles.primaryButton, pressed ? styles.buttonPressed : null, saving ? styles.buttonDisabled : null]}
-                  onPress={() => void perform(
-                    { action: "edit_and_confirm", edit: { description } },
-                    evidence.segment.kind === "commute" ? "The commute was recorded." : "The visit was recorded."
-                  )}
-                >
-                  <Text style={styles.primaryButtonText}>
-                    {saving ? "Saving…" : evidence.segment.kind === "commute" ? "Record commute" : "Record visit"}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  disabled={saving}
-                  style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                  onPress={() => void perform({ action: "record_once", edit: { description } }, "This time was recorded without saving a place.")}
-                >
-                  <Text style={styles.secondaryButtonText}>Record once</Text>
-                </Pressable>
-                {adjacentReview && evidence.segment.kind === "stay" ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    disabled={saving}
-                    style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                    onPress={() => void perform({
-                      action: "merge",
-                      adjacentReviewItemId: adjacentReview.id,
-                      acknowledgeContradictoryEvidence: false
-                    }, "The adjacent visits were merged into one review item.")}
-                  >
-                    <Text style={styles.secondaryButtonText}>Merge with adjacent visit</Text>
-                  </Pressable>
-                ) : null}
-                <Pressable
-                  accessibilityRole="button"
-                  disabled={saving}
-                  style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                  onPress={() => void perform({ action: "ignore_once_location" }, "This suggestion was ignored.")}
-                >
-                  <Text style={styles.secondaryButtonText}>Ignore suggestion</Text>
-                </Pressable>
-              </View>
-            </>
-          ) : null}
-        </View>
-      </ScrollView>
+        </ScrollView>
+      ) : error ? (
+        <ScrollView
+          style={styles.settingsScrollView}
+          contentContainerStyle={styles.settingsScrollContent}
+        >
+          <View style={styles.panel}>
+            <Text accessibilityLiveRegion="assertive" style={styles.reviewMetaLine}>{error}</Text>
+            <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={() => void load()}>
+              <Text style={styles.secondaryButtonText}>Try again</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      ) : evidence ? (
+        <LocationReviewCorrectionEditor
+          adjacentReview={adjacentReview}
+          categories={data?.categories ?? []}
+          evidence={evidence}
+          key={evidence.reviewItemId}
+          onResolve={perform}
+          places={data?.places ?? []}
+          reviewItem={reviewItem}
+          saving={saving}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -344,24 +164,4 @@ function adjacentLocationReview(
       return gap <= maximumAdjacentGapMs ? [{ item, gap }] : [];
     })
     .sort((a, b) => a.gap - b.gap || a.item.id.localeCompare(b.item.id))[0]?.item;
-}
-
-function locationActivityLabel(evidence: LocationReviewEvidenceDto) {
-  return evidence.segment.kind === "commute" ? "Commute" : evidence.display.title;
-}
-
-function formatEvidenceTimeRange(evidence: LocationReviewEvidenceDto) {
-  const startedAt = new Date(evidence.segment.startedAt);
-  const stoppedAt = evidence.segment.stoppedAt ? new Date(evidence.segment.stoppedAt) : null;
-  const date = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" }).format(startedAt);
-  const start = formatTime(evidence.segment.startedAt);
-  const stop = stoppedAt && evidence.segment.stoppedAt ? formatTime(evidence.segment.stoppedAt) : "ongoing";
-  const durationMinutes = stoppedAt
-    ? Math.max(0, Math.round((stoppedAt.getTime() - startedAt.getTime()) / 60_000))
-    : null;
-  return `${date} · ${start}–${stop}${durationMinutes === null ? "" : ` · ${durationMinutes}m`}`;
-}
-
-function formatTime(value: string) {
-  return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }

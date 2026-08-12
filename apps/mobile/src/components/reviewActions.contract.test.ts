@@ -8,6 +8,7 @@ function source(relativePath: string) {
 
 const reviewSource = source("../../app/review.tsx");
 const evidenceSource = source("../../app/review/[id].tsx");
+const evidenceEditorSource = source("./location/LocationReviewCorrectionEditor.tsx");
 const evidenceMapSource = source("./location/LocationEvidenceMap.tsx");
 const themeSource = source("../lib/mobileTheme.ts");
 const helperSource = source("../lib/review.ts");
@@ -44,15 +45,29 @@ describe("mobile Review action contracts", () => {
   });
 
   it("presents Location Evidence as activity, time and map while retaining resolution actions", () => {
-    expect(evidenceSource).toContain("formatEvidenceTimeRange(evidence)");
-    expect(evidenceSource).toContain("showDetails={false}");
-    expect(evidenceSource).toContain('evidence.segment.kind === "commute" ? "Commute"');
-    expect(evidenceSource).toContain('action: "split"');
-    expect(evidenceSource).toContain('action: "merge"');
-    expect(evidenceSource).toContain('action: "record_once"');
+    expect(evidenceSource).toContain("<LocationReviewCorrectionEditor");
+    expect(evidenceEditorSource).toContain("formatEvidenceTimeRange(evidence)");
+    expect(evidenceEditorSource).toContain("showDetails={false}");
+    expect(evidenceEditorSource).toContain('evidence.segment.kind === "commute" ? "Commute"');
+    expect(evidenceEditorSource).toContain('action: "split"');
+    expect(evidenceEditorSource).toContain('action: "merge"');
+    expect(evidenceEditorSource).toContain('action: "record_once"');
     expect(evidenceSource).not.toContain("Time and uncertainty");
     expect(evidenceSource).not.toContain("Raw evidence is retained until");
     expect(evidenceMapSource).toContain("showDetails = true");
+  });
+
+  it("uses one Where, What and When editor without creating category or mutation owners", () => {
+    expect(evidenceEditorSource).toContain("Where were you?");
+    expect(evidenceEditorSource).toContain("What did you do?");
+    expect(evidenceEditorSource).toContain('label="When?"');
+    expect(evidenceEditorSource).toContain("createNativePlaceSearchProvider");
+    expect(evidenceEditorSource).toContain("buildLocationReviewResolutionAction");
+    expect(evidenceEditorSource).toContain("FloatingDatePicker");
+    expect(evidenceEditorSource).toContain("Commute automatically");
+    expect(evidenceEditorSource).not.toContain("createCategory");
+    expect(evidenceEditorSource).not.toContain("resolveLocationReviewItem");
+    expect(evidenceSource).toContain("resolveLocationReviewItem(id, action)");
   });
 
   it("hands Edit to the sheet only after the overflow modal has unmounted", () => {

@@ -127,4 +127,73 @@ describe("location review confirmation semantics", () => {
       statement.includes("started_at <") && statement.includes("coalesce(stopped_at")
     ))).toBe(false);
   });
+
+  it("commits a saved-place correction and entry edits through one transaction owner", async () => {
+    const placeId = "30000000-0000-4000-8000-000000000003";
+    const categoryId = "40000000-0000-4000-8000-000000000004";
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes("for update of ri, ae nowait")) {
+          return {
+            rows: [{
+              id: "review-1",
+              eventId: "event-1",
+              status: "open",
+              title: "Visit sports centre",
+              confidence: "high",
+              suggestedCategoryId: null,
+              suggestedPlaceId: null,
+              suggestedStartedAt: "2026-08-12T08:08:23.126Z",
+              suggestedStoppedAt: "2026-08-12T08:22:30.004Z",
+              segmentId: "segment-1",
+              segmentKind: "stay",
+              segmentStatus: "review",
+              deviceId: "device-1",
+              algorithmVersion: "location-v2.0",
+              learnedPlaceId: null,
+              placeMatchKind: null,
+              centreLatitude: 51.73,
+              centreLongitude: 0.47
+            }]
+          };
+        }
+        if (statement.includes("select 1 from categories")) return { rows: [{ ok: true }] };
+        if (statement.includes("select 1 from places")) return { rows: [{ ok: true }] };
+        if (statement.includes("insert into time_entries")) return { rows: [{ id: "entry-1" }] };
+        return { rows: [] };
+      })
+    } as unknown as import("pg").PoolClient & { query: ReturnType<typeof vi.fn> };
+
+    await expect(resolveLocationReviewActionWithClient(
+      client,
+      "review-1",
+      {
+        action: "change_place_and_confirm",
+        placeId,
+        learnedPlaceId: null,
+        edit: {
+          categoryId,
+          description: "Training",
+          startedAt: "2026-08-12T08:10:23.126Z",
+          stoppedAt: "2026-08-12T08:25:30.004Z"
+        }
+      },
+      session
+    )).resolves.toMatchObject({ status: "accepted", entryId: "entry-1" });
+
+    const insert = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into time_entries")
+    );
+    expect(insert?.[1]).toEqual([
+      session.workspaceId,
+      session.userId,
+      categoryId,
+      placeId,
+      "high",
+      "Training",
+      "2026-08-12T08:10:23.126Z",
+      "2026-08-12T08:25:30.004Z",
+      "event-1"
+    ]);
+  });
 });
