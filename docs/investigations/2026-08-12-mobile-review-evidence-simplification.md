@@ -119,6 +119,17 @@ No product decision is inferred for those later changes.
   the committed `Podfile.lock` intentionally remains unchanged. No PR2 source
   compile error was reported. Per the bounded-validation instruction, the
   dependency state was recorded without a second pod-install/build cycle.
-- Manual staging, physical-iPhone, Dynamic Type, VoiceOver, and Reduce Motion
-  checks remain required before merge. PR2 does not install a preview build on
-  the attached phone; the physical-device instruction applied to PR1.
+- PR #169's exact Ready Preview deployment from commit `71edfaa` was assigned to
+  `dayframe-staging.vercel.app`; `/login` returned `200` and anonymous
+  `/api/bootstrap` returned the expected JSON `401`.
+- After regenerating the CocoaPods sandbox, one generic signed Staging build
+  succeeded with the staging API base and preview release channel. The signed
+  app and Live Activity extension passed `check-ios-build-config.mjs`; the app
+  used the development APNs entitlement required by the direct Staging lane.
+- Dayframe `0.1.0 (1)` installed and launched on the attached `KB's 17`
+  (iPhone 17 Pro, iOS 27.0 beta). Developer Disk Image services reported the
+  image compatible and usable after the phone was unlocked. Installing this
+  preview replaced the existing app sharing `com.layereight.dayframe`.
+- Hands-on Review/Evidence acceptance, Dynamic Type, VoiceOver, and Reduce
+  Motion checks remain required before merge. Production/TestFlight was not
+  changed or claimed.
