@@ -58,6 +58,7 @@ import {
   isOneOffLocationReviewItem,
   isOpenReviewItem,
   isReviewNeededEntry,
+  locationReviewReasonCopy,
   isLocationReviewItem,
   reduceReviewMenuState,
   reviewConfidencePresentation,
@@ -907,9 +908,10 @@ function ReviewItemCard({
     theme.mode
   );
   const controlsDisabled = disabled || syncState != null;
-  const summary = reviewItemSummary(item);
   const confidence = reviewConfidencePresentation(item.confidence);
   const overlapWarning = reviewItemOverlapWarning(item, peerEntries, now);
+  const locationReason = locationReviewReasonCopy(item, overlapWarning?.overlapCount ?? 0);
+  const summary = locationReason ?? reviewItemSummary(item);
   const syncCopy = reviewItemSyncStatusCopy(syncState);
 
   return (
@@ -965,7 +967,7 @@ function ReviewItemCard({
       {summary ? (
         <Text numberOfLines={3} style={styles.reviewSummary}>{summary}</Text>
       ) : null}
-      {overlapWarning?.overlapCount ? (
+      {overlapWarning?.overlapCount && !locationReason ? (
         <View
           accessibilityLiveRegion="polite"
           accessibilityLabel={`Overlaps ${overlapWarning.overlapCount} other ${overlapWarning.overlapCount === 1 ? "entry" : "entries"}. You can still confirm.`}

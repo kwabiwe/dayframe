@@ -136,7 +136,7 @@ export function LocationReviewCorrectionEditor({
   );
   const placeAnswer = newPlace?.name || selectedPlace?.name || (
     selectedSavedPlaceId === baselinePlaceId ? evidence.display.placeName : null
-  ) || "No saved place";
+  );
   const placeDetail = newPlace?.formattedAddress || (
     selectedSavedPlaceId === baselinePlaceId ? evidence.display.addressSummary : null
   );
@@ -329,11 +329,11 @@ export function LocationReviewCorrectionEditor({
               surfaceColor={theme.surfaceMuted}
               textColor={theme.textSecondary}
               dangerColor={theme.danger}
-              selectedPoint={selectedPoint}
+              selectedPoint={evidence.segment.kind === "stay" ? selectedPoint : undefined}
               selectedPointRadiusMeters={evidence.segment.kind === "stay" ? 80 : undefined}
               selectedSavedPlaceId={selectedSavedPlaceId}
               showDetails={false}
-              onSelectPoint={editingCentre ? setSelectedPoint : undefined}
+              onSelectPoint={evidence.segment.kind === "stay" && editingCentre ? setSelectedPoint : undefined}
               onSelectSavedPlace={evidence.segment.kind === "stay" ? chooseSavedPlace : undefined}
             />
             {editingCentre ? (
@@ -345,36 +345,28 @@ export function LocationReviewCorrectionEditor({
             layout={localLayoutTransition(reduceMotion)}
             style={editorStyles.correctionCard}
           >
-            <View style={editorStyles.section}>
-              <SectionHeading
-                glyph="place"
-                label="Where were you?"
-                theme={theme}
-              />
-              {evidence.segment.kind === "commute" ? (
-                <View style={editorStyles.answerRow}>
-                  <View style={editorStyles.answerIcon}>
-                    <ActivityGlyph name="commute" color={theme.accentText} />
-                  </View>
-                  <View style={editorStyles.answerText}>
-                    <Text style={editorStyles.answerTitle}>Route detected</Text>
-                    <Text style={editorStyles.answerMeta}>Start and end are shown on the map.</Text>
-                  </View>
-                </View>
-              ) : (
-                <>
-                  <View style={editorStyles.answerRow}>
-                    <View style={editorStyles.answerIcon}>
-                      <ActivityGlyph name="place" color={theme.accentText} />
+            {evidence.segment.kind === "stay" ? (
+              <>
+                <View style={editorStyles.section}>
+                  <SectionHeading
+                    glyph="place"
+                    label="Where were you?"
+                    theme={theme}
+                  />
+                  {placeAnswer ? (
+                    <View style={editorStyles.answerRow}>
+                      <View style={editorStyles.answerIcon}>
+                        <ActivityGlyph name="place" color={theme.accentText} />
+                      </View>
+                      <View style={editorStyles.answerText}>
+                        <Text style={editorStyles.answerTitle}>{placeAnswer}</Text>
+                        {placeDetail ? <Text style={editorStyles.answerMeta}>{placeDetail}</Text> : null}
+                        {newPlace ? (
+                          <Text style={editorStyles.answerMeta}>This place will be saved when you record.</Text>
+                        ) : null}
+                      </View>
                     </View>
-                    <View style={editorStyles.answerText}>
-                      <Text style={editorStyles.answerTitle}>{placeAnswer}</Text>
-                      {placeDetail ? <Text style={editorStyles.answerMeta}>{placeDetail}</Text> : null}
-                      {newPlace ? (
-                        <Text style={editorStyles.answerMeta}>This place will be saved when you record.</Text>
-                      ) : null}
-                    </View>
-                  </View>
+                  ) : null}
 
                   {evidence.map.nearbySavedPlaces.length > 0 || baselinePlaceId ? (
                     <View style={editorStyles.placeChoices}>
@@ -399,7 +391,7 @@ export function LocationReviewCorrectionEditor({
                       ))}
                       <PlaceChoice
                         detail="Record without a saved-place match"
-                        name="No saved place"
+                        name="Record without choosing a place"
                         onPress={() => chooseSavedPlace(null)}
                         selected={!newPlace && selectedSavedPlaceId === null}
                         theme={theme}
@@ -474,11 +466,11 @@ export function LocationReviewCorrectionEditor({
                       ))}
                     </Reanimated.View>
                   ) : null}
-                </>
-              )}
-            </View>
+                </View>
 
-            <View style={editorStyles.divider} />
+                <View style={editorStyles.divider} />
+              </>
+            ) : null}
 
             <View style={editorStyles.section}>
               <SectionHeading
