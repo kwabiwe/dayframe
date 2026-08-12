@@ -145,6 +145,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - No duplicate React keys, hydration errors, or framework runtime overlays appear during normal use.
 - In Location V2 `v2_enabled`, only completed strong stays at logging-enabled saved or accepted-and-linked learned places create automatic confirmed entries. The entry inherits the saved place/default category and description, remains editable/deletable, and retains its source event.
 - Location V2 commutes, unknown/ambiguous places, lower-confidence stays, uncertain gaps, missing approved-place links, and overlaps with confirmed/accepted time remain in Review. Retrying the same batch creates neither a duplicate entry nor a Review item for an already automatic entry.
+- Location V2 finalisation does not depend on a later location sample. Foregrounding reprocesses retained local evidence with current time and invokes one private server replay even with zero pending uploads; periodic bootstrap replay is five-minute bounded, native drain/upload work is capped, and repeated/concurrent replay creates no duplicate event, entry, or Review item.
 - Rehydrating an account with commute learning already enabled restarts Expo location updates and native iOS visit/significant-change monitoring without requiring the Settings toggle to be cycled.
 
 ## Authentication And Sessions

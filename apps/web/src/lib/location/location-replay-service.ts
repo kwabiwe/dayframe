@@ -89,9 +89,15 @@ export async function replayLocationEvidence(
             received_at as "receivedAt"
      from location_evidence
      where workspace_id = $1 and user_id = $2 and device_id = $3
-       and algorithm_version = $4 and accepted = true and expires_at > now()
+       and algorithm_version = $4 and accepted = true and expires_at > $5::timestamptz
      order by occurred_at, evidence_type, client_evidence_id`,
-    [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion]
+    [
+      session.workspaceId,
+      session.userId,
+      options.deviceId,
+      options.algorithmVersion,
+      options.processingAt
+    ]
   );
   const placesResult = await client.query<PlaceRow>(
     `select id, name, latitude, longitude,

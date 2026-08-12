@@ -20,6 +20,7 @@ Use this when adding or changing API routes, server actions, controllers, servic
 - Make ownership checks explicit for user-owned records.
 - Use transactions when writing `activity_events` plus derived `time_entries` or `review_items`.
 - Scope active timer updates by workspace and user.
+- Location retained-evidence replay is an authenticated, private/no-store command. It accepts only device/version/rollout acknowledgement metadata, uses server time, returns coordinate-free counts, and must share ingestion's owner lock, semantic cutover, and idempotent event-first transaction.
 
 ## Timer Regression Matrix
 

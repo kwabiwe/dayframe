@@ -8,7 +8,10 @@ import {
 import { pool } from "../apps/web/src/lib/db";
 import { ensureCommuteCategoryId } from "../apps/web/src/lib/automatic-category-service";
 import { processActivityEvent } from "../apps/web/src/lib/event-service";
-import { ingestLocationEvidence } from "../apps/web/src/lib/location/location-ingest-service";
+import {
+  ingestLocationEvidence,
+  replayRetainedLocationEvidence
+} from "../apps/web/src/lib/location/location-ingest-service";
 import { resolveLocationReviewAction } from "../apps/web/src/lib/location/location-review-service";
 import type { RequestSession } from "../apps/web/src/lib/session";
 
@@ -648,6 +651,46 @@ async function validateV1Compatibility() {
   assert.equal(result.rowCount, 1, "Legacy V1 geofence event was not persisted.");
 }
 
+async function validateFinalisationWithoutNewEvidence() {
+  await clearDerivedLocationState();
+  process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
+  const fixture = locationAcceptanceFixture();
+  const evidenceBeforeFinalisation = fixture.evidence.filter(
+    (item) => Date.parse(item.occurredAt) <= Date.parse("2026-07-20T14:38:00.000Z")
+  );
+  const semanticModeAcknowledgedAt = "2026-06-01T07:00:00.000Z";
+  await ingestLocationEvidence(
+    batch("db-finalisation-before-lag", evidenceBeforeFinalisation, "v2_review", semanticModeAcknowledgedAt),
+    session,
+    "2026-07-20T14:28:30.000Z"
+  );
+  const reviewsBeforeReplay = await count("review_items");
+  const replayRequest = {
+    deviceId: DEVICE_ID,
+    algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+    rolloutMode: "v2_review" as const,
+    semanticModeAcknowledgedAt
+  };
+  const firstReplay = await replayRetainedLocationEvidence(
+    replayRequest,
+    session,
+    "2026-07-20T14:40:00.000Z"
+  );
+  const reviewsAfterReplay = await count("review_items");
+  assert(firstReplay.finalisedSegmentCount > 0, "Explicit replay finalised no retained segments.");
+  assert(firstReplay.semanticSegmentCount > 0, "Explicit replay emitted no semantic segments.");
+  assert(
+    reviewsAfterReplay > reviewsBeforeReplay,
+    "A segment that crossed the finalisation lag without new evidence did not enter Review."
+  );
+  await replayRetainedLocationEvidence(replayRequest, session, "2026-07-20T14:45:00.000Z");
+  assert.equal(
+    await count("review_items"),
+    reviewsAfterReplay,
+    "Repeated explicit replay duplicated Review items."
+  );
+}
+
 async function main() {
   try {
     await seedOwner();
@@ -657,8 +700,9 @@ async function main() {
     await validateSemanticIdempotencyAndRollback();
     await validateCommuteReviewCategoryAndDescription();
     await validateEnabledTrustedPlaceAutomation();
+    await validateFinalisationWithoutNewEvidence();
     await validateV1Compatibility();
-    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, shadow cutover, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place automation, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, and V1 compatibility.");
+    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place automation, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, and V1 compatibility.");
   } finally {
     if (process.env.KEEP_LOCATION_V2_DB_FIXTURE !== "1") {
       await pool.query("delete from workspaces where id = $1", [WORKSPACE_ID]).catch(() => undefined);

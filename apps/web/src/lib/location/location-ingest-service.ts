@@ -2,9 +2,11 @@ import {
   EMPTY_LOCATION_ENGINE_STATE,
   LOCATION_ENGINE_V2_CONFIG,
   LocationEvidenceBatchRequestSchema,
+  LocationReplayRequestSchema,
   runLocationEngine,
   type CommuteSegment,
   type LocationEvidenceBatchRequest,
+  type LocationReplayResponse,
   type LocationRolloutMode,
   type LocationSegment,
   type StaySegment
@@ -65,12 +67,12 @@ export async function ingestLocationEvidence(
       `delete from location_evidence evidence
        using (
          select id from location_evidence
-         where workspace_id = $1 and user_id = $2 and expires_at < now()
+         where workspace_id = $1 and user_id = $2 and expires_at < $3::timestamptz
          order by expires_at
          limit 500
        ) expired
        where evidence.id = expired.id`,
-      [session.workspaceId, session.userId]
+      [session.workspaceId, session.userId, processingAt]
     );
     const summary = evidenceBatchSummary(batch, rollout.effectiveMode);
     const eventResult = await client.query<{ id: string; inserted: boolean }>(
@@ -141,26 +143,13 @@ export async function ingestLocationEvidence(
       );
     }
 
-    const replay = await replayLocationEvidence(client, session, {
+    const semanticReplay = await replayAndEmitLocationSemantics(client, session, {
       deviceId: batch.deviceId,
       algorithmVersion: batch.algorithmVersion,
-      processingAt
+      processingAt,
+      rollout
     });
-    if (rollout.emitV2ReviewItems && rollout.semanticCutoverAt) {
-      for (const segment of replay.segments.filter((item) =>
-        item.status === "finalised" &&
-        segmentStartedAfterSemanticCutover(item.startedAt, rollout.semanticCutoverAt!)
-      )) {
-        await emitSemanticSegment(
-          client,
-          session,
-          rollout.effectiveMode,
-          segment,
-          replay.stayIds,
-          replay.commuteIds
-        );
-      }
-    }
+    const replay = semanticReplay.replay;
     await client.query("commit");
     const warnings = [
       ...(classification.rejectedEvidence.length > 0
@@ -197,6 +186,104 @@ export async function ingestLocationEvidence(
   }
 }
 
+export async function replayRetainedLocationEvidence(
+  input: unknown,
+  session: RequestSession,
+  processingAt = new Date().toISOString()
+): Promise<LocationReplayResponse> {
+  const request = LocationReplayRequestSchema.parse(input);
+  validateSemanticAcknowledgementTime(request.semanticModeAcknowledgedAt, processingAt);
+  const rollout = decideLocationRollout(
+    getServerLocationRolloutMode(),
+    request.rolloutMode,
+    request.semanticModeAcknowledgedAt
+  );
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    await client.query(
+      "select pg_advisory_xact_lock(hashtext($1), hashtext($2))",
+      [session.workspaceId, session.userId]
+    );
+    const semanticReplay = await replayAndEmitLocationSemantics(client, session, {
+      deviceId: request.deviceId,
+      algorithmVersion: request.algorithmVersion,
+      processingAt,
+      rollout
+    });
+    await client.query("commit");
+    return {
+      ok: true,
+      replayVersion: request.algorithmVersion,
+      rolloutMode: rollout.effectiveMode,
+      clientAcknowledgedMode: rollout.clientAcknowledgedMode,
+      finalisedSegmentCount: semanticReplay.finalisedSegmentCount,
+      semanticSegmentCount: semanticReplay.semanticSegmentCount,
+      warnings: locationReplayWarnings(rollout, semanticReplay.replay.diagnostics.warningCodes)
+    };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function replayAndEmitLocationSemantics(
+  client: import("pg").PoolClient,
+  session: RequestSession,
+  options: {
+    deviceId: string;
+    algorithmVersion: string;
+    processingAt: string;
+    rollout: ReturnType<typeof decideLocationRollout>;
+  }
+) {
+  const replay = await replayLocationEvidence(client, session, options);
+  const finalisedSegments = replay.segments.filter((segment) => segment.status === "finalised");
+  let semanticSegmentCount = 0;
+  if (options.rollout.emitV2ReviewItems && options.rollout.semanticCutoverAt) {
+    for (const segment of finalisedSegments.filter((item) =>
+      segmentStartedAfterSemanticCutover(item.startedAt, options.rollout.semanticCutoverAt!)
+    )) {
+      const emitted = await emitSemanticSegment(
+        client,
+        session,
+        options.rollout.effectiveMode,
+        segment,
+        replay.stayIds,
+        replay.commuteIds
+      );
+      if (emitted) semanticSegmentCount += 1;
+    }
+  }
+  return {
+    replay,
+    finalisedSegmentCount: finalisedSegments.length,
+    semanticSegmentCount
+  };
+}
+
+function locationReplayWarnings(
+  rollout: ReturnType<typeof decideLocationRollout>,
+  warningCodes: string[]
+) {
+  return [
+    ...(rollout.effectiveMode === "v2_shadow"
+      ? ["V2 shadow mode stored segments without replacing V1 suggestions."]
+      : []),
+    ...(!rollout.clientAcknowledgedMode
+      ? ["The client has not acknowledged the server rollout mode; V2 semantic output was suppressed."]
+      : []),
+    ...(rollout.clientAcknowledgedMode &&
+        (rollout.effectiveMode === "v2_review" || rollout.effectiveMode === "v2_enabled") &&
+        !rollout.semanticCutoverAt
+      ? ["The client did not provide a semantic-mode cutover; V2 semantic output was suppressed."]
+      : []),
+    ...warningCodes
+  ];
+}
+
 function validateEvidenceTimes(batch: LocationEvidenceBatchRequest, processingAt: string) {
   const now = Date.parse(processingAt);
   const earliest = now - 30 * 86_400_000;
@@ -211,15 +298,25 @@ function validateEvidenceTimes(batch: LocationEvidenceBatchRequest, processingAt
       );
     }
   }
-  if (batch.semanticModeAcknowledgedAt) {
-    const acknowledgedAt = Date.parse(batch.semanticModeAcknowledgedAt);
-    if (acknowledgedAt < earliest || acknowledgedAt > latest) {
-      throw new LocationIngestError(
-        "The semantic-mode acknowledgement falls outside the accepted replay window.",
-        422,
-        "invalid_semantic_mode_acknowledgement"
-      );
-    }
+  validateSemanticAcknowledgementTime(batch.semanticModeAcknowledgedAt, processingAt);
+}
+
+function validateSemanticAcknowledgementTime(
+  semanticModeAcknowledgedAt: string | undefined,
+  processingAt: string
+) {
+  if (!semanticModeAcknowledgedAt) return;
+  const now = Date.parse(processingAt);
+  const latest = now + 10 * 60_000;
+  const acknowledgedAt = Date.parse(semanticModeAcknowledgedAt);
+  // This timestamp is the durable semantic cutover, not evidence. It may
+  // legitimately be older than the raw-evidence retention window.
+  if (acknowledgedAt > latest) {
+    throw new LocationIngestError(
+      "The semantic-mode acknowledgement cannot be in the future.",
+      422,
+      "invalid_semantic_mode_acknowledgement"
+    );
   }
 }
 
@@ -272,7 +369,7 @@ async function emitSemanticSegment(
   const databaseSegmentId = segment.kind === "stay"
     ? stayIds.get(segment.clientSegmentId)
     : commuteIds.get(segment.clientSegmentId);
-  if (!databaseSegmentId) return;
+  if (!databaseSegmentId) return false;
   const eventType = segment.kind === "commute"
     ? "commute_detected"
     : segment.placeMatchKind === "learned"
@@ -289,9 +386,9 @@ async function emitSemanticSegment(
   const placeId = trustedPlace?.placeId ?? (segment.kind === "stay" ? segment.placeId ?? null : null);
   if (segment.kind === "stay" && segment.placeMatchKind === "unknown") {
     const duration = Date.parse(segment.stoppedAt ?? segment.startedAt) - Date.parse(segment.startedAt);
-    if (duration < LOCATION_ENGINE_V2_CONFIG.unknownStayReviewDwellMs) return;
+    if (duration < LOCATION_ENGINE_V2_CONFIG.unknownStayReviewDwellMs) return false;
   }
-  if (trustedPlace && !trustedPlace.loggingEnabled) return;
+  if (trustedPlace && !trustedPlace.loggingEnabled) return false;
   let disposition = locationSemanticDisposition(rolloutMode, segment);
   if (disposition.action === "auto_confirm" && !trustedPlace) {
     disposition = { action: "review", reason: "untrusted_place" };
@@ -476,6 +573,7 @@ async function emitSemanticSegment(
       [event.rows[0].id, databaseSegmentId, session.workspaceId, session.userId]
     );
   }
+  return true;
 }
 
 type TrustedPlaceContext = {

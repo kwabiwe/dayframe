@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { DayframeLocationNativeSignal } from "../../../modules/dayframe-location-visits";
 import type { MobileBootstrap } from "../api";
 
 const secureValues = vi.hoisted(() => new Map<string, string>());
 const mocks = vi.hoisted(() => ({
   configureLocationAccount: vi.fn(),
-  drainSignals: vi.fn(() => Promise.resolve([])),
+  drainSignals: vi.fn<(limit: number) => Promise<DayframeLocationNativeSignal[]>>(() => Promise.resolve([])),
   clearAllSignals: vi.fn(() => Promise.resolve(0)),
   stopMonitoring: vi.fn(() => Promise.resolve({ enabled: false })),
+  processPendingLocationEvidence: vi.fn(() => Promise.resolve([])),
   syncLocationEvidence: vi.fn(() => Promise.resolve({ synced: true, acknowledgedCount: 0 }))
 }));
 
@@ -23,6 +25,7 @@ vi.mock("./store", () => ({
   activeLocationCaptureContext: vi.fn(() => Promise.resolve({ deviceId: "ios-device", timeZone: "Europe/London" })),
   getLocationRolloutMode: vi.fn(() => Promise.resolve("v2_shadow")),
   persistLocationEvidence: vi.fn(),
+  processPendingLocationEvidence: mocks.processPendingLocationEvidence,
   syncLocationEvidence: mocks.syncLocationEvidence
 }));
 
@@ -35,7 +38,11 @@ vi.mock("../../../modules/dayframe-location-visits", () => ({
   stopMonitoring: mocks.stopMonitoring
 }));
 
-const { configureLocationIntelligence } = await import("./runtime");
+const {
+  configureLocationIntelligence,
+  drainNativeLocationSignalsInBatches,
+  syncLocationIntelligenceOnForeground
+} = await import("./runtime");
 
 function bootstrap(userId: string, workspaceId: string, mode: MobileBootstrap["locationRolloutMode"] = "v2_shadow") {
   return {
@@ -62,6 +69,7 @@ describe("location account binding", () => {
     await configureLocationIntelligence(bootstrap("user-a", "workspace-a"));
     await configureLocationIntelligence(bootstrap("user-a", "workspace-a"));
     expect(mocks.clearAllSignals).not.toHaveBeenCalled();
+    expect(mocks.processPendingLocationEvidence).toHaveBeenCalledTimes(2);
   });
 
   it("purges native evidence before binding a different account", async () => {
@@ -89,5 +97,35 @@ describe("location account binding", () => {
     expect(mocks.stopMonitoring).toHaveBeenCalledOnce();
     expect(mocks.clearAllSignals).toHaveBeenCalledOnce();
     expect(mocks.drainSignals).not.toHaveBeenCalled();
+  });
+
+  it("bounds native draining to five 100-item passes", async () => {
+    mocks.drainSignals.mockResolvedValue(Array.from({ length: 100 }, (_, index) => ({
+      id: `signal-${index}`,
+      kind: "provider_status" as const,
+      occurredAt: "2026-08-11T12:00:00.000Z",
+      endedAt: null,
+      latitude: null,
+      longitude: null,
+      horizontalAccuracyMeters: null,
+      metadata: {}
+    })));
+
+    const result = await drainNativeLocationSignalsInBatches();
+
+    expect(result.transferredCount).toBe(500);
+    expect(mocks.drainSignals).toHaveBeenCalledTimes(5);
+    expect(mocks.drainSignals).toHaveBeenCalledWith(100);
+  });
+
+  it("reprocesses local time and forces replay on foreground without new signals", async () => {
+    await configureLocationIntelligence(bootstrap("user-a", "workspace-a"));
+    vi.clearAllMocks();
+    mocks.drainSignals.mockResolvedValue([]);
+
+    await syncLocationIntelligenceOnForeground();
+
+    expect(mocks.processPendingLocationEvidence).toHaveBeenCalledOnce();
+    expect(mocks.syncLocationEvidence).toHaveBeenCalledWith({ forceReplay: true });
   });
 });

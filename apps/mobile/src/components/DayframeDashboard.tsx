@@ -83,7 +83,10 @@ import { resolveCalendarManualEntryRequest } from "@/lib/calendarManualEntry";
 import { IS_DAYFRAME_STAGING } from "@/lib/config";
 import { shouldApplyDashboardRefresh } from "@/lib/dashboardRefresh";
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
-import { configureLocationIntelligence } from "@/lib/location/runtime";
+import {
+  configureLocationIntelligence,
+  syncLocationIntelligenceOnForeground
+} from "@/lib/location/runtime";
 import { recordLocationStoreError } from "@/lib/location/store";
 import { mergePersistedMobileTag } from "@/lib/mobileTags";
 import {
@@ -921,6 +924,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         deletionCoordinator.current?.reconcileForeground();
         void syncHealthKitAndReload("foreground");
         void syncQueuedEventsAndReload();
+        void syncLocationIntelligenceOnForeground().catch(recordLocationStoreError);
       }
     });
     return () => subscription.remove();
