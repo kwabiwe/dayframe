@@ -3,6 +3,9 @@ import {
   LOCATION_ACCEPTANCE_PLACES,
   LOCATION_ENGINE_V2_CONFIG,
   locationAcceptanceFixture,
+  runLocationEngine,
+  type CommuteSegment,
+  type LocationEvidence,
   type LocationEvidenceBatchRequest
 } from "@dayframe/shared";
 import { pool } from "../apps/web/src/lib/db";
@@ -37,7 +40,7 @@ const session: RequestSession = {
 
 function batch(
   clientBatchId: string,
-  evidence: ReturnType<typeof locationAcceptanceFixture>["evidence"],
+  evidence: LocationEvidence[],
   rolloutMode: LocationEvidenceBatchRequest["rolloutMode"],
   semanticModeAcknowledgedAt?: string
 ) {
@@ -50,6 +53,66 @@ function batch(
     semanticModeAcknowledgedAt,
     evidence
   };
+}
+
+function trustedCommuteFixture(prefix = "trusted-commute") {
+  const home = LOCATION_ACCEPTANCE_PLACES[0];
+  const sportsVenue = LOCATION_ACCEPTANCE_PLACES[2];
+  const baseTime = Date.parse("2026-07-20T08:00:00.000Z");
+  const evidence = (
+    id: string,
+    minute: number,
+    point: { latitude: number; longitude: number },
+    options: Partial<LocationEvidence> = {}
+  ): LocationEvidence => ({
+    clientEvidenceId: `${prefix}-${id}`,
+    deviceId: DEVICE_ID,
+    algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+    kind: "standard_location",
+    occurredAt: new Date(baseTime + minute * 60_000).toISOString(),
+    latitude: point.latitude,
+    longitude: point.longitude,
+    horizontalAccuracyMeters: 25,
+    receivedAt: PROCESSING_AT,
+    timeZone: "Europe/London",
+    ...options
+  });
+  const items = [
+    evidence("home-1", 0, home, { savedPlaceId: home.id }),
+    evidence("home-2", 5, home),
+    evidence("home-3", 10, home),
+    evidence("route-1", 12, { latitude: 51.503, longitude: -0.1246 }, { speedMetersPerSecond: 12 }),
+    evidence("route-2", 15, { latitude: 51.505, longitude: -0.1246 }, { speedMetersPerSecond: 12 }),
+    evidence("route-3", 18, { latitude: 51.507, longitude: -0.1246 }, { speedMetersPerSecond: 12 }),
+    evidence("sports-1", 21, sportsVenue, { savedPlaceId: sportsVenue.id }),
+    evidence("sports-2", 26, sportsVenue),
+    evidence("sports-3", 31, sportsVenue)
+  ];
+  const result = runLocationEngine({
+    priorState: {
+      algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+      mode: "idle",
+      activeSegmentId: null,
+      processedEvidenceIds: [],
+      lastProcessedAt: null
+    },
+    evidence: items,
+    savedPlaces: LOCATION_ACCEPTANCE_PLACES,
+    acceptedLearnedPlaces: [],
+    config: LOCATION_ENGINE_V2_CONFIG,
+    processingAt: PROCESSING_AT
+  });
+  const commute = result.segmentUpserts.find(
+    (segment): segment is CommuteSegment => segment.kind === "commute"
+  );
+  assert(commute, "Trusted commute fixture produced no commute.");
+  assert.equal(commute.status, "finalised", "Trusted commute fixture is not finalised.");
+  assert.equal(commute.confidence, "medium_high", "Trusted commute fixture lost medium-high confidence.");
+  assert.equal(commute.continuityStatus, "continuous", "Trusted commute fixture has an uncertain boundary.");
+  assert.equal(commute.qualificationReason, "significant_endpoint_displacement");
+  assert(commute.fromPlaceId && commute.toPlaceId, "Trusted commute fixture lost a saved endpoint.");
+  assert(commute.routeSampleCount >= 2, "Trusted commute fixture lost route evidence.");
+  return { commute, evidence: items };
 }
 
 async function seedOwner() {
@@ -578,12 +641,18 @@ async function validateEnabledTrustedPlaceAutomation() {
     source: string;
     reviewStatus: string;
     eventId: string;
+    eventType: string;
     startedAt: string;
     stoppedAt: string;
   }>(
-    `select place_id as "placeId", confidence, source, review_status as "reviewStatus",
-            created_from_event_id as "eventId", started_at as "startedAt", stopped_at as "stoppedAt"
-     from time_entries where workspace_id = $1 and user_id = $2`,
+    `select te.place_id as "placeId", te.confidence, te.source,
+            te.review_status as "reviewStatus", te.created_from_event_id as "eventId",
+            ae.event_type as "eventType", te.started_at as "startedAt", te.stopped_at as "stoppedAt"
+     from time_entries te
+     join activity_events ae
+       on ae.id = te.created_from_event_id
+      and ae.workspace_id = te.workspace_id and ae.user_id = te.user_id
+     where te.workspace_id = $1 and te.user_id = $2`,
     [WORKSPACE_ID, USER_ID]
   );
   assert(automaticEntries.rows.length > 0, "Enabled mode created no trusted-place automatic entries.");
@@ -593,6 +662,10 @@ async function validateEnabledTrustedPlaceAutomation() {
       entry.source === "location_learning" && entry.reviewStatus === "confirmed"
     ),
     "Enabled mode automatically wrote an untrusted or insufficient-confidence entry."
+  );
+  assert(
+    automaticEntries.rows.every((entry) => entry.eventType !== "commute_detected"),
+    "An uncertain acceptance-fixture commute was automatically logged."
   );
   assert(await count("review_items") > 0, "Enabled mode did not keep uncertain stays or commutes in Review.");
   const automaticReview = await pool.query(
@@ -628,6 +701,206 @@ async function validateEnabledTrustedPlaceAutomation() {
     [WORKSPACE_ID, USER_ID, blocked.placeId, blocked.startedAt, blocked.stoppedAt]
   );
   assert.equal(overlapReview.rowCount, 1, "An overlapping trusted stay did not fall back to Review.");
+}
+
+async function validateEnabledTrustedCommuteAutomation() {
+  await clearDerivedLocationState();
+  process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_enabled";
+  const fixture = trustedCommuteFixture();
+  const enabledBatch = batch(
+    "db-enabled-trusted-commute",
+    fixture.evidence,
+    "v2_enabled",
+    fixture.evidence[0].occurredAt
+  );
+  await ingestLocationEvidence(enabledBatch, session, PROCESSING_AT);
+
+  const automaticCommutes = await pool.query<{
+    id: string;
+    eventId: string;
+    categoryName: string | null;
+    placeId: string | null;
+    description: string | null;
+    confidence: string;
+    source: string;
+    reviewStatus: string;
+    eventReviewStatus: string;
+    semanticDisposition: string | null;
+    semanticReason: string | null;
+  }>(
+    `select te.id, te.created_from_event_id as "eventId", c.name as "categoryName",
+            te.place_id as "placeId", te.description, te.confidence, te.source,
+            te.review_status as "reviewStatus", ae.review_status as "eventReviewStatus",
+            ae.raw_payload ->> 'semanticDisposition' as "semanticDisposition",
+            ae.raw_payload ->> 'semanticReason' as "semanticReason"
+     from time_entries te
+     join activity_events ae
+       on ae.id = te.created_from_event_id
+      and ae.workspace_id = te.workspace_id and ae.user_id = te.user_id
+     left join categories c
+       on c.id = te.category_id and c.workspace_id = te.workspace_id
+     where te.workspace_id = $1 and te.user_id = $2 and ae.event_type = 'commute_detected'`,
+    [WORKSPACE_ID, USER_ID]
+  );
+  assert.equal(automaticCommutes.rows.length, 1, "Trusted commute did not create exactly one automatic entry.");
+  const automaticCommute = automaticCommutes.rows[0];
+  assert.deepEqual(
+    {
+      categoryName: automaticCommute.categoryName?.toLowerCase(),
+      placeId: automaticCommute.placeId,
+      description: automaticCommute.description,
+      confidence: automaticCommute.confidence,
+      source: automaticCommute.source,
+      reviewStatus: automaticCommute.reviewStatus,
+      eventReviewStatus: automaticCommute.eventReviewStatus,
+      semanticDisposition: automaticCommute.semanticDisposition,
+      semanticReason: automaticCommute.semanticReason
+    },
+    {
+      categoryName: "commute",
+      placeId: null,
+      description: null,
+      confidence: "medium_high",
+      source: "location_learning",
+      reviewStatus: "confirmed",
+      eventReviewStatus: "confirmed",
+      semanticDisposition: "auto_confirmed",
+      semanticReason: "enabled_trusted_commute"
+    },
+    "Trusted commute automatic entry did not preserve the category-only event-first contract."
+  );
+  const automaticReview = await pool.query(
+    `select 1 from review_items
+     where workspace_id = $1 and user_id = $2 and event_id = $3`,
+    [WORKSPACE_ID, USER_ID, automaticCommute.eventId]
+  );
+  assert.equal(automaticReview.rowCount, 0, "An automatically logged commute also entered Review.");
+
+  await ingestLocationEvidence(enabledBatch, session, PROCESSING_AT);
+  const commuteCountAfterRetry = await pool.query<{ count: number }>(
+    `select count(*)::integer as count
+     from time_entries te
+     join activity_events ae on ae.id = te.created_from_event_id
+     where te.workspace_id = $1 and te.user_id = $2 and ae.event_type = 'commute_detected'`,
+    [WORKSPACE_ID, USER_ID]
+  );
+  assert.equal(commuteCountAfterRetry.rows[0].count, 1, "Trusted commute replay duplicated its automatic entry.");
+
+  await pool.query(
+    "delete from time_entries where id = $1 and workspace_id = $2 and user_id = $3",
+    [automaticCommute.id, WORKSPACE_ID, USER_ID]
+  );
+  await ingestLocationEvidence(enabledBatch, session, PROCESSING_AT);
+  const commuteCountAfterDeleteReplay = await pool.query<{ count: number }>(
+    `select count(*)::integer as count
+     from time_entries te
+     join activity_events ae on ae.id = te.created_from_event_id
+     where te.workspace_id = $1 and te.user_id = $2 and ae.event_type = 'commute_detected'`,
+    [WORKSPACE_ID, USER_ID]
+  );
+  assert.equal(
+    commuteCountAfterDeleteReplay.rows[0].count,
+    0,
+    "Replay recreated an automatic commute after the user deleted it."
+  );
+
+  await clearDerivedLocationState();
+  await pool.query(
+    `insert into time_entries (
+       workspace_id, user_id, source, confidence, review_status,
+       description, started_at, stopped_at
+     ) values ($1, $2, 'manual_app', 'high', 'confirmed', 'Existing tracked time', $3, $4)`,
+    [WORKSPACE_ID, USER_ID, fixture.commute.startedAt, fixture.commute.stoppedAt]
+  );
+  const overlapBatch = batch(
+    "db-enabled-trusted-commute-overlap",
+    fixture.evidence,
+    "v2_enabled",
+    fixture.evidence[0].occurredAt
+  );
+  await ingestLocationEvidence(overlapBatch, session, PROCESSING_AT);
+  const overlapReview = await pool.query<{
+    id: string;
+    eventId: string;
+    status: string;
+    notes: string | null;
+    semanticReason: string | null;
+  }>(
+    `select ri.id, ri.event_id as "eventId", ri.status, ri.notes,
+            ae.raw_payload ->> 'semanticReason' as "semanticReason"
+     from review_items ri
+     join activity_events ae
+       on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
+     where ri.workspace_id = $1 and ri.user_id = $2
+       and ri.status = 'open' and ae.event_type = 'commute_detected'`,
+    [WORKSPACE_ID, USER_ID]
+  );
+  assert.equal(overlapReview.rows.length, 1, "An overlapping trusted commute did not fall back to Review.");
+  assert.equal(overlapReview.rows[0].semanticReason, "confirmed_time_overlap");
+  assert.match(overlapReview.rows[0].notes ?? "", /this commute overlaps existing tracked time/i);
+  const overlapAutomaticEntry = await pool.query(
+    `select 1 from time_entries te
+     join activity_events ae on ae.id = te.created_from_event_id
+     where te.workspace_id = $1 and te.user_id = $2 and ae.event_type = 'commute_detected'`,
+    [WORKSPACE_ID, USER_ID]
+  );
+  assert.equal(overlapAutomaticEntry.rowCount, 0, "An overlapping commute was automatically logged.");
+
+  await pool.query(
+    `delete from time_entries
+     where workspace_id = $1 and user_id = $2 and source = 'manual_app' and description = 'Existing tracked time'`,
+    [WORKSPACE_ID, USER_ID]
+  );
+  await ingestLocationEvidence(overlapBatch, session, PROCESSING_AT);
+  const preservedReview = await pool.query<{
+    status: string;
+    notes: string | null;
+    semanticReason: string | null;
+  }>(
+    `select ri.status, ri.notes, ae.raw_payload ->> 'semanticReason' as "semanticReason"
+     from review_items ri
+     join activity_events ae on ae.id = ri.event_id
+     where ri.id = $1`,
+    [overlapReview.rows[0].id]
+  );
+  assert.equal(preservedReview.rows[0].status, "open");
+  assert.equal(preservedReview.rows[0].semanticReason, "existing_review_preserved");
+  assert.match(preservedReview.rows[0].notes ?? "", /already awaiting your decision/i);
+  assert.equal(
+    (await pool.query(
+      `select 1 from time_entries where workspace_id = $1 and user_id = $2 and created_from_event_id = $3`,
+      [WORKSPACE_ID, USER_ID, overlapReview.rows[0].eventId]
+    )).rowCount,
+    0,
+    "Removing an overlap silently promoted an existing Review item."
+  );
+
+  await resolveLocationReviewAction(
+    overlapReview.rows[0].id,
+    { action: "ignore_once_location" },
+    session
+  );
+  await ingestLocationEvidence(overlapBatch, session, PROCESSING_AT);
+  const ignoredAfterReplay = await pool.query<{ reviewStatus: string; eventReviewStatus: string }>(
+    `select ri.status as "reviewStatus", ae.review_status as "eventReviewStatus"
+     from review_items ri
+     join activity_events ae on ae.id = ri.event_id
+     where ri.id = $1`,
+    [overlapReview.rows[0].id]
+  );
+  assert.deepEqual(
+    ignoredAfterReplay.rows[0],
+    { reviewStatus: "ignored", eventReviewStatus: "ignored" },
+    "Replay reopened an ignored commute decision."
+  );
+  assert.equal(
+    (await pool.query(
+      `select 1 from time_entries where workspace_id = $1 and user_id = $2 and created_from_event_id = $3`,
+      [WORKSPACE_ID, USER_ID, overlapReview.rows[0].eventId]
+    )).rowCount,
+    0,
+    "Replay created an entry for an ignored commute."
+  );
 }
 
 async function validateV1Compatibility() {
@@ -700,9 +973,10 @@ async function main() {
     await validateSemanticIdempotencyAndRollback();
     await validateCommuteReviewCategoryAndDescription();
     await validateEnabledTrustedPlaceAutomation();
+    await validateEnabledTrustedCommuteAutomation();
     await validateFinalisationWithoutNewEvidence();
     await validateV1Compatibility();
-    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place automation, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, and V1 compatibility.");
+    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, overlap fallback, terminal-decision preservation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, and V1 compatibility.");
   } finally {
     if (process.env.KEEP_LOCATION_V2_DB_FIXTURE !== "1") {
       await pool.query("delete from workspaces where id = $1", [WORKSPACE_ID]).catch(() => undefined);

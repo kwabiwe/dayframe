@@ -63,7 +63,7 @@ Behavior defaults:
 - Home: ambiguous and review-first by default.
 - Unknown stays over the threshold create review items.
 - Manual mobile starts and Siri Shortcut/NFC starts use the values supplied by the user or Shortcut; blank manual starts stay blank. Auto-log defaults are reserved for user-enabled automatic sources such as Health imports, walking/running, places, and opt-in commute/place learning.
-- Opt-in commute/place learning captures coarse mobile location samples, saved-place visit transitions, review-first commute candidates, and learned unsaved-place candidates. It defaults off and should stay review-first until real-device behaviour is trusted.
+- Opt-in commute/place learning captures coarse mobile location samples, saved-place visit transitions, and learned unsaved-place candidates. It defaults off. In the separately enabled Location V2 automatic mode, only finalised, continuous, route-backed `medium_high`/`high` commutes between saved Dayframe endpoints auto-log; all other commute candidates remain Review-first until real-device behaviour is trusted.
 
 Expo Go cannot fully exercise background geofencing; use a development build.
 

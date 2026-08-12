@@ -32,6 +32,9 @@ const commute: CommuteSegment = {
   gapDurationSeconds: 1_200,
   continuityStatus: "continuous",
   confidence: "medium_high",
+  fromPlaceId: "00000000-0000-4000-8000-000000000300",
+  toPlaceId: "00000000-0000-4000-8000-000000000400",
+  qualificationReason: "significant_endpoint_displacement",
   evidenceIds: ["route-1", "route-2", "route-3"]
 };
 
@@ -72,10 +75,35 @@ describe("locationSemanticDisposition", () => {
     });
   });
 
-  it("keeps commutes review-first even with strong endpoints", () => {
+  it("auto-confirms a route-backed medium-high commute between saved endpoints", () => {
     expect(locationSemanticDisposition("v2_enabled", commute)).toEqual({
+      action: "auto_confirm",
+      reason: "enabled_trusted_commute"
+    });
+  });
+
+  it("allows an evidence-backed saved-place round trip", () => {
+    expect(locationSemanticDisposition("v2_enabled", {
+      ...commute,
+      toPlaceId: commute.fromPlaceId,
+      qualificationReason: "same_place_meaningful_round_trip"
+    })).toEqual({
+      action: "auto_confirm",
+      reason: "enabled_trusted_commute"
+    });
+  });
+
+  it.each([
+    [{ ...commute, status: "closed" }, "segment_not_finalised"],
+    [{ ...commute, fromPlaceId: null }, "untrusted_commute_endpoints"],
+    [{ ...commute, confidence: "medium" }, "insufficient_confidence"],
+    [{ ...commute, continuityStatus: "uncertain_gap" }, "uncertain_boundary"],
+    [{ ...commute, routeSampleCount: 1 }, "insufficient_route_evidence"],
+    [{ ...commute, qualificationReason: "endpoint_only_significant_distance" }, "insufficient_route_evidence"]
+  ] as const)("keeps unsafe commutes in Review", (segment, reason) => {
+    expect(locationSemanticDisposition("v2_enabled", segment as CommuteSegment)).toEqual({
       action: "review",
-      reason: "commute_review_first"
+      reason
     });
   });
 });
