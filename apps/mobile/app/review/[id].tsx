@@ -57,7 +57,7 @@ export default function LocationReviewDetailScreen() {
         fetchBootstrap()
       ]);
       setEvidence(nextEvidence);
-      setDescription(nextEvidence.display.title);
+      setDescription(locationActivityLabel(nextEvidence));
       setReviewItems(bootstrap.reviewItems);
       if (nextEvidence.map.centre) {
         setSelectedPoint({
@@ -125,8 +125,8 @@ export default function LocationReviewDetailScreen() {
         <View style={styles.contentStack}>
           <View style={styles.panel}>
             <Text style={styles.label}>Location evidence</Text>
-            <Text style={styles.sectionTitle}>{evidence?.display.title ?? "Review detected time"}</Text>
-            <Text style={styles.muted}>Inspect the evidence and uncertainty before Dayframe records time.</Text>
+            <Text style={styles.sectionTitle}>{evidence ? locationActivityLabel(evidence) : "Review detected time"}</Text>
+            {evidence ? <Text style={styles.reviewMetaLine}>{formatEvidenceTimeRange(evidence)}</Text> : null}
           </View>
 
           {loading ? (
@@ -153,61 +153,16 @@ export default function LocationReviewDetailScreen() {
                   selectedPoint={selectedPoint}
                   selectedPointRadiusMeters={evidence.segment.kind === "stay" ? 80 : undefined}
                   selectedSavedPlaceId={selectedSavedPlaceId}
+                  showDetails={false}
                   onSelectPoint={editingCentre ? setSelectedPoint : undefined}
                   onSelectSavedPlace={setSelectedSavedPlaceId}
                 />
-                {evidence.evidenceExpired ? (
-                  <Text style={styles.muted}>Raw evidence has expired; the derived visit remains available.</Text>
-                ) : evidence.evidenceExpiresAt ? (
-                  <Text style={styles.muted}>Raw evidence is retained until {formatDateTime(evidence.evidenceExpiresAt)}.</Text>
-                ) : null}
-              </View>
-
-              <View style={styles.panel}>
-                <Text style={styles.sectionTitle}>Time and uncertainty</Text>
-                <Text style={styles.reviewMetaLine}>
-                  {formatDateTime(evidence.segment.startedAt)}–{evidence.segment.stoppedAt ? formatDateTime(evidence.segment.stoppedAt) : "ongoing"}
-                </Text>
-                <Text style={styles.muted}>{uncertaintySummary(evidence)}</Text>
-                {evidence.map.gaps.map((gap) => (
-                  <Text key={`${gap.startedAt}-${gap.stoppedAt}`} style={styles.reviewMetaLine}>
-                    Evidence gap · {Math.round(gap.durationSeconds / 60)} minutes
-                  </Text>
-                ))}
-                {evidence.suggestedSplitPoints.map((split) => (
-                  <Pressable
-                    key={split.at}
-                    accessibilityRole="button"
-                    disabled={saving}
-                    style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                    onPress={() => setSelectedSplitAt(split.at)}
-                  >
-                    <Text style={styles.secondaryButtonText}>Preview split near {formatTime(split.at)}</Text>
-                  </Pressable>
-                ))}
-                {selectedSplitAt ? (
-                  <View style={styles.activeEditSection}>
-                    <Text style={styles.reviewMetaLine}>Before: {formatTime(evidence.segment.startedAt)}–{formatTime(selectedSplitAt)}</Text>
-                    <Text style={styles.reviewMetaLine}>After: {formatTime(selectedSplitAt)}–{evidence.segment.stoppedAt ? formatTime(evidence.segment.stoppedAt) : "ongoing"}</Text>
-                    <Pressable
-                      accessibilityRole="button"
-                      disabled={saving}
-                      style={pressable(styles.primaryButton, styles.buttonPressed)}
-                      onPress={() => void perform(
-                        { action: "split", splitAt: selectedSplitAt },
-                        "The visit was split into two review items."
-                      )}
-                    >
-                      <Text style={styles.primaryButtonText}>Commit this split</Text>
-                    </Pressable>
-                  </View>
-                ) : null}
               </View>
 
               {evidence.map.nearbySavedPlaces.length ? (
                 <View style={styles.panel}>
                   <Text style={styles.sectionTitle}>Correct the place</Text>
-                  <Text style={styles.muted}>Choosing a saved place teaches future matching without enlarging its radius.</Text>
+                  <Text style={styles.muted}>Choose a nearby saved place if Dayframe matched this incorrectly.</Text>
                   {evidence.map.nearbySavedPlaces.map((place) => (
                     <Pressable
                       key={place.id}
@@ -238,15 +193,15 @@ export default function LocationReviewDetailScreen() {
               {evidence.segment.kind === "stay" ? (
                 <View style={styles.panel}>
                   <Text style={styles.sectionTitle}>Save this place</Text>
-                  <Text style={styles.muted}>The proposed 80 metre radius is shown on the map and will not expand from a noisy sample.</Text>
+                  <Text style={styles.muted}>Name this place so Dayframe can recognise it next time.</Text>
                   <Pressable
                     accessibilityRole="button"
                     style={pressable(styles.secondaryButton, styles.buttonPressed)}
                     onPress={() => setEditingCentre((current) => !current)}
                   >
-                    <Text style={styles.secondaryButtonText}>{editingCentre ? "Finish moving centre" : "Move proposed centre"}</Text>
+                    <Text style={styles.secondaryButtonText}>{editingCentre ? "Finish moving pin" : "Move map pin"}</Text>
                   </Pressable>
-                  {editingCentre ? <Text style={styles.muted}>Tap the map to move the proposed centre. Nothing is saved until you confirm below.</Text> : null}
+                  {editingCentre ? <Text style={styles.muted}>Tap the map to move the pin. Nothing is saved until you confirm below.</Text> : null}
                   <TextInput
                     accessibilityLabel="New saved place name"
                     placeholder="Place name"
@@ -271,23 +226,59 @@ export default function LocationReviewDetailScreen() {
               ) : null}
 
               <View style={styles.panel}>
-                <Text style={styles.sectionTitle}>Resolve</Text>
+                <Text style={styles.sectionTitle}>
+                  {evidence.segment.kind === "commute" ? "Record commute" : "Resolve visit"}
+                </Text>
+                <Text style={styles.label}>Activity</Text>
                 <TextInput
-                  accessibilityLabel="Time entry description"
+                  accessibilityLabel="Activity description"
                   maxLength={500}
-                  placeholder="Description"
+                  placeholder="Activity"
                   placeholderTextColor={theme.textSecondary}
                   style={styles.textInput}
                   value={description}
                   onChangeText={setDescription}
                 />
+                {evidence.suggestedSplitPoints.map((split) => (
+                  <Pressable
+                    key={split.at}
+                    accessibilityRole="button"
+                    disabled={saving}
+                    style={pressable(styles.secondaryButton, styles.buttonPressed)}
+                    onPress={() => setSelectedSplitAt(split.at)}
+                  >
+                    <Text style={styles.secondaryButtonText}>Split near {formatTime(split.at)}</Text>
+                  </Pressable>
+                ))}
+                {selectedSplitAt ? (
+                  <View style={styles.activeEditSection}>
+                    <Text style={styles.reviewMetaLine}>Before: {formatTime(evidence.segment.startedAt)}–{formatTime(selectedSplitAt)}</Text>
+                    <Text style={styles.reviewMetaLine}>After: {formatTime(selectedSplitAt)}–{evidence.segment.stoppedAt ? formatTime(evidence.segment.stoppedAt) : "ongoing"}</Text>
+                    <Pressable
+                      accessibilityRole="button"
+                      disabled={saving}
+                      style={pressable(styles.primaryButton, styles.buttonPressed)}
+                      onPress={() => void perform(
+                        { action: "split", splitAt: selectedSplitAt },
+                        "The detected time was split into two review items."
+                      )}
+                    >
+                      <Text style={styles.primaryButtonText}>Confirm split</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
                 <Pressable
                   accessibilityRole="button"
                   disabled={saving}
                   style={({ pressed }) => [styles.primaryButton, pressed ? styles.buttonPressed : null, saving ? styles.buttonDisabled : null]}
-                  onPress={() => void perform({ action: "edit_and_confirm", edit: { description } }, "This location suggestion was confirmed.")}
+                  onPress={() => void perform(
+                    { action: "edit_and_confirm", edit: { description } },
+                    evidence.segment.kind === "commute" ? "The commute was recorded." : "The visit was recorded."
+                  )}
                 >
-                  <Text style={styles.primaryButtonText}>{saving ? "Saving…" : "Confirm edits"}</Text>
+                  <Text style={styles.primaryButtonText}>
+                    {saving ? "Saving…" : evidence.segment.kind === "commute" ? "Record commute" : "Record visit"}
+                  </Text>
                 </Pressable>
                 <Pressable
                   accessibilityRole="button"
@@ -315,7 +306,7 @@ export default function LocationReviewDetailScreen() {
                   accessibilityRole="button"
                   disabled={saving}
                   style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                  onPress={() => void perform({ action: "ignore_once_location" }, "This suggestion was ignored. Raw evidence will still follow its retention window.")}
+                  onPress={() => void perform({ action: "ignore_once_location" }, "This suggestion was ignored.")}
                 >
                   <Text style={styles.secondaryButtonText}>Ignore suggestion</Text>
                 </Pressable>
@@ -355,25 +346,20 @@ function adjacentLocationReview(
     .sort((a, b) => a.gap - b.gap || a.item.id.localeCompare(b.item.id))[0]?.item;
 }
 
-function uncertaintySummary(evidence: LocationReviewEvidenceDto) {
-  const start = evidence.segment.startUncertainty;
-  const stop = evidence.segment.stopUncertainty;
-  if (evidence.segment.continuityStatus === "uncertain_gap") {
-    return "A gap limits boundary precision. Dayframe has kept the supported bounds instead of inventing an exact departure.";
-  }
-  if (start?.lower !== start?.upper || stop?.lower !== stop?.upper) {
-    return "Times are estimated between the nearest supporting evidence points.";
-  }
-  return "Arrival and departure are supported by nearby evidence anchors.";
+function locationActivityLabel(evidence: LocationReviewEvidenceDto) {
+  return evidence.segment.kind === "commute" ? "Commute" : evidence.display.title;
 }
 
-function formatDateTime(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(new Date(value));
+function formatEvidenceTimeRange(evidence: LocationReviewEvidenceDto) {
+  const startedAt = new Date(evidence.segment.startedAt);
+  const stoppedAt = evidence.segment.stoppedAt ? new Date(evidence.segment.stoppedAt) : null;
+  const date = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" }).format(startedAt);
+  const start = formatTime(evidence.segment.startedAt);
+  const stop = stoppedAt && evidence.segment.stoppedAt ? formatTime(evidence.segment.stoppedAt) : "ongoing";
+  const durationMinutes = stoppedAt
+    ? Math.max(0, Math.round((stoppedAt.getTime() - startedAt.getTime()) / 60_000))
+    : null;
+  return `${date} · ${start}–${stop}${durationMinutes === null ? "" : ` · ${durationMinutes}m`}`;
 }
 
 function formatTime(value: string) {

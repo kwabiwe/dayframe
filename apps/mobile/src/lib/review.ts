@@ -228,6 +228,23 @@ export function reviewConfirmLabel(
   return "Confirm activity";
 }
 
+export function reviewConfidencePresentation(confidence: string) {
+  switch (confidence) {
+    case "high":
+      return { label: "High", score: 5 } as const;
+    case "medium_high":
+      return { label: "Medium high", score: 4 } as const;
+    case "medium":
+      return { label: "Medium", score: 3 } as const;
+    case "low":
+      return { label: "Low", score: 2 } as const;
+    case "hint":
+      return { label: "Hint", score: 1 } as const;
+    default:
+      return { label: "Unknown", score: 1 } as const;
+  }
+}
+
 export function reviewActionOrder(item: MobileReviewItem) {
   return [
     ...(hasV2LocationEvidence(item) ? ["view_evidence" as const] : []),

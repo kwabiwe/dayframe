@@ -24,6 +24,8 @@ describe("V2 location review quality contracts", () => {
   });
 
   it("does not use a generated commute title as a confirmed description", () => {
+    expect(ingestSource).toContain('if (segment.kind === "commute") return "Commute"');
+    expect(ingestSource).not.toContain('return "Possible journey"');
     expect(reviewSource).toContain("confirmedLocationDescription");
     expect(reviewSource).not.toContain("edit?.description?.trim() || item.title");
   });

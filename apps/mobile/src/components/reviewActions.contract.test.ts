@@ -8,6 +8,7 @@ function source(relativePath: string) {
 
 const reviewSource = source("../../app/review.tsx");
 const evidenceSource = source("../../app/review/[id].tsx");
+const evidenceMapSource = source("./location/LocationEvidenceMap.tsx");
 const themeSource = source("../lib/mobileTheme.ts");
 const helperSource = source("../lib/review.ts");
 const menuSource = source("./OverflowMenu.tsx");
@@ -29,6 +30,29 @@ describe("mobile Review action contracts", () => {
   it("uses the shared mobile back affordance on Location Evidence", () => {
     expect(evidenceSource).toContain("<MobileBackButton");
     expect(evidenceSource).not.toContain(">‹</Text>");
+  });
+
+  it("keeps Review cards concise and expresses confidence accessibly", () => {
+    expect(reviewSource).toContain("reviewConfidencePresentation(item.confidence)");
+    expect(reviewSource).toContain("Confidence: ${confidence.label}, ${confidence.score} of 5");
+    expect(reviewSource).toContain("reviewOverlapRow");
+    expect(reviewSource).toContain("You can still confirm");
+    expect(reviewSource).not.toContain("Reports will show logged and covered time separately");
+    expect(reviewSource).not.toContain("ReviewDiagnosticsPanel");
+    expect(themeSource).toContain("reviewItemsSection");
+    expect(themeSource).toContain("reviewConfidenceDot");
+  });
+
+  it("presents Location Evidence as activity, time and map while retaining resolution actions", () => {
+    expect(evidenceSource).toContain("formatEvidenceTimeRange(evidence)");
+    expect(evidenceSource).toContain("showDetails={false}");
+    expect(evidenceSource).toContain('evidence.segment.kind === "commute" ? "Commute"');
+    expect(evidenceSource).toContain('action: "split"');
+    expect(evidenceSource).toContain('action: "merge"');
+    expect(evidenceSource).toContain('action: "record_once"');
+    expect(evidenceSource).not.toContain("Time and uncertainty");
+    expect(evidenceSource).not.toContain("Raw evidence is retained until");
+    expect(evidenceMapSource).toContain("showDetails = true");
   });
 
   it("hands Edit to the sheet only after the overflow modal has unmounted", () => {

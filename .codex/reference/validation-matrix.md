@@ -69,6 +69,8 @@ Required checks when touching Health import, Review, Confirm/Dismiss, or reproce
 Manual evidence:
 
 - Review before action.
+- On mobile, verify separate Review cards, prominent activity/time, five confidence dots with one VoiceOver `N of 5` label, compact overlap copy, and an About disclosure with no Health diagnostics. Check narrow width, Dynamic Type, Light/Dark/System, Reduce Motion, and rapid confirm/dismiss reflow.
+- On mobile Location Evidence, verify activity plus minute-level range and map without raw DTO/sample/retention/millisecond/standalone uncertainty copy. Confirm `Commute` replaces `Possible journey` and split, merge, place correction, save-place, record-once, confirm, and ignore remain reachable.
 - Confirm or Dismiss action.
 - Review after action.
 - Calendar/Timer/Reports showing created entry where applicable.
@@ -214,6 +216,7 @@ Required checks:
 - Native entry/review callbacks open the existing React Native sheets/routes using stable IDs and do not make direct API/timer mutations.
 - Repeated Today entries collapse by normalized description and category, descriptionless entries collapse when they have a category, truly blank uncategorized entries stay individual, totals sum grouped children, and expanded children remain individually editable.
 - Review action buttons remain tappable and readable on phone width.
+- Review cards remain visually distinct at phone width; the title/time hierarchy, five-step confidence control, concise overlap row, and Location Evidence activity/time/map hierarchy remain legible with Dynamic Type and VoiceOver.
 - No duplicate React keys or runtime overlays.
 - Light and dark theme remain legible.
 - For overlap changes, cover boundary-touch, sub-minute boundary noise, containment, partial overlap, chains, three-plus concurrency, cross-midnight/DST clipping, running entries with one captured `now`, input-order stability, and invalid/reversed intervals.
