@@ -62,7 +62,7 @@ Rollout has four server-authoritative modes, returned by bootstrap and acknowled
 - `v1`: stop and clear V2 capture; keep the previous geofence semantics.
 - `v2_shadow`: capture/replay V2 but emit no V2 review item or time-entry semantics; V1 remains active.
 - `v2_review`: suppress competing V1 location semantics and permit V2 stays/commutes that begin after the same-mode acknowledgement cutover to become review items only.
-- `v2_enabled`: the duplicate-suppressed V2 path plus a narrow automatic-write policy. A finalised stay may auto-confirm only when it matches a logging-enabled saved place or an accepted learned place linked to one, has `medium_high`/`high` confidence, has `continuous`, `supported_by_visit`, or `broken_by_other_place` continuity, and does not overlap confirmed/accepted time. It inherits the saved place's default category and activity description. Commutes, unknown/ambiguous matches, weak evidence, uncertain gaps, missing linkage, disabled logging, and overlaps remain review-first.
+- `v2_enabled`: the duplicate-suppressed V2 path plus a narrow automatic-write policy. A finalised stay may auto-confirm only when it matches a logging-enabled saved place or an accepted learned place linked to one, has `medium_high`/`high` confidence, has `continuous`, `supported_by_visit`, or `broken_by_other_place` continuity, and does not overlap confirmed/accepted time. It inherits the saved place's default category and activity description. A finalised commute may auto-confirm only with `medium_high`/`high` confidence, `continuous` continuity, at least two route samples, a `significant_endpoint_displacement` or `same_place_meaningful_round_trip` qualification, and saved Dayframe places at both endpoints. Its derived entry is category-only `Commute`, with no fabricated description or place. Unknown/ambiguous endpoints, weak or endpoint-only evidence, uncertain gaps, missing linkage, disabled stay logging, and overlaps remain review-first.
 
 The server default is `v2_shadow` through `DAYFRAME_LOCATION_ROLLOUT_MODE`. A legacy client request for `v2` maps to `v2_review`, but new code and operational documentation must use the four canonical names. The server records a semantic cutover only after a client has acknowledged the same server mode; final segments that began before that cutover cannot backfill user-visible semantics. This acknowledgement barrier is the protection against shadow-era history suddenly producing duplicate suggestions.
 
@@ -74,6 +74,14 @@ confirms, records once, saves a place and confirms, splits and confirms, or
 merges and confirms, that overlap is intentional and must not block the
 transaction. Source event/segment identifiers and Review mutation receipts
 still provide idempotency.
+
+Policy rollout and replay must not rewrite an earlier user-facing decision. An
+event already awaiting Review remains there even if a later deployment would
+make it auto-eligible. Confirmed, accepted, and ignored events are terminal for
+semantic replay. If the user deletes an automatically logged commute through
+the ordinary entry editor, the confirmed source event remains as its audit
+record and prevents retained-evidence replay from recreating the entry. This is
+the false-positive recovery path; no commute-specific Undo surface is added.
 
 Reverse geocoding is display-only: use saved/learned identity first, invoke a provider only for actionable/visible unknowns, cache a bounded provider/version/locale result, and never put the provider's raw object in an event. V2 segmentation must not call reverse geocoding.
 

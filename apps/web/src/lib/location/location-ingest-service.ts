@@ -370,6 +370,15 @@ async function emitSemanticSegment(
     ? stayIds.get(segment.clientSegmentId)
     : commuteIds.get(segment.clientSegmentId);
   if (!databaseSegmentId) return false;
+  const clientEventId = segmentEventClientId(segment);
+  const existingSemanticEvent = await client.query<{ reviewStatus: string }>(
+    `select review_status as "reviewStatus"
+     from activity_events
+     where workspace_id = $1 and user_id = $2 and client_event_id = $3
+     for update`,
+    [session.workspaceId, session.userId, clientEventId]
+  );
+  const existingReviewStatus = existingSemanticEvent.rows[0]?.reviewStatus ?? null;
   const eventType = segment.kind === "commute"
     ? "commute_detected"
     : segment.placeMatchKind === "learned"
@@ -391,18 +400,37 @@ async function emitSemanticSegment(
   if (trustedPlace && !trustedPlace.loggingEnabled) return false;
   let disposition = locationSemanticDisposition(rolloutMode, segment);
   if (disposition.action === "auto_confirm" && !trustedPlace) {
-    disposition = { action: "review", reason: "untrusted_place" };
+    if (segment.kind === "stay") {
+      disposition = { action: "review", reason: "untrusted_place" };
+    } else if (!await savedCommuteEndpointsExist(client, session, segment)) {
+      disposition = { action: "review", reason: "untrusted_commute_endpoints" };
+    }
   }
-  const overlapsConfirmedTime = disposition.action === "auto_confirm"
+  const preserveTerminalDecision = existingReviewStatus != null && existingReviewStatus !== "needs_review";
+  const preserveExistingReview = existingReviewStatus === "needs_review";
+  const overlapsConfirmedTime =
+    disposition.action === "auto_confirm" &&
+    !preserveTerminalDecision &&
+    !preserveExistingReview
     ? await hasConfirmedTimeOverlap(
         client,
         session,
         segment.startedAt,
         segment.stoppedAt!,
-        segmentEventClientId(segment)
+        clientEventId
       )
     : false;
-  const autoConfirm = disposition.action === "auto_confirm" && !overlapsConfirmedTime;
+  const autoConfirm =
+    disposition.action === "auto_confirm" &&
+    !preserveTerminalDecision &&
+    !preserveExistingReview &&
+    !overlapsConfirmedTime;
+  const shouldReview = !preserveTerminalDecision && !autoConfirm;
+  const semanticReason = overlapsConfirmedTime
+    ? "confirmed_time_overlap"
+    : preserveExistingReview && disposition.action === "auto_confirm"
+      ? "existing_review_preserved"
+      : disposition.reason;
   const rawPayload = segment.kind === "stay"
     ? {
         clientSegmentId: segment.clientSegmentId,
@@ -413,7 +441,7 @@ async function emitSemanticSegment(
         startedAt: segment.startedAt,
         stoppedAt: segment.stoppedAt,
         semanticDisposition: autoConfirm ? "auto_confirmed" : "needs_review",
-        semanticReason: overlapsConfirmedTime ? "confirmed_time_overlap" : disposition.reason
+        semanticReason
       }
     : {
         clientSegmentId: segment.clientSegmentId,
@@ -425,8 +453,8 @@ async function emitSemanticSegment(
         continuityStatus: segment.continuityStatus,
         startedAt: segment.startedAt,
         stoppedAt: segment.stoppedAt,
-        semanticDisposition: "needs_review",
-        semanticReason: disposition.reason
+        semanticDisposition: autoConfirm ? "auto_confirmed" : "needs_review",
+        semanticReason
       };
   const event = await client.query<{ id: string }>(
      `insert into activity_events (
@@ -459,7 +487,7 @@ async function emitSemanticSegment(
     [
       session.workspaceId,
       session.userId,
-      segmentEventClientId(segment),
+      clientEventId,
       eventType,
       segment.startedAt,
       segment.confidence,
@@ -471,6 +499,17 @@ async function emitSemanticSegment(
   );
   const title = trustedPlace?.description ?? await segmentTitle(client, session, segment);
   if (autoConfirm) {
+    const automaticEntry = segment.kind === "commute"
+      ? {
+          categoryId: suggestedCategoryId,
+          placeId: null,
+          description: null
+        }
+      : {
+          categoryId: trustedPlace?.categoryId ?? null,
+          placeId: trustedPlace?.placeId ?? null,
+          description: title
+        };
     await client.query(
       `insert into time_entries (
          workspace_id, user_id, category_id, place_id, source, confidence, review_status,
@@ -484,16 +523,23 @@ async function emitSemanticSegment(
       [
         session.workspaceId,
         session.userId,
-        trustedPlace!.categoryId,
-        trustedPlace!.placeId,
+        automaticEntry.categoryId,
+        automaticEntry.placeId,
         segment.confidence,
-        title,
+        automaticEntry.description,
         segment.startedAt,
         segment.stoppedAt,
         event.rows[0].id
       ]
     );
-  } else {
+  } else if (shouldReview) {
+    const notes = overlapsConfirmedTime
+      ? `Automatic logging paused because this ${segment.kind === "commute" ? "commute" : "visit"} overlaps existing tracked time. You can still confirm it from Review.`
+      : preserveExistingReview && disposition.action === "auto_confirm"
+        ? `This ${segment.kind === "commute" ? "commute" : "visit"} remains in Review because it was already awaiting your decision.`
+        : segment.continuityStatus === "uncertain_gap"
+          ? "The boundary includes an evidence gap; inspect the timeline before confirming."
+          : "Ordered location evidence supports this suggestion.";
     await client.query(
       `insert into review_items (
          workspace_id, user_id, event_id, location_segment_id, type, title,
@@ -516,11 +562,7 @@ async function emitSemanticSegment(
         segment.startedAt,
         segment.stoppedAt,
         segment.confidence,
-        overlapsConfirmedTime
-          ? "Automatic logging paused because this visit overlaps existing tracked time. You can still confirm it from Review."
-          : segment.continuityStatus === "uncertain_gap"
-            ? "The boundary includes an evidence gap; inspect the timeline before confirming."
-            : "Ordered location evidence supports this suggestion."
+        notes
       ]
     );
     await client.query(
@@ -542,11 +584,7 @@ async function emitSemanticSegment(
         segment.startedAt,
         segment.stoppedAt,
         segment.confidence,
-        overlapsConfirmedTime
-          ? "Automatic logging paused because this visit overlaps existing tracked time. You can still confirm it from Review."
-          : segment.continuityStatus === "uncertain_gap"
-            ? "The boundary includes an evidence gap; inspect the timeline before confirming."
-            : "Ordered location evidence supports this suggestion.",
+        notes,
         session.workspaceId,
         session.userId,
         event.rows[0].id
@@ -554,13 +592,18 @@ async function emitSemanticSegment(
     );
   }
   if (segment.kind === "stay") {
+    const segmentReviewStatus = preserveTerminalDecision
+      ? existingReviewStatus
+      : autoConfirm
+        ? "confirmed"
+        : "needs_review";
     await client.query(
       `update stay_segments
        set created_from_event_id = $1, review_status = $2, updated_at = now()
        where id = $3 and workspace_id = $4 and user_id = $5`,
       [
         event.rows[0].id,
-        autoConfirm ? "confirmed" : "needs_review",
+        segmentReviewStatus,
         databaseSegmentId,
         session.workspaceId,
         session.userId
@@ -574,6 +617,22 @@ async function emitSemanticSegment(
     );
   }
   return true;
+}
+
+async function savedCommuteEndpointsExist(
+  client: import("pg").PoolClient,
+  session: RequestSession,
+  segment: CommuteSegment
+) {
+  if (!segment.fromPlaceId || !segment.toPlaceId) return false;
+  const endpointIds = [...new Set([segment.fromPlaceId, segment.toPlaceId])];
+  const result = await client.query<{ count: number }>(
+    `select count(*)::integer as count
+     from places
+     where workspace_id = $1 and id = any($2::uuid[])`,
+    [session.workspaceId, endpointIds]
+  );
+  return result.rows[0]?.count === endpointIds.length;
 }
 
 type TrustedPlaceContext = {
