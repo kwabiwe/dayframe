@@ -168,9 +168,15 @@ export const LocationReviewActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("ignore_once_location") }).strict(),
   z.object({ action: z.literal("edit_and_confirm"), edit: ReviewEntryEditSchema }).strict(),
   z.object({
-    action: z.enum(["change_place", "change_place_and_confirm"]),
+    action: z.literal("change_place"),
     placeId: z.string().uuid().nullable(),
     learnedPlaceId: z.string().uuid().nullable().optional()
+  }).strict(),
+  z.object({
+    action: z.literal("change_place_and_confirm"),
+    placeId: z.string().uuid().nullable(),
+    learnedPlaceId: z.string().uuid().nullable().optional(),
+    edit: ReviewEntryEditSchema.optional()
   }).strict(),
   z.object({ action: z.literal("record_once"), edit: ReviewEntryEditSchema.optional() }).strict(),
   z.object({

@@ -137,6 +137,11 @@ async function resolveClosedLocationReview(
       action.action === "edit_and_confirm" &&
       item.status === "accepted" &&
       await locationEditMatchesExisting(client, item, action.edit, session)
+    ) ||
+    (
+      action.action === "change_place_and_confirm" &&
+      item.status === "accepted" &&
+      await locationEditMatchesExisting(client, item, action.edit ?? {}, session)
     );
   if (equivalent) {
     return {
@@ -410,7 +415,7 @@ async function changePlace(
     return confirmReview(
       client,
       { ...item, suggestedPlaceId: action.placeId },
-      undefined,
+      action.edit,
       session,
       action.action,
       action.placeId
