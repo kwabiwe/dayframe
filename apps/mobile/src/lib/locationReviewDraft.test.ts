@@ -3,6 +3,8 @@ import {
   buildLocationReviewEdit,
   buildLocationReviewResolutionAction,
   formatLocationReviewEditableTime,
+  initialLocationReviewDescription,
+  keyboardRevealScrollOffset,
   locationActivityGlyphName,
   parseLocationReviewWindow
 } from "./locationReviewDraft";
@@ -20,6 +22,47 @@ const window = {
 };
 
 describe("Location Review editor draft", () => {
+  it("starts generated unmatched-visit and commute activity as an empty optional draft", () => {
+    expect(initialLocationReviewDescription({
+      placeName: null,
+      segmentKind: "stay",
+      title: "Visit at an unknown place"
+    })).toBe("");
+    expect(initialLocationReviewDescription({
+      placeName: null,
+      segmentKind: "commute",
+      title: "Commute"
+    })).toBe("");
+  });
+
+  it("preserves meaningful stay activity copy", () => {
+    expect(initialLocationReviewDescription({
+      placeName: null,
+      segmentKind: "stay",
+      title: "Visit library"
+    })).toBe("Visit library");
+    expect(initialLocationReviewDescription({
+      placeName: "Riverside Leisure Centre",
+      segmentKind: "stay",
+      title: "Workout"
+    })).toBe("Workout");
+  });
+
+  it("reveals only a keyboard-covered control with bounded clearance", () => {
+    expect(keyboardRevealScrollOffset({
+      controlHeight: 48,
+      controlTop: 520,
+      currentOffset: 120,
+      keyboardTop: 550
+    })).toBe(154);
+    expect(keyboardRevealScrollOffset({
+      controlHeight: 48,
+      controlTop: 420,
+      currentOffset: 120,
+      keyboardTop: 550
+    })).toBe(120);
+  });
+
   it("preserves hidden seconds and milliseconds when merging visible date/time edits", () => {
     const result = parseLocationReviewWindow(window);
     expect(result.error).toBeNull();

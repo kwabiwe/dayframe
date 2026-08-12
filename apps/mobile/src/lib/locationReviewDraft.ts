@@ -25,6 +25,38 @@ export type ParsedLocationReviewWindow = {
   stoppedAt: string;
 };
 
+export function initialLocationReviewDescription({
+  placeName,
+  segmentKind,
+  title
+}: {
+  placeName: string | null;
+  segmentKind: "stay" | "commute";
+  title: string;
+}) {
+  if (segmentKind === "commute") return "";
+  const normalizedTitle = title.trim().replace(/\s+/g, " ").toLowerCase();
+  if (!placeName?.trim() && normalizedTitle === "visit at an unknown place") return "";
+  return title;
+}
+
+export function keyboardRevealScrollOffset({
+  clearance = 16,
+  controlHeight,
+  controlTop,
+  currentOffset,
+  keyboardTop
+}: {
+  clearance?: number;
+  controlHeight: number;
+  controlTop: number;
+  currentOffset: number;
+  keyboardTop: number;
+}) {
+  const coveredBy = controlTop + controlHeight + clearance - keyboardTop;
+  return coveredBy > 0 ? Math.max(0, currentOffset + coveredBy) : currentOffset;
+}
+
 export function parseLocationReviewWindow(
   draft: LocationReviewWindowDraft
 ): { value: ParsedLocationReviewWindow | null; error: string | null } {
