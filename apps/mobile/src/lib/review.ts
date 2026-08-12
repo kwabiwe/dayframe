@@ -427,3 +427,54 @@ export function hasV2LocationEvidence(item: MobileReviewItem) {
       typeof item.rawPayload?.clientSegmentId === "string"
     );
 }
+
+export function locationReviewReasonCopy(
+  item: Pick<
+    MobileReviewItem,
+    "eventSource" | "eventType" | "rawPayload" | "suggestedPlaceId"
+  >,
+  overlapCount = 0
+) {
+  if (!isLocationReviewItem(item)) return null;
+
+  if (overlapCount > 0) {
+    return `Not added automatically · overlaps ${overlapCount} ${overlapCount === 1 ? "entry" : "entries"}`;
+  }
+
+  const reason = typeof item.rawPayload?.semanticReason === "string"
+    ? item.rawPayload.semanticReason
+    : null;
+  switch (reason) {
+    case "existing_review_preserved":
+      return "Already awaiting your decision before automatic logging was enabled";
+    case "untrusted_commute_endpoints":
+      return "Needs review · start or end place isn’t saved";
+    case "untrusted_place":
+      return "Needs review · place isn’t saved";
+    case "insufficient_route_evidence":
+      return "Needs review · route evidence is limited";
+    case "uncertain_boundary":
+      return "Needs review · time range is uncertain";
+    case "insufficient_confidence":
+      return "Needs review · confidence is below the automatic threshold";
+    case "review_mode":
+      return "Needs review · automatic location logging is not enabled";
+    case "segment_not_finalised":
+      return "Needs review · location evidence is incomplete";
+    case "confirmed_time_overlap":
+      return "Not added automatically · overlaps tracked time";
+    default:
+      break;
+  }
+
+  if (item.rawPayload?.continuityStatus === "uncertain_gap") {
+    return "Needs review · time range is uncertain";
+  }
+  if (item.eventType === "commute_detected" && item.suggestedPlaceId == null) {
+    return "Needs review · start or end place isn’t saved";
+  }
+  if (item.eventType === "unknown_stay" && item.suggestedPlaceId == null) {
+    return "Needs review · place isn’t saved";
+  }
+  return "Needs review before this location activity is recorded";
+}

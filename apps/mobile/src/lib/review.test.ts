@@ -13,6 +13,7 @@ import {
   isOneOffLocationReviewItem,
   isOpenReviewItem,
   isReviewNeededEntry,
+  locationReviewReasonCopy,
   removeReviewItemOptimistically,
   reduceReviewMenuState,
   restoreReviewItemOptimistically,
@@ -211,6 +212,29 @@ describe("mobile review helpers", () => {
       label: "Unknown",
       score: 1
     });
+  });
+
+  it("explains why location suggestions still need Review", () => {
+    const commute = reviewItem({
+      eventSource: "location_learning",
+      eventType: "commute_detected",
+      rawPayload: { semanticReason: "existing_review_preserved" }
+    });
+
+    expect(locationReviewReasonCopy(commute)).toBe(
+      "Already awaiting your decision before automatic logging was enabled"
+    );
+    expect(locationReviewReasonCopy(commute, 1)).toBe(
+      "Not added automatically · overlaps 1 entry"
+    );
+    expect(locationReviewReasonCopy({
+      ...commute,
+      rawPayload: { semanticReason: "insufficient_route_evidence" }
+    })).toBe("Needs review · route evidence is limited");
+    expect(locationReviewReasonCopy({
+      ...commute,
+      rawPayload: { semanticReason: "untrusted_commute_endpoints" }
+    })).toBe("Needs review · start or end place isn’t saved");
   });
 
   it("orders evidence, confirm and overflow without peer edit/dismiss actions", () => {

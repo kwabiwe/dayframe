@@ -30,17 +30,18 @@ export function LocationEvidenceMap({
   onSelectSavedPlace
 }: Props) {
   const samples = evidence.map.acceptedSamples;
+  const shouldShowSavedPlaces = showDetails || evidence.segment.kind === "stay";
   const coordinates = [
     ...samples.map((sample) => ({
       latitude: sample.point.coordinates[1],
       longitude: sample.point.coordinates[0]
     })),
-    ...evidence.map.nearbySavedPlaces.map((place) => ({
+    ...(shouldShowSavedPlaces ? evidence.map.nearbySavedPlaces : []).map((place) => ({
       latitude: place.point.coordinates[1],
       longitude: place.point.coordinates[0]
     })),
     ...(evidence.map.straightLineFallback?.coordinates.map(([longitude, latitude]) => ({ latitude, longitude })) ?? []),
-    ...evidence.map.rejectedSamples.flatMap((sample) => sample.point
+    ...(showDetails ? evidence.map.rejectedSamples : []).flatMap((sample) => sample.point
       ? [{ latitude: sample.point.coordinates[1], longitude: sample.point.coordinates[0] }]
       : [])
   ];
@@ -67,6 +68,12 @@ export function LocationEvidenceMap({
   const route = evidence.map.route?.coordinates.map(([longitude, latitude]) => ({ latitude, longitude })) ?? [];
   const straightLineFallback = evidence.map.straightLineFallback?.coordinates
     .map(([longitude, latitude]) => ({ latitude, longitude })) ?? [];
+  const commuteLine = route.length >= 2 ? route : straightLineFallback;
+  const commuteStart = evidence.segment.kind === "commute" ? commuteLine[0] : undefined;
+  const commuteEnd = evidence.segment.kind === "commute"
+    ? commuteLine[commuteLine.length - 1]
+    : undefined;
+  const usesApproximateFallback = evidence.segment.kind === "commute" && route.length < 2 && straightLineFallback.length >= 2;
   const handlePress = (event: MapPressEvent) => onSelectPoint?.(event.nativeEvent.coordinate);
 
   return (
@@ -74,7 +81,9 @@ export function LocationEvidenceMap({
       <MapView
         accessibilityLabel={showDetails
           ? `Location evidence map. ${evidence.textualSummary}`
-          : `Location map for this ${evidence.segment.kind === "commute" ? "commute" : "visit"}.`}
+          : evidence.segment.kind === "commute"
+            ? `Approximate commute map with Start and End markers${usesApproximateFallback ? ". Detailed path unavailable" : ""}.`
+            : "Map showing the detected visit location."}
         initialRegion={{ ...centre, latitudeDelta, longitudeDelta }}
         onPress={onSelectPoint ? handlePress : undefined}
         pitchEnabled={false}
@@ -82,7 +91,7 @@ export function LocationEvidenceMap({
         style={styles.map}
       >
         {route.length >= 2 ? <Polyline coordinates={route} strokeColor={accentColor} strokeWidth={4} /> : null}
-        {straightLineFallback.length >= 2 ? (
+        {route.length < 2 && straightLineFallback.length >= 2 ? (
           <Polyline
             coordinates={straightLineFallback}
             lineDashPattern={[8, 6]}
@@ -90,7 +99,7 @@ export function LocationEvidenceMap({
             strokeWidth={3}
           />
         ) : null}
-        {evidence.map.gaps.map((gap) => gap.fromPoint && gap.toPoint ? (
+        {showDetails ? evidence.map.gaps.map((gap) => gap.fromPoint && gap.toPoint ? (
           <Polyline
             key={`${gap.startedAt}-${gap.stoppedAt}`}
             coordinates={[
@@ -101,7 +110,7 @@ export function LocationEvidenceMap({
             strokeColor={textColor}
             strokeWidth={3}
           />
-        ) : null)}
+        ) : null) : null}
         {evidence.map.stayRadiusMeters && evidence.map.centre ? (
           <Circle
             center={centre}
@@ -111,7 +120,7 @@ export function LocationEvidenceMap({
             strokeWidth={2}
           />
         ) : null}
-        {samples.map((sample) => (
+        {showDetails ? samples.map((sample) => (
           <Circle
             key={sample.id}
             center={{ latitude: sample.point.coordinates[1], longitude: sample.point.coordinates[0] }}
@@ -120,8 +129,8 @@ export function LocationEvidenceMap({
             strokeColor={`${accentColor}99`}
             strokeWidth={1}
           />
-        ))}
-        {evidence.map.rejectedSamples.map((sample) => sample.point ? (
+        )) : null}
+        {showDetails ? evidence.map.rejectedSamples.map((sample) => sample.point ? (
           <Circle
             key={`rejected-${sample.id}`}
             center={{ latitude: sample.point.coordinates[1], longitude: sample.point.coordinates[0] }}
@@ -130,16 +139,32 @@ export function LocationEvidenceMap({
             strokeColor={dangerColor}
             strokeWidth={2}
           />
-        ) : null)}
-        {evidence.map.anchors.map((anchor) => anchor.point ? (
+        ) : null) : null}
+        {showDetails ? evidence.map.anchors.map((anchor) => anchor.point ? (
           <Marker
             key={anchor.id}
             coordinate={{ latitude: anchor.point.coordinates[1], longitude: anchor.point.coordinates[0] }}
             pinColor={accentColor}
             title={anchor.label}
           />
-        ) : null)}
-        {evidence.map.nearbySavedPlaces.map((place) => (
+        ) : null) : null}
+        {!showDetails && commuteStart ? (
+          <Marker
+            accessibilityLabel="Commute start"
+            coordinate={commuteStart}
+            pinColor={accentColor}
+            title="Start"
+          />
+        ) : null}
+        {!showDetails && commuteEnd ? (
+          <Marker
+            accessibilityLabel="Commute end"
+            coordinate={commuteEnd}
+            pinColor={accentColor}
+            title="End"
+          />
+        ) : null}
+        {shouldShowSavedPlaces ? evidence.map.nearbySavedPlaces.map((place) => (
           <Circle
             key={`${place.id}-radius`}
             center={{ latitude: place.point.coordinates[1], longitude: place.point.coordinates[0] }}
@@ -148,8 +173,8 @@ export function LocationEvidenceMap({
             strokeColor={place.id === selectedSavedPlaceId ? accentColor : textColor}
             strokeWidth={place.id === selectedSavedPlaceId ? 3 : 1}
           />
-        ))}
-        {evidence.map.nearbySavedPlaces.map((place) => (
+        )) : null}
+        {shouldShowSavedPlaces ? evidence.map.nearbySavedPlaces.map((place) => (
           <Marker
             key={place.id}
             accessibilityLabel={`${place.name}, ${place.distanceMeters} metres from the detected centre`}
@@ -159,7 +184,7 @@ export function LocationEvidenceMap({
             pinColor={place.id === selectedSavedPlaceId ? accentColor : undefined}
             title={place.name}
           />
-        ))}
+        )) : null}
         {selectedPoint && selectedPointRadiusMeters ? (
           <Circle
             center={selectedPoint}
@@ -169,8 +194,18 @@ export function LocationEvidenceMap({
             strokeWidth={2}
           />
         ) : null}
-        {selectedPoint ? <Marker coordinate={selectedPoint} pinColor={accentColor} title="Proposed saved-place centre" /> : null}
+        {selectedPoint ? (
+          <Marker
+            accessibilityLabel={onSelectPoint ? "Proposed place centre" : "Detected visit location"}
+            coordinate={selectedPoint}
+            pinColor={accentColor}
+            title={onSelectPoint ? "Proposed place centre" : "Detected location"}
+          />
+        ) : null}
       </MapView>
+      {usesApproximateFallback ? (
+        <Text accessibilityLiveRegion="polite" style={[styles.routeCaption, { color: textColor }]}>Approximate route · detailed path unavailable</Text>
+      ) : null}
       {showDetails ? (
         <>
           <View accessible accessibilityLabel="Map legend: solid coral is accepted evidence, outlined circles are saved places, and dashed lines are evidence gaps." style={styles.legend}>
@@ -199,5 +234,6 @@ const styles = StyleSheet.create({
   map: { width: "100%", height: 280, borderRadius: 16 },
   legend: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 10 },
   legendText: { fontSize: 12, lineHeight: 18 },
+  routeCaption: { fontSize: 12, lineHeight: 18, marginTop: 10 },
   summary: { fontSize: 14, lineHeight: 20, marginTop: 12 }
 });

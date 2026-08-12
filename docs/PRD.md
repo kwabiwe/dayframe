@@ -104,7 +104,7 @@ Deployment:
 
 4. As a privacy-conscious user, I want ambiguous location signals to become review items, so that Dayframe does not silently guess wrong.
    - Example: Town Centre creates a "Review visit" item instead of auto-starting.
-   - Location Evidence should let me answer `Where were you?`, `What did you do?`, and `When?` in one correction flow. I can choose an existing Dayframe place or explicitly search Apple Maps for a new place to save, choose an existing category, and adjust the start/end time before one atomic confirmation.
+   - Stay evidence should let me answer `Where were you?`, `What did you do?`, and `When?` in one correction flow. I can choose an existing Dayframe place or explicitly search Apple Maps for a new place to save, choose an existing category, and adjust the start/end time before one atomic confirmation. Commute evidence should show an honest approximate route with explicit Start and End markers, then ask only what I did and when.
 
 5. As an iOS user, I want sleep and walk/workout summaries imported from HealthKit, so that health activity appears in my day timeline.
    - Example: Sleep from 23:20 to 06:45 creates a Sleep entry or high-confidence review item.
@@ -343,7 +343,7 @@ Quality indicators:
 User experience goals:
 
 - Timer start/stop feels immediate.
-- Review items explain why they exist.
+- Review items explain why they exist and why automatic logging did not apply.
 - Timeline is readable and editable.
 - Corrections are faster than manual re-entry.
 

@@ -35,6 +35,7 @@ describe("mobile Review action contracts", () => {
 
   it("keeps Review cards concise and expresses confidence accessibly", () => {
     expect(reviewSource).toContain("reviewConfidencePresentation(item.confidence)");
+    expect(reviewSource).toContain("locationReviewReasonCopy(item");
     expect(reviewSource).toContain("Confidence: ${confidence.label}, ${confidence.score} of 5");
     expect(reviewSource).toContain("reviewOverlapRow");
     expect(reviewSource).toContain("You can still confirm");
@@ -58,7 +59,9 @@ describe("mobile Review action contracts", () => {
   });
 
   it("uses one Where, What and When editor without creating category or mutation owners", () => {
-    expect(evidenceEditorSource).toContain("Where were you?");
+    expect(evidenceEditorSource).toContain('evidence.segment.kind === "stay"');
+    expect(evidenceEditorSource).not.toContain("Route detected");
+    expect(evidenceEditorSource).not.toContain("Start and end are shown on the map");
     expect(evidenceEditorSource).toContain("What did you do?");
     expect(evidenceEditorSource).toContain('label="When?"');
     expect(evidenceEditorSource).toContain("createNativePlaceSearchProvider");
@@ -68,6 +71,15 @@ describe("mobile Review action contracts", () => {
     expect(evidenceEditorSource).not.toContain("createCategory");
     expect(evidenceEditorSource).not.toContain("resolveLocationReviewItem");
     expect(evidenceSource).toContain("resolveLocationReviewItem(id, action)");
+  });
+
+  it("keeps technical map evidence out of the simplified mobile presentation", () => {
+    expect(evidenceMapSource).toContain('title="Start"');
+    expect(evidenceMapSource).toContain('title="End"');
+    expect(evidenceMapSource).toContain("Approximate route · detailed path unavailable");
+    expect(evidenceMapSource).toContain("showDetails ? evidence.map.anchors.map");
+    expect(evidenceEditorSource).toContain('selectedPoint={evidence.segment.kind === "stay"');
+    expect(evidenceEditorSource).not.toContain('|| "No saved place"');
   });
 
   it("hands Edit to the sheet only after the overflow modal has unmounted", () => {
