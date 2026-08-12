@@ -2,14 +2,14 @@
 
 This is the canonical delivery-state snapshot. Product intent belongs in `docs/PRD.md`, architecture in `docs/architecture.md`, validation rules in `.codex/reference/validation-matrix.md`, and detailed implementation evidence in `docs/investigations/` and Git history.
 
-Last repository audit: 2026-08-11 against `origin/main` at merge `f5df051` (PR #167). GitHub reported no open pull requests before the Location finalisation replay branch was created.
+Last repository audit: 2026-08-12 against `origin/main` at merge `e8a0346` (PR #168).
 
 ## Evidence snapshot
 
-- Main includes PRs #149–#167, including Health sleep reconciliation, offline/mobile editor follow-ups, category-palette grouping, native Calendar creation, unified web editing, Live Activity sync, Timeline quick editing, documentation alignment, and consistent contextual web category creation.
+- Main includes PRs #149–#168, including Health sleep reconciliation, offline/mobile editor follow-ups, category-palette grouping, native Calendar creation, unified web editing, Live Activity sync, Timeline quick editing, documentation alignment, consistent contextual web category creation, and time-driven Location V2 finalisation replay.
 - The last TestFlight release recorded in this repository is `0.1.0 (87)`, delivery/build ID `74bc9ab3-acb0-46da-8f13-820547f81806`, archived from `91380dc` and recorded as `VALID`/`IN_BETA_TESTING` on 2026-08-09.
-- Main has moved beyond that mobile binary: PRs #163 and #164 contain later mobile sheet/tag/layout changes. Do not claim those changes are in TestFlight until a newer verified build is recorded.
-- PR #165's GitHub Vercel checks succeeded. This audit did not re-verify the production deployment, stable staging alias, hosted schema, or authenticated staging behavior.
+- Main has moved beyond that mobile binary: PRs #163, #164, and #168 contain later mobile sheet/tag/layout or Location replay changes. Do not claim those changes are in TestFlight until a newer verified build is recorded.
+- PR #168's Preview was promoted to staging and exercised through a preview build on the attached iPhone. This tracker does not infer production deployment or TestFlight status from that staging evidence.
 - Preview uses staging Supabase and the manually promoted `dayframe-staging.vercel.app` alias. Production/TestFlight use `dayframe-web.vercel.app` with production Supabase.
 
 ## Status key
@@ -32,6 +32,7 @@ Last repository audit: 2026-08-11 against `origin/main` at merge `f5df051` (PR #
 | Native iOS Calendar | Watch | SwiftUI/UIKit Calendar, one native pinch/scroll owner, semantic blocks, long-press creation, React-owned sheets/mutations, and contract tests are on main. Continue physical-iPhone gesture, callback, accessibility, and frame-pacing checks. |
 | Offline event capture and timer fallback | Watch | General event queue has retry/backoff, foreground drain, idempotency, and diagnostics. Keep real-device reconnect, suspended/background, ordered dependency, and cross-device reconciliation behavior under observation. |
 | Offline Review terminal actions | Watch | Account-scoped SQLite Review cache/outbox, server receipts, visible pending state, retry/conflict handling, and validators are implemented. Detailed Location Evidence actions remain connectivity-dependent. |
+| Mobile Review and Location Evidence presentation | Release pending | Review uses separate activity cards, prominent activity/time, an accessible five-step confidence indicator, compact overlap copy, and user-facing About text without Health diagnostics. Location Evidence leads with the activity, minute-level time range, and map; technical evidence/retention/uncertainty copy is hidden while split, merge, place correction, record-once, confirm, and ignore remain available. PR #169's exact Preview was promoted to staging and a signed Staging build from `71edfaa` was installed and launched on the attached iPhone; production/TestFlight release remains pending. |
 | HealthKit sleep/workout import | Watch | Event-first import, grouped sleep sessions, mapping defaults, reprocess diagnostics, same-source untouched-entry reconciliation, and migration `202608010001_health_sleep_session_reconciliation.sql` are on main. Background delivery and real HealthKit sample revisions remain physical-device/production concerns. |
 | Location Intelligence V2 foundation | Watch | Deterministic shared engine, protected mobile journal, server evidence/segments, Review DTO, split/merge/change-place/record-once/save-and-confirm actions, retention cron, and narrow trusted-place automatic-write code are present. Retained evidence is explicitly replayed after the finalisation lag even when no new sample arrives, with bounded foreground drain/upload work and coordinate-free Settings diagnostics. Checked-in fallback remains `v2_shadow`; the live rollout mode is an operational decision below. |
 | Live Activity/App Intent sync | Watch | PR #160's App Group/Keychain hand-off, direct Stop fallback, APNs registration, revisioned delivery outbox, diagnostics, and retry cron are on main and precede build 87. Keep signed-entitlement, background/terminated/offline, and physical-device behavior under Watch. |

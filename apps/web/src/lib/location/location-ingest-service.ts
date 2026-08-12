@@ -670,7 +670,7 @@ async function segmentTitle(
   session: RequestSession,
   segment: StaySegment | CommuteSegment
 ) {
-  if (segment.kind === "commute") return "Possible journey";
+  if (segment.kind === "commute") return "Commute";
   if (segment.learnedPlaceId) {
     const learned = await client.query<{ name: string }>(
       "select name from learned_places where id = $1 and workspace_id = $2 and user_id = $3",

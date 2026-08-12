@@ -108,3 +108,5 @@ Prefer a genuine POI/business name, then street/locality/postcode. Coordinates a
 ## Privacy and UX
 
 Do not log raw coordinates or geocoder payloads. Preserve workspace/user scoping and the event-first flow. Learned places contains only saveable place candidates; one-off activity stays in Review with Confirm/Edit/Ignore. Address and coordinate copy actions must remain phone-safe and use at least 44px touch targets.
+
+The normal mobile Review and Location Evidence presentation must translate this technical model into user language. A commute is named `Commute`, not `Possible journey`; Review cards prioritise the activity, minute-level time range, category, accessible five-step confidence, and a concise summary. Location Evidence shows the activity, overall time range, and map without raw DTO summaries, sample counts, retention timestamps, millisecond timestamps, or a standalone uncertainty section. Do not remove split, merge, place correction, save-place, record-once, confirm, or ignore semantics when simplifying that presentation.

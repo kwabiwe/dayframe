@@ -25,6 +25,9 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 
 ## Time Review
 
+- Mobile Review renders each suggestion as a distinct card. Activity and minute-level time range are prominent; confidence has five visible dots and one accessible `N of 5` label; overlap is one compact inline warning; About Review contains user-facing purpose copy but no Health reprocess diagnostics.
+- Mobile Location Evidence leads with the activity, overall time range, and map. It does not expose raw DTO summaries, sample counts, retention timestamps, millisecond timestamps, or a standalone Time and uncertainty panel. Commute suggestions say `Commute`, while split, merge, place correction, save-place, record-once, confirm, and ignore remain reachable with 44px targets.
+
 - Timeline includes Calendar, List, and Timesheet views with a clear selected state.
 - Timeline List columns remain Task / tags, Category, Time, Duration, Actions. Repeated entries group by normalized description and category within each day; count badges and total duration remain exact; group restart uses the representative occurrence; `entry=` expands and highlights only the requested occurrence. Single rows, groups, and expanded occurrences use the timer-style three-dot menu for Edit/Delete; deleting a group is one atomic, user/workspace-scoped operation.
 - Timeline has one route-owned period toolbar. Canonical `date`, `scope`, and `view` URL parameters reconstruct the same selected state on refresh, direct load, and Back/Forward; invalid values fall back safely, and Timesheet always normalizes to Week.

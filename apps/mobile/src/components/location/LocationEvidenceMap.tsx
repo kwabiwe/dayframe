@@ -11,6 +11,7 @@ type Props = {
   selectedPoint?: { latitude: number; longitude: number } | null;
   selectedPointRadiusMeters?: number;
   selectedSavedPlaceId?: string | null;
+  showDetails?: boolean;
   onSelectPoint?: (point: { latitude: number; longitude: number }) => void;
   onSelectSavedPlace?: (placeId: string) => void;
 };
@@ -24,6 +25,7 @@ export function LocationEvidenceMap({
   selectedPoint,
   selectedPointRadiusMeters,
   selectedSavedPlaceId,
+  showDetails = true,
   onSelectPoint,
   onSelectSavedPlace
 }: Props) {
@@ -52,7 +54,9 @@ export function LocationEvidenceMap({
   if (!centre) {
     return (
       <View style={[styles.fallback, { backgroundColor: surfaceColor }]}>
-        <Text style={[styles.fallbackText, { color: textColor }]}>{evidence.textualSummary}</Text>
+        {showDetails ? (
+          <Text style={[styles.fallbackText, { color: textColor }]}>{evidence.textualSummary}</Text>
+        ) : null}
         <Text style={[styles.fallbackText, { color: textColor }]}>Mapped evidence has expired or is unavailable.</Text>
       </View>
     );
@@ -68,7 +72,9 @@ export function LocationEvidenceMap({
   return (
     <View>
       <MapView
-        accessibilityLabel={`Location evidence map. ${evidence.textualSummary}`}
+        accessibilityLabel={showDetails
+          ? `Location evidence map. ${evidence.textualSummary}`
+          : `Location map for this ${evidence.segment.kind === "commute" ? "commute" : "visit"}.`}
         initialRegion={{ ...centre, latitudeDelta, longitudeDelta }}
         onPress={onSelectPoint ? handlePress : undefined}
         pitchEnabled={false}
@@ -165,14 +171,18 @@ export function LocationEvidenceMap({
         ) : null}
         {selectedPoint ? <Marker coordinate={selectedPoint} pinColor={accentColor} title="Proposed saved-place centre" /> : null}
       </MapView>
-      <View accessible accessibilityLabel="Map legend: solid coral is accepted evidence, outlined circles are saved places, and dashed lines are evidence gaps." style={styles.legend}>
-        <Text style={[styles.legendText, { color: textColor }]}>Solid route · accepted evidence</Text>
-        <Text style={[styles.legendText, { color: textColor }]}>Outlined area · saved place</Text>
-        <Text style={[styles.legendText, { color: textColor }]}>Dashed line · evidence gap</Text>
-      </View>
-      <Text style={[styles.summary, { color: textColor }]}>{evidence.textualSummary}</Text>
-      {evidence.map.rejectedSamples.length ? (
-        <Text style={[styles.legendText, { color: textColor }]}>Excluded noisy or invalid samples: {evidence.map.rejectedSamples.length}</Text>
+      {showDetails ? (
+        <>
+          <View accessible accessibilityLabel="Map legend: solid coral is accepted evidence, outlined circles are saved places, and dashed lines are evidence gaps." style={styles.legend}>
+            <Text style={[styles.legendText, { color: textColor }]}>Solid route · accepted evidence</Text>
+            <Text style={[styles.legendText, { color: textColor }]}>Outlined area · saved place</Text>
+            <Text style={[styles.legendText, { color: textColor }]}>Dashed line · evidence gap</Text>
+          </View>
+          <Text style={[styles.summary, { color: textColor }]}>{evidence.textualSummary}</Text>
+          {evidence.map.rejectedSamples.length ? (
+            <Text style={[styles.legendText, { color: textColor }]}>Excluded noisy or invalid samples: {evidence.map.rejectedSamples.length}</Text>
+          ) : null}
+        </>
       ) : null}
     </View>
   );

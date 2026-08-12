@@ -922,13 +922,18 @@ function createStyles(theme: MobileTheme) {
       fontSize: 12
     },
     reviewList: {
-      gap: 10
+      gap: 12
+    },
+    reviewItemsSection: {
+      gap: 12
     },
     reviewCard: {
       backgroundColor: theme.surfaceRaised,
       borderRadius: 16,
-      padding: 14,
-      gap: 12
+      borderLeftWidth: 3,
+      paddingHorizontal: 14,
+      paddingVertical: 14,
+      gap: 10
     },
     reviewCardHeader: {
       flexDirection: "row",
@@ -958,10 +963,58 @@ function createStyles(theme: MobileTheme) {
     reviewTitle: {
       color: theme.textPrimary,
       fontFamily: monoFont,
-      fontSize: 15,
-      fontWeight: "600"
+      fontSize: 18,
+      fontWeight: "700",
+      lineHeight: 24
     },
     reviewMetaLine: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      lineHeight: 17
+    },
+    reviewSummary: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 13,
+      lineHeight: 19
+    },
+    reviewConfidenceRow: {
+      minHeight: 24,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8
+    },
+    reviewConfidenceLabel: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "600"
+    },
+    reviewConfidenceDots: {
+      flexDirection: "row",
+      gap: 4
+    },
+    reviewConfidenceDot: {
+      width: 7,
+      height: 7,
+      borderRadius: 999
+    },
+    reviewConfidenceValue: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12
+    },
+    reviewOverlapRow: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.border,
+      paddingTop: 10,
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 8
+    },
+    reviewOverlapText: {
+      flex: 1,
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 12,

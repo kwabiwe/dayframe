@@ -37,7 +37,6 @@ import {
   type MobileTimeEntry,
   type TimeEntryUpdatePatch
 } from "@/lib/api";
-import { DAYFRAME_API_BASE } from "@/lib/config";
 import { reprocessExistingHealthReviewItems } from "@/lib/health";
 import { pressable, useMobileTheme } from "@/lib/mobileTheme";
 import { mergePersistedMobileTag } from "@/lib/mobileTags";
@@ -61,6 +60,7 @@ import {
   isReviewNeededEntry,
   isLocationReviewItem,
   reduceReviewMenuState,
+  reviewConfidencePresentation,
   reviewConfirmLabel,
   reviewItemCategoryLabel,
   reviewItemDurationSeconds,
@@ -98,7 +98,6 @@ type ReviewLoadOptions = {
 };
 
 type ReviewReprocessDiagnostics = {
-  apiBaseUrl: string;
   startedAt: string | null;
   finishedAt: string | null;
   status: "idle" | "running" | "success" | "partial" | "failed" | "timed_out";
@@ -129,7 +128,6 @@ export default function ReviewScreen() {
     Map<string, ReviewItemSyncState>
   >(new Map());
   const [reprocessDiagnostics, setReprocessDiagnostics] = useState<ReviewReprocessDiagnostics>({
-    apiBaseUrl: DAYFRAME_API_BASE,
     startedAt: null,
     finishedAt: null,
     status: "idle",
@@ -708,7 +706,6 @@ export default function ReviewScreen() {
                 layout={localLayoutTransition(reduceMotion)}
               >
                 <Text style={styles.muted}>Dayframe keeps uncertain Health and location activity here so you can confirm the time, edit its details, or dismiss it without silently changing your timeline.</Text>
-                <ReviewDiagnosticsPanel diagnostics={reprocessDiagnostics} styles={styles} />
               </Reanimated.View>
             ) : null}
           </View>
@@ -741,7 +738,7 @@ export default function ReviewScreen() {
             styles={styles}
           />
 
-          <View style={styles.lifecyclePanel}>
+          <View style={styles.reviewItemsSection}>
             <Text style={styles.sectionTitle}>Review items</Text>
             {totalNeedsReview === 0 ? (
               <Text style={styles.muted}>{REVIEW_COPY.emptyState}</Text>
@@ -910,17 +907,17 @@ function ReviewItemCard({
     theme.mode
   );
   const controlsDisabled = disabled || syncState != null;
-  const contextLines = reviewItemContextLines(item, categoryName);
+  const summary = reviewItemSummary(item);
+  const confidence = reviewConfidencePresentation(item.confidence);
   const overlapWarning = reviewItemOverlapWarning(item, peerEntries, now);
   const syncCopy = reviewItemSyncStatusCopy(syncState);
 
   return (
-    <View style={styles.reviewCard}>
+    <View style={[styles.reviewCard, { borderLeftColor: categoryColor }]}>
       <View style={styles.reviewCardHeader}>
         <View style={styles.reviewTitleStack}>
           <Text style={styles.reviewTitle} numberOfLines={2}>{title}</Text>
           <Text style={styles.reviewMetaLine}>{formatReviewItemMeta(item, durationSeconds)}</Text>
-          <Text style={styles.reviewMetaLine}>{formatReviewItemSource(item)}</Text>
         </View>
         <View style={styles.reviewBadge}>
           <Text style={styles.reviewBadgeText}>
@@ -942,29 +939,41 @@ function ReviewItemCard({
           {item.placeName ? ` · ${item.placeName}` : ""}
         </Text>
       </View>
-      {item.notes && !hasV2LocationEvidence(item) ? (
-        <Text style={styles.reviewMetaLine}>{item.notes}</Text>
+      <View
+        accessible
+        accessibilityLabel={`Confidence: ${confidence.label}, ${confidence.score} of 5`}
+        style={styles.reviewConfidenceRow}
+      >
+        <Text style={styles.reviewConfidenceLabel}>Confidence</Text>
+        <View accessibilityElementsHidden style={styles.reviewConfidenceDots}>
+          {[1, 2, 3, 4, 5].map((score) => (
+            <View
+              key={score}
+              style={[
+                styles.reviewConfidenceDot,
+                {
+                  backgroundColor: score <= confidence.score
+                    ? theme.accent
+                    : theme.borderStrong
+                }
+              ]}
+            />
+          ))}
+        </View>
+        <Text style={styles.reviewConfidenceValue}>{confidence.label}</Text>
+      </View>
+      {summary ? (
+        <Text numberOfLines={3} style={styles.reviewSummary}>{summary}</Text>
       ) : null}
-      {contextLines.map((line) => (
-        <Text key={line} style={styles.reviewMetaLine}>{line}</Text>
-      ))}
       {overlapWarning?.overlapCount ? (
         <View
           accessibilityLiveRegion="polite"
-          style={{
-            backgroundColor: theme.mode === "dark" ? "rgba(240, 170, 85, 0.14)" : "rgba(179, 109, 27, 0.10)",
-            borderRadius: 12,
-            gap: 3,
-            marginTop: 8,
-            paddingHorizontal: 12,
-            paddingVertical: 10
-          }}
+          accessibilityLabel={`Overlaps ${overlapWarning.overlapCount} other ${overlapWarning.overlapCount === 1 ? "entry" : "entries"}. You can still confirm.`}
+          style={styles.reviewOverlapRow}
         >
-          <Text style={[styles.reviewMetaLine, { color: theme.textPrimary, fontWeight: "700" }]}>
-            Overlaps {overlapWarning.overlapCount} other {overlapWarning.overlapCount === 1 ? "entry" : "entries"}
-          </Text>
-          <Text style={styles.reviewMetaLine}>
-            You can still confirm it. Reports will show logged and covered time separately.
+          <WarningGlyph color={theme.warningText} />
+          <Text style={styles.reviewOverlapText}>
+            Overlaps {overlapWarning.overlapCount} other {overlapWarning.overlapCount === 1 ? "entry" : "entries"} · You can still confirm
           </Text>
         </View>
       ) : null}
@@ -1017,41 +1026,6 @@ function ReviewItemCard({
   );
 }
 
-function ReviewDiagnosticsPanel({
-  diagnostics,
-  styles
-}: {
-  diagnostics: ReviewReprocessDiagnostics;
-  styles: ReturnType<typeof useMobileTheme>["styles"];
-}) {
-  const result = diagnostics.result;
-  const reasonPreview = result?.reasons?.slice(0, 3).map((reason) => reason.message) ?? [];
-
-  return (
-    <View style={styles.panel}>
-      <Text style={styles.label}>Health reprocess</Text>
-      <Text style={styles.muted}>API: {diagnostics.apiBaseUrl}</Text>
-      <Text style={styles.reviewMetaLine}>
-        Status: {diagnostics.status}
-        {diagnostics.startedAt ? ` · started ${formatDiagnosticsTime(diagnostics.startedAt)}` : ""}
-        {diagnostics.finishedAt ? ` · finished ${formatDiagnosticsTime(diagnostics.finishedAt)}` : ""}
-      </Text>
-      {result ? (
-        <Text style={styles.reviewMetaLine}>
-          Confirmed {result.confirmedCount} · ignored {result.ignoredCount} · remaining {result.remainingReviewCount} · skipped {result.skippedCount} · failed {result.failedCount} · categories {result.updatedCategoryCount} · sleep fixes {result.repairedSleepEntryCount}
-          {result.partial ? ` · batch ${result.batchSize ?? "partial"}` : ""}
-        </Text>
-      ) : null}
-      {diagnostics.error ? (
-        <Text style={styles.reviewMetaLine}>Last error: {diagnostics.error}</Text>
-      ) : null}
-      {reasonPreview.map((reason) => (
-        <Text key={reason} style={styles.reviewMetaLine}>{reason}</Text>
-      ))}
-    </View>
-  );
-}
-
 function ReviewNeededEntryCard({
   entry,
   now,
@@ -1073,7 +1047,7 @@ function ReviewNeededEntryCard({
   );
 
   return (
-    <View style={styles.reviewCard}>
+    <View style={[styles.reviewCard, { borderLeftColor: categoryColor }]}>
       <View style={styles.reviewCardHeader}>
         <View style={styles.reviewTitleStack}>
           <Text style={styles.reviewTitle} numberOfLines={2}>{displayEntryTitle(entry)}</Text>
@@ -1134,10 +1108,11 @@ function reviewItemTitle(item: MobileReviewItem) {
 }
 
 function formatReviewItemMeta(item: MobileReviewItem, durationSeconds: number) {
-  const parts: string[] = [reviewItemKindLabel(item)];
+  const parts: string[] = [];
   const timeWindow = formatReviewItemTimeWindow(item);
   if (timeWindow) parts.push(timeWindow);
   if (durationSeconds > 0) parts.push(formatDuration(durationSeconds));
+  if (!parts.length) parts.push(reviewItemKindLabel(item));
   return parts.join(" · ");
 }
 
@@ -1149,49 +1124,27 @@ function reviewItemKindLabel(item: MobileReviewItem) {
   return REVIEW_COPY.suggestedActivity;
 }
 
-function reviewItemContextLines(item: MobileReviewItem, categoryName: string) {
-  if (hasV2LocationEvidence(item)) {
-    return item.rawPayload?.continuityStatus === "uncertain_gap"
-      ? ["Uncertain boundary · inspect evidence before confirming."]
-      : [];
-  }
+function reviewItemSummary(item: MobileReviewItem) {
   if (item.eventType === "commute_detected") {
-    return [
-      "Dayframe detected travel between places.",
-      "Confirming creates a Commute time entry with no description."
-    ];
+    return item.rawPayload?.continuityStatus === "uncertain_gap"
+      ? "Travel was detected, but part of the time range is uncertain."
+      : "Travel was detected between places.";
   }
-
-  if (!isLocationReviewItem(item)) return [];
 
   if (isOneOffLocationReviewItem(item)) {
-    const confirmTarget = categoryName === "No category"
-      ? "Confirming creates an uncategorized time entry. Edit first to choose a category or description."
-      : `Confirming creates a ${categoryName} time entry. Edit first to change the category or add a description.`;
-    return [
-      "Dayframe detected one significant stay at this location.",
-      "It is reviewable as time spent here, but it is not a suggestion to save this place.",
-      confirmTarget
-    ];
+    return "A significant stay was detected at this location.";
   }
 
-  const match = item.suggestedPlaceId || item.placeName
-    ? "Matched saved place"
-    : item.eventType === "learned_place_visit"
-      ? "Matched learned place"
-      : "Unknown location";
-  const confirmTarget = categoryName === "No category"
-    ? "Confirming creates an uncategorized time entry. Edit first to choose a category or description."
-    : `Confirming creates a ${categoryName} time entry. Edit first to change the category or add a description.`;
-  return [
-    "Dayframe detected a stay at this location.",
-    `${match}. Needs review before time is logged.`,
-    confirmTarget
-  ];
-}
+  if (isLocationReviewItem(item)) {
+    return item.placeName
+      ? `A stay was detected at ${item.placeName}.`
+      : "A stay was detected at this location.";
+  }
 
-function formatReviewItemSource(item: MobileReviewItem) {
-  return `${formatSourceLabel(item.eventSource)} · ${formatConfidence(item.confidence)}`;
+  const notes = item.notes?.trim();
+  if (notes) return notes;
+  if (isHealthReviewItem(item)) return "Review this Health activity before it is added.";
+  return "Review this suggested time before it is added.";
 }
 
 function reviewItemCategoryName(item: MobileReviewItem) {
@@ -1240,33 +1193,10 @@ function formatReviewItemTimeWindow(item: MobileReviewItem) {
   const stoppedAt = item.suggestedStoppedAt ? new Date(item.suggestedStoppedAt) : null;
   if (Number.isNaN(startedAt.getTime())) return null;
   if (!stoppedAt || Number.isNaN(stoppedAt.getTime())) return formatDateTime(startedAt);
-  return `${formatDateTime(startedAt)}-${formatTimeOfDay(stoppedAt)}`;
-}
-
-function formatSourceLabel(source: string | null) {
-  switch (source) {
-    case "health_sleep":
-      return "Apple Health sleep";
-    case "health_workout":
-      return "Apple Health workout";
-    case "geofence_specific":
-    case "geofence_broad":
-      return "Saved place visit";
-    case "ha_geofence":
-      return "Home Assistant place visit";
-    case "location_learning":
-      return "Location learning";
-    case "calendar":
-      return "Calendar hint";
-    case "mobile_app":
-      return "Mobile";
-    default:
-      return "Activity evidence";
+  if (startedAt.toDateString() === stoppedAt.toDateString()) {
+    return `${formatDateTime(startedAt)}–${formatTimeOfDay(stoppedAt)}`;
   }
-}
-
-function formatConfidence(confidence: string) {
-  return `${confidence.replace(/_/g, " ")} confidence`;
+  return `${formatDateTime(startedAt)}–${formatDateTime(stoppedAt)}`;
 }
 
 function displayEntryTitle(entry: MobileTimeEntry) {
@@ -1319,12 +1249,6 @@ function reviewItemOverlapWarning(
 
 function formatDateTime(date: Date) {
   return `${date.toLocaleDateString(undefined, { month: "short", day: "numeric" })} ${formatTimeOfDay(date)}`;
-}
-
-function formatDiagnosticsTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "--:--";
-  return formatTimeOfDay(date);
 }
 
 function formatCachedAt(value: string) {
@@ -1445,6 +1369,28 @@ function MoreActionsGlyph({ color }: { color: string }) {
       <Circle cx={5} cy={12} r={1.7} fill={color} />
       <Circle cx={12} cy={12} r={1.7} fill={color} />
       <Circle cx={19} cy={12} r={1.7} fill={color} />
+    </Svg>
+  );
+}
+
+function WarningGlyph({ color }: { color: string }) {
+  return (
+    <Svg accessibilityElementsHidden width={16} height={16} viewBox="0 0 24 24">
+      <Path
+        d="M12 3 2.8 20h18.4L12 3Z"
+        fill="none"
+        stroke={color}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+      />
+      <Path
+        d="M12 9v4.5M12 17.25h.01"
+        fill="none"
+        stroke={color}
+        strokeLinecap="round"
+        strokeWidth={2}
+      />
     </Svg>
   );
 }

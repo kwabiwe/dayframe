@@ -36,12 +36,12 @@ function categoryClient() {
 
 describe("location review confirmation semantics", () => {
   it("keeps generated commute titles out of confirmed descriptions", () => {
-    expect(confirmedLocationDescription("commute", "Possible journey", undefined)).toBeNull();
+    expect(confirmedLocationDescription("commute", "Commute", undefined)).toBeNull();
     expect(
-      confirmedLocationDescription("commute", "Possible journey", { description: "  Train home  " })
+      confirmedLocationDescription("commute", "Commute", { description: "  Train home  " })
     ).toBe("Train home");
     expect(
-      confirmedLocationDescription("commute", "Possible journey", { description: "   " })
+      confirmedLocationDescription("commute", "Commute", { description: "   " })
     ).toBeNull();
   });
 

@@ -17,6 +17,7 @@ import {
   reduceReviewMenuState,
   restoreReviewItemOptimistically,
   reviewActionOrder,
+  reviewConfidencePresentation,
   reviewConfirmLabel,
   reviewItemCategoryLabel,
   reviewItemDurationSeconds
@@ -195,6 +196,21 @@ describe("mobile review helpers", () => {
     expect(reviewConfirmLabel(commute)).toBe("Confirm commute");
     expect(reviewConfirmLabel(visit)).toBe("Confirm visit");
     expect(reviewConfirmLabel(reviewItem())).toBe("Confirm activity");
+  });
+
+  it("maps confidence to an accessible five-step indicator", () => {
+    expect(reviewConfidencePresentation("high")).toEqual({ label: "High", score: 5 });
+    expect(reviewConfidencePresentation("medium_high")).toEqual({
+      label: "Medium high",
+      score: 4
+    });
+    expect(reviewConfidencePresentation("medium")).toEqual({ label: "Medium", score: 3 });
+    expect(reviewConfidencePresentation("low")).toEqual({ label: "Low", score: 2 });
+    expect(reviewConfidencePresentation("hint")).toEqual({ label: "Hint", score: 1 });
+    expect(reviewConfidencePresentation("unexpected")).toEqual({
+      label: "Unknown",
+      score: 1
+    });
   });
 
   it("orders evidence, confirm and overflow without peer edit/dismiss actions", () => {
