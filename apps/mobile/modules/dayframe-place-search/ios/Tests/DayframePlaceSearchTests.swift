@@ -30,6 +30,56 @@ final class DayframePlaceSearchTests: XCTestCase {
     )
   }
 
+  func testContextQueryUsesRepeatedDistinctiveNameButRejectsLocalityAndGenericWords() {
+    let lakeside = [
+      nearby("Lakeside Parking", distance: 40, relevance: 0, category: .parking),
+      nearby("Apple Lakeside", distance: 90, relevance: 1, category: .store),
+      nearby("Vue Cinema Thurrock", distance: 130, relevance: 2, category: .movieTheater)
+    ]
+    XCTAssertEqual(NearbyPointOfInterestCoordinator.contextQuery(from: lakeside), "lakeside")
+
+    let localityOnly = [
+      nearby("Thurrock Cinema", distance: 40, relevance: 0, localityNames: ["Thurrock"]),
+      nearby("Thurrock Store", distance: 60, relevance: 1, localityNames: ["Thurrock"])
+    ]
+    XCTAssertNil(NearbyPointOfInterestCoordinator.contextQuery(from: localityOnly))
+
+    let genericOnly = [
+      nearby("Central Retail Park", distance: 40, relevance: 0),
+      nearby("Riverside Retail Park", distance: 60, relevance: 1)
+    ]
+    XCTAssertNil(NearbyPointOfInterestCoordinator.contextQuery(from: genericOnly))
+  }
+
+  func testContextualRankingPromotesSiteThenDiningAndActivity() {
+    let values = [
+      nearby("Mr Simms Sweet Shop", distance: 14, relevance: 0, category: .store),
+      nearby("Brother2Brother", distance: 14, relevance: 1, category: .store),
+      nearby("Charlie's Sweet Emporium", distance: 14, relevance: 2, category: .store),
+      nearby("Lakeside Shopping Centre", distance: 378, relevance: 0, category: .store, source: .contextual(anchor: "lakeside")),
+      nearby("IKEA", distance: 523, relevance: 1, category: .store, source: .contextual(anchor: "lakeside")),
+      nearby("Vue Cinema Thurrock", distance: 496, relevance: 6, category: .movieTheater, source: .contextual(anchor: "lakeside")),
+      nearby("wagamama", distance: 429, relevance: 12, category: .restaurant, source: .contextual(anchor: "lakeside"))
+    ]
+
+    XCTAssertEqual(
+      NearbyPointOfInterestCoordinator.normalized(values, maximumDistanceMeters: 750).map(\.name),
+      ["Lakeside Shopping Centre", "wagamama", "Vue Cinema Thurrock"]
+    )
+  }
+
+  func testNearbyRankingDemotesUtilitiesAndEnforcesRadius() {
+    let values = [
+      nearby("Nearest parking", distance: 5, relevance: 0, category: .parking),
+      nearby("Cafe", distance: 80, relevance: 1, category: .cafe),
+      nearby("Outside venue", distance: 751, relevance: 2, category: .movieTheater)
+    ]
+    XCTAssertEqual(
+      NearbyPointOfInterestCoordinator.normalized(values, maximumDistanceMeters: 750).map(\.name),
+      ["Cafe", "Nearest parking"]
+    )
+  }
+
   func testNearbySearchPropagatesRequestAndResults() async throws {
     let searcher = FakeNearbySearcher()
     let coordinator = NearbyPointOfInterestCoordinator(searcher: searcher)
@@ -43,7 +93,7 @@ final class DayframePlaceSearchTests: XCTestCase {
     }
     await Task.yield()
     XCTAssertEqual(searcher.radiusMeters, 750)
-    searcher.complete(.success([nearby("Cinema", distance: 100, relevance: 0)]))
+    searcher.completeNearby(.success([nearby("Cinema", distance: 100, relevance: 0)]))
     let result = try await task.value
     XCTAssertEqual(result.map(\.name), ["Cinema"])
   }
@@ -79,9 +129,84 @@ final class DayframePlaceSearchTests: XCTestCase {
       )
     }
     await Task.yield()
-    searcher.complete(.failure(.networkUnavailable))
+    searcher.completeNearby(.failure(.networkUnavailable))
     await XCTAssertThrowsErrorAsync(try await task.value) { error in
       XCTAssertEqual(error as? PlaceSearchCoordinatorError, .networkUnavailable)
+    }
+  }
+
+  func testContextSearchMergesResultsBeforePublishing() async throws {
+    let searcher = FakeNearbySearcher()
+    let coordinator = NearbyPointOfInterestCoordinator(searcher: searcher)
+    let task = Task {
+      try await coordinator.search(
+        requestId: "nearby-1",
+        latitude: 51.5,
+        longitude: 0.4,
+        radiusMeters: 750
+      )
+    }
+    await Task.yield()
+    searcher.completeNearby(.success([
+      nearby("Lakeside Parking", distance: 40, relevance: 0, category: .parking),
+      nearby("Apple Lakeside", distance: 90, relevance: 1, category: .store)
+    ]))
+    await Task.yield()
+    XCTAssertEqual(searcher.contextQuery, "lakeside")
+    searcher.completeContext(.success([
+      nearby("Lakeside Shopping Centre", distance: 300, relevance: 0, category: .store, source: .contextual(anchor: "lakeside")),
+      nearby("wagamama", distance: 320, relevance: 4, category: .restaurant, source: .contextual(anchor: "lakeside"))
+    ]))
+    let result = try await task.value
+    XCTAssertEqual(result.map(\.name), ["Lakeside Shopping Centre", "wagamama", "Apple Lakeside"])
+  }
+
+  func testContextFailureFallsBackToBaseNearbyResults() async throws {
+    let searcher = FakeNearbySearcher()
+    let coordinator = NearbyPointOfInterestCoordinator(searcher: searcher)
+    let task = Task {
+      try await coordinator.search(
+        requestId: "nearby-1",
+        latitude: 51.5,
+        longitude: 0.4,
+        radiusMeters: 750
+      )
+    }
+    await Task.yield()
+    searcher.completeNearby(.success([
+      nearby("Riverside Cafe", distance: 40, relevance: 0, category: .cafe),
+      nearby("Riverside Gym", distance: 90, relevance: 1, category: .fitnessCenter)
+    ]))
+    await Task.yield()
+    searcher.completeContext(.failure(.networkUnavailable))
+    let result = try await task.value
+    XCTAssertEqual(result.map(\.name), ["Riverside Cafe", "Riverside Gym"])
+  }
+
+  func testCancellationDuringContextSearchRejectsAndIgnoresLateResults() async {
+    let searcher = FakeNearbySearcher()
+    let coordinator = NearbyPointOfInterestCoordinator(searcher: searcher)
+    let task = Task {
+      try await coordinator.search(
+        requestId: "nearby-1",
+        latitude: 51.5,
+        longitude: 0.4,
+        radiusMeters: 750
+      )
+    }
+    await Task.yield()
+    searcher.completeNearby(.success([
+      nearby("Riverside Cafe", distance: 40, relevance: 0),
+      nearby("Riverside Gym", distance: 90, relevance: 1)
+    ]))
+    await Task.yield()
+    XCTAssertEqual(searcher.contextQuery, "riverside")
+    coordinator.cancel()
+    searcher.completeContext(.success([
+      nearby("Late result", distance: 20, relevance: 0, source: .contextual(anchor: "riverside"))
+    ]))
+    await XCTAssertThrowsErrorAsync(try await task.value) { error in
+      XCTAssertEqual(error as? PlaceSearchCoordinatorError, .cancelled)
     }
   }
 
@@ -217,25 +342,43 @@ final class DayframePlaceSearchTests: XCTestCase {
 @MainActor
 private final class FakeNearbySearcher: NearbyPointOfInterestSearching {
   var radiusMeters: Double?
+  var contextQuery: String?
   var cancelCount = 0
-  private var completion: ((Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>) -> Void)?
+  private var nearbyCompletion: ((Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>) -> Void)?
+  private var contextCompletion: ((Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>) -> Void)?
 
-  func search(
+  func searchNearby(
     center: CLLocationCoordinate2D,
     radiusMeters: CLLocationDistance,
     completion: @escaping (Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>) -> Void
   ) {
     self.radiusMeters = radiusMeters
-    self.completion = completion
+    nearbyCompletion = completion
+  }
+
+  func searchContext(
+    query: String,
+    center: CLLocationCoordinate2D,
+    radiusMeters: CLLocationDistance,
+    completion: @escaping (Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>) -> Void
+  ) {
+    contextQuery = query
+    contextCompletion = completion
   }
 
   func cancel() {
     cancelCount += 1
   }
 
-  func complete(_ result: Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>) {
-    let completion = completion
-    self.completion = nil
+  func completeNearby(_ result: Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>) {
+    let completion = nearbyCompletion
+    nearbyCompletion = nil
+    completion?(result)
+  }
+
+  func completeContext(_ result: Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>) {
+    let completion = contextCompletion
+    contextCompletion = nil
     completion?(result)
   }
 }
@@ -311,7 +454,10 @@ private func completion(_ title: String, _ subtitle: String? = nil) -> PlaceSear
 private func nearby(
   _ name: String,
   distance: Int,
-  relevance: Int
+  relevance: Int,
+  category: MKPointOfInterestCategory? = nil,
+  source: NearbyPointOfInterestValue.Source = .nearby,
+  localityNames: [String] = []
 ) -> NearbyPointOfInterestValue {
   NearbyPointOfInterestValue(
     name: name,
@@ -319,7 +465,10 @@ private func nearby(
     latitude: 51.5,
     longitude: 0.4,
     distanceMeters: distance,
-    relevanceIndex: relevance
+    relevanceIndex: relevance,
+    category: category,
+    source: source,
+    localityNames: localityNames
   )
 }
 
