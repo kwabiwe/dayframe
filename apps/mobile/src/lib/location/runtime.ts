@@ -12,6 +12,7 @@ import {
   getLocationRolloutMode,
   persistLocationEvidence,
   processPendingLocationEvidence,
+  recordLocationStoreError,
   syncLocationEvidence
 } from "./store";
 import { MAX_LOCATION_NATIVE_DRAIN_PASSES } from "./uploadPolicy";
@@ -77,7 +78,7 @@ export async function configureLocationIntelligence(bootstrap: MobileBootstrap) 
   }
   await drainNativeLocationSignalsInBatches();
   await processPendingLocationEvidence();
-  return syncLocationEvidence();
+  void syncLocationEvidence().catch(recordLocationStoreError);
 }
 
 export async function syncLocationIntelligenceOnForeground() {

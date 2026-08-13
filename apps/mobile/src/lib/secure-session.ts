@@ -15,9 +15,13 @@ const SESSION_TOKEN_OPTIONS: SecureStore.SecureStoreOptions = {
 // session successfully, keep that process-local copy available to background
 // reconciliation instead of asking Keychain for the same value again.
 let cachedSessionToken: string | null | undefined;
+let sessionRevision = 0;
+let sessionOperations: Promise<void> = Promise.resolve();
 
 export function resetSessionTokenCacheForTesting() {
   cachedSessionToken = undefined;
+  sessionRevision += 1;
+  sessionOperations = Promise.resolve();
 }
 
 type DayframeLiveActivityNativeModule = {
@@ -72,50 +76,74 @@ async function withInteractionRetry<T>(operation: () => Promise<T>): Promise<T> 
   }
 }
 
+function serialiseSessionOperation<T>(operation: () => Promise<T>) {
+  const result = sessionOperations.then(operation, operation);
+  sessionOperations = result.then(() => undefined, () => undefined);
+  return result;
+}
+
 export async function getSessionToken() {
   if (cachedSessionToken !== undefined) return cachedSessionToken;
 
-  const current = await withInteractionRetry(() =>
-    SecureStore.getItemAsync(SESSION_TOKEN_KEY, SESSION_TOKEN_OPTIONS)
-  );
-  if (current) {
-    cachedSessionToken = current;
-    await mirrorRuntimeContext(current);
-    return current;
-  }
+  const revision = sessionRevision;
+  return serialiseSessionOperation(async () => {
+    if (revision !== sessionRevision || cachedSessionToken !== undefined) {
+      return cachedSessionToken ?? null;
+    }
 
-  const legacy = await withInteractionRetry(() => SecureStore.getItemAsync(LEGACY_SESSION_TOKEN_KEY));
-  if (!legacy) {
-    cachedSessionToken = null;
-    return null;
-  }
+    const current = await withInteractionRetry(() =>
+      SecureStore.getItemAsync(SESSION_TOKEN_KEY, SESSION_TOKEN_OPTIONS)
+    );
+    if (revision !== sessionRevision) return cachedSessionToken ?? null;
+    if (current) {
+      cachedSessionToken = current;
+      await mirrorRuntimeContext(current);
+      return revision === sessionRevision ? current : cachedSessionToken ?? null;
+    }
 
-  await withInteractionRetry(() =>
-    SecureStore.setItemAsync(SESSION_TOKEN_KEY, legacy, SESSION_TOKEN_OPTIONS)
-  );
-  await withInteractionRetry(() => SecureStore.deleteItemAsync(LEGACY_SESSION_TOKEN_KEY));
-  cachedSessionToken = legacy;
-  await mirrorRuntimeContext(legacy);
-  return legacy;
+    const legacy = await withInteractionRetry(() => SecureStore.getItemAsync(LEGACY_SESSION_TOKEN_KEY));
+    if (revision !== sessionRevision) return cachedSessionToken ?? null;
+    if (!legacy) {
+      cachedSessionToken = null;
+      return null;
+    }
+
+    await withInteractionRetry(() =>
+      SecureStore.setItemAsync(SESSION_TOKEN_KEY, legacy, SESSION_TOKEN_OPTIONS)
+    );
+    await withInteractionRetry(() => SecureStore.deleteItemAsync(LEGACY_SESSION_TOKEN_KEY));
+    if (revision !== sessionRevision) return cachedSessionToken ?? null;
+    cachedSessionToken = legacy;
+    await mirrorRuntimeContext(legacy);
+    return revision === sessionRevision ? legacy : cachedSessionToken ?? null;
+  });
 }
 
 export async function setSessionToken(token: string) {
-  await withInteractionRetry(() =>
-    SecureStore.setItemAsync(SESSION_TOKEN_KEY, token, SESSION_TOKEN_OPTIONS)
-  );
-  await withInteractionRetry(() => SecureStore.deleteItemAsync(LEGACY_SESSION_TOKEN_KEY));
-  cachedSessionToken = token;
-  await mirrorRuntimeContext(token);
+  const revision = ++sessionRevision;
+  cachedSessionToken = null;
+  return serialiseSessionOperation(async () => {
+    await withInteractionRetry(() =>
+      SecureStore.setItemAsync(SESSION_TOKEN_KEY, token, SESSION_TOKEN_OPTIONS)
+    );
+    await withInteractionRetry(() => SecureStore.deleteItemAsync(LEGACY_SESSION_TOKEN_KEY));
+    if (revision !== sessionRevision) return;
+    cachedSessionToken = token;
+    await mirrorRuntimeContext(token);
+  });
 }
 
 export async function clearSessionToken() {
+  sessionRevision += 1;
   cachedSessionToken = null;
-  try {
-    await withInteractionRetry(() => SecureStore.deleteItemAsync(SESSION_TOKEN_KEY, SESSION_TOKEN_OPTIONS));
-    await withInteractionRetry(() => SecureStore.deleteItemAsync(LEGACY_SESSION_TOKEN_KEY));
-  } finally {
-    await clearRuntimeContext();
-  }
+  return serialiseSessionOperation(async () => {
+    try {
+      await withInteractionRetry(() => SecureStore.deleteItemAsync(SESSION_TOKEN_KEY, SESSION_TOKEN_OPTIONS));
+      await withInteractionRetry(() => SecureStore.deleteItemAsync(LEGACY_SESSION_TOKEN_KEY));
+    } finally {
+      await clearRuntimeContext();
+    }
+  });
 }
 
 function delay(milliseconds: number) {

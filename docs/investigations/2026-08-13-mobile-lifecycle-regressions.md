@@ -27,7 +27,7 @@ Read-only diagnostics from the production TestFlight phone showed a separate rea
 
 The location store requested SecureStore for every upload attempt. A background TaskManager callback could encounter the locked Keychain, while `configureLocationIntelligence` launched its sync without awaiting it. This made a failed background attempt easy to lose and forced the later foreground reconciliation through the same fragile read even though bootstrap had already read a valid session. The foreground replay added by `254fc60` did not cache that successful foreground credential and therefore did not close the older scheduling gap completely.
 
-The repair keeps a successfully read token in process memory until explicit session replacement/logout, treats temporary Keychain unavailability as a retryable location-sync result, awaits bootstrap outbox reconciliation, and catches background fire-and-forget failures. Exact evidence remains in the protected journal; no coordinate or account identifier is logged or committed.
+The repair keeps a successfully read token in process memory until explicit session replacement/logout, orders and generation-checks session reads so stale Keychain work cannot restore a prior account, and treats temporary Keychain unavailability as a retryable location-sync result. Bootstrap starts outbox reconciliation after local account binding without holding geofence refresh behind the network, while evidence-upload and replay requests have a 15-second deadline so one stalled request cannot permanently block later synchronisation. Exact evidence remains in the protected journal; no coordinate or account identifier is logged or committed.
 
 ### Live Activity and retained editor
 

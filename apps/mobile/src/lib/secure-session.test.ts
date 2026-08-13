@@ -167,6 +167,32 @@ describe("secure mobile session", () => {
     expect(secureStore.getItemAsync).toHaveBeenCalledOnce();
   });
 
+  it("does not restore an earlier account after logout and a new login", async () => {
+    let finishOldRead: ((token: string) => void) | undefined;
+    secureStore.getItemAsync.mockImplementationOnce(() => new Promise((resolve) => {
+      finishOldRead = resolve;
+    }));
+
+    const oldRead = getSessionToken();
+    await vi.waitFor(() => expect(secureStore.getItemAsync).toHaveBeenCalledOnce());
+    const logout = clearSessionToken();
+    const newLogin = setSessionToken("account-b-token");
+    finishOldRead?.("account-a-token");
+
+    await expect(oldRead).resolves.toBeNull();
+    await logout;
+    await newLogin;
+    await expect(getSessionToken()).resolves.toBe("account-b-token");
+    expect(nativeModule.setRuntimeContext).not.toHaveBeenCalledWith(
+      "https://dayframe-staging.vercel.app",
+      "account-a-token"
+    );
+    expect(nativeModule.setRuntimeContext).toHaveBeenLastCalledWith(
+      "https://dayframe-staging.vercel.app",
+      "account-b-token"
+    );
+  });
+
   it("clears native context even when secure storage deletion fails", async () => {
     secureStore.deleteItemAsync.mockRejectedValueOnce(new Error("Keychain unavailable"));
 

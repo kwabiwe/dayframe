@@ -20,6 +20,7 @@ import {
   getSessionToken
 } from "../secure-session";
 import { createSerialMutationQueue } from "./mutationQueue";
+import { fetchLocationSync } from "./network";
 import {
   MAX_LOCATION_UPLOAD_BATCHES_PER_SYNC,
   locationUploadDisposition,
@@ -567,7 +568,7 @@ async function uploadLocationEvidenceBatch(
   | { status: "stopped"; reason: "payload_too_large" | "request_failed"; message?: string }
 > {
   try {
-    const response = await fetch(`${DAYFRAME_API_BASE}/api/location/evidence`, {
+    const response = await fetchLocationSync(`${DAYFRAME_API_BASE}/api/location/evidence`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: batch.body_json
@@ -692,7 +693,7 @@ async function requestServerLocationReplay(token: string, now: number) {
   const attemptedAt = new Date(now).toISOString();
   await serialiseLocationMutation(() => setMetadata("last_server_replay_attempt_at", attemptedAt));
   try {
-    const response = await fetch(`${DAYFRAME_API_BASE}/api/location/replay`, {
+    const response = await fetchLocationSync(`${DAYFRAME_API_BASE}/api/location/replay`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({

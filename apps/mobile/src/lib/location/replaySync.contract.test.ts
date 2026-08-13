@@ -22,7 +22,14 @@ describe("location finalisation replay contracts", () => {
     expect(runtimeSource).toContain("MAX_LOCATION_NATIVE_DRAIN_PASSES");
     expect(runtimeSource).toContain("drainNativeLocationSignals(100)");
     expect(storeSource).toContain("MAX_LOCATION_UPLOAD_BATCHES_PER_SYNC");
+    expect(storeSource).toContain("fetchLocationSync");
     expect(storeSource).toContain("/api/location/replay");
+  });
+
+  it("does not hold geofence refresh behind remote reconciliation", () => {
+    expect(runtimeSource).toContain("void syncLocationEvidence().catch(recordLocationStoreError)");
+    expect(dashboardSource).toContain("await configureLocationIntelligence(bootstrap)");
+    expect(dashboardSource).toContain("await refreshGeofencesForPlaces(bootstrap.places)");
   });
 
   it("keeps replay diagnostics coordinate-free", () => {
