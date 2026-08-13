@@ -12,28 +12,35 @@ describe("native Live Activity presentation contract", () => {
     expect(shortcuts).not.toContain('event.description ?? "Tracking"');
   });
 
-  it("stops locally before directly submitting the queued idempotent event", () => {
+  it("starts local dismissal without blocking direct idempotent Stop delivery", () => {
     const shortcuts = readFileSync(`${mobileRoot}ios/Dayframe/DayframeShortcuts.swift`, "utf8");
     const directClient = readFileSync(
       `${mobileRoot}ios/Dayframe/DayframeShortcutDirectEventClient.swift`,
       "utf8"
     );
     const stopCase = shortcuts.slice(shortcuts.indexOf("case .stop:"), shortcuts.indexOf("struct DayframeShortcutEvent"));
+    const stopBranch = stopCase.slice(0, stopCase.indexOf("private static func requestLocalStop"));
 
     expect(shortcuts.indexOf("DayframeNativeShortcutQueue.append(event)")).toBeLessThan(
-      shortcuts.indexOf("DayframeLiveActivityController.stop()")
+      shortcuts.indexOf("requestLocalStop()")
     );
-    expect(stopCase.indexOf("DayframeLiveActivityController.stop()")).toBeLessThan(
-      stopCase.indexOf("DayframeShortcutDirectEventClient.submit(event)")
+    expect(stopBranch.indexOf("requestLocalStop()")).toBeLessThan(
+      stopBranch.indexOf("DayframeShortcutDirectEventClient.submit(event)")
     );
-    expect(stopCase).toContain("guard queued else");
-    expect(stopCase).toMatch(
-      /if await DayframeShortcutDirectEventClient\.submit\(event\) \{\s+_ = DayframeNativeShortcutQueue\.remove\(localIds: \[event\.localId\]\)/
+    expect(shortcuts).toMatch(
+      /private static func requestLocalStop\(\) \{\s+_ = Task\(priority: \.userInitiated\) \{\s+await DayframeLiveActivityController\.stop\(\)\s+\}\s+\}/
     );
+    expect(stopBranch).toMatch(
+      /if await DayframeShortcutDirectEventClient\.submit\(event\), queued \{\s+_ = DayframeNativeShortcutQueue\.remove\(localIds: \[event\.localId\]\)/
+    );
+    expect(stopBranch).not.toContain("await DayframeLiveActivityController.stop()");
+    expect(stopBranch).not.toContain("guard queued else");
     expect(directClient).toContain('clientEventId = event.localId');
     expect(directClient).toContain('/api/events');
     expect(directClient).toMatch(/statusCode == 200 \|\| httpResponse\.statusCode == 201/);
     expect(directClient).toContain('forHTTPHeaderField: "Authorization"');
+    expect(directClient).toContain("request.timeoutInterval = 8");
+    expect(directClient).toContain("configuration.timeoutIntervalForResource = 10");
   });
 
   it("limits background delivery to the staging and production Dayframe APIs", () => {

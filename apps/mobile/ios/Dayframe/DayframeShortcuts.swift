@@ -105,13 +105,20 @@ private enum DayframeShortcutPerformer {
         startedAt: event.occurredAt
       )
     case .stop:
-      _ = await DayframeLiveActivityController.stop()
-      guard queued else {
-        return
-      }
-      if await DayframeShortcutDirectEventClient.submit(event) {
+      // ActivityKit can suspend an end request while this intent is running in
+      // the background app process. Start the local dismissal immediately, but
+      // do not put the server/APNs end path behind that await. The queued event
+      // remains the offline fallback if direct delivery cannot complete.
+      requestLocalStop()
+      if await DayframeShortcutDirectEventClient.submit(event), queued {
         _ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])
       }
+    }
+  }
+
+  private static func requestLocalStop() {
+    _ = Task(priority: .userInitiated) {
+      await DayframeLiveActivityController.stop()
     }
   }
 }

@@ -31,7 +31,11 @@ The repair keeps a successfully read token in process memory until explicit sess
 
 ### Live Activity and retained editor
 
-The JS Live Activity owner remembered only its last requested entry key. When Stop ran in the App Intent extension while React Native was suspended, ActivityKit ended the native activity but the JS key remained unchanged. On foreground, the same canonical active-entry key caused an early return instead of checking whether a native activity still existed. That stale-key guard originated in `2814a81`; PR #160 (`5b93914`) added the extension/direct-delivery path that can legitimately change ActivityKit state outside the JS process.
+The JS Live Activity owner remembered only its last requested entry key. When Stop ran from the Live Activity while React Native was suspended, the JS key remained unchanged. On foreground, the same canonical active-entry key caused an early return instead of checking whether native ActivityKit state had changed. That stale-key guard originated in `2814a81`; PR #160 (`5b93914`) added the App Intent/direct-delivery path that can legitimately change ActivityKit state outside the JS process.
+
+The first repair assumed the App Intent's awaited ActivityKit end had completed. Physical-iPhone validation disproved that assumption on the connected iPhone 11 running iOS 27 beta: the native queue recorded Stop at `12:49:35Z`, but Staging did not ingest that same idempotent event until the app foregrounded 129 seconds later. A second run showed the same 25-second defer. The App Intent had therefore entered and durably queued Stop, while the serial `await DayframeLiveActivityController.stop()` prevented the independent direct API/APNs end path from running before foreground recovery. Source-order tests had encoded that faulty serialization and could not observe the suspended-device behavior.
+
+Stop now starts the local ActivityKit dismissal and direct idempotent event delivery independently. A suspended ActivityKit call cannot hold the server/APNs end behind it; successful direct delivery removes the already-durable queue item, while timeout/offline failure leaves replay intact. The direct request remains bounded to 8 seconds (10 seconds total resource time). This preserves immediate local dismissal where ActivityKit completes normally and provides a second end path on suspended or beta-OS execution.
 
 The retained active-editor behavior was separate. The shared sheet redesign in `1768806` intentionally retained the last active entry while the sheet completed its exit, but no canonical-refresh path requested that coordinated exit when another client or the Live Activity stopped the timer. The parent therefore kept passing the retained entry to a still-visible sheet.
 
@@ -63,6 +67,7 @@ Completed during implementation:
 - documentation alignment and iOS configuration checks passed;
 - unsigned arm64 iOS Simulator workspace build passed, including the new Swift/Objective-C Live Activity bridge;
 - read-only physical-device diagnostics distinguished Staging fixtures from the production local-upload backlog.
+- post-report Staging evidence matched the physical tap's queued client-event ID to a 129-second foreground ingest delay and showed APNs accepting the eventual development-token end with status `200`.
 
 Still required before merge/release:
 
