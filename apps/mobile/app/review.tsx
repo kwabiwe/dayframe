@@ -915,7 +915,11 @@ function ReviewItemCard({
   const syncCopy = reviewItemSyncStatusCopy(syncState);
 
   return (
-    <View style={[styles.reviewCard, { borderLeftColor: categoryColor }]}>
+    <View style={styles.reviewCard}>
+      <View
+        pointerEvents="none"
+        style={[styles.reviewCardAccentRail, { backgroundColor: categoryColor }]}
+      />
       <View style={styles.reviewCardHeader}>
         <View style={styles.reviewTitleStack}>
           <Text style={styles.reviewTitle} numberOfLines={2}>{title}</Text>
@@ -1049,7 +1053,11 @@ function ReviewNeededEntryCard({
   );
 
   return (
-    <View style={[styles.reviewCard, { borderLeftColor: categoryColor }]}>
+    <View style={styles.reviewCard}>
+      <View
+        pointerEvents="none"
+        style={[styles.reviewCardAccentRail, { backgroundColor: categoryColor }]}
+      />
       <View style={styles.reviewCardHeader}>
         <View style={styles.reviewTitleStack}>
           <Text style={styles.reviewTitle} numberOfLines={2}>{displayEntryTitle(entry)}</Text>

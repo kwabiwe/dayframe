@@ -930,10 +930,17 @@ function createStyles(theme: MobileTheme) {
     reviewCard: {
       backgroundColor: theme.surfaceRaised,
       borderRadius: 16,
-      borderLeftWidth: 3,
+      position: "relative",
       paddingHorizontal: 14,
       paddingVertical: 14,
       gap: 10
+    },
+    reviewCardAccentRail: {
+      position: "absolute",
+      left: 0,
+      top: 12,
+      bottom: 12,
+      width: 3
     },
     reviewCardHeader: {
       flexDirection: "row",

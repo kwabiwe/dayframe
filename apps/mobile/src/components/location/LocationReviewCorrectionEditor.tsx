@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Keyboard,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -30,6 +31,8 @@ import {
   formatLocationReviewDateLabel,
   formatLocationReviewEditableTime,
   formatLocationReviewTimeInput,
+  initialLocationReviewDescription,
+  keyboardRevealScrollOffset,
   locationActivityGlyphName,
   parseLocationReviewWindow,
   type LocationActivityGlyphName,
@@ -97,6 +100,15 @@ export function LocationReviewCorrectionEditor({
   const nearbyProvider = useMemo(() => createNativeNearbyPointOfInterestProvider(), []);
   const controllerRef = useRef<PlaceSearchController | null>(null);
   const nearbyControllerRef = useRef<NearbyPointOfInterestController | null>(null);
+  const scrollViewRef = useRef<ScrollView>(null);
+  const searchInputRef = useRef<TextInput>(null);
+  const activityInputRef = useRef<TextInput>(null);
+  const activeRevealControlRef = useRef<TextInput | null>(null);
+  const scrollOffsetRef = useRef(0);
+  const keyboardTopRef = useRef<number | null>(null);
+  const revealGenerationRef = useRef(0);
+  const reduceMotionRef = useRef(reduceMotion);
+  reduceMotionRef.current = reduceMotion;
   const startAt = useMemo(() => new Date(evidence.segment.startedAt), [evidence.segment.startedAt]);
   const stopAt = useMemo(
     () => evidence.segment.stoppedAt ? new Date(evidence.segment.stoppedAt) : null,
@@ -104,9 +116,11 @@ export function LocationReviewCorrectionEditor({
   );
   const baselinePlaceId = evidence.display.placeId ?? reviewItem?.suggestedPlaceId ?? null;
   const baselineCategoryId = reviewItem?.suggestedCategoryId ?? null;
-  const [description, setDescription] = useState(
-    evidence.segment.kind === "commute" ? "" : evidence.display.title
-  );
+  const [description, setDescription] = useState(() => initialLocationReviewDescription({
+    placeName: evidence.display.placeName,
+    segmentKind: evidence.segment.kind,
+    title: evidence.display.title
+  }));
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(baselineCategoryId);
   const [categoryTouched, setCategoryTouched] = useState(false);
   const [selectedSavedPlaceId, setSelectedSavedPlaceId] = useState<string | null>(baselinePlaceId);
@@ -127,6 +141,68 @@ export function LocationReviewCorrectionEditor({
   const [stopTimeText, setStopTimeText] = useState(() => stopAt ? formatLocationReviewTimeInput(stopAt) : "");
   const [datePickerTarget, setDatePickerTarget] = useState<"start" | "stop" | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
+
+  const revealFocusedControl = useCallback((control = activeRevealControlRef.current) => {
+    const keyboardTop = keyboardTopRef.current;
+    if (!control || keyboardTop === null) return;
+    const generation = ++revealGenerationRef.current;
+    requestAnimationFrame(() => {
+      if (generation !== revealGenerationRef.current || control !== activeRevealControlRef.current) return;
+      control.measureInWindow((_x, controlTop, _width, controlHeight) => {
+        if (generation !== revealGenerationRef.current || control !== activeRevealControlRef.current) return;
+        const nextOffset = keyboardRevealScrollOffset({
+          controlHeight,
+          controlTop,
+          currentOffset: scrollOffsetRef.current,
+          keyboardTop
+        });
+        if (nextOffset <= scrollOffsetRef.current + 0.5) return;
+        scrollViewRef.current?.scrollTo({
+          y: nextOffset,
+          animated: !reduceMotionRef.current
+        });
+      });
+    });
+  }, []);
+
+  const focusRevealControl = useCallback((control: TextInput | null) => {
+    activeRevealControlRef.current = control;
+    revealFocusedControl(control);
+  }, [revealFocusedControl]);
+
+  const blurRevealControl = useCallback((control: TextInput | null) => {
+    if (activeRevealControlRef.current !== control) return;
+    activeRevealControlRef.current = null;
+    revealGenerationRef.current += 1;
+  }, []);
+
+  useEffect(() => {
+    const updateKeyboardFrame = (event: { endCoordinates: { screenY: number } }) => {
+      keyboardTopRef.current = event.endCoordinates.screenY;
+      revealFocusedControl();
+    };
+    const keyboardChanged = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillChangeFrame" : "keyboardDidShow",
+      updateKeyboardFrame
+    );
+    const keyboardShown = Platform.OS === "ios"
+      ? Keyboard.addListener("keyboardDidShow", updateKeyboardFrame)
+      : null;
+    const keyboardHidden = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => {
+        keyboardTopRef.current = null;
+        revealGenerationRef.current += 1;
+      }
+    );
+    return () => {
+      keyboardChanged.remove();
+      keyboardShown?.remove();
+      keyboardHidden.remove();
+      activeRevealControlRef.current = null;
+      revealGenerationRef.current += 1;
+    };
+  }, [revealFocusedControl]);
 
   useEffect(() => {
     if (!provider) return;
@@ -360,8 +436,18 @@ export function LocationReviewCorrectionEditor({
   return (
     <>
       <ScrollView
+        ref={scrollViewRef}
+        automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
+        onContentSizeChange={() => revealFocusedControl()}
+        onScroll={(event) => {
+          scrollOffsetRef.current = event.nativeEvent.contentOffset.y;
+        }}
+        onScrollBeginDrag={() => {
+          revealGenerationRef.current += 1;
+        }}
+        scrollEventThrottle={16}
         style={styles.settingsScrollView}
         contentContainerStyle={[styles.settingsScrollContent, editorStyles.scrollContent]}
       >
@@ -493,11 +579,14 @@ export function LocationReviewCorrectionEditor({
                   <View style={editorStyles.searchField}>
                     <SearchGlyph color={theme.textSecondary} />
                     <TextInput
+                      ref={searchInputRef}
                       accessibilityLabel="Search other places"
                       autoCapitalize="words"
                       autoCorrect={false}
                       editable={Boolean(provider) && !saving}
                       onChangeText={changeSearchQuery}
+                      onBlur={() => blurRevealControl(searchInputRef.current)}
+                      onFocus={() => focusRevealControl(searchInputRef.current)}
                       placeholder={provider ? "Search address or place" : "Place search unavailable in this build"}
                       placeholderTextColor={theme.textSecondary}
                       returnKeyType="search"
@@ -586,11 +675,14 @@ export function LocationReviewCorrectionEditor({
                 theme={theme}
               />
               <TextInput
+                ref={activityInputRef}
                 accessibilityLabel="Activity"
                 editable={!saving}
                 maxLength={500}
                 onChangeText={setDescription}
-                placeholder={evidence.segment.kind === "commute" ? "Add commute details (optional)" : "Activity"}
+                onBlur={() => blurRevealControl(activityInputRef.current)}
+                onFocus={() => focusRevealControl(activityInputRef.current)}
+                placeholder={evidence.segment.kind === "commute" ? "Add commute details (optional)" : "Add activity (optional)"}
                 placeholderTextColor={theme.textSecondary}
                 style={styles.textInput}
                 value={description}
@@ -973,15 +1065,20 @@ function CategoryChoice({
       onPress={onPress}
       style={({ pressed }) => [
         categoryChoiceStyles.touch,
-        { backgroundColor: selected ? theme.accentSoft : theme.surfaceMuted },
         pressed ? { opacity: 0.72 } : null
       ]}
     >
-      <View style={[categoryChoiceStyles.dot, { backgroundColor: color }]} />
-      <Text style={[categoryChoiceStyles.text, { color: selected ? theme.accentText : theme.textPrimary }]}>
-        {label}
-      </Text>
-      {selected ? <CheckGlyph color={theme.accentText} /> : null}
+      <View
+        style={[
+          categoryChoiceStyles.visual,
+          { backgroundColor: selected ? theme.accentSoft : theme.surfaceMuted }
+        ]}
+      >
+        <View style={[categoryChoiceStyles.dot, { backgroundColor: color }]} />
+        <Text style={[categoryChoiceStyles.text, { color: selected ? theme.accentText : theme.textPrimary }]}>
+          {label}
+        </Text>
+      </View>
     </Pressable>
   );
 }
@@ -1215,7 +1312,8 @@ const placeChoiceStyles = StyleSheet.create({
 });
 
 const categoryChoiceStyles = StyleSheet.create({
-  touch: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 22, paddingHorizontal: 12 },
-  dot: { width: 10, height: 10, borderRadius: 5 },
-  text: { fontSize: 13, lineHeight: 17, fontWeight: "600" }
+  touch: { minHeight: 44, justifyContent: "center" },
+  visual: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 4 },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  text: { fontSize: 12, lineHeight: 16, fontWeight: "600" }
 });

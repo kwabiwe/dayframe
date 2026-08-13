@@ -45,6 +45,9 @@ describe("mobile Review action contracts", () => {
     expect(reviewSource).not.toContain("ReviewDiagnosticsPanel");
     expect(themeSource).toContain("reviewItemsSection");
     expect(themeSource).toContain("reviewConfidenceDot");
+    expect(reviewSource).toContain("reviewCardAccentRail");
+    expect(themeSource).toMatch(/reviewCardAccentRail:[\s\S]*top:\s*12,[\s\S]*bottom:\s*12,[\s\S]*width:\s*3/);
+    expect(themeSource).not.toMatch(/reviewCard:[\s\S]{0,180}borderLeftWidth/);
   });
 
   it("presents Location Evidence as activity, time and map while retaining resolution actions", () => {
@@ -73,6 +76,20 @@ describe("mobile Review action contracts", () => {
     expect(evidenceEditorSource).not.toContain("createCategory");
     expect(evidenceEditorSource).not.toContain("resolveLocationReviewItem");
     expect(evidenceSource).toContain("resolveLocationReviewItem(id, action)");
+  });
+
+  it("keeps evidence fields visible above the keyboard and uses compact category visuals", () => {
+    const categoryChoiceSource = evidenceEditorSource
+      .split("function CategoryChoice")[1]
+      ?.split("function ActivityGlyph")[0] ?? "";
+    expect(evidenceEditorSource).toContain('automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}');
+    expect(evidenceEditorSource).toContain("keyboardRevealScrollOffset");
+    expect(evidenceEditorSource).toContain("revealGenerationRef");
+    expect(evidenceEditorSource).toContain('placeholder={evidence.segment.kind === "commute" ? "Add commute details (optional)" : "Add activity (optional)"}');
+    expect(evidenceEditorSource).toContain("initialLocationReviewDescription");
+    expect(evidenceEditorSource).toMatch(/touch:\s*\{\s*minHeight:\s*44/);
+    expect(evidenceEditorSource).toMatch(/visual:\s*\{\s*minHeight:\s*32/);
+    expect(categoryChoiceSource).not.toContain("CheckGlyph");
   });
 
   it("loads nearby POIs only for unknown visits and keeps typed search as the fallback", () => {
