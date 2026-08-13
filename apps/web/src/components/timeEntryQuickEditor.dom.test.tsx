@@ -27,6 +27,19 @@ describe("TimeEntryQuickEditorModal", () => {
     document.body.innerHTML = "";
   });
 
+  it("uses one Calendar Entry title without repeating completed or running descriptions", async () => {
+    const completed = renderModal({ sourceEntry: timeEntry({ description: "Sleep" }) });
+    const completedEditor = await screen.findByTestId("time-entry-quick-editor");
+    expect(completedEditor.querySelector(".calendar-compact-editor-header")?.textContent).toBe("Calendar Entry");
+    expect((screen.getByLabelText("Time entry description") as HTMLInputElement).value).toBe("Sleep");
+
+    completed.unmount();
+    renderModal({ sourceEntry: timeEntry({ description: null, stoppedAt: null }) });
+    const runningEditor = await screen.findByTestId("time-entry-quick-editor");
+    expect(runningEditor.querySelector(".calendar-compact-editor-header")?.textContent).toBe("Calendar Entry");
+    expect(runningEditor.querySelector(".calendar-compact-editor-header")?.textContent).not.toContain("Untitled entry");
+  });
+
   it("hydrates, removes and selects tags and saves one Place-safe partial payload", async () => {
     const onClose = vi.fn();
     const onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true });

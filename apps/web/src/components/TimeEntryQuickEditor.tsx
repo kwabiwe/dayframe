@@ -605,8 +605,7 @@ export function TimeEntryQuickEditorPanel({
       ) : null}
       <div className="calendar-compact-editor-header">
         <div>
-          <span className="calendar-compact-editor-kicker">{entry ? "Calendar entry" : "New Calendar entry"}</span>
-          <strong>{title}</strong>
+          <strong>Calendar Entry</strong>
         </div>
         <div className="calendar-compact-editor-icons">
           {entry?.stoppedAt && props.mode === "entry" && props.onStartAgain ? (

@@ -8658,31 +8658,36 @@ kbd {
 
 dialog.ui-dialog.manual-entry-dialog {
   width: min(420px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
   overflow: visible;
-  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
-  border-radius: 16px;
-}
-
-.manual-entry-dialog .ui-dialog-header,
-.manual-entry-dialog .ui-dialog-actions {
-  background: var(--surface-raised);
 }
 
 .manual-entry-dialog .ui-dialog-header {
-  min-height: 64px;
   border-radius: 16px 16px 0 0;
-  padding: 10px 12px;
 }
 
-.manual-entry-dialog .ui-dialog-header h2 {
-  font-size: 0.9rem;
-  font-weight: 690;
+.manual-entry-dialog .ui-dialog-header .ui-icon-button {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.manual-entry-dialog .ui-dialog-header .ui-icon-button:hover:not(:disabled) {
+  background: var(--surface-muted);
+  color: var(--foreground);
 }
 
 .manual-entry-dialog .ui-dialog-actions {
-  min-height: 72px;
+  flex-wrap: nowrap;
+  gap: 12px;
   border-radius: 0 0 16px 16px;
-  padding: 10px 12px;
+}
+
+.manual-entry-dialog .ui-dialog-actions > .ui-button {
+  flex: 0 0 auto;
 }
 
 .manual-entry-dialog-content {
@@ -9047,24 +9052,29 @@ dialog.ui-dialog.manual-entry-dialog {
 .calendar-time-block.is-tiny .calendar-entry-primary-line {
   font-size: 11px;
 }
-.calendar-compact-editor {
+.calendar-compact-editor,
+.time-entry-quick-editor-modal,
+dialog.ui-dialog.manual-entry-dialog {
   --web-control-height: 44px;
   --calendar-compact-horizontal-inset: 12px;
   --calendar-compact-feedback-height: 72px;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: 16px;
+  background: var(--surface-raised);
+  box-shadow: 0 22px 52px var(--shadow-color), var(--shadow-raised);
+  color: var(--foreground);
+}
+
+.calendar-compact-editor {
   position: fixed;
   z-index: 75;
-  box-sizing: border-box;
   width: 420px;
   max-width: calc(100vw - 24px);
   max-height: calc(100dvh - 24px);
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
-  border-radius: 16px;
-  background: var(--surface-raised);
-  box-shadow: 0 22px 52px var(--shadow-color), var(--shadow-raised);
-  color: var(--foreground);
   opacity: 0;
   transform: translateY(-4px);
   transition: opacity 140ms ease-out, transform 140ms ease-out;
@@ -9089,19 +9099,11 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .time-entry-quick-editor-modal {
-  --web-control-height: 44px;
-  --calendar-compact-horizontal-inset: 12px;
-  --calendar-compact-feedback-height: 72px;
   width: min(420px, calc(100vw - 24px));
   max-height: calc(100dvh - 24px);
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
-  border-radius: 16px;
-  background: var(--surface-raised);
-  box-shadow: 0 22px 52px var(--shadow-color), var(--shadow-raised);
-  color: var(--foreground);
   opacity: 0;
   transform: translateY(4px);
   transition: opacity 180ms ease-out, transform 180ms ease-out;
@@ -9138,7 +9140,10 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .calendar-compact-editor-header,
-.calendar-compact-editor-footer {
+.calendar-compact-editor-footer,
+.manual-entry-dialog .ui-dialog-header,
+.manual-entry-dialog .ui-dialog-actions {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -9146,7 +9151,11 @@ dialog.ui-dialog.manual-entry-dialog {
   padding: 10px var(--calendar-compact-horizontal-inset);
 }
 
-.calendar-compact-editor-header {
+.calendar-compact-editor-header,
+.manual-entry-dialog .ui-dialog-header {
+  height: 64px;
+  min-height: 64px;
+  max-height: 64px;
   border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface-raised) 94%, var(--surface-inset));
 }
@@ -9157,8 +9166,11 @@ dialog.ui-dialog.manual-entry-dialog {
   gap: 2px;
 }
 
-.calendar-compact-editor-header strong {
+.calendar-compact-editor-header strong,
+.manual-entry-dialog .ui-dialog-header h2 {
+  margin: 0;
   overflow: hidden;
+  color: var(--foreground);
   font-size: 0.9rem;
   font-weight: 690;
   line-height: 1.25;
@@ -9166,7 +9178,6 @@ dialog.ui-dialog.manual-entry-dialog {
   white-space: nowrap;
 }
 
-.calendar-compact-editor-kicker,
 .calendar-compact-field-label,
 .calendar-compact-editor-description > label,
 .calendar-compact-editor-fields label > span,
@@ -9513,6 +9524,14 @@ dialog.ui-dialog.manual-entry-dialog {
   max-height: var(--calendar-compact-feedback-height);
   grid-template-columns: minmax(0, 1fr);
   overflow: hidden;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-raised) 94%, var(--surface-inset));
+}
+
+.manual-entry-dialog .ui-dialog-actions {
+  height: var(--calendar-compact-feedback-height);
+  min-height: var(--calendar-compact-feedback-height);
+  max-height: var(--calendar-compact-feedback-height);
   border-top: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface-raised) 94%, var(--surface-inset));
 }

@@ -703,11 +703,11 @@ function ManualEntryDialog({
       contentClassName="manual-entry-dialog-content calendar-compact-editor-panel"
       initialFocusRef={descriptionInputRef}
       onClose={onClose}
-      title="Add time"
+      title="Add Time"
       footer={(
         <>
-          <Button onClick={onClose} disabled={isBusy}>Cancel</Button>
-          <Button variant="primary" type="submit" form={formId} disabled={isBusy}>Add time</Button>
+          <Button className="calendar-compact-cancel" onClick={onClose} disabled={isBusy}>Cancel</Button>
+          <Button className="calendar-compact-save" variant="primary" type="submit" form={formId} disabled={isBusy}>Add time</Button>
         </>
       )}
     >

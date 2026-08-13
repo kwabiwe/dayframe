@@ -49,6 +49,8 @@ describe("shared web time-entry quick editor", () => {
   });
 
   it("uses one fixed feedback plane with danger discard copy and equal action sizing", () => {
+    expect(quick).toContain("<strong>Calendar Entry</strong>");
+    expect(quick).not.toContain('className="calendar-compact-editor-kicker"');
     expect(quick).toContain('data-feedback-mode={feedbackMode}');
     expect(quick).toContain("Discard changes?");
     expect(quick).toContain("Go back");
