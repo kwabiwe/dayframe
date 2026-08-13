@@ -801,7 +801,7 @@ function ManualEntryDialog({
           <div className="calendar-compact-duration-field">
             <span className="calendar-compact-field-label">Duration</span>
             <div className="calendar-compact-duration is-readonly" aria-label="Duration">
-              <strong className="tabular">{durationLabel}</strong>
+              <span className="tabular">{durationLabel}</span>
             </div>
           </div>
         </div>

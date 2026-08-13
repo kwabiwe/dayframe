@@ -559,6 +559,7 @@ export function TimeEntryQuickEditorPanel({
     : finishDayOffset > 1
       ? `Finish time, ${finishDayOffset} days after Start`
       : "Finish time";
+  const editorHeading = props.mode === "entry" ? "Edit Entry" : "Calendar Entry";
 
   function saveButton() {
     return (
@@ -605,7 +606,7 @@ export function TimeEntryQuickEditorPanel({
       ) : null}
       <div className="calendar-compact-editor-header">
         <div>
-          <strong>Calendar Entry</strong>
+          <strong>{editorHeading}</strong>
         </div>
         <div className="calendar-compact-editor-icons">
           {entry?.stoppedAt && props.mode === "entry" && props.onStartAgain ? (
@@ -759,9 +760,9 @@ export function TimeEntryQuickEditorPanel({
             <div className="calendar-compact-duration-field">
               <span className="calendar-compact-field-label">Duration</span>
               <div className="calendar-compact-duration is-readonly" aria-label="Elapsed time">
-                <strong className="tabular">
+                <span className="tabular">
                   {preview.plan ? formatCalendarEntryCompactDuration(preview.plan.durationSeconds) : "—"}
-                </strong>
+                </span>
               </div>
             </div>
           ) : (

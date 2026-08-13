@@ -50,6 +50,8 @@ describe("web manual entry and Timeline control refinement", () => {
     expect(manual).toContain('title="Add Time"');
     expect(manual).toContain('className="calendar-compact-cancel"');
     expect(manual).toContain('className="calendar-compact-save"');
+    expect(manual).toContain('<span className="tabular">{durationLabel}</span>');
+    expect(manual).not.toContain('<strong className="tabular">{durationLabel}</strong>');
     expect(manual).not.toContain("<SelectField");
     expect(manual).toContain("<DayframeDateTimePicker");
     expect(timer).not.toContain('type="datetime-local"');
@@ -58,6 +60,7 @@ describe("web manual entry and Timeline control refinement", () => {
     expect(styles).toMatch(/\.calendar-compact-editor-header,[\s\S]*\.manual-entry-dialog \.ui-dialog-actions \{[^}]*gap: 12px;[^}]*padding: 10px var\(--calendar-compact-horizontal-inset\);/s);
     expect(styles).toMatch(/\.calendar-compact-editor-header,[\s\S]*\.manual-entry-dialog \.ui-dialog-header \{[^}]*height: 64px;[^}]*min-height: 64px;[^}]*max-height: 64px;/s);
     expect(styles).toMatch(/\.manual-entry-dialog \.ui-dialog-actions \{[^}]*height: var\(--calendar-compact-feedback-height\);[^}]*min-height: var\(--calendar-compact-feedback-height\);[^}]*max-height: var\(--calendar-compact-feedback-height\);/s);
+    expect(styles).toMatch(/\.manual-entry-dialog \.ui-dialog-actions \{[^}]*justify-content:\s*flex-end;/s);
     expect(styles).toMatch(/\.manual-entry-dialog \.ui-dialog-actions > \.ui-button \{[^}]*flex: 0 0 auto;/s);
     expect(styles).toMatch(/dialog\.ui-dialog:focus \{[^}]*outline: 0;/s);
   });

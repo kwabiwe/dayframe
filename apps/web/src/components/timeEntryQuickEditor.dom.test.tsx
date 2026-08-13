@@ -27,16 +27,16 @@ describe("TimeEntryQuickEditorModal", () => {
     document.body.innerHTML = "";
   });
 
-  it("uses one Calendar Entry title without repeating completed or running descriptions", async () => {
+  it("uses one Edit Entry title without repeating completed or running descriptions", async () => {
     const completed = renderModal({ sourceEntry: timeEntry({ description: "Sleep" }) });
     const completedEditor = await screen.findByTestId("time-entry-quick-editor");
-    expect(completedEditor.querySelector(".calendar-compact-editor-header")?.textContent).toBe("Calendar Entry");
+    expect(completedEditor.querySelector(".calendar-compact-editor-header")?.textContent).toBe("Edit Entry");
     expect((screen.getByLabelText("Time entry description") as HTMLInputElement).value).toBe("Sleep");
 
     completed.unmount();
     renderModal({ sourceEntry: timeEntry({ description: null, stoppedAt: null }) });
     const runningEditor = await screen.findByTestId("time-entry-quick-editor");
-    expect(runningEditor.querySelector(".calendar-compact-editor-header")?.textContent).toBe("Calendar Entry");
+    expect(runningEditor.querySelector(".calendar-compact-editor-header")?.textContent).toBe("Edit Entry");
     expect(runningEditor.querySelector(".calendar-compact-editor-header")?.textContent).not.toContain("Untitled entry");
   });
 

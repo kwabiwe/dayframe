@@ -9447,7 +9447,7 @@ dialog.ui-dialog.manual-entry-dialog {
 .calendar-compact-date-trigger strong,
 .calendar-compact-time-control input,
 .calendar-compact-duration-input input,
-.calendar-compact-duration strong {
+.calendar-compact-duration > .tabular {
   font-variant-numeric: tabular-nums;
 }
 
@@ -9500,8 +9500,9 @@ dialog.ui-dialog.manual-entry-dialog {
   background: color-mix(in srgb, var(--surface-inset) 78%, transparent);
 }
 
-.calendar-compact-duration strong {
+.calendar-compact-duration > .tabular {
   font-size: 0.86rem;
+  font-weight: 400;
 }
 
 .calendar-compact-running-value {
@@ -9532,6 +9533,7 @@ dialog.ui-dialog.manual-entry-dialog {
   height: var(--calendar-compact-feedback-height);
   min-height: var(--calendar-compact-feedback-height);
   max-height: var(--calendar-compact-feedback-height);
+  justify-content: flex-end;
   border-top: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface-raised) 94%, var(--surface-inset));
 }

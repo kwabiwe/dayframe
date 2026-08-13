@@ -49,7 +49,8 @@ describe("shared web time-entry quick editor", () => {
   });
 
   it("uses one fixed feedback plane with danger discard copy and equal action sizing", () => {
-    expect(quick).toContain("<strong>Calendar Entry</strong>");
+    expect(quick).toContain('const editorHeading = props.mode === "entry" ? "Edit Entry" : "Calendar Entry";');
+    expect(quick).toContain("<strong>{editorHeading}</strong>");
     expect(quick).not.toContain('className="calendar-compact-editor-kicker"');
     expect(quick).toContain('data-feedback-mode={feedbackMode}');
     expect(quick).toContain("Discard changes?");
@@ -70,6 +71,8 @@ describe("shared web time-entry quick editor", () => {
     expect(styles).toMatch(/\.calendar-compact-date-trigger:hover,[\s\S]*background:\s*transparent;/s);
     expect(quick).toContain('className="calendar-compact-duration-field"');
     expect(quick).toContain('<span className="calendar-compact-field-label">Duration</span>');
+    expect(quick).not.toContain('<strong className="tabular">');
+    expect(styles).toMatch(/\.calendar-compact-duration > \.tabular \{[^}]*font-size:\s*0\.86rem;[^}]*font-weight:\s*400;/s);
   });
 
   it("keeps the CSS-only Calendar text hierarchy and narrow-container fallback", () => {
