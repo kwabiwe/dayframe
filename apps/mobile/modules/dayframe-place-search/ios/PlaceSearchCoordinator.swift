@@ -47,12 +47,20 @@ struct ResolvedPlaceSearchValue: Equatable {
 }
 
 struct NearbyPointOfInterestValue: Equatable {
+  enum Source: Equatable {
+    case nearby
+    case contextual(anchor: String)
+  }
+
   let name: String
   let formattedAddress: String?
   let latitude: Double
   let longitude: Double
   let distanceMeters: Int
   let relevanceIndex: Int
+  let category: MKPointOfInterestCategory?
+  let source: Source
+  let localityNames: [String]
 
   var dictionary: [String: Any] {
     [
@@ -75,7 +83,13 @@ enum PlaceSearchCoordinatorError: String, Error, Equatable {
 
 @MainActor
 protocol NearbyPointOfInterestSearching: AnyObject {
-  func search(
+  func searchNearby(
+    center: CLLocationCoordinate2D,
+    radiusMeters: CLLocationDistance,
+    completion: @escaping (Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>) -> Void
+  )
+  func searchContext(
+    query: String,
     center: CLLocationCoordinate2D,
     radiusMeters: CLLocationDistance,
     completion: @escaping (Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>) -> Void
@@ -115,16 +129,45 @@ final class NearbyPointOfInterestCoordinator {
     activeRequestId = requestId
     return try await withCheckedThrowingContinuation { continuation in
       pending = (requestId, continuation)
-      searcher.search(
+      searcher.searchNearby(
         center: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
         radiusMeters: radiusMeters
       ) { [weak self] result in
         guard let self,
               self.activeRequestId == requestId,
               self.pending?.requestId == requestId else { return }
-        self.pending = nil
-        self.activeRequestId = nil
-        continuation.resume(with: result.map { Self.normalized($0) }.mapError { $0 as Error })
+        switch result {
+        case .failure(let error):
+          self.finish(requestId: requestId, result: .failure(error))
+        case .success(let nearby):
+          guard let context = Self.contextQuery(from: nearby) else {
+            self.finish(
+              requestId: requestId,
+              result: .success(Self.normalized(nearby, maximumDistanceMeters: radiusMeters))
+            )
+            return
+          }
+          self.searcher.searchContext(
+            query: context,
+            center: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
+            radiusMeters: radiusMeters
+          ) { [weak self] contextResult in
+            guard let self,
+                  self.activeRequestId == requestId,
+                  self.pending?.requestId == requestId else { return }
+            let values: [NearbyPointOfInterestValue]
+            switch contextResult {
+            case .success(let contextual):
+              values = nearby + contextual
+            case .failure:
+              values = nearby
+            }
+            self.finish(
+              requestId: requestId,
+              result: .success(Self.normalized(values, maximumDistanceMeters: radiusMeters))
+            )
+          }
+        }
       }
     }
   }
@@ -137,34 +180,206 @@ final class NearbyPointOfInterestCoordinator {
     pending.continuation.resume(throwing: PlaceSearchCoordinatorError.cancelled)
   }
 
-  static func normalized(_ values: [NearbyPointOfInterestValue]) -> [NearbyPointOfInterestValue] {
-    var seen = Set<String>()
-    return values
-      .filter { !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-      .sorted {
-        if $0.relevanceIndex != $1.relevanceIndex {
-          return $0.relevanceIndex < $1.relevanceIndex
-        }
-        if $0.distanceMeters != $1.distanceMeters {
-          return $0.distanceMeters < $1.distanceMeters
-        }
-        return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+  static func contextQuery(from values: [NearbyPointOfInterestValue]) -> String? {
+    struct TokenEvidence {
+      var names = Set<String>()
+      var bestRelevance = Int.max
+      var nearestDistance = Int.max
+    }
+
+    let localityTokens = Set(values.flatMap(\.localityNames).flatMap(tokens(in:)))
+    var evidence: [String: TokenEvidence] = [:]
+    for value in values {
+      let nameKey = normalizedName(value.name)
+      for token in Set(tokens(in: value.name)) where !genericContextTokens.contains(token) && !localityTokens.contains(token) {
+        var item = evidence[token] ?? TokenEvidence()
+        item.names.insert(nameKey)
+        item.bestRelevance = min(item.bestRelevance, value.relevanceIndex)
+        item.nearestDistance = min(item.nearestDistance, value.distanceMeters)
+        evidence[token] = item
       }
-      .filter { value in
-        let key = value.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard seen.insert(key).inserted else { return false }
-        return true
+    }
+
+    return evidence
+      .filter { $0.value.names.count >= 2 }
+      .sorted { left, right in
+        if left.value.names.count != right.value.names.count {
+          return left.value.names.count > right.value.names.count
+        }
+        if left.value.bestRelevance != right.value.bestRelevance {
+          return left.value.bestRelevance < right.value.bestRelevance
+        }
+        if left.value.nearestDistance != right.value.nearestDistance {
+          return left.value.nearestDistance < right.value.nearestDistance
+        }
+        return left.key < right.key
       }
-      .prefix(3)
-      .map { $0 }
+      .first?.key
+  }
+
+  static func normalized(
+    _ values: [NearbyPointOfInterestValue],
+    maximumDistanceMeters: Double? = nil
+  ) -> [NearbyPointOfInterestValue] {
+    let distanceLimit = maximumDistanceMeters.map { max(0, Int($0.rounded(.up))) }
+    var bestByName: [String: NearbyPointOfInterestValue] = [:]
+    for value in values {
+      let key = normalizedName(value.name)
+      guard !key.isEmpty,
+            value.distanceMeters >= 0,
+            distanceLimit.map({ value.distanceMeters <= $0 }) ?? true else { continue }
+      if let existing = bestByName[key] {
+        if candidateComesBefore(value, existing) {
+          bestByName[key] = value
+        }
+      } else {
+        bestByName[key] = value
+      }
+    }
+
+    let candidates = bestByName.values.sorted(by: candidateComesBefore)
+    guard !candidates.isEmpty else { return [] }
+
+    var selected: [NearbyPointOfInterestValue] = []
+    var selectedNames = Set<String>()
+    var selectedGroups = Set<DestinationGroup>()
+
+    func append(_ candidate: NearbyPointOfInterestValue?) {
+      guard selected.count < 3, let candidate else { return }
+      let name = normalizedName(candidate.name)
+      guard selectedNames.insert(name).inserted else { return }
+      selected.append(candidate)
+      selectedGroups.insert(destinationGroup(for: candidate))
+    }
+
+    let contextual = candidates.filter { value in
+      if case .contextual = value.source { return !isUtility(value) }
+      return false
+    }
+    if let primary = contextual.first(where: { value in
+      guard case .contextual(let anchor) = value.source else { return false }
+      return tokens(in: value.name).contains(anchor)
+    }) {
+      append(primary)
+      for group in contextualGroupPreference where selected.count < 3 && !selectedGroups.contains(group) {
+        append(candidates.first { destinationGroup(for: $0) == group && !isUtility($0) })
+      }
+    }
+
+    for candidate in candidates where selected.count < 3 && !isUtility(candidate) {
+      let group = destinationGroup(for: candidate)
+      if !selectedGroups.contains(group) {
+        append(candidate)
+      }
+    }
+    for candidate in candidates where selected.count < 3 && !isUtility(candidate) {
+      append(candidate)
+    }
+    for candidate in candidates where selected.count < 3 {
+      append(candidate)
+    }
+    return selected
+  }
+
+  private enum DestinationGroup: Hashable {
+    case dining
+    case activity
+    case retail
+    case lodging
+    case service
+    case other
+    case utility
+  }
+
+  private static let contextualGroupPreference: [DestinationGroup] = [
+    .dining, .activity, .retail, .lodging, .service, .other
+  ]
+
+  private static let genericContextTokens: Set<String> = [
+    "and", "bar", "cafe", "car", "centre", "center", "cinema", "coffee",
+    "company", "food", "group", "hotel", "limited", "ltd", "mall", "market",
+    "parking", "park", "restaurant", "retail", "services", "shop", "shopping",
+    "station", "store", "superstore", "the", "uk"
+  ]
+
+  private func finish(
+    requestId: String,
+    result: Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>
+  ) {
+    guard activeRequestId == requestId,
+          let pending,
+          pending.requestId == requestId else { return }
+    self.pending = nil
+    activeRequestId = nil
+    pending.continuation.resume(with: result.mapError { $0 as Error })
+  }
+
+  private static func candidateComesBefore(
+    _ left: NearbyPointOfInterestValue,
+    _ right: NearbyPointOfInterestValue
+  ) -> Bool {
+    if isUtility(left) != isUtility(right) {
+      return !isUtility(left)
+    }
+    if sourcePriority(left.source) != sourcePriority(right.source) {
+      return sourcePriority(left.source) < sourcePriority(right.source)
+    }
+    if left.relevanceIndex != right.relevanceIndex {
+      return left.relevanceIndex < right.relevanceIndex
+    }
+    if left.distanceMeters != right.distanceMeters {
+      return left.distanceMeters < right.distanceMeters
+    }
+    return left.name.localizedCaseInsensitiveCompare(right.name) == .orderedAscending
+  }
+
+  private static func sourcePriority(_ source: NearbyPointOfInterestValue.Source) -> Int {
+    if case .contextual = source { return 0 }
+    return 1
+  }
+
+  private static func isUtility(_ value: NearbyPointOfInterestValue) -> Bool {
+    destinationGroup(for: value) == .utility
+  }
+
+  private static func destinationGroup(for value: NearbyPointOfInterestValue) -> DestinationGroup {
+    guard let category = value.category else { return .other }
+    if [
+      .restaurant, .cafe, .bakery, .brewery, .winery
+    ].contains(category) { return .dining }
+    if [
+      .movieTheater, .museum, .theater, .nightlife, .fitnessCenter,
+      .park, .amusementPark, .aquarium, .zoo, .stadium
+    ].contains(category) { return .activity }
+    if [.store, .foodMarket].contains(category) { return .retail }
+    if category == .hotel { return .lodging }
+    if [
+      .pharmacy, .bank, .laundry, .postOffice
+    ].contains(category) { return .service }
+    if [
+      .parking, .publicTransport, .gasStation, .atm, .evCharger, .restroom, .carRental
+    ].contains(category) { return .utility }
+    return .other
+  }
+
+  private static func normalizedName(_ value: String) -> String {
+    value.trimmingCharacters(in: .whitespacesAndNewlines)
+      .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+  }
+
+  private static func tokens(in value: String) -> [String] {
+    normalizedName(value)
+      .components(separatedBy: CharacterSet.alphanumerics.inverted)
+      .filter { $0.count >= 4 }
   }
 }
 
 @MainActor
 final class MapKitNearbyPointOfInterestSearcher: NearbyPointOfInterestSearching {
-  private var search: MKLocalSearch?
+  private var nearbySearch: MKLocalSearch?
+  private var contextSearch: MKLocalSearch?
 
-  func search(
+  func searchNearby(
     center: CLLocationCoordinate2D,
     radiusMeters: CLLocationDistance,
     completion: @escaping (Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>) -> Void
@@ -172,40 +387,100 @@ final class MapKitNearbyPointOfInterestSearcher: NearbyPointOfInterestSearching 
     cancel()
     let request = MKLocalPointsOfInterestRequest(center: center, radius: radiusMeters)
     let localSearch = MKLocalSearch(request: request)
-    search = localSearch
+    nearbySearch = localSearch
     let origin = CLLocation(latitude: center.latitude, longitude: center.longitude)
     localSearch.start { [weak self] response, error in
-      guard let self, self.search === localSearch else { return }
-      self.search = nil
+      guard let self, self.nearbySearch === localSearch else { return }
+      self.nearbySearch = nil
       if let error {
         completion(.failure(Self.stableError(for: error)))
         return
       }
-      let values = (response?.mapItems ?? []).enumerated().compactMap { index, item -> NearbyPointOfInterestValue? in
-        let coordinate = item.placemark.coordinate
-        guard coordinate.latitude.isFinite,
-              coordinate.longitude.isFinite,
-              (-90.0 ... 90.0).contains(coordinate.latitude),
-              (-180.0 ... 180.0).contains(coordinate.longitude),
-              let name = item.name?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !name.isEmpty else { return nil }
-        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
-        return NearbyPointOfInterestValue(
-          name: name,
-          formattedAddress: item.placemark.title,
-          latitude: coordinate.latitude,
-          longitude: coordinate.longitude,
-          distanceMeters: max(0, Int(origin.distance(from: location).rounded())),
-          relevanceIndex: index
-        )
-      }
+      let values = Self.values(
+        from: response?.mapItems ?? [],
+        origin: origin,
+        source: .nearby
+      )
       completion(.success(values))
     }
   }
 
+  func searchContext(
+    query: String,
+    center: CLLocationCoordinate2D,
+    radiusMeters: CLLocationDistance,
+    completion: @escaping (Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>) -> Void
+  ) {
+    contextSearch?.cancel()
+    let request = MKLocalSearch.Request()
+    request.naturalLanguageQuery = query
+    request.region = MKCoordinateRegion(
+      center: center,
+      latitudinalMeters: radiusMeters * 2,
+      longitudinalMeters: radiusMeters * 2
+    )
+    request.resultTypes = [.pointOfInterest]
+    if #available(iOS 18.0, macOS 15.0, *) {
+      request.regionPriority = .required
+    }
+    let localSearch = MKLocalSearch(request: request)
+    contextSearch = localSearch
+    let origin = CLLocation(latitude: center.latitude, longitude: center.longitude)
+    localSearch.start { [weak self] response, error in
+      guard let self, self.contextSearch === localSearch else { return }
+      self.contextSearch = nil
+      if let error {
+        completion(.failure(Self.stableError(for: error)))
+        return
+      }
+      completion(.success(Self.values(
+        from: response?.mapItems ?? [],
+        origin: origin,
+        source: .contextual(anchor: query)
+      )))
+    }
+  }
+
   func cancel() {
-    search?.cancel()
-    search = nil
+    nearbySearch?.cancel()
+    nearbySearch = nil
+    contextSearch?.cancel()
+    contextSearch = nil
+  }
+
+  private static func values(
+    from items: [MKMapItem],
+    origin: CLLocation,
+    source: NearbyPointOfInterestValue.Source
+  ) -> [NearbyPointOfInterestValue] {
+    items.enumerated().compactMap { index, item -> NearbyPointOfInterestValue? in
+      let coordinate = item.placemark.coordinate
+      guard coordinate.latitude.isFinite,
+            coordinate.longitude.isFinite,
+            (-90.0 ... 90.0).contains(coordinate.latitude),
+            (-180.0 ... 180.0).contains(coordinate.longitude),
+            let name = item.name?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !name.isEmpty else { return nil }
+      let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+      let localityNames = [
+        item.placemark.locality,
+        item.placemark.subLocality,
+        item.placemark.subAdministrativeArea,
+        item.placemark.administrativeArea,
+        item.placemark.country
+      ].compactMap { $0 }
+      return NearbyPointOfInterestValue(
+        name: name,
+        formattedAddress: item.placemark.title,
+        latitude: coordinate.latitude,
+        longitude: coordinate.longitude,
+        distanceMeters: max(0, Int(origin.distance(from: location).rounded())),
+        relevanceIndex: index,
+        category: item.pointOfInterestCategory,
+        source: source,
+        localityNames: localityNames
+      )
+    }
   }
 
   private static func stableError(for error: Error) -> PlaceSearchCoordinatorError {
