@@ -27,6 +27,7 @@ enum DayframeShortcutDeliveryDiagnostic {
   case legacyUnscoped
   case started
   case contextUnavailable
+  case capabilityUnavailable
   case requestInvalid
   case responseInvalid
   case httpFailure(statusCode: Int)
@@ -41,6 +42,8 @@ enum DayframeShortcutDeliveryDiagnostic {
       return "started"
     case .contextUnavailable:
       return "context-unavailable"
+    case .capabilityUnavailable:
+      return "capability-unavailable"
     case .requestInvalid:
       return "request-invalid"
     case .responseInvalid:

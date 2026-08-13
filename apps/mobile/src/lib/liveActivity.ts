@@ -2,6 +2,7 @@ import { NativeModules, Platform } from "react-native";
 import { paletteColorFor } from "@dayframe/shared";
 import type { MobileBootstrap } from "./api";
 import { registerLiveActivity } from "./api";
+import { DAYFRAME_API_BASE } from "./config";
 
 type LiveActivityEntry = Pick<
   NonNullable<MobileBootstrap["activeEntry"]>,
@@ -12,6 +13,7 @@ type DayframeLiveActivityModule = {
   start(
     title: string,
     entryId?: string | null,
+    apiBase?: string | null,
     categoryName?: string | null,
     categoryColor?: string | null,
     startedAt?: string | null
@@ -27,6 +29,7 @@ type DayframeLiveActivityModule = {
     isRunning: boolean;
   }>>;
   cleanupActivities?(activityIds: string[]): Promise<boolean>;
+  enableStop?(activityId: string, entryId: string): Promise<boolean>;
 };
 
 const nativeLiveActivity = NativeModules.DayframeLiveActivityModule as DayframeLiveActivityModule | undefined;
@@ -35,7 +38,8 @@ let lastSyncedLiveActivityKey: string | null = null;
 let requestedEntry: LiveActivityEntry | null = null;
 let requestedGeneration = 0;
 let reconciliation: Promise<void> | null = null;
-const remoteRegistrations = new Map<string, Promise<void>>();
+const remoteRegistrations = new Map<string, Promise<boolean>>();
+const registeredRemoteTokens = new Map<string, string>();
 const REMOTE_REGISTRATION_RETRY_DELAYS_MS = [0, 1_500, 5_000] as const;
 
 export async function syncLiveActivityForEntry(entry: LiveActivityEntry | null | undefined) {
@@ -77,6 +81,17 @@ async function reconcileLatestEntry() {
         return;
       }
       if (nativeState.matches) {
+        if (
+          entry &&
+          isUuid(entry.id) &&
+          nativeState.matchingActivityId &&
+          nativeLiveActivity!.pushToken
+        ) {
+          // A prior registration attempt may have exhausted its bounded
+          // retries while offline. Every later same-entry reconciliation gets
+          // another chance; Stop stays hidden until one succeeds.
+          queueRemoteRegistration(nativeState.matchingActivityId, entry.id);
+        }
         if (nativeState.mismatchedActivityIds.length > 0) {
           void nativeLiveActivity?.cleanupActivities?.(nativeState.mismatchedActivityIds)
             .catch(() => false);
@@ -109,6 +124,7 @@ async function reconcileLatestEntry() {
     const result = await nativeLiveActivity!.start(
       title,
       isUuid(entry.id) ? entry.id : null,
+      DAYFRAME_API_BASE,
       entry.categoryName,
       categoryColor,
       entry.startedAt
@@ -145,12 +161,14 @@ async function matchingNativeActivityState(entry: LiveActivityEntry | null) {
     if (!entry) {
       return {
         matches: active.length === 0,
+        matchingActivityId: null,
         mismatchedActivityIds: active.map((activity) => activity.activityId),
         snapshotAvailable: true
       };
     }
     return {
       matches: active.some((activity) => activity.entryId === entry.id),
+      matchingActivityId: active.find((activity) => activity.entryId === entry.id)?.activityId ?? null,
       mismatchedActivityIds: active
         .filter((activity) => activity.entryId !== entry.id)
         .map((activity) => activity.activityId),
@@ -163,6 +181,7 @@ async function matchingNativeActivityState(entry: LiveActivityEntry | null) {
   // arbitrary Dayframe activity as the requested run.
   return {
     matches: false,
+    matchingActivityId: null,
     mismatchedActivityIds: [] as string[],
     snapshotAvailable: false
   };
@@ -197,18 +216,28 @@ function queueRemoteRegistration(activityId: string, activeEntryId: string) {
 async function registerRemoteUpdates(activityId: string, activeEntryId: string) {
   for (const delay of REMOTE_REGISTRATION_RETRY_DELAYS_MS) {
     if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
-    if (requestedEntry?.id !== activeEntryId) return;
+    if (requestedEntry?.id !== activeEntryId) return false;
 
     const registration = await nativeLiveActivity?.pushToken?.(activityId).catch(() => null);
     if (!registration?.token || !registration.environment) continue;
+    if (registeredRemoteTokens.get(activityId) === registration.token) return true;
     const didRegister = await registerLiveActivity({
       token: registration.token,
       activityId,
       activeEntryId,
       environment: registration.environment
     }).then(() => true).catch(() => false);
-    if (didRegister) return;
+    if (!didRegister) continue;
+    const didEnable = await nativeLiveActivity?.enableStop?.(
+      activityId,
+      activeEntryId
+    ).catch(() => false);
+    if (didEnable === true) {
+      registeredRemoteTokens.set(activityId, registration.token);
+      return true;
+    }
   }
+  return false;
 }
 
 function isUuid(value: string) {

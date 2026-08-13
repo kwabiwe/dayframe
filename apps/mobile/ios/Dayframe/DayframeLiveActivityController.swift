@@ -15,6 +15,7 @@ enum DayframeLiveActivityController {
 
   static func start(
     entryId: String?,
+    apiBase: String?,
     title: String,
     categoryName: String?,
     categoryColor: String? = nil,
@@ -35,7 +36,8 @@ enum DayframeLiveActivityController {
       categoryColor: cleanText(categoryColor),
       startedAt: startedAt,
       elapsedSeconds: 0,
-      isRunning: true
+      isRunning: true,
+      canStop: false
     )
 
     if
@@ -57,7 +59,8 @@ enum DayframeLiveActivityController {
 
     let attributes = DayframeTimerAttributes(
       id: UUID().uuidString,
-      entryId: canonicalEntryId
+      entryId: canonicalEntryId,
+      apiBase: cleanAPIBase(apiBase)
     )
 
     do {
@@ -98,6 +101,52 @@ enum DayframeLiveActivityController {
       group.cancelAll()
       return token
     }
+  }
+
+  static func immediatePushToken(activityId: String, entryId: String) -> String? {
+    guard #available(iOS 16.2, *) else {
+      return nil
+    }
+    guard
+      let activity = Activity<DayframeTimerAttributes>.activities.first(where: {
+        $0.id == activityId &&
+          $0.attributes.entryId == entryId &&
+          $0.activityState == .active &&
+          $0.content.state.isRunning
+      }),
+      let token = activity.pushToken
+    else {
+      return nil
+    }
+    return token.dayframeHexString
+  }
+
+  static func enableStop(activityId: String, entryId: String) async -> Bool {
+    guard #available(iOS 16.2, *) else {
+      return false
+    }
+    guard
+      let activity = Activity<DayframeTimerAttributes>.activities.first(where: {
+        $0.id == activityId &&
+          $0.attributes.entryId == entryId &&
+          $0.activityState == .active &&
+          $0.content.state.isRunning
+      })
+    else {
+      return false
+    }
+    let current = activity.content.state
+    let state = DayframeTimerAttributes.ContentState(
+      title: current.title,
+      categoryName: current.categoryName,
+      categoryColor: current.categoryColor,
+      startedAt: current.startedAt,
+      elapsedSeconds: current.elapsedSeconds,
+      isRunning: current.isRunning,
+      canStop: true
+    )
+    await activity.update(ActivityContent(state: state, staleDate: nil))
+    return true
   }
 
   static func stop(activityIds: [String]) async -> Bool {
@@ -194,7 +243,8 @@ enum DayframeLiveActivityController {
       categoryColor: activity.content.state.categoryColor,
       startedAt: activity.content.state.startedAt,
       elapsedSeconds: elapsedSeconds(from: activity.content.state.startedAt),
-      isRunning: false
+      isRunning: false,
+      canStop: false
     )
     await activity.end(
       ActivityContent(state: state, staleDate: Date()),
@@ -237,6 +287,16 @@ enum DayframeLiveActivityController {
       return nil
     }
     return String(trimmed.prefix(80))
+  }
+
+  private static func cleanAPIBase(_ value: String?) -> String? {
+    guard let value = cleanText(value) else { return nil }
+    let normalized = value.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    let allowed = Set([
+      "https://dayframe-staging.vercel.app",
+      "https://dayframe-web.vercel.app"
+    ])
+    return allowed.contains(normalized) ? normalized : nil
   }
 }
 

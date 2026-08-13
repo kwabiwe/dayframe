@@ -13,6 +13,8 @@ struct DayframeTimerLiveActivity: Widget {
       DayframeLockScreenTimerView(
         activityId: context.activityID,
         entryId: context.attributes.entryId,
+        apiBase: context.attributes.apiBase,
+        stopControlId: context.attributes.id,
         state: context.state
       )
         .activityBackgroundTint(Color(red: 0.02, green: 0.04, blue: 0.08))
@@ -24,10 +26,17 @@ struct DayframeTimerLiveActivity: Widget {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         DynamicIslandExpandedRegion(.trailing) {
-          if context.state.isRunning, let entryId = context.attributes.entryId {
+          if
+            context.state.isRunning,
+            context.state.canStop == true,
+            let entryId = context.attributes.entryId,
+            let apiBase = context.attributes.apiBase
+          {
             DayframeLiveActivityStopButton(
               activityId: context.activityID,
               entryId: entryId,
+              apiBase: apiBase,
+              stopControlId: context.attributes.id,
               size: 58,
               iconSize: 26
             )
@@ -70,6 +79,8 @@ private struct DayframeLiveActivityStatusIcon: View {
 private struct DayframeLockScreenTimerView: View {
   let activityId: String
   let entryId: String?
+  let apiBase: String?
+  let stopControlId: String
   let state: DayframeTimerAttributes.ContentState
 
   var body: some View {
@@ -80,10 +91,12 @@ private struct DayframeLockScreenTimerView: View {
           .offset(y: -4)
       }
       Spacer(minLength: 12)
-      if state.isRunning, let entryId {
+      if state.isRunning, state.canStop == true, let entryId, let apiBase {
         DayframeLiveActivityStopButton(
           activityId: activityId,
           entryId: entryId,
+          apiBase: apiBase,
+          stopControlId: stopControlId,
           size: 54,
           iconSize: 24
         )
@@ -220,6 +233,8 @@ private enum DayframeTimerTextSize {
 private struct DayframeLiveActivityStopButton: View {
   let activityId: String
   let entryId: String
+  let apiBase: String
+  let stopControlId: String
   let size: CGFloat
   let iconSize: CGFloat
 
@@ -227,7 +242,9 @@ private struct DayframeLiveActivityStopButton: View {
     if #available(iOS 17.0, *) {
       Button(intent: DayframeLiveActivityStopIntent(
         activityId: activityId,
-        entryId: entryId
+        entryId: entryId,
+        apiBase: apiBase,
+        clientEventId: "ios-live-activity-stop-\(stopControlId)"
       )) {
         stopButtonContent
       }

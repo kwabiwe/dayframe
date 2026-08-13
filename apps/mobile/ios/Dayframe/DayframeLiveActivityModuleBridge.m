@@ -4,9 +4,15 @@
 
 RCT_EXTERN_METHOD(start:(NSString *)title
                   entryId:(NSString *)entryId
+                  apiBase:(NSString *)apiBase
                   categoryName:(NSString *)categoryName
                   categoryColor:(NSString *)categoryColor
                   startedAt:(NSString *)startedAt
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(enableStop:(NSString *)activityId
+                  entryId:(NSString *)entryId
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 

@@ -8,10 +8,11 @@ class DayframeLiveActivityModule: NSObject {
     false
   }
 
-  @objc(start:entryId:categoryName:categoryColor:startedAt:resolver:rejecter:)
+  @objc(start:entryId:apiBase:categoryName:categoryColor:startedAt:resolver:rejecter:)
   func start(
     title: String,
     entryId: String?,
+    apiBase: String?,
     categoryName: String?,
     categoryColor: String?,
     startedAt: String?,
@@ -21,6 +22,7 @@ class DayframeLiveActivityModule: NSObject {
     Task {
       let result = await DayframeLiveActivityController.start(
         entryId: entryId,
+        apiBase: apiBase,
         title: title,
         categoryName: categoryName,
         categoryColor: categoryColor,
@@ -31,6 +33,21 @@ class DayframeLiveActivityModule: NSObject {
         "activityId": result?.activityId ?? NSNull()
       ]
       resolve(payload)
+    }
+  }
+
+  @objc(enableStop:entryId:resolver:rejecter:)
+  func enableStop(
+    activityId: String,
+    entryId: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    Task {
+      resolve(await DayframeLiveActivityController.enableStop(
+        activityId: activityId,
+        entryId: entryId
+      ))
     }
   }
 

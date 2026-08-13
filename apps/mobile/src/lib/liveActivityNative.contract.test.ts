@@ -22,18 +22,26 @@ describe("native Live Activity presentation contract", () => {
       shortcuts.indexOf("case .stopLiveActivity"),
       shortcuts.indexOf("struct DayframeShortcutEvent")
     );
+    const ordinaryStop = shortcuts.slice(
+      shortcuts.indexOf("case .stopEntry"),
+      shortcuts.indexOf("case .stopLiveActivity")
+    );
 
     expect(shortcuts).toContain('@Parameter(title: "Activity ID")');
     expect(shortcuts).toContain('@Parameter(title: "Timer entry ID")');
-    expect(shortcuts).toContain("case stopLiveActivity(activityId: String, entryId: String)");
+    expect(shortcuts).toContain('@Parameter(title: "API base")');
+    expect(shortcuts).toContain('@Parameter(title: "Stop request ID")');
+    expect(shortcuts).toContain(
+      "case stopLiveActivity(activityId: String, entryId: String, apiBase: String, clientEventId: String)"
+    );
     expect(shortcuts).toContain('"targetActivityId": activityId');
     expect(shortcuts).toContain('"targetEntryId": entryId');
     expect(shortcuts).toContain('"stopScope": "entry"');
+    expect(shortcuts).toContain("localId = clientEventId");
+    expect(stopCase).toContain("DayframeLiveActivityController.immediatePushToken(");
+    expect(stopCase).toContain("DayframeShortcutDirectEventClient.submitLiveActivityStop(");
     expect(stopCase).toMatch(
-      /let delivered = await DayframeShortcutDirectEventClient\.submit\(event\)\s+_ = await DayframeLiveActivityController\.stop\(\s+activityId: activityId,\s+entryId: entryId\s+\)/
-    );
-    expect(stopCase).toMatch(
-      /if delivered, queued \{\s+_ = DayframeNativeShortcutQueue\.remove\(localIds: \[event\.localId\]\)/
+      /if delivered \{\s+_ = await DayframeLiveActivityController\.stop\(\s+activityId: activityId,\s+entryId: entryId\s+\)/
     );
     expect(stopCase).not.toContain("Task(priority:");
     expect(stopCase).not.toContain("guard queued else");
@@ -43,6 +51,7 @@ describe("native Live Activity presentation contract", () => {
     expect(shortcuts).toContain("DayframeShortcutDeliveryDiagnosticStore.record(.legacyUnscoped)");
     expect(directClient).toContain('clientEventId = event.localId');
     expect(directClient).toContain('/api/events');
+    expect(directClient).toContain('/api/live-activities/stop');
     expect(directClient).toMatch(/statusCode == 200 \|\| httpResponse\.statusCode == 201/);
     expect(directClient).toContain('forHTTPHeaderField: "Authorization"');
     expect(directClient).toContain("request.timeoutInterval = 8");
@@ -51,6 +60,16 @@ describe("native Live Activity presentation contract", () => {
     expect(directClient).toContain("DayframeShortcutDeliveryDiagnosticStore.record(.delivered)");
     expect(directClient).toContain("DayframeShortcutDeliveryDiagnosticStore.record(.contextUnavailable)");
     expect(directClient).toContain("DayframeShortcutDeliveryDiagnosticStore.record(.transportFailure)");
+    const scopedSubmit = directClient.slice(
+      directClient.indexOf("static func submitLiveActivityStop("),
+      directClient.indexOf("private static func normalizedAPIBase(")
+    );
+    expect(scopedSubmit).not.toContain('forHTTPHeaderField: "Authorization"');
+    expect(scopedSubmit).toContain("pushToken.lowercased()");
+    expect(stopCase).toContain("if delivered {");
+    expect(ordinaryStop).toMatch(
+      /let delivered = await DayframeShortcutDirectEventClient\.submit\(event\)\s+if delivered \{\s+_ = await DayframeLiveActivityController\.stop/
+    );
   });
 
   it("limits background delivery to the staging and production Dayframe APIs", () => {
@@ -160,14 +179,22 @@ describe("native Live Activity presentation contract", () => {
     );
 
     expect(attributes).toContain("var entryId: String?");
+    expect(attributes).toContain("var apiBase: String?");
+    expect(attributes).toContain("var canStop: Bool?");
     expect(widget).toContain("activityId: context.activityID");
     expect(widget).toContain("entryId: context.attributes.entryId");
+    expect(widget).toContain("apiBase: context.attributes.apiBase");
+    expect(widget).toContain("stopControlId: context.attributes.id");
+    expect(widget).toContain('clientEventId: "ios-live-activity-stop-\\(stopControlId)"');
+    expect(widget).toContain("context.state.canStop == true");
     expect(widget).toContain("DayframeLiveActivityStopIntent(");
     expect(controller).toContain("static func snapshots() -> [Snapshot]");
     expect(controller).toContain("activity.activityState == .active");
     expect(controller).toContain("activity.content.state.isRunning");
     expect(controller).toContain("$0.attributes.entryId == canonicalEntryId");
     expect(controller).toContain("static func stop(activityId: String, entryId: String) async -> Bool");
+    expect(controller).toContain("static func immediatePushToken(activityId: String, entryId: String)");
+    expect(controller).toContain("static func enableStop(activityId: String, entryId: String) async -> Bool");
     expect(controller).toContain("static func stop(activityIds: [String]) async -> Bool");
     expect(controller).not.toContain("static func stop() async -> Bool");
     const nativeStart = controller.slice(
@@ -179,6 +206,7 @@ describe("native Live Activity presentation contract", () => {
     expect(module).toContain("DayframeLiveActivityController.snapshots()");
     expect(bridge).toContain("RCT_EXTERN_METHOD(activitySnapshot:");
     expect(bridge).toContain("RCT_EXTERN_METHOD(cleanupActivities:");
+    expect(bridge).toContain("RCT_EXTERN_METHOD(enableStop:");
   });
 
   it("lifts both lock-screen metadata rows clear of the lower clipping edge", () => {

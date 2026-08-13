@@ -12,6 +12,13 @@ export type LiveActivityRegistration = {
 };
 
 export class LiveActivityRegistrationError extends Error {}
+export class LiveActivityControlError extends Error {}
+
+export type LiveActivityControl = {
+  token: string;
+  activityId: string;
+  entryId: string;
+};
 
 type ApnsEvent = "update" | "end";
 type ApnsEnvironment = "development" | "production";
@@ -112,13 +119,13 @@ export async function registerLiveActivity(
        and te.user_id = $2
        and te.stopped_at is null
      on conflict (token) do update set
-       workspace_id = excluded.workspace_id,
-       user_id = excluded.user_id,
        activity_id = excluded.activity_id,
        active_entry_id = excluded.active_entry_id,
        environment = excluded.environment,
        last_registered_at = now(),
        invalidated_at = null
+     where live_activity_push_tokens.workspace_id = excluded.workspace_id
+       and live_activity_push_tokens.user_id = excluded.user_id
      returning id`,
     [
       session.workspaceId,
@@ -132,6 +139,40 @@ export async function registerLiveActivity(
   if (!result.rowCount) {
     throw new LiveActivityRegistrationError("The running timer is no longer active.");
   }
+}
+
+export async function resolveLiveActivityControlSession(
+  control: LiveActivityControl
+): Promise<RequestSession> {
+  const result = await query<{
+    userId: string;
+    workspaceId: string;
+  }>(
+    `select t.user_id as "userId",
+            t.workspace_id as "workspaceId"
+     from live_activity_push_tokens t
+     join time_entries te
+       on te.id = t.active_entry_id
+      and te.workspace_id = t.workspace_id
+      and te.user_id = t.user_id
+     where t.token = $1
+       and t.activity_id = $2
+       and t.active_entry_id = $3
+       and t.invalidated_at is null
+     limit 1`,
+    [control.token, control.activityId, control.entryId]
+  );
+  const row = result.rows[0];
+  if (!row) {
+    // Do not reveal whether the token, activity, entry, or timer state failed.
+    throw new LiveActivityControlError("Live Activity control is unavailable.");
+  }
+  return {
+    userId: row.userId,
+    workspaceId: row.workspaceId,
+    authMode: "provider",
+    scopes: ["events:write"]
+  };
 }
 
 export async function notifyLiveActivities(session: RequestSession) {
@@ -623,7 +664,8 @@ function contentState(active: ActiveTimerRow, isRunning: boolean) {
     // Swift's default Codable Date representation is seconds since 2001-01-01.
     startedAt: startedAt.getTime() / 1000 - 978_307_200,
     elapsedSeconds: Math.max(0, Math.floor((Date.now() - startedAt.getTime()) / 1000)),
-    isRunning
+    isRunning,
+    canStop: isRunning
   };
 }
 
@@ -634,7 +676,8 @@ function stoppedContentState() {
     categoryColor: null,
     startedAt: null,
     elapsedSeconds: 0,
-    isRunning: false
+    isRunning: false,
+    canStop: false
   };
 }
 
