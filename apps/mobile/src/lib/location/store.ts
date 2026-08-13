@@ -14,7 +14,11 @@ import {
   type SavedPlaceForMatching
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "../config";
-import { clearSessionToken, getSessionToken } from "../api";
+import {
+  SecureSessionUnavailableError,
+  clearSessionToken,
+  getSessionToken
+} from "../secure-session";
 import { createSerialMutationQueue } from "./mutationQueue";
 import {
   MAX_LOCATION_UPLOAD_BATCHES_PER_SYNC,
@@ -473,7 +477,21 @@ async function drainLocationSynchronisationRequests() {
 }
 
 async function synchroniseLocationEvidenceUnsafe(options: { forceReplay: boolean }) {
-  const token = await getSessionToken();
+  let token: string | null;
+  try {
+    token = await getSessionToken();
+  } catch (error) {
+    if (!(error instanceof SecureSessionUnavailableError)) throw error;
+    await recordLocationStoreError(error).catch(() => undefined);
+    return {
+      synced: false,
+      reason: "session_unavailable" as const,
+      message: error.message,
+      acknowledgedCount: 0,
+      uploadedBatchCount: 0,
+      replayed: false
+    };
+  }
   if (!token) return { synced: false, reason: "no_session" as const };
   const db = await database();
   let acknowledgedCount = 0;

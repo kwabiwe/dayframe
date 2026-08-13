@@ -90,6 +90,10 @@ import {
 import { recordLocationStoreError } from "@/lib/location/store";
 import { mergePersistedMobileTag } from "@/lib/mobileTags";
 import {
+  shouldDismissExternallyStoppedActiveEditor,
+  shouldResetCalendarToTodayOnForeground
+} from "@/lib/mobileLifecycle";
+import {
   cacheDashboardBootstrap,
   loadCachedDashboardBootstrap
 } from "@/lib/reviewSyncStore";
@@ -283,6 +287,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const timerMutationVersions = useRef(new Map<string, number>());
   const timerStateRef = useRef<TimerStateFingerprint | null>(null);
   const timerStatePollInFlight = useRef(false);
+  const calendarBackgroundedAt = useRef<number | null>(null);
+  const calendarBackgroundedDayKey = useRef<string | null>(null);
   const deletionCoordinator = useRef<ReturnType<typeof createDeletionCoordinator<
     TimeEntry,
     MobileBootstrap | null
@@ -920,7 +926,37 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active" && authState === "authenticated") {
+      if (state !== "active") {
+        if (calendarBackgroundedAt.current == null) {
+          const backgroundedAt = Date.now();
+          calendarBackgroundedAt.current = backgroundedAt;
+          calendarBackgroundedDayKey.current = formatDateKey(new Date(backgroundedAt));
+        }
+        return;
+      }
+
+      const resumedAt = Date.now();
+      const resumedDayKey = formatDateKey(new Date(resumedAt));
+      setNow(resumedAt);
+      setSelectedDayKey((current) => {
+        if (!shouldResetCalendarToTodayOnForeground({
+          backgroundedAt: calendarBackgroundedAt.current,
+          backgroundedDayKey: calendarBackgroundedDayKey.current,
+          resumedAt,
+          selectedDayKey: current,
+          todayKey: resumedDayKey
+        })) {
+          return current;
+        }
+        setCalendarTransitionDirection(
+          dateFromKey(resumedDayKey).getTime() >= dateFromKey(current).getTime() ? 1 : -1
+        );
+        return resumedDayKey;
+      });
+      calendarBackgroundedAt.current = null;
+      calendarBackgroundedDayKey.current = null;
+
+      if (authState === "authenticated") {
         deletionCoordinator.current?.reconcileForeground();
         void syncHealthKitAndReload("foreground");
         void syncQueuedEventsAndReload();
@@ -956,6 +992,16 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         ? activeEntryForDisplay.id
         : activeEditorEntryId.current;
       setPresentedActiveEntry(activeEntryForDisplay);
+      return undefined;
+    }
+
+    if (activeEditPresentation && shouldDismissExternallyStoppedActiveEditor({
+      activeEntryId: null,
+      presentationId: activeEditPresentation.id,
+      presentedEntryId: activeEditorEntryId.current,
+      timerMutationsInFlight: timerMutationCount.current
+    })) {
+      setActiveEditDismissRequestId(activeEditPresentation.id);
       return undefined;
     }
 

@@ -19,6 +19,7 @@ type DayframeLiveActivityModule = {
     token?: string | null;
     environment?: "development" | "production" | null;
   }>;
+  hasActiveActivity?(): Promise<boolean>;
   stop(): Promise<boolean>;
 };
 
@@ -46,7 +47,22 @@ async function reconcileLatestEntry() {
   while (true) {
     const entry = requestedEntry;
     const requestedKey = liveActivityKey(entry);
-    if (lastSyncedLiveActivityKey === requestedKey) return;
+    if (lastSyncedLiveActivityKey === requestedKey) {
+      const hasActiveActivity = await nativeLiveActivity?.hasActiveActivity?.()
+        .catch(() => undefined);
+      if (requestedEntry !== entry) continue;
+      if (
+        typeof hasActiveActivity !== "boolean" ||
+        hasActiveActivity === Boolean(entry)
+      ) {
+        return;
+      }
+      // The Live Activity can be stopped by an App Intent while this JS
+      // process is suspended. Reconcile the native truth, not only our last
+      // requested key, when the app is active again.
+      lastSyncedLiveActivityKey = null;
+      continue;
+    }
 
     if (!entry) {
       const didStop = await nativeLiveActivity!.stop().catch(() => false);

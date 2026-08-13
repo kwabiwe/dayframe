@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  hasActiveActivity: vi.fn(),
   registerLiveActivity: vi.fn(),
   pushToken: vi.fn(),
   start: vi.fn(),
@@ -10,6 +11,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("react-native", () => ({
   NativeModules: {
     DayframeLiveActivityModule: {
+      hasActiveActivity: mocks.hasActiveActivity,
       start: mocks.start,
       pushToken: mocks.pushToken,
       stop: mocks.stop
@@ -30,6 +32,8 @@ async function loadModule() {
 describe("Live Activity sync", () => {
   beforeEach(() => {
     vi.useRealTimers();
+    mocks.hasActiveActivity.mockReset();
+    mocks.hasActiveActivity.mockResolvedValue(true);
     mocks.start.mockReset();
     mocks.start.mockResolvedValue(true);
     mocks.pushToken.mockReset();
@@ -136,6 +140,33 @@ describe("Live Activity sync", () => {
       "#6E5DC6",
       "2026-07-12T06:45:00.000Z"
     );
+  });
+
+  it("recreates an externally-ended activity for an unchanged running timer", async () => {
+    const { syncLiveActivityForEntry } = await loadModule();
+    const entry = {
+      id: "entry-1",
+      startedAt: "2026-07-12T06:45:00.000Z",
+      description: "School run",
+      categoryName: "Family",
+      categoryColor: "violet"
+    };
+
+    await syncLiveActivityForEntry(entry);
+    mocks.hasActiveActivity.mockResolvedValueOnce(false);
+    await syncLiveActivityForEntry(entry);
+
+    expect(mocks.start).toHaveBeenCalledTimes(2);
+  });
+
+  it("cleans up a native activity that appeared after an idle reconciliation", async () => {
+    mocks.hasActiveActivity.mockResolvedValueOnce(true);
+    const { syncLiveActivityForEntry } = await loadModule();
+
+    await syncLiveActivityForEntry(null);
+    await syncLiveActivityForEntry(null);
+
+    expect(mocks.stop).toHaveBeenCalledTimes(2);
   });
 
   it("retries active-entry reconciliation when native start reports failure", async () => {

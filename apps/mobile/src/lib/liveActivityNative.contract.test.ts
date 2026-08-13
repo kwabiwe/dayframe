@@ -115,6 +115,27 @@ describe("native Live Activity presentation contract", () => {
     expect(eas.build.production.ios.buildConfiguration).toBe("Release");
   });
 
+  it("exposes native ActivityKit state so JS can repair stale reconciliation keys", () => {
+    const controller = readFileSync(
+      `${mobileRoot}ios/Dayframe/DayframeLiveActivityController.swift`,
+      "utf8"
+    );
+    const module = readFileSync(
+      `${mobileRoot}ios/Dayframe/DayframeLiveActivityModule.swift`,
+      "utf8"
+    );
+    const bridge = readFileSync(
+      `${mobileRoot}ios/Dayframe/DayframeLiveActivityModuleBridge.m`,
+      "utf8"
+    );
+
+    expect(controller).toContain("static func hasActiveActivity() -> Bool");
+    expect(controller).toContain("activity.activityState == .active");
+    expect(controller).toContain("activity.content.state.isRunning");
+    expect(module).toContain("DayframeLiveActivityController.hasActiveActivity()");
+    expect(bridge).toContain("RCT_EXTERN_METHOD(hasActiveActivity:");
+  });
+
   it("lifts both lock-screen metadata rows clear of the lower clipping edge", () => {
     const liveActivity = readFileSync(
       `${mobileRoot}ios/DayframeLiveActivity/DayframeTimerLiveActivity.swift`,

@@ -77,7 +77,7 @@ export async function configureLocationIntelligence(bootstrap: MobileBootstrap) 
   }
   await drainNativeLocationSignalsInBatches();
   await processPendingLocationEvidence();
-  void syncLocationEvidence();
+  return syncLocationEvidence();
 }
 
 export async function syncLocationIntelligenceOnForeground() {

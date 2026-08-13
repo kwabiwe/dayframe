@@ -10,6 +10,16 @@ const SESSION_TOKEN_OPTIONS: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY
 };
 
+// SecureStore can briefly reject reads while iOS is moving between a locked
+// background task and the foreground app. Once the foreground has read the
+// session successfully, keep that process-local copy available to background
+// reconciliation instead of asking Keychain for the same value again.
+let cachedSessionToken: string | null | undefined;
+
+export function resetSessionTokenCacheForTesting() {
+  cachedSessionToken = undefined;
+}
+
 type DayframeLiveActivityNativeModule = {
   setRuntimeContext?: (apiBase: string, sessionToken: string) => Promise<boolean>;
   clearRuntimeContext?: () => Promise<boolean>;
@@ -63,21 +73,28 @@ async function withInteractionRetry<T>(operation: () => Promise<T>): Promise<T> 
 }
 
 export async function getSessionToken() {
+  if (cachedSessionToken !== undefined) return cachedSessionToken;
+
   const current = await withInteractionRetry(() =>
     SecureStore.getItemAsync(SESSION_TOKEN_KEY, SESSION_TOKEN_OPTIONS)
   );
   if (current) {
+    cachedSessionToken = current;
     await mirrorRuntimeContext(current);
     return current;
   }
 
   const legacy = await withInteractionRetry(() => SecureStore.getItemAsync(LEGACY_SESSION_TOKEN_KEY));
-  if (!legacy) return null;
+  if (!legacy) {
+    cachedSessionToken = null;
+    return null;
+  }
 
   await withInteractionRetry(() =>
     SecureStore.setItemAsync(SESSION_TOKEN_KEY, legacy, SESSION_TOKEN_OPTIONS)
   );
   await withInteractionRetry(() => SecureStore.deleteItemAsync(LEGACY_SESSION_TOKEN_KEY));
+  cachedSessionToken = legacy;
   await mirrorRuntimeContext(legacy);
   return legacy;
 }
@@ -87,10 +104,12 @@ export async function setSessionToken(token: string) {
     SecureStore.setItemAsync(SESSION_TOKEN_KEY, token, SESSION_TOKEN_OPTIONS)
   );
   await withInteractionRetry(() => SecureStore.deleteItemAsync(LEGACY_SESSION_TOKEN_KEY));
+  cachedSessionToken = token;
   await mirrorRuntimeContext(token);
 }
 
 export async function clearSessionToken() {
+  cachedSessionToken = null;
   try {
     await withInteractionRetry(() => SecureStore.deleteItemAsync(SESSION_TOKEN_KEY, SESSION_TOKEN_OPTIONS));
     await withInteractionRetry(() => SecureStore.deleteItemAsync(LEGACY_SESSION_TOKEN_KEY));

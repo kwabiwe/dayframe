@@ -59,6 +59,14 @@ class DayframeLiveActivityModule: NSObject {
     }
   }
 
+  @objc(hasActiveActivity:rejecter:)
+  func hasActiveActivity(
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    resolve(DayframeLiveActivityController.hasActiveActivity())
+  }
+
   @objc(pendingShortcutEvents:rejecter:)
   func pendingShortcutEvents(
     resolve: @escaping RCTPromiseResolveBlock,

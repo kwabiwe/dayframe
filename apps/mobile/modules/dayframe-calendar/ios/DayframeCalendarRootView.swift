@@ -244,15 +244,22 @@ private struct DayframeCalendarTimelineCanvas: View {
           .accessibilityHidden(true)
         }
 
-        if presentation.entries.isEmpty {
+        if
+          presentation.entries.isEmpty,
+          let emptyState = DayframeCalendarEmptyStateMath.metrics(
+            availableWidth: Double(geometry.size.width),
+            hourLabelWidth: Double(hourLabelWidth),
+            hourHeight: Double(hourHeight)
+          )
+        {
           Text(presentation.emptyState)
             .font(.footnote)
             .foregroundStyle(Color(dayframeCSS: theme.textSecondary))
             .multilineTextAlignment(.center)
-            .frame(width: max(0, geometry.size.width - hourLabelWidth - 24))
+            .frame(width: CGFloat(emptyState.textWidth))
             .position(
-              x: hourLabelWidth + max(0, geometry.size.width - hourLabelWidth) / 2,
-              y: min(160, timelineHeight / 2)
+              x: CGFloat(emptyState.center.x),
+              y: CGFloat(emptyState.center.y)
             )
             .allowsHitTesting(false)
         }

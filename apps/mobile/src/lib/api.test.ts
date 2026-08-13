@@ -86,10 +86,12 @@ const {
   updateTimeEntry,
   archiveCategory
 } = await import("./api");
+const { resetSessionTokenCacheForTesting } = await import("./secure-session");
 
 describe("mobile API client", () => {
   beforeEach(() => {
     vi.useRealTimers();
+    resetSessionTokenCacheForTesting();
     secureStore.clear();
     asyncStore.clear();
     vi.restoreAllMocks();

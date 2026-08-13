@@ -81,6 +81,16 @@ enum DayframeLiveActivityController {
     return true
   }
 
+  static func hasActiveActivity() -> Bool {
+    guard #available(iOS 16.2, *) else {
+      return false
+    }
+
+    return Activity<DayframeTimerAttributes>.activities.contains { activity in
+      activity.activityState == .active && activity.content.state.isRunning
+    }
+  }
+
   @available(iOS 16.2, *)
   private static func endActive(dismissalPolicy: ActivityUIDismissalPolicy) async {
     for activity in Activity<DayframeTimerAttributes>.activities {

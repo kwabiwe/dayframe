@@ -99,6 +99,23 @@ describe("location account binding", () => {
     expect(mocks.drainSignals).not.toHaveBeenCalled();
   });
 
+  it("keeps bootstrap reconciliation alive until the location outbox finishes", async () => {
+    let finishSync: ((value: { synced: true; acknowledgedCount: number }) => void) | undefined;
+    mocks.syncLocationEvidence.mockImplementationOnce(() => new Promise((resolve) => {
+      finishSync = resolve;
+    }));
+
+    let configured = false;
+    const configuration = configureLocationIntelligence(bootstrap("user-a", "workspace-a"))
+      .then(() => { configured = true; });
+    await vi.waitFor(() => expect(mocks.syncLocationEvidence).toHaveBeenCalledOnce());
+    expect(configured).toBe(false);
+
+    finishSync?.({ synced: true, acknowledgedCount: 0 });
+    await configuration;
+    expect(configured).toBe(true);
+  });
+
   it("bounds native draining to five 100-item passes", async () => {
     mocks.drainSignals.mockResolvedValue(Array.from({ length: 100 }, (_, index) => ({
       id: `signal-${index}`,
