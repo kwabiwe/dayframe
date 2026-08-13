@@ -2,6 +2,31 @@ import XCTest
 @testable import DayframeCalendarCore
 
 final class DayframeCalendarCoreTests: XCTestCase {
+  func testEmptyStateIsCentredInTimelineAtTwoThirty() throws {
+    let metrics = try XCTUnwrap(DayframeCalendarEmptyStateMath.metrics(
+      availableWidth: 320,
+      hourLabelWidth: 68,
+      hourHeight: 72
+    ))
+
+    XCTAssertEqual(metrics.center.x, 190, accuracy: 0.001)
+    XCTAssertEqual(metrics.center.y, 180, accuracy: 0.001)
+    XCTAssertEqual(metrics.textWidth, 228, accuracy: 0.001)
+  }
+
+  func testEmptyStateRejectsInvalidTimelineGeometry() {
+    XCTAssertNil(DayframeCalendarEmptyStateMath.metrics(
+      availableWidth: 68,
+      hourLabelWidth: 68,
+      hourHeight: 72
+    ))
+    XCTAssertNil(DayframeCalendarEmptyStateMath.metrics(
+      availableWidth: 320,
+      hourLabelWidth: 68,
+      hourHeight: 0
+    ))
+  }
+
   func testHourHeightClampsAtMinimumAndMaximum() {
     XCTAssertEqual(DayframeCalendarZoomMath.clampHourHeight(12), 48)
     XCTAssertEqual(DayframeCalendarZoomMath.clampHourHeight(90), 90)

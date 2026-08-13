@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const database = vi.hoisted(() => ({
   activeRows: [] as Array<Record<string, unknown>>,
   claimRows: [] as Array<Record<string, unknown>>,
+  controlRows: [] as Array<Record<string, unknown>>,
   tokenRows: [] as Array<Record<string, unknown>>,
   writes: [] as Array<{ sql: string; params: unknown[] }>,
   query: vi.fn()
@@ -59,6 +60,7 @@ const {
   notifyLiveActivities,
   parseRetryAfterMs,
   registerLiveActivity,
+  resolveLiveActivityControlSession,
   retryDelayMs
 } = await import("./live-activity-push");
 
@@ -74,9 +76,13 @@ describe("Live Activity durable remote sync", () => {
     vi.resetAllMocks();
     database.activeRows = [];
     database.claimRows = [];
+    database.controlRows = [];
     database.tokenRows = [];
     database.writes = [];
     database.query.mockImplementation((sql: string, params: unknown[] = []) => {
+      if (sql.includes('t.user_id as "userId"')) {
+        return Promise.resolve({ rows: database.controlRows, rowCount: database.controlRows.length });
+      }
       if (sql.includes("from live_activity_push_tokens") && sql.includes('activity_id as "activityId"')) {
         return Promise.resolve({ rows: database.tokenRows, rowCount: database.tokenRows.length });
       }
@@ -111,6 +117,12 @@ describe("Live Activity durable remote sync", () => {
 
     const write = database.writes[0];
     expect(write.sql).toContain("invalidated_previous_tokens");
+    expect(write.sql).toContain(
+      "where live_activity_push_tokens.workspace_id = excluded.workspace_id"
+    );
+    expect(write.sql).toContain(
+      "and live_activity_push_tokens.user_id = excluded.user_id"
+    );
     expect(write.params).toEqual([
       session.workspaceId,
       session.userId,
@@ -121,11 +133,68 @@ describe("Live Activity durable remote sync", () => {
     ]);
   });
 
+  it("rejects an APNs token conflict already owned by another account", async () => {
+    database.query.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+    await expect(registerLiveActivity(session, {
+      token: "a".repeat(64),
+      activityId: "activity-attacker",
+      activeEntryId: "80000000-0000-4000-8000-000000000001",
+      environment: "production"
+    })).rejects.toThrow("The running timer is no longer active.");
+
+    const write = database.writes[0];
+    expect(write).toBeUndefined();
+    expect(database.query).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "where live_activity_push_tokens.workspace_id = excluded.workspace_id"
+      ),
+      expect.arrayContaining([session.workspaceId, session.userId])
+    );
+  });
+
+  it("derives an event-only session from the exact Activity capability after response loss", async () => {
+    database.controlRows = [{
+      userId: session.userId,
+      workspaceId: session.workspaceId
+    }];
+
+    const resolved = await resolveLiveActivityControlSession({
+      token: "a".repeat(64),
+      activityId: "activity-1",
+      entryId: "80000000-0000-4000-8000-000000000001"
+    });
+
+    expect(resolved).toEqual({
+      userId: session.userId,
+      workspaceId: session.workspaceId,
+      authMode: "provider",
+      scopes: ["events:write"]
+    });
+    expect(database.query).toHaveBeenCalledWith(
+      expect.not.stringContaining("te.stopped_at is null"),
+      [
+        "a".repeat(64),
+        "activity-1",
+        "80000000-0000-4000-8000-000000000001"
+      ]
+    );
+  });
+
+  it("fails closed when any Activity capability identity is stale or invalid", async () => {
+    await expect(resolveLiveActivityControlSession({
+      token: "b".repeat(64),
+      activityId: "activity-old",
+      entryId: "80000000-0000-4000-8000-000000000001"
+    })).rejects.toThrow("Live Activity control is unavailable.");
+  });
+
   it("persists the newest desired state before deferring missing provider configuration", async () => {
     database.tokenRows = [{
       id: "token-row",
       token: "b".repeat(64),
       activityId: "activity-1",
+      activeEntryId: "entry-1",
       environment: "development"
     }];
     database.activeRows = [{
@@ -143,7 +212,10 @@ describe("Live Activity durable remote sync", () => {
     expect(outboxWrite?.sql).toContain("revision = live_activity_delivery_outbox.revision + 1");
     expect(outboxWrite?.sql).toContain("live_activity_delivery_outbox.payload #>> '{aps,timestamp}'");
     expect(JSON.parse(String(outboxWrite?.params[4]))).toMatchObject({
-      aps: { event: "update", "content-state": { title: "Architecture", isRunning: true } }
+      aps: {
+        event: "update",
+        "content-state": { title: "Architecture", isRunning: true, canStop: true }
+      }
     });
     expect(result.missingConfiguration).toEqual([
       "APNS_KEY_ID",
@@ -152,6 +224,51 @@ describe("Live Activity durable remote sync", () => {
       "APNS_BUNDLE_ID"
     ]);
     expect(http2Mocks.calls).toHaveLength(0);
+  });
+
+  it("updates only the current entry Activity and ends stale registrations", async () => {
+    database.tokenRows = [
+      {
+        id: "token-old",
+        token: "a".repeat(64),
+        activityId: "activity-old",
+        activeEntryId: "80000000-0000-4000-8000-000000000001",
+        environment: "development"
+      },
+      {
+        id: "token-new",
+        token: "b".repeat(64),
+        activityId: "activity-new",
+        activeEntryId: "80000000-0000-4000-8000-000000000002",
+        environment: "development"
+      }
+    ];
+    database.activeRows = [{
+      id: "80000000-0000-4000-8000-000000000002",
+      description: "New timer",
+      categoryName: "Work",
+      categoryColor: "#123456",
+      startedAt: "2026-08-13T13:50:00.000Z"
+    }];
+
+    await notifyLiveActivities(session);
+
+    const writes = database.writes.filter((write) =>
+      write.sql.includes("insert into live_activity_delivery_outbox")
+    );
+    const oldWrite = writes.find((write) => write.params[0] === "token-old");
+    const newWrite = writes.find((write) => write.params[0] === "token-new");
+    expect(oldWrite?.params[3]).toBe("end");
+    expect(JSON.parse(String(oldWrite?.params[4]))).toMatchObject({
+      aps: { event: "end", "content-state": { isRunning: false, canStop: false } }
+    });
+    expect(newWrite?.params[3]).toBe("update");
+    expect(JSON.parse(String(newWrite?.params[4]))).toMatchObject({
+      aps: {
+        event: "update",
+        "content-state": { title: "New timer", isRunning: true, canStop: true }
+      }
+    });
   });
 
   it("delivers a due sandbox update and marks the exact revision delivered", async () => {

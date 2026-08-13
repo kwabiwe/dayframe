@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   clearAllSignals: vi.fn(() => Promise.resolve(0)),
   stopMonitoring: vi.fn(() => Promise.resolve({ enabled: false })),
   processPendingLocationEvidence: vi.fn(() => Promise.resolve([])),
+  recordLocationStoreError: vi.fn(() => Promise.resolve()),
   syncLocationEvidence: vi.fn(() => Promise.resolve({ synced: true, acknowledgedCount: 0 }))
 }));
 
@@ -26,6 +27,7 @@ vi.mock("./store", () => ({
   getLocationRolloutMode: vi.fn(() => Promise.resolve("v2_shadow")),
   persistLocationEvidence: vi.fn(),
   processPendingLocationEvidence: mocks.processPendingLocationEvidence,
+  recordLocationStoreError: mocks.recordLocationStoreError,
   syncLocationEvidence: mocks.syncLocationEvidence
 }));
 
@@ -97,6 +99,14 @@ describe("location account binding", () => {
     expect(mocks.stopMonitoring).toHaveBeenCalledOnce();
     expect(mocks.clearAllSignals).toHaveBeenCalledOnce();
     expect(mocks.drainSignals).not.toHaveBeenCalled();
+  });
+
+  it("does not block bootstrap geofence refresh on location outbox sync", async () => {
+    mocks.syncLocationEvidence.mockImplementationOnce(() => new Promise(() => undefined));
+
+    await expect(configureLocationIntelligence(bootstrap("user-a", "workspace-a")))
+      .resolves.toBeUndefined();
+    await vi.waitFor(() => expect(mocks.syncLocationEvidence).toHaveBeenCalledOnce());
   });
 
   it("bounds native draining to five 100-item passes", async () => {

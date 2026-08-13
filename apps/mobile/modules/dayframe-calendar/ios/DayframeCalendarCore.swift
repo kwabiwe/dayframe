@@ -113,6 +113,44 @@ public struct DayframeCalendarPoint: Equatable {
   }
 }
 
+public struct DayframeCalendarEmptyStateMetrics: Equatable {
+  public let center: DayframeCalendarPoint
+  public let textWidth: Double
+
+  public init(center: DayframeCalendarPoint, textWidth: Double) {
+    self.center = center
+    self.textWidth = textWidth
+  }
+}
+
+public enum DayframeCalendarEmptyStateMath {
+  public static func metrics(
+    availableWidth: Double,
+    hourLabelWidth: Double,
+    hourHeight: Double
+  ) -> DayframeCalendarEmptyStateMetrics? {
+    guard
+      availableWidth.isFinite,
+      hourLabelWidth.isFinite,
+      hourHeight.isFinite,
+      availableWidth > hourLabelWidth,
+      hourLabelWidth >= 0,
+      hourHeight > 0
+    else {
+      return nil
+    }
+
+    let timelineWidth = max(0, availableWidth - hourLabelWidth - 8)
+    return DayframeCalendarEmptyStateMetrics(
+      center: DayframeCalendarPoint(
+        x: hourLabelWidth + timelineWidth / 2,
+        y: 2.5 * hourHeight
+      ),
+      textWidth: max(0, timelineWidth - 16)
+    )
+  }
+}
+
 public struct DayframeCalendarHitFrame: Equatable {
   public let minX: Double
   public let maxX: Double

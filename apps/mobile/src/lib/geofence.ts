@@ -1537,7 +1537,7 @@ async function persistV2LocationBatch(locations: Location.LocationObject[]) {
   };
   const evidence = locations.map((location) => store.evidenceFromExpoLocation(location, captureContext));
   await store.persistLocationEvidence(evidence);
-  void store.syncLocationEvidence();
+  void store.syncLocationEvidence().catch(recordV2LocationFailure);
   return { rolloutMode };
 }
 
@@ -1561,7 +1561,7 @@ async function persistV2GeofenceEvidence(transition: GeofenceTransition, region:
     metadata: {}
   } satisfies LocationEvidence);
   await store.persistLocationEvidence([evidence]);
-  void store.syncLocationEvidence();
+  void store.syncLocationEvidence().catch(recordV2LocationFailure);
   return { rolloutMode };
 }
 

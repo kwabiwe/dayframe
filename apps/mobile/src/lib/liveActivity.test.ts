@@ -1,18 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  activitySnapshot: vi.fn(),
+  cleanupActivities: vi.fn(),
+  enableStop: vi.fn(),
   registerLiveActivity: vi.fn(),
   pushToken: vi.fn(),
-  start: vi.fn(),
-  stop: vi.fn()
+  start: vi.fn()
 }));
 
 vi.mock("react-native", () => ({
   NativeModules: {
     DayframeLiveActivityModule: {
+      activitySnapshot: mocks.activitySnapshot,
+      cleanupActivities: mocks.cleanupActivities,
+      enableStop: mocks.enableStop,
       start: mocks.start,
-      pushToken: mocks.pushToken,
-      stop: mocks.stop
+      pushToken: mocks.pushToken
     }
   },
   Platform: { OS: "ios" }
@@ -20,6 +24,10 @@ vi.mock("react-native", () => ({
 
 vi.mock("./api", () => ({
   registerLiveActivity: mocks.registerLiveActivity
+}));
+
+vi.mock("./config", () => ({
+  DAYFRAME_API_BASE: "https://dayframe-staging.vercel.app"
 }));
 
 async function loadModule() {
@@ -30,14 +38,18 @@ async function loadModule() {
 describe("Live Activity sync", () => {
   beforeEach(() => {
     vi.useRealTimers();
+    mocks.activitySnapshot.mockReset();
+    mocks.activitySnapshot.mockResolvedValue([]);
+    mocks.cleanupActivities.mockReset();
+    mocks.cleanupActivities.mockResolvedValue(true);
+    mocks.enableStop.mockReset();
+    mocks.enableStop.mockResolvedValue(true);
     mocks.start.mockReset();
     mocks.start.mockResolvedValue(true);
     mocks.pushToken.mockReset();
     mocks.pushToken.mockResolvedValue({ token: "a".repeat(64), environment: "development" });
     mocks.registerLiveActivity.mockReset();
     mocks.registerLiveActivity.mockResolvedValue(undefined);
-    mocks.stop.mockReset();
-    mocks.stop.mockResolvedValue(true);
   });
 
   it("shows Uncategorized instead of Tracking for a blank timer", async () => {
@@ -53,6 +65,8 @@ describe("Live Activity sync", () => {
 
     expect(mocks.start).toHaveBeenCalledWith(
       "Uncategorized",
+      null,
+      "https://dayframe-staging.vercel.app",
       null,
       null,
       "2026-07-12T06:45:00.000Z"
@@ -76,6 +90,10 @@ describe("Live Activity sync", () => {
       activeEntryId: "80000000-0000-4000-8000-000000000001",
       environment: "development"
     }));
+    expect(mocks.enableStop).toHaveBeenCalledWith(
+      "activity-1",
+      "80000000-0000-4000-8000-000000000001"
+    );
   });
 
   it("retries until ActivityKit provides both a token and its signed APNs environment", async () => {
@@ -103,12 +121,103 @@ describe("Live Activity sync", () => {
     vi.useRealTimers();
   });
 
+  it("does not expose Stop before the exact Activity registration succeeds", async () => {
+    vi.useFakeTimers();
+    mocks.start.mockResolvedValue({ started: true, activityId: "activity-1" });
+    mocks.registerLiveActivity.mockRejectedValue(new Error("offline"));
+    const { syncLiveActivityForEntry } = await loadModule();
+
+    await syncLiveActivityForEntry({
+      id: "80000000-0000-4000-8000-000000000001",
+      startedAt: "2026-07-12T06:45:00.000Z",
+      description: "School run",
+      categoryName: "Family",
+      categoryColor: "violet"
+    });
+    await vi.advanceTimersByTimeAsync(6_500);
+
+    expect(mocks.registerLiveActivity).toHaveBeenCalledTimes(3);
+    expect(mocks.enableStop).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("retries registration on a later same-entry reconciliation after connectivity recovers", async () => {
+    vi.useFakeTimers();
+    const entry = {
+      id: "80000000-0000-4000-8000-000000000001",
+      startedAt: "2026-07-12T06:45:00.000Z",
+      description: "School run",
+      categoryName: "Family",
+      categoryColor: "violet"
+    };
+    mocks.start.mockResolvedValue({ started: true, activityId: "activity-1" });
+    mocks.activitySnapshot.mockResolvedValue([{
+      activityId: "activity-1",
+      entryId: entry.id,
+      isActive: true,
+      isRunning: true
+    }]);
+    mocks.registerLiveActivity.mockRejectedValue(new Error("offline"));
+    const { syncLiveActivityForEntry } = await loadModule();
+
+    await syncLiveActivityForEntry(entry);
+    await vi.advanceTimersByTimeAsync(6_500);
+    expect(mocks.registerLiveActivity).toHaveBeenCalledTimes(3);
+    expect(mocks.enableStop).not.toHaveBeenCalled();
+
+    mocks.registerLiveActivity.mockResolvedValue(undefined);
+    await syncLiveActivityForEntry(entry);
+    await vi.runAllTimersAsync();
+
+    expect(mocks.registerLiveActivity).toHaveBeenCalledTimes(4);
+    expect(mocks.enableStop).toHaveBeenCalledWith("activity-1", entry.id);
+    vi.useRealTimers();
+  });
+
+  it("re-registers the same activity when ActivityKit rotates its APNs token", async () => {
+    const entry = {
+      id: "80000000-0000-4000-8000-000000000001",
+      startedAt: "2026-07-12T06:45:00.000Z",
+      description: "School run",
+      categoryName: "Family",
+      categoryColor: "violet"
+    };
+    mocks.start.mockResolvedValue({ started: true, activityId: "activity-1" });
+    mocks.activitySnapshot.mockResolvedValue([{
+      activityId: "activity-1",
+      entryId: entry.id,
+      isActive: true,
+      isRunning: true
+    }]);
+    mocks.pushToken
+      .mockResolvedValueOnce({ token: "a".repeat(64), environment: "development" })
+      .mockResolvedValue({ token: "b".repeat(64), environment: "development" });
+    const { syncLiveActivityForEntry } = await loadModule();
+
+    await syncLiveActivityForEntry(entry);
+    await vi.waitFor(() => expect(mocks.registerLiveActivity).toHaveBeenCalledTimes(1));
+    await syncLiveActivityForEntry(entry);
+    await vi.waitFor(() => expect(mocks.registerLiveActivity).toHaveBeenCalledTimes(2));
+
+    expect(mocks.registerLiveActivity).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      token: "b".repeat(64),
+      activityId: "activity-1",
+      activeEntryId: entry.id
+    }));
+  });
+
   it("clears stale native activities on the first idle bootstrap", async () => {
+    mocks.activitySnapshot.mockResolvedValueOnce([{
+      activityId: "activity-stale",
+      entryId: null,
+      isActive: true,
+      isRunning: true
+    }]);
     const { syncLiveActivityForEntry } = await loadModule();
 
     await syncLiveActivityForEntry(null);
 
-    expect(mocks.stop).toHaveBeenCalledTimes(1);
+    expect(mocks.cleanupActivities).toHaveBeenCalledWith(["activity-stale"]);
   });
 
   it("starts a native activity for a changed active entry", async () => {
@@ -132,10 +241,128 @@ describe("Live Activity sync", () => {
     expect(mocks.start).toHaveBeenCalledTimes(1);
     expect(mocks.start).toHaveBeenCalledWith(
       "School run",
+      null,
+      "https://dayframe-staging.vercel.app",
       "Family",
       "#6E5DC6",
       "2026-07-12T06:45:00.000Z"
     );
+  });
+
+  it("recreates an externally-ended activity for an unchanged running timer", async () => {
+    const { syncLiveActivityForEntry } = await loadModule();
+    const entry = {
+      id: "80000000-0000-4000-8000-000000000001",
+      startedAt: "2026-07-12T06:45:00.000Z",
+      description: "School run",
+      categoryName: "Family",
+      categoryColor: "violet"
+    };
+
+    await syncLiveActivityForEntry(entry);
+    mocks.activitySnapshot.mockResolvedValueOnce([]);
+    await syncLiveActivityForEntry(entry);
+
+    expect(mocks.start).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not let a stale activity satisfy reconciliation for a newer canonical timer", async () => {
+    const { syncLiveActivityForEntry } = await loadModule();
+    const entry = {
+      id: "80000000-0000-4000-8000-000000000002",
+      startedAt: "2026-08-13T13:50:00.000Z",
+      description: "New timer",
+      categoryName: "Work",
+      categoryColor: "blue"
+    };
+
+    await syncLiveActivityForEntry(entry);
+    mocks.activitySnapshot.mockResolvedValueOnce([{
+      activityId: "activity-old",
+      entryId: "80000000-0000-4000-8000-000000000001",
+      isActive: true,
+      isRunning: true
+    }]);
+    await syncLiveActivityForEntry(entry);
+
+    expect(mocks.start).toHaveBeenCalledTimes(2);
+    expect(mocks.start).toHaveBeenLastCalledWith(
+      "New timer",
+      entry.id,
+      "https://dayframe-staging.vercel.app",
+      "Work",
+      "#579DFF",
+      entry.startedAt
+    );
+  });
+
+  it("keeps the exact current activity and cleans stale siblings", async () => {
+    const { syncLiveActivityForEntry } = await loadModule();
+    const entry = {
+      id: "80000000-0000-4000-8000-000000000002",
+      startedAt: "2026-08-13T13:50:00.000Z",
+      description: "New timer",
+      categoryName: "Work",
+      categoryColor: "blue"
+    };
+
+    await syncLiveActivityForEntry(entry);
+    mocks.activitySnapshot.mockResolvedValueOnce([
+      { activityId: "activity-new", entryId: entry.id, isActive: true, isRunning: true },
+      {
+        activityId: "activity-old",
+        entryId: "80000000-0000-4000-8000-000000000001",
+        isActive: true,
+        isRunning: true
+      }
+    ]);
+    await syncLiveActivityForEntry(entry);
+
+    expect(mocks.start).toHaveBeenCalledTimes(1);
+    expect(mocks.cleanupActivities).toHaveBeenCalledWith(["activity-old"]);
+  });
+
+  it("cleans only observed stale IDs after the intended canonical start exists", async () => {
+    const entry = {
+      id: "80000000-0000-4000-8000-000000000002",
+      startedAt: "2026-08-13T14:00:00.000Z",
+      description: "Current timer",
+      categoryName: "Work",
+      categoryColor: "blue"
+    };
+    mocks.start.mockResolvedValue({ started: true, activityId: "activity-new" });
+    mocks.activitySnapshot.mockResolvedValueOnce([
+      { activityId: "activity-new", entryId: entry.id, isActive: true, isRunning: true },
+      {
+        activityId: "activity-old",
+        entryId: "80000000-0000-4000-8000-000000000001",
+        isActive: true,
+        isRunning: true
+      }
+    ]);
+    const { syncLiveActivityForEntry } = await loadModule();
+
+    await syncLiveActivityForEntry(entry);
+
+    expect(mocks.cleanupActivities).toHaveBeenCalledTimes(1);
+    expect(mocks.cleanupActivities).toHaveBeenCalledWith(["activity-old"]);
+  });
+
+  it("cleans up a native activity that appeared after an idle reconciliation", async () => {
+    mocks.activitySnapshot
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{
+        activityId: "activity-late",
+        entryId: null,
+        isActive: true,
+        isRunning: true
+      }]);
+    const { syncLiveActivityForEntry } = await loadModule();
+
+    await syncLiveActivityForEntry(null);
+    await syncLiveActivityForEntry(null);
+
+    expect(mocks.cleanupActivities).toHaveBeenCalledWith(["activity-late"]);
   });
 
   it("retries active-entry reconciliation when native start reports failure", async () => {
@@ -158,7 +385,13 @@ describe("Live Activity sync", () => {
   });
 
   it("retries idle reconciliation when native stop reports failure", async () => {
-    mocks.stop
+    mocks.activitySnapshot.mockResolvedValue([{
+      activityId: "activity-stale",
+      entryId: null,
+      isActive: true,
+      isRunning: true
+    }]);
+    mocks.cleanupActivities
       .mockResolvedValueOnce(false)
       .mockResolvedValueOnce(true);
     const { syncLiveActivityForEntry } = await loadModule();
@@ -166,16 +399,26 @@ describe("Live Activity sync", () => {
     await syncLiveActivityForEntry(null);
     await syncLiveActivityForEntry(null);
 
-    expect(mocks.stop).toHaveBeenCalledTimes(2);
+    expect(mocks.cleanupActivities).toHaveBeenCalledTimes(2);
+    expect(mocks.cleanupActivities).toHaveBeenCalledWith(["activity-stale"]);
   });
 
   it("serializes rapid idle and optimistic active-entry reconciliation", async () => {
-    let finishStop: ((value: boolean) => void) | undefined;
-    mocks.stop.mockImplementationOnce(() => new Promise<boolean>((resolve) => {
-      finishStop = resolve;
+    let finishCleanup: ((value: boolean) => void) | undefined;
+    mocks.activitySnapshot.mockResolvedValueOnce([{
+      activityId: "activity-old",
+      entryId: null,
+      isActive: true,
+      isRunning: true
+    }]);
+    mocks.cleanupActivities.mockImplementationOnce(() => new Promise<boolean>((resolve) => {
+      finishCleanup = resolve;
     }));
     const { syncLiveActivityForEntry } = await loadModule();
     const idleSync = syncLiveActivityForEntry(null);
+    await vi.waitFor(() => {
+      expect(mocks.cleanupActivities).toHaveBeenCalledWith(["activity-old"]);
+    });
     const activeSync = syncLiveActivityForEntry({
       id: "optimistic:entry-1",
       startedAt: "2026-07-22T06:05:00.000Z",
@@ -185,10 +428,10 @@ describe("Live Activity sync", () => {
     });
 
     expect(mocks.start).not.toHaveBeenCalled();
-    finishStop?.(true);
+    finishCleanup?.(true);
     await Promise.all([idleSync, activeSync]);
 
-    expect(mocks.stop).toHaveBeenCalledTimes(1);
+    expect(mocks.cleanupActivities).toHaveBeenCalledTimes(1);
     expect(mocks.start).toHaveBeenCalledTimes(1);
   });
 

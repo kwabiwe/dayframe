@@ -32,6 +32,7 @@ const {
   clearSessionToken,
   getSessionToken,
   isKeychainInteractionUnavailable,
+  resetSessionTokenCacheForTesting,
   setSessionToken
 } = await import("./secure-session");
 
@@ -53,6 +54,7 @@ describe("secure mobile session", () => {
     });
     nativeModule.setRuntimeContext.mockResolvedValue(true);
     nativeModule.clearRuntimeContext.mockResolvedValue(true);
+    resetSessionTokenCacheForTesting();
   });
 
   it("stores new sessions with background-safe device-only accessibility", async () => {
@@ -91,6 +93,16 @@ describe("secure mobile session", () => {
       "https://dayframe-staging.vercel.app",
       "current-token"
     );
+  });
+
+  it("reuses a foreground session without another Keychain interaction", async () => {
+    values.set("dayframe.localSessionToken.v2", "current-token");
+
+    await expect(getSessionToken()).resolves.toBe("current-token");
+    await expect(getSessionToken()).resolves.toBe("current-token");
+
+    expect(secureStore.getItemAsync).toHaveBeenCalledOnce();
+    expect(nativeModule.setRuntimeContext).toHaveBeenCalledOnce();
   });
 
   it("keeps the normal session usable when native context mirroring is unavailable", async () => {
@@ -141,6 +153,44 @@ describe("secure mobile session", () => {
 
     expect(values.size).toBe(0);
     expect(nativeModule.clearRuntimeContext).toHaveBeenCalledOnce();
+  });
+
+  it("invalidates the process cache when the user signs out", async () => {
+    values.set("dayframe.localSessionToken.v2", "first-token");
+    await expect(getSessionToken()).resolves.toBe("first-token");
+
+    await clearSessionToken();
+    await expect(getSessionToken()).resolves.toBeNull();
+    await setSessionToken("second-token");
+
+    await expect(getSessionToken()).resolves.toBe("second-token");
+    expect(secureStore.getItemAsync).toHaveBeenCalledOnce();
+  });
+
+  it("does not restore an earlier account after logout and a new login", async () => {
+    let finishOldRead: ((token: string) => void) | undefined;
+    secureStore.getItemAsync.mockImplementationOnce(() => new Promise((resolve) => {
+      finishOldRead = resolve;
+    }));
+
+    const oldRead = getSessionToken();
+    await vi.waitFor(() => expect(secureStore.getItemAsync).toHaveBeenCalledOnce());
+    const logout = clearSessionToken();
+    const newLogin = setSessionToken("account-b-token");
+    finishOldRead?.("account-a-token");
+
+    await expect(oldRead).resolves.toBeNull();
+    await logout;
+    await newLogin;
+    await expect(getSessionToken()).resolves.toBe("account-b-token");
+    expect(nativeModule.setRuntimeContext).not.toHaveBeenCalledWith(
+      "https://dayframe-staging.vercel.app",
+      "account-a-token"
+    );
+    expect(nativeModule.setRuntimeContext).toHaveBeenLastCalledWith(
+      "https://dayframe-staging.vercel.app",
+      "account-b-token"
+    );
   });
 
   it("clears native context even when secure storage deletion fails", async () => {

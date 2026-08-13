@@ -14,8 +14,13 @@ import {
   type SavedPlaceForMatching
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "../config";
-import { clearSessionToken, getSessionToken } from "../api";
+import {
+  SecureSessionUnavailableError,
+  clearSessionToken,
+  getSessionToken
+} from "../secure-session";
 import { createSerialMutationQueue } from "./mutationQueue";
+import { fetchLocationSync } from "./network";
 import {
   MAX_LOCATION_UPLOAD_BATCHES_PER_SYNC,
   locationUploadDisposition,
@@ -473,7 +478,21 @@ async function drainLocationSynchronisationRequests() {
 }
 
 async function synchroniseLocationEvidenceUnsafe(options: { forceReplay: boolean }) {
-  const token = await getSessionToken();
+  let token: string | null;
+  try {
+    token = await getSessionToken();
+  } catch (error) {
+    if (!(error instanceof SecureSessionUnavailableError)) throw error;
+    await recordLocationStoreError(error).catch(() => undefined);
+    return {
+      synced: false,
+      reason: "session_unavailable" as const,
+      message: error.message,
+      acknowledgedCount: 0,
+      uploadedBatchCount: 0,
+      replayed: false
+    };
+  }
   if (!token) return { synced: false, reason: "no_session" as const };
   const db = await database();
   let acknowledgedCount = 0;
@@ -549,7 +568,7 @@ async function uploadLocationEvidenceBatch(
   | { status: "stopped"; reason: "payload_too_large" | "request_failed"; message?: string }
 > {
   try {
-    const response = await fetch(`${DAYFRAME_API_BASE}/api/location/evidence`, {
+    const response = await fetchLocationSync(`${DAYFRAME_API_BASE}/api/location/evidence`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: batch.body_json
@@ -674,7 +693,7 @@ async function requestServerLocationReplay(token: string, now: number) {
   const attemptedAt = new Date(now).toISOString();
   await serialiseLocationMutation(() => setMetadata("last_server_replay_attempt_at", attemptedAt));
   try {
-    const response = await fetch(`${DAYFRAME_API_BASE}/api/location/replay`, {
+    const response = await fetchLocationSync(`${DAYFRAME_API_BASE}/api/location/replay`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({

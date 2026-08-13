@@ -8,9 +8,11 @@ class DayframeLiveActivityModule: NSObject {
     false
   }
 
-  @objc(start:categoryName:categoryColor:startedAt:resolver:rejecter:)
+  @objc(start:entryId:apiBase:categoryName:categoryColor:startedAt:resolver:rejecter:)
   func start(
     title: String,
+    entryId: String?,
+    apiBase: String?,
     categoryName: String?,
     categoryColor: String?,
     startedAt: String?,
@@ -19,6 +21,8 @@ class DayframeLiveActivityModule: NSObject {
   ) {
     Task {
       let result = await DayframeLiveActivityController.start(
+        entryId: entryId,
+        apiBase: apiBase,
         title: title,
         categoryName: categoryName,
         categoryColor: categoryColor,
@@ -30,6 +34,46 @@ class DayframeLiveActivityModule: NSObject {
       ]
       resolve(payload)
     }
+  }
+
+  @objc(enableStop:entryId:resolver:rejecter:)
+  func enableStop(
+    activityId: String,
+    entryId: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    Task {
+      resolve(await DayframeLiveActivityController.enableStop(
+        activityId: activityId,
+        entryId: entryId
+      ))
+    }
+  }
+
+  @objc(activitySnapshot:rejecter:)
+  func activitySnapshot(
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    resolve(DayframeLiveActivityController.snapshots().map { snapshot in
+      [
+        "activityId": snapshot.activityId,
+        "entryId": snapshot.entryId ?? NSNull(),
+        "isActive": snapshot.isActive,
+        "isRunning": snapshot.isRunning
+      ] as [String: Any]
+    })
+  }
+
+  @objc(cleanupActivities:resolver:rejecter:)
+  func cleanupActivities(
+    activityIds: [String],
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DayframeLiveActivityController.cleanupActivities(activityIds: activityIds)
+    resolve(true)
   }
 
   @objc(pushToken:resolver:rejecter:)
@@ -45,17 +89,6 @@ class DayframeLiveActivityModule: NSObject {
         "environment": Self.pushEnvironment() ?? NSNull()
       ]
       resolve(payload)
-    }
-  }
-
-  @objc(stop:rejecter:)
-  func stop(
-    resolve: @escaping RCTPromiseResolveBlock,
-    reject: @escaping RCTPromiseRejectBlock
-  ) {
-    Task {
-      let didStop = await DayframeLiveActivityController.stop()
-      resolve(didStop)
     }
   }
 

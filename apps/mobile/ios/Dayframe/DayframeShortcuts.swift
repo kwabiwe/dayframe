@@ -26,6 +26,12 @@ struct StartTrackingIntent: AppIntent {
   }
 }
 
+// iOS 17+ requires this conformance when an App Intent creates a Live
+// Activity from the background app process. iOS 16.4 retains the shortcut's
+// durable queue behavior but does not attempt an unsupported background start.
+@available(iOS 17.0, *)
+extension StartTrackingIntent: LiveActivityIntent {}
+
 @available(iOS 16.4, *)
 struct StopTrackingIntent: AppIntent {
   static var title: LocalizedStringResource = "Stop tracking"
@@ -33,7 +39,13 @@ struct StopTrackingIntent: AppIntent {
   static var openAppWhenRun: Bool = false
 
   func perform() async throws -> some IntentResult {
-    await DayframeShortcutPerformer.perform(.stop)
+    guard let entryId = DayframeLiveActivityController.currentCanonicalEntryId() else {
+      // A replayable current/global Stop can target a different timer if the
+      // request is delayed. Without an immutable canonical entry, fail closed.
+      DayframeShortcutDeliveryDiagnosticStore.record(.legacyUnscoped)
+      return .result()
+    }
+    await DayframeShortcutPerformer.perform(.stopEntry(entryId: entryId))
     return .result()
   }
 }
@@ -43,9 +55,51 @@ struct DayframeLiveActivityStopIntent: LiveActivityIntent {
   static var title: LocalizedStringResource = "Stop timer"
   static var description = IntentDescription("Stop the current Dayframe timer from the Live Activity.")
   static var openAppWhenRun: Bool = false
+  static var isDiscoverable: Bool = false
+
+  @Parameter(title: "Activity ID")
+  var activityId: String?
+
+  @Parameter(title: "Timer entry ID")
+  var entryId: String?
+
+  @Parameter(title: "API base")
+  var apiBase: String?
+
+  @Parameter(title: "Stop request ID")
+  var clientEventId: String?
+
+  init() {}
+
+  init(activityId: String, entryId: String, apiBase: String, clientEventId: String) {
+    self.activityId = activityId
+    self.entryId = entryId
+    self.apiBase = apiBase
+    self.clientEventId = clientEventId
+  }
+
+  @available(iOS 26.0, *)
+  static var supportedModes: IntentModes = [.background]
 
   func perform() async throws -> some IntentResult {
-    await DayframeShortcutPerformer.perform(.stop)
+    guard
+      let activityId = dayframeCleanText(activityId),
+      let entryId = dayframeCleanText(entryId),
+      let apiBase = dayframeCleanText(apiBase),
+      let clientEventId = dayframeCleanText(clientEventId)
+    else {
+      // A Live Activity archived by an older build has no immutable target.
+      // The archived control has no immutable target, so even local dismissal
+      // must be a no-op: a newer optimistic activity can also lack an entry ID.
+      DayframeShortcutDeliveryDiagnosticStore.record(.legacyUnscoped)
+      return .result()
+    }
+    await DayframeShortcutPerformer.perform(.stopLiveActivity(
+      activityId: activityId,
+      entryId: entryId,
+      apiBase: apiBase,
+      clientEventId: clientEventId
+    ))
     return .result()
   }
 }
@@ -76,7 +130,8 @@ struct DayframeShortcuts: AppShortcutsProvider {
 
 private enum DayframeShortcutAction {
   case start(description: String?, categoryName: String?, workspaceName: String?)
-  case stop
+  case stopEntry(entryId: String)
+  case stopLiveActivity(activityId: String, entryId: String, apiBase: String, clientEventId: String)
 }
 
 private func dayframeCleanText(_ value: String?) -> String? {
@@ -97,20 +152,58 @@ private enum DayframeShortcutPerformer {
       guard queued else {
         return
       }
+      guard #available(iOS 17.0, *) else {
+        return
+      }
       let category = catalog.category(named: categoryName)
       _ = await DayframeLiveActivityController.start(
+        entryId: nil,
+        apiBase: nil,
         title: event.description ?? category?.name ?? "Uncategorized",
         categoryName: category?.name ?? dayframeCleanText(categoryName),
         categoryColor: category?.color,
         startedAt: event.occurredAt
       )
-    case .stop:
-      _ = await DayframeLiveActivityController.stop()
-      guard queued else {
+    case .stopEntry(let entryId):
+      // Ending the Activity can terminate the background intent process on
+      // current iOS before a concurrent URLSession request completes. Finish
+      // the bounded server/APNs path first, then dismiss locally. A failed
+      // request remains queued for foreground replay.
+      let activityIds = DayframeLiveActivityController.activityIds(entryId: entryId)
+      let delivered = await DayframeShortcutDirectEventClient.submit(event)
+      if delivered {
+        _ = await DayframeLiveActivityController.stop(activityIds: activityIds)
+        if queued {
+          _ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])
+        }
+      }
+    case .stopLiveActivity(let activityId, let entryId, let apiBase, _):
+      // The event and local dismissal share the immutable identity archived in
+      // the exact Live Activity view. The push token is the server-registered,
+      // activity-scoped capability, so this locked-screen path never depends
+      // on a broad account bearer or App Group/Keychain availability.
+      guard let pushToken = DayframeLiveActivityController.immediatePushToken(
+        activityId: activityId,
+        entryId: entryId
+      ) else {
+        DayframeShortcutDeliveryDiagnosticStore.record(.capabilityUnavailable)
         return
       }
-      if await DayframeShortcutDirectEventClient.submit(event) {
-        _ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])
+      let delivered = await DayframeShortcutDirectEventClient.submitLiveActivityStop(
+        event,
+        apiBase: apiBase,
+        activityId: activityId,
+        entryId: entryId,
+        pushToken: pushToken
+      )
+      if delivered {
+        _ = await DayframeLiveActivityController.stop(
+          activityId: activityId,
+          entryId: entryId
+        )
+        if queued {
+          _ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])
+        }
       }
     }
   }
@@ -131,12 +224,13 @@ struct DayframeShortcutEvent: Codable {
     var nextType: String
     var nextCategoryId: String?
     var nextDescription: String?
-    var payload = ["origin": "ios_app_intent"]
+    var payload: [String: String]
 
     switch action {
     case .start(let description, let categoryName, let workspaceName):
       actionName = "start"
       nextType = "shortcut_action"
+      payload = ["origin": "ios_app_shortcut"]
       nextDescription = dayframeCleanText(description)
       if let category = catalog.category(named: categoryName) {
         nextCategoryId = category.id
@@ -147,9 +241,31 @@ struct DayframeShortcutEvent: Codable {
       if let workspaceName = dayframeCleanText(workspaceName) {
         payload["workspaceName"] = workspaceName
       }
-    case .stop:
+    case .stopEntry(let entryId):
       actionName = "stop"
       nextType = "timer_stop"
+      payload = [
+        "origin": "ios_app_shortcut",
+        "stopScope": "entry",
+        "targetEntryId": entryId
+      ]
+    case .stopLiveActivity(let activityId, let entryId, _, let clientEventId):
+      actionName = "stop"
+      nextType = "timer_stop"
+      payload = [
+        "origin": "ios_live_activity",
+        "stopScope": "entry",
+        "targetActivityId": activityId,
+        "targetEntryId": entryId
+      ]
+      localId = clientEventId
+      source = "shortcut"
+      type = nextType
+      occurredAt = now
+      categoryId = nextCategoryId
+      description = nextDescription
+      rawPayload = payload
+      return
     }
 
     localId = "ios-shortcut-\(actionName)-\(Int(now.timeIntervalSince1970 * 1000))-\(UUID().uuidString)"
