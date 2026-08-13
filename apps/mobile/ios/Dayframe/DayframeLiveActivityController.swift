@@ -6,7 +6,15 @@ enum DayframeLiveActivityController {
     let activityId: String
   }
 
+  struct Snapshot {
+    let activityId: String
+    let entryId: String?
+    let isActive: Bool
+    let isRunning: Bool
+  }
+
   static func start(
+    entryId: String?,
     title: String,
     categoryName: String?,
     categoryColor: String? = nil,
@@ -20,9 +28,7 @@ enum DayframeLiveActivityController {
       return nil
     }
 
-    await endActive(dismissalPolicy: .immediate)
-
-    let attributes = DayframeTimerAttributes(id: UUID().uuidString)
+    let canonicalEntryId = cleanText(entryId)
     let state = DayframeTimerAttributes.ContentState(
       title: cleanTitle(title),
       categoryName: cleanText(categoryName),
@@ -30,6 +36,28 @@ enum DayframeLiveActivityController {
       startedAt: startedAt,
       elapsedSeconds: 0,
       isRunning: true
+    )
+
+    if
+      let canonicalEntryId,
+      let existing = Activity<DayframeTimerAttributes>.activities.first(where: {
+        $0.activityState == .active &&
+          $0.content.state.isRunning &&
+          $0.attributes.entryId == canonicalEntryId
+      })
+    {
+      // The logical run already owns an Activity. Update it in place. Sibling
+      // cleanup belongs to the generation-fenced JS reconciler; a native start
+      // cannot know whether an observed sibling is stale or concurrently new.
+      Task(priority: .userInitiated) {
+        await existing.update(ActivityContent(state: state, staleDate: nil))
+      }
+      return StartResult(activityId: existing.id)
+    }
+
+    let attributes = DayframeTimerAttributes(
+      id: UUID().uuidString,
+      entryId: canonicalEntryId
     )
 
     do {
@@ -72,40 +100,123 @@ enum DayframeLiveActivityController {
     }
   }
 
-  static func stop() async -> Bool {
+  static func stop(activityIds: [String]) async -> Bool {
     guard #available(iOS 16.2, *) else {
       return true
     }
-
-    await endActive(dismissalPolicy: .immediate)
+    for activityId in Set(activityIds.compactMap(cleanText)) {
+      guard
+        let activity = Activity<DayframeTimerAttributes>.activities.first(where: {
+          $0.id == activityId
+        })
+      else {
+        continue
+      }
+      await end(activity, dismissalPolicy: .immediate)
+    }
     return true
   }
 
-  static func hasActiveActivity() -> Bool {
+  static func stop(activityId: String, entryId: String) async -> Bool {
     guard #available(iOS 16.2, *) else {
-      return false
+      return true
     }
+    guard
+      let activity = Activity<DayframeTimerAttributes>.activities.first(where: {
+        $0.id == activityId && $0.attributes.entryId == entryId
+      })
+    else {
+      // An already-ended exact Activity is an idempotent success. Crucially,
+      // never fall back to ending another Activity.
+      return true
+    }
+    await end(activity, dismissalPolicy: .immediate)
+    return true
+  }
 
-    return Activity<DayframeTimerAttributes>.activities.contains { activity in
-      activity.activityState == .active && activity.content.state.isRunning
+  static func cleanupActivities(activityIds: [String]) {
+    guard #available(iOS 16.2, *) else {
+      return
+    }
+    scheduleEndActivities(activityIds: activityIds)
+  }
+
+  static func activityIds(entryId: String) -> [String] {
+    guard #available(iOS 16.2, *) else {
+      return []
+    }
+    return Activity<DayframeTimerAttributes>.activities
+      .filter { $0.attributes.entryId == entryId }
+      .map(\.id)
+  }
+
+  static func currentCanonicalEntryId() -> String? {
+    guard #available(iOS 16.2, *) else {
+      return nil
+    }
+    return Activity<DayframeTimerAttributes>.activities
+      .filter {
+        $0.activityState == .active &&
+          $0.content.state.isRunning &&
+          cleanText($0.attributes.entryId) != nil
+      }
+      .sorted {
+        ($0.content.state.startedAt ?? .distantPast) >
+          ($1.content.state.startedAt ?? .distantPast)
+      }
+      .first?
+      .attributes
+      .entryId
+  }
+
+  static func snapshots() -> [Snapshot] {
+    guard #available(iOS 16.2, *) else {
+      return []
+    }
+    return Activity<DayframeTimerAttributes>.activities.map { activity in
+      Snapshot(
+        activityId: activity.id,
+        entryId: activity.attributes.entryId,
+        isActive: activity.activityState == .active,
+        isRunning: activity.content.state.isRunning
+      )
     }
   }
 
   @available(iOS 16.2, *)
-  private static func endActive(dismissalPolicy: ActivityUIDismissalPolicy) async {
-    for activity in Activity<DayframeTimerAttributes>.activities {
-      let state = DayframeTimerAttributes.ContentState(
-        title: activity.content.state.title,
-        categoryName: activity.content.state.categoryName,
-        categoryColor: activity.content.state.categoryColor,
-        startedAt: activity.content.state.startedAt,
-        elapsedSeconds: elapsedSeconds(from: activity.content.state.startedAt),
-        isRunning: false
-      )
-      await activity.end(
-        ActivityContent(state: state, staleDate: Date()),
-        dismissalPolicy: dismissalPolicy
-      )
+  private static func end(
+    _ activity: Activity<DayframeTimerAttributes>,
+    dismissalPolicy: ActivityUIDismissalPolicy
+  ) async {
+    let state = DayframeTimerAttributes.ContentState(
+      title: activity.content.state.title,
+      categoryName: activity.content.state.categoryName,
+      categoryColor: activity.content.state.categoryColor,
+      startedAt: activity.content.state.startedAt,
+      elapsedSeconds: elapsedSeconds(from: activity.content.state.startedAt),
+      isRunning: false
+    )
+    await activity.end(
+      ActivityContent(state: state, staleDate: Date()),
+      dismissalPolicy: dismissalPolicy
+    )
+  }
+
+  @available(iOS 16.2, *)
+  private static func scheduleEndActivities(activityIds: [String]) {
+    let activityIds = Array(Set(activityIds.compactMap(cleanText)))
+    guard !activityIds.isEmpty else { return }
+    Task(priority: .userInitiated) {
+      for activityId in activityIds {
+        guard
+          let activity = Activity<DayframeTimerAttributes>.activities.first(where: {
+            $0.id == activityId
+          })
+        else {
+          continue
+        }
+        await end(activity, dismissalPolicy: .immediate)
+      }
     }
   }
 

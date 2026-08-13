@@ -24,6 +24,7 @@ enum DayframeSharedStorageConfiguration {
 }
 
 enum DayframeShortcutDeliveryDiagnostic {
+  case legacyUnscoped
   case started
   case contextUnavailable
   case requestInvalid
@@ -34,6 +35,8 @@ enum DayframeShortcutDeliveryDiagnostic {
 
   fileprivate var fileSuffix: String {
     switch self {
+    case .legacyUnscoped:
+      return "legacy-unscoped"
     case .started:
       return "started"
     case .contextUnavailable:

@@ -3,16 +3,18 @@
 @interface RCT_EXTERN_MODULE(DayframeLiveActivityModule, NSObject)
 
 RCT_EXTERN_METHOD(start:(NSString *)title
+                  entryId:(NSString *)entryId
                   categoryName:(NSString *)categoryName
                   categoryColor:(NSString *)categoryColor
                   startedAt:(NSString *)startedAt
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
-RCT_EXTERN_METHOD(stop:(RCTPromiseResolveBlock)resolve
+RCT_EXTERN_METHOD(activitySnapshot:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
-RCT_EXTERN_METHOD(hasActiveActivity:(RCTPromiseResolveBlock)resolve
+RCT_EXTERN_METHOD(cleanupActivities:(NSArray *)activityIds
+                  resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
 RCT_EXTERN_METHOD(pushToken:(NSString *)activityId

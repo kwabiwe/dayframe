@@ -417,6 +417,7 @@ export async function processActivityEvent(
   timeEntryId?: string;
   duplicate?: boolean;
   updatedExistingTimeEntry?: boolean;
+  stopOutcome?: "stopped" | "superseded" | "ignored_unscoped";
 }> {
   const input = isRecord(rawInput) ? rawInput : {};
   const parsed = ActivityEventInputSchema.parse({
@@ -428,6 +429,15 @@ export async function processActivityEvent(
   });
   const context = await getNormalizationContext(session);
   let candidate = normalizeActivityEvent(parsed, context);
+  const stopScope = timerStopScope(parsed);
+  if (stopScope.mode === "ignored_unscoped") {
+    candidate = {
+      ...candidate,
+      action: "record_only",
+      reviewStatus: "confirmed",
+      reason: "An unscoped legacy iOS Stop was recorded but could not target a newer timer."
+    };
+  }
   const client = await pool.connect();
 
   try {
@@ -566,6 +576,8 @@ export async function processActivityEvent(
     );
     const eventId = eventResult.rows[0].id;
     let timeEntryId: string | undefined;
+    let stopOutcome: "stopped" | "superseded" | "ignored_unscoped" | undefined =
+      stopScope.mode === "ignored_unscoped" ? "ignored_unscoped" : undefined;
 
     if (matchingHealthSleepEntry) {
       const updatedEntry = await updateHealthSleepTimeEntryWindow(
@@ -577,12 +589,36 @@ export async function processActivityEvent(
       );
       timeEntryId = updatedEntry?.id;
     } else if (candidate.action === "stop_timer") {
-      await client.query(
-        `update time_entries
-         set stopped_at = $1, updated_at = now()
-         where workspace_id = $2 and user_id = $3 and stopped_at is null`,
-        [parsed.occurredAt, parsed.workspaceId, parsed.userId]
-      );
+      const stopResult = stopScope.mode === "entry"
+        ? await client.query<{ id: string }>(
+            `update time_entries
+             set stopped_at = $1, updated_at = now()
+             where workspace_id = $2
+               and user_id = $3
+               and id = $4
+               and stopped_at is null
+             returning id`,
+            [parsed.occurredAt, parsed.workspaceId, parsed.userId, stopScope.targetEntryId]
+          )
+        : await client.query<{ id: string }>(
+            `with current_timer as (
+               select id
+               from time_entries
+               where workspace_id = $2 and user_id = $3 and stopped_at is null
+               order by started_at desc
+               limit 1
+               for update
+             )
+             update time_entries te
+             set stopped_at = $1, updated_at = now()
+             from current_timer
+             where te.id = current_timer.id
+             returning te.id`,
+            [parsed.occurredAt, parsed.workspaceId, parsed.userId]
+          );
+      stopOutcome = (stopResult.rowCount ?? stopResult.rows.length) > 0
+        ? "stopped"
+        : "superseded";
     } else if (candidate.action === "start_timer") {
       const startedAt = suggestedStartedAtForEvent(parsed);
       if (candidate.shouldClosePrevious) {
@@ -775,6 +811,7 @@ export async function processActivityEvent(
       eventId,
       candidate,
       timeEntryId,
+      stopOutcome,
       ...(matchingHealthSleepEntry ? { updatedExistingTimeEntry: true } : {})
     };
   } catch (error) {
@@ -783,6 +820,34 @@ export async function processActivityEvent(
   } finally {
     client.release();
   }
+}
+
+type TimerStopScope =
+  | { mode: "entry"; targetEntryId: string }
+  | { mode: "current" }
+  | { mode: "ignored_unscoped" };
+
+function timerStopScope(event: {
+  source: string;
+  type: string;
+  rawPayload: Record<string, unknown>;
+}): TimerStopScope {
+  if (event.type !== "timer_stop") return { mode: "current" };
+  const targetEntryId = uuidStringOrNull(event.rawPayload.targetEntryId);
+  if (event.rawPayload.stopScope === "entry" && targetEntryId) {
+    return { mode: "entry", targetEntryId };
+  }
+  if (event.rawPayload.stopScope === "current") {
+    return { mode: "current" };
+  }
+  // Older iOS App Intent builds used the same anonymous event for a Live
+  // Activity button and the explicit Stop shortcut. It is impossible to tell
+  // whether such an event belongs to a stale activity, so fail closed. Other
+  // authenticated clients retain their existing current-timer semantics.
+  if (event.source === "shortcut" && event.rawPayload.origin === "ios_app_intent") {
+    return { mode: "ignored_unscoped" };
+  }
+  return { mode: "current" };
 }
 
 async function lockUserTimerState(client: pg.PoolClient, session: RequestSession) {
@@ -3470,6 +3535,14 @@ function isExplicitStartEvent(type: string) {
 
 function stringOrNull(value: unknown) {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function uuidStringOrNull(value: unknown) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalized)
+    ? normalized
+    : null;
 }
 
 function normalizedLocationAddress(value: unknown): LocationDisplayAddress | null {

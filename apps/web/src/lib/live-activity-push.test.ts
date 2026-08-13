@@ -126,6 +126,7 @@ describe("Live Activity durable remote sync", () => {
       id: "token-row",
       token: "b".repeat(64),
       activityId: "activity-1",
+      activeEntryId: "entry-1",
       environment: "development"
     }];
     database.activeRows = [{
@@ -152,6 +153,48 @@ describe("Live Activity durable remote sync", () => {
       "APNS_BUNDLE_ID"
     ]);
     expect(http2Mocks.calls).toHaveLength(0);
+  });
+
+  it("updates only the current entry Activity and ends stale registrations", async () => {
+    database.tokenRows = [
+      {
+        id: "token-old",
+        token: "a".repeat(64),
+        activityId: "activity-old",
+        activeEntryId: "80000000-0000-4000-8000-000000000001",
+        environment: "development"
+      },
+      {
+        id: "token-new",
+        token: "b".repeat(64),
+        activityId: "activity-new",
+        activeEntryId: "80000000-0000-4000-8000-000000000002",
+        environment: "development"
+      }
+    ];
+    database.activeRows = [{
+      id: "80000000-0000-4000-8000-000000000002",
+      description: "New timer",
+      categoryName: "Work",
+      categoryColor: "#123456",
+      startedAt: "2026-08-13T13:50:00.000Z"
+    }];
+
+    await notifyLiveActivities(session);
+
+    const writes = database.writes.filter((write) =>
+      write.sql.includes("insert into live_activity_delivery_outbox")
+    );
+    const oldWrite = writes.find((write) => write.params[0] === "token-old");
+    const newWrite = writes.find((write) => write.params[0] === "token-new");
+    expect(oldWrite?.params[3]).toBe("end");
+    expect(JSON.parse(String(oldWrite?.params[4]))).toMatchObject({
+      aps: { event: "end", "content-state": { isRunning: false } }
+    });
+    expect(newWrite?.params[3]).toBe("update");
+    expect(JSON.parse(String(newWrite?.params[4]))).toMatchObject({
+      aps: { event: "update", "content-state": { title: "New timer", isRunning: true } }
+    });
   });
 
   it("delivers a due sandbox update and marks the exact revision delivered", async () => {

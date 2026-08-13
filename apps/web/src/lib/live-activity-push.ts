@@ -20,6 +20,7 @@ type PushTokenRow = {
   id: string;
   token: string;
   activityId: string;
+  activeEntryId: string | null;
   environment: ApnsEnvironment;
 };
 
@@ -214,6 +215,7 @@ async function enqueueLatestLiveActivityState(session: RequestSession) {
       `select id,
               token,
               activity_id as "activityId",
+              active_entry_id as "activeEntryId",
               environment
        from live_activity_push_tokens
        where workspace_id = $1
@@ -240,29 +242,35 @@ async function enqueueLatestLiveActivityState(session: RequestSession) {
 
   const active = activeResult.rows[0] ?? null;
   const timestamp = Math.floor(Date.now() / 1000);
-  const event: ApnsEvent = active ? "update" : "end";
-  const payload: LiveActivityPayload = active
-    ? {
-        aps: {
-          timestamp,
-          event,
-          "content-state": contentState(active, true)
+  await Promise.all(tokensResult.rows.map((token) => {
+    // Activity attributes are immutable. Only the Activity registered for the
+    // canonical running entry may receive its updates; every older run must be
+    // ended rather than repurposed to display a newer timer with a stale Stop
+    // control.
+    const shouldUpdate = Boolean(active && token.activeEntryId === active.id);
+    const event: ApnsEvent = shouldUpdate ? "update" : "end";
+    const payload: LiveActivityPayload = shouldUpdate
+      ? {
+          aps: {
+            timestamp,
+            event,
+            "content-state": contentState(active!, true)
+          }
         }
-      }
-    : {
-        aps: {
-          timestamp,
-          event,
-          "dismissal-date": timestamp - 1,
-          "content-state": stoppedContentState()
-        }
-      };
-  const expiresAt = new Date(
-    (timestamp + (event === "end" ? END_EXPIRY_SECONDS : UPDATE_EXPIRY_SECONDS)) * 1000
-  ).toISOString();
+      : {
+          aps: {
+            timestamp,
+            event,
+            "dismissal-date": timestamp - 1,
+            "content-state": stoppedContentState()
+          }
+        };
+    const expiresAt = new Date(
+      (timestamp + (event === "end" ? END_EXPIRY_SECONDS : UPDATE_EXPIRY_SECONDS)) * 1000
+    ).toISOString();
 
-  await Promise.all(tokensResult.rows.map((token) => query(
-    `insert into live_activity_delivery_outbox (
+    return query(
+      `insert into live_activity_delivery_outbox (
        token_id, workspace_id, user_id, event, payload, expires_at
      ) values ($1, $2, $3, $4, $5::jsonb, $6)
      on conflict (token_id) do update set
@@ -288,15 +296,16 @@ async function enqueueLatestLiveActivityState(session: RequestSession) {
        last_delivery_reason = null,
        last_apns_id = null,
        updated_at = now()`,
-    [
-      token.id,
-      session.workspaceId,
-      session.userId,
-      event,
-      JSON.stringify(payload),
-      expiresAt
-    ]
-  )));
+      [
+        token.id,
+        session.workspaceId,
+        session.userId,
+        event,
+        JSON.stringify(payload),
+        expiresAt
+      ]
+    );
+  }));
 }
 
 async function expireExhaustedOutboxRows() {

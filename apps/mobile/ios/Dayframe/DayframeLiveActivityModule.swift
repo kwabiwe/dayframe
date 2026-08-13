@@ -8,9 +8,10 @@ class DayframeLiveActivityModule: NSObject {
     false
   }
 
-  @objc(start:categoryName:categoryColor:startedAt:resolver:rejecter:)
+  @objc(start:entryId:categoryName:categoryColor:startedAt:resolver:rejecter:)
   func start(
     title: String,
+    entryId: String?,
     categoryName: String?,
     categoryColor: String?,
     startedAt: String?,
@@ -19,6 +20,7 @@ class DayframeLiveActivityModule: NSObject {
   ) {
     Task {
       let result = await DayframeLiveActivityController.start(
+        entryId: entryId,
         title: title,
         categoryName: categoryName,
         categoryColor: categoryColor,
@@ -30,6 +32,31 @@ class DayframeLiveActivityModule: NSObject {
       ]
       resolve(payload)
     }
+  }
+
+  @objc(activitySnapshot:rejecter:)
+  func activitySnapshot(
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    resolve(DayframeLiveActivityController.snapshots().map { snapshot in
+      [
+        "activityId": snapshot.activityId,
+        "entryId": snapshot.entryId ?? NSNull(),
+        "isActive": snapshot.isActive,
+        "isRunning": snapshot.isRunning
+      ] as [String: Any]
+    })
+  }
+
+  @objc(cleanupActivities:resolver:rejecter:)
+  func cleanupActivities(
+    activityIds: [String],
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DayframeLiveActivityController.cleanupActivities(activityIds: activityIds)
+    resolve(true)
   }
 
   @objc(pushToken:resolver:rejecter:)
@@ -46,25 +73,6 @@ class DayframeLiveActivityModule: NSObject {
       ]
       resolve(payload)
     }
-  }
-
-  @objc(stop:rejecter:)
-  func stop(
-    resolve: @escaping RCTPromiseResolveBlock,
-    reject: @escaping RCTPromiseRejectBlock
-  ) {
-    Task {
-      let didStop = await DayframeLiveActivityController.stop()
-      resolve(didStop)
-    }
-  }
-
-  @objc(hasActiveActivity:rejecter:)
-  func hasActiveActivity(
-    resolve: @escaping RCTPromiseResolveBlock,
-    reject: @escaping RCTPromiseRejectBlock
-  ) {
-    resolve(DayframeLiveActivityController.hasActiveActivity())
   }
 
   @objc(pendingShortcutEvents:rejecter:)

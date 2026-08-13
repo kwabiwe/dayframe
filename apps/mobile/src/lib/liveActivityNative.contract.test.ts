@@ -12,25 +12,35 @@ describe("native Live Activity presentation contract", () => {
     expect(shortcuts).not.toContain('event.description ?? "Tracking"');
   });
 
-  it("completes bounded direct Stop delivery before local ActivityKit dismissal", () => {
+  it("binds Live Activity Stop delivery and dismissal to the archived run identity", () => {
     const shortcuts = readFileSync(`${mobileRoot}ios/Dayframe/DayframeShortcuts.swift`, "utf8");
     const directClient = readFileSync(
       `${mobileRoot}ios/Dayframe/DayframeShortcutDirectEventClient.swift`,
       "utf8"
     );
-    const stopCase = shortcuts.slice(shortcuts.indexOf("case .stop:"), shortcuts.indexOf("struct DayframeShortcutEvent"));
-
-    expect(shortcuts.indexOf("DayframeNativeShortcutQueue.append(event)")).toBeLessThan(
-      shortcuts.indexOf("DayframeShortcutDirectEventClient.submit(event)")
+    const stopCase = shortcuts.slice(
+      shortcuts.indexOf("case .stopLiveActivity"),
+      shortcuts.indexOf("struct DayframeShortcutEvent")
     );
+
+    expect(shortcuts).toContain('@Parameter(title: "Activity ID")');
+    expect(shortcuts).toContain('@Parameter(title: "Timer entry ID")');
+    expect(shortcuts).toContain("case stopLiveActivity(activityId: String, entryId: String)");
+    expect(shortcuts).toContain('"targetActivityId": activityId');
+    expect(shortcuts).toContain('"targetEntryId": entryId');
+    expect(shortcuts).toContain('"stopScope": "entry"');
     expect(stopCase).toMatch(
-      /let delivered = await DayframeShortcutDirectEventClient\.submit\(event\)\s+_ = await DayframeLiveActivityController\.stop\(\)/
+      /let delivered = await DayframeShortcutDirectEventClient\.submit\(event\)\s+_ = await DayframeLiveActivityController\.stop\(\s+activityId: activityId,\s+entryId: entryId\s+\)/
     );
     expect(stopCase).toMatch(
       /if delivered, queued \{\s+_ = DayframeNativeShortcutQueue\.remove\(localIds: \[event\.localId\]\)/
     );
     expect(stopCase).not.toContain("Task(priority:");
     expect(stopCase).not.toContain("guard queued else");
+    expect(shortcuts).not.toContain("DayframeLiveActivityController.stopLegacyActivities()");
+    expect(shortcuts).toContain("DayframeLiveActivityController.currentCanonicalEntryId()");
+    expect(shortcuts).not.toContain('"stopScope": "current"');
+    expect(shortcuts).toContain("DayframeShortcutDeliveryDiagnosticStore.record(.legacyUnscoped)");
     expect(directClient).toContain('clientEventId = event.localId');
     expect(directClient).toContain('/api/events');
     expect(directClient).toMatch(/statusCode == 200 \|\| httpResponse\.statusCode == 201/);
@@ -127,7 +137,7 @@ describe("native Live Activity presentation contract", () => {
     expect(eas.build.production.ios.buildConfiguration).toBe("Release");
   });
 
-  it("exposes native ActivityKit state so JS can repair stale reconciliation keys", () => {
+  it("exposes identity-scoped ActivityKit state so stale activities cannot satisfy a newer run", () => {
     const controller = readFileSync(
       `${mobileRoot}ios/Dayframe/DayframeLiveActivityController.swift`,
       "utf8"
@@ -140,12 +150,35 @@ describe("native Live Activity presentation contract", () => {
       `${mobileRoot}ios/Dayframe/DayframeLiveActivityModuleBridge.m`,
       "utf8"
     );
+    const attributes = readFileSync(
+      `${mobileRoot}ios/Dayframe/DayframeLiveActivityAttributes.swift`,
+      "utf8"
+    );
+    const widget = readFileSync(
+      `${mobileRoot}ios/DayframeLiveActivity/DayframeTimerLiveActivity.swift`,
+      "utf8"
+    );
 
-    expect(controller).toContain("static func hasActiveActivity() -> Bool");
+    expect(attributes).toContain("var entryId: String?");
+    expect(widget).toContain("activityId: context.activityID");
+    expect(widget).toContain("entryId: context.attributes.entryId");
+    expect(widget).toContain("DayframeLiveActivityStopIntent(");
+    expect(controller).toContain("static func snapshots() -> [Snapshot]");
     expect(controller).toContain("activity.activityState == .active");
     expect(controller).toContain("activity.content.state.isRunning");
-    expect(module).toContain("DayframeLiveActivityController.hasActiveActivity()");
-    expect(bridge).toContain("RCT_EXTERN_METHOD(hasActiveActivity:");
+    expect(controller).toContain("$0.attributes.entryId == canonicalEntryId");
+    expect(controller).toContain("static func stop(activityId: String, entryId: String) async -> Bool");
+    expect(controller).toContain("static func stop(activityIds: [String]) async -> Bool");
+    expect(controller).not.toContain("static func stop() async -> Bool");
+    const nativeStart = controller.slice(
+      controller.indexOf("static func start("),
+      controller.indexOf("static func pushToken(")
+    );
+    expect(nativeStart).not.toContain("scheduleEndActivities");
+    expect(nativeStart).not.toContain("cleanupActivities");
+    expect(module).toContain("DayframeLiveActivityController.snapshots()");
+    expect(bridge).toContain("RCT_EXTERN_METHOD(activitySnapshot:");
+    expect(bridge).toContain("RCT_EXTERN_METHOD(cleanupActivities:");
   });
 
   it("lifts both lock-screen metadata rows clear of the lower clipping edge", () => {

@@ -10,7 +10,11 @@ private let dayframeExpandedMetadataLift: CGFloat = 10
 struct DayframeTimerLiveActivity: Widget {
   var body: some WidgetConfiguration {
     ActivityConfiguration(for: DayframeTimerAttributes.self) { context in
-      DayframeLockScreenTimerView(state: context.state)
+      DayframeLockScreenTimerView(
+        activityId: context.activityID,
+        entryId: context.attributes.entryId,
+        state: context.state
+      )
         .activityBackgroundTint(Color(red: 0.02, green: 0.04, blue: 0.08))
         .activitySystemActionForegroundColor(dayframeLiveActivityAccent)
     } dynamicIsland: { context in
@@ -20,8 +24,13 @@ struct DayframeTimerLiveActivity: Widget {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         DynamicIslandExpandedRegion(.trailing) {
-          if context.state.isRunning {
-            DayframeLiveActivityStopButton(size: 58, iconSize: 26)
+          if context.state.isRunning, let entryId = context.attributes.entryId {
+            DayframeLiveActivityStopButton(
+              activityId: context.activityID,
+              entryId: entryId,
+              size: 58,
+              iconSize: 26
+            )
               .frame(width: 66, height: 66, alignment: .trailing)
           }
         }
@@ -59,6 +68,8 @@ private struct DayframeLiveActivityStatusIcon: View {
 }
 
 private struct DayframeLockScreenTimerView: View {
+  let activityId: String
+  let entryId: String?
   let state: DayframeTimerAttributes.ContentState
 
   var body: some View {
@@ -69,8 +80,13 @@ private struct DayframeLockScreenTimerView: View {
           .offset(y: -4)
       }
       Spacer(minLength: 12)
-      if state.isRunning {
-        DayframeLiveActivityStopButton(size: 54, iconSize: 24)
+      if state.isRunning, let entryId {
+        DayframeLiveActivityStopButton(
+          activityId: activityId,
+          entryId: entryId,
+          size: 54,
+          iconSize: 24
+        )
       }
     }
     .padding(.vertical, 14)
@@ -202,12 +218,17 @@ private enum DayframeTimerTextSize {
 }
 
 private struct DayframeLiveActivityStopButton: View {
+  let activityId: String
+  let entryId: String
   let size: CGFloat
   let iconSize: CGFloat
 
   var body: some View {
     if #available(iOS 17.0, *) {
-      Button(intent: DayframeLiveActivityStopIntent()) {
+      Button(intent: DayframeLiveActivityStopIntent(
+        activityId: activityId,
+        entryId: entryId
+      )) {
         stopButtonContent
       }
       .buttonStyle(.plain)

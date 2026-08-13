@@ -112,10 +112,14 @@ describe("category persistence", () => {
   });
 
   it("stops the active timer once when a Live Activity event is retried", async () => {
+    const targetEntryId = "80000000-0000-4000-8000-000000000001";
     const firstClient = {
       query: vi.fn(async (statement: string) => {
         if (statement.includes("client_event_id = $3")) return { rows: [] };
         if (statement.includes("insert into activity_events")) return { rows: [{ id: "event-stop-1" }] };
+        if (statement.includes("set stopped_at = $1")) {
+          return { rows: [{ id: targetEntryId }], rowCount: 1 };
+        }
         return { rows: [] };
       }),
       release: vi.fn()
@@ -135,13 +139,22 @@ describe("category persistence", () => {
       type: "timer_stop",
       occurredAt: new Date("2026-08-06T09:30:00.000Z"),
       clientEventId: "ios-shortcut-stop-1722936600000-event",
-      rawPayload: { origin: "ios_app_intent" }
+      rawPayload: {
+        origin: "ios_live_activity",
+        stopScope: "entry",
+        targetActivityId: "activity-1",
+        targetEntryId
+      }
     };
 
     const first = await processActivityEvent(stopEvent, session);
     const retry = await processActivityEvent(stopEvent, session);
 
-    expect(first).toMatchObject({ eventId: "event-stop-1", candidate: { action: "stop_timer" } });
+    expect(first).toMatchObject({
+      eventId: "event-stop-1",
+      candidate: { action: "stop_timer" },
+      stopOutcome: "stopped"
+    });
     expect(retry).toMatchObject({ eventId: "event-stop-1", duplicate: true });
     expect(
       firstClient.query.mock.calls.filter(([statement]) =>
@@ -152,6 +165,69 @@ describe("category persistence", () => {
       retryClient.query.mock.calls.some(([statement]) => String(statement).includes("set stopped_at = $1"))
     ).toBe(false);
     expect(retryClient.query).toHaveBeenCalledWith("commit");
+    expect(firstClient.query).toHaveBeenCalledWith(
+      expect.stringContaining("and id = $4"),
+      [expect.any(Date), session.workspaceId, session.userId, targetEntryId]
+    );
+  });
+
+  it("does not let a stale Live Activity stop a newer timer", async () => {
+    const oldEntryId = "80000000-0000-4000-8000-000000000001";
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes("insert into activity_events")) return { rows: [{ id: "event-stale-stop" }] };
+        if (statement.includes("set stopped_at = $1")) return { rows: [], rowCount: 0 };
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await processActivityEvent({
+      source: "shortcut",
+      type: "timer_stop",
+      occurredAt: new Date("2026-08-13T13:50:00.000Z"),
+      clientEventId: "ios-shortcut-stop-stale",
+      rawPayload: {
+        origin: "ios_live_activity",
+        stopScope: "entry",
+        targetActivityId: "activity-old",
+        targetEntryId: oldEntryId
+      }
+    }, session);
+
+    expect(result).toMatchObject({ stopOutcome: "superseded" });
+    expect(client.query).toHaveBeenCalledWith(
+      expect.stringContaining("and id = $4"),
+      [expect.any(Date), session.workspaceId, session.userId, oldEntryId]
+    );
+  });
+
+  it("fails closed for an unscoped Stop from an older iOS App Intent", async () => {
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes("insert into activity_events")) return { rows: [{ id: "event-legacy-stop" }] };
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    const result = await processActivityEvent({
+      source: "shortcut",
+      type: "timer_stop",
+      occurredAt: new Date("2026-08-13T13:50:00.000Z"),
+      clientEventId: "ios-shortcut-stop-legacy",
+      rawPayload: { origin: "ios_app_intent" }
+    }, session);
+
+    expect(result).toMatchObject({
+      candidate: { action: "record_only" },
+      stopOutcome: "ignored_unscoped"
+    });
+    expect(client.query.mock.calls.some(([statement]) =>
+      String(statement).includes("set stopped_at = $1")
+    )).toBe(false);
   });
 
   it("returns the canonical time entry for an idempotent timer-start replay", async () => {
