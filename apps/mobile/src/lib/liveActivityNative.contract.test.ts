@@ -12,35 +12,35 @@ describe("native Live Activity presentation contract", () => {
     expect(shortcuts).not.toContain('event.description ?? "Tracking"');
   });
 
-  it("starts local dismissal without blocking direct idempotent Stop delivery", () => {
+  it("completes bounded direct Stop delivery before local ActivityKit dismissal", () => {
     const shortcuts = readFileSync(`${mobileRoot}ios/Dayframe/DayframeShortcuts.swift`, "utf8");
     const directClient = readFileSync(
       `${mobileRoot}ios/Dayframe/DayframeShortcutDirectEventClient.swift`,
       "utf8"
     );
     const stopCase = shortcuts.slice(shortcuts.indexOf("case .stop:"), shortcuts.indexOf("struct DayframeShortcutEvent"));
-    const stopBranch = stopCase.slice(0, stopCase.indexOf("private static func requestLocalStop"));
 
     expect(shortcuts.indexOf("DayframeNativeShortcutQueue.append(event)")).toBeLessThan(
-      shortcuts.indexOf("requestLocalStop()")
+      shortcuts.indexOf("DayframeShortcutDirectEventClient.submit(event)")
     );
-    expect(stopBranch.indexOf("requestLocalStop()")).toBeLessThan(
-      stopBranch.indexOf("DayframeShortcutDirectEventClient.submit(event)")
+    expect(stopCase).toMatch(
+      /let delivered = await DayframeShortcutDirectEventClient\.submit\(event\)\s+_ = await DayframeLiveActivityController\.stop\(\)/
     );
-    expect(shortcuts).toMatch(
-      /private static func requestLocalStop\(\) \{\s+_ = Task\(priority: \.userInitiated\) \{\s+await DayframeLiveActivityController\.stop\(\)\s+\}\s+\}/
+    expect(stopCase).toMatch(
+      /if delivered, queued \{\s+_ = DayframeNativeShortcutQueue\.remove\(localIds: \[event\.localId\]\)/
     );
-    expect(stopBranch).toMatch(
-      /if await DayframeShortcutDirectEventClient\.submit\(event\), queued \{\s+_ = DayframeNativeShortcutQueue\.remove\(localIds: \[event\.localId\]\)/
-    );
-    expect(stopBranch).not.toContain("await DayframeLiveActivityController.stop()");
-    expect(stopBranch).not.toContain("guard queued else");
+    expect(stopCase).not.toContain("Task(priority:");
+    expect(stopCase).not.toContain("guard queued else");
     expect(directClient).toContain('clientEventId = event.localId');
     expect(directClient).toContain('/api/events');
     expect(directClient).toMatch(/statusCode == 200 \|\| httpResponse\.statusCode == 201/);
     expect(directClient).toContain('forHTTPHeaderField: "Authorization"');
     expect(directClient).toContain("request.timeoutInterval = 8");
     expect(directClient).toContain("configuration.timeoutIntervalForResource = 10");
+    expect(directClient).toContain("DayframeShortcutDeliveryDiagnosticStore.record(.started)");
+    expect(directClient).toContain("DayframeShortcutDeliveryDiagnosticStore.record(.delivered)");
+    expect(directClient).toContain("DayframeShortcutDeliveryDiagnosticStore.record(.contextUnavailable)");
+    expect(directClient).toContain("DayframeShortcutDeliveryDiagnosticStore.record(.transportFailure)");
   });
 
   it("limits background delivery to the staging and production Dayframe APIs", () => {
@@ -93,6 +93,11 @@ describe("native Live Activity presentation contract", () => {
     expect(sharedStorage).toContain("options: .atomic");
     expect(sharedStorage).toContain("completeUntilFirstUserAuthentication");
     expect(sharedStorage).toContain('legacyKey = "dayframe.nativeShortcutQueue.v1"');
+    expect(sharedStorage).toContain('filePrefix = "dayframe-shortcut-delivery-v1."');
+    expect(sharedStorage).toContain('return "context-unavailable"');
+    expect(sharedStorage).toContain('return "http-auth"');
+    expect(sharedStorage).toContain('return "transport-failure"');
+    expect(sharedStorage).toContain('return "delivered"');
   });
 
   it("registers the immediate ActivityKit token with the APNs environment baked into signing", () => {

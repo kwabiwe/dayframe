@@ -44,6 +44,9 @@ struct DayframeLiveActivityStopIntent: LiveActivityIntent {
   static var description = IntentDescription("Stop the current Dayframe timer from the Live Activity.")
   static var openAppWhenRun: Bool = false
 
+  @available(iOS 26.0, *)
+  static var supportedModes: IntentModes = [.background]
+
   func perform() async throws -> some IntentResult {
     await DayframeShortcutPerformer.perform(.stop)
     return .result()
@@ -105,20 +108,15 @@ private enum DayframeShortcutPerformer {
         startedAt: event.occurredAt
       )
     case .stop:
-      // ActivityKit can suspend an end request while this intent is running in
-      // the background app process. Start the local dismissal immediately, but
-      // do not put the server/APNs end path behind that await. The queued event
-      // remains the offline fallback if direct delivery cannot complete.
-      requestLocalStop()
-      if await DayframeShortcutDirectEventClient.submit(event), queued {
+      // Ending the Activity can terminate the background intent process on
+      // current iOS before a concurrent URLSession request completes. Finish
+      // the bounded server/APNs path first, then dismiss locally. A failed
+      // request remains queued for foreground replay.
+      let delivered = await DayframeShortcutDirectEventClient.submit(event)
+      _ = await DayframeLiveActivityController.stop()
+      if delivered, queued {
         _ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])
       }
-    }
-  }
-
-  private static func requestLocalStop() {
-    _ = Task(priority: .userInitiated) {
-      await DayframeLiveActivityController.stop()
     }
   }
 }

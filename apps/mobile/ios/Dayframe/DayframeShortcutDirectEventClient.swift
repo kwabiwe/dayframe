@@ -26,11 +26,18 @@ enum DayframeShortcutDirectEventClient {
   }
 
   static func submit(_ event: DayframeShortcutEvent) async -> Bool {
+    DayframeShortcutDeliveryDiagnosticStore.record(.started)
     guard
-      let context = DayframeShortcutRuntimeContextStore.current(),
+      let context = DayframeShortcutRuntimeContextStore.current()
+    else {
+      DayframeShortcutDeliveryDiagnosticStore.record(.contextUnavailable)
+      return false
+    }
+    guard
       let url = URL(string: "\(context.apiBase)/api/events"),
       let body = try? JSONEncoder.dayframe.encode(EventRequest(event: event))
     else {
+      DayframeShortcutDeliveryDiagnosticStore.record(.requestInvalid)
       return false
     }
 
@@ -48,16 +55,25 @@ enum DayframeShortcutDirectEventClient {
 
     do {
       let (data, response) = try await session.data(for: request)
+      guard let httpResponse = response as? HTTPURLResponse else {
+        DayframeShortcutDeliveryDiagnosticStore.record(.responseInvalid)
+        return false
+      }
+      guard httpResponse.statusCode == 200 || httpResponse.statusCode == 201 else {
+        DayframeShortcutDeliveryDiagnosticStore.record(.httpFailure(statusCode: httpResponse.statusCode))
+        return false
+      }
       guard
-        let httpResponse = response as? HTTPURLResponse,
-        httpResponse.statusCode == 200 || httpResponse.statusCode == 201,
         let payload = try? JSONDecoder().decode(EventResponse.self, from: data),
         !payload.eventId.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty
       else {
+        DayframeShortcutDeliveryDiagnosticStore.record(.responseInvalid)
         return false
       }
+      DayframeShortcutDeliveryDiagnosticStore.record(.delivered)
       return true
     } catch {
+      DayframeShortcutDeliveryDiagnosticStore.record(.transportFailure)
       return false
     }
   }

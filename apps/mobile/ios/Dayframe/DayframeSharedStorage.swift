@@ -23,6 +23,61 @@ enum DayframeSharedStorageConfiguration {
   }
 }
 
+enum DayframeShortcutDeliveryDiagnostic {
+  case started
+  case contextUnavailable
+  case requestInvalid
+  case responseInvalid
+  case httpFailure(statusCode: Int)
+  case transportFailure
+  case delivered
+
+  fileprivate var fileSuffix: String {
+    switch self {
+    case .started:
+      return "started"
+    case .contextUnavailable:
+      return "context-unavailable"
+    case .requestInvalid:
+      return "request-invalid"
+    case .responseInvalid:
+      return "response-invalid"
+    case .httpFailure(let statusCode):
+      if statusCode == 401 || statusCode == 403 { return "http-auth" }
+      if (500...599).contains(statusCode) { return "http-server" }
+      return "http-rejected"
+    case .transportFailure:
+      return "transport-failure"
+    case .delivered:
+      return "delivered"
+    }
+  }
+}
+
+enum DayframeShortcutDeliveryDiagnosticStore {
+  private static let filePrefix = "dayframe-shortcut-delivery-v1."
+
+  static func record(_ diagnostic: DayframeShortcutDeliveryDiagnostic) {
+    guard let containerURL = DayframeSharedStorageConfiguration.containerURL else {
+      return
+    }
+    let fileManager = FileManager.default
+    if let files = try? fileManager.contentsOfDirectory(
+      at: containerURL,
+      includingPropertiesForKeys: nil
+    ) {
+      for file in files where file.lastPathComponent.hasPrefix(filePrefix) {
+        try? fileManager.removeItem(at: file)
+      }
+    }
+    let destination = containerURL.appendingPathComponent(
+      "\(filePrefix)\(diagnostic.fileSuffix)",
+      isDirectory: false
+    )
+    _ = fileManager.createFile(atPath: destination.path, contents: Data())
+  }
+}
+
 struct DayframeShortcutRuntimeContext: Codable, Equatable {
   let apiBase: String
   let sessionToken: String
