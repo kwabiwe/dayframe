@@ -45,8 +45,10 @@ export function maskTimeInput(raw: string) {
     const [hours = "", minutes = ""] = raw.replace(/[^\d:]/g, "").split(":", 2);
     return `${hours.slice(0, 2)}:${minutes.slice(0, 2)}`;
   }
-  const digits = raw.replace(/\D/g, "").slice(0, 4);
-  if (digits.length <= 2) return digits;
-  if (digits.length === 3) return `${digits.slice(0, 1)}:${digits.slice(1)}`;
-  return `${digits.slice(0, 2)}:${digits.slice(2)}`;
+  // Keep compact digits intact while the user is typing. Inserting the colon
+  // after the third digit changes the controlled input's caret position, so a
+  // fourth digit can be inserted into the minutes and then truncated. The
+  // owning editor normalises complete values (for example 1025 -> 10:25) and
+  // blur handles valid three-digit shorthand (725 -> 07:25).
+  return raw.replace(/\D/g, "").slice(0, 4);
 }

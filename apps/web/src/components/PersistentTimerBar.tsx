@@ -17,6 +17,7 @@ import { InlineTagInput } from "@/components/InlineTagInput";
 import { DayframeDateTimePicker } from "@/components/DayframeDateTimePicker";
 import { OverlapNotice } from "@/components/OverlapNotice";
 import { Button, Field, IconButton, ModalDialog } from "@/components/ui/Primitives";
+import { formatCalendarEntryCompactDuration } from "@/lib/calendar-entry-compact-editor";
 import { timeEntryAccentColor } from "@/lib/display";
 import { dateTimeLocalInputToIso, formatClockDuration, formatTime } from "@/lib/format";
 import { validateManualTimeEntryWindow } from "@/lib/manual-time-entry";
@@ -629,6 +630,13 @@ function ManualEntryDialog({
   const defaults = useMemo(() => manualEntryDefaults(data.dateRange.selectedDate), [data.dateRange.selectedDate]);
   const [startedAtDraft, setStartedAtDraft] = useState(defaults.start);
   const [stoppedAtDraft, setStoppedAtDraft] = useState(defaults.finish);
+  const durationLabel = useMemo(() => {
+    const startedAt = dateTimeLocalInputToIso(startedAtDraft);
+    const stoppedAt = dateTimeLocalInputToIso(stoppedAtDraft);
+    if (!startedAt || !stoppedAt) return "—";
+    const seconds = Math.floor((Date.parse(stoppedAt) - Date.parse(startedAt)) / 1_000);
+    return seconds > 0 ? formatCalendarEntryCompactDuration(seconds) : "—";
+  }, [startedAtDraft, stoppedAtDraft]);
   const visibleTaskSuggestions = useMemo(() => {
     const query = description.trim().toLocaleLowerCase();
     if (!query) return data.taskSuggestions.slice(0, TASK_SUGGESTION_LIMIT);
@@ -692,7 +700,8 @@ function ManualEntryDialog({
     <ModalDialog
       busy={isBusy}
       className="manual-entry-dialog"
-      contentClassName="manual-entry-dialog-content"
+      contentClassName="manual-entry-dialog-content calendar-compact-editor-panel"
+      initialFocusRef={descriptionInputRef}
       onClose={onClose}
       title="Add time"
       footer={(
@@ -702,29 +711,13 @@ function ManualEntryDialog({
         </>
       )}
     >
-      <form id={formId} className="swiss-form-grid" onSubmit={submit}>
-        <Field htmlFor="manual-entry-category" label="Category">
-          <CategoryPicker
-            categories={data.categories}
-            className="manual-entry-category"
-            menuId="manual-entry-category-menu"
-            onBeforeOpen={() => setSuggestionsOpen(false)}
-            onCreateCategory={onCreateCategory}
-            onOpenChange={setCategoryMenuOpen}
-            onSelect={setCategoryId}
-            open={categoryMenuOpen}
-            portal
-            selectedId={categoryId}
-            triggerId="manual-entry-category"
-            variant="timer"
-          />
-        </Field>
-        <Field className="swiss-form-wide" htmlFor="manual-entry-description" label="Description">
-          <div className="manual-entry-description" ref={descriptionRootRef}>
+      <form id={formId} className="calendar-compact-editor-fields manual-entry-form" onSubmit={submit}>
+        <div className="calendar-compact-editor-description manual-entry-description" ref={descriptionRootRef}>
+          <label htmlFor="manual-entry-description">Description</label>
+          <div>
             <InlineTagInput
               ariaLabel="Manual time entry description"
-              className="manual-entry-inline-tags"
-              inputClassName="ui-control"
+              className="manual-entry-inline-tags time-entry-quick-tags"
               inputId="manual-entry-description"
               inputRef={descriptionInputRef}
               name="manual-description"
@@ -733,7 +726,6 @@ function ManualEntryDialog({
                 setSuggestionsOpen(true);
               }}
               onClick={() => setSuggestionsOpen(true)}
-              onFocus={() => setSuggestionsOpen(true)}
               onHashtagPanelChange={(open) => {
                 setTagPanelOpen(open);
                 if (open) setSuggestionsOpen(false);
@@ -767,25 +759,52 @@ function ManualEntryDialog({
               />
             ) : null}
           </div>
-        </Field>
-        <Field htmlFor="manual-entry-start" label="Start">
-          <DayframeDateTimePicker
-            id="manual-entry-start"
-            name="startedAt"
-            defaultValue={defaults.start}
-            onChange={setStartedAtDraft}
-            required
-          />
-        </Field>
-        <Field htmlFor="manual-entry-finish" label="Finish">
-          <DayframeDateTimePicker
-            id="manual-entry-finish"
-            name="stoppedAt"
-            defaultValue={defaults.finish}
-            onChange={setStoppedAtDraft}
-            required
-          />
-        </Field>
+        </div>
+        <CategoryPicker
+          categories={data.categories}
+          className="manual-entry-category"
+          label="Category"
+          menuId="manual-entry-category-menu"
+          onBeforeOpen={() => setSuggestionsOpen(false)}
+          onCreateCategory={onCreateCategory}
+          onOpenChange={setCategoryMenuOpen}
+          onSelect={setCategoryId}
+          open={categoryMenuOpen}
+          portal
+          selectedId={categoryId}
+          triggerId="manual-entry-category"
+          variant="quick"
+        />
+        <div className="calendar-compact-temporal-fields manual-entry-temporal-fields">
+          <div className="calendar-compact-moment-field">
+            <span className="calendar-compact-field-label">Start</span>
+            <DayframeDateTimePicker
+              compact
+              id="manual-entry-start"
+              name="startedAt"
+              defaultValue={defaults.start}
+              onChange={setStartedAtDraft}
+              required
+            />
+          </div>
+          <div className="calendar-compact-moment-field">
+            <span className="calendar-compact-field-label">Finish</span>
+            <DayframeDateTimePicker
+              compact
+              id="manual-entry-finish"
+              name="stoppedAt"
+              defaultValue={defaults.finish}
+              onChange={setStoppedAtDraft}
+              required
+            />
+          </div>
+          <div className="calendar-compact-duration-field">
+            <span className="calendar-compact-field-label">Duration</span>
+            <div className="calendar-compact-duration is-readonly" aria-label="Duration">
+              <strong className="tabular">{durationLabel}</strong>
+            </div>
+          </div>
+        </div>
         <OverlapNotice
           candidate={{
             startedAt: dateTimeLocalInputToIso(startedAtDraft) ?? "invalid",
@@ -793,7 +812,7 @@ function ManualEntryDialog({
           }}
           entries={data.entries}
         />
-        {formError ? <p className="swiss-inline-error swiss-form-wide" role="alert">{formError}</p> : null}
+        {formError ? <p className="swiss-inline-error" role="alert">{formError}</p> : null}
       </form>
     </ModalDialog>
   );

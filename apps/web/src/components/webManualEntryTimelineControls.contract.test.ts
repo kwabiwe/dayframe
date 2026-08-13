@@ -25,7 +25,7 @@ describe("web manual entry and Timeline control refinement", () => {
 
   it("anchors manual Tags and Suggestions below their triggers with internal bounds", () => {
     expect(timer).toContain('className="manual-entry-dialog"');
-    expect(timer).toContain('className="manual-entry-inline-tags"');
+    expect(timer).toContain('className="manual-entry-inline-tags time-entry-quick-tags"');
     expect(styles).toMatch(/\.manual-entry-description \.swiss-task-suggestions \{[^}]*top: calc\(100% \+ var\(--web-field-gap\)\);[^}]*bottom: auto;/s);
     expect(styles).toMatch(/\.manual-entry-inline-tags \.inline-tag-picker \{[^}]*top: calc\(100% \+ var\(--web-field-gap\)\);[^}]*right: 0;[^}]*bottom: auto;[^}]*left: auto;/s);
     expect(styles).toMatch(/\.manual-entry-inline-tags \.inline-tag-picker \{[^}]*max-height: min\(240px, calc\(100dvh - 180px\)\);/s);
@@ -39,16 +39,24 @@ describe("web manual entry and Timeline control refinement", () => {
     expect(styles).toMatch(/\.swiss-task-suggestions-list button \{[^}]*min-height: var\(--task-suggestion-row-height\);/s);
   });
 
-  it("reuses the timer Category treatment and borderless date-time controls", () => {
+  it("uses the shared quick-editor anatomy and borderless date-time controls", () => {
     const manual = timer.slice(timer.indexOf("function ManualEntryDialog"));
     expect(manual).toContain("<CategoryPicker");
     expect(manual).toContain('className="manual-entry-category"');
-    expect(manual).toContain('variant="timer"');
+    expect(manual).toContain('variant="quick"');
+    expect(manual).toContain('className="calendar-compact-editor-fields manual-entry-form"');
+    expect(manual).toContain('className="calendar-compact-temporal-fields manual-entry-temporal-fields"');
+    expect(manual).toContain('className="calendar-compact-duration-field"');
     expect(manual).not.toContain("<SelectField");
     expect(manual).toContain("<DayframeDateTimePicker");
     expect(timer).not.toContain('type="datetime-local"');
-    expect(styles).toMatch(/\.manual-entry-category \.swiss-category-trigger,[\s\S]*\.dayframe-date-time-trigger \{[^}]*border-color: transparent;/s);
+    expect(styles).toMatch(/\.dayframe-date-time-trigger \{[^}]*border-color: transparent;/s);
+    expect(styles).toMatch(/dialog\.ui-dialog\.manual-entry-dialog \{[^}]*width: min\(420px, calc\(100vw - 24px\)\);[^}]*border-radius: 16px;/s);
     expect(styles).toMatch(/dialog\.ui-dialog:focus \{[^}]*outline: 0;/s);
+  });
+
+  it("uses the lighter Dayframe selection colour globally", () => {
+    expect(styles).toMatch(/::selection \{[^}]*background: var\(--accent-soft\);[^}]*color: var\(--foreground\);/s);
   });
 
   it("keeps the running-task menu below the More button and inside the viewport", () => {

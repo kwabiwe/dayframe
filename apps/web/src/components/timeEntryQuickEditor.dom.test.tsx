@@ -111,6 +111,39 @@ describe("TimeEntryQuickEditorModal", () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
+  it("accepts four compact digits without losing the fourth digit to controlled-input masking", async () => {
+    const onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    renderModal({ onSave });
+    const finish = await screen.findByLabelText("Finish time") as HTMLInputElement;
+
+    await user.clear(finish);
+    await user.type(finish, "1025");
+
+    expect(finish.value).toBe("10:25");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+    expect(onSave.mock.calls[0][0].payload).toEqual({ stoppedAt: localIso("2026-08-04T10:25") });
+  });
+
+  it("normalises three compact digits on blur before Save", async () => {
+    const onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    renderModal({ onSave });
+    const start = await screen.findByLabelText("Start time") as HTMLInputElement;
+
+    await user.clear(start);
+    await user.type(start, "725");
+    expect(start.value).toBe("725");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+    expect(onSave.mock.calls[0][0].payload).toEqual({
+      startedAt: localIso("2026-08-04T07:25"),
+      stoppedAt: localIso("2026-08-04T08:25")
+    });
+  });
+
   it("closes a no-change existing entry from Enter without PATCH", async () => {
     const onClose = vi.fn();
     const onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true });

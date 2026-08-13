@@ -66,6 +66,8 @@ describe("shared web time-entry quick editor", () => {
     expect(styles).toMatch(/\.calendar-compact-date-time-controls:focus-within \{[^}]*var\(--web-focus-border\)/s);
     expect(styles).toMatch(/\.calendar-compact-date-trigger \{[^}]*border-radius:\s*0;[^}]*background:\s*transparent;/s);
     expect(styles).toMatch(/\.calendar-compact-date-trigger:hover,[\s\S]*background:\s*transparent;/s);
+    expect(quick).toContain('className="calendar-compact-duration-field"');
+    expect(quick).toContain('<span className="calendar-compact-field-label">Duration</span>');
   });
 
   it("keeps the CSS-only Calendar text hierarchy and narrow-container fallback", () => {

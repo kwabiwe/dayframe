@@ -177,6 +177,11 @@ export function isCompleteCalendarEntryCompactTimeInput(value: string) {
   return /^(?:\d{1,2}:\d{2}|\d{3,4})$/.test(trimmed) && Boolean(parseTimeInput(trimmed));
 }
 
+export function isCalendarEntryCompactTimeInputReadyToSynchronize(value: string) {
+  const trimmed = value.trim();
+  return /^(?:\d{1,2}:\d{2}|\d{4})$/.test(trimmed) && Boolean(parseTimeInput(trimmed));
+}
+
 export function isCompleteCalendarEntryCompactDurationInput(value: string) {
   const trimmed = value.trim().toLowerCase();
   return /^(?:\d+m?|\d+:\d{2}(?::\d{2})?|\d+h(?:\s*\d+m?)?)$/.test(trimmed);

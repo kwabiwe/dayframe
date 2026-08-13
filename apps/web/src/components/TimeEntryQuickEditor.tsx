@@ -17,8 +17,8 @@ import {
   calendarEntryLocalDayOffset,
   emptyCalendarEntryCompactDirty,
   formatCalendarEntryCompactDuration,
+  isCalendarEntryCompactTimeInputReadyToSynchronize,
   isCompleteCalendarEntryCompactDurationInput,
-  isCompleteCalendarEntryCompactTimeInput,
   synchronizeCalendarEntryCompactDraft,
   trySynchronizeCalendarEntryCompactDraft,
   type CalendarEntryCompactCreatePlan,
@@ -196,7 +196,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
       const next = { ...current, [key]: value, temporalOwner: owner };
       const isComplete = commit || (owner === "duration"
         ? isCompleteCalendarEntryCompactDurationInput(value)
-        : isCompleteCalendarEntryCompactTimeInput(value));
+        : isCalendarEntryCompactTimeInputReadyToSynchronize(value));
       if (!isComplete) return next;
       return trySynchronizeCalendarEntryCompactDraft({ ...temporalSource, draft: next, owner }) ?? next;
     });
@@ -757,11 +757,13 @@ export function TimeEntryQuickEditorPanel({
           </div>
 
           {isRunning ? (
-            <div className="calendar-compact-duration is-readonly" aria-label="Elapsed time">
-              <span>Duration</span>
-              <strong className="tabular">
-                {preview.plan ? formatCalendarEntryCompactDuration(preview.plan.durationSeconds) : "—"}
-              </strong>
+            <div className="calendar-compact-duration-field">
+              <span className="calendar-compact-field-label">Duration</span>
+              <div className="calendar-compact-duration is-readonly" aria-label="Elapsed time">
+                <strong className="tabular">
+                  {preview.plan ? formatCalendarEntryCompactDuration(preview.plan.durationSeconds) : "—"}
+                </strong>
+              </div>
             </div>
           ) : (
             <label className="calendar-compact-duration-input">

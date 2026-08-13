@@ -2,7 +2,7 @@ import {
   buildCalendarEntryCompactSavePlan,
   calendarEntryCompactInitialDraft,
   emptyCalendarEntryCompactDirty,
-  isCompleteCalendarEntryCompactTimeInput,
+  isCalendarEntryCompactTimeInputReadyToSynchronize,
   trySynchronizeCalendarEntryCompactDraft,
   type CalendarEntryCompactDirty,
   type CalendarEntryCompactDraft,
@@ -133,7 +133,8 @@ function updateTimelineInlineTemporalEdge(
   };
   const edgeTime = edge === "start" ? nextDraft.startedAtTime : nextDraft.stoppedAtTime;
   const edgeDate = edge === "start" ? nextDraft.startedAtDate : nextDraft.stoppedAtDate;
-  const synchronized = /^\d{4}-\d{2}-\d{2}$/.test(edgeDate) && isCompleteCalendarEntryCompactTimeInput(edgeTime)
+  const synchronized = /^\d{4}-\d{2}-\d{2}$/.test(edgeDate) &&
+    isCalendarEntryCompactTimeInputReadyToSynchronize(edgeTime)
     ? trySynchronizeCalendarEntryCompactDraft({
         draft: nextDraft,
         originalStartedAt: edit.sourceStartedAt,

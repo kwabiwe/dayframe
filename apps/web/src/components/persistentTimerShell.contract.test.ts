@@ -76,10 +76,14 @@ describe("persistent timer shell contract", () => {
 
   it("keeps the manual dialog focused and removes the duplicate list form", () => {
     const manualDialog = timer.slice(timer.indexOf("function ManualEntryDialog"));
+    expect(manualDialog).toContain('initialFocusRef={descriptionInputRef}');
     expect(manualDialog).toContain('label="Category"');
-    expect(manualDialog).toContain('label="Description"');
-    expect(manualDialog).toContain('label="Start"');
-    expect(manualDialog).toContain('label="Finish"');
+    expect(manualDialog).toContain('>Description</label>');
+    expect(manualDialog).toContain('>Start</span>');
+    expect(manualDialog).toContain('>Finish</span>');
+    expect(manualDialog).toContain('>Duration</span>');
+    expect(manualDialog.indexOf('>Description</label>')).toBeLessThan(manualDialog.indexOf('label="Category"'));
+    expect(manualDialog.indexOf('label="Category"')).toBeLessThan(manualDialog.indexOf('>Start</span>'));
     expect(manualDialog).not.toContain('label="Place"');
     expect(entries).not.toContain("submitManual");
     expect(entries).not.toContain("Add manual entry");

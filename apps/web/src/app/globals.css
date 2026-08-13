@@ -371,8 +371,8 @@ a {
 }
 
 ::selection {
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--accent-soft);
+  color: var(--foreground);
 }
 
 .tabular {
@@ -8657,8 +8657,10 @@ kbd {
 }
 
 dialog.ui-dialog.manual-entry-dialog {
+  width: min(420px, calc(100vw - 24px));
   overflow: visible;
-  border-radius: 24px;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: 16px;
 }
 
 .manual-entry-dialog .ui-dialog-header,
@@ -8667,23 +8669,31 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .manual-entry-dialog .ui-dialog-header {
-  border-radius: 24px 24px 0 0;
+  min-height: 64px;
+  border-radius: 16px 16px 0 0;
+  padding: 10px 12px;
+}
+
+.manual-entry-dialog .ui-dialog-header h2 {
+  font-size: 0.9rem;
+  font-weight: 690;
 }
 
 .manual-entry-dialog .ui-dialog-actions {
-  border-radius: 0 0 24px 24px;
+  min-height: 72px;
+  border-radius: 0 0 16px 16px;
+  padding: 10px 12px;
 }
 
 .manual-entry-dialog-content {
   overflow: visible;
 }
 
-.manual-entry-dialog .swiss-form-grid {
+.manual-entry-dialog .manual-entry-form {
   border-radius: 0;
   background: var(--surface-raised);
 }
 
-.manual-entry-category .swiss-category-trigger,
 .dayframe-date-time-trigger {
   border-color: transparent;
 }
@@ -8750,6 +8760,13 @@ dialog.ui-dialog.manual-entry-dialog {
   border-radius: 999px;
   background: transparent;
   color: var(--foreground);
+}
+
+.dayframe-date-time.is-compact .dayframe-date-time-trigger {
+  min-height: 44px;
+  border-radius: 10px;
+  padding: 0 10px;
+  font-variant-numeric: tabular-nums;
 }
 
 .dayframe-calendar header button:hover,
@@ -9153,7 +9170,7 @@ dialog.ui-dialog.manual-entry-dialog {
 .calendar-compact-field-label,
 .calendar-compact-editor-description > label,
 .calendar-compact-editor-fields label > span,
-.calendar-compact-duration > span {
+.calendar-compact-duration-field > span {
   color: var(--muted);
   font-size: 0.7rem;
   font-weight: 650;
@@ -9456,6 +9473,7 @@ dialog.ui-dialog.manual-entry-dialog {
   z-index: 120;
 }
 
+.calendar-compact-duration-field,
 .calendar-compact-duration-input {
   display: grid;
   gap: 5px;
@@ -9813,6 +9831,7 @@ dialog.ui-dialog.manual-entry-dialog {
   }
 
   .calendar-compact-duration,
+  .calendar-compact-duration-field,
   .calendar-compact-duration-input {
     grid-column: 1 / -1;
   }
@@ -9824,6 +9843,7 @@ dialog.ui-dialog.manual-entry-dialog {
   }
 
   .calendar-compact-duration,
+  .calendar-compact-duration-field,
   .calendar-compact-duration-input {
     grid-column: auto;
   }

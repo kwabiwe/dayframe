@@ -12,12 +12,14 @@ function parseLocal(value: string) {
 }
 
 export function DayframeDateTimePicker({
+  compact = false,
   defaultValue,
   id,
   name,
   onChange,
   required
 }: {
+  compact?: boolean;
   defaultValue: string;
   id: string;
   name: string;
@@ -82,9 +84,10 @@ export function DayframeDateTimePicker({
   }
 
   return (
-    <div className="dayframe-date-time" ref={rootRef}>
+    <div className={`dayframe-date-time${compact ? " is-compact" : ""}`} ref={rootRef}>
       <input name={name} type="hidden" value={value} />
       <button
+        aria-label={compact ? `Choose date and time, currently ${displayLabel}` : undefined}
         aria-controls={panelId}
         aria-expanded={open}
         aria-haspopup="dialog"
@@ -95,7 +98,7 @@ export function DayframeDateTimePicker({
         ref={triggerRef}
         type="button"
       >
-        <span>{displayLabel}</span>
+        <span>{compact ? current.time : displayLabel}</span>
         <CalendarDays aria-hidden="true" size={17} />
       </button>
       <section
