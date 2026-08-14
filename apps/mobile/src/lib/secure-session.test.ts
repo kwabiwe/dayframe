@@ -31,10 +31,12 @@ const {
   SecureSessionUnavailableError,
   clearSessionToken,
   getSessionToken,
+  invalidateMobileSession,
   isKeychainInteractionUnavailable,
   resetSessionTokenCacheForTesting,
   setSessionToken
 } = await import("./secure-session");
+const { subscribeMobileSignedOut } = await import("./mobileSessionTransition");
 
 describe("secure mobile session", () => {
   beforeEach(() => {
@@ -198,5 +200,20 @@ describe("secure mobile session", () => {
 
     await expect(clearSessionToken()).rejects.toThrow("Keychain unavailable");
     expect(nativeModule.clearRuntimeContext).toHaveBeenCalledOnce();
+  });
+
+  it("publishes a signed-out transition when a background request rejects the session", async () => {
+    values.set("dayframe.localSessionToken.v2", "expired-token");
+    const listener = vi.fn();
+    const unsubscribe = subscribeMobileSignedOut(listener);
+
+    try {
+      await invalidateMobileSession();
+    } finally {
+      unsubscribe();
+    }
+
+    expect(values.size).toBe(0);
+    expect(listener).toHaveBeenCalledOnce();
   });
 });

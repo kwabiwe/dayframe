@@ -16,8 +16,8 @@ import {
 import { DAYFRAME_API_BASE } from "../config";
 import {
   SecureSessionUnavailableError,
-  clearSessionToken,
-  getSessionToken
+  getSessionToken,
+  invalidateMobileSession
 } from "../secure-session";
 import { createSerialMutationQueue } from "./mutationQueue";
 import { fetchLocationSync } from "./network";
@@ -574,7 +574,7 @@ async function uploadLocationEvidenceBatch(
       body: batch.body_json
     });
     if (response.status === 401 || response.status === 403) {
-      await clearSessionToken();
+      await invalidateMobileSession();
       throw new Error("Location evidence sync requires a new login.");
     }
     const disposition = locationUploadDisposition(response.status);
@@ -704,7 +704,7 @@ async function requestServerLocationReplay(token: string, now: number) {
       })
     });
     if (response.status === 401 || response.status === 403) {
-      await clearSessionToken();
+      await invalidateMobileSession();
       throw new Error("Location replay requires a new login.");
     }
     if (!response.ok) throw new Error(`Location replay failed with status ${response.status}.`);

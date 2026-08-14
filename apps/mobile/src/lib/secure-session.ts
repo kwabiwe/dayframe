@@ -1,6 +1,7 @@
 import * as SecureStore from "expo-secure-store";
 import { NativeModules, Platform } from "react-native";
 import { DAYFRAME_API_BASE } from "./config";
+import { publishMobileSignedOut } from "./mobileSessionTransition";
 
 const LEGACY_SESSION_TOKEN_KEY = "dayframe.localSessionToken.v1";
 const SESSION_TOKEN_KEY = "dayframe.localSessionToken.v2";
@@ -144,6 +145,14 @@ export async function clearSessionToken() {
       await clearRuntimeContext();
     }
   });
+}
+
+export async function invalidateMobileSession() {
+  try {
+    await clearSessionToken();
+  } finally {
+    publishMobileSignedOut();
+  }
 }
 
 function delay(milliseconds: number) {

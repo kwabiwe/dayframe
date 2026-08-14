@@ -199,7 +199,8 @@ describe("mobile API client", () => {
       "https://dayframe.test/api/timer-state",
       {
         headers: { Authorization: "Bearer session-token" },
-        cache: "no-store"
+        cache: "no-store",
+        credentials: "omit"
       }
     );
   });

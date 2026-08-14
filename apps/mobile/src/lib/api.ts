@@ -15,6 +15,7 @@ import {
   type TimerStateFingerprint
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
+import { mobileFetch } from "./mobile-network";
 import {
   clearSessionToken,
   getSessionToken,
@@ -405,7 +406,7 @@ type ApiJsonRead<T> =
 
 export async function fetchBootstrap(options: { date?: string } = {}): Promise<MobileBootstrap> {
   const params = options.date ? `?date=${encodeURIComponent(options.date)}` : "";
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/bootstrap${params}`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/bootstrap${params}`, {
     headers: await authHeaders()
   });
   if (response.status === 401) {
@@ -426,7 +427,7 @@ export async function fetchBootstrap(options: { date?: string } = {}): Promise<M
 }
 
 export async function fetchTimerState(): Promise<TimerStateFingerprint> {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/timer-state`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/timer-state`, {
     headers: await authHeaders(),
     cache: "no-store"
   });
@@ -446,7 +447,7 @@ export async function registerLiveActivity(input: {
   activeEntryId: string;
   environment: "development" | "production";
 }) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/live-activities`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/live-activities`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -473,7 +474,7 @@ export async function signup(email: string, password: string, name?: string, wor
 
 export async function logout() {
   const token = await getSessionToken();
-  await fetch(`${DAYFRAME_API_BASE}/api/auth/logout`, {
+  await mobileFetch(`${DAYFRAME_API_BASE}/api/auth/logout`, {
     method: "POST",
     headers: token ? { Authorization: `Bearer ${token}` } : {}
   }).catch(() => undefined);
@@ -721,7 +722,7 @@ async function syncQueueUnlocked(options: SyncQueueOptions): Promise<SyncQueueRe
 
     const attemptedAt = new Date().toISOString();
     try {
-      const response = await fetch(`${DAYFRAME_API_BASE}/api/events`, {
+      const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/events`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -804,7 +805,7 @@ export async function stopTimer() {
 }
 
 export async function deleteTimeEntry(id: string) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/time-entries/${encodeURIComponent(id)}`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/time-entries/${encodeURIComponent(id)}`, {
     method: "DELETE",
     headers: await authHeaders()
   });
@@ -817,7 +818,7 @@ export async function deleteTimeEntry(id: string) {
 }
 
 export async function updateTimeEntry(id: string, patch: TimeEntryUpdatePatch) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/time-entries/${encodeURIComponent(id)}`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/time-entries/${encodeURIComponent(id)}`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
@@ -834,7 +835,7 @@ export async function updateTimeEntry(id: string, patch: TimeEntryUpdatePatch) {
 }
 
 export async function createManualTimeEntry(input: ManualTimeEntryInput) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/time-entries`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/time-entries`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -858,7 +859,7 @@ export async function createManualTimeEntry(input: ManualTimeEntryInput) {
 }
 
 export async function resolveReviewItem(id: string, action: ReviewItemAction) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(id)}`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(id)}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -886,7 +887,7 @@ export async function resolveReviewItem(id: string, action: ReviewItemAction) {
 }
 
 export async function resolveLocationReviewItem(id: string, action: LocationReviewAction) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(id)}`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(id)}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -903,7 +904,7 @@ export async function resolveLocationReviewItem(id: string, action: LocationRevi
 }
 
 export async function fetchLocationReviewEvidence(id: string): Promise<LocationReviewEvidenceDto> {
-  const response = await fetch(
+  const response = await mobileFetch(
     `${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(id)}/location-evidence`,
     { headers: await authHeaders(), cache: "no-store" }
   );
@@ -916,7 +917,7 @@ export async function fetchLocationReviewEvidence(id: string): Promise<LocationR
 }
 
 export async function deleteRecentLocationEvidence() {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/location/evidence`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/location/evidence`, {
     method: "DELETE",
     headers: await authHeaders()
   });
@@ -944,7 +945,7 @@ export async function reprocessHealthReviewItems(
   preferences: HealthImportPreferences,
   options: { limit?: number; force?: boolean; mappings?: HealthAutoLogMappings } = {}
 ): Promise<HealthReviewReprocessResult> {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/review/reprocess-health`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/review/reprocess-health`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -966,7 +967,7 @@ export async function saveEditedReviewItem(
   options: { atomicLocation?: boolean; clientMutationId?: string } = {}
 ) {
   void options.atomicLocation;
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(id)}`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(id)}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -998,7 +999,7 @@ export async function createCategory(
   name: string,
   options: { color?: string; isPinned?: boolean } = {}
 ): Promise<MobileCategoryResponse> {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/categories`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/categories`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -1019,7 +1020,7 @@ export async function createCategory(
 }
 
 export async function createTag(name: string): Promise<MobileTagResponse> {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/tags`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/tags`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -1038,7 +1039,7 @@ export async function createTag(name: string): Promise<MobileTagResponse> {
 export async function ensureAutomaticLoggingCategories(
   kinds: Array<"sleep" | "health" | "commute">
 ): Promise<MobileCategoryResponse[]> {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/categories/automatic`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/categories/automatic`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -1061,7 +1062,7 @@ export async function updateCategory(
   id: string,
   options: { name?: string; color?: string; isPinned?: boolean }
 ): Promise<MobileCategoryResponse> {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/categories`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/categories`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
@@ -1078,7 +1079,7 @@ export async function updateCategory(
 }
 
 export async function archiveCategory(id: string) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/categories?id=${encodeURIComponent(id)}`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/categories?id=${encodeURIComponent(id)}`, {
     method: "DELETE",
     headers: await authHeaders()
   });
@@ -1092,7 +1093,7 @@ export async function archiveCategory(id: string) {
 
 export async function createPlace(input: { name: string } & PlaceMutationInput) {
   if (input.learnedPlaceId) {
-    const response = await fetch(`${DAYFRAME_API_BASE}/api/places`, {
+    const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/places`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1119,7 +1120,7 @@ export async function createPlace(input: { name: string } & PlaceMutationInput) 
     return readPlaceResponse(response, "Unable to save learned place");
   }
 
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/entities`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/entities`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -1150,7 +1151,7 @@ export async function createPlace(input: { name: string } & PlaceMutationInput) 
 }
 
 export async function ignoreLearnedPlace(id: string) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/learned-places`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/learned-places`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
@@ -1167,7 +1168,7 @@ export async function ignoreLearnedPlace(id: string) {
 }
 
 export async function resolveLearnedPlaceLocation(id: string, address: LocationDisplayAddress) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/learned-places`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/learned-places`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
@@ -1190,7 +1191,7 @@ export async function resolveLearnedPlaceLocation(id: string, address: LocationD
 }
 
 export async function forgetLearnedPlace(id: string) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/learned-places?id=${encodeURIComponent(id)}`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/learned-places?id=${encodeURIComponent(id)}`, {
     method: "DELETE",
     headers: await authHeaders()
   });
@@ -1203,7 +1204,7 @@ export async function forgetLearnedPlace(id: string) {
 }
 
 export async function updatePlace(id: string, input: PlaceMutationInput) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/places`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/places`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
@@ -1224,7 +1225,7 @@ export async function updatePlace(id: string, input: PlaceMutationInput) {
 }
 
 export async function deletePlace(id: string) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/places?id=${encodeURIComponent(id)}`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/places?id=${encodeURIComponent(id)}`, {
     method: "DELETE",
     headers: await authHeaders()
   });
@@ -1508,7 +1509,7 @@ export class AuthRequiredError extends Error {
 }
 
 async function authenticate(path: string, body: Record<string, unknown>): Promise<MobileAuthResult> {
-  const response = await fetch(`${DAYFRAME_API_BASE}${path}`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
@@ -1537,7 +1538,7 @@ async function reviewSyncStore() {
 }
 
 async function postTimerAction(body: Record<string, unknown>) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/time-entries`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/time-entries`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
