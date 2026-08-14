@@ -159,18 +159,28 @@ export function invalidateMobileSessionIfCurrent(rejectedToken: string) {
   return serialiseSessionOperation(async () => {
     if (cachedSessionToken !== rejectedToken) return false;
 
-    sessionRevision += 1;
+    const invalidationRevision = ++sessionRevision;
     cachedSessionToken = null;
+    let deletionError: unknown;
     try {
       await withInteractionRetry(() =>
         SecureStore.deleteItemAsync(SESSION_TOKEN_KEY, SESSION_TOKEN_OPTIONS)
       );
       await withInteractionRetry(() => SecureStore.deleteItemAsync(LEGACY_SESSION_TOKEN_KEY));
-    } finally {
-      await clearRuntimeContext();
-      publishMobileSignedOut();
+    } catch (error) {
+      deletionError = error;
     }
-    return true;
+
+    let invalidated = false;
+    if (invalidationRevision === sessionRevision) {
+      await clearRuntimeContext();
+      if (invalidationRevision === sessionRevision) {
+        publishMobileSignedOut();
+        invalidated = true;
+      }
+    }
+    if (deletionError) throw deletionError;
+    return invalidated;
   });
 }
 

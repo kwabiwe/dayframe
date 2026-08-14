@@ -237,6 +237,42 @@ describe("secure mobile session", () => {
     expect(listener).not.toHaveBeenCalled();
   });
 
+  it("does not publish sign-out when a replacement login starts during invalidation", async () => {
+    await setSessionToken("account-a-token");
+    let finishDelete: (() => void) | undefined;
+    secureStore.deleteItemAsync.mockImplementation((key: string) => {
+      if (key !== "dayframe.localSessionToken.v2") {
+        values.delete(key);
+        return Promise.resolve();
+      }
+      return new Promise<void>((resolve) => {
+        finishDelete = () => {
+          values.delete(key);
+          resolve();
+        };
+      });
+    });
+    const listener = vi.fn();
+    const unsubscribe = subscribeMobileSignedOut(listener);
+
+    try {
+      const staleInvalidation = invalidateMobileSessionIfCurrent("account-a-token");
+      await vi.waitFor(() => expect(finishDelete).toBeTypeOf("function"));
+      const replacementLogin = setSessionToken("account-b-token");
+      finishDelete?.();
+
+      await expect(staleInvalidation).resolves.toBe(false);
+      await replacementLogin;
+    } finally {
+      unsubscribe();
+    }
+
+    await expect(getSessionToken()).resolves.toBe("account-b-token");
+    expect(values.get("dayframe.localSessionToken.v2")).toBe("account-b-token");
+    expect(nativeModule.clearRuntimeContext).not.toHaveBeenCalled();
+    expect(listener).not.toHaveBeenCalled();
+  });
+
   it("invalidates and publishes sign-out when the rejected bearer is still current", async () => {
     await setSessionToken("expired-token");
     const listener = vi.fn();
