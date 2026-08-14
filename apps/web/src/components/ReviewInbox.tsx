@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, CircleSlash, GitMerge, Map, WandSparkles } from "lucide-react";
-import type { ReviewItemRow } from "@/lib/queries";
+import type { CategoryRow, ReviewItemRow } from "@/lib/queries";
 import { formatDate, formatEventLabel, formatSourceLabel, formatTime } from "@/lib/format";
 import { LocationReviewPanel } from "@/components/location/LocationReviewPanel";
 import { OverlapNotice } from "@/components/OverlapNotice";
@@ -16,7 +16,7 @@ export function ReviewInbox({
   entries
 }: {
   items: ReviewItemRow[];
-  categories: Array<{ id: string; name: string }>;
+  categories: CategoryRow[];
   entries: TimeEntryRow[];
 }) {
   const openItems = items.filter((item) => item.status === "open");
@@ -52,7 +52,7 @@ function ReviewItemCard({
 }: {
   item: ReviewItemRow;
   adjacentReviewItemId?: string;
-  categories: Array<{ id: string; name: string }>;
+  categories: CategoryRow[];
   entries: TimeEntryRow[];
 }) {
   const router = useRouter();

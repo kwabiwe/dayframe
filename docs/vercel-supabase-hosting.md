@@ -19,7 +19,8 @@ Provide these values from Supabase and Vercel when you want the hosted deploymen
 - `DAYFRAME_SESSION_TTL_SECONDS`: optional absolute app-session TTL, 60 seconds through 365 days; defaults to 30 days and applies equally to cookie and database expiry.
 - `DAYFRAME_LOCATION_ROLLOUT_MODE`: server-authoritative `v1`, `v2_shadow`, `v2_review`, or `v2_enabled`; keep the fail-closed `v2_shadow` value unless the tracker decision/evidence explicitly approves another mode.
 - `GEOAPIFY_API_KEY`: server-only Geoapify key used by the authenticated web
-  place-search route. Never expose it through a `NEXT_PUBLIC_` variable.
+  place-search and Review map-tile routes. Never expose it through a
+  `NEXT_PUBLIC_` variable.
 - `EXPO_PUBLIC_DAYFRAME_API_BASE`: hosted Vercel URL for mobile builds.
 - `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY`, and `APNS_BUNDLE_ID`:
   server-only Apple provider-token credentials and the Dayframe app bundle ID.
@@ -98,24 +99,32 @@ plan; do not silently change that schedule without checking the Vercel plan.
 Diagnostics include status, sanitized Apple reason, APNs request ID, and counts,
 but never device tokens, provider keys, or session credentials.
 
-## Web Place Search
+## Web Place Search And Review Maps
 
 For local development, create a Geoapify project/key and set
 `GEOAPIFY_API_KEY` in the repository `.env`. The browser calls Dayframe's
-authenticated `/api/place-search` route; only that server route calls
-Geoapify. Do not add `NEXT_PUBLIC_GEOAPIFY_API_KEY`, print the key, include it
-in screenshots, or send it in a response payload.
+authenticated `/api/place-search`, `/api/map-style`, and `/api/map-tiles/*`
+routes; only those server routes call Geoapify. Do not add
+`NEXT_PUBLIC_GEOAPIFY_API_KEY`, print the key, include it in screenshots, or
+send it in a response payload. Review map tiles are private browser-cacheable
+and require the normal Dayframe session; the style response contains only a
+relative same-origin tile template and the required provider/data attribution.
+Authentication diagnostics use a coordinate-free route template, never the
+requested XYZ values. Provider tile bodies are streamed through a hard 3 MB
+limit and cancelled as soon as that limit is exceeded.
 
 Add `GEOAPIFY_API_KEY` separately to both Vercel Preview and Production
 environments. Adding or changing an environment variable only affects new
 deployments, so redeploy the relevant Preview or Production deployment
 afterwards. A preview without the key remains usable: search reports a
-friendly unavailable state and the editor still supports Current location and
-Advanced coordinates.
+friendly unavailable state, place editing still supports Current location and
+Advanced coordinates, and Review keeps its explicit tile-free evidence canvas.
 
 Geoapify search results must retain visible Geoapify and OpenStreetMap
-attribution. If a MapLibre style is configured, its tile/provider attribution
-must also remain visible.
+attribution. The default Review map retains Geoapify, OpenMapTiles, and
+OpenStreetMap attribution. An optional `NEXT_PUBLIC_DAYFRAME_MAP_STYLE_URL`
+override remains supported only when its tile/provider attribution and CSP
+requirements are also preserved.
 
 ## Auth Model
 

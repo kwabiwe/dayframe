@@ -9009,6 +9009,190 @@ dialog.ui-dialog.manual-entry-dialog {
   }
 }
 
+.location-evidence-frame,
+.location-evidence-loading,
+.location-review-loading {
+  min-height: 18rem;
+  border-radius: 16px;
+  background: var(--surface-inset);
+}
+
+.location-evidence-frame {
+  position: relative;
+  overflow: hidden;
+}
+
+.location-evidence-map {
+  width: 100%;
+  min-height: 18rem;
+}
+
+.location-evidence-loading,
+.location-review-loading,
+.location-evidence-empty {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 6px;
+  padding: 24px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.location-review-loading {
+  min-height: 12rem;
+}
+
+.location-review-loading strong,
+.location-evidence-empty strong {
+  color: var(--foreground);
+}
+
+.location-evidence-empty {
+  min-height: 18rem;
+}
+
+.location-evidence-empty span,
+.location-review-loading span {
+  max-width: 34rem;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.location-evidence-mode,
+.location-evidence-provider-state {
+  position: absolute;
+  z-index: 2;
+  margin: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-raised) 92%, transparent);
+  box-shadow: var(--shadow-raised);
+  backdrop-filter: blur(8px);
+}
+
+.location-evidence-mode {
+  top: 10px;
+  left: 10px;
+  padding: 6px 10px;
+  color: var(--foreground);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.location-evidence-provider-state {
+  right: 10px;
+  bottom: 10px;
+  left: 10px;
+  width: fit-content;
+  max-width: calc(100% - 20px);
+  padding: 7px 10px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
+.location-evidence-provider-state.is-error {
+  background: color-mix(in srgb, var(--danger-soft) 94%, transparent);
+  color: var(--danger-text);
+}
+
+.location-evidence-caption,
+.location-evidence-rejected {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.location-evidence-rejected {
+  margin-top: 4px;
+  color: var(--danger-text);
+}
+
+.location-review-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: var(--danger-soft);
+  color: var(--danger-text);
+  font-size: 0.82rem;
+}
+
+.location-review-resolve {
+  container-name: location-review-resolve;
+  container-type: inline-size;
+}
+
+.location-review-resolve-grid {
+  display: grid;
+  grid-template-columns: minmax(14rem, 2fr) minmax(10rem, 1fr) repeat(2, minmax(11rem, 1fr));
+  align-items: end;
+  gap: 10px;
+}
+
+.location-resolve-field,
+.location-resolve-category {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.location-resolve-field > span,
+.location-resolve-category > .calendar-compact-field-label {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.location-resolve-control,
+.location-resolve-category > button {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--surface-inset);
+  color: var(--foreground);
+  font: inherit;
+}
+
+.location-resolve-control {
+  padding: 0 11px;
+}
+
+.location-resolve-control:focus {
+  outline: 0;
+  box-shadow: inset 0 0 0 2px var(--web-focus-border);
+}
+
+.location-resolve-category > button:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--web-focus-border);
+}
+
+.location-review-resolve-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@container location-review-resolve (max-width: 820px) {
+  .location-review-resolve-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container location-review-resolve (max-width: 470px) {
+  .location-review-resolve-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .location-evidence-map .maplibregl-ctrl-group button {
   width: 44px;
   height: 44px;
@@ -9017,6 +9201,21 @@ dialog.ui-dialog.manual-entry-dialog {
 .location-evidence-map .maplibregl-ctrl-attrib-button {
   min-width: 44px;
   min-height: 44px;
+}
+
+@media (max-width: 480px) {
+  .location-review-panel {
+    max-height: calc(100dvh - 24px);
+  }
+
+  .location-review-error {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .location-review-resolve-actions > button {
+    width: 100%;
+  }
 }
 
 /* Compact desktop density
