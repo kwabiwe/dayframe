@@ -40,6 +40,39 @@ describe("TimeEntryQuickEditorModal", () => {
     expect(runningEditor.querySelector(".calendar-compact-editor-header")?.textContent).not.toContain("Untitled entry");
   });
 
+  it("opens and applies suggestions for empty Uncategorized completed and running entries", async () => {
+    for (const stoppedAt of ["2026-08-04T10:00:00.000Z", null]) {
+      const view = renderModal({
+        sourceEntry: timeEntry({ categoryId: null, categoryName: null, description: null, stoppedAt, tagNames: [], tags: [] })
+      });
+      const description = await screen.findByLabelText("Time entry description") as HTMLInputElement;
+      const suggestions = await screen.findByRole("listbox", { name: "Suggestions" });
+
+      expect(description.value).toBe("");
+      expect(suggestions.parentElement).toBe(document.body);
+      expect(suggestions.textContent).toContain("Deep planning");
+      fireEvent.keyDown(description, { key: "ArrowDown" });
+      expect(document.activeElement?.textContent).toContain("Deep planning");
+      await userEvent.keyboard("{Enter}");
+
+      expect(description.value).toBe("Deep planning");
+      expect(screen.getByRole("button", { name: "Remove tag Deep work" })).not.toBeNull();
+      expect(screen.getByRole("button", { name: /Focus/ })).not.toBeNull();
+      await waitFor(() => expect(screen.queryByRole("listbox", { name: "Suggestions" })).toBeNull());
+      view.unmount();
+    }
+  });
+
+  it("reopens suggestions when an existing description is cleared", async () => {
+    renderModal();
+    const description = await screen.findByLabelText("Time entry description") as HTMLInputElement;
+
+    expect(screen.queryByRole("listbox", { name: "Suggestions" })).toBeNull();
+    fireEvent.change(description, { target: { value: "" } });
+
+    expect(await screen.findByRole("listbox", { name: "Suggestions" })).not.toBeNull();
+  });
+
   it("hydrates, removes and selects tags and saves one Place-safe partial payload", async () => {
     const onClose = vi.fn();
     const onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true });
@@ -327,13 +360,26 @@ function renderModal({
 } = {}) {
   return render(createElement(TimeEntryQuickEditorModal, {
     capturedNow: new Date("2026-08-04T12:00:00.000Z"),
-    categories: [],
+    categories: [{ id: "focus", name: "Focus", color: "mint", isPinned: false }],
     entry: sourceEntry,
     isTimerBusy: false,
     onClose,
     onDelete,
     onSave,
     peerEntries: [],
+    taskSuggestions: [{
+      key: "deep-planning",
+      categoryId: "focus",
+      categoryName: "Focus",
+      categoryColor: "mint",
+      description: "Deep planning",
+      lastSeenAt: "2026-08-04T08:00:00.000Z",
+      score: 10,
+      section: "recent",
+      useCount: 3,
+      totalSeconds: 10_800,
+      tagNames: ["Deep work"]
+    }],
     tags: [
       { id: "planning", name: "Planning", normalizedName: "planning", usageCount: 2 },
       { id: "deep-work", name: "Deep work", normalizedName: "deep work", usageCount: 1 }

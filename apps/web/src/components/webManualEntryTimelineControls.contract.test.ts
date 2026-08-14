@@ -20,6 +20,8 @@ describe("web manual entry and Timeline control refinement", () => {
     expect(manual).toContain("setDescription(suggestion.description)");
     expect(manual).toContain("setCategoryId(suggestion.categoryId ??");
     expect(manual).toContain("setTagNames(suggestion.tagNames)");
+    expect(manual).toContain("suppressSuggestionFocusRef.current");
+    expect(manual).toContain("setSuggestionsOpen(true)");
     expect(manual).not.toContain("startTimer(");
   });
 
@@ -55,6 +57,11 @@ describe("web manual entry and Timeline control refinement", () => {
     expect(manual).not.toContain('<strong className="tabular">{durationLabel}</strong>');
     expect(manual).not.toContain("<SelectField");
     expect(manual).toContain("<DayframeDateTimePicker");
+    expect(manual).toContain('label="Start"');
+    expect(manual).toContain('label="Finish"');
+    expect(manual).toContain("dayOffset={finishDayOffset}");
+    expect(manual).toContain('contentClassName="manual-entry-dialog-content"');
+    expect(manual).not.toContain('contentClassName="manual-entry-dialog-content calendar-compact-editor-panel"');
     expect(timer).not.toContain('type="datetime-local"');
     expect(styles).toMatch(/\.dayframe-date-time-trigger \{[^}]*border-color: transparent;/s);
     expect(styles).toMatch(/\.calendar-compact-editor,[\s\S]*dialog\.ui-dialog\.manual-entry-dialog \{[^}]*--calendar-compact-horizontal-inset: 12px;[^}]*border-radius: 16px;[^}]*background: var\(--surface-raised\);[^}]*box-shadow: 0 22px 52px var\(--shadow-color\), var\(--shadow-raised\);/s);
@@ -67,8 +74,13 @@ describe("web manual entry and Timeline control refinement", () => {
     expect(styles).toMatch(/dialog\.ui-dialog:focus \{[^}]*outline: 0;/s);
   });
 
-  it("uses the lighter Dayframe selection colour globally", () => {
-    expect(styles).toMatch(/::selection \{[^}]*background: var\(--accent-soft\);[^}]*color: var\(--foreground\);/s);
+  it("uses the contrast-safe Dayframe selection colour globally", () => {
+    expect(styles).toMatch(/::selection \{[^}]*background: var\(--accent\);[^}]*color: var\(--on-accent\);/s);
+  });
+
+  it("moves compact Add Time feedback onto its own row at common phone widths", () => {
+    expect(styles).toMatch(/@media \(max-width: 430px\)[\s\S]*dialog\.ui-dialog\.manual-entry-dialog \{[^}]*--calendar-compact-feedback-height: 104px;/s);
+    expect(styles).toMatch(/@media \(max-width: 430px\)[\s\S]*\.manual-entry-dialog \.ui-dialog-actions \{[^}]*grid-template-areas:[^}]*"message message message"[^}]*"spacer cancel action";/s);
   });
 
   it("keeps the running-task menu below the More button and inside the viewport", () => {

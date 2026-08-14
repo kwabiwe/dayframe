@@ -82,6 +82,8 @@ describe("persistent timer shell contract", () => {
     expect(manualDialog).toContain('>Start</span>');
     expect(manualDialog).toContain('>Finish</span>');
     expect(manualDialog).toContain('>Duration</span>');
+    expect(manualDialog).toContain('label="Start"');
+    expect(manualDialog).toContain('label="Finish"');
     expect(manualDialog.indexOf('>Description</label>')).toBeLessThan(manualDialog.indexOf('label="Category"'));
     expect(manualDialog.indexOf('label="Category"')).toBeLessThan(manualDialog.indexOf('>Start</span>'));
     expect(manualDialog).not.toContain('label="Place"');

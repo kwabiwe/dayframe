@@ -27,7 +27,7 @@ export function OverlapNotice({
     return (
       <aside className="overlap-notice is-compact" role="status" aria-live="polite">
         <p>
-          overlaps {overlap.overlapCount === 1 ? "one entry" : `${overlap.overlapCount} entries`} by {duration}
+          Overlaps {overlap.overlapCount === 1 ? "one entry" : `${overlap.overlapCount} entries`} by {duration}
         </p>
       </aside>
     );

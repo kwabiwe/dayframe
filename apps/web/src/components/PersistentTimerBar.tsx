@@ -16,8 +16,9 @@ import { CategoryPicker, type CreateCategoryOutcome } from "@/components/Categor
 import { InlineTagInput } from "@/components/InlineTagInput";
 import { DayframeDateTimePicker } from "@/components/DayframeDateTimePicker";
 import { OverlapNotice } from "@/components/OverlapNotice";
+import { TaskSuggestionsPanel } from "@/components/TaskSuggestionsPanel";
 import { Button, Field, IconButton, ModalDialog } from "@/components/ui/Primitives";
-import { formatCalendarEntryCompactDuration } from "@/lib/calendar-entry-compact-editor";
+import { calendarEntryLocalDayOffset, formatCalendarEntryCompactDuration } from "@/lib/calendar-entry-compact-editor";
 import { timeEntryAccentColor } from "@/lib/display";
 import { dateTimeLocalInputToIso, formatClockDuration, formatTime } from "@/lib/format";
 import { validateManualTimeEntryWindow } from "@/lib/manual-time-entry";
@@ -56,6 +57,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const [startEditError, setStartEditError] = useState<string | null>(null);
   const [now, setNow] = useState(0);
   const descriptionInputRef = useRef<HTMLInputElement | null>(null);
+  const suppressSuggestionFocusRef = useRef(false);
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
   const startDateInputRef = useRef<HTMLInputElement | null>(null);
   const startTimeInputRef = useRef<HTMLInputElement | null>(null);
@@ -195,17 +197,24 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     void startTimer();
   }
 
-  async function startSuggestion(suggestion: BootstrapData["taskSuggestions"][number]) {
-    setTimerDraft({
+  async function chooseTimerSuggestion(suggestion: BootstrapData["taskSuggestions"][number]) {
+    const suggestionDraft = {
       categoryId: suggestion.categoryId ?? "",
       description: suggestion.description,
       tagNames: suggestion.tagNames
-    });
+    };
+    setTimerDraft(suggestionDraft);
     setSuggestionsOpen(false);
-    await startTimer({
-      categoryId: suggestion.categoryId ?? "",
-      description: suggestion.description,
-      tagNames: suggestion.tagNames
+    if (!active) {
+      await startTimer(suggestionDraft);
+      return;
+    }
+    suppressSuggestionFocusRef.current = true;
+    window.requestAnimationFrame(() => {
+      descriptionInputRef.current?.focus({ preventScroll: true });
+      window.setTimeout(() => {
+        suppressSuggestionFocusRef.current = false;
+      }, 0);
     });
   }
 
@@ -262,14 +271,16 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
             name="timer-description"
             onChange={(description) => {
               setTimerDraft((current) => ({ ...current, description }));
-              if (!active) setSuggestionsOpen(true);
+              setSuggestionsOpen(true);
             }}
-            onClick={() => {
-              if (!active) setSuggestionsOpen(true);
-            }}
+            onClick={() => setSuggestionsOpen(true)}
             onEnter={startFromEnter}
             onFocus={() => {
-              if (!active) setSuggestionsOpen(true);
+              if (suppressSuggestionFocusRef.current) {
+                suppressSuggestionFocusRef.current = false;
+                return;
+              }
+              setSuggestionsOpen(true);
             }}
             onHashtagPanelChange={(open) => {
               setHashtagSuggestionsOpen(open);
@@ -291,11 +302,11 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
             tags={data.tags}
             value={timerDraft.description}
           />
-          {!active && visibleTaskSuggestions.length ? (
+          {visibleTaskSuggestions.length ? (
             <TaskSuggestionsPanel
               isBusy={isTimerBusy}
               isOpen={suggestionsOpen && !hashtagSuggestionsOpen}
-              onSelect={(suggestion) => void startSuggestion(suggestion)}
+              onSelect={(suggestion) => void chooseTimerSuggestion(suggestion)}
               suggestions={visibleTaskSuggestions}
             />
           ) : null}
@@ -549,55 +560,6 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   );
 }
 
-function TaskSuggestionsPanel({
-  isBusy,
-  isOpen,
-  onSelect,
-  panelRef,
-  suggestions
-}: {
-  isBusy: boolean;
-  isOpen: boolean;
-  onSelect: (suggestion: BootstrapData["taskSuggestions"][number]) => void;
-  panelRef?: RefObject<HTMLDivElement | null>;
-  suggestions: BootstrapData["taskSuggestions"];
-}) {
-  return (
-    <div
-      aria-hidden={!isOpen}
-      aria-label="Suggestions"
-      className={`ui-floating-surface swiss-task-suggestions${isOpen ? " is-open" : ""}`}
-      inert={!isOpen}
-      ref={panelRef}
-      role="listbox"
-    >
-      <div className="swiss-task-suggestions-header"><span>Suggestions</span></div>
-      <div className="swiss-task-suggestions-list">
-        {suggestions.map((suggestion) => (
-          <button
-            key={suggestion.key}
-            type="button"
-            role="option"
-            aria-selected={false}
-            disabled={isBusy}
-            onClick={() => onSelect(suggestion)}
-          >
-            <span>
-              <b>{suggestion.description}</b>
-              <small>
-                <i style={{ backgroundColor: paletteCssColorFor(suggestion.categoryColor ?? "steel", suggestion.categoryName ?? "Category") }} />
-                {suggestion.categoryName ?? "Uncategorized"}
-                {suggestion.tagNames.length ? ` · ${suggestion.tagNames.map((tag) => `#${tag}`).join(" ")}` : ""}
-              </small>
-            </span>
-            <Play size={14} fill="currentColor" strokeWidth={0} aria-hidden="true" />
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function ManualEntryDialog({
   data,
   isBusy,
@@ -625,7 +587,8 @@ function ManualEntryDialog({
   const [tagPanelOpen, setTagPanelOpen] = useState(false);
   const [tagNames, setTagNames] = useState<string[]>([]);
   const descriptionInputRef = useRef<HTMLInputElement | null>(null);
-  const descriptionRootRef = useRef<HTMLDivElement | null>(null);
+  const suppressSuggestionFocusRef = useRef(false);
+  const descriptionInteractionRef = useRef<HTMLDivElement | null>(null);
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
   const defaults = useMemo(() => manualEntryDefaults(data.dateRange.selectedDate), [data.dateRange.selectedDate]);
   const [startedAtDraft, setStartedAtDraft] = useState(defaults.start);
@@ -637,6 +600,10 @@ function ManualEntryDialog({
     const seconds = Math.floor((Date.parse(stoppedAt) - Date.parse(startedAt)) / 1_000);
     return seconds > 0 ? formatCalendarEntryCompactDuration(seconds) : "—";
   }, [startedAtDraft, stoppedAtDraft]);
+  const finishDayOffset = useMemo(() => calendarEntryLocalDayOffset(
+    startedAtDraft.slice(0, 10),
+    stoppedAtDraft.slice(0, 10)
+  ), [startedAtDraft, stoppedAtDraft]);
   const visibleTaskSuggestions = useMemo(() => {
     const query = description.trim().toLocaleLowerCase();
     if (!query) return data.taskSuggestions.slice(0, TASK_SUGGESTION_LIMIT);
@@ -650,7 +617,7 @@ function ManualEntryDialog({
   useEffect(() => {
     if (!suggestionsOpen) return undefined;
     function closeOnOutside(event: MouseEvent) {
-      if (!descriptionRootRef.current?.contains(event.target as Node)) setSuggestionsOpen(false);
+      if (!descriptionInteractionRef.current?.contains(event.target as Node)) setSuggestionsOpen(false);
     }
     document.addEventListener("mousedown", closeOnOutside);
     return () => document.removeEventListener("mousedown", closeOnOutside);
@@ -661,7 +628,13 @@ function ManualEntryDialog({
     setCategoryId(suggestion.categoryId ?? "");
     setTagNames(suggestion.tagNames);
     setSuggestionsOpen(false);
-    window.requestAnimationFrame(() => descriptionInputRef.current?.focus());
+    suppressSuggestionFocusRef.current = true;
+    window.requestAnimationFrame(() => {
+      descriptionInputRef.current?.focus({ preventScroll: true });
+      window.setTimeout(() => {
+        suppressSuggestionFocusRef.current = false;
+      }, 0);
+    });
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -700,7 +673,7 @@ function ManualEntryDialog({
     <ModalDialog
       busy={isBusy}
       className="manual-entry-dialog"
-      contentClassName="manual-entry-dialog-content calendar-compact-editor-panel"
+      contentClassName="manual-entry-dialog-content"
       initialFocusRef={descriptionInputRef}
       onClose={onClose}
       title="Add Time"
@@ -720,9 +693,9 @@ function ManualEntryDialog({
       )}
     >
       <form id={formId} className="calendar-compact-editor-fields manual-entry-form" onSubmit={submit}>
-        <div className="calendar-compact-editor-description manual-entry-description" ref={descriptionRootRef}>
+        <div className="calendar-compact-editor-description manual-entry-description">
           <label htmlFor="manual-entry-description">Description</label>
-          <div>
+          <div ref={descriptionInteractionRef}>
             <InlineTagInput
               ariaLabel="Manual time entry description"
               className="manual-entry-inline-tags time-entry-quick-tags"
@@ -734,6 +707,13 @@ function ManualEntryDialog({
                 setSuggestionsOpen(true);
               }}
               onClick={() => setSuggestionsOpen(true)}
+              onFocus={() => {
+                if (suppressSuggestionFocusRef.current) {
+                  suppressSuggestionFocusRef.current = false;
+                  return;
+                }
+                setSuggestionsOpen(true);
+              }}
               onHashtagPanelChange={(open) => {
                 setTagPanelOpen(open);
                 if (open) setSuggestionsOpen(false);
@@ -789,6 +769,7 @@ function ManualEntryDialog({
             <DayframeDateTimePicker
               compact
               id="manual-entry-start"
+              label="Start"
               name="startedAt"
               defaultValue={defaults.start}
               onChange={setStartedAtDraft}
@@ -799,7 +780,9 @@ function ManualEntryDialog({
             <span className="calendar-compact-field-label">Finish</span>
             <DayframeDateTimePicker
               compact
+              dayOffset={finishDayOffset}
               id="manual-entry-finish"
+              label="Finish"
               name="stoppedAt"
               defaultValue={defaults.finish}
               onChange={setStoppedAtDraft}

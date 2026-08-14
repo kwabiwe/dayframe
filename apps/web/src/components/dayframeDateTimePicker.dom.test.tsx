@@ -31,4 +31,22 @@ describe("DayframeDateTimePicker", () => {
     expect(onChange).toHaveBeenLastCalledWith("2026-08-13T10:25");
     expect(screen.getByRole("button", { name: /currently/ }).textContent).toContain("10:25");
   });
+
+  it("keeps the compact field label, date, and cross-midnight offset visible and accessible", () => {
+    render(
+      <DayframeDateTimePicker
+        compact
+        dayOffset={1}
+        defaultValue="2026-08-14T00:30"
+        id="manual-entry-finish"
+        label="Finish"
+        name="stoppedAt"
+      />
+    );
+
+    const trigger = screen.getByRole("button", { name: /Finish date and time, currently .*one day after Start/ });
+    expect(trigger.textContent).toContain("00:30");
+    expect(trigger.textContent).toContain("14 Aug");
+    expect(trigger.textContent).toContain("+1");
+  });
 });

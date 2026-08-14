@@ -32,7 +32,7 @@ describe("shared web time-entry quick editor", () => {
     expect(timeline).toContain('current.entryId === target.entryId');
   });
 
-  it("renders tags, compact category selection, icon-only dates and local day offsets", () => {
+  it("renders tags, historical suggestions, compact category selection, icon-only dates and local day offsets", () => {
     expect(quick).toContain("<InlineTagInput");
     expect(quick).toContain("selectedTagNames={draft.tagNames}");
     expect(quick).toContain("<CategoryPicker");
@@ -42,7 +42,11 @@ describe("shared web time-entry quick editor", () => {
     expect(quick).toContain("calendarEntryLocalDayOffset");
     expect(quick).toContain("calendar-compact-day-offset");
     expect(quick).not.toContain("placeId");
-    expect(quick).not.toContain("taskSuggestions");
+    expect(quick).toContain("taskSuggestions");
+    expect(quick).toContain("<TaskSuggestionsPanel");
+    expect(entries).toContain("taskSuggestions={shellData?.taskSuggestions ?? []}");
+    expect(reports).toContain("taskSuggestions={shellData?.taskSuggestions ?? []}");
+    expect(timeline).toContain("taskSuggestions={shellData?.taskSuggestions ?? []}");
     expect(quick).toContain("onEnter={controller.handleDescriptionEnter}");
     expect(quick).toContain('aria-label="Duration in hours and minutes"');
     expect(quick).toContain('placeholder="00:30"');

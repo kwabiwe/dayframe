@@ -590,6 +590,7 @@ export function CalendarReview({
     createCategory,
     createManualEntry,
     isTimerBusy,
+    shellData,
     startEntryAgain,
     updateActiveEntryFromCalendar
   } = useAppShellRuntime();
@@ -1381,6 +1382,7 @@ export function CalendarReview({
           peerEntries={entries}
           positionKey={`${zoomLevel}:${rowHeight}:${selectedEntry.startedAt}:${selectedEntry.stoppedAt ?? "running"}`}
           scrollContainer={calendarScroller}
+          taskSuggestions={shellData?.taskSuggestions ?? []}
           tags={tags}
         />
       ) : null}
@@ -1405,6 +1407,7 @@ export function CalendarReview({
             startedAt: visibleSelectedTarget.startedAt,
             stoppedAt: visibleSelectedTarget.stoppedAt
           }}
+          taskSuggestions={shellData?.taskSuggestions ?? []}
           tags={tags}
         />
       ) : null}

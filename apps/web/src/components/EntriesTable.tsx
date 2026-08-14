@@ -216,6 +216,7 @@ export function EntriesTable({
     clearTimerError,
     createCategory,
     isTimerBusy,
+    shellData,
     startEntryAgain,
     updateActiveEntryFromCalendar
   } = useAppShellRuntime();
@@ -937,6 +938,7 @@ export function EntriesTable({
           }}
           onStartAgain={editingEntry.stoppedAt ? () => continueEntry(editingEntry, "editor") : undefined}
           peerEntries={entries}
+          taskSuggestions={shellData?.taskSuggestions ?? []}
           tags={tags}
         />
       ) : null}
