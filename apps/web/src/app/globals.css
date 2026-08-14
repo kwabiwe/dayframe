@@ -8919,6 +8919,10 @@ dialog.ui-dialog.manual-entry-dialog {
   max-height: min(240px, calc(100dvh - 180px));
 }
 
+.manual-entry-inline-tags .inline-tag-description-input {
+  padding-left: 11px;
+}
+
 .time-entry-quick-description-control {
   position: relative;
   min-width: 0;
