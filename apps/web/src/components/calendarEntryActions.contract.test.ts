@@ -17,6 +17,7 @@ describe("shared web time-entry quick editor", () => {
     expect(quick).toContain("export function TimeEntryQuickEditorPanel");
     expect(quick).toContain("export function TimeEntryQuickEditorModal");
     expect(anchored).toContain("<TimeEntryQuickEditorPanel");
+    expect(anchored).toContain("showCancel");
     expect(entries).toContain("<TimeEntryQuickEditorModal");
     expect(reports).toContain("<TimeEntryQuickEditorModal");
     expect(existsSync(fileURLToPath(new URL("./EditTimeEntryDialog.tsx", import.meta.url)))).toBe(false);
@@ -77,7 +78,8 @@ describe("shared web time-entry quick editor", () => {
     expect(quick).toContain('className="calendar-compact-duration-field"');
     expect(quick).toContain('<span className="calendar-compact-field-label">Duration</span>');
     expect(quick).not.toContain('<strong className="tabular">');
-    expect(styles).toMatch(/\.calendar-compact-duration > \.tabular \{[^}]*font-size:\s*0\.86rem;[^}]*font-weight:\s*400;/s);
+    expect(styles).toMatch(/\.calendar-compact-date-time-controls > input,[\s\S]*?\.calendar-compact-running-value \{[^}]*font-size:\s*15px;[^}]*font-weight:\s*400;[^}]*line-height:\s*21px;/s);
+    expect(styles).toMatch(/\.dayframe-date-time-compact-value \{[^}]*font-size:\s*15px;[^}]*font-weight:\s*400;[^}]*line-height:\s*21px;/s);
   });
 
   it("keeps the CSS-only Calendar text hierarchy and narrow-container fallback", () => {

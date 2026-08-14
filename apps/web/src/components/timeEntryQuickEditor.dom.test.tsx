@@ -36,7 +36,8 @@ describe("TimeEntryQuickEditorModal", () => {
     completed.unmount();
     renderModal({ sourceEntry: timeEntry({ description: null, stoppedAt: null }) });
     const runningEditor = await screen.findByTestId("time-entry-quick-editor");
-    expect(runningEditor.querySelector(".calendar-compact-editor-header")?.textContent).toBe("Edit Entry");
+    expect(runningEditor.querySelector(".calendar-compact-editor-header strong")?.textContent).toBe("Edit Entry");
+    expect(runningEditor.querySelector(".calendar-compact-running-status")?.textContent).toBe("Running timer");
     expect(runningEditor.querySelector(".calendar-compact-editor-header")?.textContent).not.toContain("Untitled entry");
   });
 

@@ -214,7 +214,7 @@ export function CalendarEntryCompactEditor(props: CalendarEntryCompactEditorProp
         width: position?.width
       } as CSSProperties}
     >
-      <TimeEntryQuickEditorPanel controller={controller} props={editorProps} surface="anchored" />
+      <TimeEntryQuickEditorPanel controller={controller} props={editorProps} showCancel surface="anchored" />
     </div>,
     document.body
   );

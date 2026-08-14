@@ -8794,29 +8794,15 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .dayframe-date-time-compact-value {
-  display: grid;
   min-width: 0;
   flex: 1 1 auto;
-  gap: 1px;
-  line-height: 1.05;
-}
-
-.dayframe-date-time-compact-value strong,
-.dayframe-date-time-compact-value small {
   overflow: hidden;
+  color: var(--foreground);
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 21px;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.dayframe-date-time-compact-value strong {
-  font-size: 0.82rem;
-  font-weight: 500;
-}
-
-.dayframe-date-time-compact-value small {
-  color: var(--muted);
-  font-size: 0.64rem;
-  font-weight: 600;
 }
 
 .dayframe-date-time-day-offset {
@@ -9253,6 +9239,13 @@ dialog.ui-dialog.manual-entry-dialog {
   white-space: nowrap;
 }
 
+.calendar-compact-running-status {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 400;
+  line-height: 1.3;
+}
+
 .calendar-compact-field-label,
 .calendar-compact-editor-description > label,
 .calendar-compact-editor-fields label > span,
@@ -9576,8 +9569,7 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .calendar-compact-duration > .tabular {
-  font-size: 0.86rem;
-  font-weight: 400;
+  min-width: 0;
 }
 
 .calendar-compact-running-value {
@@ -9587,9 +9579,16 @@ dialog.ui-dialog.manual-entry-dialog {
   border-radius: 10px;
   background: color-mix(in srgb, var(--surface-inset) 78%, transparent);
   padding: 0 11px;
-  color: var(--muted);
-  font-size: 0.86rem;
-  font-weight: 650;
+}
+
+.calendar-compact-date-time-controls > input,
+.calendar-compact-duration-input input,
+.calendar-compact-duration > .tabular,
+.calendar-compact-running-value {
+  color: var(--foreground);
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 21px;
 }
 
 .calendar-compact-editor-footer {
@@ -9646,13 +9645,6 @@ dialog.ui-dialog.manual-entry-dialog {
 .calendar-compact-editor-default-actions {
   opacity: 1;
   visibility: visible;
-}
-
-.calendar-compact-editor-default-actions > span {
-  min-width: 0;
-  color: var(--muted);
-  font-size: 0.7rem;
-  line-height: 1.3;
 }
 
 .calendar-compact-feedback-actions {
@@ -10022,7 +10014,6 @@ dialog.ui-dialog.manual-entry-dialog {
     row-gap: 6px;
   }
 
-  .calendar-compact-editor-default-actions > span,
   .calendar-compact-feedback-copy {
     grid-area: message;
   }

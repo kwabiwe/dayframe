@@ -29,7 +29,8 @@ The application-level `::selection` rule originally used the solid action coral 
 - Global browser selection uses the contrast-safe `--accent`/`--on-accent` pair in light and dark themes. The softer coral token was rejected because its selected-to-unselected contrast was too weak.
 - Empty and cleared Description fields open historical suggestions in Add Time, completed/running Edit Entry and the running toolbar without requiring a Category. Suggestion selection applies Description/Category/Tags, restores input focus without reopening, and updates an active timer instead of starting another one. Shared quick-editor suggestions portal to the viewport so editor scrolling cannot clip them.
 - Add Time outside-dismissal now owns only the actual Description compound control and suggestion panel; the full-width label gutter is no longer an implicit Description hit target.
-- Add Time no longer places its mobile fixed Suggestions, Tags or date-time panels inside a query-container containing block. Start and Finish retain explicit accessible names, both compact controls show dates, Finish shows a cross-midnight `+N`, and common phone widths reserve a separate wrapping row for overlap feedback.
+- Add Time no longer places its mobile fixed Suggestions, Tags or date-time panels inside a query-container containing block. Start and Finish retain explicit accessible names with their full dates while their closed controls return to time-only visible values; Finish shows a cross-midnight `+N`, and common phone widths reserve a separate wrapping row for overlap feedback.
+- All compact Start, Finish and Duration values now use the same 15px/21px regular foreground typography. Running entries place the existing subtle `Running timer` status below the shared header title, and every Calendar-anchored create/edit footer exposes Cancel beside Save without removing outside dismissal.
 
 ## Guardrails And Evidence
 
@@ -41,6 +42,6 @@ The application-level `::selection` rule originally used the solid action coral 
 - Behavioural DOM coverage verifies Add Time focus/open, outside dismissal, selection and focus recovery; running/completed empty and cleared Description suggestions; keyboard option navigation; and the active-toolbar no-second-timer contract.
 - The initial rendered checks passed at `1440x900` and `390x844`, but KB's side-by-side Preview evidence exposed the unresolved Add Time gutter afterwards. The corrected follow-up therefore protects the shared shell metrics directly rather than treating those earlier screenshots as sufficient evidence.
 - The managed visual browser was healthy but its navigation policy blocked the private localhost/LAN development URL. Final visual acceptance remains on the exact Vercel Preview; local verification covered the shared light/dark token contract, DOM header states, the optimized production build and all non-visual checks.
-- Repository validation passed: `npm run test` (1,624 tests), `npm run typecheck`, `npm run lint` (two pre-existing warnings, no errors), `npm run build`, `npm run check:docs`, and `git diff --check`.
+- Repository validation passed: `npm run test` (1,625 tests), `npm run typecheck`, `npm run lint` (two pre-existing warnings, no errors), `npm run build`, `npm run check:docs`, and `git diff --check`.
 
 No API, database schema, mobile binary, migration or motion behavior changed.

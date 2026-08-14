@@ -193,6 +193,18 @@ describe("Calendar compact temporal DOM", () => {
     expect((screen.getByLabelText("Duration") as HTMLInputElement).value).toBe("02:00");
   });
 
+  it("exposes Calendar Cancel and routes it through the shared clean-dismiss path", async () => {
+    const onDismiss = vi.fn();
+    renderEditor({
+      onDismiss,
+      sourceEntry: entry("2026-08-02T10:00", "2026-08-02T10:30")
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onDismiss).toHaveBeenCalledWith({ restoreFocus: true });
+  });
+
   it("keeps running Finish static, Duration read-only and live, and Start save-only", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 2, 10, 30, 0));
@@ -205,6 +217,10 @@ describe("Calendar compact temporal DOM", () => {
 
     await act(async () => vi.advanceTimersByTime(0));
     expect(screen.getByText("Running")).not.toBeNull();
+    const editor = screen.getByTestId("calendar-compact-editor");
+    expect(editor.querySelector(".calendar-compact-editor-header .calendar-compact-running-status")?.textContent).toBe("Running timer");
+    expect(editor.querySelector(".calendar-compact-editor-footer")?.textContent).not.toContain("Running timer");
+    expect(screen.getByRole("button", { name: "Cancel" })).not.toBeNull();
     expect(screen.queryByLabelText("Finish time")).toBeNull();
     expect(screen.queryByRole("button", { name: /Choose Finish date/ })).toBeNull();
     expect(screen.queryByLabelText("Duration")).toBeNull();
@@ -235,11 +251,13 @@ function renderCompletedEditor(peers: TimeEntryRow[] = []) {
 
 function renderEditor({
   capturedNow = new Date(2026, 7, 2, 12),
+  onDismiss = vi.fn(),
   onSave = vi.fn().mockResolvedValue({ ok: true }),
   peers = [],
   sourceEntry
 }: {
   capturedNow?: Date;
+  onDismiss?: (options: { restoreFocus: boolean }) => void;
   onSave?: (plan: CalendarEntryCompactSavePlan) => Promise<{ ok: true } | { ok: false; error: string }>;
   peers?: TimeEntryRow[];
   sourceEntry: TimeEntryRow;
@@ -258,7 +276,7 @@ function renderEditor({
     isTimerBusy: false,
     mode: "entry" as const,
     onDelete: vi.fn(),
-    onDismiss: vi.fn(),
+    onDismiss,
     onSave,
     onStartAgain: vi.fn().mockResolvedValue({ ok: true }),
     peerEntries: peers,

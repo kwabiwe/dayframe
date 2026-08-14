@@ -47,10 +47,6 @@ export function DayframeDateTimePicker({
     hour: "2-digit",
     minute: "2-digit"
   }).format(new Date(value));
-  const compactDateLabel = new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "short"
-  }).format(new Date(`${current.date}T12:00:00`));
   const dayOffsetLabel = dayOffset === 1
     ? "one day after Start"
     : dayOffset > 1
@@ -113,12 +109,9 @@ export function DayframeDateTimePicker({
         ref={triggerRef}
         type="button"
       >
-        {compact ? (
-          <span className="dayframe-date-time-compact-value">
-            <strong>{current.time}</strong>
-            <small>{compactDateLabel}</small>
-          </span>
-        ) : <span>{displayLabel}</span>}
+        <span className={compact ? "dayframe-date-time-compact-value" : undefined}>
+          {compact ? current.time : displayLabel}
+        </span>
         {dayOffset > 0 ? (
           <span aria-hidden="true" className="dayframe-date-time-day-offset">+{dayOffset}</span>
         ) : null}

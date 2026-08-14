@@ -703,6 +703,9 @@ export function TimeEntryQuickEditorPanel({
       <div className="calendar-compact-editor-header">
         <div>
           <strong>{editorHeading}</strong>
+          {entry && !entry.stoppedAt ? (
+            <span className="calendar-compact-running-status">Running timer</span>
+          ) : null}
         </div>
         <div className="calendar-compact-editor-icons">
           {entry?.stoppedAt && props.mode === "entry" && props.onStartAgain ? (
@@ -919,7 +922,6 @@ export function TimeEntryQuickEditorPanel({
         data-feedback-mode={feedbackMode}
       >
         <div className="calendar-compact-editor-default-actions" aria-hidden={feedbackMode !== "default"} inert={feedbackMode !== "default"}>
-          {entry && !entry.stoppedAt ? <span>Running timer</span> : null}
           {cancelButton()}
           {saveButton()}
         </div>

@@ -32,7 +32,7 @@ describe("DayframeDateTimePicker", () => {
     expect(screen.getByRole("button", { name: /currently/ }).textContent).toContain("10:25");
   });
 
-  it("keeps the compact field label, date, and cross-midnight offset visible and accessible", () => {
+  it("keeps the compact value time-only while preserving its accessible date and cross-midnight offset", () => {
     render(
       <DayframeDateTimePicker
         compact
@@ -46,7 +46,7 @@ describe("DayframeDateTimePicker", () => {
 
     const trigger = screen.getByRole("button", { name: /Finish date and time, currently .*one day after Start/ });
     expect(trigger.textContent).toContain("00:30");
-    expect(trigger.textContent).toContain("14 Aug");
+    expect(trigger.textContent).not.toContain("14 Aug");
     expect(trigger.textContent).toContain("+1");
   });
 });
