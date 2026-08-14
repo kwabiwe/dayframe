@@ -706,6 +706,14 @@ function ManualEntryDialog({
       title="Add Time"
       footer={(
         <>
+          <OverlapNotice
+            compact
+            candidate={{
+              startedAt: dateTimeLocalInputToIso(startedAtDraft) ?? "invalid",
+              stoppedAt: dateTimeLocalInputToIso(stoppedAtDraft)
+            }}
+            entries={data.entries}
+          />
           <Button className="calendar-compact-cancel" onClick={onClose} disabled={isBusy}>Cancel</Button>
           <Button className="calendar-compact-save" variant="primary" type="submit" form={formId} disabled={isBusy}>Add time</Button>
         </>
@@ -805,13 +813,6 @@ function ManualEntryDialog({
             </div>
           </div>
         </div>
-        <OverlapNotice
-          candidate={{
-            startedAt: dateTimeLocalInputToIso(startedAtDraft) ?? "invalid",
-            stoppedAt: dateTimeLocalInputToIso(stoppedAtDraft)
-          }}
-          entries={data.entries}
-        />
         {formError ? <p className="swiss-inline-error" role="alert">{formError}</p> : null}
       </form>
     </ModalDialog>

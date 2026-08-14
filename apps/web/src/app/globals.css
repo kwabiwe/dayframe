@@ -5202,6 +5202,15 @@ kbd {
   color: var(--foreground);
 }
 
+.overlap-notice.is-compact {
+  display: block;
+  min-width: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--warning-text);
+}
+
 .report-pagination {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
@@ -9056,6 +9065,7 @@ dialog.ui-dialog.manual-entry-dialog {
 .time-entry-quick-editor-modal,
 dialog.ui-dialog.manual-entry-dialog {
   --web-control-height: 44px;
+  --calendar-compact-action-width: 92px;
   --calendar-compact-horizontal-inset: 12px;
   --calendar-compact-feedback-height: 72px;
   box-sizing: border-box;
@@ -9538,6 +9548,16 @@ dialog.ui-dialog.manual-entry-dialog {
   background: color-mix(in srgb, var(--surface-raised) 94%, var(--surface-inset));
 }
 
+.manual-entry-dialog .ui-dialog-actions > .overlap-notice.is-compact {
+  flex: 1 1 auto;
+  margin-right: auto;
+  overflow: hidden;
+}
+
+.manual-entry-dialog .ui-dialog-actions > .overlap-notice.is-compact p {
+  overflow-wrap: anywhere;
+}
+
 .calendar-compact-editor-default-actions,
 .calendar-compact-feedback-actions,
 .calendar-compact-discard-confirmation {
@@ -9599,11 +9619,8 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .calendar-compact-feedback-copy > .overlap-notice.is-compact {
-  display: grid;
+  display: block;
   min-width: 0;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 7px;
   margin: 0;
   padding: 0;
   background: transparent;
@@ -9655,6 +9672,14 @@ dialog.ui-dialog.manual-entry-dialog {
   font-size: 14px;
   font-weight: 650;
   line-height: 1.2;
+}
+
+.calendar-compact-save,
+.calendar-compact-cancel {
+  width: var(--calendar-compact-action-width);
+  min-width: var(--calendar-compact-action-width);
+  max-width: var(--calendar-compact-action-width);
+  flex: 0 0 var(--calendar-compact-action-width);
 }
 
 .calendar-compact-discard-back {
@@ -9712,8 +9737,6 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .calendar-compact-save {
-  min-width: 74px;
-  flex: 0 0 auto;
   background: var(--accent);
   color: var(--on-accent);
 }
@@ -9872,8 +9895,31 @@ dialog.ui-dialog.manual-entry-dialog {
 
 @media (max-width: 350px) {
   .calendar-compact-editor,
-  .time-entry-quick-editor-modal {
+  .time-entry-quick-editor-modal,
+  dialog.ui-dialog.manual-entry-dialog {
     --calendar-compact-feedback-height: 104px;
+  }
+
+  .manual-entry-dialog .ui-dialog-actions {
+    display: grid;
+    grid-template-areas:
+      "message message message"
+      "spacer cancel action";
+    grid-template-columns: minmax(0, 1fr) var(--calendar-compact-action-width) var(--calendar-compact-action-width);
+    row-gap: 6px;
+  }
+
+  .manual-entry-dialog .ui-dialog-actions > .overlap-notice.is-compact {
+    grid-area: message;
+    margin-right: 0;
+  }
+
+  .manual-entry-dialog .ui-dialog-actions > .calendar-compact-cancel {
+    grid-area: cancel;
+  }
+
+  .manual-entry-dialog .ui-dialog-actions > .calendar-compact-save {
+    grid-area: action;
   }
 
   .calendar-compact-editor-default-actions,

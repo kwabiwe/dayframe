@@ -225,7 +225,7 @@ describe("Calendar compact editor temporal model", () => {
     expect(calendarEntryCompactDraftHasChanges(refreshed, { ...draft, description: "Deep work" })).toBe(false);
   });
 
-  it("rejects future Start and Finish after synchronization", () => {
+  it("rejects a future Start while allowing a future Finish after synchronization", () => {
     const source = timeEntry();
     const now = new Date(2026, 0, 3, 10);
     expect(() => savePlan(source, {
@@ -233,11 +233,13 @@ describe("Calendar compact editor temporal model", () => {
       startedAtTime: "11:00",
       temporalOwner: "start"
     }, now)).toThrow("Start time cannot be in the future.");
-    expect(() => savePlan(source, {
+    const futureFinish = savePlan(source, {
       ...calendarEntryCompactInitialDraft(source),
       stoppedAtTime: "11:00",
       temporalOwner: "finish"
-    }, now)).toThrow("Finish time cannot be in the future.");
+    }, now);
+    expect(futureFinish.payload).toEqual({ stoppedAt: localIso("2026-01-03T11:00") });
+    expect(futureFinish.durationSeconds).toBe(9_978);
   });
 
   it("emits only quick-editor-owned fields and never clears hidden Place metadata", () => {

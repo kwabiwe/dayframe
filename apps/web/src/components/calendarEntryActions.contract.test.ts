@@ -58,6 +58,7 @@ describe("shared web time-entry quick editor", () => {
     expect(styles).toMatch(/\.calendar-compact-editor-footer \{[^}]*height:\s*var\(--calendar-compact-feedback-height\);[^}]*overflow:\s*hidden;/s);
     expect(styles).toMatch(/\.calendar-compact-discard-confirmation strong \{[^}]*color:\s*var\(--danger-text\);[^}]*font-size:\s*14px;[^}]*line-height:\s*1\.2;/s);
     expect(styles).toMatch(/\.calendar-compact-save,[\s\S]*\.calendar-compact-discard-confirm \{[^}]*height:\s*var\(--web-control-height\);[^}]*font-size:\s*14px;[^}]*line-height:\s*1\.2;/s);
+    expect(styles).toMatch(/\.calendar-compact-save,[\s\S]*?\.calendar-compact-cancel \{[^}]*width:\s*var\(--calendar-compact-action-width\);[^}]*flex:\s*0 0 var\(--calendar-compact-action-width\);/s);
   });
 
   it("uses borderless inset fields, neutral focus, and three/two/one temporal columns", () => {
