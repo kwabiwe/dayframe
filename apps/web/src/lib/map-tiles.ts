@@ -103,8 +103,8 @@ export function createGeoapifyMapTileProvider({
   };
 }
 
-export function dayframeMapStyle(origin: string) {
-  const tileUrl = `${origin.replace(/\/$/, "")}/api/map-tiles/{z}/{x}/{y}`;
+export function dayframeMapStyle() {
+  const tileUrl = "/api/map-tiles/{z}/{x}/{y}";
   return {
     version: 8 as const,
     sources: {

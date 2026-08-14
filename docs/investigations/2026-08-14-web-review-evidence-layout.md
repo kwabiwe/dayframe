@@ -32,7 +32,9 @@ to Review evidence/provider states and the Resolve section.
 ## Implementation contract
 
 - Reuse the server-only Geoapify key through authenticated same-origin map-style
-  and raster-tile routes. Browser responses never contain the provider key.
+  and raster-tile routes. The style uses a relative tile template so reverse
+  proxy host normalization cannot create a cross-origin request. Browser
+  responses never contain the provider key.
 - Preserve the optional authorised `NEXT_PUBLIC_DAYFRAME_MAP_STYLE_URL`
   override and a usable tile-free fallback when no provider is available.
 - Keep provider/data attribution visible. Map tiles are private browser-cacheable

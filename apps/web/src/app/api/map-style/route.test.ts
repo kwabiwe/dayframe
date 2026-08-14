@@ -31,7 +31,8 @@ describe("/api/map-style", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
-    expect(body).toContain("https://dayframe.test/api/map-tiles/{z}/{x}/{y}");
+    expect(body).toContain("/api/map-tiles/{z}/{x}/{y}");
+    expect(body).not.toContain("localhost");
     expect(body).toContain("Geoapify");
     expect(body).not.toContain("server-secret");
   });

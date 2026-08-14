@@ -11,7 +11,7 @@ export async function GET(request: Request) {
   try {
     await resolveRequestSession(request);
     getMapTileProvider();
-    return privateJson(dayframeMapStyle(new URL(request.url).origin));
+    return privateJson(dayframeMapStyle());
   } catch (error) {
     const authResponse = authErrorResponse(error);
     if (authResponse) return withPrivateNoStore(authResponse);

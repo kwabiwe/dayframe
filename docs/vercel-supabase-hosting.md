@@ -108,7 +108,7 @@ routes; only those server routes call Geoapify. Do not add
 `NEXT_PUBLIC_GEOAPIFY_API_KEY`, print the key, include it in screenshots, or
 send it in a response payload. Review map tiles are private browser-cacheable
 and require the normal Dayframe session; the style response contains only a
-same-origin tile template and the required provider/data attribution.
+relative same-origin tile template and the required provider/data attribution.
 
 Add `GEOAPIFY_API_KEY` separately to both Vercel Preview and Production
 environments. Adding or changing an environment variable only affects new

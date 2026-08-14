@@ -8,10 +8,10 @@ import {
 
 describe("map tiles", () => {
   it("builds a same-origin raster style with complete attribution and no provider key", () => {
-    const style = dayframeMapStyle("https://dayframe.test/");
+    const style = dayframeMapStyle();
     const source = style.sources["dayframe-base-map"];
 
-    expect(source.tiles).toEqual(["https://dayframe.test/api/map-tiles/{z}/{x}/{y}"]);
+    expect(source.tiles).toEqual(["/api/map-tiles/{z}/{x}/{y}"]);
     expect(source.attribution).toContain("Geoapify");
     expect(source.attribution).toContain("OpenMapTiles");
     expect(source.attribution).toContain("OpenStreetMap contributors");
