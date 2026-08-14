@@ -3,6 +3,7 @@
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import type { RecentActivitySuggestion } from "@dayframe/shared";
 import type { CreateCategoryOutcome } from "@/components/CategoryPicker";
 import {
   TimeEntryQuickEditorPanel,
@@ -33,6 +34,7 @@ type CalendarEntryCompactEditorSharedProps = {
   peerEntries: TimeEntryRow[];
   positionKey: string;
   scrollContainer: HTMLElement | null;
+  taskSuggestions?: RecentActivitySuggestion[];
   tags?: TagRow[];
 };
 
@@ -212,7 +214,7 @@ export function CalendarEntryCompactEditor(props: CalendarEntryCompactEditorProp
         width: position?.width
       } as CSSProperties}
     >
-      <TimeEntryQuickEditorPanel controller={controller} props={editorProps} surface="anchored" />
+      <TimeEntryQuickEditorPanel controller={controller} props={editorProps} showCancel surface="anchored" />
     </div>,
     document.body
   );

@@ -3,11 +3,13 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import type { RecentActivitySuggestion } from "@dayframe/shared";
 import { Play, Trash2, X } from "lucide-react";
 import { CategoryPicker, type CreateCategoryOutcome } from "@/components/CategoryPicker";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { InlineTagInput } from "@/components/InlineTagInput";
 import { OverlapNotice } from "@/components/OverlapNotice";
+import { TaskSuggestionsPanel } from "@/components/TaskSuggestionsPanel";
 import {
   buildCalendarEntryCompactCreatePlan,
   buildCalendarEntryCompactSavePlan,
@@ -17,8 +19,8 @@ import {
   calendarEntryLocalDayOffset,
   emptyCalendarEntryCompactDirty,
   formatCalendarEntryCompactDuration,
+  isCalendarEntryCompactTimeInputReadyToSynchronize,
   isCompleteCalendarEntryCompactDurationInput,
-  isCompleteCalendarEntryCompactTimeInput,
   synchronizeCalendarEntryCompactDraft,
   trySynchronizeCalendarEntryCompactDraft,
   type CalendarEntryCompactCreatePlan,
@@ -46,6 +48,7 @@ type TimeEntryQuickEditorBaseProps = {
   onCreateCategory?: (name: string) => Promise<CreateCategoryOutcome>;
   onDismiss: (options: { restoreFocus: boolean }) => void;
   peerEntries: OverlapPeerEntry[];
+  taskSuggestions?: RecentActivitySuggestion[];
   tags: TagRow[];
 };
 
@@ -79,6 +82,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
   const [error, setError] = useState<string | null>(null);
   const [isCategoryOpen, setIsCategoryOpen] = useState(false);
   const [openDatePicker, setOpenDatePicker] = useState<"start" | "finish" | null>(null);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [tagPanelOpen, setTagPanelOpen] = useState(false);
   const [dismissTagPanelsSignal, setDismissTagPanelsSignal] = useState(0);
   const [isBusy, setIsBusy] = useState(false);
@@ -95,6 +99,9 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
   ));
   const panelRef = useRef<HTMLDivElement | null>(null);
   const descriptionRef = useRef<HTMLInputElement | null>(null);
+  const descriptionInteractionRef = useRef<HTMLDivElement | null>(null);
+  const suggestionsRef = useRef<HTMLDivElement | null>(null);
+  const suppressSuggestionFocusRef = useRef(false);
   const categoryButtonRef = useRef<HTMLButtonElement | null>(null);
   const discardBackRef = useRef<HTMLButtonElement | null>(null);
   const discardPromptRef = useRef(false);
@@ -106,6 +113,15 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
   const onDraftChangeRef = useRef(onCreateDraftChange);
   const previousStoppedAtRef = useRef(entry?.stoppedAt ?? null);
   const selectedCategory = props.categories.find((category) => category.id === draft.categoryId) ?? null;
+  const taskSuggestions = useMemo(() => props.taskSuggestions ?? [], [props.taskSuggestions]);
+  const visibleTaskSuggestions = useMemo(() => {
+    const query = draft.description.trim().toLocaleLowerCase();
+    if (!query) return taskSuggestions.slice(0, 5);
+    return taskSuggestions
+      .filter((suggestion) => [suggestion.description, suggestion.categoryName ?? ""]
+        .some((value) => value.toLocaleLowerCase().includes(query)))
+      .slice(0, 5);
+  }, [draft.description, taskSuggestions]);
   const preview = useMemo(() => {
     try {
       return {
@@ -179,6 +195,32 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     setError(null);
   }, []);
 
+  const applyTaskSuggestion = useCallback((suggestion: RecentActivitySuggestion) => {
+    if (busyRef.current) return;
+    setDraft((current) => ({
+      ...current,
+      categoryId: suggestion.categoryId ?? "",
+      description: suggestion.description,
+      tagNames: suggestion.tagNames
+    }));
+    setDirty((current) => ({
+      ...current,
+      categoryId: true,
+      description: true,
+      tagNames: true
+    }));
+    setError(null);
+    setSuggestionsOpen(false);
+    setDismissTagPanelsSignal((value) => value + 1);
+    suppressSuggestionFocusRef.current = true;
+    window.requestAnimationFrame(() => {
+      descriptionRef.current?.focus({ preventScroll: true });
+      window.setTimeout(() => {
+        suppressSuggestionFocusRef.current = false;
+      }, 0);
+    });
+  }, []);
+
   const temporalSource = useMemo(() => ({
     originalStartedAt: entry?.startedAt ?? (createSource as CalendarEntryCompactCreateSource).startedAt,
     originalStoppedAt: entry?.stoppedAt ?? createSource?.stoppedAt ?? null
@@ -196,7 +238,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
       const next = { ...current, [key]: value, temporalOwner: owner };
       const isComplete = commit || (owner === "duration"
         ? isCompleteCalendarEntryCompactDurationInput(value)
-        : isCompleteCalendarEntryCompactTimeInput(value));
+        : isCalendarEntryCompactTimeInputReadyToSynchronize(value));
       if (!isComplete) return next;
       return trySynchronizeCalendarEntryCompactDraft({ ...temporalSource, draft: next, owner }) ?? next;
     });
@@ -346,6 +388,19 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
   }, [createSource, entry]);
 
   useEffect(() => {
+    if (!suggestionsOpen) return undefined;
+    function closeOnOutside(event: MouseEvent) {
+      const target = event.target as Node;
+      if (
+        !descriptionInteractionRef.current?.contains(target) &&
+        !suggestionsRef.current?.contains(target)
+      ) setSuggestionsOpen(false);
+    }
+    document.addEventListener("mousedown", closeOnOutside);
+    return () => document.removeEventListener("mousedown", closeOnOutside);
+  }, [suggestionsOpen]);
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       if (busyRef.current) {
@@ -356,6 +411,16 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
       if (discardPromptRef.current) {
         event.preventDefault();
         cancelDiscardPrompt();
+        return;
+      }
+      if (suggestionsOpen) {
+        event.preventDefault();
+        setSuggestionsOpen(false);
+        suppressSuggestionFocusRef.current = true;
+        descriptionRef.current?.focus({ preventScroll: true });
+        window.setTimeout(() => {
+          suppressSuggestionFocusRef.current = false;
+        }, 0);
         return;
       }
       if (openDatePicker || tagPanelOpen) return;
@@ -370,7 +435,26 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [attemptDismiss, cancelDiscardPrompt, isCategoryOpen, openDatePicker, tagPanelOpen]);
+  }, [attemptDismiss, cancelDiscardPrompt, isCategoryOpen, openDatePicker, suggestionsOpen, tagPanelOpen]);
+
+  function handleTaskSuggestionKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (!suggestionsOpen || tagPanelOpen || !visibleTaskSuggestions.length) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setSuggestionsOpen(false);
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      suggestionsRef.current?.querySelector<HTMLButtonElement>('[role="option"]')?.focus();
+    }
+  }
+
+  function handleTaskSuggestionFocus() {
+    if (suppressSuggestionFocusRef.current) {
+      suppressSuggestionFocusRef.current = false;
+      return;
+    }
+    setSuggestionsOpen(true);
+  }
 
   async function save() {
     if (busyRef.current || saveBlockedByTimer) return;
@@ -475,6 +559,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
 
   return {
     attemptDismiss,
+    applyTaskSuggestion,
     busyAction,
     cancelDiscardPrompt,
     categoryButtonRef,
@@ -483,6 +568,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     controlsDisabled,
     deleteEntry,
     descriptionRef,
+    descriptionInteractionRef,
     discardBackRef,
     discardPrompt,
     dismissTagPanelsSignal,
@@ -492,6 +578,8 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     finishDayOffset,
     finishIsInvalid,
     handleDescriptionEnter,
+    handleTaskSuggestionFocus,
+    handleTaskSuggestionKeyDown,
     hasUnsavedChanges,
     isBusy,
     isCategoryOpen,
@@ -504,6 +592,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     saveBlockedByTimer,
     setIsCategoryOpen,
     setOpenDatePicker,
+    setSuggestionsOpen,
     setTagPanelOpen,
     startAgain,
     startIsInvalid,
@@ -512,6 +601,9 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     title,
     updateField,
     updateTemporalField,
+    suggestionsOpen,
+    suggestionsRef,
+    visibleTaskSuggestions,
     durationIsInvalid
   };
 }
@@ -535,6 +627,7 @@ export function TimeEntryQuickEditorPanel({
     categoryButtonRef,
     commitTemporalField,
     controlsDisabled,
+    descriptionInteractionRef,
     descriptionRef,
     discardBackRef,
     discardPrompt,
@@ -550,15 +643,19 @@ export function TimeEntryQuickEditorPanel({
     preview,
     saveBlockedByTimer,
     startIsInvalid,
+    suggestionsOpen,
+    suggestionsRef,
     temporalErrorId,
     today,
-    title
+    title,
+    visibleTaskSuggestions
   } = controller;
   const finishDescription = finishDayOffset === 1
     ? "Finish time, one day after Start"
     : finishDayOffset > 1
       ? `Finish time, ${finishDayOffset} days after Start`
       : "Finish time";
+  const editorHeading = props.mode === "entry" ? "Edit Entry" : "Calendar Entry";
 
   function saveButton() {
     return (
@@ -605,8 +702,10 @@ export function TimeEntryQuickEditorPanel({
       ) : null}
       <div className="calendar-compact-editor-header">
         <div>
-          <span className="calendar-compact-editor-kicker">{entry ? "Calendar entry" : "New Calendar entry"}</span>
-          <strong>{title}</strong>
+          <strong>{editorHeading}</strong>
+          {entry && !entry.stoppedAt ? (
+            <span className="calendar-compact-running-status">Running timer</span>
+          ) : null}
         </div>
         <div className="calendar-compact-editor-icons">
           {entry?.stoppedAt && props.mode === "entry" && props.onStartAgain ? (
@@ -646,25 +745,47 @@ export function TimeEntryQuickEditorPanel({
       </div>
 
       <div className="calendar-compact-editor-fields">
-        <div className="calendar-compact-editor-description">
+        <div className="calendar-compact-editor-description time-entry-quick-description">
           <label htmlFor="time-entry-quick-description">Description</label>
-          <InlineTagInput
-            ariaLabel="Time entry description"
-            className="time-entry-quick-tags"
-            closeSignal={controller.dismissTagPanelsSignal}
-            disabled={controlsDisabled}
-            inputId="time-entry-quick-description"
-            inputRef={descriptionRef}
-            onChange={(value) => controller.updateField("description", value)}
-            onHashtagPanelChange={controller.setTagPanelOpen}
-            onEnter={controller.handleDescriptionEnter}
-            onSelectedTagNamesChange={(tagNames) => controller.updateField("tagNames", tagNames)}
-            placeholder="Enter task description"
-            portal
-            selectedTagNames={draft.tagNames}
-            tags={props.tags}
-            value={draft.description}
-          />
+          <div className="time-entry-quick-description-control" ref={descriptionInteractionRef}>
+            <InlineTagInput
+              ariaLabel="Time entry description"
+              className="time-entry-quick-tags"
+              closeSignal={controller.dismissTagPanelsSignal}
+              disabled={controlsDisabled}
+              inputId="time-entry-quick-description"
+              inputRef={descriptionRef}
+              onChange={(value) => {
+                controller.updateField("description", value);
+                controller.setSuggestionsOpen(true);
+              }}
+              onClick={() => controller.setSuggestionsOpen(true)}
+              onFocus={controller.handleTaskSuggestionFocus}
+              onHashtagPanelChange={(open) => {
+                controller.setTagPanelOpen(open);
+                if (open) controller.setSuggestionsOpen(false);
+              }}
+              onInputKeyDown={controller.handleTaskSuggestionKeyDown}
+              onEnter={controller.handleDescriptionEnter}
+              onSelectedTagNamesChange={(tagNames) => controller.updateField("tagNames", tagNames)}
+              placeholder="Enter task description"
+              portal
+              selectedTagNames={draft.tagNames}
+              tags={props.tags}
+              value={draft.description}
+            />
+            {visibleTaskSuggestions.length ? (
+              <TaskSuggestionsPanel
+                anchorRef={descriptionInteractionRef}
+                isBusy={isBusy}
+                isOpen={suggestionsOpen}
+                onSelect={controller.applyTaskSuggestion}
+                panelRef={suggestionsRef}
+                portal
+                suggestions={visibleTaskSuggestions}
+              />
+            ) : null}
+          </div>
         </div>
 
         <CategoryPicker
@@ -672,6 +793,7 @@ export function TimeEntryQuickEditorPanel({
           disabled={controlsDisabled}
           label="Category"
           menuId="time-entry-quick-category-menu"
+          onBeforeOpen={() => controller.setSuggestionsOpen(false)}
           onCreateCategory={props.onCreateCategory}
           onOpenChange={controller.setIsCategoryOpen}
           onSelect={(categoryId) => controller.updateField("categoryId", categoryId)}
@@ -705,7 +827,10 @@ export function TimeEntryQuickEditorPanel({
                 iconOnly
                 label={formatAccessibleDate(draft.startedAtDate)}
                 onChange={(date) => controller.updateTemporalField("startedAtDate", date, "start", true)}
-                onOpenChange={(open) => controller.setOpenDatePicker((current) => open ? "start" : current === "start" ? null : current)}
+                onOpenChange={(open) => {
+                  if (open) controller.setSuggestionsOpen(false);
+                  controller.setOpenDatePicker((current) => open ? "start" : current === "start" ? null : current);
+                }}
                 panelClassName="calendar-compact-date-picker-panel time-entry-quick-editor-nested-surface"
                 panelLabel="Choose Start date"
                 portal
@@ -744,7 +869,10 @@ export function TimeEntryQuickEditorPanel({
                   iconOnly
                   label={formatAccessibleDate(draft.stoppedAtDate)}
                   onChange={(date) => controller.updateTemporalField("stoppedAtDate", date, "finish", true)}
-                  onOpenChange={(open) => controller.setOpenDatePicker((current) => open ? "finish" : current === "finish" ? null : current)}
+                  onOpenChange={(open) => {
+                    if (open) controller.setSuggestionsOpen(false);
+                    controller.setOpenDatePicker((current) => open ? "finish" : current === "finish" ? null : current);
+                  }}
                   panelClassName="calendar-compact-date-picker-panel time-entry-quick-editor-nested-surface"
                   panelLabel="Choose Finish date"
                   portal
@@ -757,11 +885,13 @@ export function TimeEntryQuickEditorPanel({
           </div>
 
           {isRunning ? (
-            <div className="calendar-compact-duration is-readonly" aria-label="Elapsed time">
-              <span>Duration</span>
-              <strong className="tabular">
-                {preview.plan ? formatCalendarEntryCompactDuration(preview.plan.durationSeconds) : "—"}
-              </strong>
+            <div className="calendar-compact-duration-field">
+              <span className="calendar-compact-field-label">Duration</span>
+              <div className="calendar-compact-duration is-readonly" aria-label="Elapsed time">
+                <span className="tabular">
+                  {preview.plan ? formatCalendarEntryCompactDuration(preview.plan.durationSeconds) : "—"}
+                </span>
+              </div>
             </div>
           ) : (
             <label className="calendar-compact-duration-input">
@@ -792,7 +922,6 @@ export function TimeEntryQuickEditorPanel({
         data-feedback-mode={feedbackMode}
       >
         <div className="calendar-compact-editor-default-actions" aria-hidden={feedbackMode !== "default"} inert={feedbackMode !== "default"}>
-          {entry && !entry.stoppedAt ? <span>Running timer</span> : null}
           {cancelButton()}
           {saveButton()}
         </div>

@@ -6,6 +6,10 @@ const timerSource = readFileSync(
   fileURLToPath(new URL("./PersistentTimerBar.tsx", import.meta.url)),
   "utf8"
 );
+const taskSuggestionsSource = readFileSync(
+  fileURLToPath(new URL("./TaskSuggestionsPanel.tsx", import.meta.url)),
+  "utf8"
+);
 const tagSource = readFileSync(
   fileURLToPath(new URL("./InlineTagInput.tsx", import.meta.url)),
   "utf8"
@@ -24,7 +28,7 @@ describe("persistent timer floating surfaces", () => {
     expect(styles).toMatch(
       /\.swiss-persistent-timer\s*\{[^}]*overflow:\s*visible;/s
     );
-    expect(timerSource).toContain(
+    expect(taskSuggestionsSource).toContain(
       "ui-floating-surface swiss-task-suggestions"
     );
     expect(categorySource).toContain(

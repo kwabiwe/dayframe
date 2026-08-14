@@ -15,7 +15,7 @@ import type { ReportResult } from "@/lib/report-service";
 
 export function ReportDetailsTable({ report }: { report: ReportResult }) {
   const router = useRouter();
-  const { isTimerBusy, updateActiveEntryFromCalendar } = useAppShellRuntime();
+  const { isTimerBusy, shellData, updateActiveEntryFromCalendar } = useAppShellRuntime();
   const [isPending, startTransition] = useTransition();
   const [editingEntry, setEditingEntry] = useState<ReportResult["entries"][number] | null>(null);
 
@@ -130,6 +130,7 @@ export function ReportDetailsTable({ report }: { report: ReportResult }) {
             return outcome;
           }}
           peerEntries={report.overlapCandidates}
+          taskSuggestions={shellData?.taskSuggestions ?? []}
           tags={report.filterOptions.tags}
         />
       ) : null}

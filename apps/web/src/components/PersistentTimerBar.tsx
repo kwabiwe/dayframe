@@ -16,7 +16,9 @@ import { CategoryPicker, type CreateCategoryOutcome } from "@/components/Categor
 import { InlineTagInput } from "@/components/InlineTagInput";
 import { DayframeDateTimePicker } from "@/components/DayframeDateTimePicker";
 import { OverlapNotice } from "@/components/OverlapNotice";
+import { TaskSuggestionsPanel } from "@/components/TaskSuggestionsPanel";
 import { Button, Field, IconButton, ModalDialog } from "@/components/ui/Primitives";
+import { calendarEntryLocalDayOffset, formatCalendarEntryCompactDuration } from "@/lib/calendar-entry-compact-editor";
 import { timeEntryAccentColor } from "@/lib/display";
 import { dateTimeLocalInputToIso, formatClockDuration, formatTime } from "@/lib/format";
 import { validateManualTimeEntryWindow } from "@/lib/manual-time-entry";
@@ -55,6 +57,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const [startEditError, setStartEditError] = useState<string | null>(null);
   const [now, setNow] = useState(0);
   const descriptionInputRef = useRef<HTMLInputElement | null>(null);
+  const suppressSuggestionFocusRef = useRef(false);
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
   const startDateInputRef = useRef<HTMLInputElement | null>(null);
   const startTimeInputRef = useRef<HTMLInputElement | null>(null);
@@ -194,17 +197,24 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     void startTimer();
   }
 
-  async function startSuggestion(suggestion: BootstrapData["taskSuggestions"][number]) {
-    setTimerDraft({
+  async function chooseTimerSuggestion(suggestion: BootstrapData["taskSuggestions"][number]) {
+    const suggestionDraft = {
       categoryId: suggestion.categoryId ?? "",
       description: suggestion.description,
       tagNames: suggestion.tagNames
-    });
+    };
+    setTimerDraft(suggestionDraft);
     setSuggestionsOpen(false);
-    await startTimer({
-      categoryId: suggestion.categoryId ?? "",
-      description: suggestion.description,
-      tagNames: suggestion.tagNames
+    if (!active) {
+      await startTimer(suggestionDraft);
+      return;
+    }
+    suppressSuggestionFocusRef.current = true;
+    window.requestAnimationFrame(() => {
+      descriptionInputRef.current?.focus({ preventScroll: true });
+      window.setTimeout(() => {
+        suppressSuggestionFocusRef.current = false;
+      }, 0);
     });
   }
 
@@ -261,14 +271,16 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
             name="timer-description"
             onChange={(description) => {
               setTimerDraft((current) => ({ ...current, description }));
-              if (!active) setSuggestionsOpen(true);
+              setSuggestionsOpen(true);
             }}
-            onClick={() => {
-              if (!active) setSuggestionsOpen(true);
-            }}
+            onClick={() => setSuggestionsOpen(true)}
             onEnter={startFromEnter}
             onFocus={() => {
-              if (!active) setSuggestionsOpen(true);
+              if (suppressSuggestionFocusRef.current) {
+                suppressSuggestionFocusRef.current = false;
+                return;
+              }
+              setSuggestionsOpen(true);
             }}
             onHashtagPanelChange={(open) => {
               setHashtagSuggestionsOpen(open);
@@ -290,11 +302,11 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
             tags={data.tags}
             value={timerDraft.description}
           />
-          {!active && visibleTaskSuggestions.length ? (
+          {visibleTaskSuggestions.length ? (
             <TaskSuggestionsPanel
               isBusy={isTimerBusy}
               isOpen={suggestionsOpen && !hashtagSuggestionsOpen}
-              onSelect={(suggestion) => void startSuggestion(suggestion)}
+              onSelect={(suggestion) => void chooseTimerSuggestion(suggestion)}
               suggestions={visibleTaskSuggestions}
             />
           ) : null}
@@ -548,55 +560,6 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   );
 }
 
-function TaskSuggestionsPanel({
-  isBusy,
-  isOpen,
-  onSelect,
-  panelRef,
-  suggestions
-}: {
-  isBusy: boolean;
-  isOpen: boolean;
-  onSelect: (suggestion: BootstrapData["taskSuggestions"][number]) => void;
-  panelRef?: RefObject<HTMLDivElement | null>;
-  suggestions: BootstrapData["taskSuggestions"];
-}) {
-  return (
-    <div
-      aria-hidden={!isOpen}
-      aria-label="Suggestions"
-      className={`ui-floating-surface swiss-task-suggestions${isOpen ? " is-open" : ""}`}
-      inert={!isOpen}
-      ref={panelRef}
-      role="listbox"
-    >
-      <div className="swiss-task-suggestions-header"><span>Suggestions</span></div>
-      <div className="swiss-task-suggestions-list">
-        {suggestions.map((suggestion) => (
-          <button
-            key={suggestion.key}
-            type="button"
-            role="option"
-            aria-selected={false}
-            disabled={isBusy}
-            onClick={() => onSelect(suggestion)}
-          >
-            <span>
-              <b>{suggestion.description}</b>
-              <small>
-                <i style={{ backgroundColor: paletteCssColorFor(suggestion.categoryColor ?? "steel", suggestion.categoryName ?? "Category") }} />
-                {suggestion.categoryName ?? "Uncategorized"}
-                {suggestion.tagNames.length ? ` · ${suggestion.tagNames.map((tag) => `#${tag}`).join(" ")}` : ""}
-              </small>
-            </span>
-            <Play size={14} fill="currentColor" strokeWidth={0} aria-hidden="true" />
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function ManualEntryDialog({
   data,
   isBusy,
@@ -624,11 +587,23 @@ function ManualEntryDialog({
   const [tagPanelOpen, setTagPanelOpen] = useState(false);
   const [tagNames, setTagNames] = useState<string[]>([]);
   const descriptionInputRef = useRef<HTMLInputElement | null>(null);
-  const descriptionRootRef = useRef<HTMLDivElement | null>(null);
+  const suppressSuggestionFocusRef = useRef(false);
+  const descriptionInteractionRef = useRef<HTMLDivElement | null>(null);
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
   const defaults = useMemo(() => manualEntryDefaults(data.dateRange.selectedDate), [data.dateRange.selectedDate]);
   const [startedAtDraft, setStartedAtDraft] = useState(defaults.start);
   const [stoppedAtDraft, setStoppedAtDraft] = useState(defaults.finish);
+  const durationLabel = useMemo(() => {
+    const startedAt = dateTimeLocalInputToIso(startedAtDraft);
+    const stoppedAt = dateTimeLocalInputToIso(stoppedAtDraft);
+    if (!startedAt || !stoppedAt) return "—";
+    const seconds = Math.floor((Date.parse(stoppedAt) - Date.parse(startedAt)) / 1_000);
+    return seconds > 0 ? formatCalendarEntryCompactDuration(seconds) : "—";
+  }, [startedAtDraft, stoppedAtDraft]);
+  const finishDayOffset = useMemo(() => calendarEntryLocalDayOffset(
+    startedAtDraft.slice(0, 10),
+    stoppedAtDraft.slice(0, 10)
+  ), [startedAtDraft, stoppedAtDraft]);
   const visibleTaskSuggestions = useMemo(() => {
     const query = description.trim().toLocaleLowerCase();
     if (!query) return data.taskSuggestions.slice(0, TASK_SUGGESTION_LIMIT);
@@ -642,7 +617,7 @@ function ManualEntryDialog({
   useEffect(() => {
     if (!suggestionsOpen) return undefined;
     function closeOnOutside(event: MouseEvent) {
-      if (!descriptionRootRef.current?.contains(event.target as Node)) setSuggestionsOpen(false);
+      if (!descriptionInteractionRef.current?.contains(event.target as Node)) setSuggestionsOpen(false);
     }
     document.addEventListener("mousedown", closeOnOutside);
     return () => document.removeEventListener("mousedown", closeOnOutside);
@@ -653,7 +628,13 @@ function ManualEntryDialog({
     setCategoryId(suggestion.categoryId ?? "");
     setTagNames(suggestion.tagNames);
     setSuggestionsOpen(false);
-    window.requestAnimationFrame(() => descriptionInputRef.current?.focus());
+    suppressSuggestionFocusRef.current = true;
+    window.requestAnimationFrame(() => {
+      descriptionInputRef.current?.focus({ preventScroll: true });
+      window.setTimeout(() => {
+        suppressSuggestionFocusRef.current = false;
+      }, 0);
+    });
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -693,38 +674,31 @@ function ManualEntryDialog({
       busy={isBusy}
       className="manual-entry-dialog"
       contentClassName="manual-entry-dialog-content"
+      initialFocusRef={descriptionInputRef}
       onClose={onClose}
-      title="Add time"
+      title="Add Time"
       footer={(
         <>
-          <Button onClick={onClose} disabled={isBusy}>Cancel</Button>
-          <Button variant="primary" type="submit" form={formId} disabled={isBusy}>Add time</Button>
+          <OverlapNotice
+            compact
+            candidate={{
+              startedAt: dateTimeLocalInputToIso(startedAtDraft) ?? "invalid",
+              stoppedAt: dateTimeLocalInputToIso(stoppedAtDraft)
+            }}
+            entries={data.entries}
+          />
+          <Button className="calendar-compact-cancel" onClick={onClose} disabled={isBusy}>Cancel</Button>
+          <Button className="calendar-compact-save" variant="primary" type="submit" form={formId} disabled={isBusy}>Add time</Button>
         </>
       )}
     >
-      <form id={formId} className="swiss-form-grid" onSubmit={submit}>
-        <Field htmlFor="manual-entry-category" label="Category">
-          <CategoryPicker
-            categories={data.categories}
-            className="manual-entry-category"
-            menuId="manual-entry-category-menu"
-            onBeforeOpen={() => setSuggestionsOpen(false)}
-            onCreateCategory={onCreateCategory}
-            onOpenChange={setCategoryMenuOpen}
-            onSelect={setCategoryId}
-            open={categoryMenuOpen}
-            portal
-            selectedId={categoryId}
-            triggerId="manual-entry-category"
-            variant="timer"
-          />
-        </Field>
-        <Field className="swiss-form-wide" htmlFor="manual-entry-description" label="Description">
-          <div className="manual-entry-description" ref={descriptionRootRef}>
+      <form id={formId} className="calendar-compact-editor-fields manual-entry-form" onSubmit={submit}>
+        <div className="calendar-compact-editor-description manual-entry-description">
+          <label htmlFor="manual-entry-description">Description</label>
+          <div ref={descriptionInteractionRef}>
             <InlineTagInput
               ariaLabel="Manual time entry description"
-              className="manual-entry-inline-tags"
-              inputClassName="ui-control"
+              className="manual-entry-inline-tags time-entry-quick-tags"
               inputId="manual-entry-description"
               inputRef={descriptionInputRef}
               name="manual-description"
@@ -733,7 +707,13 @@ function ManualEntryDialog({
                 setSuggestionsOpen(true);
               }}
               onClick={() => setSuggestionsOpen(true)}
-              onFocus={() => setSuggestionsOpen(true)}
+              onFocus={() => {
+                if (suppressSuggestionFocusRef.current) {
+                  suppressSuggestionFocusRef.current = false;
+                  return;
+                }
+                setSuggestionsOpen(true);
+              }}
               onHashtagPanelChange={(open) => {
                 setTagPanelOpen(open);
                 if (open) setSuggestionsOpen(false);
@@ -767,33 +747,56 @@ function ManualEntryDialog({
               />
             ) : null}
           </div>
-        </Field>
-        <Field htmlFor="manual-entry-start" label="Start">
-          <DayframeDateTimePicker
-            id="manual-entry-start"
-            name="startedAt"
-            defaultValue={defaults.start}
-            onChange={setStartedAtDraft}
-            required
-          />
-        </Field>
-        <Field htmlFor="manual-entry-finish" label="Finish">
-          <DayframeDateTimePicker
-            id="manual-entry-finish"
-            name="stoppedAt"
-            defaultValue={defaults.finish}
-            onChange={setStoppedAtDraft}
-            required
-          />
-        </Field>
-        <OverlapNotice
-          candidate={{
-            startedAt: dateTimeLocalInputToIso(startedAtDraft) ?? "invalid",
-            stoppedAt: dateTimeLocalInputToIso(stoppedAtDraft)
-          }}
-          entries={data.entries}
+        </div>
+        <CategoryPicker
+          categories={data.categories}
+          className="manual-entry-category"
+          label="Category"
+          menuId="manual-entry-category-menu"
+          onBeforeOpen={() => setSuggestionsOpen(false)}
+          onCreateCategory={onCreateCategory}
+          onOpenChange={setCategoryMenuOpen}
+          onSelect={setCategoryId}
+          open={categoryMenuOpen}
+          portal
+          selectedId={categoryId}
+          triggerId="manual-entry-category"
+          variant="quick"
         />
-        {formError ? <p className="swiss-inline-error swiss-form-wide" role="alert">{formError}</p> : null}
+        <div className="calendar-compact-temporal-fields manual-entry-temporal-fields">
+          <div className="calendar-compact-moment-field">
+            <span className="calendar-compact-field-label">Start</span>
+            <DayframeDateTimePicker
+              compact
+              id="manual-entry-start"
+              label="Start"
+              name="startedAt"
+              defaultValue={defaults.start}
+              onChange={setStartedAtDraft}
+              required
+            />
+          </div>
+          <div className="calendar-compact-moment-field">
+            <span className="calendar-compact-field-label">Finish</span>
+            <DayframeDateTimePicker
+              compact
+              dayOffset={finishDayOffset}
+              id="manual-entry-finish"
+              label="Finish"
+              name="stoppedAt"
+              defaultValue={defaults.finish}
+              onChange={setStoppedAtDraft}
+              required
+            />
+          </div>
+          <div className="calendar-compact-duration-field">
+            <span className="calendar-compact-field-label">Duration</span>
+            <div className="calendar-compact-duration is-readonly" aria-label="Duration">
+              <span className="tabular">{durationLabel}</span>
+            </div>
+          </div>
+        </div>
+        {formError ? <p className="swiss-inline-error" role="alert">{formError}</p> : null}
       </form>
     </ModalDialog>
   );

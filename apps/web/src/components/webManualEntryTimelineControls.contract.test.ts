@@ -20,12 +20,14 @@ describe("web manual entry and Timeline control refinement", () => {
     expect(manual).toContain("setDescription(suggestion.description)");
     expect(manual).toContain("setCategoryId(suggestion.categoryId ??");
     expect(manual).toContain("setTagNames(suggestion.tagNames)");
+    expect(manual).toContain("suppressSuggestionFocusRef.current");
+    expect(manual).toContain("setSuggestionsOpen(true)");
     expect(manual).not.toContain("startTimer(");
   });
 
   it("anchors manual Tags and Suggestions below their triggers with internal bounds", () => {
     expect(timer).toContain('className="manual-entry-dialog"');
-    expect(timer).toContain('className="manual-entry-inline-tags"');
+    expect(timer).toContain('className="manual-entry-inline-tags time-entry-quick-tags"');
     expect(styles).toMatch(/\.manual-entry-description \.swiss-task-suggestions \{[^}]*top: calc\(100% \+ var\(--web-field-gap\)\);[^}]*bottom: auto;/s);
     expect(styles).toMatch(/\.manual-entry-inline-tags \.inline-tag-picker \{[^}]*top: calc\(100% \+ var\(--web-field-gap\)\);[^}]*right: 0;[^}]*bottom: auto;[^}]*left: auto;/s);
     expect(styles).toMatch(/\.manual-entry-inline-tags \.inline-tag-picker \{[^}]*max-height: min\(240px, calc\(100dvh - 180px\)\);/s);
@@ -39,16 +41,46 @@ describe("web manual entry and Timeline control refinement", () => {
     expect(styles).toMatch(/\.swiss-task-suggestions-list button \{[^}]*min-height: var\(--task-suggestion-row-height\);/s);
   });
 
-  it("reuses the timer Category treatment and borderless date-time controls", () => {
+  it("uses the shared quick-editor anatomy and borderless date-time controls", () => {
     const manual = timer.slice(timer.indexOf("function ManualEntryDialog"));
     expect(manual).toContain("<CategoryPicker");
     expect(manual).toContain('className="manual-entry-category"');
-    expect(manual).toContain('variant="timer"');
+    expect(manual).toContain('variant="quick"');
+    expect(manual).toContain('className="calendar-compact-editor-fields manual-entry-form"');
+    expect(manual).toContain('className="calendar-compact-temporal-fields manual-entry-temporal-fields"');
+    expect(manual).toContain('className="calendar-compact-duration-field"');
+    expect(manual).toContain('title="Add Time"');
+    expect(manual).toContain('className="calendar-compact-cancel"');
+    expect(manual).toContain('className="calendar-compact-save"');
+    expect(manual).toMatch(/footer=\{\([\s\S]*?<OverlapNotice[\s\S]*?compact[\s\S]*?calendar-compact-cancel[\s\S]*?calendar-compact-save[\s\S]*?<\/\>/);
+    expect(manual).toContain('<span className="tabular">{durationLabel}</span>');
+    expect(manual).not.toContain('<strong className="tabular">{durationLabel}</strong>');
     expect(manual).not.toContain("<SelectField");
     expect(manual).toContain("<DayframeDateTimePicker");
+    expect(manual).toContain('label="Start"');
+    expect(manual).toContain('label="Finish"');
+    expect(manual).toContain("dayOffset={finishDayOffset}");
+    expect(manual).toContain('contentClassName="manual-entry-dialog-content"');
+    expect(manual).not.toContain('contentClassName="manual-entry-dialog-content calendar-compact-editor-panel"');
     expect(timer).not.toContain('type="datetime-local"');
-    expect(styles).toMatch(/\.manual-entry-category \.swiss-category-trigger,[\s\S]*\.dayframe-date-time-trigger \{[^}]*border-color: transparent;/s);
+    expect(styles).toMatch(/\.dayframe-date-time-trigger \{[^}]*border-color: transparent;/s);
+    expect(styles).toMatch(/\.calendar-compact-editor,[\s\S]*dialog\.ui-dialog\.manual-entry-dialog \{[^}]*--calendar-compact-horizontal-inset: 12px;[^}]*border-radius: 16px;[^}]*background: var\(--surface-raised\);[^}]*box-shadow: 0 22px 52px var\(--shadow-color\), var\(--shadow-raised\);/s);
+    expect(styles).toMatch(/\.calendar-compact-editor-header,[\s\S]*\.manual-entry-dialog \.ui-dialog-actions \{[^}]*gap: 12px;[^}]*padding: 10px var\(--calendar-compact-horizontal-inset\);/s);
+    expect(styles).toMatch(/\.calendar-compact-editor-header,[\s\S]*\.manual-entry-dialog \.ui-dialog-header \{[^}]*height: 64px;[^}]*min-height: 64px;[^}]*max-height: 64px;/s);
+    expect(styles).toMatch(/\.manual-entry-dialog \.ui-dialog-actions \{[^}]*height: var\(--calendar-compact-feedback-height\);[^}]*min-height: var\(--calendar-compact-feedback-height\);[^}]*max-height: var\(--calendar-compact-feedback-height\);/s);
+    expect(styles).toMatch(/\.manual-entry-dialog \.ui-dialog-actions \{[^}]*justify-content:\s*flex-end;/s);
+    expect(styles).toMatch(/\.manual-entry-dialog \.ui-dialog-actions > \.overlap-notice\.is-compact \{[^}]*flex: 1 1 auto;[^}]*margin-right: auto;/s);
+    expect(styles).toMatch(/\.calendar-compact-save,[\s\S]*?\.calendar-compact-cancel \{[^}]*width: var\(--calendar-compact-action-width\);[^}]*min-width: var\(--calendar-compact-action-width\);[^}]*max-width: var\(--calendar-compact-action-width\);/s);
     expect(styles).toMatch(/dialog\.ui-dialog:focus \{[^}]*outline: 0;/s);
+  });
+
+  it("uses the contrast-safe Dayframe selection colour globally", () => {
+    expect(styles).toMatch(/::selection \{[^}]*background: var\(--accent\);[^}]*color: var\(--on-accent\);/s);
+  });
+
+  it("moves compact Add Time feedback onto its own row at common phone widths", () => {
+    expect(styles).toMatch(/@media \(max-width: 430px\)[\s\S]*dialog\.ui-dialog\.manual-entry-dialog \{[^}]*--calendar-compact-feedback-height: 104px;/s);
+    expect(styles).toMatch(/@media \(max-width: 430px\)[\s\S]*\.manual-entry-dialog \.ui-dialog-actions \{[^}]*grid-template-areas:[^}]*"message message message"[^}]*"spacer cancel action";/s);
   });
 
   it("keeps the running-task menu below the More button and inside the viewport", () => {

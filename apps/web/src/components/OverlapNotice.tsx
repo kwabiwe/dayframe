@@ -26,9 +26,8 @@ export function OverlapNotice({
     const duration = `${String(Math.floor(totalMinutes / 60)).padStart(2, "0")}:${String(totalMinutes % 60).padStart(2, "0")}`;
     return (
       <aside className="overlap-notice is-compact" role="status" aria-live="polite">
-        <AlertTriangle aria-hidden="true" size={17} />
         <p>
-          Overlaps with {overlap.overlapCount} {overlap.overlapCount === 1 ? "entry" : "entries"} by {duration}
+          Overlaps {overlap.overlapCount === 1 ? "one entry" : `${overlap.overlapCount} entries`} by {duration}
         </p>
       </aside>
     );

@@ -53,6 +53,22 @@ describe("Timeline inline entry editing", () => {
     expect(plan.payload).toEqual({ stoppedAt: localIso("2026-08-10T10:15") });
   });
 
+  it("does not insert a colon mid-entry before four compact digits are complete", () => {
+    const entry = timeEntry();
+    const partial = updateTimelineInlineTime(
+      createTimelineInlineEditDraft(entry, "time"),
+      entry,
+      "finish",
+      "102"
+    );
+    const complete = updateTimelineInlineTime(partial, entry, "finish", "1025");
+
+    expect(partial.draft.stoppedAtTime).toBe("102");
+    expect(complete.draft.stoppedAtTime).toBe("10:25");
+    expect(buildTimelineInlineSavePlan(complete, entry, localDate("2026-08-11T00:00")).payload)
+      .toEqual({ stoppedAt: localIso("2026-08-10T10:25") });
+  });
+
   it("retains an incomplete picker value and rejects it at commit time", () => {
     const entry = timeEntry();
     const edit = updateTimelineInlineTime(

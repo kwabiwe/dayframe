@@ -16,9 +16,12 @@ describe("calendar grid", () => {
 });
 
 describe("time input", () => {
-  it("masks typed digits and normalises compact values", () => {
-    expect(maskTimeInput("725")).toBe("7:25");
+  it("keeps typed digits stable and normalises compact values on commit", () => {
+    expect(maskTimeInput("725")).toBe("725");
+    expect(maskTimeInput("1025")).toBe("1025");
+    expect(maskTimeInput("10:25")).toBe("10:25");
     expect(parseTimeInput("725")).toBe("07:25");
+    expect(parseTimeInput("1025")).toBe("10:25");
     expect(parseTimeInput("9")).toBe("09:00");
     expect(parseTimeInput("2345")).toBe("23:45");
   });

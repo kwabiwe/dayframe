@@ -27,6 +27,53 @@ describe("TimeEntryQuickEditorModal", () => {
     document.body.innerHTML = "";
   });
 
+  it("uses one Edit Entry title without repeating completed or running descriptions", async () => {
+    const completed = renderModal({ sourceEntry: timeEntry({ description: "Sleep" }) });
+    const completedEditor = await screen.findByTestId("time-entry-quick-editor");
+    expect(completedEditor.querySelector(".calendar-compact-editor-header")?.textContent).toBe("Edit Entry");
+    expect((screen.getByLabelText("Time entry description") as HTMLInputElement).value).toBe("Sleep");
+
+    completed.unmount();
+    renderModal({ sourceEntry: timeEntry({ description: null, stoppedAt: null }) });
+    const runningEditor = await screen.findByTestId("time-entry-quick-editor");
+    expect(runningEditor.querySelector(".calendar-compact-editor-header strong")?.textContent).toBe("Edit Entry");
+    expect(runningEditor.querySelector(".calendar-compact-running-status")?.textContent).toBe("Running timer");
+    expect(runningEditor.querySelector(".calendar-compact-editor-header")?.textContent).not.toContain("Untitled entry");
+  });
+
+  it("opens and applies suggestions for empty Uncategorized completed and running entries", async () => {
+    for (const stoppedAt of ["2026-08-04T10:00:00.000Z", null]) {
+      const view = renderModal({
+        sourceEntry: timeEntry({ categoryId: null, categoryName: null, description: null, stoppedAt, tagNames: [], tags: [] })
+      });
+      const description = await screen.findByLabelText("Time entry description") as HTMLInputElement;
+      const suggestions = await screen.findByRole("listbox", { name: "Suggestions" });
+
+      expect(description.value).toBe("");
+      expect(suggestions.parentElement).toBe(document.body);
+      expect(suggestions.textContent).toContain("Deep planning");
+      fireEvent.keyDown(description, { key: "ArrowDown" });
+      expect(document.activeElement?.textContent).toContain("Deep planning");
+      await userEvent.keyboard("{Enter}");
+
+      expect(description.value).toBe("Deep planning");
+      expect(screen.getByRole("button", { name: "Remove tag Deep work" })).not.toBeNull();
+      expect(screen.getByRole("button", { name: /Focus/ })).not.toBeNull();
+      await waitFor(() => expect(screen.queryByRole("listbox", { name: "Suggestions" })).toBeNull());
+      view.unmount();
+    }
+  });
+
+  it("reopens suggestions when an existing description is cleared", async () => {
+    renderModal();
+    const description = await screen.findByLabelText("Time entry description") as HTMLInputElement;
+
+    expect(screen.queryByRole("listbox", { name: "Suggestions" })).toBeNull();
+    fireEvent.change(description, { target: { value: "" } });
+
+    expect(await screen.findByRole("listbox", { name: "Suggestions" })).not.toBeNull();
+  });
+
   it("hydrates, removes and selects tags and saves one Place-safe partial payload", async () => {
     const onClose = vi.fn();
     const onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true });
@@ -109,6 +156,39 @@ describe("TimeEntryQuickEditorModal", () => {
       stoppedAt: localIso("2026-08-04T09:30")
     });
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("accepts four compact digits without losing the fourth digit to controlled-input masking", async () => {
+    const onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    renderModal({ onSave });
+    const finish = await screen.findByLabelText("Finish time") as HTMLInputElement;
+
+    await user.clear(finish);
+    await user.type(finish, "1025");
+
+    expect(finish.value).toBe("10:25");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+    expect(onSave.mock.calls[0][0].payload).toEqual({ stoppedAt: localIso("2026-08-04T10:25") });
+  });
+
+  it("normalises three compact digits on blur before Save", async () => {
+    const onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    renderModal({ onSave });
+    const start = await screen.findByLabelText("Start time") as HTMLInputElement;
+
+    await user.clear(start);
+    await user.type(start, "725");
+    expect(start.value).toBe("725");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+    expect(onSave.mock.calls[0][0].payload).toEqual({
+      startedAt: localIso("2026-08-04T07:25"),
+      stoppedAt: localIso("2026-08-04T08:25")
+    });
   });
 
   it("closes a no-change existing entry from Enter without PATCH", async () => {
@@ -281,13 +361,26 @@ function renderModal({
 } = {}) {
   return render(createElement(TimeEntryQuickEditorModal, {
     capturedNow: new Date("2026-08-04T12:00:00.000Z"),
-    categories: [],
+    categories: [{ id: "focus", name: "Focus", color: "mint", isPinned: false }],
     entry: sourceEntry,
     isTimerBusy: false,
     onClose,
     onDelete,
     onSave,
     peerEntries: [],
+    taskSuggestions: [{
+      key: "deep-planning",
+      categoryId: "focus",
+      categoryName: "Focus",
+      categoryColor: "mint",
+      description: "Deep planning",
+      lastSeenAt: "2026-08-04T08:00:00.000Z",
+      score: 10,
+      section: "recent",
+      useCount: 3,
+      totalSeconds: 10_800,
+      tagNames: ["Deep work"]
+    }],
     tags: [
       { id: "planning", name: "Planning", normalizedName: "planning", usageCount: 2 },
       { id: "deep-work", name: "Deep work", normalizedName: "deep work", usageCount: 1 }

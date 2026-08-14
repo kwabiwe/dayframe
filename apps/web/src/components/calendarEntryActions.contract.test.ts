@@ -17,6 +17,7 @@ describe("shared web time-entry quick editor", () => {
     expect(quick).toContain("export function TimeEntryQuickEditorPanel");
     expect(quick).toContain("export function TimeEntryQuickEditorModal");
     expect(anchored).toContain("<TimeEntryQuickEditorPanel");
+    expect(anchored).toContain("showCancel");
     expect(entries).toContain("<TimeEntryQuickEditorModal");
     expect(reports).toContain("<TimeEntryQuickEditorModal");
     expect(existsSync(fileURLToPath(new URL("./EditTimeEntryDialog.tsx", import.meta.url)))).toBe(false);
@@ -32,7 +33,7 @@ describe("shared web time-entry quick editor", () => {
     expect(timeline).toContain('current.entryId === target.entryId');
   });
 
-  it("renders tags, compact category selection, icon-only dates and local day offsets", () => {
+  it("renders tags, historical suggestions, compact category selection, icon-only dates and local day offsets", () => {
     expect(quick).toContain("<InlineTagInput");
     expect(quick).toContain("selectedTagNames={draft.tagNames}");
     expect(quick).toContain("<CategoryPicker");
@@ -42,19 +43,27 @@ describe("shared web time-entry quick editor", () => {
     expect(quick).toContain("calendarEntryLocalDayOffset");
     expect(quick).toContain("calendar-compact-day-offset");
     expect(quick).not.toContain("placeId");
-    expect(quick).not.toContain("taskSuggestions");
+    expect(quick).toContain("taskSuggestions");
+    expect(quick).toContain("<TaskSuggestionsPanel");
+    expect(entries).toContain("taskSuggestions={shellData?.taskSuggestions ?? []}");
+    expect(reports).toContain("taskSuggestions={shellData?.taskSuggestions ?? []}");
+    expect(timeline).toContain("taskSuggestions={shellData?.taskSuggestions ?? []}");
     expect(quick).toContain("onEnter={controller.handleDescriptionEnter}");
     expect(quick).toContain('aria-label="Duration in hours and minutes"');
     expect(quick).toContain('placeholder="00:30"');
   });
 
   it("uses one fixed feedback plane with danger discard copy and equal action sizing", () => {
+    expect(quick).toContain('const editorHeading = props.mode === "entry" ? "Edit Entry" : "Calendar Entry";');
+    expect(quick).toContain("<strong>{editorHeading}</strong>");
+    expect(quick).not.toContain('className="calendar-compact-editor-kicker"');
     expect(quick).toContain('data-feedback-mode={feedbackMode}');
     expect(quick).toContain("Discard changes?");
     expect(quick).toContain("Go back");
     expect(styles).toMatch(/\.calendar-compact-editor-footer \{[^}]*height:\s*var\(--calendar-compact-feedback-height\);[^}]*overflow:\s*hidden;/s);
     expect(styles).toMatch(/\.calendar-compact-discard-confirmation strong \{[^}]*color:\s*var\(--danger-text\);[^}]*font-size:\s*14px;[^}]*line-height:\s*1\.2;/s);
     expect(styles).toMatch(/\.calendar-compact-save,[\s\S]*\.calendar-compact-discard-confirm \{[^}]*height:\s*var\(--web-control-height\);[^}]*font-size:\s*14px;[^}]*line-height:\s*1\.2;/s);
+    expect(styles).toMatch(/\.calendar-compact-save,[\s\S]*?\.calendar-compact-cancel \{[^}]*width:\s*var\(--calendar-compact-action-width\);[^}]*flex:\s*0 0 var\(--calendar-compact-action-width\);/s);
   });
 
   it("uses borderless inset fields, neutral focus, and three/two/one temporal columns", () => {
@@ -66,6 +75,11 @@ describe("shared web time-entry quick editor", () => {
     expect(styles).toMatch(/\.calendar-compact-date-time-controls:focus-within \{[^}]*var\(--web-focus-border\)/s);
     expect(styles).toMatch(/\.calendar-compact-date-trigger \{[^}]*border-radius:\s*0;[^}]*background:\s*transparent;/s);
     expect(styles).toMatch(/\.calendar-compact-date-trigger:hover,[\s\S]*background:\s*transparent;/s);
+    expect(quick).toContain('className="calendar-compact-duration-field"');
+    expect(quick).toContain('<span className="calendar-compact-field-label">Duration</span>');
+    expect(quick).not.toContain('<strong className="tabular">');
+    expect(styles).toMatch(/\.calendar-compact-date-time-controls > input,[\s\S]*?\.calendar-compact-running-value \{[^}]*font-size:\s*15px;[^}]*font-weight:\s*400;[^}]*line-height:\s*21px;/s);
+    expect(styles).toMatch(/\.dayframe-date-time-compact-value \{[^}]*font-size:\s*15px;[^}]*font-weight:\s*400;[^}]*line-height:\s*21px;/s);
   });
 
   it("keeps the CSS-only Calendar text hierarchy and narrow-container fallback", () => {

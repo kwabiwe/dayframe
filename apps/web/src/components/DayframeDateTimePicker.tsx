@@ -12,14 +12,20 @@ function parseLocal(value: string) {
 }
 
 export function DayframeDateTimePicker({
+  compact = false,
+  dayOffset = 0,
   defaultValue,
   id,
+  label,
   name,
   onChange,
   required
 }: {
+  compact?: boolean;
+  dayOffset?: number;
   defaultValue: string;
   id: string;
+  label?: string;
   name: string;
   onChange?: (value: string) => void;
   required?: boolean;
@@ -41,6 +47,11 @@ export function DayframeDateTimePicker({
     hour: "2-digit",
     minute: "2-digit"
   }).format(new Date(value));
+  const dayOffsetLabel = dayOffset === 1
+    ? "one day after Start"
+    : dayOffset > 1
+      ? `${dayOffset} days after Start`
+      : null;
 
   useEffect(() => {
     if (!open) return undefined;
@@ -82,9 +93,12 @@ export function DayframeDateTimePicker({
   }
 
   return (
-    <div className="dayframe-date-time" ref={rootRef}>
+    <div className={`dayframe-date-time${compact ? " is-compact" : ""}`} ref={rootRef}>
       <input name={name} type="hidden" value={value} />
       <button
+        aria-label={compact
+          ? `${label ? `${label} date and time` : "Choose date and time"}, currently ${displayLabel}${dayOffsetLabel ? `, ${dayOffsetLabel}` : ""}`
+          : undefined}
         aria-controls={panelId}
         aria-expanded={open}
         aria-haspopup="dialog"
@@ -95,7 +109,12 @@ export function DayframeDateTimePicker({
         ref={triggerRef}
         type="button"
       >
-        <span>{displayLabel}</span>
+        <span className={compact ? "dayframe-date-time-compact-value" : undefined}>
+          {compact ? current.time : displayLabel}
+        </span>
+        {dayOffset > 0 ? (
+          <span aria-hidden="true" className="dayframe-date-time-day-offset">+{dayOffset}</span>
+        ) : null}
         <CalendarDays aria-hidden="true" size={17} />
       </button>
       <section

@@ -135,7 +135,7 @@ describe("Calendar compact temporal DOM", () => {
     const editor = await screen.findByTestId("calendar-compact-editor");
     const feedback = editor.querySelector(".calendar-compact-editor-footer") as HTMLElement;
     expect(feedback.getAttribute("data-feedback-mode")).toBe("overlap");
-    expect(screen.getByText("Overlaps with 1 entry by 00:15")).not.toBeNull();
+    expect(screen.getByText("Overlaps one entry by 00:15")).not.toBeNull();
 
     const finish = screen.getByLabelText("Finish time") as HTMLInputElement;
     fireEvent.change(finish, { target: { value: "09:00" } });
@@ -158,7 +158,7 @@ describe("Calendar compact temporal DOM", () => {
     expect(screen.getByRole("button", { name: "Discard" })).not.toBeNull();
   });
 
-  it("renders exact compact overlap pluralization without peer names or ranges", () => {
+  it("renders one line of compact overlap copy without iconography, peer names or ranges", () => {
     const peers = [
       entry("2026-08-02T10:00", "2026-08-02T10:15", "peer-1", "Private name one"),
       entry("2026-08-02T10:15", "2026-08-02T10:30", "peer-2", "Private name two")
@@ -169,9 +169,40 @@ describe("Calendar compact temporal DOM", () => {
       entries: peers
     }));
 
-    expect(screen.getByRole("status").textContent).toContain("Overlaps with 2 entries by 00:30");
+    const notice = screen.getByRole("status");
+    expect(notice.textContent).toContain("Overlaps 2 entries by 00:30");
+    expect(notice.querySelector("svg")).toBeNull();
     expect(screen.queryByText(/Private name/)).toBeNull();
     expect(screen.queryByText(/This is allowed/)).toBeNull();
+  });
+
+  it("allows a completed entry to finish in the future without error styling", async () => {
+    renderEditor({
+      capturedNow: new Date(2026, 7, 2, 10),
+      sourceEntry: entry("2026-08-02T09:00", "2026-08-02T09:30")
+    });
+    const finish = await screen.findByLabelText("Finish time") as HTMLInputElement;
+
+    fireEvent.change(finish, { target: { value: "11:00" } });
+    fireEvent.blur(finish);
+
+    expect(finish.value).toBe("11:00");
+    expect(finish.getAttribute("aria-invalid")).toBeNull();
+    expect(finish.getAttribute("aria-describedby")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect((screen.getByLabelText("Duration") as HTMLInputElement).value).toBe("02:00");
+  });
+
+  it("exposes Calendar Cancel and routes it through the shared clean-dismiss path", async () => {
+    const onDismiss = vi.fn();
+    renderEditor({
+      onDismiss,
+      sourceEntry: entry("2026-08-02T10:00", "2026-08-02T10:30")
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onDismiss).toHaveBeenCalledWith({ restoreFocus: true });
   });
 
   it("keeps running Finish static, Duration read-only and live, and Start save-only", async () => {
@@ -186,6 +217,10 @@ describe("Calendar compact temporal DOM", () => {
 
     await act(async () => vi.advanceTimersByTime(0));
     expect(screen.getByText("Running")).not.toBeNull();
+    const editor = screen.getByTestId("calendar-compact-editor");
+    expect(editor.querySelector(".calendar-compact-editor-header .calendar-compact-running-status")?.textContent).toBe("Running timer");
+    expect(editor.querySelector(".calendar-compact-editor-footer")?.textContent).not.toContain("Running timer");
+    expect(screen.getByRole("button", { name: "Cancel" })).not.toBeNull();
     expect(screen.queryByLabelText("Finish time")).toBeNull();
     expect(screen.queryByRole("button", { name: /Choose Finish date/ })).toBeNull();
     expect(screen.queryByLabelText("Duration")).toBeNull();
@@ -216,11 +251,13 @@ function renderCompletedEditor(peers: TimeEntryRow[] = []) {
 
 function renderEditor({
   capturedNow = new Date(2026, 7, 2, 12),
+  onDismiss = vi.fn(),
   onSave = vi.fn().mockResolvedValue({ ok: true }),
   peers = [],
   sourceEntry
 }: {
   capturedNow?: Date;
+  onDismiss?: (options: { restoreFocus: boolean }) => void;
   onSave?: (plan: CalendarEntryCompactSavePlan) => Promise<{ ok: true } | { ok: false; error: string }>;
   peers?: TimeEntryRow[];
   sourceEntry: TimeEntryRow;
@@ -239,7 +276,7 @@ function renderEditor({
     isTimerBusy: false,
     mode: "entry" as const,
     onDelete: vi.fn(),
-    onDismiss: vi.fn(),
+    onDismiss,
     onSave,
     onStartAgain: vi.fn().mockResolvedValue({ ok: true }),
     peerEntries: peers,

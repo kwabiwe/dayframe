@@ -177,6 +177,11 @@ export function isCompleteCalendarEntryCompactTimeInput(value: string) {
   return /^(?:\d{1,2}:\d{2}|\d{3,4})$/.test(trimmed) && Boolean(parseTimeInput(trimmed));
 }
 
+export function isCalendarEntryCompactTimeInputReadyToSynchronize(value: string) {
+  const trimmed = value.trim();
+  return /^(?:\d{1,2}:\d{2}|\d{4})$/.test(trimmed) && Boolean(parseTimeInput(trimmed));
+}
+
 export function isCompleteCalendarEntryCompactDurationInput(value: string) {
   const trimmed = value.trim().toLowerCase();
   return /^(?:\d+m?|\d+:\d{2}(?::\d{2})?|\d+h(?:\s*\d+m?)?)$/.test(trimmed);
@@ -275,7 +280,7 @@ export function buildCalendarEntryCompactSavePlan({
     originalStartedAt: entry.startedAt,
     originalStoppedAt: entry.stoppedAt
   });
-  validateNotFuture(window.startedAt, window.stoppedAt, now);
+  validateStartNotFuture(window.startedAt, now);
 
   const payload: CalendarEntryCompactPatch = {};
   if (dirty.description && description !== entry.description) payload.description = description;
@@ -310,7 +315,7 @@ export function buildCalendarEntryCompactCreatePlan({
     originalStartedAt: source.startedAt,
     originalStoppedAt: source.stoppedAt
   });
-  validateNotFuture(window.startedAt, window.stoppedAt, now);
+  validateStartNotFuture(window.startedAt, now);
   const stoppedAt = window.stoppedAt as string;
 
   return {
@@ -516,11 +521,8 @@ function draftEdgeCandidates({
   return candidates;
 }
 
-function validateNotFuture(startedAt: string, stoppedAt: string | null, now: Date) {
+function validateStartNotFuture(startedAt: string, now: Date) {
   if (new Date(startedAt).getTime() > now.getTime()) throw new Error("Start time cannot be in the future.");
-  if (stoppedAt && new Date(stoppedAt).getTime() > now.getTime()) {
-    throw new Error("Finish time cannot be in the future.");
-  }
 }
 
 function localParts(value: string) {
