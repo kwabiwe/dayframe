@@ -155,6 +155,25 @@ export async function invalidateMobileSession() {
   }
 }
 
+export function invalidateMobileSessionIfCurrent(rejectedToken: string) {
+  return serialiseSessionOperation(async () => {
+    if (cachedSessionToken !== rejectedToken) return false;
+
+    sessionRevision += 1;
+    cachedSessionToken = null;
+    try {
+      await withInteractionRetry(() =>
+        SecureStore.deleteItemAsync(SESSION_TOKEN_KEY, SESSION_TOKEN_OPTIONS)
+      );
+      await withInteractionRetry(() => SecureStore.deleteItemAsync(LEGACY_SESSION_TOKEN_KEY));
+    } finally {
+      await clearRuntimeContext();
+      publishMobileSignedOut();
+    }
+    return true;
+  });
+}
+
 function delay(milliseconds: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 }

@@ -7,7 +7,7 @@ import {
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
 import { mobileFetch } from "./mobile-network";
-import { getSessionToken, invalidateMobileSession } from "./secure-session";
+import { getSessionToken, invalidateMobileSessionIfCurrent } from "./secure-session";
 import type {
   MobileBootstrap,
   MobileReviewItem
@@ -873,7 +873,7 @@ async function synchroniseReviewMutationsUnsafe(
           "restore"
         );
         await markAccountAuthenticationRequired(account.account_key);
-        await invalidateMobileSession();
+        await invalidateMobileSessionIfCurrent(token);
         stopped = true;
         break;
       }

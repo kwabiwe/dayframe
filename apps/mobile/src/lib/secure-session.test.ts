@@ -32,6 +32,7 @@ const {
   clearSessionToken,
   getSessionToken,
   invalidateMobileSession,
+  invalidateMobileSessionIfCurrent,
   isKeychainInteractionUnavailable,
   resetSessionTokenCacheForTesting,
   setSessionToken
@@ -214,6 +215,42 @@ describe("secure mobile session", () => {
     }
 
     expect(values.size).toBe(0);
+    expect(listener).toHaveBeenCalledOnce();
+  });
+
+  it("does not let a delayed old-session rejection sign out a newer login", async () => {
+    await setSessionToken("account-a-token");
+    const rejectedToken = await getSessionToken();
+    await setSessionToken("account-b-token");
+    const listener = vi.fn();
+    const unsubscribe = subscribeMobileSignedOut(listener);
+
+    try {
+      await expect(invalidateMobileSessionIfCurrent(rejectedToken!)).resolves.toBe(false);
+    } finally {
+      unsubscribe();
+    }
+
+    await expect(getSessionToken()).resolves.toBe("account-b-token");
+    expect(values.get("dayframe.localSessionToken.v2")).toBe("account-b-token");
+    expect(nativeModule.clearRuntimeContext).not.toHaveBeenCalled();
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("invalidates and publishes sign-out when the rejected bearer is still current", async () => {
+    await setSessionToken("expired-token");
+    const listener = vi.fn();
+    const unsubscribe = subscribeMobileSignedOut(listener);
+
+    try {
+      await expect(invalidateMobileSessionIfCurrent("expired-token")).resolves.toBe(true);
+    } finally {
+      unsubscribe();
+    }
+
+    await expect(getSessionToken()).resolves.toBeNull();
+    expect(values.size).toBe(0);
+    expect(nativeModule.clearRuntimeContext).toHaveBeenCalledOnce();
     expect(listener).toHaveBeenCalledOnce();
   });
 });
