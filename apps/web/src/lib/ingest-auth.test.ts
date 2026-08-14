@@ -77,6 +77,33 @@ describe("resolveRequestSession", () => {
     );
     log.mockRestore();
   });
+
+  it.each(["local", "provider"] as const)(
+    "sanitizes coordinate-bearing diagnostic paths in %s auth mode",
+    async (authMode) => {
+      process.env.DAYFRAME_AUTH_MODE = authMode;
+      const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+      await expect(
+        resolveRequestSession(
+          new Request("https://dayframe.test/api/map-tiles/20/742111/506821"),
+          { diagnosticPathname: "/api/map-tiles/[z]/[x]/[y]" }
+        )
+      ).rejects.toMatchObject({
+        status: 401,
+        code: "session_cookie_missing"
+      });
+      expect(log).toHaveBeenCalledWith(
+        "Dayframe auth session",
+        expect.objectContaining({
+          reason: "session_cookie_missing",
+          pathname: "/api/map-tiles/[z]/[x]/[y]"
+        })
+      );
+      expect(JSON.stringify(log.mock.calls)).not.toMatch(/742111|506821/);
+      log.mockRestore();
+    }
+  );
 });
 
 function restoreEnv(key: string, value: string | undefined) {

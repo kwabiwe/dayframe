@@ -109,6 +109,9 @@ routes; only those server routes call Geoapify. Do not add
 send it in a response payload. Review map tiles are private browser-cacheable
 and require the normal Dayframe session; the style response contains only a
 relative same-origin tile template and the required provider/data attribution.
+Authentication diagnostics use a coordinate-free route template, never the
+requested XYZ values. Provider tile bodies are streamed through a hard 3 MB
+limit and cancelled as soon as that limit is exceeded.
 
 Add `GEOAPIFY_API_KEY` separately to both Vercel Preview and Production
 environments. Adding or changing an environment variable only affects new

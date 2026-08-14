@@ -48,6 +48,15 @@ to Review evidence/provider states and the Resolve section.
   narrow threshold. Category uses the shared picker and portals its menu outside
   the query container.
 
+## Review follow-up
+
+- Keep normal session authentication on every map-tile request, but pass a
+  coordinate-free route template to auth diagnostics. Neither successful nor
+  rejected tile requests may persist the requested XYZ values in logs.
+- Treat `Content-Length` as an early rejection hint, not the size boundary.
+  Read provider bodies incrementally, enforce the 3 MB cumulative limit while
+  streaming, and cancel the provider body immediately when it is exceeded.
+
 ## Motion contract
 
 - Trigger: the existing View evidence disclosure opens the existing panel.
@@ -66,8 +75,9 @@ to Review evidence/provider states and the Resolve section.
 
 ## Validation target
 
-- Behavioural tests for map provider routes, authentication, coordinate bounds,
-  key non-disclosure, evidence-state language, loading/error retry, Category
+- Behavioural tests for map provider routes, authentication, coordinate-free
+  diagnostics, bounded chunked responses, coordinate bounds, key
+  non-disclosure, evidence-state language, loading/error retry, Category
   selection, and Resolve submission.
 - Web typecheck, lint, focused/full tests, production build, docs checks, and
   clean diff checks.

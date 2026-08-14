@@ -3,6 +3,7 @@ import {
   createGeoapifyMapTileProvider,
   dayframeMapStyle,
   isValidMapTileCoordinate,
+  MAP_TILE_MAX_BYTES,
   MapTileProviderError
 } from "./map-tiles";
 
@@ -55,5 +56,28 @@ describe("map tiles", () => {
     await expect(provider.fetchTile({ zoom: 1, x: 0, y: 0 })).rejects.toEqual(
       new MapTileProviderError("provider_invalid_response")
     );
+  });
+
+  it("cancels a chunked provider response as soon as it exceeds the byte limit", async () => {
+    const cancel = vi.fn();
+    const response = new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(MAP_TILE_MAX_BYTES));
+        controller.enqueue(new Uint8Array(1));
+      },
+      cancel
+    }), {
+      status: 200,
+      headers: { "Content-Type": "image/png" }
+    });
+    const provider = createGeoapifyMapTileProvider({
+      apiKey: "server-secret",
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(response)
+    });
+
+    await expect(provider.fetchTile({ zoom: 1, x: 0, y: 0 })).rejects.toEqual(
+      new MapTileProviderError("provider_invalid_response")
+    );
+    expect(cancel).toHaveBeenCalledOnce();
   });
 });

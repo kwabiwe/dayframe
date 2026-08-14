@@ -79,14 +79,18 @@ export function createGeoapifyMapTileProvider({
         if (!contentType?.startsWith("image/")) {
           throw new MapTileProviderError("provider_invalid_response");
         }
-        const declaredLength = Number(response.headers.get("content-length"));
-        if (Number.isFinite(declaredLength) && declaredLength > MAP_TILE_MAX_BYTES) {
+        const contentLength = response.headers.get("content-length");
+        const declaredLength = contentLength === null ? null : Number(contentLength);
+        if (
+          declaredLength !== null &&
+          (!Number.isFinite(declaredLength) ||
+            declaredLength < 0 ||
+            declaredLength > MAP_TILE_MAX_BYTES)
+        ) {
+          await response.body?.cancel().catch(() => undefined);
           throw new MapTileProviderError("provider_invalid_response");
         }
-        const body = await response.arrayBuffer();
-        if (!body.byteLength || body.byteLength > MAP_TILE_MAX_BYTES) {
-          throw new MapTileProviderError("provider_invalid_response");
-        }
+        const body = await readBoundedTileBody(response);
         return { body, contentType };
       } catch (error) {
         if (error instanceof MapTileProviderError) throw error;
@@ -101,6 +105,41 @@ export function createGeoapifyMapTileProvider({
       }
     }
   };
+}
+
+async function readBoundedTileBody(response: Response) {
+  const reader = response.body?.getReader();
+  if (!reader) throw new MapTileProviderError("provider_invalid_response");
+
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value?.byteLength) continue;
+
+      totalBytes += value.byteLength;
+      if (totalBytes > MAP_TILE_MAX_BYTES) {
+        await reader.cancel("map_tile_too_large").catch(() => undefined);
+        throw new MapTileProviderError("provider_invalid_response");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (!totalBytes) throw new MapTileProviderError("provider_invalid_response");
+
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body.buffer;
 }
 
 export function dayframeMapStyle() {

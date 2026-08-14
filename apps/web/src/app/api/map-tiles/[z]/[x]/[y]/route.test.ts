@@ -31,12 +31,16 @@ describe("/api/map-tiles/:z/:x/:y", () => {
   });
 
   it("returns a private browser-cacheable tile after authentication", async () => {
-    const response = await GET(request("/api/map-tiles/12/2048/1362"), context("12", "2048", "1362"));
+    const tileRequest = request("/api/map-tiles/12/2048/1362");
+    const response = await GET(tileRequest, context("12", "2048", "1362"));
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toBe("image/png");
     expect(response.headers.get("Cache-Control")).toBe("private, max-age=86400");
     expect(response.headers.get("Vary")).toContain("Cookie");
+    expect(mocks.resolveRequestSession).toHaveBeenCalledWith(tileRequest, {
+      diagnosticPathname: "/api/map-tiles/[z]/[x]/[y]"
+    });
     expect(mocks.fetchTile).toHaveBeenCalledWith({
       zoom: 12,
       x: 2048,

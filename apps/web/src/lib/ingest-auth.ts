@@ -17,6 +17,7 @@ export type ResolveSessionOptions = {
   allowIngestToken?: boolean;
   allowBearerIntegrationToken?: boolean;
   requiredScopes?: string[];
+  diagnosticPathname?: string;
 };
 
 type IntegrationTokenRow = {
@@ -52,11 +53,22 @@ export async function resolveRequestSession(
 
   if (authMode === "local") {
     if (options.allowIngestToken && options.allowBearerIntegrationToken && bearer) {
-      return resolveBearerIntegrationOrAppSession(request, bearer, requiredScopes, "local");
+      return resolveBearerIntegrationOrAppSession(
+        request,
+        bearer,
+        requiredScopes,
+        "local",
+        options.diagnosticPathname
+      );
     }
 
     if (appToken) {
-      const session = await resolveAppTokenSession(request, appToken, "local");
+      const session = await resolveAppTokenSession(
+        request,
+        appToken,
+        "local",
+        options.diagnosticPathname
+      );
       return scopedSession(session, requiredScopes);
     }
 
@@ -65,17 +77,28 @@ export async function resolveRequestSession(
       return scopedSession(tokenSession, requiredScopes);
     }
 
-    logSessionDiagnostic(request, "session_cookie_missing");
+    logSessionDiagnostic(request, "session_cookie_missing", options.diagnosticPathname);
     throw sessionAuthError("session_cookie_missing");
   }
 
   if (authMode === "provider") {
     if (options.allowIngestToken && options.allowBearerIntegrationToken && bearer) {
-      return resolveBearerIntegrationOrAppSession(request, bearer, requiredScopes, "provider");
+      return resolveBearerIntegrationOrAppSession(
+        request,
+        bearer,
+        requiredScopes,
+        "provider",
+        options.diagnosticPathname
+      );
     }
 
     if (appToken) {
-      const session = await resolveAppTokenSession(request, appToken, "provider");
+      const session = await resolveAppTokenSession(
+        request,
+        appToken,
+        "provider",
+        options.diagnosticPathname
+      );
       return scopedSession(session, requiredScopes);
     }
 
@@ -84,7 +107,7 @@ export async function resolveRequestSession(
       return scopedSession(tokenSession, requiredScopes);
     }
 
-    logSessionDiagnostic(request, "session_cookie_missing");
+    logSessionDiagnostic(request, "session_cookie_missing", options.diagnosticPathname);
     throw sessionAuthError("session_cookie_missing");
   }
 
@@ -96,7 +119,8 @@ async function resolveBearerIntegrationOrAppSession(
   request: Request,
   bearer: string,
   requiredScopes: string[],
-  authMode: "local" | "provider"
+  authMode: "local" | "provider",
+  diagnosticPathname?: string
 ) {
   try {
     const tokenSession = await resolveTokenSession(bearer);
@@ -107,17 +131,18 @@ async function resolveBearerIntegrationOrAppSession(
     }
   }
 
-  const session = await resolveAppTokenSession(request, bearer, authMode);
+  const session = await resolveAppTokenSession(request, bearer, authMode, diagnosticPathname);
   return scopedSession(session, requiredScopes);
 }
 
 async function resolveAppTokenSession(
   request: Request,
   token: string,
-  authMode: "local" | "provider"
+  authMode: "local" | "provider",
+  diagnosticPathname?: string
 ) {
   const resolution = await inspectLocalSession(token, authMode);
-  logSessionDiagnostic(request, resolution.reason);
+  logSessionDiagnostic(request, resolution.reason, diagnosticPathname);
   if (resolution.reason !== "session_valid") throw sessionAuthError(resolution.reason);
   return resolution.session;
 }
@@ -217,11 +242,14 @@ function timingSafeEqual(left: string, right: string) {
   return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-function logSessionDiagnostic(request: Request, reason: SessionReasonCode) {
-  const url = new URL(request.url);
+function logSessionDiagnostic(
+  request: Request,
+  reason: SessionReasonCode,
+  diagnosticPathname?: string
+) {
   console.info("Dayframe auth session", {
     reason,
-    pathname: url.pathname,
+    pathname: diagnosticPathname ?? new URL(request.url).pathname,
     method: request.method,
     deploymentEnvironment: process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? "unknown",
     cookiePresent: Boolean(cookieToken(request)),

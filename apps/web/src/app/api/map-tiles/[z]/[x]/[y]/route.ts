@@ -12,7 +12,9 @@ export async function GET(
   context: { params: Promise<{ z: string; x: string; y: string }> }
 ) {
   try {
-    await resolveRequestSession(request);
+    await resolveRequestSession(request, {
+      diagnosticPathname: "/api/map-tiles/[z]/[x]/[y]"
+    });
     const params = await context.params;
     const zoom = strictInteger(params.z);
     const x = strictInteger(params.x);
