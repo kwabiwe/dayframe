@@ -42,4 +42,8 @@ RCT_EXTERN_METHOD(setRuntimeContext:(NSString *)apiBase
 RCT_EXTERN_METHOD(clearRuntimeContext:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(clearRuntimeContextIfToken:(NSString *)sessionToken
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
 @end

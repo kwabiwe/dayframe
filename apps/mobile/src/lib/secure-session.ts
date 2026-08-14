@@ -28,6 +28,7 @@ export function resetSessionTokenCacheForTesting() {
 type DayframeLiveActivityNativeModule = {
   setRuntimeContext?: (apiBase: string, sessionToken: string) => Promise<boolean>;
   clearRuntimeContext?: () => Promise<boolean>;
+  clearRuntimeContextIfToken?: (sessionToken: string) => Promise<boolean>;
 };
 
 function liveActivityNativeModule() {
@@ -48,6 +49,14 @@ async function clearRuntimeContext() {
     await liveActivityNativeModule()?.clearRuntimeContext?.();
   } catch {
     // Clearing the JS session must not be blocked by an unavailable optional native module.
+  }
+}
+
+async function clearRuntimeContextIfCurrent(token: string) {
+  try {
+    await liveActivityNativeModule()?.clearRuntimeContextIfToken?.(token);
+  } catch {
+    // A rejected request must not let an optional native module disrupt session recovery.
   }
 }
 
@@ -173,7 +182,7 @@ export function invalidateMobileSessionIfCurrent(rejectedToken: string) {
 
     let invalidated = false;
     if (invalidationRevision === sessionRevision) {
-      await clearRuntimeContext();
+      await clearRuntimeContextIfCurrent(rejectedToken);
       if (invalidationRevision === sessionRevision) {
         publishMobileSignedOut();
         invalidated = true;

@@ -8,6 +8,9 @@ function source(relativePath: string) {
 
 const locationStoreSource = source("./location/store.ts");
 const reviewSyncStoreSource = source("./reviewSyncStore.ts");
+const apiSource = source("./api.ts");
+const networkSource = source("./mobile-network.ts");
+const nativeStorageSource = source("../../ios/Dayframe/DayframeSharedStorage.swift");
 
 describe("background session invalidation contracts", () => {
   it("guards delayed location upload and replay rejections with their captured bearer", () => {
@@ -18,5 +21,17 @@ describe("background session invalidation contracts", () => {
   it("guards delayed Review sync rejections with their captured bearer", () => {
     expect(reviewSyncStoreSource).toContain("invalidateMobileSessionIfCurrent(token)");
     expect(reviewSyncStoreSource).not.toContain("invalidateMobileSession()");
+  });
+
+  it("centralises ordinary and queued request rejection on the captured bearer", () => {
+    expect(networkSource).toContain("invalidateMobileSessionIfCurrent(rejectedToken)");
+    expect(networkSource).toContain("throw new StaleMobileSessionResponseError()");
+    expect(apiSource.match(/await clearSessionToken\(\)/g)).toHaveLength(1);
+    expect(apiSource).toContain("export async function logout()");
+  });
+
+  it("clears shortcut native context only when the rejected bearer still owns it", () => {
+    expect(nativeStorageSource).toContain("static func clear(sessionToken: String) -> Bool");
+    expect(nativeStorageSource).toContain("read(accessGroup: accessGroup)?.sessionToken == sessionToken");
   });
 });

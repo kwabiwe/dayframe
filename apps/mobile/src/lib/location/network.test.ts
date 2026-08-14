@@ -1,4 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../secure-session", () => ({
+  invalidateMobileSessionIfCurrent: vi.fn(() => Promise.resolve(true))
+}));
+
 import { fetchLocationSync } from "./network";
 
 describe("location sync network boundary", () => {

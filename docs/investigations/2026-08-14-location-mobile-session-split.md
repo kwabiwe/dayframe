@@ -57,13 +57,15 @@ split, which is why the installed build 94 still reproduced the failure.
   `credentials: "omit"`.
 - Keep the SecureStore bearer as the sole mobile API session carrier, including
   login, bootstrap, Review mutation, location upload, and replay requests.
-- When a background reconciliation request receives `401/403`, clear the bearer
-  and publish the same signed-out transition used by the visible app.
+- When any authenticated mobile request receives `401/403`, clear the rejected
+  bearer and its matching native shortcut context, then publish the signed-out
+  transition only if that bearer still owns the current session. A delayed
+  response from a replaced login must not clear or sign out the replacement.
 - Preserve queued evidence and retry it after the user signs in again. The
   privacy-driven seven-day raw-evidence retention remains unchanged.
-- Add executable coverage for cookie omission, background sign-out publication,
-  location timeouts, and the absence of direct runtime `fetch` calls outside the
-  mobile network boundary.
+- Add executable coverage for cookie omission, current-session sign-out,
+  delayed-response/login replacement races, location timeouts, and the absence
+  of direct runtime `fetch` calls outside the mobile network boundary.
 
 ## Recovery expectation
 

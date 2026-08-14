@@ -128,6 +128,15 @@ class DayframeLiveActivityModule: NSObject {
     resolve(true)
   }
 
+  @objc(clearRuntimeContextIfToken:resolver:rejecter:)
+  func clearRuntimeContextIfToken(
+    sessionToken: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    resolve(DayframeShortcutRuntimeContextStore.clear(sessionToken: sessionToken))
+  }
+
   private static func date(from value: String?) -> Date? {
     guard let value else {
       return nil

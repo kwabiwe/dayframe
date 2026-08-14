@@ -410,7 +410,6 @@ export async function fetchBootstrap(options: { date?: string } = {}): Promise<M
     headers: await authHeaders()
   });
   if (response.status === 401) {
-    await clearSessionToken();
     const reviewStore = await reviewSyncStore();
     if (reviewStore) await reviewStore.synchroniseReviewMutations();
     throw new AuthRequiredError();
@@ -432,7 +431,6 @@ export async function fetchTimerState(): Promise<TimerStateFingerprint> {
     cache: "no-store"
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) {
@@ -456,7 +454,6 @@ export async function registerLiveActivity(input: {
     body: JSON.stringify(input)
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) {
@@ -731,7 +728,6 @@ async function syncQueueUnlocked(options: SyncQueueOptions): Promise<SyncQueueRe
         body: JSON.stringify(queuedEventRequestBody(item))
       });
       if (response.status === 401 || response.status === 403) {
-        await clearSessionToken();
         throw new AuthRequiredError();
       }
       if (!response.ok) {
@@ -810,7 +806,6 @@ export async function deleteTimeEntry(id: string) {
     headers: await authHeaders()
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to delete timer"));
@@ -827,7 +822,6 @@ export async function updateTimeEntry(id: string, patch: TimeEntryUpdatePatch) {
     body: JSON.stringify(patch)
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to update timer"));
@@ -851,7 +845,6 @@ export async function createManualTimeEntry(input: ManualTimeEntryInput) {
     })
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to create time entry"));
@@ -868,7 +861,6 @@ export async function resolveReviewItem(id: string, action: ReviewItemAction) {
     body: JSON.stringify({ action })
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (response.status === 409) {
@@ -896,7 +888,6 @@ export async function resolveLocationReviewItem(id: string, action: LocationRevi
     body: JSON.stringify(action)
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to update location review"));
@@ -909,7 +900,6 @@ export async function fetchLocationReviewEvidence(id: string): Promise<LocationR
     { headers: await authHeaders(), cache: "no-store" }
   );
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to load location evidence"));
@@ -922,7 +912,6 @@ export async function deleteRecentLocationEvidence() {
     headers: await authHeaders()
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to delete recent location evidence"));
@@ -954,7 +943,6 @@ export async function reprocessHealthReviewItems(
     body: JSON.stringify({ preferences, limit: options.limit, force: options.force, mappings: options.mappings })
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to reprocess Health review items"));
@@ -988,7 +976,6 @@ export async function saveEditedReviewItem(
     })
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to save reviewed activity"));
@@ -1012,7 +999,6 @@ export async function createCategory(
     })
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to create category"));
@@ -1029,7 +1015,6 @@ export async function createTag(name: string): Promise<MobileTagResponse> {
     body: JSON.stringify({ name })
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to create tag"));
@@ -1048,7 +1033,6 @@ export async function ensureAutomaticLoggingCategories(
     body: JSON.stringify({ kinds })
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) {
@@ -1071,7 +1055,6 @@ export async function updateCategory(
     body: JSON.stringify({ id, ...options })
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to update category"));
@@ -1084,7 +1067,6 @@ export async function archiveCategory(id: string) {
     headers: await authHeaders()
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to delete category"));
@@ -1113,7 +1095,6 @@ export async function createPlace(input: { name: string } & PlaceMutationInput) 
       })
     });
     if (response.status === 401) {
-      await clearSessionToken();
       throw new AuthRequiredError();
     }
     if (!response.ok) throw new Error(await errorMessage(response, "Unable to save learned place"));
@@ -1132,7 +1113,6 @@ export async function createPlace(input: { name: string } & PlaceMutationInput) 
     })
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to save place"));
@@ -1160,7 +1140,6 @@ export async function ignoreLearnedPlace(id: string) {
     body: JSON.stringify({ id, status: "ignored" })
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to ignore learned place"));
@@ -1177,7 +1156,6 @@ export async function resolveLearnedPlaceLocation(id: string, address: LocationD
     body: JSON.stringify({ id, action: "resolve_location", address })
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to resolve learned place"));
@@ -1196,7 +1174,6 @@ export async function forgetLearnedPlace(id: string) {
     headers: await authHeaders()
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to forget learned place"));
@@ -1217,7 +1194,6 @@ export async function updatePlace(id: string, input: PlaceMutationInput) {
     })
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to update place"));
@@ -1230,7 +1206,6 @@ export async function deletePlace(id: string) {
     headers: await authHeaders()
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to delete place"));
@@ -1547,7 +1522,6 @@ async function postTimerAction(body: Record<string, unknown>) {
     body: JSON.stringify(body)
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Timer action failed"));
