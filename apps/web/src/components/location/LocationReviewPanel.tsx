@@ -1,20 +1,26 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { Check, GitMerge, MapPin, Scissors, X } from "lucide-react";
+import { Check, GitMerge, MapPin, RotateCw, Scissors, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import type { LocationReviewAction, LocationReviewEvidenceDto } from "@dayframe/shared";
 import { clientFetch } from "@/lib/client-auth-fetch";
+import { CategoryPicker } from "@/components/CategoryPicker";
 import { OverlapNotice } from "@/components/OverlapNotice";
 import { dateTimeLocalInputToIso } from "@/lib/format";
-import type { TimeEntryRow } from "@/lib/queries";
+import { locationEvidenceRetentionLabel } from "@/lib/location/location-evidence-presentation";
+import type { CategoryRow, TimeEntryRow } from "@/lib/queries";
 
 const LocationEvidenceMap = dynamic(
   () => import("./LocationEvidenceMap").then((module) => module.LocationEvidenceMap),
   {
     ssr: false,
-    loading: () => <p className="rounded-2xl bg-[var(--surface)] p-4 text-sm text-[var(--muted)]">Loading private map…</p>
+    loading: () => (
+      <div className="location-evidence-loading" role="status">
+        Loading private map…
+      </div>
+    )
   }
 );
 
@@ -28,7 +34,7 @@ export function LocationReviewPanel({
 }: {
   reviewItemId: string;
   adjacentReviewItemId?: string;
-  categories: Array<{ id: string; name: string }>;
+  categories: CategoryRow[];
   entries: TimeEntryRow[];
   initialCategoryId: string | null;
   onClose: () => void;
@@ -36,8 +42,10 @@ export function LocationReviewPanel({
   const router = useRouter();
   const [evidence, setEvidence] = useState<LocationReviewEvidenceDto | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [isPending, startTransition] = useTransition();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCategoryOpen, setIsCategoryOpen] = useState(false);
   const [placeName, setPlaceName] = useState("");
   const [selectedPoint, setSelectedPoint] = useState<{ latitude: number; longitude: number } | null>(null);
   const [description, setDescription] = useState("");
@@ -71,7 +79,7 @@ export function LocationReviewPanel({
         }
       });
     return () => { cancelled = true; };
-  }, [reviewItemId]);
+  }, [loadAttempt, reviewItemId]);
 
   async function act(action: LocationReviewAction) {
     setError(null);
@@ -97,7 +105,7 @@ export function LocationReviewPanel({
   const actionsDisabled = isPending || isSubmitting;
 
   return (
-    <div className="mt-4 max-h-[min(78vh,760px)] overflow-y-auto rounded-2xl bg-[var(--surface-muted)] p-3 sm:p-4">
+    <div className="location-review-panel mt-4 max-h-[min(78vh,760px)] overflow-y-auto rounded-2xl bg-[var(--surface-muted)] p-3 sm:p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--accent)]">Private location evidence</p>
@@ -108,8 +116,30 @@ export function LocationReviewPanel({
         </button>
       </div>
 
-      {error ? <p className="mt-3 rounded-xl bg-[var(--danger-soft)] p-3 text-sm" role="alert">{error}</p> : null}
-      {!evidence && !error ? <p className="mt-4 text-sm text-[var(--muted)]" role="status">Loading map and boundary evidence…</p> : null}
+      {error ? (
+        <div className="location-review-error mt-3" role="alert">
+          <span>{error}</span>
+          {!evidence ? (
+            <button
+              className="industrial-button focus-ring min-h-11 px-3 text-sm"
+              type="button"
+              onClick={() => {
+                setEvidence(null);
+                setError(null);
+                setLoadAttempt((attempt) => attempt + 1);
+              }}
+            >
+              <RotateCw aria-hidden="true" size={15} /> Retry
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      {!evidence && !error ? (
+        <div className="location-review-loading mt-4" role="status">
+          <strong>Loading evidence</strong>
+          <span>Preparing the private map and supported time boundaries…</span>
+        </div>
+      ) : null}
       {evidence ? (
         <div className="mt-4 space-y-4">
           <LocationEvidenceMap evidence={evidence} onSelectPoint={setSelectedPoint} />
@@ -180,40 +210,48 @@ export function LocationReviewPanel({
             </section>
           ) : null}
 
-          <section className="rounded-2xl bg-[var(--surface)] p-4">
+          <section className="location-review-resolve rounded-2xl bg-[var(--surface)] p-4">
             <h5 className="font-semibold">Resolve</h5>
-            <label className="mt-3 block text-sm font-medium" htmlFor={`location-category-${reviewItemId}`}>Category</label>
-            <select
-              id={`location-category-${reviewItemId}`}
-              className="industrial-input focus-ring mt-1 min-h-11 w-full"
-              value={categoryId}
-              onChange={(event) => setCategoryId(event.target.value)}
-            >
-              <option value="">No category</option>
-              {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-            </select>
-            <label className="mt-3 block text-sm font-medium" htmlFor={`location-description-${reviewItemId}`}>Description</label>
-            <input
-              id={`location-description-${reviewItemId}`}
-              className="industrial-input focus-ring mt-1 min-h-11 w-full"
-              maxLength={500}
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-            />
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <label className="text-sm font-medium">
-                Start
+            <div className="location-review-resolve-grid mt-3">
+              <label className="location-resolve-field" htmlFor={`location-description-${reviewItemId}`}>
+                <span>Description</span>
                 <input
-                  className="industrial-input focus-ring mt-1 min-h-11 w-full"
+                  id={`location-description-${reviewItemId}`}
+                  className="location-resolve-control"
+                  maxLength={500}
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                />
+              </label>
+              <CategoryPicker
+                categories={categories}
+                className="location-resolve-category"
+                disabled={actionsDisabled}
+                label="Category"
+                menuId={`location-category-${reviewItemId}-menu`}
+                onOpenChange={setIsCategoryOpen}
+                onSelect={setCategoryId}
+                open={isCategoryOpen}
+                portal
+                selectedId={categoryId}
+                triggerId={`location-category-${reviewItemId}`}
+                variant="quick"
+              />
+              <label className="location-resolve-field">
+                <span>Start</span>
+                <input
+                  aria-label="Start"
+                  className="location-resolve-control tabular"
                   type="datetime-local"
                   value={startedAt}
                   onChange={(event) => setStartedAt(event.target.value)}
                 />
               </label>
-              <label className="text-sm font-medium">
-                End
+              <label className="location-resolve-field">
+                <span>End</span>
                 <input
-                  className="industrial-input focus-ring mt-1 min-h-11 w-full"
+                  aria-label="End"
+                  className="location-resolve-control tabular"
                   type="datetime-local"
                   value={stoppedAt}
                   onChange={(event) => setStoppedAt(event.target.value)}
@@ -229,7 +267,7 @@ export function LocationReviewPanel({
                 entries={entries}
               />
             </div>
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="location-review-resolve-actions mt-3">
               <button
                 className="industrial-button-primary focus-ring min-h-11 px-4 text-sm"
                 disabled={actionsDisabled}
@@ -282,11 +320,7 @@ export function LocationReviewPanel({
             </div>
           </section>
           <p className="text-xs leading-5 text-[var(--muted)]">
-            {evidence.evidenceExpired
-              ? "Raw evidence has expired; the derived segment remains."
-              : evidence.evidenceExpiresAt
-                ? `Raw evidence is retained until ${formatDateTime(evidence.evidenceExpiresAt)}.`
-                : "No raw evidence retention date is available."}
+            {locationEvidenceRetentionLabel(evidence)}
           </p>
         </div>
       ) : null}

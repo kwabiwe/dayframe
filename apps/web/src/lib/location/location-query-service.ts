@@ -285,6 +285,7 @@ export async function getLocationReviewEvidence(
       nearbyPlaces.map((place) => place.name),
       suggestedSplitPoints.length,
       evidenceExpired,
+      expiryRows.length > 0,
       review
     )
   };
@@ -366,6 +367,7 @@ function textualEvidenceSummary(
   placeCandidates: string[],
   splitCount: number,
   evidenceExpired: boolean,
+  rawEvidenceAvailable: boolean,
   review: ReviewSegmentRow
 ) {
   const subject = kind === "stay" ? "visit" : "journey";
@@ -376,7 +378,9 @@ function textualEvidenceSummary(
   const splitReason = splitCount ? "A split is suggested at the largest evidence gap." : "No split is currently suggested.";
   const retention = evidenceExpired
     ? "Raw evidence has expired; only the derived segment remains."
-    : "Raw evidence is still inside its temporary retention window.";
+    : rawEvidenceAvailable
+      ? "Raw evidence is still inside its temporary retention window."
+      : "No raw evidence is attached to this segment.";
   const rejected = rejectedSampleCount
     ? ` ${rejectedSampleCount} noisy or invalid sample${rejectedSampleCount === 1 ? " was" : "s were"} excluded.`
     : "";
