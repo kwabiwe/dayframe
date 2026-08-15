@@ -1,3 +1,5 @@
+import { mobileFetch } from "../mobile-network";
+
 export const LOCATION_SYNC_REQUEST_TIMEOUT_MS = 15_000;
 
 export async function fetchLocationSync(
@@ -16,7 +18,7 @@ export async function fetchLocationSync(
 
   try {
     return await Promise.race([
-      fetch(input, { ...init, signal: controller.signal }),
+      mobileFetch(input, { ...init, signal: controller.signal }),
       timedOut
     ]);
   } finally {

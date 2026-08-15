@@ -8,8 +8,10 @@ const secureStore = vi.hoisted(() => ({
 }));
 const nativeModule = vi.hoisted(() => ({
   setRuntimeContext: vi.fn(),
-  clearRuntimeContext: vi.fn()
+  clearRuntimeContext: vi.fn(),
+  clearRuntimeContextIfToken: vi.fn()
 }));
+let nativeRuntimeToken: string | null = null;
 
 vi.mock("expo-secure-store", () => ({
   AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 1,
@@ -31,10 +33,13 @@ const {
   SecureSessionUnavailableError,
   clearSessionToken,
   getSessionToken,
+  invalidateMobileSession,
+  invalidateMobileSessionIfCurrent,
   isKeychainInteractionUnavailable,
   resetSessionTokenCacheForTesting,
   setSessionToken
 } = await import("./secure-session");
+const { subscribeMobileSignedOut } = await import("./mobileSessionTransition");
 
 describe("secure mobile session", () => {
   beforeEach(() => {
@@ -52,8 +57,20 @@ describe("secure mobile session", () => {
       values.delete(key);
       return Promise.resolve();
     });
-    nativeModule.setRuntimeContext.mockResolvedValue(true);
-    nativeModule.clearRuntimeContext.mockResolvedValue(true);
+    nativeRuntimeToken = null;
+    nativeModule.setRuntimeContext.mockImplementation((_apiBase: string, token: string) => {
+      nativeRuntimeToken = token;
+      return Promise.resolve(true);
+    });
+    nativeModule.clearRuntimeContext.mockImplementation(() => {
+      nativeRuntimeToken = null;
+      return Promise.resolve(true);
+    });
+    nativeModule.clearRuntimeContextIfToken.mockImplementation((token: string) => {
+      if (nativeRuntimeToken !== token) return Promise.resolve(false);
+      nativeRuntimeToken = null;
+      return Promise.resolve(true);
+    });
     resetSessionTokenCacheForTesting();
   });
 
@@ -198,5 +215,126 @@ describe("secure mobile session", () => {
 
     await expect(clearSessionToken()).rejects.toThrow("Keychain unavailable");
     expect(nativeModule.clearRuntimeContext).toHaveBeenCalledOnce();
+  });
+
+  it("publishes a signed-out transition when a background request rejects the session", async () => {
+    values.set("dayframe.localSessionToken.v2", "expired-token");
+    const listener = vi.fn();
+    const unsubscribe = subscribeMobileSignedOut(listener);
+
+    try {
+      await invalidateMobileSession();
+    } finally {
+      unsubscribe();
+    }
+
+    expect(values.size).toBe(0);
+    expect(listener).toHaveBeenCalledOnce();
+  });
+
+  it("does not let a delayed old-session rejection sign out a newer login", async () => {
+    await setSessionToken("account-a-token");
+    const rejectedToken = await getSessionToken();
+    await setSessionToken("account-b-token");
+    const listener = vi.fn();
+    const unsubscribe = subscribeMobileSignedOut(listener);
+
+    try {
+      await expect(invalidateMobileSessionIfCurrent(rejectedToken!)).resolves.toBe(false);
+    } finally {
+      unsubscribe();
+    }
+
+    await expect(getSessionToken()).resolves.toBe("account-b-token");
+    expect(values.get("dayframe.localSessionToken.v2")).toBe("account-b-token");
+    expect(nativeModule.clearRuntimeContext).not.toHaveBeenCalled();
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("does not publish sign-out when a replacement login starts during invalidation", async () => {
+    await setSessionToken("account-a-token");
+    let finishDelete: (() => void) | undefined;
+    secureStore.deleteItemAsync.mockImplementation((key: string) => {
+      if (key !== "dayframe.localSessionToken.v2") {
+        values.delete(key);
+        return Promise.resolve();
+      }
+      return new Promise<void>((resolve) => {
+        finishDelete = () => {
+          values.delete(key);
+          resolve();
+        };
+      });
+    });
+    const listener = vi.fn();
+    const unsubscribe = subscribeMobileSignedOut(listener);
+
+    try {
+      const staleInvalidation = invalidateMobileSessionIfCurrent("account-a-token");
+      await vi.waitFor(() => expect(finishDelete).toBeTypeOf("function"));
+      const replacementLogin = setSessionToken("account-b-token");
+      finishDelete?.();
+
+      await expect(staleInvalidation).resolves.toBe(false);
+      await replacementLogin;
+    } finally {
+      unsubscribe();
+    }
+
+    await expect(getSessionToken()).resolves.toBe("account-b-token");
+    expect(values.get("dayframe.localSessionToken.v2")).toBe("account-b-token");
+    expect(nativeModule.clearRuntimeContext).not.toHaveBeenCalled();
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("does not clear replacement native context when login starts during native invalidation", async () => {
+    await setSessionToken("account-a-token");
+    let finishNativeClear: (() => void) | undefined;
+    nativeModule.clearRuntimeContextIfToken.mockImplementationOnce((token: string) =>
+      new Promise<boolean>((resolve) => {
+        finishNativeClear = () => {
+          if (nativeRuntimeToken === token) nativeRuntimeToken = null;
+          resolve(true);
+        };
+      })
+    );
+    const listener = vi.fn();
+    const unsubscribe = subscribeMobileSignedOut(listener);
+
+    try {
+      const staleInvalidation = invalidateMobileSessionIfCurrent("account-a-token");
+      await vi.waitFor(() => expect(finishNativeClear).toBeTypeOf("function"));
+      const replacementLogin = setSessionToken("account-b-token");
+      finishNativeClear?.();
+
+      await expect(staleInvalidation).resolves.toBe(false);
+      await replacementLogin;
+    } finally {
+      unsubscribe();
+    }
+
+    await expect(getSessionToken()).resolves.toBe("account-b-token");
+    expect(nativeRuntimeToken).toBe("account-b-token");
+    expect(nativeModule.clearRuntimeContextIfToken).toHaveBeenCalledWith("account-a-token");
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("invalidates and publishes sign-out when the rejected bearer is still current", async () => {
+    await setSessionToken("expired-token");
+    const listener = vi.fn();
+    const unsubscribe = subscribeMobileSignedOut(listener);
+
+    try {
+      await expect(invalidateMobileSessionIfCurrent("expired-token")).resolves.toBe(true);
+    } finally {
+      unsubscribe();
+    }
+
+    await expect(getSessionToken()).resolves.toBeNull();
+    expect(values.size).toBe(0);
+    expect(nativeModule.clearRuntimeContextIfToken).toHaveBeenCalledOnce();
+    expect(nativeModule.clearRuntimeContextIfToken).toHaveBeenCalledWith("expired-token");
+    expect(nativeModule.clearRuntimeContext).not.toHaveBeenCalled();
+    expect(listener).toHaveBeenCalledOnce();
   });
 });

@@ -133,6 +133,24 @@ enum DayframeShortcutRuntimeContextStore {
     }
   }
 
+  static func clear(sessionToken: String) -> Bool {
+    lock.withLock {
+      var cleared = false
+      if
+        let accessGroup = DayframeSharedStorageConfiguration.keychainAccessGroup,
+        read(accessGroup: accessGroup)?.sessionToken == sessionToken
+      {
+        SecItemDelete(baseQuery(accessGroup: accessGroup) as CFDictionary)
+        cleared = true
+      }
+      if read(accessGroup: nil)?.sessionToken == sessionToken {
+        SecItemDelete(baseQuery(accessGroup: nil) as CFDictionary)
+        cleared = true
+      }
+      return cleared
+    }
+  }
+
   static func current() -> DayframeShortcutRuntimeContext? {
     lock.withLock {
       if

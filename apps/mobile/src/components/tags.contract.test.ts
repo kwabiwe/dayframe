@@ -22,7 +22,7 @@ describe("mobile tag interaction contract", () => {
     expect(sheet).toContain("Create new tag,");
     expect(sheet).toContain("await onCreateTag(normalized.name)");
     expect(dashboard).toContain("createTimerSheetTag");
-    expect(api).toContain('fetch(`${DAYFRAME_API_BASE}/api/tags`');
+    expect(api).toContain('mobileFetch(`${DAYFRAME_API_BASE}/api/tags`');
     expect(sheet).toContain("tagNames: appliedTagNames");
   });
 

@@ -1,4 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../secure-session", () => ({
+  invalidateMobileSessionIfCurrent: vi.fn(() => Promise.resolve(true))
+}));
+
 import { fetchLocationSync } from "./network";
 
 describe("location sync network boundary", () => {
@@ -24,6 +29,10 @@ describe("location sync network boundary", () => {
 
     await rejection;
     expect(requestSignals[0]?.aborted).toBe(true);
+    expect(fetch).toHaveBeenCalledWith(
+      "https://dayframe.test/api/location/evidence",
+      expect.objectContaining({ credentials: "omit" })
+    );
   });
 
   it("clears the deadline after a successful response", async () => {
@@ -32,6 +41,10 @@ describe("location sync network boundary", () => {
 
     await expect(fetchLocationSync("https://dayframe.test/api/location/replay", {}, 100))
       .resolves.toBe(response);
+    expect(fetch).toHaveBeenCalledWith(
+      "https://dayframe.test/api/location/replay",
+      expect.objectContaining({ credentials: "omit" })
+    );
     expect(vi.getTimerCount()).toBe(0);
   });
 });

@@ -15,6 +15,7 @@ import {
   type TimerStateFingerprint
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
+import { mobileFetch } from "./mobile-network";
 import {
   clearSessionToken,
   getSessionToken,
@@ -405,11 +406,10 @@ type ApiJsonRead<T> =
 
 export async function fetchBootstrap(options: { date?: string } = {}): Promise<MobileBootstrap> {
   const params = options.date ? `?date=${encodeURIComponent(options.date)}` : "";
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/bootstrap${params}`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/bootstrap${params}`, {
     headers: await authHeaders()
   });
   if (response.status === 401) {
-    await clearSessionToken();
     const reviewStore = await reviewSyncStore();
     if (reviewStore) await reviewStore.synchroniseReviewMutations();
     throw new AuthRequiredError();
@@ -426,12 +426,11 @@ export async function fetchBootstrap(options: { date?: string } = {}): Promise<M
 }
 
 export async function fetchTimerState(): Promise<TimerStateFingerprint> {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/timer-state`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/timer-state`, {
     headers: await authHeaders(),
     cache: "no-store"
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) {
@@ -446,7 +445,7 @@ export async function registerLiveActivity(input: {
   activeEntryId: string;
   environment: "development" | "production";
 }) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/live-activities`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/live-activities`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -455,7 +454,6 @@ export async function registerLiveActivity(input: {
     body: JSON.stringify(input)
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) {
@@ -473,7 +471,7 @@ export async function signup(email: string, password: string, name?: string, wor
 
 export async function logout() {
   const token = await getSessionToken();
-  await fetch(`${DAYFRAME_API_BASE}/api/auth/logout`, {
+  await mobileFetch(`${DAYFRAME_API_BASE}/api/auth/logout`, {
     method: "POST",
     headers: token ? { Authorization: `Bearer ${token}` } : {}
   }).catch(() => undefined);
@@ -721,7 +719,7 @@ async function syncQueueUnlocked(options: SyncQueueOptions): Promise<SyncQueueRe
 
     const attemptedAt = new Date().toISOString();
     try {
-      const response = await fetch(`${DAYFRAME_API_BASE}/api/events`, {
+      const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/events`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -730,7 +728,6 @@ async function syncQueueUnlocked(options: SyncQueueOptions): Promise<SyncQueueRe
         body: JSON.stringify(queuedEventRequestBody(item))
       });
       if (response.status === 401 || response.status === 403) {
-        await clearSessionToken();
         throw new AuthRequiredError();
       }
       if (!response.ok) {
@@ -804,12 +801,11 @@ export async function stopTimer() {
 }
 
 export async function deleteTimeEntry(id: string) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/time-entries/${encodeURIComponent(id)}`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/time-entries/${encodeURIComponent(id)}`, {
     method: "DELETE",
     headers: await authHeaders()
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to delete timer"));
@@ -817,7 +813,7 @@ export async function deleteTimeEntry(id: string) {
 }
 
 export async function updateTimeEntry(id: string, patch: TimeEntryUpdatePatch) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/time-entries/${encodeURIComponent(id)}`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/time-entries/${encodeURIComponent(id)}`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
@@ -826,7 +822,6 @@ export async function updateTimeEntry(id: string, patch: TimeEntryUpdatePatch) {
     body: JSON.stringify(patch)
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to update timer"));
@@ -834,7 +829,7 @@ export async function updateTimeEntry(id: string, patch: TimeEntryUpdatePatch) {
 }
 
 export async function createManualTimeEntry(input: ManualTimeEntryInput) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/time-entries`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/time-entries`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -850,7 +845,6 @@ export async function createManualTimeEntry(input: ManualTimeEntryInput) {
     })
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to create time entry"));
@@ -858,7 +852,7 @@ export async function createManualTimeEntry(input: ManualTimeEntryInput) {
 }
 
 export async function resolveReviewItem(id: string, action: ReviewItemAction) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(id)}`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(id)}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -867,7 +861,6 @@ export async function resolveReviewItem(id: string, action: ReviewItemAction) {
     body: JSON.stringify({ action })
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (response.status === 409) {
@@ -886,7 +879,7 @@ export async function resolveReviewItem(id: string, action: ReviewItemAction) {
 }
 
 export async function resolveLocationReviewItem(id: string, action: LocationReviewAction) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(id)}`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(id)}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -895,7 +888,6 @@ export async function resolveLocationReviewItem(id: string, action: LocationRevi
     body: JSON.stringify(action)
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to update location review"));
@@ -903,12 +895,11 @@ export async function resolveLocationReviewItem(id: string, action: LocationRevi
 }
 
 export async function fetchLocationReviewEvidence(id: string): Promise<LocationReviewEvidenceDto> {
-  const response = await fetch(
+  const response = await mobileFetch(
     `${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(id)}/location-evidence`,
     { headers: await authHeaders(), cache: "no-store" }
   );
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to load location evidence"));
@@ -916,12 +907,11 @@ export async function fetchLocationReviewEvidence(id: string): Promise<LocationR
 }
 
 export async function deleteRecentLocationEvidence() {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/location/evidence`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/location/evidence`, {
     method: "DELETE",
     headers: await authHeaders()
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to delete recent location evidence"));
@@ -944,7 +934,7 @@ export async function reprocessHealthReviewItems(
   preferences: HealthImportPreferences,
   options: { limit?: number; force?: boolean; mappings?: HealthAutoLogMappings } = {}
 ): Promise<HealthReviewReprocessResult> {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/review/reprocess-health`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/review/reprocess-health`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -953,7 +943,6 @@ export async function reprocessHealthReviewItems(
     body: JSON.stringify({ preferences, limit: options.limit, force: options.force, mappings: options.mappings })
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to reprocess Health review items"));
@@ -966,7 +955,7 @@ export async function saveEditedReviewItem(
   options: { atomicLocation?: boolean; clientMutationId?: string } = {}
 ) {
   void options.atomicLocation;
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(id)}`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(id)}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -987,7 +976,6 @@ export async function saveEditedReviewItem(
     })
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to save reviewed activity"));
@@ -998,7 +986,7 @@ export async function createCategory(
   name: string,
   options: { color?: string; isPinned?: boolean } = {}
 ): Promise<MobileCategoryResponse> {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/categories`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/categories`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -1011,7 +999,6 @@ export async function createCategory(
     })
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to create category"));
@@ -1019,7 +1006,7 @@ export async function createCategory(
 }
 
 export async function createTag(name: string): Promise<MobileTagResponse> {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/tags`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/tags`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -1028,7 +1015,6 @@ export async function createTag(name: string): Promise<MobileTagResponse> {
     body: JSON.stringify({ name })
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to create tag"));
@@ -1038,7 +1024,7 @@ export async function createTag(name: string): Promise<MobileTagResponse> {
 export async function ensureAutomaticLoggingCategories(
   kinds: Array<"sleep" | "health" | "commute">
 ): Promise<MobileCategoryResponse[]> {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/categories/automatic`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/categories/automatic`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -1047,7 +1033,6 @@ export async function ensureAutomaticLoggingCategories(
     body: JSON.stringify({ kinds })
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) {
@@ -1061,7 +1046,7 @@ export async function updateCategory(
   id: string,
   options: { name?: string; color?: string; isPinned?: boolean }
 ): Promise<MobileCategoryResponse> {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/categories`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/categories`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
@@ -1070,7 +1055,6 @@ export async function updateCategory(
     body: JSON.stringify({ id, ...options })
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to update category"));
@@ -1078,12 +1062,11 @@ export async function updateCategory(
 }
 
 export async function archiveCategory(id: string) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/categories?id=${encodeURIComponent(id)}`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/categories?id=${encodeURIComponent(id)}`, {
     method: "DELETE",
     headers: await authHeaders()
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to delete category"));
@@ -1092,7 +1075,7 @@ export async function archiveCategory(id: string) {
 
 export async function createPlace(input: { name: string } & PlaceMutationInput) {
   if (input.learnedPlaceId) {
-    const response = await fetch(`${DAYFRAME_API_BASE}/api/places`, {
+    const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/places`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1112,14 +1095,13 @@ export async function createPlace(input: { name: string } & PlaceMutationInput) 
       })
     });
     if (response.status === 401) {
-      await clearSessionToken();
       throw new AuthRequiredError();
     }
     if (!response.ok) throw new Error(await errorMessage(response, "Unable to save learned place"));
     return readPlaceResponse(response, "Unable to save learned place");
   }
 
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/entities`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/entities`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -1131,7 +1113,6 @@ export async function createPlace(input: { name: string } & PlaceMutationInput) 
     })
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to save place"));
@@ -1150,7 +1131,7 @@ export async function createPlace(input: { name: string } & PlaceMutationInput) 
 }
 
 export async function ignoreLearnedPlace(id: string) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/learned-places`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/learned-places`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
@@ -1159,7 +1140,6 @@ export async function ignoreLearnedPlace(id: string) {
     body: JSON.stringify({ id, status: "ignored" })
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to ignore learned place"));
@@ -1167,7 +1147,7 @@ export async function ignoreLearnedPlace(id: string) {
 }
 
 export async function resolveLearnedPlaceLocation(id: string, address: LocationDisplayAddress) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/learned-places`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/learned-places`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
@@ -1176,7 +1156,6 @@ export async function resolveLearnedPlaceLocation(id: string, address: LocationD
     body: JSON.stringify({ id, action: "resolve_location", address })
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to resolve learned place"));
@@ -1190,12 +1169,11 @@ export async function resolveLearnedPlaceLocation(id: string, address: LocationD
 }
 
 export async function forgetLearnedPlace(id: string) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/learned-places?id=${encodeURIComponent(id)}`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/learned-places?id=${encodeURIComponent(id)}`, {
     method: "DELETE",
     headers: await authHeaders()
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to forget learned place"));
@@ -1203,7 +1181,7 @@ export async function forgetLearnedPlace(id: string) {
 }
 
 export async function updatePlace(id: string, input: PlaceMutationInput) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/places`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/places`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
@@ -1216,7 +1194,6 @@ export async function updatePlace(id: string, input: PlaceMutationInput) {
     })
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to update place"));
@@ -1224,12 +1201,11 @@ export async function updatePlace(id: string, input: PlaceMutationInput) {
 }
 
 export async function deletePlace(id: string) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/places?id=${encodeURIComponent(id)}`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/places?id=${encodeURIComponent(id)}`, {
     method: "DELETE",
     headers: await authHeaders()
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to delete place"));
@@ -1508,7 +1484,7 @@ export class AuthRequiredError extends Error {
 }
 
 async function authenticate(path: string, body: Record<string, unknown>): Promise<MobileAuthResult> {
-  const response = await fetch(`${DAYFRAME_API_BASE}${path}`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
@@ -1537,7 +1513,7 @@ async function reviewSyncStore() {
 }
 
 async function postTimerAction(body: Record<string, unknown>) {
-  const response = await fetch(`${DAYFRAME_API_BASE}/api/time-entries`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/time-entries`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -1546,7 +1522,6 @@ async function postTimerAction(body: Record<string, unknown>) {
     body: JSON.stringify(body)
   });
   if (response.status === 401) {
-    await clearSessionToken();
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Timer action failed"));

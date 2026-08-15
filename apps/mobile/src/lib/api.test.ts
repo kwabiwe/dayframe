@@ -27,6 +27,7 @@ vi.mock("react-native", () => ({
   NativeModules: {
     DayframeLiveActivityModule: {
       clearRuntimeContext: vi.fn(() => Promise.resolve(true)),
+      clearRuntimeContextIfToken: vi.fn(() => Promise.resolve(true)),
       setRuntimeContext: vi.fn(() => Promise.resolve(true))
     }
   },
@@ -86,7 +87,8 @@ const {
   updateTimeEntry,
   archiveCategory
 } = await import("./api");
-const { resetSessionTokenCacheForTesting } = await import("./secure-session");
+const { resetSessionTokenCacheForTesting, setSessionToken } = await import("./secure-session");
+const { StaleMobileSessionResponseError } = await import("./mobile-network");
 
 describe("mobile API client", () => {
   beforeEach(() => {
@@ -150,6 +152,23 @@ describe("mobile API client", () => {
     await expect(getSessionToken()).resolves.toBeNull();
   });
 
+  it("ignores a delayed bootstrap rejection from the session replaced during the request", async () => {
+    await setSessionToken("account-a-token");
+    let finishResponse: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => {
+      finishResponse = resolve;
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const staleBootstrap = fetchBootstrap();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    await setSessionToken("account-b-token");
+    finishResponse?.(jsonResponse({ error: "Login required" }, 401));
+
+    await expect(staleBootstrap).rejects.toBeInstanceOf(StaleMobileSessionResponseError);
+    await expect(getSessionToken()).resolves.toBe("account-b-token");
+  });
+
   it("requests bootstrap data for a selected date", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({
@@ -199,7 +218,8 @@ describe("mobile API client", () => {
       "https://dayframe.test/api/timer-state",
       {
         headers: { Authorization: "Bearer session-token" },
-        cache: "no-store"
+        cache: "no-store",
+        credentials: "omit"
       }
     );
   });
@@ -844,6 +864,26 @@ describe("mobile API client", () => {
 
     await expect(syncQueue()).rejects.toBeInstanceOf(AuthRequiredError);
     await expect(getSessionToken()).resolves.toBeNull();
+    await expect(readQueue()).resolves.toHaveLength(1);
+  });
+
+  it("retains a replacement login when queued sync receives a delayed old-session 401", async () => {
+    await setSessionToken("account-a-token");
+    await enqueueEvent({ source: "mobile_app", type: "timer_stop" });
+    let finishResponse: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => {
+      finishResponse = resolve;
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const staleSync = syncQueue();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    await setSessionToken("account-b-token");
+    finishResponse?.(jsonResponse({ error: "Login required" }, 401));
+
+    const result = await staleSync;
+    expect(result).toMatchObject({ stopped: true, syncedCount: 0, remainingCount: 1 });
+    await expect(getSessionToken()).resolves.toBe("account-b-token");
     await expect(readQueue()).resolves.toHaveLength(1);
   });
 

@@ -6,7 +6,8 @@ import {
   type ReviewMutationEnvelope
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
-import { clearSessionToken, getSessionToken } from "./secure-session";
+import { mobileFetch } from "./mobile-network";
+import { getSessionToken, invalidateMobileSessionIfCurrent } from "./secure-session";
 import type {
   MobileBootstrap,
   MobileReviewItem
@@ -818,7 +819,7 @@ async function synchroniseReviewMutationsUnsafe(
       )
     );
     try {
-      const response = await fetch(
+      const response = await mobileFetch(
         `${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(row.review_item_id)}`,
         {
           method: "POST",
@@ -872,7 +873,7 @@ async function synchroniseReviewMutationsUnsafe(
           "restore"
         );
         await markAccountAuthenticationRequired(account.account_key);
-        await clearSessionToken();
+        await invalidateMobileSessionIfCurrent(token);
         stopped = true;
         break;
       }

@@ -1,6 +1,7 @@
 import * as SecureStore from "expo-secure-store";
 import { NativeModules, Platform } from "react-native";
 import { DAYFRAME_API_BASE } from "./config";
+import { publishMobileSignedOut } from "./mobileSessionTransition";
 
 const LEGACY_SESSION_TOKEN_KEY = "dayframe.localSessionToken.v1";
 const SESSION_TOKEN_KEY = "dayframe.localSessionToken.v2";
@@ -27,6 +28,7 @@ export function resetSessionTokenCacheForTesting() {
 type DayframeLiveActivityNativeModule = {
   setRuntimeContext?: (apiBase: string, sessionToken: string) => Promise<boolean>;
   clearRuntimeContext?: () => Promise<boolean>;
+  clearRuntimeContextIfToken?: (sessionToken: string) => Promise<boolean>;
 };
 
 function liveActivityNativeModule() {
@@ -47,6 +49,14 @@ async function clearRuntimeContext() {
     await liveActivityNativeModule()?.clearRuntimeContext?.();
   } catch {
     // Clearing the JS session must not be blocked by an unavailable optional native module.
+  }
+}
+
+async function clearRuntimeContextIfCurrent(token: string) {
+  try {
+    await liveActivityNativeModule()?.clearRuntimeContextIfToken?.(token);
+  } catch {
+    // A rejected request must not let an optional native module disrupt session recovery.
   }
 }
 
@@ -143,6 +153,43 @@ export async function clearSessionToken() {
     } finally {
       await clearRuntimeContext();
     }
+  });
+}
+
+export async function invalidateMobileSession() {
+  try {
+    await clearSessionToken();
+  } finally {
+    publishMobileSignedOut();
+  }
+}
+
+export function invalidateMobileSessionIfCurrent(rejectedToken: string) {
+  return serialiseSessionOperation(async () => {
+    if (cachedSessionToken !== rejectedToken) return false;
+
+    const invalidationRevision = ++sessionRevision;
+    cachedSessionToken = null;
+    let deletionError: unknown;
+    try {
+      await withInteractionRetry(() =>
+        SecureStore.deleteItemAsync(SESSION_TOKEN_KEY, SESSION_TOKEN_OPTIONS)
+      );
+      await withInteractionRetry(() => SecureStore.deleteItemAsync(LEGACY_SESSION_TOKEN_KEY));
+    } catch (error) {
+      deletionError = error;
+    }
+
+    let invalidated = false;
+    if (invalidationRevision === sessionRevision) {
+      await clearRuntimeContextIfCurrent(rejectedToken);
+      if (invalidationRevision === sessionRevision) {
+        publishMobileSignedOut();
+        invalidated = true;
+      }
+    }
+    if (deletionError) throw deletionError;
+    return invalidated;
   });
 }
 
