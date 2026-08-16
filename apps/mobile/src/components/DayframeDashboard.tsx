@@ -188,8 +188,12 @@ import {
 
 type TimeEntry = MobileBootstrap["entries"][number];
 type AuthView = "login" | "signup";
-type AuthState = "checking" | "authenticated" | "signedOut";
-type DashboardLoadOptions = { silent?: boolean; visibleRefresh?: boolean };
+type AuthState = "checking" | "opening" | "authenticated" | "signedOut";
+type DashboardLoadOptions = {
+  silent?: boolean;
+  throwOnError?: boolean;
+  visibleRefresh?: boolean;
+};
 type RejectedOptimisticStart = {
   error: unknown;
   optimisticId: string;
@@ -506,6 +510,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const load = useCallback(async (options?: DashboardLoadOptions) => {
     if (refreshInFlight.current || timerMutationCount.current > 0) {
       refreshQueued.current = true;
+      if (options?.throwOnError) {
+        throw new Error("Dayframe is already refreshing. Please try again.");
+      }
       return;
     }
     refreshInFlight.current = true;
@@ -562,8 +569,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         transitionToSignedOut();
+        if (options?.throwOnError) throw error;
         return;
       }
+      if (options?.throwOnError) throw error;
       if (!options?.silent && !options?.visibleRefresh) {
         Alert.alert("Dayframe API", error instanceof Error ? error.message : "Unable to load API");
       }
@@ -1825,9 +1834,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         setAuthState("signedOut");
         return;
       }
-      setAuthPassword("");
       setAuthPasswordVisible(false);
-      await load();
+      setAuthState("opening");
+      await load({ throwOnError: true });
+      setAuthPassword("");
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : "Unable to authenticate");
       setAuthState("signedOut");
@@ -1848,6 +1858,34 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       }
     ]
   };
+  if (authState === "opening") {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.container}>
+          <View style={styles.header}>
+            <View style={styles.logoLockup}>
+              <DayframeBrand
+                layout="horizontal"
+                size="md"
+                tone={theme.mode === "dark" ? "light" : "dark"}
+              />
+              <StagingBadge styles={styles} />
+            </View>
+          </View>
+          <View
+            accessibilityLiveRegion="polite"
+            accessibilityRole="progressbar"
+            style={styles.panel}
+          >
+            <Text style={styles.sectionTitle}>Opening Dayframe…</Text>
+            <Text style={styles.muted}>
+              Loading your latest timers and saved activity.
+            </Text>
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
   if (authState === "signedOut") {
     return (
       <SafeAreaView style={styles.safeArea}>

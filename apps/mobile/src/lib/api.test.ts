@@ -88,7 +88,10 @@ const {
   archiveCategory
 } = await import("./api");
 const { resetSessionTokenCacheForTesting, setSessionToken } = await import("./secure-session");
-const { StaleMobileSessionResponseError } = await import("./mobile-network");
+const {
+  MobileRequestTimeoutError,
+  StaleMobileSessionResponseError
+} = await import("./mobile-network");
 
 describe("mobile API client", () => {
   beforeEach(() => {
@@ -118,6 +121,18 @@ describe("mobile API client", () => {
 
     expect("token" in result ? result.token : null).toBe("dayframe-token");
     await expect(getSessionToken()).resolves.toBe("dayframe-token");
+  });
+
+  it("bounds a stalled login request", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => undefined)));
+
+    const request = login("user@example.com", "password");
+    const rejection = expect(request).rejects.toBeInstanceOf(MobileRequestTimeoutError);
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    await rejection;
+    await expect(getSessionToken()).resolves.toBeNull();
   });
 
   it("does not store a token for email-confirmation signup responses", async () => {

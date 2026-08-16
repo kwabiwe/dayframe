@@ -78,6 +78,10 @@ import {
   type ReviewItemSyncState,
   type ReviewSyncDiagnostics
 } from "@/lib/reviewSyncStore";
+import {
+  reviewSyncStatusCopy,
+  shouldOfferReviewSyncRetry
+} from "@/lib/reviewSyncPresentation";
 import type { TimeEntrySheetPresentation } from "@/lib/timeEntrySheetPresentation";
 
 type ReviewEditTarget =
@@ -850,7 +854,7 @@ function ReviewSyncStatus({
     >
       <Text style={styles.reviewMetaLine}>{copy}</Text>
       <View style={styles.buttonRow}>
-        {diagnostics.waitingCount > 0 ? (
+        {shouldOfferReviewSyncRetry(diagnostics) ? (
           <Pressable
             accessibilityRole="button"
             style={pressable(styles.secondaryButton, styles.buttonPressed)}
@@ -1270,29 +1274,6 @@ function formatCachedAt(value: string) {
     hour: "2-digit",
     minute: "2-digit"
   });
-}
-
-function reviewSyncStatusCopy(diagnostics: ReviewSyncDiagnostics) {
-  if (diagnostics.needsAttentionCount > 0) {
-    const issueCopy = `${diagnostics.needsAttentionCount} Review ${
-      diagnostics.needsAttentionCount === 1 ? "change needs" : "changes need"
-    } attention`;
-    return diagnostics.waitingCount > 0
-      ? `${issueCopy} · ${diagnostics.waitingCount} waiting to sync`
-      : issueCopy;
-  }
-  if (diagnostics.authenticationRequiredCount > 0) {
-    const count = diagnostics.authenticationRequiredCount;
-    return `${count} ${
-      count === 1 ? "change" : "changes"
-    } saved on this iPhone · sign in to sync`;
-  }
-  if (diagnostics.waitingCount > 0) {
-    return `${diagnostics.waitingCount} Review ${
-      diagnostics.waitingCount === 1 ? "change" : "changes"
-    } waiting to sync`;
-  }
-  return null;
 }
 
 function reviewItemSyncStatusCopy(syncState: ReviewItemSyncState | null) {

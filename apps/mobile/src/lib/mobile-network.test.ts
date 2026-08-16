@@ -8,10 +8,16 @@ vi.mock("./secure-session", () => ({
   invalidateMobileSessionIfCurrent: session.invalidateMobileSessionIfCurrent
 }));
 
-const { mobileFetch, StaleMobileSessionResponseError } = await import("./mobile-network");
+const {
+  MobileRequestTimeoutError,
+  mobileFetch,
+  mobileFetchWithTimeout,
+  StaleMobileSessionResponseError
+} = await import("./mobile-network");
 
 describe("mobile API network boundary", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.clearAllMocks();
     session.invalidateMobileSessionIfCurrent.mockResolvedValue(true);
@@ -53,5 +59,54 @@ describe("mobile API network boundary", () => {
     await expect(mobileFetch("https://dayframe.test/api/bootstrap", {
       headers: { Authorization: "Bearer old-token" }
     })).rejects.toBeInstanceOf(StaleMobileSessionResponseError);
+  });
+
+  it("aborts and rejects a stalled request at its deadline", async () => {
+    vi.useFakeTimers();
+    const requestSignals: AbortSignal[] = [];
+    vi.stubGlobal("fetch", vi.fn((_input, init: RequestInit | undefined) => {
+      requestSignals.push(init?.signal as AbortSignal);
+      return new Promise<Response>(() => undefined);
+    }));
+
+    const request = mobileFetchWithTimeout(
+      "https://dayframe.test/api/bootstrap",
+      {},
+      { timeoutMilliseconds: 100, timeoutMessage: "Dayframe opening timed out." }
+    );
+    const rejection = expect(request).rejects.toBeInstanceOf(MobileRequestTimeoutError);
+    await vi.advanceTimersByTimeAsync(100);
+
+    await rejection;
+    expect(requestSignals[0]?.aborted).toBe(true);
+  });
+
+  it("preserves caller cancellation instead of reporting it as a timeout", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => undefined)));
+    const controller = new AbortController();
+    const cancellation = new Error("Cancelled by caller.");
+
+    const request = mobileFetchWithTimeout(
+      "https://dayframe.test/api/bootstrap",
+      { signal: controller.signal },
+      { timeoutMilliseconds: 100, timeoutMessage: "Dayframe opening timed out." }
+    );
+    controller.abort(cancellation);
+
+    await expect(request).rejects.toBe(cancellation);
+  });
+
+  it("clears the request deadline after a successful response", async () => {
+    vi.useFakeTimers();
+    const response = { ok: true, status: 200 } as Response;
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(response)));
+
+    await expect(mobileFetchWithTimeout(
+      "https://dayframe.test/api/bootstrap",
+      {},
+      { timeoutMilliseconds: 100, timeoutMessage: "Dayframe opening timed out." }
+    )).resolves.toBe(response);
+
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

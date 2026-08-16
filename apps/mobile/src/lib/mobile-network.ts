@@ -7,6 +7,18 @@ export class StaleMobileSessionResponseError extends Error {
   }
 }
 
+export class MobileRequestTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MobileRequestTimeoutError";
+  }
+}
+
+type MobileRequestDeadline = {
+  timeoutMilliseconds: number;
+  timeoutMessage: string;
+};
+
 /**
  * Mobile API requests use the SecureStore bearer as their only session carrier.
  *
@@ -27,8 +39,57 @@ export async function mobileFetch(
   return response;
 }
 
+export async function mobileFetchWithTimeout(
+  input: Parameters<typeof fetch>[0],
+  init: Parameters<typeof fetch>[1] = {},
+  deadline: MobileRequestDeadline
+) {
+  const controller = new AbortController();
+  const callerSignal = init.signal;
+  let timedOut = false;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let rejectCallerAbort: ((reason?: unknown) => void) | undefined;
+  const callerAborted = new Promise<never>((_, reject) => {
+    rejectCallerAbort = reject;
+  });
+  const relayCallerAbort = () => {
+    controller.abort();
+    rejectCallerAbort?.(callerAbortReason(callerSignal));
+  };
+  if (callerSignal?.aborted) relayCallerAbort();
+  else callerSignal?.addEventListener("abort", relayCallerAbort, { once: true });
+  const timeoutReached = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+      reject(new MobileRequestTimeoutError(deadline.timeoutMessage));
+    }, deadline.timeoutMilliseconds);
+  });
+
+  try {
+    return await Promise.race([
+      mobileFetch(input, { ...init, signal: controller.signal }),
+      timeoutReached,
+      callerAborted
+    ]);
+  } catch (error) {
+    if (timedOut && !(error instanceof MobileRequestTimeoutError)) {
+      throw new MobileRequestTimeoutError(deadline.timeoutMessage);
+    }
+    throw error;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    callerSignal?.removeEventListener("abort", relayCallerAbort);
+  }
+}
+
 function bearerToken(headers: HeadersInit | undefined) {
   const authorization = new Headers(headers).get("authorization");
   const match = authorization?.match(/^Bearer\s+(.+)$/i);
   return match?.[1]?.trim() || null;
+}
+
+function callerAbortReason(signal: AbortSignal | null | undefined) {
+  if (signal?.reason instanceof Error) return signal.reason;
+  return new Error("Mobile request was cancelled.");
 }

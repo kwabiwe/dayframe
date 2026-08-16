@@ -82,6 +82,25 @@ describe("Location Review editor draft", () => {
     expect(result.error).toBe("End time must be after start time.");
   });
 
+  it("preserves the detected dates for a cross-midnight time-only edit", () => {
+    const crossMidnightStart = new Date(2026, 7, 12, 23, 55, 12, 34);
+    const crossMidnightStop = new Date(2026, 7, 13, 0, 10, 56, 78);
+    const result = parseLocationReviewWindow({
+      baselineStartedAt: crossMidnightStart.toISOString(),
+      baselineStoppedAt: crossMidnightStop.toISOString(),
+      startDateText: "2026-08-12",
+      startTimeText: "23:58",
+      stopDateText: "2026-08-13",
+      stopTimeText: "00:12"
+    });
+
+    expect(result.error).toBeNull();
+    expect(result.value).toEqual({
+      startedAt: new Date(2026, 7, 12, 23, 58, 12, 34).toISOString(),
+      stoppedAt: new Date(2026, 7, 13, 0, 12, 56, 78).toISOString()
+    });
+  });
+
   it("keeps an untouched category implicit so commute self-healing remains available", () => {
     expect(buildLocationReviewEdit({
       categoryTouched: false,
