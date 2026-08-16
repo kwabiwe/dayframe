@@ -71,8 +71,8 @@ The earlier mobile bearer/cookie split that prevented location evidence upload i
 
 Completed on the implementation branch against the baseline above:
 
-- Focused mobile coverage: 24 tests across the shared request deadline, auth handoff, Review status/transport, and Location Evidence editor contracts.
-- Full repository tests: 1,676 tests passed (mobile 695, web 825, shared 156).
+- Focused mobile coverage: 25 tests across the shared request deadline, auth handoff, Review status/transport, and Location Evidence editor contracts. The auth handoff regression also covers a bearer rejection publishing the global signed-out transition during post-login bootstrap: the stale session is invalidated while the entered password remains available on the returned Login form.
+- Full repository tests: 1,677 tests passed (mobile 696, web 825, shared 156).
 - `npm run lint`, `npm run typecheck`, `npm run build`, `npm run check:docs`, `npm run check:brand-assets`, `npm run validate:review-sync-sqlite`, and `git diff --check` passed. Lint retained two pre-existing unused-parameter warnings in `apps/web/src/lib/event-service.test.ts`.
 - A full unsigned Debug iOS Simulator build passed for the `Dayframe` workspace and scheme. The first attempt exposed stale local `node_modules` and a CocoaPods sandbox/lock mismatch; `npm install` and `npx pod-install` synchronized the installed graph to the checked-in npm/Pod locks before the successful build. Three generated CocoaPods checksum-only changes were excluded from the implementation diff.
 - The database-backed Review validator was not run because `DATABASE_URL` is not configured in this workspace; its safety guard also requires a disposable database ending in `_test`.
