@@ -35,7 +35,7 @@ describe("mobile logout transition contract", () => {
   });
 
   it("lets the mounted dashboard invalidate stale work and become signed out synchronously", () => {
-    expect(dashboard).toContain("subscribeMobileSignedOut(transitionToSignedOut)");
+    expect(dashboard).toContain("subscribeMobileSignedOut(() => transitionToSignedOut({");
     expect(dashboard).toContain("dashboardMutationRevision.current += 1;");
     expect(dashboard).toContain("latestData.current = null;");
     expect(dashboard).toContain('setAuthState("signedOut")');

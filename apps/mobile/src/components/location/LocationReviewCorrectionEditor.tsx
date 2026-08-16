@@ -19,7 +19,6 @@ import {
   type LocationReviewAction,
   type LocationReviewEvidenceDto
 } from "@dayframe/shared";
-import { FloatingDatePicker } from "@/components/FloatingDatePicker";
 import {
   type MobileBootstrap,
   type MobileReviewItem
@@ -28,7 +27,6 @@ import {
   buildLocationReviewEdit,
   buildLocationReviewResolutionAction,
   formatLocationReviewDateInput,
-  formatLocationReviewDateLabel,
   formatLocationReviewEditableTime,
   formatLocationReviewTimeInput,
   initialLocationReviewDescription,
@@ -135,11 +133,8 @@ export function LocationReviewCorrectionEditor({
   const [resolvingSuggestion, setResolvingSuggestion] = useState(false);
   const [advancedExpanded, setAdvancedExpanded] = useState(false);
   const [selectedSplitAt, setSelectedSplitAt] = useState<string | null>(null);
-  const [startDateText, setStartDateText] = useState(() => formatLocationReviewDateInput(startAt));
   const [startTimeText, setStartTimeText] = useState(() => formatLocationReviewTimeInput(startAt));
-  const [stopDateText, setStopDateText] = useState(() => stopAt ? formatLocationReviewDateInput(stopAt) : "");
   const [stopTimeText, setStopTimeText] = useState(() => stopAt ? formatLocationReviewTimeInput(stopAt) : "");
-  const [datePickerTarget, setDatePickerTarget] = useState<"start" | "stop" | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
 
   const revealFocusedControl = useCallback((control = activeRevealControlRef.current) => {
@@ -243,9 +238,19 @@ export function LocationReviewCorrectionEditor({
   const placeDetail = newPlace?.formattedAddress || (
     selectedSavedPlaceId === baselinePlaceId ? evidence.display.addressSummary : null
   );
-  const datePickerDate = datePickerTarget === "stop" && stopAt
-    ? localDateFromInput(stopDateText, stopAt)
-    : localDateFromInput(startDateText, startAt);
+  const editableWindow = stopAt
+    ? parseLocationReviewWindow({
+        baselineStartedAt: evidence.segment.startedAt,
+        baselineStoppedAt: evidence.segment.stoppedAt ?? "",
+        startDateText: formatLocationReviewDateInput(startAt),
+        startTimeText,
+        stopDateText: formatLocationReviewDateInput(stopAt),
+        stopTimeText
+      })
+    : null;
+  const editableDuration = editableWindow?.value
+    ? formatLocationReviewDuration(editableWindow.value.startedAt, editableWindow.value.stoppedAt)
+    : "—";
 
   function changeSearchQuery(value: string) {
     setSearchQuery(value);
@@ -347,16 +352,16 @@ export function LocationReviewCorrectionEditor({
   }
 
   function parsedEdit() {
-    if (!evidence.segment.stoppedAt) {
+    if (!evidence.segment.stoppedAt || !stopAt) {
       setValidationError("This suggestion does not have a complete time range.");
       return null;
     }
     const parsed = parseLocationReviewWindow({
       baselineStartedAt: evidence.segment.startedAt,
       baselineStoppedAt: evidence.segment.stoppedAt,
-      startDateText,
+      startDateText: formatLocationReviewDateInput(startAt),
       startTimeText,
-      stopDateText,
+      stopDateText: formatLocationReviewDateInput(stopAt),
       stopTimeText
     });
     if (!parsed.value) {
@@ -411,16 +416,6 @@ export function LocationReviewCorrectionEditor({
       },
       "This time was recorded once without saving a new place."
     );
-  }
-
-  function selectDate(date: Date) {
-    if (datePickerTarget === "stop") {
-      setStopDateText(formatLocationReviewDateInput(date));
-    } else {
-      setStartDateText(formatLocationReviewDateInput(date));
-    }
-    setDatePickerTarget(null);
-    setValidationError(null);
   }
 
   const primaryLabel = saving
@@ -739,22 +734,7 @@ export function LocationReviewCorrectionEditor({
               <View style={[editorStyles.timeGroups, fontScale >= 1.45 ? editorStyles.timeGroupsStacked : null]}>
                 <View style={editorStyles.timeGroup}>
                   <Text style={editorStyles.fieldLabel}>Start</Text>
-                  <View style={editorStyles.dateTimeRow}>
-                    <Pressable
-                      accessibilityLabel={`Edit start date, ${formatLocationReviewDateLabel(localDateFromInput(startDateText, startAt))}`}
-                      accessibilityRole="button"
-                      disabled={saving}
-                      onPress={() => {
-                        Keyboard.dismiss();
-                        setDatePickerTarget("start");
-                      }}
-                      style={pressable(editorStyles.dateButton, styles.buttonPressed)}
-                    >
-                      <Text style={editorStyles.dateButtonText} numberOfLines={1}>
-                        {formatLocationReviewDateLabel(localDateFromInput(startDateText, startAt))}
-                      </Text>
-                    </Pressable>
-                    <View style={editorStyles.dateTimeDivider} />
+                  <View style={editorStyles.timeField}>
                     <TextInput
                       accessibilityLabel="Start time"
                       caretHidden
@@ -766,7 +746,6 @@ export function LocationReviewCorrectionEditor({
                         setStartTimeText(formatLocationReviewEditableTime(value));
                         setValidationError(null);
                       }}
-                      onFocus={() => setDatePickerTarget(null)}
                       placeholder="09:00"
                       placeholderTextColor={theme.textSecondary}
                       selectTextOnFocus
@@ -778,22 +757,7 @@ export function LocationReviewCorrectionEditor({
                 <View style={editorStyles.timeGroup}>
                   <Text style={editorStyles.fieldLabel}>End</Text>
                   {stopAt ? (
-                    <View style={editorStyles.dateTimeRow}>
-                      <Pressable
-                        accessibilityLabel={`Edit end date, ${formatLocationReviewDateLabel(localDateFromInput(stopDateText, stopAt))}`}
-                        accessibilityRole="button"
-                        disabled={saving}
-                        onPress={() => {
-                          Keyboard.dismiss();
-                          setDatePickerTarget("stop");
-                        }}
-                        style={pressable(editorStyles.dateButton, styles.buttonPressed)}
-                      >
-                        <Text style={editorStyles.dateButtonText} numberOfLines={1}>
-                          {formatLocationReviewDateLabel(localDateFromInput(stopDateText, stopAt))}
-                        </Text>
-                      </Pressable>
-                      <View style={editorStyles.dateTimeDivider} />
+                    <View style={editorStyles.timeField}>
                       <TextInput
                         accessibilityLabel="End time"
                         caretHidden
@@ -805,7 +769,6 @@ export function LocationReviewCorrectionEditor({
                           setStopTimeText(formatLocationReviewEditableTime(value));
                           setValidationError(null);
                         }}
-                        onFocus={() => setDatePickerTarget(null)}
                         placeholder="17:30"
                         placeholderTextColor={theme.textSecondary}
                         selectTextOnFocus
@@ -818,6 +781,16 @@ export function LocationReviewCorrectionEditor({
                       <Text style={editorStyles.answerMeta}>Ongoing</Text>
                     </View>
                   )}
+                </View>
+                <View style={editorStyles.timeGroup}>
+                  <Text style={editorStyles.fieldLabel}>Duration</Text>
+                  <View
+                    accessible
+                    accessibilityLabel={`Duration ${editableDuration}`}
+                    style={editorStyles.timeField}
+                  >
+                    <Text style={editorStyles.durationValue}>{editableDuration}</Text>
+                  </View>
                 </View>
               </View>
               {validationError ? (
@@ -971,16 +944,6 @@ export function LocationReviewCorrectionEditor({
           </Reanimated.View>
         </View>
       </ScrollView>
-
-      <FloatingDatePicker
-        maxDate={new Date()}
-        onClose={() => setDatePickerTarget(null)}
-        onSelect={selectDate}
-        selectedDate={datePickerDate}
-        styles={styles}
-        theme={theme}
-        visible={datePickerTarget !== null}
-      />
     </>
   );
 }
@@ -1147,13 +1110,6 @@ function placeForSelection(
   return nearby.find((place) => place.id === id) ?? places.find((place) => place.id === id) ?? null;
 }
 
-function localDateFromInput(value: string, fallback: Date) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) return fallback;
-  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-  return Number.isNaN(date.getTime()) ? fallback : date;
-}
-
 function locationActivityLabel(evidence: LocationReviewEvidenceDto) {
   return evidence.segment.kind === "commute" ? "Commute" : evidence.display.title;
 }
@@ -1172,6 +1128,18 @@ function formatEvidenceTimeRange(evidence: LocationReviewEvidenceDto) {
 
 function formatTime(value: string) {
   return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+}
+
+function formatLocationReviewDuration(startedAt: string, stoppedAt: string) {
+  const durationMinutes = Math.max(
+    0,
+    Math.round((Date.parse(stoppedAt) - Date.parse(startedAt)) / 60_000)
+  );
+  const hours = Math.floor(durationMinutes / 60);
+  const minutes = durationMinutes % 60;
+  if (hours === 0) return `${minutes}m`;
+  if (minutes === 0) return `${hours}h`;
+  return `${hours}h ${minutes}m`;
 }
 
 function createEditorStyles(theme: MobileTheme) {
@@ -1254,19 +1222,16 @@ function createEditorStyles(theme: MobileTheme) {
     timeGroups: { flexDirection: "row", gap: 10 },
     timeGroupsStacked: { flexDirection: "column" },
     timeGroup: { flex: 1, minWidth: 0, gap: 6 },
-    dateTimeRow: {
+    timeField: {
       minHeight: 48,
-      flexDirection: "row",
       alignItems: "center",
+      justifyContent: "center",
       borderRadius: 14,
       backgroundColor: theme.surfaceMuted,
       overflow: "hidden"
     },
-    dateButton: { flex: 1, minWidth: 88, minHeight: 48, justifyContent: "center", paddingHorizontal: 10 },
-    dateButtonText: { color: theme.textPrimary, fontSize: 13, fontWeight: "600" },
-    dateTimeDivider: { width: StyleSheet.hairlineWidth, height: 26, backgroundColor: theme.border },
     timeInput: {
-      width: 72,
+      width: "100%",
       minHeight: 48,
       color: theme.textPrimary,
       fontSize: 14,
@@ -1274,6 +1239,12 @@ function createEditorStyles(theme: MobileTheme) {
       fontVariant: ["tabular-nums"],
       textAlign: "center",
       paddingHorizontal: 8
+    },
+    durationValue: {
+      color: theme.textPrimary,
+      fontSize: 14,
+      fontWeight: "600",
+      fontVariant: ["tabular-nums"]
     },
     errorText: { color: theme.danger, fontSize: 12, lineHeight: 17, fontWeight: "600" },
     disclosure: {

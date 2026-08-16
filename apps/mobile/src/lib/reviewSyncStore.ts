@@ -6,7 +6,10 @@ import {
   type ReviewMutationEnvelope
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
-import { mobileFetch } from "./mobile-network";
+import {
+  MobileRequestTimeoutError,
+  mobileFetchWithTimeout
+} from "./mobile-network";
 import { getSessionToken, invalidateMobileSessionIfCurrent } from "./secure-session";
 import type {
   MobileBootstrap,
@@ -19,6 +22,7 @@ const DATABASE_VERSION = 3;
 const ACTIVE_ACCOUNT_KEY = "active_account";
 const LAST_CACHE_AT_KEY = "last_cache_at";
 const LAST_SUCCESSFUL_SYNC_AT_KEY = "last_successful_sync_at";
+export const REVIEW_SYNC_REQUEST_TIMEOUT_MS = 15_000;
 const SYNC_STATES = [
   "pending",
   "in_flight",
@@ -819,7 +823,7 @@ async function synchroniseReviewMutationsUnsafe(
       )
     );
     try {
-      const response = await mobileFetch(
+      const response = await mobileFetchWithTimeout(
         `${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(row.review_item_id)}`,
         {
           method: "POST",
@@ -828,6 +832,10 @@ async function synchroniseReviewMutationsUnsafe(
             "Content-Type": "application/json"
           },
           body: row.request_json
+        },
+        {
+          timeoutMilliseconds: REVIEW_SYNC_REQUEST_TIMEOUT_MS,
+          timeoutMessage: "Review sync timed out. Your saved change will retry automatically."
         }
       );
       const responseBody = await safeResponseJson(response);
@@ -895,8 +903,14 @@ async function synchroniseReviewMutationsUnsafe(
         null,
         restore ? "restore" : "hidden"
       );
-    } catch {
-      await scheduleRetry(row, null, "Network request failed.");
+    } catch (error) {
+      await scheduleRetry(
+        row,
+        null,
+        error instanceof MobileRequestTimeoutError
+          ? error.message
+          : "Network request failed."
+      );
       stopped = true;
       break;
     }

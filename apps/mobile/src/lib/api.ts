@@ -15,7 +15,7 @@ import {
   type TimerStateFingerprint
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
-import { mobileFetch } from "./mobile-network";
+import { mobileFetch, mobileFetchWithTimeout } from "./mobile-network";
 import {
   clearSessionToken,
   getSessionToken,
@@ -26,6 +26,8 @@ const QUEUE_KEY = "dayframe.offlineQueue.v1";
 const TIMER_ENTRY_ID_CORRELATIONS_KEY = "dayframe.timerEntryIdCorrelations.v1";
 const DEFAULT_PLACE_RADIUS_METERS = 100;
 const DEFAULT_PLACE_PRIORITY = 5;
+const MOBILE_OPENING_REQUEST_TIMEOUT_MS = 15_000;
+const MOBILE_QUEUE_REQUEST_TIMEOUT_MS = 15_000;
 let queueMutationTail: Promise<void> = Promise.resolve();
 let timerEntryIdCorrelationMutationTail: Promise<void> = Promise.resolve();
 
@@ -406,9 +408,14 @@ type ApiJsonRead<T> =
 
 export async function fetchBootstrap(options: { date?: string } = {}): Promise<MobileBootstrap> {
   const params = options.date ? `?date=${encodeURIComponent(options.date)}` : "";
-  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/bootstrap${params}`, {
-    headers: await authHeaders()
-  });
+  const response = await mobileFetchWithTimeout(
+    `${DAYFRAME_API_BASE}/api/bootstrap${params}`,
+    { headers: await authHeaders() },
+    {
+      timeoutMilliseconds: MOBILE_OPENING_REQUEST_TIMEOUT_MS,
+      timeoutMessage: "Dayframe is taking too long to open. Check your connection and try again."
+    }
+  );
   if (response.status === 401) {
     const reviewStore = await reviewSyncStore();
     if (reviewStore) await reviewStore.synchroniseReviewMutations();
@@ -719,14 +726,21 @@ async function syncQueueUnlocked(options: SyncQueueOptions): Promise<SyncQueueRe
 
     const attemptedAt = new Date().toISOString();
     try {
-      const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/events`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(await authHeaders())
+      const response = await mobileFetchWithTimeout(
+        `${DAYFRAME_API_BASE}/api/events`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(await authHeaders())
+          },
+          body: JSON.stringify(queuedEventRequestBody(item))
         },
-        body: JSON.stringify(queuedEventRequestBody(item))
-      });
+        {
+          timeoutMilliseconds: MOBILE_QUEUE_REQUEST_TIMEOUT_MS,
+          timeoutMessage: "Queued activity sync timed out. It will retry automatically."
+        }
+      );
       if (response.status === 401 || response.status === 403) {
         throw new AuthRequiredError();
       }
@@ -1484,11 +1498,18 @@ export class AuthRequiredError extends Error {
 }
 
 async function authenticate(path: string, body: Record<string, unknown>): Promise<MobileAuthResult> {
-  const response = await mobileFetch(`${DAYFRAME_API_BASE}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body)
-  });
+  const response = await mobileFetchWithTimeout(
+    `${DAYFRAME_API_BASE}${path}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    },
+    {
+      timeoutMilliseconds: MOBILE_OPENING_REQUEST_TIMEOUT_MS,
+      timeoutMessage: `${path.endsWith("/login") ? "Login" : "Account creation"} is taking too long. Check your connection and try again.`
+    }
+  );
   const payload = await readJsonResponse<MobileAuthResult & { error?: string }>(response);
   if (!response.ok) throw new Error(payload.error ?? `Authentication failed: ${response.status}`);
   if ("requiresEmailConfirmation" in payload) return payload;
