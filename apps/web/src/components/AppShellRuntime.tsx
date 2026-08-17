@@ -20,10 +20,11 @@ import {
   createTimerMutationGate,
   entryContinuationDecision,
   mergeTimerDraft,
+  reconcileTimerDraft,
   runActiveEntryCompactMutation,
   runTimerStartMutation,
-  shouldHydrateTimerDraft,
   timerDraftForEntry,
+  timerDraftsEqual,
   timerDraftVersion,
   type TimerDraft,
   type TimerDraftInput,
@@ -147,14 +148,15 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     activeEntryVersionRef.current = activeEntryVersion;
     const activeEntryId = data?.activeEntry?.id ?? null;
     const canonicalDraft = timerDraftForEntry(data?.activeEntry);
-    const shouldHydrateDraft = shouldHydrateTimerDraft(
+    const nextDraft = reconcileTimerDraft(
       timerDraftEntryIdRef.current !== activeEntryId,
       draftRef.current,
-      canonicalTimerDraftRef.current
+      canonicalTimerDraftRef.current,
+      canonicalDraft
     );
     timerDraftEntryIdRef.current = activeEntryId;
     canonicalTimerDraftRef.current = canonicalDraft;
-    if (shouldHydrateDraft) setTimerDraft(canonicalDraft);
+    if (!timerDraftsEqual(nextDraft, draftRef.current)) setTimerDraft(nextDraft);
   }, [data?.activeEntry, setTimerDraft]);
 
   const refresh = useCallback(async ({ force = false }: { force?: boolean } = {}) => {

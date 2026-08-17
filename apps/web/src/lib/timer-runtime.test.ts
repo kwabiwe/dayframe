@@ -9,9 +9,9 @@ import {
   createTimerMutationGate,
   entryContinuationDecision,
   quickActionTimerDraft,
+  reconcileTimerDraft,
   runActiveEntryCompactMutation,
   runTimerStartMutation,
-  shouldHydrateTimerDraft,
   timerDraftForEntry,
   timerDraftsEqual,
   timerDraftVersion,
@@ -483,13 +483,25 @@ describe("shell timer runtime", () => {
     )).toBe(false);
   });
 
-  it("does not hydrate a same-entry server revision over newer local typing", () => {
+  it("merges untouched canonical fields without replacing newer local typing", () => {
     const previousServerDraft = { categoryId: "", description: "TY1", tagNames: [] };
     const localDraft = { ...previousServerDraft, description: "TY1 VPN" };
+    const nextServerDraft = { categoryId: "focus", description: "TY1", tagNames: ["remote"] };
 
-    expect(shouldHydrateTimerDraft(false, localDraft, previousServerDraft)).toBe(false);
-    expect(shouldHydrateTimerDraft(false, previousServerDraft, previousServerDraft)).toBe(true);
-    expect(shouldHydrateTimerDraft(true, localDraft, previousServerDraft)).toBe(true);
+    expect(reconcileTimerDraft(false, localDraft, previousServerDraft, nextServerDraft)).toEqual({
+      categoryId: "focus",
+      description: "TY1 VPN",
+      tagNames: ["remote"]
+    });
+    expect(reconcileTimerDraft(true, localDraft, previousServerDraft, nextServerDraft))
+      .toEqual(nextServerDraft);
+  });
+
+  it("treats tag order and display case as semantically equal during reconciliation", () => {
+    expect(timerDraftsEqual(
+      { categoryId: "", description: "", tagNames: ["VPN", "Cubic"] },
+      { categoryId: "", description: "", tagNames: ["cubic", "vpn"] }
+    )).toBe(true);
   });
 });
 
