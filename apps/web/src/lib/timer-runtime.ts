@@ -59,6 +59,39 @@ export function timerDraftForEntry(entry: TimeEntryRow | null | undefined): Time
   };
 }
 
+export function timerDraftsEqual(left: TimerDraft, right: TimerDraft) {
+  return left.categoryId === right.categoryId &&
+    left.description === right.description &&
+    timerTagNamesEqual(left.tagNames, right.tagNames);
+}
+
+export function reconcileTimerDraft(
+  activeEntryChanged: boolean,
+  currentDraft: TimerDraft,
+  lastCanonicalDraft: TimerDraft,
+  nextCanonicalDraft: TimerDraft
+) {
+  if (activeEntryChanged) return nextCanonicalDraft;
+  return {
+    categoryId: currentDraft.categoryId === lastCanonicalDraft.categoryId
+      ? nextCanonicalDraft.categoryId
+      : currentDraft.categoryId,
+    description: currentDraft.description === lastCanonicalDraft.description
+      ? nextCanonicalDraft.description
+      : currentDraft.description,
+    tagNames: timerTagNamesEqual(currentDraft.tagNames, lastCanonicalDraft.tagNames)
+      ? nextCanonicalDraft.tagNames
+      : currentDraft.tagNames
+  };
+}
+
+function timerTagNamesEqual(left: string[], right: string[]) {
+  if (left.length !== right.length) return false;
+  const normalizedLeft = left.map((name) => normalizeTagName(name).normalizedName).sort();
+  const normalizedRight = right.map((name) => normalizeTagName(name).normalizedName).sort();
+  return normalizedLeft.every((name, index) => name === normalizedRight[index]);
+}
+
 export function quickActionTimerDraft(categoryId: string | null | undefined): TimerDraft {
   return {
     categoryId: categoryId ?? "",

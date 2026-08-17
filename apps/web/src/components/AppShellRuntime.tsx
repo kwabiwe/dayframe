@@ -20,9 +20,11 @@ import {
   createTimerMutationGate,
   entryContinuationDecision,
   mergeTimerDraft,
+  reconcileTimerDraft,
   runActiveEntryCompactMutation,
   runTimerStartMutation,
   timerDraftForEntry,
+  timerDraftsEqual,
   timerDraftVersion,
   type TimerDraft,
   type TimerDraftInput,
@@ -95,6 +97,8 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   const dataRef = useRef<BootstrapData | null>(null);
   const dateDataCacheRef = useRef(new Map<string, BootstrapData>());
   const draftRef = useRef(timerDraft);
+  const canonicalTimerDraftRef = useRef(timerDraftForEntry(null));
+  const timerDraftEntryIdRef = useRef<string | null>(null);
   const activeEntryVersionRef = useRef("unhydrated");
   const refreshRequestRef = useRef(0);
   const dateLoadRequestRef = useRef(0);
@@ -142,7 +146,17 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     const activeEntryVersion = timerDraftVersion(data?.activeEntry);
     if (activeEntryVersionRef.current === activeEntryVersion) return;
     activeEntryVersionRef.current = activeEntryVersion;
-    setTimerDraft(timerDraftForEntry(data?.activeEntry));
+    const activeEntryId = data?.activeEntry?.id ?? null;
+    const canonicalDraft = timerDraftForEntry(data?.activeEntry);
+    const nextDraft = reconcileTimerDraft(
+      timerDraftEntryIdRef.current !== activeEntryId,
+      draftRef.current,
+      canonicalTimerDraftRef.current,
+      canonicalDraft
+    );
+    timerDraftEntryIdRef.current = activeEntryId;
+    canonicalTimerDraftRef.current = canonicalDraft;
+    if (!timerDraftsEqual(nextDraft, draftRef.current)) setTimerDraft(nextDraft);
   }, [data?.activeEntry, setTimerDraft]);
 
   const refresh = useCallback(async ({ force = false }: { force?: boolean } = {}) => {

@@ -14,7 +14,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - If a timer is already running, starting a new timer closes the previous active entry first.
 - The active timer ticks every second on web and mobile.
 - Stopping a timer on web or mobile stops the same active timer for the signed-in workspace.
-- Edits typed into the active timer description/category are saved before the entry is stopped.
+- Edits typed into the active timer description/category are saved before the entry is stopped. Autosave acknowledgements and background timer reconciliation must not replace newer local typing for the same running entry; a genuinely different active-entry identity still hydrates immediately.
 - Pinned and recent/frequent quick actions can start category-based tasks.
 - Play, Enter, task suggestions, Quick actions, Shift+Space, and Stop each produce one gated mutation; Dashboard/Timeline navigation preserves the same active entry and failed optimistic mutations return to the prior stable state.
 - Continue/start-again actions use a play affordance and start the task.

@@ -9,9 +9,11 @@ import {
   createTimerMutationGate,
   entryContinuationDecision,
   quickActionTimerDraft,
+  reconcileTimerDraft,
   runActiveEntryCompactMutation,
   runTimerStartMutation,
   timerDraftForEntry,
+  timerDraftsEqual,
   timerDraftVersion,
   timerStartErrorMessage,
   type TimerDraft,
@@ -468,6 +470,38 @@ describe("shell timer runtime", () => {
     expect(timerDraftVersion(entry({ id: "active", updatedAt: "2026-07-31T10:00:00.000Z" })))
       .not.toBe(timerDraftVersion(entry({ id: "active", updatedAt: "2026-07-31T10:01:00.000Z" })));
     expect(timerDraftVersion(null)).toBe("idle");
+  });
+
+  it("distinguishes a newer local timer description from the last canonical draft", () => {
+    expect(timerDraftsEqual(
+      { categoryId: "category", description: "TY1", tagNames: ["vpn"] },
+      { categoryId: "category", description: "TY1", tagNames: ["vpn"] }
+    )).toBe(true);
+    expect(timerDraftsEqual(
+      { categoryId: "category", description: "TY1 VPN", tagNames: [] },
+      { categoryId: "category", description: "TY1", tagNames: [] }
+    )).toBe(false);
+  });
+
+  it("merges untouched canonical fields without replacing newer local typing", () => {
+    const previousServerDraft = { categoryId: "", description: "TY1", tagNames: [] };
+    const localDraft = { ...previousServerDraft, description: "TY1 VPN" };
+    const nextServerDraft = { categoryId: "focus", description: "TY1", tagNames: ["remote"] };
+
+    expect(reconcileTimerDraft(false, localDraft, previousServerDraft, nextServerDraft)).toEqual({
+      categoryId: "focus",
+      description: "TY1 VPN",
+      tagNames: ["remote"]
+    });
+    expect(reconcileTimerDraft(true, localDraft, previousServerDraft, nextServerDraft))
+      .toEqual(nextServerDraft);
+  });
+
+  it("treats tag order and display case as semantically equal during reconciliation", () => {
+    expect(timerDraftsEqual(
+      { categoryId: "", description: "", tagNames: ["VPN", "Cubic"] },
+      { categoryId: "", description: "", tagNames: ["cubic", "vpn"] }
+    )).toBe(true);
   });
 });
 
