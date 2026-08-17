@@ -22,6 +22,7 @@ import {
   mergeTimerDraft,
   runActiveEntryCompactMutation,
   runTimerStartMutation,
+  shouldHydrateTimerDraft,
   timerDraftForEntry,
   timerDraftVersion,
   type TimerDraft,
@@ -95,6 +96,8 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   const dataRef = useRef<BootstrapData | null>(null);
   const dateDataCacheRef = useRef(new Map<string, BootstrapData>());
   const draftRef = useRef(timerDraft);
+  const canonicalTimerDraftRef = useRef(timerDraftForEntry(null));
+  const timerDraftEntryIdRef = useRef<string | null>(null);
   const activeEntryVersionRef = useRef("unhydrated");
   const refreshRequestRef = useRef(0);
   const dateLoadRequestRef = useRef(0);
@@ -142,7 +145,16 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     const activeEntryVersion = timerDraftVersion(data?.activeEntry);
     if (activeEntryVersionRef.current === activeEntryVersion) return;
     activeEntryVersionRef.current = activeEntryVersion;
-    setTimerDraft(timerDraftForEntry(data?.activeEntry));
+    const activeEntryId = data?.activeEntry?.id ?? null;
+    const canonicalDraft = timerDraftForEntry(data?.activeEntry);
+    const shouldHydrateDraft = shouldHydrateTimerDraft(
+      timerDraftEntryIdRef.current !== activeEntryId,
+      draftRef.current,
+      canonicalTimerDraftRef.current
+    );
+    timerDraftEntryIdRef.current = activeEntryId;
+    canonicalTimerDraftRef.current = canonicalDraft;
+    if (shouldHydrateDraft) setTimerDraft(canonicalDraft);
   }, [data?.activeEntry, setTimerDraft]);
 
   const refresh = useCallback(async ({ force = false }: { force?: boolean } = {}) => {

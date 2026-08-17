@@ -59,6 +59,21 @@ export function timerDraftForEntry(entry: TimeEntryRow | null | undefined): Time
   };
 }
 
+export function timerDraftsEqual(left: TimerDraft, right: TimerDraft) {
+  return left.categoryId === right.categoryId &&
+    left.description === right.description &&
+    left.tagNames.length === right.tagNames.length &&
+    left.tagNames.every((name, index) => name === right.tagNames[index]);
+}
+
+export function shouldHydrateTimerDraft(
+  activeEntryChanged: boolean,
+  currentDraft: TimerDraft,
+  lastCanonicalDraft: TimerDraft
+) {
+  return activeEntryChanged || timerDraftsEqual(currentDraft, lastCanonicalDraft);
+}
+
 export function quickActionTimerDraft(categoryId: string | null | undefined): TimerDraft {
   return {
     categoryId: categoryId ?? "",
