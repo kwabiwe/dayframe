@@ -507,6 +507,17 @@ function createStyles(theme: MobileTheme) {
       padding: 14,
       gap: 10
     },
+    timerSyncStatusSlot: {
+      height: 18,
+      justifyContent: "center"
+    },
+    timerSyncStatusText: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "500",
+      lineHeight: 18
+    },
     timerPanel: {
       position: "relative",
       backgroundColor: theme.surfaceRaised,

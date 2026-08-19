@@ -4,6 +4,7 @@ import {
   type RecentActivitySuggestion
 } from "@dayframe/shared";
 import type { MobileBootstrap, TimeEntryUpdatePatch } from "./api";
+import type { PendingTimerStop } from "./timerStopOutbox";
 
 type ActiveTimerEntry = MobileBootstrap["activeEntry"];
 type MobileTimeEntry = MobileBootstrap["entries"][number];
@@ -671,6 +672,24 @@ export function optimisticStopActiveTimer(data: MobileBootstrap | null, stoppedA
     dayEntries: data.dayEntries ? upsertMobileEntry(data.dayEntries, completed) : data.dayEntries,
     weekEntries: data.weekEntries ? upsertMobileEntry(data.weekEntries, completed) : data.weekEntries
   };
+}
+
+export function projectPendingTimerStops(
+  data: MobileBootstrap | null,
+  pendingStops: readonly PendingTimerStop[],
+  correlations: ReadonlyMap<string, string> = new Map()
+) {
+  if (!data?.activeEntry || pendingStops.length === 0) return data;
+  const activeEntryId = data.activeEntry.id;
+  const pendingStop = pendingStops.find((item) => {
+    if (item.targetEntryId === activeEntryId || item.optimisticEntryId === activeEntryId) return true;
+    return Boolean(
+      item.optimisticEntryId && correlations.get(item.optimisticEntryId) === activeEntryId
+    );
+  });
+  return pendingStop
+    ? optimisticStopActiveTimer(data, pendingStop.occurredAt)
+    : data;
 }
 
 export function optimisticStartTimer(data: MobileBootstrap | null, pendingEntry: MobileTimeEntry) {

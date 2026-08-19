@@ -7,6 +7,9 @@ import {
 } from "./timerPresentation";
 import { createDeletionCoordinator } from "./historyDeletion";
 
+const TIMER_STOP_OWNER = { userId: "user-a", workspaceId: "workspace-a" };
+const TIMER_TARGET_A = "80000000-0000-4000-8000-000000000001";
+
 const secureStore = vi.hoisted(() => new Map<string, string>());
 const asyncStore = vi.hoisted(() => new Map<string, string>());
 
@@ -59,6 +62,7 @@ const {
   createTag,
   deleteTimeEntry,
   deletePlace,
+  deliverPendingTimerStop,
   dismissReviewItem,
   enqueueEvent,
   fetchBootstrap,
@@ -68,7 +72,6 @@ const {
   ignoreLearnedPlace,
   isNetworkTimerError,
   login,
-  queueStopTimer,
   readQueue,
   readTimerEntryIdCorrelations,
   reprocessHealthReviewItems,
@@ -87,6 +90,10 @@ const {
   updateTimeEntry,
   archiveCategory
 } = await import("./api");
+const {
+  getOrCreatePendingStop,
+  readPendingTimerStops
+} = await import("./timerStopOutbox");
 const { resetSessionTokenCacheForTesting, setSessionToken } = await import("./secure-session");
 const {
   MobileRequestTimeoutError,
@@ -247,7 +254,7 @@ describe("mobile API client", () => {
     await expect(getSessionToken()).resolves.toBeNull();
   });
 
-  it("migrates old queued items without losing their event fields", async () => {
+  it("fails closed when migrating an old unscoped queued timer Stop", async () => {
     asyncStore.set(
       "dayframe.offlineQueue.v1",
       JSON.stringify([
@@ -267,6 +274,9 @@ describe("mobile API client", () => {
     expect(queue).toHaveLength(1);
     expect(queue[0]).toEqual(
       expect.objectContaining({
+        failureCount: 1,
+        failureKind: "permanent",
+        lastError: "Legacy timer Stop has no canonical target and cannot be replayed safely.",
         source: "mobile_app",
         type: "timer_stop",
         localId: "local-1",
@@ -275,8 +285,132 @@ describe("mobile API client", () => {
       })
     );
     expect(queue[0].occurredAt.toISOString()).toBe("2026-07-06T08:15:00.000Z");
-    expect(queue[0].failureCount).toBeUndefined();
-    expect(queue[0].lastError).toBeUndefined();
+  });
+
+  it("delivers one durable entry-scoped Stop with its original identity and timestamp", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const pending = await getOrCreatePendingStop({
+      owner: TIMER_STOP_OWNER,
+      target: { targetEntryId: TIMER_TARGET_A },
+      occurredAt: "2026-08-19T09:00:00.000Z"
+    });
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({
+      eventId: "event-stop",
+      outcome: "stopped"
+    }, 201)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(deliverPendingTimerStop(pending, TIMER_STOP_OWNER)).resolves.toMatchObject({
+      status: "delivered"
+    });
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const body = JSON.parse(String(init.body));
+    expect(url).toBe("https://dayframe.test/api/events");
+    expect(init).toEqual(expect.objectContaining({
+      method: "POST",
+      headers: expect.objectContaining({ Authorization: "Bearer session-token" })
+    }));
+    expect(body).toEqual({
+      clientEventId: pending.clientEventId,
+      occurredAt: "2026-08-19T09:00:00.000Z",
+      rawPayload: {
+        origin: "mobile_timer_stop",
+        stopScope: "entry",
+        targetEntryId: TIMER_TARGET_A
+      },
+      source: "mobile_app",
+      type: "timer_stop"
+    });
+    await expect(readPendingTimerStops()).resolves.toEqual([]);
+  });
+
+  it("retains timer_busy and retries with the same Stop idempotency key", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const pending = await getOrCreatePendingStop({
+      owner: TIMER_STOP_OWNER,
+      target: { targetEntryId: TIMER_TARGET_A },
+      occurredAt: "2026-08-19T09:05:00.000Z"
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ code: "timer_busy", error: "Timer is busy" }, 503))
+      .mockResolvedValueOnce(jsonResponse({ eventId: "event-stop", duplicate: true }, 200));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(deliverPendingTimerStop(pending, TIMER_STOP_OWNER)).resolves.toMatchObject({
+      status: "retryable_failure",
+      pendingStop: { failureCount: 1, failureKind: "retryable", lastStatusCode: 503 }
+    });
+    const retained = (await readPendingTimerStops())[0];
+    await expect(deliverPendingTimerStop(retained, TIMER_STOP_OWNER)).resolves.toMatchObject({
+      status: "delivered"
+    });
+    const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(String((init as RequestInit).body)));
+    expect(bodies.map((body) => body.clientEventId)).toEqual([
+      pending.clientEventId,
+      pending.clientEventId
+    ]);
+    expect(bodies.map((body) => body.occurredAt)).toEqual([
+      pending.occurredAt,
+      pending.occurredAt
+    ]);
+  });
+
+  it("keeps a permanent Stop rejection visible without converting it to offline success", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const pending = await getOrCreatePendingStop({
+      owner: TIMER_STOP_OWNER,
+      target: { targetEntryId: TIMER_TARGET_A }
+    });
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(
+      jsonResponse({ error: "Invalid target" }, 422)
+    )));
+
+    await expect(deliverPendingTimerStop(pending, TIMER_STOP_OWNER)).resolves.toMatchObject({
+      status: "permanent_failure",
+      pendingStop: { failureKind: "permanent", lastStatusCode: 422 }
+    });
+    await expect(readPendingTimerStops()).resolves.toEqual([
+      expect.objectContaining({ clientEventId: pending.clientEventId, failureKind: "permanent" })
+    ]);
+  });
+
+  it("does not deliver another account's pending Stop", async () => {
+    const pending = await getOrCreatePendingStop({
+      owner: TIMER_STOP_OWNER,
+      target: { targetEntryId: TIMER_TARGET_A }
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(deliverPendingTimerStop(pending, {
+      userId: "user-b",
+      workspaceId: "workspace-b"
+    })).resolves.toMatchObject({ status: "account_mismatch" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("bounds mobile Stop delivery at eight seconds and retains it for retry", async () => {
+    vi.useFakeTimers();
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const pending = await getOrCreatePendingStop({
+      owner: TIMER_STOP_OWNER,
+      target: { targetEntryId: TIMER_TARGET_A }
+    });
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => undefined)));
+
+    const delivery = deliverPendingTimerStop(pending, TIMER_STOP_OWNER);
+    await vi.advanceTimersByTimeAsync(7_999);
+    expect((await readPendingTimerStops())[0]?.failureCount).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(delivery).resolves.toMatchObject({ status: "retryable_failure" });
+    await expect(readPendingTimerStops()).resolves.toEqual([
+      expect.objectContaining({
+        clientEventId: pending.clientEventId,
+        failureKind: "retryable",
+        lastError: "Timer Stop is still pending. Dayframe will retry automatically."
+      })
+    ]);
   });
 
   it("migrates stale queue workspace fields without losing Health payload details", async () => {
@@ -478,7 +612,7 @@ describe("mobile API client", () => {
             await stopTimer();
           } else {
             await requireQueuedTimerStartUpdate(() => updateQueuedTimerStart(optimisticId, {}));
-            await queueStopTimer();
+            throw new Error("Expected the timer start correlation before Stop");
           }
           return;
         }
@@ -626,7 +760,7 @@ describe("mobile API client", () => {
     expect(restoredId).toBe(canonicalId);
   });
 
-  it("does not let an in-flight sync overwrite a newly queued Stop event", async () => {
+  it("persists a dedicated Stop while the general queue is in flight", async () => {
     const optimisticId = "optimistic-active-timer:queue-lock";
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
     await enqueueEvent({
@@ -640,29 +774,33 @@ describe("mobile API client", () => {
 
     const syncCompletion = syncQueue();
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
-    const stopEnqueue = queueStopTimer();
+    const stopEnqueue = getOrCreatePendingStop({
+      owner: TIMER_STOP_OWNER,
+      target: { targetEntryId: TIMER_TARGET_A }
+    });
     let stopEnqueued = false;
     void stopEnqueue.then(() => {
       stopEnqueued = true;
     });
 
-    await Promise.resolve();
-    expect(stopEnqueued).toBe(false);
+    await stopEnqueue;
+    expect(stopEnqueued).toBe(true);
     startResponse.resolve(jsonResponse({
       eventId: "event-queue-lock",
       timeEntryId: "entry-queue-lock"
     }, 201));
     await Promise.all([syncCompletion, stopEnqueue]);
 
-    await expect(readQueue()).resolves.toEqual([
-      expect.objectContaining({ type: "timer_stop" })
+    await expect(readQueue()).resolves.toEqual([]);
+    await expect(readPendingTimerStops()).resolves.toEqual([
+      expect.objectContaining({ targetEntryId: TIMER_TARGET_A })
     ]);
   });
 
   it("preserves queue order when the first event fails to sync", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
-    await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: { order: 1 } });
-    await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: { order: 2 } });
+    await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: scopedStopPayload({ order: 1 }) });
+    await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: scopedStopPayload({ order: 2 }) });
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ error: "Server error" }, 500)));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -671,15 +809,15 @@ describe("mobile API client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(result.synced).toEqual([]);
     expect(result.remaining).toHaveLength(2);
-    expect(result.remaining[0].rawPayload).toEqual({ order: 1 });
-    expect(result.remaining[1].rawPayload).toEqual({ order: 2 });
+    expect(result.remaining[0].rawPayload).toEqual(scopedStopPayload({ order: 1 }));
+    expect(result.remaining[1].rawPayload).toEqual(scopedStopPayload({ order: 2 }));
     expect(result.failedCount).toBe(1);
     expect(result.firstError?.message).toBe("Server error");
   });
 
   it("dedupes queued events that reuse a deterministic local id", async () => {
-    await enqueueEvent({ localId: "location-visit-1", source: "mobile_app", type: "timer_stop" });
-    await enqueueEvent({ localId: "location-visit-1", source: "mobile_app", type: "timer_stop" });
+    await enqueueEvent({ localId: "location-visit-1", source: "mobile_app", type: "timer_stop", rawPayload: scopedStopPayload() });
+    await enqueueEvent({ localId: "location-visit-1", source: "mobile_app", type: "timer_stop", rawPayload: scopedStopPayload() });
 
     const queue = await readQueue();
 
@@ -730,8 +868,8 @@ describe("mobile API client", () => {
 
   it("removes synced events and preserves later unsynced events", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
-    await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: { order: 1 } });
-    await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: { order: 2 } });
+    await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: scopedStopPayload({ order: 1 }) });
+    await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: scopedStopPayload({ order: 2 }) });
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ eventId: "event-1", duplicate: true }, 200))
@@ -742,13 +880,13 @@ describe("mobile API client", () => {
 
     expect(result.synced).toHaveLength(1);
     expect(result.remaining).toHaveLength(1);
-    expect(result.remaining[0].rawPayload).toEqual({ order: 2 });
+    expect(result.remaining[0].rawPayload).toEqual(scopedStopPayload({ order: 2 }));
   });
 
   it("records validation failures and continues syncing later valid events", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
-    await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: { order: 1 } });
-    await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: { order: 2 } });
+    await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: scopedStopPayload({ order: 1 }) });
+    await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: scopedStopPayload({ order: 2 }) });
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -775,7 +913,7 @@ describe("mobile API client", () => {
         failureKind: "permanent",
         lastError: "type: Invalid enum value. Expected timer_stop.",
         lastStatusCode: 400,
-        rawPayload: { order: 1 }
+        rawPayload: scopedStopPayload({ order: 1 })
       })
     );
     expect(result.failedCount).toBe(1);
@@ -786,7 +924,7 @@ describe("mobile API client", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-06T08:20:00.000Z"));
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
-    await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: { offline: true } });
+    await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: scopedStopPayload({ offline: true }) });
     vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("Network request failed"))));
 
     const result = await syncQueue();
@@ -805,7 +943,7 @@ describe("mobile API client", () => {
       })
     );
     expect(persisted).toHaveLength(1);
-    expect(persisted[0].rawPayload).toEqual({ offline: true });
+    expect(persisted[0].rawPayload).toEqual(scopedStopPayload({ offline: true }));
   });
 
   it("respects retry backoff before automatic queue sync tries a failed item again", async () => {
@@ -874,7 +1012,7 @@ describe("mobile API client", () => {
 
   it("clears the session token when queued event sync returns 401", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "expired-token");
-    await enqueueEvent({ source: "mobile_app", type: "timer_stop" });
+    await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: scopedStopPayload() });
     vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({ error: "Login required" }, 401))));
 
     await expect(syncQueue()).rejects.toBeInstanceOf(AuthRequiredError);
@@ -884,7 +1022,7 @@ describe("mobile API client", () => {
 
   it("retains a replacement login when queued sync receives a delayed old-session 401", async () => {
     await setSessionToken("account-a-token");
-    await enqueueEvent({ source: "mobile_app", type: "timer_stop" });
+    await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: scopedStopPayload() });
     let finishResponse: ((response: Response) => void) | undefined;
     const fetchMock = vi.fn(() => new Promise<Response>((resolve) => {
       finishResponse = resolve;
@@ -1022,9 +1160,11 @@ describe("mobile API client", () => {
     );
     expect(snapshot.queue[0]).toEqual(
       expect.objectContaining({
-        occurredAt: "2026-07-06T08:15:00.000Z",
-        rawPayload: { origin: "shortcut" }
+        occurredAt: "2026-07-06T08:15:00.000Z"
       })
+    );
+    expect(snapshot.queue[0].rawPayload).toEqual(
+      expect.objectContaining({ origin: "shortcut" })
     );
     expect(snapshot.lastSyncResult).toEqual(
       expect.objectContaining({
@@ -1866,14 +2006,30 @@ function htmlResponse(body: string, status = 200) {
 }
 
 function storedQueuedEvent(overrides: Record<string, unknown> = {}) {
-  return {
+  const item = {
     source: "mobile_app",
     type: "timer_stop",
     occurredAt: "2026-07-06T08:15:00.000Z",
     localId: "local-1",
     queuedAt: "2026-07-06T08:16:00.000Z",
-    rawPayload: {},
+    rawPayload: scopedStopPayload(),
     ...overrides
+  };
+  if (item.type === "timer_stop") {
+    item.rawPayload = scopedStopPayload(
+      item.rawPayload && typeof item.rawPayload === "object" && !Array.isArray(item.rawPayload)
+        ? item.rawPayload as Record<string, unknown>
+        : {}
+    );
+  }
+  return item;
+}
+
+function scopedStopPayload(extra: Record<string, unknown> = {}) {
+  return {
+    stopScope: "entry",
+    targetEntryId: TIMER_TARGET_A,
+    ...extra
   };
 }
 

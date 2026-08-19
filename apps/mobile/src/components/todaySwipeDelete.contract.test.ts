@@ -179,16 +179,20 @@ describe("Today history swipe-to-delete contract", () => {
     expect(saveSource).toContain("requireQueuedTimerStartUpdate(");
     expect(saveSource).toContain("createMutationAcceptance(");
     expect(saveSource).toContain("return acceptance.result(completion)");
-    expect(stopSource).toContain("requireQueuedTimerStartUpdate(");
-    expect(stopSource).toContain("shouldAwaitTimerMutationAcceptance(");
-    expect(stopSource).toContain("acceptance.fail()");
-    expect(stopSource).toContain("return acceptance.result(completion)");
+    expect(stopSource).toContain("await getOrCreatePendingStop(");
+    expect(stopSource.indexOf("await getOrCreatePendingStop(")).toBeLessThan(
+      stopSource.indexOf("optimisticStopActiveTimer(")
+    );
+    expect(stopSource).toContain("void (async () => {");
+    expect(stopSource).toContain("await deliverOwnedPendingTimerStops(bootstrap)");
+    expect(stopSource).toContain("return true");
+    expect(stopSource).not.toContain("queueStopTimer(");
+    expect(stopSource).not.toContain("stopTimer(");
     expect(dashboardSource).toContain("rollbackOptimisticTimeEntryPatch(");
-    expect(dashboardSource).toContain("rollbackOptimisticStopSafely(");
     expect(dashboardSource).not.toContain("updateDashboardData(() => previousData)");
   });
 
-  it("serializes queue sync with accepted suggestion, Stop and deletion persistence", () => {
+  it("serializes queue sync with dependent edits while Stop durability stays independent", () => {
     const syncSource = dashboardSource.slice(
       dashboardSource.indexOf("async function syncQueueWithTimerReconciliation()"),
       dashboardSource.indexOf("const syncQueuedEvents = useCallback")
@@ -202,6 +206,7 @@ describe("Today history swipe-to-delete contract", () => {
     expect(mutationQueueSource).toContain("timerMutationQueue.current.enqueue(operation)");
     expect(mutationQueueSource).toContain("serializeTimerPersistence(operation)");
     expect(dashboardSource).toContain("resolveTimerEntryIdAfterQueueBarrier(entryId)");
+    expect(dashboardSource).toContain("const timerStopDeliveryInFlight = useRef(false)");
   });
 
   it("keeps the blank Play generation gated across RAF until the sheet is presented", () => {

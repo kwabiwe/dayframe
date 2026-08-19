@@ -21,6 +21,7 @@ import {
   optimisticRestoreTimeEntries,
   optimisticStartTimer,
   optimisticStopActiveTimer,
+  projectPendingTimerStops,
   replaceOptimisticTimeEntryId,
   requireQueuedTimerStartRemoval,
   requireQueuedTimerStartUpdate,
@@ -385,6 +386,52 @@ describe("mobile timer presentation", () => {
     expect(rolledBack?.activeEntry?.id).toBe(newerTimer.id);
     expect(mobileTimeEntryById(rolledBack, "entry-running")?.stoppedAt)
       .toBe(newerTimer.startedAt);
+  });
+
+  it("projects a durable canonical Stop over stale bootstrap before presentation", () => {
+    const snapshot = bootstrapWithActiveEntry();
+    const projected = projectPendingTimerStops(snapshot, [{
+      clientEventId: "mobile-timer-stop:one",
+      occurredAt: "2026-07-16T09:30:00.000Z",
+      queuedAt: "2026-07-16T09:30:00.100Z",
+      targetEntryId: snapshot.activeEntry!.id,
+      userId: "user-a",
+      workspaceId: "workspace-a"
+    }]);
+
+    expect(projected?.activeEntry).toBeNull();
+    expect(mobileTimeEntryById(projected, snapshot.activeEntry!.id)?.stoppedAt)
+      .toBe("2026-07-16T09:30:00.000Z");
+  });
+
+  it("uses a durable optimistic-to-canonical correlation when projecting a pending Stop", () => {
+    const snapshot = bootstrapWithActiveEntry();
+    const optimisticId = "optimistic-active-timer:pending-stop";
+    const projected = projectPendingTimerStops(snapshot, [{
+      clientEventId: "mobile-timer-stop:two",
+      occurredAt: "2026-07-16T09:31:00.000Z",
+      optimisticEntryId: optimisticId,
+      queuedAt: "2026-07-16T09:31:00.100Z",
+      userId: "user-a",
+      workspaceId: "workspace-a"
+    }], new Map([[optimisticId, snapshot.activeEntry!.id]]));
+
+    expect(projected?.activeEntry).toBeNull();
+  });
+
+  it("does not hide a newer active timer for an older pending Stop", () => {
+    const snapshot = bootstrapWithActiveEntry();
+    const projected = projectPendingTimerStops(snapshot, [{
+      clientEventId: "mobile-timer-stop:three",
+      occurredAt: "2026-07-16T09:30:00.000Z",
+      queuedAt: "2026-07-16T09:30:00.100Z",
+      targetEntryId: "entry-older",
+      userId: "user-a",
+      workspaceId: "workspace-a"
+    }]);
+
+    expect(projected).toBe(snapshot);
+    expect(projected?.activeEntry?.id).toBe(snapshot.activeEntry!.id);
   });
 
   it("keeps the newer timer active and closes the older timer at its exact start when Stop fails", async () => {
