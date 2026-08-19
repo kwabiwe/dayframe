@@ -29,6 +29,15 @@ vi.mock("@/lib/event-service", () => ({
       super(message);
       this.name = "TimerReplacementWindowError";
     }
+  },
+  TimerMutationBusyError: class TimerMutationBusyError extends Error {
+    code = "timer_busy";
+    status = 503;
+
+    constructor(message = "This timer is busy. Dayframe will retry the Stop shortly.") {
+      super(message);
+      this.name = "TimerMutationBusyError";
+    }
   }
 }));
 
@@ -178,6 +187,16 @@ describe("POST /api/time-entries", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Start time must be after the currently running timer's start time."
     });
+  });
+
+  it("maps a timer busy error without reporting a migration failure", async () => {
+    const { TimerMutationBusyError } = await import("@/lib/event-service");
+    mocks.processActivityEvent.mockRejectedValueOnce(new TimerMutationBusyError());
+
+    const response = await POST(jsonRequest({ mode: "stop", source: "mobile_app" }));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({ code: "timer_busy" });
   });
 
   it("creates a manual entry with no legacy project", async () => {
