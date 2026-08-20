@@ -59,11 +59,11 @@ Offline storage is intentionally split by responsibility:
 
 - `apps/mobile/src/lib/api.ts`: general activity-event queue plus bounded API delivery;
 - `apps/mobile/src/lib/timerStopOutbox.ts`: storage-only, account-owned explicit Stop intents that persist independently of the general queue, recover an unusable JSON container before accepting new intent, and become deliverable only after an optimistic timer ID has a durable canonical correlation;
-- `apps/mobile/src/lib/reviewSyncStore.ts`: account-scoped downloaded Review state and terminal Review outbox;
+- `apps/mobile/src/lib/reviewSyncStore.ts`: account-scoped downloaded Review state, terminal Review outbox, and a validated private Location Evidence presentation cache capped at seven days, 25 items, and 5 MiB;
 - `apps/mobile/src/lib/location/store.ts`: protected Location V2 evidence journal, upload outbox, and bounded server-replay coordinator;
 - native App Group/Keychain storage: bounded Live Activity/App Intent hand-off data.
 
-These stores are not interchangeable. Detailed Location actions remain connectivity-dependent, and iOS does not promise background drain after an explicit force-quit.
+These stores are not interchangeable. Location `confirm`, `ignore_once_location`, and complete `edit_and_confirm` actions use the terminal Review outbox; place creation/change, split, merge, record-once, and one-time POI actions remain connectivity-dependent. iOS does not promise background drain after an explicit force-quit.
 
 React projects pending Stop intents over cached/fetched bootstrap before publishing timer state or reconciling ActivityKit. The running sheet retains sole ownership of its existing coordinated exit; local Stop durability, not HTTP completion, accepts dismissal. Stop delivery captures the authenticated SecureStore generation/token pair and revalidates it immediately before dispatch, so a logout/login boundary retains old-account intent without sending it under the replacement account. Native ActivityKit cleanup receives exact observed IDs, awaits their end operations, and must re-read snapshots until the requested generation has either zero active activities or exactly one running canonical survivor. Remote registration and Stop enablement occur only after that verified convergence.
 
@@ -71,6 +71,7 @@ React projects pending Stop intents over cached/fetched bootstrap before publish
 
 - HealthKit and precise location are sensitive and must not enter analytics, ordinary logs, screenshots, or committed fixtures.
 - Location V2 stores exact evidence in user-owned `location_evidence`; coordinate-free summaries enter `activity_events`.
+- The Review SQLite database intentionally caches only the validated Location Evidence presentation DTO for the active account. It stores no bearer token or upload-journal copy, is pruned against canonical open Review IDs, expires at the earlier of server retention or seven days, enforces 25-item/5-MiB LRU bounds, and cascades on logout/account switch. Exact points therefore remain sensitive local data even though the cache is bounded.
 - Native Apple nearby/search responses remain transient presentation data. A one-time POI resolution crosses the API boundary as a trimmed name only; no Apple identifier, address, POI coordinate, or raw response is persisted.
 - Mobile reprocesses its local journal against current time and calls the private authenticated `/api/location/replay` route after foregrounding or a bounded periodic interval. The route reuses the same owner lock, deterministic engine, semantic cutover, and event-first transaction as evidence ingestion, so the ten-minute finalisation lag does not depend on a later location sample.
 - Retained exact location evidence is exported and deletable. Production retention is enforced through the protected Vercel cron route.

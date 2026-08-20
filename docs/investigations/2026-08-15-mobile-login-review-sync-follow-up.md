@@ -78,3 +78,13 @@ Completed on the implementation branch against the baseline above:
 - The database-backed Review validator was not run because `DATABASE_URL` is not configured in this workspace; its safety guard also requires a disposable database ending in `_test`.
 
 A new internal build and the physical-iPhone matrix above remain release evidence, not repository-level validation.
+
+## 2026-08-20 offline-first Review follow-up
+
+`2026-08-20-mobile-review-offline-first.md` supersedes this note's
+visible-pending Review presentation contract on its implementation branch.
+The 15-second cookie-free Review transport and retry-action distinction remain;
+after a successful local SQLite commit the Review item is now hidden through
+retry/auth states, and only a canonical-open permanent conflict restores it.
+Detailed Location Evidence becomes cache-first under bounded account-owned
+retention, while complex correction actions remain connectivity-dependent.

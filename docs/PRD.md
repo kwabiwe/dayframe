@@ -112,6 +112,8 @@ Deployment:
 6. As a mobile user, I want offline capture to sync later, so that timers and geofence/health events are not lost when the network is unavailable.
    - Example: A walk captured offline syncs when the phone reconnects.
    - Example: I tap Stop and immediately force-quit; reopening still shows that exact timer stopped locally and safely retries the same event without stopping a newer timer.
+   - Example: Review opens from the last account-owned snapshot, cached private Location Evidence remains usable for up to seven days, and Confirm, Dismiss, or a complete Edit-and-confirm disappears after its local SQLite commit while Dayframe retries the canonical server mutation later.
+   - Place creation/change, split, merge, and one-time POI actions still require a bounded live connection; offline support must never substitute a different action or expose one account's cached Review/location evidence to another.
 
 7. As a user reviewing time, I want Calendar, List, and Timesheet views, so that I can edit precise entries and understand daily/weekly totals.
    - Example: Resize/edit a time block, delete an accidental entry, and review weekly totals by category.
