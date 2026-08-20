@@ -38,6 +38,7 @@ import {
   type TimeEntryUpdatePatch
 } from "@/lib/api";
 import { reprocessExistingHealthReviewItems } from "@/lib/health";
+import { createLocationReviewEvidencePrefetcher } from "@/lib/locationReviewEvidenceCache";
 import { pressable, useMobileTheme } from "@/lib/mobileTheme";
 import { mergePersistedMobileTag } from "@/lib/mobileTags";
 import {
@@ -73,6 +74,8 @@ import {
   getReviewItemSyncStates,
   getReviewSyncDiagnostics,
   loadCachedReviewBootstrap,
+  projectReviewBootstrap,
+  projectReviewBootstrapFromStore,
   subscribeReviewSync,
   synchroniseReviewMutations,
   type ReviewItemSyncState,
@@ -145,8 +148,11 @@ export default function ReviewScreen() {
   const editPresentationSequence = useRef(0);
   const appStateRef = useRef(AppState.currentState);
   const screenFocusedRef = useRef(false);
+  const screenOwnerGeneration = useRef(0);
   const refreshInFlight = useRef(false);
   const bootstrapRefreshQueued = useRef(false);
+  const initialFocusHandled = useRef(false);
+  const healthReprocessInFlight = useRef(false);
   const forcedReprocessComplete = useRef(false);
   const reviewMenuStateRef = useRef(CLOSED_REVIEW_MENU_STATE);
   const reviewMenuActionSequence = useRef(0);
@@ -154,6 +160,9 @@ export default function ReviewScreen() {
   const loadRef = useRef<(options?: ReviewLoadOptions) => Promise<void>>(
     async () => undefined
   );
+  const evidencePrefetcher = useRef(
+    createLocationReviewEvidencePrefetcher()
+  ).current;
   const now = Date.now();
 
   const applyReviewMenuEvent = useCallback((event: ReviewMenuEvent) => {
@@ -219,6 +228,30 @@ export default function ReviewScreen() {
     setReviewItemSyncStates(itemStates);
   }, []);
 
+  const reconcileLocalReviewProjection = useCallback(async (
+    generation = screenOwnerGeneration.current
+  ) => {
+    const cached = await loadCachedReviewBootstrap().catch(() => null);
+    if (
+      generation !== screenOwnerGeneration.current ||
+      !screenFocusedRef.current ||
+      !cached
+    ) {
+      return false;
+    }
+    const current = dataRef.current;
+    commitData(current ? mergeReviewBootstrapProjection(current, cached.bootstrap) : cached.bootstrap);
+    return true;
+  }, [commitData]);
+
+  const hydrateReviewFromCache = useCallback(async (
+    generation = screenOwnerGeneration.current
+  ) => {
+    const committed = await reconcileLocalReviewProjection(generation);
+    await refreshReviewSyncDiagnostics();
+    return committed;
+  }, [reconcileLocalReviewProjection, refreshReviewSyncDiagnostics]);
+
   const cancelPendingReviewHandover = useCallback(() => {
     const pendingAction = reviewMenuStateRef.current.pendingAction;
     applyReviewMenuEvent({ type: "reset" });
@@ -239,62 +272,53 @@ export default function ReviewScreen() {
       return;
     }
     refreshInFlight.current = true;
+    const generation = screenOwnerGeneration.current;
     if (!options?.preserveMenu) applyReviewMenuEvent({ type: "close" });
     if (options?.refresh) setRefreshing(true);
     try {
       if (options?.refresh) {
         await synchroniseReviewMutations({ force: true });
       }
-      commitBootstrap(await fetchBootstrap());
+      const bootstrap = await fetchBootstrap();
+      if (
+        generation !== screenOwnerGeneration.current ||
+        !screenFocusedRef.current
+      ) {
+        return;
+      }
+      commitBootstrap(bootstrap);
       setReviewAvailabilityMessage(null);
       await refreshReviewSyncDiagnostics();
-      if (options?.skipReprocess) return;
-      const forceReprocess = options?.forceReprocess ?? !forcedReprocessComplete.current;
-      if (forceReprocess) forcedReprocessComplete.current = true;
-      const startedAt = new Date().toISOString();
-      setReprocessDiagnostics((current) => ({
-        ...current,
-        startedAt,
-        finishedAt: null,
-        status: "running",
-        error: null
-      }));
-      const reprocess = await withTimeout(
-        reprocessExistingHealthReviewItems(undefined, { force: forceReprocess }),
-        HEALTH_REPROCESS_TIMEOUT_MS
-      );
-      setReprocessDiagnostics((current) => ({
-        ...current,
-        finishedAt: new Date().toISOString(),
-        status: reprocess.failedCount > 0 || reprocess.partial ? "partial" : "success",
-        result: reprocess,
-        error: reprocess.errorSummary[0] ?? null
-      }));
-      if (
-        reprocess.confirmedCount > 0 ||
-        reprocess.ignoredCount > 0 ||
-        reprocess.updatedCategoryCount > 0 ||
-        reprocess.repairedSleepEntryCount > 0
-      ) {
-        commitBootstrap(await fetchBootstrap());
-      }
+      evidencePrefetcher.start({
+        reviewItemIds: bootstrap.reviewItems
+          .filter((item) => item.status === "open" && hasV2LocationEvidence(item))
+          .map((item) => item.id),
+        workspaceId: bootstrap.workspace.id,
+        userId: bootstrap.user.id
+      });
     } catch (error) {
-      const timedOut = error instanceof Error && error.message === "Health reprocess timed out.";
-      setReprocessDiagnostics((current) => ({
-        ...current,
-        finishedAt: new Date().toISOString(),
-        status: timedOut ? "timed_out" : "failed",
-        error: error instanceof Error ? error.message : "Unable to reprocess Health review items."
-      }));
       if (error instanceof AuthRequiredError) {
         router.replace("/");
         return;
       }
+      if (
+        generation !== screenOwnerGeneration.current ||
+        !screenFocusedRef.current
+      ) {
+        return;
+      }
       const cached = await loadCachedReviewBootstrap().catch(() => null);
-      if (cached) {
-        commitBootstrap(cached.bootstrap);
+      if (cached || dataRef.current) {
+        if (cached) {
+          const current = dataRef.current;
+          commitBootstrap(
+            current
+              ? mergeReviewBootstrapProjection(current, cached.bootstrap)
+              : cached.bootstrap
+          );
+        }
         setReviewAvailabilityMessage(
-          cached.cachedAt
+          cached?.cachedAt
             ? `Offline · showing Review data saved ${formatCachedAt(cached.cachedAt)}`
             : "Offline · showing Review data saved on this iPhone"
         );
@@ -303,9 +327,6 @@ export default function ReviewScreen() {
         setReviewAvailabilityMessage(
           "Review is unavailable offline because no recent Review data is stored on this iPhone."
         );
-      }
-      if (!cached && !options?.silent && !timedOut) {
-        Alert.alert("Review", error instanceof Error ? error.message : "Unable to load review items.");
       }
     } finally {
       refreshInFlight.current = false;
@@ -323,36 +344,109 @@ export default function ReviewScreen() {
   }, [
     applyReviewMenuEvent,
     commitBootstrap,
+    evidencePrefetcher,
     refreshReviewSyncDiagnostics
   ]);
   loadRef.current = load;
 
-  useEffect(() => {
-    void load({ forceReprocess: true });
-  }, [load]);
+  const startHealthReviewReprocess = useCallback(async (force = false) => {
+    if (healthReprocessInFlight.current) return;
+    healthReprocessInFlight.current = true;
+    const generation = screenOwnerGeneration.current;
+    const forceReprocess = force || !forcedReprocessComplete.current;
+    if (forceReprocess) forcedReprocessComplete.current = true;
+    const startedAt = new Date().toISOString();
+    setReprocessDiagnostics((current) => ({
+      ...current,
+      startedAt,
+      finishedAt: null,
+      status: "running",
+      error: null
+    }));
+    try {
+      const reprocess = await withTimeout(
+        reprocessExistingHealthReviewItems(undefined, { force: forceReprocess }),
+        HEALTH_REPROCESS_TIMEOUT_MS
+      );
+      if (generation !== screenOwnerGeneration.current) return;
+      setReprocessDiagnostics((current) => ({
+        ...current,
+        finishedAt: new Date().toISOString(),
+        status: reprocess.failedCount > 0 || reprocess.partial ? "partial" : "success",
+        result: reprocess,
+        error: reprocess.errorSummary[0] ?? null
+      }));
+      if (
+        reprocess.confirmedCount > 0 ||
+        reprocess.ignoredCount > 0 ||
+        reprocess.updatedCategoryCount > 0 ||
+        reprocess.repairedSleepEntryCount > 0
+      ) {
+        void loadRef.current({
+          preserveMenu: true,
+          queueIfBusy: true,
+          silent: true,
+          skipReprocess: true
+        });
+      }
+    } catch (error) {
+      if (generation !== screenOwnerGeneration.current) return;
+      if (error instanceof AuthRequiredError) {
+        router.replace("/");
+        return;
+      }
+      const timedOut = error instanceof Error && error.message === "Health reprocess timed out.";
+      setReprocessDiagnostics((current) => ({
+        ...current,
+        finishedAt: new Date().toISOString(),
+        status: timedOut ? "timed_out" : "failed",
+        error: error instanceof Error ? error.message : "Unable to reprocess Health review items."
+      }));
+    } finally {
+      healthReprocessInFlight.current = false;
+    }
+  }, []);
 
   useEffect(() => {
     void refreshReviewSyncDiagnostics();
     return subscribeReviewSync(() => {
+      void reconcileLocalReviewProjection();
       void refreshReviewSyncDiagnostics();
     });
-  }, [refreshReviewSyncDiagnostics]);
+  }, [reconcileLocalReviewProjection, refreshReviewSyncDiagnostics]);
 
   useFocusEffect(
     useCallback(() => {
       screenFocusedRef.current = true;
+      screenOwnerGeneration.current += 1;
+      const generation = screenOwnerGeneration.current;
       applyReviewMenuEvent({ type: "close" });
       void reloadThemePreference();
-      void load({ silent: true, skipReprocess: true });
+      if (!initialFocusHandled.current) {
+        initialFocusHandled.current = true;
+        void hydrateReviewFromCache(generation).finally(() => {
+          if (generation !== screenOwnerGeneration.current) return;
+          void load({ silent: true, skipReprocess: true, queueIfBusy: true });
+          void startHealthReviewReprocess(true);
+        });
+      } else {
+        void hydrateReviewFromCache(generation);
+        void load({ silent: true, skipReprocess: true, queueIfBusy: true });
+      }
       return () => {
         screenFocusedRef.current = false;
+        screenOwnerGeneration.current += 1;
+        evidencePrefetcher.stop();
         cancelPendingReviewHandover();
       };
     }, [
       applyReviewMenuEvent,
       cancelPendingReviewHandover,
+      evidencePrefetcher,
+      hydrateReviewFromCache,
       load,
-      reloadThemePreference
+      reloadThemePreference,
+      startHealthReviewReprocess
     ])
   );
 
@@ -360,6 +454,7 @@ export default function ReviewScreen() {
     const subscription = AppState.addEventListener("change", (nextState) => {
       appStateRef.current = nextState;
       if (nextState !== "active") {
+        evidencePrefetcher.stop();
         cancelPendingReviewHandover();
         return;
       }
@@ -374,7 +469,7 @@ export default function ReviewScreen() {
       }
     });
     return () => subscription.remove();
-  }, [cancelPendingReviewHandover, load]);
+  }, [cancelPendingReviewHandover, evidencePrefetcher, load]);
 
   const openReviewItems = useMemo(
     () => (data?.reviewItems ?? []).filter(isOpenReviewItem),
@@ -399,10 +494,6 @@ export default function ReviewScreen() {
       openItemIds: openReviewItems.map((item) => item.id)
     });
   }, [applyReviewMenuEvent, openReviewItems]);
-
-  useEffect(() => {
-    if (reprocessRunning) cancelPendingReviewHandover();
-  }, [cancelPendingReviewHandover, reprocessRunning]);
 
   function confirmItem(item: MobileReviewItem) {
     applyReviewMenuEvent({ type: "close" });
@@ -430,7 +521,7 @@ export default function ReviewScreen() {
       type: "toggle",
       itemId: item.id,
       disabled:
-        reprocessRunning ||
+        (reprocessRunning && isHealthReviewItem(item)) ||
         reviewMutations.current.has(item.id) ||
         reviewItemSyncStates.has(item.id)
     });
@@ -500,8 +591,16 @@ export default function ReviewScreen() {
       item,
       mutation,
       clientMutationId
-    }).then(() => {
+    }).then(async () => {
         if (!reviewMutations.current.has(item.id)) return;
+        const currentProjection = dataRef.current;
+        if (currentProjection) {
+          const projected = await projectReviewBootstrapFromStore(currentProjection)
+            .catch(() => projectReviewBootstrap(currentProjection, new Set([item.id])));
+          commitData(projected);
+        } else {
+          await reconcileLocalReviewProjection();
+        }
         AccessibilityInfo.announceForAccessibility(successAnnouncement);
         reviewMutations.current.delete(item.id);
         void refreshReviewSyncDiagnostics();
@@ -614,7 +713,18 @@ export default function ReviewScreen() {
             }
           }
         });
-        await refreshReviewSyncDiagnostics();
+        const currentProjection = dataRef.current;
+        if (currentProjection) {
+          const projected = await projectReviewBootstrapFromStore(currentProjection)
+            .catch(() => projectReviewBootstrap(
+              currentProjection,
+              new Set([editTarget.item.id])
+            ));
+          commitData(projected);
+        } else {
+          await reconcileLocalReviewProjection();
+        }
+        void refreshReviewSyncDiagnostics();
         AccessibilityInfo.announceForAccessibility(
           "Changes saved on this iPhone. Waiting to sync."
         );
@@ -676,7 +786,10 @@ export default function ReviewScreen() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => load({ forceReprocess: true, refresh: true })}
+            onRefresh={() => {
+              void load({ refresh: true });
+              void startHealthReviewReprocess(true);
+            }}
             tintColor={theme.accent}
             colors={[theme.accent]}
           />
@@ -759,7 +872,7 @@ export default function ReviewScreen() {
                     <ReviewItemCard
                       item={item}
                       peerEntries={reviewPeerEntries(data)}
-                      disabled={reprocessRunning}
+                      disabled={reprocessRunning && isHealthReviewItem(item)}
                       syncState={reviewItemSyncStates.get(item.id) ?? null}
                       menuOpen={reviewMenuState.openItemId === item.id}
                       now={now}
@@ -796,7 +909,7 @@ export default function ReviewScreen() {
       <OverflowMenu
         disabled={
           !overflowItemId ||
-          reprocessRunning ||
+          (reprocessRunning && Boolean(overflowTarget && isHealthReviewItem(overflowTarget))) ||
           reviewMenuState.pendingAction != null
         }
         onClose={() => applyReviewMenuEvent({ type: "close" })}
@@ -1106,6 +1219,30 @@ function collectReviewNeededEntries(data: MobileBootstrap | null) {
   return Array.from(byId.values()).sort(
     (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
   );
+}
+
+export function mergeReviewBootstrapProjection(
+  current: MobileBootstrap,
+  projection: MobileBootstrap
+) {
+  if (
+    current.workspace.id !== projection.workspace.id ||
+    current.user.id !== projection.user.id
+  ) {
+    return projection;
+  }
+  return {
+    ...current,
+    workspace: projection.workspace,
+    categories: projection.categories,
+    reviewItems: projection.reviewItems,
+    stats: current.stats
+      ? {
+          ...current.stats,
+          reviewCount: projection.stats?.reviewCount ?? projection.reviewItems.length
+        }
+      : projection.stats
+  };
 }
 
 function reviewItemTitle(item: MobileReviewItem) {

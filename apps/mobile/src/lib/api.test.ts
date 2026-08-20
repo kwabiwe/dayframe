@@ -66,12 +66,14 @@ const {
   dismissReviewItem,
   enqueueEvent,
   fetchBootstrap,
+  fetchLocationReviewEvidence,
   fetchTimerState,
   getQueueDiagnostics,
   getSessionToken,
   ignoreLearnedPlace,
   isNetworkTimerError,
   login,
+  normaliseLocationReviewRequestError,
   readQueue,
   readTimerEntryIdCorrelations,
   reprocessHealthReviewItems,
@@ -79,6 +81,7 @@ const {
   removeQueuedEvent,
   removeTimerEntryIdCorrelation,
   resolveTimerEntryIdAfterQueueBarrier,
+  resolveLocationReviewItem,
   saveEditedReviewItem,
   startTimer,
   stopTimer,
@@ -175,6 +178,66 @@ describe("mobile API client", () => {
     await expect(getSessionToken()).resolves.toBeNull();
   });
 
+  it("bounds and cancels location evidence requests without leaking cookie credentials", async () => {
+    vi.useFakeTimers();
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const stalledFetch = vi.fn(() => new Promise<Response>(() => undefined));
+    vi.stubGlobal("fetch", stalledFetch);
+
+    const timedOut = fetchLocationReviewEvidence("review-1");
+    const timeoutRejection = expect(timedOut).rejects.toMatchObject({
+      name: "MobileRequestTimeoutError",
+      message: "Location evidence is taking too long to load."
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await timeoutRejection;
+    expect(stalledFetch).toHaveBeenCalledWith(
+      "https://dayframe.test/api/review/review-1/location-evidence",
+      expect.objectContaining({
+        cache: "no-store",
+        credentials: "omit",
+        headers: { Authorization: "Bearer session-token" }
+      })
+    );
+
+    const controller = new AbortController();
+    const cancelled = fetchLocationReviewEvidence("review-2", {
+      signal: controller.signal
+    });
+    controller.abort(new Error("Route exited."));
+    await expect(cancelled).rejects.toThrow("Route exited.");
+  });
+
+  it("bounds direct-only location actions and keeps native network errors friendly", async () => {
+    vi.useFakeTimers();
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => undefined)));
+
+    const request = resolveLocationReviewItem("review-1", {
+      action: "record_poi_once",
+      name: "Cafe"
+    });
+    const rejection = expect(request).rejects.toMatchObject({
+      name: "MobileRequestTimeoutError",
+      message: "This location Review action is taking too long. Your changes are still here."
+    });
+    await vi.advanceTimersByTimeAsync(15_000);
+    await rejection;
+
+    expect(normaliseLocationReviewRequestError(
+      new Error("ExpoModulesCore.UnexpectedException: Network request failed"),
+      "action"
+    )).toBe("This action needs a connection and could not be completed. Your changes are still here.");
+  });
+
+  it("invalidates the current bearer when location evidence returns 401", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "expired-token");
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({ error: "Login required" }, 401))));
+
+    await expect(fetchLocationReviewEvidence("review-1")).rejects.toBeInstanceOf(AuthRequiredError);
+    await expect(getSessionToken()).resolves.toBeNull();
+  });
+
   it("ignores a delayed bootstrap rejection from the session replaced during the request", async () => {
     await setSessionToken("account-a-token");
     let finishResponse: ((response: Response) => void) | undefined;
@@ -187,6 +250,23 @@ describe("mobile API client", () => {
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
     await setSessionToken("account-b-token");
     finishResponse?.(jsonResponse({ error: "Login required" }, 401));
+
+    await expect(staleBootstrap).rejects.toBeInstanceOf(StaleMobileSessionResponseError);
+    await expect(getSessionToken()).resolves.toBe("account-b-token");
+  });
+
+  it("ignores a delayed successful bootstrap from the account replaced during the request", async () => {
+    await setSessionToken("account-a-token");
+    let finishResponse: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => {
+      finishResponse = resolve;
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const staleBootstrap = fetchBootstrap();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    await setSessionToken("account-b-token");
+    finishResponse?.(jsonResponse({ reviewItems: [] }));
 
     await expect(staleBootstrap).rejects.toBeInstanceOf(StaleMobileSessionResponseError);
     await expect(getSessionToken()).resolves.toBe("account-b-token");

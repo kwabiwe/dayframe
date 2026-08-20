@@ -1,6 +1,8 @@
-import type {
-  LocationReviewAction,
-  ReviewEntryEdit
+import {
+  ReviewMutationSchema,
+  type LocationReviewAction,
+  type ReviewMutation,
+  type ReviewEntryEdit
 } from "@dayframe/shared";
 import { mergeTimeEntryDialLocalDateTime } from "./timeEntryDurationDial";
 
@@ -145,6 +147,29 @@ export function buildLocationReviewResolutionAction({
     };
   }
   return { action: "edit_and_confirm", edit };
+}
+
+export function durableReviewMutationFromLocationAction(
+  action: LocationReviewAction
+): ReviewMutation | null {
+  if (action.action === "confirm" || action.action === "ignore_once_location") {
+    return ReviewMutationSchema.parse(action);
+  }
+  if (
+    action.action !== "edit_and_confirm" ||
+    !action.edit.startedAt ||
+    !action.edit.stoppedAt
+  ) {
+    return null;
+  }
+  const parsed = ReviewMutationSchema.safeParse(action);
+  return parsed.success ? parsed.data : null;
+}
+
+export function locationReviewActionRequiresConnection(
+  action: LocationReviewAction
+) {
+  return durableReviewMutationFromLocationAction(action) === null;
 }
 
 export function formatLocationReviewDateInput(date: Date) {

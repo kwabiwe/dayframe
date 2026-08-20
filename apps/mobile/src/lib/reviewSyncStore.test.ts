@@ -16,11 +16,14 @@ vi.mock("./config", () => ({
 
 const {
   createReviewClientMutationId,
+  locationReviewEvidenceExpiry,
   nextReviewRetryAt,
   projectReviewBootstrap,
   sanitiseDashboardBootstrapForCache,
   reviewSyncDisposition,
-  sanitiseReviewItemForCache
+  restoreReviewItemsWithAnchors,
+  sanitiseReviewItemForCache,
+  utf8ByteSize
 } = await import("./reviewSyncStore");
 
 describe("Review sync store contracts", () => {
@@ -143,6 +146,39 @@ describe("Review sync store contracts", () => {
     expect(safe.reviewItems[0].rawPayload).toEqual({
       algorithmVersion: "location-v2.0"
     });
+  });
+
+  it("uses the earlier of the server evidence expiry and the seven-day local cap", () => {
+    const fetchedAt = "2026-08-20T10:00:00.000Z";
+    expect(locationReviewEvidenceExpiry({
+      evidenceExpiresAt: "2026-08-21T10:00:00.000Z"
+    }, fetchedAt)).toBe("2026-08-21T10:00:00.000Z");
+    expect(locationReviewEvidenceExpiry({
+      evidenceExpiresAt: "2026-09-20T10:00:00.000Z"
+    }, fetchedAt)).toBe("2026-08-27T10:00:00.000Z");
+  });
+
+  it("counts serialized evidence using UTF-8 bytes", () => {
+    expect(utf8ByteSize("map")).toBe(3);
+    expect(utf8ByteSize("map 📍")).toBe(8);
+  });
+
+  it("restores permanent conflicts at surviving canonical anchors without duplicates", () => {
+    const first = reviewItem({ id: "review-1" });
+    const restored = reviewItem({ id: "review-2" });
+    const third = reviewItem({ id: "review-3" });
+    const result = restoreReviewItemsWithAnchors([first, third], [{
+      item: restored,
+      originalPosition: 1,
+      precedingIds: [first.id],
+      followingIds: [third.id]
+    }, {
+      item: restored,
+      originalPosition: 0,
+      precedingIds: [],
+      followingIds: []
+    }]);
+    expect(result.map((item) => item.id)).toEqual(["review-1", "review-2", "review-3"]);
   });
 });
 

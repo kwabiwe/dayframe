@@ -80,7 +80,8 @@ export function LocationReviewCorrectionEditor({
   onResolve,
   places,
   reviewItem,
-  saving
+  saving,
+  statusMessage
 }: {
   adjacentReview: MobileReviewItem | undefined;
   categories: Category[];
@@ -89,6 +90,7 @@ export function LocationReviewCorrectionEditor({
   places: Place[];
   reviewItem: MobileReviewItem | undefined;
   saving: boolean;
+  statusMessage?: string | null;
 }) {
   const { fontScale } = useWindowDimensions();
   const reduceMotion = useReduceMotionPreference();
@@ -447,6 +449,15 @@ export function LocationReviewCorrectionEditor({
         contentContainerStyle={[styles.settingsScrollContent, editorStyles.scrollContent]}
       >
         <View style={styles.contentStack}>
+          <View style={editorStyles.statusSlot}>
+            {statusMessage ? (
+              <View style={styles.queueDiagnosticCard}>
+                <Text accessibilityLiveRegion="polite" style={styles.reviewMetaLine}>
+                  {statusMessage}
+                </Text>
+              </View>
+            ) : null}
+          </View>
           <View style={styles.panel}>
             <Text style={styles.label}>Location evidence</Text>
             <Text style={styles.sectionTitle}>{locationActivityLabel(evidence)}</Text>
@@ -1145,6 +1156,7 @@ function formatLocationReviewDuration(startedAt: string, stoppedAt: string) {
 function createEditorStyles(theme: MobileTheme) {
   return StyleSheet.create({
     scrollContent: { paddingBottom: 34 },
+    statusSlot: { minHeight: 58, justifyContent: "center" },
     correctionCard: {
       backgroundColor: theme.surfaceRaised,
       borderRadius: 18,

@@ -108,6 +108,7 @@ import {
   recordLocationStoreError,
   type LocationStoreDiagnostics
 } from "@/lib/location/store";
+import { getLocationReviewEvidencePrefetchDiagnostics } from "@/lib/locationReviewEvidenceCache";
 import {
   discardReviewSyncIssue,
   getReviewSyncDiagnostics,
@@ -812,7 +813,8 @@ export default function SettingsScreen() {
         ...eventQueueSnapshot,
         reviewSync: {
           diagnostics: latestReviewDiagnostics,
-          mutations: reviewMutations
+          mutations: reviewMutations,
+          locationEvidencePrefetch: getLocationReviewEvidencePrefetchDiagnostics()
         }
       };
       await Share.share({

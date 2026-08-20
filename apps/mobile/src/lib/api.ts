@@ -17,6 +17,7 @@ import {
 import { DAYFRAME_API_BASE } from "./config";
 import {
   MobileRequestTimeoutError,
+  StaleMobileSessionResponseError,
   mobileFetch,
   mobileFetchWithTimeout
 } from "./mobile-network";
@@ -42,6 +43,8 @@ const DEFAULT_PLACE_PRIORITY = 5;
 const MOBILE_OPENING_REQUEST_TIMEOUT_MS = 15_000;
 const MOBILE_QUEUE_REQUEST_TIMEOUT_MS = 15_000;
 const MOBILE_TIMER_STOP_REQUEST_TIMEOUT_MS = 8_000;
+export const MOBILE_LOCATION_REVIEW_EVIDENCE_TIMEOUT_MS = 10_000;
+export const MOBILE_LOCATION_REVIEW_ACTION_TIMEOUT_MS = 15_000;
 let queueMutationTail: Promise<void> = Promise.resolve();
 let timerEntryIdCorrelationMutationTail: Promise<void> = Promise.resolve();
 
@@ -430,9 +433,17 @@ type ApiJsonRead<T> =
 
 export async function fetchBootstrap(options: { date?: string } = {}): Promise<MobileBootstrap> {
   const params = options.date ? `?date=${encodeURIComponent(options.date)}` : "";
+  const sessionRead = await readAuthenticatedSessionSnapshot();
+  if (sessionRead.status === "changed") {
+    throw new StaleMobileSessionResponseError();
+  }
   const response = await mobileFetchWithTimeout(
     `${DAYFRAME_API_BASE}/api/bootstrap${params}`,
-    { headers: await authHeaders() },
+    {
+      headers: sessionRead.status === "authenticated"
+        ? { Authorization: `Bearer ${sessionRead.snapshot.token}` }
+        : {}
+    },
     {
       timeoutMilliseconds: MOBILE_OPENING_REQUEST_TIMEOUT_MS,
       timeoutMessage: "Dayframe is taking too long to open. Check your connection and try again."
@@ -442,6 +453,12 @@ export async function fetchBootstrap(options: { date?: string } = {}): Promise<M
     const reviewStore = await reviewSyncStore();
     if (reviewStore) await reviewStore.synchroniseReviewMutations();
     throw new AuthRequiredError();
+  }
+  if (
+    sessionRead.status === "authenticated" &&
+    !isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot)
+  ) {
+    throw new StaleMobileSessionResponseError();
   }
   if (!response.ok) {
     throw new Error(await errorMessage(response, "Unable to load Dayframe API"));
@@ -998,14 +1015,21 @@ export async function resolveReviewItem(id: string, action: ReviewItemAction) {
 }
 
 export async function resolveLocationReviewItem(id: string, action: LocationReviewAction) {
-  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(id)}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(await authHeaders())
+  const response = await mobileFetchWithTimeout(
+    `${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(id)}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(await authHeaders())
+      },
+      body: JSON.stringify(action)
     },
-    body: JSON.stringify(action)
-  });
+    {
+      timeoutMilliseconds: MOBILE_LOCATION_REVIEW_ACTION_TIMEOUT_MS,
+      timeoutMessage: "This location Review action is taking too long. Your changes are still here."
+    }
+  );
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
@@ -1013,16 +1037,47 @@ export async function resolveLocationReviewItem(id: string, action: LocationRevi
   return readJsonResponse(response);
 }
 
-export async function fetchLocationReviewEvidence(id: string): Promise<LocationReviewEvidenceDto> {
-  const response = await mobileFetch(
+export async function fetchLocationReviewEvidence(
+  id: string,
+  options: { signal?: AbortSignal } = {}
+): Promise<LocationReviewEvidenceDto> {
+  const response = await mobileFetchWithTimeout(
     `${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(id)}/location-evidence`,
-    { headers: await authHeaders(), cache: "no-store" }
+    {
+      headers: await authHeaders(),
+      cache: "no-store",
+      signal: options.signal
+    },
+    {
+      timeoutMilliseconds: MOBILE_LOCATION_REVIEW_EVIDENCE_TIMEOUT_MS,
+      timeoutMessage: "Location evidence is taking too long to load."
+    }
   );
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to load location evidence"));
   return readJsonResponse<LocationReviewEvidenceDto>(response);
+}
+
+export function normaliseLocationReviewRequestError(
+  error: unknown,
+  kind: "evidence" | "action"
+) {
+  if (error instanceof MobileRequestTimeoutError) return error.message;
+  const message = error instanceof Error ? error.message : "";
+  if (
+    /ExpoModulesCore|UnexpectedException|network connection was lost|Network request failed|failed to fetch|offline|internet connection/i.test(
+      message
+    )
+  ) {
+    return kind === "evidence"
+      ? "Detailed location evidence could not be refreshed. Check your connection and try again."
+      : "This action needs a connection and could not be completed. Your changes are still here.";
+  }
+  return kind === "evidence"
+    ? "Detailed location evidence could not be loaded. Try again when you have a connection."
+    : "This action could not be completed. Your changes are still here.";
 }
 
 export async function deleteRecentLocationEvidence() {

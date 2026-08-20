@@ -1,7 +1,9 @@
 import * as SQLite from "expo-sqlite";
 import {
+  LocationReviewEvidenceDtoSchema,
   ReviewMutationEnvelopeSchema,
   ReviewMutationSchema,
+  type LocationReviewEvidenceDto,
   type ReviewMutation,
   type ReviewMutationEnvelope
 } from "@dayframe/shared";
@@ -18,10 +20,13 @@ import type {
 import { createSerialMutationQueue } from "./location/mutationQueue";
 
 const DATABASE_NAME = "dayframe-review-sync.db";
-const DATABASE_VERSION = 3;
+const DATABASE_VERSION = 4;
 const ACTIVE_ACCOUNT_KEY = "active_account";
 const LAST_CACHE_AT_KEY = "last_cache_at";
 const LAST_SUCCESSFUL_SYNC_AT_KEY = "last_successful_sync_at";
+export const LOCATION_REVIEW_EVIDENCE_MAX_AGE_MS = 7 * 86_400_000;
+export const LOCATION_REVIEW_EVIDENCE_MAX_ITEMS = 25;
+export const LOCATION_REVIEW_EVIDENCE_MAX_BYTES = 5 * 1024 * 1024;
 export const REVIEW_SYNC_REQUEST_TIMEOUT_MS = 15_000;
 const SYNC_STATES = [
   "pending",
@@ -50,6 +55,18 @@ export type ReviewSyncDiagnostics = {
   nextRetryAt: string | null;
   lastError: string | null;
   lastCachedAt: string | null;
+  reviewCacheHitCount: number;
+  reviewCacheMissCount: number;
+  lastReviewCacheAgeMs: number | null;
+  evidenceCacheItemCount: number;
+  evidenceCacheBytes: number;
+  evidenceCacheHitCount: number;
+  evidenceCacheMissCount: number;
+  lastEvidenceCacheAgeMs: number | null;
+  lastEvidencePayloadBytes: number | null;
+  lastLocalMutationAction: string | null;
+  lastLocalMutationCommitDurationMs: number | null;
+  lastLocalMutationCommittedAt: string | null;
 };
 
 export type ReviewSyncResult = {
@@ -126,10 +143,39 @@ type CountRow = {
   last_error: string | null;
 };
 
+type CachedEvidenceRow = {
+  evidence_json: string;
+  fetched_at: string;
+  expires_at: string;
+  byte_size: number;
+};
+
+type EvidenceCacheSizeRow = {
+  review_item_id: string;
+  byte_size: number;
+};
+
+export type LocationReviewEvidenceCacheDiagnostics = {
+  itemCount: number;
+  totalBytes: number;
+  oldestFetchedAt: string | null;
+  newestFetchedAt: string | null;
+};
+
 let databasePromise: Promise<SQLite.SQLiteDatabase> | null = null;
 let synchronisationPromise: Promise<ReviewSyncResult> | null = null;
 let synchronisationRequested = false;
 let forcedSynchronisationRequested = false;
+let reviewCacheHitCount = 0;
+let reviewCacheMissCount = 0;
+let lastReviewCacheAgeMs: number | null = null;
+let evidenceCacheHitCount = 0;
+let evidenceCacheMissCount = 0;
+let lastEvidenceCacheAgeMs: number | null = null;
+let lastEvidencePayloadBytes: number | null = null;
+let lastLocalMutationAction: string | null = null;
+let lastLocalMutationCommitDurationMs: number | null = null;
+let lastLocalMutationCommittedAt: string | null = null;
 const serialiseReviewMutation = createSerialMutationQueue();
 const listeners = new Set<() => void>();
 
@@ -195,7 +241,7 @@ async function database() {
             preceding_ids_json text not null,
             following_ids_json text not null,
             state text not null,
-            local_effect text not null default 'restore',
+            local_effect text not null default 'hidden',
             attempt_count integer not null default 0,
             next_attempt_at text,
             last_attempted_at text,
@@ -212,6 +258,23 @@ async function database() {
             on review_mutation_outbox(account_key, review_item_id);
           create index if not exists review_mutation_drain_idx
             on review_mutation_outbox(account_key, state, next_attempt_at, created_at);
+          create table if not exists location_review_evidence_cache (
+            account_key text not null,
+            review_item_id text not null,
+            evidence_json text not null,
+            fetched_at text not null,
+            expires_at text not null,
+            byte_size integer not null,
+            last_accessed_at text not null,
+            primary key(account_key, review_item_id),
+            foreign key(account_key)
+              references review_account_context(account_key)
+              on delete cascade
+          );
+          create index if not exists location_review_evidence_expiry_idx
+            on location_review_evidence_cache(account_key, expires_at);
+          create index if not exists location_review_evidence_lru_idx
+            on location_review_evidence_cache(account_key, last_accessed_at);
         `);
         if ((version?.user_version ?? 0) < 2) {
           await transaction.execAsync(`
@@ -220,6 +283,19 @@ async function database() {
               when state = 'acknowledged' then 'hidden'
               else 'restore'
             end;
+          `);
+        }
+        if ((version?.user_version ?? 0) < 4) {
+          await transaction.execAsync(`
+            update review_mutation_outbox
+            set local_effect = 'hidden'
+            where state in (
+              'pending',
+              'in_flight',
+              'retry_wait',
+              'auth_required',
+              'acknowledged'
+            );
           `);
         }
         await transaction.execAsync(`PRAGMA user_version = ${DATABASE_VERSION}`);
@@ -284,6 +360,17 @@ async function activeAccount(transaction?: SQLite.SQLiteDatabase) {
      where account_key = ?`,
     key
   );
+}
+
+export async function getActiveReviewAccountIdentity() {
+  const account = await activeAccount();
+  return account
+    ? {
+        workspaceId: account.workspace_id,
+        userId: account.user_id,
+        workspaceName: account.workspace_name
+      }
+    : null;
 }
 
 export function createReviewClientMutationId() {
@@ -408,6 +495,25 @@ export async function processReviewBootstrap(bootstrap: MobileBootstrap) {
           );
         }
       }
+      const cachedEvidence = await transaction.getAllAsync<{
+        review_item_id: string;
+      }>(
+        `select review_item_id
+         from location_review_evidence_cache
+         where account_key = ?`,
+        key
+      );
+      for (const row of cachedEvidence) {
+        if (!openIds.has(row.review_item_id)) {
+          await transaction.runAsync(
+            `delete from location_review_evidence_cache
+             where account_key = ? and review_item_id = ?`,
+            key,
+            row.review_item_id
+          );
+        }
+      }
+      await pruneLocationReviewEvidenceCacheForAccount(transaction, key, now);
     })
   );
 
@@ -473,7 +579,10 @@ export async function loadCachedReviewBootstrap(): Promise<{
 } | null> {
   const db = await database();
   const account = await activeAccount(db);
-  if (!account) return null;
+  if (!account) {
+    reviewCacheMissCount += 1;
+    return null;
+  }
   const categories = await db.getAllAsync<CachedCategoryRow>(
     `select category_json
      from review_category_cache
@@ -491,35 +600,49 @@ export async function loadCachedReviewBootstrap(): Promise<{
   const restored = await db.getAllAsync<{
     original_snapshot_json: string;
     original_position: number;
+    preceding_ids_json: string;
+    following_ids_json: string;
     created_at: string;
   }>(
-    `select original_snapshot_json, original_position, created_at
+    `select original_snapshot_json, original_position,
+            preceding_ids_json, following_ids_json, created_at
      from review_mutation_outbox
      where account_key = ? and local_effect = 'restore'
      order by original_position, created_at`,
     account.account_key
   );
-  const byId = new Map<string, { item: MobileReviewItem; position: number }>();
-  for (const row of cached) {
+  const cachedItems = cached.flatMap((row) => {
     const item = parseReviewSnapshot(row.snapshot_json);
-    if (item) byId.set(item.id, { item, position: row.position });
-  }
-  for (const row of restored) {
-    const item = parseReviewSnapshot(row.original_snapshot_json);
-    if (item && !byId.has(item.id)) {
-      byId.set(item.id, { item, position: row.original_position });
-    }
-  }
+    return item ? [{ item, position: row.position }] : [];
+  });
+  const orderedItems = restoreReviewItemsWithAnchors(
+    cachedItems
+      .sort((left, right) => left.position - right.position)
+      .map(({ item }) => item),
+    restored.flatMap((row) => {
+      const item = parseReviewSnapshot(row.original_snapshot_json);
+      return item
+        ? [{
+            item,
+            originalPosition: row.original_position,
+            precedingIds: parseStringArray(row.preceding_ids_json),
+            followingIds: parseStringArray(row.following_ids_json)
+          }]
+        : [];
+    })
+  );
   const hiddenIds = await hiddenReviewItemIds(account.account_key);
-  const reviewItems = [...byId.values()]
-    .filter(({ item }) => !hiddenIds.has(item.id))
-    .sort((left, right) => left.position - right.position)
-    .map(({ item }) => item);
+  const reviewItems = orderedItems.filter((item) => !hiddenIds.has(item.id));
   const cachedAt = await metadata(
     accountMetadataKey(LAST_CACHE_AT_KEY, account.account_key),
     db
   );
-  if (!cachedAt) return null;
+  if (!cachedAt) {
+    reviewCacheMissCount += 1;
+    return null;
+  }
+  reviewCacheHitCount += 1;
+  lastReviewCacheAgeMs = ageMilliseconds(cachedAt);
   return {
     cachedAt,
     bootstrap: {
@@ -550,6 +673,229 @@ export async function loadCachedReviewBootstrap(): Promise<{
         reviewCount: reviewItems.length
       }
     }
+  };
+}
+
+export async function projectReviewBootstrapFromStore(
+  bootstrap: MobileBootstrap
+): Promise<MobileBootstrap> {
+  const db = await database();
+  const account = await activeAccount(db);
+  if (
+    !account ||
+    account.workspace_id !== bootstrap.workspace.id ||
+    account.user_id !== bootstrap.user.id
+  ) {
+    return bootstrap;
+  }
+  return projectReviewBootstrap(
+    bootstrap,
+    await hiddenReviewItemIds(account.account_key)
+  );
+}
+
+export async function loadCachedLocationReviewEvidence(
+  reviewItemId: string
+): Promise<{
+  evidence: LocationReviewEvidenceDto;
+  fetchedAt: string;
+  expiresAt: string;
+} | null> {
+  const db = await database();
+  const account = await activeAccount(db);
+  if (!account) return null;
+  const row = await db.getFirstAsync<CachedEvidenceRow>(
+    `select evidence_json, fetched_at, expires_at, byte_size
+     from location_review_evidence_cache
+     where account_key = ? and review_item_id = ?`,
+    account.account_key,
+    reviewItemId
+  );
+  if (!row) {
+    evidenceCacheMissCount += 1;
+    return null;
+  }
+  if (!isFutureIso(row.expires_at)) {
+    evidenceCacheMissCount += 1;
+    await serialiseReviewMutation(() =>
+      db.runAsync(
+        `delete from location_review_evidence_cache
+         where account_key = ? and review_item_id = ?`,
+        account.account_key,
+        reviewItemId
+      )
+    );
+    return null;
+  }
+  try {
+    const evidence = LocationReviewEvidenceDtoSchema.parse(
+      JSON.parse(row.evidence_json)
+    );
+    if (evidence.reviewItemId !== reviewItemId) throw new Error("Evidence identity mismatch.");
+    await serialiseReviewMutation(() =>
+      db.runAsync(
+        `update location_review_evidence_cache
+         set last_accessed_at = ?
+         where account_key = ? and review_item_id = ?`,
+        new Date().toISOString(),
+        account.account_key,
+        reviewItemId
+      )
+    );
+    evidenceCacheHitCount += 1;
+    lastEvidenceCacheAgeMs = ageMilliseconds(row.fetched_at);
+    lastEvidencePayloadBytes = Math.max(0, Number(row.byte_size) || 0);
+    return {
+      evidence,
+      fetchedAt: row.fetched_at,
+      expiresAt: row.expires_at
+    };
+  } catch {
+    evidenceCacheMissCount += 1;
+    await serialiseReviewMutation(() =>
+      db.runAsync(
+        `delete from location_review_evidence_cache
+         where account_key = ? and review_item_id = ?`,
+        account.account_key,
+        reviewItemId
+      )
+    );
+    return null;
+  }
+}
+
+export async function cacheLocationReviewEvidence(input: {
+  expectedWorkspaceId: string;
+  expectedUserId: string;
+  reviewItemId: string;
+  evidence: LocationReviewEvidenceDto;
+  fetchedAt?: string;
+}) {
+  const evidence = LocationReviewEvidenceDtoSchema.parse(input.evidence);
+  if (evidence.reviewItemId !== input.reviewItemId) {
+    throw new Error("Location evidence does not match this Review item.");
+  }
+  const fetchedAt = validIso(input.fetchedAt) ?? new Date().toISOString();
+  const expiresAt = locationReviewEvidenceExpiry(evidence, fetchedAt);
+  const evidenceJson = JSON.stringify(evidence);
+  const byteSize = utf8ByteSize(evidenceJson);
+  const key = accountKey({
+    workspaceId: input.expectedWorkspaceId,
+    userId: input.expectedUserId
+  });
+  const db = await database();
+  let written = false;
+  await serialiseReviewMutation(() =>
+    db.withExclusiveTransactionAsync(async (transaction) => {
+      const account = await activeAccount(transaction);
+      if (!account || account.account_key !== key) return;
+      if (!isFutureIso(expiresAt)) {
+        await transaction.runAsync(
+          `delete from location_review_evidence_cache
+           where account_key = ? and review_item_id = ?`,
+          key,
+          input.reviewItemId
+        );
+        return;
+      }
+      await transaction.runAsync(
+        `insert into location_review_evidence_cache (
+           account_key, review_item_id, evidence_json, fetched_at,
+           expires_at, byte_size, last_accessed_at
+         ) values (?, ?, ?, ?, ?, ?, ?)
+         on conflict(account_key, review_item_id) do update set
+           evidence_json = excluded.evidence_json,
+           fetched_at = excluded.fetched_at,
+           expires_at = excluded.expires_at,
+           byte_size = excluded.byte_size,
+           last_accessed_at = excluded.last_accessed_at`,
+        key,
+        input.reviewItemId,
+        evidenceJson,
+        fetchedAt,
+        expiresAt,
+        byteSize,
+        fetchedAt
+      );
+      written = true;
+      await pruneLocationReviewEvidenceCacheForAccount(
+        transaction,
+        key,
+        fetchedAt
+      );
+    })
+  );
+  if (written) emitChange();
+  return written;
+}
+
+export async function removeCachedLocationReviewEvidence(reviewItemId: string) {
+  const db = await database();
+  const account = await activeAccount(db);
+  if (!account) return false;
+  const result = await serialiseReviewMutation(() =>
+    db.runAsync(
+      `delete from location_review_evidence_cache
+       where account_key = ? and review_item_id = ?`,
+      account.account_key,
+      reviewItemId
+    )
+  );
+  if (result.changes > 0) emitChange();
+  return result.changes > 0;
+}
+
+export async function pruneLocationReviewEvidenceCache() {
+  const db = await database();
+  const account = await activeAccount(db);
+  if (!account) {
+    return { expiredRemoved: 0, countEvicted: 0, bytesEvicted: 0 };
+  }
+  let result = { expiredRemoved: 0, countEvicted: 0, bytesEvicted: 0 };
+  await serialiseReviewMutation(() =>
+    db.withExclusiveTransactionAsync(async (transaction) => {
+      result = await pruneLocationReviewEvidenceCacheForAccount(
+        transaction,
+        account.account_key,
+        new Date().toISOString()
+      );
+    })
+  );
+  return result;
+}
+
+export async function getLocationReviewEvidenceCacheDiagnostics(): Promise<
+  LocationReviewEvidenceCacheDiagnostics
+> {
+  const db = await database();
+  const account = await activeAccount(db);
+  if (!account) {
+    return {
+      itemCount: 0,
+      totalBytes: 0,
+      oldestFetchedAt: null,
+      newestFetchedAt: null
+    };
+  }
+  const row = await db.getFirstAsync<{
+    item_count: number;
+    total_bytes: number;
+    oldest_fetched_at: string | null;
+    newest_fetched_at: string | null;
+  }>(
+    `select count(*) as item_count,
+            coalesce(sum(byte_size), 0) as total_bytes,
+            min(fetched_at) as oldest_fetched_at,
+            max(fetched_at) as newest_fetched_at
+     from location_review_evidence_cache
+     where account_key = ?`,
+    account.account_key
+  );
+  return {
+    itemCount: Number(row?.item_count) || 0,
+    totalBytes: Number(row?.total_bytes) || 0,
+    oldestFetchedAt: row?.oldest_fetched_at ?? null,
+    newestFetchedAt: row?.newest_fetched_at ?? null
   };
 }
 
@@ -640,6 +986,7 @@ export async function enqueueReviewMutation(input: {
   const now = new Date().toISOString();
   const db = await database();
   let idempotent = false;
+  const localCommitStartedAt = Date.now();
 
   await serialiseReviewMutation(() =>
     db.withExclusiveTransactionAsync(async (transaction) => {
@@ -714,7 +1061,7 @@ export async function enqueueReviewMutation(input: {
            review_item_id, action_kind, request_json, original_snapshot_json,
            original_position, preceding_ids_json, following_ids_json,
            state, local_effect, created_at, updated_at
-         ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'restore', ?, ?)`,
+         ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'hidden', ?, ?)`,
         envelope.clientMutationId,
         key,
         input.bootstrap.workspace.id,
@@ -732,6 +1079,9 @@ export async function enqueueReviewMutation(input: {
     })
   );
 
+  lastLocalMutationAction = mutation.action;
+  lastLocalMutationCommitDurationMs = Date.now() - localCommitStartedAt;
+  lastLocalMutationCommittedAt = new Date().toISOString();
   emitChange();
   return { envelope, idempotent };
 }
@@ -878,7 +1228,7 @@ async function synchroniseReviewMutationsUnsafe(
           response.status,
           "Authentication required.",
           null,
-          "restore"
+          "hidden"
         );
         await markAccountAuthenticationRequired(account.account_key);
         await invalidateMobileSessionIfCurrent(token);
@@ -960,7 +1310,7 @@ async function scheduleRetry(
     status,
     error,
     retryAt,
-    "restore"
+    "hidden"
   );
 }
 
@@ -1012,6 +1362,7 @@ async function markAccountAuthenticationRequired(accountKeyValue: string) {
     db.runAsync(
       `update review_mutation_outbox
        set state = 'auth_required',
+           local_effect = 'hidden',
            next_attempt_at = null,
            last_error = 'Authentication required.',
            updated_at = ?
@@ -1056,6 +1407,7 @@ export async function getReviewSyncDiagnostics(): Promise<ReviewSyncDiagnostics>
   const pendingCount = Number(diagnostics.pending_count) || 0;
   const retryWaitCount = Number(diagnostics.retry_wait_count) || 0;
   const authenticationRequiredCount = Number(diagnostics.auth_required_count) || 0;
+  const evidenceCache = await getLocationReviewEvidenceCacheDiagnostics();
   return {
     pendingCount,
     retryWaitCount,
@@ -1076,7 +1428,19 @@ export async function getReviewSyncDiagnostics(): Promise<ReviewSyncDiagnostics>
     lastCachedAt: await metadata(
       accountMetadataKey(LAST_CACHE_AT_KEY, account.account_key),
       db
-    )
+    ),
+    evidenceCacheItemCount: evidenceCache.itemCount,
+    evidenceCacheBytes: evidenceCache.totalBytes,
+    reviewCacheHitCount,
+    reviewCacheMissCount,
+    lastReviewCacheAgeMs,
+    evidenceCacheHitCount,
+    evidenceCacheMissCount,
+    lastEvidenceCacheAgeMs,
+    lastEvidencePayloadBytes,
+    lastLocalMutationAction,
+    lastLocalMutationCommitDurationMs,
+    lastLocalMutationCommittedAt
   };
 }
 
@@ -1305,8 +1669,51 @@ export function projectReviewBootstrap(
   };
 }
 
+export function restoreReviewItemsWithAnchors(
+  currentItems: MobileReviewItem[],
+  restorations: Array<{
+    item: MobileReviewItem;
+    originalPosition: number;
+    precedingIds: string[];
+    followingIds: string[];
+  }>
+) {
+  const result = [...currentItems];
+  const ids = new Set(result.map((item) => item.id));
+  for (const restoration of restorations) {
+    if (ids.has(restoration.item.id)) continue;
+    const precedingIndex = restoration.precedingIds
+      .slice()
+      .reverse()
+      .map((id) => result.findIndex((item) => item.id === id))
+      .find((index) => index >= 0);
+    const followingIndex = restoration.followingIds
+      .map((id) => result.findIndex((item) => item.id === id))
+      .find((index) => index >= 0);
+    const insertionIndex = precedingIndex != null
+      ? precedingIndex + 1
+      : followingIndex != null
+        ? followingIndex
+        : Math.max(0, Math.min(restoration.originalPosition, result.length));
+    result.splice(insertionIndex, 0, restoration.item);
+    ids.add(restoration.item.id);
+  }
+  return result;
+}
+
 function canonicalJson(value: ReviewMutationEnvelope) {
   return JSON.stringify(sortJsonValue(value));
+}
+
+function parseStringArray(value: string) {
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 function sortJsonValue(value: unknown): unknown {
@@ -1371,6 +1778,105 @@ function emptyDiagnostics(): ReviewSyncDiagnostics {
     lastSuccessfulSyncAt: null,
     nextRetryAt: null,
     lastError: null,
-    lastCachedAt: null
+    lastCachedAt: null,
+    reviewCacheHitCount,
+    reviewCacheMissCount,
+    lastReviewCacheAgeMs,
+    evidenceCacheItemCount: 0,
+    evidenceCacheBytes: 0,
+    evidenceCacheHitCount,
+    evidenceCacheMissCount,
+    lastEvidenceCacheAgeMs,
+    lastEvidencePayloadBytes,
+    lastLocalMutationAction,
+    lastLocalMutationCommitDurationMs,
+    lastLocalMutationCommittedAt
   };
+}
+
+async function pruneLocationReviewEvidenceCacheForAccount(
+  db: SQLite.SQLiteDatabase,
+  accountKeyValue: string,
+  now: string
+) {
+  const expired = await db.runAsync(
+    `delete from location_review_evidence_cache
+     where account_key = ? and expires_at <= ?`,
+    accountKeyValue,
+    now
+  );
+  const rows = await db.getAllAsync<EvidenceCacheSizeRow>(
+    `select review_item_id, byte_size
+     from location_review_evidence_cache
+     where account_key = ?
+     order by last_accessed_at, fetched_at, review_item_id`,
+    accountKeyValue
+  );
+  let itemCount = rows.length;
+  let totalBytes = rows.reduce(
+    (sum, row) => sum + Math.max(0, Number(row.byte_size) || 0),
+    0
+  );
+  let countEvicted = 0;
+  let bytesEvicted = 0;
+  for (const row of rows) {
+    if (
+      itemCount <= LOCATION_REVIEW_EVIDENCE_MAX_ITEMS &&
+      totalBytes <= LOCATION_REVIEW_EVIDENCE_MAX_BYTES
+    ) {
+      break;
+    }
+    const byteSize = Math.max(0, Number(row.byte_size) || 0);
+    await db.runAsync(
+      `delete from location_review_evidence_cache
+       where account_key = ? and review_item_id = ?`,
+      accountKeyValue,
+      row.review_item_id
+    );
+    itemCount -= 1;
+    totalBytes -= byteSize;
+    countEvicted += 1;
+    bytesEvicted += byteSize;
+  }
+  return {
+    expiredRemoved: expired.changes,
+    countEvicted,
+    bytesEvicted
+  };
+}
+
+export function locationReviewEvidenceExpiry(
+  evidence: Pick<LocationReviewEvidenceDto, "evidenceExpiresAt">,
+  fetchedAt: string
+) {
+  const fetchedAtMs = Date.parse(fetchedAt);
+  const localExpiryMs = fetchedAtMs + LOCATION_REVIEW_EVIDENCE_MAX_AGE_MS;
+  const serverExpiryMs = evidence.evidenceExpiresAt
+    ? Date.parse(evidence.evidenceExpiresAt)
+    : Number.NaN;
+  return new Date(
+    Number.isFinite(serverExpiryMs)
+      ? Math.min(localExpiryMs, serverExpiryMs)
+      : localExpiryMs
+  ).toISOString();
+}
+
+export function utf8ByteSize(value: string) {
+  return new TextEncoder().encode(value).byteLength;
+}
+
+function validIso(value: string | undefined) {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+
+function isFutureIso(value: string) {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) && parsed > Date.now();
+}
+
+function ageMilliseconds(value: string) {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? Math.max(0, Date.now() - parsed) : null;
 }
