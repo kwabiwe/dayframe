@@ -101,6 +101,12 @@ async function countRows(table: string, userId = USER_ID) {
   return result.rows[0].count;
 }
 
+function isReviewItemLocked(error: unknown) {
+  return error instanceof Error &&
+    "code" in error &&
+    error.code === "review_item_locked";
+}
+
 async function run() {
   await seed();
   const reviewId = await createReview(
@@ -219,7 +225,7 @@ async function run() {
     clientMutationId: "51000000-0000-4000-8000-000000000024",
     mutation: { action: "accept" as const }
   };
-  const concurrentSame = await Promise.all([
+  const concurrentSame = await Promise.allSettled([
     resolveIdempotentReviewMutation(
       concurrentSameReviewId,
       concurrentSameEnvelope,
@@ -231,10 +237,33 @@ async function run() {
       session
     )
   ]);
+  const fulfilledSame = concurrentSame.filter(
+    (result): result is PromiseFulfilledResult<unknown> => result.status === "fulfilled"
+  );
+  assert(
+    fulfilledSame.length >= 1,
+    "Concurrent identical mutations did not produce a canonical result."
+  );
+  const rejectedSame = concurrentSame.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected"
+  );
+  if (rejectedSame) {
+    assert(
+      rejectedSame.reason instanceof Error &&
+      "code" in rejectedSame.reason &&
+      rejectedSame.reason.code === "review_item_locked",
+      "Concurrent identical mutation did not return typed lock contention."
+    );
+  }
+  const replayAfterContention = await resolveIdempotentReviewMutation(
+    concurrentSameReviewId,
+    concurrentSameEnvelope,
+    session
+  );
   assert.deepEqual(
-    concurrentSame[1],
-    concurrentSame[0],
-    "Concurrent receipt replay returned a different result."
+    replayAfterContention,
+    fulfilledSame[0].value,
+    "Retry after lock contention did not replay the stored receipt."
   );
   assert.equal(await countRows("time_entries"), 2);
   assert.equal(
@@ -351,8 +380,190 @@ async function run() {
     "Same mutation ID was not isolated by user."
   );
 
+  const advisoryReviewId = await createReview(
+    USER_ID,
+    15,
+    "2026-07-27T18:00:00.000Z",
+    "2026-07-27T19:00:00.000Z"
+  );
+  const advisoryEnvelope = {
+    clientMutationId: "51000000-0000-4000-8000-000000000027",
+    mutation: { action: "accept" as const }
+  };
+  const advisoryHolder = await pool.connect();
+  try {
+    await advisoryHolder.query("begin");
+    await advisoryHolder.query(
+      "select pg_advisory_xact_lock(hashtext($1), hashtext($2))",
+      [`${WORKSPACE_ID}:${USER_ID}`, advisoryEnvelope.clientMutationId]
+    );
+    const startedAt = Date.now();
+    await assert.rejects(
+      () => resolveIdempotentReviewMutation(
+        advisoryReviewId,
+        advisoryEnvelope,
+        session
+      ),
+      isReviewItemLocked
+    );
+    assert(
+      Date.now() - startedAt < 1_500,
+      "Advisory-lock contention did not fail within the 1.5-second bound."
+    );
+  } finally {
+    await advisoryHolder.query("rollback");
+    advisoryHolder.release();
+  }
+  const advisoryRetry = await resolveIdempotentReviewMutation(
+    advisoryReviewId,
+    advisoryEnvelope,
+    session
+  );
+  assert.equal(advisoryRetry.status, "accepted");
+
+  const rowLockedReviewId = await createReview(
+    USER_ID,
+    16,
+    "2026-07-27T20:00:00.000Z",
+    "2026-07-27T21:00:00.000Z"
+  );
+  const rowLockedEnvelope = {
+    clientMutationId: "51000000-0000-4000-8000-000000000028",
+    mutation: { action: "accept" as const }
+  };
+  const rowLockHolder = await pool.connect();
+  try {
+    await rowLockHolder.query("begin");
+    await rowLockHolder.query(
+      `select id from review_items
+       where id = $1 and workspace_id = $2 and user_id = $3
+       for update`,
+      [rowLockedReviewId, WORKSPACE_ID, USER_ID]
+    );
+    const startedAt = Date.now();
+    await assert.rejects(
+      () => resolveIdempotentReviewMutation(
+        rowLockedReviewId,
+        rowLockedEnvelope,
+        session
+      ),
+      isReviewItemLocked
+    );
+    assert(
+      Date.now() - startedAt < 1_500,
+      "Review-row contention did not fail within the 1.5-second bound."
+    );
+  } finally {
+    await rowLockHolder.query("rollback");
+    rowLockHolder.release();
+  }
+  const rowLockRetry = await resolveIdempotentReviewMutation(
+    rowLockedReviewId,
+    rowLockedEnvelope,
+    session
+  );
+  assert.equal(rowLockRetry.status, "accepted");
+
+  const timeoutReviewId = await createReview(
+    USER_ID,
+    17,
+    "2026-07-27T22:00:00.000Z",
+    "2026-07-27T23:00:00.000Z"
+  );
+  const timeoutEnvelope = {
+    clientMutationId: "51000000-0000-4000-8000-000000000029",
+    mutation: {
+      action: "edit_and_confirm" as const,
+      edit: {
+        categoryId: CATEGORY_ID,
+        description: "Timeout rollback",
+        startedAt: "2026-07-27T22:00:00.000Z",
+        stoppedAt: "2026-07-27T23:00:00.000Z",
+        tags: ["timeout-rollback"]
+      }
+    }
+  };
+  await pool.query(`
+    create or replace function dayframe_test_delay_review_receipt()
+    returns trigger language plpgsql as $$
+    begin
+      perform pg_sleep(9);
+      return new;
+    end
+    $$
+  `);
+  await pool.query(
+    "drop trigger if exists dayframe_test_delay_review_receipt on review_mutation_receipts"
+  );
+  await pool.query(`
+    create trigger dayframe_test_delay_review_receipt
+    before insert on review_mutation_receipts
+    for each row execute function dayframe_test_delay_review_receipt()
+  `);
+  const timeoutStartedAt = Date.now();
+  try {
+    await assert.rejects(
+      () => resolveIdempotentReviewMutation(
+        timeoutReviewId,
+        timeoutEnvelope,
+        session
+      ),
+      isReviewItemLocked
+    );
+  } finally {
+    await pool.query(
+      "drop trigger if exists dayframe_test_delay_review_receipt on review_mutation_receipts"
+    );
+    await pool.query(
+      "drop function if exists dayframe_test_delay_review_receipt()"
+    );
+  }
+  const timeoutDurationMs = Date.now() - timeoutStartedAt;
+  assert(
+    timeoutDurationMs >= 7_000 && timeoutDurationMs < 10_000,
+    `Statement timeout did not respect the 8-second ceiling (${timeoutDurationMs}ms).`
+  );
+  const timeoutRollback = await pool.query<{
+    entryCount: number;
+    receiptCount: number;
+    status: string;
+    tagCount: number;
+  }>(
+    `select ri.status,
+            count(distinct te.id)::integer as "entryCount",
+            count(distinct receipt.client_mutation_id)::integer as "receiptCount",
+            count(distinct tag.id)::integer as "tagCount"
+     from review_items ri
+     left join time_entries te
+       on te.workspace_id = ri.workspace_id
+      and te.user_id = ri.user_id
+      and te.created_from_event_id = ri.event_id
+     left join review_mutation_receipts receipt
+       on receipt.workspace_id = ri.workspace_id
+      and receipt.user_id = ri.user_id
+      and receipt.review_item_id = ri.id
+     left join tags tag
+       on tag.workspace_id = ri.workspace_id
+      and tag.normalized_name = 'timeout-rollback'
+     where ri.id = $1
+     group by ri.status`,
+    [timeoutReviewId]
+  );
+  assert.deepEqual(timeoutRollback.rows[0], {
+    status: "open",
+    entryCount: 0,
+    receiptCount: 0,
+    tagCount: 0
+  });
+  const timeoutRetry = await resolveIdempotentReviewMutation(
+    timeoutReviewId,
+    timeoutEnvelope,
+    session
+  );
+  assert.equal(timeoutRetry.status, "accepted");
+
   console.log(
-    "Review mutation database validation passed: atomic generic edit-and-confirm, tags, receipt/result commit, lost-response retry, equivalent/conflicting resolution, concurrent same/different mutations, duplicate prevention, payload conflict, rollback, workspace/user scoping."
+    "Review mutation database validation passed: atomic generic edit-and-confirm, tags, receipt/result commit, lost-response retry, equivalent/conflicting resolution, concurrent same/different mutations, deliberate advisory/row contention, bounded statement-timeout rollback, retry after contention, duplicate prevention, payload conflict, and workspace/user scoping."
   );
 }
 

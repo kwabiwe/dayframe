@@ -5,7 +5,11 @@ import {
   type ReviewMutationEdit
 } from "@dayframe/shared";
 import type pg from "pg";
-import { isLockNotAvailableError, pool } from "./db";
+import {
+  isLockNotAvailableError,
+  isStatementTimeoutError,
+  pool
+} from "./db";
 import {
   reconcileMatchingHealthSleepTimeEntry,
   ReviewResolutionError,
@@ -40,44 +44,103 @@ type GenericReviewRow = {
   locationSegmentId: string | null;
 };
 
+export const REVIEW_MUTATION_STATEMENT_TIMEOUT_MS = 8_000;
+export const REVIEW_MUTATION_LOCK_TIMEOUT_MS = 1_500;
+
 export async function resolveIdempotentReviewMutation(
   reviewItemId: string,
   input: unknown,
   session: RequestSession
 ) {
+  const startedAt = Date.now();
   const envelope = ReviewMutationEnvelopeSchema.parse(input);
   const requestHash = mutationHash(envelope.mutation);
+  let lockOutcome: "not_attempted" | "acquired" | "contended" = "not_attempted";
+  let fastReceipt: ReceiptRow | null;
+  try {
+    fastReceipt = await loadReceipt(
+      pool,
+      envelope.clientMutationId,
+      session
+    );
+  } catch (error) {
+    logReviewMutationDiagnostic({
+      actionKind: envelope.mutation.action,
+      durationMs: Date.now() - startedAt,
+      lockOutcome,
+      receiptReplay: false,
+      outcome: errorOutcome(error)
+    });
+    throw error;
+  }
+  if (fastReceipt) {
+    try {
+      const result = receiptResult(
+        fastReceipt,
+        reviewItemId,
+        envelope.mutation,
+        requestHash
+      );
+      logReviewMutationDiagnostic({
+        actionKind: envelope.mutation.action,
+        durationMs: Date.now() - startedAt,
+        lockOutcome,
+        receiptReplay: true,
+        outcome: canonicalOutcome(result)
+      });
+      return result;
+    } catch (error) {
+      logReviewMutationDiagnostic({
+        actionKind: envelope.mutation.action,
+        durationMs: Date.now() - startedAt,
+        lockOutcome,
+        receiptReplay: true,
+        outcome: errorOutcome(error)
+      });
+      throw error;
+    }
+  }
   const client = await pool.connect();
   try {
     await client.query("begin");
     await client.query(
-      "select pg_advisory_xact_lock(hashtext($1), hashtext($2))",
+      `set local statement_timeout = '${REVIEW_MUTATION_STATEMENT_TIMEOUT_MS}ms'`
+    );
+    await client.query(
+      `set local lock_timeout = '${REVIEW_MUTATION_LOCK_TIMEOUT_MS}ms'`
+    );
+    const lock = await client.query<{ acquired: boolean }>(
+      `select pg_try_advisory_xact_lock(
+         hashtext($1),
+         hashtext($2)
+       ) as acquired`,
       [
         `${session.workspaceId}:${session.userId}`,
         envelope.clientMutationId
       ]
     );
+    if (!lock.rows[0]?.acquired) {
+      lockOutcome = "contended";
+      throw reviewItemLocked(reviewItemId);
+    }
+    lockOutcome = "acquired";
     const existing = await loadReceipt(client, envelope.clientMutationId, session);
     if (existing) {
-      if (
-        existing.requestHash !== requestHash ||
-        existing.reviewItemId !== reviewItemId ||
-        existing.actionKey !== envelope.mutation.action
-      ) {
-        throw new ReviewResolutionError(
-          "mutation_id_conflict",
-          "This client mutation ID is already used for different Review data.",
-          {
-            status: 409,
-            details: {
-              reviewItemId,
-              canonicalStatus: "unknown"
-            }
-          }
-        );
-      }
+      const result = receiptResult(
+        existing,
+        reviewItemId,
+        envelope.mutation,
+        requestHash
+      );
       await client.query("commit");
-      return existing.resultJson;
+      logReviewMutationDiagnostic({
+        actionKind: envelope.mutation.action,
+        durationMs: Date.now() - startedAt,
+        lockOutcome,
+        receiptReplay: true,
+        outcome: canonicalOutcome(result)
+      });
+      return result;
     }
 
     const locationItem = await isLocationReview(client, reviewItemId, session);
@@ -115,30 +178,74 @@ export async function resolveIdempotentReviewMutation(
       ]
     );
     await client.query("commit");
+    logReviewMutationDiagnostic({
+      actionKind: envelope.mutation.action,
+      durationMs: Date.now() - startedAt,
+      lockOutcome,
+      receiptReplay: false,
+      outcome: canonicalOutcome(result)
+    });
     return result;
   } catch (error) {
     await client.query("rollback");
-    if (isLockNotAvailableError(error)) {
-      throw new ReviewResolutionError(
-        "review_item_locked",
-        "This Review item is already being updated. Try again in a moment.",
-        {
-          status: 409,
-          details: {
-            reviewItemId,
-            canonicalStatus: "open"
-          }
-        }
-      );
+    if (isLockNotAvailableError(error) || isStatementTimeoutError(error)) {
+      const lockedError = reviewItemLocked(reviewItemId);
+      logReviewMutationDiagnostic({
+        actionKind: envelope.mutation.action,
+        durationMs: Date.now() - startedAt,
+        lockOutcome: isLockNotAvailableError(error) ? "contended" : lockOutcome,
+        receiptReplay: false,
+        outcome: lockedError.code
+      });
+      throw lockedError;
     }
+    logReviewMutationDiagnostic({
+      actionKind: envelope.mutation.action,
+      durationMs: Date.now() - startedAt,
+      lockOutcome,
+      receiptReplay: false,
+      outcome: errorOutcome(error)
+    });
     throw error;
   } finally {
     client.release();
   }
 }
 
+function logReviewMutationDiagnostic(input: {
+  actionKind: string;
+  durationMs: number;
+  lockOutcome: "not_attempted" | "acquired" | "contended";
+  receiptReplay: boolean;
+  outcome: string;
+}) {
+  if (
+    input.durationMs < 750 &&
+    input.lockOutcome !== "contended" &&
+    !input.receiptReplay &&
+    ["accepted", "ignored", "completed"].includes(input.outcome)
+  ) {
+    return;
+  }
+  console.info("Dayframe Review mutation timing", input);
+}
+
+function canonicalOutcome(result: unknown) {
+  if (!result || typeof result !== "object") return "completed";
+  const status = "status" in result ? result.status : null;
+  return typeof status === "string" ? status : "completed";
+}
+
+function errorOutcome(error: unknown) {
+  if (error && typeof error === "object" && "code" in error) {
+    const code = error.code;
+    if (typeof code === "string") return code;
+  }
+  return error instanceof Error ? error.name : "unknown_error";
+}
+
 async function loadReceipt(
-  client: pg.PoolClient,
+  client: Pick<pg.Pool | pg.PoolClient, "query">,
   clientMutationId: string,
   session: RequestSession
 ) {
@@ -154,6 +261,46 @@ async function loadReceipt(
     [session.workspaceId, session.userId, clientMutationId]
   );
   return result.rows[0] ?? null;
+}
+
+function receiptResult(
+  receipt: ReceiptRow,
+  reviewItemId: string,
+  mutation: ReviewMutation,
+  requestHash: string
+) {
+  if (
+    receipt.requestHash !== requestHash ||
+    receipt.reviewItemId !== reviewItemId ||
+    receipt.actionKey !== mutation.action
+  ) {
+    throw new ReviewResolutionError(
+      "mutation_id_conflict",
+      "This client mutation ID is already used for different Review data.",
+      {
+        status: 409,
+        details: {
+          reviewItemId,
+          canonicalStatus: "unknown"
+        }
+      }
+    );
+  }
+  return receipt.resultJson;
+}
+
+function reviewItemLocked(reviewItemId: string) {
+  return new ReviewResolutionError(
+    "review_item_locked",
+    "This Review item is already being updated. Try again in a moment.",
+    {
+      status: 409,
+      details: {
+        reviewItemId,
+        canonicalStatus: "open"
+      }
+    }
+  );
 }
 
 async function isLocationReview(

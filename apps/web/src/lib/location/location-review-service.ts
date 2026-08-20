@@ -5,7 +5,11 @@ import {
   type ReviewEntryEdit
 } from "@dayframe/shared";
 import type pg from "pg";
-import { isLockNotAvailableError, pool } from "../db";
+import {
+  isLockNotAvailableError,
+  isStatementTimeoutError,
+  pool
+} from "../db";
 import { ReviewResolutionError } from "../event-service";
 import type { RequestSession } from "../session";
 import { syncTimeEntryTags } from "../tag-service";
@@ -37,19 +41,38 @@ type ConfirmedPlaceIdentity = {
   placeLabel: string | null;
 };
 
+export const LOCATION_REVIEW_STATEMENT_TIMEOUT_MS = 8_000;
+export const LOCATION_REVIEW_LOCK_TIMEOUT_MS = 1_500;
+
 export async function resolveLocationReviewAction(
   reviewItemId: string,
   input: unknown,
   session: RequestSession
 ) {
+  const startedAt = Date.now();
   const action = LocationReviewActionSchema.parse(input);
+  let lockOutcome: "not_attempted" | "acquired" | "contended" = "not_attempted";
   const client = await pool.connect();
   try {
     await client.query("begin");
     await client.query(
-      "select pg_advisory_xact_lock(hashtext($1), hashtext($2))",
+      `set local statement_timeout = '${LOCATION_REVIEW_STATEMENT_TIMEOUT_MS}ms'`
+    );
+    await client.query(
+      `set local lock_timeout = '${LOCATION_REVIEW_LOCK_TIMEOUT_MS}ms'`
+    );
+    const lock = await client.query<{ acquired: boolean }>(
+      `select pg_try_advisory_xact_lock(
+         hashtext($1),
+         hashtext($2)
+       ) as acquired`,
       [session.workspaceId, session.userId]
     );
+    if (!lock.rows[0]?.acquired) {
+      lockOutcome = "contended";
+      throw locationReviewLocked(reviewItemId);
+    }
+    lockOutcome = "acquired";
     const result = await resolveLocationReviewActionWithClient(
       client,
       reviewItemId,
@@ -57,20 +80,65 @@ export async function resolveLocationReviewAction(
       session
     );
     await client.query("commit");
+    logDirectLocationMutation({
+      actionKind: action.action,
+      durationMs: Date.now() - startedAt,
+      lockOutcome,
+      outcome: locationMutationOutcome(result)
+    });
     return result;
   } catch (error) {
     await client.query("rollback");
-    if (isLockNotAvailableError(error)) {
-      throw new ReviewResolutionError(
-        "review_item_locked",
-        "This location review is already being updated. Try again in a moment.",
-        { status: 409 }
-      );
+    if (isLockNotAvailableError(error) || isStatementTimeoutError(error)) {
+      const lockedError = locationReviewLocked(reviewItemId);
+      logDirectLocationMutation({
+        actionKind: action.action,
+        durationMs: Date.now() - startedAt,
+        lockOutcome: isLockNotAvailableError(error) ? "contended" : lockOutcome,
+        outcome: lockedError.code
+      });
+      throw lockedError;
     }
+    logDirectLocationMutation({
+      actionKind: action.action,
+      durationMs: Date.now() - startedAt,
+      lockOutcome,
+      outcome: locationMutationErrorOutcome(error)
+    });
     throw error;
   } finally {
     client.release();
   }
+}
+
+function logDirectLocationMutation(input: {
+  actionKind: string;
+  durationMs: number;
+  lockOutcome: "not_attempted" | "acquired" | "contended";
+  outcome: string;
+}) {
+  if (
+    input.durationMs < 750 &&
+    input.lockOutcome !== "contended" &&
+    ["accepted", "ignored", "completed"].includes(input.outcome)
+  ) {
+    return;
+  }
+  console.info("Dayframe direct Location Review mutation timing", input);
+}
+
+function locationMutationOutcome(result: unknown) {
+  if (!result || typeof result !== "object") return "completed";
+  const status = "status" in result ? result.status : null;
+  return typeof status === "string" ? status : "completed";
+}
+
+function locationMutationErrorOutcome(error: unknown) {
+  if (error && typeof error === "object" && "code" in error) {
+    const code = error.code;
+    if (typeof code === "string") return code;
+  }
+  return error instanceof Error ? error.name : "unknown_error";
 }
 
 export async function resolveLocationReviewActionWithClient(
@@ -80,14 +148,46 @@ export async function resolveLocationReviewActionWithClient(
   session: RequestSession
 ) {
   const action = LocationReviewActionSchema.parse(input);
-  const item = await lockLocationReview(client, reviewItemId, session);
+  const lockedItems = action.action === "merge" || action.action === "merge_and_confirm"
+    ? await lockLocationReviews(
+        client,
+        [reviewItemId, action.adjacentReviewItemId],
+        session
+      )
+    : [await lockLocationReview(client, reviewItemId, session)];
+  const item = lockedItems.find((candidate) => candidate.id === reviewItemId);
+  if (!item) {
+    throw new ReviewResolutionError(
+      "review_item_not_found",
+      "Location review item not found.",
+      { status: 404 }
+    );
+  }
   if (item.status !== "open") {
     return resolveClosedLocationReview(client, item, action, session);
   }
+  const segmentItems = action.action === "merge" || action.action === "merge_and_confirm"
+    ? lockedItems
+    : [item];
+  await lockLocationSegments(client, segmentItems, session);
   return performAction(client, item, action, session);
 }
 
 async function lockLocationReview(client: pg.PoolClient, id: string, session: RequestSession) {
+  const items = await lockLocationReviews(client, [id], session);
+  const item = items[0];
+  if (!item) {
+    throw new ReviewResolutionError("review_item_not_found", "Location review item not found.", { status: 404 });
+  }
+  return item;
+}
+
+async function lockLocationReviews(
+  client: pg.PoolClient,
+  ids: string[],
+  session: RequestSession
+) {
+  const uniqueIds = [...new Set(ids)].sort();
   const result = await client.query<LockedReview>(
     `select ri.id,
             ri.event_id as "eventId",
@@ -114,15 +214,62 @@ async function lockLocationReview(client: pg.PoolClient, id: string, session: Re
        on st.id = ri.location_segment_id and st.workspace_id = ri.workspace_id and st.user_id = ri.user_id
      left join commute_segments cs
        on cs.id = ri.location_segment_id and cs.workspace_id = ri.workspace_id and cs.user_id = ri.user_id
-     where ri.id = $1 and ri.workspace_id = $2 and ri.user_id = $3
+     where ri.id = any($1::uuid[]) and ri.workspace_id = $2 and ri.user_id = $3
        and ri.location_segment_id is not null and (st.id is not null or cs.id is not null)
+     order by ri.id
      for update of ri, ae nowait`,
-    [id, session.workspaceId, session.userId]
+    [uniqueIds, session.workspaceId, session.userId]
   );
-  if (!result.rows[0]) {
+  if (result.rows.length !== uniqueIds.length) {
     throw new ReviewResolutionError("review_item_not_found", "Location review item not found.", { status: 404 });
   }
-  return result.rows[0];
+  return result.rows;
+}
+
+async function lockLocationSegments(
+  client: pg.PoolClient,
+  items: LockedReview[],
+  session: RequestSession
+) {
+  for (const segmentKind of ["stay", "commute"] as const) {
+    const ids = items
+      .filter((item) => item.segmentKind === segmentKind)
+      .map((item) => item.segmentId)
+      .filter((id, index, all) => all.indexOf(id) === index)
+      .sort();
+    if (ids.length === 0) continue;
+    const result = await client.query<{ id: string }>(
+      `select id
+       from ${segmentKind === "stay" ? "stay_segments" : "commute_segments"}
+       where id = any($1::uuid[])
+         and workspace_id = $2
+         and user_id = $3
+       order by id
+       for update nowait`,
+      [ids, session.workspaceId, session.userId]
+    );
+    if (result.rows.length !== ids.length) {
+      throw new ReviewResolutionError(
+        "review_item_not_found",
+        "Location segment was not found.",
+        { status: 404 }
+      );
+    }
+  }
+}
+
+function locationReviewLocked(reviewItemId: string) {
+  return new ReviewResolutionError(
+    "review_item_locked",
+    "This location review is already being updated. Try again in a moment.",
+    {
+      status: 409,
+      details: {
+        reviewItemId,
+        canonicalStatus: "open"
+      }
+    }
+  );
 }
 
 async function resolveClosedLocationReview(

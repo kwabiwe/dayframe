@@ -274,6 +274,67 @@ async function validateSemanticIdempotencyAndRollback() {
   );
   assert.equal(reviews.rows.length, 4, "Four stay reviews are required for correction validation.");
 
+  const contentionTarget = await pool.query<{ segmentId: string }>(
+    `select location_segment_id as "segmentId"
+     from review_items
+     where id = $1 and workspace_id = $2 and user_id = $3`,
+    [reviews.rows[1].id, WORKSPACE_ID, USER_ID]
+  );
+  assert(contentionTarget.rows[0], "Location contention fixture is missing.");
+  const expectBoundedLocationContention = async (
+    label: string,
+    lock: (client: import("pg").PoolClient) => Promise<unknown>
+  ) => {
+    const holder = await pool.connect();
+    try {
+      await holder.query("begin");
+      await lock(holder);
+      const startedAt = Date.now();
+      await assert.rejects(
+        () => resolveLocationReviewAction(
+          reviews.rows[1].id,
+          { action: "confirm" },
+          session
+        ),
+        (error: unknown) => error instanceof Error &&
+          "code" in error &&
+          error.code === "review_item_locked"
+      );
+      assert(
+        Date.now() - startedAt < 1_500,
+        `${label} did not fail within the 1.5-second bound.`
+      );
+    } finally {
+      await holder.query("rollback");
+      holder.release();
+    }
+  };
+  await expectBoundedLocationContention(
+    "Direct Location advisory-lock contention",
+    (client) => client.query(
+      "select pg_advisory_xact_lock(hashtext($1), hashtext($2))",
+      [WORKSPACE_ID, USER_ID]
+    )
+  );
+  await expectBoundedLocationContention(
+    "Location Review-row contention",
+    (client) => client.query(
+      `select id from review_items
+       where id = $1 and workspace_id = $2 and user_id = $3
+       for update`,
+      [reviews.rows[1].id, WORKSPACE_ID, USER_ID]
+    )
+  );
+  await expectBoundedLocationContention(
+    "Exact stay-segment contention",
+    (client) => client.query(
+      `select id from stay_segments
+       where id = $1 and workspace_id = $2 and user_id = $3
+       for update`,
+      [contentionTarget.rows[0].segmentId, WORKSPACE_ID, USER_ID]
+    )
+  );
+
   await assert.rejects(() => resolveLocationReviewAction(reviews.rows[0].id, {
     action: "save_place_and_confirm",
     name: "ROLLBACK_SENTINEL",
@@ -294,11 +355,32 @@ async function validateSemanticIdempotencyAndRollback() {
   assert.equal(rolledBackReview.rows[0].status, "open", "Failed atomic action resolved the review.");
   assert.equal(await count("time_entries"), 0, "Failed atomic action left a time entry behind.");
 
-  const [first, second] = await Promise.all([
+  const concurrentConfirm = await Promise.allSettled([
     resolveLocationReviewAction(reviews.rows[1].id, { action: "confirm" }, session),
     resolveLocationReviewAction(reviews.rows[1].id, { action: "confirm" }, session)
   ]);
-  assert.equal([first, second].filter((result) => result.alreadyResolved).length, 1);
+  const fulfilledConfirm = concurrentConfirm.filter(
+    (result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof resolveLocationReviewAction>>> =>
+      result.status === "fulfilled"
+  );
+  assert(fulfilledConfirm.length >= 1, "Concurrent confirm produced no canonical winner.");
+  const rejectedConfirm = concurrentConfirm.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected"
+  );
+  if (rejectedConfirm) {
+    assert(
+      rejectedConfirm.reason instanceof Error &&
+        "code" in rejectedConfirm.reason &&
+        rejectedConfirm.reason.code === "review_item_locked",
+      "Concurrent confirm did not return typed lock contention."
+    );
+  }
+  const confirmReplay = await resolveLocationReviewAction(
+    reviews.rows[1].id,
+    { action: "confirm" },
+    session
+  );
+  assert.equal(confirmReplay.alreadyResolved, true, "Confirm retry did not resolve idempotently.");
   assert.equal(await count("time_entries"), 1, "Concurrent retry created duplicate time entries.");
 
   const splitSource = await pool.query<{ startedAt: string; stoppedAt: string; segmentId: string }>(
@@ -976,7 +1058,7 @@ async function main() {
     await validateEnabledTrustedCommuteAutomation();
     await validateFinalisationWithoutNewEvidence();
     await validateV1Compatibility();
-    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, overlap fallback, terminal-decision preservation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, and V1 compatibility.");
+    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, and V1 compatibility.");
   } finally {
     if (process.env.KEEP_LOCATION_V2_DB_FIXTURE !== "1") {
       await pool.query("delete from workspaces where id = $1", [WORKSPACE_ID]).catch(() => undefined);
