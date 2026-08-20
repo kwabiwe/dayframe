@@ -32,7 +32,7 @@ export async function getOrCreatePendingStop(input: {
   occurredAt?: string;
 }) {
   return withTimerStopOutboxMutation(async () => {
-    const outbox = await readPendingTimerStops();
+    const outbox = await readPendingTimerStopsUnlocked();
     const existing = outbox.find((item) =>
       timerStopOwnerMatches(item, input.owner) && sameTimerStopTarget(item, input.target)
     );
@@ -55,20 +55,35 @@ export async function getOrCreatePendingStop(input: {
   });
 }
 
-export async function readPendingTimerStops(): Promise<PendingTimerStop[]> {
+export function readPendingTimerStops(): Promise<PendingTimerStop[]> {
+  return withTimerStopOutboxMutation(readPendingTimerStopsUnlocked);
+}
+
+async function readPendingTimerStopsUnlocked(): Promise<PendingTimerStop[]> {
   const raw = await AsyncStorage.getItem(TIMER_STOP_OUTBOX_KEY);
   if (!raw) return [];
-  const parsed: unknown = JSON.parse(raw);
-  if (!Array.isArray(parsed)) throw new Error("Timer Stop recovery data is invalid.");
-  return parsed.flatMap((item) => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    await writePendingTimerStops([]);
+    return [];
+  }
+  if (!Array.isArray(parsed)) {
+    await writePendingTimerStops([]);
+    return [];
+  }
+  const recovered = parsed.flatMap((item) => {
     const pending = parsePendingTimerStop(item);
     return pending ? [pending] : [];
   });
+  if (recovered.length !== parsed.length) await writePendingTimerStops(recovered);
+  return recovered;
 }
 
 export async function removePendingTimerStop(clientEventId: string) {
   return withTimerStopOutboxMutation(async () => {
-    const outbox = await readPendingTimerStops();
+    const outbox = await readPendingTimerStopsUnlocked();
     const next = outbox.filter((item) => item.clientEventId !== clientEventId);
     if (next.length === outbox.length) return false;
     await writePendingTimerStops(next);
@@ -85,7 +100,7 @@ export async function markPendingTimerStopFailure(
   }
 ) {
   return withTimerStopOutboxMutation(async () => {
-    const outbox = await readPendingTimerStops();
+    const outbox = await readPendingTimerStopsUnlocked();
     let updated: PendingTimerStop | null = null;
     const next = outbox.map((item) => {
       if (item.clientEventId !== clientEventId) return item;
@@ -110,7 +125,7 @@ export async function resolvePendingTimerStopTargets(
 ) {
   if (correlations.size === 0) return readPendingTimerStops();
   return withTimerStopOutboxMutation(async () => {
-    const outbox = await readPendingTimerStops();
+    const outbox = await readPendingTimerStopsUnlocked();
     let changed = false;
     const next = outbox.map((item) => {
       if (owner && !timerStopOwnerMatches(item, owner)) return item;
@@ -130,7 +145,7 @@ export async function removePendingTimerStopsForTarget(
   target: TimerStopTarget
 ) {
   return withTimerStopOutboxMutation(async () => {
-    const outbox = await readPendingTimerStops();
+    const outbox = await readPendingTimerStopsUnlocked();
     const removed = outbox.filter((item) =>
       timerStopOwnerMatches(item, owner) && sameTimerStopTarget(item, target)
     );

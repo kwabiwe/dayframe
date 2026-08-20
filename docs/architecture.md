@@ -58,14 +58,14 @@ React Native owns authentication, bootstrap data, routing, API mutations, offlin
 Offline storage is intentionally split by responsibility:
 
 - `apps/mobile/src/lib/api.ts`: general activity-event queue plus bounded API delivery;
-- `apps/mobile/src/lib/timerStopOutbox.ts`: storage-only, account-owned explicit Stop intents that persist independently of the general queue and become deliverable only after an optimistic timer ID has a durable canonical correlation;
+- `apps/mobile/src/lib/timerStopOutbox.ts`: storage-only, account-owned explicit Stop intents that persist independently of the general queue, recover an unusable JSON container before accepting new intent, and become deliverable only after an optimistic timer ID has a durable canonical correlation;
 - `apps/mobile/src/lib/reviewSyncStore.ts`: account-scoped downloaded Review state and terminal Review outbox;
 - `apps/mobile/src/lib/location/store.ts`: protected Location V2 evidence journal, upload outbox, and bounded server-replay coordinator;
 - native App Group/Keychain storage: bounded Live Activity/App Intent hand-off data.
 
 These stores are not interchangeable. Detailed Location actions remain connectivity-dependent, and iOS does not promise background drain after an explicit force-quit.
 
-React projects pending Stop intents over cached/fetched bootstrap before publishing timer state or reconciling ActivityKit. The running sheet retains sole ownership of its existing coordinated exit; local Stop durability, not HTTP completion, accepts dismissal. Native ActivityKit cleanup receives exact observed IDs, awaits their end operations, and must re-read snapshots until the requested generation has either zero active activities or exactly one running canonical survivor. Remote registration and Stop enablement occur only after that verified convergence.
+React projects pending Stop intents over cached/fetched bootstrap before publishing timer state or reconciling ActivityKit. The running sheet retains sole ownership of its existing coordinated exit; local Stop durability, not HTTP completion, accepts dismissal. Stop delivery captures the authenticated SecureStore generation/token pair and revalidates it immediately before dispatch, so a logout/login boundary retains old-account intent without sending it under the replacement account. Native ActivityKit cleanup receives exact observed IDs, awaits their end operations, and must re-read snapshots until the requested generation has either zero active activities or exactly one running canonical survivor. Remote registration and Stop enablement occur only after that verified convergence.
 
 ## Health and location privacy
 

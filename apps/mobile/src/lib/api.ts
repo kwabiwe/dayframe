@@ -23,6 +23,8 @@ import {
 import {
   clearSessionToken,
   getSessionToken,
+  isAuthenticatedSessionSnapshotCurrent,
+  readAuthenticatedSessionSnapshot,
   setSessionToken
 } from "./secure-session";
 import {
@@ -248,6 +250,7 @@ export type PendingTimerStopDeliveryResult =
   | { status: "delivered"; pendingStop: PendingTimerStop }
   | { status: "waiting_for_canonical_target"; pendingStop: PendingTimerStop }
   | { status: "account_mismatch"; pendingStop: PendingTimerStop }
+  | { status: "session_changed"; pendingStop: PendingTimerStop }
   | { status: "retryable_failure"; pendingStop: PendingTimerStop; error: Error }
   | { status: "permanent_failure"; pendingStop: PendingTimerStop; error: Error };
 
@@ -844,6 +847,17 @@ export async function deliverPendingTimerStop(
     return { status: "waiting_for_canonical_target", pendingStop };
   }
 
+  const sessionRead = await readAuthenticatedSessionSnapshot();
+  if (sessionRead.status === "changed") {
+    return { status: "session_changed", pendingStop };
+  }
+  if (sessionRead.status === "signed_out") {
+    throw new AuthRequiredError();
+  }
+  if (!isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot)) {
+    return { status: "session_changed", pendingStop };
+  }
+
   try {
     const response = await mobileFetchWithTimeout(
       `${DAYFRAME_API_BASE}/api/events`,
@@ -851,7 +865,7 @@ export async function deliverPendingTimerStop(
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(await authHeaders())
+          Authorization: `Bearer ${sessionRead.snapshot.token}`
         },
         body: JSON.stringify({
           source: "mobile_app",

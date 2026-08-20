@@ -95,6 +95,7 @@ const {
   readPendingTimerStops
 } = await import("./timerStopOutbox");
 const { resetSessionTokenCacheForTesting, setSessionToken } = await import("./secure-session");
+const SecureStore = await import("expo-secure-store");
 const {
   MobileRequestTimeoutError,
   StaleMobileSessionResponseError
@@ -388,6 +389,34 @@ describe("mobile API client", () => {
       workspaceId: "workspace-b"
     })).resolves.toMatchObject({ status: "account_mismatch" });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not dispatch an account A Stop when the deferred token read switches to account B", async () => {
+    let finishTokenRead: ((token: string | null) => void) | undefined;
+    vi.mocked(SecureStore.getItemAsync).mockImplementationOnce(() =>
+      new Promise<string | null>((resolve) => {
+        finishTokenRead = resolve;
+      })
+    );
+    const pending = await getOrCreatePendingStop({
+      owner: TIMER_STOP_OWNER,
+      target: { targetEntryId: TIMER_TARGET_A }
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const delivery = deliverPendingTimerStop(pending, TIMER_STOP_OWNER);
+    await vi.waitFor(() => expect(finishTokenRead).toBeTypeOf("function"));
+    const replacementLogin = setSessionToken("account-b-token");
+    finishTokenRead?.("account-a-token");
+
+    await expect(delivery).resolves.toMatchObject({ status: "session_changed" });
+    await replacementLogin;
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(getSessionToken()).resolves.toBe("account-b-token");
+    await expect(readPendingTimerStops()).resolves.toEqual([
+      expect.objectContaining({ clientEventId: pending.clientEventId })
+    ]);
   });
 
   it("bounds mobile Stop delivery at eight seconds and retains it for retry", async () => {

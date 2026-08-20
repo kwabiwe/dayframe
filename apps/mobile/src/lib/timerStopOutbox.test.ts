@@ -37,6 +37,32 @@ describe("timer Stop outbox", () => {
     await expect(reloadedModule.readPendingTimerStops()).resolves.toEqual([pending]);
   });
 
+  it("resets malformed JSON and accepts the next durable Stop", async () => {
+    asyncStore.set("dayframe.timerStopOutbox.v1", "{not-json");
+    const outbox = await loadOutbox();
+
+    await expect(outbox.readPendingTimerStops()).resolves.toEqual([]);
+    expect(asyncStore.get("dayframe.timerStopOutbox.v1")).toBe("[]");
+
+    const pending = await outbox.getOrCreatePendingStop({
+      owner,
+      target: { targetEntryId: "entry-after-corruption" }
+    });
+    await expect(outbox.readPendingTimerStops()).resolves.toEqual([pending]);
+  });
+
+  it("normalizes a non-array JSON container before accepting another Stop", async () => {
+    asyncStore.set("dayframe.timerStopOutbox.v1", JSON.stringify({ pending: [] }));
+    const outbox = await loadOutbox();
+
+    const pending = await outbox.getOrCreatePendingStop({
+      owner,
+      target: { targetEntryId: "entry-after-invalid-container" }
+    });
+
+    await expect(outbox.readPendingTimerStops()).resolves.toEqual([pending]);
+  });
+
   it("reuses one clientEventId for repeated Stop of the same timer", async () => {
     const outbox = await loadOutbox();
     const first = await outbox.getOrCreatePendingStop({

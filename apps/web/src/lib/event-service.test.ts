@@ -154,7 +154,8 @@ describe("category persistence", () => {
     expect(first).toMatchObject({
       eventId: "event-stop-1",
       candidate: { action: "stop_timer" },
-      stopOutcome: "stopped"
+      stopOutcome: "stopped",
+      timeEntryId: targetEntryId
     });
     expect(retry).toMatchObject({ eventId: "event-stop-1", duplicate: true });
     expect(

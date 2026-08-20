@@ -667,9 +667,8 @@ export async function processActivityEvent(
       if (stopScope.mode === "entry") {
         lockWaitMilliseconds = Date.now() - scopedStopStartedAt;
       }
-      stopOutcome = (stopResult.rowCount ?? stopResult.rows.length) > 0
-        ? "stopped"
-        : "superseded";
+      timeEntryId = stopResult.rows[0]?.id;
+      stopOutcome = timeEntryId ? "stopped" : "superseded";
     } else if (candidate.action === "start_timer") {
       const startedAt = suggestedStartedAtForEvent(parsed);
       if (candidate.shouldClosePrevious) {

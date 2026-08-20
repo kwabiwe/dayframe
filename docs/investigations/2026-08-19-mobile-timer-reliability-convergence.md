@@ -1,7 +1,7 @@
 # Mobile timer reliability and Live Activity convergence
 
 Date: 2026-08-19  
-Trello: #147, #148  
+Trello: [#147](https://trello.com/c/XBVc6pe6/147-mobile-timer-stop-hangs-during-background-event-sync), [#148](https://trello.com/c/UN0A4CbV/148-duplicate-optimistic-and-canonical-live-activities-on-iphone)
 Status: Implementation complete; staging and physical-device validation pending
 
 ## Scope
@@ -32,6 +32,18 @@ projection boundary and does not acquire API or timer ownership.
   successful after `start()` without rereading native state.
 - A native snapshot that contains any canonical match does not currently reject
   optimistic or duplicate-canonical siblings.
+
+## Review hardening
+
+The 20 August out-of-band PR review identified two additional Stop-outbox
+failure modes. Delivery previously checked the account owner before awaiting the
+SecureStore bearer, so a logout/login during that read could dispatch Account
+A's Stop with Account B's token. Delivery now captures the session generation
+before the read, revalidates the generation and token immediately before
+`fetch`, and retains the Stop without dispatch when they changed. A malformed
+JSON or non-array outbox container previously made every later Stop mutation
+throw; serialized reads now normalize that unrecoverable container to an empty
+durable array before accepting another Stop. No stored raw value is logged.
 
 ## Motion contract
 
@@ -93,9 +105,15 @@ to tune from staging evidence, not a change to product scope.
   files after the final registration-generation race fix).
 - **PASS:** focused web event-service, events route, time-entries route, and Live
   Activity registration tests (127 assertions across four files).
-- **PASS:** full `npm run test` (mobile 707, web 834, shared 156); the gated real
-  Postgres contention file was skipped because no disposable database was
-  configured.
+- **PASS:** review-hardening coverage proves a deferred Account A token read
+  cannot dispatch after Account B replaces the session, and malformed/non-array
+  outbox containers recover before the next durable Stop (97 assertions across
+  the focused API, outbox, and secure-session files).
+- **PASS:** full `npm run test` after review hardening (mobile 711, web 834,
+  shared 156); the gated Postgres file remains skipped in the ordinary suite.
+- **PASS:** the gated two-connection Postgres test ran separately against the
+  documented local PostGIS service. An exact entry-scoped Stop completed and
+  persisted once while another connection held the user's advisory lock.
 - **PASS:** full lint, typecheck, production web build, documentation check (116
   Markdown files), brand-asset check, focused mobile/web typechecks, and
   `git diff --check`. Lint retained two pre-existing unused-parameter warnings in
@@ -104,8 +122,10 @@ to tune from staging evidence, not a change to product scope.
   directory after successful CocoaPods/autolinking install. The generic
   dual-architecture build was narrowed after its duplicated x86_64 dependency
   compile; the recorded successful result is the host-architecture build.
-- **NOT RUN:** the gated two-connection Postgres test, staging schema/index
-  verification, exact Preview promotion, signed EAS preview build, and the
+- **NOT RUN:** staging schema/index verification, exact Preview promotion,
+  signed EAS preview build, and the
   physical-iPhone Stop/force-quit/offline/contention and ActivityKit convergence
-  matrix. These remain required before merge; production and TestFlight evidence
-  must not be inferred from this branch.
+  matrix. Both paired iPhones were unavailable/offline on 20 August; only a
+  paired iPad was reachable, which is not valid evidence for this iPhone-only
+  feature. These checks remain required before merge; production and TestFlight
+  evidence must not be inferred from this branch.
