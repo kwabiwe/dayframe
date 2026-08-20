@@ -158,6 +158,55 @@ describe("Location Review evidence cache orchestration", () => {
     expect(cacheLocationReviewEvidence).not.toHaveBeenCalled();
   });
 
+  it("cancels the owned fetch and lets immediate re-entry create a replacement", async () => {
+    const evidence = evidenceFixture();
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+    const cancellation = new Error("Route exited.");
+    fetchLocationReviewEvidence
+      .mockImplementationOnce((
+        _reviewItemId: string,
+        options: { signal?: AbortSignal } = {}
+      ) => new Promise<LocationReviewEvidenceDto>((_resolve, reject) => {
+        const signal = options.signal;
+        signal?.addEventListener("abort", () => reject(signal.reason), {
+          once: true
+        });
+      }))
+      .mockResolvedValueOnce(evidence);
+
+    const first = revalidateLocationReviewEvidence({
+      ...owner,
+      reviewItemId: evidence.reviewItemId,
+      signal: firstController.signal
+    });
+    const firstRejection = expect(first).rejects.toBe(cancellation);
+    expect(fetchLocationReviewEvidence).toHaveBeenNthCalledWith(
+      1,
+      evidence.reviewItemId,
+      { signal: firstController.signal }
+    );
+
+    firstController.abort(cancellation);
+    const reopened = revalidateLocationReviewEvidence({
+      ...owner,
+      reviewItemId: evidence.reviewItemId,
+      signal: secondController.signal
+    });
+
+    await firstRejection;
+    await expect(reopened).resolves.toMatchObject({
+      evidence,
+      source: "network"
+    });
+    expect(fetchLocationReviewEvidence).toHaveBeenNthCalledWith(
+      2,
+      evidence.reviewItemId,
+      { signal: secondController.signal }
+    );
+    expect(cacheLocationReviewEvidence).toHaveBeenCalledOnce();
+  });
+
   it("rejects a response when the active account changed before caching", async () => {
     const evidence = evidenceFixture();
     fetchLocationReviewEvidence.mockResolvedValue(evidence);

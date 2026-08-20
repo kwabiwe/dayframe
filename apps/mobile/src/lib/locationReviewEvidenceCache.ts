@@ -182,8 +182,18 @@ function networkLocationReviewEvidence(input: EvidenceOwner) {
   let request = inFlightEvidenceRequests.get(key);
   if (!request) {
     let nextRequest: InFlightEvidenceRequest;
-    const networkPromise = fetchLocationReviewEvidence(input.reviewItemId)
-      .finally(() => {
+    const clearIfCurrent = () => {
+      if (inFlightEvidenceRequests.get(key) === nextRequest) {
+        inFlightEvidenceRequests.delete(key);
+      }
+    };
+    const ownerSignal = input.signal;
+    const handleOwnerAbort = () => clearIfCurrent();
+    ownerSignal?.addEventListener("abort", handleOwnerAbort, { once: true });
+    const networkPromise = fetchLocationReviewEvidence(input.reviewItemId, {
+      signal: ownerSignal
+    })
+      .then((evidence) => {
         setTimeout(() => {
           if (
             inFlightEvidenceRequests.get(key) === nextRequest &&
@@ -192,6 +202,13 @@ function networkLocationReviewEvidence(input: EvidenceOwner) {
             inFlightEvidenceRequests.delete(key);
           }
         }, 0);
+        return evidence;
+      }, (error: unknown) => {
+        clearIfCurrent();
+        throw error;
+      })
+      .finally(() => {
+        ownerSignal?.removeEventListener("abort", handleOwnerAbort);
       });
     nextRequest = { networkPromise, cachePromise: null };
     request = nextRequest;
