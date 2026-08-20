@@ -31,6 +31,7 @@ type PrefetchDiagnostics = {
 type InFlightEvidenceRequest = {
   networkPromise: Promise<LocationReviewEvidenceDto>;
   cachePromise: Promise<string> | null;
+  valid: boolean;
 };
 
 const inFlightEvidenceRequests = new Map<string, InFlightEvidenceRequest>();
@@ -67,6 +68,7 @@ export async function revalidateLocationReviewEvidence(
     input.signal
   );
   throwIfAborted(input.signal);
+  throwIfRequestCannotPersist(input, request);
   request.cachePromise ??= cacheNetworkEvidence(input, evidence, request);
   const fetchedAt = await awaitWithAbort(request.cachePromise, input.signal);
   throwIfAborted(input.signal);
@@ -187,8 +189,12 @@ function networkLocationReviewEvidence(input: EvidenceOwner) {
         inFlightEvidenceRequests.delete(key);
       }
     };
+    const invalidate = () => {
+      nextRequest.valid = false;
+      clearIfCurrent();
+    };
     const ownerSignal = input.signal;
-    const handleOwnerAbort = () => clearIfCurrent();
+    const handleOwnerAbort = () => invalidate();
     ownerSignal?.addEventListener("abort", handleOwnerAbort, { once: true });
     const networkPromise = fetchLocationReviewEvidence(input.reviewItemId, {
       signal: ownerSignal
@@ -199,18 +205,18 @@ function networkLocationReviewEvidence(input: EvidenceOwner) {
             inFlightEvidenceRequests.get(key) === nextRequest &&
             !nextRequest.cachePromise
           ) {
-            inFlightEvidenceRequests.delete(key);
+            invalidate();
           }
         }, 0);
         return evidence;
       }, (error: unknown) => {
-        clearIfCurrent();
+        invalidate();
         throw error;
       })
       .finally(() => {
         ownerSignal?.removeEventListener("abort", handleOwnerAbort);
       });
-    nextRequest = { networkPromise, cachePromise: null };
+    nextRequest = { networkPromise, cachePromise: null, valid: true };
     request = nextRequest;
     inFlightEvidenceRequests.set(key, request);
   }
@@ -223,6 +229,7 @@ async function cacheNetworkEvidence(
   request: InFlightEvidenceRequest
 ) {
   const key = `${input.workspaceId}:${input.userId}:${input.reviewItemId}`;
+  throwIfRequestCannotPersist(input, request);
   const fetchedAt = new Date().toISOString();
   try {
     await cacheLocationReviewEvidence({
@@ -241,9 +248,20 @@ async function cacheNetworkEvidence(
     }
     return fetchedAt;
   } finally {
+    request.valid = false;
     if (inFlightEvidenceRequests.get(key) === request) {
       inFlightEvidenceRequests.delete(key);
     }
+  }
+}
+
+function throwIfRequestCannotPersist(
+  input: EvidenceOwner,
+  request: InFlightEvidenceRequest
+) {
+  const key = `${input.workspaceId}:${input.userId}:${input.reviewItemId}`;
+  if (!request.valid || inFlightEvidenceRequests.get(key) !== request) {
+    throw new Error("Location evidence request was cancelled or superseded.");
   }
 }
 

@@ -62,9 +62,12 @@ fresh cache, shares in-flight network work by account and Review ID, writes one
 row at a time, yields between items, stops at the cache cap or first failure,
 and cancels on blur/background/owner change. Cancellation before cache ownership
 does not write the response. The request creator's abort signal reaches the
-actual evidence fetch; cancellation synchronously evicts only that exact
-in-flight identity so immediate reopen creates a replacement, while late cleanup
-from the cancelled request cannot delete the replacement.
+actual evidence fetch; cancellation marks that exact request invalid and
+synchronously evicts only its identity so immediate reopen creates a
+replacement. Deduplicated consumers of the invalid request reject, only the
+current valid in-flight identity can begin cache persistence, and a cancelled
+fetch that ignores abort and resolves late cannot overwrite or delete the
+replacement.
 
 ### Detail and transport behavior
 
@@ -131,14 +134,14 @@ Current results:
 
 - focused mobile Review/API tests: PASS (5 files, 104 tests); the cancellation
   follow-up passed the evidence-cache, API, and network boundary suites at 3
-  files and 89 tests, followed by the complete mobile suite at 77 files and 731
+  files and 90 tests, followed by the complete mobile suite at 77 files and 732
   tests;
 - focused web Location Evidence/Review mutation tests: PASS (18 tests), followed
   by the complete web suite at 122 passed files, 1 skipped file, 836 passed
   tests, and 1 skipped test;
 - `npm run lint`: PASS with two pre-existing unused-parameter warnings in
   `event-service.test.ts`; `npm run typecheck`: PASS; `npm run test`: PASS with
-  1,723 passed tests and 1 skipped test; `npm run build`: PASS;
+  1,724 passed tests and 1 skipped test; `npm run build`: PASS;
 - the unrelated timing-sensitive `categoryPicker.dom.test.tsx` and
   `calendarClickCreate.dom.test.tsx` tests each failed once in separate full
   runs, then passed 6/6 and 9/9 in isolation respectively; each following
@@ -147,10 +150,10 @@ Current results:
   `npm run check:brand-assets`: PASS, and `git diff --check`: PASS;
 - Review SQLite v4 validator: PASS; Location V2 SQLite validator: PASS;
 - disposable Postgres Review mutation validator: PASS, including advisory-lock
-  contention in 4 ms, row-lock contention in 10 ms, and an 8.039-second
+  contention in 5 ms, row-lock contention in 10 ms, and an 8.046-second
   statement-timeout rollback followed by a successful retry;
 - disposable Postgres Location V2 validator: PASS, including advisory-lock,
-  Review-row, and exact-segment contention in 6 ms, 72 ms, and 13 ms;
+  Review-row, and exact-segment contention in 5 ms, 72 ms, and 13 ms;
 - `npx pod-install apps/mobile`: PASS with 114 dependencies and 113 pods and no
   tracked lockfile change; `npx expo install --check`: FAIL because the baseline
   pins TypeScript 5.9.3 while Expo currently recommends `~6.0.3` (no dependency

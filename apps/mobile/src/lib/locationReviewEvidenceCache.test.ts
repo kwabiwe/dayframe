@@ -207,6 +207,76 @@ describe("Location Review evidence cache orchestration", () => {
     expect(cacheLocationReviewEvidence).toHaveBeenCalledOnce();
   });
 
+  it("prevents late cancelled deduplicated work from overwriting immediate re-entry", async () => {
+    const staleEvidence = {
+      ...evidenceFixture(),
+      textualSummary: "Stale cancelled evidence."
+    };
+    const replacementEvidence = {
+      ...evidenceFixture(),
+      textualSummary: "Fresh replacement evidence."
+    };
+    let resolveCancelledFetch:
+      | ((value: LocationReviewEvidenceDto) => void)
+      | undefined;
+    let resolveReplacementFetch:
+      | ((value: LocationReviewEvidenceDto) => void)
+      | undefined;
+    fetchLocationReviewEvidence
+      .mockImplementationOnce(
+        () => new Promise<LocationReviewEvidenceDto>((resolve) => {
+          resolveCancelledFetch = resolve;
+        })
+      )
+      .mockImplementationOnce(
+        () => new Promise<LocationReviewEvidenceDto>((resolve) => {
+          resolveReplacementFetch = resolve;
+        })
+      );
+    const ownerController = new AbortController();
+    const deduplicatedController = new AbortController();
+    const replacementController = new AbortController();
+    const cancellation = new Error("Route exited.");
+
+    const cancelledOwner = revalidateLocationReviewEvidence({
+      ...owner,
+      reviewItemId: staleEvidence.reviewItemId,
+      signal: ownerController.signal
+    });
+    const deduplicatedConsumer = revalidateLocationReviewEvidence({
+      ...owner,
+      reviewItemId: staleEvidence.reviewItemId,
+      signal: deduplicatedController.signal
+    });
+    const ownerRejection = expect(cancelledOwner).rejects.toBe(cancellation);
+    const deduplicatedRejection = expect(deduplicatedConsumer).rejects.toThrow(
+      "cancelled or superseded"
+    );
+    expect(fetchLocationReviewEvidence).toHaveBeenCalledTimes(1);
+
+    ownerController.abort(cancellation);
+    const replacement = revalidateLocationReviewEvidence({
+      ...owner,
+      reviewItemId: replacementEvidence.reviewItemId,
+      signal: replacementController.signal
+    });
+    expect(fetchLocationReviewEvidence).toHaveBeenCalledTimes(2);
+
+    resolveReplacementFetch?.(replacementEvidence);
+    await ownerRejection;
+    await expect(replacement).resolves.toMatchObject({
+      evidence: replacementEvidence,
+      source: "network"
+    });
+
+    resolveCancelledFetch?.(staleEvidence);
+    await deduplicatedRejection;
+    expect(cacheLocationReviewEvidence).toHaveBeenCalledOnce();
+    expect(cacheLocationReviewEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({ evidence: replacementEvidence })
+    );
+  });
+
   it("rejects a response when the active account changed before caching", async () => {
     const evidence = evidenceFixture();
     fetchLocationReviewEvidence.mockResolvedValue(evidence);

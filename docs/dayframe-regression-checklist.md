@@ -152,7 +152,9 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Detailed Location Evidence caches the validated presentation DTO only for the
   active account. Enforce the earlier of server expiry or seven days, 25 rows,
   5 MiB measured as UTF-8, LRU pruning, canonical-open pruning, malformed-row
-  deletion, request deduplication, serial foreground prefetch, cancellation, and
+  deletion, request deduplication, serial foreground prefetch, cancellation,
+  current-request-only cache writes after cancel/re-entry (including a
+  deduplicated consumer and a cancelled fetch that resolves late), and
   logout/account-switch cascade. Cached text, times, category, route coordinates,
   and actions remain usable when Apple map tiles are unavailable; never expose a
   raw native/network exception.
