@@ -17,7 +17,16 @@ vi.mock("@/lib/ingest-auth", () => ({
 }));
 
 vi.mock("@/lib/event-service", () => ({
-  processActivityEvent: mocks.processActivityEvent
+  processActivityEvent: mocks.processActivityEvent,
+  TimerMutationBusyError: class TimerMutationBusyError extends Error {
+    code = "timer_busy";
+    status = 503;
+
+    constructor(message = "This timer is busy. Dayframe will retry the Stop shortly.") {
+      super(message);
+      this.name = "TimerMutationBusyError";
+    }
+  }
 }));
 
 const { databasePayloadError, databaseReadinessError, missingRequiredColumnError } = await import("@/lib/db");
@@ -85,6 +94,26 @@ describe("POST /api/events", () => {
       eventId: "event-start-existing",
       timeEntryId: "entry-start-canonical"
     });
+  });
+
+  it("returns a stable retryable response when an exact timer Stop is busy", async () => {
+    const { TimerMutationBusyError } = await import("@/lib/event-service");
+    mocks.processActivityEvent.mockRejectedValueOnce(new TimerMutationBusyError());
+
+    const response = await POST(jsonRequest({
+      source: "mobile_app",
+      type: "timer_stop",
+      occurredAt: "2026-08-19T09:30:00.000Z",
+      clientEventId: "mobile-stop-entry-1",
+      rawPayload: {
+        origin: "mobile_timer_stop",
+        stopScope: "entry",
+        targetEntryId: "80000000-0000-4000-8000-000000000001"
+      }
+    }));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({ code: "timer_busy" });
   });
 
   it("returns a precise schema error when health sleep storage is missing", async () => {

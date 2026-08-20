@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { authErrorResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
-import { processActivityEvent } from "@/lib/event-service";
+import { processActivityEvent, TimerMutationBusyError } from "@/lib/event-service";
 import { isDatabasePayloadError, isDatabaseReadinessError, isMissingRequiredColumnError } from "@/lib/db";
 import { notifyLiveActivitiesBestEffort } from "@/lib/live-activity-push";
 
@@ -21,6 +21,12 @@ export async function POST(request: Request) {
     if (authResponse) return authResponse;
     if (error instanceof ZodError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    if (error instanceof TimerMutationBusyError) {
+      return NextResponse.json(
+        { code: error.code, error: error.message },
+        { status: error.status }
+      );
     }
     if (isMissingRequiredColumnError(error) || isDatabaseReadinessError(error)) {
       return NextResponse.json({ error: error.message }, { status: 500 });

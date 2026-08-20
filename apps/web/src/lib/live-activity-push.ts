@@ -100,24 +100,42 @@ export async function registerLiveActivity(
   registration: LiveActivityRegistration
 ) {
   const result = await query(
-    `with invalidated_previous_tokens as (
-       update live_activity_push_tokens
+    `with active_target as (
+       select te.id
+       from time_entries te
+       where te.id = $5
+         and te.workspace_id = $1
+         and te.user_id = $2
+         and te.stopped_at is null
+         and not exists (
+           select 1
+           from live_activity_push_tokens conflicting_token
+           where conflicting_token.token = $3
+             and (
+               conflicting_token.workspace_id <> $1
+               or conflicting_token.user_id <> $2
+             )
+         )
+     ), invalidated_previous_tokens as (
+       update live_activity_push_tokens previous_token
        set invalidated_at = now()
-       where workspace_id = $1
-         and user_id = $2
-         and activity_id = $4
-         and token <> $3
-         and invalidated_at is null
+       from active_target
+       where previous_token.workspace_id = $1
+         and previous_token.user_id = $2
+         and (
+           (previous_token.activity_id = $4 and previous_token.token <> $3)
+           or (
+             previous_token.active_entry_id = active_target.id
+             and previous_token.activity_id <> $4
+           )
+         )
+         and previous_token.invalidated_at is null
      )
      insert into live_activity_push_tokens (
        workspace_id, user_id, token, activity_id, active_entry_id, environment
      )
-     select $1, $2, $3, $4, te.id, $6
-     from time_entries te
-     where te.id = $5
-       and te.workspace_id = $1
-       and te.user_id = $2
-       and te.stopped_at is null
+     select $1, $2, $3, $4, active_target.id, $6
+     from active_target
      on conflict (token) do update set
        activity_id = excluded.activity_id,
        active_entry_id = excluded.active_entry_id,

@@ -72,8 +72,9 @@ class DayframeLiveActivityModule: NSObject {
     resolve: @escaping RCTPromiseResolveBlock,
     reject: @escaping RCTPromiseRejectBlock
   ) {
-    DayframeLiveActivityController.cleanupActivities(activityIds: activityIds)
-    resolve(true)
+    Task {
+      resolve(await DayframeLiveActivityController.cleanupActivities(activityIds: activityIds))
+    }
   }
 
   @objc(pushToken:resolver:rejecter:)

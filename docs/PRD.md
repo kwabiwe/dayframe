@@ -48,7 +48,7 @@ Key needs and pain points:
 
 Core Functionality:
 
-- ✅ Web and mobile manual timer start/stop with live active timer sync.
+- ✅ Web and mobile manual timer start/stop with live active timer sync. Mobile Stop is accepted only after an exact, account-owned Stop intent is durable on device; server delivery is entry-scoped, idempotent, bounded, and safe to replay after relaunch.
 - ✅ Description, category, place, source, confidence, and review status on time entries.
 - ✅ Calendar, List, and Timesheet review views.
 - ✅ Review inbox for ambiguous geofence/health/location suggestions.
@@ -111,6 +111,7 @@ Deployment:
 
 6. As a mobile user, I want offline capture to sync later, so that timers and geofence/health events are not lost when the network is unavailable.
    - Example: A walk captured offline syncs when the phone reconnects.
+   - Example: I tap Stop and immediately force-quit; reopening still shows that exact timer stopped locally and safely retries the same event without stopping a newer timer.
 
 7. As a user reviewing time, I want Calendar, List, and Timesheet views, so that I can edit precise entries and understand daily/weekly totals.
    - Example: Resize/edit a time block, delete an accidental entry, and review weekly totals by category.
@@ -375,6 +376,7 @@ Deliverables:
 
 - ✅ Active timer sync path.
 - ✅ Offline event queue reconciliation.
+- ✅ Dedicated durable mobile Stop outbox with exact timer identity, original tap time, stable idempotency, and foreground/relaunch projection.
 - ✅ Conflict handling for start/stop/switch events.
 - ✅ Retry and auth-expiry behavior.
 
@@ -383,6 +385,7 @@ Validation:
 - Start on mobile appears on web.
 - Stop on web appears on mobile.
 - Offline mobile events sync in order after reconnect.
+- A locally accepted mobile Stop survives force-quit, remains scoped to its original timer/account, and clears silently after success, duplicate, or superseded acknowledgement.
 
 ### Phase 3: Health And Location MVP
 

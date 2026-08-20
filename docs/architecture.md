@@ -30,6 +30,7 @@ Every newly captured signal must have an `activity_events` record before it crea
 - A reviewed unknown visit may give the derived entry either a workspace saved-place `place_id` or a user-selected one-time `place_label`, never both. Read models expose the resolved `placeName` plus `placeKind`; edits preserve the one-time label unless place selection is explicitly changed.
 - Editing or deleting an existing time entry is a mutation of already-derived user data; it does not invent a new capture signal.
 - Technical idempotency uses source identifiers such as `client_event_id`, Health sample/session identity, Location segment identity, and Review mutation receipts. User-intended time overlaps remain valid.
+- Mobile explicit Stop uses one durable `client_event_id` and the original tap timestamp across direct delivery and replay. Its `timer_stop` event targets one canonical `time_entries.id`; `superseded` is a successful no-op when that exact timer is no longer active.
 
 The primary services are:
 
@@ -56,12 +57,15 @@ React Native owns authentication, bootstrap data, routing, API mutations, offlin
 
 Offline storage is intentionally split by responsibility:
 
-- `apps/mobile/src/lib/api.ts`: general activity-event queue and timer fallback;
+- `apps/mobile/src/lib/api.ts`: general activity-event queue plus bounded API delivery;
+- `apps/mobile/src/lib/timerStopOutbox.ts`: storage-only, account-owned explicit Stop intents that persist independently of the general queue, recover an unusable JSON container before accepting new intent, and become deliverable only after an optimistic timer ID has a durable canonical correlation;
 - `apps/mobile/src/lib/reviewSyncStore.ts`: account-scoped downloaded Review state and terminal Review outbox;
 - `apps/mobile/src/lib/location/store.ts`: protected Location V2 evidence journal, upload outbox, and bounded server-replay coordinator;
 - native App Group/Keychain storage: bounded Live Activity/App Intent hand-off data.
 
 These stores are not interchangeable. Detailed Location actions remain connectivity-dependent, and iOS does not promise background drain after an explicit force-quit.
+
+React projects pending Stop intents over cached/fetched bootstrap before publishing timer state or reconciling ActivityKit. The running sheet retains sole ownership of its existing coordinated exit; local Stop durability, not HTTP completion, accepts dismissal. Stop delivery captures the authenticated SecureStore generation/token pair and revalidates it immediately before dispatch, so a logout/login boundary retains old-account intent without sending it under the replacement account. Native ActivityKit cleanup receives exact observed IDs, awaits their end operations, and must re-read snapshots until the requested generation has either zero active activities or exactly one running canonical survivor. Remote registration and Stop enablement occur only after that verified convergence.
 
 ## Health and location privacy
 

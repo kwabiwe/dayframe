@@ -19,6 +19,16 @@ let cachedSessionToken: string | null | undefined;
 let sessionRevision = 0;
 let sessionOperations: Promise<void> = Promise.resolve();
 
+export type AuthenticatedSessionSnapshot = {
+  generation: number;
+  token: string;
+};
+
+export type SessionSnapshotRead =
+  | { status: "authenticated"; snapshot: AuthenticatedSessionSnapshot }
+  | { status: "signed_out" }
+  | { status: "changed" };
+
 export function resetSessionTokenCacheForTesting() {
   cachedSessionToken = undefined;
   sessionRevision += 1;
@@ -127,6 +137,28 @@ export async function getSessionToken() {
     await mirrorRuntimeContext(legacy);
     return revision === sessionRevision ? legacy : cachedSessionToken ?? null;
   });
+}
+
+/**
+ * Captures the session generation before any Keychain work begins. Callers
+ * that are about to dispatch account-owned data must revalidate the returned
+ * snapshot immediately before invoking fetch.
+ */
+export async function readAuthenticatedSessionSnapshot(): Promise<SessionSnapshotRead> {
+  const generation = sessionRevision;
+  const token = await getSessionToken();
+  if (generation !== sessionRevision) return { status: "changed" };
+  if (!token) return { status: "signed_out" };
+  return {
+    status: "authenticated",
+    snapshot: { generation, token }
+  };
+}
+
+export function isAuthenticatedSessionSnapshotCurrent(
+  snapshot: AuthenticatedSessionSnapshot
+) {
+  return snapshot.generation === sessionRevision && cachedSessionToken === snapshot.token;
 }
 
 export async function setSessionToken(token: string) {

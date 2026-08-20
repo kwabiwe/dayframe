@@ -51,9 +51,7 @@ enum DayframeLiveActivityController {
       // The logical run already owns an Activity. Update it in place. Sibling
       // cleanup belongs to the generation-fenced JS reconciler; a native start
       // cannot know whether an observed sibling is stale or concurrently new.
-      Task(priority: .userInitiated) {
-        await existing.update(ActivityContent(state: state, staleDate: nil))
-      }
+      await existing.update(ActivityContent(state: state, staleDate: nil))
       return StartResult(activityId: existing.id)
     }
 
@@ -183,11 +181,8 @@ enum DayframeLiveActivityController {
     return true
   }
 
-  static func cleanupActivities(activityIds: [String]) {
-    guard #available(iOS 16.2, *) else {
-      return
-    }
-    scheduleEndActivities(activityIds: activityIds)
+  static func cleanupActivities(activityIds: [String]) async -> Bool {
+    await stop(activityIds: activityIds)
   }
 
   static func activityIds(entryId: String) -> [String] {
@@ -250,24 +245,6 @@ enum DayframeLiveActivityController {
       ActivityContent(state: state, staleDate: Date()),
       dismissalPolicy: dismissalPolicy
     )
-  }
-
-  @available(iOS 16.2, *)
-  private static func scheduleEndActivities(activityIds: [String]) {
-    let activityIds = Array(Set(activityIds.compactMap(cleanText)))
-    guard !activityIds.isEmpty else { return }
-    Task(priority: .userInitiated) {
-      for activityId in activityIds {
-        guard
-          let activity = Activity<DayframeTimerAttributes>.activities.first(where: {
-            $0.id == activityId
-          })
-        else {
-          continue
-        }
-        await end(activity, dismissalPolicy: .immediate)
-      }
-    }
   }
 
   private static func elapsedSeconds(from startedAt: Date?) -> Int {

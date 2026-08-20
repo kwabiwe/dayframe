@@ -9,6 +9,20 @@ type LiveActivityEntry = Pick<
   "categoryColor" | "categoryName" | "description" | "id" | "startedAt"
 >;
 
+type NativeActivitySnapshot = {
+  activityId: string;
+  entryId?: string | null;
+  isActive: boolean;
+  isRunning: boolean;
+};
+
+type NativeConvergence = {
+  converged: boolean;
+  snapshotAvailable: boolean;
+  staleActivityIds: string[];
+  survivorActivityId: string | null;
+};
+
 type DayframeLiveActivityModule = {
   start(
     title: string,
@@ -22,12 +36,7 @@ type DayframeLiveActivityModule = {
     token?: string | null;
     environment?: "development" | "production" | null;
   }>;
-  activitySnapshot?(): Promise<Array<{
-    activityId: string;
-    entryId?: string | null;
-    isActive: boolean;
-    isRunning: boolean;
-  }>>;
+  activitySnapshot?(): Promise<NativeActivitySnapshot[]>;
   cleanupActivities?(activityIds: string[]): Promise<boolean>;
   enableStop?(activityId: string, entryId: string): Promise<boolean>;
 };
@@ -40,6 +49,7 @@ let requestedGeneration = 0;
 let reconciliation: Promise<void> | null = null;
 const remoteRegistrations = new Map<string, Promise<boolean>>();
 const registeredRemoteTokens = new Map<string, string>();
+const CLEANUP_RETRY_DELAYS_MS = [0, 250, 1_000] as const;
 const REMOTE_REGISTRATION_RETRY_DELAYS_MS = [0, 1_500, 5_000] as const;
 
 export async function syncLiveActivityForEntry(entry: LiveActivityEntry | null | undefined) {
@@ -60,131 +70,157 @@ async function reconcileLatestEntry() {
     const entry = requestedEntry;
     const generation = requestedGeneration;
     const requestedKey = liveActivityKey(entry);
-    if (lastSyncedLiveActivityKey === requestedKey) {
-      // Optimistic/offline IDs intentionally create a non-interactive Activity
-      // until the server assigns a canonical UUID. Its exact identity cannot
-      // be reconciled yet, so the completed local presentation remains the
-      // truth until the canonical entry replaces it.
-      if (entry && !isUuid(entry.id)) return;
-      const nativeState = await matchingNativeActivityState(entry);
-      if (generation !== requestedGeneration) continue;
-      if (
-        !entry &&
-        nativeState.snapshotAvailable &&
-        nativeState.mismatchedActivityIds.length > 0
-      ) {
-        const didStop = await nativeLiveActivity!.cleanupActivities?.(
-          nativeState.mismatchedActivityIds
-        ).catch(() => false);
-        if (generation !== requestedGeneration) continue;
-        if (didStop !== false) lastSyncedLiveActivityKey = requestedKey;
-        return;
-      }
-      if (nativeState.matches) {
-        if (
-          entry &&
-          isUuid(entry.id) &&
-          nativeState.matchingActivityId &&
-          nativeLiveActivity!.pushToken
-        ) {
-          // A prior registration attempt may have exhausted its bounded
-          // retries while offline. Every later same-entry reconciliation gets
-          // another chance; Stop stays hidden until one succeeds.
-          queueRemoteRegistration(nativeState.matchingActivityId, entry.id);
-        }
-        if (nativeState.mismatchedActivityIds.length > 0) {
-          void nativeLiveActivity?.cleanupActivities?.(nativeState.mismatchedActivityIds)
-            .catch(() => false);
-        }
-        return;
-      }
-      // The Live Activity can be stopped by an App Intent while this JS
-      // process is suspended. Reconcile the native truth, not only our last
-      // requested key, when the app is active again.
-      lastSyncedLiveActivityKey = null;
-      continue;
-    }
 
     if (!entry) {
-      const nativeState = await matchingNativeActivityState(null);
+      const convergence = await convergeNativeActivities(null, generation, null);
       if (generation !== requestedGeneration) continue;
-      if (!nativeState.snapshotAvailable) return;
-      const didStop = nativeState.mismatchedActivityIds.length === 0 ||
-        await nativeLiveActivity!.cleanupActivities?.(nativeState.mismatchedActivityIds)
-          .catch(() => false);
-      if (generation !== requestedGeneration) continue;
-      if (didStop !== false) lastSyncedLiveActivityKey = requestedKey;
+      if (convergence.converged) lastSyncedLiveActivityKey = requestedKey;
+      else lastSyncedLiveActivityKey = null;
       return;
     }
 
-    const title = displayLiveActivityTitle(entry);
-    const categoryColor = entry.categoryName
-      ? paletteColorFor(entry.categoryColor ?? entry.categoryName, entry.categoryName, "dark")
-      : null;
-    const result = await nativeLiveActivity!.start(
-      title,
-      isUuid(entry.id) ? entry.id : null,
-      DAYFRAME_API_BASE,
-      entry.categoryName,
-      categoryColor,
-      entry.startedAt
-    ).catch(() => false);
+    if (!isUuid(entry.id)) {
+      if (lastSyncedLiveActivityKey === requestedKey) return;
+      const result = await startNativeActivity(entry).catch(() => false);
+      if (generation !== requestedGeneration) continue;
+      if (nativeStartSucceeded(result)) lastSyncedLiveActivityKey = requestedKey;
+      return;
+    }
+
+    const shouldStart = lastSyncedLiveActivityKey !== requestedKey;
+    let preferredActivityId: string | null = null;
+    if (shouldStart) {
+      const result = await startNativeActivity(entry).catch(() => false);
+      if (generation !== requestedGeneration) continue;
+      if (!nativeStartSucceeded(result)) return;
+      preferredActivityId = typeof result === "object" ? result.activityId ?? null : null;
+    }
+
+    const convergence = await convergeNativeActivities(
+      entry,
+      generation,
+      preferredActivityId
+    );
     if (generation !== requestedGeneration) continue;
-    const didStart = typeof result === "boolean" ? result : result.started;
-    if (didStart) {
-      lastSyncedLiveActivityKey = requestedKey;
-      if (isUuid(entry.id)) {
-        const nativeState = await matchingNativeActivityState(entry);
-        if (generation !== requestedGeneration) continue;
-        if (nativeState.matches && nativeState.mismatchedActivityIds.length > 0) {
-          void nativeLiveActivity?.cleanupActivities?.(nativeState.mismatchedActivityIds)
-            .catch(() => false);
-        }
-      }
-      if (
-        typeof result === "object" &&
-        result.activityId &&
-        nativeLiveActivity?.pushToken &&
-        isUuid(entry.id)
-      ) {
-        queueRemoteRegistration(result.activityId, entry.id);
-      }
+    if (!convergence.snapshotAvailable) {
+      lastSyncedLiveActivityKey = null;
+      return;
+    }
+    if (!convergence.converged || !convergence.survivorActivityId) {
+      lastSyncedLiveActivityKey = null;
+      // A same-key foreground pass can discover that ActivityKit ended the
+      // cached activity outside this JS process. Retry once through start;
+      // a failed/newly delayed start remains retryable on the next lifecycle.
+      if (!shouldStart) continue;
+      return;
+    }
+
+    lastSyncedLiveActivityKey = requestedKey;
+    if (nativeLiveActivity?.pushToken) {
+      queueRemoteRegistration(
+        convergence.survivorActivityId,
+        entry.id,
+        generation
+      );
     }
     return;
   }
 }
 
-async function matchingNativeActivityState(entry: LiveActivityEntry | null) {
-  const snapshot = await nativeLiveActivity?.activitySnapshot?.().catch(() => undefined);
-  if (Array.isArray(snapshot)) {
-    const active = snapshot.filter((activity) => activity?.isActive && activity?.isRunning);
-    if (!entry) {
-      return {
-        matches: active.length === 0,
-        matchingActivityId: null,
-        mismatchedActivityIds: active.map((activity) => activity.activityId),
-        snapshotAvailable: true
-      };
+async function convergeNativeActivities(
+  entry: LiveActivityEntry | null,
+  generation: number,
+  preferredActivityId: string | null
+): Promise<NativeConvergence> {
+  let latest: NativeConvergence = unavailableNativeConvergence();
+
+  for (const delay of CLEANUP_RETRY_DELAYS_MS) {
+    if (delay) await wait(delay);
+    if (generation !== requestedGeneration) return latest;
+
+    const observed = await matchingNativeActivityState(entry, preferredActivityId);
+    if (generation !== requestedGeneration) return observed;
+    latest = observed;
+    if (!observed.snapshotAvailable || observed.converged) return observed;
+
+    const staleActivityIds = [...observed.staleActivityIds];
+    if (staleActivityIds.length > 0) {
+      const cleaned = await nativeLiveActivity?.cleanupActivities?.(staleActivityIds)
+        .catch(() => false);
+      if (generation !== requestedGeneration) return observed;
+      if (cleaned === false) continue;
     }
+
+    const verified = await matchingNativeActivityState(entry, preferredActivityId);
+    if (generation !== requestedGeneration) return verified;
+    latest = verified;
+    if (verified.converged) return verified;
+  }
+
+  return latest;
+}
+
+async function matchingNativeActivityState(
+  entry: LiveActivityEntry | null,
+  preferredActivityId: string | null
+): Promise<NativeConvergence> {
+  const snapshot = await nativeLiveActivity?.activitySnapshot?.().catch(() => undefined);
+  if (!Array.isArray(snapshot)) return unavailableNativeConvergence();
+
+  const active = snapshot
+    .filter((activity) => activity?.isActive && activity.activityId)
+    .sort((left, right) => left.activityId.localeCompare(right.activityId));
+  if (!entry) {
     return {
-      matches: active.some((activity) => activity.entryId === entry.id),
-      matchingActivityId: active.find((activity) => activity.entryId === entry.id)?.activityId ?? null,
-      mismatchedActivityIds: active
-        .filter((activity) => activity.entryId !== entry.id)
-        .map((activity) => activity.activityId),
-      snapshotAvailable: true
+      converged: active.length === 0,
+      snapshotAvailable: true,
+      staleActivityIds: active.map((activity) => activity.activityId),
+      survivorActivityId: null
     };
   }
 
-  // The JS bundle and native binary ship together. If an unexpected binary
-  // cannot provide exact identities, fail closed instead of treating an
-  // arbitrary Dayframe activity as the requested run.
+  const matching = active.filter((activity) =>
+    activity.isRunning && activity.entryId === entry.id
+  );
+  const survivor = matching.find((activity) => activity.activityId === preferredActivityId) ?? matching[0] ?? null;
+  const staleActivityIds = active
+    .filter((activity) => activity.activityId !== survivor?.activityId)
+    .map((activity) => activity.activityId);
   return {
-    matches: false,
-    matchingActivityId: null,
-    mismatchedActivityIds: [] as string[],
-    snapshotAvailable: false
+    converged: Boolean(survivor) && active.length === 1 && staleActivityIds.length === 0,
+    snapshotAvailable: true,
+    staleActivityIds,
+    survivorActivityId: survivor?.activityId ?? null
   };
+}
+
+function unavailableNativeConvergence(): NativeConvergence {
+  return {
+    converged: false,
+    snapshotAvailable: false,
+    staleActivityIds: [],
+    survivorActivityId: null
+  };
+}
+
+function startNativeActivity(entry: LiveActivityEntry) {
+  const categoryColor = entry.categoryName
+    ? paletteColorFor(entry.categoryColor ?? entry.categoryName, entry.categoryName, "dark")
+    : null;
+  return nativeLiveActivity!.start(
+    displayLiveActivityTitle(entry),
+    isUuid(entry.id) ? entry.id : null,
+    DAYFRAME_API_BASE,
+    entry.categoryName,
+    categoryColor,
+    entry.startedAt
+  );
+}
+
+function nativeStartSucceeded(
+  result: boolean | { started: boolean; activityId?: string | null }
+) {
+  return typeof result === "boolean" ? result : result.started;
 }
 
 function liveActivityKey(entry: LiveActivityEntry | null) {
@@ -204,40 +240,85 @@ function displayLiveActivityTitle(entry: LiveActivityEntry) {
   return "Uncategorized";
 }
 
-function queueRemoteRegistration(activityId: string, activeEntryId: string) {
-  if (remoteRegistrations.has(activityId)) return;
-  const registration = registerRemoteUpdates(activityId, activeEntryId).finally(() => {
+function queueRemoteRegistration(
+  activityId: string,
+  activeEntryId: string,
+  generation: number
+) {
+  const existing = remoteRegistrations.get(activityId);
+  if (existing) {
+    void existing.finally(() => {
+      if (isCurrentCanonicalRequest(activeEntryId, generation)) {
+        queueRemoteRegistration(activityId, activeEntryId, generation);
+      }
+    });
+    return;
+  }
+  const registration = registerRemoteUpdates(activityId, activeEntryId, generation).finally(() => {
     remoteRegistrations.delete(activityId);
   });
   remoteRegistrations.set(activityId, registration);
   void registration;
 }
 
-async function registerRemoteUpdates(activityId: string, activeEntryId: string) {
+async function registerRemoteUpdates(
+  activityId: string,
+  activeEntryId: string,
+  generation: number
+) {
   for (const delay of REMOTE_REGISTRATION_RETRY_DELAYS_MS) {
-    if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
-    if (requestedEntry?.id !== activeEntryId) return false;
+    if (delay) await wait(delay);
+    if (!isCurrentCanonicalRequest(activeEntryId, generation)) return false;
+    if (!(await isVerifiedSurvivor(activityId, activeEntryId))) return false;
+    if (!isCurrentCanonicalRequest(activeEntryId, generation)) return false;
 
     const registration = await nativeLiveActivity?.pushToken?.(activityId).catch(() => null);
+    if (!isCurrentCanonicalRequest(activeEntryId, generation)) return false;
     if (!registration?.token || !registration.environment) continue;
+    if (!(await isVerifiedSurvivor(activityId, activeEntryId))) return false;
+    if (!isCurrentCanonicalRequest(activeEntryId, generation)) return false;
     if (registeredRemoteTokens.get(activityId) === registration.token) return true;
+
     const didRegister = await registerLiveActivity({
       token: registration.token,
       activityId,
       activeEntryId,
       environment: registration.environment
     }).then(() => true).catch(() => false);
+    if (!isCurrentCanonicalRequest(activeEntryId, generation)) return false;
     if (!didRegister) continue;
+    if (!(await isVerifiedSurvivor(activityId, activeEntryId))) return false;
+    if (!isCurrentCanonicalRequest(activeEntryId, generation)) return false;
+
     const didEnable = await nativeLiveActivity?.enableStop?.(
       activityId,
       activeEntryId
     ).catch(() => false);
-    if (didEnable === true) {
+    if (!isCurrentCanonicalRequest(activeEntryId, generation)) return false;
+    if (didEnable === true && await isVerifiedSurvivor(activityId, activeEntryId)) {
       registeredRemoteTokens.set(activityId, registration.token);
       return true;
     }
   }
   return false;
+}
+
+async function isVerifiedSurvivor(activityId: string, activeEntryId: string) {
+  const snapshot = await nativeLiveActivity?.activitySnapshot?.().catch(() => undefined);
+  if (!Array.isArray(snapshot)) return false;
+  const active = snapshot.filter((activity) => activity?.isActive);
+  return active.length === 1 &&
+    active[0]?.activityId === activityId &&
+    active[0]?.entryId === activeEntryId &&
+    active[0]?.isRunning === true;
+}
+
+function isCurrentCanonicalRequest(activeEntryId: string, generation: number) {
+  return requestedGeneration === generation && requestedEntry?.id === activeEntryId;
+}
+
+function wait(milliseconds: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function isUuid(value: string) {

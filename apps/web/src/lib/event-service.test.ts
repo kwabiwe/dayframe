@@ -37,6 +37,7 @@ const {
   reprocessHealthReviewItems,
   resolveLearnedPlaceLocation,
   resolveReviewItem,
+  TimerMutationBusyError,
   TimeEntryNotFoundError,
   updateLearnedPlaceStatus,
   updateCategory,
@@ -153,7 +154,8 @@ describe("category persistence", () => {
     expect(first).toMatchObject({
       eventId: "event-stop-1",
       candidate: { action: "stop_timer" },
-      stopOutcome: "stopped"
+      stopOutcome: "stopped",
+      timeEntryId: targetEntryId
     });
     expect(retry).toMatchObject({ eventId: "event-stop-1", duplicate: true });
     expect(
@@ -169,6 +171,43 @@ describe("category persistence", () => {
       expect.stringContaining("and id = $4"),
       [expect.any(Date), session.workspaceId, session.userId, targetEntryId]
     );
+    expect(firstClient.query).toHaveBeenCalledWith(
+      "select set_config('lock_timeout', $1, true)",
+      ["2s"]
+    );
+    expect(firstClient.query).toHaveBeenCalledWith(
+      "select set_config('statement_timeout', $1, true)",
+      ["5s"]
+    );
+    expect(firstClient.query.mock.calls.some(([statement]) =>
+      String(statement).includes("pg_advisory_xact_lock")
+    )).toBe(false);
+  });
+
+  it("returns a duplicate receipt before opening a transaction", async () => {
+    const targetEntryId = "80000000-0000-4000-8000-000000000001";
+    mocks.query.mockResolvedValueOnce({
+      rows: [{ eventId: "event-fast-duplicate", timeEntryId: targetEntryId }]
+    });
+
+    const result = await processActivityEvent({
+      source: "mobile_app",
+      type: "timer_stop",
+      occurredAt: new Date("2026-08-19T09:30:00.000Z"),
+      clientEventId: "mobile-timer-stop:fast-duplicate",
+      rawPayload: {
+        origin: "mobile_timer_stop",
+        stopScope: "entry",
+        targetEntryId
+      }
+    }, session);
+
+    expect(result).toMatchObject({
+      duplicate: true,
+      eventId: "event-fast-duplicate",
+      timeEntryId: targetEntryId
+    });
+    expect(mocks.pool.connect).not.toHaveBeenCalled();
   });
 
   it("does not let a stale Live Activity stop a newer timer", async () => {
@@ -201,6 +240,37 @@ describe("category persistence", () => {
       expect.stringContaining("and id = $4"),
       [expect.any(Date), session.workspaceId, session.userId, oldEntryId]
     );
+  });
+
+  it("turns bounded entry-row contention into a retryable timer error", async () => {
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes("insert into activity_events")) {
+          return { rows: [{ id: "event-busy-stop" }] };
+        }
+        if (statement.includes("set stopped_at = $1")) {
+          throw Object.assign(new Error("canceling statement due to lock timeout"), { code: "55P03" });
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(processActivityEvent({
+      source: "mobile_app",
+      type: "timer_stop",
+      occurredAt: new Date("2026-08-19T09:30:00.000Z"),
+      clientEventId: "mobile-stop-busy",
+      rawPayload: {
+        origin: "mobile_timer_stop",
+        stopScope: "entry",
+        targetEntryId: "80000000-0000-4000-8000-000000000001"
+      }
+    }, session)).rejects.toBeInstanceOf(TimerMutationBusyError);
+
+    expect(client.query).toHaveBeenCalledWith("rollback");
+    expect(client.release).toHaveBeenCalledOnce();
   });
 
   it("fails closed for an unscoped Stop from an older iOS App Intent", async () => {
@@ -1232,8 +1302,9 @@ describe("health event persistence", () => {
     const eventIndex = statements.findIndex((statement) => statement.includes("insert into activity_events"));
     const updateIndex = statements.findIndex((statement) => statement.startsWith("update time_entries"));
     expect(lockIndex).toBeGreaterThan(-1);
-    expect(matchIndex).toBeGreaterThan(lockIndex);
+    expect(lockIndex).toBeGreaterThan(matchIndex);
     expect(eventIndex).toBeGreaterThan(matchIndex);
+    expect(eventIndex).toBeGreaterThan(lockIndex);
     expect(updateIndex).toBeGreaterThan(eventIndex);
   });
 

@@ -157,6 +157,19 @@ export class TimerReplacementWindowError extends Error {
   }
 }
 
+export class TimerMutationBusyError extends Error {
+  readonly code = "timer_busy";
+  readonly status = 503;
+
+  constructor(message = "This timer is busy. Dayframe will retry the Stop shortly.") {
+    super(message);
+    this.name = "TimerMutationBusyError";
+  }
+}
+
+const SCOPED_STOP_LOCK_TIMEOUT = "2s";
+const SCOPED_STOP_STATEMENT_TIMEOUT = "5s";
+
 type OverlapBlockingEntry = {
   id: string;
   description: string | null;
@@ -427,6 +440,9 @@ export async function processActivityEvent(
     workspaceId: session.workspaceId,
     userId: session.userId
   });
+  const fastDuplicate = parsed.clientEventId
+    ? await findExistingActivityEventReceipt(parsed.clientEventId, session)
+    : null;
   const context = await getNormalizationContext(session);
   let candidate = normalizeActivityEvent(parsed, context);
   const stopScope = timerStopScope(parsed);
@@ -438,16 +454,30 @@ export async function processActivityEvent(
       reason: "An unscoped legacy iOS Stop was recorded but could not target a newer timer."
     };
   }
+  if (fastDuplicate) {
+    recordTimerMutationTiming({
+      eventType: parsed.type,
+      stopScope: stopScope.mode,
+      lockWaitMilliseconds: 0,
+      transactionMilliseconds: 0,
+      outcome: "duplicate"
+    });
+    return {
+      eventId: fastDuplicate.eventId,
+      candidate,
+      duplicate: true,
+      ...(fastDuplicate.timeEntryId ? { timeEntryId: fastDuplicate.timeEntryId } : {})
+    };
+  }
   const client = await pool.connect();
+  const transactionStartedAt = Date.now();
+  let lockWaitMilliseconds = 0;
 
   try {
     await client.query("begin");
-    if (
-      candidate.action === "start_timer" ||
-      candidate.action === "stop_timer" ||
-      parsed.type === "health_sleep_import"
-    ) {
-      await lockUserTimerState(client, session);
+    if (stopScope.mode === "entry") {
+      await client.query("select set_config('lock_timeout', $1, true)", [SCOPED_STOP_LOCK_TIMEOUT]);
+      await client.query("select set_config('statement_timeout', $1, true)", [SCOPED_STOP_STATEMENT_TIMEOUT]);
     }
 
     if (parsed.clientEventId) {
@@ -466,6 +496,13 @@ export async function processActivityEvent(
           session
         );
         await client.query("commit");
+        recordTimerMutationTiming({
+          eventType: parsed.type,
+          stopScope: stopScope.mode,
+          lockWaitMilliseconds,
+          transactionMilliseconds: Date.now() - transactionStartedAt,
+          outcome: "duplicate"
+        });
         return {
           eventId: existingEvent.rows[0].id,
           candidate,
@@ -540,6 +577,16 @@ export async function processActivityEvent(
       }
     }
 
+    if (
+      candidate.action === "start_timer" ||
+      (candidate.action === "stop_timer" && stopScope.mode !== "entry") ||
+      parsed.type === "health_sleep_import"
+    ) {
+      const lockStartedAt = Date.now();
+      await lockUserTimerState(client, session);
+      lockWaitMilliseconds = Date.now() - lockStartedAt;
+    }
+
     const eventResult = await client.query<{ id: string }>(
       `insert into activity_events (
           workspace_id,
@@ -589,6 +636,7 @@ export async function processActivityEvent(
       );
       timeEntryId = updatedEntry?.id;
     } else if (candidate.action === "stop_timer") {
+      const scopedStopStartedAt = Date.now();
       const stopResult = stopScope.mode === "entry"
         ? await client.query<{ id: string }>(
             `update time_entries
@@ -616,9 +664,11 @@ export async function processActivityEvent(
              returning te.id`,
             [parsed.occurredAt, parsed.workspaceId, parsed.userId]
           );
-      stopOutcome = (stopResult.rowCount ?? stopResult.rows.length) > 0
-        ? "stopped"
-        : "superseded";
+      if (stopScope.mode === "entry") {
+        lockWaitMilliseconds = Date.now() - scopedStopStartedAt;
+      }
+      timeEntryId = stopResult.rows[0]?.id;
+      stopOutcome = timeEntryId ? "stopped" : "superseded";
     } else if (candidate.action === "start_timer") {
       const startedAt = suggestedStartedAtForEvent(parsed);
       if (candidate.shouldClosePrevious) {
@@ -807,6 +857,17 @@ export async function processActivityEvent(
     }
 
     await client.query("commit");
+    if (candidate.action === "start_timer" || candidate.action === "stop_timer") {
+      recordTimerMutationTiming({
+        eventType: parsed.type,
+        stopScope: stopScope.mode,
+        lockWaitMilliseconds,
+        transactionMilliseconds: Date.now() - transactionStartedAt,
+        outcome: candidate.action === "start_timer"
+          ? "started"
+          : stopOutcome === "stopped" ? "stopped" : "superseded"
+      });
+    }
     return {
       eventId,
       candidate,
@@ -816,10 +877,73 @@ export async function processActivityEvent(
     };
   } catch (error) {
     await client.query("rollback");
+    if (stopScope.mode === "entry" && (isLockNotAvailableError(error) || isStatementTimeoutError(error))) {
+      recordTimerMutationTiming({
+        eventType: parsed.type,
+        stopScope: stopScope.mode,
+        lockWaitMilliseconds,
+        transactionMilliseconds: Date.now() - transactionStartedAt,
+        outcome: "timer_busy"
+      });
+      throw new TimerMutationBusyError();
+    }
+    if (parsed.clientEventId && isUniqueViolationError(error)) {
+      const duplicate = await findExistingActivityEventReceipt(parsed.clientEventId, session);
+      if (duplicate) {
+        recordTimerMutationTiming({
+          eventType: parsed.type,
+          stopScope: stopScope.mode,
+          lockWaitMilliseconds,
+          transactionMilliseconds: Date.now() - transactionStartedAt,
+          outcome: "duplicate"
+        });
+        return {
+          eventId: duplicate.eventId,
+          candidate,
+          duplicate: true,
+          ...(duplicate.timeEntryId ? { timeEntryId: duplicate.timeEntryId } : {})
+        };
+      }
+    }
     throw eventSyncReadinessError(error, parsed.type) ?? error;
   } finally {
     client.release();
   }
+}
+
+async function findExistingActivityEventReceipt(
+  clientEventId: string,
+  session: RequestSession
+) {
+  const result = await query<{ eventId: string; timeEntryId: string | null }>(
+    `select ae.id as "eventId",
+            te.id as "timeEntryId"
+     from activity_events ae
+     left join lateral (
+       select id
+       from time_entries
+       where workspace_id = ae.workspace_id
+         and user_id = ae.user_id
+         and created_from_event_id = ae.id
+       limit 1
+     ) te on true
+     where ae.workspace_id = $1
+       and ae.user_id = $2
+       and ae.client_event_id = $3
+     limit 1`,
+    [session.workspaceId, session.userId, clientEventId]
+  );
+  return result?.rows?.[0] ?? null;
+}
+
+function recordTimerMutationTiming(input: {
+  eventType: string;
+  stopScope: TimerStopScope["mode"];
+  lockWaitMilliseconds: number;
+  transactionMilliseconds: number;
+  outcome: "started" | "stopped" | "superseded" | "duplicate" | "timer_busy";
+}) {
+  console.info("Dayframe timer mutation", input);
 }
 
 type TimerStopScope =

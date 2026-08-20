@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { z, ZodError } from "zod";
-import { createManualEntry, processActivityEvent, splitActiveEntry, TimerReplacementWindowError } from "@/lib/event-service";
+import {
+  createManualEntry,
+  processActivityEvent,
+  splitActiveEntry,
+  TimerMutationBusyError,
+  TimerReplacementWindowError
+} from "@/lib/event-service";
 import { authErrorResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import {
@@ -93,6 +99,12 @@ export async function POST(request: Request) {
     if (response) return response;
     if (error instanceof TimerReplacementWindowError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    if (error instanceof TimerMutationBusyError) {
+      return NextResponse.json(
+        { code: error.code, error: error.message },
+        { status: error.status }
+      );
     }
     if (
       error instanceof ZodError ||

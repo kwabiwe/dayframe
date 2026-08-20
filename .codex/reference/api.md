@@ -20,6 +20,7 @@ Use this when adding or changing API routes, server actions, controllers, servic
 - Make ownership checks explicit for user-owned records.
 - Use transactions when writing `activity_events` plus derived `time_entries` or `review_items`.
 - Scope active timer updates by workspace and user.
+- Mobile explicit Stop posts to `/api/events` with its original `occurredAt`, stable `clientEventId`, `rawPayload.stopScope=entry`, and exact canonical `targetEntryId`. The client captures and revalidates the authenticated SecureStore generation/token pair immediately before dispatch; an account switch retains old-account intent without sending it under the replacement bearer. Success, duplicate, and `superseded` acknowledge the durable intent; `timer_busy` is a stable retryable `503`.
 - Location retained-evidence replay is an authenticated, private/no-store command. It accepts only device/version/rollout acknowledgement metadata, uses server time, returns coordinate-free counts, and must share ingestion's owner lock, semantic cutover, and idempotent event-first transaction.
 - A Location Review confirmation has one transaction owner. `change_place_and_confirm` may carry the existing strict `ReviewEntryEdit` payload so saved-place feedback, category, description, start, and stop either commit together or roll back together; clients must not sequence a place correction and a second confirm request.
 
@@ -36,6 +37,7 @@ When changing `/api/time-entries`, `/api/events`, session handling, or mobile sy
 - completed entry persistence
 - category assignment while running
 - queued event sync with `clientEventId` dedupe
+- direct/replayed entry-scoped Stop with the same `clientEventId`, bounded contention, stale-target safety, and account/session isolation
 - unauthorized request handling
 
 ## Review Checklist

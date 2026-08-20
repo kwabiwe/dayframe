@@ -15,12 +15,25 @@ import {
   type TimerStateFingerprint
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
-import { mobileFetch, mobileFetchWithTimeout } from "./mobile-network";
+import {
+  MobileRequestTimeoutError,
+  mobileFetch,
+  mobileFetchWithTimeout
+} from "./mobile-network";
 import {
   clearSessionToken,
   getSessionToken,
+  isAuthenticatedSessionSnapshotCurrent,
+  readAuthenticatedSessionSnapshot,
   setSessionToken
 } from "./secure-session";
+import {
+  markPendingTimerStopFailure,
+  removePendingTimerStop,
+  timerStopOwnerMatches,
+  type PendingTimerStop,
+  type TimerStopOwner
+} from "./timerStopOutbox";
 
 const QUEUE_KEY = "dayframe.offlineQueue.v1";
 const TIMER_ENTRY_ID_CORRELATIONS_KEY = "dayframe.timerEntryIdCorrelations.v1";
@@ -28,6 +41,7 @@ const DEFAULT_PLACE_RADIUS_METERS = 100;
 const DEFAULT_PLACE_PRIORITY = 5;
 const MOBILE_OPENING_REQUEST_TIMEOUT_MS = 15_000;
 const MOBILE_QUEUE_REQUEST_TIMEOUT_MS = 15_000;
+const MOBILE_TIMER_STOP_REQUEST_TIMEOUT_MS = 8_000;
 let queueMutationTail: Promise<void> = Promise.resolve();
 let timerEntryIdCorrelationMutationTail: Promise<void> = Promise.resolve();
 
@@ -231,6 +245,14 @@ export type TimerActionResult = {
   eventId?: string;
   timeEntryId?: string;
 };
+
+export type PendingTimerStopDeliveryResult =
+  | { status: "delivered"; pendingStop: PendingTimerStop }
+  | { status: "waiting_for_canonical_target"; pendingStop: PendingTimerStop }
+  | { status: "account_mismatch"; pendingStop: PendingTimerStop }
+  | { status: "session_changed"; pendingStop: PendingTimerStop }
+  | { status: "retryable_failure"; pendingStop: PendingTimerStop; error: Error }
+  | { status: "permanent_failure"; pendingStop: PendingTimerStop; error: Error };
 
 export type ReviewItemAction = "accept" | "ignore_once";
 
@@ -814,6 +836,89 @@ export async function stopTimer() {
   });
 }
 
+export async function deliverPendingTimerStop(
+  pendingStop: PendingTimerStop,
+  owner: TimerStopOwner
+): Promise<PendingTimerStopDeliveryResult> {
+  if (!timerStopOwnerMatches(pendingStop, owner)) {
+    return { status: "account_mismatch", pendingStop };
+  }
+  if (!pendingStop.targetEntryId) {
+    return { status: "waiting_for_canonical_target", pendingStop };
+  }
+
+  const sessionRead = await readAuthenticatedSessionSnapshot();
+  if (sessionRead.status === "changed") {
+    return { status: "session_changed", pendingStop };
+  }
+  if (sessionRead.status === "signed_out") {
+    throw new AuthRequiredError();
+  }
+  if (!isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot)) {
+    return { status: "session_changed", pendingStop };
+  }
+
+  try {
+    const response = await mobileFetchWithTimeout(
+      `${DAYFRAME_API_BASE}/api/events`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${sessionRead.snapshot.token}`
+        },
+        body: JSON.stringify({
+          source: "mobile_app",
+          type: "timer_stop",
+          occurredAt: pendingStop.occurredAt,
+          clientEventId: pendingStop.clientEventId,
+          rawPayload: {
+            origin: "mobile_timer_stop",
+            stopScope: "entry",
+            targetEntryId: pendingStop.targetEntryId
+          }
+        })
+      },
+      {
+        timeoutMilliseconds: MOBILE_TIMER_STOP_REQUEST_TIMEOUT_MS,
+        timeoutMessage: "Timer Stop is still pending. Dayframe will retry automatically."
+      }
+    );
+    if (response.status === 401 || response.status === 403) {
+      throw new AuthRequiredError();
+    }
+    if (response.ok) {
+      await removePendingTimerStop(pendingStop.clientEventId);
+      return { status: "delivered", pendingStop };
+    }
+
+    const message = await errorMessage(response, "Unable to sync timer Stop");
+    const failureKind = permanentStatusCodes.has(response.status) ? "permanent" : "retryable";
+    const updated = await markPendingTimerStopFailure(pendingStop.clientEventId, {
+      message,
+      failureKind,
+      statusCode: response.status
+    });
+    const failedStop = updated ?? pendingStop;
+    const error = new Error(message);
+    return failureKind === "permanent"
+      ? { status: "permanent_failure", pendingStop: failedStop, error }
+      : { status: "retryable_failure", pendingStop: failedStop, error };
+  } catch (error) {
+    if (error instanceof AuthRequiredError) throw error;
+    const failure = error instanceof Error ? error : new Error("Network request failed");
+    const updated = await markPendingTimerStopFailure(pendingStop.clientEventId, {
+      message: failure.message,
+      failureKind: "retryable"
+    });
+    return {
+      status: "retryable_failure",
+      pendingStop: updated ?? pendingStop,
+      error: failure
+    };
+  }
+}
+
 export async function deleteTimeEntry(id: string) {
   const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/time-entries/${encodeURIComponent(id)}`, {
     method: "DELETE",
@@ -1242,6 +1347,7 @@ export function isNetworkTimerError(error: unknown) {
   if (!(error instanceof Error)) return false;
   const message = error.message.toLowerCase();
   return (
+    error instanceof MobileRequestTimeoutError ||
     error.name === "TypeError" ||
     message.includes("network request failed") ||
     message.includes("failed to fetch") ||
@@ -1270,7 +1376,10 @@ function migrateQueuedEvent(item: StoredQueuedEvent, index: number): QueuedEvent
   const lastStatusCode = typeof item.lastStatusCode === "number" && Number.isFinite(item.lastStatusCode)
     ? Math.trunc(item.lastStatusCode)
     : undefined;
-  const failureKind = isQueueFailureKind(item.failureKind)
+  const unscopedLegacyTimerStop = item.type === "timer_stop" && !hasCanonicalStopTarget(item.rawPayload);
+  const failureKind = unscopedLegacyTimerStop
+    ? "permanent"
+    : isQueueFailureKind(item.failureKind)
     ? item.failureKind
     : lastStatusCode && permanentStatusCodes.has(lastStatusCode)
       ? "permanent"
@@ -1284,14 +1393,28 @@ function migrateQueuedEvent(item: StoredQueuedEvent, index: number): QueuedEvent
     rawPayload: isRecord(item.rawPayload) ? item.rawPayload : {},
     localId,
     queuedAt,
-    failedAt: validIsoString(item.failedAt),
-    failureCount,
-    lastError: typeof item.lastError === "string" && item.lastError.trim() ? item.lastError : undefined,
+    failedAt: unscopedLegacyTimerStop
+      ? validIsoString(item.failedAt) ?? queuedAt
+      : validIsoString(item.failedAt),
+    failureCount: unscopedLegacyTimerStop ? Math.max(1, failureCount ?? 0) : failureCount,
+    lastError: unscopedLegacyTimerStop
+      ? "Legacy timer Stop has no canonical target and cannot be replayed safely."
+      : typeof item.lastError === "string" && item.lastError.trim() ? item.lastError : undefined,
     lastStatusCode,
     lastAttemptedAt: validIsoString(item.lastAttemptedAt),
     nextRetryAt: validIsoString(item.nextRetryAt),
     failureKind
   };
+}
+
+function hasCanonicalStopTarget(rawPayload: unknown) {
+  if (!isRecord(rawPayload)) return false;
+  return rawPayload.stopScope === "entry" && isCanonicalEntryId(rawPayload.targetEntryId);
+}
+
+function isCanonicalEntryId(value: unknown) {
+  return typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function queuedEventFromParsedEvent(

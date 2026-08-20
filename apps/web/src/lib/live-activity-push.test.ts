@@ -116,7 +116,11 @@ describe("Live Activity durable remote sync", () => {
     });
 
     const write = database.writes[0];
+    expect(write.sql).toContain("with active_target as");
     expect(write.sql).toContain("invalidated_previous_tokens");
+    expect(write.sql).toContain("previous_token.active_entry_id = active_target.id");
+    expect(write.sql).toContain("conflicting_token.workspace_id <> $1");
+    expect(write.sql).toContain("conflicting_token.user_id <> $2");
     expect(write.sql).toContain(
       "where live_activity_push_tokens.workspace_id = excluded.workspace_id"
     );
@@ -128,6 +132,29 @@ describe("Live Activity durable remote sync", () => {
       session.userId,
       "a".repeat(64),
       "activity-1",
+      "80000000-0000-4000-8000-000000000001",
+      "production"
+    ]);
+  });
+
+  it("invalidates an older activity registration for the same canonical timer", async () => {
+    await registerLiveActivity(session, {
+      token: "b".repeat(64),
+      activityId: "activity-canonical-b",
+      activeEntryId: "80000000-0000-4000-8000-000000000001",
+      environment: "production"
+    });
+
+    const write = database.writes[0];
+    expect(write.sql).toContain("workspace_id = $1");
+    expect(write.sql).toContain("user_id = $2");
+    expect(write.sql).toContain("previous_token.active_entry_id = active_target.id");
+    expect(write.sql).toContain("previous_token.activity_id <> $4");
+    expect(write.params).toEqual([
+      session.workspaceId,
+      session.userId,
+      "b".repeat(64),
+      "activity-canonical-b",
       "80000000-0000-4000-8000-000000000001",
       "production"
     ]);
@@ -147,7 +174,7 @@ describe("Live Activity durable remote sync", () => {
     expect(write).toBeUndefined();
     expect(database.query).toHaveBeenCalledWith(
       expect.stringContaining(
-        "where live_activity_push_tokens.workspace_id = excluded.workspace_id"
+        "from live_activity_push_tokens conflicting_token"
       ),
       expect.arrayContaining([session.workspaceId, session.userId])
     );

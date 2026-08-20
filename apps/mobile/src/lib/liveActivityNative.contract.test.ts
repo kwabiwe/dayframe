@@ -196,6 +196,9 @@ describe("native Live Activity presentation contract", () => {
     expect(controller).toContain("static func immediatePushToken(activityId: String, entryId: String)");
     expect(controller).toContain("static func enableStop(activityId: String, entryId: String) async -> Bool");
     expect(controller).toContain("static func stop(activityIds: [String]) async -> Bool");
+    expect(controller).toContain("static func cleanupActivities(activityIds: [String]) async -> Bool");
+    expect(controller).not.toContain("scheduleEndActivities");
+    expect(controller).toContain("await existing.update(ActivityContent(state: state, staleDate: nil))");
     expect(controller).not.toContain("static func stop() async -> Bool");
     const nativeStart = controller.slice(
       controller.indexOf("static func start("),
@@ -204,6 +207,9 @@ describe("native Live Activity presentation contract", () => {
     expect(nativeStart).not.toContain("scheduleEndActivities");
     expect(nativeStart).not.toContain("cleanupActivities");
     expect(module).toContain("DayframeLiveActivityController.snapshots()");
+    expect(module).toContain(
+      "resolve(await DayframeLiveActivityController.cleanupActivities(activityIds: activityIds))"
+    );
     expect(bridge).toContain("RCT_EXTERN_METHOD(activitySnapshot:");
     expect(bridge).toContain("RCT_EXTERN_METHOD(cleanupActivities:");
     expect(bridge).toContain("RCT_EXTERN_METHOD(enableStop:");
