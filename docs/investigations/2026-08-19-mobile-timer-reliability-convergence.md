@@ -129,3 +129,10 @@ to tune from staging evidence, not a change to product scope.
   paired iPad was reachable, which is not valid evidence for this iPhone-only
   feature. These checks remain required before merge; production and TestFlight
   evidence must not be inferred from this branch.
+
+## Merge and release closure
+
+- PR #182 merged to `main` as `8d88765d89f053d8a4b3af2dc57b4cc646136667` after the exact signed Staging head was installed and owner-tested on the attached iPhone 11.
+- The gated two-connection local PostgreSQL advisory-lock contention test was rerun after merge with `DAYFRAME_RUN_DB_INTEGRATION=1` and passed.
+- The exact merge was archived with the production API and released as internal TestFlight `0.1.0 (97)`, delivery/build ID `c849ea28-424d-4222-8b57-14bcf25c310a`. App Store Connect reports `VALID`, export compliance false, en-GB notes set, and `IN_BETA_TESTING` through `Internal Health Debug`; external testing remains disabled.
+- Trello #147 and #148 return to Watch after release. Continued real-device offline, force-quit, locked/background, account-switch, and rapid-replacement observation remains appropriate; it is not evidence of a known open implementation blocker.
