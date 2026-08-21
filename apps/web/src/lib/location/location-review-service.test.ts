@@ -8,7 +8,8 @@ import type { RequestSession } from "../session";
 
 vi.mock("../db", () => ({
   pool: { connect: vi.fn() },
-  isLockNotAvailableError: vi.fn(() => false)
+  isLockNotAvailableError: vi.fn(() => false),
+  isStatementTimeoutError: vi.fn(() => false)
 }));
 vi.mock("../tag-service", () => ({
   syncTimeEntryTags: vi.fn()
@@ -104,6 +105,9 @@ describe("location review confirmation semantics", () => {
             }]
           };
         }
+        if (statement.includes("from stay_segments") && statement.includes("for update nowait")) {
+          return { rows: [{ id: "segment-1" }] };
+        }
         if (statement.includes("insert into time_entries")) {
           return { rows: [{ id: "overlapping-location-entry" }] };
         }
@@ -157,6 +161,9 @@ describe("location review confirmation semantics", () => {
             }]
           };
         }
+        if (statement.includes("from stay_segments") && statement.includes("for update nowait")) {
+          return { rows: [{ id: "segment-1" }] };
+        }
         if (statement.includes("select 1 from categories")) return { rows: [{ ok: true }] };
         if (statement.includes("select 1 from places")) return { rows: [{ ok: true }] };
         if (statement.includes("insert into time_entries")) return { rows: [{ id: "entry-1" }] };
@@ -203,6 +210,9 @@ describe("location review confirmation semantics", () => {
       query: vi.fn(async (statement: string) => {
         if (statement.includes("for update of ri, ae nowait")) {
           return { rows: [lockedStay()] };
+        }
+        if (statement.includes("from stay_segments") && statement.includes("for update nowait")) {
+          return { rows: [{ id: "segment-1" }] };
         }
         if (statement.includes("insert into time_entries")) return { rows: [{ id: "entry-poi" }] };
         return { rows: [] };
@@ -270,6 +280,9 @@ describe("location review confirmation semantics", () => {
       query: vi.fn(async (statement: string) => {
         if (statement.includes("for update of ri, ae nowait")) {
           return { rows: [{ ...lockedStay(), segmentKind: "commute" }] };
+        }
+        if (statement.includes("from commute_segments") && statement.includes("for update nowait")) {
+          return { rows: [{ id: "segment-1" }] };
         }
         return { rows: [] };
       })

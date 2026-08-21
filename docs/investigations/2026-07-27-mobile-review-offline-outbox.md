@@ -444,3 +444,14 @@ create a TestFlight build.
   never overwrites another device's terminal resolution.
 - KB must complete the full physical-iPhone Airplane Mode, failure, and UX
   matrices before approval.
+
+## 2026-08-20 cache-first follow-up
+
+The branch implementation recorded in
+`2026-08-20-mobile-review-offline-first.md` deliberately supersedes two older
+presentation/privacy statements in this historical note. Review mutations now
+hide after the local SQLite commit instead of waiting for acknowledgement, and
+the same account-scoped database intentionally holds a bounded validated
+Location Evidence presentation cache. The terminal-action boundary remains the
+same: only Confirm, Ignore once, and complete Edit-and-confirm are durable;
+complex place/split/merge/record actions remain direct-only.

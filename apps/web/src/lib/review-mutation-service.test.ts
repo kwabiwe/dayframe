@@ -2,12 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   connect: vi.fn(),
+  poolQuery: vi.fn(),
   resolveLocation: vi.fn()
 }));
 
 vi.mock("./db", () => ({
-  pool: { connect: mocks.connect },
+  pool: { connect: mocks.connect, query: mocks.poolQuery },
   isLockNotAvailableError: vi.fn(() => false),
+  isStatementTimeoutError: vi.fn(() => false),
   query: vi.fn()
 }));
 
@@ -38,6 +40,7 @@ const envelope = {
 describe("idempotent Review mutations", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mocks.poolQuery.mockResolvedValue({ rows: [] });
   });
 
   it("returns the stored result after a lost response without applying twice", async () => {
@@ -47,14 +50,14 @@ describe("idempotent Review mutations", () => {
       status: "accepted",
       entryId: "entry-1"
     };
-    const client = clientForReceipt({
+    const receipt = {
       reviewItemId: "30000000-0000-4000-8000-000000000001",
       actionKey: "confirm",
       requestHash:
         "129dbf398adfb18a4046d2368a27529739dd522d07b3b2c65bd4dee800b8aeee",
       resultJson: stored
-    });
-    mocks.connect.mockResolvedValue(client);
+    };
+    mocks.poolQuery.mockResolvedValue({ rows: [receipt] });
 
     await expect(
       resolveIdempotentReviewMutation(
@@ -64,17 +67,17 @@ describe("idempotent Review mutations", () => {
       )
     ).resolves.toEqual(stored);
     expect(mocks.resolveLocation).not.toHaveBeenCalled();
-    expect(client.query).toHaveBeenCalledWith("commit");
+    expect(mocks.connect).not.toHaveBeenCalled();
   });
 
   it("rejects reuse of one mutation ID with different data", async () => {
-    const client = clientForReceipt({
+    const receipt = {
       reviewItemId: "30000000-0000-4000-8000-000000000001",
       actionKey: "ignore_once_location",
       requestHash: "0".repeat(64),
       resultJson: { ok: true }
-    });
-    mocks.connect.mockResolvedValue(client);
+    };
+    mocks.poolQuery.mockResolvedValue({ rows: [receipt] });
 
     await expect(
       resolveIdempotentReviewMutation(
@@ -86,7 +89,7 @@ describe("idempotent Review mutations", () => {
       code: "mutation_id_conflict",
       status: 409
     });
-    expect(client.query).toHaveBeenCalledWith("rollback");
+    expect(mocks.connect).not.toHaveBeenCalled();
   });
 
   it("stores a new location result and receipt in the same transaction", async () => {
@@ -122,6 +125,36 @@ describe("idempotent Review mutations", () => {
     );
     expect(receiptIndex).toBeGreaterThan(-1);
     expect(commitIndex).toBeGreaterThan(receiptIndex);
+  });
+
+  it("returns typed retryable contention without waiting for the advisory lock", async () => {
+    const query = vi.fn(async (statement: string) => {
+      if (statement.includes("pg_try_advisory_xact_lock")) {
+        return { rows: [{ acquired: false }] };
+      }
+      return { rows: [] };
+    });
+    const client = {
+      query,
+      release: vi.fn()
+    } as unknown as import("pg").PoolClient;
+    mocks.connect.mockResolvedValue(client);
+
+    await expect(resolveIdempotentReviewMutation(
+      "30000000-0000-4000-8000-000000000001",
+      envelope,
+      session
+    )).rejects.toMatchObject({
+      code: "review_item_locked",
+      status: 409
+    });
+    expect(query).toHaveBeenCalledWith("rollback");
+    expect(query.mock.calls.some(([statement]) =>
+      String(statement).includes("set local statement_timeout = '8000ms'")
+    )).toBe(true);
+    expect(query.mock.calls.some(([statement]) =>
+      String(statement).includes("set local lock_timeout = '1500ms'")
+    )).toBe(true);
   });
 
   it("scopes receipt lookup by workspace and user", async () => {
@@ -207,7 +240,7 @@ describe("idempotent Review mutations", () => {
     const statements = client.query.mock.calls.map(([statement]) => String(statement));
     expect(statements.some((statement) => statement.includes("insert into time_entries"))).toBe(false);
     expect(statements.some((statement) => statement.includes("insert into review_mutation_receipts"))).toBe(true);
-    const lockIndex = statements.findIndex((statement) => statement.includes("pg_advisory_xact_lock"));
+    const lockIndex = statements.findIndex((statement) => statement.includes("pg_try_advisory_xact_lock"));
     const matchIndex = statements.findIndex((statement) => statement.includes("matching_health_sleep_session"));
     const updateIndex = statements.findIndex((statement) => statement.startsWith("update time_entries"));
     expect(lockIndex).toBeGreaterThan(-1);
@@ -224,6 +257,9 @@ function clientForReceipt(receipt: {
 } | null) {
   const query = vi.fn(async (statement: string, values?: unknown[]) => {
     void values;
+    if (statement.includes("pg_try_advisory_xact_lock")) {
+      return { rows: [{ acquired: true }] };
+    }
     if (statement.includes("from review_mutation_receipts")) {
       return { rows: receipt ? [receipt] : [] };
     }
@@ -246,6 +282,9 @@ function clientForNewLocation() {
 
 function clientForOverlappingGenericEdit(reviewItemId: string) {
   const query = vi.fn(async (statement: string) => {
+    if (statement.includes("pg_try_advisory_xact_lock")) {
+      return { rows: [{ acquired: true }] };
+    }
     if (statement.includes("from review_mutation_receipts")) return { rows: [] };
     if (statement.includes("for update of ri nowait")) {
       return {
@@ -283,6 +322,9 @@ function clientForOverlappingGenericEdit(reviewItemId: string) {
 
 function clientForExtendedHealthSleep(reviewItemId: string) {
   const query = vi.fn(async (statement: string, values?: unknown[]) => {
+    if (statement.includes("pg_try_advisory_xact_lock")) {
+      return { rows: [{ acquired: true }] };
+    }
     if (statement.includes("from review_mutation_receipts")) return { rows: [] };
     if (statement.includes("select location_segment_id")) {
       return { rows: [{ locationSegmentId: null }] };

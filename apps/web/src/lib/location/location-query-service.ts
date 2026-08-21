@@ -72,6 +72,17 @@ export class LocationEvidenceNotFoundError extends Error {
   status = 404;
 }
 
+type LocationEvidenceTimings = {
+  reviewLookupMs?: number;
+  acceptedEvidenceMs?: number;
+  rejectedEvidenceMs?: number;
+  nearbyPlacesMs?: number;
+  assemblyMs?: number;
+  totalMs?: number;
+};
+
+const SLOW_LOCATION_EVIDENCE_REQUEST_MS = 750;
+
 const iso = (value: Date | string | null) => value == null ? null : new Date(value).toISOString();
 const point = (longitude: number | null, latitude: number | null) =>
   longitude == null || latitude == null
@@ -82,6 +93,30 @@ export async function getLocationReviewEvidence(
   reviewItemId: string,
   session: RequestSession
 ): Promise<LocationReviewEvidenceDto> {
+  const startedAt = Date.now();
+  const timings: LocationEvidenceTimings = {};
+  try {
+    const result = await buildLocationReviewEvidence(
+      reviewItemId,
+      session,
+      timings
+    );
+    timings.totalMs = Date.now() - startedAt;
+    logLocationEvidenceTiming(timings, result, null);
+    return result;
+  } catch (error) {
+    timings.totalMs = Date.now() - startedAt;
+    logLocationEvidenceTiming(timings, null, error);
+    throw error;
+  }
+}
+
+async function buildLocationReviewEvidence(
+  reviewItemId: string,
+  session: RequestSession,
+  timings: LocationEvidenceTimings
+): Promise<LocationReviewEvidenceDto> {
+  const reviewLookupStartedAt = Date.now();
   const reviewResult = await query<ReviewSegmentRow>(
     `select ri.id as "reviewItemId",
             ri.event_id as "eventId",
@@ -130,11 +165,14 @@ export async function getLocationReviewEvidence(
      limit 1`,
     [reviewItemId, session.workspaceId, session.userId]
   );
+  timings.reviewLookupMs = Date.now() - reviewLookupStartedAt;
   const review = reviewResult.rows[0];
   if (!review) throw new LocationEvidenceNotFoundError("Location review evidence was not found.");
   const kind = review.stayId ? "stay" as const : "commute" as const;
-  const evidenceResult = await query<EvidenceMapRow>(
-    `select le.id,
+  const centre = point(review.centreLongitude, review.centreLatitude);
+  const [evidenceResult, rejectedResult, nearbyPlaces] = await Promise.all([
+    timedPhase(timings, "acceptedEvidenceMs", () => query<EvidenceMapRow>(
+      `select le.id,
             le.client_evidence_id as "clientEvidenceId",
             le.evidence_type as kind,
             le.occurred_at as "occurredAt",
@@ -153,27 +191,38 @@ export async function getLocationReviewEvidence(
        and (($3::uuid is not null and lse.stay_segment_id = $3)
          or ($4::uuid is not null and lse.commute_segment_id = $4))
      order by le.occurred_at, lse.sequence_index, le.client_evidence_id`,
-    [session.workspaceId, session.userId, review.stayId, review.commuteId]
-  );
+      [session.workspaceId, session.userId, review.stayId, review.commuteId]
+    )),
+    review.deviceId
+      ? timedPhase(timings, "rejectedEvidenceMs", () => query<RejectedEvidenceRow>(
+          `select client_evidence_id as "clientEvidenceId", evidence_type as kind,
+                  occurred_at as "occurredAt",
+                  case when coordinate is null then null else ST_X(coordinate::geometry) end as longitude,
+                  case when coordinate is null then null else ST_Y(coordinate::geometry) end as latitude,
+                  coalesce(rejection_reason, 'rejected') as "rejectionReason",
+                  expires_at as "expiresAt"
+           from location_evidence
+           where workspace_id = $1 and user_id = $2 and device_id = $3 and accepted = false
+             and occurred_at >= $4::timestamptz - interval '15 minutes'
+             and occurred_at <= coalesce($5::timestamptz, $4::timestamptz) + interval '15 minutes'
+             and expires_at > now()
+           order by occurred_at, client_evidence_id
+           limit 80`,
+          [session.workspaceId, session.userId, review.deviceId, review.startedAt, review.stoppedAt]
+        ))
+      : Promise.resolve({ rows: [] as RejectedEvidenceRow[] }),
+    centre
+      ? timedPhase(timings, "nearbyPlacesMs", () =>
+          nearbySavedPlaces(
+            session,
+            centre.coordinates[1],
+            centre.coordinates[0]
+          )
+        )
+      : Promise.resolve([])
+  ]);
   const retained = downsampleEvidence(evidenceResult.rows, 160);
-  const rejectedResult = review.deviceId
-    ? await query<RejectedEvidenceRow>(
-        `select client_evidence_id as "clientEvidenceId", evidence_type as kind,
-                occurred_at as "occurredAt",
-                case when coordinate is null then null else ST_X(coordinate::geometry) end as longitude,
-                case when coordinate is null then null else ST_Y(coordinate::geometry) end as latitude,
-                coalesce(rejection_reason, 'rejected') as "rejectionReason",
-                expires_at as "expiresAt"
-         from location_evidence
-         where workspace_id = $1 and user_id = $2 and device_id = $3 and accepted = false
-           and occurred_at >= $4::timestamptz - interval '15 minutes'
-           and occurred_at <= coalesce($5::timestamptz, $4::timestamptz) + interval '15 minutes'
-           and expires_at > now()
-         order by occurred_at, client_evidence_id
-         limit 80`,
-        [session.workspaceId, session.userId, review.deviceId, review.startedAt, review.stoppedAt]
-      )
-    : { rows: [] as RejectedEvidenceRow[] };
+  const assemblyStartedAt = Date.now();
   const coordinateRows = retained.filter(
     (row): row is EvidenceMapRow & { longitude: number; latitude: number } =>
       row.longitude != null && row.latitude != null
@@ -182,10 +231,6 @@ export async function getLocationReviewEvidence(
     ["visit", "geofence_enter", "geofence_exit", "significant_change"].includes(row.kind)
   );
   const gaps = evidenceGaps(coordinateRows);
-  const centre = point(review.centreLongitude, review.centreLatitude);
-  const nearbyPlaces = centre
-    ? await nearbySavedPlaces(session, centre.coordinates[1], centre.coordinates[0])
-    : [];
   const routeCoordinates = kind === "commute"
     ? coordinateRows.map((row) => [row.longitude, row.latitude] as [number, number])
     : [];
@@ -289,7 +334,44 @@ export async function getLocationReviewEvidence(
       review
     )
   };
-  return LocationReviewEvidenceDtoSchema.parse(dto);
+  const parsed = LocationReviewEvidenceDtoSchema.parse(dto);
+  timings.assemblyMs = Date.now() - assemblyStartedAt;
+  return parsed;
+}
+
+async function timedPhase<K extends keyof LocationEvidenceTimings, T>(
+  timings: LocationEvidenceTimings,
+  key: K,
+  operation: () => Promise<T>
+) {
+  const startedAt = Date.now();
+  try {
+    return await operation();
+  } finally {
+    timings[key] = Date.now() - startedAt;
+  }
+}
+
+function logLocationEvidenceTiming(
+  timings: LocationEvidenceTimings,
+  evidence: LocationReviewEvidenceDto | null,
+  error: unknown
+) {
+  if ((timings.totalMs ?? 0) < SLOW_LOCATION_EVIDENCE_REQUEST_MS) {
+    return;
+  }
+  console.warn("Dayframe Location Evidence request timing", {
+    reviewLookupMs: timings.reviewLookupMs ?? null,
+    acceptedEvidenceMs: timings.acceptedEvidenceMs ?? null,
+    rejectedEvidenceMs: timings.rejectedEvidenceMs ?? null,
+    nearbyPlacesMs: timings.nearbyPlacesMs ?? null,
+    assemblyMs: timings.assemblyMs ?? null,
+    totalMs: timings.totalMs ?? null,
+    acceptedEvidenceCount: evidence?.segment.evidenceCount ?? null,
+    rejectedEvidenceCount: evidence?.segment.rejectedEvidenceCount ?? null,
+    nearbyPlacesQueried: timings.nearbyPlacesMs != null,
+    errorClass: error instanceof Error ? error.name : error ? "unknown" : null
+  });
 }
 
 function downsampleEvidence(rows: EvidenceMapRow[], limit: number) {

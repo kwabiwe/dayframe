@@ -20,6 +20,18 @@ function diagnostics(
     nextRetryAt: null,
     lastError: null,
     lastCachedAt: null,
+    reviewCacheHitCount: 0,
+    reviewCacheMissCount: 0,
+    lastReviewCacheAgeMs: null,
+    evidenceCacheItemCount: 0,
+    evidenceCacheBytes: 0,
+    evidenceCacheHitCount: 0,
+    evidenceCacheMissCount: 0,
+    lastEvidenceCacheAgeMs: null,
+    lastEvidencePayloadBytes: null,
+    lastLocalMutationAction: null,
+    lastLocalMutationCommitDurationMs: null,
+    lastLocalMutationCommittedAt: null,
     ...overrides
   };
 }

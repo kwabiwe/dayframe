@@ -125,10 +125,12 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Offline Review decisions use their dedicated account-scoped SQLite owner, not
   the activity-event queue or location-evidence database. With Review data
   already downloaded, Confirm, Dismiss, and Edit-and-confirm must commit the
-  request locally, keep the card visibly disabled as `Waiting to sync`, survive
+  request locally, remove the card through the existing Review list motion owner, survive
   navigation, background/foreground, force-quit, and restart, then synchronise
-  exactly once when Dayframe is active and authenticated again. The card exits
-  only after server acknowledgement.
+  exactly once when Dayframe is active and authenticated again. Timeout, retry,
+  authentication-required, and stale in-flight recovery keep it hidden; only a
+  permanent conflict whose canonical item remains open restores the exact
+  sanitised snapshot at its surviving list anchors.
 - Cached Review data must never cross accounts or reinsert a pending local
   mutation as actionable. Session expiry preserves the same account's mutations as
   sign-in-required; confirmed logout warns with the exact unsynchronised count
@@ -139,9 +141,35 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
   cross-device resolution conflicts stop retrying, surface safe Settings
   diagnostics, and restore a card only when canonical server state remains open.
 - Review POSTs abort after 15 seconds into durable retry-wait. Pending/in-flight
-  changes show saving copy without `Retry now`; only retry-wait offers that
+  changes remain locally hidden without `Retry now`; only retry-wait offers that
   action. Authentication-required and permanent-attention states keep their
   dedicated guidance instead of presenting a transport retry.
+- Review opens cache-first without waiting for bootstrap or Health reprocess.
+  Its list and Location Evidence detail use the same right-aligned page-title
+  header treatment as Settings (`Review` and `Location evidence` respectively),
+  rather than repeating the Dayframe brand lock-up.
+  Health reprocess has a separate owner and may disable only Health items; Location
+  cards and evidence navigation remain interactive. A normal revalidation is
+  quiet, a failed refresh retains cached content with Review-specific stale copy,
+  and pull-to-refresh is the only visible refresh spinner.
+- Detailed Location Evidence caches the validated presentation DTO only for the
+  active account. Enforce the earlier of server expiry or seven days, 25 rows,
+  5 MiB measured as UTF-8, LRU pruning, canonical-open pruning, malformed-row
+  deletion, request deduplication, serial foreground prefetch, cancellation,
+  current-request-only cache writes after cancel/re-entry (including a
+  deduplicated consumer, a cancelled fetch that resolves late, cancellation
+  while SQLite persistence is held open, post-write identity validation, and
+  exact stale-row cleanup that preserves a completed replacement), and
+  logout/account-switch cascade. Cached text, times, category, route coordinates,
+  and actions remain usable when Apple map tiles are unavailable; never expose a
+  raw native/network exception. A warm cache hit that resolves within the 300 ms
+  target must render without even a transient full-screen hydration panel; cold
+  or unusually slow loading feedback appears only after that grace period.
+- Location Evidence GET has a 10-second mobile ceiling. Direct-only place/split/
+  merge/record actions have a 15-second ceiling and retain the exact editor draft
+  on failure. The three durable actions (`confirm`, `ignore_once_location`, and a
+  complete `edit_and_confirm`) return after the SQLite commit without awaiting
+  network sync.
 - Run `npm run validate:review-sync-sqlite` and
   `DATABASE_URL=..._test npm run validate:review-mutation-db` for Review outbox
   changes. The Postgres URL must name a disposable local `_test` database.
@@ -150,8 +178,9 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
   foreground/background, force-quit/reopen, session expiry, same-account login,
   web conflicts, category removal, overlap, reconnect, and explicit logout.
   Record each result; tests and screenshots are not device durability evidence.
-- Save/change place, split, merge, record-once, and detailed Location Evidence
-  remain connectivity-dependent. iOS does not guarantee a drain while
+- Save/change place, split, merge, record-once, and one-time POI actions remain
+  connectivity-dependent. Detailed Location Evidence is cache-first but does not
+  cache Apple map tiles. iOS does not guarantee a drain while
   force-quit; the contract is durable now and automatic retry when active again.
 - Bootstrap data remains backward compatible for web and mobile consumers.
 - No duplicate React keys, hydration errors, or framework runtime overlays appear during normal use.

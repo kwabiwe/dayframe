@@ -10,6 +10,16 @@ export const REVIEW_COPY = {
   emptyState: "No detected visits or suggested time entries need review."
 } as const;
 
+export const LOCATION_EVIDENCE_LOADING_FEEDBACK_DELAY_MS = 300;
+
+export function scheduleLocationEvidenceLoadingFeedback(onShow: () => void) {
+  const timeout = setTimeout(
+    onShow,
+    LOCATION_EVIDENCE_LOADING_FEEDBACK_DELAY_MS
+  );
+  return () => clearTimeout(timeout);
+}
+
 type MobileCategory = MobileBootstrap["categories"][number];
 
 export type ReviewMenuAction = "edit" | "dismiss";

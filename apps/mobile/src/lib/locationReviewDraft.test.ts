@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   buildLocationReviewEdit,
   buildLocationReviewResolutionAction,
+  durableReviewMutationFromLocationAction,
   formatLocationReviewEditableTime,
   initialLocationReviewDescription,
   keyboardRevealScrollOffset,
   locationActivityGlyphName,
+  locationReviewActionRequiresConnection,
   parseLocationReviewWindow
 } from "./locationReviewDraft";
 
@@ -175,5 +177,32 @@ describe("Location Review editor draft", () => {
       description: "",
       segmentKind: "commute"
     })).toBe("commute");
+  });
+
+  it("adapts only the three durable location actions to the Review outbox", () => {
+    expect(durableReviewMutationFromLocationAction({ action: "confirm" })).toEqual({
+      action: "confirm"
+    });
+    expect(durableReviewMutationFromLocationAction({ action: "ignore_once_location" })).toEqual({
+      action: "ignore_once_location"
+    });
+    expect(durableReviewMutationFromLocationAction({
+      action: "edit_and_confirm",
+      edit: {
+        description: "Train home",
+        startedAt: baselineStartedAt,
+        stoppedAt: baselineStoppedAt
+      }
+    })).toMatchObject({ action: "edit_and_confirm" });
+
+    expect(durableReviewMutationFromLocationAction({
+      action: "change_place_and_confirm",
+      placeId: "20000000-0000-4000-8000-000000000002",
+      learnedPlaceId: null
+    })).toBeNull();
+    expect(locationReviewActionRequiresConnection({
+      action: "edit_and_confirm",
+      edit: { description: "Missing an explicit time window" }
+    })).toBe(true);
   });
 });
