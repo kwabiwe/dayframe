@@ -1,8 +1,10 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
 import { useMemo } from "react";
-import { StatusBar } from "react-native";
+import { StatusBar, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { ConnectivityBanner } from "@/components/ConnectivityBanner";
+import { ConnectivityProvider } from "@/lib/connectivity";
 import { MobileThemeProvider, useMobileTheme } from "@/lib/mobileTheme";
 import { MOBILE_MOTION, useReduceMotionPreference } from "@/lib/motion";
 import { createNavigationColors } from "@/lib/navigationTheme";
@@ -12,10 +14,21 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <MobileThemeProvider>
-          <ThemedStack />
+          <ConnectivityProvider>
+            <ConnectivityAppShell />
+          </ConnectivityProvider>
         </MobileThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
+  );
+}
+
+function ConnectivityAppShell() {
+  return (
+    <View style={{ flex: 1 }}>
+      <ThemedStack />
+      <ConnectivityBanner />
+    </View>
   );
 }
 

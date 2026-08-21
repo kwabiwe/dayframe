@@ -270,6 +270,69 @@ Native Calendar long-press creation additionally requires:
 - On a physical staging iPhone, record PASS/FAIL/NOT RUN for recognition-only preview, no pre-release sheet, no-move release, multi-slot drag/grab-offset stability, activation and per-slot haptics without spam, edge autoscroll and day-boundary clamps, release-only single sheet/event, cancellation/interruption/stale-state cleanup, and no stuck gesture lock. Also cover every zoom/scroll position; entry/44-point/gap/overlap-lane/hour-axis initial rejection; post-activation overlap acceptance; short tap; vertical scroll; horizontal swipe; pinch; pull-to-refresh; movement; second finger; Add defaults/overlap warning; Cancel/failure/success; Light/Dark/System; Dynamic Type; Reduce Motion/Transparency; VoiceOver alternative; and creation while one active timer and Live Activity remain unchanged.
 - Verify the saved entry through stable staging web, edit/delete cross-surface, refresh iOS, and prove one active timer plus one completed entry. Use the exact Ready PR Preview and an EAS `preview` internal build targeting `https://dayframe-staging.vercel.app`; never substitute production/TestFlight or infer physical gesture quality from source, tests, simulator, or still images.
 
+## Mobile Connectivity And Reconnect
+
+Required whenever the global reachability owner, HTTP evidence boundary, reconnect ordering, root overlay, or connectivity-aware Review copy changes:
+
+- Run the connectivity state/monitor/recovery and mobile-network tests, the complete mobile suite and typecheck, `npx expo install --check`, `npx pod-install`, Review and Location SQLite validators, and a clean unsigned iOS Simulator build with fresh Derived Data. Review both JavaScript lockfile and `Podfile.lock` changes. Do not use Expo Go as native NetInfo evidence.
+- Re-run timer Stop/outbox, Live Activity, general queue, Review cache/outbox, Location Evidence cache, Location Intelligence, HealthKit, account/session, native tab, sheet/keyboard, navigation, motion, theme and accessibility regression coverage. Reachability must never replace a durable owner or disable an offline-capable action.
+- Hands-on validation uses the exact Ready PR Vercel Preview, manually promoted `dayframe-staging.vercel.app` alias, staging Supabase, and a signed EAS `preview` build. Never use production credentials/data. Record every item below individually as `PASS`, `FAIL`, or `NOT RUN`; Simulator/unit results cannot establish physical network behaviour.
+
+Physical-iPhone matrix:
+
+1. Cold launch online: no grey flash and no initial green notice.
+2. Cold launch in Airplane Mode: grey notice appears; Login or cached Dashboard remains usable where supported.
+3. Online to Airplane Mode: grey notice appears within target and blocks no touch.
+4. Airplane Mode to online: one green notice appears and leaves after approximately 2.5 seconds.
+5. Reconnect then immediately disconnect: grey supersedes green and no stale timer hides it.
+6. Wi-Fi to cellular and cellular to Wi-Fi: no false offline flash.
+7. Weak/slow timeout while NetInfo stays online: no incorrect offline notice.
+8. API `5xx`: no incorrect offline notice.
+9. Background offline, reconnect while backgrounded, then foreground: current state refreshes and exactly one recovery occurs.
+10. Repeated foreground/background: no duplicate listener, notice, or recovery.
+11. Signed-out/Login route.
+12. Opening Dayframe state.
+13. Today route.
+14. Calendar route.
+15. Reports route.
+16. Review route.
+17. Location Evidence detail.
+18. Settings route.
+19. Places and place editor.
+20. Interactive swipe-back.
+21. Active timer edit sheet.
+22. Completed-entry and Add-time sheets.
+23. Overflow menu.
+24. Date picker.
+25. Keyboard shown and hidden.
+26. Native tab bar expanded and minimised.
+27. General queued activity event drains on reconnect without duplication.
+28. Canonical pending timer Stop delivers exactly once before ordinary backlog.
+29. Stop awaiting optimistic-start correlation receives its canonical ID and targets only that timer.
+30. Offline Review Confirm, Edit-and-confirm and Dismiss remain hidden/durable and produce one receipt/entry after reconnect.
+31. Location Evidence upload outbox resumes without duplicate evidence or segment.
+32. Cached Review open during reconnect refreshes silently without spinner/card flash.
+33. Cached Location Evidence open during reconnect revalidates silently and retains the draft.
+34. No pending work produces at most one silent recovery pass and no request storm.
+35. Rapid flapping keeps bounded requests and existing in-flight gates.
+36. Session expiry while offline preserves the correct auth-required/sign-out path.
+37. Account switch before reconnect never sends old-account work under the new account.
+38. Timer start/stop regression.
+39. Live Activity start/stop/convergence regression.
+40. Today, Calendar and Reports data regression.
+41. Review cache-first warm-launch regression.
+42. Location Evidence cache/prefetch cancellation and replacement protection.
+43. HealthKit import and Review regression; reconnect alone performs no import.
+44. Location Intelligence capture/upload/replay regression.
+45. Settings queue/Review/Location diagnostics regression.
+46. System, Light and Dark appearance.
+47. Large Dynamic Type/no horizontal overflow.
+48. VoiceOver: one root announcement per transition, no focus move, silent modal mirrors.
+49. Reduce Motion: immediate or opacity-only notice transition with unchanged status/announcement.
+50. Reduce Transparency and contrast/non-colour status cues.
+
+For items 11–26, require readable headers, no horizontal clipping/reflow, no focus loss, no gesture interception, and no changed sheet/native-tab geometry. Record physical timings for confirmed offline-to-grey, confirmed reconnect-to-green, green duration, reconnect-to-recovery start, initial-online flashes, recovery passes per epoch, and parallel pass count. Targets are under one second, under one second, approximately 2.5 seconds, under one second, zero, one, and zero respectively.
+
 ## Native iOS Tabs And App Chrome
 
 Required checks when changing the mobile root navigator or tab bar:

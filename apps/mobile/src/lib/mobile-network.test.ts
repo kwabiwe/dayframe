@@ -3,13 +3,20 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const session = vi.hoisted(() => ({
   invalidateMobileSessionIfCurrent: vi.fn(() => Promise.resolve(true))
 }));
+const connectivity = vi.hoisted(() => ({
+  connectivityRequestGeneration: vi.fn(() => 7),
+  reportHttpTransportFailure: vi.fn(),
+  reportHttpTransportResponse: vi.fn()
+}));
 
 vi.mock("./secure-session", () => ({
   invalidateMobileSessionIfCurrent: session.invalidateMobileSessionIfCurrent
 }));
+vi.mock("./connectivityEvidence", () => connectivity);
 
 const {
   MobileRequestTimeoutError,
+  isMobileTransportFailure,
   mobileFetch,
   mobileFetchWithTimeout,
   StaleMobileSessionResponseError
@@ -40,6 +47,21 @@ describe("mobile API network boundary", () => {
         credentials: "omit"
       }
     );
+    expect(connectivity.reportHttpTransportResponse).toHaveBeenCalledWith({
+      requestGeneration: 7
+    });
+  });
+
+  it("reports every HTTP status as transport evidence", async () => {
+    const response = { ok: false, status: 500 } as Response;
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(response)));
+
+    await expect(mobileFetch("https://dayframe.test/api/bootstrap")).resolves.toBe(response);
+
+    expect(connectivity.reportHttpTransportResponse).toHaveBeenCalledWith({
+      requestGeneration: 7
+    });
+    expect(connectivity.reportHttpTransportFailure).not.toHaveBeenCalled();
   });
 
   it("invalidates only the bearer rejected by an authentication response", async () => {
@@ -59,6 +81,30 @@ describe("mobile API network boundary", () => {
     await expect(mobileFetch("https://dayframe.test/api/bootstrap", {
       headers: { Authorization: "Bearer old-token" }
     })).rejects.toBeInstanceOf(StaleMobileSessionResponseError);
+    expect(connectivity.reportHttpTransportResponse).toHaveBeenCalledWith({
+      requestGeneration: 7
+    });
+  });
+
+  it("refreshes reachability for fetch transport failures and rethrows unchanged", async () => {
+    const failure = new TypeError("Network request failed");
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(failure)));
+
+    await expect(mobileFetch("https://dayframe.test/api/bootstrap")).rejects.toBe(failure);
+    expect(connectivity.reportHttpTransportFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it("recognises a native connection-lost error as transport failure", () => {
+    expect(isMobileTransportFailure(new Error("The network connection was lost."))).toBe(true);
+  });
+
+  it("does not classify caller cancellation or deadline errors as transport failure", () => {
+    const cancellation = new Error("Cancelled by caller.");
+    cancellation.name = "AbortError";
+    expect(isMobileTransportFailure(cancellation)).toBe(false);
+    expect(isMobileTransportFailure(
+      new MobileRequestTimeoutError("Dayframe opening timed out.")
+    )).toBe(false);
   });
 
   it("aborts and rejects a stalled request at its deadline", async () => {
@@ -79,6 +125,7 @@ describe("mobile API network boundary", () => {
 
     await rejection;
     expect(requestSignals[0]?.aborted).toBe(true);
+    expect(connectivity.reportHttpTransportFailure).not.toHaveBeenCalled();
   });
 
   it("preserves caller cancellation instead of reporting it as a timeout", async () => {

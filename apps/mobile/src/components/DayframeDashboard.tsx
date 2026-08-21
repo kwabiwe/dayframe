@@ -80,6 +80,12 @@ import {
 import { handleDayframeUrl } from "@/lib/deepLinks";
 import { resolveCalendarManualEntryRequest } from "@/lib/calendarManualEntry";
 import { IS_DAYFRAME_STAGING } from "@/lib/config";
+import { useConnectivity } from "@/lib/connectivity";
+import {
+  createConnectivityRecoveryCoordinator,
+  runConnectivityRecoveryPass,
+  type ConnectivityRecoveryPassResult
+} from "@/lib/connectivityRecovery";
 import { shouldApplyDashboardRefresh } from "@/lib/dashboardRefresh";
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
 import {
@@ -88,13 +94,15 @@ import {
 } from "@/lib/location/runtime";
 import { recordLocationStoreError } from "@/lib/location/store";
 import { mergePersistedMobileTag } from "@/lib/mobileTags";
+import { isMobileTransportFailure } from "@/lib/mobile-network";
 import {
   shouldDismissExternallyStoppedActiveEditor,
   shouldResetCalendarToTodayOnForeground
 } from "@/lib/mobileLifecycle";
 import {
   cacheDashboardBootstrap,
-  loadCachedDashboardBootstrap
+  loadCachedDashboardBootstrap,
+  synchroniseReviewMutations
 } from "@/lib/reviewSyncStore";
 import {
   configureHealthKitAutomaticSync,
@@ -209,6 +217,10 @@ type RejectedOptimisticStart = {
   optimisticId: string;
   previousData: MobileBootstrap | null;
 };
+type TimerStopDeliverySummary = {
+  delivered: boolean;
+  transportFailure: boolean;
+};
 export type DayframeDashboardTab = "timer" | "calendar" | "reports";
 
 function StagingBadge({ styles }: { styles: MobileStyles }) {
@@ -239,6 +251,7 @@ const DashboardContext = createContext<DashboardContextValue | null>(null);
 // Native tabs mount their routes eagerly. Keep sync, HealthKit and timer state in one shared owner.
 export function DayframeDashboardProvider({ children }: { children: ReactNode }) {
   const { reloadThemePreference, styles, theme } = useMobileTheme();
+  const connectivity = useConnectivity();
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [authSubmitting, setAuthSubmitting] = useState(false);
@@ -281,6 +294,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const queueSyncInFlight = useRef(false);
   const timerStopDeliveryInFlight = useRef(false);
   const timerStopDeliveryQueued = useRef(false);
+  const timerStopDeliveryPromise = useRef<Promise<TimerStopDeliverySummary> | null>(null);
   const healthAutoSyncInFlight = useRef(false);
   const latestData = useRef<MobileBootstrap | null>(null);
   const liveActivityReconciliationDeferred = useRef(false);
@@ -322,6 +336,23 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const authEmailRef = useRef<TextInput>(null);
   const authPasswordRef = useRef<TextInput>(null);
   const preserveAuthPasswordOnSignedOut = useRef(false);
+  const authStateCurrent = useRef<AuthState>(authState);
+  const connectivityCurrent = useRef(connectivity);
+  const reconnectRecoveryPass = useRef<
+    (epoch: number) => Promise<ConnectivityRecoveryPassResult>
+  >(async () => "interrupted");
+  const reconnectRecoveryCoordinator = useRef<
+    ReturnType<typeof createConnectivityRecoveryCoordinator> | null
+  >(null);
+  authStateCurrent.current = authState;
+  connectivityCurrent.current = connectivity;
+  reconnectRecoveryCoordinator.current ??= createConnectivityRecoveryCoordinator({
+    canStart: () =>
+      authStateCurrent.current === "authenticated" &&
+      AppState.currentState === "active" &&
+      connectivityCurrent.current.isOnline,
+    runPass: (epoch) => reconnectRecoveryPass.current(epoch)
+  });
 
   const transitionToSignedOut = useCallback((options?: SignedOutTransitionOptions) => {
     if (activeEditorOpenFrame.current !== null) {
@@ -405,36 +436,61 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     return pendingTimerStopsForOwner(resolved, owner);
   }
 
-  async function deliverOwnedPendingTimerStops(bootstrap: MobileBootstrap) {
+  async function deliverOwnedPendingTimerStops(
+    bootstrap: MobileBootstrap,
+    options: { reloadAfterDelivery?: boolean } = {}
+  ): Promise<TimerStopDeliverySummary> {
     if (timerStopDeliveryInFlight.current) {
       timerStopDeliveryQueued.current = true;
-      return;
+      return timerStopDeliveryPromise.current ?? {
+        delivered: false,
+        transportFailure: false
+      };
     }
     timerStopDeliveryInFlight.current = true;
     const owner = timerStopOwner(bootstrap);
-    let delivered = false;
-    try {
+    const delivery = (async (): Promise<TimerStopDeliverySummary> => {
+      let delivered = false;
+      let transportFailure = false;
       do {
         timerStopDeliveryQueued.current = false;
         const ownedStops = await readOwnedPendingTimerStops(bootstrap);
         setPendingTimerStops(ownedStops);
         for (const pendingStop of ownedStops) {
           const current = latestData.current;
-          if (!current || !sameTimerStopOwner(timerStopOwner(current), owner)) return;
+          if (!current || !sameTimerStopOwner(timerStopOwner(current), owner)) {
+            return { delivered, transportFailure };
+          }
           if (!pendingStop.targetEntryId || pendingStop.failureKind === "permanent") continue;
           const result = await deliverPendingTimerStop(pendingStop, owner);
           if (result.status === "delivered") delivered = true;
+          if (
+            result.status === "retryable_failure" &&
+            isMobileTransportFailure(result.error)
+          ) {
+            transportFailure = true;
+            break;
+          }
         }
         const remaining = pendingTimerStopsForOwner(
           await readPendingTimerStops(),
           owner
         );
         setPendingTimerStops(remaining);
-      } while (timerStopDeliveryQueued.current);
+      } while (timerStopDeliveryQueued.current && !transportFailure);
+      return { delivered, transportFailure };
+    })();
+    timerStopDeliveryPromise.current = delivery;
+    try {
+      const summary = await delivery;
+      if (summary.delivered && options.reloadAfterDelivery !== false) {
+        void loadRef.current({ silent: true });
+      }
+      return summary;
     } finally {
       timerStopDeliveryInFlight.current = false;
+      timerStopDeliveryPromise.current = null;
     }
-    if (delivered) void loadRef.current({ silent: true });
   }
 
   function settleOptimisticTimerStart(
@@ -812,6 +868,96 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     }
   }, [authState, load, syncQueuedEvents, transitionToSignedOut]);
 
+  async function reconcileAfterConnectivityRestored(
+    _epoch: number
+  ): Promise<ConnectivityRecoveryPassResult> {
+    return runConnectivityRecoveryPass({
+      canContinue: () =>
+        authStateCurrent.current === "authenticated" &&
+        AppState.currentState === "active" &&
+        connectivityCurrent.current.isOnline,
+      isAuthenticationRequired: (error) => error instanceof AuthRequiredError,
+      isTransportFailure: isMobileTransportFailure,
+      onAuthenticationRequired: transitionToSignedOut,
+      onStepOutcome: ({ step, durationMilliseconds, outcome }) => {
+        if (typeof __DEV__ === "undefined" || !__DEV__) return;
+        console.debug("Connectivity recovery step", {
+          recoverySubsystem: step,
+          durationMilliseconds,
+          outcomeClass: outcome
+        });
+      },
+      steps: [
+        {
+          name: "timer_stops_ready",
+          run: async () => {
+            const bootstrap = latestData.current;
+            if (!bootstrap) return;
+            const result = await deliverOwnedPendingTimerStops(bootstrap, {
+              reloadAfterDelivery: false
+            });
+            return result.transportFailure ? "transport_failure" : "continue";
+          }
+        },
+        {
+          name: "activity_queue",
+          run: async () => {
+            const result = await syncQueuedEvents();
+            return result?.firstError?.failureKind === "network"
+              ? "transport_failure"
+              : "continue";
+          }
+        },
+        {
+          name: "timer_stops_after_correlation",
+          run: async () => {
+            const bootstrap = latestData.current;
+            if (!bootstrap) return;
+            const result = await deliverOwnedPendingTimerStops(bootstrap, {
+              reloadAfterDelivery: false
+            });
+            return result.transportFailure ? "transport_failure" : "continue";
+          }
+        },
+        {
+          name: "review_outbox",
+          run: async () => {
+            await synchroniseReviewMutations({ force: true });
+          }
+        },
+        {
+          name: "location_intelligence",
+          run: async () => {
+            await syncLocationIntelligenceOnForeground();
+          }
+        },
+        {
+          name: "bootstrap",
+          run: async () => {
+            await load({ silent: true });
+          }
+        }
+      ]
+    });
+  }
+  reconnectRecoveryPass.current = reconcileAfterConnectivityRestored;
+
+  useEffect(() => {
+    const coordinator = reconnectRecoveryCoordinator.current;
+    if (!coordinator) return;
+    if (authState !== "authenticated") {
+      coordinator.ignore(connectivity.reconnectEpoch);
+      return;
+    }
+    if (
+      AppState.currentState === "active" &&
+      connectivity.isOnline &&
+      connectivity.reconnectEpoch > 0
+    ) {
+      void coordinator.request(connectivity.reconnectEpoch);
+    }
+  }, [authState, connectivity.isOnline, connectivity.reconnectEpoch]);
+
   const syncHealthKitAndReload = useCallback(async (reason: "foreground" | "observer" = "foreground") => {
     if (authState !== "authenticated" || healthAutoSyncInFlight.current) return;
 
@@ -1054,8 +1200,17 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       if (authState === "authenticated") {
         deletionCoordinator.current?.reconcileForeground();
         void syncHealthKitAndReload("foreground");
-        void syncQueuedEventsAndReload();
-        void syncLocationIntelligenceOnForeground().catch(recordLocationStoreError);
+        const coordinator = reconnectRecoveryCoordinator.current;
+        const reconnectEpoch = connectivityCurrent.current.reconnectEpoch;
+        const reconnectPending =
+          connectivityCurrent.current.isOnline &&
+          reconnectEpoch > (coordinator?.snapshot().lastHandledReconnectEpoch ?? 0);
+        if (reconnectPending && coordinator) {
+          void coordinator.request(reconnectEpoch);
+        } else {
+          void syncQueuedEventsAndReload();
+          void syncLocationIntelligenceOnForeground().catch(recordLocationStoreError);
+        }
       }
     });
     return () => subscription.remove();

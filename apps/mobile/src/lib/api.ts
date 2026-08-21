@@ -18,6 +18,7 @@ import { DAYFRAME_API_BASE } from "./config";
 import {
   MobileRequestTimeoutError,
   StaleMobileSessionResponseError,
+  isMobileTransportFailure,
   mobileFetch,
   mobileFetchWithTimeout
 } from "./mobile-network";
@@ -1400,14 +1401,9 @@ export async function queueStopTimer() {
 
 export function isNetworkTimerError(error: unknown) {
   if (!(error instanceof Error)) return false;
-  const message = error.message.toLowerCase();
   return (
     error instanceof MobileRequestTimeoutError ||
-    error.name === "TypeError" ||
-    message.includes("network request failed") ||
-    message.includes("failed to fetch") ||
-    message.includes("networkerror") ||
-    message.includes("internet connection")
+    isMobileTransportFailure(error)
   );
 }
 

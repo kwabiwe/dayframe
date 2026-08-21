@@ -32,6 +32,7 @@ import {
   type RecentActivitySuggestion
 } from "@dayframe/shared";
 import { FloatingDatePicker } from "@/components/FloatingDatePicker";
+import { ConnectivityBanner } from "@/components/ConnectivityBanner";
 import {
   HistoricalSuggestionsOverlay,
   type HistoricalSuggestionsOverlayRenderState
@@ -2860,6 +2861,7 @@ export function ActiveTimerEditSheet({
           </View>
         ) : null}
       </View>
+      <ConnectivityBanner suppressAccessibilityAnnouncement />
       </Modal>
     </>
   );

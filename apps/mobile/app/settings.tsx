@@ -18,6 +18,7 @@ import Reanimated from "react-native-reanimated";
 import Svg, { Path } from "react-native-svg";
 import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { ConnectivityBanner } from "@/components/ConnectivityBanner";
 import {
   SwipeDismissSheet,
   type SwipeDismissSheetHandle
@@ -2123,6 +2124,7 @@ function LocationInformationSheet({
           </ScrollView>
         </SwipeDismissSheet>
       </View>
+      <ConnectivityBanner suppressAccessibilityAnnouncement />
     </Modal>
   );
 }

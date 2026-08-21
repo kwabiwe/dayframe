@@ -111,6 +111,8 @@ Deployment:
 
 6. As a mobile user, I want offline capture to sync later, so that timers and geofence/health events are not lost when the network is unavailable.
    - Example: A walk captured offline syncs when the phone reconnects.
+   - A persistent passive notice explains confirmed offline state; a temporary notice says when transport returns without claiming all saved work has synced.
+   - Offline-capable actions remain enabled and commit to their existing durable owners. Connectivity-dependent actions retain their bounded, explicit failure path instead of being silently replaced or globally disabled.
    - Example: I tap Stop and immediately force-quit; reopening still shows that exact timer stopped locally and safely retries the same event without stopping a newer timer.
    - Example: Review opens from the last account-owned snapshot, cached private Location Evidence remains usable for up to seven days, and Confirm, Dismiss, or a complete Edit-and-confirm disappears after its local SQLite commit while Dayframe retries the canonical server mutation later.
    - Place creation/change, split, merge, and one-time POI actions still require a bounded live connection; offline support must never substitute a different action or expose one account's cached Review/location evidence to another.
@@ -325,6 +327,7 @@ Functional requirements:
 - ✅ Only allowlisted beta users can create accounts.
 - ✅ Web and mobile share active timer state.
 - ✅ Mobile can queue events offline and sync later with retry and diagnostics; real-device reconnect/background/conflict behaviour remains under Watch before wider beta confidence.
+- ⚠️ iOS provides one informational offline/restored status surface and ordered reconnect prompts for existing durable owners; signed staging and physical-iPhone network-transition evidence remains required before release confidence.
 - ✅ Trusted places can auto-start entries.
 - ✅ Ambiguous location events appear in review.
 - ✅ HealthKit sleep and workouts/walks appear as time entries or high-confidence review items; duplicate/overlapping Sleep remains a tracked investigation.

@@ -13,6 +13,7 @@ import * as Clipboard from "expo-clipboard";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
+import { ConnectivityBanner } from "@/components/ConnectivityBanner";
 import { SheetMutationProgress } from "@/components/SheetMutationProgress";
 import {
   SwipeDismissSheet,
@@ -733,6 +734,7 @@ function LearnedPlaceDetailSheet({
           ) : null}
         </SwipeDismissSheet>
       </View>
+      <ConnectivityBanner suppressAccessibilityAnnouncement />
     </Modal>
   );
 }

@@ -1,4 +1,9 @@
 import { invalidateMobileSessionIfCurrent } from "./secure-session";
+import {
+  connectivityRequestGeneration,
+  reportHttpTransportFailure,
+  reportHttpTransportResponse
+} from "./connectivityEvidence";
 
 export class StaleMobileSessionResponseError extends Error {
   constructor() {
@@ -30,13 +35,35 @@ export async function mobileFetch(
   input: Parameters<typeof fetch>[0],
   init: Parameters<typeof fetch>[1] = {}
 ) {
-  const response = await fetch(input, { ...init, credentials: "omit" });
+  const requestGeneration = connectivityRequestGeneration();
+  let response: Response;
+  try {
+    response = await fetch(input, { ...init, credentials: "omit" });
+  } catch (error) {
+    if (isMobileTransportFailure(error)) reportHttpTransportFailure();
+    throw error;
+  }
+  reportHttpTransportResponse({ requestGeneration });
   const rejectedToken = bearerToken(init.headers);
   if ((response.status === 401 || response.status === 403) && rejectedToken) {
     const invalidated = await invalidateMobileSessionIfCurrent(rejectedToken);
     if (!invalidated) throw new StaleMobileSessionResponseError();
   }
   return response;
+}
+
+export function isMobileTransportFailure(error: unknown) {
+  if (
+    !(error instanceof Error) ||
+    error instanceof MobileRequestTimeoutError ||
+    error instanceof StaleMobileSessionResponseError ||
+    error.name === "AbortError"
+  ) {
+    return false;
+  }
+  if (error instanceof TypeError) return true;
+  return /network connection was lost|network request failed|failed to fetch|networkerror|internet connection/i
+    .test(error.message);
 }
 
 export async function mobileFetchWithTimeout(

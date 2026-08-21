@@ -15,6 +15,7 @@ import Reanimated, {
   withTiming
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ConnectivityBanner } from "@/components/ConnectivityBanner";
 import { pressable, useMobileTheme } from "@/lib/mobileTheme";
 import { MOBILE_MOTION, useReduceMotionPreference } from "@/lib/motion";
 import type { ReviewMenuAction } from "@/lib/review";
@@ -272,6 +273,7 @@ export function OverflowMenu({
           </Pressable>
         </Reanimated.View>
       </View>
+      <ConnectivityBanner suppressAccessibilityAnnouncement />
     </Modal>
   );
 }
