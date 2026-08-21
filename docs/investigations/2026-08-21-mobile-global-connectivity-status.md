@@ -3,7 +3,7 @@
 Date: 2026-08-21
 Baseline: `origin/main` at `2b732d20b4aec50f113529adeffdcfc81b979bb4` (merged PR #183)
 Implementation branch: `codex/pr184-global-connectivity-status`
-Status: implementation and repository validation complete; no hosted, signed-build, or physical-iPhone evidence yet
+Status: PR-review corrections and repository validation complete; corrected-SHA review, hosted, signed-build, and physical-iPhone evidence pending
 
 ## Problem And Boundary
 
@@ -46,6 +46,16 @@ One active authenticated coordinator handles each newer epoch at most once and r
 
 The pass rechecks authentication, active app state and confirmed online state between steps. Authentication preserves the existing signed-out transition. Transport interruption stops quietly; an independent application/permanent error is safely classified and later owners may continue. Reconnect itself does not import HealthKit; already queued Health events remain part of the general queue.
 
+### PR review correction
+
+Review of `fa4a7091be68f4253139d3678624244aa152731b` found two recovery-boundary defects; no approval or physical-test gate carries forward from that SHA.
+
+- The general activity queue now retains one shared in-flight promise. A reconnect that overlaps a foreground/background drain awaits the existing result and its optimistic-start canonical-ID correlation before running the second explicit Stop pass.
+- Review `retryable_failure` and Location `request_failed` / `replay_failed` results are converted into typed reconnect `transport_failure` outcomes. Later owners and bootstrap do not run after those returned failures; each durable owner retains its queued work for a later transport epoch.
+- Behavioural coverage holds an existing queue drain open while reconnect begins, proves the queued start is correlated before exactly one Stop delivery, and proves returned Review and Location failures stop the pass without relying on thrown exceptions.
+
+These corrections change no dependency, native binary input, API/database contract, queue format, status presentation, motion contract or reconnect ordering.
+
 ## Dependency And Native Impact
 
 - Added `@react-native-community/netinfo` `12.0.1` through Expo's installer.
@@ -64,18 +74,18 @@ Physical staging must explicitly re-check timer Stop durability, Live Activities
 
 | Check | Result |
 | --- | --- |
-| Focused connectivity/transport/recovery/Review contracts | PASS: 6 files / 52 tests on the final implementation |
+| Focused connectivity/transport/recovery/Review contracts | PASS: 6 files / 56 tests on the corrected implementation |
 | Mobile typecheck | PASS: `npm run typecheck --workspace @dayframe/mobile` |
-| Complete mobile suite | PASS: 81 files / 777 tests |
-| `npx expo install --check` | EXPECTED FAIL: the baseline pins `expo` 56.0.19, `expo-linking` 56.0.16, `expo-location` 56.0.23, `expo-modules-core` 56.0.23, `expo-router` 56.2.18 and `expo-task-manager` 56.0.25 one patch below Expo's current recommendations. These pre-existing mismatches were recorded and not changed. NetInfo itself is compatible. |
-| CocoaPods sync and lockfile review | PASS: `npx pod-install`; 115 dependencies / 114 installed pods. NetInfo 12.0.1 was autolinked. CocoaPods regenerated three unchanged-version React Native binary checksums in addition to adding NetInfo. |
+| Complete mobile suite | PASS: 81 files / 781 tests on the corrected implementation |
+| `npx expo install --check` | EXPECTED FAIL: the unchanged repository baseline pins TypeScript 5.9.3 while Expo currently recommends `~6.0.3`. This toolchain mismatch predates the correction and was not expanded into PR #184; NetInfo itself remains linked and compatible. |
+| CocoaPods sync and lockfile review | PASS: `npx pod-install`; 115 dependencies / 114 installed pods. NetInfo 12.0.1 was autolinked and the review-correction pass produced no additional lockfile change. |
 | Review SQLite validator | PASS: `npm run validate:review-sync-sqlite` |
 | Location V2 SQLite validator | PASS: `npm run validate:location-v2-sqlite` |
-| Full repository lint/typecheck/test | PASS: mobile 81 files / 777 tests; web 122 passed and 1 skipped file, 836 passed and 1 skipped test; shared 12 files / 156 tests |
-| Full repository production build | PASS: `npm run build` |
+| Full repository lint/typecheck/test | PASS on the corrected implementation: lint has two pre-existing web-test warnings and no errors; mobile 81 files / 781 tests; web 122 passed and 1 skipped file, 836 passed and 1 skipped test; shared 12 files / 156 tests |
+| Full repository production build | PASS on the corrected implementation: `npm run build` |
 | Documentation, brand and whitespace checks | PASS: `npm run check:docs` (118 Markdown files), `npm run check:brand-assets`, and `git diff --check` |
-| Clean unsigned iOS Simulator build with fresh Derived Data | PASS: `xcodebuild` Debug against the installed `Dayframe Sheet QA SE` Simulator with `ONLY_ACTIVE_ARCH=YES` and `CODE_SIGNING_ALLOWED=NO`; both clean and build succeeded. Only dependency/compiler warnings were emitted. A preceding generic dual-architecture run exhausted the host's disk while producing pod archives; its temporary Derived Data and the earlier successful build's temporary Derived Data were removed, 13 GiB was recovered, and the single installed-Simulator rerun completed from a fresh directory. |
-| Exact Vercel Preview and stable staging alias | NOT RUN |
+| Clean unsigned iOS Simulator build with fresh Derived Data | PASS again after the review corrections: `xcodebuild` Debug against the installed `Dayframe Sheet QA SE` Simulator with `ONLY_ACTIVE_ARCH=YES` and `CODE_SIGNING_ALLOWED=NO`; clean and build succeeded, including the app, Live Activity extension, HealthKit, Location modules and linked NetInfo. Only dependency/compiler/script warnings were emitted; temporary Derived Data and the build log were removed afterward. |
+| Corrected-SHA Vercel Preview and stable staging alias | NOT RUN |
 | Signed EAS `preview` build | NOT RUN |
 | Physical-iPhone matrix and measured timings | NOT RUN |
 

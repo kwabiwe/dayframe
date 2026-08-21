@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createConnectivityRecoveryCoordinator,
+  createSharedInFlightOperation,
+  locationConnectivityRecoveryStepResult,
+  reviewConnectivityRecoveryStepResult,
   runConnectivityRecoveryPass,
   type ConnectivityRecoveryStepName
 } from "./connectivityRecovery";
@@ -80,6 +83,140 @@ describe("connectivity recovery", () => {
     expect(errors).toEqual(["activity_queue"]);
     expect(calls).not.toContain("bootstrap");
   });
+
+  it("awaits an existing activity drain before delivering a correlated Stop", async () => {
+    const optimisticTimerId = "optimistic-active-timer:offline-start";
+    const queuedActivityEvents = [{
+      localId: optimisticTimerId,
+      type: "timer_start" as const
+    }];
+    const pendingStops = [{
+      clientEventId: "mobile-timer-stop:offline-stop",
+      optimisticEntryId: optimisticTimerId
+    }];
+    const correlations = new Map<string, string>();
+    const deliveredStopIds: string[] = [];
+    const queueDrain = createSharedInFlightOperation<void>();
+    const queueRelease = deferred<void>();
+    const queueRuns = vi.fn(async () => {
+      await queueRelease.promise;
+      const start = queuedActivityEvents.shift();
+      if (start) correlations.set(start.localId, "timer-canonical");
+    });
+    const deliverCorrelatedStops = () => {
+      for (let index = pendingStops.length - 1; index >= 0; index -= 1) {
+        const stop = pendingStops[index];
+        if (!correlations.has(stop.optimisticEntryId)) continue;
+        deliveredStopIds.push(stop.clientEventId);
+        pendingStops.splice(index, 1);
+      }
+    };
+
+    const foregroundDrain = queueDrain.run(queueRuns);
+    const recovery = runConnectivityRecoveryPass({
+      canContinue: () => true,
+      isAuthenticationRequired: () => false,
+      isTransportFailure: () => false,
+      onAuthenticationRequired: vi.fn(),
+      steps: [
+        {
+          name: "timer_stops_ready",
+          run: async () => {
+            deliverCorrelatedStops();
+          }
+        },
+        {
+          name: "activity_queue",
+          run: async () => {
+            await queueDrain.run(queueRuns);
+          }
+        },
+        {
+          name: "timer_stops_after_correlation",
+          run: async () => {
+            deliverCorrelatedStops();
+          }
+        }
+      ]
+    });
+
+    await Promise.resolve();
+    expect(queueRuns).toHaveBeenCalledOnce();
+    expect(deliveredStopIds).toEqual([]);
+    expect(pendingStops).toHaveLength(1);
+
+    queueRelease.resolve();
+    await Promise.all([foregroundDrain, recovery]);
+    expect(queueRuns).toHaveBeenCalledOnce();
+    expect(queuedActivityEvents).toEqual([]);
+    expect(correlations.get(optimisticTimerId)).toBe("timer-canonical");
+    expect(deliveredStopIds).toEqual(["mobile-timer-stop:offline-stop"]);
+    expect(pendingStops).toEqual([]);
+  });
+
+  it("stops on a returned retryable Review failure", async () => {
+    const calls: ConnectivityRecoveryStepName[] = [];
+    const result = await runConnectivityRecoveryPass({
+      canContinue: () => true,
+      isAuthenticationRequired: () => false,
+      isTransportFailure: () => false,
+      onAuthenticationRequired: vi.fn(),
+      steps: [
+        {
+          name: "review_outbox",
+          run: async () => {
+            calls.push("review_outbox");
+            return reviewConnectivityRecoveryStepResult({
+              reason: "retryable_failure"
+            });
+          }
+        },
+        {
+          name: "location_intelligence",
+          run: async () => {
+            calls.push("location_intelligence");
+          }
+        }
+      ]
+    });
+
+    expect(result).toBe("transport_failure");
+    expect(calls).toEqual(["review_outbox"]);
+  });
+
+  it.each(["request_failed", "replay_failed"] as const)(
+    "stops on a returned retryable Location failure: %s",
+    async (reason) => {
+      const calls: ConnectivityRecoveryStepName[] = [];
+      const result = await runConnectivityRecoveryPass({
+        canContinue: () => true,
+        isAuthenticationRequired: () => false,
+        isTransportFailure: () => false,
+        onAuthenticationRequired: vi.fn(),
+        steps: [
+          {
+            name: "location_intelligence",
+            run: async () => {
+              calls.push("location_intelligence");
+              return locationConnectivityRecoveryStepResult({
+                synced: false,
+                reason
+              });
+            }
+          },
+          {
+            name: "bootstrap",
+            run: async () => {
+              calls.push("bootstrap");
+            }
+          }
+        ]
+      });
+
+      expect(result).toBe("transport_failure");
+      expect(calls).toEqual(["location_intelligence"]);
+    }
+  );
 
   it("publishes authentication failure and stops", async () => {
     const onAuthenticationRequired = vi.fn();

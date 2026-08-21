@@ -83,6 +83,9 @@ import { IS_DAYFRAME_STAGING } from "@/lib/config";
 import { useConnectivity } from "@/lib/connectivity";
 import {
   createConnectivityRecoveryCoordinator,
+  createSharedInFlightOperation,
+  locationConnectivityRecoveryStepResult,
+  reviewConnectivityRecoveryStepResult,
   runConnectivityRecoveryPass,
   type ConnectivityRecoveryPassResult
 } from "@/lib/connectivityRecovery";
@@ -291,7 +294,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const reduceTransparency = useReduceTransparencyPreference();
   const refreshInFlight = useRef(false);
   const refreshQueued = useRef(false);
-  const queueSyncInFlight = useRef(false);
+  const queuedEventSync = useRef(
+    createSharedInFlightOperation<SyncQueueResult>()
+  ).current;
   const timerStopDeliveryInFlight = useRef(false);
   const timerStopDeliveryQueued = useRef(false);
   const timerStopDeliveryPromise = useRef<Promise<TimerStopDeliverySummary> | null>(null);
@@ -554,10 +559,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     });
   }
 
-  const syncQueuedEvents = useCallback(async () => {
-    if (queueSyncInFlight.current) return null;
-    queueSyncInFlight.current = true;
-    try {
+  const syncQueuedEvents = useCallback(() =>
+    queuedEventSync.run(async () => {
       const nativeDrain = await drainNativeShortcutQueue();
       for (const localId of nativeDrain.transferredLocalIds) {
         pendingNativeShortcutLocalIds.current.add(localId);
@@ -573,10 +576,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         liveActivityReconciliationDeferred.current = false;
       }
       return syncResult;
-    } finally {
-      queueSyncInFlight.current = false;
-    }
-  }, []);
+    }), [queuedEventSync]);
 
   function reconcilePendingActiveDeletionWithExternalActiveEntry(
     externalActiveEntryId: string | null
@@ -922,13 +922,15 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         {
           name: "review_outbox",
           run: async () => {
-            await synchroniseReviewMutations({ force: true });
+            const result = await synchroniseReviewMutations({ force: true });
+            return reviewConnectivityRecoveryStepResult(result);
           }
         },
         {
           name: "location_intelligence",
           run: async () => {
-            await syncLocationIntelligenceOnForeground();
+            const result = await syncLocationIntelligenceOnForeground();
+            return locationConnectivityRecoveryStepResult(result);
           }
         },
         {

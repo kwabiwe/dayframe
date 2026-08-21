@@ -308,9 +308,9 @@ Physical-iPhone matrix:
 26. Native tab bar expanded and minimised.
 27. General queued activity event drains on reconnect without duplication.
 28. Canonical pending timer Stop delivers exactly once before ordinary backlog.
-29. Stop awaiting optimistic-start correlation receives its canonical ID and targets only that timer.
-30. Offline Review Confirm, Edit-and-confirm and Dismiss remain hidden/durable and produce one receipt/entry after reconnect.
-31. Location Evidence upload outbox resumes without duplicate evidence or segment.
+29. Stop awaiting optimistic-start correlation receives its canonical ID and targets only that timer, including when foreground/background recovery already owns the activity-queue drain.
+30. Offline Review Confirm, Edit-and-confirm and Dismiss remain hidden/durable and produce one receipt/entry after reconnect; interrupt a replay once and verify its returned retryable result prevents later recovery owners/bootstrap until a newer reconnect.
+31. Location Evidence upload outbox resumes without duplicate evidence or segment; interrupt upload/replay once and verify its returned retryable result prevents bootstrap until a newer reconnect.
 32. Cached Review open during reconnect refreshes silently without spinner/card flash.
 33. Cached Location Evidence open during reconnect revalidates silently and retains the draft.
 34. No pending work produces at most one silent recovery pass and no request storm.

@@ -68,6 +68,8 @@ describe("reconnect integration contracts", () => {
     }
     expect(recovery).not.toContain("importHealthKit");
     expect(recovery).toContain("load({ silent: true })");
+    expect(recovery).toContain("reviewConnectivityRecoveryStepResult(result)");
+    expect(recovery).toContain("locationConnectivityRecoveryStepResult(result)");
   });
 
   it("keeps Review offline-capable and refreshes cached ownership silently after reconnect", () => {

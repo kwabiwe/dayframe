@@ -28,6 +28,58 @@ export type ConnectivityRecoveryStep = {
   run: () => Promise<ConnectivityRecoveryStepResult | void>;
 };
 
+export type ReviewConnectivityRecoveryResult = {
+  reason?: "no_account" | "no_session" | "retryable_failure";
+};
+
+export type LocationConnectivityRecoveryResult = {
+  synced: boolean;
+  reason?:
+    | "v1"
+    | "session_unavailable"
+    | "no_session"
+    | "payload_too_large"
+    | "request_failed"
+    | "invalid_batch"
+    | "replay_failed";
+};
+
+export function reviewConnectivityRecoveryStepResult(
+  result: ReviewConnectivityRecoveryResult
+): ConnectivityRecoveryStepResult {
+  return result.reason === "retryable_failure"
+    ? "transport_failure"
+    : "continue";
+}
+
+export function locationConnectivityRecoveryStepResult(
+  result: LocationConnectivityRecoveryResult
+): ConnectivityRecoveryStepResult {
+  return result.reason === "request_failed" || result.reason === "replay_failed"
+    ? "transport_failure"
+    : "continue";
+}
+
+export function createSharedInFlightOperation<Result>() {
+  let inFlight: Promise<Result> | null = null;
+
+  return {
+    run(operation: () => Promise<Result>) {
+      if (inFlight) return inFlight;
+      const shared = Promise.resolve()
+        .then(operation)
+        .finally(() => {
+          if (inFlight === shared) inFlight = null;
+        });
+      inFlight = shared;
+      return shared;
+    },
+    snapshot() {
+      return { inFlight: inFlight !== null };
+    }
+  };
+}
+
 export async function runConnectivityRecoveryPass(input: {
   canContinue: () => boolean;
   isAuthenticationRequired: (error: unknown) => boolean;
