@@ -13,7 +13,6 @@ import type {
   LocationReviewAction,
   LocationReviewEvidenceDto
 } from "@dayframe/shared";
-import { DayframeBrand } from "@/components/brand";
 import { LocationReviewCorrectionEditor } from "@/components/location/LocationReviewCorrectionEditor";
 import { MobileBackButton } from "@/components/MobileBackButton";
 import {
@@ -32,6 +31,7 @@ import {
   locationReviewActionRequiresConnection
 } from "@/lib/locationReviewDraft";
 import { pressable, useMobileTheme } from "@/lib/mobileTheme";
+import { scheduleLocationEvidenceLoadingFeedback } from "@/lib/review";
 import {
   createReviewClientMutationId,
   enqueueReviewMutation,
@@ -59,16 +59,27 @@ export default function LocationReviewDetailScreen() {
   const [screenState, setScreenState] = useState<EvidenceScreenState>({
     status: "hydrating"
   });
+  const [showHydrationFeedback, setShowHydrationFeedback] = useState(false);
   const [saving, setSaving] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [reloadSequence, setReloadSequence] = useState(0);
   const loadGenerationRef = useRef(0);
+  const hydrationFeedbackCancelRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const generation = ++loadGenerationRef.current;
     const controller = new AbortController();
+    hydrationFeedbackCancelRef.current?.();
+    setShowHydrationFeedback(false);
+    hydrationFeedbackCancelRef.current = scheduleLocationEvidenceLoadingFeedback(() => {
+      if (!isCurrent(generation, controller.signal)) return;
+      hydrationFeedbackCancelRef.current = null;
+      setShowHydrationFeedback(true);
+    });
     void initialise(generation, controller.signal);
     return () => {
+      hydrationFeedbackCancelRef.current?.();
+      hydrationFeedbackCancelRef.current = null;
       loadGenerationRef.current += 1;
       controller.abort();
     };
@@ -82,7 +93,10 @@ export default function LocationReviewDetailScreen() {
   );
 
   async function initialise(generation: number, signal: AbortSignal) {
-    if (!id) return;
+    if (!id) {
+      finishHydrationFeedback(generation);
+      return;
+    }
     setScreenState({ status: "hydrating" });
     setActionMessage(null);
     try {
@@ -101,6 +115,7 @@ export default function LocationReviewDetailScreen() {
           refreshing: true,
           refreshMessage: null
         });
+        finishHydrationFeedback(generation);
       }
 
       const contextRequest = refreshContext(generation, signal);
@@ -166,7 +181,16 @@ export default function LocationReviewDetailScreen() {
         status: "unavailable",
         message: normaliseLocationReviewRequestError(loadError, "evidence")
       });
+    } finally {
+      finishHydrationFeedback(generation);
     }
+  }
+
+  function finishHydrationFeedback(generation: number) {
+    if (generation !== loadGenerationRef.current) return;
+    hydrationFeedbackCancelRef.current?.();
+    hydrationFeedbackCancelRef.current = null;
+    setShowHydrationFeedback(false);
   }
 
   async function refreshContext(generation: number, signal: AbortSignal) {
@@ -248,20 +272,22 @@ export default function LocationReviewDetailScreen() {
             accessibilityLabel="Back to Review"
             onPress={() => router.back()}
           />
-          <DayframeBrand layout="compact" size="sm" tone={theme.mode === "dark" ? "light" : "dark"} />
+          <Text style={styles.settingsTitle} numberOfLines={1}>Location evidence</Text>
         </View>
       </View>
 
       {screenState.status === "hydrating" ? (
-        <ScrollView
-          style={styles.settingsScrollView}
-          contentContainerStyle={styles.settingsScrollContent}
-        >
-          <View style={styles.panel}>
-            <ActivityIndicator color={theme.accent} />
-            <Text accessibilityLiveRegion="polite" style={styles.muted}>Loading private map evidence…</Text>
-          </View>
-        </ScrollView>
+        showHydrationFeedback ? (
+          <ScrollView
+            style={styles.settingsScrollView}
+            contentContainerStyle={styles.settingsScrollContent}
+          >
+            <View style={styles.panel}>
+              <ActivityIndicator color={theme.accent} />
+              <Text accessibilityLiveRegion="polite" style={styles.muted}>Loading private map evidence…</Text>
+            </View>
+          </ScrollView>
+        ) : null
       ) : screenState.status === "unavailable" ? (
         <ScrollView
           style={styles.settingsScrollView}

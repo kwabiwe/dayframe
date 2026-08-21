@@ -145,6 +145,9 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
   action. Authentication-required and permanent-attention states keep their
   dedicated guidance instead of presenting a transport retry.
 - Review opens cache-first without waiting for bootstrap or Health reprocess.
+  Its list and Location Evidence detail use the same right-aligned page-title
+  header treatment as Settings (`Review` and `Location evidence` respectively),
+  rather than repeating the Dayframe brand lock-up.
   Health reprocess has a separate owner and may disable only Health items; Location
   cards and evidence navigation remain interactive. A normal revalidation is
   quiet, a failed refresh retains cached content with Review-specific stale copy,
@@ -159,7 +162,9 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
   exact stale-row cleanup that preserves a completed replacement), and
   logout/account-switch cascade. Cached text, times, category, route coordinates,
   and actions remain usable when Apple map tiles are unavailable; never expose a
-  raw native/network exception.
+  raw native/network exception. A warm cache hit that resolves within the 300 ms
+  target must render without even a transient full-screen hydration panel; cold
+  or unusually slow loading feedback appears only after that grace period.
 - Location Evidence GET has a 10-second mobile ceiling. Direct-only place/split/
   merge/record actions have a 15-second ceiling and retain the exact editor draft
   on failure. The three durable actions (`confirm`, `ignore_once_location`, and a

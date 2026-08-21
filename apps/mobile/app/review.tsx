@@ -20,7 +20,6 @@ import {
   type ReviewMutation
 } from "@dayframe/shared";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
-import { DayframeBrand } from "@/components/brand";
 import { MobileBackButton } from "@/components/MobileBackButton";
 import {
   OverflowMenu,
@@ -773,11 +772,7 @@ export default function ReviewScreen() {
       <View style={styles.settingsFloatingHeader}>
         <View style={styles.settingsHeader}>
           <MobileBackButton accessibilityLabel="Back" onPress={() => router.back()} />
-          <DayframeBrand
-            layout="compact"
-            size="sm"
-            tone={theme.mode === "dark" ? "light" : "dark"}
-          />
+          <Text style={styles.settingsTitle} numberOfLines={1}>Review</Text>
         </View>
       </View>
       <ScrollView

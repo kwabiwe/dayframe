@@ -78,8 +78,13 @@ or remain cached, while cleanup cannot delete a newer replacement.
 Location Evidence detail renders cached evidence/context immediately and
 revalidates evidence and bootstrap independently. Fresh same-item evidence
 replaces the presentation in place without a React key remount, preserving the
-editor draft. Cached evidence remains usable when revalidation or Apple map
-tiles fail; inline copy is sanitized and Back/Try again remain available.
+editor draft. The route reserves its full-screen loading feedback for a genuine
+cold or unusually slow hydration: a 300 ms grace period prevents an asynchronous
+SQLite cache hit from flashing the loading panel. Cached evidence remains usable
+when revalidation or Apple map tiles fail; inline copy is sanitized and Back/Try
+again remain available. Review list and Location Evidence detail use the same
+right-aligned page-title chrome as Settings instead of repeating the Dayframe
+brand lock-up.
 
 The evidence GET has a 10-second client ceiling. Direct-only location actions
 have a 15-second ceiling and keep their draft after failure. Confirm,
@@ -119,7 +124,9 @@ fixture, so query parallelism and instrumentation are the only endpoint changes.
 - Detail owner: the existing native stack pop occurs after local commit. Failed
   local/direct writes retain the route and draft. Fresh evidence updates local
   state without remount or spatial animation, and a reserved inline status area
-  avoids control movement.
+  avoids control movement. Cache hydration owns one cancellable 300 ms feedback
+  delay; a warm hit cancels it before any panel enters, while a cold load retains
+  the existing in-screen feedback until success or failure.
 - Interruption: per-item/screen guards reject repeated actions; generation and
   abort ownership prevent stale callbacks from navigating a newer route.
 - Reduce Motion: existing opacity/immediate layout paths remain the owner; no new
@@ -136,16 +143,17 @@ Supabase, Vercel Preview, or production evidence.
 
 Current results:
 
-- focused mobile Review/API tests: PASS (5 files, 104 tests); the cancellation
+- focused mobile Review/API tests: PASS (5 files, 119 tests); the cancellation
   follow-up passed the evidence-cache, API, and network boundary suites at 3
-  files and 91 tests, followed by the complete mobile suite at 77 files and 733
-  tests;
+  files and 91 tests; the header/loading follow-up then passed the complete
+  mobile suite at 77 files and 735 tests;
 - focused web Location Evidence/Review mutation tests: PASS (18 tests), followed
   by the complete web suite at 122 passed files, 1 skipped file, 836 passed
   tests, and 1 skipped test;
 - `npm run lint`: PASS with two pre-existing unused-parameter warnings in
-  `event-service.test.ts`; `npm run typecheck`: PASS; `npm run test`: PASS with
-  1,725 passed tests and 1 skipped test; `npm run build`: PASS;
+  `event-service.test.ts`; `npm run typecheck`: PASS; the header/loading
+  follow-up repository suites passed with 1,727 tests and 1 skipped test after
+  one unrelated CategoryPicker timing retry; `npm run build`: PASS;
 - the unrelated timing-sensitive `categoryPicker.dom.test.tsx` and
   `calendarClickCreate.dom.test.tsx` tests each failed once in separate full
   runs, then passed 6/6 and 9/9 in isolation respectively; each following

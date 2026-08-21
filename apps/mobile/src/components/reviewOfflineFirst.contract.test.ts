@@ -30,4 +30,21 @@ describe("offline-first Review screen contracts", () => {
       detailSource.indexOf("router.back();")
     );
   });
+
+  it("uses Settings-style titles and delays cold evidence feedback", () => {
+    expect(reviewSource).toContain(
+      '<Text style={styles.settingsTitle} numberOfLines={1}>Review</Text>'
+    );
+    expect(detailSource).toContain(
+      '<Text style={styles.settingsTitle} numberOfLines={1}>Location evidence</Text>'
+    );
+    expect(reviewSource).not.toContain("DayframeBrand");
+    expect(detailSource).not.toContain("DayframeBrand");
+    expect(detailSource).toContain("scheduleLocationEvidenceLoadingFeedback");
+    expect(detailSource).toContain("showHydrationFeedback ? (");
+    expect(detailSource).toContain("hydrationFeedbackCancelRef.current?.();");
+    expect(detailSource).toMatch(
+      /if \(cachedEvidence\) \{[\s\S]*?finishHydrationFeedback\(generation\);[\s\S]*?const contextRequest/
+    );
+  });
 });

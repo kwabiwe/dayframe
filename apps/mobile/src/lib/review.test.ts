@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  LOCATION_EVIDENCE_LOADING_FEEDBACK_DELAY_MS,
   REVIEW_COPY,
   CLOSED_REVIEW_MENU_STATE,
   buildReviewItemDraftEntry,
@@ -21,11 +22,37 @@ import {
   reviewConfidencePresentation,
   reviewConfirmLabel,
   reviewItemCategoryLabel,
-  reviewItemDurationSeconds
+  reviewItemDurationSeconds,
+  scheduleLocationEvidenceLoadingFeedback
 } from "./review";
 import type { MobileBootstrap, MobileReviewItem, MobileTimeEntry } from "./api";
 
 describe("mobile review helpers", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("delays cold evidence feedback without flashing it for warm hydration", async () => {
+    vi.useFakeTimers();
+    const warmFeedback = vi.fn();
+    const cancelWarmFeedback = scheduleLocationEvidenceLoadingFeedback(warmFeedback);
+
+    await vi.advanceTimersByTimeAsync(
+      LOCATION_EVIDENCE_LOADING_FEEDBACK_DELAY_MS - 1
+    );
+    cancelWarmFeedback();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(warmFeedback).not.toHaveBeenCalled();
+
+    const coldFeedback = vi.fn();
+    const cancelColdFeedback = scheduleLocationEvidenceLoadingFeedback(coldFeedback);
+    await vi.advanceTimersByTimeAsync(
+      LOCATION_EVIDENCE_LOADING_FEEDBACK_DELAY_MS
+    );
+    expect(coldFeedback).toHaveBeenCalledOnce();
+    cancelColdFeedback();
+  });
+
   it("classifies only needs_review entries as review-needed", () => {
     expect(isReviewNeededEntry({ reviewStatus: "needs_review" })).toBe(true);
     expect(isReviewNeededEntry({ reviewStatus: "confirmed" })).toBe(false);
