@@ -65,9 +65,13 @@ does not write the response. The request creator's abort signal reaches the
 actual evidence fetch; cancellation marks that exact request invalid and
 synchronously evicts only its identity so immediate reopen creates a
 replacement. Deduplicated consumers of the invalid request reject, only the
-current valid in-flight identity can begin cache persistence, and a cancelled
-fetch that ignores abort and resolves late cannot overwrite or delete the
-replacement.
+current valid in-flight identity can begin cache persistence, and ownership
+remains observed until every shared consumer settles. Each consumer checks the
+request again after the shared cache-write await. If cancellation occurs while
+SQLite persistence is open, the transaction discards that exact write when it
+can; a post-commit fallback awaits deletion only when account, Review ID,
+timestamp, and payload still match. A cancelled fetch therefore cannot return
+or remain cached, while cleanup cannot delete a newer replacement.
 
 ### Detail and transport behavior
 
@@ -134,14 +138,14 @@ Current results:
 
 - focused mobile Review/API tests: PASS (5 files, 104 tests); the cancellation
   follow-up passed the evidence-cache, API, and network boundary suites at 3
-  files and 90 tests, followed by the complete mobile suite at 77 files and 732
+  files and 91 tests, followed by the complete mobile suite at 77 files and 733
   tests;
 - focused web Location Evidence/Review mutation tests: PASS (18 tests), followed
   by the complete web suite at 122 passed files, 1 skipped file, 836 passed
   tests, and 1 skipped test;
 - `npm run lint`: PASS with two pre-existing unused-parameter warnings in
   `event-service.test.ts`; `npm run typecheck`: PASS; `npm run test`: PASS with
-  1,724 passed tests and 1 skipped test; `npm run build`: PASS;
+  1,725 passed tests and 1 skipped test; `npm run build`: PASS;
 - the unrelated timing-sensitive `categoryPicker.dom.test.tsx` and
   `calendarClickCreate.dom.test.tsx` tests each failed once in separate full
   runs, then passed 6/6 and 9/9 in isolation respectively; each following

@@ -223,6 +223,29 @@ expect_equal "$(sqlite3 "$database_path" "SELECT count(*) FROM location_review_e
 expect_equal "$(sqlite3 "$database_path" "SELECT count(*) FROM location_review_evidence_cache WHERE account_key='workspace-a:user-b'")" "0" "evidence account isolation"
 
 sqlite3 "$database_path" <<'SQL'
+INSERT INTO location_review_evidence_cache VALUES (
+  'workspace-a:user-b', 'evidence-cancel-race', '{"version":"replacement"}',
+  '2026-07-27T10:31:00Z', '2026-08-03T10:31:00Z', 25,
+  '2026-07-27T10:31:00Z'
+);
+DELETE FROM location_review_evidence_cache
+WHERE account_key='workspace-a:user-b'
+  AND review_item_id='evidence-cancel-race'
+  AND fetched_at='2026-07-27T10:30:00Z'
+  AND evidence_json='{"version":"cancelled"}';
+SQL
+expect_equal "$(sqlite3 "$database_path" "SELECT evidence_json FROM location_review_evidence_cache WHERE account_key='workspace-a:user-b' AND review_item_id='evidence-cancel-race'")" '{"version":"replacement"}' "stale cancellation cleanup preserves replacement evidence"
+
+sqlite3 "$database_path" <<'SQL'
+DELETE FROM location_review_evidence_cache
+WHERE account_key='workspace-a:user-b'
+  AND review_item_id='evidence-cancel-race'
+  AND fetched_at='2026-07-27T10:31:00Z'
+  AND evidence_json='{"version":"replacement"}';
+SQL
+expect_equal "$(sqlite3 "$database_path" "SELECT count(*) FROM location_review_evidence_cache WHERE account_key='workspace-a:user-b' AND review_item_id='evidence-cancel-race'")" "0" "exact cancellation cleanup removes only its stale row"
+
+sqlite3 "$database_path" <<'SQL'
 UPDATE location_review_evidence_cache
 SET expires_at='2026-07-27T09:59:59Z'
 WHERE account_key='workspace-a:user-a' AND review_item_id='evidence-03';
@@ -260,4 +283,4 @@ expect_equal "$(sqlite3 "$database_path" "SELECT count(*) FROM review_mutation_o
 expect_equal "$(sqlite3 "$database_path" "SELECT count(*) FROM location_review_evidence_cache WHERE account_key='workspace-a:user-a'")" "0" "evidence logout cascade"
 expect_equal "$(sqlite3 "$database_path" "SELECT count(*) FROM review_mutation_outbox WHERE account_key='workspace-a:user-b'")" "1" "logout preserves other isolated account fixture"
 
-echo "Review SQLite validation passed: WAL, foreign keys, busy timeout, v4 schema, immediate hidden enqueue, duplicate rejection, item uniqueness, failed-write rollback, stale in-flight recovery, restart persistence, account isolation, auth-required hiding, evidence TTL/LRU/account scope, acknowledged hiding, canonical cleanup, and scoped logout cleanup."
+echo "Review SQLite validation passed: WAL, foreign keys, busy timeout, v4 schema, immediate hidden enqueue, duplicate rejection, item uniqueness, failed-write rollback, stale in-flight recovery, restart persistence, account isolation, auth-required hiding, evidence TTL/LRU/account scope, identity-safe cancellation cleanup, acknowledged hiding, canonical cleanup, and scoped logout cleanup."

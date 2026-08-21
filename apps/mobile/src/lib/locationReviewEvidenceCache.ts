@@ -5,7 +5,8 @@ import {
   cacheLocationReviewEvidence,
   getActiveReviewAccountIdentity,
   getLocationReviewEvidenceCacheDiagnostics,
-  loadCachedLocationReviewEvidence
+  loadCachedLocationReviewEvidence,
+  removeCachedLocationReviewEvidenceIfUnchanged
 } from "./reviewSyncStore";
 
 type EvidenceOwner = {
@@ -32,9 +33,13 @@ type InFlightEvidenceRequest = {
   networkPromise: Promise<LocationReviewEvidenceDto>;
   cachePromise: Promise<string> | null;
   valid: boolean;
+  consumerCount: number;
+  invalidate: () => void;
+  release: () => void;
 };
 
 const inFlightEvidenceRequests = new Map<string, InFlightEvidenceRequest>();
+let lastEvidenceCacheWriteMilliseconds = Number.NEGATIVE_INFINITY;
 let prefetchDiagnostics: PrefetchDiagnostics = {
   attempted: 0,
   completed: 0,
@@ -63,20 +68,25 @@ export async function revalidateLocationReviewEvidence(
 ): Promise<LocationReviewEvidenceReadResult> {
   throwIfAborted(input.signal);
   const request = networkLocationReviewEvidence(input);
-  const evidence = await awaitWithAbort(
-    request.networkPromise,
-    input.signal
-  );
-  throwIfAborted(input.signal);
-  throwIfRequestCannotPersist(input, request);
-  request.cachePromise ??= cacheNetworkEvidence(input, evidence, request);
-  const fetchedAt = await awaitWithAbort(request.cachePromise, input.signal);
-  throwIfAborted(input.signal);
-  return {
-    evidence,
-    source: "network",
-    cachedAt: fetchedAt
-  };
+  try {
+    const evidence = await awaitWithAbort(
+      request.networkPromise,
+      input.signal
+    );
+    throwIfAborted(input.signal);
+    throwIfRequestIsNotCurrent(input, request);
+    request.cachePromise ??= cacheNetworkEvidence(input, evidence, request);
+    const fetchedAt = await awaitWithAbort(request.cachePromise, input.signal);
+    throwIfAborted(input.signal);
+    throwIfRequestIsNotCurrent(input, request);
+    return {
+      evidence,
+      source: "network",
+      cachedAt: fetchedAt
+    };
+  } finally {
+    request.release();
+  }
 }
 
 export function createLocationReviewEvidencePrefetcher() {
@@ -184,6 +194,7 @@ function networkLocationReviewEvidence(input: EvidenceOwner) {
   let request = inFlightEvidenceRequests.get(key);
   if (!request) {
     let nextRequest: InFlightEvidenceRequest;
+    const ownerSignal = input.signal;
     const clearIfCurrent = () => {
       if (inFlightEvidenceRequests.get(key) === nextRequest) {
         inFlightEvidenceRequests.delete(key);
@@ -191,10 +202,14 @@ function networkLocationReviewEvidence(input: EvidenceOwner) {
     };
     const invalidate = () => {
       nextRequest.valid = false;
+      ownerSignal?.removeEventListener("abort", handleOwnerAbort);
       clearIfCurrent();
     };
-    const ownerSignal = input.signal;
     const handleOwnerAbort = () => invalidate();
+    const release = () => {
+      nextRequest.consumerCount = Math.max(0, nextRequest.consumerCount - 1);
+      if (nextRequest.consumerCount === 0) invalidate();
+    };
     ownerSignal?.addEventListener("abort", handleOwnerAbort, { once: true });
     const networkPromise = fetchLocationReviewEvidence(input.reviewItemId, {
       signal: ownerSignal
@@ -212,14 +227,19 @@ function networkLocationReviewEvidence(input: EvidenceOwner) {
       }, (error: unknown) => {
         invalidate();
         throw error;
-      })
-      .finally(() => {
-        ownerSignal?.removeEventListener("abort", handleOwnerAbort);
       });
-    nextRequest = { networkPromise, cachePromise: null, valid: true };
+    nextRequest = {
+      networkPromise,
+      cachePromise: null,
+      valid: true,
+      consumerCount: 0,
+      invalidate,
+      release
+    };
     request = nextRequest;
     inFlightEvidenceRequests.set(key, request);
   }
+  request.consumerCount += 1;
   return request;
 }
 
@@ -229,16 +249,21 @@ async function cacheNetworkEvidence(
   request: InFlightEvidenceRequest
 ) {
   const key = `${input.workspaceId}:${input.userId}:${input.reviewItemId}`;
-  throwIfRequestCannotPersist(input, request);
-  const fetchedAt = new Date().toISOString();
+  throwIfRequestIsNotCurrent(input, request);
+  const fetchedAt = nextEvidenceCacheWriteAt();
+  let written = false;
+  let completed = false;
   try {
-    await cacheLocationReviewEvidence({
+    written = await cacheLocationReviewEvidence({
       expectedWorkspaceId: input.workspaceId,
       expectedUserId: input.userId,
       reviewItemId: input.reviewItemId,
       evidence,
-      fetchedAt
+      fetchedAt,
+      isStillCurrent: () => request.valid &&
+        inFlightEvidenceRequests.get(key) === request
     });
+    throwIfRequestIsNotCurrent(input, request);
     const activeOwner = await getActiveReviewAccountIdentity();
     if (
       activeOwner?.workspaceId !== input.workspaceId ||
@@ -246,16 +271,35 @@ async function cacheNetworkEvidence(
     ) {
       throw new Error("The active Dayframe account changed.");
     }
+    throwIfRequestIsNotCurrent(input, request);
+    completed = true;
     return fetchedAt;
-  } finally {
-    request.valid = false;
-    if (inFlightEvidenceRequests.get(key) === request) {
-      inFlightEvidenceRequests.delete(key);
+  } catch (error) {
+    if (written) {
+      await removeCachedLocationReviewEvidenceIfUnchanged({
+        expectedWorkspaceId: input.workspaceId,
+        expectedUserId: input.userId,
+        reviewItemId: input.reviewItemId,
+        evidence,
+        fetchedAt
+      });
     }
+    throw error;
+  } finally {
+    if (!completed) request.invalidate();
   }
 }
 
-function throwIfRequestCannotPersist(
+function nextEvidenceCacheWriteAt() {
+  const milliseconds = Math.max(
+    Date.now(),
+    lastEvidenceCacheWriteMilliseconds + 1
+  );
+  lastEvidenceCacheWriteMilliseconds = milliseconds;
+  return new Date(milliseconds).toISOString();
+}
+
+function throwIfRequestIsNotCurrent(
   input: EvidenceOwner,
   request: InFlightEvidenceRequest
 ) {

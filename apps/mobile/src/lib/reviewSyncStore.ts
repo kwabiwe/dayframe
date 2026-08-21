@@ -770,6 +770,7 @@ export async function cacheLocationReviewEvidence(input: {
   reviewItemId: string;
   evidence: LocationReviewEvidenceDto;
   fetchedAt?: string;
+  isStillCurrent?: () => boolean;
 }) {
   const evidence = LocationReviewEvidenceDtoSchema.parse(input.evidence);
   if (evidence.reviewItemId !== input.reviewItemId) {
@@ -787,8 +788,19 @@ export async function cacheLocationReviewEvidence(input: {
   let written = false;
   await serialiseReviewMutation(() =>
     db.withExclusiveTransactionAsync(async (transaction) => {
+      const discardIfUnchanged = () => transaction.runAsync(
+        `delete from location_review_evidence_cache
+         where account_key = ? and review_item_id = ?
+           and fetched_at = ? and evidence_json = ?`,
+        key,
+        input.reviewItemId,
+        fetchedAt,
+        evidenceJson
+      );
+      if (input.isStillCurrent && !input.isStillCurrent()) return;
       const account = await activeAccount(transaction);
       if (!account || account.account_key !== key) return;
+      if (input.isStillCurrent && !input.isStillCurrent()) return;
       if (!isFutureIso(expiresAt)) {
         await transaction.runAsync(
           `delete from location_review_evidence_cache
@@ -817,16 +829,57 @@ export async function cacheLocationReviewEvidence(input: {
         byteSize,
         fetchedAt
       );
-      written = true;
+      if (input.isStillCurrent && !input.isStillCurrent()) {
+        await discardIfUnchanged();
+        return;
+      }
       await pruneLocationReviewEvidenceCacheForAccount(
         transaction,
         key,
         fetchedAt
       );
+      if (input.isStillCurrent && !input.isStillCurrent()) {
+        await discardIfUnchanged();
+        return;
+      }
+      written = true;
     })
   );
   if (written) emitChange();
   return written;
+}
+
+export async function removeCachedLocationReviewEvidenceIfUnchanged(input: {
+  expectedWorkspaceId: string;
+  expectedUserId: string;
+  reviewItemId: string;
+  evidence: LocationReviewEvidenceDto;
+  fetchedAt: string;
+}) {
+  const evidence = LocationReviewEvidenceDtoSchema.parse(input.evidence);
+  if (evidence.reviewItemId !== input.reviewItemId) {
+    throw new Error("Location evidence does not match this Review item.");
+  }
+  const fetchedAt = validIso(input.fetchedAt);
+  if (!fetchedAt) throw new Error("Location evidence cache time is invalid.");
+  const key = accountKey({
+    workspaceId: input.expectedWorkspaceId,
+    userId: input.expectedUserId
+  });
+  const db = await database();
+  const result = await serialiseReviewMutation(() =>
+    db.runAsync(
+      `delete from location_review_evidence_cache
+       where account_key = ? and review_item_id = ?
+         and fetched_at = ? and evidence_json = ?`,
+      key,
+      input.reviewItemId,
+      fetchedAt,
+      JSON.stringify(evidence)
+    )
+  );
+  if (result.changes > 0) emitChange();
+  return result.changes > 0;
 }
 
 export async function removeCachedLocationReviewEvidence(reviewItemId: string) {

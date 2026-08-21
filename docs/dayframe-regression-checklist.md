@@ -154,7 +154,9 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
   5 MiB measured as UTF-8, LRU pruning, canonical-open pruning, malformed-row
   deletion, request deduplication, serial foreground prefetch, cancellation,
   current-request-only cache writes after cancel/re-entry (including a
-  deduplicated consumer and a cancelled fetch that resolves late), and
+  deduplicated consumer, a cancelled fetch that resolves late, cancellation
+  while SQLite persistence is held open, post-write identity validation, and
+  exact stale-row cleanup that preserves a completed replacement), and
   logout/account-switch cascade. Cached text, times, category, route coordinates,
   and actions remain usable when Apple map tiles are unavailable; never expose a
   raw native/network exception.

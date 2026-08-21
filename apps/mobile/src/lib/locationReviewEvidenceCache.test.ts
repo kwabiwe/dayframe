@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LocationReviewEvidenceDto } from "@dayframe/shared";
 
 const fetchLocationReviewEvidence = vi.hoisted(() => vi.fn());
-const cacheLocationReviewEvidence = vi.hoisted(() => vi.fn(() => Promise.resolve(true)));
+const cacheLocationReviewEvidence = vi.hoisted(() =>
+  vi.fn((_input?: { fetchedAt?: string }) => Promise.resolve(true))
+);
+const removeCachedLocationReviewEvidenceIfUnchanged = vi.hoisted(() =>
+  vi.fn(() => Promise.resolve(true))
+);
 const getActiveReviewAccountIdentity = vi.hoisted(() => vi.fn(() => Promise.resolve({
   workspaceId: "10000000-0000-4000-8000-000000000001",
   userId: "20000000-0000-4000-8000-000000000001",
@@ -22,7 +27,8 @@ vi.mock("./reviewSyncStore", () => ({
   cacheLocationReviewEvidence,
   getActiveReviewAccountIdentity,
   getLocationReviewEvidenceCacheDiagnostics,
-  loadCachedLocationReviewEvidence
+  loadCachedLocationReviewEvidence,
+  removeCachedLocationReviewEvidenceIfUnchanged
 }));
 
 const {
@@ -41,6 +47,7 @@ describe("Location Review evidence cache orchestration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     cacheLocationReviewEvidence.mockResolvedValue(true);
+    removeCachedLocationReviewEvidenceIfUnchanged.mockResolvedValue(true);
     getActiveReviewAccountIdentity.mockResolvedValue({
       ...owner,
       workspaceName: "Personal"
@@ -274,6 +281,79 @@ describe("Location Review evidence cache orchestration", () => {
     expect(cacheLocationReviewEvidence).toHaveBeenCalledOnce();
     expect(cacheLocationReviewEvidence).toHaveBeenCalledWith(
       expect.objectContaining({ evidence: replacementEvidence })
+    );
+  });
+
+  it("rejects shared stale evidence and removes its write when cancellation interrupts persistence", async () => {
+    const staleEvidence = {
+      ...evidenceFixture(),
+      textualSummary: "Persistence-held stale evidence."
+    };
+    const replacementEvidence = {
+      ...evidenceFixture(),
+      textualSummary: "Persistence replacement evidence."
+    };
+    let releaseStalePersistence: (() => void) | undefined;
+    cacheLocationReviewEvidence
+      .mockImplementationOnce(
+        () => new Promise<boolean>((resolve) => {
+          releaseStalePersistence = () => resolve(true);
+        })
+      )
+      .mockResolvedValueOnce(true);
+    fetchLocationReviewEvidence
+      .mockResolvedValueOnce(staleEvidence)
+      .mockResolvedValueOnce(replacementEvidence);
+    const ownerController = new AbortController();
+    const deduplicatedController = new AbortController();
+    const replacementController = new AbortController();
+    const cancellation = new Error("App backgrounded.");
+
+    const cancelledOwner = revalidateLocationReviewEvidence({
+      ...owner,
+      reviewItemId: staleEvidence.reviewItemId,
+      signal: ownerController.signal
+    });
+    const deduplicatedConsumer = revalidateLocationReviewEvidence({
+      ...owner,
+      reviewItemId: staleEvidence.reviewItemId,
+      signal: deduplicatedController.signal
+    });
+    const ownerRejection = expect(cancelledOwner).rejects.toBe(cancellation);
+    const deduplicatedRejection = expect(deduplicatedConsumer).rejects.toThrow(
+      "cancelled or superseded"
+    );
+    await vi.waitFor(() => {
+      expect(cacheLocationReviewEvidence).toHaveBeenCalledOnce();
+    });
+
+    ownerController.abort(cancellation);
+    const replacement = revalidateLocationReviewEvidence({
+      ...owner,
+      reviewItemId: replacementEvidence.reviewItemId,
+      signal: replacementController.signal
+    });
+    expect(fetchLocationReviewEvidence).toHaveBeenCalledTimes(2);
+    await expect(replacement).resolves.toMatchObject({
+      evidence: replacementEvidence,
+      source: "network"
+    });
+
+    releaseStalePersistence?.();
+    await ownerRejection;
+    await deduplicatedRejection;
+    const staleWrite = cacheLocationReviewEvidence.mock.calls[0]?.[0];
+    const replacementWrite = cacheLocationReviewEvidence.mock.calls[1]?.[0];
+    expect(staleWrite?.fetchedAt).not.toBe(replacementWrite?.fetchedAt);
+    expect(removeCachedLocationReviewEvidenceIfUnchanged).toHaveBeenCalledOnce();
+    expect(removeCachedLocationReviewEvidenceIfUnchanged).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedWorkspaceId: owner.workspaceId,
+        expectedUserId: owner.userId,
+        reviewItemId: staleEvidence.reviewItemId,
+        evidence: staleEvidence,
+        fetchedAt: staleWrite?.fetchedAt
+      })
     );
   });
 
