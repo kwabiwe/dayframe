@@ -327,7 +327,7 @@ Functional requirements:
 - ✅ Only allowlisted beta users can create accounts.
 - ✅ Web and mobile share active timer state.
 - ✅ Mobile can queue events offline and sync later with retry and diagnostics; real-device reconnect/background/conflict behaviour remains under Watch before wider beta confidence.
-- ⚠️ iOS provides one informational offline/restored status surface and ordered reconnect prompts for existing durable owners; signed staging and physical-iPhone network-transition evidence remains required before release confidence.
+- ⚠️ iOS provides one compact in-layout offline/recovery status strip and ordered reconnect prompts for existing durable owners. It claims success only after those owners converge, including an offline timer Start that becomes durable after reconnect has begun; signed staging and physical-iPhone network-transition evidence remains required before release confidence.
 - ✅ Trusted places can auto-start entries.
 - ✅ Ambiguous location events appear in review.
 - ✅ HealthKit sleep and workouts/walks appear as time entries or high-confidence review items; duplicate/overlapping Sleep remains a tracked investigation.

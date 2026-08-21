@@ -97,7 +97,7 @@ npm run export:workspace -- ./dayframe-backup.json
 
 - Mobile session tokens live in Expo SecureStore.
 - Offline event capture goes through the queue in `apps/mobile/src/lib/api.ts`.
-- Mobile connectivity has one process-wide NetInfo owner. Its banner is informational: never replace durable queues, clear pending work, or disable an otherwise offline-capable action solely because reachability reports offline. Validate network transitions on a physical iPhone; Simulator and unit results are not device evidence.
+- Mobile connectivity has one process-wide NetInfo owner. Its icon-free status strip is informational, in flow below the active screen/sheet header, and may claim success only after ordered recovery and final bootstrap complete with no queued work. Never restore an absolute connectivity overlay, replace durable queues, clear pending work, or disable an otherwise offline-capable action solely because reachability reports offline. Validate network transitions, layout and timer convergence on a physical iPhone; Simulator and unit results are not device evidence.
 - Geofence tasks must remain defined at module top level.
 - HealthKit access is iOS native-build only; do not assume Expo Go can exercise it.
 - Keep `EXPO_PUBLIC_DAYFRAME_API_BASE` configurable for hosted Vercel, simulator, and physical iPhone testing.

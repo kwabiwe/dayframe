@@ -8,10 +8,12 @@ export type ConnectivityRecoveryStepName =
 
 export type ConnectivityRecoveryStepResult =
   | "continue"
+  | "application_failure"
   | "transport_failure";
 
 export type ConnectivityRecoveryPassResult =
   | "completed"
+  | "failed"
   | "interrupted"
   | "transport_failure"
   | "authentication_required";
@@ -30,6 +32,8 @@ export type ConnectivityRecoveryStep = {
 
 export type ReviewConnectivityRecoveryResult = {
   reason?: "no_account" | "no_session" | "retryable_failure";
+  waitingCount?: number;
+  needsAttentionCount?: number;
 };
 
 export type LocationConnectivityRecoveryResult = {
@@ -47,17 +51,25 @@ export type LocationConnectivityRecoveryResult = {
 export function reviewConnectivityRecoveryStepResult(
   result: ReviewConnectivityRecoveryResult
 ): ConnectivityRecoveryStepResult {
-  return result.reason === "retryable_failure"
-    ? "transport_failure"
-    : "continue";
+  if (result.reason === "retryable_failure") return "transport_failure";
+  if (
+    result.reason === "no_session" ||
+    (result.waitingCount ?? 0) > 0 ||
+    (result.needsAttentionCount ?? 0) > 0
+  ) {
+    return "application_failure";
+  }
+  return "continue";
 }
 
 export function locationConnectivityRecoveryStepResult(
   result: LocationConnectivityRecoveryResult
 ): ConnectivityRecoveryStepResult {
-  return result.reason === "request_failed" || result.reason === "replay_failed"
-    ? "transport_failure"
-    : "continue";
+  if (result.reason === "request_failed" || result.reason === "replay_failed") {
+    return "transport_failure";
+  }
+  if (!result.synced && result.reason !== "v1") return "application_failure";
+  return "continue";
 }
 
 export function createSharedInFlightOperation<Result>() {
@@ -93,6 +105,7 @@ export async function runConnectivityRecoveryPass(input: {
   }) => void;
   steps: ConnectivityRecoveryStep[];
 }): Promise<ConnectivityRecoveryPassResult> {
+  let hadApplicationFailure = false;
   for (const step of input.steps) {
     if (!input.canContinue()) return "interrupted";
     const startedAt = Date.now();
@@ -111,6 +124,10 @@ export async function runConnectivityRecoveryPass(input: {
         recordOutcome("transport_failure");
         return "transport_failure";
       }
+      if (result === "application_failure") {
+        hadApplicationFailure = true;
+        recordOutcome("application_error");
+      }
     } catch (error) {
       if (input.isAuthenticationRequired(error)) {
         recordOutcome("authentication_required");
@@ -122,6 +139,7 @@ export async function runConnectivityRecoveryPass(input: {
         return "transport_failure";
       }
       input.onStepError?.(step.name, error);
+      hadApplicationFailure = true;
       recordOutcome("application_error");
     }
     if (!input.canContinue()) {
@@ -130,45 +148,88 @@ export async function runConnectivityRecoveryPass(input: {
     }
     if (!outcomeRecorded) recordOutcome("completed");
   }
-  return "completed";
+  return hadApplicationFailure ? "failed" : "completed";
 }
 
 export function createConnectivityRecoveryCoordinator(input: {
   canStart: () => boolean;
+  onPassFinished?: (input: {
+    epoch: number;
+    hasPendingPass: boolean;
+    result: ConnectivityRecoveryPassResult;
+  }) => void;
+  onPassStarted?: (epoch: number) => void;
   runPass: (epoch: number) => Promise<ConnectivityRecoveryPassResult>;
 }) {
   let lastHandledReconnectEpoch = 0;
   let reconnectRecoveryInFlight: Promise<void> | null = null;
   let queuedReconnectEpoch = 0;
+  let queuedWorkRevision = 0;
+  let handledWorkRevision = 0;
+  let interruptedReconnectEpoch = 0;
+  let ownershipRevision = 0;
 
   const drain = async () => {
     while (
-      queuedReconnectEpoch > lastHandledReconnectEpoch &&
+      (
+        queuedReconnectEpoch > lastHandledReconnectEpoch ||
+        queuedWorkRevision > handledWorkRevision ||
+        interruptedReconnectEpoch > 0
+      ) &&
       input.canStart()
     ) {
-      const epoch = queuedReconnectEpoch;
+      const epoch = Math.max(
+        queuedReconnectEpoch,
+        lastHandledReconnectEpoch,
+        interruptedReconnectEpoch
+      );
       queuedReconnectEpoch = 0;
+      interruptedReconnectEpoch = 0;
       lastHandledReconnectEpoch = epoch;
+      handledWorkRevision = queuedWorkRevision;
+      const passOwnershipRevision = ownershipRevision;
+      input.onPassStarted?.(epoch);
       const result = await input.runPass(epoch);
+      if (
+        result === "interrupted" &&
+        passOwnershipRevision === ownershipRevision
+      ) {
+        interruptedReconnectEpoch = epoch;
+      }
+      const hasPendingPass =
+        queuedReconnectEpoch > lastHandledReconnectEpoch ||
+        queuedWorkRevision > handledWorkRevision ||
+        interruptedReconnectEpoch > 0;
+      input.onPassFinished?.({ epoch, hasPendingPass, result });
       if (result === "authentication_required") break;
+      if (result === "interrupted" && !input.canStart()) break;
     }
   };
 
   return {
     ignore(epoch: number) {
+      ownershipRevision += 1;
       lastHandledReconnectEpoch = Math.max(lastHandledReconnectEpoch, epoch);
+      handledWorkRevision = queuedWorkRevision;
+      interruptedReconnectEpoch = 0;
       if (queuedReconnectEpoch <= lastHandledReconnectEpoch) {
         queuedReconnectEpoch = 0;
       }
     },
-    request(epoch: number) {
+    request(epoch: number, options: { queuedWorkArrived?: boolean } = {}) {
+      const queuedWorkArrived = options.queuedWorkArrived === true;
       if (
-        epoch <= lastHandledReconnectEpoch ||
+        (
+          !queuedWorkArrived &&
+          epoch <= lastHandledReconnectEpoch &&
+          interruptedReconnectEpoch === 0
+        ) ||
         epoch <= 0 ||
         !input.canStart()
       ) {
         return reconnectRecoveryInFlight ?? Promise.resolve();
       }
+      if (queuedWorkArrived) queuedWorkRevision += 1;
       queuedReconnectEpoch = Math.max(queuedReconnectEpoch, epoch);
       reconnectRecoveryInFlight ??= drain().finally(() => {
         reconnectRecoveryInFlight = null;
@@ -178,8 +239,10 @@ export function createConnectivityRecoveryCoordinator(input: {
     snapshot() {
       return {
         inFlight: reconnectRecoveryInFlight !== null,
+        interruptedReconnectEpoch,
         lastHandledReconnectEpoch,
-        queuedReconnectEpoch
+        queuedReconnectEpoch,
+        queuedWorkPending: queuedWorkRevision > handledWorkRevision
       };
     }
   };

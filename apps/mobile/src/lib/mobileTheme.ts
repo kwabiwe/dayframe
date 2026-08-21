@@ -161,6 +161,17 @@ function createStyles(theme: MobileTheme) {
       backgroundColor: theme.background,
       zIndex: 10
     },
+    connectivityStatusStripScreen: {
+      marginHorizontal: 16,
+      marginBottom: 8
+    },
+    connectivityStatusStripContained: {
+      marginTop: 4,
+      marginBottom: 8
+    },
+    connectivityStatusStripSheet: {
+      marginBottom: 4
+    },
     tabScreenStack: {
       gap: 12
     },

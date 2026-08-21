@@ -3,7 +3,7 @@
 Date: 2026-08-21
 Baseline: `origin/main` at `2b732d20b4aec50f113529adeffdcfc81b979bb4` (merged PR #183)
 Implementation branch: `codex/pr184-global-connectivity-status`
-Status: PR-review corrections and repository validation complete; corrected-SHA review, hosted, signed-build, and physical-iPhone evidence pending
+Status: physical-iPhone follow-up corrections implemented and locally verified; exact-SHA re-review, hosted checks, and fresh physical evidence pending
 
 ## Problem And Boundary
 
@@ -13,29 +13,29 @@ This change adds informational transport state and reconnect orchestration only.
 
 ## State And Ownership
 
-- `connectivityState.ts` is a pure `unknown | online | offline` machine with 300 ms offline confirmation, 600 ms native-online confirmation, a 2.5-second reconnect notice and a 500 ms transport-refresh cooldown.
-- Offline requires explicit native evidence. Ambiguous native state preserves the last confirmed state. Initial unknown-to-online creates neither a green notice nor a reconnect epoch.
-- Only confirmed offline-to-online increments the monotonic epoch and notice ID. Current Dayframe HTTP responses confirm transport immediately; a request generation captured before newer confirmed offline evidence cannot reverse that state.
+- `connectivityState.ts` is a pure transport/recovery presentation machine with 300 ms offline confirmation, 400 ms native-online confirmation, a two-second successful-recovery notice and a 500 ms transport-refresh cooldown.
+- Offline requires explicit native evidence. Ambiguous native state preserves the last confirmed state. Initial unknown-to-online creates neither a status strip nor a reconnect epoch.
+- Only confirmed offline-to-online increments the monotonic epoch. Reachability alone leaves recovery presentation idle; the authenticated recovery coordinator must explicitly report start and final outcome. Current Dayframe HTTP responses confirm transport immediately, while a request generation captured before newer confirmed offline evidence cannot reverse that state.
 - Caller cancellation, `AbortError`, request deadline, stale-session rejection, HTTP status and application error do not set offline. A genuine fetch/native transport rejection requests a coalesced NetInfo refresh; native truth decides the result.
 - `connectivityMonitor.ts` owns one reference-safe native listener and no account data. The root provider refreshes it on foreground without blocking the first render. A platform-neutral evidence bridge keeps the normal API/test boundary from importing the native module.
-- The banner is a passive absolute overlay. Root navigation owns the only accessibility announcement; the four existing React Native Modal hosts mirror the same state/notice ID with announcements suppressed because native modals occupy a separate presentation layer.
+- `ConnectivityStatusStrip` is a passive, icon-free, one-line, 36-point in-flow component. Each active screen and native React `Modal` host places it below its own header so navigation/sheet actions, content, keyboard, native tabs and the home indicator remain unobscured. Visual hosts are hidden from accessibility; one nonvisual root owner makes the transition announcement.
 - Connectivity is memory-only. No SSID, BSSID, IP, carrier, cell generation, account identifier, token, activity text, category, location, route point or request body is collected or logged.
 
-Durable stores remain authoritative. The banner never clears pending work and `isOffline` is not used to disable Start, Stop, Review terminal actions, cached evidence navigation or another offline-capable action.
+Durable stores remain authoritative. The strip never clears pending work and `isOffline` is not used to disable Start, Stop, Review terminal actions, cached evidence navigation or another offline-capable action. Known offline is used only to avoid a doomed immediate timer request or redundant cached-dashboard refresh before writing/retaining the same durable work.
 
 ## Motion Contract
 
-- Trigger: a committed offline state inserts the persistent notice; a committed offline-to-online transition replaces it with the temporary restored notice; matched notice expiry removes only that restored notice.
-- Single owner: `ConnectivityBanner` owns its Reanimated presence. Navigation, native tabs, screens, lists, sheets and keyboard do not animate or re-layout for this state.
-- Entrance/update/exit: opacity plus the existing small `rise` translation; no spring, bounce, scale or surrounding layout animation. The monotonic view-model key distinguishes transitions.
-- Layout: the host is absolute below the safe-area inset with 12-point gutters, bounded width and `pointerEvents="none"`; content and native tab geometry do not move.
-- Interruption: confirmed offline immediately supersedes a green notice and invalidates its matched dismissal timer. Rapid candidates are debounced by the state owner; stale candidate, request and notice identities cannot commit.
-- Async rollback/failure: there is no optimistic visual claim to roll back. The green copy says only `Checking saved changes`; a recovery failure cannot falsely claim successful sync and existing feature diagnostics remain authoritative.
-- Reduce Motion: the existing Dayframe helper makes presence immediate or opacity-only. Status, duration and the one root VoiceOver announcement remain unchanged.
+- Trigger: confirmed offline inserts the persistent strip; recovery-owner start changes it to syncing; final complete/incomplete outcome changes it in place to success/failure; only matched success expiry removes it.
+- Single owner: `ConnectivityStatusStrip` owns its Reanimated presence and local layout transition. The process monitor owns status identity and success expiry; screens, lists, sheets, keyboard and native tabs do not add competing animations.
+- Entrance/update/exit: presence is a short opacity transition; wording updates in the existing fixed geometry; insertion/removal uses the established local layout transition with no spring, bounce or scale.
+- Layout: every visual host is in normal flow below its active header, with 36-point normal geometry and `pointerEvents="none"`; surrounding content yields that space instead of being covered. The same dimensions apply to offline, syncing, success and failure.
+- Interruption: confirmed offline immediately supersedes recovery and invalidates matched success expiry. Background interruption retains the epoch for one ordered foreground resume; sign-out/account replacement invalidates the old owner and clears its status. A newer epoch or late durable-work revision prevents stale completion from dismissing/replacing newer state. Rapid native candidates retain the existing bounded confirmation.
+- Async outcome: `Back online, syncing…` exists only while a pass runs. `All changes synced` requires the last serialized pass to return `completed` after all applicable owners plus a throwing final bootstrap; typed failures or remaining durable work produce persistent `Some changes haven’t synced`.
+- Reduce Motion: the existing Dayframe helper removes layout travel and uses immediate/opacity-only presence. Status, two-second success duration and the one root VoiceOver announcement remain unchanged.
 
 ## Reconnect Order
 
-One active authenticated coordinator handles each newer epoch at most once and retains only the latest epoch received during an in-flight pass:
+One active authenticated coordinator handles each newer epoch serially and retains only the latest epoch received during an in-flight pass. A durable timer Start that arrives after an epoch passed the activity queue may request one additional same-epoch serialized pass; duplicate requests still share the active promise and no passes run in parallel:
 
 1. deliver explicit timer Stops that already have canonical targets;
 2. drain native Shortcut and general `activity_events`, preserving optimistic timer-start correlation;
@@ -44,7 +44,7 @@ One active authenticated coordinator handles each newer epoch at most once and r
 5. resume Location Intelligence native drain, processing, upload and replay through its existing coalescing/account guards;
 6. request one silent bootstrap to reconcile timer, Review/category/cache and Live Activity presentation.
 
-The pass rechecks authentication, active app state and confirmed online state between steps. Authentication preserves the existing signed-out transition. Transport interruption stops quietly; an independent application/permanent error is safely classified and later owners may continue. Reconnect itself does not import HealthKit; already queued Health events remain part of the general queue.
+The pass rechecks authentication, active app state and confirmed online state between steps. Authentication preserves the existing signed-out transition. A background interruption retains the epoch and resumes the complete order once foreground execution is available; sign-out invalidates that account-owned continuation. Transport loss waits for a newer confirmed reconnect. An independent application/permanent error is recorded, later owners may continue where safe, and the final pass result remains failed so success cannot appear. Reconnect itself does not import HealthKit; already queued Health events remain part of the general queue.
 
 ### PR review correction
 
@@ -55,6 +55,15 @@ Review of `fa4a7091be68f4253139d3678624244aa152731b` found two recovery-boundary
 - Behavioural coverage holds an existing queue drain open while reconnect begins, proves the queued start is correlated before exactly one Stop delivery, and proves returned Review and Location failures stop the pass without relying on thrown exceptions.
 
 These corrections change no dependency, native binary input, API/database contract, queue format, status presentation, motion contract or reconnect ordering.
+
+### Physical iPhone follow-up correction
+
+Physical iPhone 11 testing of `35b45be1bcef8428579791fdd6d3ba593b111f33` found two separate blockers; no earlier approval or device result carries forward.
+
+- The absolute two-line banner covered the running-entry sheet's Done action and consumed about twice the requested height. Root/modal overlay ownership is replaced by the shared in-flow strip described above, including date-picker/menu/modal hosts and a single nonvisual VoiceOver announcer.
+- An offline timer Start could remain local after reconnect. A same-account cached Dashboard was usable while dashboard auth stayed `checking`; the reconnect effect treated that transient state like sign-out and marked the epoch ignored. Separately, a request begun around the network transition could finish timing out and enqueue its optimistic Start after the first recovery pass had already read an empty activity queue. The correction promotes cached operation to authenticated only after a current SecureStore session snapshot, reserves `ignore` for real signed-out/account transitions, queues a Start immediately when offline is already confirmed, and requests a coalesced same-epoch rerun when fallback becomes durable after reconnect began.
+- Behavioural coverage follows `offline -> optimistic Start -> reconnect -> initially empty drain -> late durable enqueue -> same-epoch drain -> /api/events canonical ID -> final bootstrap convergence`. It also retains shared-drain Start/Stop ordering, duplicate-epoch coalescing, background interruption/foreground resume and account-owner invalidation.
+- General queue, post-correlation Stop, Review and Location results now surface remaining/application work as an incomplete recovery. A final bootstrap must actually finish or throw; it cannot be treated as complete while another refresh/mutation owns it.
 
 ## Dependency And Native Impact
 
@@ -74,18 +83,18 @@ Physical staging must explicitly re-check timer Stop durability, Live Activities
 
 | Check | Result |
 | --- | --- |
-| Focused connectivity/transport/recovery/Review contracts | PASS: 6 files / 56 tests on the corrected implementation |
+| Focused connectivity/state/recovery/presentation contracts | PASS: 4 files / 52 tests on the physical-follow-up implementation; the new late-queued Start test failed against `35b45be1bcef8428579791fdd6d3ba593b111f33` before the fix |
 | Mobile typecheck | PASS: `npm run typecheck --workspace @dayframe/mobile` |
-| Complete mobile suite | PASS: 81 files / 781 tests on the corrected implementation |
-| `npx expo install --check` | EXPECTED FAIL: the unchanged repository baseline pins TypeScript 5.9.3 while Expo currently recommends `~6.0.3`. This toolchain mismatch predates the correction and was not expanded into PR #184; NetInfo itself remains linked and compatible. |
-| CocoaPods sync and lockfile review | PASS: `npx pod-install`; 115 dependencies / 114 installed pods. NetInfo 12.0.1 was autolinked and the review-correction pass produced no additional lockfile change. |
+| Complete mobile suite | PASS: 81 files / 791 tests on the physical-follow-up implementation |
+| `npx expo install --check` | EXPECTED FAIL: the unchanged repository baseline is one Expo patch behind the current recommendation for `expo`, `expo-linking`, `expo-location`, `expo-modules-core`, `expo-router` and `expo-task-manager`. This drift predates the follow-up and was not expanded into PR #184; no dependency manifest changed and NetInfo remains linked. |
+| CocoaPods sync and lockfile review | PASS: `npx pod-install`; 115 dependencies / 114 installed pods. NetInfo 12.0.1 was autolinked and the physical-follow-up pass produced no lockfile or native-project change. |
 | Review SQLite validator | PASS: `npm run validate:review-sync-sqlite` |
 | Location V2 SQLite validator | PASS: `npm run validate:location-v2-sqlite` |
-| Full repository lint/typecheck/test | PASS on the corrected implementation: lint has two pre-existing web-test warnings and no errors; mobile 81 files / 781 tests; web 122 passed and 1 skipped file, 836 passed and 1 skipped test; shared 12 files / 156 tests |
-| Full repository production build | PASS on the corrected implementation: `npm run build` |
-| Documentation, brand and whitespace checks | PASS: `npm run check:docs` (118 Markdown files), `npm run check:brand-assets`, and `git diff --check` |
-| Clean unsigned iOS Simulator build with fresh Derived Data | PASS again after the review corrections: `xcodebuild` Debug against the installed `Dayframe Sheet QA SE` Simulator with `ONLY_ACTIVE_ARCH=YES` and `CODE_SIGNING_ALLOWED=NO`; clean and build succeeded, including the app, Live Activity extension, HealthKit, Location modules and linked NetInfo. Only dependency/compiler/script warnings were emitted; temporary Derived Data and the build log were removed afterward. |
-| Corrected-SHA Vercel Preview and stable staging alias | NOT RUN |
+| Full repository lint/typecheck/test | PASS on the physical-follow-up implementation: lint has two pre-existing web-test warnings and no errors; mobile 81 files / 791 tests; web 122 passed and 1 skipped file, 836 passed and 1 skipped test; shared 12 files / 156 tests |
+| Full repository production build | PASS on the physical-follow-up implementation: `npm run build` |
+| Documentation, brand and whitespace checks | PASS locally before commit: `npm run check:docs` (118 Markdown files), `npm run check:brand-assets`, and `git diff --check`; exact-SHA hosted documentation/diff checks remain pending until push |
+| Clean unsigned iOS Simulator build with fresh Derived Data | PASS: `xcodebuild` Debug `clean build` against the installed iOS 26.5 `Dayframe Sheet QA SE` Simulator with `ONLY_ACTIVE_ARCH=YES` and `CODE_SIGNING_ALLOWED=NO`; the app, Live Activity extension, HealthKit, Location modules and linked NetInfo compiled. Only existing dependency/compiler/script warnings were emitted. |
+| Corrected-SHA GitHub and Vercel Preview checks | NOT RUN until the commit is pushed; stable staging promotion is intentionally out of scope |
 | Signed EAS `preview` build | NOT RUN |
 | Physical-iPhone matrix and measured timings | NOT RUN |
 
@@ -99,11 +108,11 @@ This is product behaviour, runtime ownership, mobile-native dependency, visible 
 
 - NetInfo reports transport reachability, not Dayframe server health; an HTTP response of any status proves transport but not successful application work.
 - iOS does not guarantee background execution after explicit force-quit. Durable owners retry when the app can run again.
-- Native React `Modal` surfaces require silent presentation mirrors because the root overlay is below their native layer.
+- Native React `Modal` surfaces require their own in-flow visual host because the root accessibility announcer is nonvisual and below their native layer.
 - Exact notice timing and flapping quality require a physical iPhone and real Wi-Fi/cellular transitions.
 
 Rollout requires a Ready PR Preview backed by staging Supabase, manual promotion to `dayframe-staging.vercel.app`, a signed EAS `preview` build, and the complete physical matrix before merge. Production and TestFlight remain untouched during PR validation.
 
 ## Rollback
 
-Revert the root provider/banner and modal mirrors, reconnect effects/coordinator, HTTP evidence integration, NetInfo dependency and Pod changes. No user-data migration or cleanup is required. Do not clear the general event queue, timer Stop outbox, Review outbox/cache, Location Evidence journal/cache or native hand-off storage. After rollback, PR #183's Review-specific stale messages and existing lifecycle retry triggers remain the safe fallback.
+Revert the root provider/announcer, in-flow strip hosts, reconnect effects/coordinator, HTTP evidence integration, NetInfo dependency and Pod changes. No user-data migration or cleanup is required. Do not clear the general event queue, timer Stop outbox, Review outbox/cache, Location Evidence journal/cache or native hand-off storage. After rollback, PR #183's Review-specific stale messages and existing lifecycle retry triggers remain the safe fallback.

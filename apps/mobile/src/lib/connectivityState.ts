@@ -1,9 +1,10 @@
 export const CONNECTIVITY_OFFLINE_CONFIRM_MS = 300;
-export const CONNECTIVITY_ONLINE_CONFIRM_MS = 600;
-export const CONNECTIVITY_RECONNECTED_NOTICE_MS = 2_500;
+export const CONNECTIVITY_ONLINE_CONFIRM_MS = 400;
+export const CONNECTIVITY_SUCCESS_NOTICE_MS = 2_000;
 export const CONNECTIVITY_REFRESH_COOLDOWN_MS = 500;
 
 export type ConnectivityStatus = "unknown" | "online" | "offline";
+export type ConnectivityRecoveryStatus = "idle" | "syncing" | "success" | "failure";
 export type ConnectivityTransitionSource = "initial" | "native" | "http";
 export type ConnectivityCandidate = "online" | "offline" | "ambiguous";
 
@@ -14,7 +15,8 @@ export type ConnectivitySnapshot = {
   connectionType: string | null;
   changedAt: number | null;
   reconnectEpoch: number;
-  reconnectNoticeId: number | null;
+  recoveryEpoch: number | null;
+  recoveryStatus: ConnectivityRecoveryStatus;
   source: ConnectivityTransitionSource;
 };
 
@@ -27,15 +29,13 @@ export type RawConnectivityObservation = {
 export type ConnectivityMachineState = ConnectivitySnapshot & {
   candidateRevision: number;
   requestGeneration: number;
-  reconnectNoticeSequence: number;
 };
 
-export type ConnectivityBannerViewModel = {
+export type ConnectivityStatusViewModel = {
   accessibilityLabel: string;
-  body: string | null;
   id: string;
-  title: string;
-  variant: "offline" | "reconnected";
+  text: string;
+  variant: "offline" | "syncing" | "success" | "failure";
 };
 
 export function createConnectivityMachineState(): ConnectivityMachineState {
@@ -46,11 +46,11 @@ export function createConnectivityMachineState(): ConnectivityMachineState {
     connectionType: null,
     changedAt: null,
     reconnectEpoch: 0,
-    reconnectNoticeId: null,
+    recoveryEpoch: null,
+    recoveryStatus: "idle",
     source: "initial",
     candidateRevision: 0,
-    requestGeneration: 0,
-    reconnectNoticeSequence: 0
+    requestGeneration: 0
   };
 }
 
@@ -64,7 +64,8 @@ export function connectivitySnapshot(
     connectionType: state.connectionType,
     changedAt: state.changedAt,
     reconnectEpoch: state.reconnectEpoch,
-    reconnectNoticeId: state.reconnectNoticeId,
+    recoveryEpoch: state.recoveryEpoch,
+    recoveryStatus: state.recoveryStatus,
     source: state.source
   };
 }
@@ -143,37 +144,94 @@ export function confirmHttpConnectivity(input: {
   };
 }
 
-export function dismissConnectivityReconnectNotice(
+export function beginConnectivityRecovery(
   state: ConnectivityMachineState,
-  noticeId: number
+  epoch: number
 ) {
-  if (state.reconnectNoticeId !== noticeId) return state;
-  return { ...state, reconnectNoticeId: null };
+  if (state.status !== "online" || state.reconnectEpoch !== epoch || epoch <= 0) {
+    return state;
+  }
+  return {
+    ...state,
+    recoveryEpoch: epoch,
+    recoveryStatus: "syncing" as const
+  };
 }
 
-export function connectivityBannerViewModel(
+export function finishConnectivityRecovery(
+  state: ConnectivityMachineState,
+  epoch: number,
+  outcome: Extract<ConnectivityRecoveryStatus, "success" | "failure">
+) {
+  if (
+    state.status !== "online" ||
+    state.reconnectEpoch !== epoch ||
+    state.recoveryEpoch !== epoch
+  ) {
+    return state;
+  }
+  return { ...state, recoveryStatus: outcome };
+}
+
+export function dismissConnectivityRecoverySuccess(
+  state: ConnectivityMachineState,
+  epoch: number
+) {
+  if (
+    state.status !== "online" ||
+    state.recoveryEpoch !== epoch ||
+    state.recoveryStatus !== "success"
+  ) {
+    return state;
+  }
+  return { ...state, recoveryEpoch: null, recoveryStatus: "idle" as const };
+}
+
+export function cancelConnectivityRecovery(
+  state: ConnectivityMachineState,
+  epoch: number
+) {
+  if (state.recoveryEpoch !== epoch) return state;
+  return { ...state, recoveryEpoch: null, recoveryStatus: "idle" as const };
+}
+
+export function connectivityStatusViewModel(
   snapshot: ConnectivitySnapshot
-): ConnectivityBannerViewModel | null {
+): ConnectivityStatusViewModel | null {
   if (snapshot.status === "offline") {
     return {
       accessibilityLabel:
-        "You’re offline. Changes will sync when you’re back online.",
-      body: "Changes will sync when you’re back online",
+        "Offline — changes will sync later",
       id: `offline-${snapshot.changedAt ?? 0}`,
-      title: "You’re offline",
+      text: "Offline — changes will sync later",
       variant: "offline"
     };
   }
-  if (snapshot.status === "online" && snapshot.reconnectNoticeId !== null) {
+  if (snapshot.status !== "online" || snapshot.recoveryStatus === "idle") {
+    return null;
+  }
+  if (snapshot.recoveryStatus === "syncing") {
     return {
-      accessibilityLabel: "Back online. Checking saved changes.",
-      body: "Checking saved changes",
-      id: `reconnected-${snapshot.reconnectNoticeId}`,
-      title: "Back online",
-      variant: "reconnected"
+      accessibilityLabel: "Back online, syncing…",
+      id: `recovery-${snapshot.recoveryEpoch ?? 0}`,
+      text: "Back online, syncing…",
+      variant: "syncing"
     };
   }
-  return null;
+  if (snapshot.recoveryStatus === "success") {
+    return {
+      accessibilityLabel: "All changes synced",
+      id: `recovery-${snapshot.recoveryEpoch ?? 0}`,
+      text: "All changes synced",
+      variant: "success"
+    };
+  }
+  return {
+    accessibilityLabel: "Some changes haven’t synced",
+    id: `recovery-${snapshot.recoveryEpoch ?? 0}`,
+    text: "Some changes haven’t synced",
+    variant: "failure"
+  };
 }
 
 export function connectivitySnapshotsEqual(
@@ -186,7 +244,8 @@ export function connectivitySnapshotsEqual(
     left.connectionType === right.connectionType &&
     left.changedAt === right.changedAt &&
     left.reconnectEpoch === right.reconnectEpoch &&
-    left.reconnectNoticeId === right.reconnectNoticeId &&
+    left.recoveryEpoch === right.recoveryEpoch &&
+    left.recoveryStatus === right.recoveryStatus &&
     left.source === right.source;
 }
 
@@ -208,19 +267,17 @@ function commitConnectivityStatus(
   if (state.status === status) {
     return {
       ...state,
-      source,
-      reconnectNoticeId: status === "offline" ? null : state.reconnectNoticeId
+      source
     };
   }
   if (state.status === "offline" && status === "online") {
-    const reconnectNoticeId = state.reconnectNoticeSequence + 1;
     return {
       ...state,
       status,
       changedAt,
       reconnectEpoch: state.reconnectEpoch + 1,
-      reconnectNoticeId,
-      reconnectNoticeSequence: reconnectNoticeId,
+      recoveryEpoch: null,
+      recoveryStatus: "idle",
       source
     };
   }
@@ -228,7 +285,8 @@ function commitConnectivityStatus(
     ...state,
     status,
     changedAt,
-    reconnectNoticeId: null,
+    recoveryEpoch: null,
+    recoveryStatus: "idle",
     requestGeneration:
       status === "offline"
         ? state.requestGeneration + 1

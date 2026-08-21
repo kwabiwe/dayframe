@@ -44,6 +44,7 @@ Use this when working on frontend components.
 - A running compact edit must use the shell-owned timer mutation gate and atomically project the same Description/Category/Start values into bootstrap collections and the persistent timer draft. Preserve hidden tags, place and compatibility metadata; issue one PATCH plus one forced refresh; apply authoritative `updatedAt`; cancel/gate stale debounced timer writes; and roll both snapshots back exactly on failure.
 - Calendar portal placement is fixed and measurement-driven: prefer 8px below, flip above, clamp at 12px, and use a full 12px-gutter bounded phone card. Observe the anchor, panel, Calendar scroller, viewport and visual viewport; recompute on scroll, resize and zoom; never animate `top`/`left`; close if the anchor is detached or no longer intersects the Calendar viewport.
 - Keep the iOS dashboard focused on logo/header, active timer, start task, quick category actions, and Today summary.
+- Mobile connectivity status uses the shared icon-free `ConnectivityStatusStrip`: one line and 36 points high at normal text size, in flow immediately below the active screen/sheet header, with identical geometry for offline, syncing, success and failure. Visual hosts are accessibility-silent; one nonvisual root owner announces transitions. Never restore an absolute connectivity overlay, cover a header action, infer success from reachability alone, or use status to disable an offline-capable action.
 - Move location and HealthKit permission controls to onboarding and Settings.
 
 ## State And Forms

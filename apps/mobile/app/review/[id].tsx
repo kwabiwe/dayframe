@@ -15,6 +15,7 @@ import type {
   LocationReviewEvidenceDto
 } from "@dayframe/shared";
 import { LocationReviewCorrectionEditor } from "@/components/location/LocationReviewCorrectionEditor";
+import { ConnectivityStatusStrip } from "@/components/ConnectivityStatusStrip";
 import { MobileBackButton } from "@/components/MobileBackButton";
 import {
   AuthRequiredError,
@@ -391,6 +392,7 @@ export default function LocationReviewDetailScreen() {
           <Text style={styles.settingsTitle} numberOfLines={1}>Location evidence</Text>
         </View>
       </View>
+      <ConnectivityStatusStrip style={styles.connectivityStatusStripScreen} />
 
       {screenState.status === "hydrating" ? (
         showHydrationFeedback ? (

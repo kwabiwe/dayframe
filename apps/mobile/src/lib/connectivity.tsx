@@ -14,12 +14,16 @@ import {
   startConnectivityMonitor,
   subscribeConnectivity
 } from "./connectivityMonitor";
-import type { ConnectivityStatus } from "./connectivityState";
+import type {
+  ConnectivityRecoveryStatus,
+  ConnectivityStatus
+} from "./connectivityState";
 
 export type ConnectivityContextValue = {
   status: ConnectivityStatus;
   reconnectEpoch: number;
-  reconnectNoticeId: number | null;
+  recoveryEpoch: number | null;
+  recoveryStatus: ConnectivityRecoveryStatus;
   isOffline: boolean;
   isOnline: boolean;
 };
@@ -47,12 +51,14 @@ export function ConnectivityProvider({ children }: { children: ReactNode }) {
   const value = useMemo<ConnectivityContextValue>(() => ({
     status: snapshot.status,
     reconnectEpoch: snapshot.reconnectEpoch,
-    reconnectNoticeId: snapshot.reconnectNoticeId,
+    recoveryEpoch: snapshot.recoveryEpoch,
+    recoveryStatus: snapshot.recoveryStatus,
     isOffline: snapshot.status === "offline",
     isOnline: snapshot.status === "online"
   }), [
     snapshot.reconnectEpoch,
-    snapshot.reconnectNoticeId,
+    snapshot.recoveryEpoch,
+    snapshot.recoveryStatus,
     snapshot.status
   ]);
 

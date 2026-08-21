@@ -3,14 +3,17 @@ import { installConnectivityEvidenceReporter } from "./connectivityEvidence";
 import {
   CONNECTIVITY_OFFLINE_CONFIRM_MS,
   CONNECTIVITY_ONLINE_CONFIRM_MS,
-  CONNECTIVITY_RECONNECTED_NOTICE_MS,
   CONNECTIVITY_REFRESH_COOLDOWN_MS,
+  CONNECTIVITY_SUCCESS_NOTICE_MS,
+  beginConnectivityRecovery,
+  cancelConnectivityRecovery,
   confirmHttpConnectivity,
   confirmNativeConnectivity,
   connectivitySnapshot,
   connectivitySnapshotsEqual,
   createConnectivityMachineState,
-  dismissConnectivityReconnectNotice,
+  dismissConnectivityRecoverySuccess,
+  finishConnectivityRecovery,
   observeNativeConnectivity,
   rawConnectivityObservationsEqual,
   type ConnectivityCandidate,
@@ -37,7 +40,7 @@ let nativeUnsubscribe: (() => void) | null = null;
 let lastRawObservation: RawConnectivityObservation | null = null;
 let pendingCandidate: PendingCandidate | null = null;
 let candidateTimer: ReturnType<typeof setTimeout> | null = null;
-let reconnectNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+let recoverySuccessTimer: ReturnType<typeof setTimeout> | null = null;
 let refreshPromise: Promise<ConnectivitySnapshot> | null = null;
 let lastTransportRefreshAt = Number.NEGATIVE_INFINITY;
 const listeners = new Set<Listener>();
@@ -114,10 +117,32 @@ installConnectivityEvidenceReporter({
   reportResponse: reportHttpTransportResponse
 });
 
-export function dismissReconnectNotice(noticeId: number) {
-  applyMachineState(
-    dismissConnectivityReconnectNotice(machineState, noticeId)
-  );
+export function reportConnectivityRecoveryStarted(epoch: number) {
+  clearRecoverySuccessTimer();
+  applyMachineState(beginConnectivityRecovery(machineState, epoch));
+}
+
+export function reportConnectivityRecoveryFinished(input: {
+  epoch: number;
+  successful: boolean;
+}) {
+  applyMachineState(finishConnectivityRecovery(
+    machineState,
+    input.epoch,
+    input.successful ? "success" : "failure"
+  ));
+  if (
+    input.successful &&
+    machineState.recoveryEpoch === input.epoch &&
+    machineState.recoveryStatus === "success"
+  ) {
+    scheduleRecoverySuccessDismissal(input.epoch);
+  }
+}
+
+export function reportConnectivityRecoveryCancelled(epoch: number) {
+  clearRecoverySuccessTimer();
+  applyMachineState(cancelConnectivityRecovery(machineState, epoch));
 }
 
 export function __resetConnectivityMonitorForTests() {
@@ -150,12 +175,16 @@ function stopNativeMonitor() {
   nativeUnsubscribe?.();
   nativeUnsubscribe = null;
   clearCandidateTimer();
-  clearReconnectNoticeTimer();
+  clearRecoverySuccessTimer();
   lastRawObservation = null;
   refreshPromise = null;
-  if (machineState.reconnectNoticeId !== null) {
-    const noticeId = machineState.reconnectNoticeId;
-    applyMachineState(dismissConnectivityReconnectNotice(machineState, noticeId));
+  if (machineState.recoveryStatus !== "idle") {
+    machineState = {
+      ...machineState,
+      recoveryEpoch: null,
+      recoveryStatus: "idle"
+    };
+    publicSnapshot = connectivitySnapshot(machineState);
   }
 }
 
@@ -202,13 +231,7 @@ function applyMachineState(nextState: ConnectivityMachineState) {
   const previousSnapshot = publicSnapshot;
   machineState = nextState;
   const nextSnapshot = connectivitySnapshot(nextState);
-  if (nextSnapshot.status === "offline") clearReconnectNoticeTimer();
-  if (
-    nextSnapshot.reconnectNoticeId !== null &&
-    nextSnapshot.reconnectNoticeId !== previousSnapshot.reconnectNoticeId
-  ) {
-    scheduleReconnectNoticeDismissal(nextSnapshot.reconnectNoticeId);
-  }
+  if (nextSnapshot.status === "offline") clearRecoverySuccessTimer();
   if (connectivitySnapshotsEqual(previousSnapshot, nextSnapshot)) return;
   if (previousSnapshot.status !== nextSnapshot.status) {
     recordConnectivityTransition(previousSnapshot, nextSnapshot);
@@ -217,12 +240,12 @@ function applyMachineState(nextState: ConnectivityMachineState) {
   for (const listener of listeners) listener();
 }
 
-function scheduleReconnectNoticeDismissal(noticeId: number) {
-  clearReconnectNoticeTimer();
-  reconnectNoticeTimer = setTimeout(() => {
-    reconnectNoticeTimer = null;
-    dismissReconnectNotice(noticeId);
-  }, CONNECTIVITY_RECONNECTED_NOTICE_MS);
+function scheduleRecoverySuccessDismissal(epoch: number) {
+  clearRecoverySuccessTimer();
+  recoverySuccessTimer = setTimeout(() => {
+    recoverySuccessTimer = null;
+    applyMachineState(dismissConnectivityRecoverySuccess(machineState, epoch));
+  }, CONNECTIVITY_SUCCESS_NOTICE_MS);
 }
 
 function clearCandidateTimer() {
@@ -231,9 +254,9 @@ function clearCandidateTimer() {
   pendingCandidate = null;
 }
 
-function clearReconnectNoticeTimer() {
-  if (reconnectNoticeTimer) clearTimeout(reconnectNoticeTimer);
-  reconnectNoticeTimer = null;
+function clearRecoverySuccessTimer() {
+  if (recoverySuccessTimer) clearTimeout(recoverySuccessTimer);
+  recoverySuccessTimer = null;
 }
 
 function rawObservation(state: NetInfoState): RawConnectivityObservation {

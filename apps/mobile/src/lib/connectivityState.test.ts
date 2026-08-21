@@ -2,13 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CONNECTIVITY_OFFLINE_CONFIRM_MS,
   CONNECTIVITY_ONLINE_CONFIRM_MS,
+  beginConnectivityRecovery,
+  cancelConnectivityRecovery,
   classifyConnectivityCandidate,
   confirmHttpConnectivity,
   confirmNativeConnectivity,
-  connectivityBannerViewModel,
+  connectivityStatusViewModel,
   connectivitySnapshot,
   createConnectivityMachineState,
-  dismissConnectivityReconnectNotice,
+  dismissConnectivityRecoverySuccess,
+  finishConnectivityRecovery,
   observeNativeConnectivity,
   type ConnectivityMachineState,
   type RawConnectivityObservation
@@ -45,9 +48,9 @@ describe("connectivity state machine", () => {
     expect(connectivitySnapshot(state)).toMatchObject({
       status: "unknown",
       reconnectEpoch: 0,
-      reconnectNoticeId: null
+      recoveryStatus: "idle"
     });
-    expect(connectivityBannerViewModel(connectivitySnapshot(state))).toBeNull();
+    expect(connectivityStatusViewModel(connectivitySnapshot(state))).toBeNull();
   });
 
   it("commits initial online without a reconnect notice", () => {
@@ -59,7 +62,7 @@ describe("connectivity state machine", () => {
     expect(state).toMatchObject({
       status: "online",
       reconnectEpoch: 0,
-      reconnectNoticeId: null
+      recoveryStatus: "idle"
     });
   });
 
@@ -70,9 +73,8 @@ describe("connectivity state machine", () => {
       CONNECTIVITY_OFFLINE_CONFIRM_MS
     );
     expect(state.status).toBe("offline");
-    expect(connectivityBannerViewModel(connectivitySnapshot(state))).toMatchObject({
-      title: "You’re offline",
-      body: "Changes will sync when you’re back online",
+    expect(connectivityStatusViewModel(connectivitySnapshot(state))).toMatchObject({
+      text: "Offline — changes will sync later",
       variant: "offline"
     });
   });
@@ -101,19 +103,20 @@ describe("connectivity state machine", () => {
     })).toBe("online");
   });
 
-  it("increments the reconnect epoch and notice exactly once", () => {
+  it("increments the reconnect epoch without claiming recovery has started", () => {
     const offline = confirmedOffline();
     const online = confirmObserved(offline, ONLINE, CONNECTIVITY_ONLINE_CONFIRM_MS);
     const duplicate = confirmObserved(online, ONLINE, CONNECTIVITY_ONLINE_CONFIRM_MS);
     expect(online).toMatchObject({
       status: "online",
       reconnectEpoch: 1,
-      reconnectNoticeId: 1
+      recoveryStatus: "idle"
     });
     expect(duplicate).toMatchObject({
       reconnectEpoch: 1,
-      reconnectNoticeId: 1
+      recoveryStatus: "idle"
     });
+    expect(connectivityStatusViewModel(connectivitySnapshot(online))).toBeNull();
   });
 
   it("preserves confirmed offline status through an ambiguous observation", () => {
@@ -123,28 +126,31 @@ describe("connectivity state machine", () => {
     expect(ambiguous.state.status).toBe("offline");
   });
 
-  it("lets confirmed offline supersede an active reconnect notice", () => {
-    const reconnected = confirmedReconnect();
+  it("lets confirmed offline supersede active recovery status", () => {
+    const reconnected = beginConnectivityRecovery(confirmedReconnect(), 1);
     const offline = confirmObserved(
       reconnected,
       OFFLINE,
       CONNECTIVITY_OFFLINE_CONFIRM_MS
     );
-    expect(offline).toMatchObject({ status: "offline", reconnectNoticeId: null });
+    expect(offline).toMatchObject({ status: "offline", recoveryStatus: "idle" });
   });
 
-  it("ignores a stale notice dismissal after a newer offline state", () => {
-    const reconnected = confirmedReconnect();
-    const noticeId = reconnected.reconnectNoticeId!;
+  it("ignores a stale success dismissal after a newer offline state", () => {
+    const reconnected = finishConnectivityRecovery(
+      beginConnectivityRecovery(confirmedReconnect(), 1),
+      1,
+      "success"
+    );
     const offline = confirmObserved(
       reconnected,
       OFFLINE,
       CONNECTIVITY_OFFLINE_CONFIRM_MS
     );
-    expect(dismissConnectivityReconnectNotice(offline, noticeId)).toBe(offline);
+    expect(dismissConnectivityRecoverySuccess(offline, 1)).toBe(offline);
   });
 
-  it("assigns a newer notice ID to a second reconnect", () => {
+  it("assigns a newer epoch to a second reconnect", () => {
     const firstReconnect = confirmedReconnect();
     const secondOffline = confirmObserved(
       firstReconnect,
@@ -156,8 +162,38 @@ describe("connectivity state machine", () => {
       ONLINE,
       CONNECTIVITY_ONLINE_CONFIRM_MS
     );
-    expect(secondReconnect.reconnectNoticeId).toBe(2);
     expect(secondReconnect.reconnectEpoch).toBe(2);
+  });
+
+  it("shows syncing, success, and failure only from the matching recovery lifecycle", () => {
+    const reconnected = confirmedReconnect();
+    const syncing = beginConnectivityRecovery(reconnected, 1);
+    expect(connectivityStatusViewModel(connectivitySnapshot(syncing))).toMatchObject({
+      text: "Back online, syncing…",
+      variant: "syncing"
+    });
+
+    const success = finishConnectivityRecovery(syncing, 1, "success");
+    expect(connectivityStatusViewModel(connectivitySnapshot(success))).toMatchObject({
+      text: "All changes synced",
+      variant: "success"
+    });
+    expect(
+      connectivityStatusViewModel(connectivitySnapshot(
+        dismissConnectivityRecoverySuccess(success, 1)
+      ))
+    ).toBeNull();
+
+    const failure = finishConnectivityRecovery(syncing, 1, "failure");
+    expect(connectivityStatusViewModel(connectivitySnapshot(failure))).toMatchObject({
+      text: "Some changes haven’t synced",
+      variant: "failure"
+    });
+    expect(dismissConnectivityRecoverySuccess(failure, 1)).toBe(failure);
+    expect(cancelConnectivityRecovery(failure, 1)).toMatchObject({
+      recoveryEpoch: null,
+      recoveryStatus: "idle"
+    });
   });
 
   it("prevents a pre-offline HTTP request from overriding newer offline evidence", () => {

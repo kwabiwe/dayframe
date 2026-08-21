@@ -218,6 +218,47 @@ describe("connectivity recovery", () => {
     }
   );
 
+  it("reports failed when an owner completes with queued or permanent work remaining", async () => {
+    const calls: ConnectivityRecoveryStepName[] = [];
+    const result = await runConnectivityRecoveryPass({
+      canContinue: () => true,
+      isAuthenticationRequired: () => false,
+      isTransportFailure: () => false,
+      onAuthenticationRequired: vi.fn(),
+      steps: [
+        {
+          name: "review_outbox",
+          run: async () => {
+            calls.push("review_outbox");
+            return reviewConnectivityRecoveryStepResult({
+              waitingCount: 1,
+              needsAttentionCount: 0
+            });
+          }
+        },
+        {
+          name: "location_intelligence",
+          run: async () => {
+            calls.push("location_intelligence");
+            return locationConnectivityRecoveryStepResult({
+              synced: false,
+              reason: "invalid_batch"
+            });
+          }
+        },
+        {
+          name: "bootstrap",
+          run: async () => {
+            calls.push("bootstrap");
+          }
+        }
+      ]
+    });
+
+    expect(result).toBe("failed");
+    expect(calls).toEqual(["review_outbox", "location_intelligence", "bootstrap"]);
+  });
+
   it("publishes authentication failure and stops", async () => {
     const onAuthenticationRequired = vi.fn();
     const result = await runConnectivityRecoveryPass({
@@ -286,6 +327,140 @@ describe("connectivity recovery", () => {
       lastHandledReconnectEpoch: 3,
       queuedReconnectEpoch: 0
     });
+  });
+
+  it("drops a same-epoch queued-work rerun when account ownership is ignored", async () => {
+    let canStart = true;
+    const firstPass = deferred<"completed">();
+    const calls: number[] = [];
+    const coordinator = createConnectivityRecoveryCoordinator({
+      canStart: () => canStart,
+      runPass: vi.fn(async (epoch) => {
+        calls.push(epoch);
+        return firstPass.promise;
+      })
+    });
+
+    const recovery = coordinator.request(1);
+    void coordinator.request(1, { queuedWorkArrived: true });
+    canStart = false;
+    coordinator.ignore(1);
+    firstPass.resolve("completed");
+    await recovery;
+
+    expect(calls).toEqual([1]);
+    expect(coordinator.snapshot()).toMatchObject({
+      inFlight: false,
+      queuedReconnectEpoch: 0,
+      queuedWorkPending: false
+    });
+  });
+
+  it("retains an interrupted epoch for one serialized foreground resume", async () => {
+    let canStart = true;
+    const calls: number[] = [];
+    const finishes: Array<{ hasPendingPass: boolean; result: string }> = [];
+    const coordinator = createConnectivityRecoveryCoordinator({
+      canStart: () => canStart,
+      onPassFinished: ({ hasPendingPass, result }) => {
+        finishes.push({ hasPendingPass, result });
+      },
+      runPass: vi.fn(async (epoch) => {
+        calls.push(epoch);
+        if (calls.length === 1) {
+          canStart = false;
+          return "interrupted" as const;
+        }
+        return "completed" as const;
+      })
+    });
+
+    await coordinator.request(1);
+    expect(coordinator.snapshot()).toMatchObject({
+      inFlight: false,
+      interruptedReconnectEpoch: 1
+    });
+
+    canStart = true;
+    await coordinator.request(1);
+    expect(calls).toEqual([1, 1]);
+    expect(finishes).toEqual([
+      { hasPendingPass: true, result: "interrupted" },
+      { hasPendingPass: false, result: "completed" }
+    ]);
+    expect(coordinator.snapshot().interruptedReconnectEpoch).toBe(0);
+  });
+
+  it("replays an offline timer Start that becomes durable after reconnect already passed the queue", async () => {
+    const optimisticTimerId = "optimistic-active-timer:late-offline-start";
+    const canonicalTimerId = "timer-canonical-after-reconnect";
+    const queuedStarts: string[] = [];
+    const serverStarts: string[] = [];
+    const correlations = new Map<string, string>();
+    const firstBootstrapRelease = deferred<void>();
+    const firstActivityDrainPassed = deferred<void>();
+    const passFinishes: Array<{ hasPendingPass: boolean; result: string }> = [];
+    let canonicalActiveTimerId: string | null = null;
+    let passCount = 0;
+
+    const coordinator = createConnectivityRecoveryCoordinator({
+      canStart: () => true,
+      onPassFinished: ({ hasPendingPass, result }) => {
+        passFinishes.push({ hasPendingPass, result });
+      },
+      runPass: async () => {
+        passCount += 1;
+        const currentPass = passCount;
+        return runConnectivityRecoveryPass({
+          canContinue: () => true,
+          isAuthenticationRequired: () => false,
+          isTransportFailure: () => false,
+          onAuthenticationRequired: vi.fn(),
+          steps: [
+            {
+              name: "activity_queue",
+              run: async () => {
+                const queuedStart = queuedStarts.shift();
+                if (queuedStart) {
+                  serverStarts.push(queuedStart);
+                  correlations.set(queuedStart, canonicalTimerId);
+                }
+                if (currentPass === 1) firstActivityDrainPassed.resolve();
+              }
+            },
+            {
+              name: "bootstrap",
+              run: async () => {
+                if (currentPass === 1) await firstBootstrapRelease.promise;
+                canonicalActiveTimerId = correlations.get(optimisticTimerId) ?? null;
+              }
+            }
+          ]
+        });
+      }
+    });
+
+    // Connectivity returns while the original offline Start request is still
+    // timing out. The first recovery pass therefore sees an empty queue.
+    const recovery = coordinator.request(1);
+    await firstActivityDrainPassed.promise;
+
+    // The request then fails, and the optimistic Start becomes durable. This
+    // must schedule a same-epoch recovery after the current pass completes.
+    queuedStarts.push(optimisticTimerId);
+    void coordinator.request(1, { queuedWorkArrived: true });
+    firstBootstrapRelease.resolve();
+    await recovery;
+
+    expect(passCount).toBe(2);
+    expect(serverStarts).toEqual([optimisticTimerId]);
+    expect(queuedStarts).toEqual([]);
+    expect(correlations.get(optimisticTimerId)).toBe(canonicalTimerId);
+    expect(canonicalActiveTimerId).toBe(canonicalTimerId);
+    expect(passFinishes).toEqual([
+      { hasPendingPass: true, result: "completed" },
+      { hasPendingPass: false, result: "completed" }
+    ]);
   });
 });
 

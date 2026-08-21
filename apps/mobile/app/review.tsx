@@ -20,6 +20,7 @@ import {
   type ReviewMutation
 } from "@dayframe/shared";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
+import { ConnectivityStatusStrip } from "@/components/ConnectivityStatusStrip";
 import { MobileBackButton } from "@/components/MobileBackButton";
 import {
   OverflowMenu,
@@ -840,6 +841,7 @@ export default function ReviewScreen() {
           <Text style={styles.settingsTitle} numberOfLines={1}>Review</Text>
         </View>
       </View>
+      <ConnectivityStatusStrip style={styles.connectivityStatusStripScreen} />
       <ScrollView
         style={styles.settingsScrollView}
         contentContainerStyle={styles.settingsScrollContent}

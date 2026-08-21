@@ -68,12 +68,12 @@ describe("process-wide connectivity monitor", () => {
   it("fetches initial state and does not emit a reconnect for initial online", async () => {
     const stop = monitor.startConnectivityMonitor();
     await vi.runAllTicks();
-    await vi.advanceTimersByTimeAsync(600);
+    await vi.advanceTimersByTimeAsync(400);
     expect(netInfo.fetch).toHaveBeenCalledTimes(1);
     expect(monitor.getConnectivitySnapshot()).toMatchObject({
       status: "online",
       reconnectEpoch: 0,
-      reconnectNoticeId: null
+      recoveryStatus: "idle"
     });
     stop();
   });
@@ -86,44 +86,85 @@ describe("process-wide connectivity monitor", () => {
     expect(monitor.getConnectivitySnapshot().status).toBe("unknown");
 
     netInfo.emit(ONLINE);
-    await vi.advanceTimersByTimeAsync(600);
+    await vi.advanceTimersByTimeAsync(400);
     expect(monitor.getConnectivitySnapshot().status).toBe("online");
     stop();
   });
 
-  it("confirms reconnect once and dismisses only that notice after 2.5 seconds", async () => {
+  it("shows recovery success only after the owner reports completion and dismisses it after two seconds", async () => {
     netInfo.fetch.mockResolvedValueOnce(OFFLINE);
     const stop = monitor.startConnectivityMonitor();
     await vi.runAllTicks();
     await vi.advanceTimersByTimeAsync(300);
     netInfo.emit(ONLINE);
-    await vi.advanceTimersByTimeAsync(600);
+    await vi.advanceTimersByTimeAsync(400);
     expect(monitor.getConnectivitySnapshot()).toMatchObject({
       status: "online",
       reconnectEpoch: 1,
-      reconnectNoticeId: 1
+      recoveryStatus: "idle"
     });
+    monitor.reportConnectivityRecoveryStarted(1);
+    expect(monitor.getConnectivitySnapshot().recoveryStatus).toBe("syncing");
+    monitor.reportConnectivityRecoveryFinished({ epoch: 1, successful: true });
+    expect(monitor.getConnectivitySnapshot().recoveryStatus).toBe("success");
 
-    await vi.advanceTimersByTimeAsync(2_499);
-    expect(monitor.getConnectivitySnapshot().reconnectNoticeId).toBe(1);
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(monitor.getConnectivitySnapshot().recoveryStatus).toBe("success");
     await vi.advanceTimersByTimeAsync(1);
-    expect(monitor.getConnectivitySnapshot().reconnectNoticeId).toBeNull();
+    expect(monitor.getConnectivitySnapshot().recoveryStatus).toBe("idle");
     stop();
   });
 
-  it("keeps a newer offline state safe from a stale reconnect timer", async () => {
+  it("keeps a newer offline state safe from a stale recovery-success timer", async () => {
     netInfo.fetch.mockResolvedValueOnce(OFFLINE);
     const stop = monitor.startConnectivityMonitor();
     await vi.runAllTicks();
     await vi.advanceTimersByTimeAsync(300);
     netInfo.emit(ONLINE);
-    await vi.advanceTimersByTimeAsync(600);
+    await vi.advanceTimersByTimeAsync(400);
+    monitor.reportConnectivityRecoveryStarted(1);
+    monitor.reportConnectivityRecoveryFinished({ epoch: 1, successful: true });
     netInfo.emit(OFFLINE);
     await vi.advanceTimersByTimeAsync(300);
-    await vi.advanceTimersByTimeAsync(2_500);
+    await vi.advanceTimersByTimeAsync(2_000);
     expect(monitor.getConnectivitySnapshot()).toMatchObject({
       status: "offline",
-      reconnectNoticeId: null
+      recoveryStatus: "idle"
+    });
+    stop();
+  });
+
+  it("keeps a reported recovery failure visible instead of scheduling success dismissal", async () => {
+    netInfo.fetch.mockResolvedValueOnce(OFFLINE);
+    const stop = monitor.startConnectivityMonitor();
+    await vi.runAllTicks();
+    await vi.advanceTimersByTimeAsync(300);
+    netInfo.emit(ONLINE);
+    await vi.advanceTimersByTimeAsync(400);
+    monitor.reportConnectivityRecoveryStarted(1);
+    monitor.reportConnectivityRecoveryFinished({ epoch: 1, successful: false });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(monitor.getConnectivitySnapshot()).toMatchObject({
+      recoveryEpoch: 1,
+      recoveryStatus: "failure"
+    });
+    stop();
+  });
+
+  it("clears account-owned recovery presentation when its epoch is cancelled", async () => {
+    netInfo.fetch.mockResolvedValueOnce(OFFLINE);
+    const stop = monitor.startConnectivityMonitor();
+    await vi.runAllTicks();
+    await vi.advanceTimersByTimeAsync(300);
+    netInfo.emit(ONLINE);
+    await vi.advanceTimersByTimeAsync(400);
+    monitor.reportConnectivityRecoveryStarted(1);
+    monitor.reportConnectivityRecoveryCancelled(1);
+
+    expect(monitor.getConnectivitySnapshot()).toMatchObject({
+      recoveryEpoch: null,
+      recoveryStatus: "idle"
     });
     stop();
   });
@@ -147,7 +188,7 @@ describe("process-wide connectivity monitor", () => {
   it("coalesces transport-failure refreshes without directly setting offline", async () => {
     const stop = monitor.startConnectivityMonitor();
     await vi.runAllTicks();
-    await vi.advanceTimersByTimeAsync(600);
+    await vi.advanceTimersByTimeAsync(400);
     netInfo.refresh.mockClear();
 
     monitor.reportHttpTransportFailure();
@@ -176,7 +217,7 @@ describe("process-wide connectivity monitor", () => {
   it("ignores a response from a request started before newer offline evidence", async () => {
     const stop = monitor.startConnectivityMonitor();
     await vi.runAllTicks();
-    await vi.advanceTimersByTimeAsync(600);
+    await vi.advanceTimersByTimeAsync(400);
     const requestGeneration = monitor.connectivityRequestGeneration();
     netInfo.emit(OFFLINE);
     await vi.advanceTimersByTimeAsync(300);

@@ -45,6 +45,7 @@ import {
 } from "@dayframe/shared";
 import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
+import { ConnectivityStatusStrip } from "@/components/ConnectivityStatusStrip";
 import { TagMetadata } from "@/components/TagMetadata";
 import { DayframeBrand } from "@/components/brand";
 import {
@@ -89,6 +90,11 @@ import {
   runConnectivityRecoveryPass,
   type ConnectivityRecoveryPassResult
 } from "@/lib/connectivityRecovery";
+import {
+  reportConnectivityRecoveryCancelled,
+  reportConnectivityRecoveryFinished,
+  reportConnectivityRecoveryStarted
+} from "@/lib/connectivityMonitor";
 import { shouldApplyDashboardRefresh } from "@/lib/dashboardRefresh";
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
 import {
@@ -98,6 +104,7 @@ import {
 import { recordLocationStoreError } from "@/lib/location/store";
 import { mergePersistedMobileTag } from "@/lib/mobileTags";
 import { isMobileTransportFailure } from "@/lib/mobile-network";
+import { readAuthenticatedSessionSnapshot } from "@/lib/secure-session";
 import {
   shouldDismissExternallyStoppedActiveEditor,
   shouldResetCalendarToTodayOnForeground
@@ -222,6 +229,7 @@ type RejectedOptimisticStart = {
 };
 type TimerStopDeliverySummary = {
   delivered: boolean;
+  remainingCount: number;
   transportFailure: boolean;
 };
 export type DayframeDashboardTab = "timer" | "calendar" | "reports";
@@ -318,6 +326,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const pendingNativeShortcutLocalIds = useRef<Set<string>>(new Set());
   const timerMutationQueue = useRef(createSerializedMutationQueue());
   const timerMutationCount = useRef(0);
+  const queuedTimerStartRecoveryRequested = useRef(false);
   const dashboardMutationRevision = useRef(0);
   const loadRef = useRef<(options?: DashboardLoadOptions) => Promise<void>>(async () => undefined);
   const timerMutationVersions = useRef(new Map<string, number>());
@@ -356,10 +365,30 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       authStateCurrent.current === "authenticated" &&
       AppState.currentState === "active" &&
       connectivityCurrent.current.isOnline,
+    onPassStarted: reportConnectivityRecoveryStarted,
+    onPassFinished: ({ epoch, hasPendingPass, result }) => {
+      if (
+        hasPendingPass ||
+        result === "interrupted" ||
+        result === "authentication_required"
+      ) return;
+      reportConnectivityRecoveryFinished({
+        epoch,
+        successful:
+          result === "completed" &&
+          authStateCurrent.current === "authenticated" &&
+          AppState.currentState === "active" &&
+          connectivityCurrent.current.isOnline
+      });
+    },
     runPass: (epoch) => reconnectRecoveryPass.current(epoch)
   });
 
   const transitionToSignedOut = useCallback((options?: SignedOutTransitionOptions) => {
+    authStateCurrent.current = "signedOut";
+    const reconnectEpoch = connectivityCurrent.current.reconnectEpoch;
+    reconnectRecoveryCoordinator.current?.ignore(reconnectEpoch);
+    reportConnectivityRecoveryCancelled(reconnectEpoch);
     if (activeEditorOpenFrame.current !== null) {
       cancelAnimationFrame(activeEditorOpenFrame.current);
       activeEditorOpenFrame.current = null;
@@ -382,6 +411,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     manualEntryPresentationRef.current = null;
     dashboardMutationRevision.current += 1;
     refreshQueued.current = false;
+    queuedTimerStartRecoveryRequested.current = false;
     latestData.current = null;
     timerStateRef.current = null;
     setData(null);
@@ -449,6 +479,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       timerStopDeliveryQueued.current = true;
       return timerStopDeliveryPromise.current ?? {
         delivered: false,
+        remainingCount: 0,
         transportFailure: false
       };
     }
@@ -456,6 +487,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     const owner = timerStopOwner(bootstrap);
     const delivery = (async (): Promise<TimerStopDeliverySummary> => {
       let delivered = false;
+      let remainingCount = 0;
       let transportFailure = false;
       do {
         timerStopDeliveryQueued.current = false;
@@ -464,7 +496,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         for (const pendingStop of ownedStops) {
           const current = latestData.current;
           if (!current || !sameTimerStopOwner(timerStopOwner(current), owner)) {
-            return { delivered, transportFailure };
+            return { delivered, remainingCount: ownedStops.length, transportFailure };
           }
           if (!pendingStop.targetEntryId || pendingStop.failureKind === "permanent") continue;
           const result = await deliverPendingTimerStop(pendingStop, owner);
@@ -481,9 +513,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           await readPendingTimerStops(),
           owner
         );
+        remainingCount = remaining.length;
         setPendingTimerStops(remaining);
       } while (timerStopDeliveryQueued.current && !transportFailure);
-      return { delivered, transportFailure };
+      return { delivered, remainingCount, transportFailure };
     })();
     timerStopDeliveryPromise.current = delivery;
     try {
@@ -626,6 +659,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   const load = useCallback(async (options?: DashboardLoadOptions) => {
+    if (
+      connectivityCurrent.current.isOffline &&
+      latestData.current !== null &&
+      !options?.visibleRefresh &&
+      !options?.throwOnError
+    ) {
+      return;
+    }
     if (refreshInFlight.current || timerMutationCount.current > 0) {
       refreshQueued.current = true;
       if (options?.throwOnError) {
@@ -706,7 +747,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         return;
       }
       if (options?.throwOnError) throw error;
-      if (!options?.silent && !options?.visibleRefresh) {
+      const cachedOfflineDashboardAvailable =
+        connectivityCurrent.current.isOffline && latestData.current !== null;
+      if (
+        !options?.silent &&
+        !options?.visibleRefresh &&
+        !cachedOfflineDashboardAvailable
+      ) {
         Alert.alert("Dayframe API", error instanceof Error ? error.message : "Unable to load API");
       }
     } finally {
@@ -849,6 +896,23 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     void run.finally(() => {
       timerMutationCount.current = Math.max(0, timerMutationCount.current - 1);
       if (timerMutationCount.current === 0) {
+        if (queuedTimerStartRecoveryRequested.current) {
+          const coordinator = reconnectRecoveryCoordinator.current;
+          const currentConnectivity = connectivityCurrent.current;
+          if (
+            coordinator &&
+            authStateCurrent.current === "authenticated" &&
+            AppState.currentState === "active" &&
+            currentConnectivity.isOnline &&
+            currentConnectivity.reconnectEpoch > 0
+          ) {
+            queuedTimerStartRecoveryRequested.current = false;
+            void coordinator.request(currentConnectivity.reconnectEpoch, {
+              queuedWorkArrived: true
+            });
+          }
+          return;
+        }
         refreshQueued.current = true;
         void loadRef.current({ silent: true });
       }
@@ -903,8 +967,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           name: "activity_queue",
           run: async () => {
             const result = await syncQueuedEvents();
-            return result?.firstError?.failureKind === "network"
-              ? "transport_failure"
+            if (result.firstError?.failureKind === "network") {
+              return "transport_failure";
+            }
+            return result.remainingCount > 0
+              ? "application_failure"
               : "continue";
           }
         },
@@ -916,7 +983,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             const result = await deliverOwnedPendingTimerStops(bootstrap, {
               reloadAfterDelivery: false
             });
-            return result.transportFailure ? "transport_failure" : "continue";
+            if (result.transportFailure) return "transport_failure";
+            return result.remainingCount > 0
+              ? "application_failure"
+              : "continue";
           }
         },
         {
@@ -936,7 +1006,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         {
           name: "bootstrap",
           run: async () => {
-            await load({ silent: true });
+            await load({ silent: true, throwOnError: true });
           }
         }
       ]
@@ -947,16 +1017,22 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   useEffect(() => {
     const coordinator = reconnectRecoveryCoordinator.current;
     if (!coordinator) return;
-    if (authState !== "authenticated") {
+    if (authState === "signedOut") {
       coordinator.ignore(connectivity.reconnectEpoch);
+      reportConnectivityRecoveryCancelled(connectivity.reconnectEpoch);
       return;
     }
+    if (authState !== "authenticated") return;
     if (
       AppState.currentState === "active" &&
       connectivity.isOnline &&
       connectivity.reconnectEpoch > 0
     ) {
-      void coordinator.request(connectivity.reconnectEpoch);
+      const queuedWorkArrived = queuedTimerStartRecoveryRequested.current;
+      queuedTimerStartRecoveryRequested.current = false;
+      void coordinator.request(connectivity.reconnectEpoch, {
+        queuedWorkArrived
+      });
     }
   }, [authState, connectivity.isOnline, connectivity.reconnectEpoch]);
 
@@ -1017,6 +1093,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     const openDashboard = async () => {
       const cached = await loadCachedDashboardBootstrap().catch(() => null);
       if (cached && !latestData.current) {
+        const sessionRead = await readAuthenticatedSessionSnapshot().catch(() => null);
         await readPendingTimerStops();
         await hydrateTimerEntryIdCorrelations();
         const pendingDeletionIds = await reconcilePendingActiveDeletionAfterQueueBarrier(
@@ -1035,6 +1112,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         latestData.current = filtered;
         setData(filtered);
         setPendingTimerStops(ownedPendingStops);
+        if (sessionRead?.status === "authenticated") {
+          setAuthState("authenticated");
+        }
       }
       await loadRef.current();
     };
@@ -1204,11 +1284,17 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         void syncHealthKitAndReload("foreground");
         const coordinator = reconnectRecoveryCoordinator.current;
         const reconnectEpoch = connectivityCurrent.current.reconnectEpoch;
+        const coordinatorSnapshot = coordinator?.snapshot();
         const reconnectPending =
           connectivityCurrent.current.isOnline &&
-          reconnectEpoch > (coordinator?.snapshot().lastHandledReconnectEpoch ?? 0);
+          (
+            reconnectEpoch > (coordinatorSnapshot?.lastHandledReconnectEpoch ?? 0) ||
+            coordinatorSnapshot?.interruptedReconnectEpoch === reconnectEpoch
+          );
         if (reconnectPending && coordinator) {
-          void coordinator.request(reconnectEpoch);
+          const queuedWorkArrived = queuedTimerStartRecoveryRequested.current;
+          queuedTimerStartRecoveryRequested.current = false;
+          void coordinator.request(reconnectEpoch, { queuedWorkArrived });
         } else {
           void syncQueuedEventsAndReload();
           void syncLocationIntelligenceOnForeground().catch(recordLocationStoreError);
@@ -1588,7 +1674,37 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     updateDashboardData((current) => optimisticStartTimer(current, pendingEntry));
     if (options.animateLayout !== false) scheduleLayoutTransition(reduceMotion);
 
+    const queueOptimisticStart = async () => {
+      const queuedEntry = mobileTimeEntryById(latestData.current, optimisticId) ?? pendingEntry;
+      const queue = await enqueueEvent({
+        localId: optimisticId,
+        source: "mobile_app",
+        type: "timer_start",
+        occurredAt: new Date(queuedEntry.startedAt),
+        categoryId: queuedEntry.categoryId ?? undefined,
+        description: queuedEntry.description?.trim() || undefined,
+        rawPayload: {
+          origin: "mobile_custom_start_fallback",
+          startedAt: queuedEntry.startedAt,
+          tagNames: queuedEntry.tagNames ?? queuedEntry.tags?.map((tag) => tag.name) ?? []
+        }
+      });
+      if (!queue.some((item) => item.localId === optimisticId && item.type === "timer_start")) {
+        throw new Error("The offline timer start could not be queued.");
+      }
+      settleOptimisticTimerStart(optimisticId, "queued");
+      queuedTimerStartRecoveryRequested.current = true;
+    };
+
     enqueueTimerMutation(async () => {
+      if (connectivityCurrent.current.isOffline) {
+        try {
+          await queueOptimisticStart();
+        } catch (queueError) {
+          rejectOptimisticTimerStart(optimisticId, previousData, queueError);
+        }
+        return;
+      }
       try {
         const result = await startTimer(
           input.categoryId ?? null,
@@ -1611,25 +1727,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           rejectOptimisticTimerStart(optimisticId, previousData, error);
           return;
         }
-        const queuedEntry = mobileTimeEntryById(latestData.current, optimisticId) ?? pendingEntry;
         try {
-          const queue = await enqueueEvent({
-            localId: optimisticId,
-            source: "mobile_app",
-            type: "timer_start",
-            occurredAt: new Date(queuedEntry.startedAt),
-            categoryId: queuedEntry.categoryId ?? undefined,
-            description: queuedEntry.description?.trim() || undefined,
-            rawPayload: {
-              origin: "mobile_custom_start_fallback",
-              startedAt: queuedEntry.startedAt,
-              tagNames: queuedEntry.tagNames ?? queuedEntry.tags?.map((tag) => tag.name) ?? []
-            }
-          });
-          if (!queue.some((item) => item.localId === optimisticId && item.type === "timer_start")) {
-            throw new Error("The offline timer start could not be queued.");
-          }
-          settleOptimisticTimerStart(optimisticId, "queued");
+          await queueOptimisticStart();
         } catch (queueError) {
           rejectOptimisticTimerStart(optimisticId, previousData, queueError);
         }
@@ -2111,6 +2210,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               <StagingBadge styles={styles} />
             </View>
           </View>
+          <ConnectivityStatusStrip style={styles.connectivityStatusStripContained} />
           <View
             accessibilityLiveRegion="polite"
             accessibilityRole="progressbar"
@@ -2139,6 +2239,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               <StagingBadge styles={styles} />
             </View>
           </View>
+          <ConnectivityStatusStrip style={styles.connectivityStatusStripContained} />
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>{authView === "signup" ? "Create account" : "Log in"}</Text>
             <Text style={styles.muted}>
@@ -2316,6 +2417,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   <SettingsGlyph color={theme.accent} />
                 </Pressable>
               </View>
+              <ConnectivityStatusStrip style={styles.connectivityStatusStripContained} />
 
               <View style={styles.todayHeading}>
                 <Text style={styles.todayTitle}>Today</Text>
@@ -2553,6 +2655,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 <SettingsGlyph color={theme.accent} />
               </Pressable>
             </Animated.View>
+            <ConnectivityStatusStrip style={styles.connectivityStatusStripScreen} />
             <DayframeCalendarView
               model={{
                 ...nativeCalendarBridge.model,
@@ -2616,6 +2719,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               <SettingsGlyph color={theme.accent} />
             </Pressable>
           </View>
+          <ConnectivityStatusStrip style={styles.connectivityStatusStripContained} />
 
           <ReportsTab
             chartView={reportChartView}

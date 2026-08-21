@@ -18,7 +18,7 @@ import Reanimated from "react-native-reanimated";
 import Svg, { Path } from "react-native-svg";
 import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { ConnectivityBanner } from "@/components/ConnectivityBanner";
+import { ConnectivityStatusStrip } from "@/components/ConnectivityStatusStrip";
 import {
   SwipeDismissSheet,
   type SwipeDismissSheetHandle
@@ -1159,6 +1159,7 @@ export default function SettingsScreen() {
           <Text style={styles.settingsTitle} numberOfLines={1}>{settingsTitle}</Text>
         </View>
       </View>
+      <ConnectivityStatusStrip style={styles.connectivityStatusStripScreen} />
       <ScrollView
         key={settingsSection}
         ref={settingsScrollRef}
@@ -2097,6 +2098,7 @@ function LocationInformationSheet({
               <CloseGlyph color={theme.accent} />
             </Pressable>
           </View>
+          <ConnectivityStatusStrip style={styles.connectivityStatusStripSheet} />
           <ScrollView
             contentContainerStyle={styles.activeEditContent}
             style={styles.activeEditScroller}
@@ -2124,7 +2126,6 @@ function LocationInformationSheet({
           </ScrollView>
         </SwipeDismissSheet>
       </View>
-      <ConnectivityBanner suppressAccessibilityAnnouncement />
     </Modal>
   );
 }

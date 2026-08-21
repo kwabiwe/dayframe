@@ -17,6 +17,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Circle as SvgCircle, Path } from "react-native-svg";
 import MapView, { Circle, Marker, type MapPressEvent } from "react-native-maps";
 import { paletteColorFor } from "@dayframe/shared";
+import { ConnectivityStatusStrip } from "@/components/ConnectivityStatusStrip";
 import {
   AuthRequiredError,
   createPlace,
@@ -345,6 +346,7 @@ export default function PlaceEditorScreen() {
           <Text style={styles.settingsTitle} numberOfLines={1}>{title}</Text>
         </View>
       </View>
+      <ConnectivityStatusStrip style={styles.connectivityStatusStripScreen} />
 
       <ScrollView
         automaticallyAdjustKeyboardInsets
