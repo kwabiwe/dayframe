@@ -7,7 +7,6 @@ import {
   classifyConnectivityCandidate,
   confirmHttpConnectivity,
   confirmNativeConnectivity,
-  connectivityStatusViewModel,
   connectivitySnapshot,
   createConnectivityMachineState,
   dismissConnectivityRecoverySuccess,
@@ -50,7 +49,6 @@ describe("connectivity state machine", () => {
       reconnectEpoch: 0,
       recoveryStatus: "idle"
     });
-    expect(connectivityStatusViewModel(connectivitySnapshot(state))).toBeNull();
   });
 
   it("commits initial online without a reconnect notice", () => {
@@ -73,10 +71,6 @@ describe("connectivity state machine", () => {
       CONNECTIVITY_OFFLINE_CONFIRM_MS
     );
     expect(state.status).toBe("offline");
-    expect(connectivityStatusViewModel(connectivitySnapshot(state))).toMatchObject({
-      text: "Offline — changes will sync later",
-      variant: "offline"
-    });
   });
 
   it("rejects a stale offline candidate cancelled by a later handover observation", () => {
@@ -116,7 +110,6 @@ describe("connectivity state machine", () => {
       reconnectEpoch: 1,
       recoveryStatus: "idle"
     });
-    expect(connectivityStatusViewModel(connectivitySnapshot(online))).toBeNull();
   });
 
   it("preserves confirmed offline status through an ambiguous observation", () => {
@@ -165,30 +158,17 @@ describe("connectivity state machine", () => {
     expect(secondReconnect.reconnectEpoch).toBe(2);
   });
 
-  it("shows syncing, success, and failure only from the matching recovery lifecycle", () => {
+  it("keeps recovery lifecycle diagnostics scoped to the matching epoch", () => {
     const reconnected = confirmedReconnect();
     const syncing = beginConnectivityRecovery(reconnected, 1);
-    expect(connectivityStatusViewModel(connectivitySnapshot(syncing))).toMatchObject({
-      text: "Back online, syncing…",
-      variant: "syncing"
-    });
+    expect(syncing).toMatchObject({ recoveryEpoch: 1, recoveryStatus: "syncing" });
 
     const success = finishConnectivityRecovery(syncing, 1, "success");
-    expect(connectivityStatusViewModel(connectivitySnapshot(success))).toMatchObject({
-      text: "All changes synced",
-      variant: "success"
-    });
-    expect(
-      connectivityStatusViewModel(connectivitySnapshot(
-        dismissConnectivityRecoverySuccess(success, 1)
-      ))
-    ).toBeNull();
+    expect(success.recoveryStatus).toBe("success");
+    expect(dismissConnectivityRecoverySuccess(success, 1).recoveryStatus).toBe("idle");
 
     const failure = finishConnectivityRecovery(syncing, 1, "failure");
-    expect(connectivityStatusViewModel(connectivitySnapshot(failure))).toMatchObject({
-      text: "Some changes haven’t synced",
-      variant: "failure"
-    });
+    expect(failure.recoveryStatus).toBe("failure");
     expect(dismissConnectivityRecoverySuccess(failure, 1)).toBe(failure);
     expect(cancelConnectivityRecovery(failure, 1)).toMatchObject({
       recoveryEpoch: null,

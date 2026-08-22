@@ -14,6 +14,7 @@ import {
   startConnectivityMonitor,
   subscribeConnectivity
 } from "./connectivityMonitor";
+import { startDurableWorkMonitor } from "./durableWorkMonitor";
 import type {
   ConnectivityRecoveryStatus,
   ConnectivityStatus
@@ -37,7 +38,14 @@ export function ConnectivityProvider({ children }: { children: ReactNode }) {
     getConnectivitySnapshot
   );
 
-  useEffect(() => startConnectivityMonitor(), []);
+  useEffect(() => {
+    const stopConnectivity = startConnectivityMonitor();
+    const stopDurableWork = startDurableWorkMonitor();
+    return () => {
+      stopDurableWork();
+      stopConnectivity();
+    };
+  }, []);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState) => {

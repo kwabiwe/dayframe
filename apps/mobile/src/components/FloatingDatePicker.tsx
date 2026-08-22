@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import Reanimated from "react-native-reanimated";
 import Svg, { Path } from "react-native-svg";
-import { ConnectivityStatusStrip } from "@/components/ConnectivityStatusStrip";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
 import {
   localPresenceEntering,
@@ -90,7 +89,6 @@ export function FloatingDatePicker({
               <CalendarChevronGlyph color={theme.textPrimary} direction="right" />
             </Pressable>
           </View>
-          <ConnectivityStatusStrip style={styles.connectivityStatusStripSheet} />
           <View style={styles.datePickerWeekdays}>
             {["M", "T", "W", "T", "F", "S", "S"].map((label, index) => (
               <Text key={`${label}-${index}`} style={styles.datePickerWeekday}>{label}</Text>

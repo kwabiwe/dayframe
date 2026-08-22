@@ -1,6 +1,11 @@
 import { NativeModules, Platform, Settings } from "react-native";
 import { paletteColorFor } from "@dayframe/shared";
 import { enqueueEvent, type MobileBootstrap } from "./api";
+import {
+  mobileAccountOwnersEqual,
+  readActiveMobileAccount,
+  type MobileAccountOwner
+} from "./mobileAccount";
 
 const SHORTCUT_CATALOG_KEY = "dayframe.shortcutCatalog.v1";
 
@@ -12,6 +17,8 @@ type NativeShortcutQueuedEvent = {
   categoryId?: string;
   description?: string;
   rawPayload?: Record<string, unknown>;
+  userId?: string;
+  workspaceId?: string;
 };
 
 type NativeShortcutEventType = "shortcut_action" | "timer_stop";
@@ -23,7 +30,9 @@ type NativeShortcutQueueModule = {
 
 const nativeShortcutQueue = NativeModules.DayframeLiveActivityModule as NativeShortcutQueueModule | undefined;
 
-export function syncShortcutCatalog(data: Pick<MobileBootstrap, "categories" | "workspace"> | null | undefined) {
+export function syncShortcutCatalog(
+  data: Pick<MobileBootstrap, "categories" | "user" | "workspace"> | null | undefined
+) {
   if (Platform.OS !== "ios") return;
 
   if (!data?.workspace) return;
@@ -33,6 +42,7 @@ export function syncShortcutCatalog(data: Pick<MobileBootstrap, "categories" | "
       id: data.workspace.id,
       name: data.workspace.name
     },
+    user: { id: data.user.id },
     categories: data.categories
       .map((category) => ({
         color: paletteColorFor(category.color, category.name, "dark"),
@@ -50,13 +60,31 @@ export function syncShortcutCatalog(data: Pick<MobileBootstrap, "categories" | "
   }
 }
 
-export async function drainNativeShortcutQueue() {
+export function clearShortcutCatalog() {
+  if (Platform.OS !== "ios") return;
+  try {
+    Settings.set({ [SHORTCUT_CATALOG_KEY]: "" });
+  } catch {
+    // The catalog contains no secret; clearing it is a best-effort logout boundary.
+  }
+}
+
+export async function getNativeShortcutPendingCount(owner: MobileAccountOwner) {
+  if (Platform.OS !== "ios" || !nativeShortcutQueue?.pendingShortcutEvents) return 0;
+  const events = parseNativeShortcutQueue(await nativeShortcutQueue.pendingShortcutEvents());
+  return events.filter((event) => nativeEventBelongsToOwner(event, owner)).length;
+}
+
+export async function drainNativeShortcutQueue(requestedOwner?: MobileAccountOwner) {
   if (Platform.OS !== "ios") return { transferredCount: 0, transferredLocalIds: [] as string[] };
   if (!nativeShortcutQueue?.pendingShortcutEvents || !nativeShortcutQueue.removeShortcutEvents) {
     return { transferredCount: 0, transferredLocalIds: [] as string[] };
   }
 
-  const events = parseNativeShortcutQueue(await nativeShortcutQueue.pendingShortcutEvents());
+  const owner = requestedOwner ?? await readActiveMobileAccount();
+  if (!owner) return { transferredCount: 0, transferredLocalIds: [] as string[] };
+  const events = parseNativeShortcutQueue(await nativeShortcutQueue.pendingShortcutEvents())
+    .filter((event) => nativeEventBelongsToOwner(event, owner));
   if (!events.length) return { transferredCount: 0, transferredLocalIds: [] as string[] };
 
   let transferredCount = 0;
@@ -64,6 +92,7 @@ export async function drainNativeShortcutQueue() {
   try {
     for (const event of events) {
       await enqueueEvent({
+        owner,
         localId: event.localId,
         source: "shortcut",
         type: event.type,
@@ -120,8 +149,18 @@ function normalizeNativeShortcutEvent(value: unknown) {
     occurredAt,
     categoryId: stringValue(value.categoryId),
     description: stringValue(value.description),
-    rawPayload: isRecord(value.rawPayload) ? value.rawPayload : {}
+    rawPayload: isRecord(value.rawPayload) ? value.rawPayload : {},
+    userId: stringValue(value.userId),
+    workspaceId: stringValue(value.workspaceId)
   };
+}
+
+function nativeEventBelongsToOwner(
+  event: Pick<NativeShortcutQueuedEvent, "userId" | "workspaceId">,
+  owner: MobileAccountOwner
+) {
+  if (!event.userId || !event.workspaceId) return false;
+  return mobileAccountOwnersEqual(event as MobileAccountOwner, owner);
 }
 
 function nativeShortcutEventType(value: unknown): NativeShortcutEventType | null {

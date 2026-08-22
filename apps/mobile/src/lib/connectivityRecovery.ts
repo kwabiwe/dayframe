@@ -1,6 +1,7 @@
 export type ConnectivityRecoveryStepName =
   | "timer_stops_ready"
   | "activity_queue"
+  | "time_entry_outbox"
   | "timer_stops_after_correlation"
   | "review_outbox"
   | "location_intelligence"
@@ -153,13 +154,23 @@ export async function runConnectivityRecoveryPass(input: {
 
 export function createConnectivityRecoveryCoordinator(input: {
   canStart: () => boolean;
+  clearTimer?: (timer: ReturnType<typeof setTimeout>) => void;
+  now?: () => number;
   onPassFinished?: (input: {
     epoch: number;
     hasPendingPass: boolean;
     result: ConnectivityRecoveryPassResult;
   }) => void;
   onPassStarted?: (epoch: number) => void;
+  onRetryScheduled?: (input: {
+    attempt: number;
+    epoch: number;
+    retryAt: number;
+  }) => void;
+  random?: () => number;
   runPass: (epoch: number) => Promise<ConnectivityRecoveryPassResult>;
+  setTimer?: (callback: () => void, delay: number) => ReturnType<typeof setTimeout>;
+  shouldRetry?: (result: ConnectivityRecoveryPassResult) => boolean;
 }) {
   let lastHandledReconnectEpoch = 0;
   let reconnectRecoveryInFlight: Promise<void> | null = null;
@@ -168,6 +179,36 @@ export function createConnectivityRecoveryCoordinator(input: {
   let handledWorkRevision = 0;
   let interruptedReconnectEpoch = 0;
   let ownershipRevision = 0;
+  let retryAttempt = 0;
+  let retryAt: number | null = null;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  const clearTimer = input.clearTimer ?? clearTimeout;
+  const now = input.now ?? Date.now;
+  const random = input.random ?? Math.random;
+  const setTimer = input.setTimer ?? setTimeout;
+
+  const clearScheduledRetry = () => {
+    if (retryTimer) clearTimer(retryTimer);
+    retryTimer = null;
+    retryAt = null;
+  };
+
+  const scheduleRetry = (epoch: number) => {
+    clearScheduledRetry();
+    retryAttempt += 1;
+    const baseMilliseconds = [1_000, 2_500, 5_000, 15_000, 30_000, 60_000][
+      Math.min(retryAttempt, 6) - 1
+    ];
+    const jitter = 0.8 + Math.max(0, Math.min(random(), 1)) * 0.4;
+    const delay = Math.round(baseMilliseconds * jitter);
+    retryAt = now() + delay;
+    input.onRetryScheduled?.({ attempt: retryAttempt, epoch, retryAt });
+    retryTimer = setTimer(() => {
+      retryTimer = null;
+      retryAt = null;
+      void request(epoch, { queuedWorkArrived: true });
+    }, delay) as ReturnType<typeof setTimeout>;
+  };
 
   const drain = async () => {
     while (
@@ -201,13 +242,53 @@ export function createConnectivityRecoveryCoordinator(input: {
         queuedWorkRevision > handledWorkRevision ||
         interruptedReconnectEpoch > 0;
       input.onPassFinished?.({ epoch, hasPendingPass, result });
+      if (result === "completed") retryAttempt = 0;
+      const shouldRetry = input.shouldRetry?.(result) ?? result === "transport_failure";
+      if (!hasPendingPass && shouldRetry && input.canStart()) {
+        scheduleRetry(epoch);
+      }
       if (result === "authentication_required") break;
       if (result === "interrupted" && !input.canStart()) break;
     }
   };
 
+  const request = (
+    epoch: number,
+    options: { queuedWorkArrived?: boolean } = {}
+  ) => {
+    const queuedWorkArrived = options.queuedWorkArrived === true;
+    if (epoch > lastHandledReconnectEpoch) {
+      clearScheduledRetry();
+      retryAttempt = 0;
+    }
+    if (
+      (
+        !queuedWorkArrived &&
+        epoch <= lastHandledReconnectEpoch &&
+        interruptedReconnectEpoch === 0
+      ) ||
+      epoch < 0 ||
+      (epoch === 0 && !queuedWorkArrived) ||
+      !input.canStart()
+    ) {
+      return reconnectRecoveryInFlight ?? Promise.resolve();
+    }
+    if (queuedWorkArrived) queuedWorkRevision += 1;
+    queuedReconnectEpoch = Math.max(queuedReconnectEpoch, epoch);
+    reconnectRecoveryInFlight ??= drain().finally(() => {
+      reconnectRecoveryInFlight = null;
+    });
+    return reconnectRecoveryInFlight;
+  };
+
   return {
+    dispose() {
+      clearScheduledRetry();
+      ownershipRevision += 1;
+    },
     ignore(epoch: number) {
+      clearScheduledRetry();
+      retryAttempt = 0;
       ownershipRevision += 1;
       lastHandledReconnectEpoch = Math.max(lastHandledReconnectEpoch, epoch);
       handledWorkRevision = queuedWorkRevision;
@@ -216,33 +297,19 @@ export function createConnectivityRecoveryCoordinator(input: {
         queuedReconnectEpoch = 0;
       }
     },
-    request(epoch: number, options: { queuedWorkArrived?: boolean } = {}) {
-      const queuedWorkArrived = options.queuedWorkArrived === true;
-      if (
-        (
-          !queuedWorkArrived &&
-          epoch <= lastHandledReconnectEpoch &&
-          interruptedReconnectEpoch === 0
-        ) ||
-        epoch <= 0 ||
-        !input.canStart()
-      ) {
-        return reconnectRecoveryInFlight ?? Promise.resolve();
-      }
-      if (queuedWorkArrived) queuedWorkRevision += 1;
-      queuedReconnectEpoch = Math.max(queuedReconnectEpoch, epoch);
-      reconnectRecoveryInFlight ??= drain().finally(() => {
-        reconnectRecoveryInFlight = null;
-      });
-      return reconnectRecoveryInFlight;
+    pause() {
+      clearScheduledRetry();
     },
+    request,
     snapshot() {
       return {
         inFlight: reconnectRecoveryInFlight !== null,
         interruptedReconnectEpoch,
         lastHandledReconnectEpoch,
         queuedReconnectEpoch,
-        queuedWorkPending: queuedWorkRevision > handledWorkRevision
+        queuedWorkPending: queuedWorkRevision > handledWorkRevision,
+        retryAttempt,
+        retryAt
       };
     }
   };

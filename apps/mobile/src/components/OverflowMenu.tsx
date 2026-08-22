@@ -15,7 +15,6 @@ import Reanimated, {
   withTiming
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { ConnectivityStatusStrip } from "@/components/ConnectivityStatusStrip";
 import { pressable, useMobileTheme } from "@/lib/mobileTheme";
 import { MOBILE_MOTION, useReduceMotionPreference } from "@/lib/motion";
 import type { ReviewMenuAction } from "@/lib/review";
@@ -251,7 +250,6 @@ export function OverflowMenu({
           accessibilityLabel={`Actions for ${renderedPresentation.title}`}
           style={[styles.overflowMenuSurface, menuStyle]}
         >
-          <ConnectivityStatusStrip style={styles.connectivityStatusStripSheet} />
           <Pressable
             ref={firstActionRef}
             accessibilityLabel="Edit details"

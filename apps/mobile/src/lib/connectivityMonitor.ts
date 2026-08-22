@@ -1,13 +1,17 @@
 import NetInfo, { type NetInfoState } from "@react-native-community/netinfo";
+import { IS_DAYFRAME_STAGING } from "./config";
 import { installConnectivityEvidenceReporter } from "./connectivityEvidence";
 import {
   CONNECTIVITY_OFFLINE_CONFIRM_MS,
   CONNECTIVITY_ONLINE_CONFIRM_MS,
+  CONNECTIVITY_FAILURE_THRESHOLD,
+  CONNECTIVITY_FAILURE_WINDOW_MS,
   CONNECTIVITY_REFRESH_COOLDOWN_MS,
   CONNECTIVITY_SUCCESS_NOTICE_MS,
   beginConnectivityRecovery,
   cancelConnectivityRecovery,
   confirmHttpConnectivity,
+  confirmHttpConnectivityFailure,
   confirmNativeConnectivity,
   connectivitySnapshot,
   connectivitySnapshotsEqual,
@@ -43,6 +47,7 @@ let candidateTimer: ReturnType<typeof setTimeout> | null = null;
 let recoverySuccessTimer: ReturnType<typeof setTimeout> | null = null;
 let refreshPromise: Promise<ConnectivitySnapshot> | null = null;
 let lastTransportRefreshAt = Number.NEGATIVE_INFINITY;
+let recentHttpFailures: number[] = [];
 const listeners = new Set<Listener>();
 
 export function startConnectivityMonitor() {
@@ -94,18 +99,34 @@ export function reportHttpTransportResponse(input: {
   requestGeneration: number;
   completedAt?: number;
 }) {
+  recentHttpFailures = [];
   const result = confirmHttpConnectivity({
     completedAt: input.completedAt ?? Date.now(),
     requestGeneration: input.requestGeneration,
     state: machineState
   });
   if (!result.accepted) return;
-  clearCandidateTimer();
+  recordHttpSuccess(input.completedAt ?? Date.now());
+  clearCandidateTimer("http_success");
   applyMachineState(result.state);
 }
 
-export function reportHttpTransportFailure() {
-  const now = Date.now();
+export function reportHttpTransportFailure(input: {
+  kind?: "deadline" | "transport";
+  occurredAt?: number;
+} = {}) {
+  const now = input.occurredAt ?? Date.now();
+  recentHttpFailures = recentHttpFailures
+    .filter((occurredAt) => now - occurredAt <= CONNECTIVITY_FAILURE_WINDOW_MS);
+  recentHttpFailures.push(now);
+  recordHttpEvidence(input.kind ?? "transport", now, recentHttpFailures.length);
+  if (recentHttpFailures.length >= CONNECTIVITY_FAILURE_THRESHOLD) {
+    clearCandidateTimer("negative_http_evidence");
+    applyMachineState(confirmHttpConnectivityFailure({
+      failedAt: now,
+      state: machineState
+    }));
+  }
   if (now - lastTransportRefreshAt < CONNECTIVITY_REFRESH_COOLDOWN_MS) return;
   lastTransportRefreshAt = now;
   void refreshConnectivity("transport_failure").catch(() => undefined);
@@ -153,11 +174,17 @@ export function __resetConnectivityMonitorForTests() {
   lastRawObservation = null;
   refreshPromise = null;
   lastTransportRefreshAt = Number.NEGATIVE_INFINITY;
+  recentHttpFailures = [];
   listeners.clear();
 }
 
 function startNativeMonitor() {
   const lifecycle = ++monitorLifecycle;
+  NetInfo.configure({
+    reachabilityShortTimeout: 2_000,
+    reachabilityLongTimeout: 5_000,
+    reachabilityRequestTimeout: 3_000
+  });
   nativeUnsubscribe = NetInfo.addEventListener((state) => {
     if (lifecycle !== monitorLifecycle || monitorReferenceCount === 0) return;
     handleNativeState(state, "native");
@@ -174,7 +201,7 @@ function stopNativeMonitor() {
   monitorLifecycle += 1;
   nativeUnsubscribe?.();
   nativeUnsubscribe = null;
-  clearCandidateTimer();
+  clearCandidateTimer("native_observation_replaced");
   clearRecoverySuccessTimer();
   lastRawObservation = null;
   refreshPromise = null;
@@ -197,6 +224,8 @@ function handleNativeState(
   if (rawConnectivityObservationsEqual(lastRawObservation, observation)) return;
   lastRawObservation = observation;
   const observed = observeNativeConnectivity(machineState, observation, source);
+  recordRawNetInfo(observation, source);
+  if (observed.candidate === "online") recentHttpFailures = [];
   applyMachineState(observed.state);
   clearCandidateTimer();
   if (observed.candidate === "ambiguous") return;
@@ -212,6 +241,13 @@ function handleNativeState(
       ? CONNECTIVITY_OFFLINE_CONFIRM_MS
       : CONNECTIVITY_ONLINE_CONFIRM_MS
   );
+  recordConnectivityDebounce("start", {
+    candidate: observed.candidate,
+    candidateRevision: observed.candidateRevision,
+    delayMilliseconds: observed.candidate === "offline"
+      ? CONNECTIVITY_OFFLINE_CONFIRM_MS
+      : CONNECTIVITY_ONLINE_CONFIRM_MS
+  });
 }
 
 function commitPendingCandidate() {
@@ -219,6 +255,10 @@ function commitPendingCandidate() {
   const pending = pendingCandidate;
   pendingCandidate = null;
   if (!pending || monitorReferenceCount === 0) return;
+  recordConnectivityDebounce("commit", {
+    candidate: pending.candidate,
+    candidateRevision: pending.candidateRevision
+  });
   applyMachineState(confirmNativeConnectivity({
     candidate: pending.candidate,
     candidateRevision: pending.candidateRevision,
@@ -248,10 +288,18 @@ function scheduleRecoverySuccessDismissal(epoch: number) {
   }, CONNECTIVITY_SUCCESS_NOTICE_MS);
 }
 
-function clearCandidateTimer() {
+function clearCandidateTimer(reason = "cancelled") {
+  const cancelledCandidate = candidateTimer ? pendingCandidate : null;
   if (candidateTimer) clearTimeout(candidateTimer);
   candidateTimer = null;
   pendingCandidate = null;
+  if (cancelledCandidate) {
+    recordConnectivityDebounce("cancel", {
+      candidate: cancelledCandidate.candidate,
+      candidateRevision: cancelledCandidate.candidateRevision,
+      reason
+    });
+  }
 }
 
 function clearRecoverySuccessTimer() {
@@ -268,8 +316,9 @@ function rawObservation(state: NetInfoState): RawConnectivityObservation {
 }
 
 function recordConnectivityRefresh(reason: ConnectivityMonitorRefreshReason) {
-  if (typeof __DEV__ === "undefined" || !__DEV__) return;
+  if (!shouldRecordConnectivityDiagnostics()) return;
   console.debug("Connectivity monitor refresh", {
+    timestamp: new Date().toISOString(),
     monitorRefreshReason: reason
   });
 }
@@ -278,11 +327,64 @@ function recordConnectivityTransition(
   previous: ConnectivitySnapshot,
   next: ConnectivitySnapshot
 ) {
-  if (typeof __DEV__ === "undefined" || !__DEV__) return;
+  if (!shouldRecordConnectivityDiagnostics()) return;
   console.debug("Connectivity transition", {
+    timestamp: new Date().toISOString(),
     previousConnectivityStatus: previous.status,
     nextConnectivityStatus: next.status,
     transitionSource: next.source,
     reconnectEpoch: next.reconnectEpoch
   });
+}
+
+function recordRawNetInfo(
+  observation: RawConnectivityObservation,
+  source: "initial" | "native"
+) {
+  if (!shouldRecordConnectivityDiagnostics()) return;
+  console.debug("Connectivity NetInfo observation", {
+    timestamp: new Date().toISOString(),
+    observationSource: source,
+    isConnected: observation.isConnected,
+    isInternetReachable: observation.isInternetReachable,
+    connectionType: observation.connectionType
+  });
+}
+
+function recordHttpEvidence(
+  kind: "deadline" | "transport",
+  occurredAt: number,
+  recentFailureCount: number
+) {
+  if (!shouldRecordConnectivityDiagnostics()) return;
+  console.debug("Connectivity HTTP evidence", {
+    timestamp: new Date(occurredAt).toISOString(),
+    evidenceKind: kind,
+    recentFailureCount
+  });
+}
+
+function recordHttpSuccess(completedAt: number) {
+  if (!shouldRecordConnectivityDiagnostics()) return;
+  console.debug("Connectivity HTTP evidence", {
+    timestamp: new Date(completedAt).toISOString(),
+    evidenceKind: "success",
+    recentFailureCount: 0
+  });
+}
+
+function recordConnectivityDebounce(
+  phase: "start" | "cancel" | "commit",
+  details: Record<string, unknown>
+) {
+  if (!shouldRecordConnectivityDiagnostics()) return;
+  console.debug("Connectivity debounce", {
+    timestamp: new Date().toISOString(),
+    debouncePhase: phase,
+    ...details
+  });
+}
+
+function shouldRecordConnectivityDiagnostics() {
+  return (typeof __DEV__ !== "undefined" && __DEV__) || IS_DAYFRAME_STAGING;
 }

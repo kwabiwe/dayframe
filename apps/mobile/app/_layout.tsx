@@ -3,7 +3,8 @@ import { useMemo } from "react";
 import { StatusBar, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { ConnectivityAnnouncement } from "@/components/ConnectivityStatusStrip";
+import { ConnectivityStatusOverlay } from "@/components/ConnectivityStatusStrip";
+import { ConnectivityRecoveryOwner } from "@/components/ConnectivityRecoveryOwner";
 import { ConnectivityProvider } from "@/lib/connectivity";
 import { MobileThemeProvider, useMobileTheme } from "@/lib/mobileTheme";
 import { MOBILE_MOTION, useReduceMotionPreference } from "@/lib/motion";
@@ -27,7 +28,8 @@ function ConnectivityAppShell() {
   return (
     <View style={{ flex: 1 }}>
       <ThemedStack />
-      <ConnectivityAnnouncement />
+      <ConnectivityRecoveryOwner />
+      <ConnectivityStatusOverlay />
     </View>
   );
 }

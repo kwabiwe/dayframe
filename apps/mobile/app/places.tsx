@@ -13,7 +13,6 @@ import * as Clipboard from "expo-clipboard";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
-import { ConnectivityStatusStrip } from "@/components/ConnectivityStatusStrip";
 import { SheetMutationProgress } from "@/components/SheetMutationProgress";
 import {
   SwipeDismissSheet,
@@ -294,7 +293,6 @@ export default function PlacesScreen() {
           <Text style={styles.settingsTitle} numberOfLines={1}>Places</Text>
         </View>
       </View>
-      <ConnectivityStatusStrip style={styles.connectivityStatusStripScreen} />
       <ScrollView
         style={styles.settingsScrollView}
         contentContainerStyle={styles.settingsScrollContent}
@@ -630,7 +628,6 @@ function LearnedPlaceDetailSheet({
                 <CloseGlyph color={theme.textPrimary} />
               </Pressable>
             </View>
-            <ConnectivityStatusStrip style={styles.connectivityStatusStripSheet} />
             <SheetMutationProgress
               accessibilityLabel={forgetting ? "Forgetting place suggestion" : ignoring ? "Ignoring place suggestion" : "Working"}
               active={disabled}

@@ -4,7 +4,10 @@ type ConnectivityEvidenceReporter = {
     requestGeneration: number;
     completedAt?: number;
   }) => void;
-  reportFailure: () => void;
+  reportFailure: (input: {
+    kind: "deadline" | "transport";
+    occurredAt?: number;
+  }) => void;
 };
 
 let reporter: ConnectivityEvidenceReporter | null = null;
@@ -30,5 +33,9 @@ export function reportHttpTransportResponse(input: {
 }
 
 export function reportHttpTransportFailure() {
-  reporter?.reportFailure();
+  reporter?.reportFailure({ kind: "transport" });
+}
+
+export function reportHttpRequestDeadline() {
+  reporter?.reportFailure({ kind: "deadline" });
 }

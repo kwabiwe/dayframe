@@ -1,6 +1,7 @@
 import { invalidateMobileSessionIfCurrent } from "./secure-session";
 import {
   connectivityRequestGeneration,
+  reportHttpRequestDeadline,
   reportHttpTransportFailure,
   reportHttpTransportResponse
 } from "./connectivityEvidence";
@@ -100,6 +101,7 @@ export async function mobileFetchWithTimeout(
       callerAborted
     ]);
   } catch (error) {
+    if (timedOut) reportHttpRequestDeadline();
     if (timedOut && !(error instanceof MobileRequestTimeoutError)) {
       throw new MobileRequestTimeoutError(deadline.timeoutMessage);
     }

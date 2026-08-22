@@ -32,7 +32,6 @@ import {
   type RecentActivitySuggestion
 } from "@dayframe/shared";
 import { FloatingDatePicker } from "@/components/FloatingDatePicker";
-import { ConnectivityStatusStrip } from "@/components/ConnectivityStatusStrip";
 import {
   HistoricalSuggestionsOverlay,
   type HistoricalSuggestionsOverlayRenderState
@@ -2300,7 +2299,6 @@ export function ActiveTimerEditSheet({
                 style={styles.sheetHeader}
                 testID="time-entry-sheet-upper-dismiss-area"
               />
-              <ConnectivityStatusStrip style={styles.connectivityStatusStripSheet} />
 
               {isRunningMode ? timeEntryHero : null}
 

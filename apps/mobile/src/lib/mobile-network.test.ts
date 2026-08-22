@@ -5,6 +5,7 @@ const session = vi.hoisted(() => ({
 }));
 const connectivity = vi.hoisted(() => ({
   connectivityRequestGeneration: vi.fn(() => 7),
+  reportHttpRequestDeadline: vi.fn(),
   reportHttpTransportFailure: vi.fn(),
   reportHttpTransportResponse: vi.fn()
 }));
@@ -125,6 +126,7 @@ describe("mobile API network boundary", () => {
 
     await rejection;
     expect(requestSignals[0]?.aborted).toBe(true);
+    expect(connectivity.reportHttpRequestDeadline).toHaveBeenCalledTimes(1);
     expect(connectivity.reportHttpTransportFailure).not.toHaveBeenCalled();
   });
 
@@ -141,6 +143,8 @@ describe("mobile API network boundary", () => {
     controller.abort(cancellation);
 
     await expect(request).rejects.toBe(cancellation);
+    expect(connectivity.reportHttpRequestDeadline).not.toHaveBeenCalled();
+    expect(connectivity.reportHttpTransportFailure).not.toHaveBeenCalled();
   });
 
   it("clears the request deadline after a successful response", async () => {

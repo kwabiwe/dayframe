@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const netInfo = vi.hoisted(() => {
   let listener: ((state: unknown) => void) | null = null;
   return {
+    configure: vi.fn(),
     addEventListener: vi.fn((nextListener: (state: unknown) => void) => {
       listener = nextListener;
       return vi.fn(() => {
@@ -17,6 +18,7 @@ const netInfo = vi.hoisted(() => {
 
 vi.mock("@react-native-community/netinfo", () => ({
   default: {
+    configure: netInfo.configure,
     addEventListener: netInfo.addEventListener,
     fetch: netInfo.fetch,
     refresh: netInfo.refresh
@@ -185,7 +187,7 @@ describe("process-wide connectivity monitor", () => {
     stop();
   });
 
-  it("coalesces transport-failure refreshes without directly setting offline", async () => {
+  it("uses repeated transport failures as negative evidence while coalescing refreshes", async () => {
     const stop = monitor.startConnectivityMonitor();
     await vi.runAllTicks();
     await vi.advanceTimersByTimeAsync(400);
@@ -195,7 +197,18 @@ describe("process-wide connectivity monitor", () => {
     monitor.reportHttpTransportFailure();
     await vi.runAllTicks();
     expect(netInfo.refresh).toHaveBeenCalledTimes(1);
+    expect(monitor.getConnectivitySnapshot().status).toBe("offline");
+    stop();
+  });
+
+  it("uses repeated request deadlines as negative connectivity evidence", async () => {
+    const stop = monitor.startConnectivityMonitor();
+    await vi.runAllTicks();
+    await vi.advanceTimersByTimeAsync(400);
+    monitor.reportHttpTransportFailure({ kind: "deadline" });
     expect(monitor.getConnectivitySnapshot().status).toBe("online");
+    monitor.reportHttpTransportFailure({ kind: "deadline" });
+    expect(monitor.getConnectivitySnapshot().status).toBe("offline");
     stop();
   });
 

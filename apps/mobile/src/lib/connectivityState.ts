@@ -2,6 +2,8 @@ export const CONNECTIVITY_OFFLINE_CONFIRM_MS = 300;
 export const CONNECTIVITY_ONLINE_CONFIRM_MS = 400;
 export const CONNECTIVITY_SUCCESS_NOTICE_MS = 2_000;
 export const CONNECTIVITY_REFRESH_COOLDOWN_MS = 500;
+export const CONNECTIVITY_FAILURE_WINDOW_MS = 4_000;
+export const CONNECTIVITY_FAILURE_THRESHOLD = 2;
 
 export type ConnectivityStatus = "unknown" | "online" | "offline";
 export type ConnectivityRecoveryStatus = "idle" | "syncing" | "success" | "failure";
@@ -29,13 +31,6 @@ export type RawConnectivityObservation = {
 export type ConnectivityMachineState = ConnectivitySnapshot & {
   candidateRevision: number;
   requestGeneration: number;
-};
-
-export type ConnectivityStatusViewModel = {
-  accessibilityLabel: string;
-  id: string;
-  text: string;
-  variant: "offline" | "syncing" | "success" | "failure";
 };
 
 export function createConnectivityMachineState(): ConnectivityMachineState {
@@ -144,6 +139,18 @@ export function confirmHttpConnectivity(input: {
   };
 }
 
+export function confirmHttpConnectivityFailure(input: {
+  failedAt: number;
+  state: ConnectivityMachineState;
+}) {
+  return commitConnectivityStatus(
+    input.state,
+    "offline",
+    input.failedAt,
+    "http"
+  );
+}
+
 export function beginConnectivityRecovery(
   state: ConnectivityMachineState,
   epoch: number
@@ -193,45 +200,6 @@ export function cancelConnectivityRecovery(
 ) {
   if (state.recoveryEpoch !== epoch) return state;
   return { ...state, recoveryEpoch: null, recoveryStatus: "idle" as const };
-}
-
-export function connectivityStatusViewModel(
-  snapshot: ConnectivitySnapshot
-): ConnectivityStatusViewModel | null {
-  if (snapshot.status === "offline") {
-    return {
-      accessibilityLabel:
-        "Offline — changes will sync later",
-      id: `offline-${snapshot.changedAt ?? 0}`,
-      text: "Offline — changes will sync later",
-      variant: "offline"
-    };
-  }
-  if (snapshot.status !== "online" || snapshot.recoveryStatus === "idle") {
-    return null;
-  }
-  if (snapshot.recoveryStatus === "syncing") {
-    return {
-      accessibilityLabel: "Back online, syncing…",
-      id: `recovery-${snapshot.recoveryEpoch ?? 0}`,
-      text: "Back online, syncing…",
-      variant: "syncing"
-    };
-  }
-  if (snapshot.recoveryStatus === "success") {
-    return {
-      accessibilityLabel: "All changes synced",
-      id: `recovery-${snapshot.recoveryEpoch ?? 0}`,
-      text: "All changes synced",
-      variant: "success"
-    };
-  }
-  return {
-    accessibilityLabel: "Some changes haven’t synced",
-    id: `recovery-${snapshot.recoveryEpoch ?? 0}`,
-    text: "Some changes haven’t synced",
-    variant: "failure"
-  };
 }
 
 export function connectivitySnapshotsEqual(

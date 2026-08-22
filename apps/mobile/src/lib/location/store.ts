@@ -85,7 +85,19 @@ type OutboxRow = { client_batch_id: string; body_json: string; attempt_count: nu
 let databasePromise: Promise<SQLite.SQLiteDatabase> | null = null;
 let synchronisationPromise: Promise<Awaited<ReturnType<typeof synchroniseLocationEvidenceUnsafe>>> | null = null;
 let forcedReplayRequested = false;
-const serialiseLocationMutation = createSerialMutationQueue();
+const locationMutationQueue = createSerialMutationQueue();
+const locationStoreListeners = new Set<() => void>();
+
+function serialiseLocationMutation<Result>(operation: () => Promise<Result>) {
+  return locationMutationQueue(operation).finally(() => {
+    for (const listener of locationStoreListeners) listener();
+  });
+}
+
+export function subscribeLocationStore(listener: () => void) {
+  locationStoreListeners.add(listener);
+  return () => locationStoreListeners.delete(listener);
+}
 
 async function database() {
   databasePromise ??= SQLite.openDatabaseAsync(DATABASE_NAME).then(async (db) => {
@@ -236,6 +248,16 @@ async function currentContext() {
   );
   if (!row) return null;
   return { key, context: JSON.parse(row.context_json) as LocationAccountContext };
+}
+
+export async function getActiveLocationAccountIdentity() {
+  const current = await currentContext();
+  return current
+    ? {
+        userId: current.context.userId,
+        workspaceId: current.context.workspaceId
+      }
+    : null;
 }
 
 async function rebindUnownedEvidence(key: string, context: LocationAccountContext) {
@@ -839,12 +861,12 @@ export async function getLocationStoreDiagnostics(): Promise<LocationStoreDiagno
         lastAccepted: string | null;
       }>(
         `select
-          (select count(*) from location_evidence_journal where account_key = ? and upload_state != 'acknowledged') as pending,
+          (select count(*) from location_evidence_journal where account_key = ? and upload_state in ('pending', 'batched')) as pending,
           (select count(*) from location_evidence_journal where account_key = ? and upload_state = 'acknowledged') as acknowledged,
           (select count(*) from location_segment_snapshot where account_key = ?) as segments,
           (select count(*) from location_upload_outbox where account_key = ? and state = 'pending') as outbox,
           (select min(occurred_at) from location_evidence_journal where account_key = ?) as oldest,
-          (select min(occurred_at) from location_evidence_journal where account_key = ? and upload_state != 'acknowledged') as "oldestUnsynchronised",
+          (select min(occurred_at) from location_evidence_journal where account_key = ? and upload_state in ('pending', 'batched')) as "oldestUnsynchronised",
           (select max(occurred_at) from location_evidence_journal where account_key = ? and upload_state != 'rejected') as "lastAccepted"`,
         current.key,
         current.key,
