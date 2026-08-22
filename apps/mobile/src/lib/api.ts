@@ -18,6 +18,7 @@ import { DAYFRAME_API_BASE } from "./config";
 import {
   MobileRequestTimeoutError,
   StaleMobileSessionResponseError,
+  isMobileTransportFailure,
   mobileFetch,
   mobileFetchWithTimeout
 } from "./mobile-network";
@@ -28,6 +29,14 @@ import {
   readAuthenticatedSessionSnapshot,
   setSessionToken
 } from "./secure-session";
+import {
+  activateMobileAccount,
+  deactivateMobileAccount,
+  mobileAccountKey,
+  mobileAccountOwnersEqual,
+  readActiveMobileAccount,
+  type MobileAccountOwner
+} from "./mobileAccount";
 import {
   markPendingTimerStopFailure,
   removePendingTimerStop,
@@ -43,10 +52,13 @@ const DEFAULT_PLACE_PRIORITY = 5;
 const MOBILE_OPENING_REQUEST_TIMEOUT_MS = 15_000;
 const MOBILE_QUEUE_REQUEST_TIMEOUT_MS = 15_000;
 const MOBILE_TIMER_STOP_REQUEST_TIMEOUT_MS = 8_000;
+export const MOBILE_TIME_ENTRY_REQUEST_TIMEOUT_MS = 8_000;
 export const MOBILE_LOCATION_REVIEW_EVIDENCE_TIMEOUT_MS = 10_000;
 export const MOBILE_LOCATION_REVIEW_ACTION_TIMEOUT_MS = 15_000;
 let queueMutationTail: Promise<void> = Promise.resolve();
 let timerEntryIdCorrelationMutationTail: Promise<void> = Promise.resolve();
+const activityQueueSyncInFlightByOwner = new Map<string, Promise<SyncQueueResult>>();
+const activityQueueListeners = new Set<() => void>();
 
 export type MobileDateRange = {
   selectedDate: string;
@@ -311,6 +323,8 @@ export type QueuedEvent = Omit<ActivityEventInput, "occurredAt" | "workspaceId" 
   occurredAt: Date;
   localId: string;
   queuedAt: string;
+  userId: string;
+  workspaceId: string;
   failedAt?: string;
   failureCount?: number;
   lastError?: string;
@@ -398,6 +412,8 @@ type QueueableEvent = Omit<
   | "lastAttemptedAt"
   | "nextRetryAt"
   | "failureKind"
+  | "userId"
+  | "workspaceId"
 >;
 
 type ActivityEventDraft = {
@@ -411,6 +427,7 @@ type ActivityEventDraft = {
   placeId?: string;
   description?: string;
   rawPayload?: Record<string, unknown>;
+  owner?: MobileAccountOwner;
 };
 
 type ApiErrorPayload = {
@@ -464,6 +481,12 @@ export async function fetchBootstrap(options: { date?: string } = {}): Promise<M
     throw new Error(await errorMessage(response, "Unable to load Dayframe API"));
   }
   const bootstrap = await readJsonResponse<MobileBootstrap>(response);
+  if (bootstrap.user?.id && bootstrap.workspace?.id) {
+    await activateMobileAccount({
+      userId: bootstrap.user.id,
+      workspaceId: bootstrap.workspace.id
+    });
+  }
   const reviewStore = await reviewSyncStore();
   if (!reviewStore) return bootstrap;
   const projected = await reviewStore.processReviewBootstrap(bootstrap);
@@ -533,74 +556,99 @@ export async function logout() {
   await import("./reviewSyncStore")
     .then(({ clearActiveReviewAccountData }) => clearActiveReviewAccountData())
     .catch(() => undefined);
+  await import("./shortcuts")
+    .then(({ clearShortcutCatalog }) => clearShortcutCatalog())
+    .catch(() => undefined);
   await clearSessionToken();
+  await deactivateMobileAccount();
 }
 
 export { clearSessionToken, getSessionToken };
 
 export async function enqueueEvent(input: ActivityEventDraft) {
   return withQueueMutation(async () => {
-    const { localId, ...eventInput } = input;
+    const activeOwner = await readActiveMobileAccount();
+    const owner = input.owner ?? activeOwner;
+    if (!owner || !mobileAccountOwnersEqual(activeOwner, owner)) {
+      throw new Error("An authenticated account is required to queue activity.");
+    }
+    const { localId, owner: _owner, ...eventInput } = input;
     const parsed = ActivityEventInputSchema.parse({
       ...eventInput,
       occurredAt: input.occurredAt ?? new Date(),
       rawPayload: eventInput.rawPayload ?? {}
     });
-    const queue = await readQueue();
+    const all = await readAllQueue(owner);
+    const queue = all.filter((item) => mobileAccountOwnersEqual(item, owner));
     const queuedLocalId = normalizeLocalId(localId) ?? generatedLocalId();
     if (queue.some((item) => item.localId === queuedLocalId)) return queue;
-    queue.push({
+    const nextItem: QueuedEvent = {
       ...queuedEventFromParsedEvent(parsed),
       localId: queuedLocalId,
-      queuedAt: new Date().toISOString()
-    });
-    await writeQueue(queue);
-    return queue;
+      queuedAt: new Date().toISOString(),
+      userId: owner.userId,
+      workspaceId: owner.workspaceId
+    };
+    await writeAllQueue([...all, nextItem]);
+    return [...queue, nextItem];
   });
 }
 
-export async function readQueue(): Promise<QueuedEvent[]> {
-  const raw = await AsyncStorage.getItem(QUEUE_KEY);
-  if (!raw) return [];
-  const parsed = JSON.parse(raw) as StoredQueuedEvent[];
-  return parsed.map(migrateQueuedEvent);
+export async function readQueue(owner?: MobileAccountOwner): Promise<QueuedEvent[]> {
+  const resolvedOwner = owner ?? await readActiveMobileAccount();
+  if (!resolvedOwner) return [];
+  return (await readAllQueue(resolvedOwner))
+    .filter((item) => mobileAccountOwnersEqual(item, resolvedOwner));
 }
 
-export async function readTimerEntryIdCorrelations() {
-  const raw = await AsyncStorage.getItem(TIMER_ENTRY_ID_CORRELATIONS_KEY);
-  if (!raw) return new Map<string, string>();
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return new Map(
-      Object.entries(parsed).filter(
-        (entry): entry is [string, string] => Boolean(entry[0] && typeof entry[1] === "string" && entry[1])
-      )
-    );
-  } catch {
-    return new Map<string, string>();
-  }
+export async function readTimerEntryIdCorrelations(owner?: MobileAccountOwner) {
+  const resolvedOwner = owner ?? await readActiveMobileAccount();
+  if (!resolvedOwner) return new Map<string, string>();
+  const records = await readAllTimerEntryIdCorrelations(resolvedOwner);
+  return new Map(
+    records
+      .filter((record) => mobileAccountOwnersEqual(record, resolvedOwner))
+      .map((record) => [record.localId, record.timeEntryId])
+  );
 }
 
-export async function recordTimerEntryIdCorrelation(localId: string, timeEntryId: string) {
+export async function recordTimerEntryIdCorrelation(
+  localId: string,
+  timeEntryId: string,
+  owner?: MobileAccountOwner
+) {
   if (!localId || !timeEntryId) return false;
   return withTimerEntryIdCorrelationMutation(async () => {
-    const correlations = await readTimerEntryIdCorrelations();
-    correlations.set(localId, timeEntryId);
+    const resolvedOwner = owner ?? await readActiveMobileAccount();
+    if (!resolvedOwner) return false;
+    const records = await readAllTimerEntryIdCorrelations(resolvedOwner);
+    const next = records.filter((record) =>
+      !mobileAccountOwnersEqual(record, resolvedOwner) || record.localId !== localId
+    );
+    next.push({ ...resolvedOwner, localId, timeEntryId });
     await AsyncStorage.setItem(
       TIMER_ENTRY_ID_CORRELATIONS_KEY,
-      JSON.stringify(Object.fromEntries(correlations))
+      JSON.stringify(next)
     );
     return true;
   });
 }
 
-export async function removeTimerEntryIdCorrelation(localId: string) {
+export async function removeTimerEntryIdCorrelation(
+  localId: string,
+  owner?: MobileAccountOwner
+) {
   return withTimerEntryIdCorrelationMutation(async () => {
-    const correlations = await readTimerEntryIdCorrelations();
-    if (!correlations.delete(localId)) return false;
+    const resolvedOwner = owner ?? await readActiveMobileAccount();
+    if (!resolvedOwner) return false;
+    const records = await readAllTimerEntryIdCorrelations(resolvedOwner);
+    const next = records.filter((record) =>
+      !mobileAccountOwnersEqual(record, resolvedOwner) || record.localId !== localId
+    );
+    if (next.length === records.length) return false;
     await AsyncStorage.setItem(
       TIMER_ENTRY_ID_CORRELATIONS_KEY,
-      JSON.stringify(Object.fromEntries(correlations))
+      JSON.stringify(next)
     );
     return true;
   });
@@ -614,7 +662,15 @@ export async function removeTimerEntryIdCorrelation(localId: string) {
  */
 export async function resolveTimerEntryIdAfterQueueBarrier(localId: string) {
   if (!localId) return null;
-  await withQueueMutation(async () => undefined);
+  const { pendingSync } = await withQueueMutation(async () => {
+    const owner = await readActiveMobileAccount();
+    return {
+      pendingSync: owner
+        ? activityQueueSyncInFlightByOwner.get(mobileAccountKey(owner)) ?? null
+        : null
+    };
+  });
+  await pendingSync?.catch(() => undefined);
   return withTimerEntryIdCorrelationMutation(async () => {
     const correlations = await readTimerEntryIdCorrelations();
     return correlations.get(localId) ?? null;
@@ -626,10 +682,16 @@ export async function updateQueuedTimerStart(
   patch: Pick<TimeEntryUpdatePatch, "categoryId" | "description" | "startedAt" | "tagNames">
 ) {
   return withQueueMutation(async () => {
-    const queue = await readQueue();
+    const owner = await readActiveMobileAccount();
+    if (!owner) return false;
+    const all = await readAllQueue(owner);
     let updated = false;
-    const next = queue.map((item) => {
-      if (item.localId !== localId || item.type !== "timer_start") return item;
+    const next = all.map((item) => {
+      if (
+        !mobileAccountOwnersEqual(item, owner) ||
+        item.localId !== localId ||
+        item.type !== "timer_start"
+      ) return item;
       updated = true;
       return {
         ...item,
@@ -649,18 +711,27 @@ export async function updateQueuedTimerStart(
         }
       };
     });
-    if (updated) await writeQueue(next);
+    if (updated) await writeAllQueue(next);
     return updated;
   });
 }
 
 export async function removeQueuedEvent(localId: string) {
   return withQueueMutation(async () => {
-    const queue = await readQueue();
-    const next = queue.filter((item) => item.localId !== localId);
-    if (next.length !== queue.length) await writeQueue(next);
-    return next.length !== queue.length;
+    const owner = await readActiveMobileAccount();
+    if (!owner) return false;
+    const all = await readAllQueue(owner);
+    const next = all.filter((item) =>
+      !mobileAccountOwnersEqual(item, owner) || item.localId !== localId
+    );
+    if (next.length !== all.length) await writeAllQueue(next);
+    return next.length !== all.length;
   });
+}
+
+export function subscribeActivityQueue(listener: () => void) {
+  activityQueueListeners.add(listener);
+  return () => activityQueueListeners.delete(listener);
 }
 
 export function getQueueDiagnostics(queue: QueuedEvent[]): QueueDiagnostics {
@@ -709,10 +780,18 @@ export async function retryFailedQueuedEvents() {
 
 export async function clearFailedQueuedEvents() {
   return withQueueMutation(async () => {
-    const queue = await readQueue();
+    const owner = await readActiveMobileAccount();
+    if (!owner) {
+      return { removed: [], remaining: [], removedCount: 0, remainingCount: 0 };
+    }
+    const all = await readAllQueue(owner);
+    const queue = all.filter((item) => mobileAccountOwnersEqual(item, owner));
     const remaining = queue.filter((item) => !isClearableFailedEvent(item));
     const removed = queue.filter(isClearableFailedEvent);
-    await writeQueue(remaining);
+    await writeAllQueue([
+      ...all.filter((item) => !mobileAccountOwnersEqual(item, owner)),
+      ...remaining
+    ]);
     return {
       removed,
       remaining,
@@ -723,11 +802,31 @@ export async function clearFailedQueuedEvents() {
 }
 
 export async function syncQueue(options: SyncQueueOptions = {}): Promise<SyncQueueResult> {
-  return withQueueMutation(() => syncQueueUnlocked(options));
+  const { sync } = await withQueueMutation(async () => {
+    const owner = await readActiveMobileAccount();
+    if (!owner) {
+      return { sync: Promise.resolve(queueSyncResult([], [], undefined, false)) };
+    }
+    const ownerKey = mobileAccountKey(owner);
+    const existing = activityQueueSyncInFlightByOwner.get(ownerKey);
+    if (existing) return { sync: existing };
+    const nextSync = syncQueueUnlocked(options, owner).finally(() => {
+      if (activityQueueSyncInFlightByOwner.get(ownerKey) === nextSync) {
+        activityQueueSyncInFlightByOwner.delete(ownerKey);
+      }
+    });
+    activityQueueSyncInFlightByOwner.set(ownerKey, nextSync);
+    return { sync: nextSync };
+  });
+  return sync;
 }
 
-async function syncQueueUnlocked(options: SyncQueueOptions): Promise<SyncQueueResult> {
-  const queue = await readQueue();
+async function syncQueueUnlocked(
+  options: SyncQueueOptions,
+  owner: MobileAccountOwner
+): Promise<SyncQueueResult> {
+  const all = await withQueueMutation(() => readAllQueue(owner));
+  const queue = all.filter((item) => mobileAccountOwnersEqual(item, owner));
   const remaining: QueuedEvent[] = [];
   const synced: string[] = [];
   const timerEntryIdCorrelations: TimerEntryIdCorrelation[] = [];
@@ -780,6 +879,11 @@ async function syncQueueUnlocked(options: SyncQueueOptions): Promise<SyncQueueRe
           timeoutMessage: "Queued activity sync timed out. It will retry automatically."
         }
       );
+      if (!mobileAccountOwnersEqual(await readActiveMobileAccount(), owner)) {
+        remaining.push(item, ...queue.slice(index + 1));
+        stopped = true;
+        break;
+      }
       if (response.status === 401 || response.status === 403) {
         throw new AuthRequiredError();
       }
@@ -801,7 +905,7 @@ async function syncQueueUnlocked(options: SyncQueueOptions): Promise<SyncQueueRe
         if (!payload.timeEntryId) {
           throw new Error("Synced timer start did not return its canonical time entry.");
         }
-        await recordTimerEntryIdCorrelation(item.localId, payload.timeEntryId);
+        await recordTimerEntryIdCorrelation(item.localId, payload.timeEntryId, owner);
         timerEntryIdCorrelations.push({
           localId: item.localId,
           timeEntryId: payload.timeEntryId
@@ -819,10 +923,15 @@ async function syncQueueUnlocked(options: SyncQueueOptions): Promise<SyncQueueRe
     }
   }
 
-  await writeQueue(remaining);
+  const reconciledRemaining = await reconcileActivityQueueDrain({
+    owner,
+    processed: queue,
+    remaining,
+    synced
+  });
   return queueSyncResult(
     synced,
-    remaining,
+    reconciledRemaining,
     firstError,
     stopped,
     timerEntryIdCorrelations
@@ -863,6 +972,9 @@ export async function deliverPendingTimerStop(
   if (!pendingStop.targetEntryId) {
     return { status: "waiting_for_canonical_target", pendingStop };
   }
+  if (!mobileAccountOwnersEqual(await readActiveMobileAccount(), owner)) {
+    return { status: "session_changed", pendingStop };
+  }
 
   const sessionRead = await readAuthenticatedSessionSnapshot();
   if (sessionRead.status === "changed") {
@@ -901,6 +1013,12 @@ export async function deliverPendingTimerStop(
         timeoutMessage: "Timer Stop is still pending. Dayframe will retry automatically."
       }
     );
+    if (
+      !isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot) ||
+      !mobileAccountOwnersEqual(await readActiveMobileAccount(), owner)
+    ) {
+      return { status: "session_changed", pendingStop };
+    }
     if (response.status === 401 || response.status === 403) {
       throw new AuthRequiredError();
     }
@@ -937,10 +1055,17 @@ export async function deliverPendingTimerStop(
 }
 
 export async function deleteTimeEntry(id: string) {
-  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/time-entries/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-    headers: await authHeaders()
-  });
+  const response = await mobileFetchWithTimeout(
+    `${DAYFRAME_API_BASE}/api/time-entries/${encodeURIComponent(id)}`,
+    {
+      method: "DELETE",
+      headers: await authHeaders()
+    },
+    {
+      timeoutMilliseconds: MOBILE_TIME_ENTRY_REQUEST_TIMEOUT_MS,
+      timeoutMessage: "This deletion is taking too long. It can be retried safely."
+    }
+  );
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
@@ -949,14 +1074,21 @@ export async function deleteTimeEntry(id: string) {
 }
 
 export async function updateTimeEntry(id: string, patch: TimeEntryUpdatePatch) {
-  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/time-entries/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      ...(await authHeaders())
+  const response = await mobileFetchWithTimeout(
+    `${DAYFRAME_API_BASE}/api/time-entries/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        ...(await authHeaders())
+      },
+      body: JSON.stringify(patch)
     },
-    body: JSON.stringify(patch)
-  });
+    {
+      timeoutMilliseconds: MOBILE_TIME_ENTRY_REQUEST_TIMEOUT_MS,
+      timeoutMessage: "This edit is taking too long. It can be retried safely."
+    }
+  );
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
@@ -1400,24 +1532,26 @@ export async function queueStopTimer() {
 
 export function isNetworkTimerError(error: unknown) {
   if (!(error instanceof Error)) return false;
-  const message = error.message.toLowerCase();
   return (
     error instanceof MobileRequestTimeoutError ||
-    error.name === "TypeError" ||
-    message.includes("network request failed") ||
-    message.includes("failed to fetch") ||
-    message.includes("networkerror") ||
-    message.includes("internet connection")
+    isMobileTransportFailure(error)
   );
 }
 
 const permanentStatusCodes = new Set([400, 413, 422]);
 
-function migrateQueuedEvent(item: StoredQueuedEvent, index: number): QueuedEvent {
+function migrateQueuedEvent(
+  item: StoredQueuedEvent,
+  index: number,
+  legacyOwner?: MobileAccountOwner
+): QueuedEvent | null {
   const queueItem = { ...item };
   delete queueItem.workspaceId;
   delete queueItem.userId;
   delete queueItem.clientEventId;
+  const userId = optionalQueueOwnerText(item.userId) ?? legacyOwner?.userId;
+  const workspaceId = optionalQueueOwnerText(item.workspaceId) ?? legacyOwner?.workspaceId;
+  if (!userId || !workspaceId) return null;
 
   const queuedAt = validIsoString(item.queuedAt) ?? new Date().toISOString();
   const localId = typeof item.localId === "string" && item.localId.trim()
@@ -1448,6 +1582,8 @@ function migrateQueuedEvent(item: StoredQueuedEvent, index: number): QueuedEvent
     rawPayload: isRecord(item.rawPayload) ? item.rawPayload : {},
     localId,
     queuedAt,
+    userId,
+    workspaceId,
     failedAt: unscopedLegacyTimerStop
       ? validIsoString(item.failedAt) ?? queuedAt
       : validIsoString(item.failedAt),
@@ -1584,6 +1720,45 @@ function latestIso(values: Array<string | undefined>) {
     .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
 }
 
+function reconcileActivityQueueDrain(input: {
+  owner: MobileAccountOwner;
+  processed: readonly QueuedEvent[];
+  remaining: readonly QueuedEvent[];
+  synced: readonly string[];
+}) {
+  return withQueueMutation(async () => {
+    const current = await readAllQueue(input.owner);
+    const processedIds = new Set(input.processed.map((item) => item.localId));
+    const syncedIds = new Set(input.synced);
+    const remainingById = new Map(input.remaining.map((item) => [item.localId, item]));
+    const next = current.flatMap((item) => {
+      if (
+        !mobileAccountOwnersEqual(item, input.owner) ||
+        !processedIds.has(item.localId)
+      ) {
+        return [item];
+      }
+      if (syncedIds.has(item.localId)) return [];
+      const processed = remainingById.get(item.localId);
+      if (!processed) return [item];
+      return [{
+        ...item,
+        ...(processed.failedAt ? { failedAt: processed.failedAt } : {}),
+        ...(processed.failureCount === undefined ? {} : { failureCount: processed.failureCount }),
+        ...(processed.lastError ? { lastError: processed.lastError } : {}),
+        ...(processed.lastStatusCode === undefined
+          ? {}
+          : { lastStatusCode: processed.lastStatusCode }),
+        ...(processed.lastAttemptedAt ? { lastAttemptedAt: processed.lastAttemptedAt } : {}),
+        ...(processed.nextRetryAt ? { nextRetryAt: processed.nextRetryAt } : {}),
+        ...(processed.failureKind ? { failureKind: processed.failureKind } : {})
+      }];
+    });
+    await writeAllQueue(next);
+    return next.filter((item) => mobileAccountOwnersEqual(item, input.owner));
+  });
+}
+
 function formatRetryIso(value?: string) {
   return value ?? "after the retry window";
 }
@@ -1646,8 +1821,32 @@ function withTimerEntryIdCorrelationMutation<Result>(operation: () => Promise<Re
   return result;
 }
 
-async function writeQueue(queue: QueuedEvent[]) {
+async function readAllQueue(legacyOwner?: MobileAccountOwner): Promise<QueuedEvent[]> {
+  const raw = await AsyncStorage.getItem(QUEUE_KEY);
+  if (!raw) return [];
+  let parsed: StoredQueuedEvent[];
+  try {
+    const value = JSON.parse(raw) as unknown;
+    parsed = Array.isArray(value) ? value as StoredQueuedEvent[] : [];
+  } catch {
+    parsed = [];
+  }
+  const migrated = parsed.flatMap((item, index) => {
+    const event = migrateQueuedEvent(item, index, legacyOwner);
+    return event ? [event] : [];
+  });
+  if (
+    migrated.length !== parsed.length ||
+    parsed.some((item) => !optionalQueueOwnerText(item.userId) || !optionalQueueOwnerText(item.workspaceId))
+  ) {
+    await writeAllQueue(migrated);
+  }
+  return migrated;
+}
+
+async function writeAllQueue(queue: QueuedEvent[]) {
   await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
+  for (const listener of activityQueueListeners) listener();
 }
 
 function coerceQueuedDate(value: StoredQueuedEvent["occurredAt"]) {
@@ -1666,6 +1865,47 @@ function isQueueFailureKind(value: unknown): value is QueueFailureKind {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+type TimerEntryIdCorrelationRecord = MobileAccountOwner & {
+  localId: string;
+  timeEntryId: string;
+};
+
+async function readAllTimerEntryIdCorrelations(
+  legacyOwner?: MobileAccountOwner
+): Promise<TimerEntryIdCorrelationRecord[]> {
+  const raw = await AsyncStorage.getItem(TIMER_ENTRY_ID_CORRELATIONS_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) {
+      return parsed.flatMap((value) => {
+        if (!isRecord(value)) return [];
+        const userId = optionalQueueOwnerText(value.userId);
+        const workspaceId = optionalQueueOwnerText(value.workspaceId);
+        const localId = optionalQueueOwnerText(value.localId);
+        const timeEntryId = optionalQueueOwnerText(value.timeEntryId);
+        return userId && workspaceId && localId && timeEntryId
+          ? [{ userId, workspaceId, localId, timeEntryId }]
+          : [];
+      });
+    }
+    if (!isRecord(parsed) || !legacyOwner) return [];
+    const migrated = Object.entries(parsed).flatMap(([localId, timeEntryId]) =>
+      localId && typeof timeEntryId === "string" && timeEntryId
+        ? [{ ...legacyOwner, localId, timeEntryId }]
+        : []
+    );
+    await AsyncStorage.setItem(TIMER_ENTRY_ID_CORRELATIONS_KEY, JSON.stringify(migrated));
+    return migrated;
+  } catch {
+    return [];
+  }
+}
+
+function optionalQueueOwnerText(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 export class AuthRequiredError extends Error {
@@ -1692,6 +1932,10 @@ async function authenticate(path: string, body: Record<string, unknown>): Promis
   if (!response.ok) throw new Error(payload.error ?? `Authentication failed: ${response.status}`);
   if ("requiresEmailConfirmation" in payload) return payload;
   await setSessionToken(payload.token);
+  await activateMobileAccount({
+    userId: payload.user.id,
+    workspaceId: payload.workspace.id
+  });
   const reviewStore = await reviewSyncStore();
   if (reviewStore) {
     await reviewStore.activateReviewAccount({

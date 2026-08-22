@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AccessibilityInfo,
   ActivityIndicator,
+  AppState,
   Pressable,
   ScrollView,
   Text,
   View
 } from "react-native";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useIsFocused, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type {
   LocationReviewAction,
@@ -26,6 +27,7 @@ import {
 import {
   revalidateLocationReviewEvidence
 } from "@/lib/locationReviewEvidenceCache";
+import { useConnectivity } from "@/lib/connectivity";
 import {
   durableReviewMutationFromLocationAction,
   locationReviewActionRequiresConnection
@@ -54,7 +56,9 @@ type EvidenceScreenState =
 
 export default function LocationReviewDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const isFocused = useIsFocused();
   const { styles, theme } = useMobileTheme();
+  const { isOffline, isOnline, reconnectEpoch } = useConnectivity();
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [screenState, setScreenState] = useState<EvidenceScreenState>({
     status: "hydrating"
@@ -65,6 +69,14 @@ export default function LocationReviewDetailScreen() {
   const [reloadSequence, setReloadSequence] = useState(0);
   const loadGenerationRef = useRef(0);
   const hydrationFeedbackCancelRef = useRef<(() => void) | null>(null);
+  const appStateRef = useRef(AppState.currentState);
+  const routeFocusedRef = useRef(false);
+  const screenStateRef = useRef<EvidenceScreenState>(screenState);
+  const connectivityRef = useRef({ isOffline, isOnline, reconnectEpoch });
+  const lastHandledReconnectEpoch = useRef(0);
+  const reconnectControllerRef = useRef<AbortController | null>(null);
+  screenStateRef.current = screenState;
+  connectivityRef.current = { isOffline, isOnline, reconnectEpoch };
 
   useEffect(() => {
     const generation = ++loadGenerationRef.current;
@@ -84,6 +96,19 @@ export default function LocationReviewDetailScreen() {
       controller.abort();
     };
   }, [id, reloadSequence]);
+
+  useEffect(() => {
+    routeFocusedRef.current = isFocused;
+    if (isFocused) {
+      lastHandledReconnectEpoch.current = Math.max(
+        lastHandledReconnectEpoch.current,
+        connectivityRef.current.reconnectEpoch
+      );
+    } else {
+      reconnectControllerRef.current?.abort();
+      reconnectControllerRef.current = null;
+    }
+  }, [isFocused]);
 
   const evidence = screenState.status === "ready" ? screenState.evidence : null;
   const reviewItem = data?.reviewItems.find((item) => item.id === id);
@@ -161,8 +186,9 @@ export default function LocationReviewDetailScreen() {
             evidence: cachedEvidence.evidence,
             source: "cache",
             refreshing: false,
-            refreshMessage:
-              "Couldn’t refresh this evidence. Showing the copy saved on this iPhone. Map tiles may be unavailable while offline."
+            refreshMessage: connectivityRef.current.isOffline
+              ? "Showing evidence saved on this iPhone"
+              : "Couldn’t refresh this evidence · showing the saved copy"
           });
         } else {
           setScreenState({
@@ -208,6 +234,96 @@ export default function LocationReviewDetailScreen() {
     if (!isCurrent(generation, signal)) return;
     if (error instanceof AuthRequiredError) router.replace("/");
   }
+
+  const recoverEvidenceAfterReconnect = useCallback(() => {
+    const connectivity = connectivityRef.current;
+    if (
+      connectivity.reconnectEpoch <= lastHandledReconnectEpoch.current ||
+      !connectivity.isOnline ||
+      appStateRef.current !== "active" ||
+      !routeFocusedRef.current ||
+      !id
+    ) {
+      return;
+    }
+    lastHandledReconnectEpoch.current = connectivity.reconnectEpoch;
+    const currentState = screenStateRef.current;
+    if (currentState.status === "unavailable") {
+      setReloadSequence((current) => current + 1);
+      return;
+    }
+    if (currentState.status !== "ready") return;
+
+    const generation = loadGenerationRef.current;
+    reconnectControllerRef.current?.abort();
+    const controller = new AbortController();
+    reconnectControllerRef.current = controller;
+    void getActiveReviewAccountIdentity()
+      .then(async (owner) => {
+        if (!owner || !isCurrent(generation, controller.signal)) return;
+        const refreshed = await revalidateLocationReviewEvidence({
+          reviewItemId: id,
+          workspaceId: owner.workspaceId,
+          userId: owner.userId,
+          signal: controller.signal
+        });
+        if (
+          !isCurrent(generation, controller.signal) ||
+          !routeFocusedRef.current
+        ) {
+          return;
+        }
+        setScreenState({
+          status: "ready",
+          evidence: refreshed.evidence,
+          source: "network",
+          refreshing: false,
+          refreshMessage: null
+        });
+      })
+      .catch((error) => {
+        if (
+          !isCurrent(generation, controller.signal) ||
+          !routeFocusedRef.current
+        ) {
+          return;
+        }
+        if (error instanceof AuthRequiredError) {
+          router.replace("/");
+          return;
+        }
+        const mounted = screenStateRef.current;
+        if (mounted.status !== "ready") return;
+        setScreenState({
+          ...mounted,
+          refreshing: false,
+          refreshMessage: connectivityRef.current.isOffline
+            ? "Showing evidence saved on this iPhone"
+            : "Couldn’t refresh this evidence · showing the saved copy"
+        });
+      })
+      .finally(() => {
+        if (reconnectControllerRef.current === controller) {
+          reconnectControllerRef.current = null;
+        }
+      });
+  }, [id]);
+
+  useEffect(() => recoverEvidenceAfterReconnect(), [
+    isOnline,
+    reconnectEpoch,
+    recoverEvidenceAfterReconnect
+  ]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      appStateRef.current = nextState;
+      if (nextState === "active") recoverEvidenceAfterReconnect();
+    });
+    return () => subscription.remove();
+  }, [recoverEvidenceAfterReconnect]);
+
+  useEffect(() => () => reconnectControllerRef.current?.abort(), []);
 
   async function perform(
     action: LocationReviewAction,

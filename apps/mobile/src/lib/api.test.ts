@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { QueuedEvent } from "./api";
+import type { MobileBootstrap, QueuedEvent } from "./api";
 import {
   createOptimisticTimerStartReconciler,
   requireQueuedTimerStartRemoval,
@@ -42,6 +42,10 @@ vi.mock("@react-native-async-storage/async-storage", () => ({
     getItem: vi.fn((key: string) => Promise.resolve(asyncStore.get(key) ?? null)),
     setItem: vi.fn((key: string, value: string) => {
       asyncStore.set(key, value);
+      return Promise.resolve();
+    }),
+    removeItem: vi.fn((key: string) => {
+      asyncStore.delete(key);
       return Promise.resolve();
     })
   }
@@ -98,19 +102,26 @@ const {
   readPendingTimerStops
 } = await import("./timerStopOutbox");
 const { resetSessionTokenCacheForTesting, setSessionToken } = await import("./secure-session");
+const {
+  __resetMobileAccountForTests,
+  activateMobileAccount
+} = await import("./mobileAccount");
 const SecureStore = await import("expo-secure-store");
 const {
   MobileRequestTimeoutError,
   StaleMobileSessionResponseError
 } = await import("./mobile-network");
+const { projectDurableLocalWork } = await import("./durableLocalProjection");
 
 describe("mobile API client", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.useRealTimers();
     resetSessionTokenCacheForTesting();
     secureStore.clear();
     asyncStore.clear();
     vi.restoreAllMocks();
+    __resetMobileAccountForTests();
+    await activateMobileAccount(TIMER_STOP_OWNER);
   });
 
   it("stores the Dayframe app session token after login", async () => {
@@ -471,6 +482,20 @@ describe("mobile API client", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("does not send an owned Stop after the active mobile account changes", async () => {
+    const pending = await getOrCreatePendingStop({
+      owner: TIMER_STOP_OWNER,
+      target: { targetEntryId: TIMER_TARGET_A }
+    });
+    await activateMobileAccount({ userId: "user-b", workspaceId: "workspace-b" });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(deliverPendingTimerStop(pending, TIMER_STOP_OWNER))
+      .resolves.toMatchObject({ status: "session_changed" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("does not dispatch an account A Stop when the deferred token read switches to account B", async () => {
     let finishTokenRead: ((token: string | null) => void) | undefined;
     vi.mocked(SecureStore.getItemAsync).mockImplementationOnce(() =>
@@ -529,8 +554,8 @@ describe("mobile API client", () => {
         storedQueuedEvent({
           source: "health_sleep",
           type: "health_sleep_import",
-          workspaceId: "00000000-0000-4000-8000-000000000010",
-          userId: "00000000-0000-4000-8000-000000000001",
+          workspaceId: TIMER_STOP_OWNER.workspaceId,
+          userId: TIMER_STOP_OWNER.userId,
           clientEventId: "stale-client-event-id",
           rawPayload: {
             provider: "healthkit",
@@ -544,8 +569,7 @@ describe("mobile API client", () => {
     const queue = await readQueue();
 
     expect(queue).toHaveLength(1);
-    expect((queue[0] as Record<string, unknown>).workspaceId).toBeUndefined();
-    expect((queue[0] as Record<string, unknown>).userId).toBeUndefined();
+    expect(queue[0]).toMatchObject(TIMER_STOP_OWNER);
     expect((queue[0] as Record<string, unknown>).clientEventId).toBeUndefined();
     expect(queue[0].rawPayload).toEqual({
       provider: "healthkit",
@@ -563,8 +587,8 @@ describe("mobile API client", () => {
           localId: "local-health-sleep-1",
           source: "health_sleep",
           type: "health_sleep_import",
-          workspaceId: "00000000-0000-4000-8000-000000000010",
-          userId: "00000000-0000-4000-8000-000000000001",
+          workspaceId: TIMER_STOP_OWNER.workspaceId,
+          userId: TIMER_STOP_OWNER.userId,
           clientEventId: "stale-client-event-id",
           rawPayload: {
             provider: "healthkit",
@@ -598,32 +622,70 @@ describe("mobile API client", () => {
     await expect(readQueue()).resolves.toHaveLength(0);
   });
 
-  it("durably correlates a synced offline timer start before removing its local event", async () => {
+  it("converges an offline timer Start from local projection to one canonical server entry", async () => {
     secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    const localId = "optimistic-active-timer:offline-1";
+    const canonicalId = "entry-canonical-1";
     await enqueueEvent({
-      localId: "optimistic-active-timer:offline-1",
+      localId,
       source: "mobile_app",
       type: "timer_start",
       description: "Offline work"
     });
-    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({
-      eventId: "event-start-1",
-      timeEntryId: "entry-canonical-1"
-    }, 201))));
+
+    const offlineProjection = projectDurableLocalWork(timerRecoveryBootstrap(), {
+      owner: TIMER_STOP_OWNER,
+      activityEvents: await readQueue(),
+      correlations: new Map(),
+      timeEntryCommands: [],
+      timerStops: []
+    });
+    expect(offlineProjection.activeEntry).toMatchObject({
+      id: localId,
+      description: "Offline work"
+    });
+
+    let canonicalServerEntry: MobileBootstrap["activeEntry"] = null;
+    const fetchMock = vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { clientEventId?: string };
+      expect(body.clientEventId).toBe(localId);
+      canonicalServerEntry = timerRecoveryEntry(canonicalId);
+      return Promise.resolve(jsonResponse({
+        eventId: "event-start-1",
+        timeEntryId: canonicalId
+      }, 201));
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     const result = await syncQueue();
 
-    expect(result.synced).toEqual(["optimistic-active-timer:offline-1"]);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(result.synced).toEqual([localId]);
     expect(result.timerEntryIdCorrelations).toEqual([{
-      localId: "optimistic-active-timer:offline-1",
-      timeEntryId: "entry-canonical-1"
+      localId,
+      timeEntryId: canonicalId
     }]);
-    await expect(readTimerEntryIdCorrelations()).resolves.toEqual(
-      new Map([["optimistic-active-timer:offline-1", "entry-canonical-1"]])
-    );
+    const correlations = await readTimerEntryIdCorrelations();
+    expect(correlations).toEqual(new Map([[localId, canonicalId]]));
     await expect(readQueue()).resolves.toEqual([]);
 
-    await expect(removeTimerEntryIdCorrelation("optimistic-active-timer:offline-1"))
+    const converged = projectDurableLocalWork(
+      timerRecoveryBootstrap(canonicalServerEntry),
+      {
+        owner: TIMER_STOP_OWNER,
+        activityEvents: await readQueue(),
+        correlations,
+        timeEntryCommands: [],
+        timerStops: []
+      }
+    );
+    expect(converged.activeEntry?.id).toBe(canonicalId);
+    expect(converged.entries).toEqual([
+      expect.objectContaining({ id: canonicalId, description: "Offline work" })
+    ]);
+    expect(converged.entries.some((entry) => entry.id === localId)).toBe(false);
+
+    await expect(removeTimerEntryIdCorrelation(localId))
       .resolves.toBe(true);
     await expect(readTimerEntryIdCorrelations()).resolves.toEqual(new Map());
   });
@@ -904,6 +966,61 @@ describe("mobile API client", () => {
     await expect(readPendingTimerStops()).resolves.toEqual([
       expect.objectContaining({ targetEntryId: TIMER_TARGET_A })
     ]);
+  });
+
+  it("shares an in-flight activity drain while allowing a new Start to become durable", async () => {
+    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    await enqueueEvent({
+      localId: "optimistic-active-timer:first",
+      source: "mobile_app",
+      type: "timer_start"
+    });
+    const firstResponse = deferred<Response>();
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => firstResponse.promise)
+      .mockResolvedValue(jsonResponse({
+        eventId: "event-second",
+        timeEntryId: "entry-second"
+      }, 201));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const firstDrain = syncQueue();
+    const sharedDrain = syncQueue();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+
+    await expect(enqueueEvent({
+      localId: "optimistic-active-timer:second",
+      source: "mobile_app",
+      type: "timer_start"
+    })).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ localId: "optimistic-active-timer:second" })
+    ]));
+    await expect(readQueue()).resolves.toHaveLength(2);
+
+    firstResponse.resolve(jsonResponse({
+      eventId: "event-first",
+      timeEntryId: "entry-first"
+    }, 201));
+    const results = await Promise.all([firstDrain, sharedDrain]);
+    expect(results).toEqual([
+      expect.objectContaining({
+        synced: ["optimistic-active-timer:first"],
+        remainingCount: 1
+      }),
+      expect.objectContaining({
+        synced: ["optimistic-active-timer:first"],
+        remainingCount: 1
+      })
+    ]);
+    await expect(readQueue()).resolves.toEqual([
+      expect.objectContaining({ localId: "optimistic-active-timer:second" })
+    ]);
+
+    await expect(syncQueue()).resolves.toMatchObject({
+      synced: ["optimistic-active-timer:second"],
+      remainingCount: 0
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("preserves queue order when the first event fails to sync", async () => {
@@ -2100,6 +2217,43 @@ describe("mobile API client", () => {
   });
 });
 
+function timerRecoveryBootstrap(
+  activeEntry: MobileBootstrap["activeEntry"] = null
+): MobileBootstrap {
+  return {
+    user: { id: TIMER_STOP_OWNER.userId, email: "a@example.com", name: "A" },
+    workspace: { id: TIMER_STOP_OWNER.workspaceId, name: "A" },
+    activeEntry,
+    projects: [],
+    categories: [],
+    entries: activeEntry ? [activeEntry] : [],
+    places: [],
+    reviewItems: []
+  };
+}
+
+function timerRecoveryEntry(id: string): NonNullable<MobileBootstrap["activeEntry"]> {
+  return {
+    id,
+    projectId: null,
+    projectName: null,
+    projectColor: null,
+    clientName: null,
+    categoryId: null,
+    categoryName: null,
+    categoryColor: null,
+    placeName: null,
+    source: "mobile_app",
+    confidence: "high",
+    reviewStatus: "confirmed",
+    description: "Offline work",
+    startedAt: "2026-08-22T10:00:00.000Z",
+    stoppedAt: null,
+    durationSeconds: 0,
+    tagNames: []
+  };
+}
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -2147,7 +2301,9 @@ function readMigratedQueuedEventForTest(item: ReturnType<typeof storedQueuedEven
     ...item,
     source: item.source as QueuedEvent["source"],
     type: item.type as QueuedEvent["type"],
-    occurredAt: new Date(item.occurredAt)
+    occurredAt: new Date(item.occurredAt),
+    userId: "user-test",
+    workspaceId: "workspace-test"
   };
 }
 

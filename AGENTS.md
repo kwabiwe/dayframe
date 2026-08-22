@@ -97,6 +97,7 @@ npm run export:workspace -- ./dayframe-backup.json
 
 - Mobile session tokens live in Expo SecureStore.
 - Offline event capture goes through the queue in `apps/mobile/src/lib/api.ts`.
+- Mobile connectivity has one process-wide NetInfo owner and one icon-free root overlay. The fixed 32-point pill sits in unused top safe-area space without reserving layout; native sheets cover it and no screen, sheet, menu or picker mounts a duplicate. Presentation comes from confirmed offline truth plus the live account-owned durable-work count: `Offline`, `Syncing…`, and a two-second `Online` notice only after pending work changes from non-zero to zero. Never replace durable queues, clear pending work, infer completion from reachability/pass outcome, or disable an offline-capable action solely because reachability reports offline. Project queued Start/Edit/Delete/Stop work over every cached or fetched Dashboard bootstrap. Validate network transitions, layout and timer convergence on a physical iPhone; Simulator and unit results are not device evidence.
 - Geofence tasks must remain defined at module top level.
 - HealthKit access is iOS native-build only; do not assume Expo Go can exercise it.
 - Keep `EXPO_PUBLIC_DAYFRAME_API_BASE` configurable for hosted Vercel, simulator, and physical iPhone testing.

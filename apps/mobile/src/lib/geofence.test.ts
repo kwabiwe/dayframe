@@ -89,6 +89,7 @@ const {
   startGeofences
 } = await import("./geofence");
 const { readQueue, syncQueue } = await import("./api");
+const { __resetMobileAccountForTests, activateMobileAccount } = await import("./mobileAccount");
 
 const place = {
   id: "30000000-0000-4000-8000-000000000003",
@@ -134,10 +135,12 @@ const homeRegion = {
 };
 
 describe("mobile geofence visit candidates", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     asyncStore.clear();
     secureStore.clear();
     vi.clearAllMocks();
+    __resetMobileAccountForTests();
+    await activateMobileAccount({ userId: "user-geofence", workspaceId: "workspace-geofence" });
   });
 
   it("rehydrates unchanged region state without repeatedly re-registering iOS geofences", async () => {

@@ -38,6 +38,7 @@ import {
 } from "@/lib/api";
 import { reprocessExistingHealthReviewItems } from "@/lib/health";
 import { createLocationReviewEvidencePrefetcher } from "@/lib/locationReviewEvidenceCache";
+import { useConnectivity } from "@/lib/connectivity";
 import { pressable, useMobileTheme } from "@/lib/mobileTheme";
 import { mergePersistedMobileTag } from "@/lib/mobileTags";
 import {
@@ -116,6 +117,7 @@ const HEALTH_REPROCESS_TIMEOUT_MS = 45_000;
 
 export default function ReviewScreen() {
   const { reloadThemePreference, styles, theme } = useMobileTheme();
+  const { isOffline, isOnline, reconnectEpoch } = useConnectivity();
   const {
     reduceMotion,
     resolved: reduceMotionPreferenceResolved
@@ -153,6 +155,8 @@ export default function ReviewScreen() {
   const initialFocusHandled = useRef(false);
   const healthReprocessInFlight = useRef(false);
   const forcedReprocessComplete = useRef(false);
+  const lastHandledReconnectEpoch = useRef(0);
+  const connectivityRef = useRef({ isOffline, isOnline, reconnectEpoch });
   const reviewMenuStateRef = useRef(CLOSED_REVIEW_MENU_STATE);
   const reviewMenuActionSequence = useRef(0);
   const reviewMutations = useRef(new Map<string, number>());
@@ -163,6 +167,7 @@ export default function ReviewScreen() {
     createLocationReviewEvidencePrefetcher()
   ).current;
   const now = Date.now();
+  connectivityRef.current = { isOffline, isOnline, reconnectEpoch };
 
   const applyReviewMenuEvent = useCallback((event: ReviewMenuEvent) => {
     const nextState = reduceReviewMenuState(reviewMenuStateRef.current, event);
@@ -251,6 +256,16 @@ export default function ReviewScreen() {
     return committed;
   }, [reconcileLocalReviewProjection, refreshReviewSyncDiagnostics]);
 
+  const startEvidencePrefetch = useCallback((bootstrap: MobileBootstrap) => {
+    evidencePrefetcher.start({
+      reviewItemIds: bootstrap.reviewItems
+        .filter((item) => item.status === "open" && hasV2LocationEvidence(item))
+        .map((item) => item.id),
+      workspaceId: bootstrap.workspace.id,
+      userId: bootstrap.user.id
+    });
+  }, [evidencePrefetcher]);
+
   const cancelPendingReviewHandover = useCallback(() => {
     const pendingAction = reviewMenuStateRef.current.pendingAction;
     applyReviewMenuEvent({ type: "reset" });
@@ -288,13 +303,7 @@ export default function ReviewScreen() {
       commitBootstrap(bootstrap);
       setReviewAvailabilityMessage(null);
       await refreshReviewSyncDiagnostics();
-      evidencePrefetcher.start({
-        reviewItemIds: bootstrap.reviewItems
-          .filter((item) => item.status === "open" && hasV2LocationEvidence(item))
-          .map((item) => item.id),
-        workspaceId: bootstrap.workspace.id,
-        userId: bootstrap.user.id
-      });
+      startEvidencePrefetch(bootstrap);
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         router.replace("/");
@@ -310,21 +319,28 @@ export default function ReviewScreen() {
       if (cached || dataRef.current) {
         if (cached) {
           const current = dataRef.current;
-          commitBootstrap(
+          const nextBootstrap =
             current
               ? mergeReviewBootstrapProjection(current, cached.bootstrap)
-              : cached.bootstrap
-          );
+              : cached.bootstrap;
+          commitBootstrap(nextBootstrap);
+          startEvidencePrefetch(nextBootstrap);
+        } else if (dataRef.current) {
+          startEvidencePrefetch(dataRef.current);
         }
         setReviewAvailabilityMessage(
-          cached?.cachedAt
-            ? `Offline · showing Review data saved ${formatCachedAt(cached.cachedAt)}`
-            : "Offline · showing Review data saved on this iPhone"
+          connectivityRef.current.isOffline
+            ? cached?.cachedAt
+              ? `Showing Review data saved ${formatCachedAt(cached.cachedAt)}`
+              : "Showing Review data saved on this iPhone"
+            : "Couldn’t refresh Review · showing saved data"
         );
         await refreshReviewSyncDiagnostics();
       } else {
         setReviewAvailabilityMessage(
-          "Review is unavailable offline because no recent Review data is stored on this iPhone."
+          connectivityRef.current.isOffline
+            ? "No Review data is saved on this iPhone yet."
+            : "Review couldn’t load and no saved copy is available."
         );
       }
     } finally {
@@ -344,9 +360,41 @@ export default function ReviewScreen() {
     applyReviewMenuEvent,
     commitBootstrap,
     evidencePrefetcher,
-    refreshReviewSyncDiagnostics
+    refreshReviewSyncDiagnostics,
+    startEvidencePrefetch
   ]);
   loadRef.current = load;
+
+  const recoverReviewAfterReconnect = useCallback(() => {
+    const currentConnectivity = connectivityRef.current;
+    if (
+      currentConnectivity.reconnectEpoch <= lastHandledReconnectEpoch.current ||
+      !currentConnectivity.isOnline ||
+      appStateRef.current !== "active" ||
+      !screenFocusedRef.current
+    ) {
+      return;
+    }
+    lastHandledReconnectEpoch.current = currentConnectivity.reconnectEpoch;
+    const generation = screenOwnerGeneration.current;
+    void synchroniseReviewMutations({ force: true })
+      .catch(() => undefined)
+      .then(() => {
+        if (
+          generation !== screenOwnerGeneration.current ||
+          !screenFocusedRef.current ||
+          appStateRef.current !== "active"
+        ) {
+          return;
+        }
+        return load({
+          preserveMenu: true,
+          queueIfBusy: true,
+          silent: true,
+          skipReprocess: true
+        });
+      });
+  }, [load]);
 
   const startHealthReviewReprocess = useCallback(async (force = false) => {
     if (healthReprocessInFlight.current) return;
@@ -418,6 +466,10 @@ export default function ReviewScreen() {
     useCallback(() => {
       screenFocusedRef.current = true;
       screenOwnerGeneration.current += 1;
+      lastHandledReconnectEpoch.current = Math.max(
+        lastHandledReconnectEpoch.current,
+        connectivityRef.current.reconnectEpoch
+      );
       const generation = screenOwnerGeneration.current;
       applyReviewMenuEvent({ type: "close" });
       void reloadThemePreference();
@@ -449,6 +501,12 @@ export default function ReviewScreen() {
     ])
   );
 
+  useEffect(() => recoverReviewAfterReconnect(), [
+    isOnline,
+    reconnectEpoch,
+    recoverReviewAfterReconnect
+  ]);
+
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState) => {
       appStateRef.current = nextState;
@@ -458,17 +516,24 @@ export default function ReviewScreen() {
         return;
       }
       if (screenFocusedRef.current) {
-        void synchroniseReviewMutations().catch(() => undefined);
-        void load({
-          preserveMenu: true,
-          queueIfBusy: true,
-          silent: true,
-          skipReprocess: true
-        });
+        const reconnectPending =
+          connectivityRef.current.isOnline &&
+          connectivityRef.current.reconnectEpoch > lastHandledReconnectEpoch.current;
+        if (reconnectPending) {
+          recoverReviewAfterReconnect();
+        } else {
+          void synchroniseReviewMutations().catch(() => undefined);
+          void load({
+            preserveMenu: true,
+            queueIfBusy: true,
+            silent: true,
+            skipReprocess: true
+          });
+        }
       }
     });
     return () => subscription.remove();
-  }, [cancelPendingReviewHandover, evidencePrefetcher, load]);
+  }, [cancelPendingReviewHandover, evidencePrefetcher, load, recoverReviewAfterReconnect]);
 
   const openReviewItems = useMemo(
     () => (data?.reviewItems ?? []).filter(isOpenReviewItem),

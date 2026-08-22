@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 const TIMER_STOP_OUTBOX_KEY = "dayframe.timerStopOutbox.v1";
 let timerStopOutboxMutationTail: Promise<void> = Promise.resolve();
 let fallbackEventSequence = 0;
+const listeners = new Set<() => void>();
 
 export type TimerStopOwner = {
   userId: string;
@@ -170,6 +171,11 @@ export function timerStopOwnerMatches(
   return pendingStop.userId === owner.userId && pendingStop.workspaceId === owner.workspaceId;
 }
 
+export function subscribeTimerStopOutbox(listener: () => void) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
 function withTimerStopOutboxMutation<Result>(operation: () => Promise<Result>) {
   const result = timerStopOutboxMutationTail.catch(() => undefined).then(operation);
   timerStopOutboxMutationTail = result.then(() => undefined, () => undefined);
@@ -183,6 +189,7 @@ function sameTimerStopTarget(item: PendingTimerStop, target: TimerStopTarget) {
 
 async function writePendingTimerStops(outbox: readonly PendingTimerStop[]) {
   await AsyncStorage.setItem(TIMER_STOP_OUTBOX_KEY, JSON.stringify(outbox));
+  for (const listener of listeners) listener();
 }
 
 function parsePendingTimerStop(value: unknown): PendingTimerStop | null {
