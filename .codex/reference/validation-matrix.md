@@ -272,7 +272,7 @@ Native Calendar long-press creation additionally requires:
 
 ## Mobile Connectivity And Reconnect
 
-Required whenever the global reachability owner, HTTP evidence boundary, reconnect ordering, in-layout status host, or connectivity-aware Review copy changes:
+Required whenever the global reachability owner, HTTP evidence boundary, durable projection/retry ordering, root status overlay, or connectivity-aware Review copy changes:
 
 - Run the connectivity state/monitor/recovery and mobile-network tests, the complete mobile suite and typecheck, `npx expo install --check`, `npx pod-install`, Review and Location SQLite validators, and a clean unsigned iOS Simulator build with fresh Derived Data. Review both JavaScript lockfile and `Podfile.lock` changes. Do not use Expo Go as native NetInfo evidence.
 - Re-run timer Stop/outbox, Live Activity, general queue, Review cache/outbox, Location Evidence cache, Location Intelligence, HealthKit, account/session, native tab, sheet/keyboard, navigation, motion, theme and accessibility regression coverage. Reachability must never replace a durable owner or disable an offline-capable action.
@@ -281,12 +281,12 @@ Required whenever the global reachability owner, HTTP evidence boundary, reconne
 Physical-iPhone matrix:
 
 1. Cold launch online: no status flash and no initial success strip.
-2. Cold launch in Airplane Mode: `Offline — changes will sync later` appears; Login or a same-account cached Dashboard remains usable, and the generic `Dayframe API is taking too long to open` modal does not block cached operation once offline is known.
-3. Online to Airplane Mode: the compact offline strip appears after approximately 300 ms, remains one line/approximately 36 points at normal text size, and blocks no touch.
-4. Airplane Mode to online: `Back online, syncing…` appears only after ordered recovery starts; `All changes synced` replaces it only after every applicable recovery owner plus bootstrap succeeds with no queued work, remains for approximately two seconds, then leaves.
-5. Reconnect then immediately disconnect: offline supersedes syncing/success/failure and no stale completion timer hides it. Force one owner to return a typed failure and one queue to retain work; each must show persistent `Some changes haven’t synced` with no success flash.
+2. Cold launch in Airplane Mode: amber `Offline` appears; Login or a same-account cached Dashboard remains usable, and the generic opening-timeout modal does not block cached operation once offline is known.
+3. Online to Airplane Mode: the root pill appears after approximately 300 ms, remains one line/32 points, moves no page content and blocks no touch.
+4. Airplane Mode to online with durable work: `Syncing…` persists while any applicable account-owned command remains. Only a live pending-count change from non-zero to zero produces green `Online` for approximately two seconds, then hides it.
+5. Reconnect then immediately disconnect: `Offline` supersedes other presentation and no stale timer hides it. Force a retryable owner failure and verify `Syncing…` remains while queued work is retained and automatic retry is scheduled. Force permanent rejection and verify targeted diagnostics with no permanent generic pill.
 6. Wi-Fi to cellular and cellular to Wi-Fi: no false offline flash.
-7. Weak/slow timeout while NetInfo stays online: no incorrect offline notice.
+7. Weak/blackholed connection: one isolated failure stays neutral; repeated request deadlines/transport failures in the bounded window confirm offline, while caller cancellation remains neutral. A retained Edit/Delete stops awaiting at its configured deadline and later retries.
 8. API `5xx`: no incorrect offline notice.
 9. Background offline, reconnect while backgrounded, then foreground: current state refreshes and exactly one recovery occurs. Also background during an active ordered pass; foreground must resume that retained epoch from the beginning without an unordered fallback, parallel pass or stuck syncing strip.
 10. Repeated foreground/background: no duplicate listener, strip transition, recovery or stale account-owned presentation.
@@ -300,25 +300,25 @@ Physical-iPhone matrix:
 18. Settings route.
 19. Places and place editor.
 20. Interactive swipe-back.
-21. Active timer edit sheet, with the strip below the top action/header and never covering Done.
-22. Completed-entry and Add-time sheets, with the strip below the top action/header and no form clipping.
+21. Active timer edit sheet opened while the root pill is visible: the native sheet covers it, Done remains reachable, and no duplicate exists inside.
+22. Completed-entry and Add-time sheets: each covers the root pill and contains no duplicate or form clipping.
 23. Overflow menu.
 24. Date picker.
 25. Keyboard shown and hidden.
 26. Native tab bar expanded and minimised.
 27. General queued activity event drains on reconnect without duplication.
-27a. Launch or remain offline with a same-account cached Dashboard, start one timer, restore connectivity, and verify the durable Start reaches `/api/events`, receives one canonical timer ID, leaves no queued Start, and converges to the same running timer on iPhone and staging web. Repeat with reconnect recovery already past an initially empty activity queue so the late durable fallback forces exactly one serialized same-epoch rerun.
+27a. Launch or remain offline with a same-account cached Dashboard, start one timer, restore connectivity, and verify the durable Start reaches `/api/events`, receives one canonical timer ID, leaves no queued Start, and converges to the same running timer on iPhone and staging web without disappearing during bootstrap.
 28. Canonical pending timer Stop delivers exactly once before ordinary backlog.
 29. Stop awaiting optimistic-start correlation receives its canonical ID and targets only that timer, including when foreground/background recovery already owns the activity-queue drain.
 30. Offline Review Confirm, Edit-and-confirm and Dismiss remain hidden/durable and produce one receipt/entry after reconnect; interrupt a replay once and verify its returned retryable result prevents later recovery owners/bootstrap until a newer reconnect.
 31. Location Evidence upload outbox resumes without duplicate evidence or segment; interrupt upload/replay once and verify its returned retryable result prevents bootstrap until a newer reconnect.
 32. Cached Review open during reconnect refreshes silently without spinner/card flash.
 33. Cached Location Evidence open during reconnect revalidates silently and retains the draft.
-34. No pending work produces at most one silent recovery pass and no request storm.
+34. No pending work produces no pill, no startup online notice and no request storm.
 35. Rapid flapping keeps bounded requests and existing in-flight gates.
 36. Session expiry while offline preserves the correct auth-required/sign-out path.
 37. Account switch before reconnect never sends old-account work under the new account.
-38. Timer start/stop regression, including offline Start-only convergence and offline Start followed by offline Stop with exactly one completed entry.
+38. Timer start/stop regression: while offline perform Start → Edit description/category → Stop, pull-to-refresh repeatedly, force-quit and relaunch, then reconnect. One final stopped entry remains continuously visible and converges exactly once on web. Repeat Start-only and concurrent-drain cases.
 39. Live Activity start/stop/convergence regression.
 40. Today, Calendar and Reports data regression.
 41. Review cache-first warm-launch regression.
@@ -328,11 +328,11 @@ Physical-iPhone matrix:
 45. Settings queue/Review/Location diagnostics regression.
 46. System, Light and Dark appearance.
 47. Large Dynamic Type/no horizontal overflow.
-48. VoiceOver: one root announcement per transition, no focus move, and accessibility-silent visual strips across eagerly mounted tabs and modal hosts.
-49. Reduce Motion: immediate or opacity-only strip presence/layout transition with unchanged status/announcement.
+48. VoiceOver: one root announcement per distinct visible transition, including a repeated Offline transition after a settled hidden state; no focus move and no visual-pill traversal.
+49. Reduce Motion: opacity-only root-pill entrance/exit with no layout or travel.
 50. Reduce Transparency and contrast/non-colour status cues.
 
-For items 11–26, require the same strip position and dimensions for offline, syncing, success and failure; placement below the active header; readable headers; no horizontal clipping; intentional vertical reflow; no covered navigation/sheet actions, content, keyboard, tab bar or home indicator; no focus loss; no gesture interception; and no unsafe sheet/native-tab geometry. Exercise keyboard shown/hidden, tab minimisation, interactive swipe-back and the largest supported Dynamic Type size. Record physical timings for confirmed offline-to-strip, confirmed reconnect-to-syncing, successful recovery-to-success, success duration, initial-online flashes, recovery passes per epoch, same-epoch late-work reruns, and parallel pass count. Targets are approximately 300 ms, under one second, only after final successful bootstrap, approximately two seconds, zero, one ordinary pass, one additional pass only when durable work arrives late, and zero parallel passes respectively.
+For items 11–20 and 23–26, require the same 16-point-gutter/32-point root position for all three states, no page reflow, readable headers, no clipping, no covered navigation/content/keyboard/tab bar/home indicator, no focus loss, no gesture interception and safe native-tab geometry. For items 21–22, the sheet must cover the root pill and contain no duplicate. Exercise keyboard shown/hidden, tab minimisation, interactive swipe-back and maximum Dynamic Type. Record physical timings for offline confirmation, reconnect-to-syncing, pending-zero-to-online, online-notice duration, initial flashes, automatic retry delay and parallel pass count. Targets are approximately 300 ms, under one second, only after the live count reaches zero, approximately two seconds, zero, bounded jittered backoff and zero parallel passes.
 
 ## Native iOS Tabs And App Chrome
 
