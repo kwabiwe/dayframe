@@ -16,10 +16,10 @@ The repair keeps NetInfo as transport evidence and durable domain owners as auth
 - `connectivityState.ts` remains the pure transport machine. Native offline confirms after 300 ms and native online after 400 ms. Initial online produces no reconnect epoch or presentation.
 - Any current-generation HTTP response is strong online evidence. Intentional caller cancellation and stale-session rejection are neutral. A current-generation request deadline or repeated genuine transport failures within four seconds provide negative evidence; one isolated failure does not. Success and failure evidence from an older offline/reconnect request generation is ignored before it can clear or add failure history.
 - `connectivityMonitor.ts` owns one reference-safe NetInfo listener, bounded reachability timeouts and timestamped development/staging diagnostics for raw native state, HTTP evidence, debounce lifecycle, committed state and reconnect epoch. Logs contain no token, activity text, category, location or request payload.
-- `mobileAccount.ts` owns the active mobile user/workspace identity. General events, ID correlations, explicit Stops, time-entry commands, Review, Location and native hand-off counts are filtered before projection or delivery.
+- `mobileAccount.ts` owns the active mobile user/workspace identity. The bearer and its server-verified user/workspace are persisted atomically in one SecureStore envelope; queue delivery requires that bound owner to match the active durable owner. A legacy unbound token can perform only the bootstrap that verifies and binds it, and cannot project cached account data or replay commands beforehand. General events, ID correlations, explicit Stops, time-entry commands, Review, Location and native hand-off counts are filtered before projection or delivery.
 - `durableWorkMonitor.ts` subscribes to the active account plus all recovery-owned stores. Pending count includes general/native activity, explicit Stops, time-entry Edit/Delete, Review and Location/native-signal work. Retry wait remains pending; permanently rejected work leaves the global count and remains available to targeted diagnostics.
-- `ConnectivityRecoveryOwner.tsx` is the one account/workspace retry owner. It wakes for new durable work, confirmed online, foreground and scheduled retry; pauses offline; supersedes obsolete retry timers on newer reconnect epochs; and shares every in-flight drain.
-- `ConnectivityStatusOverlay` is mounted once in `app/_layout.tsx`, after the main stack in visual order. Its 32-point fully rounded pill uses 16-point gutters and `top = safeArea.top + 4`, reserves no layout, accepts no touches and is absent from all screens, sheets, menus and pickers. Native sheets cover it.
+- `ConnectivityRecoveryOwner.tsx` is the one account/workspace retry owner. It wakes for new durable work, confirmed online, foreground and scheduled retry; a real reconnect or foreground transition runs the ordered pass even when pending count is zero, while ordinary epoch-zero initial-online startup remains quiet. It pauses offline, supersedes obsolete retry timers on newer reconnect epochs, retries zero-count transport failures and shares every in-flight drain.
+- `ConnectivityStatusOverlay` is mounted once in `app/_layout.tsx`, after the main stack in visual order. Its fully rounded pill uses 16-point gutters, approximately 32 points as a minimum height and `top = safeArea.top + 4`, reserves no layout, accepts no touches and is absent from all screens, sheets, menus and pickers. Native sheets cover it.
 
 ## Presentation Contract
 
@@ -29,7 +29,7 @@ The repair keeps NetInfo as transport evidence and durable domain owners as auth
 - Ordinary startup or settled online with no pending transition: hidden.
 - Permanent rejection: no generic permanent connectivity message; use the owning queue's targeted diagnostics/action path.
 
-The visual pill is one manually revisitable accessibility element while its child text is excluded from duplicate traversal. Its root owner also calls `AccessibilityInfo.announceForAccessibility` once per distinct visible transition and resets identity after the pill hides, so a later repeated Offline transition is announced. Large Dynamic Type stays one line within fixed geometry. Reduce Motion uses short opacity-only presence; normal motion fades and travels a short distance from/to the top. The next presentation is calculated without mutation during render, used immediately so `Syncing…` changes in place to `Online`, and committed afterward; a discarded render cannot consume the two-second state.
+The visual pill is one manually revisitable accessibility element while its child text is excluded from duplicate traversal. Its root owner also calls `AccessibilityInfo.announceForAccessibility` once per distinct visible transition and resets identity after the pill hides, so a later repeated Offline transition is announced. Large Dynamic Type remains one line without font shrinking or a multiplier cap; the minimum-height pill may grow instead of clipping. Warning/success foreground tokens meet contrast in Light and Dark. Reduce Motion uses short opacity-only presence; normal motion fades and travels a short distance from/to the top. The next presentation is calculated without mutation during render, used immediately so `Syncing…` changes in place to `Online`, and committed afterward; a discarded render cannot consume the two-second state.
 
 ## Durable Local Projection
 
@@ -51,7 +51,7 @@ The Dashboard cache stores the last successful server snapshot. Offline truth is
 - Existing-entry and optimistic-Start Edit commands are durable before projection and sheet dismissal. Direct delivery has an eight-second deadline; retryable timeout/transport/5xx preserves the command and projection.
 - Delete is durable before optimistic removal. Its command carries a short delivery hold for the existing five-second Undo lifecycle. Undo removes the durable command; expiry/commit releases it. Force-quit during the window retains the user's deletion and later delivery.
 - Explicit Stop remains a separate persist-before-dismiss outbox. All callers use the same account-keyed in-flight drain. Ready Stops run before activity, then dependent Stops run again after Start correlation.
-- Permanent validation/rejection is classified separately and is not retried indefinitely or represented as generic connectivity failure.
+- Permanent validation/not-found rejection is classified separately and is not retried indefinitely or represented as generic connectivity failure. It stops affecting projection, a guarded bootstrap restores canonical server truth, and Settings > Sync & diagnostics exposes account-owned Retry/Discard actions. Malformed time-entry outbox bytes are retained in a bounded local quarantine with a clear diagnostic count rather than silently treated as empty; quarantine content is never logged or projected.
 
 ## Reconnect Order And Retry
 
@@ -65,7 +65,7 @@ One pass checks active app, confirmed online state and account identity between 
 6. resume same-account Location native drain, processing, upload and replay;
 7. fetch/cache one server bootstrap, project any work still durable, and publish it through the Dashboard's mutation-revision and pending-deletion guard. A Stop/Edit that overlaps the fetch queues a fresh projected load instead of accepting the recovered snapshot; a failed publication emits an explicit abandonment event so its captured guard is released.
 
-Retryable transport/application failure schedules jittered exponential backoff without requiring another network toggle. A newer reconnect epoch cancels the obsolete timer and runs promptly. Confirmed offline pauses timers and delivery; foreground refreshes native/durable counts. A newly created command wakes the coordinator even at reconnect epoch zero. HealthKit is not imported merely because transport changes.
+Retryable transport/application failure schedules jittered exponential backoff without requiring another network toggle, including when a zero-pending reconnect/foreground pass fails in Location or bootstrap. A newer reconnect epoch cancels the obsolete timer and runs promptly. Confirmed offline pauses timers and delivery; foreground always requests one ordered pass for an authenticated account. A newly created command wakes the coordinator even at reconnect epoch zero. HealthKit is not imported merely because transport changes.
 
 ## Motion Contract
 
@@ -95,15 +95,15 @@ Update this table only with commands actually run for the final exact SHA.
 
 | Check | Result |
 | --- | --- |
-| Focused reconnect-race, connectivity-evidence, presentation, outbox and structural suites | PASS: 9 files / 86 tests |
-| Complete mobile suite | PASS: 85 files / 823 tests |
+| Focused reconnect-race, connectivity-evidence, presentation, outbox and structural suites | PASS: 7 files / 152 tests; broader timer/connectivity risk suite PASS: 35 files / 420 tests |
+| Complete mobile suite | PASS: 85 files / 839 tests |
 | Mobile typecheck | PASS as part of the repository workspace typecheck |
-| Repository lint/typecheck/test/build | PASS: lint (two pre-existing web-test warnings), all workspace typechecks, mobile 823/823, web 836/836 with one skipped, shared 156/156, and the production Next.js build |
+| Repository lint/typecheck/test/build | PASS: lint (two pre-existing web-test warnings), all workspace typechecks, mobile 839/839, web 836/836 with one skipped, shared 156/156, and the production Next.js build |
 | Review SQLite validator | PASS |
 | Location V2 SQLite validator | PASS |
 | Expo dependency check / CocoaPods | Baseline Expo patch drift remains: `npx expo install --check` recommends six SDK-compatible patch updates; clean-base `npm ci`, NetInfo install and two repeat `npx pod-install` runs PASS with 115 dependencies / 114 pods. NetInfo entries reproduce. Diffing generated podspec JSON proves the three React Native prebuilt checksum differences come only from checkout-specific absolute Hermes CLI and local artifact paths; those three hashes are restored to the frozen-base values so the committed full-PR lock delta is NetInfo-only |
 | Documentation/brand/iOS-config/diff checks | PASS: 118 Markdown files, brand assets, iOS configuration and `git diff --check` |
-| Clean unsigned iOS Simulator build | PASS: fresh Derived Data, Debug, iOS 26.5 `Dayframe Sheet QA SE`, `CODE_SIGNING_ALLOWED=NO`; dependency warnings only, no launch or install |
+| Clean unsigned iOS Simulator build | PASS: fresh Derived Data at `/tmp/dayframe-pr184-final-ios.MXtagb`, Debug, iOS Simulator 26.5 `Dayframe Sheet QA SE`, `CODE_SIGNING_ALLOWED=NO`; dependency warnings only, no launch or install |
 | Exact-SHA GitHub/Vercel Preview checks | NOT RUN until pushed |
 | Signed staging build / physical iPhone matrix | NOT RUN; requires explicit next-stage approval after independent re-review |
 
