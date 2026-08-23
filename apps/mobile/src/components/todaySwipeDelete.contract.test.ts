@@ -82,10 +82,12 @@ describe("Today history swipe-to-delete contract", () => {
     expect(dashboardSource).toContain("coordinator.reconcileExternalActiveEntry({");
     expect(dashboardSource).toContain("deferredExternalActiveEntryIds()");
     expect(loadSource).toContain("await syncQueueWithTimerReconciliation()");
-    expect(loadSource).toContain(
-      "reconcilePendingActiveDeletionAfterQueueBarrier(\n        bootstrap.activeEntry?.id ?? null"
+    expect(dashboardSource).toContain(
+      "async function reconcileDashboardDeletionState(bootstrap: MobileBootstrap)"
     );
-    expect(loadSource.indexOf("reconcilePendingActiveDeletionAfterQueueBarrier(")).toBeGreaterThan(
+    expect(dashboardSource).toContain("bootstrap.activeEntry?.id ?? null");
+    expect(loadSource).toContain("reconcile: reconcileDashboardDeletionState");
+    expect(loadSource.indexOf("reconcileDashboardRefreshCandidate({")).toBeGreaterThan(
       loadSource.indexOf("await syncQueueWithTimerReconciliation()")
     );
     expect(dashboardSource).toContain("await resolveTimerEntryIdAfterQueueBarrier(localId)");

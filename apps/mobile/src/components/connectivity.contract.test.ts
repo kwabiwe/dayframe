@@ -21,6 +21,17 @@ describe("connectivity overlay ownership", () => {
     expect(content).not.toContain("ConnectivityStatusOverlay");
     expect(content).not.toContain("ConnectivityStatusStrip");
   });
+
+  it("keeps the root pill revisitable without mutating presentation state during render", () => {
+    const overlay = source("./ConnectivityStatusStrip.tsx");
+
+    expect(overlay).toContain("accessibilityLabel={viewModel.accessibilityLabel}");
+    expect(overlay).toContain("accessibilityRole=\"text\"");
+    expect(overlay).toContain("accessible");
+    expect(overlay).not.toContain("accessibilityElementsHidden");
+    expect(overlay).not.toContain("no-hide-descendants");
+    expect(overlay).not.toContain("presentation.current =");
+  });
 });
 
 function source(relativePath: string) {

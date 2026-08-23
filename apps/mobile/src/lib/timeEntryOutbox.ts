@@ -58,7 +58,15 @@ export type TimeEntryOutboxSyncResult = {
 };
 
 let mutationTail: Promise<void> = Promise.resolve();
-const syncInFlightByOwner = new Map<string, Promise<TimeEntryOutboxSyncResult>>();
+type ActiveTimeEntryCommandDrain = {
+  control: TimeEntryCommandDrainControl;
+  promise: Promise<TimeEntryOutboxSyncResult>;
+};
+type TimeEntryCommandDrainControl = {
+  correlations: Map<string, string>;
+  forceRequested: boolean;
+};
+const syncInFlightByOwner = new Map<string, ActiveTimeEntryCommandDrain>();
 const listeners = new Set<() => void>();
 
 export async function enqueueTimeEntryUpdate(input: {
@@ -159,13 +167,27 @@ export async function synchroniseTimeEntryCommands(input: {
 }): Promise<TimeEntryOutboxSyncResult> {
   const ownerKey = mobileAccountKey(input.owner);
   const existing = syncInFlightByOwner.get(ownerKey);
-  if (existing) return existing;
-  const sync = runTimeEntryCommandDrain(input).finally(() => {
-    if (syncInFlightByOwner.get(ownerKey) === sync) {
+  if (existing) {
+    if (input.force) existing.control.forceRequested = true;
+    for (const [localId, canonicalId] of input.correlations) {
+      existing.control.correlations.set(localId, canonicalId);
+    }
+    return existing.promise;
+  }
+  const control: TimeEntryCommandDrainControl = {
+    correlations: new Map(input.correlations),
+    forceRequested: input.force === true
+  };
+  const sync = runTimeEntryCommandDrain({
+    control,
+    now: input.now,
+    owner: input.owner
+  }).finally(() => {
+    if (syncInFlightByOwner.get(ownerKey)?.promise === sync) {
       syncInFlightByOwner.delete(ownerKey);
     }
   });
-  syncInFlightByOwner.set(ownerKey, sync);
+  syncInFlightByOwner.set(ownerKey, { control, promise: sync });
   return sync;
 }
 
@@ -198,9 +220,8 @@ export function __resetTimeEntryOutboxForTests() {
 }
 
 async function runTimeEntryCommandDrain(input: {
+  control: TimeEntryCommandDrainControl;
   owner: MobileAccountOwner;
-  correlations: ReadonlyMap<string, string>;
-  force?: boolean;
   now?: Date;
 }): Promise<TimeEntryOutboxSyncResult> {
   if (!mobileAccountOwnersEqual(await readActiveMobileAccount(), input.owner)) {
@@ -225,13 +246,17 @@ async function runTimeEntryCommandDrain(input: {
     }
     const targetEntryId = original.targetEntryId ?? (
       original.optimisticEntryId
-        ? input.correlations.get(original.optimisticEntryId)
+        ? input.control.correlations.get(original.optimisticEntryId)
         : undefined
     );
     if (!targetEntryId) {
       return outboxResult(all, input.owner, deliveredCount, true, "dependency_wait");
     }
-    if (!input.force && original.nextAttemptAt && Date.parse(original.nextAttemptAt) > now.getTime()) {
+    if (
+      !input.control.forceRequested &&
+      original.nextAttemptAt &&
+      Date.parse(original.nextAttemptAt) > now.getTime()
+    ) {
       return outboxResult(all, input.owner, deliveredCount, true, "retry_wait");
     }
 

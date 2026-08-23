@@ -20,7 +20,9 @@ import {
   reportConnectivityRecoveryFinished,
   reportConnectivityRecoveryStarted
 } from "@/lib/connectivityMonitor";
-import { publishRecoveredDashboardBootstrap } from "@/lib/dashboardBootstrapChannel";
+import {
+  beginRecoveredDashboardBootstrapPublication
+} from "@/lib/dashboardBootstrapChannel";
 import {
   projectDurableLocalWork
 } from "@/lib/durableLocalProjection";
@@ -275,6 +277,7 @@ async function runRootRecoveryPass() {
       {
         name: "bootstrap",
         run: async () => {
+          const publication = beginRecoveredDashboardBootstrapPublication();
           const serverBootstrap = await fetchBootstrap();
           if (
             serverBootstrap.user.id !== owner.userId ||
@@ -287,7 +290,7 @@ async function runRootRecoveryPass() {
             serverBootstrap,
             await readDurableLocalWork(owner)
           );
-          publishRecoveredDashboardBootstrap(projected);
+          publication.publish(projected);
         }
       }
     ]

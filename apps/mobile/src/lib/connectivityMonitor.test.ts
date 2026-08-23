@@ -193,8 +193,9 @@ describe("process-wide connectivity monitor", () => {
     await vi.advanceTimersByTimeAsync(400);
     netInfo.refresh.mockClear();
 
-    monitor.reportHttpTransportFailure();
-    monitor.reportHttpTransportFailure();
+    const requestGeneration = monitor.connectivityRequestGeneration();
+    monitor.reportHttpTransportFailure({ requestGeneration });
+    monitor.reportHttpTransportFailure({ requestGeneration });
     await vi.runAllTicks();
     expect(netInfo.refresh).toHaveBeenCalledTimes(1);
     expect(monitor.getConnectivitySnapshot().status).toBe("offline");
@@ -205,9 +206,10 @@ describe("process-wide connectivity monitor", () => {
     const stop = monitor.startConnectivityMonitor();
     await vi.runAllTicks();
     await vi.advanceTimersByTimeAsync(400);
-    monitor.reportHttpTransportFailure({ kind: "deadline" });
+    const requestGeneration = monitor.connectivityRequestGeneration();
+    monitor.reportHttpTransportFailure({ kind: "deadline", requestGeneration });
     expect(monitor.getConnectivitySnapshot().status).toBe("online");
-    monitor.reportHttpTransportFailure({ kind: "deadline" });
+    monitor.reportHttpTransportFailure({ kind: "deadline", requestGeneration });
     expect(monitor.getConnectivitySnapshot().status).toBe("offline");
     stop();
   });
@@ -236,6 +238,51 @@ describe("process-wide connectivity monitor", () => {
     await vi.advanceTimersByTimeAsync(300);
     monitor.reportHttpTransportResponse({ requestGeneration });
     expect(monitor.getConnectivitySnapshot().status).toBe("offline");
+    stop();
+  });
+
+  it("does not let a stale success clear current-generation failure evidence", async () => {
+    const stop = monitor.startConnectivityMonitor();
+    await vi.runAllTicks();
+    await vi.advanceTimersByTimeAsync(400);
+    const staleGeneration = monitor.connectivityRequestGeneration();
+    netInfo.emit(OFFLINE);
+    await vi.advanceTimersByTimeAsync(300);
+    const currentGeneration = monitor.connectivityRequestGeneration();
+    monitor.reportHttpTransportResponse({ requestGeneration: currentGeneration });
+    expect(monitor.getConnectivitySnapshot().status).toBe("online");
+    const reconnectedGeneration = monitor.connectivityRequestGeneration();
+
+    monitor.reportHttpTransportFailure({ requestGeneration: reconnectedGeneration });
+    monitor.reportHttpTransportResponse({ requestGeneration: staleGeneration });
+    monitor.reportHttpTransportFailure({ requestGeneration: reconnectedGeneration });
+
+    expect(monitor.getConnectivitySnapshot().status).toBe("offline");
+    stop();
+  });
+
+  it("ignores a failure from an offline request after reconnect advances the generation", async () => {
+    const stop = monitor.startConnectivityMonitor();
+    await vi.runAllTicks();
+    await vi.advanceTimersByTimeAsync(400);
+    netInfo.emit(OFFLINE);
+    await vi.advanceTimersByTimeAsync(300);
+    const offlineRequestGeneration = monitor.connectivityRequestGeneration();
+    netInfo.emit(ONLINE);
+    await vi.advanceTimersByTimeAsync(400);
+    expect(monitor.getConnectivitySnapshot()).toMatchObject({
+      status: "online",
+      reconnectEpoch: 1
+    });
+    expect(monitor.connectivityRequestGeneration()).toBeGreaterThan(offlineRequestGeneration);
+
+    monitor.reportHttpTransportFailure({ requestGeneration: offlineRequestGeneration });
+    monitor.reportHttpTransportFailure({ requestGeneration: offlineRequestGeneration });
+
+    expect(monitor.getConnectivitySnapshot()).toMatchObject({
+      status: "online",
+      reconnectEpoch: 1
+    });
     stop();
   });
 

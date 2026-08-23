@@ -92,7 +92,9 @@ describe("mobile API network boundary", () => {
     vi.stubGlobal("fetch", vi.fn(() => Promise.reject(failure)));
 
     await expect(mobileFetch("https://dayframe.test/api/bootstrap")).rejects.toBe(failure);
-    expect(connectivity.reportHttpTransportFailure).toHaveBeenCalledTimes(1);
+    expect(connectivity.reportHttpTransportFailure).toHaveBeenCalledWith({
+      requestGeneration: 7
+    });
   });
 
   it("recognises a native connection-lost error as transport failure", () => {
@@ -126,7 +128,9 @@ describe("mobile API network boundary", () => {
 
     await rejection;
     expect(requestSignals[0]?.aborted).toBe(true);
-    expect(connectivity.reportHttpRequestDeadline).toHaveBeenCalledTimes(1);
+    expect(connectivity.reportHttpRequestDeadline).toHaveBeenCalledWith({
+      requestGeneration: 7
+    });
     expect(connectivity.reportHttpTransportFailure).not.toHaveBeenCalled();
   });
 

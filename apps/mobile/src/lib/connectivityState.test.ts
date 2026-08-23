@@ -195,7 +195,7 @@ describe("connectivity state machine", () => {
     expect(response.state.status).toBe("offline");
   });
 
-  it("advances request generation only when offline is confirmed", () => {
+  it("advances request generation when offline is confirmed and again on reconnect", () => {
     const online = confirmedOnline();
     const observed = observeNativeConnectivity(online, OFFLINE, "native");
     expect(observed.state.requestGeneration).toBe(online.requestGeneration);
@@ -206,6 +206,12 @@ describe("connectivity state machine", () => {
       state: observed.state
     });
     expect(offline.requestGeneration).toBe(online.requestGeneration + 1);
+    const reconnected = confirmObserved(
+      offline,
+      ONLINE,
+      CONNECTIVITY_ONLINE_CONFIRM_MS
+    );
+    expect(reconnected.requestGeneration).toBe(offline.requestGeneration + 1);
   });
 
   it("lets a current HTTP response immediately confirm transport online", () => {

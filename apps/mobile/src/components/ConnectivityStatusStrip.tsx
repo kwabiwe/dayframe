@@ -17,6 +17,7 @@ import {
   createDistinctConnectivityAnnouncementTracker,
   createConnectivityPresentationState,
   connectivityPillColorRoles,
+  connectivityPillViewModel,
   updateConnectivityPresentation
 } from "@/lib/connectivityPresentation";
 import {
@@ -36,30 +37,41 @@ export function ConnectivityStatusOverlay() {
   const { theme } = useMobileTheme();
   const insets = useSafeAreaInsets();
   const reduceMotion = useReduceMotionPreference();
-  const presentation = useRef(createConnectivityPresentationState());
+  const [presentation, setPresentation] = useState(createConnectivityPresentationState);
   const announcementTracker = useRef(createDistinctConnectivityAnnouncementTracker());
   const [, setClockRevision] = useState(0);
   const now = Date.now();
 
-  const updated = updateConnectivityPresentation({
-    accountKey: durableWork.accountKey,
+  useEffect(() => {
+    setPresentation((current) => updateConnectivityPresentation({
+      accountKey: durableWork.accountKey,
+      now: Date.now(),
+      pendingCount: durableWork.pendingCount,
+      state: current,
+      status: connectivity.status
+    }).state);
+  }, [connectivity.status, durableWork.accountKey, durableWork.pendingCount]);
+
+  const viewModel = connectivityPillViewModel({
+    completionSequence: presentation.completionSequence,
     now,
+    onlineUntil:
+      presentation.accountKey === durableWork.accountKey
+        ? presentation.onlineUntil
+        : null,
     pendingCount: durableWork.pendingCount,
-    state: presentation.current,
     status: connectivity.status
   });
-  presentation.current = updated.state;
-  const viewModel = updated.viewModel;
 
   useEffect(() => {
-    const onlineUntil = presentation.current.onlineUntil;
+    const onlineUntil = presentation.onlineUntil;
     if (onlineUntil === null) return undefined;
     const timeout = setTimeout(
       () => setClockRevision((revision) => revision + 1),
       Math.max(0, onlineUntil - Date.now())
     );
     return () => clearTimeout(timeout);
-  }, [presentation.current.onlineUntil]);
+  }, [presentation.onlineUntil]);
 
   useEffect(() => {
     const announcement = announcementTracker.current.next(viewModel);
@@ -82,10 +94,11 @@ export function ConnectivityStatusOverlay() {
 
   return (
     <Reanimated.View
-      accessibilityElementsHidden
+      accessibilityLabel={viewModel.accessibilityLabel}
+      accessibilityRole="text"
+      accessible
       entering={entering}
       exiting={exiting}
-      importantForAccessibility="no-hide-descendants"
       pointerEvents="none"
       style={[
         styles.overlay,
@@ -97,6 +110,7 @@ export function ConnectivityStatusOverlay() {
       testID="connectivity-status-overlay"
     >
       <Text
+        accessible={false}
         adjustsFontSizeToFit
         maxFontSizeMultiplier={1.6}
         minimumFontScale={0.8}

@@ -125,7 +125,7 @@ export function confirmHttpConnectivity(input: {
   requestGeneration: number;
   state: ConnectivityMachineState;
 }) {
-  if (input.requestGeneration < input.state.requestGeneration) {
+  if (!isConnectivityRequestGenerationCurrent(input)) {
     return { accepted: false, state: input.state };
   }
   return {
@@ -141,14 +141,28 @@ export function confirmHttpConnectivity(input: {
 
 export function confirmHttpConnectivityFailure(input: {
   failedAt: number;
+  requestGeneration: number;
   state: ConnectivityMachineState;
 }) {
-  return commitConnectivityStatus(
-    input.state,
-    "offline",
-    input.failedAt,
-    "http"
-  );
+  if (!isConnectivityRequestGenerationCurrent(input)) {
+    return { accepted: false, state: input.state };
+  }
+  return {
+    accepted: true,
+    state: commitConnectivityStatus(
+      input.state,
+      "offline",
+      input.failedAt,
+      "http"
+    )
+  };
+}
+
+export function isConnectivityRequestGenerationCurrent(input: {
+  requestGeneration: number;
+  state: ConnectivityMachineState;
+}) {
+  return input.requestGeneration >= input.state.requestGeneration;
 }
 
 export function beginConnectivityRecovery(
@@ -246,6 +260,7 @@ function commitConnectivityStatus(
       reconnectEpoch: state.reconnectEpoch + 1,
       recoveryEpoch: null,
       recoveryStatus: "idle",
+      requestGeneration: state.requestGeneration + 1,
       source
     };
   }

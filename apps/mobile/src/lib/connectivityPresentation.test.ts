@@ -75,6 +75,38 @@ describe("connectivity pill presentation", () => {
     expect(drained.viewModel?.text).toBe("Online");
   });
 
+  it("does not consume an Online transition when a calculated render is discarded", () => {
+    const pending = updateConnectivityPresentation({
+      accountKey: "workspace:user",
+      now: NOW,
+      pendingCount: 1,
+      state: createConnectivityPresentationState(),
+      status: "online"
+    });
+    const discarded = updateConnectivityPresentation({
+      accountKey: "workspace:user",
+      now: NOW + 1,
+      pendingCount: 0,
+      state: pending.state,
+      status: "online"
+    });
+    const committed = updateConnectivityPresentation({
+      accountKey: "workspace:user",
+      now: NOW + 1,
+      pendingCount: 0,
+      state: pending.state,
+      status: "online"
+    });
+
+    expect(discarded.viewModel?.id).toBe("online-1");
+    expect(committed.viewModel?.id).toBe("online-1");
+    expect(pending.state).toMatchObject({
+      completionSequence: 0,
+      onlineUntil: null,
+      previousPendingCount: 1
+    });
+  });
+
   it("cannot emit removed pass-verdict wording", () => {
     const emitted = [
       view("offline", 0)?.text,

@@ -135,6 +135,54 @@ describe("durable time-entry outbox", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("preserves a forced reconnect request while a non-forced drain is active", async () => {
+    storage.set("dayframe.timeEntryOutbox.v1", JSON.stringify([
+      commandFixture({
+        clientCommandId: "command-in-flight",
+        targetEntryId: "entry-in-flight"
+      }),
+      commandFixture({
+        clientCommandId: "command-in-backoff",
+        failureKind: "retryable",
+        nextAttemptAt: "2026-08-22T12:05:00.000Z",
+        targetEntryId: "entry-in-backoff"
+      })
+    ]));
+    let markFetchStarted!: () => void;
+    const fetchStarted = new Promise<void>((resolve) => {
+      markFetchStarted = resolve;
+    });
+    let finishFirstFetch!: (response: Response) => void;
+    const firstFetch = new Promise<Response>((resolve) => {
+      finishFirstFetch = resolve;
+    });
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => {
+        markFetchStarted();
+        return firstFetch;
+      })
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const ordinaryDrain = outbox.synchroniseTimeEntryCommands({
+      owner: OWNER_A,
+      correlations: new Map()
+    });
+    await fetchStarted;
+    const reconnectDrain = outbox.synchroniseTimeEntryCommands({
+      owner: OWNER_A,
+      correlations: new Map(),
+      force: true
+    });
+    finishFirstFetch(new Response(null, { status: 204 }));
+
+    await expect(Promise.all([ordinaryDrain, reconnectDrain])).resolves.toEqual([
+      expect.objectContaining({ deliveredCount: 2, waitingCount: 0 }),
+      expect.objectContaining({ deliveredCount: 2, waitingCount: 0 })
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps commands isolated from a different active account", async () => {
     await outbox.enqueueTimeEntryUpdate({
       owner: OWNER_A,
@@ -195,3 +243,24 @@ describe("durable time-entry outbox", () => {
     await expect(outbox.readPendingTimeEntryCommands(OWNER_A)).resolves.toEqual([]);
   });
 });
+
+function commandFixture(input: {
+  clientCommandId: string;
+  failureKind?: "retryable";
+  nextAttemptAt?: string;
+  targetEntryId: string;
+}) {
+  return {
+    attemptCount: input.failureKind ? 1 : 0,
+    clientCommandId: input.clientCommandId,
+    createdAt: "2026-08-22T11:59:00.000Z",
+    operation: "update",
+    patch: { description: input.clientCommandId },
+    targetEntryId: input.targetEntryId,
+    updatedAt: "2026-08-22T11:59:00.000Z",
+    userId: OWNER_A.userId,
+    workspaceId: OWNER_A.workspaceId,
+    ...(input.failureKind ? { failureKind: input.failureKind } : {}),
+    ...(input.nextAttemptAt ? { nextAttemptAt: input.nextAttemptAt } : {})
+  };
+}

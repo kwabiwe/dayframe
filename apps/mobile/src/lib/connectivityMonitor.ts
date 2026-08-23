@@ -18,6 +18,7 @@ import {
   createConnectivityMachineState,
   dismissConnectivityRecoverySuccess,
   finishConnectivityRecovery,
+  isConnectivityRequestGenerationCurrent,
   observeNativeConnectivity,
   rawConnectivityObservationsEqual,
   type ConnectivityCandidate,
@@ -99,14 +100,15 @@ export function reportHttpTransportResponse(input: {
   requestGeneration: number;
   completedAt?: number;
 }) {
-  recentHttpFailures = [];
+  const completedAt = input.completedAt ?? Date.now();
   const result = confirmHttpConnectivity({
-    completedAt: input.completedAt ?? Date.now(),
+    completedAt,
     requestGeneration: input.requestGeneration,
     state: machineState
   });
   if (!result.accepted) return;
-  recordHttpSuccess(input.completedAt ?? Date.now());
+  recentHttpFailures = [];
+  recordHttpSuccess(completedAt);
   clearCandidateTimer("http_success");
   applyMachineState(result.state);
 }
@@ -114,18 +116,28 @@ export function reportHttpTransportResponse(input: {
 export function reportHttpTransportFailure(input: {
   kind?: "deadline" | "transport";
   occurredAt?: number;
-} = {}) {
+  requestGeneration: number;
+}) {
+  if (!isConnectivityRequestGenerationCurrent({
+    requestGeneration: input.requestGeneration,
+    state: machineState
+  })) {
+    return;
+  }
   const now = input.occurredAt ?? Date.now();
   recentHttpFailures = recentHttpFailures
     .filter((occurredAt) => now - occurredAt <= CONNECTIVITY_FAILURE_WINDOW_MS);
   recentHttpFailures.push(now);
   recordHttpEvidence(input.kind ?? "transport", now, recentHttpFailures.length);
   if (recentHttpFailures.length >= CONNECTIVITY_FAILURE_THRESHOLD) {
-    clearCandidateTimer("negative_http_evidence");
-    applyMachineState(confirmHttpConnectivityFailure({
+    const result = confirmHttpConnectivityFailure({
       failedAt: now,
+      requestGeneration: input.requestGeneration,
       state: machineState
-    }));
+    });
+    if (!result.accepted) return;
+    clearCandidateTimer("negative_http_evidence");
+    applyMachineState(result.state);
   }
   if (now - lastTransportRefreshAt < CONNECTIVITY_REFRESH_COOLDOWN_MS) return;
   lastTransportRefreshAt = now;

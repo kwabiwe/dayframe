@@ -41,7 +41,9 @@ export async function mobileFetch(
   try {
     response = await fetch(input, { ...init, credentials: "omit" });
   } catch (error) {
-    if (isMobileTransportFailure(error)) reportHttpTransportFailure();
+    if (isMobileTransportFailure(error)) {
+      reportHttpTransportFailure({ requestGeneration });
+    }
     throw error;
   }
   reportHttpTransportResponse({ requestGeneration });
@@ -72,6 +74,7 @@ export async function mobileFetchWithTimeout(
   init: Parameters<typeof fetch>[1] = {},
   deadline: MobileRequestDeadline
 ) {
+  const requestGeneration = connectivityRequestGeneration();
   const controller = new AbortController();
   const callerSignal = init.signal;
   let timedOut = false;
@@ -101,7 +104,7 @@ export async function mobileFetchWithTimeout(
       callerAborted
     ]);
   } catch (error) {
-    if (timedOut) reportHttpRequestDeadline();
+    if (timedOut) reportHttpRequestDeadline({ requestGeneration });
     if (timedOut && !(error instanceof MobileRequestTimeoutError)) {
       throw new MobileRequestTimeoutError(deadline.timeoutMessage);
     }

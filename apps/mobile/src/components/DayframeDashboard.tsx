@@ -76,7 +76,11 @@ import { refreshConnectivity } from "@/lib/connectivityMonitor";
 import {
   createSharedInFlightOperation
 } from "@/lib/connectivityRecovery";
-import { shouldApplyDashboardRefresh } from "@/lib/dashboardRefresh";
+import {
+  captureDashboardRefreshGuard,
+  reconcileDashboardRefreshCandidate,
+  type DashboardRefreshGuard
+} from "@/lib/dashboardRefresh";
 import { subscribeRecoveredDashboardBootstrap } from "@/lib/dashboardBootstrapChannel";
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
 import {
@@ -307,6 +311,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const timerMutationCount = useRef(0);
   const queuedTimerStartRecoveryRequested = useRef(false);
   const dashboardMutationRevision = useRef(0);
+  const recoveredBootstrapGuards = useRef(new Map<number, DashboardRefreshGuard>());
   const loadRef = useRef<(options?: DashboardLoadOptions) => Promise<void>>(async () => undefined);
   const timerMutationVersions = useRef(new Map<string, number>());
   const timerStateRef = useRef<TimerStateFingerprint | null>(null);
@@ -365,6 +370,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     calendarEditPresentationRef.current = null;
     manualEntryPresentationRef.current = null;
     dashboardMutationRevision.current += 1;
+    recoveredBootstrapGuards.current.clear();
     refreshQueued.current = false;
     queuedTimerStartRecoveryRequested.current = false;
     latestData.current = null;
@@ -394,7 +400,30 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     preserveAuthPassword: preserveAuthPasswordOnSignedOut.current
   })), [transitionToSignedOut]);
 
-  useEffect(() => subscribeRecoveredDashboardBootstrap((bootstrap) => {
+  useEffect(() => subscribeRecoveredDashboardBootstrap((event) => {
+    if (event.type === "started") {
+      recoveredBootstrapGuards.current.set(
+        event.publicationId,
+        captureDashboardRefreshGuard({
+          currentRevision: dashboardMutationRevision.current,
+          timerMutationsInFlight: timerMutationCount.current
+        })
+      );
+      return;
+    }
+    const guard = recoveredBootstrapGuards.current.get(event.publicationId);
+    recoveredBootstrapGuards.current.delete(event.publicationId);
+    if (!guard) {
+      queueDashboardRefreshAfterConflict();
+      return;
+    }
+    void applyRecoveredDashboardBootstrap(event.bootstrap, guard);
+  }), []);
+
+  async function applyRecoveredDashboardBootstrap(
+    bootstrap: MobileBootstrap,
+    guard: DashboardRefreshGuard
+  ) {
     const current = latestData.current;
     if (
       authStateCurrent.current !== "authenticated" ||
@@ -402,15 +431,51 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     ) {
       return;
     }
-    latestData.current = bootstrap;
-    setData(bootstrap);
-    void readOwnedPendingTimerStops(bootstrap).then((stops) => {
-      setPendingTimerStops(stops);
+    const reconciled = await reconcileDashboardRefreshCandidate({
+      candidate: bootstrap,
+      currentRevision: () => dashboardMutationRevision.current,
+      guard,
+      reconcile: reconcileDashboardDeletionState,
+      timerMutationsInFlight: () => timerMutationCount.current
     });
-    syncShortcutCatalog(bootstrap);
-    void refreshLocationServices(bootstrap);
-    void syncLiveActivityForEntry(bootstrap.activeEntry);
-  }), []);
+    if (reconciled.action === "refresh") {
+      queueDashboardRefreshAfterConflict();
+      return;
+    }
+    const next = reconciled.candidate;
+    const latest = latestData.current;
+    if (
+      authStateCurrent.current !== "authenticated" ||
+      (latest && !sameTimerStopOwner(timerStopOwner(latest), timerStopOwner(next)))
+    ) {
+      return;
+    }
+    latestData.current = next;
+    setData(next);
+    void readOwnedPendingTimerStops(next).then((stops) => {
+      const visible = latestData.current;
+      if (visible && sameTimerStopOwner(timerStopOwner(visible), timerStopOwner(next))) {
+        setPendingTimerStops(stops);
+      }
+    });
+    syncShortcutCatalog(next);
+    void refreshLocationServices(next);
+    void syncLiveActivityForEntry(next.activeEntry);
+  }
+
+  async function reconcileDashboardDeletionState(bootstrap: MobileBootstrap) {
+    const pendingDeletionIds = await reconcilePendingActiveDeletionAfterQueueBarrier(
+      bootstrap.activeEntry?.id ?? null
+    );
+    return filterPendingDeletedTimeEntries(bootstrap, pendingDeletionIds) as MobileBootstrap;
+  }
+
+  function queueDashboardRefreshAfterConflict() {
+    refreshQueued.current = true;
+    if (timerMutationCount.current > 0 || refreshInFlight.current) return;
+    refreshQueued.current = false;
+    void loadRef.current({ silent: true });
+  }
 
   const changeReportRange = useCallback((nextRange: ReportRange) => {
     scheduleLayoutTransition(reduceMotion);
@@ -616,7 +681,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       return;
     }
     refreshInFlight.current = true;
-    const refreshRevision = dashboardMutationRevision.current;
+    const refreshGuard = captureDashboardRefreshGuard({
+      currentRevision: dashboardMutationRevision.current,
+      timerMutationsInFlight: timerMutationCount.current
+    });
     if (options?.visibleRefresh) setRefreshing(true);
     try {
       const date = formatDateKey(new Date());
@@ -649,19 +717,19 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         optimisticTimerIds.current.set(localId, timeEntryId);
       }
       let bootstrap = projectDurableLocalWork(serverBootstrap, durableWork);
-      const pendingDeletionIds = await reconcilePendingActiveDeletionAfterQueueBarrier(
-        bootstrap.activeEntry?.id ?? null
-      );
-      bootstrap = filterPendingDeletedTimeEntries(bootstrap, pendingDeletionIds) as MobileBootstrap;
       const ownedPendingStops = durableWork.timerStops;
-      if (!shouldApplyDashboardRefresh({
-        startedRevision: refreshRevision,
-        currentRevision: dashboardMutationRevision.current,
-        timerMutationsInFlight: timerMutationCount.current
-      })) {
+      const reconciled = await reconcileDashboardRefreshCandidate({
+        candidate: bootstrap,
+        currentRevision: () => dashboardMutationRevision.current,
+        guard: refreshGuard,
+        reconcile: reconcileDashboardDeletionState,
+        timerMutationsInFlight: () => timerMutationCount.current
+      });
+      if (reconciled.action === "refresh") {
         refreshQueued.current = true;
         return;
       }
+      bootstrap = reconciled.candidate;
       if (!timerStateRef.current) {
         timerStateRef.current = {
           activeEntryId: bootstrap.activeEntry?.id ?? null,
