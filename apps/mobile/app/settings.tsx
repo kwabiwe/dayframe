@@ -89,6 +89,7 @@ import {
   type MobileStyles,
   type MobileTheme
 } from "@/lib/mobileTheme";
+import { isRetryableMobileConnectivityFailure } from "@/lib/mobile-network";
 import { publishMobileSignedOut } from "@/lib/mobileSessionTransition";
 import { REVIEW_COPY, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
 import {
@@ -421,8 +422,11 @@ export default function SettingsScreen() {
         finishSignedOutNavigation();
         return;
       }
-      if (!options?.silent) {
-        Alert.alert("Dayframe API", error instanceof Error ? error.message : "Unable to load API");
+      if (!options?.silent && !isRetryableMobileConnectivityFailure(error)) {
+        Alert.alert(
+          "Unable to refresh Settings",
+          "Dayframe could not refresh Settings. Try again in a moment."
+        );
       }
     } finally {
       refreshInFlight.current = false;

@@ -16,8 +16,10 @@ vi.mock("./secure-session", () => ({
 vi.mock("./connectivityEvidence", () => connectivity);
 
 const {
+  MobileHttpResponseError,
   MobileRequestTimeoutError,
   isMobileTransportFailure,
+  isRetryableMobileConnectivityFailure,
   mobileFetch,
   mobileFetchWithTimeout,
   StaleMobileSessionResponseError
@@ -63,6 +65,15 @@ describe("mobile API network boundary", () => {
       requestGeneration: 7
     });
     expect(connectivity.reportHttpTransportFailure).not.toHaveBeenCalled();
+  });
+
+  it("classifies only transport, deadline and retryable HTTP failures as connectivity retry", () => {
+    expect(isRetryableMobileConnectivityFailure(new TypeError("Network request failed"))).toBe(true);
+    expect(isRetryableMobileConnectivityFailure(new MobileRequestTimeoutError("Timed out"))).toBe(true);
+    expect(isRetryableMobileConnectivityFailure(new MobileHttpResponseError(429, "Try later"))).toBe(true);
+    expect(isRetryableMobileConnectivityFailure(new MobileHttpResponseError(503, "Unavailable"))).toBe(true);
+    expect(isRetryableMobileConnectivityFailure(new MobileHttpResponseError(422, "Invalid"))).toBe(false);
+    expect(isRetryableMobileConnectivityFailure(new Error("Local storage failed"))).toBe(false);
   });
 
   it("invalidates only the bearer rejected by an authentication response", async () => {

@@ -507,17 +507,6 @@ function createStyles(theme: MobileTheme) {
       padding: 14,
       gap: 10
     },
-    timerSyncStatusSlot: {
-      height: 18,
-      justifyContent: "center"
-    },
-    timerSyncStatusText: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "500",
-      lineHeight: 18
-    },
     timerPanel: {
       position: "relative",
       backgroundColor: theme.surfaceRaised,
@@ -1514,8 +1503,9 @@ function createStyles(theme: MobileTheme) {
     quickCategoryHint: {
       color: theme.textSecondary,
       fontFamily: monoFont,
-      fontSize: 12,
+      fontSize: 11,
       fontWeight: "700",
+      letterSpacing: 0.45,
       paddingHorizontal: 2,
       paddingTop: 2
     },
@@ -1879,7 +1869,7 @@ function createStyles(theme: MobileTheme) {
     startComposerMain: {
       flex: 1,
       minWidth: 0,
-      gap: 8
+      gap: 6
     },
     startInput: {
       flex: 1,

@@ -1,22 +1,16 @@
 import { CONNECTIVITY_SUCCESS_NOTICE_MS, type ConnectivityStatus } from "./connectivityState";
 
-export type ConnectivityPillVariant = "offline" | "syncing" | "online";
+export type ConnectivityStatusVariant = "offline" | "syncing" | "synced" | "attention";
 
-export type ConnectivityPillViewModel = {
+export type ConnectivityStatusViewModel = {
   accessibilityLabel: string;
   id: string;
-  text: "Offline" | "Syncing…" | "Online";
-  variant: ConnectivityPillVariant;
+  isActionable: boolean;
+  variant: ConnectivityStatusVariant;
 };
 
-export function connectivityPillColorRoles(variant: ConnectivityPillVariant) {
-  if (variant === "offline") {
-    return { background: "warning" as const, foreground: "onAccent" as const };
-  }
-  if (variant === "online") {
-    return { background: "success" as const, foreground: "onAccent" as const };
-  }
-  return { background: "surfaceMuted" as const, foreground: "textPrimary" as const };
+export function connectivityStatusColorRole(_variant: ConnectivityStatusVariant) {
+  return "textSecondary" as const;
 }
 
 export type ConnectivityPresentationState = {
@@ -37,11 +31,13 @@ export function createConnectivityPresentationState(): ConnectivityPresentationS
 
 export function updateConnectivityPresentation(input: {
   accountKey: string | null;
+  attentionCount: number;
   now: number;
   pendingCount: number;
   state: ConnectivityPresentationState;
   status: ConnectivityStatus;
 }) {
+  const attentionCount = Math.max(0, Math.trunc(input.attentionCount));
   const pendingCount = Math.max(0, Math.trunc(input.pendingCount));
   let state = input.state;
   if (state.accountKey !== input.accountKey) {
@@ -66,18 +62,22 @@ export function updateConnectivityPresentation(input: {
       ...state,
       completionSequence: state.completionSequence + 1,
       onlineUntil:
-        input.status === "online"
+        input.status === "online" && attentionCount === 0
           ? input.now + CONNECTIVITY_SUCCESS_NOTICE_MS
           : null,
       previousPendingCount: 0
     };
-  } else if (state.onlineUntil !== null && state.onlineUntil <= input.now) {
+  } else if (
+    state.onlineUntil !== null &&
+    (state.onlineUntil <= input.now || attentionCount > 0)
+  ) {
     state = { ...state, onlineUntil: null };
   }
 
   return {
     state,
-    viewModel: connectivityPillViewModel({
+    viewModel: connectivityStatusViewModel({
+      attentionCount,
       completionSequence: state.completionSequence,
       now: input.now,
       onlineUntil: state.onlineUntil,
@@ -87,26 +87,35 @@ export function updateConnectivityPresentation(input: {
   };
 }
 
-export function connectivityPillViewModel(input: {
+export function connectivityStatusViewModel(input: {
+  attentionCount: number;
   completionSequence: number;
   now: number;
   onlineUntil: number | null;
   pendingCount: number;
   status: ConnectivityStatus;
-}): ConnectivityPillViewModel | null {
+}): ConnectivityStatusViewModel | null {
   if (input.status === "offline") {
     return {
       accessibilityLabel: "Offline. Changes will sync later.",
       id: "offline",
-      text: "Offline",
+      isActionable: false,
       variant: "offline"
+    };
+  }
+  if (input.attentionCount > 0) {
+    return {
+      accessibilityLabel: "A time entry sync issue needs attention. Open Sync and diagnostics.",
+      id: "attention",
+      isActionable: true,
+      variant: "attention"
     };
   }
   if (input.status === "online" && input.pendingCount > 0) {
     return {
       accessibilityLabel: "Syncing saved changes.",
       id: "syncing",
-      text: "Syncing…",
+      isActionable: false,
       variant: "syncing"
     };
   }
@@ -117,10 +126,10 @@ export function connectivityPillViewModel(input: {
     input.onlineUntil > input.now
   ) {
     return {
-      accessibilityLabel: "Online.",
-      id: `online-${input.completionSequence}`,
-      text: "Online",
-      variant: "online"
+      accessibilityLabel: "Saved changes synced.",
+      id: `synced-${input.completionSequence}`,
+      isActionable: false,
+      variant: "synced"
     };
   }
   return null;
@@ -129,7 +138,7 @@ export function connectivityPillViewModel(input: {
 export function createDistinctConnectivityAnnouncementTracker() {
   let lastId: string | null = null;
   return {
-    next(viewModel: ConnectivityPillViewModel | null) {
+    next(viewModel: ConnectivityStatusViewModel | null) {
       if (!viewModel) {
         lastId = null;
         return null;

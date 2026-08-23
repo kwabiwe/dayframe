@@ -19,17 +19,17 @@ The repair keeps NetInfo as transport evidence and durable domain owners as auth
 - `mobileAccount.ts` owns the active mobile user/workspace identity. The bearer and its server-verified user/workspace are persisted atomically in one SecureStore envelope; queue delivery requires that bound owner to match the active durable owner. A legacy unbound token can perform only the bootstrap that verifies and binds it, and cannot project cached account data or replay commands beforehand. General events, ID correlations, explicit Stops, time-entry commands, Review, Location and native hand-off counts are filtered before projection or delivery.
 - `durableWorkMonitor.ts` subscribes to the active account plus all recovery-owned stores. Pending count includes general/native activity, explicit Stops, time-entry Edit/Delete, Review and Location/native-signal work. Retry wait remains pending; permanently rejected work leaves the global count and remains available to targeted diagnostics.
 - `ConnectivityRecoveryOwner.tsx` is the one account/workspace retry owner. It wakes for new durable work, confirmed online, foreground and scheduled retry; a real reconnect or foreground transition runs the ordered pass even when pending count is zero, while ordinary epoch-zero initial-online startup remains quiet. It pauses offline, supersedes obsolete retry timers on newer reconnect epochs, retries zero-count transport failures and shares every in-flight drain.
-- `ConnectivityStatusOverlay` is mounted once in `app/_layout.tsx`, after the main stack in visual order. Its fully rounded pill uses 16-point gutters, approximately 32 points as a minimum height and `top = safeArea.top + 4`, reserves no layout, accepts no touches and is absent from all screens, sheets, menus and pickers. Native sheets cover it.
+- `ConnectivityStatusProvider` is mounted once in `app/_layout.tsx`. It subscribes to connectivity and account-owned durable work, derives presentation, owns the approximately two-second settled expiry, and issues one VoiceOver announcement per distinct visible transition. `ConnectivityStatusIndicator` consumes that root state in a fixed 44-point slot immediately after the shared Dayframe wordmark on Today, Calendar, and Reports; inactive eager tab routes are hidden from accessibility. Settings, sheets, menus and pickers contain no duplicate.
 
 ## Presentation Contract
 
-- Confirmed offline: amber `Offline`, persistent.
-- Confirmed online with account-owned pending work: `Syncing…`, persistent even during retry backoff or an out-of-band drain.
-- Pending count changes from non-zero to zero while online: green `Online` for approximately two seconds, then hidden.
-- Ordinary startup or settled online with no pending transition: hidden.
-- Permanent rejection: no generic permanent connectivity message; use the owning queue's targeted diagnostics/action path.
+- Confirmed offline: neutral cloud-slash, persistent.
+- Confirmed online with account-owned pending work: neutral circular sync arrows, persistent even during retry backoff or an out-of-band drain.
+- Pending count changes from non-zero to zero while online: neutral cloud-check for approximately two seconds, then the slot becomes visually empty.
+- Ordinary startup or settled online with no pending transition: the fixed slot remains visually empty, preserving header geometry.
+- Permanent time-entry rejection: persistent neutral cloud-X that opens Settings > Sync & diagnostics for owned Retry/Discard actions. Confirmed offline remains the one-slot priority and the cloud-X returns after reconnect.
 
-The visual pill is one manually revisitable accessibility element while its child text is excluded from duplicate traversal. Its root owner also calls `AccessibilityInfo.announceForAccessibility` once per distinct visible transition and resets identity after the pill hides, so a later repeated Offline transition is announced. Large Dynamic Type remains one line without font shrinking or a multiplier cap; the minimum-height pill may grow instead of clipping. Warning/success foreground tokens meet contrast in Light and Dark. Reduce Motion uses short opacity-only presence; normal motion fades and travels a short distance from/to the top. The next presentation is calculated without mutation during render, used immediately so `Syncing…` changes in place to `Online`, and committed afterward; a discarded render cannot consume the two-second state.
+On the focused tab, the icon is one manually revisitable labelled accessibility element; cloud-X is a labelled button with a diagnostics hint, while SVG children are excluded from duplicate traversal. The root provider calls `AccessibilityInfo.announceForAccessibility` once per distinct visible transition and resets identity after the slot becomes empty, so a later repeated Offline transition is announced. All glyphs use the theme's neutral `textSecondary` token with non-colour shapes that meet contrast in Light and Dark. Sync arrows rotate subtly during normal motion and remain static with Reduce Motion; state presence uses restrained opacity without moving layout. The next presentation is calculated without mutation during render, used immediately so sync arrows change in place to cloud-check, and committed afterward; a discarded render cannot consume the two-second state.
 
 ## Durable Local Projection
 
@@ -69,11 +69,11 @@ Retryable transport/application failure schedules jittered exponential backoff w
 
 ## Motion Contract
 
-- Trigger: confirmed offline or a live pending-count change selects the pill state; pending reaching zero starts the bounded Online expiry.
-- Single owner: the root overlay owns entrance/exit; it never animates surrounding layout.
-- Entrance/exit: normal motion uses short top fade/travel; Reduce Motion uses restrained opacity only. State updates retain identical geometry.
-- Interruption: Offline immediately supersedes Syncing/Online; new work cancels the Online notice; account replacement resets presentation; rapid render repeats do not duplicate VoiceOver announcements.
-- Async rollback: retryable failure retains Syncing because work remains; permanent outcomes leave the global pill and remain with their durable owner.
+- Trigger: confirmed offline, live pending-count change, or permanent time-entry attention selects the one-slot icon; pending reaching zero starts the bounded cloud-check expiry.
+- Single owner: the root provider owns state and announcements; the fixed header slot owns visual entrance/exit and never animates surrounding layout.
+- Entrance/exit: state presence uses restrained opacity. Sync arrows rotate subtly in normal motion and remain static with Reduce Motion. State updates retain identical geometry.
+- Interruption: cloud-slash immediately supersedes sync arrows/cloud-check/cloud-X; new work cancels the cloud-check; account replacement resets presentation; rapid render repeats do not duplicate VoiceOver announcements.
+- Async rollback: retryable failure retains sync arrows because work remains; permanent time-entry outcomes exit the pending count and expose cloud-X plus their durable diagnostics.
 
 ## Dependency And Native Impact
 
@@ -91,7 +91,7 @@ The authoritative commands and physical matrix are in `.codex/reference/validati
 
 ## Validation Evidence
 
-Update this table only with commands actually run for the final exact SHA.
+The evidence below was recorded for reviewed head `a093b99aa4628c648658e9469b11f71198dd67ef`. Update or replace it only with commands actually run for a later exact SHA; working-tree UI-adjustment checks are reported separately until committed.
 
 | Check | Result |
 | --- | --- |
@@ -117,4 +117,4 @@ PR #184 stays draft. The final pushed SHA requires independent diff review and g
 
 ## Rollback
 
-Revert the root overlay/recovery owner, durable-work monitor, projection/time-entry outbox, HTTP evidence changes and scoped native hand-off fields together. Do not clear the general event queue, explicit Stop outbox, time-entry outbox, Review outbox/cache, Location journal/cache or native hand-off storage. No server or database rollback is required.
+Revert the root presentation provider/header indicator and recovery owner, durable-work monitor, projection/time-entry outbox, HTTP evidence changes and scoped native hand-off fields together. Do not clear the general event queue, explicit Stop outbox, time-entry outbox, Review outbox/cache, Location journal/cache or native hand-off storage. No server or database rollback is required.

@@ -45,6 +45,7 @@ import {
 } from "@dayframe/shared";
 import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
+import { ConnectivityStatusIndicator } from "@/components/ConnectivityStatusStrip";
 import { TagMetadata } from "@/components/TagMetadata";
 import { DayframeBrand } from "@/components/brand";
 import {
@@ -88,6 +89,10 @@ import {
 } from "@/lib/location/runtime";
 import { recordLocationStoreError } from "@/lib/location/store";
 import { mergePersistedMobileTag } from "@/lib/mobileTags";
+import {
+  StaleMobileSessionResponseError,
+  isRetryableMobileConnectivityFailure
+} from "@/lib/mobile-network";
 import {
   activateMobileAccount,
   deactivateMobileAccount
@@ -226,6 +231,34 @@ export type DayframeDashboardTab = "timer" | "calendar" | "reports";
 function StagingBadge({ styles }: { styles: MobileStyles }) {
   if (!IS_DAYFRAME_STAGING) return null;
   return <Text style={styles.environmentBadge}>STAGING</Text>;
+}
+
+function DashboardBrandLockup({
+  isFocused = true,
+  styles,
+  theme
+}: {
+  isFocused?: boolean;
+  styles: MobileStyles;
+  theme: MobileTheme;
+}) {
+  return (
+    <View style={styles.logoLockup}>
+      <DayframeBrand
+        layout="horizontal"
+        size="md"
+        tone={theme.mode === "dark" ? "light" : "dark"}
+      />
+      <ConnectivityStatusIndicator
+        isFocused={isFocused}
+        onOpenDiagnostics={() => router.push({
+          pathname: "/settings",
+          params: { section: "sync" }
+        })}
+      />
+      <StagingBadge styles={styles} />
+    </View>
+  );
 }
 type ReportRange = "today" | "week";
 type ReportChartView = "pie" | "bars";
@@ -770,12 +803,20 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       if (options?.throwOnError) throw error;
       const cachedOfflineDashboardAvailable =
         connectivityCurrent.current.isOffline && latestData.current !== null;
+      const expectedConnectivityFailure =
+        connectivityCurrent.current.isOffline ||
+        error instanceof StaleMobileSessionResponseError ||
+        isRetryableMobileConnectivityFailure(error);
       if (
         !options?.silent &&
         !options?.visibleRefresh &&
-        !cachedOfflineDashboardAvailable
+        !cachedOfflineDashboardAvailable &&
+        !expectedConnectivityFailure
       ) {
-        Alert.alert("Dayframe API", error instanceof Error ? error.message : "Unable to load API");
+        Alert.alert(
+          "Unable to refresh Dayframe",
+          "Dayframe could not refresh your data. Try again in a moment."
+        );
       }
     } finally {
       refreshInFlight.current = false;
@@ -1447,7 +1488,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       }
       Alert.alert(
         "Time not added",
-        error instanceof Error ? error.message : "Unable to add this time entry."
+        isRetryableMobileConnectivityFailure(error)
+          ? "This time needs a connection and was not added. Your draft is still open so you can try again."
+          : "Dayframe could not add this time. Check the details and try again."
       );
       return false;
     } finally {
@@ -1528,13 +1571,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       if (!queue.some((item) => item.localId === optimisticId && item.type === "timer_start")) {
         throw new Error("The offline timer start could not be queued.");
       }
-    } catch (error) {
+    } catch {
       if (options.blankStartToken !== undefined) {
         blankTimerStartGate.current.release(options.blankStartToken);
       }
       Alert.alert(
         "Timer not started",
-        error instanceof Error ? error.message : "Unable to save this timer on your iPhone."
+        "Dayframe could not save this timer on your iPhone. Check available storage and try again."
       );
       return false;
     }
@@ -1612,7 +1655,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   function finalizeRejectedOptimisticStart({
-    error,
     optimisticId,
     previousData
   }: RejectedOptimisticStart) {
@@ -1623,7 +1665,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     ));
     Alert.alert(
       "Timer not started",
-      error instanceof Error ? error.message : "Unable to start this timer."
+      "Dayframe could not start this timer because the saved request was rejected. Check Sync and diagnostics for details."
     );
     setPresentedActiveEntry((current) => current?.id === optimisticId ? null : current);
   }
@@ -1667,10 +1709,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           : { optimisticEntryId: entryId },
         patch
       });
-    } catch (error) {
+    } catch {
       Alert.alert(
         errorTitle,
-        error instanceof Error ? error.message : "Unable to save this change on your iPhone."
+        "Dayframe could not save this change on your iPhone. Check available storage and try again."
       );
       return false;
     }
@@ -1751,10 +1793,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           : { optimisticEntryId: activeEntry.id },
         occurredAt: stoppedAt
       });
-    } catch (error) {
+    } catch {
       Alert.alert(
         "Timer not stopped",
-        error instanceof Error ? error.message : "Unable to save this Stop on your device."
+        "Dayframe could not save this Stop on your iPhone. Check available storage and try again."
       );
       return false;
     }
@@ -1821,12 +1863,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       }
       deletionCommandIds.current.set(token, commandIds);
       return true;
-    } catch (error) {
+    } catch {
       await removeTimeEntryCommands(commandIds).catch(() => undefined);
       getDeletionCoordinator().invalidate(token);
       Alert.alert(
         entries.length > 1 ? "Entries not deleted" : "Entry not deleted",
-        error instanceof Error ? error.message : "Unable to save this deletion on your iPhone."
+        "Dayframe could not save this deletion on your iPhone. Check available storage and try again."
       );
       return false;
     }
@@ -1846,7 +1888,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       const owner = timerStopOwner(bootstrap);
       try {
         await releaseTimeEntryCommands(commandIds);
-      } catch (error) {
+      } catch {
         await removeTimeEntryCommands(commandIds).catch(() => undefined);
         const actionableFailures = entries
           .filter((entry) => isCurrentTimerMutation(entry.id, versions.get(entry.id) as number))
@@ -1860,9 +1902,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         ));
         Alert.alert(
           currentIds.length > 1 ? "Entries not deleted" : "Entry not deleted",
-          error instanceof Error
-            ? error.message
-            : "Unable to delete the selected time entries."
+          "Dayframe could not finish saving this deletion on your iPhone. The time entry was restored; check available storage and try again."
         );
         AccessibilityInfo.announceForAccessibility(
           currentIds.length > 1
@@ -2082,14 +2122,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.container}>
           <View style={styles.header}>
-            <View style={styles.logoLockup}>
-              <DayframeBrand
-                layout="horizontal"
-                size="md"
-                tone={theme.mode === "dark" ? "light" : "dark"}
-              />
-              <StagingBadge styles={styles} />
-            </View>
+            <DashboardBrandLockup styles={styles} theme={theme} />
           </View>
           <View
             accessibilityLiveRegion="polite"
@@ -2110,14 +2143,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       <SafeAreaView style={styles.safeArea}>
         <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
           <View style={styles.header}>
-            <View style={styles.logoLockup}>
-              <DayframeBrand
-                layout="horizontal"
-                size="md"
-                tone={theme.mode === "dark" ? "light" : "dark"}
-              />
-              <StagingBadge styles={styles} />
-            </View>
+            <DashboardBrandLockup styles={styles} theme={theme} />
           </View>
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>{authView === "signup" ? "Create account" : "Log in"}</Text>
@@ -2279,14 +2305,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           ListHeaderComponent={(
             <Animated.View style={[styles.contentStack, enteringStyle, styles.todayListHeader]}>
               <View style={styles.header}>
-                <View style={styles.logoLockup}>
-                  <DayframeBrand
-                    layout="horizontal"
-                    size="md"
-                    tone={theme.mode === "dark" ? "light" : "dark"}
-                  />
-                  <StagingBadge styles={styles} />
-                </View>
+                <DashboardBrandLockup isFocused={isFocused} styles={styles} theme={theme} />
                 <Pressable
                   accessibilityLabel="Open settings"
                   accessibilityRole="button"
@@ -2374,16 +2393,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 </Pressable>
               ) : (
                 <View style={styles.panel}>
-                  <View style={styles.timerSyncStatusSlot}>
-                    <Text
-                      accessibilityLiveRegion="polite"
-                      style={styles.timerSyncStatusText}
-                    >
-                      {pendingTimerStops.some((item) => item.failureKind === "permanent")
-                        ? "Stop could not sync"
-                        : pendingTimerStops.length > 0 ? "Stop pending sync" : ""}
-                    </Text>
-                  </View>
                   <View style={styles.startInputRow}>
                     <View style={styles.startComposerMain}>
                       <Pressable
@@ -2394,6 +2403,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                       >
                         <Text style={styles.startInputText} numberOfLines={1}>What are you working on?</Text>
                       </Pressable>
+                      <Text style={styles.quickCategoryHint}>QUICK ACTIONS</Text>
                       <ScrollView
                         accessibilityLabel="Quick actions"
                         horizontal
@@ -2516,14 +2526,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         <SafeAreaView collapsable={false} edges={["top", "left", "right"]} style={styles.safeArea}>
           <View style={styles.nativeCalendarScreen}>
             <Animated.View style={[styles.nativeCalendarHeader, enteringStyle]}>
-              <View style={styles.logoLockup}>
-                <DayframeBrand
-                  layout="horizontal"
-                  size="md"
-                  tone={theme.mode === "dark" ? "light" : "dark"}
-                />
-                <StagingBadge styles={styles} />
-              </View>
+              <DashboardBrandLockup isFocused={isFocused} styles={styles} theme={theme} />
               <Pressable
                 accessibilityLabel="Open settings"
                 accessibilityRole="button"
@@ -2579,14 +2582,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         >
           <Animated.View style={[styles.contentStack, enteringStyle]}>
           <View style={styles.header}>
-            <View style={styles.logoLockup}>
-              <DayframeBrand
-                layout="horizontal"
-                size="md"
-                tone={theme.mode === "dark" ? "light" : "dark"}
-              />
-              <StagingBadge styles={styles} />
-            </View>
+            <DashboardBrandLockup isFocused={isFocused} styles={styles} theme={theme} />
             <Pressable
               accessibilityLabel="Open settings"
               accessibilityRole="button"

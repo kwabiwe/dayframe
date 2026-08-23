@@ -20,6 +20,16 @@ export class MobileRequestTimeoutError extends Error {
   }
 }
 
+export class MobileHttpResponseError extends Error {
+  readonly statusCode: number;
+
+  constructor(statusCode: number, message: string) {
+    super(message);
+    this.name = "MobileHttpResponseError";
+    this.statusCode = statusCode;
+  }
+}
+
 type MobileRequestDeadline = {
   timeoutMilliseconds: number;
   timeoutMessage: string;
@@ -67,6 +77,16 @@ export function isMobileTransportFailure(error: unknown) {
   if (error instanceof TypeError) return true;
   return /network connection was lost|network request failed|failed to fetch|networkerror|internet connection/i
     .test(error.message);
+}
+
+export function isRetryableMobileConnectivityFailure(error: unknown) {
+  return error instanceof MobileRequestTimeoutError ||
+    isMobileTransportFailure(error) ||
+    (error instanceof MobileHttpResponseError && (
+      error.statusCode === 408 ||
+      error.statusCode === 429 ||
+      error.statusCode >= 500
+    ));
 }
 
 export async function mobileFetchWithTimeout(

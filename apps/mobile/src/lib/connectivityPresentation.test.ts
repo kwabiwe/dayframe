@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { DAYFRAME_THEME } from "@dayframe/shared";
 import {
-  connectivityPillViewModel,
-  connectivityPillColorRoles,
+  connectivityStatusColorRole,
+  connectivityStatusViewModel,
   createConnectivityPresentationState,
   createDistinctConnectivityAnnouncementTracker,
   updateConnectivityPresentation
@@ -10,26 +10,26 @@ import {
 
 const NOW = Date.parse("2026-08-22T12:00:00.000Z");
 
-describe("connectivity pill presentation", () => {
-  it("renders no pill for settled online startup with no work", () => {
+describe("connectivity status presentation", () => {
+  it("renders no status for settled online startup with no work", () => {
     expect(view("online", 0)).toBeNull();
   });
 
-  it("renders the amber Offline state from confirmed offline truth", () => {
+  it("renders a neutral Offline icon from confirmed offline truth", () => {
     expect(view("offline", 0)).toMatchObject({
-      text: "Offline",
+      isActionable: false,
       variant: "offline"
     });
-    expect(connectivityPillColorRoles("offline").background).toBe("warning");
+    expect(connectivityStatusColorRole("offline")).toBe("textSecondary");
   });
 
-  it("uses contrast-safe semantic foregrounds in Light and Dark appearance", () => {
+  it("uses a contrast-safe neutral foreground in Light and Dark appearance", () => {
     for (const mode of ["light", "dark"] as const) {
-      for (const variant of ["offline", "online"] as const) {
-        const roles = connectivityPillColorRoles(variant);
+      for (const variant of ["offline", "syncing", "synced", "attention"] as const) {
+        const role = connectivityStatusColorRole(variant);
         expect(contrastRatio(
-          DAYFRAME_THEME[mode][roles.background],
-          DAYFRAME_THEME[mode][roles.foreground]
+          DAYFRAME_THEME[mode].background,
+          DAYFRAME_THEME[mode][role]
         )).toBeGreaterThanOrEqual(4.5);
       }
     }
@@ -37,14 +37,15 @@ describe("connectivity pill presentation", () => {
 
   it("renders persistent Syncing while online durable work exists, including epoch-zero startup", () => {
     expect(view("online", 3)).toMatchObject({
-      text: "Syncing…",
+      isActionable: false,
       variant: "syncing"
     });
   });
 
-  it("shows Online only for a non-zero to zero transition and expires after two seconds", () => {
+  it("shows Synced only for a non-zero to zero transition and expires after two seconds", () => {
     const initial = updateConnectivityPresentation({
       accountKey: "workspace:user",
+      attentionCount: 0,
       now: NOW,
       pendingCount: 2,
       state: createConnectivityPresentationState(),
@@ -52,15 +53,17 @@ describe("connectivity pill presentation", () => {
     });
     const completed = updateConnectivityPresentation({
       accountKey: "workspace:user",
+      attentionCount: 0,
       now: NOW + 10,
       pendingCount: 0,
       state: initial.state,
       status: "online"
     });
-    expect(completed.viewModel).toMatchObject({ text: "Online", variant: "online" });
+    expect(completed.viewModel).toMatchObject({ variant: "synced" });
 
     const expired = updateConnectivityPresentation({
       accountKey: "workspace:user",
+      attentionCount: 0,
       now: NOW + 2_011,
       pendingCount: 0,
       state: completed.state,
@@ -69,9 +72,48 @@ describe("connectivity pill presentation", () => {
     expect(expired.viewModel).toBeNull();
   });
 
+  it("shows actionable permanent time-entry attention without consuming a false Synced notice", () => {
+    const pending = updateConnectivityPresentation({
+      accountKey: "workspace:user",
+      attentionCount: 0,
+      now: NOW,
+      pendingCount: 1,
+      state: createConnectivityPresentationState(),
+      status: "online"
+    });
+    const rejected = updateConnectivityPresentation({
+      accountKey: "workspace:user",
+      attentionCount: 1,
+      now: NOW + 1,
+      pendingCount: 0,
+      state: pending.state,
+      status: "online"
+    });
+    expect(rejected.viewModel).toMatchObject({
+      isActionable: true,
+      variant: "attention"
+    });
+    expect(rejected.state.onlineUntil).toBeNull();
+
+    const cleared = updateConnectivityPresentation({
+      accountKey: "workspace:user",
+      attentionCount: 0,
+      now: NOW + 2,
+      pendingCount: 0,
+      state: rejected.state,
+      status: "online"
+    });
+    expect(cleared.viewModel).toBeNull();
+  });
+
+  it("keeps confirmed offline ahead of permanent attention in the one status slot", () => {
+    expect(view("offline", 0, 1)).toMatchObject({ variant: "offline" });
+  });
+
   it("self-heals after an out-of-band drain without a recovery-pass verdict", () => {
     const syncing = updateConnectivityPresentation({
       accountKey: "workspace:user",
+      attentionCount: 0,
       now: NOW,
       pendingCount: 1,
       state: createConnectivityPresentationState(),
@@ -79,18 +121,20 @@ describe("connectivity pill presentation", () => {
     });
     const drained = updateConnectivityPresentation({
       accountKey: "workspace:user",
+      attentionCount: 0,
       now: NOW + 1,
       pendingCount: 0,
       state: syncing.state,
       status: "online"
     });
-    expect(syncing.viewModel?.text).toBe("Syncing…");
-    expect(drained.viewModel?.text).toBe("Online");
+    expect(syncing.viewModel?.variant).toBe("syncing");
+    expect(drained.viewModel?.variant).toBe("synced");
   });
 
-  it("does not consume an Online transition when a calculated render is discarded", () => {
+  it("does not consume a Synced transition when a calculated render is discarded", () => {
     const pending = updateConnectivityPresentation({
       accountKey: "workspace:user",
+      attentionCount: 0,
       now: NOW,
       pendingCount: 1,
       state: createConnectivityPresentationState(),
@@ -98,6 +142,7 @@ describe("connectivity pill presentation", () => {
     });
     const discarded = updateConnectivityPresentation({
       accountKey: "workspace:user",
+      attentionCount: 0,
       now: NOW + 1,
       pendingCount: 0,
       state: pending.state,
@@ -105,14 +150,15 @@ describe("connectivity pill presentation", () => {
     });
     const committed = updateConnectivityPresentation({
       accountKey: "workspace:user",
+      attentionCount: 0,
       now: NOW + 1,
       pendingCount: 0,
       state: pending.state,
       status: "online"
     });
 
-    expect(discarded.viewModel?.id).toBe("online-1");
-    expect(committed.viewModel?.id).toBe("online-1");
+    expect(discarded.viewModel?.id).toBe("synced-1");
+    expect(committed.viewModel?.id).toBe("synced-1");
     expect(pending.state).toMatchObject({
       completionSequence: 0,
       onlineUntil: null,
@@ -120,6 +166,7 @@ describe("connectivity pill presentation", () => {
     });
     expect(updateConnectivityPresentation({
       accountKey: "workspace:user",
+      attentionCount: 0,
       now: NOW,
       pendingCount: 1,
       state: pending.state,
@@ -127,30 +174,30 @@ describe("connectivity pill presentation", () => {
     }).state).toBe(pending.state);
   });
 
-  it("cannot emit removed pass-verdict wording", () => {
-    const emitted = [
-      view("offline", 0)?.text,
-      view("online", 1)?.text,
-      view("online", 0)?.text
-    ].filter(Boolean);
-    expect(emitted).toEqual(["Offline", "Syncing…"]);
-  });
-
   it("announces each distinct visible transition once", () => {
     const tracker = createDistinctConnectivityAnnouncementTracker();
     const offline = view("offline", 0);
     const syncing = view("online", 1);
+    const attention = view("online", 0, 1);
     expect(tracker.next(offline)).toBe("Offline. Changes will sync later.");
     expect(tracker.next(offline)).toBeNull();
     expect(tracker.next(syncing)).toBe("Syncing saved changes.");
     expect(tracker.next(syncing)).toBeNull();
+    expect(tracker.next(attention)).toBe(
+      "A time entry sync issue needs attention. Open Sync and diagnostics."
+    );
     expect(tracker.next(null)).toBeNull();
     expect(tracker.next(offline)).toBe("Offline. Changes will sync later.");
   });
 });
 
-function view(status: "online" | "offline", pendingCount: number) {
-  return connectivityPillViewModel({
+function view(
+  status: "online" | "offline",
+  pendingCount: number,
+  attentionCount = 0
+) {
+  return connectivityStatusViewModel({
+    attentionCount,
     completionSequence: 0,
     now: NOW,
     onlineUntil: null,

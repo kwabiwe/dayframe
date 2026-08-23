@@ -45,4 +45,19 @@ describe("primary mobile timer action geometry", () => {
     expect(theme).toMatch(/startInput: \{[\s\S]*?minHeight: 44/);
     expect(theme).toMatch(/activeEditStopButton: \{[\s\S]*?width: 44,[\s\S]*?height: 44/);
   });
+
+  it("keeps the idle timer hierarchy task-first without a reserved sync-copy row", () => {
+    const taskIndex = dashboard.indexOf("What are you working on?");
+    const labelIndex = dashboard.indexOf("QUICK ACTIONS");
+    const actionsIndex = dashboard.indexOf('accessibilityLabel="Quick actions"');
+
+    expect(taskIndex).toBeGreaterThan(-1);
+    expect(labelIndex).toBeGreaterThan(taskIndex);
+    expect(actionsIndex).toBeGreaterThan(labelIndex);
+    expect(dashboard).not.toContain("Stop pending sync");
+    expect(dashboard).not.toContain("Stop could not sync");
+    expect(dashboard).not.toContain("timerSyncStatusSlot");
+    expect(theme).not.toContain("timerSyncStatusSlot");
+    expect(theme).not.toContain("timerSyncStatusText");
+  });
 });

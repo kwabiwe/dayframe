@@ -16,6 +16,7 @@ import {
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
 import {
+  MobileHttpResponseError,
   MobileRequestTimeoutError,
   StaleMobileSessionResponseError,
   isMobileTransportFailure,
@@ -480,7 +481,10 @@ export async function fetchBootstrap(options: { date?: string } = {}): Promise<M
     throw new StaleMobileSessionResponseError();
   }
   if (!response.ok) {
-    throw new Error(await errorMessage(response, "Unable to load Dayframe API"));
+    throw new MobileHttpResponseError(
+      response.status,
+      await errorMessage(response, "Unable to load Dayframe API")
+    );
   }
   const bootstrap = await readJsonResponse<MobileBootstrap>(response);
   if (bootstrap.user?.id && bootstrap.workspace?.id) {

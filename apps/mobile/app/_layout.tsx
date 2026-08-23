@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import { StatusBar, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { ConnectivityStatusOverlay } from "@/components/ConnectivityStatusStrip";
+import { ConnectivityStatusProvider } from "@/components/ConnectivityStatusStrip";
 import { ConnectivityRecoveryOwner } from "@/components/ConnectivityRecoveryOwner";
 import { ConnectivityProvider } from "@/lib/connectivity";
 import { MobileThemeProvider, useMobileTheme } from "@/lib/mobileTheme";
@@ -16,7 +16,9 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <MobileThemeProvider>
           <ConnectivityProvider>
-            <ConnectivityAppShell />
+            <ConnectivityStatusProvider>
+              <ConnectivityAppShell />
+            </ConnectivityStatusProvider>
           </ConnectivityProvider>
         </MobileThemeProvider>
       </SafeAreaProvider>
@@ -29,7 +31,6 @@ function ConnectivityAppShell() {
     <View style={{ flex: 1 }}>
       <ThemedStack />
       <ConnectivityRecoveryOwner />
-      <ConnectivityStatusOverlay />
     </View>
   );
 }
