@@ -292,6 +292,7 @@ export function createConnectivityRecoveryCoordinator(input: {
       if (!hasPendingPass && shouldRetry && input.canStart()) {
         scheduleRetry(epoch);
       } else if (!hasPendingPass && !shouldRetry && !hasPendingWork) {
+        clearScheduledRetry();
         retryAttempt = 0;
       }
       if (result === "authentication_required") break;

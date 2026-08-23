@@ -214,7 +214,7 @@ describe("process-wide connectivity monitor", () => {
     stop();
   });
 
-  it("lets unchanged native online evidence recover an HTTP-forced offline state", async () => {
+  it("does not let unchanged native online evidence undo HTTP-forced offline", async () => {
     const stop = monitor.startConnectivityMonitor();
     await vi.runAllTicks();
     await vi.advanceTimersByTimeAsync(400);
@@ -226,13 +226,19 @@ describe("process-wide connectivity monitor", () => {
     expect(monitor.getConnectivitySnapshot()).toMatchObject({
       status: "offline",
       reconnectEpoch: 0,
-      source: "native"
+      source: "http"
     });
 
     await monitor.refreshConnectivity();
-    await vi.advanceTimersByTimeAsync(399);
-    expect(monitor.getConnectivitySnapshot().status).toBe("offline");
-    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(400);
+    expect(monitor.getConnectivitySnapshot()).toMatchObject({
+      status: "offline",
+      reconnectEpoch: 0
+    });
+
+    netInfo.emit(OFFLINE);
+    netInfo.emit(ONLINE);
+    await vi.advanceTimersByTimeAsync(400);
     expect(monitor.getConnectivitySnapshot()).toMatchObject({
       status: "online",
       reconnectEpoch: 1,

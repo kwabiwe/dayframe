@@ -72,10 +72,9 @@ describe("connectivity status ownership", () => {
     expect(status).toContain("durableWork.timerStopNeedsAttentionCount");
     expect(projection).toContain('stop.failureKind !== "permanent"');
     expect(settings).toContain("Timer Stop rejected");
-    expect(settings).toContain("Retry Stop");
-    expect(settings).toContain("Discard Stop");
     expect(settings).toContain("retryTimerStopSyncIssue");
     expect(settings).toContain("discardTimerStopSyncIssue");
+    expect(settings).toContain("TimerStopIssueActions");
   });
 });
 

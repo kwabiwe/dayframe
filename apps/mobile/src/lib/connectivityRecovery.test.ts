@@ -498,6 +498,30 @@ describe("connectivity recovery", () => {
     expect(calls).toEqual([1, 2]);
   });
 
+  it("cancels a scheduled retry after a successful forced recovery pass", async () => {
+    vi.useFakeTimers();
+    const runPass = vi.fn(async () =>
+      runPass.mock.calls.length === 1 ? "transport_failure" as const : "completed" as const
+    );
+    const coordinator = createConnectivityRecoveryCoordinator({
+      canStart: () => true,
+      random: () => 0.5,
+      runPass
+    });
+
+    await coordinator.request(1);
+    expect(coordinator.snapshot()).toMatchObject({ retryAttempt: 1 });
+    expect(vi.getTimerCount()).toBe(1);
+
+    await coordinator.request(1, { forcePass: true });
+    expect(runPass).toHaveBeenCalledTimes(2);
+    expect(coordinator.snapshot()).toMatchObject({ retryAttempt: 0, retryAt: null });
+    expect(vi.getTimerCount()).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(runPass).toHaveBeenCalledTimes(2);
+  });
+
   it("treats normal retry wait as pending work rather than a terminal outcome", async () => {
     vi.useFakeTimers();
     const coordinator = createConnectivityRecoveryCoordinator({

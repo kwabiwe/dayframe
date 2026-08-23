@@ -96,6 +96,15 @@ export function connectivityStatusViewModel(input: {
   status: ConnectivityStatus;
 }): ConnectivityStatusViewModel | null {
   if (input.status === "offline") {
+    if (input.attentionCount > 0) {
+      return {
+        accessibilityLabel:
+          "Offline. A timer or time entry sync issue also needs attention. Open Sync and diagnostics.",
+        id: "offline-attention",
+        isActionable: true,
+        variant: "offline"
+      };
+    }
     return {
       accessibilityLabel: "Offline. Changes will sync later.",
       id: "offline",

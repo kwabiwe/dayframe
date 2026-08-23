@@ -135,6 +135,8 @@ import {
   retryTimerStopSyncIssue,
   subscribeTimerStopOutbox
 } from "@/lib/timerStopOutbox";
+import { deviceSyncAttentionStatus } from "@/lib/settingsSyncDiagnostics";
+import { TimerStopIssueActions } from "@/components/TimerStopIssueActions";
 
 type Category = MobileBootstrap["categories"][number];
 type SettingsSection = "index" | "profile" | "categories" | "automations" | "health" | "sync" | "appearance";
@@ -557,15 +559,11 @@ export default function SettingsScreen() {
     lastSyncResult,
     queueDiagnostics
   });
-  const deviceSyncStatus = timerStopSyncDiagnostics?.needsAttentionCount
-    ? `${timerStopSyncDiagnostics.needsAttentionCount} timer ${
-        timerStopSyncDiagnostics.needsAttentionCount === 1 ? "Stop needs" : "Stops need"
-      } attention`
-    : timeEntrySyncDiagnostics?.needsAttentionCount
-    ? `${timeEntrySyncDiagnostics.needsAttentionCount} time entry ${
-        timeEntrySyncDiagnostics.needsAttentionCount === 1 ? "change needs" : "changes need"
-      } attention`
-    : timeEntrySyncDiagnostics?.quarantinedCount
+  const deviceAttentionStatus = deviceSyncAttentionStatus({
+    timerStopNeedsAttentionCount: timerStopSyncDiagnostics?.needsAttentionCount,
+    timeEntryNeedsAttentionCount: timeEntrySyncDiagnostics?.needsAttentionCount
+  });
+  const deviceSyncStatus = deviceAttentionStatus ?? (timeEntrySyncDiagnostics?.quarantinedCount
       ? `${timeEntrySyncDiagnostics.quarantinedCount} unreadable local sync ${
           timeEntrySyncDiagnostics.quarantinedCount === 1 ? "record" : "records"
         } quarantined`
@@ -581,7 +579,7 @@ export default function SettingsScreen() {
       ? `${reviewSyncDiagnostics.waitingCount} Review ${
           reviewSyncDiagnostics.waitingCount === 1 ? "change" : "changes"
         } waiting`
-      : eventSyncStatus;
+      : eventSyncStatus);
   const locationMonitoringAllowed = locationDiagnostics?.backgroundPermission === "granted";
   const locationActionLabel = locationMonitoringAllowed
     ? "Refresh"
@@ -1875,22 +1873,12 @@ export default function SettingsScreen() {
                   <Text style={styles.accountMeta}>
                     The server did not accept this Stop. Retry it, or discard it to keep the server timer unchanged.
                   </Text>
-                  <View style={styles.buttonRow}>
-                    <Pressable
-                      accessibilityRole="button"
-                      style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                      onPress={() => retryTimerStopIssue(issue.clientEventId)}
-                    >
-                      <Text style={styles.secondaryButtonText}>Retry Stop</Text>
-                    </Pressable>
-                    <Pressable
-                      accessibilityRole="button"
-                      style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                      onPress={() => confirmDiscardTimerStopIssue(issue.clientEventId)}
-                    >
-                      <Text style={styles.secondaryButtonText}>Discard Stop</Text>
-                    </Pressable>
-                  </View>
+                  <TimerStopIssueActions
+                    clientEventId={issue.clientEventId}
+                    onDiscard={confirmDiscardTimerStopIssue}
+                    onRetry={retryTimerStopIssue}
+                    styles={styles}
+                  />
                 </Reanimated.View>
               ))}
             </View>

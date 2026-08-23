@@ -234,12 +234,12 @@ function handleNativeState(
   if (source === "native") recordConnectivityRefresh("native_event");
   const observation = rawObservation(state);
   const rawUnchanged = rawConnectivityObservationsEqual(lastRawObservation, observation);
+  // NetInfo reachability is weaker than the repeated, current-generation HTTP
+  // failure evidence that can force Offline. Repeating the same positive sample
+  // must not manufacture a reconnect epoch and reset ordered-recovery backoff.
+  // A real native transition (or a successful HTTP response) can still recover.
+  if (rawUnchanged) return;
   const candidate = classifyConnectivityCandidate(observation);
-  const repairsForcedStatus =
-    candidate !== "ambiguous" &&
-    candidate !== machineState.status &&
-    pendingCandidate?.candidate !== candidate;
-  if (rawUnchanged && !repairsForcedStatus) return;
   lastRawObservation = observation;
   const observed = observeNativeConnectivity(machineState, observation, source);
   recordRawNetInfo(observation, source);
