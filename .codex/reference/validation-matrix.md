@@ -274,7 +274,7 @@ Native Calendar long-press creation additionally requires:
 
 Required whenever the global reachability owner, HTTP evidence boundary, durable projection/retry ordering, root status overlay, or connectivity-aware Review copy changes:
 
-- Run the connectivity state/monitor/recovery and mobile-network tests, the complete mobile suite and typecheck, `npx expo install --check`, `npx pod-install`, Review and Location SQLite validators, and a clean unsigned iOS Simulator build with fresh Derived Data. Review both JavaScript lockfile and `Podfile.lock` changes. Do not use Expo Go as native NetInfo evidence.
+- Run the connectivity state/monitor/recovery and mobile-network tests, the complete mobile suite and typecheck, `npx expo install --check`, `npx pod-install`, Review and Location SQLite validators, and a clean unsigned iOS Simulator build with fresh Derived Data. Review both JavaScript lockfile and `Podfile.lock` changes. Reproduce a new native dependency from the frozen base in a clean checkout. Reject unexplained unrelated checksum churn; React Native prebuilt-pod checksums may change when their generated podspec JSON embeds a different absolute artifact or CLI path, so compare those JSON fields and record that evidence rather than attributing the hashes to the new dependency. Do not use Expo Go as native NetInfo evidence.
 - Re-run timer Stop/outbox, Live Activity, general queue, Review cache/outbox, Location Evidence cache, Location Intelligence, HealthKit, account/session, native tab, sheet/keyboard, navigation, motion, theme and accessibility regression coverage. Reachability must never replace a durable owner or disable an offline-capable action.
 - Hands-on validation uses the exact Ready PR Vercel Preview, manually promoted `dayframe-staging.vercel.app` alias, staging Supabase, and a signed EAS `preview` build. Never use production credentials/data. Record every item below individually as `PASS`, `FAIL`, or `NOT RUN`; Simulator/unit results cannot establish physical network behaviour.
 
@@ -286,7 +286,7 @@ Physical-iPhone matrix:
 4. Airplane Mode to online with durable work: `Syncing…` persists while any applicable account-owned command remains. Only a live pending-count change from non-zero to zero produces green `Online` for approximately two seconds, then hides it.
 5. Reconnect then immediately disconnect: `Offline` supersedes other presentation and no stale timer hides it. Force a retryable owner failure and verify `Syncing…` remains while queued work is retained and automatic retry is scheduled. Force permanent rejection and verify targeted diagnostics with no permanent generic pill.
 6. Wi-Fi to cellular and cellular to Wi-Fi: no false offline flash.
-7. Weak/blackholed connection: one isolated failure stays neutral; repeated request deadlines/transport failures in the bounded window confirm offline, while caller cancellation remains neutral. A retained Edit/Delete stops awaiting at its configured deadline and later retries.
+7. Weak/blackholed connection: one isolated failure stays neutral; repeated request deadlines/transport failures in the bounded window confirm offline, while caller cancellation remains neutral. Capture requests on both sides of an offline/reconnect generation: stale success must not clear current failure evidence, and stale failure must not flip the new online epoch offline. A retained Edit/Delete stops awaiting at its configured deadline and later retries.
 8. API `5xx`: no incorrect offline notice.
 9. Background offline, reconnect while backgrounded, then foreground: current state refreshes and exactly one recovery occurs. Also background during an active ordered pass; foreground must resume that retained epoch from the beginning without an unordered fallback, parallel pass or stuck syncing strip.
 10. Repeated foreground/background: no duplicate listener, strip transition, recovery or stale account-owned presentation.
@@ -315,10 +315,10 @@ Physical-iPhone matrix:
 32. Cached Review open during reconnect refreshes silently without spinner/card flash.
 33. Cached Location Evidence open during reconnect revalidates silently and retains the draft.
 34. No pending work produces no pill, no startup online notice and no request storm.
-35. Rapid flapping keeps bounded requests and existing in-flight gates.
+35. Rapid flapping keeps bounded requests and existing in-flight gates. An active ordinary time-entry drain must retain a later forced reconnect request and bypass obsolete retry wait once its current request settles.
 36. Session expiry while offline preserves the correct auth-required/sign-out path.
 37. Account switch before reconnect never sends old-account work under the new account.
-38. Timer start/stop regression: while offline perform Start → Edit description/category → Stop, pull-to-refresh repeatedly, force-quit and relaunch, then reconnect. One final stopped entry remains continuously visible and converges exactly once on web. Repeat Start-only and concurrent-drain cases.
+38. Timer start/stop regression: while offline perform Start → Edit description/category → Stop, pull-to-refresh repeatedly, force-quit and relaunch, then reconnect. One final stopped entry remains continuously visible and converges exactly once on web. Repeat Start-only and concurrent-drain cases. While recovery's final bootstrap is in flight, tap Stop and separately save an Edit; the recovered snapshot must be rejected through the ordinary mutation-revision/deletion guard, queue a fresh projected load and never visibly resume or revert the entry.
 39. Live Activity start/stop/convergence regression.
 40. Today, Calendar and Reports data regression.
 41. Review cache-first warm-launch regression.
@@ -328,7 +328,7 @@ Physical-iPhone matrix:
 45. Settings queue/Review/Location diagnostics regression.
 46. System, Light and Dark appearance.
 47. Large Dynamic Type/no horizontal overflow.
-48. VoiceOver: one root announcement per distinct visible transition, including a repeated Offline transition after a settled hidden state; no focus move and no visual-pill traversal.
+48. VoiceOver: one root announcement per distinct visible transition, including a repeated Offline transition after a settled hidden state; no forced focus move. While visible, the pill is manually revisitable as one labelled element with no duplicate child-text traversal.
 49. Reduce Motion: opacity-only root-pill entrance/exit with no layout or travel.
 50. Reduce Transparency and contrast/non-colour status cues.
 
