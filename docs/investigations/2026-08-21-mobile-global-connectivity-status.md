@@ -3,7 +3,7 @@
 Date: 2026-08-21
 Baseline: `origin/main` at `2b732d20b4aec50f113529adeffdcfc81b979bb4` (merged PR #183)
 Implementation branch: `codex/pr184-global-connectivity-status`
-Status: architectural repair implemented locally; final automated gates, exact-SHA independent review and physical evidence pending
+Status: architectural repair and local automated gates complete; exact-SHA hosted checks, independent review and physical evidence pending
 
 ## Problem And Boundary
 
@@ -51,7 +51,7 @@ The Dashboard cache stores the last successful server snapshot. Offline truth is
 - Existing-entry and optimistic-Start Edit commands are durable before projection and sheet dismissal. Direct delivery has an eight-second deadline; retryable timeout/transport/5xx preserves the command and projection.
 - Delete is durable before optimistic removal. Its command carries a short delivery hold for the existing five-second Undo lifecycle. Undo removes the durable command; expiry/commit releases it. Force-quit during the window retains the user's deletion and later delivery.
 - Explicit Stop remains a separate persist-before-dismiss outbox. All callers use the same account-keyed in-flight drain. Ready Stops run before activity, then dependent Stops run again after Start correlation.
-- Permanent validation/not-found rejection is classified separately and is not retried indefinitely or represented as generic connectivity failure. It stops affecting projection, a guarded bootstrap restores canonical server truth, and Settings > Sync & diagnostics exposes account-owned Retry/Discard actions. Malformed time-entry outbox bytes are retained in a bounded local quarantine with a clear diagnostic count rather than silently treated as empty; quarantine content is never logged or projected.
+- Permanent validation/not-found rejection is classified separately and is not retried indefinitely or represented as generic connectivity failure. It stops affecting projection, a guarded bootstrap restores canonical server truth, and Settings > Sync & diagnostics exposes account-owned Retry/Discard actions. Malformed time-entry outbox bytes are retained in bounded local quarantine rather than silently treated as empty; recoverable owner fields scope diagnostics and clearing to that account, while irrecoverably ownerless corruption is labelled and cleared separately as device-wide. Quarantine content is never logged or projected.
 
 ## Reconnect Order And Retry
 
@@ -62,7 +62,7 @@ One pass checks active app, confirmed online state and account identity between 
 3. deliver time-entry Edit/Delete commands after Start correlation is available;
 4. deliver explicit Stops again after correlation;
 5. drain Review mutations for the same account;
-6. resume same-account Location native drain, processing, upload and replay;
+6. resume same-account Location native drain, processing, upload and replay; batch selection, request dispatch, replay and every response-side SQLite mutation pin the captured location owner and authenticated-session generation, so an A → B switch interrupts the stale pass without selecting or mutating B evidence;
 7. fetch/cache one server bootstrap, project any work still durable, and publish it through the Dashboard's mutation-revision and pending-deletion guard. A Stop/Edit that overlaps the fetch queues a fresh projected load instead of accepting the recovered snapshot; a failed publication emits an explicit abandonment event so its captured guard is released.
 
 Retryable transport/application failure schedules jittered exponential backoff without requiring another network toggle, including when a zero-pending reconnect/foreground pass fails in Location or bootstrap. A newer reconnect epoch cancels the obsolete timer and runs promptly. Confirmed offline pauses timers and delivery; foreground always requests one ordered pass for an authenticated account. A newly created command wakes the coordinator even at reconnect epoch zero. HealthKit is not imported merely because transport changes.
@@ -95,15 +95,15 @@ Update this table only with commands actually run for the final exact SHA.
 
 | Check | Result |
 | --- | --- |
-| Focused reconnect-race, connectivity-evidence, presentation, outbox and structural suites | PASS: 7 files / 152 tests; broader timer/connectivity risk suite PASS: 35 files / 420 tests |
-| Complete mobile suite | PASS: 85 files / 839 tests |
+| Focused account-ownership, reconnect, connectivity-evidence and outbox suites | PASS: 6 files / 140 tests |
+| Complete mobile suite | PASS: 86 files / 844 tests |
 | Mobile typecheck | PASS as part of the repository workspace typecheck |
-| Repository lint/typecheck/test/build | PASS: lint (two pre-existing web-test warnings), all workspace typechecks, mobile 839/839, web 836/836 with one skipped, shared 156/156, and the production Next.js build |
+| Repository lint/typecheck/test/build | PASS: lint (two pre-existing web-test warnings), all workspace typechecks, mobile 844/844, web 836/836 with one skipped, shared 156/156, and the production Next.js build |
 | Review SQLite validator | PASS |
 | Location V2 SQLite validator | PASS |
 | Expo dependency check / CocoaPods | Baseline Expo patch drift remains: `npx expo install --check` recommends six SDK-compatible patch updates; clean-base `npm ci`, NetInfo install and two repeat `npx pod-install` runs PASS with 115 dependencies / 114 pods. NetInfo entries reproduce. Diffing generated podspec JSON proves the three React Native prebuilt checksum differences come only from checkout-specific absolute Hermes CLI and local artifact paths; those three hashes are restored to the frozen-base values so the committed full-PR lock delta is NetInfo-only |
 | Documentation/brand/iOS-config/diff checks | PASS: 118 Markdown files, brand assets, iOS configuration and `git diff --check` |
-| Clean unsigned iOS Simulator build | PASS: fresh Derived Data at `/tmp/dayframe-pr184-final-ios.MXtagb`, Debug, iOS Simulator 26.5 `Dayframe Sheet QA SE`, `CODE_SIGNING_ALLOWED=NO`; dependency warnings only, no launch or install |
+| Clean unsigned iOS Simulator build | PASS: fresh Derived Data at `/tmp/dayframe-pr184-final-owner-ios.NHmCse`, Debug, iOS Simulator 26.5 `Dayframe Sheet QA SE`, `CODE_SIGNING_ALLOWED=NO`; dependency warnings only, no launch or install |
 | Exact-SHA GitHub/Vercel Preview checks | NOT RUN until pushed |
 | Signed staging build / physical iPhone matrix | NOT RUN; requires explicit next-stage approval after independent re-review |
 
