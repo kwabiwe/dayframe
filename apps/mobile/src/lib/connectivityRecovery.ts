@@ -93,6 +93,20 @@ export function shouldRetryConnectivityRecovery(
   );
 }
 
+export function connectivityAllowsRecovery(input: {
+  isConnected: boolean | null;
+  isInternetReachable: boolean | null;
+  source: "initial" | "native" | "http";
+  status: "unknown" | "online" | "offline";
+}) {
+  return input.status === "online" || (
+    input.status === "offline" &&
+    input.source === "http" &&
+    input.isConnected !== false &&
+    input.isInternetReachable !== false
+  );
+}
+
 export function reviewConnectivityRecoveryStepResult(
   result: ReviewConnectivityRecoveryResult
 ): ConnectivityRecoveryStepResult {

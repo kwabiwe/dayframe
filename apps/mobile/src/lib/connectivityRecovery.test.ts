@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  connectivityAllowsRecovery,
   connectivityRecoveryRequest,
   createConnectivityRecoveryCoordinator,
   createSharedInFlightOperation,
@@ -24,6 +25,65 @@ const ORDER: ConnectivityRecoveryStepName[] = [
 describe("connectivity recovery", () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("keeps bounded recovery available for HTTP-forced Offline only", () => {
+    expect(connectivityAllowsRecovery({
+      isConnected: true,
+      isInternetReachable: true,
+      source: "http",
+      status: "offline"
+    })).toBe(true);
+    expect(connectivityAllowsRecovery({
+      isConnected: false,
+      isInternetReachable: false,
+      source: "native",
+      status: "offline"
+    })).toBe(false);
+    expect(connectivityAllowsRecovery({
+      isConnected: true,
+      isInternetReachable: false,
+      source: "http",
+      status: "offline"
+    })).toBe(false);
+  });
+
+  it("backs off through HTTP-forced Offline and recovers without a native toggle", async () => {
+    vi.useFakeTimers();
+    let connectivity: Parameters<typeof connectivityAllowsRecovery>[0] = {
+      isConnected: true,
+      isInternetReachable: true,
+      source: "native",
+      status: "online"
+    };
+    const runPass = vi.fn(async () => {
+      if (runPass.mock.calls.length === 1) {
+        connectivity = { ...connectivity, source: "http", status: "offline" };
+        return "transport_failure" as const;
+      }
+      connectivity = { ...connectivity, source: "http", status: "online" };
+      return "completed" as const;
+    });
+    const coordinator = createConnectivityRecoveryCoordinator({
+      canStart: () => connectivityAllowsRecovery(connectivity),
+      random: () => 0.5,
+      runPass
+    });
+
+    await coordinator.request(1);
+    expect(connectivity.status).toBe("offline");
+    expect(coordinator.snapshot()).toMatchObject({
+      retryAttempt: 1,
+      retryAt: Date.now() + 1_000
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(connectivity.status).toBe("online");
+    expect(runPass).toHaveBeenCalledTimes(2);
+    expect(coordinator.snapshot()).toMatchObject({ retryAttempt: 0, retryAt: null });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(runPass).toHaveBeenCalledTimes(2);
   });
   it("requests reconnect and foreground recovery with zero durable work", async () => {
     expect(connectivityRecoveryRequest({

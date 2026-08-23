@@ -17,7 +17,8 @@ import {
 import { startDurableWorkMonitor } from "./durableWorkMonitor";
 import type {
   ConnectivityRecoveryStatus,
-  ConnectivityStatus
+  ConnectivityStatus,
+  ConnectivityTransitionSource
 } from "./connectivityState";
 
 export type ConnectivityContextValue = {
@@ -25,6 +26,9 @@ export type ConnectivityContextValue = {
   reconnectEpoch: number;
   recoveryEpoch: number | null;
   recoveryStatus: ConnectivityRecoveryStatus;
+  source: ConnectivityTransitionSource;
+  isConnected: boolean | null;
+  isInternetReachable: boolean | null;
   isOffline: boolean;
   isOnline: boolean;
 };
@@ -61,12 +65,18 @@ export function ConnectivityProvider({ children }: { children: ReactNode }) {
     reconnectEpoch: snapshot.reconnectEpoch,
     recoveryEpoch: snapshot.recoveryEpoch,
     recoveryStatus: snapshot.recoveryStatus,
+    source: snapshot.source,
+    isConnected: snapshot.isConnected,
+    isInternetReachable: snapshot.isInternetReachable,
     isOffline: snapshot.status === "offline",
     isOnline: snapshot.status === "online"
   }), [
+    snapshot.isConnected,
+    snapshot.isInternetReachable,
     snapshot.reconnectEpoch,
     snapshot.recoveryEpoch,
     snapshot.recoveryStatus,
+    snapshot.source,
     snapshot.status
   ]);
 

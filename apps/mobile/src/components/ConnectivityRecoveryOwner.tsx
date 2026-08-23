@@ -9,6 +9,7 @@ import {
 import { useConnectivity } from "@/lib/connectivity";
 import { IS_DAYFRAME_STAGING } from "@/lib/config";
 import {
+  connectivityAllowsRecovery,
   createConnectivityRecoveryCoordinator,
   connectivityRecoveryRequest,
   foregroundRecoveryRequest,
@@ -74,7 +75,7 @@ export function ConnectivityRecoveryOwner() {
   coordinator.current ??= createConnectivityRecoveryCoordinator({
     canStart: () =>
       appActiveRef.current &&
-      connectivityRef.current.isOnline &&
+      connectivityAllowsRecovery(connectivityRef.current) &&
       Boolean(durableWorkRef.current.accountKey),
     hasPendingWork: () => getDurableWorkSnapshot().pendingCount > 0,
     onPassStarted: (epoch) => {
@@ -129,9 +130,24 @@ export function ConnectivityRecoveryOwner() {
     const currentCoordinator = coordinator.current;
     if (!currentCoordinator) return;
     void refreshDurableWorkSnapshot();
-    if (connectivity.isOffline) {
+    if (!connectivityAllowsRecovery(connectivity)) {
       currentCoordinator.pause();
       reportConnectivityRecoveryCancelled(connectivity.reconnectEpoch);
+      return;
+    }
+    if (connectivity.isOffline) {
+      if (
+        appActiveRef.current &&
+        durableWork.accountKey &&
+        !currentCoordinator.snapshot().inFlight
+      ) {
+        void currentCoordinator.request(connectivity.reconnectEpoch, {
+          forcePass: true
+        });
+      }
+      return;
+    }
+    if (connectivity.source === "http" && currentCoordinator.snapshot().inFlight) {
       return;
     }
     const request = connectivityRecoveryRequest({
@@ -144,7 +160,15 @@ export function ConnectivityRecoveryOwner() {
     if (request) {
       void currentCoordinator.request(request.epoch, request.options);
     }
-  }, [connectivity.isOffline, connectivity.isOnline, connectivity.reconnectEpoch]);
+  }, [
+    connectivity.isConnected,
+    connectivity.isInternetReachable,
+    connectivity.isOffline,
+    connectivity.isOnline,
+    connectivity.reconnectEpoch,
+    connectivity.source,
+    durableWork.accountKey
+  ]);
 
   useEffect(() => {
     const currentCoordinator = coordinator.current;
@@ -183,7 +207,7 @@ export function ConnectivityRecoveryOwner() {
       void refreshDurableWorkSnapshot().then((current) => {
         const request = foregroundRecoveryRequest({
           accountKey: current.accountKey,
-          isOnline: connectivityRef.current.isOnline,
+          isOnline: connectivityAllowsRecovery(connectivityRef.current),
           reconnectEpoch: connectivityRef.current.reconnectEpoch
         });
         if (request) {
@@ -208,7 +232,7 @@ async function runRootRecoveryPass() {
   const canContinue = () => {
     const snapshot = getDurableWorkSnapshot();
     return AppState.currentState === "active" &&
-      getConnectivitySnapshot().status === "online" &&
+      connectivityAllowsRecovery(getConnectivitySnapshot()) &&
       snapshot.accountKey === ownerKey;
   };
 
