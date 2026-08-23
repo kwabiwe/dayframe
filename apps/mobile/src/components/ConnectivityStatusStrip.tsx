@@ -24,10 +24,9 @@ import Reanimated, {
   withRepeat,
   withTiming
 } from "react-native-reanimated";
-import Svg, { Path } from "react-native-svg";
+import { SymbolView, type SFSymbol } from "expo-symbols";
 import { useConnectivity } from "@/lib/connectivity";
 import {
-  connectivityStatusColorRole,
   createDistinctConnectivityAnnouncementTracker,
   createConnectivityPresentationState,
   updateConnectivityPresentation,
@@ -104,6 +103,7 @@ export function ConnectivityStatusIndicator({
   const viewModel = useContext(ConnectivityStatusContext);
   const { theme } = useMobileTheme();
   const reduceMotion = useReduceMotionPreference();
+  const statusColor = theme.mode === "dark" ? theme.textSecondary : theme.borderStrong;
 
   if (viewModel === undefined) {
     throw new Error("ConnectivityStatusIndicator must be used within ConnectivityStatusProvider");
@@ -132,7 +132,7 @@ export function ConnectivityStatusIndicator({
           testID="connectivity-status-attention"
         >
           <ConnectivityStatusGlyph
-            color={theme[connectivityStatusColorRole(viewModel.variant)]}
+            color={statusColor}
             reduceMotion={reduceMotion}
             variant={viewModel.variant}
           />
@@ -147,7 +147,7 @@ export function ConnectivityStatusIndicator({
           style={styles.statusTarget}
         >
           <ConnectivityStatusGlyph
-            color={theme[connectivityStatusColorRole(viewModel.variant)]}
+            color={statusColor}
             reduceMotion={reduceMotion}
             variant={viewModel.variant}
           />
@@ -180,7 +180,10 @@ function ConnectivityStatusGlyph({
 }) {
   const rotation = useSharedValue(0);
   const rotatingStyle = useAnimatedStyle<ViewStyle>(() => ({
-    transform: [{ rotate: `${rotation.value}deg` }]
+    transform: [
+      { translateY: 4 },
+      { rotate: `${rotation.value}deg` }
+    ]
   }));
 
   useEffect(() => {
@@ -195,61 +198,30 @@ function ConnectivityStatusGlyph({
     return () => cancelAnimation(rotation);
   }, [reduceMotion, rotation, variant]);
 
+  const symbolName: Record<ConnectivityStatusVariant, SFSymbol> = {
+    attention: "xmark.icloud",
+    offline: "icloud.slash",
+    synced: "checkmark.icloud",
+    syncing: "arrow.triangle.2.circlepath.icloud"
+  };
+
   return (
-    <Reanimated.View style={variant === "syncing" ? rotatingStyle : undefined}>
-      <Svg
+    <Reanimated.View
+      style={[
+        styles.statusGlyph,
+        variant === "syncing" ? rotatingStyle : styles.statusGlyphAligned
+      ]}
+    >
+      <SymbolView
         accessibilityElementsHidden
-        height={22}
         importantForAccessibility="no-hide-descendants"
-        viewBox="0 0 24 24"
-        width={22}
-      >
-        {variant === "syncing" ? (
-          <>
-            <Path
-              d="M20 7h-5V2M4 17h5v5M19 7a8 8 0 0 0-13.5-2M5 17a8 8 0 0 0 13.5 2"
-              fill="none"
-              stroke={color}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.9}
-            />
-          </>
-        ) : (
-          <>
-            <Path
-              d="M7 18h10a4 4 0 0 0 .7-7.94A6 6 0 0 0 6.3 8.7 4.5 4.5 0 0 0 7 18Z"
-              fill="none"
-              stroke={color}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.8}
-            />
-            {variant === "offline" ? (
-              <Path d="M5 5l14 14" stroke={color} strokeLinecap="round" strokeWidth={2} />
-            ) : null}
-            {variant === "synced" ? (
-              <Path
-                d="m9 13 2 2 4-4"
-                fill="none"
-                stroke={color}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-              />
-            ) : null}
-            {variant === "attention" ? (
-              <Path
-                d="m10 11 4 4m0-4-4 4"
-                fill="none"
-                stroke={color}
-                strokeLinecap="round"
-                strokeWidth={2}
-              />
-            ) : null}
-          </>
-        )}
-      </Svg>
+        name={symbolName[variant]}
+        resizeMode="center"
+        scale="medium"
+        size={26}
+        tintColor={color}
+        weight="regular"
+      />
     </Reanimated.View>
   );
 }
@@ -273,6 +245,13 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center"
+  },
+  statusGlyph: {
+    height: 26,
+    width: 26
+  },
+  statusGlyphAligned: {
+    transform: [{ translateY: 4 }]
   },
   statusPressed: {
     opacity: 0.62

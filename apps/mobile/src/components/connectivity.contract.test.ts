@@ -34,6 +34,9 @@ describe("connectivity status ownership", () => {
     );
     expect(status).toContain("width: 44");
     expect(status).toContain("height: 44");
+    expect(status).toContain("size={26}");
+    expect(status).toContain("translateY: 4");
+    expect(status).toContain('theme.mode === "dark" ? theme.textSecondary : theme.borderStrong');
     expect(status).toContain("accessibilityLabel={viewModel.accessibilityLabel}");
     expect(status).toContain('accessibilityRole="text"');
     expect(status).toContain('accessibilityRole="button"');
@@ -49,6 +52,8 @@ describe("connectivity status ownership", () => {
     expect(status).toContain("Easing.linear");
     expect(status).toContain("cancelAnimation(rotation)");
     expect(status).toContain("useReduceMotionPreference()");
+    expect(status).toContain('syncing: "arrow.triangle.2.circlepath.icloud"');
+    expect(status).not.toContain('d="M20 7h-5V2');
   });
 
   it("keeps retryable connectivity delivery silent and local failures actionable", () => {
