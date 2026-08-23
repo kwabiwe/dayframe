@@ -35,6 +35,7 @@ export type DurableWorkSnapshot = {
   timeEntryCommandCount: number;
   timeEntryNeedsAttentionCount: number;
   timeEntryQuarantinedCount: number;
+  timeEntryDeviceQuarantinedCount: number;
   reviewCount: number;
   locationCount: number;
   nativeLocationSignalCount: number;
@@ -52,6 +53,7 @@ const EMPTY_SNAPSHOT: DurableWorkSnapshot = {
   timeEntryCommandCount: 0,
   timeEntryNeedsAttentionCount: 0,
   timeEntryQuarantinedCount: 0,
+  timeEntryDeviceQuarantinedCount: 0,
   reviewCount: 0,
   locationCount: 0,
   nativeLocationSignalCount: 0,
@@ -185,6 +187,7 @@ async function refreshOnce() {
     timeEntryCommandCount: timeEntries.pendingCount,
     timeEntryNeedsAttentionCount: timeEntries.needsAttentionCount,
     timeEntryQuarantinedCount: timeEntries.quarantinedCount,
+    timeEntryDeviceQuarantinedCount: timeEntries.deviceQuarantinedCount,
     reviewCount,
     locationCount,
     nativeLocationSignalCount: locationOwned ? nativeLocationSignalCount : 0,
@@ -215,6 +218,7 @@ function snapshotsEqual(left: DurableWorkSnapshot, right: DurableWorkSnapshot) {
     left.timeEntryCommandCount === right.timeEntryCommandCount &&
     left.timeEntryNeedsAttentionCount === right.timeEntryNeedsAttentionCount &&
     left.timeEntryQuarantinedCount === right.timeEntryQuarantinedCount &&
+    left.timeEntryDeviceQuarantinedCount === right.timeEntryDeviceQuarantinedCount &&
     left.reviewCount === right.reviewCount &&
     left.locationCount === right.locationCount &&
     left.nativeLocationSignalCount === right.nativeLocationSignalCount &&
@@ -245,6 +249,7 @@ function recordPendingTransition(
     timeEntryCommandCount: next.timeEntryCommandCount,
     timeEntryNeedsAttentionCount: next.timeEntryNeedsAttentionCount,
     timeEntryQuarantinedCount: next.timeEntryQuarantinedCount,
+    timeEntryDeviceQuarantinedCount: next.timeEntryDeviceQuarantinedCount,
     reviewCount: next.reviewCount,
     locationCount: next.locationCount,
     nativeLocationSignalCount: next.nativeLocationSignalCount,

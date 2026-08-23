@@ -119,6 +119,7 @@ import {
   type ReviewSyncDiagnostics
 } from "@/lib/reviewSyncStore";
 import {
+  clearDeviceTimeEntryOutboxQuarantine,
   clearTimeEntryOutboxQuarantine,
   discardTimeEntrySyncIssue,
   getTimeEntryOutboxDiagnostics,
@@ -525,6 +526,10 @@ export default function SettingsScreen() {
       ? `${timeEntrySyncDiagnostics.quarantinedCount} unreadable local sync ${
           timeEntrySyncDiagnostics.quarantinedCount === 1 ? "record" : "records"
         } quarantined`
+    : timeEntrySyncDiagnostics?.deviceQuarantinedCount
+      ? `${timeEntrySyncDiagnostics.deviceQuarantinedCount} unreadable device-wide sync ${
+          timeEntrySyncDiagnostics.deviceQuarantinedCount === 1 ? "record" : "records"
+        } quarantined`
     : reviewSyncDiagnostics?.needsAttentionCount
     ? `${reviewSyncDiagnostics.needsAttentionCount} Review ${
         reviewSyncDiagnostics.needsAttentionCount === 1 ? "issue" : "issues"
@@ -828,6 +833,25 @@ export default function SettingsScreen() {
           style: "destructive",
           onPress: () => {
             void clearTimeEntryOutboxQuarantine().then(() =>
+              refreshTimeEntryDiagnostics()
+            );
+          }
+        }
+      ]
+    );
+  }
+
+  function confirmClearDeviceTimeEntryQuarantine() {
+    Alert.alert(
+      "Clear unreadable device-wide sync data?",
+      "The damaged data has no recoverable account owner and cannot be replayed. Clearing it removes only device-wide quarantine diagnostics.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear",
+          style: "destructive",
+          onPress: () => {
+            void clearDeviceTimeEntryOutboxQuarantine().then(() =>
               refreshTimeEntryDiagnostics()
             );
           }
@@ -1764,9 +1788,14 @@ export default function SettingsScreen() {
               <Text style={styles.label}>Time entry changes</Text>
               <Text style={styles.accountMeta}>
                 Pending {timeEntrySyncDiagnostics?.pendingCount ?? 0} · Needs attention{" "}
-                {timeEntrySyncDiagnostics?.needsAttentionCount ?? 0} · Quarantined{" "}
+                {timeEntrySyncDiagnostics?.needsAttentionCount ?? 0} · Account quarantine{" "}
                 {timeEntrySyncDiagnostics?.quarantinedCount ?? 0}
               </Text>
+              {(timeEntrySyncDiagnostics?.deviceQuarantinedCount ?? 0) > 0 ? (
+                <Text style={styles.accountMeta}>
+                  Device-wide quarantine {timeEntrySyncDiagnostics?.deviceQuarantinedCount ?? 0} · owner could not be recovered
+                </Text>
+              ) : null}
               {timeEntrySyncDiagnostics?.nextRetryAt ? (
                 <Text style={styles.accountMeta}>
                   Next retry {formatQueueTime(timeEntrySyncDiagnostics.nextRetryAt)}
@@ -1814,6 +1843,17 @@ export default function SettingsScreen() {
                     onPress={confirmClearTimeEntryQuarantine}
                   >
                     <Text style={styles.secondaryButtonText}>Clear quarantined data</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+              {(timeEntrySyncDiagnostics?.deviceQuarantinedCount ?? 0) > 0 ? (
+                <View style={styles.buttonRow}>
+                  <Pressable
+                    accessibilityRole="button"
+                    style={pressable(styles.secondaryButton, styles.buttonPressed)}
+                    onPress={confirmClearDeviceTimeEntryQuarantine}
+                  >
+                    <Text style={styles.secondaryButtonText}>Clear device-wide quarantine</Text>
                   </Pressable>
                 </View>
               ) : null}

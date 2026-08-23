@@ -313,11 +313,14 @@ describe("durable time-entry outbox", () => {
       })
     ]);
     await expect(outbox.getTimeEntryOutboxDiagnostics(OWNER_A)).resolves.toMatchObject({
-      quarantinedCount: 1
+      quarantinedCount: 0,
+      deviceQuarantinedCount: 1
     });
-    await outbox.clearTimeEntryOutboxQuarantine();
+    await expect(outbox.clearTimeEntryOutboxQuarantine(OWNER_A)).resolves.toBe(false);
+    await outbox.clearDeviceTimeEntryOutboxQuarantine();
     await expect(outbox.getTimeEntryOutboxDiagnostics(OWNER_A)).resolves.toMatchObject({
-      quarantinedCount: 0
+      quarantinedCount: 0,
+      deviceQuarantinedCount: 0
     });
   });
 
@@ -327,14 +330,20 @@ describe("durable time-entry outbox", () => {
     await expect(outbox.readPendingTimeEntryCommands(OWNER_A)).resolves.toEqual([]);
     expect(storage.has("dayframe.timeEntryOutbox.v1")).toBe(false);
     await expect(outbox.getTimeEntryOutboxDiagnostics(OWNER_A)).resolves.toMatchObject({
-      quarantinedCount: 1
+      quarantinedCount: 0,
+      deviceQuarantinedCount: 1
     });
   });
 
   it("quarantines invalid records without discarding valid owned commands", async () => {
     storage.set("dayframe.timeEntryOutbox.v1", JSON.stringify([
       commandFixture({ clientCommandId: "valid-command" }),
-      { clientCommandId: "invalid-command", operation: "update" }
+      {
+        clientCommandId: "invalid-command",
+        operation: "update",
+        userId: OWNER_A.userId,
+        workspaceId: OWNER_A.workspaceId
+      }
     ]));
 
     await expect(outbox.readPendingTimeEntryCommands(OWNER_A)).resolves.toEqual([
@@ -344,6 +353,42 @@ describe("durable time-entry outbox", () => {
       .toEqual([expect.objectContaining({ clientCommandId: "valid-command" })]);
     await expect(outbox.getTimeEntryOutboxDiagnostics(OWNER_A)).resolves.toMatchObject({
       pendingCount: 1,
+      quarantinedCount: 1,
+      deviceQuarantinedCount: 0
+    });
+  });
+
+  it("scopes recoverable quarantine evidence and clearing to its account", async () => {
+    storage.set("dayframe.timeEntryOutbox.v1", JSON.stringify([
+      {
+        clientCommandId: "invalid-a",
+        operation: "update",
+        userId: OWNER_A.userId,
+        workspaceId: OWNER_A.workspaceId
+      },
+      {
+        clientCommandId: "invalid-b",
+        operation: "update",
+        userId: OWNER_B.userId,
+        workspaceId: OWNER_B.workspaceId
+      }
+    ]));
+
+    await outbox.readPendingTimeEntryCommands(OWNER_A);
+    await expect(outbox.getTimeEntryOutboxDiagnostics(OWNER_A)).resolves.toMatchObject({
+      quarantinedCount: 1,
+      deviceQuarantinedCount: 0
+    });
+    await expect(outbox.getTimeEntryOutboxDiagnostics(OWNER_B)).resolves.toMatchObject({
+      quarantinedCount: 1,
+      deviceQuarantinedCount: 0
+    });
+
+    await expect(outbox.clearTimeEntryOutboxQuarantine(OWNER_A)).resolves.toBe(true);
+    await expect(outbox.getTimeEntryOutboxDiagnostics(OWNER_A)).resolves.toMatchObject({
+      quarantinedCount: 0
+    });
+    await expect(outbox.getTimeEntryOutboxDiagnostics(OWNER_B)).resolves.toMatchObject({
       quarantinedCount: 1
     });
   });
