@@ -3,7 +3,7 @@
 Date: 2026-08-21
 Baseline: `origin/main` at `2b732d20b4aec50f113529adeffdcfc81b979bb4` (merged PR #183)
 Implementation branch: `codex/pr184-global-connectivity-status`
-Status: architectural repair and local automated gates complete; exact-SHA hosted checks, independent review and physical evidence pending
+Status: architectural repair, local automated gates and hosted checks complete; exact-SHA independent review and physical evidence pending
 
 ## Problem And Boundary
 
@@ -104,7 +104,7 @@ Update this table only with commands actually run for the final exact SHA.
 | Expo dependency check / CocoaPods | Baseline Expo patch drift remains: `npx expo install --check` recommends six SDK-compatible patch updates; clean-base `npm ci`, NetInfo install and two repeat `npx pod-install` runs PASS with 115 dependencies / 114 pods. NetInfo entries reproduce. Diffing generated podspec JSON proves the three React Native prebuilt checksum differences come only from checkout-specific absolute Hermes CLI and local artifact paths; those three hashes are restored to the frozen-base values so the committed full-PR lock delta is NetInfo-only |
 | Documentation/brand/iOS-config/diff checks | PASS: 118 Markdown files, brand assets, iOS configuration and `git diff --check` |
 | Clean unsigned iOS Simulator build | PASS: fresh Derived Data at `/tmp/dayframe-pr184-final-owner-ios.NHmCse`, Debug, iOS Simulator 26.5 `Dayframe Sheet QA SE`, `CODE_SIGNING_ALLOWED=NO`; dependency warnings only, no launch or install |
-| Exact-SHA GitHub/Vercel Preview checks | NOT RUN until pushed |
+| Exact-SHA GitHub/Vercel Preview checks | PASS: documentation alignment, Vercel Preview and Preview comments on the pushed repair head; the final documentation-only evidence commit must repeat these checks |
 | Signed staging build / physical iPhone matrix | NOT RUN; requires explicit next-stage approval after independent re-review |
 
 ## Known Limitations And Rollout
