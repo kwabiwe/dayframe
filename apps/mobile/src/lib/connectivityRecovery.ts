@@ -43,6 +43,7 @@ export type LocationConnectivityRecoveryResult = {
     | "v1"
     | "session_unavailable"
     | "no_session"
+    | "session_changed"
     | "payload_too_large"
     | "request_failed"
     | "invalid_batch"

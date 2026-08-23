@@ -14,7 +14,8 @@ const nativeStorageSource = source("../../ios/Dayframe/DayframeSharedStorage.swi
 
 describe("background session invalidation contracts", () => {
   it("guards delayed location upload and replay rejections with their captured bearer", () => {
-    expect(locationStoreSource.match(/invalidateMobileSessionIfCurrent\(token\)/g)).toHaveLength(2);
+    expect(locationStoreSource.match(/invalidateMobileSessionIfCurrent\(session\.token\)/g)).toHaveLength(2);
+    expect(locationStoreSource.match(/executeOwnedLocationRequest\(/g)).toHaveLength(2);
     expect(locationStoreSource).not.toContain("invalidateMobileSession()");
   });
 
