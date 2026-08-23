@@ -105,6 +105,13 @@ describe("connectivity pill presentation", () => {
       onlineUntil: null,
       previousPendingCount: 1
     });
+    expect(updateConnectivityPresentation({
+      accountKey: "workspace:user",
+      now: NOW,
+      pendingCount: 1,
+      state: pending.state,
+      status: "online"
+    }).state).toBe(pending.state);
   });
 
   it("cannot emit removed pass-verdict wording", () => {

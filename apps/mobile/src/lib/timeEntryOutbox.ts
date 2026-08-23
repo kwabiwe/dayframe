@@ -172,7 +172,15 @@ export async function synchroniseTimeEntryCommands(input: {
     for (const [localId, canonicalId] of input.correlations) {
       existing.control.correlations.set(localId, canonicalId);
     }
-    return existing.promise;
+    if (!input.force) return existing.promise;
+    return existing.promise.then((result) => {
+      if (result.reason !== "retry_wait") return result;
+      return synchroniseTimeEntryCommands({
+        ...input,
+        correlations: new Map(existing.control.correlations),
+        force: true
+      });
+    });
   }
   const control: TimeEntryCommandDrainControl = {
     correlations: new Map(input.correlations),

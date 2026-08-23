@@ -135,7 +135,6 @@ export function reportHttpTransportFailure(input: {
       requestGeneration: input.requestGeneration,
       state: machineState
     });
-    if (!result.accepted) return;
     clearCandidateTimer("negative_http_evidence");
     applyMachineState(result.state);
   }

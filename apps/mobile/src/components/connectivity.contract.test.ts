@@ -31,6 +31,8 @@ describe("connectivity overlay ownership", () => {
     expect(overlay).not.toContain("accessibilityElementsHidden");
     expect(overlay).not.toContain("no-hide-descendants");
     expect(overlay).not.toContain("presentation.current =");
+    expect(overlay).toContain("const viewModel = updated.viewModel");
+    expect(overlay).toContain("setPresentation(updated.state)");
   });
 });
 

@@ -278,19 +278,23 @@ async function runRootRecoveryPass() {
         name: "bootstrap",
         run: async () => {
           const publication = beginRecoveredDashboardBootstrapPublication();
-          const serverBootstrap = await fetchBootstrap();
-          if (
-            serverBootstrap.user.id !== owner.userId ||
-            serverBootstrap.workspace.id !== owner.workspaceId
-          ) {
-            throw new AuthRequiredError();
+          try {
+            const serverBootstrap = await fetchBootstrap();
+            if (
+              serverBootstrap.user.id !== owner.userId ||
+              serverBootstrap.workspace.id !== owner.workspaceId
+            ) {
+              throw new AuthRequiredError();
+            }
+            await cacheDashboardBootstrap(serverBootstrap);
+            const projected = projectDurableLocalWork(
+              serverBootstrap,
+              await readDurableLocalWork(owner)
+            );
+            publication.publish(projected);
+          } finally {
+            publication.abandon();
           }
-          await cacheDashboardBootstrap(serverBootstrap);
-          const projected = projectDurableLocalWork(
-            serverBootstrap,
-            await readDurableLocalWork(owner)
-          );
-          publication.publish(projected);
         }
       }
     ]

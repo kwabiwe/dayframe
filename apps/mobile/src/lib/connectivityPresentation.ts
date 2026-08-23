@@ -54,11 +54,13 @@ export function updateConnectivityPresentation(input: {
   }
 
   if (pendingCount > 0) {
-    state = {
-      ...state,
-      onlineUntil: null,
-      previousPendingCount: pendingCount
-    };
+    if (state.previousPendingCount !== pendingCount || state.onlineUntil !== null) {
+      state = {
+        ...state,
+        onlineUntil: null,
+        previousPendingCount: pendingCount
+      };
+    }
   } else if (state.previousPendingCount > 0) {
     state = {
       ...state,

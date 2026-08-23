@@ -183,6 +183,38 @@ describe("durable time-entry outbox", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("forces the oldest backoff command when reconnect joins its drain", async () => {
+    storage.set("dayframe.timeEntryOutbox.v1", JSON.stringify([
+      commandFixture({
+        clientCommandId: "oldest-command-in-backoff",
+        failureKind: "retryable",
+        nextAttemptAt: "2026-08-22T12:05:00.000Z",
+        targetEntryId: "entry-in-backoff"
+      })
+    ]));
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const ordinaryDrain = outbox.synchroniseTimeEntryCommands({
+      owner: OWNER_A,
+      correlations: new Map()
+    });
+    const reconnectDrain = outbox.synchroniseTimeEntryCommands({
+      owner: OWNER_A,
+      correlations: new Map(),
+      force: true
+    });
+
+    await expect(reconnectDrain).resolves.toMatchObject({
+      deliveredCount: 1,
+      waitingCount: 0
+    });
+    await expect(ordinaryDrain).resolves.toMatchObject({
+      waitingCount: 0
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps commands isolated from a different active account", async () => {
     await outbox.enqueueTimeEntryUpdate({
       owner: OWNER_A,

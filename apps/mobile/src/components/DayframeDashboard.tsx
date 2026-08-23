@@ -413,6 +413,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     }
     const guard = recoveredBootstrapGuards.current.get(event.publicationId);
     recoveredBootstrapGuards.current.delete(event.publicationId);
+    if (event.type === "abandoned") return;
     if (!guard) {
       queueDashboardRefreshAfterConflict();
       return;
@@ -450,6 +451,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     ) {
       return;
     }
+    refreshQueued.current = false;
     latestData.current = next;
     setData(next);
     void readOwnedPendingTimerStops(next).then((stops) => {
@@ -472,7 +474,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   function queueDashboardRefreshAfterConflict() {
     refreshQueued.current = true;
-    if (timerMutationCount.current > 0 || refreshInFlight.current) return;
+    if (
+      timerMutationCount.current > 0 ||
+      refreshInFlight.current ||
+      connectivityCurrent.current.isOffline
+    ) {
+      return;
+    }
     refreshQueued.current = false;
     void loadRef.current({ silent: true });
   }
