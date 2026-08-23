@@ -29,7 +29,7 @@ The repair keeps NetInfo as transport evidence and durable domain owners as auth
 - Ordinary startup or settled online with no pending transition: hidden.
 - Permanent rejection: no generic permanent connectivity message; use the owning queue's targeted diagnostics/action path.
 
-The visual pill is one manually revisitable accessibility element while its child text is excluded from duplicate traversal. Its root owner also calls `AccessibilityInfo.announceForAccessibility` once per distinct visible transition and resets identity after the pill hides, so a later repeated Offline transition is announced. Large Dynamic Type stays one line within fixed geometry. Reduce Motion uses short opacity-only presence; normal motion fades and travels a short distance from/to the top. Presentation transitions advance only from committed React state, so a discarded render cannot consume the two-second Online state.
+The visual pill is one manually revisitable accessibility element while its child text is excluded from duplicate traversal. Its root owner also calls `AccessibilityInfo.announceForAccessibility` once per distinct visible transition and resets identity after the pill hides, so a later repeated Offline transition is announced. Large Dynamic Type stays one line within fixed geometry. Reduce Motion uses short opacity-only presence; normal motion fades and travels a short distance from/to the top. The next presentation is calculated without mutation during render, used immediately so `Syncing…` changes in place to `Online`, and committed afterward; a discarded render cannot consume the two-second state.
 
 ## Durable Local Projection
 
@@ -63,7 +63,7 @@ One pass checks active app, confirmed online state and account identity between 
 4. deliver explicit Stops again after correlation;
 5. drain Review mutations for the same account;
 6. resume same-account Location native drain, processing, upload and replay;
-7. fetch/cache one server bootstrap, project any work still durable, and publish it through the Dashboard's mutation-revision and pending-deletion guard. A Stop/Edit that overlaps the fetch queues a fresh projected load instead of accepting the recovered snapshot.
+7. fetch/cache one server bootstrap, project any work still durable, and publish it through the Dashboard's mutation-revision and pending-deletion guard. A Stop/Edit that overlaps the fetch queues a fresh projected load instead of accepting the recovered snapshot; a failed publication emits an explicit abandonment event so its captured guard is released.
 
 Retryable transport/application failure schedules jittered exponential backoff without requiring another network toggle. A newer reconnect epoch cancels the obsolete timer and runs promptly. Confirmed offline pauses timers and delivery; foreground refreshes native/durable counts. A newly created command wakes the coordinator even at reconnect epoch zero. HealthKit is not imported merely because transport changes.
 
@@ -78,7 +78,7 @@ Retryable transport/application failure schedules jittered exponential backoff w
 ## Dependency And Native Impact
 
 - PR #184 already adds `@react-native-community/netinfo` `12.0.1`; no further package or Pod dependency is added by this repair.
-- Clean-checkout reproduction from the frozen base confirms the NetInfo package/pod entries. React Native 0.85's generated podspec JSON embeds the checkout-specific absolute Hermes CLI and local prebuilt-artifact paths, so clean installs at different paths produce different checksums for `hermes-engine`, `React-Core-prebuilt` and `ReactNativeDependencies` despite identical versions and artifacts. The reviewed PR worktree's deployment-mode install reproduces its three hashes; a second install in the isolated base worktree is stable at that worktree's hashes. These changes are path-derived rather than NetInfo transitive changes.
+- Clean-checkout reproduction from the frozen base confirms the NetInfo package/pod entries. React Native 0.85's generated podspec JSON embeds the checkout-specific absolute Hermes CLI and local prebuilt-artifact paths, so clean installs at different paths produce different checksums for `hermes-engine`, `React-Core-prebuilt` and `ReactNativeDependencies` despite identical versions and artifacts. Those path-derived hashes are local noise rather than NetInfo transitive changes and are restored to the frozen-base values before commit; the accepted full-PR `Podfile.lock` delta is NetInfo-only.
 - The native Shortcut catalog/event payload now includes non-secret user/workspace IDs so pending App Intent/Live Activity hand-off events are counted and drained only by their owner. Legacy unscoped events are quarantined rather than guessed into the current account.
 - Pending native Location signals and scoped native Shortcut events contribute to the live durable-work count.
 - Swift input changed, so a clean unsigned iOS Simulator build is required. No server, API, schema, hosted configuration or deployment change is required.
@@ -95,13 +95,13 @@ Update this table only with commands actually run for the final exact SHA.
 
 | Check | Result |
 | --- | --- |
-| Focused reconnect-race, connectivity-evidence, presentation, outbox and structural suites | PASS: 7 files / 65 tests |
-| Complete mobile suite | PASS: 84 files / 820 tests |
+| Focused reconnect-race, connectivity-evidence, presentation, outbox and structural suites | PASS: 9 files / 86 tests |
+| Complete mobile suite | PASS: 85 files / 823 tests |
 | Mobile typecheck | PASS as part of the repository workspace typecheck |
-| Repository lint/typecheck/test/build | PASS: lint (two pre-existing web-test warnings), all workspace typechecks, mobile 820/820, web 836/836 with one skipped, shared 156/156, and the production Next.js build |
+| Repository lint/typecheck/test/build | PASS: lint (two pre-existing web-test warnings), all workspace typechecks, mobile 823/823, web 836/836 with one skipped, shared 156/156, and the production Next.js build |
 | Review SQLite validator | PASS |
 | Location V2 SQLite validator | PASS |
-| Expo dependency check / CocoaPods | Baseline Expo patch drift remains: `npx expo install --check` recommends six SDK-compatible patch updates; clean-base `npm ci`, NetInfo install and two repeat `npx pod-install` runs PASS with 115 dependencies / 114 pods. NetInfo entries reproduce. Diffing generated podspec JSON proves the three React Native prebuilt checksum differences come only from checkout-specific absolute Hermes CLI and local artifact paths; deployment mode reproduces the reviewed worktree hashes |
+| Expo dependency check / CocoaPods | Baseline Expo patch drift remains: `npx expo install --check` recommends six SDK-compatible patch updates; clean-base `npm ci`, NetInfo install and two repeat `npx pod-install` runs PASS with 115 dependencies / 114 pods. NetInfo entries reproduce. Diffing generated podspec JSON proves the three React Native prebuilt checksum differences come only from checkout-specific absolute Hermes CLI and local artifact paths; those three hashes are restored to the frozen-base values so the committed full-PR lock delta is NetInfo-only |
 | Documentation/brand/iOS-config/diff checks | PASS: 118 Markdown files, brand assets, iOS configuration and `git diff --check` |
 | Clean unsigned iOS Simulator build | PASS: fresh Derived Data, Debug, iOS 26.5 `Dayframe Sheet QA SE`, `CODE_SIGNING_ALLOWED=NO`; dependency warnings only, no launch or install |
 | Exact-SHA GitHub/Vercel Preview checks | NOT RUN until pushed |
