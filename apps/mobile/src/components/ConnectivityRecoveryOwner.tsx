@@ -10,9 +10,12 @@ import { useConnectivity } from "@/lib/connectivity";
 import { IS_DAYFRAME_STAGING } from "@/lib/config";
 import {
   createConnectivityRecoveryCoordinator,
+  connectivityRecoveryRequest,
+  foregroundRecoveryRequest,
   locationConnectivityRecoveryStepResult,
   reviewConnectivityRecoveryStepResult,
-  runConnectivityRecoveryPass
+  runConnectivityRecoveryPass,
+  shouldRetryConnectivityRecovery
 } from "@/lib/connectivityRecovery";
 import {
   getConnectivitySnapshot,
@@ -38,6 +41,10 @@ import {
   readActiveMobileAccount
 } from "@/lib/mobileAccount";
 import { isMobileTransportFailure } from "@/lib/mobile-network";
+import {
+  readOwnedAuthenticatedSessionSnapshot,
+  subscribeAuthenticatedSession
+} from "@/lib/secure-session";
 import {
   cacheDashboardBootstrap,
   getActiveReviewAccountIdentity,
@@ -91,16 +98,31 @@ export function ConnectivityRecoveryOwner() {
       });
     },
     runPass: runRootRecoveryPass,
-    shouldRetry: (result) =>
-      result !== "authentication_required" &&
-      result !== "interrupted" &&
-      getDurableWorkSnapshot().pendingCount > 0
+    shouldRetry: (result) => shouldRetryConnectivityRecovery(
+      result,
+      getDurableWorkSnapshot().pendingCount
+    )
   });
 
   useEffect(() => {
     void refreshDurableWorkSnapshot();
     return () => coordinator.current?.dispose();
   }, []);
+
+  useEffect(() => subscribeAuthenticatedSession(() => {
+    const currentCoordinator = coordinator.current;
+    if (!currentCoordinator) return;
+    void refreshDurableWorkSnapshot().then((current) => {
+      const request = connectivityRecoveryRequest({
+        accountKey: current.accountKey,
+        appActive: appActiveRef.current,
+        isOnline: connectivityRef.current.isOnline,
+        pendingCount: current.pendingCount,
+        reconnectEpoch: connectivityRef.current.reconnectEpoch
+      });
+      if (request) void currentCoordinator.request(request.epoch, request.options);
+    });
+  }), []);
 
   useEffect(() => {
     const currentCoordinator = coordinator.current;
@@ -111,14 +133,15 @@ export function ConnectivityRecoveryOwner() {
       reportConnectivityRecoveryCancelled(connectivity.reconnectEpoch);
       return;
     }
-    if (
-      connectivity.isOnline &&
-      appActiveRef.current &&
-      durableWork.pendingCount > 0
-    ) {
-      void currentCoordinator.request(connectivity.reconnectEpoch, {
-        queuedWorkArrived: true
-      });
+    const request = connectivityRecoveryRequest({
+      accountKey: durableWork.accountKey,
+      appActive: appActiveRef.current,
+      isOnline: connectivity.isOnline,
+      pendingCount: durableWork.pendingCount,
+      reconnectEpoch: connectivity.reconnectEpoch
+    });
+    if (request) {
+      void currentCoordinator.request(request.epoch, request.options);
     }
   }, [connectivity.isOffline, connectivity.isOnline, connectivity.reconnectEpoch]);
 
@@ -134,13 +157,15 @@ export function ConnectivityRecoveryOwner() {
     previousPendingCount.current = durableWork.pendingCount;
     if (
       durableWork.accountKey &&
-      durableWork.pendingCount > 0 &&
       (accountChanged || workArrived) &&
       connectivity.isOnline &&
       appActiveRef.current
     ) {
       void currentCoordinator.request(connectivity.reconnectEpoch, {
-        queuedWorkArrived: true
+        ...(workArrived ? { queuedWorkArrived: true } : {}),
+        ...(accountChanged && connectivity.reconnectEpoch > 0
+          ? { forcePass: true }
+          : {})
       });
     }
   }, [connectivity.isOnline, connectivity.reconnectEpoch, durableWork]);
@@ -155,13 +180,13 @@ export function ConnectivityRecoveryOwner() {
         return;
       }
       void refreshDurableWorkSnapshot().then((current) => {
-        if (
-          current.pendingCount > 0 &&
-          connectivityRef.current.isOnline
-        ) {
-          void currentCoordinator.request(connectivityRef.current.reconnectEpoch, {
-            queuedWorkArrived: true
-          });
+        const request = foregroundRecoveryRequest({
+          accountKey: current.accountKey,
+          isOnline: connectivityRef.current.isOnline,
+          reconnectEpoch: connectivityRef.current.reconnectEpoch
+        });
+        if (request) {
+          void currentCoordinator.request(request.epoch, request.options);
         }
       });
     });
@@ -174,6 +199,10 @@ export function ConnectivityRecoveryOwner() {
 async function runRootRecoveryPass() {
   const owner = await readActiveMobileAccount();
   if (!owner) return "authentication_required" as const;
+  const sessionRead = await readOwnedAuthenticatedSessionSnapshot(owner);
+  if (sessionRead.status !== "authenticated") {
+    return "authentication_required" as const;
+  }
   const ownerKey = mobileAccountKey(owner);
   const canContinue = () => {
     const snapshot = getDurableWorkSnapshot();

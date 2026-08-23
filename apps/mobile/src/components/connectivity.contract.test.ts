@@ -33,6 +33,9 @@ describe("connectivity overlay ownership", () => {
     expect(overlay).not.toContain("presentation.current =");
     expect(overlay).toContain("const viewModel = updated.viewModel");
     expect(overlay).toContain("setPresentation(updated.state)");
+    expect(overlay).toContain("minHeight: 32");
+    expect(overlay).not.toContain("maxFontSizeMultiplier");
+    expect(overlay).not.toContain("adjustsFontSizeToFit");
   });
 });
 

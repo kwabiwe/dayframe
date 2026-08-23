@@ -33,6 +33,8 @@ export type DurableWorkSnapshot = {
   nativeShortcutCount: number;
   timerStopCount: number;
   timeEntryCommandCount: number;
+  timeEntryNeedsAttentionCount: number;
+  timeEntryQuarantinedCount: number;
   reviewCount: number;
   locationCount: number;
   nativeLocationSignalCount: number;
@@ -48,6 +50,8 @@ const EMPTY_SNAPSHOT: DurableWorkSnapshot = {
   nativeShortcutCount: 0,
   timerStopCount: 0,
   timeEntryCommandCount: 0,
+  timeEntryNeedsAttentionCount: 0,
+  timeEntryQuarantinedCount: 0,
   reviewCount: 0,
   locationCount: 0,
   nativeLocationSignalCount: 0,
@@ -179,6 +183,8 @@ async function refreshOnce() {
     nativeShortcutCount,
     timerStopCount,
     timeEntryCommandCount: timeEntries.pendingCount,
+    timeEntryNeedsAttentionCount: timeEntries.needsAttentionCount,
+    timeEntryQuarantinedCount: timeEntries.quarantinedCount,
     reviewCount,
     locationCount,
     nativeLocationSignalCount: locationOwned ? nativeLocationSignalCount : 0,
@@ -207,6 +213,8 @@ function snapshotsEqual(left: DurableWorkSnapshot, right: DurableWorkSnapshot) {
     left.nativeShortcutCount === right.nativeShortcutCount &&
     left.timerStopCount === right.timerStopCount &&
     left.timeEntryCommandCount === right.timeEntryCommandCount &&
+    left.timeEntryNeedsAttentionCount === right.timeEntryNeedsAttentionCount &&
+    left.timeEntryQuarantinedCount === right.timeEntryQuarantinedCount &&
     left.reviewCount === right.reviewCount &&
     left.locationCount === right.locationCount &&
     left.nativeLocationSignalCount === right.nativeLocationSignalCount &&
@@ -235,6 +243,8 @@ function recordPendingTransition(
     nativeShortcutCount: next.nativeShortcutCount,
     timerStopCount: next.timerStopCount,
     timeEntryCommandCount: next.timeEntryCommandCount,
+    timeEntryNeedsAttentionCount: next.timeEntryNeedsAttentionCount,
+    timeEntryQuarantinedCount: next.timeEntryQuarantinedCount,
     reviewCount: next.reviewCount,
     locationCount: next.locationCount,
     nativeLocationSignalCount: next.nativeLocationSignalCount,

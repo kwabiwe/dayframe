@@ -84,6 +84,53 @@ describe("durable dashboard projection", () => {
     expect(projected.entries.some((item) => item.id === deleted.id)).toBe(false);
   });
 
+  it("restores server truth instead of projecting a permanently rejected edit", () => {
+    const persisted = entry("persisted-edit");
+    const projected = projectDurableLocalWork(bootstrap({
+      activeEntry: persisted,
+      entries: [persisted]
+    }), work({
+      timeEntryCommands: [{
+        ...OWNER,
+        clientCommandId: "rejected-edit",
+        operation: "update",
+        targetEntryId: persisted.id,
+        patch: { description: "Rejected ghost edit" },
+        createdAt: "2026-08-22T10:05:00.000Z",
+        updatedAt: "2026-08-22T10:06:00.000Z",
+        attemptCount: 1,
+        failureKind: "permanent",
+        lastStatusCode: 404,
+        lastError: "Entry not found"
+      }]
+    }));
+
+    expect(projected.activeEntry?.description).toBe("Initial description");
+    expect(projected.entries[0]?.description).toBe("Initial description");
+  });
+
+  it("restores a server entry instead of projecting a permanently rejected delete", () => {
+    const persisted = entry("persisted-delete");
+    const projected = projectDurableLocalWork(bootstrap({
+      entries: [persisted]
+    }), work({
+      timeEntryCommands: [{
+        ...OWNER,
+        clientCommandId: "rejected-delete",
+        operation: "delete",
+        targetEntryId: persisted.id,
+        createdAt: "2026-08-22T10:05:00.000Z",
+        updatedAt: "2026-08-22T10:06:00.000Z",
+        attemptCount: 1,
+        failureKind: "permanent",
+        lastStatusCode: 422,
+        lastError: "Entry cannot be deleted"
+      }]
+    }));
+
+    expect(projected.entries).toEqual([persisted]);
+  });
+
   it("is deterministic and idempotent for cached relaunch restoration", () => {
     const durable = work({
       activityEvents: [queuedStart()],

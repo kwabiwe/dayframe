@@ -16,8 +16,8 @@ import {
 import { DAYFRAME_API_BASE } from "../config";
 import {
   SecureSessionUnavailableError,
-  getSessionToken,
-  invalidateMobileSessionIfCurrent
+  invalidateMobileSessionIfCurrent,
+  readOwnedAuthenticatedSessionSnapshot
 } from "../secure-session";
 import { createSerialMutationQueue } from "./mutationQueue";
 import { fetchLocationSync } from "./network";
@@ -500,9 +500,11 @@ async function drainLocationSynchronisationRequests() {
 }
 
 async function synchroniseLocationEvidenceUnsafe(options: { forceReplay: boolean }) {
-  let token: string | null;
+  const owner = await getActiveLocationAccountIdentity();
+  if (!owner) return { synced: false, reason: "no_session" as const };
+  let sessionRead: Awaited<ReturnType<typeof readOwnedAuthenticatedSessionSnapshot>>;
   try {
-    token = await getSessionToken();
+    sessionRead = await readOwnedAuthenticatedSessionSnapshot(owner);
   } catch (error) {
     if (!(error instanceof SecureSessionUnavailableError)) throw error;
     await recordLocationStoreError(error).catch(() => undefined);
@@ -515,7 +517,10 @@ async function synchroniseLocationEvidenceUnsafe(options: { forceReplay: boolean
       replayed: false
     };
   }
-  if (!token) return { synced: false, reason: "no_session" as const };
+  if (sessionRead.status !== "authenticated") {
+    return { synced: false, reason: "no_session" as const };
+  }
+  const token = sessionRead.snapshot.token;
   const db = await database();
   let acknowledgedCount = 0;
   let uploadedBatchCount = 0;

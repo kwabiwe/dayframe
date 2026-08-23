@@ -23,10 +23,12 @@ import {
   mobileFetchWithTimeout
 } from "./mobile-network";
 import {
+  bindAuthenticatedSessionOwner,
   clearSessionToken,
   getSessionToken,
   isAuthenticatedSessionSnapshotCurrent,
   readAuthenticatedSessionSnapshot,
+  readOwnedAuthenticatedSessionSnapshot,
   setSessionToken
 } from "./secure-session";
 import {
@@ -482,10 +484,22 @@ export async function fetchBootstrap(options: { date?: string } = {}): Promise<M
   }
   const bootstrap = await readJsonResponse<MobileBootstrap>(response);
   if (bootstrap.user?.id && bootstrap.workspace?.id) {
-    await activateMobileAccount({
+    const owner = {
       userId: bootstrap.user.id,
       workspaceId: bootstrap.workspace.id
-    });
+    };
+    if (sessionRead.status === "authenticated") {
+      if (
+        sessionRead.snapshot.owner &&
+        !mobileAccountOwnersEqual(sessionRead.snapshot.owner, owner)
+      ) {
+        throw new StaleMobileSessionResponseError();
+      }
+      if (!await bindAuthenticatedSessionOwner(sessionRead.snapshot, owner)) {
+        throw new StaleMobileSessionResponseError();
+      }
+    }
+    await activateMobileAccount(owner);
   }
   const reviewStore = await reviewSyncStore();
   if (!reviewStore) return bootstrap;
@@ -864,13 +878,19 @@ async function syncQueueUnlocked(
 
     const attemptedAt = new Date().toISOString();
     try {
+      const sessionRead = await readOwnedAuthenticatedSessionSnapshot(owner);
+      if (sessionRead.status !== "authenticated") {
+        remaining.push(item, ...queue.slice(index + 1));
+        stopped = true;
+        break;
+      }
       const response = await mobileFetchWithTimeout(
         `${DAYFRAME_API_BASE}/api/events`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...(await authHeaders())
+            Authorization: `Bearer ${sessionRead.snapshot.token}`
           },
           body: JSON.stringify(queuedEventRequestBody(item))
         },
@@ -879,13 +899,16 @@ async function syncQueueUnlocked(
           timeoutMessage: "Queued activity sync timed out. It will retry automatically."
         }
       );
-      if (!mobileAccountOwnersEqual(await readActiveMobileAccount(), owner)) {
+      if (response.status === 401 || response.status === 403) {
+        throw new AuthRequiredError();
+      }
+      if (
+        !isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot) ||
+        !mobileAccountOwnersEqual(await readActiveMobileAccount(), owner)
+      ) {
         remaining.push(item, ...queue.slice(index + 1));
         stopped = true;
         break;
-      }
-      if (response.status === 401 || response.status === 403) {
-        throw new AuthRequiredError();
       }
       if (!response.ok) {
         const failureKind = permanentStatusCodes.has(response.status) ? "permanent" : "server";
@@ -976,8 +999,8 @@ export async function deliverPendingTimerStop(
     return { status: "session_changed", pendingStop };
   }
 
-  const sessionRead = await readAuthenticatedSessionSnapshot();
-  if (sessionRead.status === "changed") {
+  const sessionRead = await readOwnedAuthenticatedSessionSnapshot(owner);
+  if (sessionRead.status === "changed" || sessionRead.status === "owner_mismatch") {
     return { status: "session_changed", pendingStop };
   }
   if (sessionRead.status === "signed_out") {
@@ -1013,14 +1036,14 @@ export async function deliverPendingTimerStop(
         timeoutMessage: "Timer Stop is still pending. Dayframe will retry automatically."
       }
     );
+    if (response.status === 401 || response.status === 403) {
+      throw new AuthRequiredError();
+    }
     if (
       !isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot) ||
       !mobileAccountOwnersEqual(await readActiveMobileAccount(), owner)
     ) {
       return { status: "session_changed", pendingStop };
-    }
-    if (response.status === 401 || response.status === 403) {
-      throw new AuthRequiredError();
     }
     if (response.ok) {
       await removePendingTimerStop(pendingStop.clientEventId);
@@ -1931,11 +1954,12 @@ async function authenticate(path: string, body: Record<string, unknown>): Promis
   const payload = await readJsonResponse<MobileAuthResult & { error?: string }>(response);
   if (!response.ok) throw new Error(payload.error ?? `Authentication failed: ${response.status}`);
   if ("requiresEmailConfirmation" in payload) return payload;
-  await setSessionToken(payload.token);
-  await activateMobileAccount({
+  const owner = {
     userId: payload.user.id,
     workspaceId: payload.workspace.id
-  });
+  };
+  await setSessionToken(payload.token, owner);
+  await activateMobileAccount(owner);
   const reviewStore = await reviewSyncStore();
   if (reviewStore) {
     await reviewStore.activateReviewAccount({
@@ -1972,8 +1996,14 @@ async function postTimerAction(body: Record<string, unknown>) {
 }
 
 async function authHeaders(): Promise<Record<string, string>> {
-  const token = await getSessionToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  const owner = await readActiveMobileAccount();
+  if (!owner) return {};
+  const sessionRead = await readOwnedAuthenticatedSessionSnapshot(owner);
+  if (sessionRead.status === "signed_out") return {};
+  if (sessionRead.status !== "authenticated") {
+    throw new StaleMobileSessionResponseError();
+  }
+  return { Authorization: `Bearer ${sessionRead.snapshot.token}` };
 }
 
 async function readJsonResponse<T>(response: Response): Promise<T> {

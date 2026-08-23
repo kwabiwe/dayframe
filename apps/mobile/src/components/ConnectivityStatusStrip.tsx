@@ -102,9 +102,6 @@ export function ConnectivityStatusOverlay() {
     >
       <Text
         accessible={false}
-        adjustsFontSizeToFit
-        maxFontSizeMultiplier={1.6}
-        minimumFontScale={0.8}
         numberOfLines={1}
         style={[styles.text, { color: colors.color }]}
       >
@@ -120,12 +117,13 @@ const styles = StyleSheet.create({
     left: 16,
     right: 16,
     zIndex: 30,
-    height: 32,
+    minHeight: 32,
     borderRadius: 999,
     paddingHorizontal: 12,
+    paddingVertical: 6,
     alignItems: "center",
     justifyContent: "center",
-    overflow: "hidden"
+    overflow: "visible"
   },
   text: {
     width: "100%",

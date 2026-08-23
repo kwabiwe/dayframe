@@ -17,14 +17,15 @@ vi.mock("@react-native-async-storage/async-storage", () => ({
 vi.mock("./secure-session", () => ({
   invalidateMobileSessionIfCurrent: vi.fn(async () => false),
   isAuthenticatedSessionSnapshotCurrent: vi.fn(() => true),
-  readAuthenticatedSessionSnapshot: vi.fn(async () => ({
+  readOwnedAuthenticatedSessionSnapshot: vi.fn(async (owner) => ({
     status: "authenticated",
-    snapshot: { generation: 1, token: "token-a" }
+    snapshot: { generation: 1, owner, token: "token-a" }
   }))
 }));
 
 const account = await import("./mobileAccount");
 const outbox = await import("./timeEntryOutbox");
+const secureSession = await import("./secure-session");
 
 const OWNER_A = { userId: "user-a", workspaceId: "workspace-a" };
 const OWNER_B = { userId: "user-b", workspaceId: "workspace-b" };
@@ -85,6 +86,28 @@ describe("durable time-entry outbox", () => {
       expect(retained[0]?.nextAttemptAt).toBeTruthy();
     }
   );
+
+  it("does not dispatch when the durable owner and bearer owner differ", async () => {
+    await outbox.enqueueTimeEntryUpdate({
+      owner: OWNER_A,
+      target: { targetEntryId: "entry-a" },
+      patch: { description: "Account A" }
+    });
+    vi.mocked(secureSession.readOwnedAuthenticatedSessionSnapshot)
+      .mockResolvedValueOnce({ status: "owner_mismatch" });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(outbox.synchroniseTimeEntryCommands({
+      owner: OWNER_A,
+      correlations: new Map(),
+      force: true
+    })).resolves.toMatchObject({
+      reason: "session_changed",
+      waitingCount: 1
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 
   it("persists new work without waiting for an existing delivery and shares the drain", async () => {
     await outbox.enqueueTimeEntryUpdate({
@@ -215,6 +238,116 @@ describe("durable time-entry outbox", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps a permanent rejection as actionable diagnostics without pending projection", async () => {
+    const command = await outbox.enqueueTimeEntryUpdate({
+      owner: OWNER_A,
+      target: { targetEntryId: "deleted-on-server" },
+      patch: { description: "Offline ghost edit" }
+    });
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "Entry not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" }
+      }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 })));
+
+    await expect(outbox.synchroniseTimeEntryCommands({
+      owner: OWNER_A,
+      correlations: new Map(),
+      force: true
+    })).resolves.toMatchObject({
+      needsAttentionCount: 1,
+      waitingCount: 0
+    });
+    await expect(outbox.getTimeEntryOutboxDiagnostics(OWNER_A)).resolves.toMatchObject({
+      needsAttentionCount: 1,
+      pendingCount: 0
+    });
+    await expect(outbox.listTimeEntrySyncIssues(OWNER_A)).resolves.toEqual([
+      expect.objectContaining({
+        clientCommandId: command.clientCommandId,
+        failureKind: "permanent",
+        lastStatusCode: 404
+      })
+    ]);
+
+    await expect(outbox.retryTimeEntrySyncIssue(command.clientCommandId, OWNER_A))
+      .resolves.toBe(true);
+    await expect(outbox.synchroniseTimeEntryCommands({
+      owner: OWNER_A,
+      correlations: new Map(),
+      force: true
+    })).resolves.toMatchObject({ deliveredCount: 1, needsAttentionCount: 0 });
+  });
+
+  it("discards only an owned permanent issue", async () => {
+    storage.set("dayframe.timeEntryOutbox.v1", JSON.stringify([
+      commandFixture({ clientCommandId: "issue-a", failureKind: "permanent" }),
+      commandFixture({
+        clientCommandId: "issue-b",
+        failureKind: "permanent",
+        userId: OWNER_B.userId,
+        workspaceId: OWNER_B.workspaceId
+      })
+    ]));
+
+    await expect(outbox.discardTimeEntrySyncIssue("issue-b", OWNER_A)).resolves.toBe(false);
+    await expect(outbox.discardTimeEntrySyncIssue("issue-a", OWNER_A)).resolves.toBe(true);
+    await expect(outbox.readPendingTimeEntryCommands(OWNER_B)).resolves.toEqual([
+      expect.objectContaining({ clientCommandId: "issue-b" })
+    ]);
+  });
+
+  it("quarantines malformed storage instead of silently treating it as empty", async () => {
+    storage.set("dayframe.timeEntryOutbox.v1", "{not-json");
+
+    await expect(outbox.readPendingTimeEntryCommands(OWNER_A)).resolves.toEqual([]);
+    expect(storage.has("dayframe.timeEntryOutbox.v1")).toBe(false);
+    const quarantined = JSON.parse(
+      storage.get("dayframe.timeEntryOutbox.quarantine.v1") ?? "[]"
+    ) as Array<{ raw: string; reason: string }>;
+    expect(quarantined).toEqual([
+      expect.objectContaining({
+        raw: "{not-json",
+        reason: expect.stringContaining("could not be parsed")
+      })
+    ]);
+    await expect(outbox.getTimeEntryOutboxDiagnostics(OWNER_A)).resolves.toMatchObject({
+      quarantinedCount: 1
+    });
+    await outbox.clearTimeEntryOutboxQuarantine();
+    await expect(outbox.getTimeEntryOutboxDiagnostics(OWNER_A)).resolves.toMatchObject({
+      quarantinedCount: 0
+    });
+  });
+
+  it("quarantines a non-array outbox container", async () => {
+    storage.set("dayframe.timeEntryOutbox.v1", JSON.stringify({ command: "not-an-array" }));
+
+    await expect(outbox.readPendingTimeEntryCommands(OWNER_A)).resolves.toEqual([]);
+    expect(storage.has("dayframe.timeEntryOutbox.v1")).toBe(false);
+    await expect(outbox.getTimeEntryOutboxDiagnostics(OWNER_A)).resolves.toMatchObject({
+      quarantinedCount: 1
+    });
+  });
+
+  it("quarantines invalid records without discarding valid owned commands", async () => {
+    storage.set("dayframe.timeEntryOutbox.v1", JSON.stringify([
+      commandFixture({ clientCommandId: "valid-command" }),
+      { clientCommandId: "invalid-command", operation: "update" }
+    ]));
+
+    await expect(outbox.readPendingTimeEntryCommands(OWNER_A)).resolves.toEqual([
+      expect.objectContaining({ clientCommandId: "valid-command" })
+    ]);
+    expect(JSON.parse(storage.get("dayframe.timeEntryOutbox.v1") ?? "[]"))
+      .toEqual([expect.objectContaining({ clientCommandId: "valid-command" })]);
+    await expect(outbox.getTimeEntryOutboxDiagnostics(OWNER_A)).resolves.toMatchObject({
+      pendingCount: 1,
+      quarantinedCount: 1
+    });
+  });
+
   it("keeps commands isolated from a different active account", async () => {
     await outbox.enqueueTimeEntryUpdate({
       owner: OWNER_A,
@@ -278,9 +411,11 @@ describe("durable time-entry outbox", () => {
 
 function commandFixture(input: {
   clientCommandId: string;
-  failureKind?: "retryable";
+  failureKind?: "retryable" | "permanent";
   nextAttemptAt?: string;
-  targetEntryId: string;
+  targetEntryId?: string;
+  userId?: string;
+  workspaceId?: string;
 }) {
   return {
     attemptCount: input.failureKind ? 1 : 0,
@@ -288,10 +423,10 @@ function commandFixture(input: {
     createdAt: "2026-08-22T11:59:00.000Z",
     operation: "update",
     patch: { description: input.clientCommandId },
-    targetEntryId: input.targetEntryId,
+    targetEntryId: input.targetEntryId ?? `entry:${input.clientCommandId}`,
     updatedAt: "2026-08-22T11:59:00.000Z",
-    userId: OWNER_A.userId,
-    workspaceId: OWNER_A.workspaceId,
+    userId: input.userId ?? OWNER_A.userId,
+    workspaceId: input.workspaceId ?? OWNER_A.workspaceId,
     ...(input.failureKind ? { failureKind: input.failureKind } : {}),
     ...(input.nextAttemptAt ? { nextAttemptAt: input.nextAttemptAt } : {})
   };

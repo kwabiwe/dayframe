@@ -92,7 +92,10 @@ function projectionOperations(work: DurableLocalWork): ProjectionOperation[] {
       event
     }));
   const commands: ProjectionOperation[] = work.timeEntryCommands
-    .filter((command) => mobileAccountOwnersEqual(command, work.owner))
+    .filter((command) =>
+      mobileAccountOwnersEqual(command, work.owner) &&
+      command.failureKind !== "permanent"
+    )
     .map((command) => command.operation === "delete"
       ? {
           kind: "delete" as const,

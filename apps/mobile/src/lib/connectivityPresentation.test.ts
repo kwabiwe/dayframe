@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DAYFRAME_THEME } from "@dayframe/shared";
 import {
   connectivityPillViewModel,
   connectivityPillColorRoles,
@@ -20,6 +21,18 @@ describe("connectivity pill presentation", () => {
       variant: "offline"
     });
     expect(connectivityPillColorRoles("offline").background).toBe("warning");
+  });
+
+  it("uses contrast-safe semantic foregrounds in Light and Dark appearance", () => {
+    for (const mode of ["light", "dark"] as const) {
+      for (const variant of ["offline", "online"] as const) {
+        const roles = connectivityPillColorRoles(variant);
+        expect(contrastRatio(
+          DAYFRAME_THEME[mode][roles.background],
+          DAYFRAME_THEME[mode][roles.foreground]
+        )).toBeGreaterThanOrEqual(4.5);
+      }
+    }
   });
 
   it("renders persistent Syncing while online durable work exists, including epoch-zero startup", () => {
@@ -144,4 +157,16 @@ function view(status: "online" | "offline", pendingCount: number) {
     pendingCount,
     status
   });
+}
+
+function contrastRatio(left: string, right: string) {
+  const luminance = (hex: string) => {
+    const channels = [1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16) / 255);
+    const linear = channels.map((channel) => channel <= 0.03928
+      ? channel / 12.92
+      : ((channel + 0.055) / 1.055) ** 2.4);
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+  };
+  const [lighter, darker] = [luminance(left), luminance(right)].sort((a, b) => b - a);
+  return (lighter + 0.05) / (darker + 0.05);
 }

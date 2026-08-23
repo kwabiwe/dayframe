@@ -49,6 +49,49 @@ export type LocationConnectivityRecoveryResult = {
     | "replay_failed";
 };
 
+export type ConnectivityRecoveryRequest = {
+  epoch: number;
+  options?: { forcePass?: boolean; queuedWorkArrived?: boolean };
+};
+
+export function connectivityRecoveryRequest(input: {
+  accountKey: string | null;
+  appActive: boolean;
+  isOnline: boolean;
+  pendingCount: number;
+  reconnectEpoch: number;
+}): ConnectivityRecoveryRequest | null {
+  if (!input.accountKey || !input.appActive || !input.isOnline) return null;
+  if (input.reconnectEpoch > 0) return { epoch: input.reconnectEpoch };
+  if (input.pendingCount > 0) {
+    return { epoch: 0, options: { queuedWorkArrived: true } };
+  }
+  return null;
+}
+
+export function foregroundRecoveryRequest(input: {
+  accountKey: string | null;
+  isOnline: boolean;
+  reconnectEpoch: number;
+}): ConnectivityRecoveryRequest | null {
+  if (!input.accountKey || !input.isOnline) return null;
+  return {
+    epoch: input.reconnectEpoch,
+    options: { forcePass: true }
+  };
+}
+
+export function shouldRetryConnectivityRecovery(
+  result: ConnectivityRecoveryPassResult,
+  pendingCount: number
+) {
+  return result === "transport_failure" || (
+    result !== "authentication_required" &&
+    result !== "interrupted" &&
+    pendingCount > 0
+  );
+}
+
 export function reviewConnectivityRecoveryStepResult(
   result: ReviewConnectivityRecoveryResult
 ): ConnectivityRecoveryStepResult {
@@ -254,26 +297,27 @@ export function createConnectivityRecoveryCoordinator(input: {
 
   const request = (
     epoch: number,
-    options: { queuedWorkArrived?: boolean } = {}
+    options: { forcePass?: boolean; queuedWorkArrived?: boolean } = {}
   ) => {
     const queuedWorkArrived = options.queuedWorkArrived === true;
+    const passRequested = queuedWorkArrived || options.forcePass === true;
     if (epoch > lastHandledReconnectEpoch) {
       clearScheduledRetry();
       retryAttempt = 0;
     }
     if (
       (
-        !queuedWorkArrived &&
+        !passRequested &&
         epoch <= lastHandledReconnectEpoch &&
         interruptedReconnectEpoch === 0
       ) ||
       epoch < 0 ||
-      (epoch === 0 && !queuedWorkArrived) ||
+      (epoch === 0 && !passRequested) ||
       !input.canStart()
     ) {
       return reconnectRecoveryInFlight ?? Promise.resolve();
     }
-    if (queuedWorkArrived) queuedWorkRevision += 1;
+    if (passRequested) queuedWorkRevision += 1;
     queuedReconnectEpoch = Math.max(queuedReconnectEpoch, epoch);
     reconnectRecoveryInFlight ??= drain().finally(() => {
       reconnectRecoveryInFlight = null;

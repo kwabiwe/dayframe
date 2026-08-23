@@ -88,12 +88,15 @@ import {
 } from "@/lib/location/runtime";
 import { recordLocationStoreError } from "@/lib/location/store";
 import { mergePersistedMobileTag } from "@/lib/mobileTags";
-import { activateMobileAccount, deactivateMobileAccount } from "@/lib/mobileAccount";
+import {
+  activateMobileAccount,
+  deactivateMobileAccount
+} from "@/lib/mobileAccount";
 import {
   projectDurableLocalWork
 } from "@/lib/durableLocalProjection";
 import { readDurableLocalWork } from "@/lib/durableLocalWork";
-import { readAuthenticatedSessionSnapshot } from "@/lib/secure-session";
+import { readOwnedAuthenticatedSessionSnapshot } from "@/lib/secure-session";
 import {
   shouldDismissExternallyStoppedActiveEditor,
   shouldResetCalendarToTodayOnForeground
@@ -991,19 +994,21 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     const openDashboard = async () => {
       const cached = await loadCachedDashboardBootstrap().catch(() => null);
       if (cached && !latestData.current) {
-        const sessionRead = await readAuthenticatedSessionSnapshot().catch(() => null);
         const owner = timerStopOwner(cached.bootstrap);
+        const sessionRead = await readOwnedAuthenticatedSessionSnapshot(owner).catch(() => null);
+        if (sessionRead?.status !== "authenticated") {
+          await loadRef.current();
+          return;
+        }
         let filtered = cached.bootstrap;
         let durableWork = null;
-        if (sessionRead?.status === "authenticated") {
-          await activateMobileAccount(owner);
-          durableWork = await readDurableLocalWork(owner);
-          for (const [localId, timeEntryId] of durableWork.correlations) {
-            optimisticTimerIds.current.set(localId, timeEntryId);
-          }
-          timerIdCorrelationsLoaded.current = true;
-          filtered = projectDurableLocalWork(cached.bootstrap, durableWork);
+        await activateMobileAccount(owner);
+        durableWork = await readDurableLocalWork(owner);
+        for (const [localId, timeEntryId] of durableWork.correlations) {
+          optimisticTimerIds.current.set(localId, timeEntryId);
         }
+        timerIdCorrelationsLoaded.current = true;
+        filtered = projectDurableLocalWork(cached.bootstrap, durableWork);
         const pendingDeletionIds = await reconcilePendingActiveDeletionAfterQueueBarrier(
           filtered.activeEntry?.id ?? null
         );
@@ -1014,9 +1019,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         latestData.current = filtered;
         setData(filtered);
         setPendingTimerStops([...(durableWork?.timerStops ?? [])]);
-        if (sessionRead?.status === "authenticated") {
-          setAuthState("authenticated");
-        }
+        setAuthState("authenticated");
       }
       await loadRef.current();
     };
@@ -1688,11 +1691,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           transitionToSignedOut();
           return;
         }
-        if (result.deliveredCount > 0) await loadRef.current({ silent: true });
+        if (result.deliveredCount > 0 || result.needsAttentionCount > 0) {
+          await loadRef.current({ silent: true });
+        }
         if (result.needsAttentionCount > 0) {
           Alert.alert(
-            errorTitle,
-            "This change needs attention and remains saved on this iPhone."
+            "Time entry change not applied",
+            "The server rejected this change, so Dayframe restored the server version. You can retry or discard the saved diagnostic in Settings > Sync & diagnostics."
           );
         }
       })().catch(() => undefined);

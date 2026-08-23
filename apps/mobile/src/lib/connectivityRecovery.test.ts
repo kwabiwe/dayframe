@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  connectivityRecoveryRequest,
   createConnectivityRecoveryCoordinator,
   createSharedInFlightOperation,
+  foregroundRecoveryRequest,
   locationConnectivityRecoveryStepResult,
   reviewConnectivityRecoveryStepResult,
   runConnectivityRecoveryPass,
+  shouldRetryConnectivityRecovery,
   type ConnectivityRecoveryStepName
 } from "./connectivityRecovery";
 
@@ -21,6 +24,45 @@ const ORDER: ConnectivityRecoveryStepName[] = [
 describe("connectivity recovery", () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+  it("requests reconnect and foreground recovery with zero durable work", async () => {
+    expect(connectivityRecoveryRequest({
+      accountKey: "workspace:user",
+      appActive: true,
+      isOnline: true,
+      pendingCount: 0,
+      reconnectEpoch: 3
+    })).toEqual({ epoch: 3 });
+    expect(foregroundRecoveryRequest({
+      accountKey: "workspace:user",
+      isOnline: true,
+      reconnectEpoch: 0
+    })).toEqual({ epoch: 0, options: { forcePass: true } });
+
+    const runPass = vi.fn(async () => "completed" as const);
+    const coordinator = createConnectivityRecoveryCoordinator({
+      canStart: () => true,
+      runPass
+    });
+    await coordinator.request(0, { forcePass: true });
+    expect(runPass).toHaveBeenCalledWith(0);
+  });
+
+  it("does not request zero-work recovery on ordinary online startup", () => {
+    expect(connectivityRecoveryRequest({
+      accountKey: "workspace:user",
+      appActive: true,
+      isOnline: true,
+      pendingCount: 0,
+      reconnectEpoch: 0
+    })).toBeNull();
+  });
+
+  it("retries transport failure even when no durable count is visible", () => {
+    expect(shouldRetryConnectivityRecovery("transport_failure", 0)).toBe(true);
+    expect(shouldRetryConnectivityRecovery("failed", 0)).toBe(false);
+    expect(shouldRetryConnectivityRecovery("failed", 1)).toBe(true);
+    expect(shouldRetryConnectivityRecovery("authentication_required", 1)).toBe(false);
   });
   it("runs durable owners in the required dependency order", async () => {
     const calls: ConnectivityRecoveryStepName[] = [];

@@ -8,7 +8,17 @@ import {
 import { createDeletionCoordinator } from "./historyDeletion";
 
 const TIMER_STOP_OWNER = { userId: "user-a", workspaceId: "workspace-a" };
+const ACCOUNT_B_OWNER = { userId: "user-b", workspaceId: "workspace-b" };
 const TIMER_TARGET_A = "80000000-0000-4000-8000-000000000001";
+
+function storeBoundSession(token: string, owner = TIMER_STOP_OWNER) {
+  secureStore.set("dayframe.localSessionToken.v2", JSON.stringify({
+    version: 1,
+    token,
+    userId: owner.userId,
+    workspaceId: owner.workspaceId
+  }));
+}
 
 const secureStore = vi.hoisted(() => new Map<string, string>());
 const asyncStore = vi.hoisted(() => new Map<string, string>());
@@ -101,7 +111,12 @@ const {
   getOrCreatePendingStop,
   readPendingTimerStops
 } = await import("./timerStopOutbox");
-const { resetSessionTokenCacheForTesting, setSessionToken } = await import("./secure-session");
+const {
+  readAuthenticatedSessionSnapshot,
+  readOwnedAuthenticatedSessionSnapshot,
+  resetSessionTokenCacheForTesting,
+  setSessionToken
+} = await import("./secure-session");
 const {
   __resetMobileAccountForTests,
   activateMobileAccount
@@ -182,7 +197,7 @@ describe("mobile API client", () => {
   });
 
   it("clears the session token when bootstrap returns 401", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "expired-token");
+    storeBoundSession("expired-token");
     vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({ error: "Login required" }, 401))));
 
     await expect(fetchBootstrap()).rejects.toBeInstanceOf(AuthRequiredError);
@@ -191,7 +206,7 @@ describe("mobile API client", () => {
 
   it("bounds and cancels location evidence requests without leaking cookie credentials", async () => {
     vi.useFakeTimers();
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const stalledFetch = vi.fn(() => new Promise<Response>(() => undefined));
     vi.stubGlobal("fetch", stalledFetch);
 
@@ -221,7 +236,7 @@ describe("mobile API client", () => {
 
   it("bounds direct-only location actions and keeps native network errors friendly", async () => {
     vi.useFakeTimers();
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => undefined)));
 
     const request = resolveLocationReviewItem("review-1", {
@@ -242,7 +257,7 @@ describe("mobile API client", () => {
   });
 
   it("invalidates the current bearer when location evidence returns 401", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "expired-token");
+    storeBoundSession("expired-token");
     vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({ error: "Login required" }, 401))));
 
     await expect(fetchLocationReviewEvidence("review-1")).rejects.toBeInstanceOf(AuthRequiredError);
@@ -250,7 +265,7 @@ describe("mobile API client", () => {
   });
 
   it("ignores a delayed bootstrap rejection from the session replaced during the request", async () => {
-    await setSessionToken("account-a-token");
+    await setSessionToken("account-a-token", TIMER_STOP_OWNER);
     let finishResponse: ((response: Response) => void) | undefined;
     const fetchMock = vi.fn(() => new Promise<Response>((resolve) => {
       finishResponse = resolve;
@@ -259,7 +274,7 @@ describe("mobile API client", () => {
 
     const staleBootstrap = fetchBootstrap();
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
-    await setSessionToken("account-b-token");
+    await setSessionToken("account-b-token", ACCOUNT_B_OWNER);
     finishResponse?.(jsonResponse({ error: "Login required" }, 401));
 
     await expect(staleBootstrap).rejects.toBeInstanceOf(StaleMobileSessionResponseError);
@@ -267,7 +282,7 @@ describe("mobile API client", () => {
   });
 
   it("ignores a delayed successful bootstrap from the account replaced during the request", async () => {
-    await setSessionToken("account-a-token");
+    await setSessionToken("account-a-token", TIMER_STOP_OWNER);
     let finishResponse: ((response: Response) => void) | undefined;
     const fetchMock = vi.fn(() => new Promise<Response>((resolve) => {
       finishResponse = resolve;
@@ -276,7 +291,7 @@ describe("mobile API client", () => {
 
     const staleBootstrap = fetchBootstrap();
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
-    await setSessionToken("account-b-token");
+    await setSessionToken("account-b-token", ACCOUNT_B_OWNER);
     finishResponse?.(jsonResponse({ reviewItems: [] }));
 
     await expect(staleBootstrap).rejects.toBeInstanceOf(StaleMobileSessionResponseError);
@@ -284,7 +299,7 @@ describe("mobile API client", () => {
   });
 
   it("requests bootstrap data for a selected date", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({
       entries: [],
       places: [
@@ -315,7 +330,7 @@ describe("mobile API client", () => {
   });
 
   it("requests a no-store timer fingerprint with the bearer session", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({
       activeEntryId: "entry-1",
       updatedAt: "2026-07-30T15:00:00.000Z",
@@ -339,7 +354,7 @@ describe("mobile API client", () => {
   });
 
   it("clears the bearer session when the timer-state check returns 401", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "expired-token");
+    storeBoundSession("expired-token");
     vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({ error: "Login required" }, 401))));
 
     await expect(fetchTimerState()).rejects.toBeInstanceOf(AuthRequiredError);
@@ -380,7 +395,7 @@ describe("mobile API client", () => {
   });
 
   it("delivers one durable entry-scoped Stop with its original identity and timestamp", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const pending = await getOrCreatePendingStop({
       owner: TIMER_STOP_OWNER,
       target: { targetEntryId: TIMER_TARGET_A },
@@ -417,7 +432,7 @@ describe("mobile API client", () => {
   });
 
   it("retains timer_busy and retries with the same Stop idempotency key", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const pending = await getOrCreatePendingStop({
       owner: TIMER_STOP_OWNER,
       target: { targetEntryId: TIMER_TARGET_A },
@@ -449,7 +464,7 @@ describe("mobile API client", () => {
   });
 
   it("keeps a permanent Stop rejection visible without converting it to offline success", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const pending = await getOrCreatePendingStop({
       owner: TIMER_STOP_OWNER,
       target: { targetEntryId: TIMER_TARGET_A }
@@ -512,7 +527,7 @@ describe("mobile API client", () => {
 
     const delivery = deliverPendingTimerStop(pending, TIMER_STOP_OWNER);
     await vi.waitFor(() => expect(finishTokenRead).toBeTypeOf("function"));
-    const replacementLogin = setSessionToken("account-b-token");
+    const replacementLogin = setSessionToken("account-b-token", ACCOUNT_B_OWNER);
     finishTokenRead?.("account-a-token");
 
     await expect(delivery).resolves.toMatchObject({ status: "session_changed" });
@@ -526,7 +541,7 @@ describe("mobile API client", () => {
 
   it("bounds mobile Stop delivery at eight seconds and retains it for retry", async () => {
     vi.useFakeTimers();
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const pending = await getOrCreatePendingStop({
       owner: TIMER_STOP_OWNER,
       target: { targetEntryId: TIMER_TARGET_A }
@@ -579,7 +594,7 @@ describe("mobile API client", () => {
   });
 
   it("syncs a queued Health event without posting stale client workspace fields", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     asyncStore.set(
       "dayframe.offlineQueue.v1",
       JSON.stringify([
@@ -623,7 +638,7 @@ describe("mobile API client", () => {
   });
 
   it("converges an offline timer Start from local projection to one canonical server entry", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const localId = "optimistic-active-timer:offline-1";
     const canonicalId = "entry-canonical-1";
     await enqueueEvent({
@@ -691,7 +706,7 @@ describe("mobile API client", () => {
   });
 
   it("keeps a timer start queued when a successful response omits canonical correlation", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     await enqueueEvent({
       localId: "optimistic-active-timer:missing-correlation",
       source: "mobile_app",
@@ -715,7 +730,7 @@ describe("mobile API client", () => {
     async (action) => {
       const optimisticId = `optimistic-active-timer:in-flight-${action}`;
       const canonicalId = `entry-canonical-${action}`;
-      secureStore.set("dayframe.localSessionToken.v1", "session-token");
+      storeBoundSession("session-token");
       await enqueueEvent({
         localId: optimisticId,
         source: "mobile_app",
@@ -852,7 +867,7 @@ describe("mobile API client", () => {
   it("hydrates an externally synced canonical alias before active-deletion collision classification", async () => {
     const optimisticId = "optimistic-active-timer:settings-sync-deletion";
     const canonicalId = "entry-settings-sync-deletion";
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     await enqueueEvent({
       localId: optimisticId,
       source: "mobile_app",
@@ -933,7 +948,7 @@ describe("mobile API client", () => {
 
   it("persists a dedicated Stop while the general queue is in flight", async () => {
     const optimisticId = "optimistic-active-timer:queue-lock";
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     await enqueueEvent({
       localId: optimisticId,
       source: "mobile_app",
@@ -969,7 +984,7 @@ describe("mobile API client", () => {
   });
 
   it("shares an in-flight activity drain while allowing a new Start to become durable", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     await enqueueEvent({
       localId: "optimistic-active-timer:first",
       source: "mobile_app",
@@ -1024,7 +1039,7 @@ describe("mobile API client", () => {
   });
 
   it("preserves queue order when the first event fails to sync", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: scopedStopPayload({ order: 1 }) });
     await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: scopedStopPayload({ order: 2 }) });
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ error: "Server error" }, 500)));
@@ -1093,7 +1108,7 @@ describe("mobile API client", () => {
   });
 
   it("removes synced events and preserves later unsynced events", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: scopedStopPayload({ order: 1 }) });
     await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: scopedStopPayload({ order: 2 }) });
     const fetchMock = vi
@@ -1110,7 +1125,7 @@ describe("mobile API client", () => {
   });
 
   it("records validation failures and continues syncing later valid events", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: scopedStopPayload({ order: 1 }) });
     await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: scopedStopPayload({ order: 2 }) });
     const fetchMock = vi
@@ -1149,7 +1164,7 @@ describe("mobile API client", () => {
   it("keeps network failures queued for retry with failure metadata", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-06T08:20:00.000Z"));
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: scopedStopPayload({ offline: true }) });
     vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("Network request failed"))));
 
@@ -1175,7 +1190,7 @@ describe("mobile API client", () => {
   it("respects retry backoff before automatic queue sync tries a failed item again", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-06T08:20:00.000Z"));
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     asyncStore.set(
       "dayframe.offlineQueue.v1",
       JSON.stringify([
@@ -1211,7 +1226,7 @@ describe("mobile API client", () => {
   it("manual failed retry bypasses retry backoff", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-06T08:20:10.000Z"));
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     asyncStore.set(
       "dayframe.offlineQueue.v1",
       JSON.stringify([
@@ -1237,17 +1252,55 @@ describe("mobile API client", () => {
   });
 
   it("clears the session token when queued event sync returns 401", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "expired-token");
+    storeBoundSession("expired-token");
+    await expect(readAuthenticatedSessionSnapshot()).resolves.toMatchObject({
+      status: "authenticated",
+      snapshot: { owner: TIMER_STOP_OWNER, token: "expired-token" }
+    });
+    await expect(readOwnedAuthenticatedSessionSnapshot(TIMER_STOP_OWNER)).resolves.toMatchObject({
+      status: "authenticated"
+    });
     await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: scopedStopPayload() });
-    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({ error: "Login required" }, 401))));
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ error: "Login required" }, 401)));
+    vi.stubGlobal("fetch", fetchMock);
 
     await expect(syncQueue()).rejects.toBeInstanceOf(AuthRequiredError);
+    expect(fetchMock).toHaveBeenCalledOnce();
     await expect(getSessionToken()).resolves.toBeNull();
     await expect(readQueue()).resolves.toHaveLength(1);
   });
 
+  it("never sends account A durable work with account B's restored bearer", async () => {
+    await setSessionToken("account-b-token", ACCOUNT_B_OWNER);
+    await enqueueEvent({
+      source: "mobile_app",
+      type: "timer_stop",
+      rawPayload: scopedStopPayload()
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(syncQueue()).resolves.toMatchObject({
+      stopped: true,
+      syncedCount: 0,
+      remainingCount: 1
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(readQueue(TIMER_STOP_OWNER)).resolves.toHaveLength(1);
+  });
+
+  it("blocks direct timer actions while the restored bearer owner disagrees", async () => {
+    await setSessionToken("account-b-token", ACCOUNT_B_OWNER);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(startTimer(null, "Wrong account"))
+      .rejects.toBeInstanceOf(StaleMobileSessionResponseError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("retains a replacement login when queued sync receives a delayed old-session 401", async () => {
-    await setSessionToken("account-a-token");
+    await setSessionToken("account-a-token", TIMER_STOP_OWNER);
     await enqueueEvent({ source: "mobile_app", type: "timer_stop", rawPayload: scopedStopPayload() });
     let finishResponse: ((response: Response) => void) | undefined;
     const fetchMock = vi.fn(() => new Promise<Response>((resolve) => {
@@ -1257,7 +1310,7 @@ describe("mobile API client", () => {
 
     const staleSync = syncQueue();
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
-    await setSessionToken("account-b-token");
+    await setSessionToken("account-b-token", ACCOUNT_B_OWNER);
     finishResponse?.(jsonResponse({ error: "Login required" }, 401));
 
     const result = await staleSync;
@@ -1286,7 +1339,7 @@ describe("mobile API client", () => {
         })
       ])
     );
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ eventId: "event-1" }, 201)));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1402,7 +1455,7 @@ describe("mobile API client", () => {
   });
 
   it("starts timers with an optional category and no project", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({
       eventId: "event-1",
       timeEntryId: "entry-1"
@@ -1429,7 +1482,7 @@ describe("mobile API client", () => {
   });
 
   it("starts uncategorized timers when no category is selected", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 201)));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1449,7 +1502,7 @@ describe("mobile API client", () => {
   });
 
   it("starts a bare uncategorized timer without a description", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 201)));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1468,7 +1521,7 @@ describe("mobile API client", () => {
   });
 
   it("starts timers at a user-selected start time", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 201)));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1489,7 +1542,7 @@ describe("mobile API client", () => {
   });
 
   it("omits blank timer descriptions from mobile starts", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 201)));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1509,7 +1562,7 @@ describe("mobile API client", () => {
   });
 
   it("creates pinned categories through the hosted API", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 201)));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1529,7 +1582,7 @@ describe("mobile API client", () => {
   });
 
   it("creates tags immediately through the hosted API", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({
       ok: true,
       tag: {
@@ -1553,7 +1606,7 @@ describe("mobile API client", () => {
   });
 
   it("updates category name, color and pin state through the hosted API", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true, category: { id: "20000000-0000-4000-8000-000000000001", name: "Deep work", color: "sky", isPinned: true } }, 200)));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1578,7 +1631,7 @@ describe("mobile API client", () => {
   });
 
   it("unpins categories through the hosted API", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true, category: { id: "20000000-0000-4000-8000-000000000001", name: "Deep work", color: "sky", isPinned: false } }, 200)));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1597,7 +1650,7 @@ describe("mobile API client", () => {
   });
 
   it("deletes categories through the hosted API", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1610,7 +1663,7 @@ describe("mobile API client", () => {
   });
 
   it("creates places through the hosted API without auto-start", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const savedPlace = {
       id: "30000000-0000-4000-8000-000000000001",
       name: "Gym",
@@ -1674,7 +1727,7 @@ describe("mobile API client", () => {
   });
 
   it("promotes learned places through the hosted places API", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const savedPlace = {
       id: "30000000-0000-4000-8000-000000000001",
       name: "Office",
@@ -1720,7 +1773,7 @@ describe("mobile API client", () => {
   });
 
   it("ignores learned places through the hosted API", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true, id: "learned-1", status: "ignored" }, 200)));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1739,7 +1792,7 @@ describe("mobile API client", () => {
   });
 
   it("updates places through the hosted API without project fields", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true, place: { id: "place-1" } }, 200)));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1767,7 +1820,7 @@ describe("mobile API client", () => {
   });
 
   it("rejects place saves when the API does not return the saved place", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     vi.stubGlobal(
       "fetch",
       vi.fn()
@@ -1781,7 +1834,7 @@ describe("mobile API client", () => {
   });
 
   it("does not surface raw HTML when a place route returns a hosted 404 page", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     vi.stubGlobal(
       "fetch",
@@ -1804,7 +1857,7 @@ describe("mobile API client", () => {
   });
 
   it("deletes places through the hosted API", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1817,7 +1870,7 @@ describe("mobile API client", () => {
   });
 
   it("deletes running time entries through the hosted API without queueing", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true, id: "entry-1", deleted: true }, 200)));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1834,7 +1887,7 @@ describe("mobile API client", () => {
   });
 
   it("updates running time entries through the hosted API without queueing", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1865,7 +1918,7 @@ describe("mobile API client", () => {
   });
 
   it("creates manual time entries for edited suggestions", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 201)));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1896,7 +1949,7 @@ describe("mobile API client", () => {
   });
 
   it("sends explicit blank manual-entry fields and an empty tag set", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 201)));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1924,7 +1977,7 @@ describe("mobile API client", () => {
   });
 
   it("confirms and dismisses review items through the hosted API", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1954,7 +2007,7 @@ describe("mobile API client", () => {
   });
 
   it("surfaces structured review confirm errors from the hosted API", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     vi.stubGlobal(
       "fetch",
       vi.fn(() =>
@@ -1979,7 +2032,7 @@ describe("mobile API client", () => {
   });
 
   it("treats already-resolved review items as idempotent success", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     vi.stubGlobal(
       "fetch",
       vi.fn(() =>
@@ -1998,7 +2051,7 @@ describe("mobile API client", () => {
   });
 
   it("reprocesses existing Health review items with current preferences", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() =>
       Promise.resolve(jsonResponse({
         ok: true,
@@ -2058,7 +2111,7 @@ describe("mobile API client", () => {
   });
 
   it("can force a Health review reprocess batch from mobile", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() =>
       Promise.resolve(jsonResponse({
         ok: true,
@@ -2094,7 +2147,7 @@ describe("mobile API client", () => {
   });
 
   it("passes Health auto-log mappings when reprocessing review items", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() =>
       Promise.resolve(jsonResponse({
         ok: true,
@@ -2137,7 +2190,7 @@ describe("mobile API client", () => {
   });
 
   it("saves edited review items with one atomic review transaction", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -2173,7 +2226,7 @@ describe("mobile API client", () => {
   });
 
   it("uses the same atomic review operation outside Location V2", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "session-token");
+    storeBoundSession("session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -2196,7 +2249,7 @@ describe("mobile API client", () => {
   });
 
   it("clears the session token when deleting a time entry returns 401", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "expired-token");
+    storeBoundSession("expired-token");
     vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({ error: "Login required." }, 401))));
 
     await expect(deleteTimeEntry("entry-1")).rejects.toBeInstanceOf(AuthRequiredError);
@@ -2204,7 +2257,7 @@ describe("mobile API client", () => {
   });
 
   it("clears the session token when updating a time entry returns 401", async () => {
-    secureStore.set("dayframe.localSessionToken.v1", "expired-token");
+    storeBoundSession("expired-token");
     vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({ error: "Login required." }, 401))));
 
     await expect(updateTimeEntry("entry-1", { startedAt: "2026-07-06T08:15:00.000Z" })).rejects.toBeInstanceOf(AuthRequiredError);

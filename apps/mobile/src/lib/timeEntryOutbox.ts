@@ -7,7 +7,7 @@ import {
 } from "./mobile-network";
 import {
   isAuthenticatedSessionSnapshotCurrent,
-  readAuthenticatedSessionSnapshot
+  readOwnedAuthenticatedSessionSnapshot
 } from "./secure-session";
 import {
   mobileAccountKey,
@@ -18,6 +18,7 @@ import {
 import type { TimeEntryUpdatePatch } from "./api";
 
 const TIME_ENTRY_OUTBOX_KEY = "dayframe.timeEntryOutbox.v1";
+const TIME_ENTRY_OUTBOX_QUARANTINE_KEY = "dayframe.timeEntryOutbox.quarantine.v1";
 export const MOBILE_TIME_ENTRY_COMMAND_TIMEOUT_MS = 8_000;
 const PERMANENT_STATUS_CODES = new Set([400, 409, 413, 422]);
 const RETRY_BACKOFF_SECONDS = [5, 15, 30, 120, 300, 900];
@@ -55,6 +56,12 @@ export type TimeEntryOutboxSyncResult = {
     | "retry_wait"
     | "retryable_failure"
     | "session_changed";
+};
+
+export type TimeEntryOutboxQuarantineRecord = {
+  quarantinedAt: string;
+  reason: string;
+  raw: string;
 };
 
 let mutationTail: Promise<void> = Promise.resolve();
@@ -201,11 +208,13 @@ export async function synchroniseTimeEntryCommands(input: {
 
 export async function getTimeEntryOutboxDiagnostics(owner?: MobileAccountOwner) {
   const commands = await readPendingTimeEntryCommands(owner);
+  const quarantine = await readTimeEntryOutboxQuarantine();
   const retryable = commands.filter((command) => command.failureKind !== "permanent");
   const permanent = commands.filter((command) => command.failureKind === "permanent");
   return {
     pendingCount: retryable.length,
     needsAttentionCount: permanent.length,
+    quarantinedCount: quarantine.length,
     nextRetryAt: retryable
       .flatMap((command) => [command.nextAttemptAt, command.deliverAfter]
         .filter((value): value is string => Boolean(value)))
@@ -216,9 +225,72 @@ export async function getTimeEntryOutboxDiagnostics(owner?: MobileAccountOwner) 
   };
 }
 
+export async function listTimeEntrySyncIssues(owner?: MobileAccountOwner) {
+  return (await readPendingTimeEntryCommands(owner))
+    .filter((command) => command.failureKind === "permanent");
+}
+
+export async function retryTimeEntrySyncIssue(
+  clientCommandId: string,
+  owner?: MobileAccountOwner
+) {
+  const resolvedOwner = owner ?? await readActiveMobileAccount();
+  if (!resolvedOwner) return false;
+  return withMutation(async () => {
+    const current = await readAllCommands();
+    let retried = false;
+    const next = current.map((command) => {
+      if (
+        command.clientCommandId !== clientCommandId ||
+        command.failureKind !== "permanent" ||
+        !mobileAccountOwnersEqual(command, resolvedOwner)
+      ) {
+        return command;
+      }
+      retried = true;
+      const {
+        failureKind: _failureKind,
+        lastError: _lastError,
+        lastStatusCode: _lastStatusCode,
+        nextAttemptAt: _nextAttemptAt,
+        ...retryable
+      } = command;
+      return { ...retryable, updatedAt: new Date().toISOString() };
+    });
+    if (retried) await writeAllCommands(next);
+    return retried;
+  });
+}
+
+export async function discardTimeEntrySyncIssue(
+  clientCommandId: string,
+  owner?: MobileAccountOwner
+) {
+  const resolvedOwner = owner ?? await readActiveMobileAccount();
+  if (!resolvedOwner) return false;
+  return withMutation(async () => {
+    const current = await readAllCommands();
+    const next = current.filter((command) => !(
+      command.clientCommandId === clientCommandId &&
+      command.failureKind === "permanent" &&
+      mobileAccountOwnersEqual(command, resolvedOwner)
+    ));
+    if (next.length === current.length) return false;
+    await writeAllCommands(next);
+    return true;
+  });
+}
+
+export async function clearTimeEntryOutboxQuarantine() {
+  await AsyncStorage.removeItem(TIME_ENTRY_OUTBOX_QUARANTINE_KEY);
+  for (const listener of listeners) listener();
+}
+
 export function subscribeTimeEntryOutbox(listener: () => void) {
   listeners.add(listener);
-  return () => listeners.delete(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
 export function __resetTimeEntryOutboxForTests() {
@@ -269,9 +341,14 @@ async function runTimeEntryCommandDrain(input: {
     }
 
     const attemptedAt = new Date().toISOString();
-    const sessionRead = await readAuthenticatedSessionSnapshot();
+    const sessionRead = await readOwnedAuthenticatedSessionSnapshot(input.owner);
     if (sessionRead.status !== "authenticated") {
-      return currentOutboxResult(input.owner, deliveredCount, true, "authentication_required");
+      return currentOutboxResult(
+        input.owner,
+        deliveredCount,
+        true,
+        sessionRead.status === "signed_out" ? "authentication_required" : "session_changed"
+      );
     }
     if (!mobileAccountOwnersEqual(await readActiveMobileAccount(), input.owner)) {
       return currentOutboxResult(input.owner, deliveredCount, true, "session_changed");
@@ -295,14 +372,19 @@ async function runTimeEntryCommandDrain(input: {
           timeoutMessage: "This change is saved on your iPhone and will retry automatically."
         }
       );
+      if (response.status === 401 || response.status === 403) {
+        return currentOutboxResult(
+          input.owner,
+          deliveredCount,
+          true,
+          "authentication_required"
+        );
+      }
       if (
         !isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot) ||
         !mobileAccountOwnersEqual(await readActiveMobileAccount(), input.owner)
       ) {
         return currentOutboxResult(input.owner, deliveredCount, true, "session_changed");
-      }
-      if (response.status === 401 || response.status === 403) {
-        return currentOutboxResult(input.owner, deliveredCount, true, "authentication_required");
       }
       if (response.ok || (original.operation === "delete" && response.status === 404)) {
         const removed = await removeDeliveredCommand(original.clientCommandId);
@@ -368,16 +450,68 @@ async function enqueueTimeEntryCommand(input: {
 async function readAllCommands(): Promise<PendingTimeEntryCommand[]> {
   const raw = await AsyncStorage.getItem(TIME_ENTRY_OUTBOX_KEY);
   if (!raw) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    await quarantineTimeEntryOutboxPayload(raw, "The outbox JSON could not be parsed.", true);
+    return [];
+  }
+  if (!Array.isArray(parsed)) {
+    await quarantineTimeEntryOutboxPayload(raw, "The outbox container was not an array.", true);
+    return [];
+  }
+  const commands: PendingTimeEntryCommand[] = [];
+  const invalid: unknown[] = [];
+  for (const value of parsed) {
+    const command = parseCommand(value);
+    if (command) commands.push(command);
+    else invalid.push(value);
+  }
+  if (invalid.length > 0) {
+    await quarantineTimeEntryOutboxPayload(
+      JSON.stringify(invalid),
+      "One or more outbox records could not be validated.",
+      false
+    );
+    await AsyncStorage.setItem(TIME_ENTRY_OUTBOX_KEY, JSON.stringify(commands));
+  }
+  return commands;
+}
+
+async function readTimeEntryOutboxQuarantine(): Promise<TimeEntryOutboxQuarantineRecord[]> {
+  const raw = await AsyncStorage.getItem(TIME_ENTRY_OUTBOX_QUARANTINE_KEY);
+  if (!raw) return [];
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
     return parsed.flatMap((value) => {
-      const command = parseCommand(value);
-      return command ? [command] : [];
+      if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+      const item = value as Record<string, unknown>;
+      const quarantinedAt = optionalText(item.quarantinedAt);
+      const reason = optionalText(item.reason);
+      const payload = typeof item.raw === "string" ? item.raw : null;
+      return quarantinedAt && reason && payload !== null
+        ? [{ quarantinedAt, reason, raw: payload }]
+        : [];
     });
   } catch {
     return [];
   }
+}
+
+async function quarantineTimeEntryOutboxPayload(
+  raw: string,
+  reason: string,
+  removeOriginal: boolean
+) {
+  const quarantine = await readTimeEntryOutboxQuarantine();
+  const next = [
+    ...quarantine,
+    { quarantinedAt: new Date().toISOString(), raw, reason }
+  ].slice(-10);
+  await AsyncStorage.setItem(TIME_ENTRY_OUTBOX_QUARANTINE_KEY, JSON.stringify(next));
+  if (removeOriginal) await AsyncStorage.removeItem(TIME_ENTRY_OUTBOX_KEY);
 }
 
 async function writeAllCommands(commands: readonly PendingTimeEntryCommand[]) {

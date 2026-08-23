@@ -11,10 +11,10 @@ export type ConnectivityPillViewModel = {
 
 export function connectivityPillColorRoles(variant: ConnectivityPillVariant) {
   if (variant === "offline") {
-    return { background: "warning" as const, foreground: "background" as const };
+    return { background: "warning" as const, foreground: "onAccent" as const };
   }
   if (variant === "online") {
-    return { background: "success" as const, foreground: "background" as const };
+    return { background: "success" as const, foreground: "onAccent" as const };
   }
   return { background: "surfaceMuted" as const, foreground: "textPrimary" as const };
 }

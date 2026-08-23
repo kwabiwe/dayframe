@@ -12,7 +12,10 @@ import {
   MobileRequestTimeoutError,
   mobileFetchWithTimeout
 } from "./mobile-network";
-import { getSessionToken, invalidateMobileSessionIfCurrent } from "./secure-session";
+import {
+  invalidateMobileSessionIfCurrent,
+  readOwnedAuthenticatedSessionSnapshot
+} from "./secure-session";
 import type {
   MobileBootstrap,
   MobileReviewItem
@@ -1193,8 +1196,11 @@ async function synchroniseReviewMutationsUnsafe(
       )
     );
   }
-  const token = await getSessionToken();
-  if (!token) {
+  const sessionRead = await readOwnedAuthenticatedSessionSnapshot({
+    userId: account.user_id,
+    workspaceId: account.workspace_id
+  });
+  if (sessionRead.status !== "authenticated") {
     await markAccountAuthenticationRequired(account.account_key);
     const diagnostics = await getReviewSyncDiagnostics();
     return {
@@ -1205,6 +1211,7 @@ async function synchroniseReviewMutationsUnsafe(
       reason: "no_session"
     };
   }
+  const token = sessionRead.snapshot.token;
 
   let acknowledgedCount = 0;
   let stopped = false;
