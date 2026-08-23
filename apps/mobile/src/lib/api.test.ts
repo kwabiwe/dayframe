@@ -127,6 +127,7 @@ const {
   StaleMobileSessionResponseError
 } = await import("./mobile-network");
 const { projectDurableLocalWork } = await import("./durableLocalProjection");
+const { synchronisePendingTimerStops } = await import("./timerStopSync");
 
 describe("mobile API client", () => {
   beforeEach(async () => {
@@ -480,6 +481,32 @@ describe("mobile API client", () => {
     await expect(readPendingTimerStops()).resolves.toEqual([
       expect.objectContaining({ clientEventId: pending.clientEventId, failureKind: "permanent" })
     ]);
+  });
+
+  it("reports the exact newly rejected Stop for safe optimistic rollback", async () => {
+    storeBoundSession("session-token");
+    const pending = await getOrCreatePendingStop({
+      owner: TIMER_STOP_OWNER,
+      target: { targetEntryId: TIMER_TARGET_A }
+    });
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(
+      jsonResponse({ error: "Invalid target" }, 422)
+    )));
+
+    await expect(synchronisePendingTimerStops({
+      correlations: new Map(),
+      owner: TIMER_STOP_OWNER
+    })).resolves.toMatchObject({
+      deliveredCount: 0,
+      needsAttentionCount: 1,
+      permanentRejectedCount: 1,
+      permanentRejectedClientEventIds: [pending.clientEventId],
+      remaining: [expect.objectContaining({
+        clientEventId: pending.clientEventId,
+        failureKind: "permanent"
+      })],
+      transportFailure: false
+    });
   });
 
   it("does not deliver another account's pending Stop", async () => {

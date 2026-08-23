@@ -682,6 +682,7 @@ export function projectPendingTimerStops(
   if (!data?.activeEntry || pendingStops.length === 0) return data;
   const activeEntryId = data.activeEntry.id;
   const pendingStop = pendingStops.find((item) => {
+    if (item.failureKind === "permanent") return false;
     if (item.targetEntryId === activeEntryId || item.optimisticEntryId === activeEntryId) return true;
     return Boolean(
       item.optimisticEntryId && correlations.get(item.optimisticEntryId) === activeEntryId

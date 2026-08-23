@@ -13,6 +13,9 @@ import { mobileAccountKey } from "./mobileAccount";
 
 export type TimerStopSyncResult = {
   deliveredCount: number;
+  needsAttentionCount: number;
+  permanentRejectedCount: number;
+  permanentRejectedClientEventIds: string[];
   remaining: PendingTimerStop[];
   transportFailure: boolean;
 };
@@ -33,11 +36,15 @@ export function synchronisePendingTimerStops(input: {
     );
     const owned = pendingTimerStopsForOwner(resolved, input.owner);
     let deliveredCount = 0;
+    const permanentRejectedClientEventIds: string[] = [];
     let transportFailure = false;
     for (const pendingStop of owned) {
       if (!pendingStop.targetEntryId || pendingStop.failureKind === "permanent") continue;
       const result = await deliverPendingTimerStop(pendingStop, input.owner);
       if (result.status === "delivered") deliveredCount += 1;
+      if (result.status === "permanent_failure") {
+        permanentRejectedClientEventIds.push(result.pendingStop.clientEventId);
+      }
       if (result.status === "retryable_failure" && isNetworkTimerError(result.error)) {
         transportFailure = true;
         break;
@@ -47,7 +54,14 @@ export function synchronisePendingTimerStops(input: {
       await readPendingTimerStops(),
       input.owner
     );
-    return { deliveredCount, remaining, transportFailure };
+    return {
+      deliveredCount,
+      needsAttentionCount: remaining.filter((stop) => stop.failureKind === "permanent").length,
+      permanentRejectedCount: permanentRejectedClientEventIds.length,
+      permanentRejectedClientEventIds,
+      remaining,
+      transportFailure
+    };
   })();
   accountDrains.set(key, drain);
   void drain.finally(() => {

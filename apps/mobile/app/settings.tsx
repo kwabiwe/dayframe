@@ -128,6 +128,13 @@ import {
   retryTimeEntrySyncIssue,
   subscribeTimeEntryOutbox
 } from "@/lib/timeEntryOutbox";
+import {
+  discardTimerStopSyncIssue,
+  getTimerStopOutboxDiagnostics,
+  listTimerStopSyncIssues,
+  retryTimerStopSyncIssue,
+  subscribeTimerStopOutbox
+} from "@/lib/timerStopOutbox";
 
 type Category = MobileBootstrap["categories"][number];
 type SettingsSection = "index" | "profile" | "categories" | "automations" | "health" | "sync" | "appearance";
@@ -236,6 +243,12 @@ export default function SettingsScreen() {
   >(null);
   const [timeEntrySyncIssues, setTimeEntrySyncIssues] = useState<
     Awaited<ReturnType<typeof listTimeEntrySyncIssues>>
+  >([]);
+  const [timerStopSyncDiagnostics, setTimerStopSyncDiagnostics] = useState<
+    Awaited<ReturnType<typeof getTimerStopOutboxDiagnostics>> | null
+  >(null);
+  const [timerStopSyncIssues, setTimerStopSyncIssues] = useState<
+    Awaited<ReturnType<typeof listTimerStopSyncIssues>>
   >([]);
   const [showLocationTroubleshooting, setShowLocationTroubleshooting] = useState(false);
   const [locationInfoSheet, setLocationInfoSheet] = useState<"places" | "suggestions" | null>(null);
@@ -388,6 +401,15 @@ export default function SettingsScreen() {
     setTimeEntrySyncIssues(issues);
   }, []);
 
+  const refreshTimerStopDiagnostics = useCallback(async () => {
+    const [diagnostics, issues] = await Promise.all([
+      getTimerStopOutboxDiagnostics(),
+      listTimerStopSyncIssues()
+    ]);
+    setTimerStopSyncDiagnostics(diagnostics);
+    setTimerStopSyncIssues(issues);
+  }, []);
+
   const load = useCallback(async (options?: { silent?: boolean; trigger?: "navigation" | "focus" | "pull" }) => {
     if (refreshInFlight.current) return;
     refreshInFlight.current = true;
@@ -417,6 +439,7 @@ export default function SettingsScreen() {
       await refreshLocationV2Diagnostics();
       await refreshReviewDiagnostics();
       await refreshTimeEntryDiagnostics();
+      await refreshTimerStopDiagnostics();
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         finishSignedOutNavigation();
@@ -432,7 +455,12 @@ export default function SettingsScreen() {
       refreshInFlight.current = false;
       if (showRefreshIndicator) setRefreshing(false);
     }
-  }, [finishSignedOutNavigation, refreshReviewDiagnostics, refreshTimeEntryDiagnostics]);
+  }, [
+    finishSignedOutNavigation,
+    refreshReviewDiagnostics,
+    refreshTimeEntryDiagnostics,
+    refreshTimerStopDiagnostics
+  ]);
 
   useEffect(() => {
     if (!isSettingsSnapshotFresh()) void load({ silent: true });
@@ -451,6 +479,13 @@ export default function SettingsScreen() {
       void refreshTimeEntryDiagnostics();
     });
   }, [refreshTimeEntryDiagnostics]);
+
+  useEffect(() => {
+    void refreshTimerStopDiagnostics();
+    return subscribeTimerStopOutbox(() => {
+      void refreshTimerStopDiagnostics();
+    });
+  }, [refreshTimerStopDiagnostics]);
 
   useFocusEffect(
     useCallback(() => {
@@ -522,7 +557,11 @@ export default function SettingsScreen() {
     lastSyncResult,
     queueDiagnostics
   });
-  const deviceSyncStatus = timeEntrySyncDiagnostics?.needsAttentionCount
+  const deviceSyncStatus = timerStopSyncDiagnostics?.needsAttentionCount
+    ? `${timerStopSyncDiagnostics.needsAttentionCount} timer ${
+        timerStopSyncDiagnostics.needsAttentionCount === 1 ? "Stop needs" : "Stops need"
+      } attention`
+    : timeEntrySyncDiagnostics?.needsAttentionCount
     ? `${timeEntrySyncDiagnostics.needsAttentionCount} time entry ${
         timeEntrySyncDiagnostics.needsAttentionCount === 1 ? "change needs" : "changes need"
       } attention`
@@ -822,6 +861,34 @@ export default function SettingsScreen() {
       await refreshTimeEntryDiagnostics();
       if (retried) {
         setSyncStatusMessageAndCache("Retrying the saved time entry change...");
+      }
+    });
+  }
+
+  function confirmDiscardTimerStopIssue(clientEventId: string) {
+    Alert.alert(
+      "Discard rejected timer Stop?",
+      "The server timer will stay unchanged. This removes only the rejected Stop saved on this iPhone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Discard Stop",
+          style: "destructive",
+          onPress: () => {
+            void discardTimerStopSyncIssue(clientEventId).then(() =>
+              refreshTimerStopDiagnostics()
+            );
+          }
+        }
+      ]
+    );
+  }
+
+  function retryTimerStopIssue(clientEventId: string) {
+    void retryTimerStopSyncIssue(clientEventId).then(async (retried) => {
+      await refreshTimerStopDiagnostics();
+      if (retried) {
+        setSyncStatusMessageAndCache("Retrying the saved timer Stop...");
       }
     });
   }
@@ -1788,6 +1855,45 @@ export default function SettingsScreen() {
                 )}
               </View>
             ) : null}
+            <View style={styles.queueDiagnosticCard}>
+              <Text style={styles.label}>Timer Stops</Text>
+              <Text style={styles.accountMeta}>
+                Pending {timerStopSyncDiagnostics?.pendingCount ?? 0} · Needs attention{" "}
+                {timerStopSyncDiagnostics?.needsAttentionCount ?? 0}
+              </Text>
+              {timerStopSyncIssues.map((issue) => (
+                <Reanimated.View
+                  key={issue.clientEventId}
+                  entering={localPresenceEntering(reduceMotion)}
+                  exiting={localPresenceExiting(reduceMotion)}
+                  layout={localLayoutTransition(reduceMotion)}
+                  style={styles.accountRow}
+                >
+                  <Text style={styles.accountValue}>
+                    Timer Stop rejected · {formatQueueTime(issue.failedAt ?? issue.queuedAt)}
+                  </Text>
+                  <Text style={styles.accountMeta}>
+                    The server did not accept this Stop. Retry it, or discard it to keep the server timer unchanged.
+                  </Text>
+                  <View style={styles.buttonRow}>
+                    <Pressable
+                      accessibilityRole="button"
+                      style={pressable(styles.secondaryButton, styles.buttonPressed)}
+                      onPress={() => retryTimerStopIssue(issue.clientEventId)}
+                    >
+                      <Text style={styles.secondaryButtonText}>Retry Stop</Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      style={pressable(styles.secondaryButton, styles.buttonPressed)}
+                      onPress={() => confirmDiscardTimerStopIssue(issue.clientEventId)}
+                    >
+                      <Text style={styles.secondaryButtonText}>Discard Stop</Text>
+                    </Pressable>
+                  </View>
+                </Reanimated.View>
+              ))}
+            </View>
             <View style={styles.queueDiagnosticCard}>
               <Text style={styles.label}>Time entry changes</Text>
               <Text style={styles.accountMeta}>

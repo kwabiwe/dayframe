@@ -131,6 +131,31 @@ describe("durable dashboard projection", () => {
     expect(projected.entries).toEqual([persisted]);
   });
 
+  it("restores the running server timer instead of projecting a permanently rejected Stop", () => {
+    const running = entry("rejected-stop-target");
+    const projected = projectDurableLocalWork(bootstrap({
+      activeEntry: running,
+      entries: [running]
+    }), work({
+      timerStops: [{
+        ...OWNER,
+        clientEventId: "rejected-stop",
+        targetEntryId: running.id,
+        occurredAt: "2026-08-22T10:25:00.000Z",
+        queuedAt: "2026-08-22T10:25:00.000Z",
+        failureCount: 1,
+        failureKind: "permanent",
+        failedAt: "2026-08-22T10:25:01.000Z",
+        lastStatusCode: 422,
+        lastError: "Invalid target"
+      }]
+    }));
+
+    expect(projected.activeEntry).toEqual(running);
+    expect(projected.entries).toEqual([running]);
+    expect(projected.activeEntry?.stoppedAt).toBeNull();
+  });
+
   it("is deterministic and idempotent for cached relaunch restoration", () => {
     const durable = work({
       activityEvents: [queuedStart()],

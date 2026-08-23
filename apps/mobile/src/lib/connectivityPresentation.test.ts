@@ -72,7 +72,7 @@ describe("connectivity status presentation", () => {
     expect(expired.viewModel).toBeNull();
   });
 
-  it("shows actionable permanent time-entry attention without consuming a false Synced notice", () => {
+  it("shows actionable permanent timer or time-entry attention without consuming a false Synced notice", () => {
     const pending = updateConnectivityPresentation({
       accountKey: "workspace:user",
       attentionCount: 0,
@@ -184,7 +184,7 @@ describe("connectivity status presentation", () => {
     expect(tracker.next(syncing)).toBe("Syncing saved changes.");
     expect(tracker.next(syncing)).toBeNull();
     expect(tracker.next(attention)).toBe(
-      "A time entry sync issue needs attention. Open Sync and diagnostics."
+      "A timer or time entry sync issue needs attention. Open Sync and diagnostics."
     );
     expect(tracker.next(null)).toBeNull();
     expect(tracker.next(offline)).toBe("Offline. Changes will sync later.");

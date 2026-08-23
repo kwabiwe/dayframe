@@ -214,6 +214,38 @@ describe("process-wide connectivity monitor", () => {
     stop();
   });
 
+  it("lets unchanged native online evidence recover an HTTP-forced offline state", async () => {
+    const stop = monitor.startConnectivityMonitor();
+    await vi.runAllTicks();
+    await vi.advanceTimersByTimeAsync(400);
+    const forcedOfflineGeneration = monitor.connectivityRequestGeneration();
+
+    monitor.reportHttpTransportFailure({ requestGeneration: forcedOfflineGeneration });
+    monitor.reportHttpTransportFailure({ requestGeneration: forcedOfflineGeneration });
+    await vi.runAllTicks();
+    expect(monitor.getConnectivitySnapshot()).toMatchObject({
+      status: "offline",
+      reconnectEpoch: 0,
+      source: "native"
+    });
+
+    await monitor.refreshConnectivity();
+    await vi.advanceTimersByTimeAsync(399);
+    expect(monitor.getConnectivitySnapshot().status).toBe("offline");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(monitor.getConnectivitySnapshot()).toMatchObject({
+      status: "online",
+      reconnectEpoch: 1,
+      source: "native"
+    });
+    expect(monitor.connectivityRequestGeneration()).toBeGreaterThan(forcedOfflineGeneration);
+
+    monitor.reportHttpTransportFailure({ requestGeneration: forcedOfflineGeneration });
+    monitor.reportHttpTransportFailure({ requestGeneration: forcedOfflineGeneration });
+    expect(monitor.getConnectivitySnapshot().status).toBe("online");
+    stop();
+  });
+
   it("uses an HTTP response as immediate current transport evidence", async () => {
     netInfo.fetch.mockResolvedValueOnce(OFFLINE);
     const stop = monitor.startConnectivityMonitor();

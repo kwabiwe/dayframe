@@ -32,6 +32,7 @@ export type DurableWorkSnapshot = {
   activityCount: number;
   nativeShortcutCount: number;
   timerStopCount: number;
+  timerStopNeedsAttentionCount: number;
   timeEntryCommandCount: number;
   timeEntryNeedsAttentionCount: number;
   timeEntryQuarantinedCount: number;
@@ -50,6 +51,7 @@ const EMPTY_SNAPSHOT: DurableWorkSnapshot = {
   activityCount: 0,
   nativeShortcutCount: 0,
   timerStopCount: 0,
+  timerStopNeedsAttentionCount: 0,
   timeEntryCommandCount: 0,
   timeEntryNeedsAttentionCount: 0,
   timeEntryQuarantinedCount: 0,
@@ -164,8 +166,11 @@ async function refreshOnce() {
   const activityDiagnostics = getQueueDiagnostics(queue);
   const queuedActivityCount = queue.filter((event) => event.failureKind !== "permanent").length;
   const activityCount = queuedActivityCount + nativeShortcutCount;
-  const timerStopCount = pendingTimerStopsForOwner(stops, owner)
+  const ownedTimerStops = pendingTimerStopsForOwner(stops, owner);
+  const timerStopCount = ownedTimerStops
     .filter((stop) => stop.failureKind !== "permanent").length;
+  const timerStopNeedsAttentionCount = ownedTimerStops
+    .filter((stop) => stop.failureKind === "permanent").length;
   const reviewOwned = reviewOwner?.userId === owner.userId &&
     reviewOwner.workspaceId === owner.workspaceId;
   const locationOwned = locationOwner?.userId === owner.userId &&
@@ -184,6 +189,7 @@ async function refreshOnce() {
     activityCount,
     nativeShortcutCount,
     timerStopCount,
+    timerStopNeedsAttentionCount,
     timeEntryCommandCount: timeEntries.pendingCount,
     timeEntryNeedsAttentionCount: timeEntries.needsAttentionCount,
     timeEntryQuarantinedCount: timeEntries.quarantinedCount,
@@ -215,6 +221,7 @@ function snapshotsEqual(left: DurableWorkSnapshot, right: DurableWorkSnapshot) {
     left.activityCount === right.activityCount &&
     left.nativeShortcutCount === right.nativeShortcutCount &&
     left.timerStopCount === right.timerStopCount &&
+    left.timerStopNeedsAttentionCount === right.timerStopNeedsAttentionCount &&
     left.timeEntryCommandCount === right.timeEntryCommandCount &&
     left.timeEntryNeedsAttentionCount === right.timeEntryNeedsAttentionCount &&
     left.timeEntryQuarantinedCount === right.timeEntryQuarantinedCount &&
@@ -246,6 +253,7 @@ function recordPendingTransition(
     activityCount: next.activityCount,
     nativeShortcutCount: next.nativeShortcutCount,
     timerStopCount: next.timerStopCount,
+    timerStopNeedsAttentionCount: next.timerStopNeedsAttentionCount,
     timeEntryCommandCount: next.timeEntryCommandCount,
     timeEntryNeedsAttentionCount: next.timeEntryNeedsAttentionCount,
     timeEntryQuarantinedCount: next.timeEntryQuarantinedCount,

@@ -105,7 +105,7 @@ export function connectivityStatusViewModel(input: {
   }
   if (input.attentionCount > 0) {
     return {
-      accessibilityLabel: "A time entry sync issue needs attention. Open Sync and diagnostics.",
+      accessibilityLabel: "A timer or time entry sync issue needs attention. Open Sync and diagnostics.",
       id: "attention",
       isActionable: true,
       variant: "attention"

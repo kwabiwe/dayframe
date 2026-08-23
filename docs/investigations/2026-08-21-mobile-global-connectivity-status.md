@@ -15,7 +15,7 @@ The repair keeps NetInfo as transport evidence and durable domain owners as auth
 
 - `connectivityState.ts` remains the pure transport machine. Native offline confirms after 300 ms and native online after 400 ms. Initial online produces no reconnect epoch or presentation.
 - Any current-generation HTTP response is strong online evidence. Intentional caller cancellation and stale-session rejection are neutral. A current-generation request deadline or repeated genuine transport failures within four seconds provide negative evidence; one isolated failure does not. Success and failure evidence from an older offline/reconnect request generation is ignored before it can clear or add failure history.
-- `connectivityMonitor.ts` owns one reference-safe NetInfo listener, bounded reachability timeouts and timestamped development/staging diagnostics for raw native state, HTTP evidence, debounce lifecycle, committed state and reconnect epoch. Logs contain no token, activity text, category, location or request payload.
+- `connectivityMonitor.ts` owns one reference-safe NetInfo listener, bounded reachability timeouts and timestamped development/staging diagnostics for raw native state, HTTP evidence, debounce lifecycle, committed state and reconnect epoch. Raw deduplication still accepts unchanged native evidence when it disagrees with an HTTP-forced committed state, allowing the normal debounce to repair Offline without weakening request-generation rejection. Logs contain no token, activity text, category, location or request payload.
 - `mobileAccount.ts` owns the active mobile user/workspace identity. The bearer and its server-verified user/workspace are persisted atomically in one SecureStore envelope; queue delivery requires that bound owner to match the active durable owner. A legacy unbound token can perform only the bootstrap that verifies and binds it, and cannot project cached account data or replay commands beforehand. General events, ID correlations, explicit Stops, time-entry commands, Review, Location and native hand-off counts are filtered before projection or delivery.
 - `durableWorkMonitor.ts` subscribes to the active account plus all recovery-owned stores. Pending count includes general/native activity, explicit Stops, time-entry Edit/Delete, Review and Location/native-signal work. Retry wait remains pending; permanently rejected work leaves the global count and remains available to targeted diagnostics.
 - `ConnectivityRecoveryOwner.tsx` is the one account/workspace retry owner. It wakes for new durable work, confirmed online, foreground and scheduled retry; a real reconnect or foreground transition runs the ordered pass even when pending count is zero, while ordinary epoch-zero initial-online startup remains quiet. It pauses offline, supersedes obsolete retry timers on newer reconnect epochs, retries zero-count transport failures and shares every in-flight drain.
@@ -27,7 +27,7 @@ The repair keeps NetInfo as transport evidence and durable domain owners as auth
 - Confirmed online with account-owned pending work: neutral circular sync arrows, persistent even during retry backoff or an out-of-band drain.
 - Pending count changes from non-zero to zero while online: neutral cloud-check for approximately two seconds, then the slot becomes visually empty.
 - Ordinary startup or settled online with no pending transition: the fixed slot remains visually empty, preserving header geometry.
-- Permanent time-entry rejection: persistent neutral cloud-X that opens Settings > Sync & diagnostics for owned Retry/Discard actions. Confirmed offline remains the one-slot priority and the cloud-X returns after reconnect.
+- Permanent timer Stop or time-entry Edit/Delete rejection: persistent neutral cloud-X that opens Settings > Sync & diagnostics for owned plain-language Retry/Discard actions. Confirmed offline remains the one-slot priority and the cloud-X returns after reconnect.
 
 On the focused tab, the icon is one manually revisitable labelled accessibility element; cloud-X is a labelled button with a diagnostics hint, while SVG children are excluded from duplicate traversal. The root provider calls `AccessibilityInfo.announceForAccessibility` once per distinct visible transition and resets identity after the slot becomes empty, so a later repeated Offline transition is announced. All glyphs use the theme's neutral `textSecondary` token with non-colour shapes that meet contrast in Light and Dark. Sync arrows rotate subtly during normal motion and remain static with Reduce Motion; state presence uses restrained opacity without moving layout. The next presentation is calculated without mutation during render, used immediately so sync arrows change in place to cloud-check, and committed afterward; a discarded render cannot consume the two-second state.
 
@@ -65,7 +65,7 @@ One pass checks active app, confirmed online state and account identity between 
 6. resume same-account Location native drain, processing, upload and replay; batch selection, request dispatch, replay and every response-side SQLite mutation pin the captured location owner and authenticated-session generation, so an A → B switch interrupts the stale pass without selecting or mutating B evidence;
 7. fetch/cache one server bootstrap, project any work still durable, and publish it through the Dashboard's mutation-revision and pending-deletion guard. A Stop/Edit that overlaps the fetch queues a fresh projected load instead of accepting the recovered snapshot; a failed publication emits an explicit abandonment event so its captured guard is released.
 
-Retryable transport/application failure schedules jittered exponential backoff without requiring another network toggle, including when a zero-pending reconnect/foreground pass fails in Location or bootstrap. A newer reconnect epoch cancels the obsolete timer and runs promptly. Confirmed offline pauses timers and delivery; foreground always requests one ordered pass for an authenticated account. A newly created command wakes the coordinator even at reconnect epoch zero. HealthKit is not imported merely because transport changes.
+Retryable transport/application failure schedules jittered exponential backoff without requiring another network toggle, including when a zero-pending reconnect/foreground pass fails in Location or bootstrap. Retry due requests a forced pass rather than pretending that durable work just arrived, so the attempt keeps increasing while the same work remains and resets only after work clears or a genuine reconnect/new-work epoch arrives. A newer reconnect epoch cancels the obsolete timer and runs promptly. Confirmed offline pauses timers and delivery; foreground always requests one ordered pass for an authenticated account. A newly created command wakes the coordinator even at reconnect epoch zero. HealthKit is not imported merely because transport changes.
 
 ## Motion Contract
 
@@ -73,7 +73,7 @@ Retryable transport/application failure schedules jittered exponential backoff w
 - Single owner: the root provider owns state and announcements; the fixed header slot owns visual entrance/exit and never animates surrounding layout.
 - Entrance/exit: state presence uses restrained opacity. Sync arrows rotate subtly in normal motion and remain static with Reduce Motion. State updates retain identical geometry.
 - Interruption: cloud-slash immediately supersedes sync arrows/cloud-check/cloud-X; new work cancels the cloud-check; account replacement resets presentation; rapid render repeats do not duplicate VoiceOver announcements.
-- Async rollback: retryable failure retains sync arrows because work remains; permanent time-entry outcomes exit the pending count and expose cloud-X plus their durable diagnostics.
+- Async rollback: retryable failure retains sync arrows because work remains; permanent timer Stop and time-entry Edit/Delete outcomes exit the pending count, restore server projection, and expose cloud-X plus their durable diagnostics. The existing Settings local-presence/layout primitive owns diagnostics-row entrance, Retry/Discard removal and surrounding reflow; Reduce Motion uses its restrained fallback and neither action moves focus programmatically.
 
 ## Dependency And Native Impact
 
@@ -106,6 +106,18 @@ The evidence below was recorded for reviewed head `a093b99aa4628c648658e9469b11f
 | Clean unsigned iOS Simulator build | PASS: fresh Derived Data at `/tmp/dayframe-pr184-final-owner-ios.NHmCse`, Debug, iOS Simulator 26.5 `Dayframe Sheet QA SE`, `CODE_SIGNING_ALLOWED=NO`; dependency warnings only, no launch or install |
 | Exact-SHA GitHub/Vercel Preview checks | PASS: documentation alignment, Vercel Preview and Preview comments on the pushed repair head; the final documentation-only evidence commit must repeat these checks |
 | Signed staging build / physical iPhone matrix | NOT RUN; requires explicit next-stage approval after independent re-review |
+
+The bounded blocker repair committed with this record adds no dependency, pod,
+native source, server, schema or hosted change. Its local evidence is:
+
+| Repair check | Result |
+| --- | --- |
+| Focused recovery/monitor/Stop projection, diagnostics, presentation and API suites | PASS: 8 files / 220 tests |
+| Complete mobile suite | PASS: 86 files / 858 tests |
+| Mobile and full workspace typecheck | PASS |
+| Repository lint | PASS: documentation and iOS configuration checks plus web ESLint; two pre-existing web-test unused-parameter warnings, zero errors |
+| Documentation, brand, Review SQLite, Location V2 SQLite and diff checks | PASS: 118 Markdown files, brand assets, Review SQLite, Location V2 SQLite and `git diff --check` |
+| Staging promotion, device build/install and physical-iPhone matrix | NOT RUN; explicitly outside this bounded repair |
 
 ## Known Limitations And Rollout
 

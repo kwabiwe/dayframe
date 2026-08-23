@@ -13,6 +13,7 @@ import {
   confirmHttpConnectivity,
   confirmHttpConnectivityFailure,
   confirmNativeConnectivity,
+  classifyConnectivityCandidate,
   connectivitySnapshot,
   connectivitySnapshotsEqual,
   createConnectivityMachineState,
@@ -232,7 +233,13 @@ function handleNativeState(
 ) {
   if (source === "native") recordConnectivityRefresh("native_event");
   const observation = rawObservation(state);
-  if (rawConnectivityObservationsEqual(lastRawObservation, observation)) return;
+  const rawUnchanged = rawConnectivityObservationsEqual(lastRawObservation, observation);
+  const candidate = classifyConnectivityCandidate(observation);
+  const repairsForcedStatus =
+    candidate !== "ambiguous" &&
+    candidate !== machineState.status &&
+    pendingCandidate?.candidate !== candidate;
+  if (rawUnchanged && !repairsForcedStatus) return;
   lastRawObservation = observation;
   const observed = observeNativeConnectivity(machineState, observation, source);
   recordRawNetInfo(observation, source);

@@ -59,7 +59,8 @@ export function ConnectivityStatusProvider({ children }: { children: ReactNode }
 
   const updated = updateConnectivityPresentation({
     accountKey: durableWork.accountKey,
-    attentionCount: durableWork.timeEntryNeedsAttentionCount,
+    attentionCount:
+      durableWork.timeEntryNeedsAttentionCount + durableWork.timerStopNeedsAttentionCount,
     now,
     pendingCount: durableWork.pendingCount,
     state: presentation,

@@ -538,6 +538,76 @@ describe("connectivity recovery", () => {
     expect(coordinator.snapshot()).toMatchObject({ retryAttempt: 0, retryAt: null });
   });
 
+  it("keeps increasing backoff while the same durable work remains", async () => {
+    vi.useFakeTimers();
+    const startedAt = Date.now();
+    let pendingCount = 1;
+    const retrySchedules: Array<{ attempt: number; retryAt: number }> = [];
+    const runPass = vi.fn(async () => "completed" as const);
+    const coordinator = createConnectivityRecoveryCoordinator({
+      canStart: () => true,
+      onRetryScheduled: ({ attempt, retryAt }) => {
+        retrySchedules.push({ attempt, retryAt });
+      },
+      random: () => 0.5,
+      runPass,
+      shouldRetry: () => pendingCount > 0
+    });
+
+    await coordinator.request(0, { queuedWorkArrived: true });
+    expect(coordinator.snapshot().retryAttempt).toBe(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(coordinator.snapshot().retryAttempt).toBe(2);
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(coordinator.snapshot().retryAttempt).toBe(3);
+    expect(runPass).toHaveBeenCalledTimes(3);
+    expect(retrySchedules.map(({ attempt }) => attempt)).toEqual([1, 2, 3]);
+    expect(retrySchedules.map(({ retryAt }, index) =>
+      retryAt - [startedAt, startedAt + 1_000, startedAt + 3_500][index]
+    ))
+      .toEqual([1_000, 2_500, 5_000]);
+
+    pendingCount = 0;
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(runPass).toHaveBeenCalledTimes(4);
+    expect(coordinator.snapshot()).toMatchObject({ retryAttempt: 0, retryAt: null });
+  });
+
+  it("resets an existing retry epoch only for genuinely new work", async () => {
+    vi.useFakeTimers();
+    const coordinator = createConnectivityRecoveryCoordinator({
+      canStart: () => true,
+      random: () => 0.5,
+      runPass: vi.fn(async () => "failed" as const),
+      shouldRetry: () => true
+    });
+
+    await coordinator.request(0, { queuedWorkArrived: true });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(coordinator.snapshot().retryAttempt).toBe(2);
+
+    await coordinator.request(0, { queuedWorkArrived: true });
+    expect(coordinator.snapshot()).toMatchObject({ retryAttempt: 1, retryAt: Date.now() + 1_000 });
+  });
+
+  it("does not reset the retry epoch while authentication interrupts remaining work", async () => {
+    vi.useFakeTimers();
+    let result: "failed" | "authentication_required" = "failed";
+    const coordinator = createConnectivityRecoveryCoordinator({
+      canStart: () => true,
+      hasPendingWork: () => true,
+      random: () => 0.5,
+      runPass: vi.fn(async () => result),
+      shouldRetry: (passResult) => passResult === "failed"
+    });
+
+    await coordinator.request(0, { queuedWorkArrived: true });
+    expect(coordinator.snapshot().retryAttempt).toBe(1);
+    result = "authentication_required";
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(coordinator.snapshot()).toMatchObject({ retryAttempt: 1, retryAt: null });
+  });
+
   it("replays an offline timer Start that becomes durable after reconnect already passed the queue", async () => {
     const optimisticTimerId = "optimistic-active-timer:late-offline-start";
     const canonicalTimerId = "timer-canonical-after-reconnect";

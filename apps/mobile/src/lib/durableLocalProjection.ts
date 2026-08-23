@@ -110,7 +110,10 @@ function projectionOperations(work: DurableLocalWork): ProjectionOperation[] {
           command
         });
   const stops: ProjectionOperation[] = work.timerStops
-    .filter((stop) => mobileAccountOwnersEqual(stop, work.owner))
+    .filter((stop) =>
+      mobileAccountOwnersEqual(stop, work.owner) &&
+      stop.failureKind !== "permanent"
+    )
     .map((stop) => ({
       kind: "stop",
       at: stop.occurredAt,

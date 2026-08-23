@@ -191,8 +191,14 @@ describe("Today history swipe-to-delete contract", () => {
     expect(stopSource.indexOf("await getOrCreatePendingStop(")).toBeLessThan(
       stopSource.indexOf("optimisticStopActiveTimer(")
     );
+    expect(stopSource.indexOf('pendingStop.failureKind === "permanent"')).toBeLessThan(
+      stopSource.indexOf("optimisticStopActiveTimer(")
+    );
+    expect(stopSource).toContain("Open Settings > Sync & diagnostics to retry or discard");
     expect(stopSource).toContain("void (async () => {");
-    expect(stopSource).toContain("await deliverOwnedPendingTimerStops(bootstrap)");
+    expect(stopSource).toContain("const summary = await deliverOwnedPendingTimerStops(bootstrap");
+    expect(stopSource).toContain("summary.permanentRejectedClientEventIds.includes(");
+    expect(stopSource).toContain("rollbackOptimisticStopSafely(");
     expect(stopSource).toContain("return true");
     expect(stopSource).not.toContain("queueStopTimer(");
     expect(stopSource).not.toContain("stopTimer(");

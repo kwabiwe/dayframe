@@ -76,6 +76,7 @@ export function ConnectivityRecoveryOwner() {
       appActiveRef.current &&
       connectivityRef.current.isOnline &&
       Boolean(durableWorkRef.current.accountKey),
+    hasPendingWork: () => getDurableWorkSnapshot().pendingCount > 0,
     onPassStarted: (epoch) => {
       reportConnectivityRecoveryStarted(epoch);
       recordRecoveryLifecycle("start", { epoch });

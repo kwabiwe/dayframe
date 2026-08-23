@@ -199,6 +199,7 @@ export async function runConnectivityRecoveryPass(input: {
 export function createConnectivityRecoveryCoordinator(input: {
   canStart: () => boolean;
   clearTimer?: (timer: ReturnType<typeof setTimeout>) => void;
+  hasPendingWork?: () => boolean;
   now?: () => number;
   onPassFinished?: (input: {
     epoch: number;
@@ -250,7 +251,7 @@ export function createConnectivityRecoveryCoordinator(input: {
     retryTimer = setTimer(() => {
       retryTimer = null;
       retryAt = null;
-      void request(epoch, { queuedWorkArrived: true });
+      void request(epoch, { forcePass: true });
     }, delay) as ReturnType<typeof setTimeout>;
   };
 
@@ -286,10 +287,12 @@ export function createConnectivityRecoveryCoordinator(input: {
         queuedWorkRevision > handledWorkRevision ||
         interruptedReconnectEpoch > 0;
       input.onPassFinished?.({ epoch, hasPendingPass, result });
-      if (result === "completed") retryAttempt = 0;
       const shouldRetry = input.shouldRetry?.(result) ?? result === "transport_failure";
+      const hasPendingWork = input.hasPendingWork?.() ?? shouldRetry;
       if (!hasPendingPass && shouldRetry && input.canStart()) {
         scheduleRetry(epoch);
+      } else if (!hasPendingPass && !shouldRetry && !hasPendingWork) {
+        retryAttempt = 0;
       }
       if (result === "authentication_required") break;
       if (result === "interrupted" && !input.canStart()) break;
@@ -302,7 +305,7 @@ export function createConnectivityRecoveryCoordinator(input: {
   ) => {
     const queuedWorkArrived = options.queuedWorkArrived === true;
     const passRequested = queuedWorkArrived || options.forcePass === true;
-    if (epoch > lastHandledReconnectEpoch) {
+    if (epoch > lastHandledReconnectEpoch || queuedWorkArrived) {
       clearScheduledRetry();
       retryAttempt = 0;
     }

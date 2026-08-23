@@ -207,6 +207,7 @@ import {
   restoreDeletedTimeEntriesSafely,
   restoreFailedDeletionSafely,
   rollbackRejectedOptimisticTimerStart,
+  rollbackOptimisticStopSafely,
   shouldAwaitTimerMutationAcceptance,
   sortMobileCategoriesByUsage
 } from "@/lib/timerPresentation";
@@ -568,7 +569,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       return summary;
     }
     setPendingTimerStops(summary.remaining);
-    if (summary.deliveredCount > 0 && options.reloadAfterDelivery !== false) {
+    if (
+      (summary.deliveredCount > 0 || summary.permanentRejectedCount > 0) &&
+      options.reloadAfterDelivery !== false
+    ) {
       void loadRef.current({ silent: true });
     }
     return summary;
@@ -1800,6 +1804,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       );
       return false;
     }
+    if (pendingStop.failureKind === "permanent") {
+      Alert.alert(
+        "Timer Stop needs attention",
+        "Open Settings > Sync & diagnostics to retry or discard the rejected Stop."
+      );
+      return false;
+    }
 
     setPendingTimerStops((current) => [
       ...current.filter((item) => item.clientEventId !== pendingStop.clientEventId),
@@ -1819,7 +1830,21 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           pendingStop = resolved.find((item) => item.clientEventId === pendingStop.clientEventId) ?? pendingStop;
         }
       }
-      await deliverOwnedPendingTimerStops(bootstrap);
+      const summary = await deliverOwnedPendingTimerStops(bootstrap, {
+        reloadAfterDelivery: false
+      });
+      if (summary.permanentRejectedClientEventIds.includes(pendingStop.clientEventId)) {
+        updateDashboardData((current) => rollbackOptimisticStopSafely(
+          current,
+          bootstrap,
+          activeEntry.id,
+          optimisticTimerIds.current
+        ));
+        scheduleLayoutTransition(reduceMotion);
+      }
+      if (summary.deliveredCount > 0 || summary.permanentRejectedCount > 0) {
+        void loadRef.current({ silent: true });
+      }
     })().catch((error) => {
       if (error instanceof AuthRequiredError) transitionToSignedOut();
     });

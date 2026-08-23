@@ -63,6 +63,20 @@ describe("connectivity status ownership", () => {
     expect(dashboard).toContain("Check available storage and try again.");
     expect(dashboard).toContain("Check Sync and diagnostics for details.");
   });
+
+  it("routes permanently rejected timer Stops to attention diagnostics", () => {
+    const status = source("./ConnectivityStatusStrip.tsx");
+    const settings = source("../../app/settings.tsx");
+    const projection = source("../lib/durableLocalProjection.ts");
+
+    expect(status).toContain("durableWork.timerStopNeedsAttentionCount");
+    expect(projection).toContain('stop.failureKind !== "permanent"');
+    expect(settings).toContain("Timer Stop rejected");
+    expect(settings).toContain("Retry Stop");
+    expect(settings).toContain("Discard Stop");
+    expect(settings).toContain("retryTimerStopSyncIssue");
+    expect(settings).toContain("discardTimerStopSyncIssue");
+  });
 });
 
 function source(relativePath: string) {
