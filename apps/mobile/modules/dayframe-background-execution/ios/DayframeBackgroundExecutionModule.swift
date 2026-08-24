@@ -18,17 +18,23 @@ public final class DayframeBackgroundExecutionModule: Module {
     Name("DayframeBackgroundExecution")
     Events("onExpired")
 
-    AsyncFunction("begin") { (name: String) -> String? in
-      self.service.begin(name: name)
-    }.runOnQueue(.main)
+    AsyncFunction("begin") { (name: String) async -> String? in
+      await MainActor.run {
+        self.service.begin(name: name)
+      }
+    }
 
-    AsyncFunction("end") { (leaseToken: String, _reason: String) -> Bool in
-      self.service.end(leaseToken: leaseToken)
-    }.runOnQueue(.main)
+    AsyncFunction("end") { (leaseToken: String, _reason: String) async -> Bool in
+      await MainActor.run {
+        self.service.end(leaseToken: leaseToken)
+      }
+    }
 
-    AsyncFunction("endAll") { (_reason: String) -> Int in
-      self.service.endAll()
-    }.runOnQueue(.main)
+    AsyncFunction("endAll") { (_reason: String) async -> Int in
+      await MainActor.run {
+        self.service.endAll()
+      }
+    }
 
     OnDestroy {
       Task { @MainActor in
@@ -37,4 +43,3 @@ public final class DayframeBackgroundExecutionModule: Module {
     }
   }
 }
-
