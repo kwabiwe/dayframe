@@ -310,7 +310,10 @@ export function createConnectivityRecoveryCoordinator(input: {
         retryAttempt = 0;
       }
       if (result === "authentication_required") break;
-      if (result === "interrupted" && !input.canStart()) break;
+      // An interruption is resumed by the next connectivity, foreground, or
+      // durable-work request. Retrying it in this drain can starve the JS
+      // macrotask queue while React still has a state update pending.
+      if (result === "interrupted") break;
     }
   };
 

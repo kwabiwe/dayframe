@@ -72,7 +72,7 @@ export function clearShortcutCatalog() {
 export async function getNativeShortcutPendingCount(owner: MobileAccountOwner) {
   if (Platform.OS !== "ios" || !nativeShortcutQueue?.pendingShortcutEvents) return 0;
   const events = parseNativeShortcutQueue(await nativeShortcutQueue.pendingShortcutEvents());
-  return events.filter((event) => nativeEventBelongsToOwner(event, owner)).length;
+  return events.filter((event) => nativeEventCanTransferToOwner(event, owner)).length;
 }
 
 export async function drainNativeShortcutQueue(requestedOwner?: MobileAccountOwner) {
@@ -84,7 +84,7 @@ export async function drainNativeShortcutQueue(requestedOwner?: MobileAccountOwn
   const owner = requestedOwner ?? await readActiveMobileAccount();
   if (!owner) return { transferredCount: 0, transferredLocalIds: [] as string[] };
   const events = parseNativeShortcutQueue(await nativeShortcutQueue.pendingShortcutEvents())
-    .filter((event) => nativeEventBelongsToOwner(event, owner));
+    .filter((event) => nativeEventCanTransferToOwner(event, owner));
   if (!events.length) return { transferredCount: 0, transferredLocalIds: [] as string[] };
 
   let transferredCount = 0;
@@ -161,6 +161,14 @@ function nativeEventBelongsToOwner(
 ) {
   if (!event.userId || !event.workspaceId) return false;
   return mobileAccountOwnersEqual(event as MobileAccountOwner, owner);
+}
+
+function nativeEventCanTransferToOwner(
+  event: Pick<NativeShortcutQueuedEvent, "userId" | "workspaceId">,
+  owner: MobileAccountOwner
+) {
+  const isLegacyUnscopedEvent = !event.userId && !event.workspaceId;
+  return isLegacyUnscopedEvent || nativeEventBelongsToOwner(event, owner);
 }
 
 function nativeShortcutEventType(value: unknown): NativeShortcutEventType | null {

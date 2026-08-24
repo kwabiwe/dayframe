@@ -497,6 +497,29 @@ describe("connectivity recovery", () => {
     expect(coordinator.snapshot().interruptedReconnectEpoch).toBe(0);
   });
 
+  it("yields after an interruption even when the start gate is briefly stale", async () => {
+    const calls: number[] = [];
+    const coordinator = createConnectivityRecoveryCoordinator({
+      canStart: () => true,
+      runPass: vi.fn(async (epoch) => {
+        calls.push(epoch);
+        return calls.length === 1 ? "interrupted" as const : "completed" as const;
+      })
+    });
+
+    await coordinator.request(1);
+
+    expect(calls).toEqual([1]);
+    expect(coordinator.snapshot()).toMatchObject({
+      inFlight: false,
+      interruptedReconnectEpoch: 1
+    });
+
+    await coordinator.request(1);
+    expect(calls).toEqual([1, 1]);
+    expect(coordinator.snapshot().interruptedReconnectEpoch).toBe(0);
+  });
+
   it("schedules bounded exponential backoff for retryable transport failure", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-22T12:00:00.000Z"));

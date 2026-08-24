@@ -180,12 +180,40 @@ describe("native Shortcut bridge", () => {
     expect(mocks.removeShortcutEvents).toHaveBeenCalledWith(["owned"]);
   });
 
-  it("quarantines legacy unscoped native events instead of binding them to the current account", async () => {
+  it("adopts legacy unscoped native events into the active account queue", async () => {
     mocks.pendingShortcutEvents.mockResolvedValue([{
       localId: "legacy-unscoped",
       type: "shortcut_action",
       occurredAt: "2026-07-12T03:50:00.000Z"
     }]);
+
+    await expect(getNativeShortcutPendingCount(OWNER)).resolves.toBe(1);
+    await expect(drainNativeShortcutQueue(OWNER)).resolves.toEqual({
+      transferredCount: 1,
+      transferredLocalIds: ["legacy-unscoped"]
+    });
+    expect(mocks.enqueueEvent).toHaveBeenCalledWith(expect.objectContaining({
+      localId: "legacy-unscoped",
+      owner: OWNER,
+      source: "shortcut"
+    }));
+    expect(mocks.removeShortcutEvents).toHaveBeenCalledWith(["legacy-unscoped"]);
+  });
+
+  it("does not adopt partially scoped or other-account native events", async () => {
+    mocks.pendingShortcutEvents.mockResolvedValue([
+      {
+        localId: "missing-workspace",
+        type: "shortcut_action",
+        userId: OWNER.userId
+      },
+      {
+        localId: "other-account",
+        type: "shortcut_action",
+        userId: "user-2",
+        workspaceId: "workspace-2"
+      }
+    ]);
 
     await expect(getNativeShortcutPendingCount(OWNER)).resolves.toBe(0);
     await expect(drainNativeShortcutQueue(OWNER)).resolves.toEqual({

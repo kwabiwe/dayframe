@@ -73,10 +73,12 @@ export function ConnectivityRecoveryOwner() {
 
   const coordinator = useRef<ReturnType<typeof createConnectivityRecoveryCoordinator> | null>(null);
   coordinator.current ??= createConnectivityRecoveryCoordinator({
-    canStart: () =>
-      appActiveRef.current &&
-      connectivityAllowsRecovery(connectivityRef.current) &&
-      Boolean(durableWorkRef.current.accountKey),
+    canStart: () => {
+      const currentDurableWork = getDurableWorkSnapshot();
+      return AppState.currentState === "active" &&
+        connectivityAllowsRecovery(getConnectivitySnapshot()) &&
+        Boolean(currentDurableWork.accountKey);
+    },
     hasPendingWork: () => getDurableWorkSnapshot().pendingCount > 0,
     onPassStarted: (epoch) => {
       reportConnectivityRecoveryStarted(epoch);
