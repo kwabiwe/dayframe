@@ -60,4 +60,10 @@ describe("primary mobile timer action geometry", () => {
     expect(theme).not.toContain("timerSyncStatusSlot");
     expect(theme).not.toContain("timerSyncStatusText");
   });
+
+  it("keeps idle and running timer cards aligned after restoring Quick Actions", () => {
+    expect(dashboard).toContain("styles.idleTimerPanel");
+    expect(theme).toContain("paddingBottom: 8");
+    expect(theme).toContain("minHeight: 137");
+  });
 });

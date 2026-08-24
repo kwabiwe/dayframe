@@ -103,13 +103,13 @@ export function ConnectivityStatusIndicator({
   const viewModel = useContext(ConnectivityStatusContext);
   const { theme } = useMobileTheme();
   const reduceMotion = useReduceMotionPreference();
-  const statusColor = theme.mode === "dark" ? theme.textSecondary : theme.borderStrong;
+  const statusColor = theme.textSecondary;
 
   if (viewModel === undefined) {
     throw new Error("ConnectivityStatusIndicator must be used within ConnectivityStatusProvider");
   }
 
-  const content = viewModel && isFocused ? (
+  const content = viewModel ? (
     <Reanimated.View
       key={viewModel.id}
       entering={FadeIn.duration(reduceMotion ? 70 : MOBILE_MOTION.control)}
@@ -133,7 +133,7 @@ export function ConnectivityStatusIndicator({
         >
           <ConnectivityStatusGlyph
             color={statusColor}
-            reduceMotion={reduceMotion}
+            reduceMotion={reduceMotion || !isFocused}
             variant={viewModel.variant}
           />
         </Pressable>
@@ -148,7 +148,7 @@ export function ConnectivityStatusIndicator({
         >
           <ConnectivityStatusGlyph
             color={statusColor}
-            reduceMotion={reduceMotion}
+            reduceMotion={reduceMotion || !isFocused}
             variant={viewModel.variant}
           />
         </View>
@@ -180,10 +180,7 @@ function ConnectivityStatusGlyph({
 }) {
   const rotation = useSharedValue(0);
   const rotatingStyle = useAnimatedStyle<ViewStyle>(() => ({
-    transform: [
-      { translateY: 4 },
-      { rotate: `${rotation.value}deg` }
-    ]
+    transform: [{ rotate: `${rotation.value}deg` }]
   }));
 
   useEffect(() => {
@@ -191,38 +188,51 @@ function ConnectivityStatusGlyph({
     rotation.value = 0;
     if (variant !== "syncing" || reduceMotion) return undefined;
     rotation.value = withRepeat(
-      withTiming(360, { duration: 2_200, easing: Easing.linear }),
+      withTiming(360, { duration: 3_200, easing: Easing.linear }),
       -1,
       false
     );
     return () => cancelAnimation(rotation);
   }, [reduceMotion, rotation, variant]);
 
-  const symbolName: Record<ConnectivityStatusVariant, SFSymbol> = {
+  const symbolName: Record<Exclude<ConnectivityStatusVariant, "syncing">, SFSymbol> = {
     attention: "xmark.icloud",
     offline: "icloud.slash",
-    synced: "checkmark.icloud",
-    syncing: "arrow.triangle.2.circlepath.icloud"
+    synced: "checkmark.icloud"
   };
 
+  if (variant === "syncing") {
+    return (
+      <View style={[styles.statusGlyph, styles.statusGlyphAligned]}>
+        <Reanimated.View style={[styles.syncArrows, rotatingStyle]}>
+          <SymbolView
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            name="arrow.triangle.2.circlepath"
+            resizeMode="center"
+            scale="medium"
+            size={36}
+            tintColor={color}
+            weight="regular"
+          />
+        </Reanimated.View>
+      </View>
+    );
+  }
+
   return (
-    <Reanimated.View
-      style={[
-        styles.statusGlyph,
-        variant === "syncing" ? rotatingStyle : styles.statusGlyphAligned
-      ]}
-    >
+    <View style={[styles.statusGlyph, styles.statusGlyphAligned]}>
       <SymbolView
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
         name={symbolName[variant]}
         resizeMode="center"
         scale="medium"
-        size={26}
+        size={34}
         tintColor={color}
         weight="regular"
       />
-    </Reanimated.View>
+    </View>
   );
 }
 
@@ -247,11 +257,21 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   statusGlyph: {
-    height: 26,
-    width: 26
+    alignItems: "center",
+    height: 38,
+    justifyContent: "center",
+    position: "relative",
+    width: 38
   },
   statusGlyphAligned: {
-    transform: [{ translateY: 4 }]
+    transform: [{ translateY: 1 }]
+  },
+  syncArrows: {
+    alignItems: "center",
+    height: 38,
+    justifyContent: "center",
+    position: "absolute",
+    width: 38
   },
   statusPressed: {
     opacity: 0.62

@@ -2417,7 +2417,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   </View>
                 </Pressable>
               ) : (
-                <View style={styles.panel}>
+                <View style={[styles.panel, styles.idleTimerPanel]}>
                   <View style={styles.startInputRow}>
                     <View style={styles.startComposerMain}>
                       <Pressable

@@ -183,7 +183,7 @@ function createStyles(theme: MobileTheme) {
       justifyContent: "space-between",
       gap: 12,
       paddingHorizontal: 18,
-      paddingTop: 12,
+      paddingTop: 14,
       paddingBottom: 4,
       backgroundColor: theme.background
     },
@@ -507,11 +507,14 @@ function createStyles(theme: MobileTheme) {
       padding: 14,
       gap: 10
     },
+    idleTimerPanel: {
+      paddingBottom: 8
+    },
     timerPanel: {
       position: "relative",
       backgroundColor: theme.surfaceRaised,
       borderRadius: 18,
-      minHeight: 104,
+      minHeight: 137,
       paddingHorizontal: 16,
       paddingVertical: 14,
       gap: 8,
