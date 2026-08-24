@@ -9,7 +9,6 @@ const session = {
 
 const mocks = vi.hoisted(() => ({
   resolveRequestSession: vi.fn(),
-  retryLiveActivityDeliveryBestEffort: vi.fn(),
   getTimerState: vi.fn()
 }));
 
@@ -21,17 +20,12 @@ vi.mock("@/lib/timer-state", () => ({
   getTimerState: mocks.getTimerState
 }));
 
-vi.mock("@/lib/live-activity-push", () => ({
-  retryLiveActivityDeliveryBestEffort: mocks.retryLiveActivityDeliveryBestEffort
-}));
-
 const { GET } = await import("./route");
 
 describe("/api/timer-state", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.resolveRequestSession.mockResolvedValue(session);
-    mocks.retryLiveActivityDeliveryBestEffort.mockResolvedValue(undefined);
     mocks.getTimerState.mockResolvedValue({
       activeEntryId: "80000000-0000-4000-8000-000000000001",
       updatedAt: "2026-07-30T15:00:00.000Z",
@@ -49,6 +43,25 @@ describe("/api/timer-state", () => {
       serverNow: "2026-07-30T15:00:03.000Z"
     });
     expect(mocks.getTimerState).toHaveBeenCalledWith(session);
-    expect(mocks.retryLiveActivityDeliveryBestEffort).toHaveBeenCalledWith(session);
+    expect(mocks.resolveRequestSession).toHaveBeenCalledWith(expect.any(Request), {
+      allowIngestToken: true,
+      requiredScopes: ["time:read"]
+    });
+  });
+
+  it("keeps integration-token polling to the lightweight fingerprint read", async () => {
+    const tokenSession = {
+      ...session,
+      authMode: "token" as const,
+      scopes: ["time:read"]
+    };
+    mocks.resolveRequestSession.mockResolvedValueOnce(tokenSession);
+
+    const response = await GET(new Request("https://dayframe.test/api/timer-state", {
+      headers: { "x-dayframe-ingest-token": "desk-token" }
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.getTimerState).toHaveBeenCalledWith(tokenSession);
   });
 });

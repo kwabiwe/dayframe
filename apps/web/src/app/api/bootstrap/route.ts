@@ -4,6 +4,7 @@ import { isMissingRequiredColumnError } from "@/lib/db";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import { getBootstrapData } from "@/lib/queries";
 import { getServerLocationRolloutMode } from "@/lib/location/location-rollout";
+import { scheduleLiveActivityRetry } from "@/lib/live-activity-post-response";
 
 export async function GET(request: Request) {
   try {
@@ -12,6 +13,7 @@ export async function GET(request: Request) {
     const data = await getBootstrapData(session, {
       selectedDate: url.searchParams.get("date")
     });
+    scheduleLiveActivityRetry(session);
     return NextResponse.json({
       ...data,
       locationRolloutMode: getServerLocationRolloutMode()

@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { AppState } from "react-native";
 import {
   ActivityEventInputSchema,
   type ActivityEventInput,
@@ -47,6 +48,13 @@ import {
   type PendingTimerStop,
   type TimerStopOwner
 } from "./timerStopOutbox";
+import {
+  endAllTimerBackgroundExecution,
+  getTimerBackgroundExecutionSnapshot,
+  reserveTimerBackgroundExecution,
+  withTimerBackgroundExecutionReservation
+} from "./timerBackgroundExecution";
+import { isExplicitTimerMutationEventType } from "./timerMutationEvents";
 
 const QUEUE_KEY = "dayframe.offlineQueue.v1";
 const TIMER_ENTRY_ID_CORRELATIONS_KEY = "dayframe.timerEntryIdCorrelations.v1";
@@ -60,7 +68,10 @@ export const MOBILE_LOCATION_REVIEW_EVIDENCE_TIMEOUT_MS = 10_000;
 export const MOBILE_LOCATION_REVIEW_ACTION_TIMEOUT_MS = 15_000;
 let queueMutationTail: Promise<void> = Promise.resolve();
 let timerEntryIdCorrelationMutationTail: Promise<void> = Promise.resolve();
-const activityQueueSyncInFlightByOwner = new Map<string, Promise<SyncQueueResult>>();
+type ActiveActivityQueueSync = {
+  promise: Promise<SyncQueueResult>;
+};
+const activityQueueSyncInFlightByOwner = new Map<string, ActiveActivityQueueSync>();
 const activityQueueListeners = new Set<() => void>();
 
 export type MobileDateRange = {
@@ -391,10 +402,12 @@ export type QueueDiagnosticsSnapshot = {
   queue: Array<Omit<QueuedEvent, "occurredAt"> & { occurredAt: string }>;
 };
 
-type SyncQueueOptions = {
+export type SyncQueueOptions = {
   retryFailed?: boolean;
   onlyFailed?: boolean;
   forceRetry?: boolean;
+  signal?: AbortSignal;
+  eventScope?: "all" | "timer_mutations" | "non_timer";
 };
 
 type StoredQueuedEvent = Partial<Omit<QueuedEvent, "occurredAt">> & {
@@ -431,6 +444,7 @@ type ActivityEventDraft = {
   description?: string;
   rawPayload?: Record<string, unknown>;
   owner?: MobileAccountOwner;
+  requestImmediateDelivery?: boolean;
 };
 
 type ApiErrorPayload = {
@@ -557,6 +571,10 @@ export async function signup(email: string, password: string, name?: string, wor
 }
 
 export async function logout() {
+  // Abort request signals before the first awaited logout operation. Native
+  // task cleanup continues asynchronously, but queued mutations remain owned
+  // by the account until the normal durable-work cleanup boundary runs.
+  void endAllTimerBackgroundExecution("logout");
   const activeOwner = await readActiveMobileAccount();
   const token = await getSessionToken();
   await mobileFetch(`${DAYFRAME_API_BASE}/api/auth/logout`, {
@@ -596,7 +614,12 @@ export async function enqueueEvent(input: ActivityEventDraft) {
     if (!owner || !mobileAccountOwnersEqual(activeOwner, owner)) {
       throw new Error("An authenticated account is required to queue activity.");
     }
-    const { localId, owner: _owner, ...eventInput } = input;
+    const {
+      localId,
+      owner: _owner,
+      requestImmediateDelivery,
+      ...eventInput
+    } = input;
     const parsed = ActivityEventInputSchema.parse({
       ...eventInput,
       occurredAt: input.occurredAt ?? new Date(),
@@ -605,7 +628,15 @@ export async function enqueueEvent(input: ActivityEventDraft) {
     const all = await readAllQueue(owner);
     const queue = all.filter((item) => mobileAccountOwnersEqual(item, owner));
     const queuedLocalId = normalizeLocalId(localId) ?? generatedLocalId();
-    if (queue.some((item) => item.localId === queuedLocalId)) return queue;
+    if (queue.some((item) => item.localId === queuedLocalId)) {
+      if (requestImmediateDelivery && isExplicitTimerMutationEventType(parsed.type)) {
+        await reserveTimerBackgroundExecution(
+          activityQueueBackgroundExecutionKey(owner),
+          "Dayframe timer Start sync"
+        );
+      }
+      return queue;
+    }
     const nextItem: QueuedEvent = {
       ...queuedEventFromParsedEvent(parsed),
       localId: queuedLocalId,
@@ -614,6 +645,12 @@ export async function enqueueEvent(input: ActivityEventDraft) {
       workspaceId: owner.workspaceId
     };
     await writeAllQueue([...all, nextItem]);
+    if (requestImmediateDelivery && isExplicitTimerMutationEventType(nextItem.type)) {
+      await reserveTimerBackgroundExecution(
+        activityQueueBackgroundExecutionKey(owner),
+        "Dayframe timer Start sync"
+      );
+    }
     return [...queue, nextItem];
   });
 }
@@ -690,7 +727,7 @@ export async function resolveTimerEntryIdAfterQueueBarrier(localId: string) {
     const owner = await readActiveMobileAccount();
     return {
       pendingSync: owner
-        ? activityQueueSyncInFlightByOwner.get(mobileAccountKey(owner)) ?? null
+        ? activityQueueSyncInFlightByOwner.get(mobileAccountKey(owner))?.promise ?? null
         : null
     };
   });
@@ -832,17 +869,121 @@ export async function syncQueue(options: SyncQueueOptions = {}): Promise<SyncQue
       return { sync: Promise.resolve(queueSyncResult([], [], undefined, false)) };
     }
     const ownerKey = mobileAccountKey(owner);
-    const existing = activityQueueSyncInFlightByOwner.get(ownerKey);
-    if (existing) return { sync: existing };
-    const nextSync = syncQueueUnlocked(options, owner).finally(() => {
-      if (activityQueueSyncInFlightByOwner.get(ownerKey) === nextSync) {
-        activityQueueSyncInFlightByOwner.delete(ownerKey);
-      }
-    });
-    activityQueueSyncInFlightByOwner.set(ownerKey, nextSync);
+    const previous = activityQueueSyncInFlightByOwner.get(ownerKey)?.promise;
+    const active: ActiveActivityQueueSync = { promise: Promise.resolve(
+      queueSyncResult([], [], undefined, false)
+    ) };
+    const nextSync = (previous?.catch(() => undefined) ?? Promise.resolve())
+      .then(() => runActivityQueueSyncRequest(options, owner))
+      .finally(() => {
+        if (activityQueueSyncInFlightByOwner.get(ownerKey) === active) {
+          activityQueueSyncInFlightByOwner.delete(ownerKey);
+        }
+      });
+    active.promise = nextSync;
+    activityQueueSyncInFlightByOwner.set(ownerKey, active);
     return { sync: nextSync };
   });
   return sync;
+}
+
+async function runActivityQueueSyncRequest(
+  options: SyncQueueOptions,
+  owner: MobileAccountOwner
+) {
+  if (options.eventScope === "timer_mutations") {
+    return syncQueueUnlocked(options, owner);
+  }
+  if (options.eventScope === "non_timer") {
+    if (
+      getTimerBackgroundExecutionSnapshot().activeLeaseCount > 0 ||
+      !foregroundActivitySyncAllowed()
+    ) {
+      return deferredQueueSyncResult(owner, "non_timer");
+    }
+    return syncQueueUnlocked({ ...options, signal: undefined }, owner);
+  }
+
+  const timerResult = await syncQueueUnlocked({
+    ...options,
+    eventScope: "timer_mutations"
+  }, owner);
+  if (
+    options.signal?.aborted ||
+    timerResult.stopped
+  ) {
+    return combineQueueSyncResults(
+      [timerResult],
+      await ownedQueueForScope(owner, "all"),
+      options.signal?.aborted === true
+    );
+  }
+  if (
+    getTimerBackgroundExecutionSnapshot().activeLeaseCount > 0 ||
+    !foregroundActivitySyncAllowed()
+  ) {
+    return combineQueueSyncResults(
+      [timerResult],
+      await ownedQueueForScope(owner, "all"),
+      true
+    );
+  }
+  const foregroundResult = await syncQueueUnlocked({
+    ...options,
+    eventScope: "non_timer",
+    signal: undefined
+  }, owner);
+  return combineQueueSyncResults(
+    [timerResult, foregroundResult],
+    await ownedQueueForScope(owner, "all")
+  );
+}
+
+async function deferredQueueSyncResult(
+  owner: MobileAccountOwner,
+  scope: NonNullable<SyncQueueOptions["eventScope"]>
+) {
+  return combineQueueSyncResults(
+    [],
+    await ownedQueueForScope(owner, scope),
+    true
+  );
+}
+
+async function ownedQueueForScope(
+  owner: MobileAccountOwner,
+  scope: NonNullable<SyncQueueOptions["eventScope"]>
+) {
+  const all = await withQueueMutation(() => readAllQueue(owner));
+  return all.filter((item) =>
+    mobileAccountOwnersEqual(item, owner) && queueEventMatchesScope(item, scope)
+  );
+}
+
+function foregroundActivitySyncAllowed() {
+  return !AppState?.currentState || AppState.currentState === "active";
+}
+
+function combineQueueSyncResults(
+  results: readonly SyncQueueResult[],
+  remaining: QueuedEvent[],
+  forceStopped = false
+): SyncQueueResult {
+  const synced = [...new Set(results.flatMap((result) => result.synced))];
+  const correlations = new Map<string, string>();
+  for (const result of results) {
+    for (const correlation of result.timerEntryIdCorrelations) {
+      correlations.set(correlation.localId, correlation.timeEntryId);
+    }
+  }
+  const firstError = results.find((result) => result.firstError)?.firstError;
+  return queueSyncResult(
+    synced,
+    remaining,
+    firstError,
+    forceStopped || results.some((result) => result.stopped),
+    [...correlations].map(([localId, timeEntryId]) => ({ localId, timeEntryId }))
+  );
 }
 
 async function syncQueueUnlocked(
@@ -850,7 +991,36 @@ async function syncQueueUnlocked(
   owner: MobileAccountOwner
 ): Promise<SyncQueueResult> {
   const all = await withQueueMutation(() => readAllQueue(owner));
-  const queue = all.filter((item) => mobileAccountOwnersEqual(item, owner));
+  const queue = all.filter((item) =>
+    mobileAccountOwnersEqual(item, owner) && queueEventMatchesScope(item, options.eventScope)
+  );
+  const hasDeliverableTimerMutation = queue.some((item) =>
+    isQueuedTimerMutationEvent(item) && item.failureKind !== "permanent"
+  );
+  if (options.eventScope !== "non_timer") {
+    return withTimerBackgroundExecutionReservation(
+      activityQueueBackgroundExecutionKey(owner),
+      "Dayframe timer Start sync",
+      (reservedSignal) => syncQueueItems(
+        queue,
+        { ...options, signal: options.signal ?? reservedSignal },
+        owner
+      ),
+      { beginIfMissing: !options.signal && hasDeliverableTimerMutation }
+    );
+  }
+  return syncQueueItems(queue, options, owner);
+}
+
+function activityQueueBackgroundExecutionKey(owner: MobileAccountOwner) {
+  return `activity_queue:${mobileAccountKey(owner)}`;
+}
+
+async function syncQueueItems(
+  queue: QueuedEvent[],
+  options: SyncQueueOptions,
+  owner: MobileAccountOwner
+): Promise<SyncQueueResult> {
   const remaining: QueuedEvent[] = [];
   const synced: string[] = [];
   const timerEntryIdCorrelations: TimerEntryIdCorrelation[] = [];
@@ -860,6 +1030,11 @@ async function syncQueueUnlocked(
 
   for (let index = 0; index < queue.length; index += 1) {
     const item = queue[index];
+    if (options.signal?.aborted) {
+      remaining.push(item, ...queue.slice(index + 1));
+      stopped = true;
+      break;
+    }
     if (options.onlyFailed && !hasQueueFailure(item)) {
       remaining.push(item);
       continue;
@@ -902,7 +1077,8 @@ async function syncQueueUnlocked(
             "Content-Type": "application/json",
             Authorization: `Bearer ${sessionRead.snapshot.token}`
           },
-          body: JSON.stringify(queuedEventRequestBody(item))
+          body: JSON.stringify(queuedEventRequestBody(item)),
+          signal: options.signal
         },
         {
           timeoutMilliseconds: MOBILE_QUEUE_REQUEST_TIMEOUT_MS,
@@ -964,11 +1140,24 @@ async function syncQueueUnlocked(
   });
   return queueSyncResult(
     synced,
-    reconciledRemaining,
+    reconciledRemaining.filter((item) => queueEventMatchesScope(item, options.eventScope)),
     firstError,
     stopped,
     timerEntryIdCorrelations
   );
+}
+
+function queueEventMatchesScope(
+  event: Pick<QueuedEvent, "type">,
+  scope: SyncQueueOptions["eventScope"] = "all"
+) {
+  if (scope === "timer_mutations") return isQueuedTimerMutationEvent(event);
+  if (scope === "non_timer") return !isQueuedTimerMutationEvent(event);
+  return true;
+}
+
+export function isQueuedTimerMutationEvent(event: Pick<QueuedEvent, "type">) {
+  return isExplicitTimerMutationEventType(event.type);
 }
 
 export async function startTimer(
@@ -997,7 +1186,8 @@ export async function stopTimer() {
 
 export async function deliverPendingTimerStop(
   pendingStop: PendingTimerStop,
-  owner: TimerStopOwner
+  owner: TimerStopOwner,
+  signal?: AbortSignal
 ): Promise<PendingTimerStopDeliveryResult> {
   if (!timerStopOwnerMatches(pendingStop, owner)) {
     return { status: "account_mismatch", pendingStop };
@@ -1039,7 +1229,8 @@ export async function deliverPendingTimerStop(
             stopScope: "entry",
             targetEntryId: pendingStop.targetEntryId
           }
-        })
+        }),
+        signal
       },
       {
         timeoutMilliseconds: MOBILE_TIMER_STOP_REQUEST_TIMEOUT_MS,

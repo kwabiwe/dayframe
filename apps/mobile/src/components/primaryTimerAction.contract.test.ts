@@ -7,10 +7,12 @@ const primaryAction = readFileSync(`${componentRoot}PrimaryTimerAction.tsx`, "ut
 const dashboard = readFileSync(`${componentRoot}DayframeDashboard.tsx`, "utf8");
 const editSheet = readFileSync(`${componentRoot}ActiveTimerEditSheet.tsx`, "utf8");
 const theme = readFileSync(fileURLToPath(new URL("../lib/mobileTheme.ts", import.meta.url)), "utf8");
+const layout = readFileSync(fileURLToPath(new URL("../lib/timerCardLayout.ts", import.meta.url)), "utf8");
 
 describe("primary mobile timer action geometry", () => {
   it("matches the canonical web glyph proportions inside the existing 44-point control", () => {
-    expect(primaryAction).toContain("PRIMARY_TIMER_ACTION_SIZE = 44");
+    expect(primaryAction).toContain("PRIMARY_TIMER_ACTION_SIZE = TIMER_CARD_ACTION_SIZE");
+    expect(layout).toContain("TIMER_CARD_ACTION_SIZE = 44");
     expect(primaryAction).toContain("PRIMARY_TIMER_PLAY_GLYPH_SIZE = 22");
     expect(primaryAction).toContain("PRIMARY_TIMER_STOP_GLYPH_SIZE = 17");
     expect(primaryAction).toContain("PRIMARY_TIMER_PLAY_OFFSET_X = 1");
@@ -61,9 +63,14 @@ describe("primary mobile timer action geometry", () => {
     expect(theme).not.toContain("timerSyncStatusText");
   });
 
-  it("keeps idle and running timer cards aligned after restoring Quick Actions", () => {
+  it("uses one explicit idle/running card geometry and a bottom-anchored action column", () => {
     expect(dashboard).toContain("styles.idleTimerPanel");
-    expect(theme).toContain("paddingBottom: 8");
-    expect(theme).toContain("minHeight: 137");
+    expect(dashboard).toContain("styles.quickActionsGroup");
+    expect(theme.match(/minHeight: TIMER_CARD_MIN_HEIGHT/g)).toHaveLength(2);
+    expect(theme.match(/paddingHorizontal: TIMER_CARD_HORIZONTAL_INSET/g)).toHaveLength(2);
+    expect(theme.match(/paddingVertical: TIMER_CARD_VERTICAL_INSET/g)).toHaveLength(2);
+    expect(theme.match(/width: TIMER_CARD_ACTION_COLUMN_WIDTH/g)).toHaveLength(2);
+    expect(theme.match(/justifyContent: "space-between"/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+    expect(theme).not.toMatch(/idleTimerPanel: \{[^}]*paddingBottom: 8/);
   });
 });

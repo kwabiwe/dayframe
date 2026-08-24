@@ -39,6 +39,70 @@ describe("shell timer runtime", () => {
     expect(gate.isActive()).toBe(false);
   });
 
+  it("cancels a queued latest Start inertly when its provider is disposed", async () => {
+    const gate = createTimerMutationGate();
+    let finishStop: (() => void) | undefined;
+    const stopPending = new Promise<void>((resolve) => { finishStop = resolve; });
+    const stop = gate.run(async () => { await stopPending; });
+    const send = vi.fn(async () => undefined);
+
+    const queuedStart = runTimerStartMutation({
+      gate,
+      snapshot: bootstrapData(null),
+      currentDraft: timerDraftForEntry(null),
+      input: { description: "Must not cross accounts" },
+      now: () => "2026-08-24T16:00:00.000Z",
+      createOptimisticId: () => "cancelled-start",
+      commit: () => undefined,
+      setDraft: () => undefined,
+      setBusy: () => undefined,
+      setError: () => undefined,
+      send,
+      refresh: async () => undefined
+    });
+
+    gate.dispose();
+    await expect(queuedStart).resolves.toEqual({
+      ok: false,
+      error: "Timer update was cancelled."
+    });
+    expect(send).not.toHaveBeenCalled();
+
+    finishStop?.();
+    await expect(stop).resolves.toEqual({ ran: true, value: undefined });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("isolates old work across a StrictMode-style dispose and activate remount", async () => {
+    const gate = createTimerMutationGate();
+    let finishOld: (() => void) | undefined;
+    let finishNew: (() => void) | undefined;
+    const oldPending = new Promise<void>((resolve) => { finishOld = resolve; });
+    const newPending = new Promise<void>((resolve) => { finishNew = resolve; });
+    const oldMutation = gate.run(async () => { await oldPending; return "old"; });
+    const staleNetwork = vi.fn(async () => undefined);
+    const staleQueued = gate.runLatest(staleNetwork);
+
+    gate.dispose();
+    await expect(staleQueued).resolves.toEqual({
+      ran: false,
+      cancelled: true,
+      ownsResult: false
+    });
+    gate.activate();
+    const newMutation = gate.run(async () => { await newPending; return "new"; });
+    expect(gate.isActive()).toBe(true);
+
+    finishOld?.();
+    await expect(oldMutation).resolves.toEqual({ ran: true, value: "old" });
+    expect(gate.isActive()).toBe(true);
+    expect(staleNetwork).not.toHaveBeenCalled();
+
+    finishNew?.();
+    await expect(newMutation).resolves.toEqual({ ran: true, value: "new" });
+    expect(gate.isActive()).toBe(false);
+  });
+
   it("projects one optimistic start and one optimistic stop through every entry collection", () => {
     const data = bootstrapData(null);
     const started = applyOptimisticTimerStart(
@@ -327,7 +391,7 @@ describe("shell timer runtime", () => {
     }]);
   });
 
-  it("admits only the first of rapid same and different Quick Actions", async () => {
+  it("coalesces rapid starts so the latest Quick Action becomes authoritative", async () => {
     let releaseRequest: (() => void) | undefined;
     const requestPending = new Promise<void>((resolve) => {
       releaseRequest = resolve;
@@ -346,8 +410,6 @@ describe("shell timer runtime", () => {
     const repeated = harness.run(quickActionTimerDraft("chores"));
     const different = harness.run(quickActionTimerDraft("focus"));
 
-    await expect(repeated).resolves.toEqual({ ok: false, error: "A timer update is already in progress." });
-    await expect(different).resolves.toEqual({ ok: false, error: "A timer update is already in progress." });
     expect(harness.state().requests).toHaveLength(1);
     expect(harness.state().drafts).toEqual([{
       categoryId: "chores",
@@ -357,10 +419,95 @@ describe("shell timer runtime", () => {
 
     releaseRequest?.();
     await expect(first).resolves.toEqual({ ok: true });
+    await expect(repeated).resolves.toEqual({ ok: true });
+    await expect(different).resolves.toEqual({ ok: true });
     const state = harness.state();
     expect(state.data.entries.filter((item) => item.stoppedAt === null)).toHaveLength(1);
-    expect(state.data.entries.filter((item) => item.durationSeconds === 0 && item.stoppedAt !== null)).toHaveLength(0);
-    expect(state.requests).toHaveLength(1);
+    expect(state.data.activeEntry).toEqual(expect.objectContaining({ categoryId: "focus" }));
+    expect(state.data.entries.find((item) => item.categoryId === "chores")?.stoppedAt).not.toBeNull();
+    expect(state.requests.map(serializedRequest)).toEqual([
+      { mode: "start", categoryId: "chores", tagNames: [] },
+      { mode: "start", categoryId: "focus", tagNames: [] }
+    ]);
+    expect(state.refreshes).toBe(1);
+  });
+
+  it("releases the mutation gate before the bootstrap refresh settles", async () => {
+    const gate = createTimerMutationGate();
+    let finishSend: (() => void) | undefined;
+    let finishRefresh: (() => void) | undefined;
+    const sendPending = new Promise<void>((resolve) => { finishSend = resolve; });
+    const refreshPending = new Promise<void>((resolve) => { finishRefresh = resolve; });
+    const snapshot = bootstrapData(null);
+
+    const mutation = runTimerStartMutation({
+      gate,
+      snapshot,
+      currentDraft: timerDraftForEntry(null),
+      input: { description: "Latest intent" },
+      now: () => "2026-07-22T10:00:00.000Z",
+      createOptimisticId: () => "optimistic-latest",
+      commit: () => undefined,
+      setDraft: () => undefined,
+      setBusy: () => undefined,
+      setError: () => undefined,
+      send: async () => { await sendPending; },
+      refresh: async () => { await refreshPending; }
+    });
+
+    expect(gate.isActive()).toBe(true);
+    finishSend?.();
+    await vi.waitFor(() => expect(gate.isActive()).toBe(false));
+    await expect(gate.run(async () => "next mutation")).resolves.toEqual({
+      ran: true,
+      value: "next mutation"
+    });
+
+    finishRefresh?.();
+    await expect(mutation).resolves.toEqual({ ok: true });
+  });
+
+  it("queues Start B behind Stop A instead of rejecting the latest intent", async () => {
+    const gate = createTimerMutationGate();
+    let finishStop: (() => void) | undefined;
+    const stopPending = new Promise<void>((resolve) => { finishStop = resolve; });
+    const stopA = gate.run(async () => {
+      await stopPending;
+      return { ok: true } as const;
+    });
+    const stoppedA = bootstrapData(null);
+    let finalData = stoppedA;
+    const sent: TimerStartRequestPayload[] = [];
+
+    const startB = runTimerStartMutation({
+      gate,
+      snapshot: stoppedA,
+      currentDraft: timerDraftForEntry(null),
+      input: { categoryId: "focus", description: "B", tagNames: [] },
+      now: () => "2026-07-22T10:00:00.000Z",
+      createOptimisticId: () => "optimistic-b",
+      commit: (data) => { finalData = data; },
+      setDraft: () => undefined,
+      setBusy: () => undefined,
+      setError: () => undefined,
+      send: async (payload) => { sent.push(payload); },
+      refresh: async () => undefined
+    });
+
+    expect(sent).toHaveLength(0);
+    finishStop?.();
+    await expect(stopA).resolves.toEqual({ ran: true, value: { ok: true } });
+    await expect(startB).resolves.toEqual({ ok: true });
+    expect(sent).toEqual([{
+      mode: "start",
+      categoryId: "focus",
+      description: "B",
+      tagNames: []
+    }]);
+    expect(finalData.activeEntry).toEqual(expect.objectContaining({
+      id: "optimistic-b",
+      description: "B"
+    }));
   });
 
   it("rolls a failed Quick Action back to the complete previous timer and draft", async () => {
@@ -542,6 +689,7 @@ function timerStartHarness(
   let draft = initialDraft;
   let busy = false;
   let error: string | null = null;
+  let refreshes = 0;
   const requests: TimerStartRequestPayload[] = [];
   const drafts: TimerDraft[] = [];
   let optimisticId = 0;
@@ -566,10 +714,10 @@ function timerStartHarness(
           requests.push(payload);
           await send(payload);
         },
-        refresh: async () => undefined
+        refresh: async () => { refreshes += 1; }
       });
     },
-    state: () => ({ data, draft, drafts, requests, busy, error })
+    state: () => ({ data, draft, drafts, requests, busy, error, refreshes })
   };
 }
 

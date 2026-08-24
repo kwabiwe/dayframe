@@ -59,6 +59,7 @@ import {
   enqueueEvent,
   fetchBootstrap,
   fetchTimerState,
+  isQueuedTimerMutationEvent,
   login,
   readQueue,
   readTimerEntryIdCorrelations,
@@ -122,7 +123,6 @@ import {
 } from "@/lib/health";
 import { syncLiveActivityForEntry } from "@/lib/liveActivity";
 import {
-  getOrCreatePendingStop,
   pendingTimerStopsForOwner,
   readPendingTimerStops,
   removePendingTimerStopsForTarget,
@@ -130,7 +130,11 @@ import {
   type PendingTimerStop,
   type TimerStopOwner
 } from "@/lib/timerStopOutbox";
-import { synchronisePendingTimerStops } from "@/lib/timerStopSync";
+import {
+  persistPendingTimerStop,
+  synchronisePendingTimerStops
+} from "@/lib/timerStopSync";
+import { endAllTimerBackgroundExecution } from "@/lib/timerBackgroundExecution";
 import {
   enqueueTimeEntryDelete,
   enqueueTimeEntryUpdate,
@@ -379,6 +383,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   connectivityCurrent.current = connectivity;
 
   const transitionToSignedOut = useCallback((options?: SignedOutTransitionOptions) => {
+    void endAllTimerBackgroundExecution("logout");
     authStateCurrent.current = "signedOut";
     const signedOutOwner = latestData.current
       ? timerStopOwner(latestData.current)
@@ -639,8 +644,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     });
   }
 
-  const syncQueuedEvents = useCallback(() =>
-    queuedEventSync.run(async () => {
+  const syncQueuedEvents = useCallback(async () => {
+    const runPass = () => queuedEventSync.run(async () => {
       const nativeDrain = await drainNativeShortcutQueue();
       for (const localId of nativeDrain.transferredLocalIds) {
         pendingNativeShortcutLocalIds.current.add(localId);
@@ -656,7 +661,15 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         liveActivityReconciliationDeferred.current = false;
       }
       return syncResult;
-    }), [queuedEventSync]);
+    });
+    const firstResult = await runPass();
+    // A Start can become durable while an older foreground activity drain is
+    // in flight. Join that owner, then immediately give the new timer intent
+    // its own timer-scoped pass instead of mistaking the shared result for it.
+    return firstResult.remaining.some(isQueuedTimerMutationEvent)
+      ? runPass()
+      : firstResult;
+  }, [queuedEventSync]);
 
   function reconcilePendingActiveDeletionWithExternalActiveEntry(
     externalActiveEntryId: string | null
@@ -1302,11 +1315,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }, [activeTimerExpansion, hasLiveActiveTimer, reduceMotion]);
 
   const activeTimerDetailsStyle = {
-    opacity: activeTimerExpansion,
-    maxHeight: activeTimerExpansion.interpolate({
-      inputRange: [0, 1],
-      outputRange: [0, 96]
-    })
+    opacity: activeTimerExpansion
   };
   const activeTimerActionsStyle = {
     opacity: activeTimerExpansion,
@@ -1570,7 +1579,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           origin: "mobile_timer_start",
           startedAt: pendingEntry.startedAt,
           tagNames: pendingEntry.tagNames ?? []
-        }
+        },
+        requestImmediateDelivery: connectivityCurrent.current.isOnline
       });
       if (!queue.some((item) => item.localId === optimisticId && item.type === "timer_start")) {
         throw new Error("The offline timer start could not be queued.");
@@ -1711,7 +1721,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         target: persistedId
           ? { targetEntryId: persistedId }
           : { optimisticEntryId: entryId },
-        patch
+        patch,
+        requestImmediateDelivery: connectivityCurrent.current.isOnline
       });
     } catch {
       Alert.alert(
@@ -1788,15 +1799,19 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     if (!bootstrap) return false;
     const stoppedAt = new Date().toISOString();
     let pendingStop: PendingTimerStop;
+    let stopBackgroundReservation: Promise<void> | null;
     try {
       const persistedId = persistedTimerEntryId(activeEntry.id);
-      pendingStop = await getOrCreatePendingStop({
+      const persisted = await persistPendingTimerStop({
         owner: timerStopOwner(bootstrap),
         target: persistedId
           ? { targetEntryId: persistedId }
           : { optimisticEntryId: activeEntry.id },
-        occurredAt: stoppedAt
+        occurredAt: stoppedAt,
+        requestImmediateDelivery: connectivityCurrent.current.isOnline
       });
+      pendingStop = persisted.pendingStop;
+      stopBackgroundReservation = persisted.backgroundReservation;
     } catch {
       Alert.alert(
         "Timer not stopped",
@@ -1820,6 +1835,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     scheduleLayoutTransition(reduceMotion);
 
     void (async () => {
+      if (!stopBackgroundReservation) return;
+      await stopBackgroundReservation;
       if (!pendingStop.targetEntryId && activeEntry.id.startsWith(OPTIMISTIC_TIMER_ID_PREFIX)) {
         const persistedId = await resolvePersistedTimerEntryId(activeEntry.id);
         if (persistedId) {
@@ -1912,7 +1929,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       if (!bootstrap) return;
       const owner = timerStopOwner(bootstrap);
       try {
-        await releaseTimeEntryCommands(commandIds);
+        await releaseTimeEntryCommands(commandIds, {
+          owner,
+          requestImmediateDelivery: connectivityCurrent.current.isOnline
+        });
       } catch {
         await removeTimeEntryCommands(commandIds).catch(() => undefined);
         const actionableFailures = entries
@@ -2428,49 +2448,51 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                       >
                         <Text style={styles.startInputText} numberOfLines={1}>What are you working on?</Text>
                       </Pressable>
-                      <Text style={styles.quickCategoryHint}>QUICK ACTIONS</Text>
-                      <ScrollView
-                        accessibilityLabel="Quick actions"
-                        horizontal
-                        keyboardShouldPersistTaps="handled"
-                        showsHorizontalScrollIndicator={false}
-                        style={styles.quickActionsInline}
-                        contentContainerStyle={styles.compactCategoryScroller}
-                      >
-                        {quickActions.map((action) => {
-                          const categoryColor = action.isUncategorized
-                            ? null
-                            : paletteColorFor(action.color, action.subtitle ?? action.name, theme.mode);
-                          return (
-                            <Pressable
-                              key={action.key}
-                              accessibilityRole="button"
-                              accessibilityLabel={`Start ${action.name}`}
-                              style={pressable(styles.categoryPillTouch, styles.buttonPressed)}
-                              onPress={() => {
-                                void startTask(action.id, action.description ?? "");
-                              }}
-                            >
-                              <View
-                                style={[
-                                  styles.categoryPill,
-                                  categoryColor
-                                    ? { backgroundColor: colorWithAlpha(categoryColor, theme.mode === "dark" ? 0.18 : 0.13) }
-                                    : styles.categoryPillMuted
-                                ]}
+                      <View style={styles.quickActionsGroup}>
+                        <Text style={styles.quickCategoryHint}>QUICK ACTIONS</Text>
+                        <ScrollView
+                          accessibilityLabel="Quick actions"
+                          horizontal
+                          keyboardShouldPersistTaps="handled"
+                          showsHorizontalScrollIndicator={false}
+                          style={styles.quickActionsInline}
+                          contentContainerStyle={styles.compactCategoryScroller}
+                        >
+                          {quickActions.map((action) => {
+                            const categoryColor = action.isUncategorized
+                              ? null
+                              : paletteColorFor(action.color, action.subtitle ?? action.name, theme.mode);
+                            return (
+                              <Pressable
+                                key={action.key}
+                                accessibilityRole="button"
+                                accessibilityLabel={`Start ${action.name}`}
+                                style={pressable(styles.categoryPillTouch, styles.buttonPressed)}
+                                onPress={() => {
+                                  void startTask(action.id, action.description ?? "");
+                                }}
                               >
                                 <View
                                   style={[
-                                    styles.colorDot,
-                                    categoryColor ? { backgroundColor: categoryColor } : styles.colorDotMuted
+                                    styles.categoryPill,
+                                    categoryColor
+                                      ? { backgroundColor: colorWithAlpha(categoryColor, theme.mode === "dark" ? 0.18 : 0.13) }
+                                      : styles.categoryPillMuted
                                   ]}
-                                />
-                                <Text style={styles.categoryPillText} numberOfLines={1}>{action.name}</Text>
-                              </View>
-                            </Pressable>
-                          );
-                        })}
-                      </ScrollView>
+                                >
+                                  <View
+                                    style={[
+                                      styles.colorDot,
+                                      categoryColor ? { backgroundColor: categoryColor } : styles.colorDotMuted
+                                    ]}
+                                  />
+                                  <Text style={styles.categoryPillText} numberOfLines={1}>{action.name}</Text>
+                                </View>
+                              </Pressable>
+                            );
+                          })}
+                        </ScrollView>
+                      </View>
                     </View>
                     <View style={styles.startActionColumn}>
                       <PrimaryTimerAction

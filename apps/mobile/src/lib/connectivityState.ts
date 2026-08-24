@@ -169,7 +169,7 @@ export function beginConnectivityRecovery(
   state: ConnectivityMachineState,
   epoch: number
 ) {
-  if (state.status !== "online" || state.reconnectEpoch !== epoch || epoch <= 0) {
+  if (state.status !== "online" || state.reconnectEpoch !== epoch || epoch < 0) {
     return state;
   }
   return {

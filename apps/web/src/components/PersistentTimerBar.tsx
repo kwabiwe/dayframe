@@ -184,7 +184,10 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
 
   async function submitTimer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!shouldStartTimerFromEntrySubmit({ hasActiveTimer: Boolean(active), isBusy: isTimerBusy })) return;
+    if (!shouldStartTimerFromEntrySubmit({
+      hasActiveTimer: Boolean(active),
+      isBusy: isTimerBusy && Boolean(active)
+    })) return;
     setSuggestionsOpen(false);
     await startTimer();
   }
@@ -192,7 +195,10 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   function startFromEnter(event: ReactKeyboardEvent<HTMLInputElement>) {
     if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
     event.preventDefault();
-    if (!shouldStartTimerFromEntrySubmit({ hasActiveTimer: Boolean(active), isBusy: isTimerBusy })) return;
+    if (!shouldStartTimerFromEntrySubmit({
+      hasActiveTimer: Boolean(active),
+      isBusy: isTimerBusy && Boolean(active)
+    })) return;
     setSuggestionsOpen(false);
     void startTimer();
   }
@@ -455,8 +461,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
           <button
             className={["swiss-command-play", active ? "is-active" : ""].filter(Boolean).join(" ")}
             type={active ? "button" : "submit"}
-            disabled={isTimerBusy}
-            aria-busy={isTimerBusy || undefined}
+            disabled={Boolean(active) && isTimerBusy}
+            aria-busy={(Boolean(active) && isTimerBusy) || undefined}
             aria-label={active ? "Stop timer" : "Start timer"}
             onClick={() => {
               if (active) void stopTimer();
@@ -528,7 +534,6 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
               <button
                 key={action.key}
                 type="button"
-                disabled={isTimerBusy}
                 onClick={() => {
                   const draft = quickActionTimerDraft(action.categoryId);
                   setCategoryMenuOpen(false);

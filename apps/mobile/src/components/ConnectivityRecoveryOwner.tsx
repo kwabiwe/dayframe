@@ -55,6 +55,11 @@ import { getActiveLocationAccountIdentity } from "@/lib/location/store";
 import { drainNativeShortcutQueue } from "@/lib/shortcuts";
 import { synchronisePendingTimerStops } from "@/lib/timerStopSync";
 import { synchroniseTimeEntryCommands } from "@/lib/timeEntryOutbox";
+import {
+  beginTimerBackgroundExecution,
+  endAllTimerBackgroundExecution,
+  type TimerBackgroundExecutionLease
+} from "@/lib/timerBackgroundExecution";
 
 export function ConnectivityRecoveryOwner() {
   const connectivity = useConnectivity();
@@ -110,7 +115,10 @@ export function ConnectivityRecoveryOwner() {
 
   useEffect(() => {
     void refreshDurableWorkSnapshot();
-    return () => coordinator.current?.dispose();
+    return () => {
+      coordinator.current?.dispose();
+      void endAllTimerBackgroundExecution("teardown");
+    };
   }, []);
 
   useEffect(() => subscribeAuthenticatedSession(() => {
@@ -135,6 +143,7 @@ export function ConnectivityRecoveryOwner() {
     if (!connectivityAllowsRecovery(connectivity)) {
       currentCoordinator.pause();
       reportConnectivityRecoveryCancelled(connectivity.reconnectEpoch);
+      void endAllTimerBackgroundExecution("cancelled");
       return;
     }
     if (connectivity.isOffline) {
@@ -179,6 +188,7 @@ export function ConnectivityRecoveryOwner() {
     const workArrived = durableWork.pendingCount > previousPendingCount.current;
     if (accountChanged && previousAccountKey.current !== null) {
       currentCoordinator.ignore(connectivity.reconnectEpoch);
+      void endAllTimerBackgroundExecution("account_changed");
     }
     previousAccountKey.current = durableWork.accountKey;
     previousPendingCount.current = durableWork.pendingCount;
@@ -231,132 +241,181 @@ async function runRootRecoveryPass() {
     return "authentication_required" as const;
   }
   const ownerKey = mobileAccountKey(owner);
+  let timerBackgroundLease: TimerBackgroundExecutionLease | null = null;
+  let timerPhaseActive = getDurableWorkSnapshot().timerMutationCount > 0;
+  let timerPhaseEnded = !timerPhaseActive;
+  if (timerPhaseActive) {
+    timerBackgroundLease = await beginTimerBackgroundExecution(
+      "Dayframe timer mutation recovery"
+    );
+  }
+  const endTimerPhase = async (reason: "success" | "failure" | "cancelled") => {
+    if (timerPhaseEnded) return;
+    timerPhaseEnded = true;
+    timerPhaseActive = false;
+    await timerBackgroundLease?.end(reason);
+  };
   const canContinue = () => {
     const snapshot = getDurableWorkSnapshot();
-    return AppState.currentState === "active" &&
+    const timerCanContinue = timerPhaseActive &&
+      timerBackgroundLease !== null &&
+      !timerBackgroundLease.signal.aborted;
+    return (AppState.currentState === "active" || timerCanContinue) &&
       connectivityAllowsRecovery(getConnectivitySnapshot()) &&
       snapshot.accountKey === ownerKey;
   };
 
-  const result = await runConnectivityRecoveryPass({
-    canContinue,
-    isAuthenticationRequired: (error) => error instanceof AuthRequiredError,
-    isTransportFailure: isMobileTransportFailure,
-    onAuthenticationRequired: () => undefined,
-    onStepOutcome: ({ step, durationMilliseconds, outcome }) => {
-      recordRecoveryLifecycle("step", {
-        durationMilliseconds,
-        outcome,
-        step
-      });
-    },
-    steps: [
-      {
-        name: "timer_stops_ready",
-        run: async () => {
-          const result = await synchronisePendingTimerStops({
-            owner,
-            correlations: await readTimerEntryIdCorrelations(owner)
-          });
-          return result.transportFailure ? "transport_failure" : "continue";
-        }
+  try {
+    const result = await runConnectivityRecoveryPass({
+      canContinue,
+      isAuthenticationRequired: (error) => error instanceof AuthRequiredError,
+      isTransportFailure: isMobileTransportFailure,
+      onAuthenticationRequired: () => undefined,
+      onStepOutcome: ({ step, durationMilliseconds, outcome }) => {
+        recordRecoveryLifecycle("step", {
+          durationMilliseconds,
+          outcome,
+          step
+        });
       },
-      {
-        name: "activity_queue",
-        run: async () => {
-          await drainNativeShortcutQueue(owner);
-          const result = await syncQueue({ forceRetry: true });
-          if (result.firstError?.failureKind === "network") return "transport_failure";
-          return result.remaining.some((event) => event.failureKind !== "permanent")
-            ? "application_failure"
-            : "continue";
-        }
-      },
-      {
-        name: "time_entry_outbox",
-        run: async () => {
-          const result = await synchroniseTimeEntryCommands({
-            owner,
-            correlations: await readTimerEntryIdCorrelations(owner),
-            force: true
-          });
-          if (result.reason === "retryable_failure") return "transport_failure";
-          if (result.reason === "authentication_required" || result.reason === "session_changed") {
-            throw new AuthRequiredError();
+      steps: [
+        {
+          name: "timer_stops_ready",
+          run: async () => {
+            const result = await synchronisePendingTimerStops({
+              owner,
+              correlations: await readTimerEntryIdCorrelations(owner),
+              signal: timerBackgroundLease?.signal
+            });
+            return result.transportFailure ? "transport_failure" : "continue";
           }
-          return result.waitingCount > 0 ? "application_failure" : "continue";
-        }
-      },
-      {
-        name: "timer_stops_after_correlation",
-        run: async () => {
-          const result = await synchronisePendingTimerStops({
-            owner,
-            correlations: await readTimerEntryIdCorrelations(owner)
-          });
-          if (result.transportFailure) return "transport_failure";
-          return result.remaining.some((stop) => stop.failureKind !== "permanent")
-            ? "application_failure"
-            : "continue";
-        }
-      },
-      {
-        name: "review_outbox",
-        run: async () => {
-          const reviewOwner = await getActiveReviewAccountIdentity();
-          if (
-            reviewOwner?.userId !== owner.userId ||
-            reviewOwner.workspaceId !== owner.workspaceId
-          ) {
-            return "continue";
+        },
+        {
+          name: "timer_activity_queue",
+          run: async () => {
+            await drainNativeShortcutQueue(owner);
+            const result = await syncQueue({
+              eventScope: "timer_mutations",
+              forceRetry: true,
+              signal: timerBackgroundLease?.signal
+            });
+            if (result.firstError?.failureKind === "network") return "transport_failure";
+            return result.remaining.some((event) => event.failureKind !== "permanent")
+              ? "application_failure"
+              : "continue";
           }
-          return reviewConnectivityRecoveryStepResult(
-            await synchroniseReviewMutations({ force: true })
-          );
-        }
-      },
-      {
-        name: "location_intelligence",
-        run: async () => {
-          const locationOwner = await getActiveLocationAccountIdentity();
-          if (
-            locationOwner?.userId !== owner.userId ||
-            locationOwner.workspaceId !== owner.workspaceId
-          ) {
-            return "continue";
-          }
-          return locationConnectivityRecoveryStepResult(
-            await syncLocationIntelligenceOnForeground()
-          );
-        }
-      },
-      {
-        name: "bootstrap",
-        run: async () => {
-          const publication = beginRecoveredDashboardBootstrapPublication();
-          try {
-            const serverBootstrap = await fetchBootstrap();
+        },
+        {
+          name: "time_entry_outbox",
+          run: async () => {
+            const result = await synchroniseTimeEntryCommands({
+              owner,
+              correlations: await readTimerEntryIdCorrelations(owner),
+              signal: timerBackgroundLease?.signal
+            });
+            if (result.reason === "retryable_failure") return "transport_failure";
             if (
-              serverBootstrap.user.id !== owner.userId ||
-              serverBootstrap.workspace.id !== owner.workspaceId
+              result.reason === "authentication_required" ||
+              result.reason === "session_changed"
             ) {
               throw new AuthRequiredError();
             }
-            await cacheDashboardBootstrap(serverBootstrap);
-            const projected = projectDurableLocalWork(
-              serverBootstrap,
-              await readDurableLocalWork(owner)
+            return result.waitingCount > 0 ? "application_failure" : "continue";
+          }
+        },
+        {
+          name: "timer_stops_after_correlation",
+          run: async () => {
+            try {
+              const result = await synchronisePendingTimerStops({
+                owner,
+                correlations: await readTimerEntryIdCorrelations(owner),
+                signal: timerBackgroundLease?.signal
+              });
+              if (result.transportFailure) return "transport_failure";
+              return result.remaining.some((stop) => stop.failureKind !== "permanent")
+                ? "application_failure"
+                : "continue";
+            } finally {
+              await endTimerPhase(
+                timerBackgroundLease?.signal.aborted ? "cancelled" : "success"
+              );
+            }
+          }
+        },
+        {
+          name: "activity_queue",
+          run: async () => {
+            const result = await syncQueue({
+              eventScope: "non_timer",
+              forceRetry: true
+            });
+            if (result.firstError?.failureKind === "network") return "transport_failure";
+            return result.remaining.some((event) => event.failureKind !== "permanent")
+              ? "application_failure"
+              : "continue";
+          }
+        },
+        {
+          name: "review_outbox",
+          run: async () => {
+            const reviewOwner = await getActiveReviewAccountIdentity();
+            if (
+              reviewOwner?.userId !== owner.userId ||
+              reviewOwner.workspaceId !== owner.workspaceId
+            ) {
+              return "continue";
+            }
+            return reviewConnectivityRecoveryStepResult(
+              await synchroniseReviewMutations({ force: true })
             );
-            publication.publish(projected);
-          } finally {
-            publication.abandon();
+          }
+        },
+        {
+          name: "location_intelligence",
+          run: async () => {
+            const locationOwner = await getActiveLocationAccountIdentity();
+            if (
+              locationOwner?.userId !== owner.userId ||
+              locationOwner.workspaceId !== owner.workspaceId
+            ) {
+              return "continue";
+            }
+            return locationConnectivityRecoveryStepResult(
+              await syncLocationIntelligenceOnForeground()
+            );
+          }
+        },
+        {
+          name: "bootstrap",
+          run: async () => {
+            const publication = beginRecoveredDashboardBootstrapPublication();
+            try {
+              const serverBootstrap = await fetchBootstrap();
+              if (
+                serverBootstrap.user.id !== owner.userId ||
+                serverBootstrap.workspace.id !== owner.workspaceId
+              ) {
+                throw new AuthRequiredError();
+              }
+              await cacheDashboardBootstrap(serverBootstrap);
+              const projected = projectDurableLocalWork(
+                serverBootstrap,
+                await readDurableLocalWork(owner)
+              );
+              publication.publish(projected);
+            } finally {
+              publication.abandon();
+            }
           }
         }
-      }
-    ]
-  });
-  await refreshDurableWorkSnapshot();
-  return result;
+      ]
+    });
+    await refreshDurableWorkSnapshot();
+    return result;
+  } finally {
+    await endTimerPhase(timerBackgroundLease?.signal.aborted ? "cancelled" : "failure");
+  }
 }
 
 function recordRecoveryLifecycle(

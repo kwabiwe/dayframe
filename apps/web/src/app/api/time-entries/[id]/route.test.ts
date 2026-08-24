@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   resolveRequestSession: vi.fn(),
   updateTimeEntry: vi.fn(),
   deleteTimeEntry: vi.fn(),
+  scheduleLiveActivityNotification: vi.fn(),
   TimeEntryNotFoundError: class TimeEntryNotFoundError extends Error {
     constructor() {
       super("Time entry not found.");
@@ -35,6 +36,10 @@ vi.mock("@/lib/event-service", () => ({
   deleteTimeEntry: mocks.deleteTimeEntry,
   TimeEntryNotFoundError: mocks.TimeEntryNotFoundError,
   TimeEntryValidationError: mocks.TimeEntryValidationError
+}));
+
+vi.mock("@/lib/live-activity-post-response", () => ({
+  scheduleLiveActivityNotification: mocks.scheduleLiveActivityNotification
 }));
 
 const { DELETE, PATCH } = await import("./route");
@@ -79,6 +84,7 @@ describe("PATCH /api/time-entries/[id]", () => {
       },
       session
     );
+    expect(mocks.scheduleLiveActivityNotification).toHaveBeenCalledWith(session);
   });
 
   it("rejects a running timer start time in the future", async () => {
@@ -174,6 +180,7 @@ describe("DELETE /api/time-entries/[id]", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, id: "entry-1", deleted: true });
     expect(mocks.deleteTimeEntry).toHaveBeenCalledWith("entry-1", session);
+    expect(mocks.scheduleLiveActivityNotification).toHaveBeenCalledWith(session);
   });
 
   it("keeps completed-entry delete behavior on the same scoped route", async () => {

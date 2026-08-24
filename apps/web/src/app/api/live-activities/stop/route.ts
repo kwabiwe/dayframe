@@ -1,4 +1,4 @@
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
   isDatabasePayloadError,
@@ -8,9 +8,9 @@ import {
 import { processActivityEvent } from "@/lib/event-service";
 import {
   LiveActivityControlError,
-  notifyLiveActivitiesBestEffort,
   resolveLiveActivityControlSession
 } from "@/lib/live-activity-push";
+import { scheduleLiveActivityNotification } from "@/lib/live-activity-post-response";
 
 const StopSchema = z.object({
   token: z.string().regex(/^[0-9a-f]+$/i).min(32).max(512),
@@ -41,9 +41,7 @@ export async function POST(request: Request) {
     }, session);
     // The exact timer mutation is already committed. APNs delivery must not
     // hold the App Intent response open long enough for iOS to terminate it.
-    after(async () => {
-      await notifyLiveActivitiesBestEffort(session);
-    });
+    scheduleLiveActivityNotification(session);
     return NextResponse.json(result, {
       status: result.duplicate ? 200 : 201,
       headers: { "Cache-Control": "no-store" }

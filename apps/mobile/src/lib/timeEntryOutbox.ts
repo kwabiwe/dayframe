@@ -16,6 +16,11 @@ import {
   type MobileAccountOwner
 } from "./mobileAccount";
 import type { TimeEntryUpdatePatch } from "./api";
+import {
+  hasTimerBackgroundExecutionReservation,
+  reserveTimerBackgroundExecution,
+  withTimerBackgroundExecutionReservation
+} from "./timerBackgroundExecution";
 
 const TIME_ENTRY_OUTBOX_KEY = "dayframe.timeEntryOutbox.v1";
 const TIME_ENTRY_OUTBOX_QUARANTINE_KEY = "dayframe.timeEntryOutbox.quarantine.v1";
@@ -81,12 +86,14 @@ export async function enqueueTimeEntryUpdate(input: {
   owner: MobileAccountOwner;
   target: TimeEntryCommandTarget;
   patch: TimeEntryUpdatePatch;
+  requestImmediateDelivery?: boolean;
 }) {
   return enqueueTimeEntryCommand({
     owner: input.owner,
     target: input.target,
     operation: "update",
-    patch: input.patch
+    patch: input.patch,
+    requestImmediateDelivery: input.requestImmediateDelivery
   });
 }
 
@@ -94,16 +101,24 @@ export async function enqueueTimeEntryDelete(input: {
   owner: MobileAccountOwner;
   target: TimeEntryCommandTarget;
   deliverAfter?: string;
+  requestImmediateDelivery?: boolean;
 }) {
   return enqueueTimeEntryCommand({
     owner: input.owner,
     target: input.target,
     operation: "delete",
-    deliverAfter: input.deliverAfter
+    deliverAfter: input.deliverAfter,
+    requestImmediateDelivery: input.requestImmediateDelivery
   });
 }
 
-export async function releaseTimeEntryCommands(clientCommandIds: readonly string[]) {
+export async function releaseTimeEntryCommands(
+  clientCommandIds: readonly string[],
+  options: {
+    owner?: MobileAccountOwner;
+    requestImmediateDelivery?: boolean;
+  } = {}
+) {
   const ids = new Set(clientCommandIds);
   if (ids.size === 0) return 0;
   return withMutation(async () => {
@@ -115,7 +130,23 @@ export async function releaseTimeEntryCommands(clientCommandIds: readonly string
       const { deliverAfter: _deliverAfter, ...released } = command;
       return { ...released, updatedAt: new Date().toISOString() };
     });
-    if (releasedCount > 0) await writeAllCommands(next);
+    if (releasedCount > 0) {
+      await writeAllCommands(next);
+      if (
+        options.requestImmediateDelivery &&
+        options.owner &&
+        next.some((command) =>
+          ids.has(command.clientCommandId) &&
+          mobileAccountOwnersEqual(command, options.owner) &&
+          isTimeEntryCommandTransportReady(command, new Map(), {
+            force: true,
+            now: new Date()
+          })
+        )
+      ) {
+        await reserveTimeEntryBackgroundExecution(options.owner);
+      }
+    }
     return releasedCount;
   });
 }
@@ -172,6 +203,7 @@ export async function synchroniseTimeEntryCommands(input: {
   correlations: ReadonlyMap<string, string>;
   force?: boolean;
   now?: Date;
+  signal?: AbortSignal;
 }): Promise<TimeEntryOutboxSyncResult> {
   const ownerKey = mobileAccountKey(input.owner);
   const existing = syncInFlightByOwner.get(ownerKey);
@@ -180,14 +212,18 @@ export async function synchroniseTimeEntryCommands(input: {
     for (const [localId, canonicalId] of input.correlations) {
       existing.control.correlations.set(localId, canonicalId);
     }
-    if (!input.force) return existing.promise;
     return existing.promise.then((result) => {
-      if (result.reason !== "retry_wait") return result;
+      const hasNewImmediateMutation = hasTimerBackgroundExecutionReservation(
+        timeEntryBackgroundExecutionKey(input.owner)
+      );
+      if (!hasNewImmediateMutation && (!input.force || result.reason !== "retry_wait")) {
+        return result;
+      }
       return synchroniseTimeEntryCommands({
         ...input,
         correlations: new Map(existing.control.correlations),
-        force: true
-      });
+        force: hasNewImmediateMutation ? input.force : true
+      }).then((next) => combineTimeEntryOutboxSyncResults(result, next));
     });
   }
   const control: TimeEntryCommandDrainControl = {
@@ -197,7 +233,8 @@ export async function synchroniseTimeEntryCommands(input: {
   const sync = runTimeEntryCommandDrain({
     control,
     now: input.now,
-    owner: input.owner
+    owner: input.owner,
+    signal: input.signal
   }).finally(() => {
     if (syncInFlightByOwner.get(ownerKey)?.promise === sync) {
       syncInFlightByOwner.delete(ownerKey);
@@ -207,7 +244,13 @@ export async function synchroniseTimeEntryCommands(input: {
   return sync;
 }
 
-export async function getTimeEntryOutboxDiagnostics(owner?: MobileAccountOwner) {
+export async function getTimeEntryOutboxDiagnostics(
+  owner?: MobileAccountOwner,
+  options: {
+    correlations?: ReadonlyMap<string, string>;
+    now?: Date;
+  } = {}
+) {
   const resolvedOwner = owner ?? await readActiveMobileAccount();
   const commands = resolvedOwner
     ? await readPendingTimeEntryCommands(resolvedOwner)
@@ -221,6 +264,13 @@ export async function getTimeEntryOutboxDiagnostics(owner?: MobileAccountOwner) 
   const permanent = commands.filter((command) => command.failureKind === "permanent");
   return {
     pendingCount: retryable.length,
+    transportReadyCount: retryable.filter((command) =>
+      isTimeEntryCommandTransportReady(
+        command,
+        options.correlations ?? new Map(),
+        { now: options.now }
+      )
+    ).length,
     needsAttentionCount: permanent.length,
     quarantinedCount: ownedQuarantine.length,
     deviceQuarantinedCount: deviceQuarantine.length,
@@ -327,14 +377,49 @@ async function runTimeEntryCommandDrain(input: {
   control: TimeEntryCommandDrainControl;
   owner: MobileAccountOwner;
   now?: Date;
+  signal?: AbortSignal;
+  backgroundExecutionChecked?: boolean;
 }): Promise<TimeEntryOutboxSyncResult> {
   if (!mobileAccountOwnersEqual(await readActiveMobileAccount(), input.owner)) {
     return currentOutboxResult(input.owner, 0, true, "session_changed");
+  }
+  if (!input.signal && !input.backgroundExecutionChecked) {
+    const reservationKey = timeEntryBackgroundExecutionKey(input.owner);
+    const firstPendingCommand = (await readPendingTimeEntryCommands(input.owner))
+      .find((command) => command.failureKind !== "permanent");
+    const hasTransportReadyCommand = firstPendingCommand
+      ? isTimeEntryCommandTransportReady(
+          firstPendingCommand,
+          input.control.correlations,
+          {
+            force: input.control.forceRequested,
+            now: input.now ?? new Date()
+          }
+        )
+      : false;
+    if (
+      hasTimerBackgroundExecutionReservation(reservationKey) ||
+      hasTransportReadyCommand
+    ) {
+      return withTimerBackgroundExecutionReservation(
+        reservationKey,
+        "Dayframe timer Edit or Delete sync",
+        (signal) => runTimeEntryCommandDrain({
+          ...input,
+          signal,
+          backgroundExecutionChecked: true
+        }),
+        { beginIfMissing: hasTransportReadyCommand }
+      );
+    }
   }
   let deliveredCount = 0;
   const now = input.now ?? new Date();
 
   while (true) {
+    if (input.signal?.aborted) {
+      return currentOutboxResult(input.owner, deliveredCount, true, "retryable_failure");
+    }
     const { all, command: original } = await withMutation(async () => {
       const current = await readAllCommands();
       return {
@@ -389,7 +474,8 @@ async function runTimeEntryCommandDrain(input: {
           },
           ...(original.operation === "update"
             ? { body: JSON.stringify(original.patch ?? {}) }
-            : {})
+            : {}),
+          signal: input.signal
         },
         {
           timeoutMilliseconds: MOBILE_TIME_ENTRY_COMMAND_TIMEOUT_MS,
@@ -427,7 +513,9 @@ async function runTimeEntryCommandDrain(input: {
         return outboxResult(current, input.owner, deliveredCount, true, "retryable_failure");
       }
     } catch (error) {
-      const retryable = error instanceof MobileRequestTimeoutError || isMobileTransportFailure(error);
+      const retryable = input.signal?.aborted ||
+        error instanceof MobileRequestTimeoutError ||
+        isMobileTransportFailure(error);
       const message = error instanceof Error ? error.message : "Network request failed.";
       const current = await retainCommandFailure(original.clientCommandId, attemptedAt, {
         kind: retryable ? "retryable" : "permanent",
@@ -446,6 +534,7 @@ async function enqueueTimeEntryCommand(input: {
   operation: "update" | "delete";
   patch?: TimeEntryUpdatePatch;
   deliverAfter?: string;
+  requestImmediateDelivery?: boolean;
 }) {
   const activeOwner = await readActiveMobileAccount();
   if (!mobileAccountOwnersEqual(activeOwner, input.owner)) {
@@ -467,8 +556,60 @@ async function enqueueTimeEntryCommand(input: {
     };
     const all = await readAllCommands();
     await writeAllCommands([...all, command]);
+    if (
+      input.requestImmediateDelivery &&
+      isTimeEntryCommandTransportReady(command, new Map(), {
+        force: true,
+        now: new Date()
+      })
+    ) {
+      await reserveTimeEntryBackgroundExecution(input.owner);
+    }
     return command;
   });
+}
+
+export function isTimeEntryCommandTransportReady(
+  command: PendingTimeEntryCommand,
+  correlations: ReadonlyMap<string, string>,
+  options: { force?: boolean; now?: Date } = {}
+) {
+  if (command.failureKind === "permanent") return false;
+  const now = options.now ?? new Date();
+  if (command.deliverAfter && Date.parse(command.deliverAfter) > now.getTime()) {
+    return false;
+  }
+  if (!command.targetEntryId && !(
+    command.optimisticEntryId && correlations.has(command.optimisticEntryId)
+  )) {
+    return false;
+  }
+  return options.force === true || !command.nextAttemptAt ||
+    Date.parse(command.nextAttemptAt) <= now.getTime();
+}
+
+function timeEntryBackgroundExecutionKey(owner: MobileAccountOwner) {
+  return `time_entry_outbox:${mobileAccountKey(owner)}`;
+}
+
+function reserveTimeEntryBackgroundExecution(owner: MobileAccountOwner) {
+  return reserveTimerBackgroundExecution(
+    timeEntryBackgroundExecutionKey(owner),
+    "Dayframe timer Edit or Delete sync"
+  );
+}
+
+function combineTimeEntryOutboxSyncResults(
+  first: TimeEntryOutboxSyncResult,
+  second: TimeEntryOutboxSyncResult
+): TimeEntryOutboxSyncResult {
+  return {
+    deliveredCount: first.deliveredCount + second.deliveredCount,
+    waitingCount: second.waitingCount,
+    needsAttentionCount: second.needsAttentionCount,
+    stopped: second.stopped,
+    ...(second.reason ? { reason: second.reason } : {})
+  };
 }
 
 async function readAllCommands(): Promise<PendingTimeEntryCommand[]> {

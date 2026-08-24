@@ -26,6 +26,11 @@ vi.mock("./secure-session", () => ({
 const account = await import("./mobileAccount");
 const outbox = await import("./timeEntryOutbox");
 const secureSession = await import("./secure-session");
+const {
+  getTimerBackgroundExecutionSnapshot,
+  subscribeTimerBackgroundExecution
+} = await import("./timerBackgroundExecution");
+const AsyncStorage = (await import("@react-native-async-storage/async-storage")).default;
 
 const OWNER_A = { userId: "user-a", workspaceId: "workspace-a" };
 const OWNER_B = { userId: "user-b", workspaceId: "workspace-b" };
@@ -86,6 +91,126 @@ describe("durable time-entry outbox", () => {
       expect(retained[0]?.nextAttemptAt).toBeTruthy();
     }
   );
+
+  it("retains an in-flight Edit when finite background execution expires", async () => {
+    await outbox.enqueueTimeEntryUpdate({
+      owner: OWNER_A,
+      target: { targetEntryId: "entry-expiry" },
+      patch: { description: "Still saved" }
+    });
+    const controller = new AbortController();
+    const fetchMock = vi.fn((_input: string | URL | Request, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const sync = outbox.synchroniseTimeEntryCommands({
+      owner: OWNER_A,
+      correlations: new Map(),
+      force: true,
+      signal: controller.signal
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    controller.abort(new Error("Background execution expired."));
+
+    await expect(sync).resolves.toMatchObject({
+      deliveredCount: 0,
+      reason: "retryable_failure",
+      waitingCount: 1
+    });
+    await expect(outbox.readPendingTimeEntryCommands(OWNER_A)).resolves.toEqual([
+      expect.objectContaining({
+        failureKind: "retryable",
+        operation: "update",
+        targetEntryId: "entry-expiry"
+      })
+    ]);
+  });
+
+  it("reserves finite execution only after an immediately deliverable Edit is durable", async () => {
+    let finishDurableWrite!: () => void;
+    const durableWrite = new Promise<void>((resolve) => {
+      finishDurableWrite = resolve;
+    });
+    vi.mocked(AsyncStorage.setItem).mockImplementationOnce(async (key, value) => {
+      await durableWrite;
+      storage.set(key, value);
+    });
+    const enqueue = outbox.enqueueTimeEntryUpdate({
+      owner: OWNER_A,
+      target: { targetEntryId: "entry-storage-boundary" },
+      patch: { description: "Saved first" },
+      requestImmediateDelivery: true
+    });
+    await Promise.resolve();
+    expect(getTimerBackgroundExecutionSnapshot().activeLeaseCount).toBe(0);
+
+    finishDurableWrite();
+    await enqueue;
+    expect(getTimerBackgroundExecutionSnapshot().activeLeaseCount).toBe(1);
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(null, { status: 204 }))));
+    await expect(outbox.synchroniseTimeEntryCommands({
+      owner: OWNER_A,
+      correlations: new Map(),
+      force: true
+    })).resolves.toMatchObject({ deliveredCount: 1, waitingCount: 0 });
+    expect(getTimerBackgroundExecutionSnapshot().activeLeaseCount).toBe(0);
+  });
+
+  it.each([
+    {
+      expectedReason: "deferred",
+      record: commandFixture({
+        clientCommandId: "undo-held",
+        deliverAfter: "2026-08-22T12:00:06.000Z",
+        targetEntryId: "entry-undo-held"
+      })
+    },
+    {
+      expectedReason: "dependency_wait",
+      record: commandFixture({
+        clientCommandId: "dependency-held",
+        optimisticEntryId: "optimistic-entry",
+        targetEntryId: null
+      })
+    },
+    {
+      expectedReason: "retry_wait",
+      record: commandFixture({
+        clientCommandId: "backoff-held",
+        failureKind: "retryable",
+        nextAttemptAt: "2026-08-22T12:05:00.000Z",
+        targetEntryId: "entry-backoff-held"
+      })
+    }
+  ])("keeps $expectedReason work pending without showing transmission", async ({
+    expectedReason,
+    record
+  }) => {
+    storage.set("dayframe.timeEntryOutbox.v1", JSON.stringify([record]));
+    const activeCounts: number[] = [];
+    const unsubscribe = subscribeTimerBackgroundExecution(() => {
+      activeCounts.push(getTimerBackgroundExecutionSnapshot().activeLeaseCount);
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(outbox.synchroniseTimeEntryCommands({
+      owner: OWNER_A,
+      correlations: new Map(),
+      now: new Date("2026-08-22T12:00:01.000Z")
+    })).resolves.toMatchObject({
+      reason: expectedReason,
+      waitingCount: 1
+    });
+    unsubscribe();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(activeCounts).not.toContain(1);
+    expect(getTimerBackgroundExecutionSnapshot().activeLeaseCount).toBe(0);
+  });
 
   it("does not dispatch when the durable owner and bearer owner differ", async () => {
     await outbox.enqueueTimeEntryUpdate({
@@ -436,13 +561,19 @@ describe("durable time-entry outbox", () => {
       now: new Date("2026-08-22T12:00:01.000Z")
     })).resolves.toMatchObject({ reason: "deferred", waitingCount: 1 });
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(getTimerBackgroundExecutionSnapshot().activeLeaseCount).toBe(0);
 
-    await expect(outbox.releaseTimeEntryCommands([held.clientCommandId])).resolves.toBe(1);
+    await expect(outbox.releaseTimeEntryCommands([held.clientCommandId], {
+      owner: OWNER_A,
+      requestImmediateDelivery: true
+    })).resolves.toBe(1);
+    expect(getTimerBackgroundExecutionSnapshot().activeLeaseCount).toBe(1);
     await expect(outbox.synchroniseTimeEntryCommands({
       owner: OWNER_A,
       correlations: new Map(),
       force: true
     })).resolves.toMatchObject({ deliveredCount: 1, waitingCount: 0 });
+    expect(getTimerBackgroundExecutionSnapshot().activeLeaseCount).toBe(0);
 
     const undone = await outbox.enqueueTimeEntryDelete({
       owner: OWNER_A,
@@ -456,9 +587,11 @@ describe("durable time-entry outbox", () => {
 
 function commandFixture(input: {
   clientCommandId: string;
+  deliverAfter?: string;
   failureKind?: "retryable" | "permanent";
   nextAttemptAt?: string;
-  targetEntryId?: string;
+  optimisticEntryId?: string;
+  targetEntryId?: string | null;
   userId?: string;
   workspaceId?: string;
 }) {
@@ -468,11 +601,15 @@ function commandFixture(input: {
     createdAt: "2026-08-22T11:59:00.000Z",
     operation: "update",
     patch: { description: input.clientCommandId },
-    targetEntryId: input.targetEntryId ?? `entry:${input.clientCommandId}`,
+    ...(input.targetEntryId === null
+      ? {}
+      : { targetEntryId: input.targetEntryId ?? `entry:${input.clientCommandId}` }),
+    ...(input.optimisticEntryId ? { optimisticEntryId: input.optimisticEntryId } : {}),
     updatedAt: "2026-08-22T11:59:00.000Z",
     userId: input.userId ?? OWNER_A.userId,
     workspaceId: input.workspaceId ?? OWNER_A.workspaceId,
     ...(input.failureKind ? { failureKind: input.failureKind } : {}),
-    ...(input.nextAttemptAt ? { nextAttemptAt: input.nextAttemptAt } : {})
+    ...(input.nextAttemptAt ? { nextAttemptAt: input.nextAttemptAt } : {}),
+    ...(input.deliverAfter ? { deliverAfter: input.deliverAfter } : {})
   };
 }

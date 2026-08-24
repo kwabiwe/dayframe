@@ -14,7 +14,7 @@ import {
   validateManualTimeEntryWindow
 } from "@/lib/manual-time-entry";
 import { TagNameSchema } from "@dayframe/shared";
-import { notifyLiveActivitiesBestEffort } from "@/lib/live-activity-push";
+import { scheduleLiveActivityNotification } from "@/lib/live-activity-post-response";
 
 export async function POST(request: Request) {
   try {
@@ -48,27 +48,30 @@ export async function POST(request: Request) {
         },
         session
       );
-      await notifyLiveActivitiesBestEffort(session);
+      scheduleLiveActivityNotification(session);
       return NextResponse.json({ ok: true }, { status: 201 });
     }
 
     if (mode === "stop") {
+      const targetEntryId = optionalUuid(body.entryId, "entryId");
       const result = await processActivityEvent(
         {
           source: eventSource,
           type: "timer_stop",
           occurredAt: new Date(),
-          rawPayload: { origin }
+          rawPayload: targetEntryId
+            ? { origin, stopScope: "entry", targetEntryId }
+            : { origin }
         },
         session
       );
-      await notifyLiveActivitiesBestEffort(session);
+      scheduleLiveActivityNotification(session);
       return NextResponse.json(result, { status: 201 });
     }
 
     if (mode === "split") {
       await splitActiveEntry(session);
-      await notifyLiveActivitiesBestEffort(session);
+      scheduleLiveActivityNotification(session);
       return NextResponse.json({ ok: true }, { status: 201 });
     }
 
@@ -92,7 +95,7 @@ export async function POST(request: Request) {
       },
       session
     );
-    await notifyLiveActivitiesBestEffort(session);
+    scheduleLiveActivityNotification(session);
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     const response = authErrorResponse(error);
@@ -133,6 +136,13 @@ class BadRequestError extends Error {
 
 function optionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function optionalUuid(value: unknown, field: string) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const parsed = z.string().uuid().safeParse(value);
+  if (!parsed.success) throw new BadRequestError(`${field} must be a valid UUID.`);
+  return parsed.data;
 }
 
 async function parseJsonBody(request: Request): Promise<Record<string, unknown>> {

@@ -80,6 +80,24 @@ describe("process-wide connectivity monitor", () => {
     stop();
   });
 
+  it("publishes an epoch-zero queued-work transmission lifecycle", async () => {
+    const stop = monitor.startConnectivityMonitor();
+    await vi.runAllTicks();
+    await vi.advanceTimersByTimeAsync(400);
+
+    monitor.reportConnectivityRecoveryStarted(0);
+    expect(monitor.getConnectivitySnapshot()).toMatchObject({
+      recoveryEpoch: 0,
+      recoveryStatus: "syncing"
+    });
+    monitor.reportConnectivityRecoveryFinished({ epoch: 0, successful: false });
+    expect(monitor.getConnectivitySnapshot()).toMatchObject({
+      recoveryEpoch: 0,
+      recoveryStatus: "failure"
+    });
+    stop();
+  });
+
   it("debounces initial offline and cancels a transient candidate", async () => {
     netInfo.fetch.mockResolvedValueOnce(OFFLINE);
     const stop = monitor.startConnectivityMonitor();

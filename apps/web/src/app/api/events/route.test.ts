@@ -9,7 +9,8 @@ const session = {
 
 const mocks = vi.hoisted(() => ({
   resolveRequestSession: vi.fn(),
-  processActivityEvent: vi.fn()
+  processActivityEvent: vi.fn(),
+  scheduleLiveActivityNotification: vi.fn()
 }));
 
 vi.mock("@/lib/ingest-auth", () => ({
@@ -29,6 +30,10 @@ vi.mock("@/lib/event-service", () => ({
   }
 }));
 
+vi.mock("@/lib/live-activity-post-response", () => ({
+  scheduleLiveActivityNotification: mocks.scheduleLiveActivityNotification
+}));
+
 const { databasePayloadError, databaseReadinessError, missingRequiredColumnError } = await import("@/lib/db");
 const { POST } = await import("./route");
 
@@ -46,6 +51,7 @@ describe("POST /api/events", () => {
     expect(response.status).toBe(201);
     expect(payload.eventId).toBe("event-1");
     expect(mocks.processActivityEvent).toHaveBeenCalledWith(healthSleepEvent(), session);
+    expect(mocks.scheduleLiveActivityNotification).toHaveBeenCalledWith(session);
   });
 
   it("accepts an idempotent Live Activity stop retry without creating another mutation", async () => {

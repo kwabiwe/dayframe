@@ -64,6 +64,20 @@ describe("connectivity state machine", () => {
     });
   });
 
+  it("tracks active queued-work transmission at the initial online epoch", () => {
+    const online = confirmedOnline();
+    const syncing = beginConnectivityRecovery(online, 0);
+    expect(syncing).toMatchObject({
+      reconnectEpoch: 0,
+      recoveryEpoch: 0,
+      recoveryStatus: "syncing"
+    });
+    expect(finishConnectivityRecovery(syncing, 0, "success")).toMatchObject({
+      recoveryEpoch: 0,
+      recoveryStatus: "success"
+    });
+  });
+
   it("commits initial offline after the confirmation interval", () => {
     const state = confirmObserved(
       createConnectivityMachineState(),

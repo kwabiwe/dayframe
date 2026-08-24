@@ -57,7 +57,7 @@ describe("persistent timer shell contract", () => {
     expect(categoryPicker).toContain("aria-labelledby={ariaLabelledBy}");
     expect(timer).toContain('aria-label="Timer is idle. Elapsed time 00:00."');
     expect(timer).toContain('aria-label={active ? "Stop timer" : "Start timer"}');
-    expect(timer).toContain("disabled={isTimerBusy}");
+    expect(timer).toContain("disabled={Boolean(active) && isTimerBusy}");
     expect(inlineTags).toContain("selectedTagNames.map");
     expect(inlineTags).toContain("Remove tag ${tagName}");
     expect(compoundControl).toContain('className="inline-selected-tags"');

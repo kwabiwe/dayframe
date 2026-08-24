@@ -187,8 +187,8 @@ describe("Today history swipe-to-delete contract", () => {
       saveSource.indexOf("optimisticPatchTimeEntry(")
     );
     expect(saveSource).toContain("return true");
-    expect(stopSource).toContain("await getOrCreatePendingStop(");
-    expect(stopSource.indexOf("await getOrCreatePendingStop(")).toBeLessThan(
+    expect(stopSource).toContain("await persistPendingTimerStop(");
+    expect(stopSource.indexOf("await persistPendingTimerStop(")).toBeLessThan(
       stopSource.indexOf("optimisticStopActiveTimer(")
     );
     expect(stopSource.indexOf('pendingStop.failureKind === "permanent"')).toBeLessThan(

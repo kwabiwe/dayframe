@@ -32,21 +32,122 @@ export type EntryContinuationDecision =
   | { ok: true; draft: TimerDraft }
   | { ok: false; error: string };
 
+type GateCancellation = { ran: false; cancelled: true };
+type GateExecutionResult<T> = { ran: true; value: T } | GateCancellation;
+type GateLatestResult<T> =
+  | { ran: true; value: T; ownsResult: boolean }
+  | (GateCancellation & { ownsResult: false });
+
 export function createTimerMutationGate() {
-  let active = false;
+  let enabled = true;
+  let generation = 1;
+  let activeGeneration: number | null = null;
+  let nextWaiterId = 0;
+  let queuedLatest: {
+    generation: number;
+    mutation: () => Promise<unknown>;
+    latestWaiterId: number;
+    waiters: Array<{
+      id: number;
+      resolve: (result: GateLatestResult<unknown>) => void;
+      reject: (reason?: unknown) => void;
+    }>;
+  } | null = null;
+
+  const cancelled = (): GateCancellation => ({ ran: false, cancelled: true });
+
+  const execute = async <T>(
+    mutation: () => Promise<T>,
+    executionGeneration: number
+  ): Promise<GateExecutionResult<T>> => {
+    if (!enabled || executionGeneration !== generation) return cancelled();
+    activeGeneration = executionGeneration;
+    try {
+      if (!enabled || executionGeneration !== generation) return cancelled();
+      return { ran: true as const, value: await mutation() };
+    } finally {
+      if (activeGeneration === executionGeneration) activeGeneration = null;
+      const pending = enabled && executionGeneration === generation &&
+        queuedLatest?.generation === executionGeneration
+        ? queuedLatest
+        : null;
+      if (pending) {
+        queuedLatest = null;
+        const pendingRun = execute(pending.mutation, executionGeneration);
+        void pendingRun.then(
+          (result) => {
+            for (const waiter of pending.waiters) {
+              waiter.resolve(result.ran
+                ? {
+                    ...result,
+                    ownsResult: waiter.id === pending.latestWaiterId
+                  }
+                : { ...result, ownsResult: false });
+            }
+          },
+          (error) => {
+            for (const waiter of pending.waiters) waiter.reject(error);
+          }
+        );
+      }
+    }
+  };
+
+  const cancelQueuedLatest = () => {
+    const pending = queuedLatest;
+    queuedLatest = null;
+    if (!pending) return;
+    for (const waiter of pending.waiters) {
+      waiter.resolve({ ran: false, cancelled: true, ownsResult: false });
+    }
+  };
 
   return {
+    activate() {
+      if (enabled) return;
+      generation += 1;
+      enabled = true;
+    },
+    dispose() {
+      if (!enabled) return;
+      enabled = false;
+      generation += 1;
+      cancelQueuedLatest();
+    },
     isActive() {
-      return active;
+      return enabled && activeGeneration === generation;
     },
     async run<T>(mutation: () => Promise<T>) {
-      if (active) return { ran: false as const };
-      active = true;
-      try {
-        return { ran: true as const, value: await mutation() };
-      } finally {
-        active = false;
+      if (!enabled) return cancelled();
+      if (activeGeneration === generation) return { ran: false as const };
+      return execute(mutation, generation);
+    },
+    async runLatest<T>(mutation: () => Promise<T>): Promise<GateLatestResult<T>> {
+      if (!enabled) return { ...cancelled(), ownsResult: false };
+      if (activeGeneration !== generation) {
+        const result = await execute(mutation, generation);
+        return result.ran
+          ? { ...result, ownsResult: true }
+          : { ...result, ownsResult: false };
       }
+
+      const waiterId = ++nextWaiterId;
+      const pending = new Promise<GateLatestResult<unknown>>((resolve, reject) => {
+        const waiter = { id: waiterId, resolve, reject };
+        if (queuedLatest?.generation === generation) {
+          queuedLatest.mutation = mutation as () => Promise<unknown>;
+          queuedLatest.latestWaiterId = waiterId;
+          queuedLatest.waiters.push(waiter);
+        } else {
+          queuedLatest = {
+            generation,
+            mutation: mutation as () => Promise<unknown>,
+            latestWaiterId: waiterId,
+            waiters: [waiter]
+          };
+        }
+      });
+      return pending as Promise<GateLatestResult<T>>;
     }
   };
 }
@@ -116,6 +217,8 @@ export async function runTimerStartMutation({
   input,
   now,
   createOptimisticId,
+  getCurrentDraft,
+  getCurrentSnapshot,
   onAccepted,
   commit,
   setDraft,
@@ -130,6 +233,8 @@ export async function runTimerStartMutation({
   input: TimerDraftInput;
   now: () => string;
   createOptimisticId: (startedAt: string) => string;
+  getCurrentDraft?: () => TimerDraft;
+  getCurrentSnapshot?: () => BootstrapData;
   onAccepted?: () => void;
   commit: (data: BootstrapData) => void;
   setDraft: (draft: TimerDraft) => void;
@@ -138,22 +243,23 @@ export async function runTimerStartMutation({
   send: (payload: TimerStartRequestPayload) => Promise<void>;
   refresh: () => Promise<void>;
 }): Promise<TimerMutationOutcome> {
-  const result = await gate.run(async () => {
-    const draft = mergeTimerDraft(currentDraft, input);
+  const result = await gate.runLatest(async () => {
+    const acceptedSnapshot = getCurrentSnapshot?.() ?? snapshot;
+    const acceptedDraft = getCurrentDraft?.() ?? currentDraft;
+    const draft = mergeTimerDraft(acceptedDraft, input);
     const startedAt = now();
     onAccepted?.();
     setBusy(true);
     setError(null);
-    commit(applyOptimisticTimerStart(snapshot, draft, startedAt, createOptimisticId(startedAt)));
+    commit(applyOptimisticTimerStart(acceptedSnapshot, draft, startedAt, createOptimisticId(startedAt)));
     setDraft(draft);
 
     try {
       await send(timerStartRequestPayload(draft));
-      await refresh();
       return { ok: true } as const;
     } catch (error) {
-      commit(snapshot);
-      setDraft(timerDraftForEntry(snapshot.activeEntry));
+      commit(acceptedSnapshot);
+      setDraft(timerDraftForEntry(acceptedSnapshot.activeEntry));
       const message = timerStartErrorMessage(error);
       setError(message);
       return { ok: false, error: message } as const;
@@ -162,9 +268,9 @@ export async function runTimerStartMutation({
     }
   });
 
-  return result.ran
-    ? result.value
-    : { ok: false, error: "A timer update is already in progress." };
+  if (!result.ran) return { ok: false, error: "Timer update was cancelled." };
+  if (result.ownsResult && result.value.ok && !gate.isActive()) await refresh();
+  return result.value;
 }
 
 export function mergeTimerDraft(current: TimerDraft, input: TimerDraftInput): TimerDraft {
@@ -379,7 +485,6 @@ export async function runActiveEntryCompactMutation({
       if (response.updatedAt && current) {
         commit(applyAuthoritativeActiveEntryVersion(current, activeEntry.id, response.updatedAt));
       }
-      await refresh();
       return { ok: true } as const;
     } catch (error) {
       commit(snapshot);
@@ -391,6 +496,7 @@ export async function runActiveEntryCompactMutation({
       setBusy(false);
     }
   });
+  if (result.ran && result.value.ok && !gate.isActive()) await refresh();
   return result.ran
     ? result.value
     : { ok: false, error: "A timer update is already in progress." };

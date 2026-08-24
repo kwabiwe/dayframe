@@ -27,6 +27,8 @@ type IntegrationTokenRow = {
   scopes: string[];
 };
 
+export const INTEGRATION_TOKEN_LAST_USED_TOUCH_INTERVAL_SECONDS = 10 * 60;
+
 export async function resolveRequestSession(
   request: Request,
   options: ResolveSessionOptions = {}
@@ -163,11 +165,20 @@ async function resolveTokenSession(token: string): Promise<RequestSession> {
 
   const tokenHash = hashIntegrationToken(token);
   const result = await query<IntegrationTokenRow>(
-    `with token as (
-       update integration_tokens
-       set last_used_at = now()
+    `with token as materialized (
+       select id, workspace_id, scopes
+       from integration_tokens
        where token_hash = $1 and revoked_at is null
-       returning id, workspace_id, scopes
+     ), touched as (
+       update integration_tokens integration_token
+       set last_used_at = now()
+       from token
+       where integration_token.id = token.id
+         and (
+           integration_token.last_used_at is null
+           or integration_token.last_used_at < now() - ($2 * interval '1 second')
+         )
+       returning integration_token.id
      )
      select token.id,
             token.workspace_id as "workspaceId",
@@ -181,7 +192,7 @@ async function resolveTokenSession(token: string): Promise<RequestSession> {
        order by case role when 'owner' then 0 else 1 end, created_at
        limit 1
      ) owner on true`,
-    [tokenHash]
+    [tokenHash, INTEGRATION_TOKEN_LAST_USED_TOUCH_INTERVAL_SECONDS]
   );
   const row = result.rows[0];
   if (!row) {

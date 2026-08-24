@@ -1,4 +1,9 @@
-import { getQueueDiagnostics, readQueue, subscribeActivityQueue } from "./api";
+import {
+  getQueueDiagnostics,
+  readQueue,
+  readTimerEntryIdCorrelations,
+  subscribeActivityQueue
+} from "./api";
 import { IS_DAYFRAME_STAGING } from "./config";
 import {
   mobileAccountKey,
@@ -26,11 +31,14 @@ import {
 } from "./timerStopOutbox";
 import { getNativeShortcutPendingCount } from "./shortcuts";
 import { getNativeLocationIntelligenceStatus } from "./location/runtime";
+import { durableTimerMutationCounts } from "./durableWorkCounts";
 
 export type DurableWorkSnapshot = {
   accountKey: string | null;
   activityCount: number;
   nativeShortcutCount: number;
+  timerEventCount: number;
+  timerMutationCount: number;
   timerStopCount: number;
   timerStopNeedsAttentionCount: number;
   timeEntryCommandCount: number;
@@ -50,6 +58,8 @@ const EMPTY_SNAPSHOT: DurableWorkSnapshot = {
   accountKey: null,
   activityCount: 0,
   nativeShortcutCount: 0,
+  timerEventCount: 0,
+  timerMutationCount: 0,
   timerStopCount: 0,
   timerStopNeedsAttentionCount: 0,
   timeEntryCommandCount: 0,
@@ -143,7 +153,7 @@ async function refreshOnce() {
   const [
     queue,
     stops,
-    timeEntries,
+    timeEntryCorrelations,
     review,
     reviewOwner,
     location,
@@ -153,7 +163,7 @@ async function refreshOnce() {
   ] = await Promise.all([
     readQueue(owner),
     readPendingTimerStops(),
-    getTimeEntryOutboxDiagnostics(owner),
+    readTimerEntryIdCorrelations(owner),
     getReviewSyncDiagnostics(),
     getActiveReviewAccountIdentity(),
     getLocationStoreDiagnostics(),
@@ -163,6 +173,9 @@ async function refreshOnce() {
       .then((status) => status.pendingSignalCount ?? 0)
       .catch(() => 0)
   ]);
+  const timeEntries = await getTimeEntryOutboxDiagnostics(owner, {
+    correlations: timeEntryCorrelations
+  });
   const activityDiagnostics = getQueueDiagnostics(queue);
   const queuedActivityCount = queue.filter((event) => event.failureKind !== "permanent").length;
   const activityCount = queuedActivityCount + nativeShortcutCount;
@@ -171,6 +184,12 @@ async function refreshOnce() {
     .filter((stop) => stop.failureKind !== "permanent").length;
   const timerStopNeedsAttentionCount = ownedTimerStops
     .filter((stop) => stop.failureKind === "permanent").length;
+  const { timerEventCount, timerMutationCount } = durableTimerMutationCounts({
+    activityQueue: queue,
+    nativeShortcutCount,
+    timeEntryCommandCount: timeEntries.transportReadyCount,
+    timerStopCount
+  });
   const reviewOwned = reviewOwner?.userId === owner.userId &&
     reviewOwner.workspaceId === owner.workspaceId;
   const locationOwned = locationOwner?.userId === owner.userId &&
@@ -188,6 +207,8 @@ async function refreshOnce() {
     accountKey: mobileAccountKey(owner),
     activityCount,
     nativeShortcutCount,
+    timerEventCount,
+    timerMutationCount,
     timerStopCount,
     timerStopNeedsAttentionCount,
     timeEntryCommandCount: timeEntries.pendingCount,
@@ -220,6 +241,8 @@ function snapshotsEqual(left: DurableWorkSnapshot, right: DurableWorkSnapshot) {
   return left.accountKey === right.accountKey &&
     left.activityCount === right.activityCount &&
     left.nativeShortcutCount === right.nativeShortcutCount &&
+    left.timerEventCount === right.timerEventCount &&
+    left.timerMutationCount === right.timerMutationCount &&
     left.timerStopCount === right.timerStopCount &&
     left.timerStopNeedsAttentionCount === right.timerStopNeedsAttentionCount &&
     left.timeEntryCommandCount === right.timeEntryCommandCount &&
@@ -252,6 +275,8 @@ function recordPendingTransition(
     pendingCount: next.pendingCount,
     activityCount: next.activityCount,
     nativeShortcutCount: next.nativeShortcutCount,
+    timerEventCount: next.timerEventCount,
+    timerMutationCount: next.timerMutationCount,
     timerStopCount: next.timerStopCount,
     timerStopNeedsAttentionCount: next.timerStopNeedsAttentionCount,
     timeEntryCommandCount: next.timeEntryCommandCount,
