@@ -31,11 +31,14 @@ vi.mock("./config", () => ({
 
 const {
   SecureSessionUnavailableError,
+  bindAuthenticatedSessionOwner,
   clearSessionToken,
   getSessionToken,
   invalidateMobileSession,
   invalidateMobileSessionIfCurrent,
   isKeychainInteractionUnavailable,
+  readAuthenticatedSessionSnapshot,
+  readOwnedAuthenticatedSessionSnapshot,
   resetSessionTokenCacheForTesting,
   setSessionToken
 } = await import("./secure-session");
@@ -87,6 +90,48 @@ describe("secure mobile session", () => {
       "https://dayframe-staging.vercel.app",
       "session-token"
     );
+  });
+
+  it("persists the verified account in the same secure session envelope", async () => {
+    const owner = { userId: "user-a", workspaceId: "workspace-a" };
+    await setSessionToken("session-token", owner);
+
+    expect(JSON.parse(values.get("dayframe.localSessionToken.v2") ?? "{}")).toEqual({
+      version: 1,
+      token: "session-token",
+      userId: "user-a",
+      workspaceId: "workspace-a"
+    });
+    resetSessionTokenCacheForTesting();
+    await expect(readOwnedAuthenticatedSessionSnapshot(owner)).resolves.toMatchObject({
+      status: "authenticated",
+      snapshot: { owner, token: "session-token" }
+    });
+    await expect(readOwnedAuthenticatedSessionSnapshot({
+      userId: "user-b",
+      workspaceId: "workspace-b"
+    })).resolves.toEqual({ status: "owner_mismatch" });
+  });
+
+  it("binds a migrated unowned token only after its session snapshot is verified", async () => {
+    values.set("dayframe.localSessionToken.v2", "legacy-unbound-token");
+    const session = await readAuthenticatedSessionSnapshot();
+    expect(session).toMatchObject({
+      status: "authenticated",
+      snapshot: { owner: null, token: "legacy-unbound-token" }
+    });
+    await expect(readOwnedAuthenticatedSessionSnapshot({
+      userId: "user-a",
+      workspaceId: "workspace-a"
+    })).resolves.toEqual({ status: "owner_mismatch" });
+    if (session.status !== "authenticated") throw new Error("Expected an authenticated session");
+    const owner = { userId: "user-a", workspaceId: "workspace-a" };
+
+    await expect(bindAuthenticatedSessionOwner(session.snapshot, owner)).resolves.toBe(true);
+    resetSessionTokenCacheForTesting();
+    await expect(readOwnedAuthenticatedSessionSnapshot(owner)).resolves.toMatchObject({
+      status: "authenticated"
+    });
   });
 
   it("migrates the legacy token without signing the user out", async () => {

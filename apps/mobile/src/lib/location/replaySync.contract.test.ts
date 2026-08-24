@@ -9,13 +9,15 @@ function source(relativePath: string) {
 const runtimeSource = source("./runtime.ts");
 const storeSource = source("./store.ts");
 const dashboardSource = source("../../components/DayframeDashboard.tsx");
+const recoveryOwnerSource = source("../../components/ConnectivityRecoveryOwner.tsx");
 
 describe("location finalisation replay contracts", () => {
   it("reprocesses local evidence and forces one replay on foreground", () => {
     expect(runtimeSource).toContain("syncLocationIntelligenceOnForeground");
     expect(runtimeSource).toContain("await processPendingLocationEvidence()");
     expect(runtimeSource).toContain("syncLocationEvidence({ forceReplay: true })");
-    expect(dashboardSource).toContain("syncLocationIntelligenceOnForeground().catch(recordLocationStoreError)");
+    expect(recoveryOwnerSource).toContain("await syncLocationIntelligenceOnForeground()");
+    expect(dashboardSource).not.toContain("syncLocationIntelligenceOnForeground");
   });
 
   it("bounds native drain and upload work", () => {

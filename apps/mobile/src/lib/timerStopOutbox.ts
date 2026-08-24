@@ -1,8 +1,10 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { readActiveMobileAccount } from "./mobileAccount";
 
 const TIMER_STOP_OUTBOX_KEY = "dayframe.timerStopOutbox.v1";
 let timerStopOutboxMutationTail: Promise<void> = Promise.resolve();
 let fallbackEventSequence = 0;
+const listeners = new Set<() => void>();
 
 export type TimerStopOwner = {
   userId: string;
@@ -91,6 +93,79 @@ export async function removePendingTimerStop(clientEventId: string) {
   });
 }
 
+export async function getTimerStopOutboxDiagnostics(owner?: TimerStopOwner) {
+  const resolvedOwner = owner ?? await readActiveMobileAccount();
+  const stops = resolvedOwner
+    ? pendingTimerStopsForOwner(await readPendingTimerStops(), resolvedOwner)
+    : [];
+  const pending = stops.filter((stop) => stop.failureKind !== "permanent");
+  const permanent = stops.filter((stop) => stop.failureKind === "permanent");
+  return {
+    pendingCount: pending.length,
+    needsAttentionCount: permanent.length,
+    lastError: [...stops].reverse().find((stop) => stop.lastError)?.lastError ?? null
+  };
+}
+
+export async function listTimerStopSyncIssues(owner?: TimerStopOwner) {
+  const resolvedOwner = owner ?? await readActiveMobileAccount();
+  if (!resolvedOwner) return [];
+  return pendingTimerStopsForOwner(await readPendingTimerStops(), resolvedOwner)
+    .filter((stop) => stop.failureKind === "permanent");
+}
+
+export async function retryTimerStopSyncIssue(
+  clientEventId: string,
+  owner?: TimerStopOwner
+) {
+  const resolvedOwner = owner ?? await readActiveMobileAccount();
+  if (!resolvedOwner) return false;
+  return withTimerStopOutboxMutation(async () => {
+    const outbox = await readPendingTimerStopsUnlocked();
+    let retried = false;
+    const next = outbox.map((stop) => {
+      if (
+        stop.clientEventId !== clientEventId ||
+        stop.failureKind !== "permanent" ||
+        !timerStopOwnerMatches(stop, resolvedOwner)
+      ) {
+        return stop;
+      }
+      retried = true;
+      const {
+        failedAt: _failedAt,
+        failureCount: _failureCount,
+        failureKind: _failureKind,
+        lastError: _lastError,
+        lastStatusCode: _lastStatusCode,
+        ...retryable
+      } = stop;
+      return retryable;
+    });
+    if (retried) await writePendingTimerStops(next);
+    return retried;
+  });
+}
+
+export async function discardTimerStopSyncIssue(
+  clientEventId: string,
+  owner?: TimerStopOwner
+) {
+  const resolvedOwner = owner ?? await readActiveMobileAccount();
+  if (!resolvedOwner) return false;
+  return withTimerStopOutboxMutation(async () => {
+    const outbox = await readPendingTimerStopsUnlocked();
+    const next = outbox.filter((stop) => !(
+      stop.clientEventId === clientEventId &&
+      stop.failureKind === "permanent" &&
+      timerStopOwnerMatches(stop, resolvedOwner)
+    ));
+    if (next.length === outbox.length) return false;
+    await writePendingTimerStops(next);
+    return true;
+  });
+}
+
 export async function markPendingTimerStopFailure(
   clientEventId: string,
   input: {
@@ -170,6 +245,13 @@ export function timerStopOwnerMatches(
   return pendingStop.userId === owner.userId && pendingStop.workspaceId === owner.workspaceId;
 }
 
+export function subscribeTimerStopOutbox(listener: () => void) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
 function withTimerStopOutboxMutation<Result>(operation: () => Promise<Result>) {
   const result = timerStopOutboxMutationTail.catch(() => undefined).then(operation);
   timerStopOutboxMutationTail = result.then(() => undefined, () => undefined);
@@ -183,6 +265,7 @@ function sameTimerStopTarget(item: PendingTimerStop, target: TimerStopTarget) {
 
 async function writePendingTimerStops(outbox: readonly PendingTimerStop[]) {
   await AsyncStorage.setItem(TIMER_STOP_OUTBOX_KEY, JSON.stringify(outbox));
+  for (const listener of listeners) listener();
 }
 
 function parsePendingTimerStop(value: unknown): PendingTimerStop | null {

@@ -3,13 +3,23 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const session = vi.hoisted(() => ({
   invalidateMobileSessionIfCurrent: vi.fn(() => Promise.resolve(true))
 }));
+const connectivity = vi.hoisted(() => ({
+  connectivityRequestGeneration: vi.fn(() => 7),
+  reportHttpRequestDeadline: vi.fn(),
+  reportHttpTransportFailure: vi.fn(),
+  reportHttpTransportResponse: vi.fn()
+}));
 
 vi.mock("./secure-session", () => ({
   invalidateMobileSessionIfCurrent: session.invalidateMobileSessionIfCurrent
 }));
+vi.mock("./connectivityEvidence", () => connectivity);
 
 const {
+  MobileHttpResponseError,
   MobileRequestTimeoutError,
+  isMobileTransportFailure,
+  isRetryableMobileConnectivityFailure,
   mobileFetch,
   mobileFetchWithTimeout,
   StaleMobileSessionResponseError
@@ -40,6 +50,30 @@ describe("mobile API network boundary", () => {
         credentials: "omit"
       }
     );
+    expect(connectivity.reportHttpTransportResponse).toHaveBeenCalledWith({
+      requestGeneration: 7
+    });
+  });
+
+  it("reports every HTTP status as transport evidence", async () => {
+    const response = { ok: false, status: 500 } as Response;
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(response)));
+
+    await expect(mobileFetch("https://dayframe.test/api/bootstrap")).resolves.toBe(response);
+
+    expect(connectivity.reportHttpTransportResponse).toHaveBeenCalledWith({
+      requestGeneration: 7
+    });
+    expect(connectivity.reportHttpTransportFailure).not.toHaveBeenCalled();
+  });
+
+  it("classifies only transport, deadline and retryable HTTP failures as connectivity retry", () => {
+    expect(isRetryableMobileConnectivityFailure(new TypeError("Network request failed"))).toBe(true);
+    expect(isRetryableMobileConnectivityFailure(new MobileRequestTimeoutError("Timed out"))).toBe(true);
+    expect(isRetryableMobileConnectivityFailure(new MobileHttpResponseError(429, "Try later"))).toBe(true);
+    expect(isRetryableMobileConnectivityFailure(new MobileHttpResponseError(503, "Unavailable"))).toBe(true);
+    expect(isRetryableMobileConnectivityFailure(new MobileHttpResponseError(422, "Invalid"))).toBe(false);
+    expect(isRetryableMobileConnectivityFailure(new Error("Local storage failed"))).toBe(false);
   });
 
   it("invalidates only the bearer rejected by an authentication response", async () => {
@@ -59,6 +93,32 @@ describe("mobile API network boundary", () => {
     await expect(mobileFetch("https://dayframe.test/api/bootstrap", {
       headers: { Authorization: "Bearer old-token" }
     })).rejects.toBeInstanceOf(StaleMobileSessionResponseError);
+    expect(connectivity.reportHttpTransportResponse).toHaveBeenCalledWith({
+      requestGeneration: 7
+    });
+  });
+
+  it("refreshes reachability for fetch transport failures and rethrows unchanged", async () => {
+    const failure = new TypeError("Network request failed");
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(failure)));
+
+    await expect(mobileFetch("https://dayframe.test/api/bootstrap")).rejects.toBe(failure);
+    expect(connectivity.reportHttpTransportFailure).toHaveBeenCalledWith({
+      requestGeneration: 7
+    });
+  });
+
+  it("recognises a native connection-lost error as transport failure", () => {
+    expect(isMobileTransportFailure(new Error("The network connection was lost."))).toBe(true);
+  });
+
+  it("does not classify caller cancellation or deadline errors as transport failure", () => {
+    const cancellation = new Error("Cancelled by caller.");
+    cancellation.name = "AbortError";
+    expect(isMobileTransportFailure(cancellation)).toBe(false);
+    expect(isMobileTransportFailure(
+      new MobileRequestTimeoutError("Dayframe opening timed out.")
+    )).toBe(false);
   });
 
   it("aborts and rejects a stalled request at its deadline", async () => {
@@ -79,6 +139,10 @@ describe("mobile API network boundary", () => {
 
     await rejection;
     expect(requestSignals[0]?.aborted).toBe(true);
+    expect(connectivity.reportHttpRequestDeadline).toHaveBeenCalledWith({
+      requestGeneration: 7
+    });
+    expect(connectivity.reportHttpTransportFailure).not.toHaveBeenCalled();
   });
 
   it("preserves caller cancellation instead of reporting it as a timeout", async () => {
@@ -94,6 +158,8 @@ describe("mobile API network boundary", () => {
     controller.abort(cancellation);
 
     await expect(request).rejects.toBe(cancellation);
+    expect(connectivity.reportHttpRequestDeadline).not.toHaveBeenCalled();
+    expect(connectivity.reportHttpTransportFailure).not.toHaveBeenCalled();
   });
 
   it("clears the request deadline after a successful response", async () => {

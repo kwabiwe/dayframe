@@ -16,11 +16,21 @@ import {
 import { DAYFRAME_API_BASE } from "../config";
 import {
   SecureSessionUnavailableError,
-  getSessionToken,
-  invalidateMobileSessionIfCurrent
+  invalidateMobileSessionIfCurrent,
+  isAuthenticatedSessionSnapshotCurrent,
+  readOwnedAuthenticatedSessionSnapshot,
+  type AuthenticatedSessionSnapshot
 } from "../secure-session";
+import {
+  mobileAccountOwnersEqual,
+  type MobileAccountOwner
+} from "../mobileAccount";
 import { createSerialMutationQueue } from "./mutationQueue";
 import { fetchLocationSync } from "./network";
+import {
+  executeOwnedLocationRequest,
+  prepareOwnedLocationBatch
+} from "./syncOwnership";
 import {
   MAX_LOCATION_UPLOAD_BATCHES_PER_SYNC,
   locationUploadDisposition,
@@ -80,12 +90,29 @@ export type LocationStoreDiagnostics = {
 type MetadataRow = { value: string };
 type EvidenceRow = { evidence_json: string };
 type SegmentRow = { segment_json: string };
-type OutboxRow = { client_batch_id: string; body_json: string; attempt_count: number };
+type OutboxRow = {
+  account_key: string;
+  client_batch_id: string;
+  body_json: string;
+  attempt_count: number;
+};
 
 let databasePromise: Promise<SQLite.SQLiteDatabase> | null = null;
 let synchronisationPromise: Promise<Awaited<ReturnType<typeof synchroniseLocationEvidenceUnsafe>>> | null = null;
 let forcedReplayRequested = false;
-const serialiseLocationMutation = createSerialMutationQueue();
+const locationMutationQueue = createSerialMutationQueue();
+const locationStoreListeners = new Set<() => void>();
+
+function serialiseLocationMutation<Result>(operation: () => Promise<Result>) {
+  return locationMutationQueue(operation).finally(() => {
+    for (const listener of locationStoreListeners) listener();
+  });
+}
+
+export function subscribeLocationStore(listener: () => void) {
+  locationStoreListeners.add(listener);
+  return () => locationStoreListeners.delete(listener);
+}
 
 async function database() {
   databasePromise ??= SQLite.openDatabaseAsync(DATABASE_NAME).then(async (db) => {
@@ -236,6 +263,21 @@ async function currentContext() {
   );
   if (!row) return null;
   return { key, context: JSON.parse(row.context_json) as LocationAccountContext };
+}
+
+async function currentContextForOwner(owner: MobileAccountOwner) {
+  const current = await currentContext();
+  return current?.key === accountKey(owner) ? current : null;
+}
+
+export async function getActiveLocationAccountIdentity() {
+  const current = await currentContext();
+  return current
+    ? {
+        userId: current.context.userId,
+        workspaceId: current.context.workspaceId
+      }
+    : null;
 }
 
 async function rebindUnownedEvidence(key: string, context: LocationAccountContext) {
@@ -389,16 +431,18 @@ export async function readLocationSegments(): Promise<LocationSegment[]> {
   return rows.map((row) => JSON.parse(row.segment_json) as LocationSegment);
 }
 
-export async function prepareLocationUploadBatch() {
-  return serialiseLocationMutation(prepareLocationUploadBatchUnsafe);
+export async function prepareLocationUploadBatch(owner?: MobileAccountOwner) {
+  return serialiseLocationMutation(() => prepareLocationUploadBatchUnsafe(owner));
 }
 
-async function prepareLocationUploadBatchUnsafe() {
-  const current = await currentContext();
+async function prepareLocationUploadBatchUnsafe(owner?: MobileAccountOwner) {
+  const current = owner
+    ? await currentContextForOwner(owner)
+    : await currentContext();
   if (!current) return null;
   const db = await database();
   const existing = await db.getFirstAsync<OutboxRow>(
-    `select client_batch_id, body_json, attempt_count from location_upload_outbox
+    `select account_key, client_batch_id, body_json, attempt_count from location_upload_outbox
      where account_key = ? and state = 'pending'
        and (next_attempt_at is null or next_attempt_at <= ?)
      order by created_at limit 1`,
@@ -451,7 +495,12 @@ async function prepareLocationUploadBatchUnsafe() {
       );
     }
   });
-  return { client_batch_id: clientBatchId, body_json: JSON.stringify(body), attempt_count: 0 };
+  return {
+    account_key: current.key,
+    client_batch_id: clientBatchId,
+    body_json: JSON.stringify(body),
+    attempt_count: 0
+  };
 }
 
 export async function syncLocationEvidence(options: { forceReplay?: boolean } = {}) {
@@ -478,9 +527,11 @@ async function drainLocationSynchronisationRequests() {
 }
 
 async function synchroniseLocationEvidenceUnsafe(options: { forceReplay: boolean }) {
-  let token: string | null;
+  const owner = await getActiveLocationAccountIdentity();
+  if (!owner) return { synced: false, reason: "no_session" as const };
+  let sessionRead: Awaited<ReturnType<typeof readOwnedAuthenticatedSessionSnapshot>>;
   try {
-    token = await getSessionToken();
+    sessionRead = await readOwnedAuthenticatedSessionSnapshot(owner);
   } catch (error) {
     if (!(error instanceof SecureSessionUnavailableError)) throw error;
     await recordLocationStoreError(error).catch(() => undefined);
@@ -493,15 +544,29 @@ async function synchroniseLocationEvidenceUnsafe(options: { forceReplay: boolean
       replayed: false
     };
   }
-  if (!token) return { synced: false, reason: "no_session" as const };
+  if (sessionRead.status !== "authenticated") {
+    return { synced: false, reason: "no_session" as const };
+  }
+  const session = sessionRead.snapshot;
   const db = await database();
   let acknowledgedCount = 0;
   let uploadedBatchCount = 0;
   let rejectedBatchCount = 0;
   for (let batchIndex = 0; batchIndex < MAX_LOCATION_UPLOAD_BATCHES_PER_SYNC; batchIndex += 1) {
-    const batch = await prepareLocationUploadBatch();
-    if (!batch) break;
-    const attempt = await uploadLocationEvidenceBatch(token, db, batch);
+    const preparation = await prepareOwnedLocationBatch({
+      isCurrent: () => isLocationSyncOwnershipCurrent(owner, session),
+      prepare: () => prepareLocationUploadBatch(owner)
+    });
+    if (preparation.status === "session_changed") {
+      return interruptedLocationSyncResult(acknowledgedCount, uploadedBatchCount);
+    }
+    if (preparation.status === "empty") break;
+    const attempt = await uploadLocationEvidenceBatch(
+      owner,
+      session,
+      db,
+      preparation.batch
+    );
     if (attempt.status === "success") {
       acknowledgedCount += attempt.acknowledgedCount;
       uploadedBatchCount += 1;
@@ -510,6 +575,9 @@ async function synchroniseLocationEvidenceUnsafe(options: { forceReplay: boolean
     if (attempt.status === "rejected") {
       rejectedBatchCount += 1;
       continue;
+    }
+    if (attempt.reason === "session_changed") {
+      return interruptedLocationSyncResult(acknowledgedCount, uploadedBatchCount);
     }
     return {
       synced: false,
@@ -522,10 +590,16 @@ async function synchroniseLocationEvidenceUnsafe(options: { forceReplay: boolean
   }
 
   const now = Date.now();
+  const replayState = await serialiseOwnedLocationMutation(owner, session, async () => ({
+    lastAttemptAt: await metadata("last_server_replay_attempt_at")
+  }));
+  if (!replayState) {
+    return interruptedLocationSyncResult(acknowledgedCount, uploadedBatchCount);
+  }
   const shouldReplay = shouldRequestLocationReplay({
     force: options.forceReplay,
     uploadedBatchCount,
-    lastAttemptAt: await metadata("last_server_replay_attempt_at"),
+    lastAttemptAt: replayState.lastAttemptAt,
     now
   });
   if (!shouldReplay) {
@@ -538,11 +612,19 @@ async function synchroniseLocationEvidenceUnsafe(options: { forceReplay: boolean
     };
   }
 
-  const replay = await requestServerLocationReplay(token, now);
+  if (!await isLocationSyncOwnershipCurrent(owner, session)) {
+    return interruptedLocationSyncResult(acknowledgedCount, uploadedBatchCount);
+  }
+  const replay = await requestServerLocationReplay(owner, session, now);
   return {
     synced: replay.ok && rejectedBatchCount === 0,
     ...(!replay.ok
-      ? { reason: "replay_failed" as const, message: replay.message }
+      ? {
+          reason: replay.reason === "session_changed"
+            ? "session_changed" as const
+            : "replay_failed" as const,
+          message: replay.message
+        }
       : rejectedBatchCount
         ? { reason: "invalid_batch" as const }
         : {}),
@@ -558,60 +640,121 @@ async function synchroniseLocationEvidenceUnsafe(options: { forceReplay: boolean
   };
 }
 
+function interruptedLocationSyncResult(
+  acknowledgedCount: number,
+  uploadedBatchCount: number
+) {
+  return {
+    synced: false,
+    reason: "session_changed" as const,
+    acknowledgedCount,
+    uploadedBatchCount,
+    replayed: false
+  };
+}
+
+async function isLocationSyncOwnershipCurrent(
+  owner: MobileAccountOwner,
+  session: AuthenticatedSessionSnapshot
+) {
+  if (!isAuthenticatedSessionSnapshotCurrent(session)) return false;
+  const activeOwner = await getActiveLocationAccountIdentity();
+  return isAuthenticatedSessionSnapshotCurrent(session) &&
+    mobileAccountOwnersEqual(activeOwner, owner);
+}
+
+async function serialiseOwnedLocationMutation<Result>(
+  owner: MobileAccountOwner,
+  session: AuthenticatedSessionSnapshot,
+  operation: () => Promise<Result>
+) {
+  return serialiseLocationMutation(async () => {
+    if (!await isLocationSyncOwnershipCurrent(owner, session)) return null;
+    return operation();
+  });
+}
+
 async function uploadLocationEvidenceBatch(
-  token: string,
+  owner: MobileAccountOwner,
+  session: AuthenticatedSessionSnapshot,
   db: SQLite.SQLiteDatabase,
   batch: OutboxRow
 ): Promise<
   | { status: "success"; acknowledgedCount: number }
   | { status: "rejected" }
-  | { status: "stopped"; reason: "payload_too_large" | "request_failed"; message?: string }
+  | {
+      status: "stopped";
+      reason: "payload_too_large" | "request_failed" | "session_changed";
+      message?: string;
+    }
 > {
+  if (
+    batch.account_key !== accountKey(owner) ||
+    !await isLocationSyncOwnershipCurrent(owner, session)
+  ) {
+    return { status: "stopped", reason: "session_changed" };
+  }
   try {
-    const response = await fetchLocationSync(`${DAYFRAME_API_BASE}/api/location/evidence`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: batch.body_json
+    const request = await executeOwnedLocationRequest({
+      isCurrent: () => isLocationSyncOwnershipCurrent(owner, session),
+      request: () => fetchLocationSync(`${DAYFRAME_API_BASE}/api/location/evidence`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.token}`,
+          "Content-Type": "application/json"
+        },
+        body: batch.body_json
+      })
     });
+    if (request.status === "session_changed") {
+      return { status: "stopped", reason: "session_changed" };
+    }
+    const response = request.response;
     if (response.status === 401 || response.status === 403) {
-      await invalidateMobileSessionIfCurrent(token);
+      await invalidateMobileSessionIfCurrent(session.token);
       throw new Error("Location evidence sync requires a new login.");
     }
     const disposition = locationUploadDisposition(response.status);
     if (disposition === "shrink") {
       const parsed = LocationEvidenceBatchRequestSchema.parse(JSON.parse(batch.body_json));
       const nextLimit = Math.max(1, Math.floor(parsed.evidence.length / 2));
-      await serialiseLocationMutation(() => db.withExclusiveTransactionAsync(async (transaction) => {
-        await transaction.runAsync(
-          "update location_upload_outbox set state = 'rejected', last_error = 'payload_too_large', updated_at = ? where client_batch_id = ?",
-          new Date().toISOString(),
-          batch.client_batch_id
-        );
-        await transaction.runAsync(
-          `update location_evidence_journal
-           set upload_state = ?, client_batch_id = null
-           where client_batch_id = ?`,
-          parsed.evidence.length > 1 ? "pending" : "rejected",
-          batch.client_batch_id
-        );
-        await setMetadata("location_upload_batch_limit", String(nextLimit), transaction);
-        await setMetadata("last_upload_error", "payload_too_large", transaction);
-      }));
+      const applied = await serialiseOwnedLocationMutation(owner, session, () =>
+        db.withExclusiveTransactionAsync(async (transaction) => {
+          await transaction.runAsync(
+            "update location_upload_outbox set state = 'rejected', last_error = 'payload_too_large', updated_at = ? where client_batch_id = ?",
+            new Date().toISOString(),
+            batch.client_batch_id
+          );
+          await transaction.runAsync(
+            `update location_evidence_journal
+             set upload_state = ?, client_batch_id = null
+             where client_batch_id = ?`,
+            parsed.evidence.length > 1 ? "pending" : "rejected",
+            batch.client_batch_id
+          );
+          await setMetadata("location_upload_batch_limit", String(nextLimit), transaction);
+          await setMetadata("last_upload_error", "payload_too_large", transaction);
+        })
+      );
+      if (applied === null) return { status: "stopped", reason: "session_changed" };
       return { status: "stopped", reason: "payload_too_large" };
     }
     if (disposition === "reject") {
-      await serialiseLocationMutation(() => db.withExclusiveTransactionAsync(async (transaction) => {
-        await transaction.runAsync(
-          "update location_upload_outbox set state = 'rejected', last_error = 'invalid_batch', updated_at = ? where client_batch_id = ?",
-          new Date().toISOString(),
-          batch.client_batch_id
-        );
-        await transaction.runAsync(
-          "update location_evidence_journal set upload_state = 'rejected' where client_batch_id = ?",
-          batch.client_batch_id
-        );
-        await setMetadata("last_upload_error", "invalid_batch", transaction);
-      }));
+      const applied = await serialiseOwnedLocationMutation(owner, session, () =>
+        db.withExclusiveTransactionAsync(async (transaction) => {
+          await transaction.runAsync(
+            "update location_upload_outbox set state = 'rejected', last_error = 'invalid_batch', updated_at = ? where client_batch_id = ?",
+            new Date().toISOString(),
+            batch.client_batch_id
+          );
+          await transaction.runAsync(
+            "update location_evidence_journal set upload_state = 'rejected' where client_batch_id = ?",
+            batch.client_batch_id
+          );
+          await setMetadata("last_upload_error", "invalid_batch", transaction);
+        })
+      );
+      if (applied === null) return { status: "stopped", reason: "session_changed" };
       return { status: "rejected" };
     }
     if (!response.ok) throw new Error(`Location evidence sync failed with status ${response.status}.`);
@@ -627,93 +770,131 @@ async function uploadLocationEvidenceBatch(
     );
     const acknowledged = partition.acknowledgedIds;
     const serverMode = LocationRolloutModeSchema.safeParse(payload.rolloutMode);
-    const existingSemanticAcknowledgement = serverMode.success && isSemanticMode(serverMode.data)
-      ? await metadata(SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY)
-      : null;
-    await serialiseLocationMutation(() => db.withExclusiveTransactionAsync(async (transaction) => {
-      for (const id of acknowledged) {
-        await transaction.runAsync(
-          "update location_evidence_journal set upload_state = 'acknowledged' where client_evidence_id = ?",
-          id
-        );
-      }
-      for (const id of partition.retryIds) {
-        await transaction.runAsync(
-          "update location_evidence_journal set upload_state = 'pending', client_batch_id = null where client_evidence_id = ?",
-          id
-        );
-      }
-      await transaction.runAsync(
-        `update location_upload_outbox set state = ?, updated_at = ? where client_batch_id = ?`,
-        partition.retryIds.length ? "partial" : "acknowledged",
-        new Date().toISOString(),
-        batch.client_batch_id
-      );
-      await setMetadata("last_upload_at", new Date().toISOString(), transaction);
-      await setMetadata("last_server_replay_version", payload.replayVersion ?? LOCATION_ENGINE_V2_CONFIG.algorithmVersion, transaction);
-      if (serverMode.success) {
-        await setMetadata(ROLLOUT_MODE_KEY, serverMode.data, transaction);
-        if (isSemanticMode(serverMode.data)) {
-          const acknowledgement = isSemanticMode(parsedBatch.rolloutMode) && existingSemanticAcknowledgement
-            ? existingSemanticAcknowledgement
-            : new Date().toISOString();
-          await setMetadata(SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY, acknowledgement, transaction);
-        } else {
-          await setMetadata(SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY, "", transaction);
+    const applied = await serialiseOwnedLocationMutation(owner, session, async () => {
+      const existingSemanticAcknowledgement = serverMode.success && isSemanticMode(serverMode.data)
+        ? await metadata(SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY)
+        : null;
+      return db.withExclusiveTransactionAsync(async (transaction) => {
+        for (const id of acknowledged) {
+          await transaction.runAsync(
+            "update location_evidence_journal set upload_state = 'acknowledged' where client_evidence_id = ?",
+            id
+          );
         }
-      }
-      await setMetadata("last_upload_error", "", transaction);
-    }));
+        for (const id of partition.retryIds) {
+          await transaction.runAsync(
+            "update location_evidence_journal set upload_state = 'pending', client_batch_id = null where client_evidence_id = ?",
+            id
+          );
+        }
+        await transaction.runAsync(
+          `update location_upload_outbox set state = ?, updated_at = ? where client_batch_id = ?`,
+          partition.retryIds.length ? "partial" : "acknowledged",
+          new Date().toISOString(),
+          batch.client_batch_id
+        );
+        await setMetadata("last_upload_at", new Date().toISOString(), transaction);
+        await setMetadata("last_server_replay_version", payload.replayVersion ?? LOCATION_ENGINE_V2_CONFIG.algorithmVersion, transaction);
+        if (serverMode.success) {
+          await setMetadata(ROLLOUT_MODE_KEY, serverMode.data, transaction);
+          if (isSemanticMode(serverMode.data)) {
+            const acknowledgement = isSemanticMode(parsedBatch.rolloutMode) && existingSemanticAcknowledgement
+              ? existingSemanticAcknowledgement
+              : new Date().toISOString();
+            await setMetadata(SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY, acknowledgement, transaction);
+          } else {
+            await setMetadata(SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY, "", transaction);
+          }
+        }
+        await setMetadata("last_upload_error", "", transaction);
+      });
+    });
+    if (applied === null) return { status: "stopped", reason: "session_changed" };
     return { status: "success", acknowledgedCount: acknowledged.length };
   } catch (error) {
+    if (!await isLocationSyncOwnershipCurrent(owner, session)) {
+      return { status: "stopped", reason: "session_changed" };
+    }
     const message = error instanceof Error ? error.message.slice(0, 200) : "Location evidence sync failed.";
     const exponentialDelay = Math.min(3_600_000, 30_000 * 2 ** Math.min(batch.attempt_count, 7));
     const jitteredDelay = Math.round(exponentialDelay * (0.8 + Math.random() * 0.4));
-    await serialiseLocationMutation(() => db.withExclusiveTransactionAsync(async (transaction) => {
-      await transaction.runAsync(
-        `update location_upload_outbox
-         set attempt_count = attempt_count + 1, last_error = ?,
-             next_attempt_at = ?, updated_at = ? where client_batch_id = ?`,
-        message,
-        new Date(Date.now() + jitteredDelay).toISOString(),
-        new Date().toISOString(),
-        batch.client_batch_id
-      );
-      await setMetadata("last_upload_error", message, transaction);
-    }));
+    const applied = await serialiseOwnedLocationMutation(owner, session, () =>
+      db.withExclusiveTransactionAsync(async (transaction) => {
+        await transaction.runAsync(
+          `update location_upload_outbox
+           set attempt_count = attempt_count + 1, last_error = ?,
+               next_attempt_at = ?, updated_at = ? where client_batch_id = ?`,
+          message,
+          new Date(Date.now() + jitteredDelay).toISOString(),
+          new Date().toISOString(),
+          batch.client_batch_id
+        );
+        await setMetadata("last_upload_error", message, transaction);
+      })
+    );
+    if (applied === null) return { status: "stopped", reason: "session_changed" };
     return { status: "stopped", reason: "request_failed", message };
   }
 }
 
-async function requestServerLocationReplay(token: string, now: number) {
-  const current = await currentContext();
-  if (!current) return { ok: false as const, message: "Location account is not configured." };
-  const requestedMode = await getLocationRolloutMode();
-  const semanticModeAcknowledgedAt = await metadata(SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY);
-  const attemptedAt = new Date(now).toISOString();
-  await serialiseLocationMutation(() => setMetadata("last_server_replay_attempt_at", attemptedAt));
+async function requestServerLocationReplay(
+  owner: MobileAccountOwner,
+  session: AuthenticatedSessionSnapshot,
+  now: number
+) {
+  const prepared = await serialiseOwnedLocationMutation(owner, session, async () => {
+    const current = await currentContextForOwner(owner);
+    if (!current) return null;
+    const requestedMode = await getLocationRolloutMode();
+    const semanticModeAcknowledgedAt = await metadata(SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY);
+    await setMetadata("last_server_replay_attempt_at", new Date(now).toISOString());
+    return { current, requestedMode, semanticModeAcknowledgedAt };
+  });
+  if (!prepared) {
+    return {
+      ok: false as const,
+      reason: "session_changed" as const,
+      message: "Location account changed before replay."
+    };
+  }
   try {
-    const response = await fetchLocationSync(`${DAYFRAME_API_BASE}/api/location/replay`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        deviceId: current.context.deviceId,
-        algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
-        rolloutMode: requestedMode,
-        ...(semanticModeAcknowledgedAt ? { semanticModeAcknowledgedAt } : {})
+    const request = await executeOwnedLocationRequest({
+      isCurrent: () => isLocationSyncOwnershipCurrent(owner, session),
+      request: () => fetchLocationSync(`${DAYFRAME_API_BASE}/api/location/replay`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          deviceId: prepared.current.context.deviceId,
+          algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+          rolloutMode: prepared.requestedMode,
+          ...(prepared.semanticModeAcknowledgedAt
+            ? { semanticModeAcknowledgedAt: prepared.semanticModeAcknowledgedAt }
+            : {})
+        })
       })
     });
+    if (request.status === "session_changed") {
+      return {
+        ok: false as const,
+        reason: "session_changed" as const,
+        message: "Location account changed while replay was running."
+      };
+    }
+    const response = request.response;
     if (response.status === 401 || response.status === 403) {
-      await invalidateMobileSessionIfCurrent(token);
+      await invalidateMobileSessionIfCurrent(session.token);
       throw new Error("Location replay requires a new login.");
     }
     if (!response.ok) throw new Error(`Location replay failed with status ${response.status}.`);
     const payload = LocationReplayResponseSchema.parse(await response.json());
-    const existingSemanticAcknowledgement = isSemanticMode(payload.rolloutMode)
-      ? await metadata(SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY)
-      : null;
     const completedAt = new Date().toISOString();
-    await serialiseLocationMutation(async () => {
+    const applied = await serialiseOwnedLocationMutation(owner, session, async () => {
+      const existingSemanticAcknowledgement = isSemanticMode(payload.rolloutMode)
+        ? await metadata(SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY)
+        : null;
       const replayDb = await database();
       await replayDb.withExclusiveTransactionAsync(async (transaction) => {
         await setMetadata("last_server_replay_at", completedAt, transaction);
@@ -724,29 +905,51 @@ async function requestServerLocationReplay(token: string, now: number) {
         await setMetadata("last_server_replay_error", "", transaction);
         await setMetadata(ROLLOUT_MODE_KEY, payload.rolloutMode, transaction);
         if (isSemanticMode(payload.rolloutMode)) {
-          const acknowledgement = isSemanticMode(requestedMode) && existingSemanticAcknowledgement
-            ? existingSemanticAcknowledgement
-            : completedAt;
+          const acknowledgement =
+            isSemanticMode(prepared.requestedMode) && existingSemanticAcknowledgement
+              ? existingSemanticAcknowledgement
+              : completedAt;
           await setMetadata(SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY, acknowledgement, transaction);
         } else {
           await setMetadata(SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY, "", transaction);
         }
       });
     });
+    if (applied === null) {
+      return {
+        ok: false as const,
+        reason: "session_changed" as const,
+        message: "Location account changed before replay was accepted."
+      };
+    }
     return {
       ok: true as const,
       finalisedSegmentCount: payload.finalisedSegmentCount,
       semanticSegmentCount: payload.semanticSegmentCount
     };
   } catch (error) {
+    if (!await isLocationSyncOwnershipCurrent(owner, session)) {
+      return {
+        ok: false as const,
+        reason: "session_changed" as const,
+        message: "Location account changed while replay was running."
+      };
+    }
     const message = error instanceof Error ? error.message.slice(0, 200) : "Location replay failed.";
-    await serialiseLocationMutation(async () => {
+    const applied = await serialiseOwnedLocationMutation(owner, session, async () => {
       const replayDb = await database();
       await replayDb.withExclusiveTransactionAsync(async (transaction) => {
         await setMetadata("last_server_replay_status", "failed", transaction);
         await setMetadata("last_server_replay_error", message, transaction);
       });
     });
+    if (applied === null) {
+      return {
+        ok: false as const,
+        reason: "session_changed" as const,
+        message: "Location account changed before replay failure was recorded."
+      };
+    }
     return { ok: false as const, message };
   }
 }
@@ -839,12 +1042,12 @@ export async function getLocationStoreDiagnostics(): Promise<LocationStoreDiagno
         lastAccepted: string | null;
       }>(
         `select
-          (select count(*) from location_evidence_journal where account_key = ? and upload_state != 'acknowledged') as pending,
+          (select count(*) from location_evidence_journal where account_key = ? and upload_state in ('pending', 'batched')) as pending,
           (select count(*) from location_evidence_journal where account_key = ? and upload_state = 'acknowledged') as acknowledged,
           (select count(*) from location_segment_snapshot where account_key = ?) as segments,
           (select count(*) from location_upload_outbox where account_key = ? and state = 'pending') as outbox,
           (select min(occurred_at) from location_evidence_journal where account_key = ?) as oldest,
-          (select min(occurred_at) from location_evidence_journal where account_key = ? and upload_state != 'acknowledged') as "oldestUnsynchronised",
+          (select min(occurred_at) from location_evidence_journal where account_key = ? and upload_state in ('pending', 'batched')) as "oldestUnsynchronised",
           (select max(occurred_at) from location_evidence_journal where account_key = ? and upload_state != 'rejected') as "lastAccepted"`,
         current.key,
         current.key,

@@ -82,18 +82,20 @@ describe("Today history swipe-to-delete contract", () => {
     expect(dashboardSource).toContain("coordinator.reconcileExternalActiveEntry({");
     expect(dashboardSource).toContain("deferredExternalActiveEntryIds()");
     expect(loadSource).toContain("await syncQueueWithTimerReconciliation()");
-    expect(loadSource).toContain(
-      "reconcilePendingActiveDeletionAfterQueueBarrier(\n        bootstrap.activeEntry?.id ?? null"
+    expect(dashboardSource).toContain(
+      "async function reconcileDashboardDeletionState(bootstrap: MobileBootstrap)"
     );
-    expect(loadSource.indexOf("reconcilePendingActiveDeletionAfterQueueBarrier(")).toBeGreaterThan(
+    expect(dashboardSource).toContain("bootstrap.activeEntry?.id ?? null");
+    expect(loadSource).toContain("reconcile: reconcileDashboardDeletionState");
+    expect(loadSource.indexOf("reconcileDashboardRefreshCandidate({")).toBeGreaterThan(
       loadSource.indexOf("await syncQueueWithTimerReconciliation()")
     );
     expect(dashboardSource).toContain("await resolveTimerEntryIdAfterQueueBarrier(localId)");
   });
 
-  it("prepares sheet deletion immediately but activates Undo only after visual exit", () => {
+  it("persists sheet deletion before projection and activates Undo only after visual exit", () => {
     const prepareSource = dashboardSource.slice(
-      dashboardSource.indexOf("function prepareSheetDeletion("),
+      dashboardSource.indexOf("async function prepareSheetDeletion("),
       dashboardSource.indexOf("function activateSheetDeletion(")
     );
     const activeExitSource = dashboardSource.slice(
@@ -106,6 +108,10 @@ describe("Today history swipe-to-delete contract", () => {
     );
 
     expect(prepareSource).toContain("coordinator.prepare([entry], snapshot)");
+    expect(prepareSource).toContain("await persistPreparedDeletion([entry], snapshot, prepared.token)");
+    expect(prepareSource.indexOf("await persistPreparedDeletion(")).toBeLessThan(
+      prepareSource.indexOf("filterPendingDeletedTimeEntries(")
+    );
     expect(prepareSource).toContain("filterPendingDeletedTimeEntries(");
     expect(prepareSource).not.toContain(".activate(");
     expect(activeExitSource).toContain("activateSheetDeletion(activeSheetDeletionToken, presentationId)");
@@ -176,19 +182,27 @@ describe("Today history swipe-to-delete contract", () => {
     expect(rejectionSource).toContain("rejectedOptimisticStartExit.current.schedule(");
     expect(rejectionSource).toContain("setActiveEditDismissRequestId(failedPresentation.id)");
     expect(rejectionSource).not.toContain("setActiveEditPresentation(null)");
-    expect(saveSource).toContain("requireQueuedTimerStartUpdate(");
-    expect(saveSource).toContain("createMutationAcceptance(");
-    expect(saveSource).toContain("return acceptance.result(completion)");
+    expect(saveSource).toContain("await enqueueTimeEntryUpdate({");
+    expect(saveSource.indexOf("await enqueueTimeEntryUpdate({")).toBeLessThan(
+      saveSource.indexOf("optimisticPatchTimeEntry(")
+    );
+    expect(saveSource).toContain("return true");
     expect(stopSource).toContain("await getOrCreatePendingStop(");
     expect(stopSource.indexOf("await getOrCreatePendingStop(")).toBeLessThan(
       stopSource.indexOf("optimisticStopActiveTimer(")
     );
+    expect(stopSource.indexOf('pendingStop.failureKind === "permanent"')).toBeLessThan(
+      stopSource.indexOf("optimisticStopActiveTimer(")
+    );
+    expect(stopSource).toContain("Open Settings > Sync & diagnostics to retry or discard");
     expect(stopSource).toContain("void (async () => {");
-    expect(stopSource).toContain("await deliverOwnedPendingTimerStops(bootstrap)");
+    expect(stopSource).toContain("const summary = await deliverOwnedPendingTimerStops(bootstrap");
+    expect(stopSource).toContain("summary.permanentRejectedClientEventIds.includes(");
+    expect(stopSource).toContain("rollbackOptimisticStopSafely(");
     expect(stopSource).toContain("return true");
     expect(stopSource).not.toContain("queueStopTimer(");
     expect(stopSource).not.toContain("stopTimer(");
-    expect(dashboardSource).toContain("rollbackOptimisticTimeEntryPatch(");
+    expect(dashboardSource).not.toContain("rollbackOptimisticTimeEntryPatch(");
     expect(dashboardSource).not.toContain("updateDashboardData(() => previousData)");
   });
 
@@ -206,7 +220,7 @@ describe("Today history swipe-to-delete contract", () => {
     expect(mutationQueueSource).toContain("timerMutationQueue.current.enqueue(operation)");
     expect(mutationQueueSource).toContain("serializeTimerPersistence(operation)");
     expect(dashboardSource).toContain("resolveTimerEntryIdAfterQueueBarrier(entryId)");
-    expect(dashboardSource).toContain("const timerStopDeliveryInFlight = useRef(false)");
+    expect(dashboardSource).toContain("await synchronisePendingTimerStops({ owner, correlations })");
   });
 
   it("keeps the blank Play generation gated across RAF until the sheet is presented", () => {

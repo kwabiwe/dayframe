@@ -92,9 +92,16 @@ describe("mobile tag interaction contract", () => {
     expect(sheet).toContain("tagNames: appliedTagNames");
   });
 
-  it("rolls back exact edited fields without erasing newer dashboard state", () => {
-    expect(dashboard).toContain("const previousData = latestData.current");
-    expect(dashboard).toContain("rollbackOptimisticTimeEntryPatch(");
+  it("durably saves edited fields before projecting them without a network rollback", () => {
+    const saveSource = dashboard.slice(
+      dashboard.indexOf("async function saveTimeEntryOptimistically("),
+      dashboard.indexOf("async function deleteCalendarEntry(")
+    );
+    expect(saveSource).toContain("await enqueueTimeEntryUpdate({");
+    expect(saveSource.indexOf("await enqueueTimeEntryUpdate({")).toBeLessThan(
+      saveSource.indexOf("optimisticPatchTimeEntry(")
+    );
+    expect(saveSource).not.toContain("rollbackOptimisticTimeEntryPatch(");
     expect(dashboard).not.toContain("updateDashboardData(() => previousData)");
     expect(dashboard).not.toContain("setData(previousData)");
     expect(dashboard).not.toContain("ActivityIndicator");

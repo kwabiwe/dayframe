@@ -19,10 +19,12 @@ Calendar, reporting, or location-evidence operations generally offline-capable.
 
 Generate one UUID, validate the open item and its time window, and atomically
 write the canonical request, safe original snapshot, ordering anchors, and a
-visible pending local effect. Disable repeated actions and label the card
-`Waiting to sync`; do not remove it until the server acknowledges the mutation.
-Network success is not part of local acknowledgement. A retryable network
-failure must leave the durable row and visible card in place.
+hidden local projection. Disable repeated actions only while that local
+transaction is in flight. After commit, remove the card or close the detail
+route immediately through its existing presentation owner; do not wait for the
+server. Network success is not part of local acknowledgement. A retryable
+network failure leaves the durable row hidden and pending across refresh,
+backgrounding, force-quit, and reopen.
 
 One account may have at most one stored terminal mutation per Review item. The
 same mutation ID plus the same canonical payload is idempotent; either a reused
@@ -40,7 +42,7 @@ ID with different data or a second terminal mutation for the item is rejected.
   the same account.
 - Mark semantic conflicts and unchanged permanent validation errors
   `needs_attention`; never retry them forever.
-- A successful response changes the local row to `acknowledged`, hides the card,
+- A successful response changes the already-hidden local row to `acknowledged`
   and triggers a canonical refresh. Delete the row only
   after a later canonical bootstrap proves that the Review item is no longer
   open.

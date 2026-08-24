@@ -1,4 +1,10 @@
 import { invalidateMobileSessionIfCurrent } from "./secure-session";
+import {
+  connectivityRequestGeneration,
+  reportHttpRequestDeadline,
+  reportHttpTransportFailure,
+  reportHttpTransportResponse
+} from "./connectivityEvidence";
 
 export class StaleMobileSessionResponseError extends Error {
   constructor() {
@@ -11,6 +17,16 @@ export class MobileRequestTimeoutError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "MobileRequestTimeoutError";
+  }
+}
+
+export class MobileHttpResponseError extends Error {
+  readonly statusCode: number;
+
+  constructor(statusCode: number, message: string) {
+    super(message);
+    this.name = "MobileHttpResponseError";
+    this.statusCode = statusCode;
   }
 }
 
@@ -30,7 +46,17 @@ export async function mobileFetch(
   input: Parameters<typeof fetch>[0],
   init: Parameters<typeof fetch>[1] = {}
 ) {
-  const response = await fetch(input, { ...init, credentials: "omit" });
+  const requestGeneration = connectivityRequestGeneration();
+  let response: Response;
+  try {
+    response = await fetch(input, { ...init, credentials: "omit" });
+  } catch (error) {
+    if (isMobileTransportFailure(error)) {
+      reportHttpTransportFailure({ requestGeneration });
+    }
+    throw error;
+  }
+  reportHttpTransportResponse({ requestGeneration });
   const rejectedToken = bearerToken(init.headers);
   if ((response.status === 401 || response.status === 403) && rejectedToken) {
     const invalidated = await invalidateMobileSessionIfCurrent(rejectedToken);
@@ -39,11 +65,36 @@ export async function mobileFetch(
   return response;
 }
 
+export function isMobileTransportFailure(error: unknown) {
+  if (
+    !(error instanceof Error) ||
+    error instanceof MobileRequestTimeoutError ||
+    error instanceof StaleMobileSessionResponseError ||
+    error.name === "AbortError"
+  ) {
+    return false;
+  }
+  if (error instanceof TypeError) return true;
+  return /network connection was lost|network request failed|failed to fetch|networkerror|internet connection/i
+    .test(error.message);
+}
+
+export function isRetryableMobileConnectivityFailure(error: unknown) {
+  return error instanceof MobileRequestTimeoutError ||
+    isMobileTransportFailure(error) ||
+    (error instanceof MobileHttpResponseError && (
+      error.statusCode === 408 ||
+      error.statusCode === 429 ||
+      error.statusCode >= 500
+    ));
+}
+
 export async function mobileFetchWithTimeout(
   input: Parameters<typeof fetch>[0],
   init: Parameters<typeof fetch>[1] = {},
   deadline: MobileRequestDeadline
 ) {
+  const requestGeneration = connectivityRequestGeneration();
   const controller = new AbortController();
   const callerSignal = init.signal;
   let timedOut = false;
@@ -73,6 +124,7 @@ export async function mobileFetchWithTimeout(
       callerAborted
     ]);
   } catch (error) {
+    if (timedOut) reportHttpRequestDeadline({ requestGeneration });
     if (timedOut && !(error instanceof MobileRequestTimeoutError)) {
       throw new MobileRequestTimeoutError(deadline.timeoutMessage);
     }

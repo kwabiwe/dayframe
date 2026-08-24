@@ -12,6 +12,16 @@ describe("native Live Activity presentation contract", () => {
     expect(shortcuts).not.toContain('event.description ?? "Tracking"');
   });
 
+  it("refuses to create ownerless native Shortcut events while signed out", () => {
+    const shortcuts = readFileSync(`${mobileRoot}ios/Dayframe/DayframeShortcuts.swift`, "utf8");
+    const ownerGuard = shortcuts.indexOf(
+      "guard catalog.user != nil, catalog.workspace != nil else"
+    );
+
+    expect(ownerGuard).toBeGreaterThan(-1);
+    expect(ownerGuard).toBeLessThan(shortcuts.indexOf("DayframeNativeShortcutQueue.append(event)"));
+  });
+
   it("binds Live Activity Stop delivery and dismissal to the archived run identity", () => {
     const shortcuts = readFileSync(`${mobileRoot}ios/Dayframe/DayframeShortcuts.swift`, "utf8");
     const directClient = readFileSync(

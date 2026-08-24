@@ -11,6 +11,8 @@ describe("offline-first Review screen contracts", () => {
     expect(reviewSource).toContain("startHealthReviewReprocess");
     expect(reviewSource).toContain("reprocessRunning && isHealthReviewItem(item)");
     expect(reviewSource).toContain("evidencePrefetcher.start");
+    expect(reviewSource).toContain("recoverReviewAfterReconnect");
+    expect(reviewSource).toContain("skipReprocess: true");
   });
 
   it("hides mutations after the local transaction and preserves restore anchors", () => {
@@ -26,6 +28,8 @@ describe("offline-first Review screen contracts", () => {
     expect(detailSource).toContain("await enqueueReviewMutation");
     expect(detailSource).toContain("void synchroniseReviewMutations().catch");
     expect(detailSource).not.toContain("key={evidence.reviewItemId}");
+    expect(detailSource).toContain("recoverEvidenceAfterReconnect");
+    expect(detailSource).toContain("Showing evidence saved on this iPhone");
     expect(detailSource.indexOf("await enqueueReviewMutation")).toBeLessThan(
       detailSource.indexOf("router.back();")
     );

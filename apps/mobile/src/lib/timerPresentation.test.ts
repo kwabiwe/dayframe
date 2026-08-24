@@ -419,6 +419,22 @@ describe("mobile timer presentation", () => {
     expect(projected?.activeEntry).toBeNull();
   });
 
+  it("does not project a permanently rejected Stop over a running timer", () => {
+    const snapshot = bootstrapWithActiveEntry();
+    const projected = projectPendingTimerStops(snapshot, [{
+      clientEventId: "mobile-timer-stop:rejected",
+      failureKind: "permanent",
+      occurredAt: "2026-07-16T09:31:00.000Z",
+      queuedAt: "2026-07-16T09:31:00.100Z",
+      targetEntryId: snapshot.activeEntry!.id,
+      userId: "user-a",
+      workspaceId: "workspace-a"
+    }]);
+
+    expect(projected).toBe(snapshot);
+    expect(projected?.activeEntry).toEqual(snapshot.activeEntry);
+  });
+
   it("does not hide a newer active timer for an older pending Stop", () => {
     const snapshot = bootstrapWithActiveEntry();
     const projected = projectPendingTimerStops(snapshot, [{

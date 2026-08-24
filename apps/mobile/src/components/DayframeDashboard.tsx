@@ -45,6 +45,7 @@ import {
 } from "@dayframe/shared";
 import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
+import { ConnectivityStatusIndicator } from "@/components/ConnectivityStatusStrip";
 import { TagMetadata } from "@/components/TagMetadata";
 import { DayframeBrand } from "@/components/brand";
 import {
@@ -55,24 +56,15 @@ import {
   AuthRequiredError,
   createManualTimeEntry,
   createTag,
-  deleteTimeEntry,
-  deliverPendingTimerStop,
   enqueueEvent,
   fetchBootstrap,
   fetchTimerState,
-  isNetworkTimerError,
   login,
   readQueue,
   readTimerEntryIdCorrelations,
-  recordTimerEntryIdCorrelation,
-  removeQueuedEvent,
-  removeTimerEntryIdCorrelation,
   resolveTimerEntryIdAfterQueueBarrier,
   signup,
-  startTimer,
   syncQueue,
-  updateQueuedTimerStart,
-  updateTimeEntry,
   type MobileBootstrap,
   type SyncQueueResult,
   type TimeEntryUpdatePatch
@@ -80,14 +72,36 @@ import {
 import { handleDayframeUrl } from "@/lib/deepLinks";
 import { resolveCalendarManualEntryRequest } from "@/lib/calendarManualEntry";
 import { IS_DAYFRAME_STAGING } from "@/lib/config";
-import { shouldApplyDashboardRefresh } from "@/lib/dashboardRefresh";
+import { useConnectivity } from "@/lib/connectivity";
+import { refreshConnectivity } from "@/lib/connectivityMonitor";
+import {
+  createSharedInFlightOperation
+} from "@/lib/connectivityRecovery";
+import {
+  captureDashboardRefreshGuard,
+  reconcileDashboardRefreshCandidate,
+  type DashboardRefreshGuard
+} from "@/lib/dashboardRefresh";
+import { subscribeRecoveredDashboardBootstrap } from "@/lib/dashboardBootstrapChannel";
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
 import {
-  configureLocationIntelligence,
-  syncLocationIntelligenceOnForeground
+  configureLocationIntelligence
 } from "@/lib/location/runtime";
 import { recordLocationStoreError } from "@/lib/location/store";
 import { mergePersistedMobileTag } from "@/lib/mobileTags";
+import {
+  StaleMobileSessionResponseError,
+  isRetryableMobileConnectivityFailure
+} from "@/lib/mobile-network";
+import {
+  activateMobileAccount,
+  deactivateMobileAccount
+} from "@/lib/mobileAccount";
+import {
+  projectDurableLocalWork
+} from "@/lib/durableLocalProjection";
+import { readDurableLocalWork } from "@/lib/durableLocalWork";
+import { readOwnedAuthenticatedSessionSnapshot } from "@/lib/secure-session";
 import {
   shouldDismissExternallyStoppedActiveEditor,
   shouldResetCalendarToTodayOnForeground
@@ -116,12 +130,21 @@ import {
   type PendingTimerStop,
   type TimerStopOwner
 } from "@/lib/timerStopOutbox";
+import { synchronisePendingTimerStops } from "@/lib/timerStopSync";
+import {
+  enqueueTimeEntryDelete,
+  enqueueTimeEntryUpdate,
+  releaseTimeEntryCommands,
+  removeTimeEntryCommands,
+  synchroniseTimeEntryCommands
+} from "@/lib/timeEntryOutbox";
 import {
   type TimeEntrySheetOpenReason,
   type TimeEntrySheetPresentation
 } from "@/lib/timeEntrySheetPresentation";
 import {
   createDeletionCoordinator,
+  DELETION_UNDO_MS,
   type PendingDeletion
 } from "@/lib/historyDeletion";
 import {
@@ -164,11 +187,9 @@ import {
 import {
   activeTimerElapsedSeconds,
   activeTimerPresentation,
-  applySuggestionToRunningTimer,
   buildMobileQuickActions,
   createBlankTimerStartGate,
   createGenerationScopedExitCoordinator,
-  createMutationAcceptance,
   createOptimisticTimerStartReconciler,
   createSerializedMutationQueue,
   createSupersededStopRollbackTracker,
@@ -182,14 +203,11 @@ import {
   optimisticStartTimer,
   optimisticStopActiveTimer,
   OPTIMISTIC_TIMER_ID_PREFIX,
-  projectPendingTimerStops,
   replaceOptimisticTimeEntryId,
-  requireQueuedTimerStartRemoval,
-  requireQueuedTimerStartUpdate,
   restoreDeletedTimeEntriesSafely,
   restoreFailedDeletionSafely,
-  rollbackOptimisticTimeEntryPatch,
   rollbackRejectedOptimisticTimerStart,
+  rollbackOptimisticStopSafely,
   shouldAwaitTimerMutationAcceptance,
   sortMobileCategoriesByUsage
 } from "@/lib/timerPresentation";
@@ -215,6 +233,34 @@ function StagingBadge({ styles }: { styles: MobileStyles }) {
   if (!IS_DAYFRAME_STAGING) return null;
   return <Text style={styles.environmentBadge}>STAGING</Text>;
 }
+
+function DashboardBrandLockup({
+  isFocused = true,
+  styles,
+  theme
+}: {
+  isFocused?: boolean;
+  styles: MobileStyles;
+  theme: MobileTheme;
+}) {
+  return (
+    <View style={styles.logoLockup}>
+      <DayframeBrand
+        layout="horizontal"
+        size="md"
+        tone={theme.mode === "dark" ? "light" : "dark"}
+      />
+      <ConnectivityStatusIndicator
+        isFocused={isFocused}
+        onOpenDiagnostics={() => router.push({
+          pathname: "/settings",
+          params: { section: "sync" }
+        })}
+      />
+      <StagingBadge styles={styles} />
+    </View>
+  );
+}
 type ReportRange = "today" | "week";
 type ReportChartView = "pie" | "bars";
 type SummarySegment = {
@@ -239,6 +285,7 @@ const DashboardContext = createContext<DashboardContextValue | null>(null);
 // Native tabs mount their routes eagerly. Keep sync, HealthKit and timer state in one shared owner.
 export function DayframeDashboardProvider({ children }: { children: ReactNode }) {
   const { reloadThemePreference, styles, theme } = useMobileTheme();
+  const connectivity = useConnectivity();
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [authSubmitting, setAuthSubmitting] = useState(false);
@@ -278,9 +325,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const reduceTransparency = useReduceTransparencyPreference();
   const refreshInFlight = useRef(false);
   const refreshQueued = useRef(false);
-  const queueSyncInFlight = useRef(false);
-  const timerStopDeliveryInFlight = useRef(false);
-  const timerStopDeliveryQueued = useRef(false);
+  const queuedEventSync = useRef(
+    createSharedInFlightOperation<SyncQueueResult>()
+  ).current;
   const healthAutoSyncInFlight = useRef(false);
   const latestData = useRef<MobileBootstrap | null>(null);
   const liveActivityReconciliationDeferred = useRef(false);
@@ -299,7 +346,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const pendingNativeShortcutLocalIds = useRef<Set<string>>(new Set());
   const timerMutationQueue = useRef(createSerializedMutationQueue());
   const timerMutationCount = useRef(0);
+  const queuedTimerStartRecoveryRequested = useRef(false);
   const dashboardMutationRevision = useRef(0);
+  const recoveredBootstrapGuards = useRef(new Map<number, DashboardRefreshGuard>());
   const loadRef = useRef<(options?: DashboardLoadOptions) => Promise<void>>(async () => undefined);
   const timerMutationVersions = useRef(new Map<string, number>());
   const timerStateRef = useRef<TimerStateFingerprint | null>(null);
@@ -310,6 +359,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     TimeEntry,
     MobileBootstrap | null
   >> | null>(null);
+  const deletionCommandIds = useRef(new Map<number, string[]>());
+  const deletionPreparationInFlight = useRef(false);
   const activeSheetDeletionToken = useRef<{ presentationId: number; token: number } | null>(null);
   const calendarSheetDeletionToken = useRef<{ presentationId: number; token: number } | null>(null);
   const activeEditorOpenFrame = useRef<number | null>(null);
@@ -322,8 +373,17 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const authEmailRef = useRef<TextInput>(null);
   const authPasswordRef = useRef<TextInput>(null);
   const preserveAuthPasswordOnSignedOut = useRef(false);
+  const authStateCurrent = useRef<AuthState>(authState);
+  const connectivityCurrent = useRef(connectivity);
+  authStateCurrent.current = authState;
+  connectivityCurrent.current = connectivity;
 
   const transitionToSignedOut = useCallback((options?: SignedOutTransitionOptions) => {
+    authStateCurrent.current = "signedOut";
+    const signedOutOwner = latestData.current
+      ? timerStopOwner(latestData.current)
+      : undefined;
+    void deactivateMobileAccount(signedOutOwner);
     if (activeEditorOpenFrame.current !== null) {
       cancelAnimationFrame(activeEditorOpenFrame.current);
       activeEditorOpenFrame.current = null;
@@ -332,6 +392,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     if (blankStart) blankTimerStartGate.current.release(blankStart.token);
     deletionCoordinator.current?.dispose();
     deletionCoordinator.current = null;
+    deletionCommandIds.current.clear();
+    deletionPreparationInFlight.current = false;
     activeSheetDeletionToken.current = null;
     calendarSheetDeletionToken.current = null;
     activeEditPresentationRef.current = null;
@@ -345,7 +407,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     calendarEditPresentationRef.current = null;
     manualEntryPresentationRef.current = null;
     dashboardMutationRevision.current += 1;
+    recoveredBootstrapGuards.current.clear();
     refreshQueued.current = false;
+    queuedTimerStartRecoveryRequested.current = false;
     latestData.current = null;
     timerStateRef.current = null;
     setData(null);
@@ -372,6 +436,91 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   useEffect(() => subscribeMobileSignedOut(() => transitionToSignedOut({
     preserveAuthPassword: preserveAuthPasswordOnSignedOut.current
   })), [transitionToSignedOut]);
+
+  useEffect(() => subscribeRecoveredDashboardBootstrap((event) => {
+    if (event.type === "started") {
+      recoveredBootstrapGuards.current.set(
+        event.publicationId,
+        captureDashboardRefreshGuard({
+          currentRevision: dashboardMutationRevision.current,
+          timerMutationsInFlight: timerMutationCount.current
+        })
+      );
+      return;
+    }
+    const guard = recoveredBootstrapGuards.current.get(event.publicationId);
+    recoveredBootstrapGuards.current.delete(event.publicationId);
+    if (event.type === "abandoned") return;
+    if (!guard) {
+      queueDashboardRefreshAfterConflict();
+      return;
+    }
+    void applyRecoveredDashboardBootstrap(event.bootstrap, guard);
+  }), []);
+
+  async function applyRecoveredDashboardBootstrap(
+    bootstrap: MobileBootstrap,
+    guard: DashboardRefreshGuard
+  ) {
+    const current = latestData.current;
+    if (
+      authStateCurrent.current !== "authenticated" ||
+      (current && !sameTimerStopOwner(timerStopOwner(current), timerStopOwner(bootstrap)))
+    ) {
+      return;
+    }
+    const reconciled = await reconcileDashboardRefreshCandidate({
+      candidate: bootstrap,
+      currentRevision: () => dashboardMutationRevision.current,
+      guard,
+      reconcile: reconcileDashboardDeletionState,
+      timerMutationsInFlight: () => timerMutationCount.current
+    });
+    if (reconciled.action === "refresh") {
+      queueDashboardRefreshAfterConflict();
+      return;
+    }
+    const next = reconciled.candidate;
+    const latest = latestData.current;
+    if (
+      authStateCurrent.current !== "authenticated" ||
+      (latest && !sameTimerStopOwner(timerStopOwner(latest), timerStopOwner(next)))
+    ) {
+      return;
+    }
+    refreshQueued.current = false;
+    latestData.current = next;
+    setData(next);
+    void readOwnedPendingTimerStops(next).then((stops) => {
+      const visible = latestData.current;
+      if (visible && sameTimerStopOwner(timerStopOwner(visible), timerStopOwner(next))) {
+        setPendingTimerStops(stops);
+      }
+    });
+    syncShortcutCatalog(next);
+    void refreshLocationServices(next);
+    void syncLiveActivityForEntry(next.activeEntry);
+  }
+
+  async function reconcileDashboardDeletionState(bootstrap: MobileBootstrap) {
+    const pendingDeletionIds = await reconcilePendingActiveDeletionAfterQueueBarrier(
+      bootstrap.activeEntry?.id ?? null
+    );
+    return filterPendingDeletedTimeEntries(bootstrap, pendingDeletionIds) as MobileBootstrap;
+  }
+
+  function queueDashboardRefreshAfterConflict() {
+    refreshQueued.current = true;
+    if (
+      timerMutationCount.current > 0 ||
+      refreshInFlight.current ||
+      connectivityCurrent.current.isOffline
+    ) {
+      return;
+    }
+    refreshQueued.current = false;
+    void loadRef.current({ silent: true });
+  }
 
   const changeReportRange = useCallback((nextRange: ReportRange) => {
     scheduleLayoutTransition(reduceMotion);
@@ -405,36 +554,28 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     return pendingTimerStopsForOwner(resolved, owner);
   }
 
-  async function deliverOwnedPendingTimerStops(bootstrap: MobileBootstrap) {
-    if (timerStopDeliveryInFlight.current) {
-      timerStopDeliveryQueued.current = true;
-      return;
-    }
-    timerStopDeliveryInFlight.current = true;
+  async function deliverOwnedPendingTimerStops(
+    bootstrap: MobileBootstrap,
+    options: { reloadAfterDelivery?: boolean } = {}
+  ) {
     const owner = timerStopOwner(bootstrap);
-    let delivered = false;
-    try {
-      do {
-        timerStopDeliveryQueued.current = false;
-        const ownedStops = await readOwnedPendingTimerStops(bootstrap);
-        setPendingTimerStops(ownedStops);
-        for (const pendingStop of ownedStops) {
-          const current = latestData.current;
-          if (!current || !sameTimerStopOwner(timerStopOwner(current), owner)) return;
-          if (!pendingStop.targetEntryId || pendingStop.failureKind === "permanent") continue;
-          const result = await deliverPendingTimerStop(pendingStop, owner);
-          if (result.status === "delivered") delivered = true;
-        }
-        const remaining = pendingTimerStopsForOwner(
-          await readPendingTimerStops(),
-          owner
-        );
-        setPendingTimerStops(remaining);
-      } while (timerStopDeliveryQueued.current);
-    } finally {
-      timerStopDeliveryInFlight.current = false;
+    const correlations = new Map(await readTimerEntryIdCorrelations(owner));
+    for (const [localId, canonicalId] of optimisticTimerIds.current) {
+      correlations.set(localId, canonicalId);
     }
-    if (delivered) void loadRef.current({ silent: true });
+    const summary = await synchronisePendingTimerStops({ owner, correlations });
+    const current = latestData.current;
+    if (!current || !sameTimerStopOwner(timerStopOwner(current), owner)) {
+      return summary;
+    }
+    setPendingTimerStops(summary.remaining);
+    if (
+      (summary.deliveredCount > 0 || summary.permanentRejectedCount > 0) &&
+      options.reloadAfterDelivery !== false
+    ) {
+      void loadRef.current({ silent: true });
+    }
+    return summary;
   }
 
   function settleOptimisticTimerStart(
@@ -498,10 +639,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     });
   }
 
-  const syncQueuedEvents = useCallback(async () => {
-    if (queueSyncInFlight.current) return null;
-    queueSyncInFlight.current = true;
-    try {
+  const syncQueuedEvents = useCallback(() =>
+    queuedEventSync.run(async () => {
       const nativeDrain = await drainNativeShortcutQueue();
       for (const localId of nativeDrain.transferredLocalIds) {
         pendingNativeShortcutLocalIds.current.add(localId);
@@ -517,10 +656,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         liveActivityReconciliationDeferred.current = false;
       }
       return syncResult;
-    } finally {
-      queueSyncInFlight.current = false;
-    }
-  }, []);
+    }), [queuedEventSync]);
 
   function reconcilePendingActiveDeletionWithExternalActiveEntry(
     externalActiveEntryId: string | null
@@ -570,6 +706,21 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   const load = useCallback(async (options?: DashboardLoadOptions) => {
+    if (
+      connectivityCurrent.current.isOffline &&
+      latestData.current !== null &&
+      !options?.throwOnError
+    ) {
+      if (options?.visibleRefresh) {
+        setRefreshing(true);
+        try {
+          await refreshConnectivity();
+        } finally {
+          setRefreshing(false);
+        }
+      }
+      return;
+    }
     if (refreshInFlight.current || timerMutationCount.current > 0) {
       refreshQueued.current = true;
       if (options?.throwOnError) {
@@ -578,13 +729,16 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       return;
     }
     refreshInFlight.current = true;
-    const refreshRevision = dashboardMutationRevision.current;
+    const refreshGuard = captureDashboardRefreshGuard({
+      currentRevision: dashboardMutationRevision.current,
+      timerMutationsInFlight: timerMutationCount.current
+    });
     if (options?.visibleRefresh) setRefreshing(true);
     try {
       const date = formatDateKey(new Date());
       await readPendingTimerStops();
       await hydrateTimerEntryIdCorrelations();
-      let bootstrap = await fetchBootstrap({ date });
+      let serverBootstrap = await fetchBootstrap({ date });
       const nativeDrain = await drainNativeShortcutQueue();
       for (const localId of nativeDrain.transferredLocalIds) {
         pendingNativeShortcutLocalIds.current.add(localId);
@@ -597,31 +751,33 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         }
         const hasRemainingShortcutEvents = syncResult.remaining.some((event) => event.source === "shortcut");
         if (pendingNativeShortcutLocalIds.current.size === 0 && !hasRemainingShortcutEvents) {
-          bootstrap = await fetchBootstrap({ date });
+          serverBootstrap = await fetchBootstrap({ date });
           liveActivityReconciliationDeferred.current = false;
         }
       } else {
         const pendingQueue = await readQueue().catch(() => []);
         liveActivityReconciliationDeferred.current = pendingQueue.some((event) => event.source === "shortcut");
       }
-      const pendingDeletionIds = await reconcilePendingActiveDeletionAfterQueueBarrier(
-        bootstrap.activeEntry?.id ?? null
-      );
-      bootstrap = filterPendingDeletedTimeEntries(bootstrap, pendingDeletionIds) as MobileBootstrap;
-      const ownedPendingStops = await readOwnedPendingTimerStops(bootstrap);
-      bootstrap = projectPendingTimerStops(
-        bootstrap,
-        ownedPendingStops,
-        optimisticTimerIds.current
-      ) as MobileBootstrap;
-      if (!shouldApplyDashboardRefresh({
-        startedRevision: refreshRevision,
-        currentRevision: dashboardMutationRevision.current,
-        timerMutationsInFlight: timerMutationCount.current
-      })) {
+      void cacheDashboardBootstrap(serverBootstrap).catch(() => undefined);
+      const owner = timerStopOwner(serverBootstrap);
+      const durableWork = await readDurableLocalWork(owner);
+      for (const [localId, timeEntryId] of durableWork.correlations) {
+        optimisticTimerIds.current.set(localId, timeEntryId);
+      }
+      let bootstrap = projectDurableLocalWork(serverBootstrap, durableWork);
+      const ownedPendingStops = durableWork.timerStops;
+      const reconciled = await reconcileDashboardRefreshCandidate({
+        candidate: bootstrap,
+        currentRevision: () => dashboardMutationRevision.current,
+        guard: refreshGuard,
+        reconcile: reconcileDashboardDeletionState,
+        timerMutationsInFlight: () => timerMutationCount.current
+      });
+      if (reconciled.action === "refresh") {
         refreshQueued.current = true;
         return;
       }
+      bootstrap = reconciled.candidate;
       if (!timerStateRef.current) {
         timerStateRef.current = {
           activeEntryId: bootstrap.activeEntry?.id ?? null,
@@ -631,8 +787,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       }
       latestData.current = bootstrap;
       setData(bootstrap);
-      setPendingTimerStops(ownedPendingStops);
-      void cacheDashboardBootstrap(bootstrap).catch(() => undefined);
+      setPendingTimerStops([...ownedPendingStops]);
       syncShortcutCatalog(bootstrap);
       setAuthState("authenticated");
       void refreshLocationServices(bootstrap);
@@ -650,8 +805,22 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         return;
       }
       if (options?.throwOnError) throw error;
-      if (!options?.silent && !options?.visibleRefresh) {
-        Alert.alert("Dayframe API", error instanceof Error ? error.message : "Unable to load API");
+      const cachedOfflineDashboardAvailable =
+        connectivityCurrent.current.isOffline && latestData.current !== null;
+      const expectedConnectivityFailure =
+        connectivityCurrent.current.isOffline ||
+        error instanceof StaleMobileSessionResponseError ||
+        isRetryableMobileConnectivityFailure(error);
+      if (
+        !options?.silent &&
+        !options?.visibleRefresh &&
+        !cachedOfflineDashboardAvailable &&
+        !expectedConnectivityFailure
+      ) {
+        Alert.alert(
+          "Unable to refresh Dayframe",
+          "Dayframe could not refresh your data. Try again in a moment."
+        );
       }
     } finally {
       refreshInFlight.current = false;
@@ -793,6 +962,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     void run.finally(() => {
       timerMutationCount.current = Math.max(0, timerMutationCount.current - 1);
       if (timerMutationCount.current === 0) {
+        queuedTimerStartRecoveryRequested.current = false;
         refreshQueued.current = true;
         void loadRef.current({ silent: true });
       }
@@ -869,24 +1039,32 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     const openDashboard = async () => {
       const cached = await loadCachedDashboardBootstrap().catch(() => null);
       if (cached && !latestData.current) {
-        await readPendingTimerStops();
-        await hydrateTimerEntryIdCorrelations();
+        const owner = timerStopOwner(cached.bootstrap);
+        const sessionRead = await readOwnedAuthenticatedSessionSnapshot(owner).catch(() => null);
+        if (sessionRead?.status !== "authenticated") {
+          await loadRef.current();
+          return;
+        }
+        let filtered = cached.bootstrap;
+        let durableWork = null;
+        await activateMobileAccount(owner);
+        durableWork = await readDurableLocalWork(owner);
+        for (const [localId, timeEntryId] of durableWork.correlations) {
+          optimisticTimerIds.current.set(localId, timeEntryId);
+        }
+        timerIdCorrelationsLoaded.current = true;
+        filtered = projectDurableLocalWork(cached.bootstrap, durableWork);
         const pendingDeletionIds = await reconcilePendingActiveDeletionAfterQueueBarrier(
-          cached.bootstrap.activeEntry?.id ?? null
+          filtered.activeEntry?.id ?? null
         );
-        let filtered = filterPendingDeletedTimeEntries(
-          cached.bootstrap,
-          pendingDeletionIds
-        ) as MobileBootstrap;
-        const ownedPendingStops = await readOwnedPendingTimerStops(filtered);
-        filtered = projectPendingTimerStops(
+        filtered = filterPendingDeletedTimeEntries(
           filtered,
-          ownedPendingStops,
-          optimisticTimerIds.current
+          pendingDeletionIds
         ) as MobileBootstrap;
         latestData.current = filtered;
         setData(filtered);
-        setPendingTimerStops(ownedPendingStops);
+        setPendingTimerStops([...(durableWork?.timerStops ?? [])]);
+        setAuthState("authenticated");
       }
       await loadRef.current();
     };
@@ -932,11 +1110,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   useFocusEffect(
     useCallback(() => {
       void reloadThemePreference();
-      if (AppState.currentState !== "active") return;
-      if (authState === "authenticated") {
-        void syncQueuedEventsAndReload();
-      }
-    }, [authState, load, reloadThemePreference, syncQueuedEventsAndReload])
+    }, [reloadThemePreference])
   );
 
   useEffect(() => {
@@ -1054,12 +1228,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       if (authState === "authenticated") {
         deletionCoordinator.current?.reconcileForeground();
         void syncHealthKitAndReload("foreground");
-        void syncQueuedEventsAndReload();
-        void syncLocationIntelligenceOnForeground().catch(recordLocationStoreError);
       }
     });
     return () => subscription.remove();
-  }, [authState, syncHealthKitAndReload, syncQueuedEventsAndReload]);
+  }, [authState, syncHealthKitAndReload]);
 
   useEffect(() => {
     const subscription = Linking.addEventListener("url", async ({ url }) => {
@@ -1320,7 +1492,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       }
       Alert.alert(
         "Time not added",
-        error instanceof Error ? error.message : "Unable to add this time entry."
+        isRetryableMobileConnectivityFailure(error)
+          ? "This time needs a connection and was not added. Your draft is still open so you can try again."
+          : "Dayframe could not add this time. Check the details and try again."
       );
       return false;
     } finally {
@@ -1343,58 +1517,15 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   async function applyRunningTimerSuggestion(entryId: string, suggestion: RecentActivitySuggestion) {
     const activeEntry = latestData.current?.activeEntry;
     if (!activeEntry || activeEntry.id !== entryId) return false;
-    const patch: TimeEntryUpdatePatch = {
-      categoryId: suggestion.categoryId,
-      description: suggestion.description,
-      tagNames: suggestion.tagNames
-    };
-    const previousData = latestData.current;
-    // The sheet applies suggestion fields immediately, but waits on this
-    // result before announcing success; a post-start PATCH failure therefore
-    // drives its generation-scoped field rollback instead of a false success.
-    const acceptance = createMutationAcceptance(true);
-    const version = nextTimerMutationVersion(entryId);
-    updateDashboardData((current) => optimisticPatchTimeEntry(current, entryId, patch));
-    const completion = enqueueTimerMutation(async () => {
-      try {
-        if (!optimisticTimerStartReconciler.current.canRunDependentMutation(entryId)) {
-          acceptance.fail();
-          return;
-        }
-        const persistedId = await resolvePersistedTimerEntryId(entryId);
-        if (persistedId) {
-          await applySuggestionToRunningTimer({
-            entryId: persistedId,
-            suggestion,
-            updateEntry: updateTimeEntry
-          });
-        } else {
-          await requireQueuedTimerStartUpdate(() => updateQueuedTimerStart(entryId, patch));
-        }
-      } catch (error) {
-        acceptance.fail();
-        if (isCurrentTimerMutation(entryId, version)) {
-          updateDashboardData((current) => rollbackOptimisticTimeEntryPatch(
-            current,
-            previousData,
-            entryId,
-            patch,
-            optimisticTimerIds.current
-          ));
-        }
-        if (error instanceof AuthRequiredError) {
-          transitionToSignedOut();
-          return;
-        }
-        Alert.alert(
-          "Timer not saved",
-          isNetworkTimerError(error)
-            ? "Your timer details were not saved. Check your connection and try again."
-            : error instanceof Error ? error.message : "Unable to save this timer."
-        );
-      }
-    });
-    return acceptance.result(completion);
+    return saveTimeEntryOptimistically(
+      entryId,
+      {
+        categoryId: suggestion.categoryId,
+        description: suggestion.description,
+        tagNames: suggestion.tagNames
+      },
+      "Timer not saved"
+    );
   }
 
   async function startTaskWith(input: {
@@ -1425,59 +1556,45 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     ) {
       return false;
     }
-    optimisticTimerStartReconciler.current.begin(optimisticId);
     const previousData = latestData.current;
+    try {
+      const queue = await enqueueEvent({
+        owner: timerStopOwner(previousData),
+        localId: optimisticId,
+        source: "mobile_app",
+        type: "timer_start",
+        occurredAt: new Date(pendingEntry.startedAt),
+        categoryId: pendingEntry.categoryId ?? undefined,
+        description: pendingEntry.description?.trim() || undefined,
+        rawPayload: {
+          origin: "mobile_timer_start",
+          startedAt: pendingEntry.startedAt,
+          tagNames: pendingEntry.tagNames ?? []
+        }
+      });
+      if (!queue.some((item) => item.localId === optimisticId && item.type === "timer_start")) {
+        throw new Error("The offline timer start could not be queued.");
+      }
+    } catch {
+      if (options.blankStartToken !== undefined) {
+        blankTimerStartGate.current.release(options.blankStartToken);
+      }
+      Alert.alert(
+        "Timer not started",
+        "Dayframe could not save this timer on your iPhone. Check available storage and try again."
+      );
+      return false;
+    }
+
+    optimisticTimerStartReconciler.current.begin(optimisticId);
+    settleOptimisticTimerStart(optimisticId, "queued");
+    queuedTimerStartRecoveryRequested.current = true;
     nextTimerMutationVersion(optimisticId);
     updateDashboardData((current) => optimisticStartTimer(current, pendingEntry));
     if (options.animateLayout !== false) scheduleLayoutTransition(reduceMotion);
-
-    enqueueTimerMutation(async () => {
-      try {
-        const result = await startTimer(
-          input.categoryId ?? null,
-          trimmedDescription,
-          input.startedAt ?? undefined,
-          input.tagNames
-        );
-        if (!result.timeEntryId) {
-          throw new Error("The timer start did not return a time entry.");
-        }
-        await recordTimerEntryIdCorrelation(optimisticId, result.timeEntryId).catch(() => false);
-        applyTimerEntryIdCorrelation(optimisticId, result.timeEntryId);
-      } catch (error) {
-        if (error instanceof AuthRequiredError) {
-          transitionToSignedOut();
-          return;
-        }
-        if (optimisticTimerStartReconciler.current.phase(optimisticId) === "persisted") return;
-        if (!isNetworkTimerError(error)) {
-          rejectOptimisticTimerStart(optimisticId, previousData, error);
-          return;
-        }
-        const queuedEntry = mobileTimeEntryById(latestData.current, optimisticId) ?? pendingEntry;
-        try {
-          const queue = await enqueueEvent({
-            localId: optimisticId,
-            source: "mobile_app",
-            type: "timer_start",
-            occurredAt: new Date(queuedEntry.startedAt),
-            categoryId: queuedEntry.categoryId ?? undefined,
-            description: queuedEntry.description?.trim() || undefined,
-            rawPayload: {
-              origin: "mobile_custom_start_fallback",
-              startedAt: queuedEntry.startedAt,
-              tagNames: queuedEntry.tagNames ?? queuedEntry.tags?.map((tag) => tag.name) ?? []
-            }
-          });
-          if (!queue.some((item) => item.localId === optimisticId && item.type === "timer_start")) {
-            throw new Error("The offline timer start could not be queued.");
-          }
-          settleOptimisticTimerStart(optimisticId, "queued");
-        } catch (queueError) {
-          rejectOptimisticTimerStart(optimisticId, previousData, queueError);
-        }
-      }
-    });
+    if (connectivityCurrent.current.isOnline) {
+      void syncQueuedEventsAndReload();
+    }
     return true;
   }
 
@@ -1542,7 +1659,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   function finalizeRejectedOptimisticStart({
-    error,
     optimisticId,
     previousData
   }: RejectedOptimisticStart) {
@@ -1553,7 +1669,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     ));
     Alert.alert(
       "Timer not started",
-      error instanceof Error ? error.message : "Unable to start this timer."
+      "Dayframe could not start this timer because the saved request was rejected. Check Sync and diagnostics for details."
     );
     setPresentedActiveEntry((current) => current?.id === optimisticId ? null : current);
   }
@@ -1580,49 +1696,59 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     entryId: string,
     patch: TimeEntryUpdatePatch,
     errorTitle: string,
-    options: { awaitPersistence?: boolean } = {}
+    _options: { awaitPersistence?: boolean } = {}
   ) {
-    const previousData = latestData.current;
-    const waitsForOptimisticStart = entryId.startsWith(OPTIMISTIC_TIMER_ID_PREFIX) &&
-      !persistedTimerEntryId(entryId);
-    const acceptance = createMutationAcceptance(
-      Boolean(options.awaitPersistence || waitsForOptimisticStart)
-    );
-    const version = nextTimerMutationVersion(entryId);
+    const bootstrap = latestData.current;
+    if (!bootstrap) return false;
+    if (!optimisticTimerStartReconciler.current.canRunDependentMutation(entryId)) {
+      return false;
+    }
+    const owner = timerStopOwner(bootstrap);
+    const persistedId = persistedTimerEntryId(entryId);
+    try {
+      await enqueueTimeEntryUpdate({
+        owner,
+        target: persistedId
+          ? { targetEntryId: persistedId }
+          : { optimisticEntryId: entryId },
+        patch
+      });
+    } catch {
+      Alert.alert(
+        errorTitle,
+        "Dayframe could not save this change on your iPhone. Check available storage and try again."
+      );
+      return false;
+    }
+
+    nextTimerMutationVersion(entryId);
     updateDashboardData((current) => optimisticPatchTimeEntry(current, entryId, patch));
-    const completion = enqueueTimerMutation(async () => {
-      try {
-        if (!optimisticTimerStartReconciler.current.canRunDependentMutation(entryId)) {
-          acceptance.fail();
-          return;
-        }
-        const persistedId = await resolvePersistedTimerEntryId(entryId);
-        if (persistedId) await updateTimeEntry(persistedId, patch);
-        else await requireQueuedTimerStartUpdate(() => updateQueuedTimerStart(entryId, patch));
-      } catch (error) {
-        acceptance.fail();
-        if (isCurrentTimerMutation(entryId, version)) {
-          updateDashboardData((current) => rollbackOptimisticTimeEntryPatch(
-            current,
-            previousData,
-            entryId,
-            patch,
-            optimisticTimerIds.current
-          ));
-        }
-        if (error instanceof AuthRequiredError) {
+    queuedTimerStartRecoveryRequested.current = true;
+
+    if (connectivityCurrent.current.isOnline) {
+      void (async () => {
+        const correlations = await readTimerEntryIdCorrelations(owner);
+        const result = await synchroniseTimeEntryCommands({
+          owner,
+          correlations,
+          force: true
+        });
+        if (result.reason === "authentication_required") {
           transitionToSignedOut();
           return;
         }
-        Alert.alert(
-          errorTitle,
-          isNetworkTimerError(error)
-            ? "Your changes were not saved. Check your connection and try again."
-            : error instanceof Error ? error.message : "Unable to save this entry."
-        );
-      }
-    });
-    return acceptance.result(completion);
+        if (result.deliveredCount > 0 || result.needsAttentionCount > 0) {
+          await loadRef.current({ silent: true });
+        }
+        if (result.needsAttentionCount > 0) {
+          Alert.alert(
+            "Time entry change not applied",
+            "The server rejected this change, so Dayframe restored the server version. You can retry or discard the saved diagnostic in Settings > Sync & diagnostics."
+          );
+        }
+      })().catch(() => undefined);
+    }
+    return true;
   }
 
   async function deleteCalendarEntry(entryId: string) {
@@ -1671,10 +1797,17 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           : { optimisticEntryId: activeEntry.id },
         occurredAt: stoppedAt
       });
-    } catch (error) {
+    } catch {
       Alert.alert(
         "Timer not stopped",
-        error instanceof Error ? error.message : "Unable to save this Stop on your device."
+        "Dayframe could not save this Stop on your iPhone. Check available storage and try again."
+      );
+      return false;
+    }
+    if (pendingStop.failureKind === "permanent") {
+      Alert.alert(
+        "Timer Stop needs attention",
+        "Open Settings > Sync & diagnostics to retry or discard the rejected Stop."
       );
       return false;
     }
@@ -1697,7 +1830,21 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           pendingStop = resolved.find((item) => item.clientEventId === pendingStop.clientEventId) ?? pendingStop;
         }
       }
-      await deliverOwnedPendingTimerStops(bootstrap);
+      const summary = await deliverOwnedPendingTimerStops(bootstrap, {
+        reloadAfterDelivery: false
+      });
+      if (summary.permanentRejectedClientEventIds.includes(pendingStop.clientEventId)) {
+        updateDashboardData((current) => rollbackOptimisticStopSafely(
+          current,
+          bootstrap,
+          activeEntry.id,
+          optimisticTimerIds.current
+        ));
+        scheduleLayoutTransition(reduceMotion);
+      }
+      if (summary.deliveredCount > 0 || summary.permanentRejectedCount > 0) {
+        void loadRef.current({ silent: true });
+      }
     })().catch((error) => {
       if (error instanceof AuthRequiredError) transitionToSignedOut();
     });
@@ -1716,33 +1863,59 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     );
   }
 
-  function commitDeletion(entries: TimeEntry[], snapshot: MobileBootstrap | null) {
-    const versions = new Map(entries.map((entry) => [entry.id, nextTimerMutationVersion(entry.id)]));
-    enqueueTimerMutation(async () => {
-      const failed: Array<{ entry: TimeEntry; error: unknown }> = [];
+  async function persistPreparedDeletion(
+    entries: TimeEntry[],
+    snapshot: MobileBootstrap | null,
+    token: number
+  ) {
+    const bootstrap = snapshot ?? latestData.current;
+    if (!bootstrap) return false;
+    const owner = timerStopOwner(bootstrap);
+    const commandIds: string[] = [];
+    try {
       for (const entry of entries) {
-        try {
-          const persistedId = await resolvePersistedTimerEntryId(entry.id);
-          if (persistedId) {
-            await deleteTimeEntry(persistedId);
-            if (entry.id.startsWith(OPTIMISTIC_TIMER_ID_PREFIX)) {
-              optimisticTimerIds.current.delete(entry.id);
-              await removeTimerEntryIdCorrelation(entry.id).catch(() => false);
-            }
-          } else {
-            await requireQueuedTimerStartRemoval(() => removeQueuedEvent(entry.id));
-          }
-        } catch (error) {
-          if (error instanceof AuthRequiredError) {
-            transitionToSignedOut();
-            return;
-          }
-          failed.push({ entry, error });
-        }
+        const persistedId = persistedTimerEntryId(entry.id);
+        const command = await enqueueTimeEntryDelete({
+          owner,
+          target: persistedId
+            ? { targetEntryId: persistedId }
+            : { optimisticEntryId: entry.id },
+          // A force-quit during Undo keeps the deletion durable. The normal
+          // coordinator releases this hold as soon as the Undo window commits.
+          deliverAfter: new Date(Date.now() + DELETION_UNDO_MS + 1_000).toISOString()
+        });
+        commandIds.push(command.clientCommandId);
       }
-      if (failed.length > 0) {
-        const actionableFailures = failed
-          .map(({ entry }) => entry)
+      deletionCommandIds.current.set(token, commandIds);
+      return true;
+    } catch {
+      await removeTimeEntryCommands(commandIds).catch(() => undefined);
+      getDeletionCoordinator().invalidate(token);
+      Alert.alert(
+        entries.length > 1 ? "Entries not deleted" : "Entry not deleted",
+        "Dayframe could not save this deletion on your iPhone. Check available storage and try again."
+      );
+      return false;
+    }
+  }
+
+  function commitDeletion(
+    entries: TimeEntry[],
+    snapshot: MobileBootstrap | null,
+    token: number
+  ) {
+    const versions = new Map(entries.map((entry) => [entry.id, nextTimerMutationVersion(entry.id)]));
+    const commandIds = deletionCommandIds.current.get(token) ?? [];
+    deletionCommandIds.current.delete(token);
+    enqueueTimerMutation(async () => {
+      const bootstrap = snapshot ?? latestData.current;
+      if (!bootstrap) return;
+      const owner = timerStopOwner(bootstrap);
+      try {
+        await releaseTimeEntryCommands(commandIds);
+      } catch {
+        await removeTimeEntryCommands(commandIds).catch(() => undefined);
+        const actionableFailures = entries
           .filter((entry) => isCurrentTimerMutation(entry.id, versions.get(entry.id) as number))
         const currentIds = actionableFailures.map((entry) => entry.id);
         if (currentIds.length === 0) return;
@@ -1752,18 +1925,30 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           currentIds,
           optimisticTimerIds.current
         ));
-        const firstError = failed.find(({ entry }) => currentIds.includes(entry.id))?.error;
         Alert.alert(
           currentIds.length > 1 ? "Entries not deleted" : "Entry not deleted",
-          firstError instanceof Error
-            ? firstError.message
-            : "Unable to delete the selected time entries."
+          "Dayframe could not finish saving this deletion on your iPhone. The time entry was restored; check available storage and try again."
         );
         AccessibilityInfo.announceForAccessibility(
           currentIds.length > 1
             ? "Time entries restored because deletion failed."
             : "Time entry restored because deletion failed."
         );
+        return;
+      }
+      queuedTimerStartRecoveryRequested.current = true;
+      if (connectivityCurrent.current.isOnline) {
+        const correlations = await readTimerEntryIdCorrelations(owner);
+        const result = await synchroniseTimeEntryCommands({
+          owner,
+          correlations,
+          force: true
+        });
+        if (result.reason === "authentication_required") {
+          transitionToSignedOut();
+          return;
+        }
+        if (result.deliveredCount > 0) await loadRef.current({ silent: true });
       }
     });
   }
@@ -1776,10 +1961,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       >({
         onCommit: ({ entries, snapshot, token }) => {
           clearSheetDeletionToken(token);
-          commitDeletion(entries, snapshot);
+          commitDeletion(entries, snapshot, token);
         },
         onPendingChange: setPendingDeletion,
-        onRestore: ({ entries, snapshot }) => {
+        onRestore: ({ entries, snapshot, token }) => {
+          const commandIds = deletionCommandIds.current.get(token) ?? [];
+          deletionCommandIds.current.delete(token);
+          void removeTimeEntryCommands(commandIds).catch(() => undefined);
           updateDashboardData((current) => restoreDeletedTimeEntriesSafely(
             current,
             snapshot,
@@ -1792,21 +1980,27 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     return deletionCoordinator.current;
   }
 
-  function scheduleHistoryDeletion(entries: TimeEntry[]) {
+  async function scheduleHistoryDeletion(entries: TimeEntry[]) {
+    if (deletionPreparationInFlight.current) return;
+    deletionPreparationInFlight.current = true;
     const snapshot = latestData.current;
     const coordinator = getDeletionCoordinator();
     const prepared = coordinator.prepare(entries, snapshot);
-    if (!prepared) return;
-    updateDashboardData((current) => filterPendingDeletedTimeEntries(
-      current,
-      coordinator.pendingEntryIds()
-    ));
-    coordinator.activate(prepared.token);
-    AccessibilityInfo.announceForAccessibility(
-      entries.length > 1
-        ? `${entries.length} time entries deleted. Undo available for five seconds.`
-        : "Time entry deleted. Undo available for five seconds."
-    );
+    try {
+      if (!prepared || !await persistPreparedDeletion(entries, snapshot, prepared.token)) return;
+      updateDashboardData((current) => filterPendingDeletedTimeEntries(
+        current,
+        coordinator.pendingEntryIds()
+      ));
+      coordinator.activate(prepared.token);
+      AccessibilityInfo.announceForAccessibility(
+        entries.length > 1
+          ? `${entries.length} time entries deleted. Undo available for five seconds.`
+          : "Time entry deleted. Undo available for five seconds."
+      );
+    } finally {
+      deletionPreparationInFlight.current = false;
+    }
   }
 
   function undoDeletion() {
@@ -1818,28 +2012,36 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     }
   }
 
-  function prepareSheetDeletion(
+  async function prepareSheetDeletion(
     entryId: string,
     presentedEntry: TimeEntry | null,
     tokenRef: { current: { presentationId: number; token: number } | null },
     presentationId: number
   ) {
-    if (tokenRef.current !== null) return false;
+    if (tokenRef.current !== null || deletionPreparationInFlight.current) return false;
+    deletionPreparationInFlight.current = true;
     const snapshot = latestData.current;
     const entry = mobileTimeEntryById(snapshot, entryId) ?? (
       presentedEntry?.id === entryId ? presentedEntry : null
     );
-    if (!entry) return false;
+    if (!entry) {
+      deletionPreparationInFlight.current = false;
+      return false;
+    }
 
     const coordinator = getDeletionCoordinator();
     const prepared = coordinator.prepare([entry], snapshot);
-    if (!prepared) return false;
-    tokenRef.current = { presentationId, token: prepared.token };
-    updateDashboardData((current) => filterPendingDeletedTimeEntries(
-      current,
-      coordinator.pendingEntryIds()
-    ));
-    return true;
+    try {
+      if (!prepared || !await persistPreparedDeletion([entry], snapshot, prepared.token)) return false;
+      tokenRef.current = { presentationId, token: prepared.token };
+      updateDashboardData((current) => filterPendingDeletedTimeEntries(
+        current,
+        coordinator.pendingEntryIds()
+      ));
+      return true;
+    } finally {
+      deletionPreparationInFlight.current = false;
+    }
   }
 
   function activateSheetDeletion(
@@ -1945,14 +2147,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.container}>
           <View style={styles.header}>
-            <View style={styles.logoLockup}>
-              <DayframeBrand
-                layout="horizontal"
-                size="md"
-                tone={theme.mode === "dark" ? "light" : "dark"}
-              />
-              <StagingBadge styles={styles} />
-            </View>
+            <DashboardBrandLockup styles={styles} theme={theme} />
           </View>
           <View
             accessibilityLiveRegion="polite"
@@ -1973,14 +2168,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       <SafeAreaView style={styles.safeArea}>
         <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
           <View style={styles.header}>
-            <View style={styles.logoLockup}>
-              <DayframeBrand
-                layout="horizontal"
-                size="md"
-                tone={theme.mode === "dark" ? "light" : "dark"}
-              />
-              <StagingBadge styles={styles} />
-            </View>
+            <DashboardBrandLockup styles={styles} theme={theme} />
           </View>
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>{authView === "signup" ? "Create account" : "Log in"}</Text>
@@ -2142,14 +2330,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           ListHeaderComponent={(
             <Animated.View style={[styles.contentStack, enteringStyle, styles.todayListHeader]}>
               <View style={styles.header}>
-                <View style={styles.logoLockup}>
-                  <DayframeBrand
-                    layout="horizontal"
-                    size="md"
-                    tone={theme.mode === "dark" ? "light" : "dark"}
-                  />
-                  <StagingBadge styles={styles} />
-                </View>
+                <DashboardBrandLockup isFocused={isFocused} styles={styles} theme={theme} />
                 <Pressable
                   accessibilityLabel="Open settings"
                   accessibilityRole="button"
@@ -2236,17 +2417,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   </View>
                 </Pressable>
               ) : (
-                <View style={styles.panel}>
-                  <View style={styles.timerSyncStatusSlot}>
-                    <Text
-                      accessibilityLiveRegion="polite"
-                      style={styles.timerSyncStatusText}
-                    >
-                      {pendingTimerStops.some((item) => item.failureKind === "permanent")
-                        ? "Stop could not sync"
-                        : pendingTimerStops.length > 0 ? "Stop pending sync" : ""}
-                    </Text>
-                  </View>
+                <View style={[styles.panel, styles.idleTimerPanel]}>
                   <View style={styles.startInputRow}>
                     <View style={styles.startComposerMain}>
                       <Pressable
@@ -2257,6 +2428,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                       >
                         <Text style={styles.startInputText} numberOfLines={1}>What are you working on?</Text>
                       </Pressable>
+                      <Text style={styles.quickCategoryHint}>QUICK ACTIONS</Text>
                       <ScrollView
                         accessibilityLabel="Quick actions"
                         horizontal
@@ -2379,14 +2551,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         <SafeAreaView collapsable={false} edges={["top", "left", "right"]} style={styles.safeArea}>
           <View style={styles.nativeCalendarScreen}>
             <Animated.View style={[styles.nativeCalendarHeader, enteringStyle]}>
-              <View style={styles.logoLockup}>
-                <DayframeBrand
-                  layout="horizontal"
-                  size="md"
-                  tone={theme.mode === "dark" ? "light" : "dark"}
-                />
-                <StagingBadge styles={styles} />
-              </View>
+              <DashboardBrandLockup isFocused={isFocused} styles={styles} theme={theme} />
               <Pressable
                 accessibilityLabel="Open settings"
                 accessibilityRole="button"
@@ -2442,14 +2607,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         >
           <Animated.View style={[styles.contentStack, enteringStyle]}>
           <View style={styles.header}>
-            <View style={styles.logoLockup}>
-              <DayframeBrand
-                layout="horizontal"
-                size="md"
-                tone={theme.mode === "dark" ? "light" : "dark"}
-              />
-              <StagingBadge styles={styles} />
-            </View>
+            <DashboardBrandLockup isFocused={isFocused} styles={styles} theme={theme} />
             <Pressable
               accessibilityLabel="Open settings"
               accessibilityRole="button"

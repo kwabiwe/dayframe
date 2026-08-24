@@ -14,7 +14,8 @@ const nativeStorageSource = source("../../ios/Dayframe/DayframeSharedStorage.swi
 
 describe("background session invalidation contracts", () => {
   it("guards delayed location upload and replay rejections with their captured bearer", () => {
-    expect(locationStoreSource.match(/invalidateMobileSessionIfCurrent\(token\)/g)).toHaveLength(2);
+    expect(locationStoreSource.match(/invalidateMobileSessionIfCurrent\(session\.token\)/g)).toHaveLength(2);
+    expect(locationStoreSource.match(/executeOwnedLocationRequest\(/g)).toHaveLength(2);
     expect(locationStoreSource).not.toContain("invalidateMobileSession()");
   });
 
@@ -28,6 +29,7 @@ describe("background session invalidation contracts", () => {
     expect(networkSource).toContain("throw new StaleMobileSessionResponseError()");
     expect(apiSource.match(/await clearSessionToken\(\)/g)).toHaveLength(1);
     expect(apiSource).toContain("export async function logout()");
+    expect(apiSource).toContain("clearActiveOwnerNativeShortcutQueue(activeOwner)");
   });
 
   it("clears shortcut native context only when the rejected bearer still owns it", () => {

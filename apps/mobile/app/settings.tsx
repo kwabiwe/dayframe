@@ -89,6 +89,7 @@ import {
   type MobileStyles,
   type MobileTheme
 } from "@/lib/mobileTheme";
+import { isRetryableMobileConnectivityFailure } from "@/lib/mobile-network";
 import { publishMobileSignedOut } from "@/lib/mobileSessionTransition";
 import { REVIEW_COPY, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
 import {
@@ -118,6 +119,24 @@ import {
   synchroniseReviewMutations,
   type ReviewSyncDiagnostics
 } from "@/lib/reviewSyncStore";
+import {
+  clearDeviceTimeEntryOutboxQuarantine,
+  clearTimeEntryOutboxQuarantine,
+  discardTimeEntrySyncIssue,
+  getTimeEntryOutboxDiagnostics,
+  listTimeEntrySyncIssues,
+  retryTimeEntrySyncIssue,
+  subscribeTimeEntryOutbox
+} from "@/lib/timeEntryOutbox";
+import {
+  discardTimerStopSyncIssue,
+  getTimerStopOutboxDiagnostics,
+  listTimerStopSyncIssues,
+  retryTimerStopSyncIssue,
+  subscribeTimerStopOutbox
+} from "@/lib/timerStopOutbox";
+import { deviceSyncAttentionStatus } from "@/lib/settingsSyncDiagnostics";
+import { TimerStopIssueActions } from "@/components/TimerStopIssueActions";
 
 type Category = MobileBootstrap["categories"][number];
 type SettingsSection = "index" | "profile" | "categories" | "automations" | "health" | "sync" | "appearance";
@@ -220,6 +239,18 @@ export default function SettingsScreen() {
     useState<ReviewSyncDiagnostics | null>(null);
   const [reviewSyncIssues, setReviewSyncIssues] = useState<
     Awaited<ReturnType<typeof listReviewSyncIssues>>
+  >([]);
+  const [timeEntrySyncDiagnostics, setTimeEntrySyncDiagnostics] = useState<
+    Awaited<ReturnType<typeof getTimeEntryOutboxDiagnostics>> | null
+  >(null);
+  const [timeEntrySyncIssues, setTimeEntrySyncIssues] = useState<
+    Awaited<ReturnType<typeof listTimeEntrySyncIssues>>
+  >([]);
+  const [timerStopSyncDiagnostics, setTimerStopSyncDiagnostics] = useState<
+    Awaited<ReturnType<typeof getTimerStopOutboxDiagnostics>> | null
+  >(null);
+  const [timerStopSyncIssues, setTimerStopSyncIssues] = useState<
+    Awaited<ReturnType<typeof listTimerStopSyncIssues>>
   >([]);
   const [showLocationTroubleshooting, setShowLocationTroubleshooting] = useState(false);
   const [locationInfoSheet, setLocationInfoSheet] = useState<"places" | "suggestions" | null>(null);
@@ -363,6 +394,24 @@ export default function SettingsScreen() {
     setReviewSyncIssues(issues);
   }, []);
 
+  const refreshTimeEntryDiagnostics = useCallback(async () => {
+    const [diagnostics, issues] = await Promise.all([
+      getTimeEntryOutboxDiagnostics(),
+      listTimeEntrySyncIssues()
+    ]);
+    setTimeEntrySyncDiagnostics(diagnostics);
+    setTimeEntrySyncIssues(issues);
+  }, []);
+
+  const refreshTimerStopDiagnostics = useCallback(async () => {
+    const [diagnostics, issues] = await Promise.all([
+      getTimerStopOutboxDiagnostics(),
+      listTimerStopSyncIssues()
+    ]);
+    setTimerStopSyncDiagnostics(diagnostics);
+    setTimerStopSyncIssues(issues);
+  }, []);
+
   const load = useCallback(async (options?: { silent?: boolean; trigger?: "navigation" | "focus" | "pull" }) => {
     if (refreshInFlight.current) return;
     refreshInFlight.current = true;
@@ -391,19 +440,29 @@ export default function SettingsScreen() {
       setLocationStatus(nextLocationStatus);
       await refreshLocationV2Diagnostics();
       await refreshReviewDiagnostics();
+      await refreshTimeEntryDiagnostics();
+      await refreshTimerStopDiagnostics();
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         finishSignedOutNavigation();
         return;
       }
-      if (!options?.silent) {
-        Alert.alert("Dayframe API", error instanceof Error ? error.message : "Unable to load API");
+      if (!options?.silent && !isRetryableMobileConnectivityFailure(error)) {
+        Alert.alert(
+          "Unable to refresh Settings",
+          "Dayframe could not refresh Settings. Try again in a moment."
+        );
       }
     } finally {
       refreshInFlight.current = false;
       if (showRefreshIndicator) setRefreshing(false);
     }
-  }, [finishSignedOutNavigation, refreshReviewDiagnostics]);
+  }, [
+    finishSignedOutNavigation,
+    refreshReviewDiagnostics,
+    refreshTimeEntryDiagnostics,
+    refreshTimerStopDiagnostics
+  ]);
 
   useEffect(() => {
     if (!isSettingsSnapshotFresh()) void load({ silent: true });
@@ -415,6 +474,20 @@ export default function SettingsScreen() {
       void refreshReviewDiagnostics();
     });
   }, [refreshReviewDiagnostics]);
+
+  useEffect(() => {
+    void refreshTimeEntryDiagnostics();
+    return subscribeTimeEntryOutbox(() => {
+      void refreshTimeEntryDiagnostics();
+    });
+  }, [refreshTimeEntryDiagnostics]);
+
+  useEffect(() => {
+    void refreshTimerStopDiagnostics();
+    return subscribeTimerStopOutbox(() => {
+      void refreshTimerStopDiagnostics();
+    });
+  }, [refreshTimerStopDiagnostics]);
 
   useFocusEffect(
     useCallback(() => {
@@ -486,7 +559,19 @@ export default function SettingsScreen() {
     lastSyncResult,
     queueDiagnostics
   });
-  const deviceSyncStatus = reviewSyncDiagnostics?.needsAttentionCount
+  const deviceAttentionStatus = deviceSyncAttentionStatus({
+    timerStopNeedsAttentionCount: timerStopSyncDiagnostics?.needsAttentionCount,
+    timeEntryNeedsAttentionCount: timeEntrySyncDiagnostics?.needsAttentionCount
+  });
+  const deviceSyncStatus = deviceAttentionStatus ?? (timeEntrySyncDiagnostics?.quarantinedCount
+      ? `${timeEntrySyncDiagnostics.quarantinedCount} unreadable local sync ${
+          timeEntrySyncDiagnostics.quarantinedCount === 1 ? "record" : "records"
+        } quarantined`
+    : timeEntrySyncDiagnostics?.deviceQuarantinedCount
+      ? `${timeEntrySyncDiagnostics.deviceQuarantinedCount} unreadable device-wide sync ${
+          timeEntrySyncDiagnostics.deviceQuarantinedCount === 1 ? "record" : "records"
+        } quarantined`
+    : reviewSyncDiagnostics?.needsAttentionCount
     ? `${reviewSyncDiagnostics.needsAttentionCount} Review ${
         reviewSyncDiagnostics.needsAttentionCount === 1 ? "issue" : "issues"
       }`
@@ -494,7 +579,7 @@ export default function SettingsScreen() {
       ? `${reviewSyncDiagnostics.waitingCount} Review ${
           reviewSyncDiagnostics.waitingCount === 1 ? "change" : "changes"
         } waiting`
-      : eventSyncStatus;
+      : eventSyncStatus);
   const locationMonitoringAllowed = locationDiagnostics?.backgroundPermission === "granted";
   const locationActionLabel = locationMonitoringAllowed
     ? "Refresh"
@@ -743,6 +828,100 @@ export default function SettingsScreen() {
           onPress: () => {
             void discardReviewSyncIssue(clientMutationId).then(() =>
               refreshReviewDiagnostics()
+            );
+          }
+        }
+      ]
+    );
+  }
+
+  function confirmDiscardTimeEntryIssue(clientCommandId: string) {
+    Alert.alert(
+      "Discard failed time entry change?",
+      "The server version is already restored. This removes the rejected local change from diagnostics.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Discard",
+          style: "destructive",
+          onPress: () => {
+            void discardTimeEntrySyncIssue(clientCommandId).then(() =>
+              refreshTimeEntryDiagnostics()
+            );
+          }
+        }
+      ]
+    );
+  }
+
+  function retryTimeEntryIssue(clientCommandId: string) {
+    void retryTimeEntrySyncIssue(clientCommandId).then(async (retried) => {
+      await refreshTimeEntryDiagnostics();
+      if (retried) {
+        setSyncStatusMessageAndCache("Retrying the saved time entry change...");
+      }
+    });
+  }
+
+  function confirmDiscardTimerStopIssue(clientEventId: string) {
+    Alert.alert(
+      "Discard rejected timer Stop?",
+      "The server timer will stay unchanged. This removes only the rejected Stop saved on this iPhone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Discard Stop",
+          style: "destructive",
+          onPress: () => {
+            void discardTimerStopSyncIssue(clientEventId).then(() =>
+              refreshTimerStopDiagnostics()
+            );
+          }
+        }
+      ]
+    );
+  }
+
+  function retryTimerStopIssue(clientEventId: string) {
+    void retryTimerStopSyncIssue(clientEventId).then(async (retried) => {
+      await refreshTimerStopDiagnostics();
+      if (retried) {
+        setSyncStatusMessageAndCache("Retrying the saved timer Stop...");
+      }
+    });
+  }
+
+  function confirmClearTimeEntryQuarantine() {
+    Alert.alert(
+      "Clear unreadable local sync data?",
+      "These records cannot be replayed. Clearing them removes only quarantined diagnostics.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear",
+          style: "destructive",
+          onPress: () => {
+            void clearTimeEntryOutboxQuarantine().then(() =>
+              refreshTimeEntryDiagnostics()
+            );
+          }
+        }
+      ]
+    );
+  }
+
+  function confirmClearDeviceTimeEntryQuarantine() {
+    Alert.alert(
+      "Clear unreadable device-wide sync data?",
+      "The damaged data has no recoverable account owner and cannot be replayed. Clearing it removes only device-wide quarantine diagnostics.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear",
+          style: "destructive",
+          onPress: () => {
+            void clearDeviceTimeEntryOutboxQuarantine().then(() =>
+              refreshTimeEntryDiagnostics()
             );
           }
         }
@@ -1674,6 +1853,109 @@ export default function SettingsScreen() {
                 )}
               </View>
             ) : null}
+            <View style={styles.queueDiagnosticCard}>
+              <Text style={styles.label}>Timer Stops</Text>
+              <Text style={styles.accountMeta}>
+                Pending {timerStopSyncDiagnostics?.pendingCount ?? 0} · Needs attention{" "}
+                {timerStopSyncDiagnostics?.needsAttentionCount ?? 0}
+              </Text>
+              {timerStopSyncIssues.map((issue) => (
+                <Reanimated.View
+                  key={issue.clientEventId}
+                  entering={localPresenceEntering(reduceMotion)}
+                  exiting={localPresenceExiting(reduceMotion)}
+                  layout={localLayoutTransition(reduceMotion)}
+                  style={styles.accountRow}
+                >
+                  <Text style={styles.accountValue}>
+                    Timer Stop rejected · {formatQueueTime(issue.failedAt ?? issue.queuedAt)}
+                  </Text>
+                  <Text style={styles.accountMeta}>
+                    The server did not accept this Stop. Retry it, or discard it to keep the server timer unchanged.
+                  </Text>
+                  <TimerStopIssueActions
+                    clientEventId={issue.clientEventId}
+                    onDiscard={confirmDiscardTimerStopIssue}
+                    onRetry={retryTimerStopIssue}
+                    styles={styles}
+                  />
+                </Reanimated.View>
+              ))}
+            </View>
+            <View style={styles.queueDiagnosticCard}>
+              <Text style={styles.label}>Time entry changes</Text>
+              <Text style={styles.accountMeta}>
+                Pending {timeEntrySyncDiagnostics?.pendingCount ?? 0} · Needs attention{" "}
+                {timeEntrySyncDiagnostics?.needsAttentionCount ?? 0} · Account quarantine{" "}
+                {timeEntrySyncDiagnostics?.quarantinedCount ?? 0}
+              </Text>
+              {(timeEntrySyncDiagnostics?.deviceQuarantinedCount ?? 0) > 0 ? (
+                <Text style={styles.accountMeta}>
+                  Device-wide quarantine {timeEntrySyncDiagnostics?.deviceQuarantinedCount ?? 0} · owner could not be recovered
+                </Text>
+              ) : null}
+              {timeEntrySyncDiagnostics?.nextRetryAt ? (
+                <Text style={styles.accountMeta}>
+                  Next retry {formatQueueTime(timeEntrySyncDiagnostics.nextRetryAt)}
+                </Text>
+              ) : null}
+              {timeEntrySyncDiagnostics?.lastError ? (
+                <Text style={styles.accountMeta} numberOfLines={3}>
+                  Last error {timeEntrySyncDiagnostics.lastError}
+                </Text>
+              ) : null}
+              {timeEntrySyncIssues.map((issue) => (
+                <View key={issue.clientCommandId} style={styles.accountRow}>
+                  <Text style={styles.accountValue}>
+                    {issue.operation === "delete" ? "Delete" : "Edit"} rejected ·{" "}
+                    {formatQueueTime(issue.updatedAt)}
+                  </Text>
+                  <Text style={styles.accountMeta} numberOfLines={3}>
+                    Entry {(issue.targetEntryId ?? issue.optimisticEntryId ?? "unknown").slice(0, 8)}
+                    {issue.lastStatusCode ? ` · HTTP ${issue.lastStatusCode}` : ""}
+                    {issue.lastError ? ` · ${issue.lastError}` : ""}
+                  </Text>
+                  <View style={styles.buttonRow}>
+                    <Pressable
+                      accessibilityRole="button"
+                      style={pressable(styles.secondaryButton, styles.buttonPressed)}
+                      onPress={() => retryTimeEntryIssue(issue.clientCommandId)}
+                    >
+                      <Text style={styles.secondaryButtonText}>Retry change</Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      style={pressable(styles.secondaryButton, styles.buttonPressed)}
+                      onPress={() => confirmDiscardTimeEntryIssue(issue.clientCommandId)}
+                    >
+                      <Text style={styles.secondaryButtonText}>Discard change</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ))}
+              {(timeEntrySyncDiagnostics?.quarantinedCount ?? 0) > 0 ? (
+                <View style={styles.buttonRow}>
+                  <Pressable
+                    accessibilityRole="button"
+                    style={pressable(styles.secondaryButton, styles.buttonPressed)}
+                    onPress={confirmClearTimeEntryQuarantine}
+                  >
+                    <Text style={styles.secondaryButtonText}>Clear quarantined data</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+              {(timeEntrySyncDiagnostics?.deviceQuarantinedCount ?? 0) > 0 ? (
+                <View style={styles.buttonRow}>
+                  <Pressable
+                    accessibilityRole="button"
+                    style={pressable(styles.secondaryButton, styles.buttonPressed)}
+                    onPress={confirmClearDeviceTimeEntryQuarantine}
+                  >
+                    <Text style={styles.secondaryButtonText}>Clear device-wide quarantine</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+            </View>
             <View style={styles.queueDiagnosticCard}>
               <Text style={styles.label}>Review changes</Text>
               <Text style={styles.accountMeta}>

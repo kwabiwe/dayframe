@@ -11,7 +11,8 @@ describe("secure session startup contract", () => {
   it("waits for active iOS app state before the initial authenticated load", () => {
     expect(dashboardSource).toContain('if (AppState.currentState === "active")');
     expect(dashboardSource).toContain('if (state !== "active") return;');
-    expect(dashboardSource).toContain('if (AppState.currentState !== "active") return;');
+    expect(dashboardSource).toContain('AppState.addEventListener("change", (state) => {');
+    expect(dashboardSource).toContain("subscription.remove();");
   });
 
   it("uses one branded post-auth opening state and clears the password only after load", () => {

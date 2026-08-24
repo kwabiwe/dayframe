@@ -144,6 +144,11 @@ private func dayframeCleanText(_ value: String?) -> String? {
 private enum DayframeShortcutPerformer {
   static func perform(_ action: DayframeShortcutAction) async {
     let catalog = DayframeShortcutCatalogStore.catalog
+    // App Intents can run while Dayframe is signed out. Never create an
+    // ownerless event that a different account could inherit later.
+    guard catalog.user != nil, catalog.workspace != nil else {
+      return
+    }
     let event = DayframeShortcutEvent(action: action, catalog: catalog)
     let queued = DayframeNativeShortcutQueue.append(event)
 
@@ -217,6 +222,8 @@ struct DayframeShortcutEvent: Codable {
   let categoryId: String?
   let description: String?
   let rawPayload: [String: String]
+  let userId: String?
+  let workspaceId: String?
 
   fileprivate init(action: DayframeShortcutAction, catalog: DayframeShortcutCatalog) {
     let now = Date()
@@ -265,6 +272,8 @@ struct DayframeShortcutEvent: Codable {
       categoryId = nextCategoryId
       description = nextDescription
       rawPayload = payload
+      userId = catalog.user?.id
+      workspaceId = catalog.workspace?.id
       return
     }
 
@@ -275,6 +284,8 @@ struct DayframeShortcutEvent: Codable {
     categoryId = nextCategoryId
     description = nextDescription
     rawPayload = payload
+    userId = catalog.user?.id
+    workspaceId = catalog.workspace?.id
   }
 
 }
@@ -310,7 +321,7 @@ private enum DayframeShortcutCatalogStore {
       let data = value.data(using: .utf8),
       let decoded = try? JSONDecoder().decode(DayframeShortcutCatalog.self, from: data)
     else {
-      return DayframeShortcutCatalog(workspace: nil, categories: [])
+      return DayframeShortcutCatalog(user: nil, workspace: nil, categories: [])
     }
 
     return decoded
@@ -318,6 +329,7 @@ private enum DayframeShortcutCatalogStore {
 }
 
 private struct DayframeShortcutCatalog: Decodable {
+  let user: DayframeShortcutUser?
   let workspace: DayframeShortcutWorkspace?
   let categories: [DayframeShortcutCategory]
 
@@ -354,6 +366,10 @@ private struct DayframeShortcutCatalog: Decodable {
     }
     return trimmed
   }
+}
+
+private struct DayframeShortcutUser: Decodable {
+  let id: String
 }
 
 private struct DayframeShortcutWorkspace: Decodable {

@@ -179,4 +179,54 @@ describe("timer Stop outbox", () => {
     });
     await expect(outbox.readPendingTimerStops()).resolves.toEqual([accountB]);
   });
+
+  it("scopes permanent Stop attention plus Retry and Discard to the active account", async () => {
+    const outbox = await loadOutbox();
+    const accountA = await outbox.getOrCreatePendingStop({
+      owner,
+      target: { targetEntryId: "entry-a" }
+    });
+    const otherOwner = { userId: "user-b", workspaceId: "workspace-b" };
+    const accountB = await outbox.getOrCreatePendingStop({
+      owner: otherOwner,
+      target: { targetEntryId: "entry-b" }
+    });
+    await outbox.markPendingTimerStopFailure(accountA.clientEventId, {
+      failureKind: "permanent",
+      message: "Invalid target",
+      statusCode: 422
+    });
+    await outbox.markPendingTimerStopFailure(accountB.clientEventId, {
+      failureKind: "permanent",
+      message: "Invalid target",
+      statusCode: 422
+    });
+
+    await expect(outbox.getTimerStopOutboxDiagnostics(owner)).resolves.toMatchObject({
+      pendingCount: 0,
+      needsAttentionCount: 1
+    });
+    await expect(outbox.listTimerStopSyncIssues(owner)).resolves.toEqual([
+      expect.objectContaining({ clientEventId: accountA.clientEventId })
+    ]);
+
+    await expect(outbox.retryTimerStopSyncIssue(accountA.clientEventId, owner)).resolves.toBe(true);
+    await expect(outbox.getTimerStopOutboxDiagnostics(owner)).resolves.toMatchObject({
+      pendingCount: 1,
+      needsAttentionCount: 0
+    });
+    await expect(outbox.listTimerStopSyncIssues(otherOwner)).resolves.toEqual([
+      expect.objectContaining({ clientEventId: accountB.clientEventId })
+    ]);
+
+    await outbox.markPendingTimerStopFailure(accountA.clientEventId, {
+      failureKind: "permanent",
+      message: "Invalid target",
+      statusCode: 422
+    });
+    await expect(outbox.discardTimerStopSyncIssue(accountA.clientEventId, owner)).resolves.toBe(true);
+    await expect(outbox.readPendingTimerStops()).resolves.toEqual([
+      expect.objectContaining({ clientEventId: accountB.clientEventId })
+    ]);
+  });
 });
