@@ -38,6 +38,7 @@ vi.mock("./mobileAccount", () => ({
 }));
 
 const {
+  clearActiveOwnerNativeShortcutQueue,
   drainNativeShortcutQueue,
   getNativeShortcutPendingCount,
   syncShortcutCatalog
@@ -222,5 +223,33 @@ describe("native Shortcut bridge", () => {
     });
     expect(mocks.enqueueEvent).not.toHaveBeenCalled();
     expect(mocks.removeShortcutEvents).not.toHaveBeenCalled();
+  });
+
+  it("clears owned and legacy events at logout without deleting another account's work", async () => {
+    mocks.pendingShortcutEvents.mockResolvedValue([
+      {
+        localId: "owned",
+        type: "shortcut_action",
+        userId: OWNER.userId,
+        workspaceId: OWNER.workspaceId
+      },
+      {
+        localId: "legacy-unscoped",
+        type: "timer_stop"
+      },
+      {
+        localId: "other-account",
+        type: "shortcut_action",
+        userId: "user-2",
+        workspaceId: "workspace-2"
+      }
+    ]);
+    mocks.removeShortcutEvents.mockResolvedValue(2);
+
+    await expect(clearActiveOwnerNativeShortcutQueue(OWNER)).resolves.toBe(2);
+    expect(mocks.removeShortcutEvents).toHaveBeenCalledWith([
+      "owned",
+      "legacy-unscoped"
+    ]);
   });
 });

@@ -557,6 +557,7 @@ export async function signup(email: string, password: string, name?: string, wor
 }
 
 export async function logout() {
+  const activeOwner = await readActiveMobileAccount();
   const token = await getSessionToken();
   await mobileFetch(`${DAYFRAME_API_BASE}/api/auth/logout`, {
     method: "POST",
@@ -575,7 +576,12 @@ export async function logout() {
     .then(({ clearActiveReviewAccountData }) => clearActiveReviewAccountData())
     .catch(() => undefined);
   await import("./shortcuts")
-    .then(({ clearShortcutCatalog }) => clearShortcutCatalog())
+    .then(async ({ clearActiveOwnerNativeShortcutQueue, clearShortcutCatalog }) => {
+      if (activeOwner) {
+        await clearActiveOwnerNativeShortcutQueue(activeOwner).catch(() => 0);
+      }
+      clearShortcutCatalog();
+    })
     .catch(() => undefined);
   await clearSessionToken();
   await deactivateMobileAccount();

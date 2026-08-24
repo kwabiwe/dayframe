@@ -29,6 +29,7 @@ describe("background session invalidation contracts", () => {
     expect(networkSource).toContain("throw new StaleMobileSessionResponseError()");
     expect(apiSource.match(/await clearSessionToken\(\)/g)).toHaveLength(1);
     expect(apiSource).toContain("export async function logout()");
+    expect(apiSource).toContain("clearActiveOwnerNativeShortcutQueue(activeOwner)");
   });
 
   it("clears shortcut native context only when the rejected bearer still owns it", () => {

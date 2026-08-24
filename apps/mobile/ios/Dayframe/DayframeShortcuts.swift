@@ -144,6 +144,11 @@ private func dayframeCleanText(_ value: String?) -> String? {
 private enum DayframeShortcutPerformer {
   static func perform(_ action: DayframeShortcutAction) async {
     let catalog = DayframeShortcutCatalogStore.catalog
+    // App Intents can run while Dayframe is signed out. Never create an
+    // ownerless event that a different account could inherit later.
+    guard catalog.user != nil, catalog.workspace != nil else {
+      return
+    }
     let event = DayframeShortcutEvent(action: action, catalog: catalog)
     let queued = DayframeNativeShortcutQueue.append(event)
 

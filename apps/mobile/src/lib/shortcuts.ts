@@ -69,6 +69,21 @@ export function clearShortcutCatalog() {
   }
 }
 
+export async function clearActiveOwnerNativeShortcutQueue(owner: MobileAccountOwner) {
+  if (Platform.OS !== "ios") return 0;
+  if (!nativeShortcutQueue?.pendingShortcutEvents || !nativeShortcutQueue.removeShortcutEvents) {
+    return 0;
+  }
+
+  const localIds = parseNativeShortcutQueue(await nativeShortcutQueue.pendingShortcutEvents())
+    .filter((event) =>
+      nativeEventBelongsToOwner(event, owner) || (!event.userId && !event.workspaceId)
+    )
+    .map((event) => event.localId);
+  if (!localIds.length) return 0;
+  return nativeShortcutQueue.removeShortcutEvents(localIds);
+}
+
 export async function getNativeShortcutPendingCount(owner: MobileAccountOwner) {
   if (Platform.OS !== "ios" || !nativeShortcutQueue?.pendingShortcutEvents) return 0;
   const events = parseNativeShortcutQueue(await nativeShortcutQueue.pendingShortcutEvents());
