@@ -71,6 +71,8 @@ describe("primary mobile timer action geometry", () => {
     expect(theme.match(/paddingVertical: TIMER_CARD_VERTICAL_INSET/g)).toHaveLength(2);
     expect(theme.match(/width: TIMER_CARD_ACTION_COLUMN_WIDTH/g)).toHaveLength(2);
     expect(theme.match(/justifyContent: "space-between"/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+    expect(theme).toContain("minHeight: TIMER_CARD_QUICK_ACTION_PILL_HEIGHT");
+    expect(dashboard).toContain("TIMER_CARD_QUICK_ACTION_HIT_SLOP");
     expect(theme).not.toMatch(/idleTimerPanel: \{[^}]*paddingBottom: 8/);
   });
 });

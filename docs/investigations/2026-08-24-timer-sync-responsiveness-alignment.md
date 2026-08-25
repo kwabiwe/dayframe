@@ -130,13 +130,16 @@ future option rather than part of this focused repair.
 
 ### Mobile timer-card geometry
 
-Idle and running cards share horizontal/vertical insets, minimum content
-height, 44-point action size, action-column width, inter-column gap, and the
-description-to-label/label-to-pill spacing contract. Their action columns
-stretch to the content row and use top/bottom distribution: Play/Stop share the
-same top centre and both plus controls share the same bottom centre. The Quick
-Actions row has the same bottom edge as the plus control, remains horizontally
-scrollable, and retains trailing scroll inset for a partial-pill affordance.
+Idle and running cards share a 136-point baseline height, 16-point horizontal
+and 14-point vertical insets, 44-point action size, action-column width,
+inter-column gap, and the description-to-label spacing contract. Their action
+columns stretch to the 108-point content row and use top/bottom distribution:
+Play/Stop share the same top centre and both plus controls share the same bottom
+centre. The visible 32-point Quick Actions pill bodies use a 4-point gap below
+the label and share their bottom edge with the plus control at card-relative
+`y=122`, leaving 14 points below both. Six-point vertical hit expansion keeps
+the pill target effectively 44 points without making an invisible touch row the
+visual alignment edge. The scroller retains its trailing partial-pill affordance.
 
 The existing one-point Play glyph optical correction stays inside the shared
 44-point control. No button column is translated.
@@ -224,6 +227,25 @@ review, without rerunning failures merely to obtain a clean result:
   staging Preview;
 - UI screenshots, stable-staging checks, signed builds, and all physical-device
   checks are `NOT RUN` and remain explicit pre-merge work.
+
+## 2026-08-25 timer-card correction evidence
+
+The initial shared-card implementation aligned the 44-point Quick Actions
+touch row rather than the visible 32-point pill body, and its geometry helper
+modelled the Description surface as 44 points despite the inherited 48-point
+minimum. The corrected baseline is 136 points: top controls remain at
+`y=14...58`, visible pills move to `y=90...122`, and both Plus controls occupy
+`y=78...122`, leaving 14 points below the visible bottom. Pills retain a
+44-point effective target through six-point vertical hit expansion.
+
+Focused mobile geometry/contract tests (13 tests), mobile TypeScript, the
+documentation-alignment check, and `git diff --check` passed. Claude CLI using
+Claude Sonnet 5 reviewed the correction and independently reproduced every
+target coordinate with no actionable finding. A full Debug `iphoneos` build
+then passed for the connected physical iPhone 11 (`iPhone12,1`, iOS 27.0),
+signed with the Dayframe development team, and the resulting app was installed
+on that device. This is build/install evidence only: the visual/device matrix,
+runtime launch, stable staging, and owner acceptance remain pending.
 
 ## Unresolved decisions
 

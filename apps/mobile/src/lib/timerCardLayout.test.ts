@@ -3,11 +3,14 @@ import {
   TIMER_CARD_ACTION_COLUMN_WIDTH,
   TIMER_CARD_ACTION_SIZE,
   TIMER_CARD_CONTENT_MIN_HEIGHT,
+  TIMER_CARD_DESCRIPTION_HEIGHT,
   TIMER_CARD_DESCRIPTION_TO_QUICK_ACTIONS_SPACING,
   TIMER_CARD_HORIZONTAL_INSET,
   TIMER_CARD_LABEL_TO_PILL_SPACING,
   TIMER_CARD_MIN_HEIGHT,
-  TIMER_CARD_QUICK_ACTION_ROW_HEIGHT,
+  TIMER_CARD_QUICK_ACTION_HIT_SLOP,
+  TIMER_CARD_QUICK_ACTION_PILL_HEIGHT,
+  TIMER_CARD_QUICK_ACTION_LABEL_LINE_HEIGHT,
   TIMER_CARD_VERTICAL_INSET,
   timerCardActionGeometry
 } from "./timerCardLayout";
@@ -28,23 +31,30 @@ describe("mobile timer-card layout", () => {
     }
   );
 
-  it("bottom-aligns both plus controls with the Quick Actions row", () => {
+  it("bottom-aligns both plus controls with the visible Quick Actions pills", () => {
     const geometry = timerCardActionGeometry({ cardWidth: 414 });
     const plusBottom = geometry.secondaryCenter.y + TIMER_CARD_ACTION_SIZE / 2;
-    const quickActionsBottom =
-      TIMER_CARD_VERTICAL_INSET + TIMER_CARD_CONTENT_MIN_HEIGHT;
+    const quickActionsBottom = TIMER_CARD_VERTICAL_INSET + TIMER_CARD_CONTENT_MIN_HEIGHT;
 
     expect(plusBottom).toBe(quickActionsBottom);
     expect(geometry.cardHeight - plusBottom).toBe(TIMER_CARD_VERTICAL_INSET);
     expect(geometry.secondaryBottomInset).toBe(TIMER_CARD_VERTICAL_INSET);
-    expect(TIMER_CARD_QUICK_ACTION_ROW_HEIGHT).toBe(TIMER_CARD_ACTION_SIZE);
+    expect(TIMER_CARD_QUICK_ACTION_PILL_HEIGHT).toBe(32);
+    expect(TIMER_CARD_QUICK_ACTION_HIT_SLOP).toBe(6);
+    expect(TIMER_CARD_QUICK_ACTION_PILL_HEIGHT + TIMER_CARD_QUICK_ACTION_HIT_SLOP * 2).toBe(
+      TIMER_CARD_ACTION_SIZE
+    );
   });
 
-  it("keeps deliberate description, label, and pill spacing", () => {
+  it("records the rendered 48-point description and four-point visible label-to-pill gap", () => {
+    expect(TIMER_CARD_DESCRIPTION_HEIGHT).toBe(48);
+    expect(TIMER_CARD_QUICK_ACTION_LABEL_LINE_HEIGHT).toBe(14);
+    expect(TIMER_CARD_LABEL_TO_PILL_SPACING).toBe(4);
     expect(TIMER_CARD_DESCRIPTION_TO_QUICK_ACTIONS_SPACING).toBeGreaterThan(
       TIMER_CARD_LABEL_TO_PILL_SPACING
     );
-    expect(TIMER_CARD_LABEL_TO_PILL_SPACING).toBeGreaterThanOrEqual(2);
+    expect(TIMER_CARD_CONTENT_MIN_HEIGHT).toBe(108);
+    expect(TIMER_CARD_MIN_HEIGHT).toBe(136);
   });
 
   it("lets larger text and long content grow vertically without moving the top action or bottom inset", () => {

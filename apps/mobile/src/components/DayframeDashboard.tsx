@@ -215,6 +215,7 @@ import {
   shouldAwaitTimerMutationAcceptance,
   sortMobileCategoriesByUsage
 } from "@/lib/timerPresentation";
+import { TIMER_CARD_QUICK_ACTION_HIT_SLOP } from "@/lib/timerCardLayout";
 
 type TimeEntry = MobileBootstrap["entries"][number];
 type AuthView = "login" | "signup";
@@ -2467,6 +2468,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                                 key={action.key}
                                 accessibilityRole="button"
                                 accessibilityLabel={`Start ${action.name}`}
+                                hitSlop={{
+                                  top: TIMER_CARD_QUICK_ACTION_HIT_SLOP,
+                                  bottom: TIMER_CARD_QUICK_ACTION_HIT_SLOP
+                                }}
                                 style={pressable(styles.categoryPillTouch, styles.buttonPressed)}
                                 onPress={() => {
                                   void startTask(action.id, action.description ?? "");

@@ -28,7 +28,7 @@ import {
   TIMER_CARD_LABEL_TO_PILL_SPACING,
   TIMER_CARD_MIN_HEIGHT,
   TIMER_CARD_QUICK_ACTION_LABEL_LINE_HEIGHT,
-  TIMER_CARD_QUICK_ACTION_ROW_HEIGHT,
+  TIMER_CARD_QUICK_ACTION_PILL_HEIGHT,
   TIMER_CARD_TRAILING_SCROLL_INSET,
   TIMER_CARD_VERTICAL_INSET
 } from "./timerCardLayout";
@@ -1498,14 +1498,14 @@ function createStyles(theme: MobileTheme) {
     },
     quickActionsInline: {
       flexGrow: 0,
-      minHeight: TIMER_CARD_QUICK_ACTION_ROW_HEIGHT
+      minHeight: TIMER_CARD_QUICK_ACTION_PILL_HEIGHT
     },
     categoryPillTouch: {
-      minHeight: 44,
+      minHeight: TIMER_CARD_QUICK_ACTION_PILL_HEIGHT,
       justifyContent: "center"
     },
     categoryPill: {
-      minHeight: 32,
+      minHeight: TIMER_CARD_QUICK_ACTION_PILL_HEIGHT,
       backgroundColor: theme.surfaceMuted,
       borderRadius: 999,
       paddingHorizontal: 11,
