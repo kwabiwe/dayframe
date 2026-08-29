@@ -78,6 +78,11 @@ export type LiveActivityDrainResult = {
   missingConfiguration: string[];
 };
 
+type LiveActivityOwnerRow = {
+  workspaceId: string;
+  userId: string;
+};
+
 const MAX_DELIVERY_ATTEMPTS = 8;
 const OUTBOX_BATCH_SIZE = 25;
 const OUTBOX_LEASE_SECONDS = 30;
@@ -212,6 +217,7 @@ export async function notifyLiveActivitiesBestEffort(session: RequestSession) {
 
 export async function retryLiveActivityDeliveryBestEffort(session: RequestSession) {
   try {
+    await enqueueLatestLiveActivityState(session);
     const result = await drainLiveActivityOutbox({ session });
     logDrainResult("reconciliation", result);
   } catch (error) {
@@ -220,6 +226,26 @@ export async function retryLiveActivityDeliveryBestEffort(session: RequestSessio
       name: error instanceof Error ? error.name : "UnknownError"
     });
   }
+}
+
+/**
+ * Reconstructs desired state from authoritative timers before the platform
+ * cron drains the outbox. This repairs the otherwise-empty outbox left by a
+ * failed mutation-side `after` registration or enqueue attempt.
+ */
+export async function reconcileLiveActivityDesiredState(limit = OUTBOX_BATCH_SIZE) {
+  const owners = await query<LiveActivityOwnerRow>(
+    `select workspace_id as "workspaceId",
+            user_id as "userId"
+     from live_activity_push_tokens
+     where invalidated_at is null
+     group by workspace_id, user_id
+     order by max(last_registered_at) desc
+     limit $1`,
+    [Math.min(Math.max(limit, 1), OUTBOX_BATCH_SIZE)]
+  );
+  for (const owner of owners.rows) await enqueueLatestLiveActivityState(owner);
+  return drainLiveActivityOutbox();
 }
 
 export async function drainLiveActivityOutbox(options?: {
@@ -242,8 +268,8 @@ export async function drainLiveActivityOutbox(options?: {
     return emptyDrainResult([]);
   }
 
-  // The global sweep owns terminal cleanup. Authenticated timer-state polls only
-  // need to claim their user's due work and should stay lightweight.
+  // The global sweep owns terminal cleanup. Session-scoped post-response
+  // reconciliation only claims the authenticated user's due work.
   if (!options?.session) {
     await expireExhaustedOutboxRows();
   }
@@ -268,7 +294,9 @@ export async function drainLiveActivityOutbox(options?: {
   return result;
 }
 
-async function enqueueLatestLiveActivityState(session: RequestSession) {
+async function enqueueLatestLiveActivityState(
+  session: Pick<RequestSession, "workspaceId" | "userId">
+) {
   const [tokensResult, activeResult] = await Promise.all([
     query<PushTokenRow>(
       `select id,
@@ -354,7 +382,10 @@ async function enqueueLatestLiveActivityState(session: RequestSession) {
        last_delivery_status = null,
        last_delivery_reason = null,
        last_apns_id = null,
-       updated_at = now()`,
+       updated_at = now()
+     where live_activity_delivery_outbox.event is distinct from excluded.event
+        or live_activity_delivery_outbox.payload #> '{aps,content-state}'
+           is distinct from excluded.payload #> '{aps,content-state}'`,
       [
         token.id,
         session.workspaceId,

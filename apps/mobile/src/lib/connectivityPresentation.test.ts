@@ -25,7 +25,7 @@ describe("connectivity status presentation", () => {
 
   it("uses a contrast-safe neutral foreground in Light and Dark appearance", () => {
     for (const mode of ["light", "dark"] as const) {
-      for (const variant of ["offline", "syncing", "synced", "attention"] as const) {
+      for (const variant of ["offline", "pending", "syncing", "synced", "attention"] as const) {
         const role = connectivityStatusColorRole(variant);
         expect(contrastRatio(
           DAYFRAME_THEME[mode].background,
@@ -35,8 +35,15 @@ describe("connectivity status presentation", () => {
     }
   });
 
-  it("renders persistent Syncing while online durable work exists, including epoch-zero startup", () => {
+  it("renders static Pending when durable work is waiting but no request is active", () => {
     expect(view("online", 3)).toMatchObject({
+      isActionable: false,
+      variant: "pending"
+    });
+  });
+
+  it("renders Syncing only while a durable recovery request is active", () => {
+    expect(view("online", 3, 0, true)).toMatchObject({
       isActionable: false,
       variant: "syncing"
     });
@@ -119,6 +126,7 @@ describe("connectivity status presentation", () => {
     const syncing = updateConnectivityPresentation({
       accountKey: "workspace:user",
       attentionCount: 0,
+      isTransmitting: true,
       now: NOW,
       pendingCount: 1,
       state: createConnectivityPresentationState(),
@@ -186,7 +194,7 @@ describe("connectivity status presentation", () => {
     const attention = view("online", 0, 1);
     expect(tracker.next(offline)).toBe("Offline. Changes will sync later.");
     expect(tracker.next(offline)).toBeNull();
-    expect(tracker.next(syncing)).toBe("Syncing saved changes.");
+    expect(tracker.next(syncing)).toBe("Saved changes waiting to sync.");
     expect(tracker.next(syncing)).toBeNull();
     expect(tracker.next(attention)).toBe(
       "A timer or time entry sync issue needs attention. Open Sync and diagnostics."
@@ -202,11 +210,13 @@ describe("connectivity status presentation", () => {
 function view(
   status: "online" | "offline",
   pendingCount: number,
-  attentionCount = 0
+  attentionCount = 0,
+  isTransmitting = false
 ) {
   return connectivityStatusViewModel({
     attentionCount,
     completionSequence: 0,
+    isTransmitting,
     now: NOW,
     onlineUntil: null,
     pendingCount,

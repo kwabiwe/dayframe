@@ -22,6 +22,7 @@ function storeBoundSession(token: string, owner = TIMER_STOP_OWNER) {
 
 const secureStore = vi.hoisted(() => new Map<string, string>());
 const asyncStore = vi.hoisted(() => new Map<string, string>());
+const appState = vi.hoisted(() => ({ currentState: "active" }));
 
 vi.mock("expo-secure-store", () => ({
   AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 1,
@@ -37,6 +38,7 @@ vi.mock("expo-secure-store", () => ({
 }));
 
 vi.mock("react-native", () => ({
+  AppState: appState,
   NativeModules: {
     DayframeLiveActivityModule: {
       clearRuntimeContext: vi.fn(() => Promise.resolve(true)),
@@ -127,7 +129,14 @@ const {
   StaleMobileSessionResponseError
 } = await import("./mobile-network");
 const { projectDurableLocalWork } = await import("./durableLocalProjection");
-const { synchronisePendingTimerStops } = await import("./timerStopSync");
+const {
+  persistPendingTimerStop,
+  synchronisePendingTimerStops
+} = await import("./timerStopSync");
+const {
+  getTimerBackgroundExecutionSnapshot
+} = await import("./timerBackgroundExecution");
+const AsyncStorage = (await import("@react-native-async-storage/async-storage")).default;
 
 describe("mobile API client", () => {
   beforeEach(async () => {
@@ -135,6 +144,7 @@ describe("mobile API client", () => {
     resetSessionTokenCacheForTesting();
     secureStore.clear();
     asyncStore.clear();
+    appState.currentState = "active";
     vi.restoreAllMocks();
     __resetMobileAccountForTests();
     await activateMobileAccount(TIMER_STOP_OWNER);
@@ -464,6 +474,38 @@ describe("mobile API client", () => {
     ]);
   });
 
+  it("retains an in-flight Stop when finite background execution expires", async () => {
+    storeBoundSession("session-token");
+    const pending = await getOrCreatePendingStop({
+      owner: TIMER_STOP_OWNER,
+      target: { targetEntryId: TIMER_TARGET_A }
+    });
+    const controller = new AbortController();
+    const fetchMock = vi.fn((_input: string | URL | Request, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const delivery = synchronisePendingTimerStops({
+      correlations: new Map(),
+      owner: TIMER_STOP_OWNER,
+      signal: controller.signal
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    controller.abort(new Error("Background execution expired."));
+
+    await expect(delivery).resolves.toMatchObject({
+      deliveredCount: 0,
+      remaining: [expect.objectContaining({
+        clientEventId: pending.clientEventId,
+        failureKind: "retryable"
+      })],
+      transportFailure: true
+    });
+  });
+
   it("keeps a permanent Stop rejection visible without converting it to offline success", async () => {
     storeBoundSession("session-token");
     const pending = await getOrCreatePendingStop({
@@ -662,6 +704,195 @@ describe("mobile API client", () => {
       workspaceId: "00000000-0000-4000-8000-000000000010"
     });
     await expect(readQueue()).resolves.toHaveLength(0);
+  });
+
+  it("drains timer mutations separately from foreground-only activity work", async () => {
+    storeBoundSession("session-token");
+    await enqueueEvent({
+      localId: "timer-start-scoped",
+      source: "mobile_app",
+      type: "timer_start"
+    });
+    await enqueueEvent({
+      localId: "health-scoped",
+      source: "health_sleep",
+      type: "health_sleep_import",
+      rawPayload: { provider: "healthkit", externalSampleId: "sleep-scoped" }
+    });
+    const fetchMock = vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { clientEventId?: string };
+      return Promise.resolve(jsonResponse(
+        body.clientEventId === "timer-start-scoped"
+          ? { eventId: "event-timer", timeEntryId: "entry-timer" }
+          : { eventId: "event-health" },
+        201
+      ));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(syncQueue({ eventScope: "timer_mutations", forceRetry: true }))
+      .resolves.toMatchObject({ synced: ["timer-start-scoped"], remaining: [] });
+    await expect(readQueue()).resolves.toEqual([
+      expect.objectContaining({ localId: "health-scoped" })
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await expect(syncQueue({ eventScope: "non_timer", forceRetry: true }))
+      .resolves.toMatchObject({ synced: ["health-scoped"], remaining: [] });
+    await expect(readQueue()).resolves.toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("holds the native lease only while the timer half of a mixed queue transmits", async () => {
+    storeBoundSession("session-token");
+    await enqueueEvent({
+      localId: "timer-mixed",
+      source: "mobile_app",
+      type: "timer_start"
+    });
+    await enqueueEvent({
+      localId: "health-mixed",
+      source: "health_sleep",
+      type: "health_sleep_import",
+      rawPayload: { provider: "healthkit", externalSampleId: "sleep-mixed" }
+    });
+    const transmissions: Array<{ activeLeaseCount: number; localId: string }> = [];
+    vi.stubGlobal("fetch", vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { clientEventId: string };
+      transmissions.push({
+        activeLeaseCount: getTimerBackgroundExecutionSnapshot().activeLeaseCount,
+        localId: body.clientEventId
+      });
+      return Promise.resolve(jsonResponse(
+        body.clientEventId === "timer-mixed"
+          ? { eventId: "event-timer-mixed", timeEntryId: "entry-timer-mixed" }
+          : { eventId: "event-health-mixed" },
+        201
+      ));
+    }));
+
+    await expect(syncQueue()).resolves.toMatchObject({
+      synced: ["timer-mixed", "health-mixed"],
+      remainingCount: 0,
+      timerEntryIdCorrelations: [{
+        localId: "timer-mixed",
+        timeEntryId: "entry-timer-mixed"
+      }]
+    });
+    expect(transmissions).toEqual([
+      { activeLeaseCount: 1, localId: "timer-mixed" },
+      { activeLeaseCount: 0, localId: "health-mixed" }
+    ]);
+  });
+
+  it("defers the foreground-only half when timer completion backgrounds the app", async () => {
+    storeBoundSession("session-token");
+    await enqueueEvent({
+      localId: "timer-before-background",
+      source: "mobile_app",
+      type: "timer_start"
+    });
+    await enqueueEvent({
+      localId: "health-after-background",
+      source: "health_workout",
+      type: "health_workout_import",
+      rawPayload: { provider: "healthkit", externalSampleId: "workout-background" }
+    });
+    const fetchMock = vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { clientEventId: string };
+      if (body.clientEventId === "timer-before-background") {
+        appState.currentState = "background";
+        return Promise.resolve(jsonResponse({
+          eventId: "event-before-background",
+          timeEntryId: "entry-before-background"
+        }, 201));
+      }
+      return Promise.resolve(jsonResponse({ eventId: "event-after-foreground" }, 201));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(syncQueue()).resolves.toMatchObject({
+      stopped: true,
+      synced: ["timer-before-background"],
+      remainingCount: 1
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(readQueue()).resolves.toEqual([
+      expect.objectContaining({ localId: "health-after-background" })
+    ]);
+
+    appState.currentState = "active";
+    await expect(syncQueue()).resolves.toMatchObject({
+      synced: ["health-after-background"],
+      remainingCount: 0
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("begins the timer lease after durable storage resolves and before the next queue read", async () => {
+    storeBoundSession("session-token");
+    const durableWrite = deferred<void>();
+    vi.mocked(AsyncStorage.setItem).mockImplementationOnce(async (key, value) => {
+      await durableWrite.promise;
+      asyncStore.set(key, value);
+    });
+    const enqueue = enqueueEvent({
+      localId: "timer-storage-boundary",
+      source: "mobile_app",
+      type: "timer_start",
+      requestImmediateDelivery: true
+    });
+    await Promise.resolve();
+    expect(getTimerBackgroundExecutionSnapshot().activeLeaseCount).toBe(0);
+
+    durableWrite.resolve();
+    await enqueue;
+    expect(getTimerBackgroundExecutionSnapshot().activeLeaseCount).toBe(1);
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({
+      eventId: "event-storage-boundary",
+      timeEntryId: "entry-storage-boundary"
+    }, 201))));
+
+    await expect(syncQueue()).resolves.toMatchObject({
+      synced: ["timer-storage-boundary"],
+      remainingCount: 0
+    });
+    expect(getTimerBackgroundExecutionSnapshot().activeLeaseCount).toBe(0);
+  });
+
+  it("retains an in-flight timer Start when background execution is cancelled", async () => {
+    storeBoundSession("session-token");
+    await enqueueEvent({
+      localId: "timer-start-expired",
+      source: "mobile_app",
+      type: "timer_start"
+    });
+    const controller = new AbortController();
+    const fetchMock = vi.fn((_input: string | URL | Request, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const sync = syncQueue({
+      eventScope: "timer_mutations",
+      forceRetry: true,
+      signal: controller.signal
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    controller.abort(new Error("Background execution expired."));
+
+    await expect(sync).resolves.toMatchObject({
+      stopped: true,
+      firstError: { failureKind: "network", localId: "timer-start-expired" }
+    });
+    await expect(readQueue()).resolves.toEqual([
+      expect.objectContaining({
+        failureKind: "network",
+        localId: "timer-start-expired"
+      })
+    ]);
   });
 
   it("converges an offline timer Start from local projection to one canonical server entry", async () => {
@@ -1010,7 +1241,38 @@ describe("mobile API client", () => {
     ]);
   });
 
-  it("shares an in-flight activity drain while allowing a new Start to become durable", async () => {
+  it("begins Stop background execution only after its outbox write is durable", async () => {
+    storeBoundSession("session-token");
+    const durableWrite = deferred<void>();
+    vi.mocked(AsyncStorage.setItem).mockImplementationOnce(async (key, value) => {
+      await durableWrite.promise;
+      asyncStore.set(key, value);
+    });
+    const persist = persistPendingTimerStop({
+      owner: TIMER_STOP_OWNER,
+      target: { targetEntryId: TIMER_TARGET_A },
+      requestImmediateDelivery: true
+    });
+    await Promise.resolve();
+    expect(getTimerBackgroundExecutionSnapshot().activeLeaseCount).toBe(0);
+
+    durableWrite.resolve();
+    const { backgroundReservation } = await persist;
+    await backgroundReservation;
+    expect(getTimerBackgroundExecutionSnapshot().activeLeaseCount).toBe(1);
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({
+      eventId: "event-stop-storage-boundary",
+      timeEntryId: TIMER_TARGET_A
+    }, 201))));
+
+    await expect(synchronisePendingTimerStops({
+      owner: TIMER_STOP_OWNER,
+      correlations: new Map()
+    })).resolves.toMatchObject({ deliveredCount: 1, remaining: [] });
+    expect(getTimerBackgroundExecutionSnapshot().activeLeaseCount).toBe(0);
+  });
+
+  it("queues behind an in-flight drain and retries a Start that became durable meanwhile", async () => {
     storeBoundSession("session-token");
     await enqueueEvent({
       localId: "optimistic-active-timer:first",
@@ -1050,19 +1312,70 @@ describe("mobile API client", () => {
         remainingCount: 1
       }),
       expect.objectContaining({
-        synced: ["optimistic-active-timer:first"],
-        remainingCount: 1
+        synced: ["optimistic-active-timer:second"],
+        remainingCount: 0
       })
     ]);
-    await expect(readQueue()).resolves.toEqual([
-      expect.objectContaining({ localId: "optimistic-active-timer:second" })
-    ]);
+    await expect(readQueue()).resolves.toEqual([]);
 
     await expect(syncQueue()).resolves.toMatchObject({
-      synced: ["optimistic-active-timer:second"],
+      synced: [],
       remainingCount: 0
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("finishes an already transmitting Health drain before retrying a newly queued Start", async () => {
+    storeBoundSession("session-token");
+    await enqueueEvent({
+      localId: "health-already-transmitting",
+      source: "health_sleep",
+      type: "health_sleep_import",
+      rawPayload: { provider: "healthkit", externalSampleId: "sleep-in-flight" }
+    });
+    const healthResponse = deferred<Response>();
+    const transmissions: Array<{ activeLeaseCount: number; localId: string }> = [];
+    const fetchMock = vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { clientEventId: string };
+      transmissions.push({
+        activeLeaseCount: getTimerBackgroundExecutionSnapshot().activeLeaseCount,
+        localId: body.clientEventId
+      });
+      return body.clientEventId === "health-already-transmitting"
+        ? healthResponse.promise
+        : Promise.resolve(jsonResponse({
+            eventId: "event-timer-after-health",
+            timeEntryId: "entry-timer-after-health"
+          }, 201));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const generalDrain = syncQueue({ eventScope: "non_timer", forceRetry: true });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    await enqueueEvent({
+      localId: "timer-arrived-during-health",
+      source: "mobile_app",
+      type: "timer_start",
+      requestImmediateDelivery: true
+    });
+    const timerDrain = syncQueue();
+
+    healthResponse.resolve(jsonResponse({ eventId: "event-health-in-flight" }, 201));
+    await expect(generalDrain).resolves.toMatchObject({
+      synced: ["health-already-transmitting"]
+    });
+    await expect(timerDrain).resolves.toMatchObject({
+      synced: ["timer-arrived-during-health"],
+      remainingCount: 0,
+      timerEntryIdCorrelations: [{
+        localId: "timer-arrived-during-health",
+        timeEntryId: "entry-timer-after-health"
+      }]
+    });
+    expect(transmissions).toEqual([
+      { activeLeaseCount: 0, localId: "health-already-transmitting" },
+      { activeLeaseCount: 1, localId: "timer-arrived-during-health" }
+    ]);
   });
 
   it("preserves queue order when the first event fails to sync", async () => {

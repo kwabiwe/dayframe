@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { drainLiveActivityOutbox } from "@/lib/live-activity-push";
+import { reconcileLiveActivityDesiredState } from "@/lib/live-activity-push";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +10,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await drainLiveActivityOutbox();
+    const result = await reconcileLiveActivityDesiredState();
     if (result.retryScheduled || result.permanentFailures || result.invalidatedTokens) {
       console.warn("Scheduled Live Activity outbox reconciliation completed with diagnostics", {
         claimed: result.claimed,

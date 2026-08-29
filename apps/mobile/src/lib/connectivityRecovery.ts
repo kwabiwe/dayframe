@@ -1,5 +1,6 @@
 export type ConnectivityRecoveryStepName =
   | "timer_stops_ready"
+  | "timer_activity_queue"
   | "activity_queue"
   | "time_entry_outbox"
   | "timer_stops_after_correlation"

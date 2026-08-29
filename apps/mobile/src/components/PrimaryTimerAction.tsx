@@ -1,7 +1,8 @@
 import { Pressable, StyleSheet, type GestureResponderEvent } from "react-native";
 import Svg, { Path, Rect } from "react-native-svg";
+import { TIMER_CARD_ACTION_SIZE } from "@/lib/timerCardLayout";
 
-export const PRIMARY_TIMER_ACTION_SIZE = 44;
+export const PRIMARY_TIMER_ACTION_SIZE = TIMER_CARD_ACTION_SIZE;
 // Lucide's nominal 18/14 sizes include generous 24-point view-box margins.
 // These optical sizes preserve the web silhouettes while matching their
 // visible bounds inside the same 44-point outer control.

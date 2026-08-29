@@ -53,6 +53,7 @@ vi.mock("expo-secure-store", () => ({
 }));
 
 vi.mock("react-native", () => ({
+  AppState: { currentState: "active" },
   NativeModules: {
     DayframeLiveActivityModule: {
       clearRuntimeContext: vi.fn(() => Promise.resolve(true)),

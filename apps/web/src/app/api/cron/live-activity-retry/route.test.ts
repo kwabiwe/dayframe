@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ drainLiveActivityOutbox: vi.fn() }));
+const mocks = vi.hoisted(() => ({ reconcileLiveActivityDesiredState: vi.fn() }));
 
 vi.mock("@/lib/live-activity-push", () => ({
-  drainLiveActivityOutbox: mocks.drainLiveActivityOutbox
+  reconcileLiveActivityDesiredState: mocks.reconcileLiveActivityDesiredState
 }));
 
 const { GET } = await import("./route");
@@ -12,7 +12,7 @@ describe("GET /api/cron/live-activity-retry", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     process.env.CRON_SECRET = "test-cron-secret";
-    mocks.drainLiveActivityOutbox.mockResolvedValue({
+    mocks.reconcileLiveActivityDesiredState.mockResolvedValue({
       claimed: 1,
       delivered: 1,
       retryScheduled: 0,
@@ -25,7 +25,7 @@ describe("GET /api/cron/live-activity-retry", () => {
   it("fails closed without Vercel's bearer secret", async () => {
     const response = await GET(new Request("https://dayframe.test/api/cron/live-activity-retry"));
     expect(response.status).toBe(401);
-    expect(mocks.drainLiveActivityOutbox).not.toHaveBeenCalled();
+    expect(mocks.reconcileLiveActivityDesiredState).not.toHaveBeenCalled();
   });
 
   it("runs one bounded global reconciliation batch", async () => {
@@ -35,6 +35,6 @@ describe("GET /api/cron/live-activity-retry", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("private, no-store, max-age=0");
     await expect(response.json()).resolves.toMatchObject({ ok: true, claimed: 1, delivered: 1 });
-    expect(mocks.drainLiveActivityOutbox).toHaveBeenCalledOnce();
+    expect(mocks.reconcileLiveActivityDesiredState).toHaveBeenCalledOnce();
   });
 });

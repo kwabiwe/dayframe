@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { authErrorResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
-import { retryLiveActivityDeliveryBestEffort } from "@/lib/live-activity-push";
 import { getTimerState } from "@/lib/timer-state";
 
 export async function GET(request: Request) {
   try {
-    const session = await resolveRequestSession(request);
-    await retryLiveActivityDeliveryBestEffort(session);
+    const session = await resolveRequestSession(request, {
+      allowIngestToken: true,
+      requiredScopes: ["time:read"]
+    });
     const state = await getTimerState(session);
     return NextResponse.json(state, {
       headers: {

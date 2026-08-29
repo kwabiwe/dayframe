@@ -48,7 +48,7 @@ Key needs and pain points:
 
 Core Functionality:
 
-- ✅ Web and mobile manual timer start/stop with live active timer sync. Mobile Stop is accepted only after an exact, account-owned Stop intent is durable on device; server delivery is entry-scoped, idempotent, bounded, and safe to replay after relaunch.
+- ✅ Web and mobile manual timer start/stop/switch with live active timer sync. Mobile Stop is accepted only after an exact, account-owned Stop intent is durable on device; server delivery is entry-scoped, idempotent, bounded, and safe to replay after relaunch. Already-started durable timer saves receive best-effort finite iOS background time, while offline, expiry and force-quit continue through the same durable recovery path.
 - ✅ Description, category, place, source, confidence, and review status on time entries.
 - ✅ Calendar, List, and Timesheet review views.
 - ✅ Review inbox for ambiguous geofence/health/location suggestions.
@@ -112,6 +112,7 @@ Deployment:
 6. As a mobile user, I want offline capture to sync later, so that timers and geofence/health events are not lost when the network is unavailable.
    - Example: A walk captured offline syncs when the phone reconnects.
    - A persistent passive notice explains confirmed offline state; a temporary notice says when transport returns without claiming all saved work has synced.
+   - Pending saved work and active transmission are distinct: waiting/backoff is static, while motion is reserved for a live delivery attempt.
    - Offline-capable actions remain enabled and commit to their existing durable owners. Connectivity-dependent actions retain their bounded, explicit failure path instead of being silently replaced or globally disabled.
    - Example: I tap Stop and immediately force-quit; reopening still shows that exact timer stopped locally and safely retries the same event without stopping a newer timer.
    - Example: Review opens from the last account-owned snapshot, cached private Location Evidence remains usable for up to seven days, and Confirm, Dismiss, or a complete Edit-and-confirm disappears after its local SQLite commit while Dayframe retries the canonical server mutation later.
@@ -327,7 +328,7 @@ Functional requirements:
 - ✅ Only allowlisted beta users can create accounts.
 - ✅ Web and mobile share active timer state.
 - ✅ Mobile can queue events offline and sync later with retry and diagnostics; real-device reconnect/background/conflict behaviour remains under Watch before wider beta confidence.
-- ⚠️ iOS provides one compact safe-area connectivity pill plus an account-owned retry coordinator. Cached and fetched Dashboard truth is deterministically composed with durable Start/Edit/Delete/Stop work, so refresh/relaunch cannot erase offline changes; the brief green online notice is driven only by live pending work reaching zero. Signed staging and physical-iPhone network-transition evidence remains required before release confidence.
+- ⚠️ iOS provides one fixed-slot connectivity status plus an account-owned retry coordinator. Cached and fetched Dashboard truth is deterministically composed with durable Start/Edit/Delete/Stop work, so refresh/relaunch cannot erase offline changes; pending and actively transmitting work remain distinct, and the brief settled notice is driven only by live pending work reaching zero. Signed staging and physical-iPhone network/background-transition evidence remains required before release confidence.
 - ✅ Trusted places can auto-start entries.
 - ✅ Ambiguous location events appear in review.
 - ✅ HealthKit sleep and workouts/walks appear as time entries or high-confidence review items; duplicate/overlapping Sleep remains a tracked investigation.

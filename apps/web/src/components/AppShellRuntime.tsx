@@ -109,6 +109,12 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   const timerStateRef = useRef<TimerStateFingerprint | null>(null);
   const timerStatePollInFlightRef = useRef(false);
 
+  useEffect(() => {
+    const gate = mutationGateRef.current;
+    gate.activate();
+    return () => gate.dispose();
+  }, []);
+
   const commitData = useCallback((incoming: BootstrapData | null, source: BootstrapCommitSource) => {
     const nextData = incoming
       ? reconcileTimerBootstrap(dataRef.current, incoming, source)
@@ -316,6 +322,8 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       input,
       now: () => new Date().toISOString(),
       createOptimisticId: (startedAt) => `optimistic-timer:${startedAt}:${++optimisticIdRef.current}`,
+      getCurrentDraft: () => draftRef.current,
+      getCurrentSnapshot: () => dataRef.current ?? snapshot,
       onAccepted: () => {
         refreshRequestRef.current += 1;
       },
@@ -346,6 +354,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   const stopTimer = useCallback(async (input: TimerDraftInput = {}): Promise<MutationOutcome> => {
     const snapshot = dataRef.current;
     if (!snapshot?.activeEntry) return { ok: false, error: "There is no running timer to stop." };
+    const activeEntry = snapshot.activeEntry;
     const draftSnapshot = draftRef.current;
     const draft = mergeTimerDraft(draftSnapshot, input);
     const result = await mutationGateRef.current.run(async () => {
@@ -355,28 +364,38 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       commitData(applyOptimisticTimerStop(snapshot, new Date().toISOString()), "optimistic");
 
       try {
-        const updateResponse = await clientFetch(`/api/time-entries/${snapshot.activeEntry!.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            categoryId: draft.categoryId || null,
-            placeId: snapshot.activeEntry!.placeId,
-            description: draft.description.trim() || null,
-            tagNames: draft.tagNames,
-            startedAt: snapshot.activeEntry!.startedAt,
-            stoppedAt: snapshot.activeEntry!.stoppedAt
-          })
-        });
-        if (!updateResponse.ok) {
-          throw new Error(await responseError(updateResponse, `Unable to save timer details: ${updateResponse.status}`));
+        if (!timerDraftsEqual(draft, timerDraftForEntry(activeEntry))) {
+          const updateResponse = await clientFetch(`/api/time-entries/${activeEntry.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              categoryId: draft.categoryId || null,
+              placeId: activeEntry.placeId,
+              description: draft.description.trim() || null,
+              tagNames: draft.tagNames,
+              startedAt: activeEntry.startedAt
+            })
+          });
+          if (!updateResponse.ok) {
+            throw new Error(await responseError(updateResponse, `Unable to save timer details: ${updateResponse.status}`));
+          }
         }
-        const response = await clientFetch("/api/time-entries", {
+        const response = await clientFetch("/api/events", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode: "stop" })
+          body: JSON.stringify({
+            source: "manual_app",
+            type: "timer_stop",
+            occurredAt: new Date().toISOString(),
+            clientEventId: `web-timer-stop:${activeEntry.id}`,
+            rawPayload: {
+              origin: "web_timer",
+              stopScope: "entry",
+              targetEntryId: activeEntry.id
+            }
+          })
         });
         if (!response.ok) throw new Error(await responseError(response, `Unable to stop timer: ${response.status}`));
-        await refresh({ force: true });
         return { ok: true } as const;
       } catch (error) {
         commitData(snapshot, "optimistic");
@@ -388,6 +407,9 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         setIsTimerBusy(false);
       }
     });
+    if (result.ran && result.value.ok && !mutationGateRef.current.isActive()) {
+      await refresh({ force: true });
+    }
     return result.ran ? result.value : { ok: false, error: "A timer update is already in progress." };
   }, [commitData, refresh, setTimerDraft]);
 
@@ -406,7 +428,6 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
           method: "DELETE"
         });
         if (!response.ok) throw new Error(await responseError(response, `Unable to delete timer: ${response.status}`));
-        await refresh({ force: true });
         return { ok: true } as const;
       } catch (error) {
         commitData(snapshot, "optimistic");
@@ -418,6 +439,9 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         setIsTimerBusy(false);
       }
     });
+    if (result.ran && result.value.ok && !mutationGateRef.current.isActive()) {
+      await refresh({ force: true });
+    }
     return result.ran ? result.value : { ok: false, error: "A timer update is already in progress." };
   }, [commitData, refresh, setTimerDraft]);
 
@@ -448,7 +472,6 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
             "canonical"
           );
         }
-        await refresh({ force: true });
         return { ok: true } as const;
       } catch {
         commitData(snapshot, "optimistic");
@@ -460,6 +483,9 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         setIsTimerBusy(false);
       }
     });
+    if (result.ran && result.value.ok && !mutationGateRef.current.isActive()) {
+      await refresh({ force: true });
+    }
     return result.ran ? result.value : { ok: false, error: "A timer update is already in progress." };
   }, [commitData, refresh, setTimerDraft]);
 
@@ -527,7 +553,6 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
             "canonical"
           );
         }
-        await refresh({ force: true });
         return { ok: true } as const;
       } catch (error) {
         commitData(snapshot, "optimistic");
@@ -538,6 +563,9 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         setIsTimerBusy(false);
       }
     });
+    if (result.ran && result.value.ok && !mutationGateRef.current.isActive()) {
+      await refresh({ force: true });
+    }
     return result.ran ? result.value : { ok: false, error: "A timer update is already in progress." };
   }, [commitData, refresh]);
 
@@ -551,7 +579,6 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
           body: JSON.stringify({ mode: "manual", ...input })
         });
         if (!response.ok) throw new Error(await responseError(response, `Unable to add entry: ${response.status}`));
-        await refresh({ force: true });
         return { ok: true } as const;
       } catch (error) {
         return { ok: false, error: errorMessage(error, "Unable to add this time entry.") } as const;
@@ -559,6 +586,9 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         setIsTimerBusy(false);
       }
     });
+    if (result.ran && result.value.ok && !mutationGateRef.current.isActive()) {
+      await refresh({ force: true });
+    }
     return result.ran ? result.value : { ok: false, error: "A timer update is already in progress." };
   }, [refresh]);
 

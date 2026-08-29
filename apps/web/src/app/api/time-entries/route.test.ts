@@ -11,7 +11,8 @@ const mocks = vi.hoisted(() => ({
   resolveRequestSession: vi.fn(),
   processActivityEvent: vi.fn(),
   createManualEntry: vi.fn(),
-  splitActiveEntry: vi.fn()
+  splitActiveEntry: vi.fn(),
+  scheduleLiveActivityNotification: vi.fn()
 }));
 
 vi.mock("@/lib/ingest-auth", () => ({
@@ -39,6 +40,10 @@ vi.mock("@/lib/event-service", () => ({
       this.name = "TimerMutationBusyError";
     }
   }
+}));
+
+vi.mock("@/lib/live-activity-post-response", () => ({
+  scheduleLiveActivityNotification: mocks.scheduleLiveActivityNotification
 }));
 
 const { POST } = await import("./route");
@@ -197,6 +202,33 @@ describe("POST /api/time-entries", () => {
 
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({ code: "timer_busy" });
+  });
+
+  it("targets an exact entry when a browser Stop supplies its active entry id", async () => {
+    const entryId = "80000000-0000-4000-8000-000000000001";
+    const response = await POST(jsonRequest({ mode: "stop", entryId }));
+
+    expect(response.status).toBe(201);
+    expect(mocks.processActivityEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "timer_stop",
+        rawPayload: {
+          origin: "web_timer",
+          stopScope: "entry",
+          targetEntryId: entryId
+        }
+      }),
+      session
+    );
+    expect(mocks.scheduleLiveActivityNotification).toHaveBeenCalledWith(session);
+  });
+
+  it("rejects a malformed exact-entry Stop target", async () => {
+    const response = await POST(jsonRequest({ mode: "stop", entryId: "not-an-entry" }));
+
+    expect(response.status).toBe(400);
+    expect(mocks.processActivityEvent).not.toHaveBeenCalled();
+    expect(mocks.scheduleLiveActivityNotification).not.toHaveBeenCalled();
   });
 
   it("creates a manual entry with no legacy project", async () => {

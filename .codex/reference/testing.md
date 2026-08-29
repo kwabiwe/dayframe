@@ -36,6 +36,12 @@ For timer, auth, sync, schema, or category/task model changes, validate:
 - mobile direct API start/stop
 - mobile offline queue sync
 - duplicate `clientEventId` dedupe
+- Start while running leaves exactly one active timer; a delayed exact Stop for A cannot stop replacement B
+- unchanged web Stop emits only the exact-entry event; dirty Stop emits one metadata PATCH without `stoppedAt` followed by that exact event
+- delayed/failed Live Activity delivery cannot delay or change a committed Start, Stop, Switch, Edit, or Delete response
+- browser mutation ownership releases before bootstrap/push reconciliation and the newest queued Stop-to-Start intent wins
+- finite iOS timer execution ends exactly once on success, failure, expiry, cancellation, logout, account replacement, and teardown while retryable work remains durable
+- online pending/backoff presentation is static and only active transmission rotates
 - no project required for approved category/task-first flows
 
 ## Hosted Migration Checks

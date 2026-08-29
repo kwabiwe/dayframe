@@ -18,6 +18,20 @@ import {
   type ViewStyle
 } from "react-native";
 import { DAYFRAME_THEME, type DayframeTheme } from "@dayframe/shared";
+import {
+  TIMER_CARD_ACTION_COLUMN_GAP,
+  TIMER_CARD_ACTION_COLUMN_WIDTH,
+  TIMER_CARD_CONTENT_MIN_HEIGHT,
+  TIMER_CARD_CONTENT_TO_ACTION_GAP,
+  TIMER_CARD_DESCRIPTION_TO_QUICK_ACTIONS_SPACING,
+  TIMER_CARD_HORIZONTAL_INSET,
+  TIMER_CARD_LABEL_TO_PILL_SPACING,
+  TIMER_CARD_MIN_HEIGHT,
+  TIMER_CARD_QUICK_ACTION_LABEL_LINE_HEIGHT,
+  TIMER_CARD_QUICK_ACTION_PILL_HEIGHT,
+  TIMER_CARD_TRAILING_SCROLL_INSET,
+  TIMER_CARD_VERTICAL_INSET
+} from "./timerCardLayout";
 
 export type ThemeMode = "light" | "dark";
 export type ThemePreference = ThemeMode | "system";
@@ -508,15 +522,17 @@ function createStyles(theme: MobileTheme) {
       gap: 10
     },
     idleTimerPanel: {
-      paddingBottom: 8
+      minHeight: TIMER_CARD_MIN_HEIGHT,
+      paddingHorizontal: TIMER_CARD_HORIZONTAL_INSET,
+      paddingVertical: TIMER_CARD_VERTICAL_INSET
     },
     timerPanel: {
       position: "relative",
       backgroundColor: theme.surfaceRaised,
       borderRadius: 18,
-      minHeight: 137,
-      paddingHorizontal: 16,
-      paddingVertical: 14,
+      minHeight: TIMER_CARD_MIN_HEIGHT,
+      paddingHorizontal: TIMER_CARD_HORIZONTAL_INSET,
+      paddingVertical: TIMER_CARD_VERTICAL_INSET,
       gap: 8,
       shadowColor: theme.shadow,
       shadowOpacity: 1,
@@ -749,9 +765,10 @@ function createStyles(theme: MobileTheme) {
     },
     activeTimerHeader: {
       flexDirection: "row",
-      alignItems: "flex-start",
+      alignItems: "stretch",
       justifyContent: "space-between",
-      gap: 12
+      gap: TIMER_CARD_CONTENT_TO_ACTION_GAP,
+      minHeight: TIMER_CARD_CONTENT_MIN_HEIGHT
     },
     activeTimerTextStack: {
       flex: 1,
@@ -765,7 +782,10 @@ function createStyles(theme: MobileTheme) {
     activeTimerActions: {
       flexDirection: "column",
       alignItems: "center",
-      gap: 8
+      alignSelf: "stretch",
+      gap: TIMER_CARD_ACTION_COLUMN_GAP,
+      justifyContent: "space-between",
+      width: TIMER_CARD_ACTION_COLUMN_WIDTH
     },
     activeTitleRow: {
       flexDirection: "row",
@@ -1474,18 +1494,18 @@ function createStyles(theme: MobileTheme) {
     },
     compactCategoryScroller: {
       gap: 7,
-      paddingRight: 4
+      paddingRight: TIMER_CARD_TRAILING_SCROLL_INSET
     },
     quickActionsInline: {
       flexGrow: 0,
-      minHeight: 44
+      minHeight: TIMER_CARD_QUICK_ACTION_PILL_HEIGHT
     },
     categoryPillTouch: {
-      minHeight: 44,
+      minHeight: TIMER_CARD_QUICK_ACTION_PILL_HEIGHT,
       justifyContent: "center"
     },
     categoryPill: {
-      minHeight: 32,
+      minHeight: TIMER_CARD_QUICK_ACTION_PILL_HEIGHT,
       backgroundColor: theme.surfaceMuted,
       borderRadius: 999,
       paddingHorizontal: 11,
@@ -1509,8 +1529,8 @@ function createStyles(theme: MobileTheme) {
       fontSize: 11,
       fontWeight: "700",
       letterSpacing: 0.45,
-      paddingHorizontal: 2,
-      paddingTop: 2
+      lineHeight: TIMER_CARD_QUICK_ACTION_LABEL_LINE_HEIGHT,
+      paddingHorizontal: 2
     },
     colorDot: {
       width: 9,
@@ -1866,13 +1886,17 @@ function createStyles(theme: MobileTheme) {
     },
     startInputRow: {
       flexDirection: "row",
-      alignItems: "flex-start",
-      gap: 8
+      alignItems: "stretch",
+      gap: TIMER_CARD_CONTENT_TO_ACTION_GAP,
+      minHeight: TIMER_CARD_CONTENT_MIN_HEIGHT
     },
     startComposerMain: {
       flex: 1,
       minWidth: 0,
-      gap: 6
+      gap: TIMER_CARD_DESCRIPTION_TO_QUICK_ACTIONS_SPACING
+    },
+    quickActionsGroup: {
+      gap: TIMER_CARD_LABEL_TO_PILL_SPACING
     },
     startInput: {
       flex: 1,
@@ -1887,7 +1911,11 @@ function createStyles(theme: MobileTheme) {
       lineHeight: 18
     },
     startActionColumn: {
-      gap: 8
+      alignItems: "center",
+      alignSelf: "stretch",
+      gap: TIMER_CARD_ACTION_COLUMN_GAP,
+      justifyContent: "space-between",
+      width: TIMER_CARD_ACTION_COLUMN_WIDTH
     },
     addPastTimeButton: {
       width: 44,

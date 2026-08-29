@@ -1,10 +1,24 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEV_WORKSPACE_COOKIE } from "@/lib/session";
-import { resolveRequestSession } from "./ingest-auth";
+
+const mocks = vi.hoisted(() => ({
+  query: vi.fn()
+}));
+
+vi.mock("./db", () => ({ query: mocks.query }));
+
+const {
+  INTEGRATION_TOKEN_LAST_USED_TOUCH_INTERVAL_SECONDS,
+  resolveRequestSession
+} = await import("./ingest-auth");
 
 describe("resolveRequestSession", () => {
   const originalAuthMode = process.env.DAYFRAME_AUTH_MODE;
   const originalIngestToken = process.env.DAYFRAME_INGEST_TOKEN;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
 
   afterEach(() => {
     restoreEnv("DAYFRAME_AUTH_MODE", originalAuthMode);
@@ -40,6 +54,59 @@ describe("resolveRequestSession", () => {
 
     expect(session.authMode).toBe("token");
     expect(session.scopes).toContain("time:read");
+  });
+
+  it("accepts the ingest header with time:read and rate-limits last-used writes", async () => {
+    process.env.DAYFRAME_AUTH_MODE = "provider";
+    delete process.env.DAYFRAME_INGEST_TOKEN;
+    mocks.query.mockResolvedValueOnce({
+      rows: [{
+        id: "token-1",
+        userId: "00000000-0000-4000-8000-000000000001",
+        workspaceId: "00000000-0000-4000-8000-000000000010",
+        scopes: ["time:read"]
+      }]
+    });
+
+    const session = await resolveRequestSession(
+      new Request("https://dayframe.test/api/timer-state", {
+        headers: { "x-dayframe-ingest-token": "desk-token" }
+      }),
+      { allowIngestToken: true, requiredScopes: ["time:read"] }
+    );
+
+    expect(session).toMatchObject({
+      authMode: "token",
+      scopes: ["time:read"]
+    });
+    expect(mocks.query).toHaveBeenCalledOnce();
+    const [statement, values] = mocks.query.mock.calls[0];
+    expect(statement).toContain("integration_token.last_used_at is null");
+    expect(statement).toContain("integration_token.last_used_at < now() - ($2 * interval '1 second')");
+    expect(values).toEqual([
+      expect.stringMatching(/^[0-9a-f]{64}$/),
+      INTEGRATION_TOKEN_LAST_USED_TOUCH_INTERVAL_SECONDS
+    ]);
+  });
+
+  it("rejects an integration token that lacks time:read", async () => {
+    process.env.DAYFRAME_AUTH_MODE = "provider";
+    delete process.env.DAYFRAME_INGEST_TOKEN;
+    mocks.query.mockResolvedValueOnce({
+      rows: [{
+        id: "token-1",
+        userId: "00000000-0000-4000-8000-000000000001",
+        workspaceId: "00000000-0000-4000-8000-000000000010",
+        scopes: ["events:write"]
+      }]
+    });
+
+    await expect(resolveRequestSession(
+      new Request("https://dayframe.test/api/timer-state", {
+        headers: { "x-dayframe-ingest-token": "write-only-token" }
+      }),
+      { allowIngestToken: true, requiredScopes: ["time:read"] }
+    )).rejects.toMatchObject({ status: 403, code: "insufficient_scope" });
   });
 
   it("returns a typed 403 when a valid session lacks a required scope", async () => {

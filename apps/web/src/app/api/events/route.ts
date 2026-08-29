@@ -4,7 +4,7 @@ import { authErrorResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import { processActivityEvent, TimerMutationBusyError } from "@/lib/event-service";
 import { isDatabasePayloadError, isDatabaseReadinessError, isMissingRequiredColumnError } from "@/lib/db";
-import { notifyLiveActivitiesBestEffort } from "@/lib/live-activity-push";
+import { scheduleLiveActivityNotification } from "@/lib/live-activity-post-response";
 
 export async function POST(request: Request) {
   try {
@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     });
     const body = await request.json();
     const result = await processActivityEvent(body, session);
-    await notifyLiveActivitiesBestEffort(session);
+    scheduleLiveActivityNotification(session);
     return NextResponse.json(result, { status: result.duplicate ? 200 : 201 });
   } catch (error) {
     const authResponse = authErrorResponse(error);

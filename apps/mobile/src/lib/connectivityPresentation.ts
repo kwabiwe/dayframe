@@ -1,6 +1,11 @@
 import { CONNECTIVITY_SUCCESS_NOTICE_MS, type ConnectivityStatus } from "./connectivityState";
 
-export type ConnectivityStatusVariant = "offline" | "syncing" | "synced" | "attention";
+export type ConnectivityStatusVariant =
+  | "offline"
+  | "pending"
+  | "syncing"
+  | "synced"
+  | "attention";
 
 export type ConnectivityStatusViewModel = {
   accessibilityLabel: string;
@@ -32,6 +37,7 @@ export function createConnectivityPresentationState(): ConnectivityPresentationS
 export function updateConnectivityPresentation(input: {
   accountKey: string | null;
   attentionCount: number;
+  isTransmitting?: boolean;
   now: number;
   pendingCount: number;
   state: ConnectivityPresentationState;
@@ -79,6 +85,7 @@ export function updateConnectivityPresentation(input: {
     viewModel: connectivityStatusViewModel({
       attentionCount,
       completionSequence: state.completionSequence,
+      isTransmitting: input.isTransmitting,
       now: input.now,
       onlineUntil: state.onlineUntil,
       pendingCount,
@@ -90,6 +97,7 @@ export function updateConnectivityPresentation(input: {
 export function connectivityStatusViewModel(input: {
   attentionCount: number;
   completionSequence: number;
+  isTransmitting?: boolean;
   now: number;
   onlineUntil: number | null;
   pendingCount: number;
@@ -121,12 +129,19 @@ export function connectivityStatusViewModel(input: {
     };
   }
   if (input.status === "online" && input.pendingCount > 0) {
-    return {
-      accessibilityLabel: "Syncing saved changes.",
-      id: "syncing",
-      isActionable: false,
-      variant: "syncing"
-    };
+    return input.isTransmitting
+      ? {
+          accessibilityLabel: "Syncing saved changes.",
+          id: "syncing",
+          isActionable: false,
+          variant: "syncing"
+        }
+      : {
+          accessibilityLabel: "Saved changes waiting to sync.",
+          id: "pending",
+          isActionable: false,
+          variant: "pending"
+        };
   }
   if (
     input.status === "online" &&

@@ -9,7 +9,7 @@ import {
 import { authErrorResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import { TagNameSchema } from "@dayframe/shared";
-import { notifyLiveActivitiesBestEffort } from "@/lib/live-activity-push";
+import { scheduleLiveActivityNotification } from "@/lib/live-activity-post-response";
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
@@ -28,7 +28,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
     validateTimeWindow(update);
     const result = await updateTimeEntry(id, update, session);
-    await notifyLiveActivitiesBestEffort(session);
+    scheduleLiveActivityNotification(session);
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
     const response = authErrorResponse(error);
@@ -48,7 +48,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
     const session = await resolveRequestSession(request);
     const { id } = await context.params;
     const result = await deleteTimeEntry(id, session);
-    await notifyLiveActivitiesBestEffort(session);
+    scheduleLiveActivityNotification(session);
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
     const response = authErrorResponse(error);

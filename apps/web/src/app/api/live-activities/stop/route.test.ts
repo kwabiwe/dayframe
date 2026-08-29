@@ -8,20 +8,10 @@ const session = {
 };
 
 const mocks = vi.hoisted(() => ({
-  notifyLiveActivitiesBestEffort: vi.fn(),
+  scheduleLiveActivityNotification: vi.fn(),
   processActivityEvent: vi.fn(),
   resolveLiveActivityControlSession: vi.fn()
 }));
-
-vi.mock("next/server", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("next/server")>();
-  return {
-    ...actual,
-    after: (callback: () => void | Promise<void>) => {
-      void callback();
-    }
-  };
-});
 
 vi.mock("@/lib/event-service", () => ({
   processActivityEvent: mocks.processActivityEvent
@@ -29,8 +19,11 @@ vi.mock("@/lib/event-service", () => ({
 
 vi.mock("@/lib/live-activity-push", () => ({
   LiveActivityControlError: class LiveActivityControlError extends Error {},
-  notifyLiveActivitiesBestEffort: mocks.notifyLiveActivitiesBestEffort,
   resolveLiveActivityControlSession: mocks.resolveLiveActivityControlSession
+}));
+
+vi.mock("@/lib/live-activity-post-response", () => ({
+  scheduleLiveActivityNotification: mocks.scheduleLiveActivityNotification
 }));
 
 const { POST } = await import("./route");
@@ -51,7 +44,6 @@ describe("/api/live-activities/stop", () => {
       candidate: {},
       stopOutcome: "stopped"
     });
-    mocks.notifyLiveActivitiesBestEffort.mockResolvedValue(undefined);
   });
 
   it("stops only the entry bound to the exact registered Activity capability", async () => {
@@ -80,7 +72,7 @@ describe("/api/live-activities/stop", () => {
         targetEntryId: body.entryId
       }
     }, session);
-    expect(mocks.notifyLiveActivitiesBestEffort).toHaveBeenCalledWith(session);
+    expect(mocks.scheduleLiveActivityNotification).toHaveBeenCalledWith(session);
   });
 
   it("returns idempotent duplicate delivery as success", async () => {

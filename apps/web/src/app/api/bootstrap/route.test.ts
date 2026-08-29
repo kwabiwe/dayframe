@@ -9,7 +9,8 @@ const session = {
 
 const mocks = vi.hoisted(() => ({
   resolveRequestSession: vi.fn(),
-  getBootstrapData: vi.fn()
+  getBootstrapData: vi.fn(),
+  scheduleLiveActivityRetry: vi.fn()
 }));
 
 vi.mock("@/lib/ingest-auth", () => ({
@@ -18,6 +19,10 @@ vi.mock("@/lib/ingest-auth", () => ({
 
 vi.mock("@/lib/queries", () => ({
   getBootstrapData: mocks.getBootstrapData
+}));
+
+vi.mock("@/lib/live-activity-post-response", () => ({
+  scheduleLiveActivityRetry: mocks.scheduleLiveActivityRetry
 }));
 
 const { GET } = await import("./route");
@@ -63,6 +68,7 @@ describe("/api/bootstrap", () => {
     expect(payload.places[0].defaultActivityDescription).toBe("School drop-off/pickup");
     expect(payload.locationRolloutMode).toBe("v2_shadow");
     expect(mocks.getBootstrapData).toHaveBeenCalledWith(session, { selectedDate: null });
+    expect(mocks.scheduleLiveActivityRetry).toHaveBeenCalledWith(session);
   });
 
   it("serializes normalized tag records and active-entry associations without replacing legacy tagNames", async () => {

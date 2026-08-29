@@ -5,7 +5,9 @@ const database = vi.hoisted(() => ({
   activeRows: [] as Array<Record<string, unknown>>,
   claimRows: [] as Array<Record<string, unknown>>,
   controlRows: [] as Array<Record<string, unknown>>,
+  ownerRows: [] as Array<Record<string, unknown>>,
   tokenRows: [] as Array<Record<string, unknown>>,
+  failNextOutboxWrite: false,
   writes: [] as Array<{ sql: string; params: unknown[] }>,
   query: vi.fn()
 }));
@@ -58,9 +60,12 @@ const {
   classifyApnsFailure,
   drainLiveActivityOutbox,
   notifyLiveActivities,
+  notifyLiveActivitiesBestEffort,
   parseRetryAfterMs,
+  reconcileLiveActivityDesiredState,
   registerLiveActivity,
   resolveLiveActivityControlSession,
+  retryLiveActivityDeliveryBestEffort,
   retryDelayMs
 } = await import("./live-activity-push");
 
@@ -77,11 +82,16 @@ describe("Live Activity durable remote sync", () => {
     database.activeRows = [];
     database.claimRows = [];
     database.controlRows = [];
+    database.ownerRows = [];
     database.tokenRows = [];
+    database.failNextOutboxWrite = false;
     database.writes = [];
     database.query.mockImplementation((sql: string, params: unknown[] = []) => {
       if (sql.includes('t.user_id as "userId"')) {
         return Promise.resolve({ rows: database.controlRows, rowCount: database.controlRows.length });
+      }
+      if (sql.includes("group by workspace_id, user_id")) {
+        return Promise.resolve({ rows: database.ownerRows, rowCount: database.ownerRows.length });
       }
       if (sql.includes("from live_activity_push_tokens") && sql.includes('activity_id as "activityId"')) {
         return Promise.resolve({ rows: database.tokenRows, rowCount: database.tokenRows.length });
@@ -93,6 +103,10 @@ describe("Live Activity durable remote sync", () => {
         const rows = database.claimRows;
         database.claimRows = [];
         return Promise.resolve({ rows, rowCount: rows.length });
+      }
+      if (sql.includes("insert into live_activity_delivery_outbox") && database.failNextOutboxWrite) {
+        database.failNextOutboxWrite = false;
+        return Promise.reject(new Error("outbox unavailable"));
       }
       database.writes.push({ sql, params });
       return Promise.resolve({ rows: [{ id: "token-row" }], rowCount: 1 });
@@ -238,6 +252,7 @@ describe("Live Activity durable remote sync", () => {
     expect(outboxWrite?.sql).toContain("on conflict (token_id) do update");
     expect(outboxWrite?.sql).toContain("revision = live_activity_delivery_outbox.revision + 1");
     expect(outboxWrite?.sql).toContain("live_activity_delivery_outbox.payload #>> '{aps,timestamp}'");
+    expect(outboxWrite?.sql).toContain("payload #> '{aps,content-state}'");
     expect(JSON.parse(String(outboxWrite?.params[4]))).toMatchObject({
       aps: {
         event: "update",
@@ -251,6 +266,65 @@ describe("Live Activity durable remote sync", () => {
       "APNS_BUNDLE_ID"
     ]);
     expect(http2Mocks.calls).toHaveLength(0);
+  });
+
+  it("reconstructs desired state after an earlier enqueue failure left no outbox row", async () => {
+    database.tokenRows = [{
+      id: "token-row",
+      token: "b".repeat(64),
+      activityId: "activity-1",
+      activeEntryId: "entry-1",
+      environment: "development"
+    }];
+    database.activeRows = [{
+      id: "entry-1",
+      description: "Recovered timer",
+      categoryName: "Work",
+      categoryColor: "#123456",
+      startedAt: "2026-08-24T16:00:00.000Z"
+    }];
+    database.failNextOutboxWrite = true;
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await notifyLiveActivitiesBestEffort(session);
+    expect(database.writes.some((write) => write.sql.includes("live_activity_delivery_outbox"))).toBe(false);
+
+    await retryLiveActivityDeliveryBestEffort(session);
+    const recovered = database.writes.find((write) => write.sql.includes("live_activity_delivery_outbox"));
+    expect(JSON.parse(String(recovered?.params[4]))).toMatchObject({
+      aps: { "content-state": { title: "Recovered timer", isRunning: true } }
+    });
+    expect(log).toHaveBeenCalledWith(
+      "Dayframe Live Activity outbox enqueue or delivery failed",
+      expect.objectContaining({ source: "mutation", name: "Error" })
+    );
+    log.mockRestore();
+  });
+
+  it("lets the platform cron rebuild missing desired state before its global drain", async () => {
+    database.ownerRows = [{ workspaceId: session.workspaceId, userId: session.userId }];
+    database.tokenRows = [{
+      id: "token-row",
+      token: "b".repeat(64),
+      activityId: "activity-1",
+      activeEntryId: "entry-1",
+      environment: "development"
+    }];
+    database.activeRows = [{
+      id: "entry-1",
+      description: "Cron recovery",
+      categoryName: "Work",
+      categoryColor: "#123456",
+      startedAt: "2026-08-24T16:00:00.000Z"
+    }];
+
+    const result = await reconcileLiveActivityDesiredState();
+
+    expect(result.missingConfiguration).toContain("APNS_KEY_ID");
+    expect(database.writes.some((write) =>
+      write.sql.includes("insert into live_activity_delivery_outbox") &&
+      String(write.params[4]).includes("Cron recovery")
+    )).toBe(true);
   });
 
   it("updates only the current entry Activity and ends stale registrations", async () => {

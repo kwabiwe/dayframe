@@ -38,6 +38,7 @@ Before declaring hosted auth/timer/event changes ready, verify:
 - Root layout/page consumers must share one request-scoped optional-session result. Do not create separate `cache()` wrappers or a cross-request user-session cache.
 - Optional session resolution may return anonymous state for no cookie or an explicit `401` authentication error only. Database, SQL, configuration and programming errors must propagate to the normal server error path.
 - Bound `auth_sessions.last_used_at` writes with an age condition; ordinary page/API polling must not update the row on every read.
+- Bound `integration_tokens.last_used_at` writes with the same age-conditioned principle. A scoped high-frequency fingerprint consumer must authenticate and update its usage timestamp periodically without creating one MVCC row write per poll.
 - Personal Reports queries must scope `time_entries` by both `workspace_id` and `user_id`, including daily series and workspace-qualified joins. Add a two-user/same-workspace regression whenever report query architecture changes.
 
 ## Migration Safety

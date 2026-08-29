@@ -1,0 +1,13 @@
+{
+  "name": "dayframe-background-execution",
+  "version": "0.1.0",
+  "description": "Dayframe's finite iOS background assertion for active timer delivery",
+  "main": "index.ts",
+  "private": true,
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}
+

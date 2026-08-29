@@ -1,4 +1,6 @@
 PODS:
+  - DayframeBackgroundExecution (0.1.0):
+    - ExpoModulesCore
   - DayframeCalendar (0.1.0):
     - ExpoModulesCore
   - DayframeDurationDial (0.1.0):
@@ -2388,6 +2390,7 @@ PODS:
   - Yoga (0.0.0)
 
 DEPENDENCIES:
+  - DayframeBackgroundExecution (from `../modules/dayframe-background-execution/ios`)
   - DayframeCalendar (from `../modules/dayframe-calendar/ios`)
   - DayframeDurationDial (from `../modules/dayframe-duration-dial/ios`)
   - DayframeLocationVisits (from `../modules/dayframe-location-visits/ios`)
@@ -2505,6 +2508,8 @@ DEPENDENCIES:
   - Yoga (from `../../../node_modules/react-native/ReactCommon/yoga`)
 
 EXTERNAL SOURCES:
+  DayframeBackgroundExecution:
+    :path: "../modules/dayframe-background-execution/ios"
   DayframeCalendar:
     :path: "../modules/dayframe-calendar/ios"
   DayframeDurationDial:
@@ -2736,6 +2741,7 @@ EXTERNAL SOURCES:
     :path: "../../../node_modules/react-native/ReactCommon/yoga"
 
 SPEC CHECKSUMS:
+  DayframeBackgroundExecution: 274dfb23d7af7ae9d558dc477a9d87e78291864b
   DayframeCalendar: 105d3dd67c3a016050217d253a97bc81eeed0cbe
   DayframeDurationDial: dfee3e1252be07902bf9097d15129947d54b96b2
   DayframeLocationVisits: a92d96c395edf56959289c8e57ebb10ab4417884

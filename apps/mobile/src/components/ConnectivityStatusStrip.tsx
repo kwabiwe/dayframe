@@ -37,6 +37,10 @@ import {
   getDurableWorkSnapshot,
   subscribeDurableWork
 } from "@/lib/durableWorkMonitor";
+import {
+  getTimerBackgroundExecutionSnapshot,
+  subscribeTimerBackgroundExecution
+} from "@/lib/timerBackgroundExecution";
 import { MOBILE_MOTION, useReduceMotionPreference } from "@/lib/motion";
 import { useMobileTheme } from "@/lib/mobileTheme";
 
@@ -51,6 +55,11 @@ export function ConnectivityStatusProvider({ children }: { children: ReactNode }
     getDurableWorkSnapshot,
     getDurableWorkSnapshot
   );
+  const timerBackgroundExecution = useSyncExternalStore(
+    subscribeTimerBackgroundExecution,
+    getTimerBackgroundExecutionSnapshot,
+    getTimerBackgroundExecutionSnapshot
+  );
   const [presentation, setPresentation] = useState(createConnectivityPresentationState);
   const announcementTracker = useRef(createDistinctConnectivityAnnouncementTracker());
   const [, setClockRevision] = useState(0);
@@ -60,6 +69,9 @@ export function ConnectivityStatusProvider({ children }: { children: ReactNode }
     accountKey: durableWork.accountKey,
     attentionCount:
       durableWork.timeEntryNeedsAttentionCount + durableWork.timerStopNeedsAttentionCount,
+    isTransmitting:
+      connectivity.recoveryStatus === "syncing" ||
+      timerBackgroundExecution.activeLeaseCount > 0,
     now,
     pendingCount: durableWork.pendingCount,
     state: presentation,
@@ -195,13 +207,16 @@ function ConnectivityStatusGlyph({
     return () => cancelAnimation(rotation);
   }, [reduceMotion, rotation, variant]);
 
-  const symbolName: Record<Exclude<ConnectivityStatusVariant, "syncing">, SFSymbol> = {
+  const symbolName: Record<
+    Exclude<ConnectivityStatusVariant, "pending" | "syncing">,
+    SFSymbol
+  > = {
     attention: "xmark.icloud",
     offline: "icloud.slash",
     synced: "checkmark.icloud"
   };
 
-  if (variant === "syncing") {
+  if (variant === "syncing" || variant === "pending") {
     return (
       <View style={[styles.statusGlyph, styles.statusGlyphAligned]}>
         <Reanimated.View style={[styles.syncArrows, rotatingStyle]}>
