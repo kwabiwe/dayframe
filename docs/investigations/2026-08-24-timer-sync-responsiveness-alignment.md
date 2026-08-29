@@ -253,3 +253,18 @@ None are required to implement this contract. A guaranteed completion model
 that survives suspension or process termination would require a separately
 approved native background `URLSession` design; the current finite assertion
 plus durable retry intentionally does not claim that guarantee.
+
+## 2026-08-29 merge and TestFlight release
+
+PR #185 merged to `main` at `6c4a168`. A signed Release archive was produced
+from that merge with the production API base, production APNs environment, and
+temporary build number 100. App Store Connect accepted delivery
+`10f84f0c-de70-4c77-b54c-1f7d4b7d8125` as `0.1.0 (100)` and reports the build
+as `VALID`, export compliance false, and `IN_BETA_TESTING` through the internal
+`Internal Health Debug` group. The en-GB notes describe the timer reliability,
+background recovery, sync presentation, account isolation, and timer-card
+alignment changes. External testing remains disabled.
+
+This release evidence proves binary delivery, not completion of the owner
+acceptance matrix. Physical offline/background/account-switch behavior and the
+final timer-card visual comparison remain on Watch.
