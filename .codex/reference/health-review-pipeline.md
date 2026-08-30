@@ -67,7 +67,7 @@ Auto-log should be conservative and explainable.
 Walking:
 
 - Enabled by default.
-- High-confidence walks at or above the configured threshold should auto-confirm.
+- `medium_high`/`high` walks at or above the configured threshold should auto-confirm, including during overlapping tracked time.
 - Current intended walking threshold is 5 minutes.
 
 Sleep:
@@ -77,19 +77,18 @@ Sleep:
 - Group sleep samples independently per normalized Health source. Samples whose waking gap is at most 90 minutes belong to one session; a gap greater than 90 minutes preserves split sleep.
 - A grouped Health sleep import is the same logical session as one existing untouched Health-derived Sleep entry only when the provider/source identity matches and at least 80% of the shorter time window overlaps. The 80% rule is deliberately stricter than the one-minute UI/report overlap rule: contained or extended Health revisions reconcile, while partial collisions remain ambiguous.
 - Reconciliation updates the existing entry in place to the union of the valid windows. It must preserve the entry id, category, description, tags, place, original event provenance, and all other user metadata. Repeated and out-of-order imports must neither shrink the most complete window nor create another entry.
-- Never reconcile automatically into a manual entry, an explicitly edited imported entry, a different Health source, a weak overlap, or multiple matching historical entries. Leave those cases in Review.
+- Never reconcile into manual entries. Eligible Sleep may coexist with manual time without changing it. Explicitly edited imported Sleep, different-source/weak logical collisions, and multiple matching historical Sleep entries remain Review-first. Acquire the per-user lock before session lookup and creation/update.
 - Confirmed sleep should use a user-facing `Sleep` category, creating it when needed. Workouts can keep using the broader `Health` category unless a user changes defaults later.
 - User mapping defaults can override category and description for supported sleep/workout imports and for Health Review reprocess.
-- Implausible, too short, too long, overlapping, or malformed sleep should stay in Review with a reason.
+- Implausible, too short, too long, malformed or unsafe logical-session Sleep collisions stay in Review. Ordinary activity overlap is not a blocker.
 
-Strength training, swimming, and unknown/other workouts should remain review-first unless a product decision changes that.
+Strength training, swimming and other/unknown remain disabled by default. An explicitly enabled supported type, including swimming, may auto-log with a complete valid window, normal confidence and existing duration thresholds. Disabled preferences retain their existing ignore/review behaviour.
 
 ## Manual Review Rules
 
 Manual Confirm is a user decision. It should be more permissive than auto-log and must not silently fail.
 
-An overlap may keep an automatic Health signal in Review, but it must not block
-the user's later explicit Confirm or Edit-and-confirm. The confirmed activity
+Ordinary overlap must block neither eligible automatic Health logging nor the user's explicit Confirm or Edit-and-confirm. The confirmed activity
 counts in full towards Total logged while concurrent clock time counts once
 towards Time covered. Health sample/event idempotency remains independent from
 logical sleep-session reconciliation.
@@ -121,8 +120,7 @@ Health items left in Review should have a compact reason whenever possible:
 - `preference_disabled`
 - `invalid_time_window`
 - `missing_end_time`
-- `overlap`
-- `stale_open_timer`
+- `unsafe_sleep_session`
 - `duplicate_event`
 - `locked_or_busy`
 - `database_constraint`
@@ -138,10 +136,10 @@ If a reason is not visible in UI, it should at least be present in diagnostics o
 - Supabase schema is missing columns used by the deployed code.
 - Review reprocess and manual Confirm contend on the same review rows.
 - Health sample preferences are off or defaults are not applied.
-- A stale open `time_entries` row with `stopped_at is null` overlaps everything.
+- A stale open timer must not block eligible Health or be changed by Health import.
 - Sleep stages are imported independently and never consolidated.
-- Already-created Sleep/Health entries can cover sibling Health review rows; those covered rows should be accepted, not left open as overlaps.
-- High-confidence walks stay open because overlap detection is correct but invisible.
+- Same-source untouched Sleep coverage can accept sibling legacy stages. An unrelated workout occupying the same window is not proof of duplicate sample identity.
+- Eligible `medium_high`/`high` workouts must not stay open solely because other time is logged.
 - Health mapping defaults are absent, stale, or not applied consistently between new imports and reprocess.
 - Duplicate or overlapping Sleep entries may come from HealthKit revisions, legacy rows, or old Review confirmations. Verify source identity, event provenance, `user_edited_at`, and all matching rows before cleanup; multiple matches must remain ambiguous.
 - Accepted/ignored review items leak back into Review due to query or mobile filtering.
