@@ -1337,7 +1337,7 @@ describe("health event persistence", () => {
     )).toBe(false);
   });
 
-  it("leaves an overlapping manually created Sleep entry in Review", async () => {
+  it("auto-logs Sleep alongside a manually created Sleep entry without changing it", async () => {
     const client = healthSleepAmbiguityClient({ source: "manual_app" });
     mocks.pool.connect.mockResolvedValueOnce(client);
 
@@ -1348,10 +1348,10 @@ describe("health event persistence", () => {
 
     expect(client.query.mock.calls.some(([statement]) =>
       String(statement).includes("insert into review_items")
-    )).toBe(true);
+    )).toBe(false);
     expect(client.query.mock.calls.some(([statement]) =>
       String(statement).includes("insert into time_entries")
-    )).toBe(false);
+    )).toBe(true);
   });
 
   it("leaves a manually edited imported Sleep entry protected in Review", async () => {
@@ -1833,6 +1833,21 @@ describe("health event persistence", () => {
       expect.stringContaining("set status = $2"),
       ["review-walk-disabled", "ignored"]
     );
+  });
+
+  it.each([
+    ["medium_high", "walking", true, 2220, 1],
+    ["medium", "walking", true, 2220, 0],
+    ["high", "swimming", true, 2220, 1],
+    ["high", "swimming", false, 2220, 0],
+    ["high", "walking", true, 60, 0],
+    ["high", "unknown", false, 2220, 0]
+  ] as const)("reprocesses %s %s with preference %s and duration %i", async (confidence, workoutType, enabled, seconds, expected) => {
+    const client = reprocessClient([{ ...healthWorkoutReviewRow({ workoutType, durationSeconds: seconds, stoppedAt: new Date(Date.parse("2026-07-04T19:09:00.000Z") + seconds * 1000).toISOString() }), title: workoutType === "unknown" ? "Unknown workout" : "Workout", confidence }]);
+    mocks.pool.connect.mockResolvedValueOnce(client);
+    const result = await reprocessHealthReviewItems({ preferences: { swimming: enabled } }, session);
+    expect(result.confirmedCount).toBe(expected);
+    expect(client.query.mock.calls.filter(([statement])=>String(statement).includes("insert into time_entries"))).toHaveLength(expected);
   });
 
   it("reprocesses overlapping Health despite a stale manual timer", async () => {
@@ -3612,6 +3627,8 @@ function healthSleepAmbiguityClient(input: {
       if (statement.includes("insert into activity_events")) {
         return { rows: [{ id: "event-ambiguous" }] };
       }
+      if (statement.includes("unsafe_health_sleep_collision") && input.source === "manual_app") return { rows: [] };
+      if (statement.includes("insert into time_entries")) return { rows: [{ id: "new-health-sleep" }] };
       if (statement.includes("from time_entries te")) {
         return {
           rows: [{

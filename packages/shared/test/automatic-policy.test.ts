@@ -126,6 +126,11 @@ describe("automatic activity overlaps", () => {
   it("never uses a manual entry's place or title as location provenance", () => {
     expect(classifyAutomaticActivity(entry("manual_app", "manual_entry", 10))).toBe("manual_or_other");
   });
+  it.each(["geofence_specific", "geofence_broad", "ha_geofence"])("recognises legacy %s stays as conflicting location activity", (source) => {
+    const legacy = entry(source, "geofence_exit", tolerance + 1);
+    expect(classifyAutomaticActivity(legacy)).toBe("location_stay");
+    expect(assessAutomaticOverlap(candidate, [legacy])).toMatchObject({ allowed: false, reason: "location_stay_conflict" });
+  });
 });
 
 describe("deterministic saved-place ranking", () => {

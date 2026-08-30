@@ -151,7 +151,7 @@ export function classifyAutomaticActivity(entry: Pick<AutomaticOverlapEntry, "so
   if (entry.source === "health_sleep" || entry.source === "health_workout" ||
     entry.eventType === "health_sleep_import" || entry.eventType === "health_workout_import") return "health";
   if (entry.eventType === "commute_detected") return "location_commute";
-  if (["geofence", "location_learning"].includes(entry.source) &&
+  if (["geofence", "geofence_specific", "geofence_broad", "ha_geofence", "location_learning"].includes(entry.source) &&
     ["geofence_enter", "geofence_exit", "learned_place_visit", "unknown_stay"].includes(entry.eventType ?? "")) return "location_stay";
   return "manual_or_other";
 }

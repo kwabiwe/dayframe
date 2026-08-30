@@ -782,7 +782,13 @@ async function validateEnabledTrustedPlaceAutomation() {
        and notes like 'Automatic logging paused because this visit overlaps existing tracked time%'`,
     [WORKSPACE_ID, USER_ID, blocked.placeId, blocked.startedAt, blocked.stoppedAt]
   );
-  assert.equal(overlapReview.rowCount, 1, "An overlapping trusted stay did not fall back to Review.");
+  assert.equal(overlapReview.rowCount, 0, "A manual overlap incorrectly blocked a trusted stay.");
+  const overlappingStay = await pool.query(
+    `select 1 from time_entries where workspace_id = $1 and user_id = $2 and place_id = $3
+      and started_at = $4 and stopped_at = $5 and source = 'location_learning'`,
+    [WORKSPACE_ID, USER_ID, blocked.placeId, blocked.startedAt, blocked.stoppedAt]
+  );
+  assert.equal(overlappingStay.rowCount, 1, "Trusted stay was not logged alongside manual time.");
 }
 
 async function validateEnabledTrustedCommuteAutomation() {
@@ -918,8 +924,8 @@ async function validateEnabledTrustedCommuteAutomation() {
     [WORKSPACE_ID, USER_ID]
   );
   assert.equal(overlapReview.rows.length, 1, "An overlapping trusted commute did not fall back to Review.");
-  assert.equal(overlapReview.rows[0].semanticReason, "confirmed_time_overlap");
-  assert.match(overlapReview.rows[0].notes ?? "", /this commute overlaps existing tracked time/i);
+  assert.equal(overlapReview.rows[0].semanticReason, "commute_overlap_exceeded");
+  assert.match(overlapReview.rows[0].notes ?? "", /more than five minutes/i);
   const overlapAutomaticEntry = await pool.query(
     `select 1 from time_entries te
      join activity_events ae on ae.id = te.created_from_event_id
