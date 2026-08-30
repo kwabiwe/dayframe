@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { analyzeTimeIntervals } from "@dayframe/shared";
 import { prepareReviewOverlapCounts, reviewPeerEntries } from "./reviewPresentation";
-import { REVIEW_PERFORMANCE_PROFILES, SYNTHETIC_REVIEW_NOW, syntheticReviewBootstrap } from "../../../../scripts/fixtures/review-performance";
+import { REVIEW_PERFORMANCE_PROFILES, SYNTHETIC_REVIEW_NOW, syntheticReviewBootstrap, syntheticReviewEvidence } from "../../../../scripts/fixtures/review-performance";
 
 describe("Review presentation preparation", () => {
+  it("constructs mixed synthetic evidence profiles without private source data", () => {
+    const data = syntheticReviewBootstrap(50);
+    expect(new Set(data.reviewItems.map(item => item.eventType)).size).toBe(5);
+    expect(new Set(syntheticReviewEvidence(data).map(item => item.segment.evidenceCount))).toEqual(new Set([8, 400]));
+    const counts = [...prepareReviewOverlapCounts(data.reviewItems, reviewPeerEntries(data), SYNTHETIC_REVIEW_NOW).values()];
+    expect(counts.some(count => count === 0)).toBe(true);
+    expect(counts.some(count => count > 0)).toBe(true);
+  });
   it.each(REVIEW_PERFORMANCE_PROFILES)("preserves interval counts for a %i-item mixed backlog", (size) => {
     const data = syntheticReviewBootstrap(size);
     const peers = reviewPeerEntries(data);

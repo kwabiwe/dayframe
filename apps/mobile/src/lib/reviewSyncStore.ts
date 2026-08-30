@@ -23,6 +23,7 @@ import type {
   MobileReviewItem
 } from "./api";
 import { createSerialMutationQueue } from "./location/mutationQueue";
+import { isLocationReviewItem } from "./review";
 
 const DATABASE_NAME = "dayframe-review-sync.db";
 const DATABASE_VERSION = 5;
@@ -1051,6 +1052,9 @@ export async function enqueueReviewMutation(input: {
   }
   for (const item of affected) {
     assertActionableReviewItem(item);
+    if ((mutation.action === "merge" || mutation.action === "merge_and_confirm") && !isLocationReviewItem(item)) {
+      throw new Error("Only saved Location Review visits can be merged.");
+    }
     if (!input.bootstrap.reviewItems.some((cached) => cached.id === item.id && cached.status === "open")) {
       throw new Error("This suggestion is no longer available in this account's Review data.");
     }

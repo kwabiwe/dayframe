@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { syntheticId, syntheticReviewBootstrap } from "../../../../scripts/fixtures/review-performance";
 
-const mocks = vi.hoisted(() => ({ open: vi.fn(), fetch: vi.fn(), session: vi.fn(), failItem: "" }));
+const mocks = vi.hoisted(() => ({ open: vi.fn(), fetch: vi.fn(), session: vi.fn(), current: vi.fn(), failItem: "" }));
 vi.mock("expo-sqlite", () => ({ openDatabaseAsync: mocks.open }));
-vi.mock("./secure-session", () => ({ readOwnedAuthenticatedSessionSnapshot: mocks.session, invalidateMobileSessionIfCurrent: vi.fn(), isAuthenticatedSessionSnapshotCurrent: () => true }));
+vi.mock("./secure-session", () => ({ readOwnedAuthenticatedSessionSnapshot: mocks.session, invalidateMobileSessionIfCurrent: vi.fn(), isAuthenticatedSessionSnapshotCurrent: mocks.current }));
 vi.mock("./config", () => ({ DAYFRAME_API_BASE: "https://local-fixture.invalid" }));
 vi.mock("./mobile-network", () => ({ mobileFetchWithTimeout: mocks.fetch, MobileRequestTimeoutError: class extends Error {} }));
 let db: DatabaseSync;
@@ -45,6 +45,7 @@ beforeEach(async () => {
   directory = mkdtempSync(join(tmpdir(), "dayframe-review-test-"));
   db = new DatabaseSync(join(directory, "review.db"));
   mocks.open.mockImplementation(async () => adapter());
+  mocks.current.mockReturnValue(true);
   mocks.session.mockResolvedValue({ status: "authenticated", snapshot: { token: "synthetic-token" } });
   await reopen(); await store.processReviewBootstrap(bootstrap());
 });
@@ -66,6 +67,8 @@ describe("Review real SQLite transactions", () => {
   });
   it("rejects missing, busy or invalid sources without hiding another card", async () => {
     await expect(store.enqueueReviewMutation({ ...mergeInput(), affectedItems: [mergeInput().item] })).rejects.toThrow();
+    const data = bootstrap();
+    await expect(store.enqueueReviewMutation({ ...mergeInput(), item: data.reviewItems[0], affectedItems: [data.reviewItems[0], data.reviewItems[3]] })).rejects.toThrow("Only saved Location");
     await store.enqueueReviewMutation(mergeInput());
     const input = mergeInput();
     await expect(store.enqueueReviewMutation({ ...input, clientMutationId: syntheticId(11), item: input.affectedItems[1], affectedItems: undefined, mutation: { action: "confirm" } })).rejects.toThrow("already exists");
@@ -97,6 +100,14 @@ describe("Review real SQLite transactions", () => {
     expect(count("review_mutation_outbox")).toBe(1);
     await store.processReviewBootstrap({ ...input.bootstrap, reviewItems: input.bootstrap.reviewItems.slice(0, 2) });
     expect(count("review_mutation_outbox")).toBe(0); expect(count("review_mutation_effects")).toBe(0);
+  });
+  it("keeps intent pending without dispatch when the session changes during local preparation", async () => {
+    await store.enqueueReviewMutation(mergeInput());
+    mocks.current.mockReturnValue(false);
+    await store.synchroniseReviewMutations();
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(db.prepare("select state from review_mutation_outbox").get()!.state).toBe("pending");
+    expect(count("review_mutation_effects")).toBe(2);
   });
   it("backfills a v4 pending action without changing its stable ID or request", async () => {
     const data = bootstrap();
