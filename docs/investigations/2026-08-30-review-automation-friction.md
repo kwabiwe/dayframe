@@ -117,7 +117,34 @@ xcodebuild -workspace apps/mobile/ios/Dayframe.xcworkspace -scheme Dayframe \
   -derivedDataPath /tmp/dayframe-pr186-derived-data CODE_SIGNING_ALLOWED=NO clean build
 ```
 
-**FAIL (65)**: missing `Pods-Dayframe.debug.xcconfig` after deployment-mode Pod installation stopped. The Mac had approximately 1.9 GiB free at the final check. A full clean native build is still required; TypeScript/Swift unit success is not native UI evidence. Normal `npx pod-install`, full simulator UI/motion capture and signed build were not completed. Docker's existing container and a fresh isolated container attempt both returned filesystem/containerd I/O; no production database was substituted and no user services/data were reset.
+**Local FAIL (65)**: missing `Pods-Dayframe.debug.xcconfig` after deployment-mode Pod installation stopped. The Mac had approximately 1.9 GiB free when checked. Full simulator UI/motion capture and signed build were not completed. Docker's existing container and a fresh isolated container attempt both returned filesystem/containerd I/O; no production database was substituted and no user services/data were reset.
+
+**CI PASS:** [run 33332043685](https://github.com/kwabiwe/dayframe/actions/runs/33332043685), commit `a955f52187e6466e00660238d9f1a937f185950b`, passed both disposable PostGIS profiles and the clean unsigned Simulator build. Xcode 26.6 (`17F113`), CocoaPods 1.16.2; native job 19:51:55–20:13:56 UTC. The committed Pod/npm lockfiles remain unchanged. The successful isolated build supersedes the local build blocker for compile acceptance; it is not hands-on UI/device evidence. Expo's newer-patch advisory remains unresolved by design, and GitHub warned about the existing v4 actions' Node runtime deprecation.
+
+Exact additional successful CI commands (synthetic service credentials only):
+
+```bash
+# Each profile runs in its own disposable service with DATABASE_URL set to:
+# postgres://dayframe:dayframe@localhost:5432/dayframe_ci_test
+npx tsx scripts/setup-validation-db.ts base
+# In the second service:
+npx tsx scripts/setup-validation-db.ts ordered
+# In both services:
+npm run validate:location-v2-db
+npm run validate:review-mutation-db
+DAYFRAME_RUN_DB_INTEGRATION=1 npm run test -w @dayframe/web -- src/lib/event-service.postgres.integration.test.ts
+
+# On the isolated macOS runner, with the staging-only public env in the workflow:
+gem install cocoapods -v 1.16.2 --no-document
+# In apps/mobile/ios:
+pod _1.16.2_ install
+# From repository root:
+xcodebuild -quiet -workspace apps/mobile/ios/Dayframe.xcworkspace \
+  -scheme Dayframe -configuration Debug -sdk iphonesimulator \
+  -destination 'generic/platform=iOS Simulator' \
+  -derivedDataPath "$RUNNER_TEMP/dayframe-clean-derived-data" \
+  CODE_SIGNING_ALLOWED=NO clean build
+```
 
 ## Synthetic fixture safety and measurements
 
@@ -151,9 +178,11 @@ Preview public/login pages loaded at 375×812 and 1280×900 without horizontal o
 
 The existing stable alias resolved to Ready Preview `https://dayframe-2xy4js23l-dayframeworkshop.vercel.app` (`dpl_5xpY29qcdnPfcNGbYbjAVnEkCguQ`, created 2026-08-25); it was not changed. The signed-in staging web page showed its Staging badge. That old deployment is not evidence for this branch.
 
-Preview-scoped `vercel env pull` authenticated but could not retrieve fourteen sensitive environment values, including the database/auth/rollout identity needed for verification. Vercel admin UI required login in both available browsers. New Preview staging Supabase identity/schema and operational Location rollout mode are therefore **unverified**; no mode or stable alias was changed. Repository fallback remains `v2_shadow` and automatic Location requires `v2_enabled`.
+Preview-scoped `vercel env pull` authenticated but could not retrieve fourteen sensitive environment values, including the database/auth/rollout identity needed for verification. Vercel admin UI required login; the browser safety check rejected initiating GitHub sign-in without explicit authorization. No workaround was used. The new Preview's mapping to staging Supabase and its operational Location rollout mode remain **unverified**; no mode or stable alias was changed. Repository fallback remains `v2_shadow` and automatic Location requires `v2_enabled`.
 
-EAS preview build: **NOT RUN**; `npx --yes eas-cli@latest whoami` returned `Not logged in`. No signed build ID/URL, production/TestFlight build or OTA update exists for this task. Supabase's admin browser also required sign-in. Do not begin signed iPhone acceptance until the exact Ready Preview is verified against staging Supabase, required existing schema is confirmed and that Preview is manually promoted to the stable alias. Preview uses the same bundle identity and may replace TestFlight on the phone.
+Supabase's existing sign-in was successfully reused. A metadata-only staging audit verified required columns across 13 feature tables, RLS on those tables, all 11 inspected time/event/receipt/Location indexes, and receipt owner uniqueness. No feature migration is needed. A separate pre-existing staging access-control finding blocks promotion; details were given privately to the owner and are intentionally not published in this public repository. No row data was queried and no permissions/migrations changed.
+
+EAS preview build: **NOT RUN**; `npx --yes eas-cli@latest whoami` returned `Not logged in`. No signed build ID/URL, production/TestFlight build or OTA update exists for this task. Do not begin signed iPhone acceptance until the separate staging access-control finding is resolved, the exact Ready Preview is verified against staging Supabase and that Preview is manually promoted to the stable alias. Preview uses the same bundle identity and may replace TestFlight on the phone.
 
 | Physical iPhone check | Result | Required evidence |
 | --- | --- | --- |
@@ -175,7 +204,7 @@ EAS preview build: **NOT RUN**; `npx --yes eas-cli@latest whoami` returned `Not 
 ## Required owner tests before merge
 
 1. Review the passing isolated base/ordered PostGIS jobs (Location, structural Review receipts and enabled Stop contention) and the final native CI result. Restore local Docker/disk before future local database/native runs; local infrastructure failures remain recorded but do not replace or negate the real CI database evidence. Do not treat mocked SQL as a replacement. A clean native build and hands-on checks are still required.
-2. Verify the exact PR Preview is Ready and uses staging Supabase with all existing columns/indexes; record rollout mode, then manually promote that exact URL to `dayframe-staging.vercel.app`. Build/install an EAS **preview** from the same code, verify staging API base and record build/device/iOS identities. Do not install production configuration for these checks.
+2. Resolve the separate staging access-control finding reported privately. Authorize or complete the required service sign-ins. Verify the exact PR Preview is Ready and uses the audited staging Supabase project; record rollout mode, then manually promote that exact URL to `dayframe-staging.vercel.app`. Build/install an EAS **preview** from the same code, verify staging API base and record build/device/iOS identities. Do not install production configuration for these checks.
 3. Upgrade an app with pending v4 Review actions. Offline, exercise every strict resolving action. For merge confirm both source cards disappear only after local commit; kill/reopen before sync, reconnect, and retry a lost response. Expect one canonical operation/result. Fail local storage and expect both cards and draft to remain. Resolve one source on a second client, retry, and restore only the source still canonically open.
 4. Exercise saved-radius ties in different arrival/input orders; baseline stays selected and alternatives remain bounded. Show nearby POIs for saved and unknown stays, use one-time with save off, explicitly save once, cancel/search/back rapidly, and verify no provider result becomes an engine signal.
 5. Exercise independent start/stop widths and maximum single overlaps at 4:59.999, 5:00.000 and 5:00.001; touching, running and two separate sub-five-minute overlaps. Verify exact detected times and the final tables above. Test medium routes with 2 versus 3 samples, missing/different/same saved endpoints and >12-minute internal gaps.
@@ -197,7 +226,7 @@ Product policy: PRD and product-model. Runtime/persistence: architecture, API, d
 
 The blocked local Postgres run exposed a recurring validation gap: the only existing CI workflow checked documentation. This PR adds a read-only-permission GitHub Actions matrix using the repository's existing PostGIS image, explicit synthetic credentials and an empty disposable service per base/ordered schema. No deployment credentials or production configuration enter that job. It runs both database validators and enables the real Stop contention test. The new setup helper refuses non-local/non-test/non-empty databases; its production-target rejection was executed successfully. Both profiles passed in [CI run 33331617641](https://github.com/kwabiwe/dayframe/actions/runs/33331617641) at `2ebba5abc587e5b45ae16d744301d5a91c18221a`, including all eleven complex actions and real Stop contention. Local Docker remains broken; database correctness acceptance is now established by isolated CI rather than that host.
 
-The workflow also attempts a clean unsigned Simulator build with staging-only public configuration on GitHub's documented [macOS 26 runner](https://github.com/actions/runner-images/blob/main/images/macos/macos-26-Readme.md), avoiding the local disk limit. It verifies the Pod dependency graph while tolerating only the three documented path-generated prebuilt checksums. The first run stopped in the newly added YAML checker because CocoaPods uses Symbol keys; the checker now explicitly permits only that extra safe scalar class, and local parsing passed. The second run identified runner CocoaPods 1.17.0 changing the lockfile generator version; the job now installs/executes the frozen 1.16.2 (`gem install cocoapods -v 1.16.2 --no-document`, `pod _1.16.2_ install`) instead of weakening the graph check or changing the committed lock. Native outcome remains pending until the corrected job completes. Documentation-only PR changes do not rerun the expensive native/database workflow; the application/validator/workflow paths do.
+The workflow also runs a clean unsigned Simulator build with staging-only public configuration on GitHub's documented [macOS 26 runner](https://github.com/actions/runner-images/blob/main/images/macos/macos-26-Readme.md), avoiding the local disk limit. It verifies the Pod dependency graph while tolerating only the three documented path-generated prebuilt checksums. The first run stopped in the newly added YAML checker because CocoaPods uses Symbol keys; the checker now explicitly permits only that extra safe scalar class, and local parsing passed. The second run identified runner CocoaPods 1.17.0 changing the lockfile generator version; the job installs/executes frozen 1.16.2 instead of weakening the graph check or changing the committed lock. The corrected native job passed in run 33332043685. PRs that change only documentation do not trigger this workflow; this implementation PR may rerun it after evidence-only commits because its overall diff includes application code.
 
 ## Changed files by area
 
