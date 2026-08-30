@@ -307,6 +307,7 @@ export function deriveCommutes(
           : Math.round(summary.straightLineDistanceMeters),
       routeSampleCount: summary.routeSampleCount,
       gapDurationSeconds: Math.round(duration / 1_000),
+      maximumObservationGapSeconds: summary.maximumObservationGapSeconds,
       continuityStatus: uncertainBoundary ? "uncertain_gap" : "continuous",
       confidence: uncertainBoundary && qualification.confidence === "medium_high"
         ? "medium"

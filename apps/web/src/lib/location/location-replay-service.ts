@@ -443,7 +443,7 @@ async function upsertCommute(
       segment.routeDistanceMeters ?? null,
       segment.straightLineDistanceMeters ?? null,
       segment.routeSampleCount,
-      segment.gapDurationSeconds,
+      segment.maximumObservationGapSeconds,
       segment.continuityStatus,
       segment.confidence,
       JSON.stringify({

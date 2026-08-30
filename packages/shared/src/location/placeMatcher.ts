@@ -51,6 +51,8 @@ export function matchLocationToPlaces(
     };
   });
 
+  // Canonical input order also makes near-equal distance comparisons stable.
+  candidates.sort((a, b) => a.id.localeCompare(b.id) || a.source.localeCompare(b.source));
   candidates.sort((a, b) => {
     const classDifference = classRank(a.matchClass) - classRank(b.matchClass);
     if (classDifference !== 0) return classDifference;
@@ -71,19 +73,6 @@ export function matchLocationToPlaces(
   if (plausible.length === 0) return { kind: "unknown", placeId: null, candidates };
 
   const top = plausible[0];
-  const second = plausible[1];
-  const similarlyPlausible =
-    second &&
-    top.matchClass === second.matchClass &&
-    Math.abs(top.distanceMeters / top.radiusMeters - second.distanceMeters / second.radiusMeters) <= 0.12 &&
-    Math.abs(top.priority - second.priority) < 3 &&
-    top.source === "saved" &&
-    second.source === "saved" &&
-    input.savedPlaceIdHint !== top.id &&
-    input.savedPlaceIdHint !== second.id;
-  if (similarlyPlausible) {
-    return { kind: "ambiguous", placeId: null, candidates: plausible.slice(0, 4) };
-  }
 
   return {
     kind: top.source,

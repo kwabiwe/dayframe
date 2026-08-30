@@ -1,4 +1,7 @@
 import {
+  AUTOMATIC_LOCATION_POLICY_VERSION,
+  assessAutomaticOverlap,
+  type AutomaticOverlapEntry,
   EMPTY_LOCATION_ENGINE_STATE,
   LOCATION_ENGINE_V2_CONFIG,
   LocationEvidenceBatchRequestSchema,
@@ -401,25 +404,23 @@ async function emitSemanticSegment(
   let disposition = locationSemanticDisposition(rolloutMode, segment);
   if (disposition.action === "auto_confirm" && !trustedPlace) {
     if (segment.kind === "stay") {
-      disposition = { action: "review", reason: "untrusted_place" };
+      disposition = { ...disposition, action: "review", confidenceTier: "none", reason: "untrusted_place" };
     } else if (!await savedCommuteEndpointsExist(client, session, segment)) {
-      disposition = { action: "review", reason: "untrusted_commute_endpoints" };
+      disposition = { ...disposition, action: "review", confidenceTier: "none", reason: "untrusted_commute_endpoints" };
     }
   }
   const preserveTerminalDecision = existingReviewStatus != null && existingReviewStatus !== "needs_review";
   const preserveExistingReview = existingReviewStatus === "needs_review";
-  const overlapsConfirmedTime =
-    disposition.action === "auto_confirm" &&
-    !preserveTerminalDecision &&
-    !preserveExistingReview
-    ? await hasConfirmedTimeOverlap(
-        client,
-        session,
-        segment.startedAt,
-        segment.stoppedAt!,
-        clientEventId
-      )
-    : false;
+  const overlapDecision = assessAutomaticOverlap({
+    kind: segment.kind === "commute" ? "location_commute" : "location_stay",
+    startedAt: segment.startedAt,
+    stoppedAt: segment.stoppedAt!,
+    placeId,
+    clientEventId
+  }, disposition.action === "auto_confirm" && !preserveTerminalDecision && !preserveExistingReview
+    ? await loadConfirmedTimeOverlaps(client, session, segment.startedAt, segment.stoppedAt!, clientEventId)
+    : []);
+  const overlapsConfirmedTime = !overlapDecision.allowed;
   const autoConfirm =
     disposition.action === "auto_confirm" &&
     !preserveTerminalDecision &&
@@ -427,12 +428,23 @@ async function emitSemanticSegment(
     !overlapsConfirmedTime;
   const shouldReview = !preserveTerminalDecision && !autoConfirm;
   const semanticReason = overlapsConfirmedTime
-    ? "confirmed_time_overlap"
+    ? overlapDecision.reason
     : preserveExistingReview && disposition.action === "auto_confirm"
       ? "existing_review_preserved"
       : disposition.reason;
+  const policyEvidence = {
+    policyVersion: AUTOMATIC_LOCATION_POLICY_VERSION,
+    confidenceTier: disposition.confidenceTier,
+    startUncertaintySeconds: disposition.boundary.startUncertaintyMs == null ? null : disposition.boundary.startUncertaintyMs / 1_000,
+    stopUncertaintySeconds: disposition.boundary.stopUncertaintyMs == null ? null : disposition.boundary.stopUncertaintyMs / 1_000,
+    maximumObservationGapSeconds: segment.kind === "commute" ? segment.maximumObservationGapSeconds ?? null : null,
+    maximumOverlapSeconds: overlapDecision.maximumOverlapMs / 1_000,
+    overlapReason: overlapDecision.reason,
+    overlapClass: overlapDecision.overlapClass
+  };
   const rawPayload = segment.kind === "stay"
     ? {
+        ...policyEvidence,
         clientSegmentId: segment.clientSegmentId,
         algorithmVersion: segment.algorithmVersion,
         placeMatchKind: segment.placeMatchKind,
@@ -444,6 +456,7 @@ async function emitSemanticSegment(
         semanticReason
       }
     : {
+        ...policyEvidence,
         clientSegmentId: segment.clientSegmentId,
         algorithmVersion: segment.algorithmVersion,
         fromStaySegmentId: segment.fromStaySegmentId,
@@ -534,7 +547,7 @@ async function emitSemanticSegment(
     );
   } else if (shouldReview) {
     const notes = overlapsConfirmedTime
-      ? `Automatic logging paused because this ${segment.kind === "commute" ? "commute" : "visit"} overlaps existing tracked time. You can still confirm it from Review.`
+      ? `Automatic logging paused because this ${segment.kind === "commute" ? "commute" : "visit"} conflicts with tracked time by more than five minutes. You can still confirm it from Review.`
       : preserveExistingReview && disposition.action === "auto_confirm"
         ? `This ${segment.kind === "commute" ? "commute" : "visit"} remains in Review because it was already awaiting your decision.`
         : segment.continuityStatus === "uncertain_gap"
@@ -695,29 +708,33 @@ async function trustedPlaceContext(
   return null;
 }
 
-async function hasConfirmedTimeOverlap(
+async function loadConfirmedTimeOverlaps(
   client: import("pg").PoolClient,
   session: RequestSession,
   startedAt: string,
   stoppedAt: string,
   clientEventId: string
-) {
-  const overlap = await client.query(
-    `select 1 from time_entries
-     where workspace_id = $1 and user_id = $2
-       and review_status in ('confirmed', 'accepted')
-       and started_at < $4 and coalesce(stopped_at, 'infinity'::timestamptz) > $3
-       and least(coalesce(stopped_at, 'infinity'::timestamptz), $4)
-           - greatest(started_at, $3) >= interval '1 minute'
-       and not exists (
-         select 1 from activity_events ae
-         where ae.id = time_entries.created_from_event_id
-           and ae.workspace_id = $1 and ae.user_id = $2 and ae.client_event_id = $5
-       )
-     limit 1`,
+): Promise<AutomaticOverlapEntry[]> {
+  const overlap = await client.query<Omit<AutomaticOverlapEntry, "startedAt" | "stoppedAt"> & {
+    startedAt: Date | string; stoppedAt: Date | string | null;
+  }>(
+    `select te.id, te.source, te.started_at as "startedAt", te.stopped_at as "stoppedAt",
+            te.place_id as "placeId", te.created_from_event_id as "eventId",
+            ae.event_type as "eventType", ae.client_event_id as "clientEventId"
+     from time_entries te
+     left join activity_events ae on ae.id = te.created_from_event_id
+       and ae.workspace_id = te.workspace_id and ae.user_id = te.user_id
+     where te.workspace_id = $1 and te.user_id = $2
+       and te.review_status in ('confirmed', 'accepted')
+       and te.started_at < $4 and coalesce(te.stopped_at, $4::timestamptz) > $3
+       and ae.client_event_id is distinct from $5
+     order by te.started_at, te.id`,
     [session.workspaceId, session.userId, startedAt, stoppedAt, clientEventId]
   );
-  return Boolean(overlap.rows[0]);
+  return overlap.rows.map((row) => ({
+    ...row, startedAt: new Date(row.startedAt).toISOString(),
+    stoppedAt: row.stoppedAt == null ? null : new Date(row.stoppedAt).toISOString()
+  }));
 }
 
 function segmentEventClientId(segment: LocationSegment) {

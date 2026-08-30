@@ -463,6 +463,17 @@ export function locationReviewReasonCopy(
       return "Needs review · place isn’t saved";
     case "insufficient_route_evidence":
       return "Needs review · route evidence is limited";
+    case "boundary_uncertainty_exceeded":
+      return "A start or end boundary is uncertain by more than five minutes.";
+    case "boundary_bounds_missing":
+    case "boundary_bounds_invalid":
+      return "The start or end time needs your review.";
+    case "internal_route_gap":
+      return "There is a gap in the journey evidence.";
+    case "commute_overlap_exceeded":
+      return "This commute overlaps tracked time by more than five minutes.";
+    case "location_stay_conflict":
+      return "This visit conflicts with another location activity by more than five minutes.";
     case "uncertain_boundary":
       return "Needs review · time range is uncertain";
     case "insufficient_confidence":

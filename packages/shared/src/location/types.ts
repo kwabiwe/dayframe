@@ -135,6 +135,7 @@ export type CommuteSegment = {
   straightLineDistanceMeters?: number | null;
   routeSampleCount: number;
   gapDurationSeconds: number;
+  maximumObservationGapSeconds: number;
   continuityStatus: ContinuityStatus;
   confidence: "low" | "medium" | "medium_high" | "high";
   qualificationReason?: CommuteQualificationReason;
