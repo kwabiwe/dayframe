@@ -447,7 +447,7 @@ export function locationReviewReasonCopy(
 ) {
   if (!isLocationReviewItem(item)) return null;
 
-  if (overlapCount > 0) {
+  if (overlapCount > 0 && !item.rawPayload?.semanticReason && !item.rawPayload?.policyVersion) {
     return `Not added automatically · overlaps ${overlapCount} ${overlapCount === 1 ? "entry" : "entries"}`;
   }
 

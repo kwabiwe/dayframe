@@ -24,7 +24,7 @@ describe("offline-first Review screen contracts", () => {
 
   it("renders cached evidence before revalidation and routes safe actions to the outbox", () => {
     expect(detailSource).toContain("loadCachedLocationReviewEvidence(id)");
-    expect(detailSource).toContain("durableReviewMutationFromLocationAction(action)");
+    expect(detailSource).toContain("buildDurableLocationReviewCommand(action, reviewItem, data)");
     expect(detailSource).toContain("await enqueueReviewMutation");
     expect(detailSource).toContain("void synchroniseReviewMutations().catch");
     expect(detailSource).not.toContain("key={evidence.reviewItemId}");

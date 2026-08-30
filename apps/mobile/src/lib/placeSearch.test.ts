@@ -30,7 +30,8 @@ const {
   isSuitableLastKnownLocation,
   resolvePlaceSearchBias,
   robustCoordinateMedian,
-  selectPlaceSearchBias
+  selectPlaceSearchBias,
+  visibleNearbyPlaces
 } = await import("./placeSearch");
 
 describe("place search provider", () => {
@@ -173,6 +174,14 @@ describe("place search provider", () => {
 });
 
 describe("nearby point of interest controller", () => {
+  it("deduplicates the saved match and nearby results without broadening 750 m", () => {
+    const baseline = { name: "  Library  ", latitude: 51.5, longitude: -0.1 };
+    const poi = (name: string, distanceMeters: number, longitude = -0.1) => ({ name, distanceMeters, latitude:51.5,longitude,formattedAddress:null });
+    expect(visibleNearbyPlaces([
+      poi("library", 0), poi("Cafe", 40), poi(" CAFE ", 45), poi("Library", 300, -0.104),
+      poi("Outside", 751), poi("Shop", 750), poi("Fourth", 100)
+    ], baseline).map(x=>x.name)).toEqual(["Cafe", "Library", "Shop"]);
+  });
   it("loads within 750 metres and caps visible results at three", async () => {
     const search = vi.fn().mockResolvedValue({
       requestId: "nearby-1",

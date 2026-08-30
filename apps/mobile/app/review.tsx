@@ -11,10 +11,10 @@ import {
 } from "react-native";
 import Reanimated from "react-native-reanimated";
 import Svg, { Circle, Path } from "react-native-svg";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, useNavigation } from "expo-router";
+import type { NativeStackNavigationProp } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
-  analyzeTimeIntervals,
   paletteColorFor,
   readableLocationNameFromParts,
   type ReviewMutation
@@ -38,6 +38,7 @@ import {
 } from "@/lib/api";
 import { reprocessExistingHealthReviewItems } from "@/lib/health";
 import { createLocationReviewEvidencePrefetcher } from "@/lib/locationReviewEvidenceCache";
+import { prepareReviewOverlapCounts, reviewPeerEntries } from "@/lib/reviewPresentation";
 import { useConnectivity } from "@/lib/connectivity";
 import { pressable, useMobileTheme } from "@/lib/mobileTheme";
 import { mergePersistedMobileTag } from "@/lib/mobileTags";
@@ -167,6 +168,9 @@ export default function ReviewScreen() {
     createLocationReviewEvidencePrefetcher()
   ).current;
   const now = Date.now();
+  const navigation = useNavigation<NativeStackNavigationProp<ReactNavigation.RootParamList>>();
+  const peerEntries = useMemo(() => reviewPeerEntries(data), [data]);
+  const overlapCounts = useMemo(() => prepareReviewOverlapCounts(data?.reviewItems ?? [], peerEntries, Date.now()), [data, peerEntries]);
   connectivityRef.current = { isOffline, isOnline, reconnectEpoch };
 
   const applyReviewMenuEvent = useCallback((event: ReviewMenuEvent) => {
@@ -224,10 +228,12 @@ export default function ReviewScreen() {
   }, [commitData]);
 
   const refreshReviewSyncDiagnostics = useCallback(async () => {
+    const generation = screenOwnerGeneration.current;
     const [diagnostics, itemStates] = await Promise.all([
       getReviewSyncDiagnostics(),
       getReviewItemSyncStates()
     ]);
+    if (generation !== screenOwnerGeneration.current || !screenFocusedRef.current) return;
     setReviewSyncDiagnostics(diagnostics);
     setReviewItemSyncStates(itemStates);
   }, []);
@@ -457,10 +463,29 @@ export default function ReviewScreen() {
   useEffect(() => {
     void refreshReviewSyncDiagnostics();
     return subscribeReviewSync(() => {
+      if (!screenFocusedRef.current) return;
       void reconcileLocalReviewProjection();
       void refreshReviewSyncDiagnostics();
     });
   }, [reconcileLocalReviewProjection, refreshReviewSyncDiagnostics]);
+
+  const stopReviewPresentationWork = useCallback(() => {
+    screenFocusedRef.current = false;
+    screenOwnerGeneration.current += 1;
+    evidencePrefetcher.stop();
+    cancelPendingReviewHandover();
+  }, [cancelPendingReviewHandover, evidencePrefetcher]);
+
+  useEffect(() => navigation.addListener("beforeRemove", stopReviewPresentationWork), [navigation, stopReviewPresentationWork]);
+  useEffect(() => navigation.addListener("transitionStart", (event) => {
+    if (event.data.closing) stopReviewPresentationWork();
+  }), [navigation, stopReviewPresentationWork]);
+  useEffect(() => navigation.addListener("gestureCancel", () => {
+    screenFocusedRef.current = true;
+    const generation = ++screenOwnerGeneration.current;
+    void hydrateReviewFromCache(generation);
+    void loadRef.current({ silent: true, skipReprocess: true, queueIfBusy: true });
+  }), [hydrateReviewFromCache, navigation]);
 
   useFocusEffect(
     useCallback(() => {
@@ -836,7 +861,7 @@ export default function ReviewScreen() {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.settingsFloatingHeader}>
         <View style={styles.settingsHeader}>
-          <MobileBackButton accessibilityLabel="Back" onPress={() => router.back()} />
+          <MobileBackButton accessibilityLabel="Back" onPress={() => { stopReviewPresentationWork(); router.back(); }} />
           <Text style={styles.settingsTitle} numberOfLines={1}>Review</Text>
         </View>
       </View>
@@ -931,7 +956,7 @@ export default function ReviewScreen() {
                   >
                     <ReviewItemCard
                       item={item}
-                      peerEntries={reviewPeerEntries(data)}
+                      overlapCount={overlapCounts.get(item.id) ?? 0}
                       disabled={reprocessRunning && isHealthReviewItem(item)}
                       syncState={reviewItemSyncStates.get(item.id) ?? null}
                       menuOpen={reviewMenuState.openItemId === item.id}
@@ -985,7 +1010,7 @@ export default function ReviewScreen() {
           categories={data?.categories ?? []}
           elapsedSeconds={editingEntry ? entryDurationSeconds(editingEntry, now) : 0}
           entry={editingEntry}
-          historicalEntries={reviewPeerEntries(data)}
+          historicalEntries={peerEntries}
           lastStoppedAt={null}
           mode="entry"
           onCancel={cancelEdit}
@@ -1058,7 +1083,7 @@ function ReviewItemCard({
   onConfirm,
   onToggleMenu,
   onViewEvidence,
-  peerEntries,
+  overlapCount,
   syncState,
   styles,
   theme
@@ -1070,7 +1095,7 @@ function ReviewItemCard({
   onConfirm: () => void;
   onToggleMenu: () => void;
   onViewEvidence: () => void;
-  peerEntries: MobileTimeEntry[];
+  overlapCount: number;
   syncState: ReviewItemSyncState | null;
   styles: ReturnType<typeof useMobileTheme>["styles"];
   theme: ReturnType<typeof useMobileTheme>["theme"];
@@ -1086,8 +1111,7 @@ function ReviewItemCard({
   );
   const controlsDisabled = disabled || syncState != null;
   const confidence = reviewConfidencePresentation(item.confidence);
-  const overlapWarning = reviewItemOverlapWarning(item, peerEntries, now);
-  const locationReason = locationReviewReasonCopy(item, overlapWarning?.overlapCount ?? 0);
+  const locationReason = locationReviewReasonCopy(item, overlapCount);
   const summary = locationReason ?? reviewItemSummary(item);
   const syncCopy = reviewItemSyncStatusCopy(syncState);
 
@@ -1148,15 +1172,15 @@ function ReviewItemCard({
       {summary ? (
         <Text numberOfLines={3} style={styles.reviewSummary}>{summary}</Text>
       ) : null}
-      {overlapWarning?.overlapCount && !locationReason ? (
+      {overlapCount && !locationReason ? (
         <View
           accessibilityLiveRegion="polite"
-          accessibilityLabel={`Overlaps ${overlapWarning.overlapCount} other ${overlapWarning.overlapCount === 1 ? "entry" : "entries"}. You can still confirm.`}
+          accessibilityLabel={`Overlaps ${overlapCount} other ${overlapCount === 1 ? "entry" : "entries"}. You can still confirm.`}
           style={styles.reviewOverlapRow}
         >
           <WarningGlyph color={theme.warningText} />
           <Text style={styles.reviewOverlapText}>
-            Overlaps {overlapWarning.overlapCount} other {overlapWarning.overlapCount === 1 ? "entry" : "entries"} · You can still confirm
+            Overlaps {overlapCount} other {overlapCount === 1 ? "entry" : "entries"} · You can still confirm
           </Text>
         </View>
       ) : null}
@@ -1418,44 +1442,6 @@ function formatEntryTimeRange(entry: MobileTimeEntry, now: number) {
   const startedAt = new Date(entry.startedAt);
   const stoppedAt = entry.stoppedAt ? new Date(entry.stoppedAt) : new Date(now);
   return `${formatTimeOfDay(startedAt)}-${entry.stoppedAt ? formatTimeOfDay(stoppedAt) : "now"}`;
-}
-
-function reviewPeerEntries(data: MobileBootstrap | null) {
-  if (!data) return [];
-  return Array.from(
-    new Map(
-      [
-        ...(data.historyEntries ?? []),
-        ...(data.weekEntries ?? []),
-        ...(data.dayEntries ?? []),
-        ...(data.entries ?? [])
-      ].map((entry) => [entry.id, entry])
-    ).values()
-  );
-}
-
-function reviewItemOverlapWarning(
-  item: MobileReviewItem,
-  peerEntries: MobileTimeEntry[],
-  now: number
-) {
-  if (!item.suggestedStartedAt || !item.suggestedStoppedAt) return null;
-  const candidateId = "__review_overlap_candidate__";
-  return analyzeTimeIntervals(
-    [
-      ...peerEntries.map((entry) => ({
-        id: entry.id,
-        startedAt: entry.startedAt,
-        stoppedAt: entry.stoppedAt
-      })),
-      {
-        id: candidateId,
-        startedAt: item.suggestedStartedAt,
-        stoppedAt: item.suggestedStoppedAt
-      }
-    ],
-    { now }
-  ).entries.find((entry) => entry.id === candidateId) ?? null;
 }
 
 function formatDateTime(date: Date) {

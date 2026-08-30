@@ -1,4 +1,5 @@
 import * as Location from "expo-location";
+import { distanceMeters } from "@dayframe/shared";
 import {
   addSearchErrorListener,
   addSuggestionsListener,
@@ -24,6 +25,23 @@ export const PLACE_SEARCH_MAX_LOCATION_AGE_MS = 24 * 60 * 60 * 1000;
 export const PLACE_SEARCH_REQUIRED_ACCURACY_METERS = 5_000;
 export const NEARBY_POI_RADIUS_METERS = 750;
 export const NEARBY_POI_MAX_VISIBLE_RESULTS = 3;
+
+/** Presentation-only deduplication. Never changes saved radii or engine matching. */
+export function visibleNearbyPlaces(
+  places: NearbyPointOfInterest[],
+  baseline: { name: string; latitude?: number | null; longitude?: number | null } | null = null
+) {
+  const normalise = (name: string) => name.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+  const unique: NearbyPointOfInterest[] = [];
+  for (const place of places) {
+    if (!isCoordinate(place) || !Number.isFinite(place.distanceMeters) || place.distanceMeters < 0 || place.distanceMeters > NEARBY_POI_RADIUS_METERS) continue;
+    const duplicates = [...unique, ...(baseline && isCoordinate(baseline) ? [baseline] : [])];
+    if (duplicates.some((other) => normalise(other.name) === normalise(place.name) && distanceMeters(other, place) <= 25)) continue;
+    unique.push(place);
+    if (unique.length === NEARBY_POI_MAX_VISIBLE_RESULTS) break;
+  }
+  return unique;
+}
 
 export type PlaceSearchCoordinate = {
   latitude: number;
@@ -269,7 +287,7 @@ export class NearbyPointOfInterestController {
         radiusMeters: NEARBY_POI_RADIUS_METERS
       });
       if (this.disposed || result.requestId !== requestId || requestId !== `nearby-${this.requestSequence}`) return;
-      const places = result.places.slice(0, NEARBY_POI_MAX_VISIBLE_RESULTS);
+      const places = visibleNearbyPlaces(result.places);
       this.onStateChange({
         requestId,
         status: places.length > 0 ? "results" : "no-results",
