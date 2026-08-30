@@ -284,3 +284,7 @@ expect_equal "$(sqlite3 "$database_path" "SELECT count(*) FROM location_review_e
 expect_equal "$(sqlite3 "$database_path" "SELECT count(*) FROM review_mutation_outbox WHERE account_key='workspace-a:user-b'")" "1" "logout preserves other isolated account fixture"
 
 echo "Review SQLite validation passed: WAL, foreign keys, busy timeout, v4 schema, immediate hidden enqueue, duplicate rejection, item uniqueness, failed-write rollback, stale in-flight recovery, restart persistence, account isolation, auth-required hiding, evidence TTL/LRU/account scope, identity-safe cancellation cleanup, acknowledged hiding, canonical cleanup, and scoped logout cleanup."
+
+# Execute the production migration and store operations through real SQLite,
+# including two-source transactions, v4 backfill and canonical acknowledgements.
+npm run test -w @dayframe/mobile -- src/lib/reviewSyncStore.sqlite.test.ts
