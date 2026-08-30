@@ -1,5 +1,6 @@
 import {
   ActivityEventInputSchema,
+  hasAutomaticConfidence,
   classifyLocationLearningEvidence,
   DEFAULT_HEALTH_IMPORT_PREFERENCES,
   HEALTH_SLEEP_SESSION_GAP_MS,
@@ -535,6 +536,9 @@ export async function processActivityEvent(
       };
     }
 
+    // Serialize the session lookup as well as its insert/update. Otherwise two
+    // concurrent revisions can both see no existing Sleep before taking the lock.
+    if (parsed.type === "health_sleep_import") await lockUserTimerState(client, session);
     const matchingHealthSleepEntry = parsed.type === "health_sleep_import"
       ? await findMatchingHealthSleepTimeEntry(
         client,
@@ -554,13 +558,17 @@ export async function processActivityEvent(
     }
 
     if (candidate.action === "create_time_entry" && isHealthEvent(parsed.type)) {
-      const conflict = await hasOverlappingTimeEntry(client, parsed, session);
-      if (conflict) {
+      const start = suggestedStartedAtForEvent(parsed);
+      const stop = suggestedStoppedAtForEvent(parsed);
+      const safeWindow = validHealthWindow(start, stop);
+      const unsafeSleep = parsed.type === "health_sleep_import" && safeWindow &&
+        await hasUnsafeHealthSleepCollision(client, session, start, stop);
+      if (!safeWindow || unsafeSleep) {
         candidate = {
-          ...candidate,
-          action: "create_review_item",
-          reviewStatus: "needs_review",
-          reason: "Automatic logging paused because this Health activity overlaps existing time. You can still confirm it from Review."
+          ...candidate, action: "create_review_item", reviewStatus: "needs_review",
+          reason: unsafeSleep
+            ? "This Sleep import may conflict with an existing logical session and needs review."
+            : "This Health activity needs a complete valid time window."
         };
       }
     }
@@ -579,8 +587,7 @@ export async function processActivityEvent(
 
     if (
       candidate.action === "start_timer" ||
-      (candidate.action === "stop_timer" && stopScope.mode !== "entry") ||
-      parsed.type === "health_sleep_import"
+      (candidate.action === "stop_timer" && stopScope.mode !== "entry")
     ) {
       const lockStartedAt = Date.now();
       await lockUserTimerState(client, session);
@@ -2510,7 +2517,8 @@ export async function reprocessHealthReviewItems(
           }
         }
 
-        const mayUseLegacySleepCoverage = !isGroupedHealthSleep;
+        if (item.eventType === "health_sleep_import") await lockUserTimerState(client, session);
+        const mayUseLegacySleepCoverage = item.eventType === "health_sleep_import" && !isGroupedHealthSleep;
         const coveredEntry = mayUseLegacySleepCoverage
           ? await findCoveringHealthTimeEntry(client, session, item, startedAt, stoppedAt)
           : null;
@@ -2535,16 +2543,11 @@ export async function reprocessHealthReviewItems(
           continue;
         }
 
-        const blockingEntry = await findOverlappingTimeEntry(client, session, startedAt, stoppedAt);
-        if (blockingEntry) {
-          const message = overlapReviewNote(blockingEntry);
+        if (item.eventType === "health_sleep_import" &&
+          await hasUnsafeHealthSleepCollision(client, session, startedAt, stoppedAt)) {
+          const message = "Left in Review: this Sleep import may conflict with an existing logical session.";
           await updateHealthReviewNotes(client, item.id, message);
-          addHealthReviewReason(result.reasons, {
-            reviewItemId: item.id,
-            code: "overlap",
-            message,
-            blockingEntry
-          });
+          addHealthReviewReason(result.reasons, { reviewItemId: item.id, code: "unsafe_sleep_session", message });
           result.leftInReviewCount += 1;
           result.remainingReviewCount += 1;
           await client.query("release savepoint reprocess_health_item");
@@ -2768,7 +2771,11 @@ async function consolidateLegacyHealthSleepReviewItems(
 
   const groups: SleepReviewSegment[][] = [];
   for (const segment of segments) {
-    const current = groups.at(-1);
+    const identity = healthSleepImportIdentity(segment.item.rawPayload);
+    const current = [...groups].reverse().find((group) => {
+      const previous = healthSleepImportIdentity(group[0].item.rawPayload);
+      return identity.provider === previous.provider && identity.sourceName === previous.sourceName;
+    });
     if (!current) {
       groups.push([segment]);
       continue;
@@ -2799,27 +2806,13 @@ async function consolidateLegacyHealthSleepReviewItems(
         }
       }
 
+      await lockUserTimerState(client, session);
       const existingEntry = await firstExistingEntryForHealthReviewItems(client, group.map((segment) => segment.item), session);
       const coveredEntry = existingEntry
         ? existingEntry
         : await findCoveringHealthTimeEntry(client, session, { ...group[0].item, title: sleepDescription }, startedAt, stoppedAt);
       if (!coveredEntry) {
-        const blockingEntry = await findOverlappingTimeEntry(client, session, startedAt, stoppedAt);
-        if (blockingEntry) {
-          const message = overlapReviewNote(blockingEntry);
-          for (const segment of group) {
-            handledIds.add(segment.item.id);
-            result.checkedCount += 1;
-            await updateHealthReviewNotes(client, segment.item.id, message);
-            addHealthReviewReason(result.reasons, {
-              reviewItemId: segment.item.id,
-              code: "overlap",
-              message,
-              blockingEntry
-            });
-            result.leftInReviewCount += 1;
-            result.remainingReviewCount += 1;
-          }
+        if (await hasUnsafeHealthSleepCollision(client, session, startedAt, stoppedAt)) {
           await client.query("release savepoint consolidate_health_sleep");
           continue;
         }
@@ -2856,7 +2849,7 @@ async function consolidateLegacyHealthSleepReviewItems(
 }
 
 function legacySleepReviewSegment(item: HealthReviewItemRow): SleepReviewSegment | null {
-  if (item.eventType !== "health_sleep_import") return null;
+  if (item.eventType !== "health_sleep_import" || !hasAutomaticConfidence(item.confidence)) return null;
   const rawPayload = isRecord(item.rawPayload) ? item.rawPayload : {};
   if (Array.isArray(rawPayload.samples) && rawPayload.samples.length > 0) return null;
 
@@ -3179,6 +3172,36 @@ export async function reconcileMatchingHealthSleepTimeEntry(
   );
 }
 
+function validHealthWindow(startedAt: unknown, stoppedAt: unknown) {
+  if (!(typeof startedAt === "string" || startedAt instanceof Date) ||
+    !(typeof stoppedAt === "string" || stoppedAt instanceof Date)) return false;
+  const start = new Date(startedAt).getTime(), stop = new Date(stoppedAt).getTime();
+  return Number.isFinite(start) && Number.isFinite(stop) && stop > start;
+}
+
+async function hasUnsafeHealthSleepCollision(
+  client: pg.PoolClient, session: RequestSession,
+  startedAt: string | Date | null | undefined, stoppedAt: string | Date | null | undefined
+) {
+  if (!validHealthWindow(startedAt, stoppedAt)) return true;
+  // A safe same-source session has already reconciled before this fallback.
+  // Do not turn an edited, cross-source, weak or multiple Sleep collision into
+  // another entry just because ordinary activity overlaps are now allowed.
+  const result = await client.query(
+    `/* unsafe_health_sleep_collision */
+     select te.id from time_entries te
+     join activity_events ae on ae.id = te.created_from_event_id
+       and ae.workspace_id = te.workspace_id and ae.user_id = te.user_id
+     where te.workspace_id = $1 and te.user_id = $2
+       and te.source = 'health_sleep' and ae.event_type = 'health_sleep_import'
+       and te.review_status in ('confirmed', 'accepted')
+       and te.started_at < $4::timestamptz and coalesce(te.stopped_at, $4::timestamptz) > $3::timestamptz
+     limit 1`,
+    [session.workspaceId, session.userId, startedAt, stoppedAt]
+  );
+  return result.rows.length > 0;
+}
+
 async function findMatchingHealthSleepTimeEntry(
   client: pg.PoolClient,
   session: RequestSession,
@@ -3282,13 +3305,14 @@ function normalizedHealthIdentityText(value: unknown) {
 async function findCoveringHealthTimeEntry(
   client: pg.PoolClient,
   session: RequestSession,
-  item: Pick<HealthReviewItemRow, "eventType" | "title">,
+  item: Pick<HealthReviewItemRow, "eventType" | "title"> & { rawPayload?: unknown },
   startedAt: string | Date | null | undefined,
   stoppedAt: string | Date | null | undefined
 ): Promise<OverlapBlockingEntry | null> {
   if (!startedAt || !stoppedAt) return null;
   const title = healthReviewCoverageTitle(item);
-  const result = await client.query<OverlapBlockingEntry>(
+  const incomingIdentity = healthSleepImportIdentity(item.rawPayload);
+  const result = await client.query<OverlapBlockingEntry & { rawPayload: unknown }>(
     `/* health_covering_entry */
      select te.id,
             te.description,
@@ -3297,8 +3321,11 @@ async function findCoveringHealthTimeEntry(
             te.started_at as "startedAt",
             te.stopped_at as "stoppedAt",
             c.name as "categoryName",
-            false as "stoppedAtIsNull"
+            false as "stoppedAtIsNull",
+            ae.raw_payload as "rawPayload"
      from time_entries te
+     join activity_events ae on ae.id = te.created_from_event_id
+       and ae.workspace_id = te.workspace_id and ae.user_id = te.user_id
      left join categories c on c.id = te.category_id
      where te.workspace_id = $1
        and te.user_id = $2
@@ -3306,20 +3333,20 @@ async function findCoveringHealthTimeEntry(
        and te.stopped_at is not null
        and te.started_at <= $3::timestamptz + interval '5 minutes'
        and te.stopped_at >= $4::timestamptz - interval '5 minutes'
-       and (
-         te.source in ('health_sleep', 'health_workout')
-         or (
-           lower(coalesce(c.name, '')) in ('health', 'sleep')
-           and lower(coalesce(te.description, '')) = lower($5)
-         )
-       )
+       and te.source = 'health_sleep'
+       and te.user_edited_at is null
+       and lower(coalesce(te.description, '')) = lower($5)
      order by
        case when te.source in ('health_sleep', 'health_workout') then 0 else 1 end,
        abs(extract(epoch from (te.started_at - $3::timestamptz))) asc
-     limit 1`,
+     for update of te`,
     [session.workspaceId, session.userId, startedAt, stoppedAt, title]
   );
-  return result.rows[0] ?? null;
+  const matches = result.rows.filter((entry) => {
+    const identity = healthSleepImportIdentity(entry.rawPayload);
+    return identity.provider === incomingIdentity.provider && identity.sourceName === incomingIdentity.sourceName;
+  });
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function healthReviewCoverageTitle(item: Pick<HealthReviewItemRow, "eventType" | "title">) {
@@ -3409,7 +3436,7 @@ function isEligibleHealthReviewItemForAutoConfirm(
   startedAt: string | null,
   stoppedAt: string | null
 ) {
-  if (item.confidence !== "high") return false;
+  if (!hasAutomaticConfidence(item.confidence) || !validHealthWindow(startedAt, stoppedAt)) return false;
   if (item.eventType === "health_sleep_import") {
     return shouldAutoConfirmHealthSleep({ durationSeconds, startedAt, stoppedAt });
   }
@@ -3427,7 +3454,7 @@ function healthAutoConfirmSkipReason(
   startedAt: string | null,
   stoppedAt: string | null
 ) {
-  if (item.confidence !== "high") {
+  if (!hasAutomaticConfidence(item.confidence)) {
     return {
       code: "low_confidence",
       message: "Left in Review: confidence is not high enough for auto-log."
@@ -3511,13 +3538,7 @@ function addHealthReviewReason(reasons: HealthReviewReason[], reason: HealthRevi
   if (reasons.length < 20) reasons.push(reason);
 }
 
-function overlapReviewNote(blockingEntry: OverlapBlockingEntry) {
-  const title = blockingEntry.description?.trim() || blockingEntry.categoryName || blockingEntry.source;
-  if (blockingEntry.stoppedAtIsNull) {
-    return `Left in Review: automatic logging paused because this overlaps stale open timer "${title}" with no stop time. You can still confirm it.`;
-  }
-  return `Left in Review: automatic logging paused because this overlaps existing timer "${title}". You can still confirm it.`;
-}
+
 
 async function updateHealthReviewCategory(
   client: pg.PoolClient,
