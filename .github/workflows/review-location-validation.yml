@@ -76,8 +76,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: xcodebuild -version
-      - run: npx pod-install
-        working-directory: apps/mobile
+      - name: Install frozen CocoaPods version
+        run: gem install cocoapods -v 1.16.2 --no-document
+      - run: pod _1.16.2_ install
+        working-directory: apps/mobile/ios
       - name: Reject unrelated native dependency changes
         run: |
           ruby -ryaml -e '
