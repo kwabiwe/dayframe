@@ -191,6 +191,8 @@ EAS preview build: **NOT RUN**; no signed build ID/URL. No production/TestFlight
 
 Product policy: PRD and product-model. Runtime/persistence: architecture, API, database, Location learning, Health pipeline and offline Review. Presentation: components and motion. Acceptance: regression checklist, validation matrix, tracker and this evidence note. Brand/style and hosting/release instructions were read; their visual tokens, ownership and deployment boundaries are unchanged, so those files need no edit. Older historical direct-only guidance is superseded explicitly in current canonical sources; no shipped acceptance is inferred from this branch.
 
+The blocked local Postgres run exposed a recurring validation gap: the only existing CI workflow checked documentation. This PR adds a read-only-permission GitHub Actions matrix using the repository's existing PostGIS image, explicit synthetic credentials and an empty disposable service per base/ordered schema. No deployment credentials or production configuration enter that job. It runs both database validators and enables the real Stop contention test. The new setup helper refuses non-local/non-test/non-empty databases; its production-target rejection was executed successfully. CI outcome will be recorded at handoff.
+
 ## Changed files by area
 
 ### Shared
@@ -226,6 +228,7 @@ Product policy: PRD and product-model. Runtime/persistence: architecture, API, d
 
 ### Tests and validators
 
+- `.github/workflows/review-location-validation.yml`
 - `apps/mobile/src/components/reviewActions.contract.test.ts`
 - `apps/mobile/src/components/reviewOfflineFirst.contract.test.ts`
 - `apps/mobile/src/lib/locationReviewDraft.test.ts`
@@ -242,6 +245,7 @@ Product policy: PRD and product-model. Runtime/persistence: architecture, API, d
 - `scripts/fixtures/review-performance.ts`
 - `scripts/measure-review-performance.ts`
 - `scripts/seed-review-performance-fixtures.ts`
+- `scripts/setup-validation-db.ts`
 - `scripts/validate-complex-review-mutations.ts`
 - `scripts/validate-location-v2-db.ts`
 - `scripts/validate-review-mutation-db.ts`

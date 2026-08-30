@@ -36,11 +36,13 @@ export async function validateComplexReviewMutations(session: RequestSession, ca
   }
   async function counts() {
     const result: Record<string, number> = {};
-    for (const table of ['activity_events','review_items','time_entries','stay_segments','audit_log','review_mutation_receipts']) {
+    for (const table of ['activity_events','review_items','time_entries','stay_segments','commute_segments','location_segment_evidence','place_match_feedback','audit_log','review_mutation_receipts']) {
       const rows = await pool.query<{ n: number }>(`select count(*)::int as n from ${table} where workspace_id=$1 and user_id=$2`, [session.workspaceId,session.userId]);
       result[table] = rows.rows[0].n;
     }
     result.places = (await pool.query<{ n: number }>('select count(*)::int as n from places where workspace_id=$1',[session.workspaceId])).rows[0].n;
+    result.tags = (await pool.query<{ n: number }>('select count(*)::int as n from tags where workspace_id=$1',[session.workspaceId])).rows[0].n;
+    result.tagLinks = (await pool.query<{ n: number }>('select count(*)::int as n from time_entry_tags where workspace_id=$1',[session.workspaceId])).rows[0].n;
     return result;
   }
   const actions: ReviewMutation[] = [
