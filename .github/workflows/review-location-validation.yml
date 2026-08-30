@@ -1,4 +1,4 @@
-name: Review and Location database validation
+name: Review and Location validation
 
 on:
   pull_request:
@@ -50,3 +50,44 @@ jobs:
         env:
           DAYFRAME_RUN_DB_INTEGRATION: "1"
         run: npm run test -w @dayframe/web -- src/lib/event-service.postgres.integration.test.ts
+
+  clean-ios-simulator:
+    name: Clean iOS Simulator
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      EXPO_PUBLIC_DAYFRAME_API_BASE: https://dayframe-staging.vercel.app
+      EXPO_PUBLIC_DAYFRAME_RELEASE_CHANNEL: preview
+      RCT_NO_LAUNCH_PACKAGER: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: xcodebuild -version
+      - run: npx pod-install
+        working-directory: apps/mobile
+      - name: Reject unrelated native dependency changes
+        run: |
+          ruby -ryaml -e '
+            before = YAML.safe_load(IO.popen(["git", "show", "HEAD:apps/mobile/ios/Podfile.lock"], &:read))
+            after = YAML.load_file("apps/mobile/ios/Podfile.lock")
+            %w[hermes-engine React-Core-prebuilt ReactNativeDependencies].each do |key|
+              before.fetch("SPEC CHECKSUMS").delete(key)
+              after.fetch("SPEC CHECKSUMS").delete(key)
+            end
+            abort "Unexpected Pod dependency graph change" unless before == after
+            puts "Pod graph matches; only permitted path-generated checksums excluded."
+          '
+          git diff --exit-code -- package-lock.json
+      - name: Clean unsigned Simulator build
+        run: >-
+          xcodebuild -quiet -workspace apps/mobile/ios/Dayframe.xcworkspace
+          -scheme Dayframe -configuration Debug -sdk iphonesimulator
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath "$RUNNER_TEMP/dayframe-clean-derived-data"
+          CODE_SIGNING_ALLOWED=NO clean build
