@@ -6,6 +6,7 @@ Use this when changing schema, RLS, hosted auth, timer/event writes, or migratio
 
 - Local schema history lives in the ordered SQL files under `packages/db/migrations`. `001_init.sql` is the base; later numbered migrations add tags and Live Activity delivery state. The setup script applies every SQL file in filename order.
 - Hosted Supabase-only migrations live in `supabase/migrations`.
+- `integration_tokens` is server-only authentication material: hosted schemas must enable RLS, expose no client policies, and grant no table privileges to `PUBLIC`, `anon`, or `authenticated`.
 - Hosted deployments must run all required Supabase migrations before the Vercel code that depends on them is deployed or smoke-tested.
 
 ## Hosted Migration Checks

@@ -27,6 +27,7 @@
     "validate:location-v2-sqlite": "bash scripts/validate-location-v2-sqlite.sh",
     "validate:review-sync-sqlite": "bash scripts/validate-review-sync-sqlite.sh",
     "validate:review-mutation-db": "tsx scripts/validate-review-mutation-db.ts",
+    "validate:integration-token-security": "tsx scripts/validate-integration-token-security.ts",
     "testflight:preflight": "node scripts/dayframe-testflight-preflight.mjs"
   },
   "devDependencies": {

@@ -47,6 +47,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx tsx scripts/setup-validation-db.ts ${{ matrix.schema }}
+      - name: Integration token access control
+        run: npm run validate:integration-token-security
       - name: Location replay and corrections
         run: npm run validate:location-v2-db
       - name: Review receipts and all structural actions
