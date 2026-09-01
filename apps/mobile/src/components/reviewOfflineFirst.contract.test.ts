@@ -15,6 +15,13 @@ describe("offline-first Review screen contracts", () => {
     expect(reviewSource).toContain("skipReprocess: true");
   });
 
+  it("only stops presentation work after navigation actually begins", () => {
+    expect(reviewSource).toContain('navigation.addListener("beforeRemove", stopReviewPresentationWork)');
+    expect(reviewSource).toContain('if (event.data.closing) stopReviewPresentationWork();');
+    expect(reviewSource).toContain('<MobileBackButton accessibilityLabel="Back" onPress={() => router.back()} />');
+    expect(reviewSource).not.toContain('onPress={() => { stopReviewPresentationWork(); router.back(); }}');
+  });
+
   it("hides mutations after the local transaction and preserves restore anchors", () => {
     expect(storeSource).toContain("'pending', 'hidden'");
     expect(storeSource).toContain("preceding_ids_json");

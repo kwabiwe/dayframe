@@ -97,7 +97,7 @@ describe("mobile Review action contracts", () => {
 
   it("loads nearby POIs for saved and unknown stays and keeps typed search as the fallback", () => {
     expect(evidenceEditorSource).toContain("createNativeNearbyPointOfInterestProvider");
-    expect(evidenceEditorSource).toContain('!isFocused || !nearbyProvider || evidence.segment.kind !== "stay" || !centre');
+    expect(evidenceEditorSource).toContain('!isFocused || !nearbyProvider || evidence.segment.kind !== "stay" || baselinePlaceId || !centre');
     expect(evidenceEditorSource).toContain("void controller.load(centre)");
     expect(evidenceEditorSource).toContain("Nearby places");
     expect(evidenceEditorSource).toContain("Search other places");

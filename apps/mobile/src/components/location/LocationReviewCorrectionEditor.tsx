@@ -216,7 +216,7 @@ export function LocationReviewCorrectionEditor({
 
   useEffect(() => {
     const centre = pointFromEvidence(evidence);
-    if (!isFocused || !nearbyProvider || evidence.segment.kind !== "stay" || !centre) return;
+    if (!isFocused || !nearbyProvider || evidence.segment.kind !== "stay" || baselinePlaceId || !centre) return;
     const controller = new NearbyPointOfInterestController(nearbyProvider, setNearbyState);
     nearbyControllerRef.current = controller;
     void controller.load(centre);
@@ -224,7 +224,7 @@ export function LocationReviewCorrectionEditor({
       controller.dispose();
       nearbyControllerRef.current = null;
     };
-  }, [evidence, isFocused, nearbyProvider]);
+  }, [baselinePlaceId, evidence, isFocused, nearbyProvider]);
 
   const baselinePlace = placeForSelection(baselinePlaceId, evidence.map.nearbySavedPlaces, places);
   const nearbyChoices = visibleNearbyPlaces(nearbyState.places, baselinePlace);

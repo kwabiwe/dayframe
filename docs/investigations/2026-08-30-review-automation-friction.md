@@ -52,15 +52,17 @@ All Location rows require finalised segments, `v2_enabled`, acknowledged rollout
 
 Overlapping saved radii retain the existing hint/continuity/distance/priority ranking with deterministic ID ordering and at most four alternatives. No radius expansion or provider lookup enters replay.
 
-## Final overlap matrix
+## Final V2 automatic overlap matrix
 
 Each threshold is the largest **single** intersection, inclusive at five minutes. Touching is zero; running intervals stop at the candidate's finite end. Source identity exclusion remains independent. Blocker ordering is largest overlap, earliest start, then ID.
+
+This matrix applies to V2 semantic decisions in `v2_review` and `v2_enabled`. While the checked-in default remains `v2_shadow`, visible legacy `commute_detected` events retain the older one-minute overlap guard until V2 cutover; the two paths are deliberately not described as unified before that rollout change.
 
 | Automatic candidate ↓ / existing confirmed or accepted entry → | Manual/other | Health | Same saved-place Location stay | Different/unknown Location stay | Commute |
 | --- | --- | --- | --- | --- | --- |
 | Health | Allowed | Allowed, subject to Sleep/sample safeguards | Allowed | Allowed | Allowed |
 | Trusted stay | Allowed | Allowed | Allowed, subject to source idempotency | ≤5 min | ≤5 min |
-| Commute (both tiers) | ≤5 min | ≤5 min | ≤5 min | ≤5 min | ≤5 min |
+| V2 commute (both confidence tiers) | ≤5 min | ≤5 min | ≤5 min | ≤5 min | ≤5 min |
 
 Explicit Review confirmation still allows intentional overlap. Calendar/Reports retain Logged = full duration sum and Covered = clipped union.
 

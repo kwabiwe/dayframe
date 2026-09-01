@@ -1372,6 +1372,27 @@ describe("health event persistence", () => {
     )).toBe(true);
   });
 
+  it("protects legacy imported Sleep entries that have no event provenance", async () => {
+    const client = healthSleepAmbiguityClient({ source: "health_sleep" });
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await processActivityEvent(
+      healthSleepEvent({ autoConfirm: true, externalSampleId: "legacy-no-provenance" }),
+      session
+    );
+
+    const collisionLookup = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("unsafe_health_sleep_collision")
+    );
+    expect(String(collisionLookup?.[0])).not.toContain("join activity_events");
+    expect(client.query.mock.calls.some(([statement]) =>
+      String(statement).includes("insert into review_items")
+    )).toBe(true);
+    expect(client.query.mock.calls.some(([statement]) =>
+      String(statement).includes("insert into time_entries")
+    )).toBe(false);
+  });
+
   it("keeps cross-source and weak same-source overlaps ambiguous", async () => {
     for (const scenario of [
       {

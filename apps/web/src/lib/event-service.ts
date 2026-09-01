@@ -538,7 +538,11 @@ export async function processActivityEvent(
 
     // Serialize the session lookup as well as its insert/update. Otherwise two
     // concurrent revisions can both see no existing Sleep before taking the lock.
-    if (parsed.type === "health_sleep_import") await lockUserTimerState(client, session);
+    if (parsed.type === "health_sleep_import") {
+      const lockStartedAt = Date.now();
+      await lockUserTimerState(client, session);
+      lockWaitMilliseconds = Date.now() - lockStartedAt;
+    }
     const matchingHealthSleepEntry = parsed.type === "health_sleep_import"
       ? await findMatchingHealthSleepTimeEntry(
         client,
@@ -3190,10 +3194,8 @@ async function hasUnsafeHealthSleepCollision(
   const result = await client.query(
     `/* unsafe_health_sleep_collision */
      select te.id from time_entries te
-     join activity_events ae on ae.id = te.created_from_event_id
-       and ae.workspace_id = te.workspace_id and ae.user_id = te.user_id
      where te.workspace_id = $1 and te.user_id = $2
-       and te.source = 'health_sleep' and ae.event_type = 'health_sleep_import'
+       and te.source = 'health_sleep'
        and te.review_status in ('confirmed', 'accepted')
        and te.started_at < $4::timestamptz and coalesce(te.stopped_at, $4::timestamptz) > $3::timestamptz
      limit 1`,

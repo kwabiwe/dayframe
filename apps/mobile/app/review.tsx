@@ -861,7 +861,7 @@ export default function ReviewScreen() {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.settingsFloatingHeader}>
         <View style={styles.settingsHeader}>
-          <MobileBackButton accessibilityLabel="Back" onPress={() => { stopReviewPresentationWork(); router.back(); }} />
+          <MobileBackButton accessibilityLabel="Back" onPress={() => router.back()} />
           <Text style={styles.settingsTitle} numberOfLines={1}>Review</Text>
         </View>
       </View>
