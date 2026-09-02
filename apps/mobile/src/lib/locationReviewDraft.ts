@@ -4,6 +4,8 @@ import {
   type ReviewMutation,
   type ReviewEntryEdit
 } from "@dayframe/shared";
+import type { MobileBootstrap, MobileReviewItem } from "./api";
+import { isLocationReviewItem } from "./review";
 import { mergeTimeEntryDialLocalDateTime } from "./timeEntryDurationDial";
 
 export type LocationReviewNewPlace = {
@@ -152,18 +154,42 @@ export function buildLocationReviewResolutionAction({
 export function durableReviewMutationFromLocationAction(
   action: LocationReviewAction
 ): ReviewMutation | null {
-  if (action.action === "confirm" || action.action === "ignore_once_location") {
-    return ReviewMutationSchema.parse(action);
-  }
-  if (
-    action.action !== "edit_and_confirm" ||
-    !action.edit.startedAt ||
-    !action.edit.stoppedAt
-  ) {
-    return null;
-  }
   const parsed = ReviewMutationSchema.safeParse(action);
   return parsed.success ? parsed.data : null;
+}
+
+export type DurableLocationReviewCommand = {
+  mutation: ReviewMutation;
+  affectedReviewItemIds: string[];
+  affectedItems: MobileReviewItem[];
+  completion: "resolve_current" | "replace_current" | "resolve_current_and_adjacent";
+  catalogueRefreshRequired: boolean;
+};
+
+export class LocationReviewDraftError extends Error {}
+
+export function buildDurableLocationReviewCommand(
+  action: LocationReviewAction,
+  current: MobileReviewItem,
+  bootstrap: MobileBootstrap
+): DurableLocationReviewCommand | null {
+  const mutation = durableReviewMutationFromLocationAction(action);
+  if (!mutation) return null;
+  const merge = mutation.action === "merge" || mutation.action === "merge_and_confirm";
+  const ids = merge ? [current.id, mutation.adjacentReviewItemId] : [current.id];
+  if (new Set(ids).size !== ids.length) throw new LocationReviewDraftError("Choose a different adjacent visit.");
+  const affectedItems = ids.map((id) => {
+    const item = bootstrap.reviewItems.find((candidate) => candidate.id === id && candidate.status === "open");
+    if (!item || !isLocationReviewItem(item)) throw new LocationReviewDraftError(merge
+      ? "Both visits must be available in saved Review data before merging. Go back and refresh Review."
+      : "This visit is no longer available in saved Review data. Go back and refresh Review.");
+    return item;
+  });
+  return {
+    mutation, affectedReviewItemIds: [...ids].sort(), affectedItems,
+    completion: merge ? "resolve_current_and_adjacent" : mutation.action === "split" ? "replace_current" : "resolve_current",
+    catalogueRefreshRequired: mutation.action === "save_place_and_confirm"
+  };
 }
 
 export function locationReviewActionRequiresConnection(

@@ -1,4 +1,5 @@
 export * from "./commute";
+export * from "./automaticPolicy";
 export * from "./config";
 export * from "./evidenceDto";
 export * from "./geo";

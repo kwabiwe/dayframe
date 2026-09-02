@@ -104,7 +104,7 @@ Deployment:
 
 4. As a privacy-conscious user, I want ambiguous location signals to become review items, so that Dayframe does not silently guess wrong.
    - Example: Town Centre creates a "Review visit" item instead of auto-starting.
-   - Stay evidence should let me answer `Where were you?`, `What did you do?`, and `When?` in one correction flow. For an unknown visit, Dayframe automatically offers up to three Apple Maps points of interest within 750 metres as nearby—not inferred—places. When Apple results expose a shared site context, the list should prioritise that venue and a useful variety of destination types instead of three near-identical tenants or utilities; it must not claim popularity or certainty Apple does not provide. I can use a selected name once, explicitly save it for future location learning, choose an existing Dayframe place, search for another place, choose an existing category, and adjust the start/end time before one atomic confirmation. Commute evidence should show an honest approximate route with explicit Start and End markers, then ask only what I did and when.
+   - Stay evidence should let me answer `Where were you?`, `What did you do?`, and `When?` in one correction flow. For every stay, including a saved-place match, Dayframe automatically offers up to three Apple Maps points of interest within 750 metres as nearby—not inferred—places. When Apple results expose a shared site context, the list should prioritise that venue and a useful variety of destination types instead of three near-identical tenants or utilities; it must not claim popularity or certainty Apple does not provide. I can use a selected name once, explicitly save it for future location learning, choose an existing Dayframe place, search for another place, choose an existing category, and adjust the start/end time before one atomic confirmation. Commute evidence should show an honest approximate route with explicit Start and End markers, then ask only what I did and when.
 
 5. As an iOS user, I want sleep and walk/workout summaries imported from HealthKit, so that health activity appears in my day timeline.
    - Example: Sleep from 23:20 to 06:45 creates a Sleep entry or high-confidence review item.
@@ -115,8 +115,8 @@ Deployment:
    - Pending saved work and active transmission are distinct: waiting/backoff is static, while motion is reserved for a live delivery attempt.
    - Offline-capable actions remain enabled and commit to their existing durable owners. Connectivity-dependent actions retain their bounded, explicit failure path instead of being silently replaced or globally disabled.
    - Example: I tap Stop and immediately force-quit; reopening still shows that exact timer stopped locally and safely retries the same event without stopping a newer timer.
-   - Example: Review opens from the last account-owned snapshot, cached private Location Evidence remains usable for up to seven days, and Confirm, Dismiss, or a complete Edit-and-confirm disappears after its local SQLite commit while Dayframe retries the canonical server mutation later.
-   - Place creation/change, split, merge, and one-time POI actions still require a bounded live connection; offline support must never substitute a different action or expose one account's cached Review/location evidence to another.
+   - Example: Review opens from the last account-owned snapshot, cached private Location Evidence remains usable for up to seven days, and every resolving/structural Location action (including save-place, record-once, split and merge), Confirm, Dismiss, or complete Edit-and-confirm disappears after its account-owned SQLite commit while Dayframe retries the canonical server mutation later.
+   - Nearby/search lookup and the compatibility-only pure place-change action require a bounded live connection. Resolving and structural corrections preserve the exact selected action in the account-owned outbox; offline support must never substitute a different action or expose another account's cached Review/location evidence.
 
 7. As a user reviewing time, I want Calendar, List, and Timesheet views, so that I can edit precise entries and understand daily/weekly totals.
    - Example: Resize/edit a time block, delete an accidental entry, and review weekly totals by category.
@@ -145,6 +145,22 @@ Key patterns:
 - Workspace scoping: every user data table is scoped by workspace and protected through app session checks and Supabase RLS.
 - Mobile offline queue: mobile writes local queued events, then syncs to API when available.
 - Hybrid iOS boundary: React Native owns authenticated data, API mutations, route state, and shared sheets. A native SwiftUI surface receives a serializable presentation model and emits semantic actions back to React Native; it does not create a parallel API, session, timer, or persistence layer.
+
+### Automatic logging decisions
+
+Normal automatic confidence is `medium_high` or `high`. Location additionally requires a finalised segment, server `v2_enabled`, same-mode client acknowledgement/cutover and no earlier Review or terminal decision. Start and stop bounds are independently complete, finite, ordered, contain the unchanged detected estimate, and each span at most five minutes. Missing or invalid bounds fail closed; never round or move detected times to pass a guard.
+
+| Candidate | Additional requirements | Overlap policy |
+| --- | --- | --- |
+| Health sleep/workout | Enabled type preference, supported type, complete valid window, existing duration/plausibility thresholds, sample/session safeguards | May coexist with every activity type |
+| Trusted stay | Logging-enabled saved place or accepted learned place linked to one; normal confidence; supported continuity including a bounded `uncertain_gap` | Manual/Health allowed; commute or a different location stay allowed only up to five minutes |
+| Standard commute | Normal confidence; two verified saved endpoints; at least two accepted route samples; significant endpoint displacement or meaningful same-place round trip; actual maximum internal observation gap at most twelve minutes | Every confirmed/accepted activity allowed only up to five minutes |
+| Medium commute exception | `medium`; distinct verified saved endpoints; at least three accepted route samples; significant endpoint displacement or significant route distance; same gap/boundary guards | Same commute overlap rule |
+| Other signals | Unknown endpoints, weak/endpoint-only routes, missing linkage, disabled logging, invalid window or failed thresholds | Review |
+
+Thresholded overlap is the maximum intersection with any single confirmed/accepted entry, not a sum. Exact touching is zero; a running entry is intersected only through the candidate's finite end. Choose a blocker deterministically by largest overlap, earliest start, then ID. Entry provenance determines activity kind; a manual entry's name/place does not make it a Location stay. Preserve source idempotency and unsafe logical Sleep collision/user-edit guards independently. Total logged remains the sum of complete durations; Time covered remains their clipped union.
+
+Overlapping saved radii select one deterministic best existing saved match using the established hint, continuity, distance and priority rules plus stable ID tie-breaks. Retain bounded alternatives; do not enlarge radii or call Apple POI search from matching/replay.
 
 ## 7. Tools / Features
 
@@ -406,8 +422,8 @@ Deliverables:
 - ✅ Learned-location evidence separates repeat place suggestions, significant one-off stays, and weak/pass-through noise.
 - ✅ Learned-place details cache readable address/POI resolution and keep coordinates secondary.
 - ✅ `location-v2.0` closes stays on accepted intervening-place evidence, sustained exits, or explicit gaps; preserves short saved-place endpoints; derives journeys from movement evidence; and exposes uncertainty instead of fabricating exact boundaries.
-- ✅ Mobile and web consume one user-scoped `LocationReviewEvidenceDto` for map plus textual review, with atomic confirm, split, merge, place correction, record-once, one-time POI, and save-place actions. Unknown mobile stays use the native Apple POI boundary to load up to three nearby results, enrich a repeated distinctive site context with at most one bounded local search, prefer a varied destination slate over duplicate tenants and utilities, retain explicit search and map fallback, and default selection to a one-time name unless the user enables `Save for future visits`. This ranking remains a nearby aid rather than a popularity or exact-venue claim. A one-time choice stores only its trimmed name on the derived entry; it does not retain Apple identifiers, address, coordinates, or response payloads. Physical iPhone reliability and battery measurement are still mandatory before the rollout is considered settled.
-- ⚠️ V2 rollout is server-authoritative: `v2_shadow` captures and replays without user-visible V2 semantics; `v2_review` permits review items only after a same-mode client acknowledgement; and `v2_enabled` applies the narrow automatic policy. It confirms completed, strong saved/approved-place stays with bounded continuity and completed `medium_high`/`high`, continuous, route-backed commutes whose two endpoints are saved Dayframe places. Unknown/ambiguous endpoints, weak or endpoint-only evidence, uncertain gaps, missing approved-place linkage, and confirmed-time overlaps remain Review-first. Existing Review or terminal decisions are never silently promoted on replay, and deleting an automatic commute prevents replay from recreating it. Shadow-era segments cannot be backfilled at cutover.
+- ✅ Mobile and web consume one user-scoped `LocationReviewEvidenceDto` for map plus textual review, with atomic confirm, split, merge, place correction, record-once, one-time POI, and save-place actions. Mobile stays, including saved matches, use the native Apple POI boundary to load up to three nearby results, enrich a repeated distinctive site context with at most one bounded local search, prefer a varied destination slate over duplicate tenants and utilities, retain explicit search and map fallback, and default selection to a one-time name unless the user enables `Save for future visits`. This ranking remains a nearby aid rather than a popularity or exact-venue claim. A one-time choice stores only its trimmed name on the derived entry; it does not retain Apple identifiers, address, coordinates, or response payloads. Physical iPhone reliability and battery measurement are still mandatory before the rollout is considered settled.
+- ⚠️ V2 rollout is server-authoritative: `v2_shadow` captures and replays without user-visible V2 semantics; `v2_review` permits review items only after a same-mode client acknowledgement; and `v2_enabled` applies the narrow automatic policy. See the automatic logging decision table above. Existing Review or terminal decisions are never silently promoted on replay; deletion cannot resurrect an entry, and shadow-era segments cannot be backfilled at cutover.
 - ⚠️ Export path exists; account/workspace deletion and raw sensitive payload hard-deletion are still future work.
 
 Validation:
@@ -416,7 +432,7 @@ Validation:
 - Walking/workout entries have correct duration.
 - Trusted place starts correctly.
 - Unknown/broad places do not create silent incorrect entries.
-- Two appearances at one venue separated by Home remain two stays; a 10–15 minute saved stop remains a journey endpoint; nearby saved places can remain explicitly ambiguous; and Europe/London local-day grouping remains correct across BST/DST.
+- Two appearances at one venue separated by Home remain two stays; a 10–15 minute saved stop remains a journey endpoint; overlapping saved radii select one deterministic best saved place while retaining bounded alternatives; and Europe/London local-day grouping remains correct across BST/DST.
 
 ### Phase 4: Product Polish And Beta Hardening
 

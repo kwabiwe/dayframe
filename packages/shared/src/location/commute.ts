@@ -133,7 +133,9 @@ export function summariseCommuteEvidence({
         ? straightLineDistance / measuredRouteDistance
         : null,
     maximumDisplacementFromOriginMeters: maximumDisplacementFromOrigin,
-    maximumObservationGapSeconds: Math.round(maximumObservationGapMs / 1_000),
+    // Persisted max_gap_seconds is integral. Round upward so a gap just beyond
+    // the continuity ceiling cannot become eligible through rounding.
+    maximumObservationGapSeconds: Math.ceil(maximumObservationGapMs / 1_000),
     sameKnownPlace: sameKnownEndpoint(from, to),
     strongEndpoints: from.placeMatchKind !== "unknown" && to.placeMatchKind !== "unknown",
     hasCredibleFasterMovement:
@@ -307,6 +309,7 @@ export function deriveCommutes(
           : Math.round(summary.straightLineDistanceMeters),
       routeSampleCount: summary.routeSampleCount,
       gapDurationSeconds: Math.round(duration / 1_000),
+      maximumObservationGapSeconds: summary.maximumObservationGapSeconds,
       continuityStatus: uncertainBoundary ? "uncertain_gap" : "continuous",
       confidence: uncertainBoundary && qualification.confidence === "medium_high"
         ? "medium"

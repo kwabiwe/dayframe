@@ -179,7 +179,7 @@ describe("Location Review editor draft", () => {
     })).toBe("commute");
   });
 
-  it("adapts only the three durable location actions to the Review outbox", () => {
+  it("adapts resolving location actions, but excludes an incomplete edit", () => {
     expect(durableReviewMutationFromLocationAction({ action: "confirm" })).toEqual({
       action: "confirm"
     });
@@ -199,7 +199,7 @@ describe("Location Review editor draft", () => {
       action: "change_place_and_confirm",
       placeId: "20000000-0000-4000-8000-000000000002",
       learnedPlaceId: null
-    })).toBeNull();
+    })).toMatchObject({ action: "change_place_and_confirm" });
     expect(locationReviewActionRequiresConnection({
       action: "edit_and_confirm",
       edit: { description: "Missing an explicit time window" }

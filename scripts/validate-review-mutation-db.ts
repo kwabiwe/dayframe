@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { pool } from "../apps/web/src/lib/db";
 import { resolveIdempotentReviewMutation } from "../apps/web/src/lib/review-mutation-service";
 import type { RequestSession } from "../apps/web/src/lib/session";
+import { validateComplexReviewMutations } from "./validate-complex-review-mutations";
 
 const databaseUrl = process.env.DATABASE_URL;
 assert(databaseUrl, "DATABASE_URL is required.");
@@ -561,6 +562,8 @@ async function run() {
     session
   );
   assert.equal(timeoutRetry.status, "accepted");
+
+  await validateComplexReviewMutations(session, CATEGORY_ID);
 
   console.log(
     "Review mutation database validation passed: atomic generic edit-and-confirm, tags, receipt/result commit, lost-response retry, equivalent/conflicting resolution, concurrent same/different mutations, deliberate advisory/row contention, bounded statement-timeout rollback, retry after contention, duplicate prevention, payload conflict, and workspace/user scoping."

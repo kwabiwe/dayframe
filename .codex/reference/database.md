@@ -6,6 +6,7 @@ Use this when changing schema, RLS, hosted auth, timer/event writes, or migratio
 
 - Local schema history lives in the ordered SQL files under `packages/db/migrations`. `001_init.sql` is the base; later numbered migrations add tags and Live Activity delivery state. The setup script applies every SQL file in filename order.
 - Hosted Supabase-only migrations live in `supabase/migrations`.
+- `integration_tokens` is server-only authentication material: hosted schemas must enable RLS, expose no client policies, and grant no table privileges to `PUBLIC`, `anon`, or `authenticated`.
 - Hosted deployments must run all required Supabase migrations before the Vercel code that depends on them is deployed or smoke-tested.
 
 ## Hosted Migration Checks
@@ -46,3 +47,7 @@ Before declaring hosted auth/timer/event changes ready, verify:
 - Prefer additive migrations for repair work.
 - Keep legacy nullable fields until data migration is explicitly approved.
 - Do not drop historical data or integration tables without an export/safety decision.
+
+## Review automation storage
+
+SQLite v5 adds account-owned per-source mutation effects and backfills v4 outbox rows transactionally; it removes no queue or compatibility columns. Two-source merge intent must reserve both IDs atomically. Postgres already has the boundary fields, `commute_segments.max_gap_seconds` and Review mutation receipts; changing these policies needs no new Postgres migration. The max-gap column means maximum internal observation gap (ceil to integral seconds), not total commute duration. Verify existing columns, receipt uniqueness and indexes in staging before smoke tests; do not fabricate bounds for old rows. Keep same-source Sleep lookup plus insertion under its existing user lock, and preserve `user_edited_at` protection.

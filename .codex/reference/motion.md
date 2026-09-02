@@ -76,3 +76,7 @@ Tests should protect state ordering, timers, rollback, stable keys, and animatio
 - Combining native navigation, a JavaScript transform, and a local layout animation for one transition.
 - Rewriting a smooth native route or sheet in Swift to repair an unrelated local React Native state change.
 - Declaring motion complete from unit tests or still screenshots alone.
+
+## Location Review status and durable actions
+
+Optional detail status enters below the stable activity/time summary with the existing local presence/layout primitives; absence reserves no empty height. The native stack exclusively owns Back and post-commit dismissal. One SQLite commit accepts a resolving/structural action; its one/two source effects drive the existing card exit/reflow. Failed commit preserves the draft; permanent conflict restores only proven-open sources at surviving anchors. Cancel presentation-only prefetch and stale callbacks at Back/closing transition, without cancelling durable intent. Verify entrance/update/exit, rapid repeat, cancelled swipe, status replacement, rollback, keyboard focus and Reduce Motion (no travel, unchanged semantic result). No global spacing or navigation rewrite follows from removing this local gap.

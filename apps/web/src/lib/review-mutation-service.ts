@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   ReviewMutationEnvelopeSchema,
+  DurableLocationReviewMutationSchema,
   type ReviewMutation,
   type ReviewMutationEdit
 } from "@dayframe/shared";
@@ -143,6 +144,16 @@ export async function resolveIdempotentReviewMutation(
       return result;
     }
 
+    if (!["accept", "ignore_once", "confirm", "ignore_once_location", "edit_and_confirm"].includes(envelope.mutation.action)) {
+      // Structural corrections share the existing replay/direct-action owner.
+      // A busy owner is retryable; never wait without the transaction deadlines.
+      const ownerLock = await client.query<{ acquired: boolean }>(
+        "select pg_try_advisory_xact_lock(hashtext($1), hashtext($2)) as acquired",
+        [session.workspaceId, session.userId]
+      );
+      if (!ownerLock.rows[0]?.acquired) throw reviewItemLocked(reviewItemId);
+    }
+
     const locationItem = await isLocationReview(client, reviewItemId, session);
     const result = locationItem
       ? await resolveLocationMutation(
@@ -198,6 +209,37 @@ export async function resolveIdempotentReviewMutation(
         outcome: lockedError.code
       });
       throw lockedError;
+    }
+    if (error instanceof ReviewResolutionError && error.code !== "review_item_locked") {
+      const ids = envelope.mutation.action === "merge" || envelope.mutation.action === "merge_and_confirm"
+        ? [reviewItemId, envelope.mutation.adjacentReviewItemId] : [reviewItemId];
+      // Read after rollback so a rejected mutation never publishes rolled-back
+      // intermediate status. Failure to prove open must keep the item hidden.
+      const canonical = await (async () => {
+        try {
+          await client.query("begin");
+          await client.query(`set local statement_timeout = '${REVIEW_MUTATION_STATEMENT_TIMEOUT_MS}ms'`);
+          const rows = await client.query<{ id: string; status: string }>(
+            "select id, status from review_items where workspace_id = $1 and user_id = $2 and id = any($3::uuid[])",
+            [session.workspaceId, session.userId, ids]
+          );
+          await client.query("commit");
+          return rows;
+        } catch {
+          await client.query("rollback");
+          return null;
+        }
+      })();
+      if (canonical) {
+        const statuses = Object.fromEntries(ids.map((id) => {
+          const status = canonical.rows.find((row) => row.id === id)?.status;
+          return [id, status === "open" || status === "accepted" || status === "ignored" ? status : "missing"];
+        }));
+        error.details = { ...error.details,
+          canonicalReviewStatuses: statuses,
+          canonicalOpenReviewItemIds: ids.filter((id) => statuses[id] === "open")
+        };
+      }
     }
     logReviewMutationDiagnostic({
       actionKind: envelope.mutation.action,
@@ -336,11 +378,7 @@ async function resolveLocationMutation(
   mutation: ReviewMutation,
   session: RequestSession
 ) {
-  if (
-    mutation.action !== "confirm" &&
-    mutation.action !== "ignore_once_location" &&
-    mutation.action !== "edit_and_confirm"
-  ) {
+  if (!DurableLocationReviewMutationSchema.safeParse(mutation).success) {
     throw new ReviewResolutionError(
       "invalid_action",
       "Use a location Review action for this suggestion.",

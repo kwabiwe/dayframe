@@ -30,8 +30,9 @@ describe("V2 location review quality contracts", () => {
     expect(reviewSource).not.toContain("edit?.description?.trim() || item.title");
   });
 
-  it("uses the shared one-minute product threshold for automatic overlap decisions", () => {
-    expect(ingestSource).toContain(">= interval '1 minute'");
+  it("separates automatic activity policy from the one-minute presentation threshold", () => {
+    expect(ingestSource).toContain("assessAutomaticOverlap");
+    expect(ingestSource).not.toContain(">= interval '1 minute'");
     expect(eventSource).toContain(">= interval '1 minute'");
   });
 });

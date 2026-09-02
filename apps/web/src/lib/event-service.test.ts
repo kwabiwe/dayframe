@@ -1302,7 +1302,7 @@ describe("health event persistence", () => {
     const eventIndex = statements.findIndex((statement) => statement.includes("insert into activity_events"));
     const updateIndex = statements.findIndex((statement) => statement.startsWith("update time_entries"));
     expect(lockIndex).toBeGreaterThan(-1);
-    expect(lockIndex).toBeGreaterThan(matchIndex);
+    expect(lockIndex).toBeLessThan(matchIndex);
     expect(eventIndex).toBeGreaterThan(matchIndex);
     expect(eventIndex).toBeGreaterThan(lockIndex);
     expect(updateIndex).toBeGreaterThan(eventIndex);
@@ -1337,7 +1337,7 @@ describe("health event persistence", () => {
     )).toBe(false);
   });
 
-  it("leaves an overlapping manually created Sleep entry in Review", async () => {
+  it("auto-logs Sleep alongside a manually created Sleep entry without changing it", async () => {
     const client = healthSleepAmbiguityClient({ source: "manual_app" });
     mocks.pool.connect.mockResolvedValueOnce(client);
 
@@ -1348,10 +1348,10 @@ describe("health event persistence", () => {
 
     expect(client.query.mock.calls.some(([statement]) =>
       String(statement).includes("insert into review_items")
-    )).toBe(true);
+    )).toBe(false);
     expect(client.query.mock.calls.some(([statement]) =>
       String(statement).includes("insert into time_entries")
-    )).toBe(false);
+    )).toBe(true);
   });
 
   it("leaves a manually edited imported Sleep entry protected in Review", async () => {
@@ -1370,6 +1370,27 @@ describe("health event persistence", () => {
     expect(client.query.mock.calls.some(([statement]) =>
       String(statement).includes("insert into review_items")
     )).toBe(true);
+  });
+
+  it("protects legacy imported Sleep entries that have no event provenance", async () => {
+    const client = healthSleepAmbiguityClient({ source: "health_sleep" });
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await processActivityEvent(
+      healthSleepEvent({ autoConfirm: true, externalSampleId: "legacy-no-provenance" }),
+      session
+    );
+
+    const collisionLookup = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("unsafe_health_sleep_collision")
+    );
+    expect(String(collisionLookup?.[0])).not.toContain("join activity_events");
+    expect(client.query.mock.calls.some(([statement]) =>
+      String(statement).includes("insert into review_items")
+    )).toBe(true);
+    expect(client.query.mock.calls.some(([statement]) =>
+      String(statement).includes("insert into time_entries")
+    )).toBe(false);
   });
 
   it("keeps cross-source and weak same-source overlaps ambiguous", async () => {
@@ -1599,7 +1620,7 @@ describe("health event persistence", () => {
     ).toBeUndefined();
   });
 
-  it("keeps overlapping auto-confirm Health workouts in review", async () => {
+  it("auto-logs eligible Health workouts alongside existing tracked time", async () => {
     const client = {
       query: vi.fn(async (statement: string, values?: unknown[]) => {
         void values;
@@ -1615,12 +1636,10 @@ describe("health event persistence", () => {
     const reviewInsert = client.query.mock.calls.find(([statement]) =>
       String(statement).includes("insert into review_items")
     );
-    expect(reviewInsert?.[1]).toEqual(expect.arrayContaining([
-      expect.stringContaining("Automatic logging paused because this Health activity overlaps existing time")
-    ]));
-    expect(
-      client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"))
-    ).toBeUndefined();
+    expect(reviewInsert).toBeUndefined();
+    expect(client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"))).toBeTruthy();
+    expect(client.query.mock.calls.some(([statement]) => String(statement).includes("from time_entries"))).toBe(false);
+
   });
 
   it("reprocesses existing high-confidence Walk review candidates using current preferences", async () => {
@@ -1837,7 +1856,22 @@ describe("health event persistence", () => {
     );
   });
 
-  it("leaves overlapping Health review candidates open with stale open timer blocker details", async () => {
+  it.each([
+    ["medium_high", "walking", true, 2220, 1],
+    ["medium", "walking", true, 2220, 0],
+    ["high", "swimming", true, 2220, 1],
+    ["high", "swimming", false, 2220, 0],
+    ["high", "walking", true, 60, 0],
+    ["high", "unknown", false, 2220, 0]
+  ] as const)("reprocesses %s %s with preference %s and duration %i", async (confidence, workoutType, enabled, seconds, expected) => {
+    const client = reprocessClient([{ ...healthWorkoutReviewRow({ workoutType, durationSeconds: seconds, stoppedAt: new Date(Date.parse("2026-07-04T19:09:00.000Z") + seconds * 1000).toISOString() }), title: workoutType === "unknown" ? "Unknown workout" : "Workout", confidence }]);
+    mocks.pool.connect.mockResolvedValueOnce(client);
+    const result = await reprocessHealthReviewItems({ preferences: { swimming: enabled } }, session);
+    expect(result.confirmedCount).toBe(expected);
+    expect(client.query.mock.calls.filter(([statement])=>String(statement).includes("insert into time_entries"))).toHaveLength(expected);
+  });
+
+  it("reprocesses overlapping Health despite a stale manual timer", async () => {
     const client = reprocessClient([
       healthWorkoutReviewRow({
         id: "review-overlap",
@@ -1892,32 +1926,12 @@ describe("health event persistence", () => {
       }
     }, session);
 
-    expect(result).toMatchObject({
-      checkedCount: 1,
-      confirmedCount: 0,
-      leftInReviewCount: 1,
-      remainingReviewCount: 1,
-      reasons: [
-        {
-          reviewItemId: "review-overlap",
-          code: "overlap",
-          blockingEntry: {
-            id: "entry-open",
-            stoppedAtIsNull: true
-          }
-        }
-      ]
-    });
-    expect(
-      client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"))
-    ).toBeUndefined();
-    expect(client.query).toHaveBeenCalledWith(
-      expect.stringContaining("set notes = $2"),
-      ["review-overlap", "Left in Review: automatic logging paused because this overlaps stale open timer \"BAU\" with no stop time. You can still confirm it."]
-    );
+    expect(result).toMatchObject({ checkedCount: 1, confirmedCount: 1, leftInReviewCount: 0, reasons: [] });
+    expect(client.query.mock.calls.some(([statement]) => String(statement).includes("insert into time_entries"))).toBe(true);
+
   });
 
-  it("accepts Health review candidates already covered by confirmed Health time", async () => {
+  it("does not mistake another overlapping Health workout for the same sample", async () => {
     const client = reprocessClient([
       healthWorkoutReviewRow({
         id: "review-walk-covered",
@@ -1981,7 +1995,7 @@ describe("health event persistence", () => {
     });
     expect(
       client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"))
-    ).toBeUndefined();
+    ).toBeTruthy();
     expect(client.query).toHaveBeenCalledWith(
       expect.stringContaining("set status = $2"),
       ["review-walk-covered", "accepted"]
@@ -3634,6 +3648,8 @@ function healthSleepAmbiguityClient(input: {
       if (statement.includes("insert into activity_events")) {
         return { rows: [{ id: "event-ambiguous" }] };
       }
+      if (statement.includes("unsafe_health_sleep_collision") && input.source === "manual_app") return { rows: [] };
+      if (statement.includes("insert into time_entries")) return { rows: [{ id: "new-health-sleep" }] };
       if (statement.includes("from time_entries te")) {
         return {
           rows: [{

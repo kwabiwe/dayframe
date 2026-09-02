@@ -1,4 +1,5 @@
 import * as SQLite from "expo-sqlite";
+import { REVIEW_EFFECTS_V5_SQL } from "./reviewSyncSchema";
 import {
   LocationReviewEvidenceDtoSchema,
   ReviewMutationEnvelopeSchema,
@@ -14,6 +15,7 @@ import {
 } from "./mobile-network";
 import {
   invalidateMobileSessionIfCurrent,
+  isAuthenticatedSessionSnapshotCurrent,
   readOwnedAuthenticatedSessionSnapshot
 } from "./secure-session";
 import type {
@@ -21,9 +23,10 @@ import type {
   MobileReviewItem
 } from "./api";
 import { createSerialMutationQueue } from "./location/mutationQueue";
+import { isLocationReviewItem } from "./review";
 
 const DATABASE_NAME = "dayframe-review-sync.db";
-const DATABASE_VERSION = 4;
+const DATABASE_VERSION = 5;
 const ACTIVE_ACCOUNT_KEY = "active_account";
 const LAST_CACHE_AT_KEY = "last_cache_at";
 const LAST_SUCCESSFUL_SYNC_AT_KEY = "last_successful_sync_at";
@@ -301,6 +304,7 @@ async function database() {
             );
           `);
         }
+        await transaction.execAsync(REVIEW_EFFECTS_V5_SQL);
         await transaction.execAsync(`PRAGMA user_version = ${DATABASE_VERSION}`);
       });
     }
@@ -485,19 +489,27 @@ export async function processReviewBootstrap(bootstrap: MobileBootstrap) {
         client_mutation_id: string;
         review_item_id: string;
       }>(
-        `select client_mutation_id, review_item_id
-         from review_mutation_outbox
-         where account_key = ? and state = 'acknowledged'`,
+        `select o.client_mutation_id, e.review_item_id
+         from review_mutation_outbox o
+         join review_mutation_effects e on e.client_mutation_id = o.client_mutation_id and e.account_key = o.account_key
+         where o.account_key = ? and o.state = 'acknowledged'`,
         key
       );
       for (const row of acknowledged) {
-        if (!openIds.has(row.review_item_id)) {
+        if (!acknowledged.some((effect) => effect.client_mutation_id === row.client_mutation_id && openIds.has(effect.review_item_id))) {
           await transaction.runAsync(
             "delete from review_mutation_outbox where client_mutation_id = ?",
             row.client_mutation_id
           );
         }
       }
+      await transaction.runAsync(
+        `update review_mutation_effects set local_effect = 'hidden'
+         where account_key = ? and local_effect = 'restore'
+           and not exists (select 1 from review_item_cache c
+             where c.account_key = review_mutation_effects.account_key
+               and c.review_item_id = review_mutation_effects.review_item_id and c.server_status = 'open')`, key
+      );
       const cachedEvidence = await transaction.getAllAsync<{
         review_item_id: string;
       }>(
@@ -607,11 +619,12 @@ export async function loadCachedReviewBootstrap(): Promise<{
     following_ids_json: string;
     created_at: string;
   }>(
-    `select original_snapshot_json, original_position,
-            preceding_ids_json, following_ids_json, created_at
-     from review_mutation_outbox
-     where account_key = ? and local_effect = 'restore'
-     order by original_position, created_at`,
+    `select e.snapshot_json as original_snapshot_json, e.original_position,
+            e.preceding_ids_json, e.following_ids_json, o.created_at
+     from review_mutation_effects e
+     join review_mutation_outbox o on o.client_mutation_id = e.client_mutation_id and o.account_key = e.account_key
+     where e.account_key = ? and e.local_effect = 'restore'
+     order by e.original_position, o.created_at, e.review_item_id`,
     account.account_key
   );
   const cachedItems = cached.flatMap((row) => {
@@ -1024,117 +1037,83 @@ export async function enqueueReviewMutation(input: {
   item: MobileReviewItem;
   mutation: ReviewMutation;
   clientMutationId: string;
+  affectedItems?: MobileReviewItem[];
 }) {
-  const mutation = ReviewMutationSchema.parse(input.mutation);
-  const envelope = ReviewMutationEnvelopeSchema.parse({
-    clientMutationId: input.clientMutationId,
-    mutation
-  });
-  assertActionableReviewItem(input.item);
-  const key = accountKey({
-    workspaceId: input.bootstrap.workspace.id,
-    userId: input.bootstrap.user.id
-  });
+  const envelope = ReviewMutationEnvelopeSchema.parse({ clientMutationId: input.clientMutationId, mutation: input.mutation });
+  const mutation = envelope.mutation;
+  const expectedIds = [...new Set(mutation.action === "merge" || mutation.action === "merge_and_confirm"
+    ? [input.item.id, mutation.adjacentReviewItemId] : [input.item.id])].sort();
+  if ((mutation.action === "merge" || mutation.action === "merge_and_confirm") && expectedIds.length !== 2) {
+    throw new Error("Choose a different adjacent visit.");
+  }
+  const affected = [...(input.affectedItems ?? [input.item])].sort((a, b) => a.id.localeCompare(b.id));
+  if (affected.length !== expectedIds.length || affected.some((item, index) => item.id !== expectedIds[index])) {
+    throw new Error("Both visits must be available in saved Review data before merging.");
+  }
+  for (const item of affected) {
+    assertActionableReviewItem(item);
+    if ((mutation.action === "merge" || mutation.action === "merge_and_confirm") && !isLocationReviewItem(item)) {
+      throw new Error("Only saved Location Review visits can be merged.");
+    }
+    if (!input.bootstrap.reviewItems.some((cached) => cached.id === item.id && cached.status === "open")) {
+      throw new Error("This suggestion is no longer available in this account's Review data.");
+    }
+  }
+  const key = accountKey({ workspaceId: input.bootstrap.workspace.id, userId: input.bootstrap.user.id });
   const requestJson = canonicalJson(envelope);
   const itemIds = input.bootstrap.reviewItems.map((item) => item.id);
-  const position = itemIds.indexOf(input.item.id);
-  const safePosition = position < 0 ? itemIds.length : position;
+  const effects = affected.map((item) => {
+    const position = itemIds.indexOf(item.id);
+    return { item, position, snapshot: JSON.stringify(sanitiseReviewItemForCache(item)),
+      preceding: JSON.stringify(itemIds.slice(0, position)), following: JSON.stringify(itemIds.slice(position + 1)) };
+  });
+  const primary = effects.find((effect) => effect.item.id === input.item.id)!;
   const now = new Date().toISOString();
   const db = await database();
   let idempotent = false;
   const localCommitStartedAt = Date.now();
-
-  await serialiseReviewMutation(() =>
-    db.withExclusiveTransactionAsync(async (transaction) => {
-      const account = await activeAccount(transaction);
-      if (!account || account.account_key !== key) {
-        throw new Error("Review data is not configured for this account.");
+  await serialiseReviewMutation(() => db.withExclusiveTransactionAsync(async (transaction) => {
+    const account = await activeAccount(transaction);
+    if (!account || account.account_key !== key) throw new Error("Review data is not configured for this account.");
+    const existing = await transaction.getFirstAsync<{ account_key: string; review_item_id: string; request_json: string }>(
+      "select account_key, review_item_id, request_json from review_mutation_outbox where client_mutation_id = ?", envelope.clientMutationId
+    );
+    if (existing) {
+      if (existing.account_key === key && existing.review_item_id === input.item.id && existing.request_json === requestJson) {
+        idempotent = true;
+        return;
       }
-      const existingId = await transaction.getFirstAsync<{
-        account_key: string;
-        request_json: string;
-      }>(
-        `select account_key, request_json
-         from review_mutation_outbox
-         where client_mutation_id = ?`,
-        envelope.clientMutationId
+      throw new Error("This Review mutation ID is already used for different data.");
+    }
+    for (const effect of effects) {
+      const cached = await transaction.getFirstAsync<{ server_status: string }>(
+        "select server_status from review_item_cache where account_key = ? and review_item_id = ?", key, effect.item.id
       );
-      if (existingId) {
-        if (
-          existingId.account_key === key &&
-          existingId.request_json === requestJson
-        ) {
-          idempotent = true;
-          return;
-        }
-        throw new Error("This Review mutation ID is already used for different data.");
-      }
-      const existingItem = await transaction.getFirstAsync<{
-        client_mutation_id: string;
-      }>(
-        `select client_mutation_id
-         from review_mutation_outbox
-         where account_key = ? and review_item_id = ?`,
-        key,
-        input.item.id
+      if (cached?.server_status !== "open") throw new Error("Refresh Review before saving this suggestion.");
+      const owned = await transaction.getFirstAsync<{ client_mutation_id: string }>(
+        "select client_mutation_id from review_mutation_effects where account_key = ? and review_item_id = ?", key, effect.item.id
       );
-      if (existingItem) {
-        throw new Error("A saved Review change already exists for this suggestion.");
-      }
+      if (owned) throw new Error("A saved Review change already exists for one of these suggestions.");
+    }
+    await transaction.runAsync(
+      `insert into review_mutation_outbox (
+        client_mutation_id, account_key, workspace_id, user_id, review_item_id, action_kind, request_json,
+        original_snapshot_json, original_position, preceding_ids_json, following_ids_json,
+        state, local_effect, created_at, updated_at
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'hidden', ?, ?)`,
+      envelope.clientMutationId, key, input.bootstrap.workspace.id, input.bootstrap.user.id, input.item.id,
+      mutation.action, requestJson, primary.snapshot, primary.position, primary.preceding, primary.following, now, now
+    );
+    for (const effect of effects) {
       await transaction.runAsync(
-        `insert into review_item_cache (
-           account_key, review_item_id, snapshot_json, server_status, position, cached_at
-         ) values (?, ?, ?, ?, ?, ?)
-         on conflict(account_key, review_item_id) do update set
-           snapshot_json = excluded.snapshot_json,
-           server_status = excluded.server_status,
-           position = excluded.position,
-           cached_at = excluded.cached_at`,
-        key,
-        input.item.id,
-        JSON.stringify(sanitiseReviewItemForCache(input.item)),
-        input.item.status,
-        safePosition,
-        now
+        `insert into review_mutation_effects (
+          client_mutation_id, account_key, review_item_id, snapshot_json, original_position,
+          preceding_ids_json, following_ids_json, local_effect
+        ) values (?, ?, ?, ?, ?, ?, ?, 'hidden')`,
+        envelope.clientMutationId, key, effect.item.id, effect.snapshot, effect.position, effect.preceding, effect.following
       );
-      for (const category of input.bootstrap.categories) {
-        await transaction.runAsync(
-          `insert into review_category_cache (
-             account_key, category_id, category_json, cached_at
-           ) values (?, ?, ?, ?)
-           on conflict(account_key, category_id) do update set
-             category_json = excluded.category_json,
-             cached_at = excluded.cached_at`,
-          key,
-          category.id,
-          JSON.stringify(category),
-          now
-        );
-      }
-      await transaction.runAsync(
-        `insert into review_mutation_outbox (
-           client_mutation_id, account_key, workspace_id, user_id,
-           review_item_id, action_kind, request_json, original_snapshot_json,
-           original_position, preceding_ids_json, following_ids_json,
-           state, local_effect, created_at, updated_at
-         ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'hidden', ?, ?)`,
-        envelope.clientMutationId,
-        key,
-        input.bootstrap.workspace.id,
-        input.bootstrap.user.id,
-        input.item.id,
-        mutation.action,
-        requestJson,
-        JSON.stringify(sanitiseReviewItemForCache(input.item)),
-        safePosition,
-        JSON.stringify(itemIds.slice(0, Math.max(safePosition, 0))),
-        JSON.stringify(itemIds.slice(Math.max(safePosition + 1, 0))),
-        now,
-        now
-      );
-    })
-  );
-
+    }
+  }));
   lastLocalMutationAction = mutation.action;
   lastLocalMutationCommitDurationMs = Date.now() - localCommitStartedAt;
   lastLocalMutationCommittedAt = new Date().toISOString();
@@ -1216,6 +1195,12 @@ async function synchroniseReviewMutationsUnsafe(
   let acknowledgedCount = 0;
   let stopped = false;
   while (true) {
+    const currentOwner = await activeAccount(db);
+    const currentSession = await readOwnedAuthenticatedSessionSnapshot({ userId: account.user_id, workspaceId: account.workspace_id });
+    if (currentOwner?.account_key !== account.account_key || currentSession.status !== "authenticated" || currentSession.snapshot.token !== token) {
+      stopped = true;
+      break;
+    }
     const row = await nextMutation(account.account_key, options.force ?? false);
     if (!row) break;
     const attemptedAt = new Date().toISOString();
@@ -1233,6 +1218,11 @@ async function synchroniseReviewMutationsUnsafe(
       )
     );
     try {
+      if (!isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot)) {
+        await markMutation(row.client_mutation_id, "pending", null, null, null, "hidden");
+        stopped = true;
+        break;
+      }
       const response = await mobileFetchWithTimeout(
         `${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(row.review_item_id)}`,
         {
@@ -1304,14 +1294,15 @@ async function synchroniseReviewMutationsUnsafe(
         stopped = true;
         break;
       }
-      const restore = responseBody?.canonicalStatus === "open";
+      const restoreIds = canonicalOpenEffectIds(responseBody, row.review_item_id);
       await markMutation(
         row.client_mutation_id,
         "needs_attention",
         response.status,
         safeFailureSummary(response.status, responseBody),
         null,
-        restore ? "restore" : "hidden"
+        "hidden",
+        restoreIds
       );
     } catch (error) {
       await scheduleRetry(
@@ -1386,34 +1377,35 @@ export function nextReviewRetryAt(
   return new Date(attemptedAt.getTime() + Math.round(baseSeconds * jitter * 1000)).toISOString();
 }
 
+export function canonicalOpenEffectIds(body: Record<string, unknown> | null, primaryId: string): string[] {
+  const statuses = body?.canonicalReviewStatuses;
+  if (statuses && typeof statuses === "object" && !Array.isArray(statuses)) {
+    return Object.entries(statuses).filter(([, status]) => status === "open").map(([id]) => id);
+  }
+  // Compatibility for an older server: canonicalStatus proves only the primary.
+  return body?.canonicalStatus === "open" ? [primaryId] : [];
+}
+
 async function markMutation(
-  clientMutationId: string,
-  state: ReviewMutationState,
-  status: number | null,
-  error: string | null,
-  nextAttemptAt: string | null,
-  localEffect: "hidden" | "restore"
+  clientMutationId: string, state: ReviewMutationState, status: number | null,
+  error: string | null, nextAttemptAt: string | null, localEffect: "hidden" | "restore",
+  canonicalOpenIds: string[] = []
 ) {
   const db = await database();
-  await serialiseReviewMutation(() =>
-    db.runAsync(
-      `update review_mutation_outbox
-       set state = ?,
-           local_effect = ?,
-           next_attempt_at = ?,
-           last_http_status = ?,
-           last_error = ?,
-           updated_at = ?
+  await serialiseReviewMutation(() => db.withExclusiveTransactionAsync(async (transaction) => {
+    await transaction.runAsync(
+      `update review_mutation_outbox set state = ?, local_effect = ?, next_attempt_at = ?, last_http_status = ?, last_error = ?, updated_at = ?
        where client_mutation_id = ?`,
-      state,
-      localEffect,
-      nextAttemptAt,
-      status,
-      error,
-      new Date().toISOString(),
-      clientMutationId
-    )
-  );
+      state, localEffect, nextAttemptAt, status, error, new Date().toISOString(), clientMutationId
+    );
+    await transaction.runAsync("update review_mutation_effects set local_effect = 'hidden' where client_mutation_id = ?", clientMutationId);
+    for (const id of canonicalOpenIds) {
+      await transaction.runAsync(
+        "update review_mutation_effects set local_effect = 'restore' where client_mutation_id = ? and review_item_id = ?",
+        clientMutationId, id
+      );
+    }
+  }));
 }
 
 async function markAccountAuthenticationRequired(accountKeyValue: string) {
@@ -1513,10 +1505,11 @@ export async function getReviewItemSyncStates() {
     review_item_id: string;
     state: ReviewMutationState;
   }>(
-    `select review_item_id, action_kind, state
-     from review_mutation_outbox
-     where account_key = ? and state != 'acknowledged'
-     order by created_at`,
+    `select e.review_item_id, o.action_kind, o.state
+     from review_mutation_effects e join review_mutation_outbox o
+       on o.client_mutation_id = e.client_mutation_id and o.account_key = e.account_key
+     where e.account_key = ? and o.state != 'acknowledged'
+     order by o.created_at, e.review_item_id`,
     account.account_key
   );
   return new Map(
@@ -1581,18 +1574,30 @@ export async function discardReviewSyncIssue(clientMutationId: string) {
   const db = await database();
   const account = await activeAccount(db);
   if (!account) return false;
-  const result = await serialiseReviewMutation(() =>
-    db.runAsync(
+  let removed = false;
+  await serialiseReviewMutation(() => db.withExclusiveTransactionAsync(async (transaction) => {
+    // Discard must not reveal an old cached source that the server never proved
+    // open. Canonical refresh can reintroduce it later if it is actually open.
+    await transaction.runAsync(
+      `delete from review_item_cache where account_key = ? and review_item_id in (
+        select e.review_item_id from review_mutation_effects e
+        join review_mutation_outbox o on o.client_mutation_id = e.client_mutation_id
+        where e.account_key = ? and o.client_mutation_id = ?
+          and o.state = 'needs_attention' and e.local_effect = 'hidden'
+      )`, account.account_key, account.account_key, clientMutationId
+    );
+    const result = await transaction.runAsync(
       `delete from review_mutation_outbox
        where client_mutation_id = ?
          and account_key = ?
          and state = 'needs_attention'`,
       clientMutationId,
       account.account_key
-    )
-  );
+    );
+    removed = result.changes > 0;
+  }));
   emitChange();
-  return result.changes > 0;
+  return removed;
 }
 
 export async function clearActiveReviewAccountData() {
@@ -1673,6 +1678,8 @@ function sanitiseRawPayload(rawPayload: Record<string, unknown> | null) {
     "evidenceKind",
     "placeMatchKind",
     "uncertaintyReason",
+    "semanticReason",
+    "policyVersion",
     "workoutType",
     "workoutLabel",
     "activityType",
@@ -1689,7 +1696,11 @@ function sanitiseRawPayload(rawPayload: Record<string, unknown> | null) {
 
 function parseReviewSnapshot(value: string) {
   try {
-    return JSON.parse(value) as MobileReviewItem;
+    const item = JSON.parse(value) as MobileReviewItem;
+    if (!item || typeof item.id !== "string" || item.status !== "open" || typeof item.title !== "string") return null;
+    // Incomplete server suggestions remain valid cached presentation. Enqueue
+    // separately requires a complete window before allowing local dismissal.
+    return sanitiseReviewItemForCache(item);
   } catch {
     return null;
   }
@@ -1699,7 +1710,7 @@ async function hiddenReviewItemIds(accountKeyValue: string) {
   const db = await database();
   const rows = await db.getAllAsync<{ review_item_id: string }>(
     `select review_item_id
-     from review_mutation_outbox
+     from review_mutation_effects
      where account_key = ? and local_effect = 'hidden'`,
     accountKeyValue
   );

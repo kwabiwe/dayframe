@@ -162,48 +162,41 @@ const legacyReviewActionSchema = z.object({
   action: z.enum(["accept", "ignore", "ignore_once", "always_ignore_source", "create_rule"])
 }).strict();
 
+export const ConfirmLocationReviewSchema = z.object({ action: z.literal("confirm") }).strict();
+export const IgnoreLocationReviewSchema = z.object({ action: z.literal("ignore_once_location") }).strict();
+export const EditLocationReviewSchema = z.object({ action: z.literal("edit_and_confirm"), edit: ReviewEntryEditSchema }).strict();
+export const ChangePlaceAndConfirmSchema = z.object({
+  action: z.literal("change_place_and_confirm"),
+  placeId: z.string().uuid().nullable(),
+  learnedPlaceId: z.string().uuid().nullable().optional(),
+  edit: ReviewEntryEditSchema.optional()
+}).strict();
+export const RecordOnceLocationReviewSchema = z.object({ action: z.literal("record_once"), edit: ReviewEntryEditSchema.optional() }).strict();
+export const RecordPoiOnceLocationReviewSchema = z.object({
+  action: z.literal("record_poi_once"), name: z.string().trim().min(1).max(120), edit: ReviewEntryEditSchema.optional()
+}).strict();
+export const SavePlaceAndConfirmSchema = z.object({
+  action: z.literal("save_place_and_confirm"), name: z.string().trim().min(1).max(120),
+  latitude: z.number().finite().min(-90).max(90), longitude: z.number().finite().min(-180).max(180),
+  radiusMeters: z.number().int().min(30).max(160).default(80), edit: ReviewEntryEditSchema.optional()
+}).strict();
+export const SplitLocationReviewSchema = z.object({
+  action: z.enum(["split", "split_and_confirm"]), splitAt: z.string().datetime({ offset: true }),
+  left: ReviewEntryEditSchema.optional(), right: ReviewEntryEditSchema.optional()
+}).strict();
+export const MergeLocationReviewSchema = z.object({
+  action: z.enum(["merge", "merge_and_confirm"]), adjacentReviewItemId: z.string().uuid(),
+  acknowledgeContradictoryEvidence: z.boolean().default(false), edit: ReviewEntryEditSchema.optional()
+}).strict();
+
 export const LocationReviewActionSchema = z.discriminatedUnion("action", [
-  legacyReviewActionSchema,
-  z.object({ action: z.literal("confirm") }).strict(),
-  z.object({ action: z.literal("ignore_once_location") }).strict(),
-  z.object({ action: z.literal("edit_and_confirm"), edit: ReviewEntryEditSchema }).strict(),
+  legacyReviewActionSchema, ConfirmLocationReviewSchema, IgnoreLocationReviewSchema, EditLocationReviewSchema,
   z.object({
-    action: z.literal("change_place"),
-    placeId: z.string().uuid().nullable(),
+    action: z.literal("change_place"), placeId: z.string().uuid().nullable(),
     learnedPlaceId: z.string().uuid().nullable().optional()
   }).strict(),
-  z.object({
-    action: z.literal("change_place_and_confirm"),
-    placeId: z.string().uuid().nullable(),
-    learnedPlaceId: z.string().uuid().nullable().optional(),
-    edit: ReviewEntryEditSchema.optional()
-  }).strict(),
-  z.object({ action: z.literal("record_once"), edit: ReviewEntryEditSchema.optional() }).strict(),
-  z.object({
-    action: z.literal("record_poi_once"),
-    name: z.string().trim().min(1).max(120),
-    edit: ReviewEntryEditSchema.optional()
-  }).strict(),
-  z.object({
-    action: z.literal("save_place_and_confirm"),
-    name: z.string().trim().min(1).max(120),
-    latitude: z.number().finite().min(-90).max(90),
-    longitude: z.number().finite().min(-180).max(180),
-    radiusMeters: z.number().int().min(30).max(160).default(80),
-    edit: ReviewEntryEditSchema.optional()
-  }).strict(),
-  z.object({
-    action: z.enum(["split", "split_and_confirm"]),
-    splitAt: z.string().datetime({ offset: true }),
-    left: ReviewEntryEditSchema.optional(),
-    right: ReviewEntryEditSchema.optional()
-  }).strict(),
-  z.object({
-    action: z.enum(["merge", "merge_and_confirm"]),
-    adjacentReviewItemId: z.string().uuid(),
-    acknowledgeContradictoryEvidence: z.boolean().default(false),
-    edit: ReviewEntryEditSchema.optional()
-  }).strict()
+  ChangePlaceAndConfirmSchema, RecordOnceLocationReviewSchema, RecordPoiOnceLocationReviewSchema,
+  SavePlaceAndConfirmSchema, SplitLocationReviewSchema, MergeLocationReviewSchema
 ]);
 
 export type LocationEvidenceBatchRequest = z.output<typeof LocationEvidenceBatchRequestSchema>;

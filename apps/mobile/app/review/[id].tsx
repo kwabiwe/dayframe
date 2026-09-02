@@ -29,7 +29,8 @@ import {
 } from "@/lib/locationReviewEvidenceCache";
 import { useConnectivity } from "@/lib/connectivity";
 import {
-  durableReviewMutationFromLocationAction,
+  buildDurableLocationReviewCommand,
+  LocationReviewDraftError,
   locationReviewActionRequiresConnection
 } from "@/lib/locationReviewDraft";
 import { pressable, useMobileTheme } from "@/lib/mobileTheme";
@@ -325,30 +326,38 @@ export default function LocationReviewDetailScreen() {
 
   useEffect(() => () => reconnectControllerRef.current?.abort(), []);
 
+  const actionInFlightRef = useRef(false);
+
   async function perform(
     action: LocationReviewAction,
     _successMessage: string
   ) {
-    if (!id || saving) return;
+    if (!id || actionInFlightRef.current) return;
+    actionInFlightRef.current = true;
     const generation = loadGenerationRef.current;
+    const durableAction = !locationReviewActionRequiresConnection(action);
     setActionMessage(null);
     setSaving(true);
-    const durableMutation = durableReviewMutationFromLocationAction(action);
     try {
-      if (durableMutation) {
+      if (durableAction) {
         if (!data || !reviewItem) {
           setActionMessage(
             "This Review suggestion is not available in the saved account data. Go back and refresh Review."
           );
           return;
         }
+        const command = buildDurableLocationReviewCommand(action, reviewItem, data);
+        if (!command) throw new Error("This correction is not available offline.");
         await enqueueReviewMutation({
           bootstrap: data,
           item: reviewItem,
-          mutation: durableMutation,
+          mutation: command.mutation,
+          affectedItems: command.affectedItems,
           clientMutationId: createReviewClientMutationId()
         });
         if (generation !== loadGenerationRef.current) return;
+        const owner = await getActiveReviewAccountIdentity();
+        if (generation !== loadGenerationRef.current || !owner || owner.userId !== data.user.id || owner.workspaceId !== data.workspace.id) return;
         AccessibilityInfo.announceForAccessibility(
           "Saved on this iPhone. Waiting to sync."
         );
@@ -356,7 +365,6 @@ export default function LocationReviewDetailScreen() {
         router.back();
         return;
       }
-      if (!locationReviewActionRequiresConnection(action)) return;
       await resolveLocationReviewItem(id, action);
       if (generation !== loadGenerationRef.current) return;
       router.back();
@@ -367,11 +375,12 @@ export default function LocationReviewDetailScreen() {
         return;
       }
       setActionMessage(
-        durableMutation
+        actionError instanceof LocationReviewDraftError ? actionError.message : durableAction
           ? "This Review change was not saved on this iPhone. Your edits are still here."
           : normaliseLocationReviewRequestError(actionError, "action")
       );
     } finally {
+      actionInFlightRef.current = false;
       if (generation === loadGenerationRef.current) setSaving(false);
     }
   }
@@ -425,6 +434,7 @@ export default function LocationReviewDetailScreen() {
           adjacentReview={adjacentReview}
           categories={data?.categories ?? []}
           evidence={evidence}
+          isFocused={isFocused}
           onResolve={perform}
           places={data?.places ?? []}
           reviewItem={reviewItem}

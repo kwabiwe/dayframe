@@ -31,3 +31,23 @@ describe("Review mutation schemas", () => {
     })).toThrow();
   });
 });
+
+describe("durable structural Location envelopes", () => {
+  const id = "18600000-0000-4000-8000-000000000001";
+  const actions = [
+    { action: "change_place_and_confirm", placeId: id }, { action: "record_once" },
+    { action: "record_poi_once", name: "Synthetic cafe" },
+    { action: "save_place_and_confirm", name: "Synthetic place", latitude: 51.5, longitude: -0.1 },
+    { action: "split", splitAt: "2026-08-28T08:30:00Z" },
+    { action: "split_and_confirm", splitAt: "2026-08-28T08:30:00Z" },
+    { action: "merge", adjacentReviewItemId: id }, { action: "merge_and_confirm", adjacentReviewItemId: id }
+  ];
+  it.each(actions)("accepts strict $action and rejects extra provider payload", (mutation) => {
+    expect(ReviewMutationEnvelopeSchema.safeParse({ clientMutationId: id, mutation }).success).toBe(true);
+    expect(ReviewMutationEnvelopeSchema.safeParse({ clientMutationId: id, mutation: { ...mutation, appleResponse: {} } }).success).toBe(false);
+  });
+  it("does not silently accept a pure place edit or invalid save coordinates", () => {
+    expect(ReviewMutationSchema.safeParse({ action: "change_place", placeId: id }).success).toBe(false);
+    expect(ReviewMutationSchema.safeParse({ action:"save_place_and_confirm", name:"X", latitude:91,longitude:0 }).success).toBe(false);
+  });
+});

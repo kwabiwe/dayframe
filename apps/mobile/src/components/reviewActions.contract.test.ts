@@ -95,14 +95,14 @@ describe("mobile Review action contracts", () => {
     expect(categoryChoiceSource).not.toContain("CheckGlyph");
   });
 
-  it("loads nearby POIs only for unknown visits and keeps typed search as the fallback", () => {
+  it("loads nearby POIs for saved and unknown stays and keeps typed search as the fallback", () => {
     expect(evidenceEditorSource).toContain("createNativeNearbyPointOfInterestProvider");
-    expect(evidenceEditorSource).toContain('evidence.segment.kind !== "stay" || baselinePlaceId || !centre');
+    expect(evidenceEditorSource).toContain('!isFocused || !nearbyProvider || evidence.segment.kind !== "stay" || baselinePlaceId || !centre');
     expect(evidenceEditorSource).toContain("void controller.load(centre)");
     expect(evidenceEditorSource).toContain("Nearby places");
     expect(evidenceEditorSource).toContain("Search other places");
     expect(evidenceEditorSource).toContain("searchQuery.trim().length < 2");
-    expect(evidenceEditorSource).toContain("nearbyState.places.map");
+    expect(evidenceEditorSource).toContain("nearbyChoices.map");
     expect(evidenceEditorSource).toContain("setSelectedPoint({ latitude: place.latitude, longitude: place.longitude })");
   });
 
@@ -136,7 +136,7 @@ describe("mobile Review action contracts", () => {
     expect(editSheetSource).toContain("descriptionInputRef.current?.focus()");
     expect(reviewSource).toContain("onPresented={finishEditHandover}");
     expect(reviewSource).toContain('reason: "review_edit"');
-    expect(reviewSource).toContain("historicalEntries={reviewPeerEntries(data)}");
+    expect(reviewSource).toContain("historicalEntries={peerEntries}");
     expect(editSheetSource).not.toContain("focusDescriptionOnShow");
   });
 

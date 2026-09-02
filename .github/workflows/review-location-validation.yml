@@ -1,0 +1,107 @@
+name: Review and Location validation
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/review-location-validation.yml"
+      - "apps/**"
+      - "packages/**"
+      - "scripts/**"
+      - "package.json"
+      - "package-lock.json"
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  disposable-postgis:
+    name: Disposable PostGIS (${{ matrix.schema }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        schema: [base, ordered]
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: dayframe
+          POSTGRES_PASSWORD: dayframe
+          POSTGRES_DB: dayframe_ci_test
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U dayframe -d dayframe_ci_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://dayframe:dayframe@localhost:5432/dayframe_ci_test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsx scripts/setup-validation-db.ts ${{ matrix.schema }}
+      - name: Integration token access control
+        run: npm run validate:integration-token-security
+      - name: Location replay and corrections
+        run: npm run validate:location-v2-db
+      - name: Review receipts and all structural actions
+        if: ${{ !cancelled() }}
+        run: npm run validate:review-mutation-db
+      - name: Exact-entry Stop contention
+        if: ${{ !cancelled() }}
+        env:
+          DAYFRAME_RUN_DB_INTEGRATION: "1"
+        run: npm run test -w @dayframe/web -- src/lib/event-service.postgres.integration.test.ts
+
+  clean-ios-simulator:
+    name: Clean iOS Simulator
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      EXPO_PUBLIC_DAYFRAME_API_BASE: https://dayframe-staging.vercel.app
+      EXPO_PUBLIC_DAYFRAME_RELEASE_CHANNEL: preview
+      RCT_NO_LAUNCH_PACKAGER: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: xcodebuild -version
+      - name: Install frozen CocoaPods version
+        run: gem install cocoapods -v 1.16.2 --no-document
+      - run: pod _1.16.2_ install
+        working-directory: apps/mobile/ios
+      - name: Reject unrelated native dependency changes
+        run: |
+          ruby -ryaml -e '
+            before = YAML.safe_load(IO.popen(["git", "show", "HEAD:apps/mobile/ios/Podfile.lock"], &:read), permitted_classes: [Symbol])
+            after = YAML.safe_load(File.read("apps/mobile/ios/Podfile.lock"), permitted_classes: [Symbol])
+            %w[hermes-engine React-Core-prebuilt ReactNativeDependencies].each do |key|
+              before.fetch("SPEC CHECKSUMS").delete(key)
+              after.fetch("SPEC CHECKSUMS").delete(key)
+            end
+            unless before == after
+              system("git", "diff", "--", "apps/mobile/ios/Podfile.lock")
+              abort "Unexpected Pod dependency graph change"
+            end
+            puts "Pod graph matches; only permitted path-generated checksums excluded."
+          '
+          git diff --exit-code -- package-lock.json
+      - name: Clean unsigned Simulator build
+        run: >-
+          xcodebuild -quiet -workspace apps/mobile/ios/Dayframe.xcworkspace
+          -scheme Dayframe -configuration Debug -sdk iphonesimulator
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath "$RUNNER_TEMP/dayframe-clean-derived-data"
+          CODE_SIGNING_ALLOWED=NO clean build

@@ -50,3 +50,7 @@ When changing `/api/time-entries`, `/api/events`, session handling, or mobile sy
 - [ ] Auth checks happen before data access.
 - [ ] Errors are useful without leaking sensitive details.
 - [ ] Tests cover success, validation failure, unauthorized access, and the timer regression matrix where relevant.
+
+## Durable Location Review
+
+`POST /api/review/:id` accepts every resolving/structural Location action through the strict shared `{ clientMutationId, mutation }` envelope. Reject malformed envelopes rather than falling back to a direct action. Complete `edit_and_confirm` requires both valid timestamps; optional edits on other structural actions preserve the existing server validation. Receipt replay returns exact stored IDs/results. Complex actions share the Location replay owner lock and one transaction for all side effects. On permanent conflict, scoped canonical statuses identify each source independently after rollback; mobile must not infer the adjacent merge item's status from the primary. See `offline-review-mutations.md` for the SQLite/account contract.

@@ -291,11 +291,6 @@ async function resolveClosedLocationReview(
       await locationEditMatchesExisting(client, item, action.edit, session)
     ) ||
     (
-      action.action === "change_place_and_confirm" &&
-      item.status === "accepted" &&
-      await locationEditMatchesExisting(client, item, action.edit ?? {}, session)
-    ) ||
-    (
       action.action === "record_poi_once" &&
       item.status === "accepted" &&
       await locationEditMatchesExisting(

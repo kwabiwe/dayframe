@@ -1,75 +1,38 @@
 # Offline Review Mutation Guardrail
 
-Use this reference whenever a mobile Review terminal action must work without a
-connection. This pattern is specific to Review decisions; it does not make timer,
-Calendar, reporting, or location-evidence operations generally offline-capable.
+Use this for mobile Review resolving and structural actions. Signal capture stays event-first; Review does not replace the timer queues or Location journal.
 
-## Ownership
+## Ownership and local acknowledgement
 
-- `activity_events`, the mobile event queue, and the protected location journal
-  remain the owners of signal capture.
-- `reviewSyncStore.ts` is the only durable mobile owner of downloaded Review
-  snapshots, local terminal decisions, pending presentation, retry state, and account
-  lifecycle.
-- The server remains authoritative for canonical Review and time-entry state.
-- React state may project the SQLite owner but must never be the only record of
-  an accepted Review action.
+`reviewSyncStore.ts` exclusively owns downloaded Review presentation, durable intent, retry state and account lifecycle. React projects that owner; Postgres owns canonical Review, entries, places and corrections.
 
-## Local acknowledgement
+All resolving/structural Location actions use the strict shared envelope: `confirm`, `ignore_once_location`, complete `edit_and_confirm`, `change_place_and_confirm`, `record_once`, `record_poi_once`, `save_place_and_confirm`, `split`, `split_and_confirm`, `merge`, `merge_and_confirm`. Generic accept/ignore remain supported. Pure `change_place` remains a direct compatibility action, not the normal confirmation flow.
 
-Generate one UUID, validate the open item and its time window, and atomically
-write the canonical request, safe original snapshot, ordering anchors, and a
-hidden local projection. Disable repeated actions only while that local
-transaction is in flight. After commit, remove the card or close the detail
-route immediately through its existing presentation owner; do not wait for the
-server. Network success is not part of local acknowledgement. A retryable
-network failure leaves the durable row hidden and pending across refresh,
-backgrounding, force-quit, and reopen.
+Generate one UUID and validate the full canonical request. In one exclusive SQLite transaction, verify the active account, every affected source's open cached state and complete time window, absence of conflicting outbox ownership, and then write one request plus all source effects. Merge reserves two distinct source IDs with independent snapshots, positions and preceding/following anchors. Missing adjacent data fails visibly; never hide only the current source.
 
-One account may have at most one stored terminal mutation per Review item. The
-same mutation ID plus the same canonical payload is idempotent; either a reused
-ID with different data or a second terminal mutation for the item is rejected.
+Only successful local commit permits card removal or native detail dismissal. Duplicate taps are gated during commit. Do not await HTTP or show normal mutation spinners. SQLite failure preserves every source and the exact draft. Split/merge children come from canonical refresh, not fabricated optimistic entries. Save-place catalogue refresh uses the existing coordinator/final bootstrap.
 
-## Synchronisation
+## SQLite v5
 
-- Use one serial SQLite mutation owner and one in-flight drain promise.
-- Reset stale `in_flight` work on database open.
-- Preserve created order. Stop a pass after a retryable network failure, but let
-  a permanent failure on one item move to `needs_attention` so later items run.
-- Retry network errors, 408, 429, 5xx, and temporary lock contention with bounded
-  jitter.
-- Preserve 401/403 work as `auth_required`; resume only after authentication for
-  the same account.
-- Mark semantic conflicts and unchanged permanent validation errors
-  `needs_attention`; never retry them forever.
-- A successful response changes the already-hidden local row to `acknowledged`
-  and triggers a canonical refresh. Delete the row only
-  after a later canonical bootstrap proves that the Review item is no longer
-  open.
+The additive v4→v5 transaction creates `review_mutation_effects`, keyed by mutation/source ID and unique by account/source ID. A composite foreign key ties each effect to its mutation's account; deletion cascades. Every existing outbox row backfills one effect with its snapshot, anchors and hidden/restored state. Compatibility columns remain, no pending row is evicted, and `user_version` advances only after commit. Malformed cached presentation fails safely; pending requests are never silently dropped. Evidence retains its independent seven-day/25-item/5-MiB cache policy.
 
-## Server contract
+Same UUID, primary source and canonical payload is idempotent; any changed request or a second owner of either merge source fails without a partial write. Do not downgrade a binary while complex work is pending: an older binary does not understand two-source effects. Drain or explicitly resolve pending work with a compatible build first.
 
-Queued calls use the strict shared `{ clientMutationId, mutation }` envelope.
-The workspace/user-scoped receipt lookup, Review lock, resulting entry/tags,
-Review/event resolution, and receipt insert share one Postgres transaction.
-Matching receipt replay returns the stored result. Reuse with different content
-is a conflict. An already-resolved item is successful only when equivalence can
-be proven.
+## Synchronisation and rollback
 
-## Accounts and privacy
+- Keep one serial mutation queue, one drain promise and the existing root reconnect coordinator. Review stays foreground-only and never acquires the finite timer background assertion.
+- Recover stale `in_flight` on database open; preserve created order and bounded retry/backoff. Stop after network/408/429/5xx/lock contention; permanent errors become `needs_attention` and allow later work.
+- Revalidate account and authenticated session generation/token before dispatch. Session expiry preserves intent for the same account; logout/replacement clears only its account-owned state after the existing warning.
+- Acknowledgement retains all hidden effects until a later canonical bootstrap proves every source is no longer open.
+- Permanent conflicts restore only source IDs individually proven open by scoped canonical server statuses. Unknown, accepted, ignored or missing sources stay hidden; restoration uses surviving anchors. A legacy `canonicalStatus=open` proves only the primary source.
+- Discard removes an unproven hidden source's stale cache snapshot before deleting its effect, so it cannot resurrect a resolved card. Later canonical refresh may reintroduce an actually open item.
 
-Every SQLite and Postgres lookup is scoped by workspace and user. Cache only the
-minimum Review/category presentation data. Never cache tokens, coordinates, raw
-location evidence, or raw HealthKit payloads, and never expose descriptions or
-place names in diagnostics. Session expiry preserves the same account's queue.
-Confirmed logout or account change clears that active account's cache and
-outbox after warning about unsynchronised work.
+## Server and privacy
+
+Receipt lookup, exact Review/event/segment locks, every place/feedback/entry/tag/child/supersession side effect and the receipt share one Postgres transaction. Receipt identity includes account, UUID, primary Review ID, action and full canonical request hash. Same-ID replay returns the stored result, including child/merged/entry IDs, before reapplying anything. Different-ID equivalence is accepted only when all requested effects can be proved; complex ambiguous outcomes return conflict. Structural mutations share the Location replay owner lock. Preserve nonblocking contention and 8-second statement/1.5-second lock deadlines. Conflict status is read after rollback under a bounded, scoped read.
+
+Store only required private intent and presentation. Save-place requests necessarily retain selected name, coordinates, radius and edits; record-POI-once retains only the trimmed name and edits. No raw Apple response, HealthKit payload, bearer token or upload journal copy belongs in this outbox. Location Evidence DTO coordinates have their separate bounded cache owner. Diagnostics expose action/state/count/timing only, never request JSON, names, descriptions or coordinates.
 
 ## Required evidence
 
-Run the mobile/web/shared suites, both Review validators, both Location V2
-validators, full lint/typecheck/test/build/brand/diff checks, and a clean native
-build. On a physical iPhone, complete the Airplane Mode, conflict/session, app
-restart, theme, Dynamic Type, VoiceOver, and Reduce Motion matrices in
-`docs/dayframe-regression-checklist.md`. Never infer force-quit durability or
-eventual sync from unit tests or screenshots.
+Run shared/web/mobile suites, both Review validators and both Location validators, full lint/typecheck/test/build/docs/brand/diff gates and a clean native build. The Review SQLite validator executes real store transactions, v4 backfill, two-source rollback/restore/acknowledgement and account tests. Complete the physical staging matrix in `docs/dayframe-regression-checklist.md`; unit/Simulator results do not establish iPhone force-quit, background, network or navigation behaviour.

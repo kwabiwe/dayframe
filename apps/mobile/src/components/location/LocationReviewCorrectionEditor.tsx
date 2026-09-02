@@ -40,6 +40,7 @@ import {
   createNativeNearbyPointOfInterestProvider,
   createNativePlaceSearchProvider,
   friendlyPlaceSearchError,
+  visibleNearbyPlaces,
   NearbyPointOfInterestController,
   PlaceSearchController,
   selectPlaceSearchBias,
@@ -77,6 +78,7 @@ export function LocationReviewCorrectionEditor({
   adjacentReview,
   categories,
   evidence,
+  isFocused,
   onResolve,
   places,
   reviewItem,
@@ -86,6 +88,7 @@ export function LocationReviewCorrectionEditor({
   adjacentReview: MobileReviewItem | undefined;
   categories: Category[];
   evidence: LocationReviewEvidenceDto;
+  isFocused: boolean;
   onResolve: (action: LocationReviewAction, successMessage: string) => Promise<void>;
   places: Place[];
   reviewItem: MobileReviewItem | undefined;
@@ -202,18 +205,18 @@ export function LocationReviewCorrectionEditor({
   }, [revealFocusedControl]);
 
   useEffect(() => {
-    if (!provider) return;
+    if (!provider || !isFocused) return;
     const controller = new PlaceSearchController(provider, setSearchState);
     controllerRef.current = controller;
     return () => {
       controller.dispose();
       controllerRef.current = null;
     };
-  }, [provider]);
+  }, [isFocused, provider]);
 
   useEffect(() => {
     const centre = pointFromEvidence(evidence);
-    if (!nearbyProvider || evidence.segment.kind !== "stay" || baselinePlaceId || !centre) return;
+    if (!isFocused || !nearbyProvider || evidence.segment.kind !== "stay" || baselinePlaceId || !centre) return;
     const controller = new NearbyPointOfInterestController(nearbyProvider, setNearbyState);
     nearbyControllerRef.current = controller;
     void controller.load(centre);
@@ -221,7 +224,10 @@ export function LocationReviewCorrectionEditor({
       controller.dispose();
       nearbyControllerRef.current = null;
     };
-  }, [baselinePlaceId, evidence, nearbyProvider]);
+  }, [baselinePlaceId, evidence, isFocused, nearbyProvider]);
+
+  const baselinePlace = placeForSelection(baselinePlaceId, evidence.map.nearbySavedPlaces, places);
+  const nearbyChoices = visibleNearbyPlaces(nearbyState.places, baselinePlace);
 
   const selectedCategory = categories.find((category) => category.id === selectedCategoryId) ?? null;
   const activityGlyph = locationActivityGlyphName({
@@ -449,22 +455,23 @@ export function LocationReviewCorrectionEditor({
         contentContainerStyle={[styles.settingsScrollContent, editorStyles.scrollContent]}
       >
         <View style={styles.contentStack}>
-          <View style={editorStyles.statusSlot}>
-            {statusMessage ? (
-              <View style={styles.queueDiagnosticCard}>
-                <Text accessibilityLiveRegion="polite" style={styles.reviewMetaLine}>
-                  {statusMessage}
-                </Text>
-              </View>
-            ) : null}
-          </View>
           <View style={styles.panel}>
             <Text style={styles.label}>Location evidence</Text>
             <Text style={styles.sectionTitle}>{locationActivityLabel(evidence)}</Text>
             <Text style={styles.reviewMetaLine}>{formatEvidenceTimeRange(evidence)}</Text>
           </View>
 
-          <View style={styles.panel}>
+          {statusMessage ? (
+            <Reanimated.View
+              entering={localPresenceEntering(reduceMotion)}
+              exiting={localPresenceExiting(reduceMotion)}
+              layout={localLayoutTransition(reduceMotion)}
+              style={styles.queueDiagnosticCard}
+            >
+              <Text accessibilityLiveRegion="polite" style={styles.reviewMetaLine}>{statusMessage}</Text>
+            </Reanimated.View>
+          ) : null}
+          <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.panel}>
             <LocationEvidenceMap
               evidence={evidence}
               accentColor={theme.accent}
@@ -481,7 +488,7 @@ export function LocationReviewCorrectionEditor({
             {editingCentre ? (
               <Text style={editorStyles.helperText}>Tap the map to move the pin.</Text>
             ) : null}
-          </View>
+          </Reanimated.View>
 
           <Reanimated.View
             layout={localLayoutTransition(reduceMotion)}
@@ -516,7 +523,7 @@ export function LocationReviewCorrectionEditor({
 
                   {evidence.map.nearbySavedPlaces.length > 0 || baselinePlaceId ? (
                     <View style={editorStyles.placeChoices}>
-                      {baselinePlaceId && !evidence.map.nearbySavedPlaces.some((place) => place.id === baselinePlaceId) ? (
+                      {baselinePlaceId ? (
                         <PlaceChoice
                           detail="Current match"
                           name={evidence.display.placeName || "Current saved place"}
@@ -525,7 +532,7 @@ export function LocationReviewCorrectionEditor({
                           theme={theme}
                         />
                       ) : null}
-                      {evidence.map.nearbySavedPlaces.map((place) => (
+                      {evidence.map.nearbySavedPlaces.filter((place) => place.id !== baselinePlaceId).map((place) => (
                         <PlaceChoice
                           detail={`${place.distanceMeters} m away`}
                           key={place.id}
@@ -559,9 +566,9 @@ export function LocationReviewCorrectionEditor({
                       {nearbyState.message ? (
                         <Text accessibilityLiveRegion="polite" style={editorStyles.helperText}>{nearbyState.message}</Text>
                       ) : null}
-                      {nearbyState.places.length > 0 ? (
-                        <View accessibilityLabel={`${nearbyState.places.length} nearby places`} style={editorStyles.placeChoices}>
-                          {nearbyState.places.map((place) => (
+                      {nearbyChoices.length > 0 ? (
+                        <View accessibilityLabel={`${nearbyChoices.length} nearby places`} style={editorStyles.placeChoices}>
+                          {nearbyChoices.map((place) => (
                             <PlaceChoice
                               detail={`${place.distanceMeters} m away`}
                               key={`${place.name}:${place.latitude}:${place.longitude}`}
@@ -1156,7 +1163,6 @@ function formatLocationReviewDuration(startedAt: string, stoppedAt: string) {
 function createEditorStyles(theme: MobileTheme) {
   return StyleSheet.create({
     scrollContent: { paddingBottom: 34 },
-    statusSlot: { minHeight: 58, justifyContent: "center" },
     correctionCard: {
       backgroundColor: theme.surfaceRaised,
       borderRadius: 18,

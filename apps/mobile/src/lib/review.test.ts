@@ -252,7 +252,7 @@ describe("mobile review helpers", () => {
       "Already awaiting your decision before automatic logging was enabled"
     );
     expect(locationReviewReasonCopy(commute, 1)).toBe(
-      "Not added automatically · overlaps 1 entry"
+      "Already awaiting your decision before automatic logging was enabled"
     );
     expect(locationReviewReasonCopy({
       ...commute,

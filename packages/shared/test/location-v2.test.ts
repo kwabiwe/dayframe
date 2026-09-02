@@ -104,7 +104,7 @@ describe("Location Intelligence V2", () => {
     expect(match.placeId).toBe(LOCATION_ACCEPTANCE_PLACE_IDS.home);
   });
 
-  it("returns ambiguity for similarly plausible user-saved places", () => {
+  it("chooses the stable best saved place and retains overlapping alternatives", () => {
     const places = [
       { id: "a", name: "A", latitude: 51.5, longitude: -0.1, radiusMeters: 80 },
       { id: "b", name: "B", latitude: 51.501, longitude: -0.1, radiusMeters: 80 }
@@ -115,7 +115,8 @@ describe("Location Intelligence V2", () => {
       [],
       LOCATION_ENGINE_V2_CONFIG
     );
-    expect(match.kind).toBe("ambiguous");
+    expect(match.kind).toBe("saved");
+    expect(match.placeId).toBe("a");
     expect(match.candidates.map((candidate) => candidate.id)).toEqual(["a", "b"]);
   });
 
