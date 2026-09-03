@@ -1,9 +1,5 @@
 import type { ReviewSyncDiagnostics } from "./reviewSyncStore";
 
-export function shouldOfferReviewSyncRetry(diagnostics: ReviewSyncDiagnostics) {
-  return diagnostics.retryWaitCount > 0;
-}
-
 export function reviewSyncStatusCopy(diagnostics: ReviewSyncDiagnostics) {
   if (diagnostics.needsAttentionCount > 0) {
     const issueCopy = `${diagnostics.needsAttentionCount} Review ${
@@ -19,10 +15,8 @@ export function reviewSyncStatusCopy(diagnostics: ReviewSyncDiagnostics) {
       count === 1 ? "change" : "changes"
     } saved on this iPhone · sign in to sync`;
   }
-  if (diagnostics.waitingCount > 0) {
-    return `${diagnostics.waitingCount} Review ${
-      diagnostics.waitingCount === 1 ? "change" : "changes"
-    } waiting to sync`;
-  }
+  // Pending and retryable Review work is durable background state. It should
+  // not turn the Review screen into a sync console or invite retries that can
+  // collide with the request already completing on the server.
   return null;
 }

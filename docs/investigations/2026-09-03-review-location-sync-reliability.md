@@ -34,6 +34,26 @@
 - Waiting/backoff alone never shows the header sync icon; active reconnect and completion still do.
 - Focused tests, full lint/typecheck/test/build/docs checks, CI, staging smoke and physical-iPhone verification are recorded honestly.
 
+## Production follow-up after TestFlight build 102
+
+Build 102 exposed a release-lane mismatch: the mobile binary contained this
+draft branch while the production API still ran the previous `main` revision.
+The resulting `review_item_locked` response also exposed three client defects:
+concurrent sync callers requested additional drain passes, a forced caller
+could bypass freshly stored backoff, and Review offered a manual retry for
+ordinary retryable contention. A card that reappeared could then attempt to
+enqueue the same logical action under a new mutation ID and surface an internal
+duplicate-intent error.
+
+The follow-up coalesces all callers onto the active drain, prevents the root
+recovery loop from force-bypassing the Review outbox's durable backoff, keeps
+pending and retryable state silent on Review, removes the routine Review retry
+controls, and treats an identical repeated action as the already-persisted
+intent. The original mutation ID remains authoritative and its tombstone remains hidden.
+Settings continues to expose diagnostics and permanent-attention recovery;
+the general explicit Sync action remains available without multiplying an
+already active Review request.
+
 ## Independent review
 
 Claude Opus 5 reviewed draft PR #187 after the first implementation pass and requested changes. The accepted findings were:

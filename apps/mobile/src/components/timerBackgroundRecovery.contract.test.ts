@@ -40,6 +40,26 @@ describe("finite timer background recovery ownership", () => {
     expect(bootstrap).toBeGreaterThan(location);
     expect(owner).toContain('AppState.currentState === "active" || timerCanContinue');
   });
+
+  it("lets the Review outbox honour its durable backoff during recovery retries", () => {
+    const owner = source("./ConnectivityRecoveryOwner.tsx");
+    const reviewStart = owner.indexOf('name: "review_outbox"');
+    const locationStart = owner.indexOf('name: "location_intelligence"', reviewStart);
+    const reviewStep = owner.slice(reviewStart, locationStart);
+
+    expect(reviewStep).toContain("await synchroniseReviewMutations()");
+    expect(reviewStep).not.toContain("force: true");
+  });
+
+  it("coalesces the screen reconnect and root recovery paths in the shared outbox owner", () => {
+    const owner = source("./ConnectivityRecoveryOwner.tsx");
+    const reviewScreen = source("../../app/review.tsx");
+    const store = source("../lib/reviewSyncStore.ts");
+
+    expect(reviewScreen).toContain("synchroniseReviewMutations({ force: true })");
+    expect(owner).toContain("await synchroniseReviewMutations()");
+    expect(store).toContain("if (synchronisationPromise) return synchronisationPromise;");
+  });
 });
 
 function source(relativePath: string) {

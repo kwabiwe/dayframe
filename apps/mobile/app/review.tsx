@@ -82,8 +82,7 @@ import {
   type ReviewSyncDiagnostics
 } from "@/lib/reviewSyncStore";
 import {
-  reviewSyncStatusCopy,
-  shouldOfferReviewSyncRetry
+  reviewSyncStatusCopy
 } from "@/lib/reviewSyncPresentation";
 import type { TimeEntrySheetPresentation } from "@/lib/timeEntrySheetPresentation";
 
@@ -887,18 +886,6 @@ export default function ReviewScreen() {
             onReviewIssue={() =>
               router.push({ pathname: "/settings", params: { section: "sync" } })
             }
-            onRetry={() => {
-              void synchroniseReviewMutations({ force: true })
-                .then(() =>
-                  load({
-                    preserveMenu: true,
-                    queueIfBusy: true,
-                    silent: true,
-                    skipReprocess: true
-                  })
-                )
-                .catch(() => refreshReviewSyncDiagnostics());
-            }}
             styles={styles}
           />
 
@@ -992,12 +979,10 @@ export default function ReviewScreen() {
 
 function ReviewSyncStatus({
   diagnostics,
-  onRetry,
   onReviewIssue,
   styles
 }: {
   diagnostics: ReviewSyncDiagnostics | null;
-  onRetry: () => void;
   onReviewIssue: () => void;
   styles: ReturnType<typeof useMobileTheme>["styles"];
 }) {
@@ -1011,15 +996,6 @@ function ReviewSyncStatus({
     >
       <Text style={styles.reviewMetaLine}>{copy}</Text>
       <View style={styles.buttonRow}>
-        {shouldOfferReviewSyncRetry(diagnostics) ? (
-          <Pressable
-            accessibilityRole="button"
-            style={pressable(styles.secondaryButton, styles.buttonPressed)}
-            onPress={onRetry}
-          >
-            <Text style={styles.secondaryButtonText}>Retry now</Text>
-          </Pressable>
-        ) : null}
         {diagnostics.needsAttentionCount > 0 ? (
           <Pressable
             accessibilityRole="button"

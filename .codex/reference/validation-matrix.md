@@ -92,9 +92,9 @@ Offline Review mutation changes additionally require:
   conflict/Discard diagnostics, and lost-response receipt replay without a
   duplicate entry.
 - Stall the Review POST beyond 15 seconds and verify it aborts into durable
-  retry-wait. Pending/in-flight work must show saving copy without `Retry now`;
-  retry-wait alone offers that action, while sign-in and permanent issues keep
-  their dedicated guidance.
+  retry-wait. Pending, in-flight, and retry-wait work stays locally hidden and
+  silent on Review while automatic backoff owns retries; sign-in and permanent
+  issues keep their dedicated guidance.
 - A clean iOS native build and the physical-iPhone Airplane Mode,
   force-quit/reopen, reconnect, conflict, System/Light/Dark, Dynamic Type,
   VoiceOver, and Reduce Motion matrices.

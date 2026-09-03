@@ -152,10 +152,11 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
   response. Permanent category, technical duplicate, supersession, and
   cross-device resolution conflicts stop retrying, surface safe Settings
   diagnostics, and restore a card only when canonical server state remains open.
-- Review POSTs abort after 15 seconds into durable retry-wait. Pending/in-flight
-  changes remain locally hidden without `Retry now`; only retry-wait offers that
-  action. Authentication-required and permanent-attention states keep their
-  dedicated guidance instead of presenting a transport retry.
+- Review POSTs abort after 15 seconds into durable retry-wait. Pending,
+  in-flight, and retry-wait changes remain locally hidden and silent on the
+  Review screen; background retry follows its stored backoff without a manual
+  action that can collide with the original request. Authentication-required
+  and permanent-attention states keep their dedicated guidance.
 - Review opens cache-first without waiting for bootstrap or Health reprocess.
   Its list and Location Evidence detail use the same right-aligned page-title
   header treatment as Settings (`Review` and `Location evidence` respectively),

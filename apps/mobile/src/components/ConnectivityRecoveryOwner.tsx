@@ -367,7 +367,7 @@ async function runRootRecoveryPass() {
               return "continue";
             }
             return reviewConnectivityRecoveryStepResult(
-              await synchroniseReviewMutations({ force: true })
+              await synchroniseReviewMutations()
             );
           }
         },

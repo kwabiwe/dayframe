@@ -140,7 +140,7 @@ describe("mobile Review action contracts", () => {
     expect(editSheetSource).not.toContain("focusDescriptionOnShow");
   });
 
-  it("keeps Review cards pending until server acknowledgement and reconciles stale bootstrap data", () => {
+  it("hides Review cards after durable local acknowledgement and reconciles stale bootstrap data", () => {
     expect(reviewSource).toContain("enqueueReviewMutation");
     expect(reviewSource).toContain("getReviewItemSyncStates");
     expect(reviewSource).toContain("Waiting to sync");

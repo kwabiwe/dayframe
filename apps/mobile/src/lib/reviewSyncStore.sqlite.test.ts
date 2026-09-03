@@ -80,6 +80,81 @@ describe("Review real SQLite transactions", () => {
     await expect(store.enqueueReviewMutation({ ...input, mutation: { ...input.mutation, acknowledgeContradictoryEvidence: true } })).rejects.toThrow("different data");
     await expect(store.enqueueReviewMutation({ ...input, item: input.affectedItems[1], mutation: { ...input.mutation, adjacentReviewItemId: input.item.id } })).rejects.toThrow("different data");
   });
+  it("coalesces a repeated local action onto the existing durable intent", async () => {
+    const data = bootstrap();
+    const item = data.reviewItems[0];
+    const first = await store.enqueueReviewMutation({
+      bootstrap: data,
+      item,
+      clientMutationId: syntheticId(40),
+      mutation: { action: "accept" }
+    });
+    const repeated = await store.enqueueReviewMutation({
+      bootstrap: data,
+      item,
+      clientMutationId: syntheticId(41),
+      mutation: { action: "accept" }
+    });
+    expect(first.idempotent).toBe(false);
+    expect(repeated.idempotent).toBe(true);
+    expect(repeated.envelope.clientMutationId).toBe(first.envelope.clientMutationId);
+    expect(count("review_mutation_outbox")).toBe(1);
+    expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((candidate) => candidate.id)).not.toContain(item.id);
+  });
+  it("does not queue another forced pass while a Review request is active", async () => {
+    const data = bootstrap();
+    await store.enqueueReviewMutation({
+      bootstrap: data,
+      item: data.reviewItems[0],
+      clientMutationId: syntheticId(42),
+      mutation: { action: "accept" }
+    });
+    let releaseResponse!: () => void;
+    mocks.fetch.mockImplementation(() => new Promise((resolve) => {
+      releaseResponse = () => resolve({
+        status: 409,
+        json: async () => ({ code: "review_item_locked" })
+      });
+    }));
+    const first = store.synchroniseReviewMutations();
+    await vi.waitFor(() => expect(mocks.fetch).toHaveBeenCalledOnce());
+    const repeated = store.synchroniseReviewMutations({ force: true });
+    releaseResponse();
+    await Promise.all([first, repeated]);
+    expect(mocks.fetch).toHaveBeenCalledOnce();
+    expect(db.prepare("select attempt_count from review_mutation_outbox").get()!.attempt_count).toBe(1);
+  });
+  it("keeps a locked mutation hidden until a later retry is acknowledged", async () => {
+    const data = bootstrap();
+    const item = data.reviewItems[0];
+    await store.enqueueReviewMutation({
+      bootstrap: data,
+      item,
+      clientMutationId: syntheticId(43),
+      mutation: { action: "accept" }
+    });
+    mocks.fetch
+      .mockResolvedValueOnce({
+        status: 409,
+        json: async () => ({ code: "review_item_locked" })
+      })
+      .mockResolvedValueOnce({ status: 200, json: async () => ({ ok: true }) });
+
+    await store.synchroniseReviewMutations();
+    await store.processReviewBootstrap(data);
+    expect(db.prepare("select state from review_mutation_outbox").get()!.state).toBe("retry_wait");
+    expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((candidate) => candidate.id)).not.toContain(item.id);
+
+    await store.synchroniseReviewMutations({ force: true });
+    expect(db.prepare("select state from review_mutation_outbox").get()!.state).toBe("acknowledged");
+    expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((candidate) => candidate.id)).not.toContain(item.id);
+
+    await store.processReviewBootstrap({
+      ...data,
+      reviewItems: data.reviewItems.filter((candidate) => candidate.id !== item.id)
+    });
+    expect(count("review_mutation_outbox")).toBe(0);
+  });
   it("restores only canonically open sources after a permanent conflict", async () => {
     const input = mergeInput(); await store.enqueueReviewMutation(input);
     mocks.fetch.mockResolvedValue({ status: 409, json: async () => ({ code: "resolution_conflict", canonicalReviewStatuses: { [input.item.id]: "accepted", [input.mutation.adjacentReviewItemId]: "open" } }) });
