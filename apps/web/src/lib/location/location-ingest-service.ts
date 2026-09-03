@@ -26,6 +26,8 @@ import {
 import { locationSemanticDisposition } from "./location-semantic-policy";
 
 export const LOCATION_EVIDENCE_BODY_LIMIT_BYTES = 512 * 1024;
+const LOCATION_INGEST_LOCK_TIMEOUT = "1500ms";
+const LOCATION_INGEST_STATEMENT_TIMEOUT = "12s";
 
 export class LocationIngestError extends Error {
   constructor(message: string, readonly status: number, readonly code: string) {
@@ -62,6 +64,8 @@ export async function ingestLocationEvidence(
   const client = await pool.connect();
   try {
     await client.query("begin");
+    await client.query("select set_config('lock_timeout', $1, true)", [LOCATION_INGEST_LOCK_TIMEOUT]);
+    await client.query("select set_config('statement_timeout', $1, true)", [LOCATION_INGEST_STATEMENT_TIMEOUT]);
     await client.query(
       "select pg_advisory_xact_lock(hashtext($1), hashtext($2))",
       [session.workspaceId, session.userId]
@@ -204,6 +208,8 @@ export async function replayRetainedLocationEvidence(
   const client = await pool.connect();
   try {
     await client.query("begin");
+    await client.query("select set_config('lock_timeout', $1, true)", [LOCATION_INGEST_LOCK_TIMEOUT]);
+    await client.query("select set_config('statement_timeout', $1, true)", [LOCATION_INGEST_STATEMENT_TIMEOUT]);
     await client.query(
       "select pg_advisory_xact_lock(hashtext($1), hashtext($2))",
       [session.workspaceId, session.userId]

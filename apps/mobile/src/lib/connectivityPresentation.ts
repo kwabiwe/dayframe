@@ -136,12 +136,7 @@ export function connectivityStatusViewModel(input: {
           isActionable: false,
           variant: "syncing"
         }
-      : {
-          accessibilityLabel: "Saved changes waiting to sync.",
-          id: "pending",
-          isActionable: false,
-          variant: "pending"
-        };
+      : null;
   }
   if (
     input.status === "online" &&

@@ -155,6 +155,7 @@ export default function ReviewScreen() {
   const bootstrapRefreshQueued = useRef(false);
   const initialFocusHandled = useRef(false);
   const healthReprocessInFlight = useRef(false);
+  const healthReprocessRunSequence = useRef(0);
   const forcedReprocessComplete = useRef(false);
   const lastHandledReconnectEpoch = useRef(0);
   const connectivityRef = useRef({ isOffline, isOnline, reconnectEpoch });
@@ -405,7 +406,7 @@ export default function ReviewScreen() {
   const startHealthReviewReprocess = useCallback(async (force = false) => {
     if (healthReprocessInFlight.current) return;
     healthReprocessInFlight.current = true;
-    const generation = screenOwnerGeneration.current;
+    const runSequence = ++healthReprocessRunSequence.current;
     const forceReprocess = force || !forcedReprocessComplete.current;
     if (forceReprocess) forcedReprocessComplete.current = true;
     const startedAt = new Date().toISOString();
@@ -421,7 +422,7 @@ export default function ReviewScreen() {
         reprocessExistingHealthReviewItems(undefined, { force: forceReprocess }),
         HEALTH_REPROCESS_TIMEOUT_MS
       );
-      if (generation !== screenOwnerGeneration.current) return;
+      if (runSequence !== healthReprocessRunSequence.current) return;
       setReprocessDiagnostics((current) => ({
         ...current,
         finishedAt: new Date().toISOString(),
@@ -443,7 +444,7 @@ export default function ReviewScreen() {
         });
       }
     } catch (error) {
-      if (generation !== screenOwnerGeneration.current) return;
+      if (runSequence !== healthReprocessRunSequence.current) return;
       if (error instanceof AuthRequiredError) {
         router.replace("/");
         return;
@@ -456,7 +457,9 @@ export default function ReviewScreen() {
         error: error instanceof Error ? error.message : "Unable to reprocess Health review items."
       }));
     } finally {
-      healthReprocessInFlight.current = false;
+      if (runSequence === healthReprocessRunSequence.current) {
+        healthReprocessInFlight.current = false;
+      }
     }
   }, []);
 
@@ -570,7 +573,6 @@ export default function ReviewScreen() {
   );
   const totalNeedsReview = openReviewItems.length + reviewNeededEntries.length;
   const editingEntry = editTarget?.entry ?? null;
-  const reprocessRunning = reprocessDiagnostics.status === "running";
   const overflowItemId =
     reviewMenuState.openItemId ?? reviewMenuState.closingItemId;
   const overflowTarget = (data?.reviewItems ?? []).find(
@@ -610,7 +612,6 @@ export default function ReviewScreen() {
       type: "toggle",
       itemId: item.id,
       disabled:
-        (reprocessRunning && isHealthReviewItem(item)) ||
         reviewMutations.current.has(item.id) ||
         reviewItemSyncStates.has(item.id)
     });
@@ -957,7 +958,7 @@ export default function ReviewScreen() {
                     <ReviewItemCard
                       item={item}
                       overlapCount={overlapCounts.get(item.id) ?? 0}
-                      disabled={reprocessRunning && isHealthReviewItem(item)}
+                      disabled={false}
                       syncState={reviewItemSyncStates.get(item.id) ?? null}
                       menuOpen={reviewMenuState.openItemId === item.id}
                       now={now}
@@ -994,7 +995,6 @@ export default function ReviewScreen() {
       <OverflowMenu
         disabled={
           !overflowItemId ||
-          (reprocessRunning && Boolean(overflowTarget && isHealthReviewItem(overflowTarget))) ||
           reviewMenuState.pendingAction != null
         }
         onClose={() => applyReviewMenuEvent({ type: "close" })}

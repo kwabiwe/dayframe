@@ -101,6 +101,26 @@ describe("Review real SQLite transactions", () => {
     await store.processReviewBootstrap({ ...input.bootstrap, reviewItems: input.bootstrap.reviewItems.slice(0, 2) });
     expect(count("review_mutation_outbox")).toBe(0); expect(count("review_mutation_effects")).toBe(0);
   });
+  it("repairs a server-rejected split that an older client queued for a commute", async () => {
+    const data = bootstrap();
+    const visit = data.reviewItems[2];
+    await store.enqueueReviewMutation({
+      bootstrap: data,
+      item: visit,
+      clientMutationId: syntheticId(30),
+      mutation: { action: "split", splitAt: visit.suggestedStartedAt! }
+    });
+    db.prepare(`update review_mutation_outbox set state = 'needs_attention', last_http_status = 422,
+      last_error = 'HTTP 422 · invalid_action'`).run();
+    await store.processReviewBootstrap({
+      ...data,
+      reviewItems: data.reviewItems.map((item) => item.id === visit.id
+        ? { ...item, eventType: "commute_detected" }
+        : item)
+    });
+    expect(count("review_mutation_outbox")).toBe(0);
+    expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((item) => item.id)).toContain(visit.id);
+  });
   it("keeps intent pending without dispatch when the session changes during local preparation", async () => {
     await store.enqueueReviewMutation(mergeInput());
     mocks.current.mockReturnValue(false);

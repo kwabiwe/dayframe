@@ -485,6 +485,22 @@ export async function processReviewBootstrap(bootstrap: MobileBootstrap) {
           .filter((item) => item.status === "open")
           .map((item) => item.id)
       );
+      const commuteIds = new Set(
+        bootstrap.reviewItems
+          .filter((item) => item.status === "open" && item.eventType === "commute_detected")
+          .map((item) => item.id)
+      );
+      for (const commuteId of commuteIds) {
+        await transaction.runAsync(
+          `delete from review_mutation_outbox
+           where account_key = ? and review_item_id = ?
+             and action_kind in ('split', 'split_and_confirm')
+             and state = 'needs_attention' and last_http_status = 422
+             and last_error like '%invalid_action%'`,
+          key,
+          commuteId
+        );
+      }
       const acknowledged = await transaction.getAllAsync<{
         client_mutation_id: string;
         review_item_id: string;

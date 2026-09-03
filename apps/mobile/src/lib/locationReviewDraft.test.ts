@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { syntheticReviewBootstrap } from "../../../../scripts/fixtures/review-performance";
 import {
   buildLocationReviewEdit,
   buildLocationReviewResolutionAction,
+  buildDurableLocationReviewCommand,
   durableReviewMutationFromLocationAction,
   formatLocationReviewEditableTime,
   initialLocationReviewDescription,
@@ -204,5 +206,15 @@ describe("Location Review editor draft", () => {
       action: "edit_and_confirm",
       edit: { description: "Missing an explicit time window" }
     })).toBe(true);
+  });
+
+  it("rejects stay-only structural actions for a commute before enqueue", () => {
+    const data = syntheticReviewBootstrap(4);
+    const commute = data.reviewItems.find((item) => item.eventType === "commute_detected")!;
+    expect(() => buildDurableLocationReviewCommand(
+      { action: "split", splitAt: commute.suggestedStartedAt! },
+      commute,
+      data
+    )).toThrow("Only a detected visit can be split.");
   });
 });

@@ -13,6 +13,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/ingest-auth", () => ({ resolveRequestSession: mocks.resolveRequestSession }));
+vi.mock("@/lib/db", () => ({
+  isLockNotAvailableError: (error: { code?: string }) => error?.code === "55P03",
+  isStatementTimeoutError: (error: { code?: string }) => error?.code === "57014"
+}));
 vi.mock("@/lib/location/location-ingest-service", () => ({
   LOCATION_EVIDENCE_BODY_LIMIT_BYTES: 512 * 1024,
   LocationIngestError: class LocationIngestError extends Error {},
@@ -90,8 +94,19 @@ describe("POST /api/location/replay", () => {
     expect(response.status).toBe(500);
     expect(errorSpy).toHaveBeenCalledWith(
       "Location replay failed without coordinate payloads",
-      { name: "Error" }
+      { name: "Error", code: null }
     );
     errorSpy.mockRestore();
+  });
+
+  it("returns a retryable busy response for owner lock contention", async () => {
+    mocks.replayRetainedLocationEvidence.mockRejectedValueOnce({ code: "55P03" });
+    const response = await POST(new Request("https://dayframe.test/api/location/replay", {
+      method: "POST",
+      body: JSON.stringify({ deviceId: "ios-device" })
+    }));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({ code: "location_processing_busy" });
   });
 });
