@@ -299,6 +299,10 @@ export default function ReviewScreen() {
         router.replace("/");
         return;
       }
+      console.warn("Health Review reprocess did not complete", {
+        name: error instanceof Error ? error.name : "UnknownError",
+        timedOut: error instanceof Error && error.message === "Health reprocess timed out."
+      });
       if (
         generation !== screenOwnerGeneration.current ||
         !screenFocusedRef.current

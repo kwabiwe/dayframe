@@ -25,7 +25,7 @@ describe("connectivity status presentation", () => {
 
   it("uses a contrast-safe neutral foreground in Light and Dark appearance", () => {
     for (const mode of ["light", "dark"] as const) {
-      for (const variant of ["offline", "pending", "syncing", "synced", "attention"] as const) {
+      for (const variant of ["offline", "syncing", "synced", "attention"] as const) {
         const role = connectivityStatusColorRole(variant);
         expect(contrastRatio(
           DAYFRAME_THEME[mode].background,

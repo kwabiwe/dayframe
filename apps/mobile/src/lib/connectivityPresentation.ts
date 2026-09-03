@@ -2,7 +2,6 @@ import { CONNECTIVITY_SUCCESS_NOTICE_MS, type ConnectivityStatus } from "./conne
 
 export type ConnectivityStatusVariant =
   | "offline"
-  | "pending"
   | "syncing"
   | "synced"
   | "attention";

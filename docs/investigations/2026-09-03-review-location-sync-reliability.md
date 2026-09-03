@@ -44,3 +44,5 @@ Claude Opus 5 reviewed draft PR #187 after the first implementation pass and req
 - cover the transaction configuration directly rather than only mocking route-level classification.
 
 The suggestion to show stale background work in the header was not adopted because the owner explicitly requires background retries to remain invisible; persistent failures remain available in Sync & diagnostics. The second implementation pass also removed write-only Health reprocess presentation state instead of retaining an unreachable run-sequence guard.
+
+Opus 5 re-reviewed amended head `0fa7f88`, independently reran the full test/typecheck/lint/docs suites, and returned `APPROVE`. Its two non-blocking cleanups were also applied: the now-unreachable `pending` header variant was removed so the product decision is enforced by the type system, and background Health reprocess failure now emits bounded, payload-free diagnostic metadata.

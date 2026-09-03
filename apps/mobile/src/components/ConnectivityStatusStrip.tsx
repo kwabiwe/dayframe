@@ -208,7 +208,7 @@ function ConnectivityStatusGlyph({
   }, [reduceMotion, rotation, variant]);
 
   const symbolName: Record<
-    Exclude<ConnectivityStatusVariant, "pending" | "syncing">,
+    Exclude<ConnectivityStatusVariant, "syncing">,
     SFSymbol
   > = {
     attention: "xmark.icloud",
@@ -216,7 +216,7 @@ function ConnectivityStatusGlyph({
     synced: "checkmark.icloud"
   };
 
-  if (variant === "syncing" || variant === "pending") {
+  if (variant === "syncing") {
     return (
       <View style={[styles.statusGlyph, styles.statusGlyphAligned]}>
         <Reanimated.View style={[styles.syncArrows, rotatingStyle]}>
