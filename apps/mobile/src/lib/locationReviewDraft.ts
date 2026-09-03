@@ -180,8 +180,7 @@ export function assertLocationReviewActionCompatible(
     throw new LocationReviewDraftError("Only adjacent detected visits can be merged.");
   }
   if (
-    (mutation.action === "change_place_and_confirm" ||
-      mutation.action === "record_poi_once" ||
+    (mutation.action === "record_poi_once" ||
       mutation.action === "save_place_and_confirm") &&
     isCommute
   ) {

@@ -494,7 +494,10 @@ export async function processReviewBootstrap(bootstrap: MobileBootstrap) {
         await transaction.runAsync(
           `delete from review_mutation_outbox
            where account_key = ? and review_item_id = ?
-             and action_kind in ('split', 'split_and_confirm')
+             and action_kind in (
+               'split', 'split_and_confirm', 'merge', 'merge_and_confirm',
+               'record_poi_once', 'save_place_and_confirm'
+             )
              and state = 'needs_attention' and last_http_status = 422
              and last_error like '%invalid_action%'`,
           key,

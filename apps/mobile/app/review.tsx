@@ -30,7 +30,6 @@ import {
   createTag,
   fetchBootstrap,
   updateTimeEntry,
-  type HealthReviewReprocessResult,
   type MobileBootstrap,
   type MobileReviewItem,
   type MobileTimeEntry,
@@ -106,14 +105,6 @@ type ReviewLoadOptions = {
   skipReprocess?: boolean;
 };
 
-type ReviewReprocessDiagnostics = {
-  startedAt: string | null;
-  finishedAt: string | null;
-  status: "idle" | "running" | "success" | "partial" | "failed" | "timed_out";
-  result: HealthReviewReprocessResult | null;
-  error: string | null;
-};
-
 const HEALTH_REPROCESS_TIMEOUT_MS = 45_000;
 
 export default function ReviewScreen() {
@@ -137,13 +128,6 @@ export default function ReviewScreen() {
   const [reviewItemSyncStates, setReviewItemSyncStates] = useState<
     Map<string, ReviewItemSyncState>
   >(new Map());
-  const [reprocessDiagnostics, setReprocessDiagnostics] = useState<ReviewReprocessDiagnostics>({
-    startedAt: null,
-    finishedAt: null,
-    status: "idle",
-    result: null,
-    error: null
-  });
   const dataRef = useRef<MobileBootstrap | null>(null);
   const editTargetRef = useRef<ReviewEditTarget | null>(null);
   const editPresentationRef = useRef<TimeEntrySheetPresentation | null>(null);
@@ -155,7 +139,6 @@ export default function ReviewScreen() {
   const bootstrapRefreshQueued = useRef(false);
   const initialFocusHandled = useRef(false);
   const healthReprocessInFlight = useRef(false);
-  const healthReprocessRunSequence = useRef(0);
   const forcedReprocessComplete = useRef(false);
   const lastHandledReconnectEpoch = useRef(0);
   const connectivityRef = useRef({ isOffline, isOnline, reconnectEpoch });
@@ -406,30 +389,13 @@ export default function ReviewScreen() {
   const startHealthReviewReprocess = useCallback(async (force = false) => {
     if (healthReprocessInFlight.current) return;
     healthReprocessInFlight.current = true;
-    const runSequence = ++healthReprocessRunSequence.current;
     const forceReprocess = force || !forcedReprocessComplete.current;
     if (forceReprocess) forcedReprocessComplete.current = true;
-    const startedAt = new Date().toISOString();
-    setReprocessDiagnostics((current) => ({
-      ...current,
-      startedAt,
-      finishedAt: null,
-      status: "running",
-      error: null
-    }));
     try {
       const reprocess = await withTimeout(
         reprocessExistingHealthReviewItems(undefined, { force: forceReprocess }),
         HEALTH_REPROCESS_TIMEOUT_MS
       );
-      if (runSequence !== healthReprocessRunSequence.current) return;
-      setReprocessDiagnostics((current) => ({
-        ...current,
-        finishedAt: new Date().toISOString(),
-        status: reprocess.failedCount > 0 || reprocess.partial ? "partial" : "success",
-        result: reprocess,
-        error: reprocess.errorSummary[0] ?? null
-      }));
       if (
         reprocess.confirmedCount > 0 ||
         reprocess.ignoredCount > 0 ||
@@ -444,22 +410,12 @@ export default function ReviewScreen() {
         });
       }
     } catch (error) {
-      if (runSequence !== healthReprocessRunSequence.current) return;
       if (error instanceof AuthRequiredError) {
         router.replace("/");
         return;
       }
-      const timedOut = error instanceof Error && error.message === "Health reprocess timed out.";
-      setReprocessDiagnostics((current) => ({
-        ...current,
-        finishedAt: new Date().toISOString(),
-        status: timedOut ? "timed_out" : "failed",
-        error: error instanceof Error ? error.message : "Unable to reprocess Health review items."
-      }));
     } finally {
-      if (runSequence === healthReprocessRunSequence.current) {
-        healthReprocessInFlight.current = false;
-      }
+      healthReprocessInFlight.current = false;
     }
   }, []);
 
@@ -958,7 +914,6 @@ export default function ReviewScreen() {
                     <ReviewItemCard
                       item={item}
                       overlapCount={overlapCounts.get(item.id) ?? 0}
-                      disabled={false}
                       syncState={reviewItemSyncStates.get(item.id) ?? null}
                       menuOpen={reviewMenuState.openItemId === item.id}
                       now={now}
@@ -1076,7 +1031,6 @@ function ReviewSyncStatus({
 }
 
 function ReviewItemCard({
-  disabled,
   item,
   menuOpen,
   now,
@@ -1088,7 +1042,6 @@ function ReviewItemCard({
   styles,
   theme
 }: {
-  disabled: boolean;
   item: MobileReviewItem;
   menuOpen: boolean;
   now: number;
@@ -1109,7 +1062,7 @@ function ReviewItemCard({
     theme.textSecondary,
     theme.mode
   );
-  const controlsDisabled = disabled || syncState != null;
+  const controlsDisabled = syncState != null;
   const confidence = reviewConfidencePresentation(item.confidence);
   const locationReason = locationReviewReasonCopy(item, overlapCount);
   const summary = locationReason ?? reviewItemSummary(item);

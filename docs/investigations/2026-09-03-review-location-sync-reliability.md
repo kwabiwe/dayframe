@@ -33,3 +33,14 @@
 - Health reprocess timeout/focus changes cannot leave Review actions disabled.
 - Waiting/backoff alone never shows the header sync icon; active reconnect and completion still do.
 - Focused tests, full lint/typecheck/test/build/docs checks, CI, staging smoke and physical-iPhone verification are recorded honestly.
+
+## Independent review
+
+Claude Opus 5 reviewed draft PR #187 after the first implementation pass and requested changes. The accepted findings were:
+
+- keep `change_place_and_confirm` available for commutes because the server supports that contract;
+- widen legacy repair to every genuinely stay-only operation that an older client could strand on a commute;
+- keep the database statement deadline below the hosted request budget; and
+- cover the transaction configuration directly rather than only mocking route-level classification.
+
+The suggestion to show stale background work in the header was not adopted because the owner explicitly requires background retries to remain invisible; persistent failures remain available in Sync & diagnostics. The second implementation pass also removed write-only Health reprocess presentation state instead of retaining an unreachable run-sequence guard.

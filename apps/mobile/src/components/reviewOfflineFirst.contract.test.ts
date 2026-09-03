@@ -10,7 +10,7 @@ describe("offline-first Review screen contracts", () => {
     expect(reviewSource).toContain("hydrateReviewFromCache");
     expect(reviewSource).toContain("startHealthReviewReprocess");
     expect(reviewSource).not.toContain("reprocessRunning && isHealthReviewItem(item)");
-    expect(reviewSource).toContain("healthReprocessRunSequence");
+    expect(reviewSource).not.toContain("setReprocessDiagnostics");
     expect(reviewSource).toContain("evidencePrefetcher.start");
     expect(reviewSource).toContain("recoverReviewAfterReconnect");
     expect(reviewSource).toContain("skipReprocess: true");
