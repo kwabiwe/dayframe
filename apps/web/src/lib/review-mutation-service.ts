@@ -1,6 +1,8 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   ReviewMutationEnvelopeSchema,
+  ReviewReconciliationRequestSchema,
+  type ReviewReconciliationResult,
   DurableLocationReviewMutationSchema,
   type ReviewMutation,
   type ReviewMutationEdit
@@ -8,11 +10,12 @@ import {
 import type pg from "pg";
 import {
   isLockNotAvailableError,
-  isStatementTimeoutError,
-  pool
+  isQueryCancelledError
 } from "./db";
+import { withSyncTransaction, setSyncPhase, syncFailureMetadata, SyncOperationError, type SyncTransactionOptions } from "./sync-transaction";
 import {
   reconcileMatchingHealthSleepTimeEntry,
+  recordHealthSleepResolution,
   ReviewResolutionError,
   type ReviewResolutionResult
 } from "./event-service";
@@ -43,6 +46,7 @@ type GenericReviewRow = {
   eventType: string | null;
   rawPayload: unknown;
   locationSegmentId: string | null;
+  resolvedTimeEntryId?: string | null;
 };
 
 export const REVIEW_MUTATION_STATEMENT_TIMEOUT_MS = 8_000;
@@ -51,207 +55,163 @@ export const REVIEW_MUTATION_LOCK_TIMEOUT_MS = 1_500;
 export async function resolveIdempotentReviewMutation(
   reviewItemId: string,
   input: unknown,
-  session: RequestSession
+  session: RequestSession,
+  options: SyncTransactionOptions & { requestId?: string } = {}
 ) {
   const startedAt = Date.now();
+  const deadlineAt = options.deadlineAt ?? startedAt + 8_000;
+  const requestId = options.requestId ?? randomUUID();
   const envelope = ReviewMutationEnvelopeSchema.parse(input);
   const requestHash = mutationHash(envelope.mutation);
   let lockOutcome: "not_attempted" | "acquired" | "contended" = "not_attempted";
-  let fastReceipt: ReceiptRow | null;
+  let receiptReplay = false;
+  const transactionOptions = { ...options, deadlineAt };
   try {
-    fastReceipt = await loadReceipt(
-      pool,
-      envelope.clientMutationId,
-      session
-    );
-  } catch (error) {
-    logReviewMutationDiagnostic({
-      actionKind: envelope.mutation.action,
-      durationMs: Date.now() - startedAt,
-      lockOutcome,
-      receiptReplay: false,
-      outcome: errorOutcome(error)
-    });
-    throw error;
-  }
-  if (fastReceipt) {
-    try {
-      const result = receiptResult(
-        fastReceipt,
-        reviewItemId,
-        envelope.mutation,
-        requestHash
+    const result = await withSyncTransaction("review_mutation", async ({ client, phase }) => {
+      phase("receipt_read");
+      const fastReceipt = await loadReceipt(client, envelope.clientMutationId, session);
+      if (fastReceipt) {
+        receiptReplay = true;
+        return receiptResult(fastReceipt, reviewItemId, envelope.mutation, requestHash);
+      }
+      phase("mutation_lock");
+      const lock = await client.query<{ acquired: boolean }>(
+        "select pg_try_advisory_xact_lock(hashtext($1), hashtext($2)) as acquired",
+        [`${session.workspaceId}:${session.userId}`, envelope.clientMutationId]
       );
-      logReviewMutationDiagnostic({
-        actionKind: envelope.mutation.action,
-        durationMs: Date.now() - startedAt,
-        lockOutcome,
-        receiptReplay: true,
-        outcome: canonicalOutcome(result)
-      });
-      return result;
-    } catch (error) {
-      logReviewMutationDiagnostic({
-        actionKind: envelope.mutation.action,
-        durationMs: Date.now() - startedAt,
-        lockOutcome,
-        receiptReplay: true,
-        outcome: errorOutcome(error)
-      });
-      throw error;
-    }
-  }
-  const client = await pool.connect();
-  try {
-    await client.query("begin");
-    await client.query(
-      `set local statement_timeout = '${REVIEW_MUTATION_STATEMENT_TIMEOUT_MS}ms'`
-    );
-    await client.query(
-      `set local lock_timeout = '${REVIEW_MUTATION_LOCK_TIMEOUT_MS}ms'`
-    );
-    const lock = await client.query<{ acquired: boolean }>(
-      `select pg_try_advisory_xact_lock(
-         hashtext($1),
-         hashtext($2)
-       ) as acquired`,
-      [
-        `${session.workspaceId}:${session.userId}`,
-        envelope.clientMutationId
-      ]
-    );
-    if (!lock.rows[0]?.acquired) {
-      lockOutcome = "contended";
-      throw reviewItemLocked(reviewItemId);
-    }
-    lockOutcome = "acquired";
-    const existing = await loadReceipt(client, envelope.clientMutationId, session);
-    if (existing) {
-      const result = receiptResult(
-        existing,
-        reviewItemId,
-        envelope.mutation,
-        requestHash
-      );
-      await client.query("commit");
-      logReviewMutationDiagnostic({
-        actionKind: envelope.mutation.action,
-        durationMs: Date.now() - startedAt,
-        lockOutcome,
-        receiptReplay: true,
-        outcome: canonicalOutcome(result)
-      });
-      return result;
-    }
-
-    if (!["accept", "ignore_once", "confirm", "ignore_once_location", "edit_and_confirm"].includes(envelope.mutation.action)) {
-      // Structural corrections share the existing replay/direct-action owner.
-      // A busy owner is retryable; never wait without the transaction deadlines.
+      if (!lock.rows[0]?.acquired) {
+        lockOutcome = "contended";
+        throw reviewItemLocked(reviewItemId, "mutation_in_progress");
+      }
+      lockOutcome = "acquired";
+      phase("receipt_read");
+      const existing = await loadReceipt(client, envelope.clientMutationId, session);
+      if (existing) {
+        receiptReplay = true;
+        return receiptResult(existing, reviewItemId, envelope.mutation, requestHash);
+      }
+      // One lock order in every producer: mutation (when present), user/Sleep,
+      // automatic category, then Review/event/entry rows. Never row -> user.
+      phase("owner_lock");
       const ownerLock = await client.query<{ acquired: boolean }>(
         "select pg_try_advisory_xact_lock(hashtext($1), hashtext($2)) as acquired",
         [session.workspaceId, session.userId]
       );
-      if (!ownerLock.rows[0]?.acquired) throw reviewItemLocked(reviewItemId);
-    }
-
-    const locationItem = await isLocationReview(client, reviewItemId, session);
-    const result = locationItem
-      ? await resolveLocationMutation(
-          client,
-          reviewItemId,
-          envelope.mutation,
-          session
-        )
-      : await resolveGenericMutation(
-          client,
-          reviewItemId,
-          envelope.mutation,
-          session
-        );
-    await client.query(
-      `insert into review_mutation_receipts (
-         workspace_id,
-         user_id,
-         client_mutation_id,
-         review_item_id,
-         action_key,
-         request_hash,
-         result_json
-       ) values ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
-      [
-        session.workspaceId,
-        session.userId,
-        envelope.clientMutationId,
-        reviewItemId,
-        envelope.mutation.action,
-        requestHash,
-        JSON.stringify(result)
-      ]
-    );
-    await client.query("commit");
-    logReviewMutationDiagnostic({
-      actionKind: envelope.mutation.action,
-      durationMs: Date.now() - startedAt,
-      lockOutcome,
-      receiptReplay: false,
-      outcome: canonicalOutcome(result)
-    });
+      if (!ownerLock.rows[0]?.acquired) throw reviewItemLocked(reviewItemId, "owner_busy");
+      phase("canonical_read");
+      const locationItem = await isLocationReview(client, reviewItemId, session);
+      phase("review_lock");
+      const result = locationItem
+        ? await resolveLocationMutation(client, reviewItemId, envelope.mutation, session)
+        : await resolveGenericMutation(client, reviewItemId, envelope.mutation, session);
+      phase("receipt_write");
+      await client.query(
+        `insert into review_mutation_receipts (
+           workspace_id, user_id, client_mutation_id, review_item_id,
+           action_key, request_hash, result_json
+         ) values ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+        [session.workspaceId, session.userId, envelope.clientMutationId, reviewItemId,
+          envelope.mutation.action, requestHash, JSON.stringify(result)]
+      );
+      return result;
+    }, transactionOptions);
+    logReviewMutationDiagnostic({ actionKind: envelope.mutation.action,
+      durationMs: Date.now() - startedAt, lockOutcome, receiptReplay,
+      outcome: canonicalOutcome(result) });
     return result;
-  } catch (error) {
-    await client.query("rollback");
-    if (isLockNotAvailableError(error) || isStatementTimeoutError(error)) {
-      const lockedError = reviewItemLocked(reviewItemId);
-      logReviewMutationDiagnostic({
-        actionKind: envelope.mutation.action,
-        durationMs: Date.now() - startedAt,
-        lockOutcome: isLockNotAvailableError(error) ? "contended" : lockOutcome,
-        receiptReplay: false,
-        outcome: lockedError.code
-      });
-      throw lockedError;
+  } catch (cause) {
+    let error = cause;
+    const metadata = cause as { code?: string; syncPhase?: string; phase?: string; message?: string; sqlState?: string };
+    const phase = metadata.syncPhase ?? metadata.phase ?? "unknown";
+    const sqlState = metadata.sqlState ?? (/^[0-9A-Z]{5}$/.test(metadata.code ?? "") ? metadata.code : undefined);
+    if (isLockNotAvailableError(cause)) {
+      lockOutcome = "contended";
+      error = reviewItemLocked(reviewItemId, "lock_unavailable");
+    } else if (isQueryCancelledError(cause) || cause instanceof SyncOperationError) {
+      const failure = syncFailureMetadata(cause);
+      error = new ReviewResolutionError(failure.reason === "operation_timeout" ? "review_query_timeout" :
+        failure.reason === "query_cancelled" ? "review_query_cancelled" : "review_service_unavailable",
+        "Review could not finish within this request. Your saved action can be reconciled safely.", {
+          status: 503, details: { reviewItemId, canonicalStatus: "unknown", ...failure, retryAfterMs: 5_000 }
+        });
     }
-    if (error instanceof ReviewResolutionError && error.code !== "review_item_locked") {
-      const ids = envelope.mutation.action === "merge" || envelope.mutation.action === "merge_and_confirm"
-        ? [reviewItemId, envelope.mutation.adjacentReviewItemId] : [reviewItemId];
-      // Read after rollback so a rejected mutation never publishes rolled-back
-      // intermediate status. Failure to prove open must keep the item hidden.
-      const canonical = await (async () => {
+    if (error instanceof ReviewResolutionError) {
+      error.details = { ...error.details, phase, requestId, ...(sqlState ? { sqlState } : {}) };
+      // The failed transaction is already rolled back/destroyed. A concurrent
+      // matching request may have committed meanwhile. Receipt proof wins.
+      if (error.code !== "mutation_id_conflict" && !options.signal?.aborted && Date.now() < deadlineAt - 100) {
         try {
-          await client.query("begin");
-          await client.query(`set local statement_timeout = '${REVIEW_MUTATION_STATEMENT_TIMEOUT_MS}ms'`);
-          const rows = await client.query<{ id: string; status: string }>(
-            "select id, status from review_items where workspace_id = $1 and user_id = $2 and id = any($3::uuid[])",
-            [session.workspaceId, session.userId, ids]
-          );
-          await client.query("commit");
-          return rows;
-        } catch {
-          await client.query("rollback");
-          return null;
+          const fresh = await withSyncTransaction("review_recovery_read", async ({ client, phase }) => {
+            phase("receipt_read");
+            const receipt = await loadReceipt(client, envelope.clientMutationId, session);
+            if (receipt) return { receipt, statuses: null };
+            phase("canonical_read");
+            const ids = affectedReviewIds(reviewItemId, envelope.mutation);
+            const rows = await client.query<{ id: string; status: string }>(
+              "select id, status from review_items where workspace_id = $1 and user_id = $2 and id = any($3::uuid[])",
+              [session.workspaceId, session.userId, ids]
+            );
+            return { receipt: null, statuses: Object.fromEntries(ids.map(id => [id,
+              rows.rows.find(row => row.id === id)?.status ?? "missing"])) };
+          }, { ...transactionOptions, readOnly: true, cleanupReserveMs: 100 });
+          if (fresh.receipt) return receiptResult(fresh.receipt, reviewItemId, envelope.mutation, requestHash);
+          if (fresh.statuses) error.details = { ...error.details,
+            canonicalReviewStatuses: fresh.statuses,
+            canonicalOpenReviewItemIds: Object.keys(fresh.statuses).filter(id => fresh.statuses[id] === "open"),
+            checkedAt: new Date().toISOString() };
+        } catch (freshError) {
+          if (freshError instanceof ReviewResolutionError && freshError.code === "mutation_id_conflict") throw freshError;
         }
-      })();
-      if (canonical) {
-        const statuses = Object.fromEntries(ids.map((id) => {
-          const status = canonical.rows.find((row) => row.id === id)?.status;
-          return [id, status === "open" || status === "accepted" || status === "ignored" ? status : "missing"];
-        }));
-        error.details = { ...error.details,
-          canonicalReviewStatuses: statuses,
-          canonicalOpenReviewItemIds: ids.filter((id) => statuses[id] === "open")
-        };
       }
     }
-    logReviewMutationDiagnostic({
-      actionKind: envelope.mutation.action,
-      durationMs: Date.now() - startedAt,
-      lockOutcome,
-      receiptReplay: false,
-      outcome: errorOutcome(error)
-    });
+    logReviewMutationDiagnostic({ actionKind: envelope.mutation.action,
+      durationMs: Date.now() - startedAt, lockOutcome, receiptReplay,
+      outcome: errorOutcome(error), phase, sqlState, requestId });
     throw error;
-  } finally {
-    client.release();
   }
+}
+
+function affectedReviewIds(reviewItemId: string, mutation: ReviewMutation) {
+  return mutation.action === "merge" || mutation.action === "merge_and_confirm"
+    ? [reviewItemId, mutation.adjacentReviewItemId] : [reviewItemId];
+}
+
+/** Read-only proof. Equivalent decisions go back through the normal mutation
+ * resolver to recheck provenance and atomically write the existing receipt. */
+export async function reconcileReviewMutations(input: unknown, session: RequestSession, options: SyncTransactionOptions = {}) {
+  const { mutations } = ReviewReconciliationRequestSchema.parse(input);
+  const deadlineAt = options.deadlineAt ?? Date.now() + 8_000;
+  const results: ReviewReconciliationResult[] = [];
+  for (const envelope of mutations) {
+    const base = { clientMutationId: envelope.clientMutationId, reviewItemId: envelope.reviewItemId };
+    try {
+      const result = await withSyncTransaction("review_reconcile", async ({ client, phase }): Promise<ReviewReconciliationResult> => {
+        phase("receipt_read");
+        const receipt = await loadReceipt(client, envelope.clientMutationId, session);
+        if (receipt) return { ...base, state: "applied", checkedAt: new Date().toISOString(),
+          result: receiptResult(receipt, envelope.reviewItemId, envelope.mutation, mutationHash(envelope.mutation)) as Record<string, unknown> };
+        phase("canonical_read");
+        const ids = affectedReviewIds(envelope.reviewItemId, envelope.mutation);
+        const rows = await client.query<{ id: string; status: string }>(
+          "select id, status from review_items where workspace_id=$1 and user_id=$2 and id=any($3::uuid[])",
+          [session.workspaceId, session.userId, ids]);
+        const checkedAt = new Date().toISOString();
+        if (!rows.rows.find(row => row.id === envelope.reviewItemId)) return { ...base, checkedAt, state: "missing" };
+        if (rows.rows.length === ids.length && rows.rows.every(row => row.status === "open")) return { ...base, checkedAt, state: "open" };
+        const wanted = ["ignore_once", "ignore_once_location"].includes(envelope.mutation.action) ? "ignored" : "accepted";
+        if (rows.rows.some(row => ["accepted", "ignored"].includes(row.status) && row.status !== wanted)) {
+          return { ...base, checkedAt, state: "conflict", reason: "different_final_decision" };
+        }
+        return { ...base, checkedAt, state: "unknown", reason: "effect_requires_receipt", retryOriginal: true };
+      }, { ...options, readOnly: true, deadlineAt });
+      results.push(result);
+    } catch (error) {
+      results.push({ ...base, checkedAt: new Date().toISOString(),
+        state: error instanceof ReviewResolutionError && error.code === "mutation_id_conflict" ? "conflict" : "unknown",
+        reason: error instanceof ReviewResolutionError ? error.code : "read_unavailable" });
+    }
+  }
+  return { ok: true as const, results };
 }
 
 function logReviewMutationDiagnostic(input: {
@@ -260,6 +220,9 @@ function logReviewMutationDiagnostic(input: {
   lockOutcome: "not_attempted" | "acquired" | "contended";
   receiptReplay: boolean;
   outcome: string;
+  phase?: string;
+  sqlState?: string;
+  requestId?: string;
 }) {
   if (
     input.durationMs < 750 &&
@@ -331,7 +294,7 @@ function receiptResult(
   return receipt.resultJson;
 }
 
-function reviewItemLocked(reviewItemId: string) {
+function reviewItemLocked(reviewItemId: string, reason = "lock_unavailable") {
   return new ReviewResolutionError(
     "review_item_locked",
     "This Review item is already being updated. Try again in a moment.",
@@ -339,7 +302,9 @@ function reviewItemLocked(reviewItemId: string) {
       status: 409,
       details: {
         reviewItemId,
-        canonicalStatus: "open"
+        canonicalStatus: "unknown",
+        reason,
+        retryAfterMs: 5_000
       }
     }
   );
@@ -386,7 +351,7 @@ async function resolveLocationMutation(
         status: 422,
         details: {
           reviewItemId,
-          canonicalStatus: "open"
+          canonicalStatus: "unknown"
         }
       }
     );
@@ -417,7 +382,7 @@ async function resolveGenericMutation(
         status: 422,
         details: {
           reviewItemId,
-          canonicalStatus: "open"
+          canonicalStatus: "unknown"
         }
       }
     );
@@ -450,6 +415,7 @@ async function lockGenericReview(
   reviewItemId: string,
   session: RequestSession
 ) {
+  setSyncPhase(client, "review_lock");
   const result = await client.query<GenericReviewRow>(
     `select ri.id,
             ri.event_id as "eventId",
@@ -463,6 +429,7 @@ async function lockGenericReview(
             ae.source as "eventSource",
             ae.event_type as "eventType",
             ae.raw_payload as "rawPayload",
+            ae.resolved_time_entry_id as "resolvedTimeEntryId",
             ri.location_segment_id as "locationSegmentId"
      from review_items ri
      left join activity_events ae
@@ -473,6 +440,7 @@ async function lockGenericReview(
      for update of ri nowait`,
     [reviewItemId, session.workspaceId, session.userId]
   );
+  setSyncPhase(client, "effect");
   const item = result.rows[0];
   if (!item) {
     throw new ReviewResolutionError(
@@ -573,6 +541,7 @@ async function acceptGenericReview(
     );
     entryId = inserted.rows[0]?.id;
   }
+  if (item.eventType === "health_sleep_import" && item.eventId && entryId) await recordHealthSleepResolution(client, session, item.eventId, entryId);
   await resolveGenericReviewAndEvent(client, item, session, "accepted");
   return {
     ok: true,
@@ -697,7 +666,15 @@ async function genericAcceptMatchesExisting(
   const window = validWindow(item.suggestedStartedAt, item.suggestedStoppedAt);
   if (!window || !item.eventId) return false;
   const entry = await entryCreatedFromEvent(client, item.eventId, session);
-  if (!entry) return false;
+  if (!entry) {
+    if (item.eventType !== "health_sleep_import" || !item.resolvedTimeEntryId) return false;
+    const linked = await client.query(
+      `select id from time_entries where id=$3 and workspace_id=$1 and user_id=$2
+         and source='health_sleep' and user_edited_at is null and review_status in ('confirmed','accepted')
+         and started_at <= $4::timestamptz and stopped_at >= $5::timestamptz`,
+      [session.workspaceId,session.userId,item.resolvedTimeEntryId,window.startedAt,window.stoppedAt]);
+    return linked.rows.length === 1;
+  }
   return genericEditMatchesExisting(
     client,
     entry.id,

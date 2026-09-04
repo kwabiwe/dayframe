@@ -15,7 +15,9 @@ export async function POST(request: Request) {
     const body = await request.json();
     const result = await processActivityEvent(body, session);
     scheduleLiveActivityNotification(session);
-    return NextResponse.json(result, { status: result.duplicate ? 200 : 201 });
+    return NextResponse.json({ ...result,
+      ...(typeof body?.clientEventId === "string" ? { clientEventId: body.clientEventId } : {})
+    }, { status: result.duplicate ? 200 : 201 });
   } catch (error) {
     const authResponse = authErrorResponse(error);
     if (authResponse) return authResponse;
@@ -34,7 +36,8 @@ export async function POST(request: Request) {
     if (isDatabasePayloadError(error)) {
       return NextResponse.json({ error: error.message }, { status: 422 });
     }
-    console.error("Dayframe event sync failed", error);
+    console.error("Dayframe event sync failed", { name: error instanceof Error ? error.name : "UnknownError",
+      sqlState: typeof (error as {code?:unknown})?.code === "string" ? (error as {code:string}).code : undefined });
     return NextResponse.json(
       {
         error:

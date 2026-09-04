@@ -63,7 +63,7 @@ describe("POST /api/location/evidence", () => {
     expect(response.status).toBe(201);
     expect(response.headers.get("cache-control")).toBe("private, no-store, max-age=0");
     expect(response.headers.get("vary")).toBe("Authorization, Cookie");
-    expect(mocks.ingestLocationEvidence).toHaveBeenCalledWith(body, session);
+    expect(mocks.ingestLocationEvidence).toHaveBeenCalledWith(body, session, undefined, expect.objectContaining({ signal: expect.any(AbortSignal), deadlineAt: expect.any(Number) }));
   });
 
   it("returns a retryable busy response when owner processing is locked", async () => {

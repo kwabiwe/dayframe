@@ -39,6 +39,14 @@ The primary services are:
 - `apps/web/src/lib/location/location-ingest-service.ts` and `location-review-service.ts` for Location V2 evidence, retained-evidence replay, and corrections;
 - `apps/web/src/app/api/time-entries/**` and `apps/web/src/app/api/events/route.ts` for app-facing writes.
 
+## Bounded sync operations
+
+Review receipt lookup, mutation, Health reprocess units and Location ingest/replay use one checked-out client per bounded transaction. The operation budget is eight seconds including cleanup (six seconds for interactive Health reprocess); statements are at most three seconds, lock waits at most 1.5 seconds, and idle transactions at most five seconds. PostgreSQL transaction timeout is feature detected; failure to configure a supported guard fails closed. Client abort/deadline destroys its lease, while database guards remain effective if application cleanup never runs.
+
+Review mutation IDs, canonical request hashes and the existing atomic receipts remain authoritative. A fresh bounded receipt read follows failed transactions. `/api/review/mutations/reconcile` is an authenticated, read-only, maximum-25-envelope proof operation. An accepted row alone never acknowledges a saved mutation: possible equivalents return to the ordinary mutation resolver for guarded provenance checks and an atomic receipt. `activity_events.resolved_time_entry_id` explicitly links newly reconciled Sleep revisions to their canonical entry; historical rows are not backfilled by overlap. Receipt replay never reapplies an old write over later user edits/deletion.
+
+Health reprocess selects candidates without batch row locks, then commits one bounded logical unit at a time. Complete legacy Sleep groups remain atomic and lock rows in ID order; scan overflow defers the group. The response includes a stable next cursor, committed counts, deferred/failed/remaining outcomes and stop reason. Category maintenance is a separate bounded unit. Lock order is mutation (when present), user/Sleep owner, automatic category, then Review/event/entry rows.
+
 ## Authentication and scoping
 
 Dayframe has three server auth modes:

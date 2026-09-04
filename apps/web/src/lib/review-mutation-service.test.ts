@@ -10,6 +10,7 @@ vi.mock("./db", () => ({
   pool: { connect: mocks.connect, query: mocks.poolQuery },
   isLockNotAvailableError: vi.fn(() => false),
   isStatementTimeoutError: vi.fn(() => false),
+  isQueryCancelledError: vi.fn(() => false),
   query: vi.fn()
 }));
 
@@ -41,6 +42,7 @@ describe("idempotent Review mutations", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.poolQuery.mockResolvedValue({ rows: [] });
+    mocks.connect.mockResolvedValue(clientForNewLocation());
   });
 
   it("returns the stored result after a lost response without applying twice", async () => {
@@ -57,7 +59,7 @@ describe("idempotent Review mutations", () => {
         "129dbf398adfb18a4046d2368a27529739dd522d07b3b2c65bd4dee800b8aeee",
       resultJson: stored
     };
-    mocks.poolQuery.mockResolvedValue({ rows: [receipt] });
+    mocks.connect.mockResolvedValue(clientForReceipt(receipt));
 
     await expect(
       resolveIdempotentReviewMutation(
@@ -67,7 +69,7 @@ describe("idempotent Review mutations", () => {
       )
     ).resolves.toEqual(stored);
     expect(mocks.resolveLocation).not.toHaveBeenCalled();
-    expect(mocks.connect).not.toHaveBeenCalled();
+    expect(mocks.connect).toHaveBeenCalledOnce();
   });
 
   it("rejects reuse of one mutation ID with different data", async () => {
@@ -77,7 +79,7 @@ describe("idempotent Review mutations", () => {
       requestHash: "0".repeat(64),
       resultJson: { ok: true }
     };
-    mocks.poolQuery.mockResolvedValue({ rows: [receipt] });
+    mocks.connect.mockResolvedValue(clientForReceipt(receipt));
 
     await expect(
       resolveIdempotentReviewMutation(
@@ -89,7 +91,7 @@ describe("idempotent Review mutations", () => {
       code: "mutation_id_conflict",
       status: 409
     });
-    expect(mocks.connect).not.toHaveBeenCalled();
+    expect(mocks.connect).toHaveBeenCalledOnce();
   });
 
   it("stores a new location result and receipt in the same transaction", async () => {
@@ -150,7 +152,7 @@ describe("idempotent Review mutations", () => {
     });
     expect(query).toHaveBeenCalledWith("rollback");
     expect(query.mock.calls.some(([statement]) =>
-      String(statement).includes("set local statement_timeout = '8000ms'")
+      String(statement).includes("set local statement_timeout = '3000ms'")
     )).toBe(true);
     expect(query.mock.calls.some(([statement]) =>
       String(statement).includes("set local lock_timeout = '1500ms'")
