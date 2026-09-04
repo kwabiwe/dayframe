@@ -14,7 +14,11 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/ingest-auth", () => ({ resolveRequestSession: mocks.resolveRequestSession }));
-vi.mock("@/lib/db", () => ({ query: mocks.query }));
+vi.mock("@/lib/db", () => ({
+  query: mocks.query,
+  isLockNotAvailableError: (error: { code?: string }) => error?.code === "55P03",
+  isStatementTimeoutError: (error: { code?: string }) => error?.code === "57014"
+}));
 vi.mock("@/lib/location/location-ingest-service", () => ({
   LOCATION_EVIDENCE_BODY_LIMIT_BYTES: 512 * 1024,
   LocationIngestError: class LocationIngestError extends Error {},
@@ -60,6 +64,16 @@ describe("POST /api/location/evidence", () => {
     expect(response.headers.get("cache-control")).toBe("private, no-store, max-age=0");
     expect(response.headers.get("vary")).toBe("Authorization, Cookie");
     expect(mocks.ingestLocationEvidence).toHaveBeenCalledWith(body, session);
+  });
+
+  it("returns a retryable busy response when owner processing is locked", async () => {
+    mocks.ingestLocationEvidence.mockRejectedValueOnce({ code: "55P03" });
+    const response = await POST(new Request("https://dayframe.test/api/location/evidence", {
+      method: "POST",
+      body: JSON.stringify({ clientBatchId: "batch-1", evidence: [{ clientEvidenceId: "evidence-1" }] })
+    }));
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({ code: "location_processing_busy" });
   });
 
   it("deletes only the authenticated owner's evidence with private response headers", async () => {

@@ -49,7 +49,8 @@ describe("connectivity status ownership", () => {
     const status = source("./ConnectivityStatusStrip.tsx");
 
     expect(status).toContain('variant !== "syncing" || reduceMotion');
-    expect(status).toContain('variant === "syncing" || variant === "pending"');
+    expect(status).toContain('variant === "syncing"');
+    expect(status).not.toContain('variant === "pending"');
     expect(status).toContain("withRepeat(");
     expect(status).toContain("Easing.linear");
     expect(status).toContain("cancelAnimation(rotation)");

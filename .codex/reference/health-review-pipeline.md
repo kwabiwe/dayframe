@@ -135,6 +135,7 @@ If a reason is not visible in UI, it should at least be present in diagnostics o
 - Vercel production is not deployed from the expected commit.
 - Supabase schema is missing columns used by the deployed code.
 - Review reprocess and manual Confirm contend on the same review rows.
+- A presentation timeout, focus-generation change, or still-running server reprocess must never leave Health Review controls disabled. Manual durable actions remain available and retry safely if the server row is briefly locked.
 - Health sample preferences are off or defaults are not applied.
 - A stale open timer must not block eligible Health or be changed by Health import.
 - Sleep stages are imported independently and never consolidated.

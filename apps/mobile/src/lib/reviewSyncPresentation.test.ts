@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ReviewSyncDiagnostics } from "./reviewSyncStore";
 import {
-  reviewSyncStatusCopy,
-  shouldOfferReviewSyncRetry
+  reviewSyncStatusCopy
 } from "./reviewSyncPresentation";
 
 function diagnostics(
@@ -37,26 +36,19 @@ function diagnostics(
 }
 
 describe("Review sync presentation", () => {
-  it("does not offer retry while a saved mutation is pending or in flight", () => {
+  it("keeps pending and retryable work in the background", () => {
     const state = diagnostics({ pendingCount: 1, waitingCount: 1 });
-
-    expect(reviewSyncStatusCopy(state)).toBe("1 Review change waiting to sync");
-    expect(shouldOfferReviewSyncRetry(state)).toBe(false);
-  });
-
-  it("offers retry only after a retryable failure enters backoff", () => {
-    const state = diagnostics({ retryWaitCount: 1, waitingCount: 1 });
-
-    expect(shouldOfferReviewSyncRetry(state)).toBe(true);
+    expect(reviewSyncStatusCopy(state)).toBeNull();
+    expect(reviewSyncStatusCopy(diagnostics({ retryWaitCount: 1, waitingCount: 1 }))).toBeNull();
   });
 
   it("keeps authentication and permanent issues on their dedicated actions", () => {
-    expect(shouldOfferReviewSyncRetry(diagnostics({
+    expect(reviewSyncStatusCopy(diagnostics({
       authenticationRequiredCount: 1,
       waitingCount: 1
-    }))).toBe(false);
-    expect(shouldOfferReviewSyncRetry(diagnostics({
+    }))).toContain("sign in to sync");
+    expect(reviewSyncStatusCopy(diagnostics({
       needsAttentionCount: 1
-    }))).toBe(false);
+    }))).toContain("needs attention");
   });
 });

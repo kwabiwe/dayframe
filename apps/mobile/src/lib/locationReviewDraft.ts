@@ -168,6 +168,26 @@ export type DurableLocationReviewCommand = {
 
 export class LocationReviewDraftError extends Error {}
 
+export function assertLocationReviewActionCompatible(
+  mutation: ReviewMutation,
+  item: Pick<MobileReviewItem, "eventType">
+) {
+  const isCommute = item.eventType === "commute_detected";
+  if ((mutation.action === "split" || mutation.action === "split_and_confirm") && isCommute) {
+    throw new LocationReviewDraftError("Only a detected visit can be split.");
+  }
+  if ((mutation.action === "merge" || mutation.action === "merge_and_confirm") && isCommute) {
+    throw new LocationReviewDraftError("Only adjacent detected visits can be merged.");
+  }
+  if (
+    (mutation.action === "record_poi_once" ||
+      mutation.action === "save_place_and_confirm") &&
+    isCommute
+  ) {
+    throw new LocationReviewDraftError("This place correction is only available for a detected visit.");
+  }
+}
+
 export function buildDurableLocationReviewCommand(
   action: LocationReviewAction,
   current: MobileReviewItem,
@@ -175,6 +195,7 @@ export function buildDurableLocationReviewCommand(
 ): DurableLocationReviewCommand | null {
   const mutation = durableReviewMutationFromLocationAction(action);
   if (!mutation) return null;
+  assertLocationReviewActionCompatible(mutation, current);
   const merge = mutation.action === "merge" || mutation.action === "merge_and_confirm";
   const ids = merge ? [current.id, mutation.adjacentReviewItemId] : [current.id];
   if (new Set(ids).size !== ids.length) throw new LocationReviewDraftError("Choose a different adjacent visit.");

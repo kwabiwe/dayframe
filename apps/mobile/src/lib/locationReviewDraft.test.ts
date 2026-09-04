@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { syntheticId, syntheticReviewBootstrap } from "../../../../scripts/fixtures/review-performance";
 import {
   buildLocationReviewEdit,
   buildLocationReviewResolutionAction,
+  buildDurableLocationReviewCommand,
   durableReviewMutationFromLocationAction,
   formatLocationReviewEditableTime,
   initialLocationReviewDescription,
@@ -204,5 +206,26 @@ describe("Location Review editor draft", () => {
       action: "edit_and_confirm",
       edit: { description: "Missing an explicit time window" }
     })).toBe(true);
+  });
+
+  it("rejects stay-only structural actions for a commute before enqueue", () => {
+    const data = syntheticReviewBootstrap(4);
+    const commute = data.reviewItems.find((item) => item.eventType === "commute_detected")!;
+    const stayOnlyActions = [
+      { action: "split" as const, splitAt: commute.suggestedStartedAt! },
+      { action: "split_and_confirm" as const, splitAt: commute.suggestedStartedAt! },
+      { action: "merge" as const, adjacentReviewItemId: syntheticId(999), acknowledgeContradictoryEvidence: false },
+      { action: "merge_and_confirm" as const, adjacentReviewItemId: syntheticId(999), acknowledgeContradictoryEvidence: false },
+      { action: "record_poi_once" as const, name: "Station" },
+      { action: "save_place_and_confirm" as const, name: "Station", latitude: 51.5, longitude: -0.1, radiusMeters: 80 }
+    ];
+    for (const action of stayOnlyActions) {
+      expect(() => buildDurableLocationReviewCommand(action, commute, data)).toThrow();
+    }
+    expect(() => buildDurableLocationReviewCommand({
+      action: "change_place_and_confirm",
+      placeId: syntheticId(4),
+      learnedPlaceId: null
+    }, commute, data)).not.toThrow();
   });
 });

@@ -2,7 +2,6 @@ import { CONNECTIVITY_SUCCESS_NOTICE_MS, type ConnectivityStatus } from "./conne
 
 export type ConnectivityStatusVariant =
   | "offline"
-  | "pending"
   | "syncing"
   | "synced"
   | "attention";
@@ -136,12 +135,7 @@ export function connectivityStatusViewModel(input: {
           isActionable: false,
           variant: "syncing"
         }
-      : {
-          accessibilityLabel: "Saved changes waiting to sync.",
-          id: "pending",
-          isActionable: false,
-          variant: "pending"
-        };
+      : null;
   }
   if (
     input.status === "online" &&

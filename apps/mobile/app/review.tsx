@@ -30,7 +30,6 @@ import {
   createTag,
   fetchBootstrap,
   updateTimeEntry,
-  type HealthReviewReprocessResult,
   type MobileBootstrap,
   type MobileReviewItem,
   type MobileTimeEntry,
@@ -83,8 +82,7 @@ import {
   type ReviewSyncDiagnostics
 } from "@/lib/reviewSyncStore";
 import {
-  reviewSyncStatusCopy,
-  shouldOfferReviewSyncRetry
+  reviewSyncStatusCopy
 } from "@/lib/reviewSyncPresentation";
 import type { TimeEntrySheetPresentation } from "@/lib/timeEntrySheetPresentation";
 
@@ -104,14 +102,6 @@ type ReviewLoadOptions = {
   refresh?: boolean;
   silent?: boolean;
   skipReprocess?: boolean;
-};
-
-type ReviewReprocessDiagnostics = {
-  startedAt: string | null;
-  finishedAt: string | null;
-  status: "idle" | "running" | "success" | "partial" | "failed" | "timed_out";
-  result: HealthReviewReprocessResult | null;
-  error: string | null;
 };
 
 const HEALTH_REPROCESS_TIMEOUT_MS = 45_000;
@@ -137,13 +127,6 @@ export default function ReviewScreen() {
   const [reviewItemSyncStates, setReviewItemSyncStates] = useState<
     Map<string, ReviewItemSyncState>
   >(new Map());
-  const [reprocessDiagnostics, setReprocessDiagnostics] = useState<ReviewReprocessDiagnostics>({
-    startedAt: null,
-    finishedAt: null,
-    status: "idle",
-    result: null,
-    error: null
-  });
   const dataRef = useRef<MobileBootstrap | null>(null);
   const editTargetRef = useRef<ReviewEditTarget | null>(null);
   const editPresentationRef = useRef<TimeEntrySheetPresentation | null>(null);
@@ -315,6 +298,10 @@ export default function ReviewScreen() {
         router.replace("/");
         return;
       }
+      console.warn("Health Review reprocess did not complete", {
+        name: error instanceof Error ? error.name : "UnknownError",
+        timedOut: error instanceof Error && error.message === "Health reprocess timed out."
+      });
       if (
         generation !== screenOwnerGeneration.current ||
         !screenFocusedRef.current
@@ -405,30 +392,13 @@ export default function ReviewScreen() {
   const startHealthReviewReprocess = useCallback(async (force = false) => {
     if (healthReprocessInFlight.current) return;
     healthReprocessInFlight.current = true;
-    const generation = screenOwnerGeneration.current;
     const forceReprocess = force || !forcedReprocessComplete.current;
     if (forceReprocess) forcedReprocessComplete.current = true;
-    const startedAt = new Date().toISOString();
-    setReprocessDiagnostics((current) => ({
-      ...current,
-      startedAt,
-      finishedAt: null,
-      status: "running",
-      error: null
-    }));
     try {
       const reprocess = await withTimeout(
         reprocessExistingHealthReviewItems(undefined, { force: forceReprocess }),
         HEALTH_REPROCESS_TIMEOUT_MS
       );
-      if (generation !== screenOwnerGeneration.current) return;
-      setReprocessDiagnostics((current) => ({
-        ...current,
-        finishedAt: new Date().toISOString(),
-        status: reprocess.failedCount > 0 || reprocess.partial ? "partial" : "success",
-        result: reprocess,
-        error: reprocess.errorSummary[0] ?? null
-      }));
       if (
         reprocess.confirmedCount > 0 ||
         reprocess.ignoredCount > 0 ||
@@ -443,18 +413,10 @@ export default function ReviewScreen() {
         });
       }
     } catch (error) {
-      if (generation !== screenOwnerGeneration.current) return;
       if (error instanceof AuthRequiredError) {
         router.replace("/");
         return;
       }
-      const timedOut = error instanceof Error && error.message === "Health reprocess timed out.";
-      setReprocessDiagnostics((current) => ({
-        ...current,
-        finishedAt: new Date().toISOString(),
-        status: timedOut ? "timed_out" : "failed",
-        error: error instanceof Error ? error.message : "Unable to reprocess Health review items."
-      }));
     } finally {
       healthReprocessInFlight.current = false;
     }
@@ -570,7 +532,6 @@ export default function ReviewScreen() {
   );
   const totalNeedsReview = openReviewItems.length + reviewNeededEntries.length;
   const editingEntry = editTarget?.entry ?? null;
-  const reprocessRunning = reprocessDiagnostics.status === "running";
   const overflowItemId =
     reviewMenuState.openItemId ?? reviewMenuState.closingItemId;
   const overflowTarget = (data?.reviewItems ?? []).find(
@@ -610,7 +571,6 @@ export default function ReviewScreen() {
       type: "toggle",
       itemId: item.id,
       disabled:
-        (reprocessRunning && isHealthReviewItem(item)) ||
         reviewMutations.current.has(item.id) ||
         reviewItemSyncStates.has(item.id)
     });
@@ -926,18 +886,6 @@ export default function ReviewScreen() {
             onReviewIssue={() =>
               router.push({ pathname: "/settings", params: { section: "sync" } })
             }
-            onRetry={() => {
-              void synchroniseReviewMutations({ force: true })
-                .then(() =>
-                  load({
-                    preserveMenu: true,
-                    queueIfBusy: true,
-                    silent: true,
-                    skipReprocess: true
-                  })
-                )
-                .catch(() => refreshReviewSyncDiagnostics());
-            }}
             styles={styles}
           />
 
@@ -957,7 +905,6 @@ export default function ReviewScreen() {
                     <ReviewItemCard
                       item={item}
                       overlapCount={overlapCounts.get(item.id) ?? 0}
-                      disabled={reprocessRunning && isHealthReviewItem(item)}
                       syncState={reviewItemSyncStates.get(item.id) ?? null}
                       menuOpen={reviewMenuState.openItemId === item.id}
                       now={now}
@@ -994,7 +941,6 @@ export default function ReviewScreen() {
       <OverflowMenu
         disabled={
           !overflowItemId ||
-          (reprocessRunning && Boolean(overflowTarget && isHealthReviewItem(overflowTarget))) ||
           reviewMenuState.pendingAction != null
         }
         onClose={() => applyReviewMenuEvent({ type: "close" })}
@@ -1033,12 +979,10 @@ export default function ReviewScreen() {
 
 function ReviewSyncStatus({
   diagnostics,
-  onRetry,
   onReviewIssue,
   styles
 }: {
   diagnostics: ReviewSyncDiagnostics | null;
-  onRetry: () => void;
   onReviewIssue: () => void;
   styles: ReturnType<typeof useMobileTheme>["styles"];
 }) {
@@ -1052,15 +996,6 @@ function ReviewSyncStatus({
     >
       <Text style={styles.reviewMetaLine}>{copy}</Text>
       <View style={styles.buttonRow}>
-        {shouldOfferReviewSyncRetry(diagnostics) ? (
-          <Pressable
-            accessibilityRole="button"
-            style={pressable(styles.secondaryButton, styles.buttonPressed)}
-            onPress={onRetry}
-          >
-            <Text style={styles.secondaryButtonText}>Retry now</Text>
-          </Pressable>
-        ) : null}
         {diagnostics.needsAttentionCount > 0 ? (
           <Pressable
             accessibilityRole="button"
@@ -1076,7 +1011,6 @@ function ReviewSyncStatus({
 }
 
 function ReviewItemCard({
-  disabled,
   item,
   menuOpen,
   now,
@@ -1088,7 +1022,6 @@ function ReviewItemCard({
   styles,
   theme
 }: {
-  disabled: boolean;
   item: MobileReviewItem;
   menuOpen: boolean;
   now: number;
@@ -1109,7 +1042,7 @@ function ReviewItemCard({
     theme.textSecondary,
     theme.mode
   );
-  const controlsDisabled = disabled || syncState != null;
+  const controlsDisabled = syncState != null;
   const confidence = reviewConfidencePresentation(item.confidence);
   const locationReason = locationReviewReasonCopy(item, overlapCount);
   const summary = locationReason ?? reviewItemSummary(item);

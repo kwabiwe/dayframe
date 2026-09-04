@@ -25,7 +25,7 @@ describe("connectivity status presentation", () => {
 
   it("uses a contrast-safe neutral foreground in Light and Dark appearance", () => {
     for (const mode of ["light", "dark"] as const) {
-      for (const variant of ["offline", "pending", "syncing", "synced", "attention"] as const) {
+      for (const variant of ["offline", "syncing", "synced", "attention"] as const) {
         const role = connectivityStatusColorRole(variant);
         expect(contrastRatio(
           DAYFRAME_THEME[mode].background,
@@ -35,11 +35,8 @@ describe("connectivity status presentation", () => {
     }
   });
 
-  it("renders static Pending when durable work is waiting but no request is active", () => {
-    expect(view("online", 3)).toMatchObject({
-      isActionable: false,
-      variant: "pending"
-    });
+  it("keeps ordinary background retries out of the header", () => {
+    expect(view("online", 3)).toBeNull();
   });
 
   it("renders Syncing only while a durable recovery request is active", () => {
@@ -190,11 +187,11 @@ describe("connectivity status presentation", () => {
   it("announces each distinct visible transition once", () => {
     const tracker = createDistinctConnectivityAnnouncementTracker();
     const offline = view("offline", 0);
-    const syncing = view("online", 1);
+    const syncing = view("online", 1, 0, true);
     const attention = view("online", 0, 1);
     expect(tracker.next(offline)).toBe("Offline. Changes will sync later.");
     expect(tracker.next(offline)).toBeNull();
-    expect(tracker.next(syncing)).toBe("Saved changes waiting to sync.");
+    expect(tracker.next(syncing)).toBe("Syncing saved changes.");
     expect(tracker.next(syncing)).toBeNull();
     expect(tracker.next(attention)).toBe(
       "A timer or time entry sync issue needs attention. Open Sync and diagnostics."

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { authErrorResponse } from "@/lib/api-errors";
+import { isLockNotAvailableError, isStatementTimeoutError } from "@/lib/db";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import {
   LOCATION_EVIDENCE_BODY_LIMIT_BYTES,
@@ -50,8 +51,17 @@ export async function POST(request: Request) {
     if (error instanceof ZodError) {
       return privateJson({ error: "Invalid location replay request.", issues: error.issues }, 400);
     }
+    if (isLockNotAvailableError(error) || isStatementTimeoutError(error)) {
+      return privateJson({
+        error: "Location processing is busy. The saved evidence will retry automatically.",
+        code: "location_processing_busy"
+      }, 503);
+    }
     console.error("Location replay failed without coordinate payloads", {
-      name: error instanceof Error ? error.name : "UnknownError"
+      name: error instanceof Error ? error.name : "UnknownError",
+      code: typeof (error as { code?: unknown } | null)?.code === "string"
+        ? (error as { code: string }).code
+        : null
     });
     return privateJson({ error: "Unable to replay retained location evidence." }, 500);
   }

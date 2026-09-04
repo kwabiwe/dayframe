@@ -170,8 +170,6 @@ export type LocationReviewEvidenceCacheDiagnostics = {
 
 let databasePromise: Promise<SQLite.SQLiteDatabase> | null = null;
 let synchronisationPromise: Promise<ReviewSyncResult> | null = null;
-let synchronisationRequested = false;
-let forcedSynchronisationRequested = false;
 let reviewCacheHitCount = 0;
 let reviewCacheMissCount = 0;
 let lastReviewCacheAgeMs: number | null = null;
@@ -485,6 +483,25 @@ export async function processReviewBootstrap(bootstrap: MobileBootstrap) {
           .filter((item) => item.status === "open")
           .map((item) => item.id)
       );
+      const commuteIds = new Set(
+        bootstrap.reviewItems
+          .filter((item) => item.status === "open" && item.eventType === "commute_detected")
+          .map((item) => item.id)
+      );
+      for (const commuteId of commuteIds) {
+        await transaction.runAsync(
+          `delete from review_mutation_outbox
+           where account_key = ? and review_item_id = ?
+             and action_kind in (
+               'split', 'split_and_confirm', 'merge', 'merge_and_confirm',
+               'record_poi_once', 'save_place_and_confirm'
+             )
+             and state = 'needs_attention' and last_http_status = 422
+             and last_error like '%invalid_action%'`,
+          key,
+          commuteId
+        );
+      }
       const acknowledged = await transaction.getAllAsync<{
         client_mutation_id: string;
         review_item_id: string;
@@ -1071,6 +1088,7 @@ export async function enqueueReviewMutation(input: {
   const now = new Date().toISOString();
   const db = await database();
   let idempotent = false;
+  let persistedEnvelope = envelope;
   const localCommitStartedAt = Date.now();
   await serialiseReviewMutation(() => db.withExclusiveTransactionAsync(async (transaction) => {
     const account = await activeAccount(transaction);
@@ -1090,11 +1108,28 @@ export async function enqueueReviewMutation(input: {
         "select server_status from review_item_cache where account_key = ? and review_item_id = ?", key, effect.item.id
       );
       if (cached?.server_status !== "open") throw new Error("Refresh Review before saving this suggestion.");
-      const owned = await transaction.getFirstAsync<{ client_mutation_id: string }>(
-        "select client_mutation_id from review_mutation_effects where account_key = ? and review_item_id = ?", key, effect.item.id
+      const owned = await transaction.getFirstAsync<{ client_mutation_id: string; request_json: string }>(
+        `select e.client_mutation_id, o.request_json
+         from review_mutation_effects e
+         join review_mutation_outbox o
+           on o.client_mutation_id = e.client_mutation_id
+          and o.account_key = e.account_key
+         where e.account_key = ? and e.review_item_id = ?`, key, effect.item.id
       );
-      if (owned) throw new Error("A saved Review change already exists for one of these suggestions.");
+      if (owned) {
+        const existingEnvelope = parseReviewMutationEnvelope(owned.request_json);
+        if (
+          existingEnvelope &&
+          canonicalJson(existingEnvelope.mutation) === canonicalJson(mutation)
+        ) {
+          idempotent = true;
+          persistedEnvelope = existingEnvelope;
+          return;
+        }
+        throw new Error("A different saved Review change already exists for one of these suggestions.");
+      }
     }
+    if (idempotent) return;
     await transaction.runAsync(
       `insert into review_mutation_outbox (
         client_mutation_id, account_key, workspace_id, user_id, review_item_id, action_kind, request_json,
@@ -1118,34 +1153,16 @@ export async function enqueueReviewMutation(input: {
   lastLocalMutationCommitDurationMs = Date.now() - localCommitStartedAt;
   lastLocalMutationCommittedAt = new Date().toISOString();
   emitChange();
-  return { envelope, idempotent };
+  return { envelope: persistedEnvelope, idempotent };
 }
 
 export async function synchroniseReviewMutations(options: { force?: boolean } = {}) {
-  synchronisationRequested = true;
-  forcedSynchronisationRequested ||= options.force ?? false;
-  synchronisationPromise ??= runRequestedSynchronisation().finally(() => {
+  if (synchronisationPromise) return synchronisationPromise;
+  synchronisationPromise = synchroniseReviewMutationsUnsafe(options).finally(() => {
     synchronisationPromise = null;
     emitChange();
   });
   return synchronisationPromise;
-}
-
-async function runRequestedSynchronisation() {
-  let result: ReviewSyncResult = {
-    acknowledgedCount: 0,
-    waitingCount: 0,
-    needsAttentionCount: 0,
-    stopped: false,
-    reason: "no_account"
-  };
-  while (synchronisationRequested) {
-    synchronisationRequested = false;
-    const force = forcedSynchronisationRequested;
-    forcedSynchronisationRequested = false;
-    result = await synchroniseReviewMutationsUnsafe({ force });
-  }
-  return result;
 }
 
 async function synchroniseReviewMutationsUnsafe(
@@ -1772,8 +1789,17 @@ export function restoreReviewItemsWithAnchors(
   return result;
 }
 
-function canonicalJson(value: ReviewMutationEnvelope) {
+function canonicalJson(value: unknown) {
   return JSON.stringify(sortJsonValue(value));
+}
+
+function parseReviewMutationEnvelope(value: string) {
+  try {
+    const parsed = ReviewMutationEnvelopeSchema.safeParse(JSON.parse(value));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
 }
 
 function parseStringArray(value: string) {

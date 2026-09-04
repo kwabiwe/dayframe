@@ -129,7 +129,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Web and mobile use authenticated workspace-scoped API calls.
 - Mobile foreground starts use the general event queue fallback. Explicit Stop is durable before network in its dedicated outbox, posts the same entry-scoped idempotent event directly, and retains it for foreground/relaunch retry on timeout, network failure, `timer_busy`, or retryable 5xx.
 - An already-started durable mobile Start/Switch/Stop/Edit/Delete transmission may share one finite native iOS background task. Every native task ends exactly once after the final lease settles or on expiry/logout/account replacement/cancellation/teardown; expiry and force-quit never delete retryable work. Background state starts no new pass, and Review, Location Intelligence, and bootstrap remain foreground-owned.
-- Confirmed online pending work that is waiting, blocked, or in retry backoff uses static sync arrows. Only a live recovery/delivery attempt rotates; Reduce Motion keeps every arrow static. The pending count still reaches zero only from durable-owner settlement, never from reachability or a pass outcome.
+- Confirmed online pending work that is waiting, blocked, or in retry backoff remains background-only and does not occupy the header. Only a live reconnect/recovery delivery attempt shows sync arrows and rotates them; Reduce Motion keeps those arrows static. The pending count still reaches zero only from durable-owner settlement, never from reachability or a pass outcome.
 - Offline queue sync preserves shortcut, NFC, geofence, Apple Health, and other background event paths, respects retry backoff for automatic retries, and exposes retry/export diagnostics in Settings.
 - Apple Health sleep stages group per normalized source with the shared 90-minute maximum waking gap. A gap exactly at the boundary remains one session; a gap one millisecond beyond it remains legitimate split sleep.
 - Same-source grouped sleep revisions with at least 80% overlap of the shorter interval update one untouched Health-derived entry in place. Incomplete-then-extended, extended-then-incomplete, identical retries, and small boundary adjustments preserve one stable entry and one logical total.
@@ -152,15 +152,16 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
   response. Permanent category, technical duplicate, supersession, and
   cross-device resolution conflicts stop retrying, surface safe Settings
   diagnostics, and restore a card only when canonical server state remains open.
-- Review POSTs abort after 15 seconds into durable retry-wait. Pending/in-flight
-  changes remain locally hidden without `Retry now`; only retry-wait offers that
-  action. Authentication-required and permanent-attention states keep their
-  dedicated guidance instead of presenting a transport retry.
+- Review POSTs abort after 15 seconds into durable retry-wait. Pending,
+  in-flight, and retry-wait changes remain locally hidden and silent on the
+  Review screen; background retry follows its stored backoff without a manual
+  action that can collide with the original request. Authentication-required
+  and permanent-attention states keep their dedicated guidance.
 - Review opens cache-first without waiting for bootstrap or Health reprocess.
   Its list and Location Evidence detail use the same right-aligned page-title
   header treatment as Settings (`Review` and `Location evidence` respectively),
   rather than repeating the Dayframe brand lock-up.
-  Health reprocess has a separate owner and may disable only Health items; Location
+  Health reprocess has a separate owner and must not disable Review actions; Location
   cards and evidence navigation remain interactive. A normal revalidation is
   quiet, a failed refresh retains cached content with Review-specific stale copy,
   and pull-to-refresh is the only visible refresh spinner.

@@ -799,23 +799,6 @@ export default function SettingsScreen() {
     }
   }
 
-  async function retryReviewChanges() {
-    setSyncingQueue(true);
-    setSyncStatusMessageAndCache("Retrying saved Review changes...");
-    try {
-      await synchroniseReviewMutations({ force: true });
-      await refreshReviewDiagnostics();
-      setSyncStatusMessageAndCache(null);
-      await load({ silent: true });
-    } catch {
-      setSyncStatusMessageAndCache(
-        "Saved Review changes remain on this iPhone and will retry later."
-      );
-    } finally {
-      setSyncingQueue(false);
-    }
-  }
-
   function confirmDiscardReviewIssue(clientMutationId: string) {
     Alert.alert(
       "Discard saved Review change?",
@@ -2009,17 +1992,6 @@ export default function SettingsScreen() {
                   </Pressable>
                 </View>
               ))}
-              <View style={styles.buttonRow}>
-                <Pressable
-                  accessibilityRole="button"
-                  style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                  onPress={() => void retryReviewChanges()}
-                >
-                  <Text style={styles.secondaryButtonText}>
-                    Retry Review changes
-                  </Text>
-                </Pressable>
-              </View>
             </View>
             <View style={styles.buttonRow}>
               <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={() => void syncAndReload()}>
