@@ -54,6 +54,11 @@ Settings continues to expose diagnostics and permanent-attention recovery;
 the general explicit Sync action remains available without multiplying an
 already active Review request.
 
+The clean iOS CI job was twice terminated by its 30-minute job deadline while
+the cold unsigned Simulator build was still compiling, without a compiler
+failure. Its finite timeout is raised to 45 minutes so the hosted macOS runner
+can return a real build result rather than a false timeout gate.
+
 ## Independent review
 
 Claude Opus 5 reviewed draft PR #187 after the first implementation pass and requested changes. The accepted findings were:

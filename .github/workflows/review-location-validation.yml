@@ -63,7 +63,10 @@ jobs:
   clean-ios-simulator:
     name: Clean iOS Simulator
     runs-on: macos-26
-    timeout-minutes: 30
+    # A cold Expo/RN build on the hosted macOS 26 image regularly exceeds
+    # thirty minutes after npm and CocoaPods setup. Keep the deadline finite,
+    # but leave enough room for xcodebuild to report a real result.
+    timeout-minutes: 45
     env:
       EXPO_PUBLIC_DAYFRAME_API_BASE: https://dayframe-staging.vercel.app
       EXPO_PUBLIC_DAYFRAME_RELEASE_CHANNEL: preview
