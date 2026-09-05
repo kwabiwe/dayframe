@@ -347,13 +347,14 @@ export async function getBootstrapData(
 }
 
 export async function getNormalizationContext(
-  session: RequestSession = getDevSession()
+  session: RequestSession = getDevSession(),
+  execute?: typeof query
 ): Promise<NormalizationContext> {
-  const [projects, categories, places, automationRules] = await Promise.all([
-    getProjects(session),
-    getCategories(session),
-    getPlaces(session),
-    getAutomationRules(session)
+  const [projects, categories, places, automationRules] = execute ? [
+    await getProjects(session, execute), await getCategories(session, execute),
+    await getPlaces(session, execute), await getAutomationRules(session, execute)
+  ] : await Promise.all([
+    getProjects(session), getCategories(session), getPlaces(session), getAutomationRules(session)
   ]);
 
   return {
@@ -436,9 +437,9 @@ async function getClients(session: RequestSession) {
   return result.rows;
 }
 
-async function getCategories(session: RequestSession) {
+async function getCategories(session: RequestSession, execute: typeof query = query) {
   try {
-    const result = await query<CategoryRow>(
+    const result = await execute<CategoryRow>(
       `select id, name, color, is_pinned as "isPinned"
        from categories
        where workspace_id = $1 and is_archived = false
@@ -459,8 +460,8 @@ async function getCategories(session: RequestSession) {
   }
 }
 
-async function getProjects(session: RequestSession) {
-  const result = await query<ProjectRow>(
+async function getProjects(session: RequestSession, execute: typeof query = query) {
+  const result = await execute<ProjectRow>(
     `select p.id,
             p.name,
             p.color,
@@ -496,9 +497,9 @@ export async function getTags(session: RequestSession) {
   return result.rows;
 }
 
-async function getPlaces(session: RequestSession) {
+async function getPlaces(session: RequestSession, execute: typeof query = query) {
   try {
-    const result = await query<PlaceRow>(
+    const result = await execute<PlaceRow>(
       `select pl.id,
               pl.name,
               pl.latitude,
@@ -599,9 +600,9 @@ async function getLearnedPlaces(session: RequestSession, limit = 10) {
   }
 }
 
-async function getAutomationRules(session: RequestSession) {
+async function getAutomationRules(session: RequestSession, execute: typeof query = query) {
   try {
-    const result = await query<AutomationRuleRow>(
+    const result = await execute<AutomationRuleRow>(
       `select ar.id,
               ar.name,
               ar.trigger_source as "triggerSource",
@@ -626,8 +627,8 @@ async function getAutomationRules(session: RequestSession) {
     );
     return result.rows;
   } catch (error) {
-    if (isUndefinedColumnError(error, "activity_description")) {
-      const result = await query<AutomationRuleRow>(
+    if (isUndefinedColumnError(error, "activity_description") && execute === query) {
+      const result = await execute<AutomationRuleRow>(
         `select ar.id,
                 ar.name,
                 ar.trigger_source as "triggerSource",

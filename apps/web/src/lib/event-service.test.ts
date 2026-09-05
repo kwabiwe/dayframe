@@ -1436,7 +1436,7 @@ describe("health event persistence", () => {
     const client = {
       query: vi.fn(async (statement: string, values?: unknown[]) => {
         void values;
-        if (statement.includes("client_event_id = $3")) return { rows: [{ id: "event-existing" }] };
+        if (statement.includes("client_event_id = $3")) return { rows: [{ eventId: "event-existing", processingDisposition: "confirmed", timeEntryId: null }] };
         return { rows: [] };
       }),
       release: vi.fn()
@@ -1453,6 +1453,7 @@ describe("health event persistence", () => {
 
     expect(result).toEqual({
       eventId: "event-existing",
+      processingDisposition: "confirmed",
       candidate: expect.objectContaining({ action: "create_time_entry" }),
       duplicate: true
     });
@@ -2515,7 +2516,7 @@ describe("health event persistence", () => {
     const client = {
       query: vi.fn(async (statement: string, values?: unknown[]) => {
         void values;
-        if (statement.includes("client_event_id = $3")) return { rows: [{ id: "event-existing" }] };
+        if (statement.includes("client_event_id = $3")) return { rows: [{ eventId: "event-existing", processingDisposition: "confirmed", timeEntryId: null }] };
         return { rows: [] };
       }),
       release: vi.fn()
@@ -2534,6 +2535,7 @@ describe("health event persistence", () => {
     ]);
     expect(result).toEqual({
       eventId: "event-existing",
+      processingDisposition: "confirmed",
       candidate: expect.objectContaining({ action: "create_review_item" }),
       duplicate: true
     });
@@ -2547,7 +2549,7 @@ describe("health event persistence", () => {
     const client = {
       query: vi.fn(async (statement: string, values?: unknown[]) => {
         void values;
-        if (statement.includes("client_event_id = $3")) return { rows: [{ id: "event-existing" }] };
+        if (statement.includes("client_event_id = $3")) return { rows: [{ eventId: "event-existing", processingDisposition: "confirmed", timeEntryId: null }] };
         return { rows: [] };
       }),
       release: vi.fn()
@@ -2564,6 +2566,7 @@ describe("health event persistence", () => {
 
     expect(result).toEqual({
       eventId: "event-existing",
+      processingDisposition: "confirmed",
       candidate: expect.objectContaining({ action: "create_time_entry" }),
       duplicate: true
     });

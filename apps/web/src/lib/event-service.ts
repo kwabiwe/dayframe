@@ -427,8 +427,32 @@ function healthSchemaReadinessError(
 }
 
 export async function processActivityEvent(
+  rawInput: unknown, session: RequestSession = getDevSession(), options: SyncTransactionOptions = {}
+) {
+  if (!isRecord(rawInput) || !isHealthEvent(String(rawInput.type))) {
+    return processActivityEventWithClient(rawInput, session);
+  }
+  const deadlineAt = options.deadlineAt ?? Date.now() + 8_000;
+  try {
+    return await withSyncTransaction("health_ingest", ({client}) => processActivityEventWithClient(rawInput,session,client), {...options,deadlineAt});
+  } catch (error) {
+    // A competing delivery may have committed the existing event receipt. Read it
+    // only after rollback, on a fresh bounded transaction; never retry the effect here.
+    if (isUniqueViolationError(error) && typeof rawInput.clientEventId === "string") {
+      return withSyncTransaction("health_ingest_receipt", async ({client,phase})=>{
+        phase("receipt_read");
+        if (!await findExistingActivityEventReceipt(rawInput.clientEventId as string,session,client.query)) throw error;
+        return processActivityEventWithClient(rawInput,session,client);
+      },{...options,deadlineAt,cleanupReserveMs:100,readOnly:true});
+    }
+    throw error;
+  }
+}
+
+async function processActivityEventWithClient(
   rawInput: unknown,
-  session: RequestSession = getDevSession()
+  session: RequestSession,
+  boundedClient?: pg.PoolClient
 ): Promise<{
   eventId: string;
   candidate: CandidateActivity;
@@ -447,10 +471,12 @@ export async function processActivityEvent(
     workspaceId: session.workspaceId,
     userId: session.userId
   });
+  if (boundedClient) setSyncPhase(boundedClient, "receipt_read");
   const fastDuplicate = parsed.clientEventId
-    ? await findExistingActivityEventReceipt(parsed.clientEventId, session)
+    ? await findExistingActivityEventReceipt(parsed.clientEventId, session, boundedClient?.query)
     : null;
-  const context = await getNormalizationContext(session);
+  if (boundedClient) setSyncPhase(boundedClient, "canonical_read");
+  const context = await getNormalizationContext(session, boundedClient?.query);
   let candidate = normalizeActivityEvent(parsed, context);
   const stopScope = timerStopScope(parsed);
   if (stopScope.mode === "ignored_unscoped") {
@@ -477,12 +503,12 @@ export async function processActivityEvent(
       ...(fastDuplicate.timeEntryId ? { timeEntryId: fastDuplicate.timeEntryId } : {})
     };
   }
-  const client = await pool.connect();
+  const client = boundedClient ?? await pool.connect();
   const transactionStartedAt = Date.now();
   let lockWaitMilliseconds = 0;
 
   try {
-    await client.query("begin");
+    if (!boundedClient) await client.query("begin");
     if (stopScope.mode === "entry") {
       await client.query("select set_config('lock_timeout', $1, true)", [SCOPED_STOP_LOCK_TIMEOUT]);
       await client.query("select set_config('statement_timeout', $1, true)", [SCOPED_STOP_STATEMENT_TIMEOUT]);
@@ -503,7 +529,7 @@ export async function processActivityEvent(
           existingEvent.rows[0].id,
           session
         );
-        await client.query("commit");
+        if (!boundedClient) await client.query("commit");
         recordTimerMutationTiming({
           eventType: parsed.type,
           stopScope: stopScope.mode,
@@ -521,9 +547,11 @@ export async function processActivityEvent(
     }
 
     if (isHealthEvent(parsed.type) || parsed.type === "commute_detected") {
+      setSyncPhase(client, "owner_lock");
       await lockUserTimerState(client, session);
     }
 
+    setSyncPhase(client, "effect");
     if (isHealthEvent(parsed.type) && !candidate.categoryId) {
       candidate = {
         ...candidate,
@@ -882,7 +910,7 @@ export async function processActivityEvent(
       await upsertLearnedPlaceVisit(client, parsed, session);
     }
 
-    await client.query("commit");
+    if (!boundedClient) await client.query("commit");
     if (candidate.action === "start_timer" || candidate.action === "stop_timer") {
       recordTimerMutationTiming({
         eventType: parsed.type,
@@ -904,7 +932,7 @@ export async function processActivityEvent(
       ...(matchingHealthSleepEntry ? { updatedExistingTimeEntry: true } : {})
     };
   } catch (error) {
-    await client.query("rollback");
+    if (!boundedClient) await client.query("rollback");
     if (stopScope.mode === "entry" && (isLockNotAvailableError(error) || isStatementTimeoutError(error))) {
       recordTimerMutationTiming({
         eventType: parsed.type,
@@ -915,7 +943,7 @@ export async function processActivityEvent(
       });
       throw new TimerMutationBusyError();
     }
-    if (parsed.clientEventId && isUniqueViolationError(error)) {
+    if (!boundedClient && parsed.clientEventId && isUniqueViolationError(error)) {
       const duplicate = await findExistingActivityEventReceipt(parsed.clientEventId, session);
       if (duplicate) {
         recordTimerMutationTiming({
@@ -935,15 +963,16 @@ export async function processActivityEvent(
     }
     throw eventSyncReadinessError(error, parsed.type) ?? error;
   } finally {
-    client.release();
+    if (!boundedClient) client.release();
   }
 }
 
 async function findExistingActivityEventReceipt(
   clientEventId: string,
-  session: RequestSession
+  session: RequestSession,
+  execute: typeof query = query
 ) {
-  const result = await query<{ eventId: string; timeEntryId: string | null; processingDisposition: string }>(
+  const result = await execute<{ eventId: string; timeEntryId: string | null; processingDisposition: string }>(
     `select ae.id as "eventId",
             te.id as "timeEntryId", ae.review_status as "processingDisposition"
      from activity_events ae
