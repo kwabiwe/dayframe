@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   boundedHealthQuery,
   createHealthCaptureCoalescer,
-  HealthQueryDeadlineError
+  HealthQueryDeadlineError,
 } from "./healthCaptureLifecycle";
 const deferred = <T>() => {
   let resolve!: (value: T) => void;
@@ -17,8 +17,12 @@ describe("Health capture lifecycle", () => {
     vi.useFakeTimers();
     const native = deferred<number>();
     const commit = vi.fn();
-    const result = boundedHealthQuery(native.promise, Date.now() + 15_000).then(commit);
-    const rejected = expect(result).rejects.toBeInstanceOf(HealthQueryDeadlineError);
+    const result = boundedHealthQuery(native.promise, Date.now() + 15_000).then(
+      commit,
+    );
+    const rejected = expect(result).rejects.toBeInstanceOf(
+      HealthQueryDeadlineError,
+    );
     await vi.advanceTimersByTimeAsync(15_000);
     await rejected;
     native.resolve(1);
@@ -29,9 +33,11 @@ describe("Health capture lifecycle", () => {
     const native = deferred<number>();
     const controller = new AbortController();
     const commit = vi.fn();
-    const result = boundedHealthQuery(native.promise, Date.now() + 15_000, controller.signal).then(
-      commit
-    );
+    const result = boundedHealthQuery(
+      native.promise,
+      Date.now() + 15_000,
+      controller.signal,
+    ).then(commit);
     controller.abort();
     await expect(result).rejects.toMatchObject({ name: "AbortError" });
     native.resolve(1);
@@ -41,12 +47,17 @@ describe("Health capture lifecycle", () => {
   it("coalesces repeated observer updates into a subsequent pass without starving workouts", async () => {
     const runner = createHealthCaptureCoalescer();
     const first = deferred<string>();
-    const sleep = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue("later");
+    const sleep = vi
+      .fn()
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValue("later");
     const active = runner.run("owner:sleep", sleep);
     const observer = runner.run("owner:sleep", sleep, true);
     runner.run("owner:sleep", sleep, true);
     expect(observer).toBe(active);
-    await expect(runner.run("owner:workout", async () => "captured")).resolves.toBe("captured");
+    await expect(
+      runner.run("owner:workout", async () => "captured"),
+    ).resolves.toBe("captured");
     first.resolve("initial");
     await expect(observer).resolves.toBe("later");
     expect(sleep).toHaveBeenCalledTimes(2);
@@ -61,5 +72,29 @@ describe("Health capture lifecycle", () => {
     runner.run("owner:sleep", capture, true);
     await expect(first).resolves.toBe("saved");
     expect(capture).toHaveBeenCalledTimes(2);
+  });
+  it("settles the original caller during an observer storm and carries later changes into a separate cycle", async () => {
+    vi.useFakeTimers();
+    const runner = createHealthCaptureCoalescer();
+    const first = deferred<string>(),
+      second = deferred<string>(),
+      third = deferred<string>();
+    const capture = vi
+      .fn()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise)
+      .mockReturnValueOnce(third.promise);
+    const original = runner.run("sleep", capture);
+    runner.run("sleep", capture, true);
+    first.resolve("first");
+    await Promise.resolve();
+    runner.run("sleep", capture, true);
+    second.resolve("second");
+    await expect(original).resolves.toBe("second");
+    expect(capture).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(capture).toHaveBeenCalledTimes(3);
+    third.resolve("third");
+    await Promise.resolve();
   });
 });

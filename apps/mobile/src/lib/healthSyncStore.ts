@@ -2,7 +2,11 @@ import * as SQLite from "expo-sqlite";
 import type { enqueueEvent } from "./api";
 import { healthFingerprint, canonicalHealthJson } from "./healthFingerprint";
 
-export type HealthCaptureOwner = { backendId: string; workspaceId: string; userId: string };
+export type HealthCaptureOwner = {
+  backendId: string;
+  workspaceId: string;
+  userId: string;
+};
 export type HealthCaptureKind = "sleep" | "workout";
 export type HealthQueryContract = {
   version: 2;
@@ -46,6 +50,7 @@ export const HEALTH_RAW_RETENTION_DAYS = 14;
 export const HEALTH_PROVENANCE_RETENTION_DAYS = 90;
 let opening: Promise<SQLite.SQLiteDatabase> | undefined;
 let tail: Promise<unknown> = Promise.resolve();
+const handoffTails = new Map<string, Promise<unknown>>();
 function serial<T>(work: () => Promise<T>) {
   const result = tail.catch(() => undefined).then(work);
   tail = result.catch(() => undefined);
@@ -57,12 +62,13 @@ export function healthOwnerKey(owner: HealthCaptureOwner) {
   return JSON.stringify([owner.backendId, owner.workspaceId, owner.userId]);
 }
 async function database() {
-  opening ??= SQLite.openDatabaseAsync("dayframe-health-capture-v2.db").then(async (db) => {
-    await db.execAsync(
-      "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;"
-    );
-    await db.withExclusiveTransactionAsync(async (transaction) => {
-      await transaction.execAsync(`
+  opening ??= SQLite.openDatabaseAsync("dayframe-health-capture-v2.db").then(
+    async (db) => {
+      await db.execAsync(
+        "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
+      );
+      await db.withExclusiveTransactionAsync(async (transaction) => {
+        await transaction.execAsync(`
         create table if not exists health_checkpoints (
           owner_key text not null, contract_key text not null, contract_json text not null,
           anchor text, updated_at text not null, primary key(owner_key,contract_key));
@@ -96,26 +102,30 @@ async function database() {
         create index if not exists health_delivery_pending on health_deliveries(owner_key,state,created_at);
         PRAGMA user_version=1;
       `);
-    });
-    return db;
-  });
+      });
+      return db;
+    },
+  );
   return opening;
 }
 
 export async function getHealthCheckpoint(
   owner: HealthCaptureOwner,
   kind: HealthCaptureKind,
-  repair?: { startedAt: string; stoppedAt: string }
+  repair?: { startedAt: string; stoppedAt: string },
 ) {
   const db = await database();
   const key = healthOwnerKey(owner);
   const contractKey = repair
     ? `repair:${kind}:${repair.startedAt}:${repair.stoppedAt}`
     : `delta:${kind}:v2`;
-  const saved = await db.getFirstAsync<{ contract_json: string; anchor: string | null }>(
+  const saved = await db.getFirstAsync<{
+    contract_json: string;
+    anchor: string | null;
+  }>(
     "select contract_json,anchor from health_checkpoints where owner_key=? and contract_key=?",
     key,
-    contractKey
+    contractKey,
   );
   // Never copy a global legacy anchor into a different predicate or backend.
   const contract: HealthQueryContract = saved
@@ -124,8 +134,10 @@ export async function getHealthCheckpoint(
         version: 2,
         kind,
         mode: repair ? "repair" : "delta",
-        startedAt: repair?.startedAt ?? new Date(Date.now() - 7 * 86_400_000).toISOString(),
-        ...(repair ? { stoppedAt: repair.stoppedAt } : {})
+        startedAt:
+          repair?.startedAt ??
+          new Date(Date.now() - 7 * 86_400_000).toISOString(),
+        ...(repair ? { stoppedAt: repair.stoppedAt } : {}),
       };
   return { contractKey, contract, anchor: saved?.anchor ?? null };
 }
@@ -152,30 +164,38 @@ export async function commitHealthCapturePage(input: {
     const now = new Date().toISOString();
     let generated = 0;
     await db.withExclusiveTransactionAsync(async (transaction) => {
-      if (!(await input.isCurrent())) throw new Error("Health capture owner changed.");
-      const previous = await transaction.getFirstAsync<{ anchor: string | null }>(
+      if (!(await input.isCurrent()))
+        throw new Error("Health capture owner changed.");
+      const previous = await transaction.getFirstAsync<{
+        anchor: string | null;
+      }>(
         "select anchor from health_checkpoints where owner_key=? and contract_key=?",
         key,
-        input.contractKey
+        input.contractKey,
       );
       if ((previous?.anchor ?? null) !== input.previousAnchor)
         throw new Error(
-          "Health checkpoint advanced during this query; retry from its saved anchor."
+          "Health checkpoint advanced during this query; retry from its saved anchor.",
         );
-      const count = await transaction.getFirstAsync<{ samples: number; pending: number }>(
+      const count = await transaction.getFirstAsync<{
+        samples: number;
+        pending: number;
+      }>(
         `select
         (select count(*) from health_samples where owner_key=?) as samples,
         (select count(*) from health_deliveries where owner_key=? and state!='acknowledged') as pending`,
         key,
-        key
+        key,
       );
       if (
-        (count?.samples ?? 0) + input.additions.length + input.deletedIds.length >
+        (count?.samples ?? 0) +
+          input.additions.length +
+          input.deletedIds.length >
           MAX_SAMPLES_PER_OWNER ||
         (count?.pending ?? 0) >= MAX_UNSETTLED_DELIVERIES
       ) {
         throw new Error(
-          "Health capture storage is full. Saved work is preserved; sync or review it before capturing more."
+          "Health capture storage is full. Saved work is preserved; sync or review it before capturing more.",
         );
       }
       for (const sample of input.additions) {
@@ -191,13 +211,13 @@ export async function commitHealthCapturePage(input: {
           sample.startedAt,
           sample.stoppedAt,
           canonicalHealthJson(sample.value),
-          now
+          now,
         );
       }
       const oldEpisodes = await transaction.getAllAsync<EpisodeRow>(
         "select * from health_episodes where owner_key=? and kind=?",
         key,
-        input.contract.kind
+        input.contract.kind,
       );
       for (const id of input.deletedIds) {
         await transaction.runAsync(
@@ -206,14 +226,20 @@ export async function commitHealthCapturePage(input: {
           key,
           input.contract.kind,
           id,
-          now
+          now,
         );
       }
       for (const episode of oldEpisodes) {
         const members: string[] = JSON.parse(episode.sample_ids_json);
-        const deleted = input.deletedIds.filter((id) => members.includes(id)).sort();
+        const deleted = input.deletedIds
+          .filter((id) => members.includes(id))
+          .sort();
         if (!deleted.length) continue;
-        const correctionId = await healthFingerprint([key, episode.episode_id, deleted]);
+        const correctionId = await healthFingerprint([
+          key,
+          episode.episode_id,
+          deleted,
+        ]);
         await transaction.runAsync(
           `insert or ignore into health_source_corrections(owner_key,correction_id,episode_id,deleted_ids_json,created_at)
           values(?,?,?,?,?)`,
@@ -221,7 +247,7 @@ export async function commitHealthCapturePage(input: {
           correctionId,
           episode.episode_id,
           JSON.stringify(deleted),
-          now
+          now,
         );
       }
       const sampleRows = await transaction.getAllAsync<{
@@ -235,7 +261,9 @@ export async function commitHealthCapturePage(input: {
          and stopped_at>=? order by started_at,sample_id`,
         key,
         input.contract.kind,
-        new Date(Date.now() - HEALTH_RAW_RETENTION_DAYS * 86_400_000).toISOString()
+        new Date(
+          Date.now() - HEALTH_RAW_RETENTION_DAYS * 86_400_000,
+        ).toISOString(),
       );
       const drafts = input.derive(
         sampleRows.map((row) => ({
@@ -243,8 +271,8 @@ export async function commitHealthCapturePage(input: {
           sourceKey: row.source_key,
           startedAt: row.started_at,
           stoppedAt: row.stopped_at,
-          value: JSON.parse(row.sample_json)
-        }))
+          value: JSON.parse(row.sample_json),
+        })),
       );
       for (const draft of drafts) {
         const members = [...new Set(draft.sampleIds)].sort();
@@ -252,16 +280,23 @@ export async function commitHealthCapturePage(input: {
           .filter(
             (episode) =>
               episode.source_key === draft.sourceKey &&
-              (JSON.parse(episode.sample_ids_json) as string[]).some((id) => members.includes(id))
+              (JSON.parse(episode.sample_ids_json) as string[]).some((id) =>
+                members.includes(id),
+              ),
           )
           .sort((a, b) => a.episode_id.localeCompare(b.episode_id));
         const episodeId =
           matches[0]?.episode_id ??
-          (await healthFingerprint([key, input.contract.kind, draft.sourceKey, members[0]]));
+          (await healthFingerprint([
+            key,
+            input.contract.kind,
+            draft.sourceKey,
+            members[0],
+          ]));
         const unresolved = await transaction.getFirstAsync<{ n: number }>(
           `select count(*) as n from health_source_corrections where owner_key=? and episode_id=?`,
           key,
-          episodeId
+          episodeId,
         );
         if (unresolved?.n) continue; // Explicit correction preserves the existing union and user-visible time.
         const {
@@ -275,8 +310,8 @@ export async function commitHealthCapturePage(input: {
           rawPayload: {
             ...base.rawPayload,
             externalSampleId: undefined,
-            logicalEpisodeId: episodeId
-          }
+            logicalEpisodeId: episodeId,
+          },
         };
         const revision = await healthFingerprint(payload);
         const clientEventId = `healthkit:${input.contract.kind}:${episodeId}:${revision}`;
@@ -289,8 +324,8 @@ export async function commitHealthCapturePage(input: {
               input.contract.kind === "workout"
                 ? base.rawPayload?.externalSampleId
                 : `health-revision-${revision}`,
-            episodeRevision: revision
-          }
+            episodeRevision: revision,
+          },
         };
         const inserted = await transaction.runAsync(
           `insert or ignore into health_deliveries(owner_key,client_event_id,episode_id,revision,payload_json,created_at)
@@ -300,7 +335,7 @@ export async function commitHealthCapturePage(input: {
           episodeId,
           revision,
           canonicalHealthJson(event),
-          now
+          now,
         );
         generated += inserted.changes;
         await transaction.runAsync(
@@ -315,12 +350,15 @@ export async function commitHealthCapturePage(input: {
           draft.startedAt,
           draft.stoppedAt,
           revision,
-          now
+          now,
         );
       }
       if ((count?.pending ?? 0) + generated > MAX_UNSETTLED_DELIVERIES)
-        throw new Error("Health handoff capacity reached; this query was not checkpointed.");
-      if (!(await input.isCurrent())) throw new Error("Health capture owner changed.");
+        throw new Error(
+          "Health handoff capacity reached; this query was not checkpointed.",
+        );
+      if (!(await input.isCurrent()))
+        throw new Error("Health capture owner changed.");
       await transaction.runAsync(
         `insert into health_checkpoints(owner_key,contract_key,contract_json,anchor,updated_at) values(?,?,?,?,?)
         on conflict(owner_key,contract_key) do update set anchor=excluded.anchor,updated_at=excluded.updated_at`,
@@ -328,15 +366,18 @@ export async function commitHealthCapturePage(input: {
         input.contractKey,
         canonicalHealthJson(input.contract),
         input.newAnchor,
-        now
+        now,
       );
       if (input.contract.mode === "repair" && input.complete) {
-        const column = input.contract.kind === "sleep" ? "sleep_complete" : "workout_complete";
+        const column =
+          input.contract.kind === "sleep"
+            ? "sleep_complete"
+            : "workout_complete";
         await transaction.runAsync(
           `update health_repairs set ${column}=1 where owner_key=? and started_at=? and stopped_at=?`,
           key,
           input.contract.startedAt,
-          input.contract.stoppedAt!
+          input.contract.stoppedAt!,
         );
       }
       await transaction.runAsync(
@@ -354,13 +395,13 @@ export async function commitHealthCapturePage(input: {
         generated,
         input.ignoredCount ?? 0,
         input.previousAnchor !== input.newAnchor ? 1 : 0,
-        input.complete ? "query_completed" : "partial"
+        input.complete ? "query_completed" : "partial",
       );
     });
     return {
       generatedCount: generated,
       deletionCount: input.deletedIds.length,
-      usableSampleCount: input.additions.length
+      usableSampleCount: input.additions.length,
     };
   });
 }
@@ -368,39 +409,54 @@ export async function commitHealthCapturePage(input: {
 export async function handoffHealthEvents(
   owner: HealthCaptureOwner,
   enqueue: typeof enqueueEvent,
-  isCurrent: () => boolean | Promise<boolean>
+  isCurrent: () => boolean | Promise<boolean>,
 ) {
-  const db = await database();
   const key = healthOwnerKey(owner);
-  const rows = await db.getAllAsync<DeliveryRow>(
-    "select * from health_deliveries where owner_key=? and state='pending_handoff' order by created_at,client_event_id limit 250",
-    key
-  );
-  let queuedCount = 0;
-  for (const row of rows) {
-    if (!(await isCurrent())) break;
-    if (!row.payload_json)
-      throw new Error("Unacknowledged Health payload is unavailable; source repair is required.");
-    const payload = JSON.parse(row.payload_json) as Parameters<typeof enqueueEvent>[0];
-    // Explicit owner + deterministic ID make the separate outbox boundary restartable.
-    await enqueue({
-      ...payload,
-      localId: row.client_event_id,
-      occurredAt: new Date(String(payload.occurredAt)),
-      owner: { workspaceId: owner.workspaceId, userId: owner.userId }
-    });
-    if (!(await isCurrent())) break;
-    await serial(() =>
-      db.runAsync(
-        "update health_deliveries set state='queued',handed_off_at=? where owner_key=? and client_event_id=? and state='pending_handoff'",
-        new Date().toISOString(),
+  const previous = handoffTails.get(key) ?? Promise.resolve();
+  const result = previous
+    .catch(() => undefined)
+    .then(async () => {
+      const db = await database();
+      const rows = await db.getAllAsync<DeliveryRow>(
+        "select * from health_deliveries where owner_key=? and state='pending_handoff' order by created_at,client_event_id limit 250",
         key,
-        row.client_event_id
-      )
-    );
-    queuedCount++;
+      );
+      let queuedCount = 0;
+      for (const row of rows) {
+        if (!(await isCurrent())) break;
+        if (!row.payload_json)
+          throw new Error(
+            "Unacknowledged Health payload is unavailable; source repair is required.",
+          );
+        const payload = JSON.parse(row.payload_json) as Parameters<
+          typeof enqueueEvent
+        >[0];
+        // Explicit owner + deterministic ID make the separate outbox boundary restartable.
+        await enqueue({
+          ...payload,
+          localId: row.client_event_id,
+          occurredAt: new Date(String(payload.occurredAt)),
+          owner: { workspaceId: owner.workspaceId, userId: owner.userId },
+        });
+        if (!(await isCurrent())) break;
+        await serial(() =>
+          db.runAsync(
+            "update health_deliveries set state='queued',handed_off_at=? where owner_key=? and client_event_id=? and state='pending_handoff'",
+            new Date().toISOString(),
+            key,
+            row.client_event_id,
+          ),
+        );
+        queuedCount++;
+      }
+      return { queuedCount };
+    });
+  handoffTails.set(key, result);
+  try {
+    return await result;
+  } finally {
+    if (handoffTails.get(key) === result) handoffTails.delete(key);
   }
-  return { queuedCount };
 }
 
 export async function recordHealthAcknowledgement(
@@ -412,9 +468,12 @@ export async function recordHealthAcknowledgement(
     processingDisposition: string;
     reviewItemId?: string | null;
     timeEntryId?: string | null;
-  }
+  },
 ) {
-  if (!acknowledgement.eventId || acknowledgement.clientEventId !== clientEventId)
+  if (
+    !acknowledgement.eventId ||
+    acknowledgement.clientEventId !== clientEventId
+  )
     throw new Error("Health acknowledgement identity mismatch.");
   const db = await database();
   await serial(() =>
@@ -424,12 +483,15 @@ export async function recordHealthAcknowledgement(
       canonicalHealthJson(acknowledgement),
       new Date().toISOString(),
       healthOwnerKey(owner),
-      clientEventId
-    )
+      clientEventId,
+    ),
   );
 }
 
-export async function beginOrResumeHealthRepair(owner: HealthCaptureOwner, days: 7 | 14) {
+export async function beginOrResumeHealthRepair(
+  owner: HealthCaptureOwner,
+  days: 7 | 14,
+) {
   return serial(async () => {
     const db = await database();
     const key = healthOwnerKey(owner);
@@ -440,14 +502,18 @@ export async function beginOrResumeHealthRepair(owner: HealthCaptureOwner, days:
         stopped_at: string;
         sleep_complete: number;
         workout_complete: number;
-      }>("select * from health_repairs where owner_key=? and days=?", key, days);
+      }>(
+        "select * from health_repairs where owner_key=? and days=?",
+        key,
+        days,
+      );
       if (saved && (!saved.sleep_complete || !saved.workout_complete)) {
         window = { startedAt: saved.started_at, stoppedAt: saved.stopped_at };
         return;
       }
       window = {
         startedAt: new Date(Date.now() - days * 86_400_000).toISOString(),
-        stoppedAt: new Date().toISOString()
+        stoppedAt: new Date().toISOString(),
       };
       await transaction.runAsync(
         `insert into health_repairs(owner_key,days,started_at,stopped_at) values(?,?,?,?)
@@ -455,10 +521,35 @@ export async function beginOrResumeHealthRepair(owner: HealthCaptureOwner, days:
         key,
         days,
         window.startedAt,
-        window.stoppedAt
+        window.stoppedAt,
       );
     });
     return window!;
+  });
+}
+
+/** Disabled import types finish only the explicit repair window, without moving an anchor. */
+export async function completeSkippedHealthRepairKind(
+  owner: HealthCaptureOwner,
+  kind: HealthCaptureKind,
+  window: { startedAt: string; stoppedAt: string },
+  isCurrent: () => boolean | Promise<boolean>,
+) {
+  return serial(async () => {
+    const db = await database();
+    await db.withExclusiveTransactionAsync(async (transaction) => {
+      if (!(await isCurrent()))
+        throw new Error("Health capture owner changed.");
+      const column = kind === "sleep" ? "sleep_complete" : "workout_complete";
+      await transaction.runAsync(
+        `update health_repairs set ${column}=1 where owner_key=? and started_at=? and stopped_at=?`,
+        healthOwnerKey(owner),
+        window.startedAt,
+        window.stoppedAt,
+      );
+      if (!(await isCurrent()))
+        throw new Error("Health capture owner changed.");
+    });
   });
 }
 
@@ -467,15 +558,15 @@ export async function getHealthJournalDiagnostics(owner: HealthCaptureOwner) {
   const key = healthOwnerKey(owner);
   const deliveries = await db.getAllAsync<{ state: string; count: number }>(
     "select state,count(*) as count from health_deliveries where owner_key=? group by state",
-    key
+    key,
   );
   const runs = await db.getAllAsync<Record<string, unknown>>(
     "select kind,started_at,finished_at,additions,deletions,usable,generated,ignored,checkpoint_advanced,outcome from health_query_runs where owner_key=? order by finished_at desc limit 20",
-    key
+    key,
   );
   const corrections = await db.getFirstAsync<{ count: number }>(
     "select count(*) as count from health_source_corrections where owner_key=? and state='needs_attention'",
-    key
+    key,
   );
   return {
     backendId: owner.backendId,
@@ -485,7 +576,7 @@ export async function getHealthJournalDiagnostics(owner: HealthCaptureOwner) {
     rawRetentionDays: HEALTH_RAW_RETENTION_DAYS,
     provenanceRetentionDays: HEALTH_PROVENANCE_RETENTION_DAYS,
     maxSamples: MAX_SAMPLES_PER_OWNER,
-    maxUnsettledDeliveries: MAX_UNSETTLED_DELIVERIES
+    maxUnsettledDeliveries: MAX_UNSETTLED_DELIVERIES,
   };
 }
 
@@ -507,8 +598,8 @@ export async function recordHealthQueryFailure(input: {
       canonicalHealthJson(input.contract),
       input.startedAt,
       new Date().toISOString(),
-      input.reason
-    )
+      input.reason,
+    ),
   );
 }
 
@@ -525,7 +616,7 @@ export async function listHealthSourceCorrections(owner: HealthCaptureOwner) {
     `select c.correction_id as correctionId,c.episode_id as episodeId,e.kind,e.started_at as startedAt,e.stopped_at as stoppedAt,c.created_at as createdAt
      from health_source_corrections c join health_episodes e on e.owner_key=c.owner_key and e.episode_id=c.episode_id
      where c.owner_key=? and c.state='needs_attention' order by c.created_at limit 100`,
-    healthOwnerKey(owner)
+    healthOwnerKey(owner),
   );
 }
 
@@ -533,7 +624,7 @@ export async function listHealthSourceCorrections(owner: HealthCaptureOwner) {
 export async function keepRecordedHealthTime(
   owner: HealthCaptureOwner,
   correctionId: string,
-  isCurrent: () => boolean | Promise<boolean>
+  isCurrent: () => boolean | Promise<boolean>,
 ) {
   const db = await database();
   return serial(async () => {
@@ -543,18 +634,23 @@ export async function keepRecordedHealthTime(
       where owner_key=? and correction_id=? and state='needs_attention'`,
       new Date().toISOString(),
       healthOwnerKey(owner),
-      correctionId
+      correctionId,
     );
     return result.changes > 0;
   });
 }
 
-export async function pruneAcknowledgedHealthCapture(owner: HealthCaptureOwner, now = Date.now()) {
+export async function pruneAcknowledgedHealthCapture(
+  owner: HealthCaptureOwner,
+  now = Date.now(),
+) {
   const db = await database();
   const key = healthOwnerKey(owner);
-  const rawBefore = new Date(now - HEALTH_RAW_RETENTION_DAYS * 86_400_000).toISOString();
+  const rawBefore = new Date(
+    now - HEALTH_RAW_RETENTION_DAYS * 86_400_000,
+  ).toISOString();
   const provenanceBefore = new Date(
-    now - HEALTH_PROVENANCE_RETENTION_DAYS * 86_400_000
+    now - HEALTH_PROVENANCE_RETENTION_DAYS * 86_400_000,
   ).toISOString();
   await serial(() =>
     db.withExclusiveTransactionAsync(async (transaction) => {
@@ -566,42 +662,42 @@ export async function pruneAcknowledgedHealthCapture(owner: HealthCaptureOwner, 
       await transaction.runAsync(
         `update health_samples set sample_json=null where owner_key=? and updated_at<? and ${unprotected}`,
         key,
-        rawBefore
+        rawBefore,
       );
       await transaction.runAsync(
         `update health_deliveries set payload_json=null where owner_key=? and state='acknowledged' and acknowledged_at<?
       and not exists(select 1 from health_source_corrections c where c.owner_key=health_deliveries.owner_key and c.episode_id=health_deliveries.episode_id and c.state='needs_attention')`,
         key,
-        rawBefore
+        rawBefore,
       );
       await transaction.runAsync(
         `delete from health_samples where owner_key=? and updated_at<? and ${unprotected}`,
         key,
-        provenanceBefore
+        provenanceBefore,
       );
       await transaction.runAsync(
         `delete from health_deliveries where owner_key=? and state='acknowledged' and acknowledged_at<?
       and not exists(select 1 from health_source_corrections c where c.owner_key=health_deliveries.owner_key and c.episode_id=health_deliveries.episode_id and c.state='needs_attention')`,
         key,
-        provenanceBefore
+        provenanceBefore,
       );
       await transaction.runAsync(
         "delete from health_query_runs where owner_key=? and finished_at<?",
         key,
-        provenanceBefore
+        provenanceBefore,
       );
       await transaction.runAsync(
         "delete from health_source_corrections where owner_key=? and state!='needs_attention' and resolved_at<?",
         key,
-        provenanceBefore
+        provenanceBefore,
       );
       await transaction.runAsync(
         `delete from health_episodes where owner_key=? and updated_at<?
       and not exists(select 1 from health_deliveries d where d.owner_key=health_episodes.owner_key and d.episode_id=health_episodes.episode_id)
       and not exists(select 1 from health_source_corrections c where c.owner_key=health_episodes.owner_key and c.episode_id=health_episodes.episode_id and c.state='needs_attention')`,
         key,
-        provenanceBefore
+        provenanceBefore,
       );
-    })
+    }),
   );
 }

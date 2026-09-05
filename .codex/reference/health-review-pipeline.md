@@ -18,7 +18,7 @@ HealthKit is an input signal, not a separate user-facing product model. Sleep st
 ## End-To-End Flow
 
 1. iPhone reads HealthKit samples in `apps/mobile/src/lib/health.ts`.
-2. Mobile transforms samples into Dayframe activity event payloads.
+2. Mobile atomically journals source additions/deletions, reconstructed episode revisions and immutable event payloads with their checkpoint. A later durable handoff to the existing activity queue repeats the same event ID after interruption.
 3. Mobile submits events through the API client in `apps/mobile/src/lib/api.ts`.
 4. Web API accepts events and stores `activity_events`.
 5. Event processing in `apps/web/src/lib/event-service.ts` creates entries or `review_items`.
@@ -31,6 +31,12 @@ Do not patch one step without checking the adjacent step on either side.
 Automatic Health sync needs both JS wiring and native launch wiring: after Health permission is granted, Dayframe should configure/enable background delivery for sleep and workouts, subscribe to observer changes while JS is running, and keep `BackgroundDeliveryManager.shared.setupBackgroundObservers()` in AppDelegate so cold-launch delivery works.
 
 Current implementation contract:
+
+- Capture checkpoints are keyed by stable backend identity, workspace, user, Health type and query contract. Global legacy anchors remain untouched. Unknown custom API backends require an explicit `EXPO_PUBLIC_DAYFRAME_BACKEND_ID`; checkpoint isolation alone does not attest a legacy session token.
+- Sleep revisions reconstruct all retained members of the source episode across query pages and deltas. Preserve the existing 90-minute grouping and server logical Sleep/user-edit guards. Source deletions retain recorded time and create a durable correction record; they never rewrite queued payloads.
+- Retain acknowledged raw capture for 14 days and compact provenance for 90 days. Pending handoff, acknowledgement and unresolved correction dependencies remain protected; capacity limits stop checkpoint advancement rather than evict intent.
+- Sleep/workout captures settle independently, with bounded native-query callers and at most one observer follow-up per caller. A background-delivery configuration error does not revoke consent or prevent permitted foreground capture.
+- Server source identities preserve prior ignore decisions, reuse an existing workout entry, and report `prior_resolution_unavailable` when a confirmed source no longer has a provable entry. Do not recreate it or infer why it is missing.
 
 - Foreground sync, HealthKit observer callbacks, and AppDelegate background-delivery setup cover sleep/workout changes; real-device background delivery remains under Watch.
 - Apple Health settings own sleep/workout category and description defaults, and both new imports and Review reprocess apply them.

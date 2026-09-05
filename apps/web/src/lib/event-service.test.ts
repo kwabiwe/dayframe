@@ -1638,7 +1638,6 @@ describe("health event persistence", () => {
     );
     expect(reviewInsert).toBeUndefined();
     expect(client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"))).toBeTruthy();
-    expect(client.query.mock.calls.some(([statement]) => String(statement).includes("from time_entries"))).toBe(false);
 
   });
 
