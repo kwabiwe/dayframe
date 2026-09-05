@@ -1,3 +1,4 @@
+import { inspectHealthSourceRevision, type HealthSourceDecision } from "./health-source-provenance";
 import { withSyncTransaction, setSyncPhase, syncFailureMetadata, SyncOperationError, type SyncTransactionOptions } from "./sync-transaction";
 import {
   ActivityEventInputSchema,
@@ -471,6 +472,7 @@ async function processActivityEventWithClient(
     workspaceId: session.workspaceId,
     userId: session.userId
   });
+  if (isHealthEvent(parsed.type)) delete parsed.rawPayload.serverHealthSourceDecision;
   if (boundedClient) setSyncPhase(boundedClient, "receipt_read");
   const fastDuplicate = parsed.clientEventId
     ? await findExistingActivityEventReceipt(parsed.clientEventId, session, boundedClient?.query)
@@ -552,6 +554,20 @@ async function processActivityEventWithClient(
     }
 
     setSyncPhase(client, "effect");
+    const sourceDecision: HealthSourceDecision = isHealthEvent(parsed.type)
+      ? await inspectHealthSourceRevision(client,session,parsed.type,parsed.rawPayload) : {kind:"none"};
+    if(sourceDecision.kind!=="none") {
+      parsed.rawPayload.serverHealthSourceDecision={...sourceDecision,version:1};
+      candidate={...candidate,
+        action:sourceDecision.kind==="needs_review"?"create_review_item":"record_only",
+        reviewStatus:sourceDecision.kind==="ignored"?"ignored":sourceDecision.kind==="needs_review"?"needs_review":"confirmed",
+        reason:sourceDecision.kind==="ignored" ? "These Apple Health source samples were previously ignored; their decision is preserved."
+          : sourceDecision.kind==="resolution_unavailable" ? "These source samples were previously resolved, but their recorded entry is unavailable. No replacement was created."
+          : sourceDecision.kind==="existing_workout" ? "This Apple Health source revision refers to the existing workout; later edits are preserved."
+          : "This Health source revision needs review because its prior decisions or entry links are ambiguous."
+      };
+    }
+
     if (isHealthEvent(parsed.type) && !candidate.categoryId) {
       candidate = {
         ...candidate,
@@ -582,7 +598,7 @@ async function processActivityEventWithClient(
       await lockUserTimerState(client, session);
       lockWaitMilliseconds = Date.now() - lockStartedAt;
     }
-    const matchingHealthSleepEntry = parsed.type === "health_sleep_import"
+    const matchingHealthSleepEntry = parsed.type === "health_sleep_import" && sourceDecision.kind === "none"
       ? await findMatchingHealthSleepTimeEntry(
         client,
         session,
@@ -672,10 +688,16 @@ async function processActivityEventWithClient(
       ]
     );
     const eventId = eventResult.rows[0].id;
-    let timeEntryId: string | undefined;
+    let timeEntryId: string | undefined = sourceDecision.kind === "existing_workout" ? sourceDecision.timeEntryId : undefined;
     let reviewItemId: string | undefined;
     let stopOutcome: "stopped" | "superseded" | "ignored_unscoped" | undefined =
       stopScope.mode === "ignored_unscoped" ? "ignored_unscoped" : undefined;
+
+    if(sourceDecision.kind==="existing_workout") {
+      await client.query(`update activity_events ae set resolved_time_entry_id=te.id from time_entries te
+        where ae.id=$1 and ae.workspace_id=$2 and ae.user_id=$3 and te.id=$4 and te.workspace_id=ae.workspace_id and te.user_id=ae.user_id`,
+        [eventId,session.workspaceId,session.userId,sourceDecision.timeEntryId]);
+    }
 
     if (matchingHealthSleepEntry) {
       const updatedEntry = await updateHealthSleepTimeEntryWindow(
@@ -763,7 +785,7 @@ async function processActivityEventWithClient(
     } else if (candidate.action === "create_time_entry") {
       const startedAt = suggestedStartedAtForEvent(parsed);
       const stoppedAt = suggestedStoppedAtForEvent(parsed);
-      const created = await client.query<{id: string}>(
+      const createdEntry = await client.query<{ id: string }>(
         `insert into time_entries (
             workspace_id,
             user_id,
@@ -793,7 +815,7 @@ async function processActivityEventWithClient(
           eventId
         ]
       );
-      timeEntryId = created.rows[0]?.id;
+      timeEntryId = createdEntry.rows[0]?.id;
     }
 
     if (candidate.reviewStatus === "needs_review") {
@@ -924,8 +946,8 @@ async function processActivityEventWithClient(
     }
     return {
       eventId,
+      processingDisposition: sourceDecision.kind==="resolution_unavailable" ? "prior_resolution_unavailable" : sourceDecision.kind==="ignored" ? "prior_ignore_preserved" : candidate.reviewStatus,
       candidate,
-      processingDisposition: candidate.reviewStatus,
       timeEntryId,
       reviewItemId,
       stopOutcome,
@@ -974,7 +996,11 @@ async function findExistingActivityEventReceipt(
 ) {
   const result = await execute<{ eventId: string; timeEntryId: string | null; processingDisposition: string }>(
     `select ae.id as "eventId",
-            te.id as "timeEntryId", ae.review_status as "processingDisposition"
+            te.id as "timeEntryId",
+            case ae.raw_payload->'serverHealthSourceDecision'->>'kind'
+              when 'resolution_unavailable' then 'prior_resolution_unavailable'
+              when 'ignored' then 'prior_ignore_preserved'
+              else ae.review_status::text end as "processingDisposition"
      from activity_events ae
      left join lateral (
        select id

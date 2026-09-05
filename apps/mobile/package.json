@@ -20,6 +20,7 @@
     "expo": "~56.0.19",
     "expo-constants": "~56.0.23",
     "expo-clipboard": "~56.0.4",
+    "expo-crypto": "~56.0.4",
     "expo-linking": "~56.0.16",
     "expo-location": "~56.0.23",
     "expo-modules-core": "~56.0.23",

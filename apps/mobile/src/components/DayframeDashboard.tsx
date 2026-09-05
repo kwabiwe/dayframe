@@ -333,7 +333,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const queuedEventSync = useRef(
     createSharedInFlightOperation<SyncQueueResult>()
   ).current;
-  const healthAutoSyncInFlight = useRef(false);
   const latestData = useRef<MobileBootstrap | null>(null);
   const liveActivityReconciliationDeferred = useRef(false);
   const optimisticTimerIds = useRef(new Map<string, string>());
@@ -996,30 +995,24 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     }
   }, [authState, load, syncQueuedEvents, transitionToSignedOut]);
 
-  const syncHealthKitAndReload = useCallback(async (reason: "foreground" | "observer" = "foreground") => {
-    if (authState !== "authenticated" || healthAutoSyncInFlight.current) return;
-
-    let enabled = await isHealthKitAutomaticSyncEnabled().catch(() => false);
-    if (!enabled) {
-      enabled = await configureHealthKitAutomaticSync().catch(() => false);
-    }
-    if (!enabled) return;
-
-    healthAutoSyncInFlight.current = true;
+  const syncHealthKitAndReload = useCallback(async (reason: "foreground" | "observer" = "foreground", changedType?: string) => {
+    if (authState !== "authenticated") return;
+    if (!await isHealthKitAutomaticSyncEnabled().catch(() => false)) return;
+    // Background registration and server reprocess never own source capture.
+    void configureHealthKitAutomaticSync().catch(() => undefined);
+    const options = { observerChange: reason === "observer" };
+    const captures = await Promise.allSettled([
+      ...(!changedType || changedType === "HKCategoryTypeIdentifierSleepAnalysis" ? [importHealthKitSleep(options)] : []),
+      ...(!changedType || changedType === "HKWorkoutTypeIdentifier" ? [importHealthKitWorkouts(options)] : [])
+    ]);
+    const captured = captures.some(result => result.status === "fulfilled");
+    if (!captured) return;
     try {
-      await importHealthKitSleep();
-      await importHealthKitWorkouts();
       await syncQueuedEvents();
       await reprocessExistingHealthReviewItems(undefined, { force: reason === "observer" });
       await load({ silent: true });
     } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        transitionToSignedOut();
-        return;
-      }
-      console.warn(friendlyHealthKitError(error, "sync Apple Health"));
-    } finally {
-      healthAutoSyncInFlight.current = false;
+      if (error instanceof AuthRequiredError) transitionToSignedOut();
     }
   }, [authState, load, syncQueuedEvents, transitionToSignedOut]);
 
@@ -1098,14 +1091,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     if (authState !== "authenticated") return undefined;
     let mounted = true;
     let subscription: HealthKitChangeSubscription | null = null;
+    void syncHealthKitAndReload("foreground");
 
     void (async () => {
-      await syncHealthKitAndReload("foreground");
-      if (!mounted) return;
-
-      const nextSubscription = await startHealthKitChangeObservers((_type, errorMessage) => {
-        if (errorMessage) console.warn(`HealthKit observer update failed: ${errorMessage}`);
-        void syncHealthKitAndReload("observer");
+      const nextSubscription = await startHealthKitChangeObservers((type) => {
+        if (mounted) void syncHealthKitAndReload("observer", type);
       });
       if (!mounted) {
         nextSubscription?.remove();
