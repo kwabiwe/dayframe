@@ -168,3 +168,13 @@ For one failed walk and one broken sleep session, collect:
 - Database rows for linked `activity_events`, `review_items`, and `time_entries`.
 - Import preferences for walking and sleep.
 - Any open timer with `stopped_at is null`.
+
+## Recovery and provenance guardrails
+
+Interactive reprocess has a six-second request budget, at most 25 candidate IDs, a returned cursor, and one transaction per complete bounded logical unit. Pass the cursor to reach later candidates; an end-of-scan result is distinct from an empty Review inbox. Never split a legacy Sleep group merely to meet the page limit. Category maintenance runs in a separate bounded transaction. Counters describe committed effects, and unavailable remaining counts stay unknown.
+
+New logical Sleep resolutions record `activity_events.resolved_time_entry_id` while preserving the existing entry and user metadata. Apply the additive resolution-link migration before the new server; do not infer or backfill historical provenance. SQL cancellation is not evidence of a Review-row lock, and an empty later lock snapshot cannot identify a historical blocker. Code tests, queue counts and hidden cards do not close a reported missing-record incident; trace exact source/event/receipt/entry identities through server and mobile visibility.
+
+### Bounded source ingestion
+
+Health ingestion uses the narrow sync transaction policy from the initial receipt read and normalisation context through owner lock, event, Review/entry and source-row persistence. It shares one finite operation budget and checked-out client; SQL or request cancellation rolls back the complete event-first unit. Same-ID duplicate recovery after a competing transaction uses a fresh bounded receipt read. Validate with `DATABASE_URL` pointing to a disposable local `*_test` database and `npx tsx scripts/validate-health-ingest-bounds.ts`; staging smoke testing remains a separate release gate.

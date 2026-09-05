@@ -723,6 +723,20 @@ describe("mobile API client", () => {
     });
   });
 
+
+  it.each(["all", "non_timer"] as const)("preserves caller cancellation during %s Health delivery",async(eventScope)=>{
+    storeBoundSession("session-token");
+    asyncStore.set("dayframe.offlineQueue.v1",JSON.stringify([storedQueuedEvent({source:"health_sleep",type:"health_sleep_import"})]));
+    const controller=new AbortController();let observed:AbortSignal|null|undefined;
+    let started!:()=>void;const fetching=new Promise<void>(resolve=>{started=resolve;});
+    vi.stubGlobal("fetch",vi.fn((_url:string,options:RequestInit)=>{
+      observed=options.signal;started();return new Promise<Response>(()=>undefined);
+    }));
+    const pass=syncQueue({eventScope,signal:controller.signal});await fetching;controller.abort();
+    expect(observed?.aborted).toBe(true);await pass;
+    expect(await readQueue()).toHaveLength(1);
+  });
+
   it("retains a generic event until the response includes a canonical event ID", async () => {
     storeBoundSession("session-token");
     asyncStore.set("dayframe.offlineQueue.v1",JSON.stringify([storedQueuedEvent({source:"health_sleep",type:"health_sleep_import"})]));
@@ -754,6 +768,7 @@ describe("mobile API client", () => {
     await syncQueue();expect(await readQueue()).toHaveLength(0);
     expect(healthAcknowledgement.mock.calls[0][2]).toMatchObject({processingDisposition:"legacy_unknown",timeEntryId:null,reviewItemId:null});
   });
+
 
   it("syncs a queued Health event without posting stale client workspace fields", async () => {
     storeBoundSession("session-token");

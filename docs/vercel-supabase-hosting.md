@@ -143,3 +143,7 @@ See `docs/ios-hosted-supabase-runbook.md` for the iOS/EAS setup and physical-dev
 - No billing.
 - iOS-only mobile app.
 - Health and location data stay in Dayframe-owned tables and should be exportable/deletable before a broader beta.
+
+### Sync recovery schema prerequisite
+
+The bounded sync server requires `supabase/migrations/202609040001_health_sleep_resolution_link.sql` before its Preview or production deployment. It adds nullable, owner-scoped lookup provenance for logical Sleep resolution without backfilling existing events. Validate against the existing staging schema and clean ordered local setup (`packages/db/migrations/006_health_sleep_resolution_link.sql`). An exact Review receipt remains authoritative and replays without rewriting the canonical entry. Production application of this migration remains part of the separately approved release; staging validation is not production authorization.

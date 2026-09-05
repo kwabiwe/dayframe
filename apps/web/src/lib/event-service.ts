@@ -1,4 +1,5 @@
 import { inspectHealthSourceRevision, type HealthSourceDecision } from "./health-source-provenance";
+import { withSyncTransaction, setSyncPhase, syncFailureMetadata, SyncOperationError, type SyncTransactionOptions } from "./sync-transaction";
 import {
   ActivityEventInputSchema,
   hasAutomaticConfidence,
@@ -116,7 +117,10 @@ export type ReviewResolutionCode =
   | "overlap"
   | "duplicate_entry"
   | "database_constraint"
-  | "review_item_locked";
+  | "review_item_locked"
+  | "review_query_timeout"
+  | "review_query_cancelled"
+  | "review_service_unavailable";
 
 export type ReviewResolutionResult = {
   ok: true;
@@ -424,12 +428,37 @@ function healthSchemaReadinessError(
 }
 
 export async function processActivityEvent(
+  rawInput: unknown, session: RequestSession = getDevSession(), options: SyncTransactionOptions = {}
+) {
+  if (!isRecord(rawInput) || !isHealthEvent(String(rawInput.type))) {
+    return processActivityEventWithClient(rawInput, session);
+  }
+  const deadlineAt = options.deadlineAt ?? Date.now() + 8_000;
+  try {
+    return await withSyncTransaction("health_ingest", ({client}) => processActivityEventWithClient(rawInput,session,client), {...options,deadlineAt});
+  } catch (error) {
+    // A competing delivery may have committed the existing event receipt. Read it
+    // only after rollback, on a fresh bounded transaction; never retry the effect here.
+    if (isUniqueViolationError(error) && typeof rawInput.clientEventId === "string") {
+      return withSyncTransaction("health_ingest_receipt", async ({client,phase})=>{
+        phase("receipt_read");
+        if (!await findExistingActivityEventReceipt(rawInput.clientEventId as string,session,client.query)) throw error;
+        return processActivityEventWithClient(rawInput,session,client);
+      },{...options,deadlineAt,cleanupReserveMs:100,readOnly:true});
+    }
+    throw error;
+  }
+}
+
+async function processActivityEventWithClient(
   rawInput: unknown,
-  session: RequestSession = getDevSession()
+  session: RequestSession,
+  boundedClient?: pg.PoolClient
 ): Promise<{
   eventId: string;
-  processingDisposition?: string;
   candidate: CandidateActivity;
+  processingDisposition?: string;
+  reviewItemId?: string;
   timeEntryId?: string;
   duplicate?: boolean;
   updatedExistingTimeEntry?: boolean;
@@ -444,10 +473,12 @@ export async function processActivityEvent(
     userId: session.userId
   });
   if (isHealthEvent(parsed.type)) delete parsed.rawPayload.serverHealthSourceDecision;
+  if (boundedClient) setSyncPhase(boundedClient, "receipt_read");
   const fastDuplicate = parsed.clientEventId
-    ? await findExistingActivityEventReceipt(parsed.clientEventId, session)
+    ? await findExistingActivityEventReceipt(parsed.clientEventId, session, boundedClient?.query)
     : null;
-  const context = await getNormalizationContext(session);
+  if (boundedClient) setSyncPhase(boundedClient, "canonical_read");
+  const context = await getNormalizationContext(session, boundedClient?.query);
   let candidate = normalizeActivityEvent(parsed, context);
   const stopScope = timerStopScope(parsed);
   if (stopScope.mode === "ignored_unscoped") {
@@ -474,12 +505,12 @@ export async function processActivityEvent(
       ...(fastDuplicate.timeEntryId ? { timeEntryId: fastDuplicate.timeEntryId } : {})
     };
   }
-  const client = await pool.connect();
+  const client = boundedClient ?? await pool.connect();
   const transactionStartedAt = Date.now();
   let lockWaitMilliseconds = 0;
 
   try {
-    await client.query("begin");
+    if (!boundedClient) await client.query("begin");
     if (stopScope.mode === "entry") {
       await client.query("select set_config('lock_timeout', $1, true)", [SCOPED_STOP_LOCK_TIMEOUT]);
       await client.query("select set_config('statement_timeout', $1, true)", [SCOPED_STOP_STATEMENT_TIMEOUT]);
@@ -500,7 +531,7 @@ export async function processActivityEvent(
           existingEvent.rows[0].id,
           session
         );
-        await client.query("commit");
+        if (!boundedClient) await client.query("commit");
         recordTimerMutationTiming({
           eventType: parsed.type,
           stopScope: stopScope.mode,
@@ -517,7 +548,12 @@ export async function processActivityEvent(
       }
     }
 
-    if (isHealthEvent(parsed.type)) await lockUserTimerState(client, session);
+    if (isHealthEvent(parsed.type) || parsed.type === "commute_detected") {
+      setSyncPhase(client, "owner_lock");
+      await lockUserTimerState(client, session);
+    }
+
+    setSyncPhase(client, "effect");
     const sourceDecision: HealthSourceDecision = isHealthEvent(parsed.type)
       ? await inspectHealthSourceRevision(client,session,parsed.type,parsed.rawPayload) : {kind:"none"};
     if(sourceDecision.kind!=="none") {
@@ -653,6 +689,7 @@ export async function processActivityEvent(
     );
     const eventId = eventResult.rows[0].id;
     let timeEntryId: string | undefined = sourceDecision.kind === "existing_workout" ? sourceDecision.timeEntryId : undefined;
+    let reviewItemId: string | undefined;
     let stopOutcome: "stopped" | "superseded" | "ignored_unscoped" | undefined =
       stopScope.mode === "ignored_unscoped" ? "ignored_unscoped" : undefined;
 
@@ -671,12 +708,7 @@ export async function processActivityEvent(
         suggestedStoppedAtForEvent(parsed)
       );
       timeEntryId = updatedEntry?.id;
-      if (timeEntryId) await client.query(
-        `update activity_events ae set resolved_time_entry_id=te.id from time_entries te
-         where ae.id=$1 and ae.workspace_id=$2 and ae.user_id=$3
-         and te.id=$4 and te.workspace_id=ae.workspace_id and te.user_id=ae.user_id`,
-        [eventId, session.workspaceId, session.userId, timeEntryId]
-      );
+      if (timeEntryId) await recordHealthSleepResolution(client, session, eventId, timeEntryId);
     } else if (candidate.action === "stop_timer") {
       const scopedStopStartedAt = Date.now();
       const stopResult = stopScope.mode === "entry"
@@ -789,7 +821,7 @@ export async function processActivityEvent(
     if (candidate.reviewStatus === "needs_review") {
       const suggestedStartedAt = suggestedStartedAtForEvent(parsed);
       const suggestedStoppedAt = suggestedStoppedAtForEvent(parsed);
-      await client.query(
+      const createdReview = await client.query<{id: string}>(
         `insert into review_items (
             workspace_id,
             user_id,
@@ -805,7 +837,7 @@ export async function processActivityEvent(
             status,
             notes
          )
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'open', $12)`,
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'open', $12) returning id`,
         [
           parsed.workspaceId,
           parsed.userId,
@@ -821,6 +853,7 @@ export async function processActivityEvent(
           candidate.reason
         ]
       );
+      reviewItemId = createdReview.rows[0]?.id;
     }
 
     if (parsed.type === "health_sleep_import") {
@@ -899,7 +932,7 @@ export async function processActivityEvent(
       await upsertLearnedPlaceVisit(client, parsed, session);
     }
 
-    await client.query("commit");
+    if (!boundedClient) await client.query("commit");
     if (candidate.action === "start_timer" || candidate.action === "stop_timer") {
       recordTimerMutationTiming({
         eventType: parsed.type,
@@ -916,11 +949,12 @@ export async function processActivityEvent(
       processingDisposition: sourceDecision.kind==="resolution_unavailable" ? "prior_resolution_unavailable" : sourceDecision.kind==="ignored" ? "prior_ignore_preserved" : candidate.reviewStatus,
       candidate,
       timeEntryId,
+      reviewItemId,
       stopOutcome,
       ...(matchingHealthSleepEntry ? { updatedExistingTimeEntry: true } : {})
     };
   } catch (error) {
-    await client.query("rollback");
+    if (!boundedClient) await client.query("rollback");
     if (stopScope.mode === "entry" && (isLockNotAvailableError(error) || isStatementTimeoutError(error))) {
       recordTimerMutationTiming({
         eventType: parsed.type,
@@ -931,7 +965,7 @@ export async function processActivityEvent(
       });
       throw new TimerMutationBusyError();
     }
-    if (parsed.clientEventId && isUniqueViolationError(error)) {
+    if (!boundedClient && parsed.clientEventId && isUniqueViolationError(error)) {
       const duplicate = await findExistingActivityEventReceipt(parsed.clientEventId, session);
       if (duplicate) {
         recordTimerMutationTiming({
@@ -951,15 +985,16 @@ export async function processActivityEvent(
     }
     throw eventSyncReadinessError(error, parsed.type) ?? error;
   } finally {
-    client.release();
+    if (!boundedClient) client.release();
   }
 }
 
 async function findExistingActivityEventReceipt(
   clientEventId: string,
-  session: RequestSession
+  session: RequestSession,
+  execute: typeof query = query
 ) {
-  const result = await query<{ eventId: string; timeEntryId: string | null; processingDisposition: string }>(
+  const result = await execute<{ eventId: string; timeEntryId: string | null; processingDisposition: string }>(
     `select ae.id as "eventId",
             te.id as "timeEntryId",
             case ae.raw_payload->'serverHealthSourceDecision'->>'kind'
@@ -1998,11 +2033,13 @@ export async function splitActiveEntry(session: RequestSession = getDevSession()
 export async function resolveReviewItem(
   id: string,
   action: unknown,
-  session: RequestSession = getDevSession()
+  session: RequestSession = getDevSession(),
+  options: SyncTransactionOptions = {}
 ): Promise<ReviewResolutionResult> {
-  const client = await pool.connect();
   try {
-    await client.query("begin");
+    return await withSyncTransaction("legacy_review", async ({ client }) => {
+    setSyncPhase(client, "owner_lock");
+    await lockUserTimerState(client, session);
     if (!isReviewResolutionAction(action)) {
       throw new ReviewResolutionError("invalid_action", "Unsupported review action.", {
         status: 400,
@@ -2010,6 +2047,7 @@ export async function resolveReviewItem(
       });
     }
 
+    setSyncPhase(client, "review_lock");
     const review = await client.query<{
       id: string;
       eventId: string | null;
@@ -2062,13 +2100,13 @@ export async function resolveReviewItem(
        for update of ri nowait`,
       [id, session.workspaceId, session.userId]
     );
+    setSyncPhase(client, "effect");
     const item = review.rows[0];
     if (!item) {
       throw new ReviewResolutionError("review_item_not_found", "Review item not found.", { status: 404 });
     }
     if (item.status !== "open") {
       const resolvedStatus = item.status === "ignored" ? "ignored" : "accepted";
-      await client.query("commit");
       return { ok: true, action, status: resolvedStatus, alreadyResolved: true };
     }
 
@@ -2146,6 +2184,10 @@ export async function resolveReviewItem(
         );
         entryId = inserted.rows[0]?.id;
       }
+    }
+
+    if (item.eventType === "health_sleep_import" && item.eventId && entryId) {
+      await recordHealthSleepResolution(client, session, item.eventId, entryId);
     }
 
     if (action === "create_rule" && item.eventSource && item.eventType) {
@@ -2241,13 +2283,10 @@ export async function resolveReviewItem(
         ]
       );
     }
-    await client.query("commit");
     return { ok: true, action, status: resolvedStatus, entryId, duplicate };
+    }, options);
   } catch (error) {
-    await client.query("rollback");
     throw reviewResolutionErrorForDatabaseError(error);
-  } finally {
-    client.release();
   }
 }
 
@@ -2296,15 +2335,26 @@ function reviewResolutionErrorForDatabaseError(error: unknown) {
     );
   }
 
-  if (isLockNotAvailableError(error) || isStatementTimeoutError(error)) {
+  if (isLockNotAvailableError(error)) {
     return new ReviewResolutionError(
       "review_item_locked",
-      "This review item is being updated by Health reprocess. Try again in a moment.",
+      "This Review item is being updated. Try again in a moment.",
       {
         status: 409,
-        cause: error
+        cause: error,
+        details: { canonicalStatus: "unknown", reason: "lock_unavailable", retryAfterMs: 5_000,
+          phase: (error as {syncPhase?:string}).syncPhase, sqlState: "55P03" }
       }
     );
+  }
+
+  if (isStatementTimeoutError(error) || error instanceof SyncOperationError) {
+    const failure = syncFailureMetadata(error);
+    return new ReviewResolutionError(failure.reason === "operation_timeout" ? "review_query_timeout" :
+      failure.reason === "query_cancelled" ? "review_query_cancelled" : "review_service_unavailable",
+      "Review could not finish. Reconcile your saved action.", {
+        status: 503, details: { canonicalStatus: "unknown", ...failure, retryAfterMs: 5_000 }, cause: error
+      });
   }
 
   if (
@@ -2350,6 +2400,7 @@ type HealthReviewReprocessInput = {
   limit?: number | null;
   batchSize?: number | null;
   force?: boolean | null;
+  cursor?: string | null;
 };
 
 type HealthReviewItemRow = {
@@ -2370,32 +2421,162 @@ type HealthReviewItemRow = {
 
 export async function reprocessHealthReviewItems(
   input: HealthReviewReprocessInput = {},
-  session: RequestSession = getDevSession()
+  session: RequestSession = getDevSession(),
+  options: SyncTransactionOptions = {}
 ) {
+  const deadlineAt = Math.min(options.deadlineAt ?? Infinity, Date.now() + 6_000);
+  const batchSize = Math.min(25, normalizeHealthReprocessBatchSize(input.limit ?? input.batchSize));
+  const result = emptyHealthReprocessResult(batchSize);
+  if (normalizeHealthImportPreferences(input.preferences).sleep) {
+    try {
+      result.repairedSleepEntryCount = await withSyncTransaction("health_category_maintenance", async ({ client }) => {
+        await lockUserTimerState(client, session);
+        const mapping = healthAutoLogMappingFor("sleep", normalizeHealthAutoLogMappings(input.mappings));
+        const categoryId = mapping.categoryId ?? await ensureHealthEventCategoryId(client, session, "health_sleep_import");
+        return repairHealthCategorySleepTimeEntries(client, session, categoryId);
+      }, { ...options, deadlineAt, cleanupReserveMs: 300 });
+    } catch { result.errorSummary.push("category_maintenance_deferred"); result.deferred += 1; }
+  }
+  const cursor = typeof input.cursor === "string" && /^[0-9a-f-]{36}$/i.test(input.cursor) ? input.cursor : null;
+  const candidates = await withSyncTransaction("health_candidates", async ({ client }) => {
+    const rows = await client.query<{ id: string; eventType: string; rawPayload: unknown; suggestedStartedAt: string | null; suggestedStoppedAt: string | null; confidence: string }>(
+      `select ri.id, ae.event_type as "eventType", ae.raw_payload as "rawPayload",
+              ri.suggested_started_at as "suggestedStartedAt", ri.suggested_stopped_at as "suggestedStoppedAt", ri.confidence
+       from review_items ri join activity_events ae on ae.id=ri.event_id
+         and ae.workspace_id=ri.workspace_id and ae.user_id=ri.user_id
+       where ri.workspace_id=$1 and ri.user_id=$2 and ri.status='open'
+         and ae.event_type in ('health_sleep_import','health_workout_import')
+         and ($3::uuid is null or ri.id > $3::uuid)
+       order by ri.id limit $4`, [session.workspaceId, session.userId, cursor, batchSize + 1]);
+    return rows.rows;
+  }, { ...options, deadlineAt, readOnly: true, cleanupReserveMs: 300 }).catch(() => null);
+  if (!candidates) {
+    result.partial = true; result.hasMore = true; result.stopReason = "candidate_read_unavailable";
+    return result;
+  }
+  result.hasMore = candidates.length > batchSize;
+  const selected = candidates.slice(0, batchSize);
+  const done = new Set<string>();
+  for (const candidate of selected) {
+    if (done.has(candidate.id)) continue;
+    if (options.signal?.aborted || Date.now() >= deadlineAt - 400) {
+      result.deferred += selected.filter(item => !done.has(item.id)).length;
+      result.stopReason = "operation_budget";
+      result.hasMore = true;
+      break;
+    }
+    let ids = [candidate.id];
+    // Legacy fragments need the COMPLETE bounded same-source connected group.
+    // An overflow cannot be safely split: retain it with an explicit reason.
+    if (candidate.eventType === "health_sleep_import" && !Array.isArray(isRecord(candidate.rawPayload) ? candidate.rawPayload.samples : null)) {
+      const legacy = await withSyncTransaction("health_legacy_candidates", async ({ client }) =>
+        loadLegacySleepReviewItemsForConsolidation(client, session, Boolean(input.force)),
+        { ...options, deadlineAt, readOnly: true, cleanupReserveMs: 300 }).catch(() => null);
+      if (!legacy) {
+        result.deferred += 1; result.hasMore = true; result.stopReason = "legacy_read_unavailable"; break;
+      }
+      if (legacy.length >= LEGACY_SLEEP_CONSOLIDATION_BATCH_SIZE) {
+        result.deferred += 1; result.stopReason = "legacy_group_scan_limit";
+        done.add(candidate.id); result.nextCursor = candidate.id; continue;
+      }
+      ids = legacySleepGroupIds(legacy, candidate.id);
+    }
+    try {
+      const unit = await reprocessHealthReviewUnit(input, session, ids,
+        { ...options, deadlineAt, cleanupReserveMs: 300 },
+        candidate.eventType === "health_sleep_import" && !Array.isArray(isRecord(candidate.rawPayload) ? candidate.rawPayload.samples : null));
+      for (const key of ["checkedCount", "confirmedCount", "ignoredCount", "leftInReviewCount", "skippedCount", "failedCount", "updatedCategoryCount"] as const) result[key] += unit[key];
+      result.reasons.push(...unit.reasons); result.errorSummary.push(...unit.errorSummary);
+      result.processed += unit.checkedCount;
+    } catch (error) {
+      const busy = error instanceof SyncOperationError || isLockNotAvailableError(error) ||
+        error instanceof ReviewResolutionError && error.code === "review_item_locked";
+      if (busy) result.deferred += ids.length; else result.failedCount += ids.length;
+      result.errorSummary.push(busy ? "health_unit_deferred" : "health_unit_failed");
+    }
+    ids.forEach(id => done.add(id));
+    result.nextCursor = candidate.id;
+  }
+  result.failed = result.failedCount;
+  result.partial = result.deferred > 0 || result.failed > 0 || result.hasMore;
+  // Remaining work is measured independently. Failure is UNKNOWN, not zero.
+  try {
+    result.remainingReviewCount = await withSyncTransaction("health_remaining", async ({ client }) => {
+      const count = await client.query<{ count: number }>(
+        `select count(*)::int as count from review_items ri join activity_events ae on ae.id=ri.event_id
+         and ae.workspace_id=ri.workspace_id and ae.user_id=ri.user_id
+         where ri.workspace_id=$1 and ri.user_id=$2 and ri.status='open'
+           and ae.event_type in ('health_sleep_import','health_workout_import')`, [session.workspaceId,session.userId]);
+      return count.rows[0]?.count ?? 0;
+    }, { ...options, deadlineAt, readOnly: true, cleanupReserveMs: 100 });
+    result.remaining = result.remainingReviewCount;
+  } catch { result.remaining = null; result.partial = true; }
+  if (!result.hasMore && !result.stopReason) result.stopReason = "end_of_scan";
+  return result;
+}
+
+function emptyHealthReprocessResult(batchSize: number) {
+  return {
+    checkedCount: 0, confirmedCount: 0, ignoredCount: 0, leftInReviewCount: 0,
+    skippedCount: 0, failedCount: 0, updatedCategoryCount: 0, repairedSleepEntryCount: 0,
+    remainingReviewCount: 0, batchSize, partial: false, hasMore: false,
+    processed: 0, deferred: 0, failed: 0, remaining: null as number | null,
+    nextCursor: null as string | null, stopReason: null as string | null,
+    errorSummary: [] as string[], reasons: [] as HealthReviewReason[]
+  };
+}
+
+function legacySleepGroupIds(items: HealthReviewItemRow[], candidateId: string) {
+  const target = items.find(item => item.id === candidateId);
+  if (!target) return [candidateId];
+  const identity = healthSleepImportIdentity(target.rawPayload);
+  const segments = items.filter(item => {
+    const other = healthSleepImportIdentity(item.rawPayload);
+    return other.provider === identity.provider && other.sourceName === identity.sourceName;
+  }).map(legacySleepReviewSegment).filter((item): item is SleepReviewSegment => Boolean(item))
+    .sort((a,b) => a.startedMs - b.startedMs);
+  let group: SleepReviewSegment[] = [];
+  for (const segment of segments) {
+    if (group.length && segment.startedMs - Math.max(...group.map(item => item.stoppedMs)) > HEALTH_SLEEP_SESSION_GAP_MS) {
+      if (group.some(item => item.item.id === candidateId)) return group.map(item => item.item.id).sort();
+      group = [];
+    }
+    group.push(segment);
+  }
+  return group.some(item => item.item.id === candidateId) ? group.map(item => item.item.id).sort() : [candidateId];
+}
+
+async function reprocessHealthReviewUnit(input: HealthReviewReprocessInput, session: RequestSession, ids: string[], options: SyncTransactionOptions, legacy: boolean) {
   const preferences = normalizeHealthImportPreferences(input.preferences);
   const mappings = normalizeHealthAutoLogMappings(input.mappings);
-  const batchSize = normalizeHealthReprocessBatchSize(input.limit ?? input.batchSize);
-  const force = Boolean(input.force);
-  const client = await pool.connect();
-  const result = {
-    checkedCount: 0,
-    confirmedCount: 0,
-    ignoredCount: 0,
-    leftInReviewCount: 0,
-    skippedCount: 0,
-    failedCount: 0,
-    updatedCategoryCount: 0,
-    repairedSleepEntryCount: 0,
-    remainingReviewCount: 0,
-    batchSize,
-    partial: false,
-    hasMore: false,
-    errorSummary: [] as string[],
-    reasons: [] as HealthReviewReason[]
-  };
+  const result = emptyHealthReprocessResult(ids.length);
+  return withSyncTransaction("health_reprocess_unit", async ({ client, phase }) => {
+    phase("owner_lock");
+    await lockUserTimerState(client, session);
+    phase("effect");
+    if (legacy) {
+      const fresh = await loadLegacySleepReviewItemsForConsolidation(client, session, Boolean(input.force));
+      if (fresh.length >= LEGACY_SLEEP_CONSOLIDATION_BATCH_SIZE ||
+          JSON.stringify(legacySleepGroupIds(fresh, ids[0]).sort()) !== JSON.stringify([...ids].sort())) {
+        throw new ReviewResolutionError("review_item_locked", "The source group changed. Retry the bounded scan.",
+          { status: 409, details: { canonicalStatus: "unknown", reason: "group_changed" } });
+      }
+    }
 
-  try {
-    await client.query("begin");
+    const healthCategoryIds = new Map<string, string>();
+    async function ensureReviewCategoryId(item: Pick<HealthReviewItemRow, "eventType">) {
+      const spec = healthCategorySpecForEventType(item.eventType);
+      const key = spec.name.toLowerCase();
+      const cached = healthCategoryIds.get(key);
+      if (cached) return cached;
+      const categoryId = await ensureHealthEventCategoryId(client, session, item.eventType);
+      healthCategoryIds.set(key, categoryId);
+      return categoryId;
+    }
+
+    await ensureReviewCategoryId({ eventType: "health_workout_import" });
+    if (preferences.sleep) await ensureReviewCategoryId({ eventType: "health_sleep_import" });
+    phase("review_lock");
     const reviewItems = await client.query<HealthReviewItemRow>(
       `select ri.id,
               ri.event_id as "eventId",
@@ -2415,70 +2596,26 @@ export async function reprocessHealthReviewItems(
        where ri.workspace_id = $1
          and ri.user_id = $2
          and ri.status = 'open'
+         and ri.id = any($3::uuid[])
          and ae.workspace_id = $1
          and ae.user_id = $2
          and ae.event_type in ('health_sleep_import', 'health_workout_import')
-       order by
-         case
-           when ri.notes is null or ri.notes not like 'Left in Review:%' then 0
-           when $4::boolean then 1
-           else 2
-         end asc,
-         case
-           when ae.event_type = 'health_workout_import' then 0
-           when ae.event_type = 'health_sleep_import' and ae.raw_payload ? 'samples' then 1
-           else 2
-         end asc,
-         coalesce(ri.suggested_started_at, ae.occurred_at) desc,
-         ri.created_at desc
-       limit $3
-       for update of ri skip locked`,
-      [session.workspaceId, session.userId, batchSize, force]
+       order by ri.id
+       for update of ri nowait`,
+      [session.workspaceId, session.userId, ids]
     );
 
-    const healthCategoryIds = new Map<string, string>();
-    async function ensureReviewCategoryId(item: Pick<HealthReviewItemRow, "eventType">) {
-      const spec = healthCategorySpecForEventType(item.eventType);
-      const key = spec.name.toLowerCase();
-      const cached = healthCategoryIds.get(key);
-      if (cached) return cached;
-      const categoryId = await ensureHealthEventCategoryId(client, session, item.eventType);
-      healthCategoryIds.set(key, categoryId);
-      return categoryId;
-    }
-
+    phase("effect");
     const sleepMapping = healthAutoLogMappingFor("sleep", mappings);
-    let sleepCategoryId: string | null = null;
-    try {
-      sleepCategoryId = preferences.sleep
-        ? sleepMapping.categoryId ?? await ensureReviewCategoryId({ eventType: "health_sleep_import" })
-        : null;
-      if (sleepCategoryId) {
-        result.repairedSleepEntryCount = await repairHealthCategorySleepTimeEntries(client, session, sleepCategoryId);
-      }
-    } catch (error) {
-      result.failedCount = Math.max(
-        1,
-        reviewItems.rows.filter((item) => item.eventType === "health_sleep_import").length
-      );
-      result.errorSummary.push(compactErrorSummary(error, "Unable to repair legacy Sleep categories"));
-      await client.query("rollback");
-      return result;
+    const sleepCategoryId = preferences.sleep
+      ? sleepMapping.categoryId ?? await ensureReviewCategoryId({ eventType: "health_sleep_import" }) : null;
+    if (reviewItems.rows.length !== ids.length) {
+      // A concurrent resolution changed this logical group: retry selection.
+      throw new ReviewResolutionError("review_item_locked", "Health group changed before processing.", {
+        status: 409, details: { canonicalStatus: "unknown", reason: "group_changed" }
+      });
     }
-
-    if (reviewItems.rows.length === 0) {
-      await refreshHealthReviewRemainingCount(client, session, result, 0);
-      await client.query("commit");
-      return result;
-    }
-
-    const sleepItems = preferences.sleep
-      ? mergeHealthReviewItemRows(
-        reviewItems.rows,
-        await loadLegacySleepReviewItemsForConsolidation(client, session, force)
-      )
-      : reviewItems.rows;
-
+    const sleepItems = reviewItems.rows;
     const consolidatedSleepIds = await consolidateLegacyHealthSleepReviewItems(
       client,
       sleepItems,
@@ -2490,6 +2627,7 @@ export async function reprocessHealthReviewItems(
 
     for (const item of reviewItems.rows) {
       if (consolidatedSleepIds.has(item.id)) continue;
+      const beforeItem = { ...result, reasons: [...result.reasons], errorSummary: [...result.errorSummary] };
       result.checkedCount += 1;
       await client.query("savepoint reprocess_health_item");
       try {
@@ -2551,6 +2689,7 @@ export async function reprocessHealthReviewItems(
             stoppedAt
           });
           if (matchingEntry) {
+            if (item.eventId) await recordHealthSleepResolution(client, session, item.eventId, matchingEntry.id);
             await resolveReprocessedHealthReviewItem(client, item, "accepted");
             result.confirmedCount += 1;
             await client.query("release savepoint reprocess_health_item");
@@ -2564,6 +2703,7 @@ export async function reprocessHealthReviewItems(
           ? await findCoveringHealthTimeEntry(client, session, item, startedAt, stoppedAt)
           : null;
         if (coveredEntry) {
+          if (item.eventId) await recordHealthSleepResolution(client, session, item.eventId, coveredEntry.id);
           await resolveReprocessedHealthReviewItem(client, item, "accepted");
           result.confirmedCount += 1;
           await client.query("release savepoint reprocess_health_item");
@@ -2607,6 +2747,8 @@ export async function reprocessHealthReviewItems(
       } catch (error) {
         await client.query("rollback to savepoint reprocess_health_item");
         await client.query("release savepoint reprocess_health_item");
+        Object.assign(result, beforeItem);
+        result.checkedCount += 1;
         result.failedCount += 1;
         result.skippedCount += 1;
         result.leftInReviewCount += 1;
@@ -2615,15 +2757,8 @@ export async function reprocessHealthReviewItems(
       }
     }
 
-    await refreshHealthReviewRemainingCount(client, session, result, reviewItems.rows.length);
-    await client.query("commit");
     return result;
-  } catch (error) {
-    await client.query("rollback");
-    throw error;
-  } finally {
-    client.release();
-  }
+  }, options);
 }
 
 async function repairHealthCategorySleepTimeEntries(
@@ -2632,10 +2767,9 @@ async function repairHealthCategorySleepTimeEntries(
   sleepCategoryId: string
 ) {
   const repaired = await client.query<{ id: string }>(
-    `update time_entries te
-     set category_id = $3,
-         updated_at = now()
-     from categories current_category
+    `with candidates as (
+       select te.id from time_entries te
+       join categories current_category on current_category.id=te.category_id
      where te.category_id = current_category.id
        and te.workspace_id = $1
        and te.user_id = $2
@@ -2657,6 +2791,11 @@ async function repairHealthCategorySleepTimeEntries(
              and ae.event_type = 'health_sleep_import'
          )
        )
+
+       order by te.id limit 25 for update of te skip locked
+     )
+     update time_entries te set category_id=$3, updated_at=now()
+     from candidates where te.id=candidates.id
      returning te.id`,
     [session.workspaceId, session.userId, sleepCategoryId]
   );
@@ -2667,53 +2806,6 @@ function normalizeHealthReprocessBatchSize(value: unknown) {
   const numeric = Number(value ?? DEFAULT_HEALTH_REPROCESS_BATCH_SIZE);
   if (!Number.isFinite(numeric)) return DEFAULT_HEALTH_REPROCESS_BATCH_SIZE;
   return Math.max(1, Math.min(MAX_HEALTH_REPROCESS_BATCH_SIZE, Math.round(numeric)));
-}
-
-async function refreshHealthReviewRemainingCount(
-  client: pg.PoolClient,
-  session: RequestSession,
-  result: {
-    leftInReviewCount: number;
-    failedCount: number;
-    remainingReviewCount: number;
-    batchSize: number;
-    partial: boolean;
-    hasMore: boolean;
-  },
-  fetchedCount: number
-) {
-  try {
-    const countResult = await client.query<{ count: number; unexplainedCount: number }>(
-      `select count(*)::int as count,
-              count(*) filter (
-                where ri.notes is null or ri.notes not like 'Left in Review:%'
-              )::int as "unexplainedCount"
-       from review_items ri
-       join activity_events ae on ae.id = ri.event_id
-       where ri.workspace_id = $1
-         and ri.user_id = $2
-         and ri.status = 'open'
-         and ae.workspace_id = $1
-         and ae.user_id = $2
-         and ae.event_type in ('health_sleep_import', 'health_workout_import')`,
-      [session.workspaceId, session.userId]
-    );
-    const remaining = Number(countResult.rows[0]?.count);
-    const unexplained = Number(countResult.rows[0]?.unexplainedCount);
-    if (Number.isFinite(remaining)) {
-      result.remainingReviewCount = remaining;
-      result.partial = Number.isFinite(unexplained)
-        ? unexplained > 0
-        : remaining > result.leftInReviewCount + result.failedCount;
-      result.hasMore = result.partial;
-      return;
-    }
-  } catch {
-    // Diagnostics should not make reprocess fail after item handling succeeded.
-  }
-
-  result.partial = fetchedCount >= result.batchSize;
-  result.hasMore = result.partial;
 }
 
 async function loadLegacySleepReviewItemsForConsolidation(
@@ -2753,23 +2845,10 @@ async function loadLegacySleepReviewItemsForConsolidation(
        coalesce(ri.suggested_started_at, ae.occurred_at) desc,
        ri.created_at desc
      limit $4
-     for update of ri skip locked`,
+`,
     [session.workspaceId, session.userId, force, LEGACY_SLEEP_CONSOLIDATION_BATCH_SIZE]
   );
   return result.rows;
-}
-
-function mergeHealthReviewItemRows(...groups: HealthReviewItemRow[][]) {
-  const seen = new Set<string>();
-  const merged: HealthReviewItemRow[] = [];
-  for (const group of groups) {
-    for (const item of group) {
-      if (seen.has(item.id)) continue;
-      seen.add(item.id);
-      merged.push(item);
-    }
-  }
-  return merged;
 }
 
 async function consolidateLegacyHealthSleepReviewItems(
@@ -2838,6 +2917,7 @@ async function consolidateLegacyHealthSleepReviewItems(
     const durationSeconds = Math.round((new Date(stoppedAt).getTime() - new Date(startedAt).getTime()) / 1000);
     if (!shouldAutoConfirmHealthSleep({ durationSeconds, startedAt, stoppedAt })) continue;
 
+    const beforeGroup = { ...result, reasons: [...result.reasons] };
     await client.query("savepoint consolidate_health_sleep");
     try {
       for (const segment of group) {
@@ -2852,13 +2932,14 @@ async function consolidateLegacyHealthSleepReviewItems(
       const coveredEntry = existingEntry
         ? existingEntry
         : await findCoveringHealthTimeEntry(client, session, { ...group[0].item, title: sleepDescription }, startedAt, stoppedAt);
+      let resolvedEntryId = coveredEntry?.id;
       if (!coveredEntry) {
         if (await hasUnsafeHealthSleepCollision(client, session, startedAt, stoppedAt)) {
           await client.query("release savepoint consolidate_health_sleep");
           continue;
         }
 
-        await insertConfirmedHealthTimeEntry(client, {
+        resolvedEntryId = await insertConfirmedHealthTimeEntry(client, {
           ...group[0].item,
           title: sleepDescription
         }, session, {
@@ -2872,6 +2953,7 @@ async function consolidateLegacyHealthSleepReviewItems(
       for (const segment of group) {
         handledIds.add(segment.item.id);
         result.checkedCount += 1;
+        if (resolvedEntryId && segment.item.eventId) await recordHealthSleepResolution(client, session, segment.item.eventId, resolvedEntryId);
         await resolveReprocessedHealthReviewItem(client, segment.item, "accepted");
       }
       result.confirmedCount += 1;
@@ -2880,6 +2962,7 @@ async function consolidateLegacyHealthSleepReviewItems(
       void error;
       await client.query("rollback to savepoint consolidate_health_sleep");
       await client.query("release savepoint consolidate_health_sleep");
+      Object.assign(result, beforeGroup);
       handledIds.forEach((id) => {
         if (group.some((segment) => segment.item.id === id)) handledIds.delete(id);
       });
@@ -3565,8 +3648,8 @@ function reviewDurationSeconds(
 }
 
 function compactErrorSummary(error: unknown, fallback: string) {
-  const message = error instanceof Error ? error.message : String(error ?? "");
-  return `${fallback}: ${message || "Unknown error"}`.replace(/\s+/g, " ").slice(0, 240);
+  const failure = syncFailureMetadata(error);
+  return `${fallback}: ${failure.reason} (${failure.phase}${failure.sqlState ? `, ${failure.sqlState}` : ""})`;
 }
 
 function addCompactError(errors: string[], message: string) {
@@ -3636,6 +3719,15 @@ async function resolveReprocessedHealthReviewItem(
   }
 }
 
+export async function recordHealthSleepResolution(client: pg.PoolClient, session: RequestSession, eventId: string, entryId: string) {
+  await client.query(
+    `update activity_events ae set resolved_time_entry_id=te.id
+     from time_entries te where ae.id=$3 and ae.workspace_id=$1 and ae.user_id=$2
+       and ae.event_type='health_sleep_import' and te.id=$4
+       and te.workspace_id=ae.workspace_id and te.user_id=ae.user_id`,
+    [session.workspaceId,session.userId,eventId,entryId]);
+}
+
 async function hasTimeEntryCreatedFromEvent(
   client: pg.PoolClient,
   eventId: string,
@@ -3675,7 +3767,7 @@ async function insertConfirmedHealthTimeEntry(
     stoppedAt: string;
   }
 ) {
-  await client.query(
+  const result = await client.query<{id: string}>(
     `insert into time_entries (
         workspace_id,
         user_id,
@@ -3690,7 +3782,7 @@ async function insertConfirmedHealthTimeEntry(
         stopped_at,
         created_from_event_id
      )
-     values ($1, $2, $3, $4, $5, coalesce($6, 'manual_app'), $7, 'confirmed', $8, $9, $10, $11)`,
+     values ($1, $2, $3, $4, $5, coalesce($6, 'manual_app'), $7, 'confirmed', $8, $9, $10, $11) returning id`,
     [
       session.workspaceId,
       session.userId,
@@ -3705,6 +3797,7 @@ async function insertConfirmedHealthTimeEntry(
       item.eventId
     ]
   );
+  return result.rows[0]?.id;
 }
 
 function isExplicitStartEvent(type: string) {

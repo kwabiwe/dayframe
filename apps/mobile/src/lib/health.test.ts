@@ -16,7 +16,6 @@ vi.mock("expo-sqlite",()=>({openDatabaseAsync:async()=>{
   };return adapter;
 }}));
 vi.mock("./backendIdentity",()=>({requireBackendIdentity:()=>"staging-fixture"}));
-vi.mock("./mobileAccount",()=>({readActiveMobileAccount:async()=>({workspaceId:"workspace",userId:"user"}),mobileAccountOwnersEqual:()=>true}));
 vi.mock("./secure-session",()=>({readOwnedAuthenticatedSessionSnapshot:async()=>({status:"authenticated",snapshot:{}}),isAuthenticatedSessionSnapshotCurrent:()=>true}));
 afterAll(()=>captureDb.close());
 afterEach(()=>vi.useRealTimers());
@@ -53,6 +52,15 @@ vi.mock("@react-native-async-storage/async-storage", () => ({
     })
   }
 }));
+
+vi.mock("./mobileAccount", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./mobileAccount")>();
+  return {
+    ...actual,
+    readActiveMobileAccount: async () => ({ userId: "health-user", workspaceId: "health-workspace" }),
+  };
+});
+vi.mock("./mobile-network", () => ({StaleMobileSessionResponseError: class extends Error {}}));
 
 vi.mock("./api", () => ({
   enqueueEvent: apiMocks.enqueueEvent,

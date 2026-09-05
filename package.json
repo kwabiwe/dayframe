@@ -28,7 +28,9 @@
     "validate:review-sync-sqlite": "bash scripts/validate-review-sync-sqlite.sh",
     "validate:review-mutation-db": "tsx scripts/validate-review-mutation-db.ts",
     "validate:integration-token-security": "tsx scripts/validate-integration-token-security.ts",
-    "testflight:preflight": "node scripts/dayframe-testflight-preflight.mjs"
+    "testflight:preflight": "node scripts/dayframe-testflight-preflight.mjs",
+    "validate:sync-transactions": "tsx scripts/validate-sync-transactions.ts",
+    "validate:health-sync-units": "tsx scripts/validate-health-sync-units.ts"
   },
   "devDependencies": {
     "@types/node": "^26.0.0",

@@ -1,3 +1,10 @@
+import { mobileBuildDiagnostics } from "@/lib/mobileBuildDiagnostics";
+import { supportQueueDiagnostics } from "@/lib/supportSyncDiagnostics";
+import { readActiveMobileAccount, mobileAccountOwnersEqual } from "@/lib/mobileAccount";
+import { synchroniseDeviceNow, getLastManualSyncResult } from "@/lib/manualSyncRuntime";
+import { manualSyncSummary } from "@/lib/syncCoordinator";
+import { createOwnerSyncCoalescer } from "@/lib/ownerSyncCoalescer";
+import { subscribeRecoveredDashboardBootstrap } from "@/lib/dashboardBootstrapChannel";
 import { useCallback, useEffect, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import {
   Alert,
@@ -42,7 +49,6 @@ import {
 import {
   AuthRequiredError,
   archiveCategory,
-  buildQueueDiagnosticsSnapshot,
   clearFailedQueuedEvents,
   createCategory,
   deleteRecentLocationEvidence,
@@ -52,7 +58,6 @@ import {
   logout,
   readQueue,
   retryFailedQueuedEvents,
-  syncQueue,
   updateCategory,
   type MobileBootstrap,
   type QueueDiagnostics,
@@ -74,8 +79,6 @@ import {
   getHealthImportPreferences,
   getHealthImportStatus,
   HEALTH_IMPORT_PREFERENCE_OPTIONS,
-  importHealthKitSleep,
-  importHealthKitWorkouts,
   reprocessExistingHealthReviewItems,
   requestHealthKitPermissions,
   setHealthAutoLogMapping,
@@ -287,7 +290,7 @@ export default function SettingsScreen() {
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [editingCategoryName, setEditingCategoryName] = useState("");
   const [editingCategoryColor, setEditingCategoryColor] = useState("lime");
-  const refreshInFlight = useRef(false);
+  const refreshes = useRef(createOwnerSyncCoalescer<void>());
   const categoryEditRef = useRef<TextInput>(null);
   const newCategoryInputRef = useRef<TextInput>(null);
   const settingsScrollRef = useRef<ScrollView>(null);
@@ -412,9 +415,7 @@ export default function SettingsScreen() {
     setTimerStopSyncIssues(issues);
   }, []);
 
-  const load = useCallback(async (options?: { silent?: boolean; trigger?: "navigation" | "focus" | "pull" }) => {
-    if (refreshInFlight.current) return;
-    refreshInFlight.current = true;
+  const load = useCallback((options?: { silent?: boolean; trigger?: "navigation" | "focus" | "pull" }) => refreshes.current.run("settings", true, async () => {
     const showRefreshIndicator = shouldShowSettingsRefreshSpinner(options?.trigger ?? "navigation");
     if (showRefreshIndicator) setRefreshing(true);
     try {
@@ -454,15 +455,18 @@ export default function SettingsScreen() {
         );
       }
     } finally {
-      refreshInFlight.current = false;
       if (showRefreshIndicator) setRefreshing(false);
     }
-  }, [
+  }, async () => {}), [
     finishSignedOutNavigation,
     refreshReviewDiagnostics,
     refreshTimeEntryDiagnostics,
     refreshTimerStopDiagnostics
   ]);
+
+  useEffect(() => subscribeRecoveredDashboardBootstrap(event => {
+    if (event.type === "completed") setDataAndCache(event.bootstrap);
+  }), [setDataAndCache]);
 
   useEffect(() => {
     if (!isSettingsSnapshotFresh()) void load({ silent: true });
@@ -777,15 +781,10 @@ export default function SettingsScreen() {
     setSyncingQueue(true);
     setSyncStatusMessageAndCache(options?.syncingMessage ?? "Syncing device data...");
     try {
-      const [result] = await Promise.all([
-        syncQueue({ forceRetry: true }),
-        synchroniseReviewMutations({ force: true })
-      ]);
-      setQueueAndCache(result.remaining);
-      setLastSyncResultAndCache(result);
-      setSyncStatusMessageAndCache(null);
-      await refreshReviewDiagnostics();
-      await load();
+      const result = await synchroniseDeviceNow({ date: data?.dateRange?.selectedDate });
+      setQueueAndCache(await readQueue());
+      setSyncStatusMessageAndCache(manualSyncSummary(result));
+      await Promise.all([refreshReviewDiagnostics(), refreshLocationV2Diagnostics(), refreshTimeEntryDiagnostics(), refreshTimerStopDiagnostics()]);
       return result;
     } catch (error) {
       if (error instanceof AuthRequiredError) {
@@ -965,19 +964,35 @@ export default function SettingsScreen() {
 
   async function exportQueueDiagnostics() {
     try {
-      const [latestQueue, latestReviewDiagnostics, reviewMutations] = await Promise.all([
-        readQueue(),
-        getReviewSyncDiagnostics(),
-        listReviewSyncDiagnosticMutations()
+      const owner = await readActiveMobileAccount();
+      const [latestQueue, latestReviewDiagnostics, reviewMutations, location, native, health, manual] = await Promise.all([
+        readQueue(), getReviewSyncDiagnostics(), listReviewSyncDiagnosticMutations(),
+        getLocationStoreDiagnostics(), getNativeLocationIntelligenceStatus().catch(() => null),
+        getHealthImportStatus(), getLastManualSyncResult()
       ]);
-      const eventQueueSnapshot = buildQueueDiagnosticsSnapshot(latestQueue, lastSyncResult);
+      if (!owner || !mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return;
       const snapshot = {
-        ...eventQueueSnapshot,
-        reviewSync: {
-          diagnostics: latestReviewDiagnostics,
-          mutations: reviewMutations,
-          locationEvidencePrefetch: getLocationReviewEvidencePrefetchDiagnostics()
-        }
+        exportedAt: new Date().toISOString(),
+        build: mobileBuildDiagnostics(),
+        lastObservedServerBuild: data?.serverBuild ?? null,
+        owner: { workspace: owner.workspaceId.slice(0, 8), user: owner.userId.slice(0, 8) },
+        activity: supportQueueDiagnostics(latestQueue),
+        health,
+        reviewSync: { diagnostics: latestReviewDiagnostics, mutations: reviewMutations },
+        location,
+        nativeLocation: native ? {
+          pendingSignalCount: native.pendingSignalCount,
+          locationServicesEnabled: native.locationServicesEnabled,
+          accuracyAuthorization: native.accuracyAuthorization,
+          backgroundRefreshStatus: native.backgroundRefreshStatus,
+          monitoringVisits: native.monitoringVisits,
+          monitoringSignificantChanges: native.monitoringSignificantChanges,
+          nativeStoreErrorCode: native.nativeStoreErrorCode
+        } : null,
+        presentationCache: getLocationReviewEvidencePrefetchDiagnostics(),
+        manualSync: manual,
+        selectedDate: data?.dateRange?.selectedDate ?? null,
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
       };
       await Share.share({
         title: `Dayframe sync diagnostics ${snapshot.exportedAt}`,
@@ -1089,8 +1104,7 @@ export default function SettingsScreen() {
   }
 
   async function shareLocationDiagnostics() {
-    const local = locationV2Diagnostics ?? await getLocationStoreDiagnostics();
-    const native = nativeLocationStatus ?? await getNativeLocationIntelligenceStatus().catch(() => null);
+    const [local, native] = await Promise.all([getLocationStoreDiagnostics(), getNativeLocationIntelligenceStatus().catch(() => null)]);
     await Share.share({
       title: "Dayframe location diagnostics",
       message: JSON.stringify({
@@ -1155,13 +1169,8 @@ export default function SettingsScreen() {
   async function syncAppleHealth(options?: { silent?: boolean }) {
     try {
       setSyncStatusMessageAndCache("Syncing Health data...");
-      const sleep = await importHealthKitSleep();
-      updateHealthStatus(sleep);
-      const workout = await importHealthKitWorkouts();
-      updateHealthStatus(workout);
       await syncAndReload({ syncingMessage: "Syncing Health data..." });
-      await reprocessExistingHealthReviewItems(undefined, { force: true });
-      await load({ silent: true });
+      setHealthStatusAndCache(await getHealthImportStatus());
     } catch (error) {
       if (error instanceof AuthRequiredError) return;
       const message = friendlyHealthKitError(error, "sync Apple Health");
@@ -1969,28 +1978,31 @@ export default function SettingsScreen() {
                 </Text>
               ) : null}
               {reviewSyncIssues.map((issue) => (
-                <View key={issue.clientMutationId} style={styles.accountRow}>
+                <Reanimated.View key={issue.clientMutationId} style={styles.accountRow}
+                  entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)} layout={localLayoutTransition(reduceMotion)}>
                   <Text style={styles.accountValue}>
-                    {formatReviewMutationAction(issue.action)} ·{" "}
-                    {formatQueueTime(issue.createdAt)}
+                    {formatReviewMutationAction(issue.action)} · {formatQueueTime(issue.createdAt)}
                   </Text>
                   <Text style={styles.accountMeta}>
-                    Item {issue.reviewItemId.slice(0, 8)} · Mutation{" "}
-                    {issue.clientMutationId.slice(0, 8)}
+                    Item {issue.reviewItemId.slice(0, 8)} · Mutation {issue.clientMutationId.slice(0, 8)}
                     {issue.lastHttpStatus ? ` · HTTP ${issue.lastHttpStatus}` : ""}
                   </Text>
-                  <Pressable
-                    accessibilityRole="button"
+                  <Text style={styles.accountMeta}>
+                    {issue.resolutionStatus === "resolution_unknown" ? "Outcome not yet verified. Your saved change is preserved." : "This saved change needs attention."}
+                  </Text>
+                  <Pressable accessibilityRole="button" accessibilityLabel="Reconcile saved Review change"
                     style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                    onPress={() =>
-                      confirmDiscardReviewIssue(issue.clientMutationId)
-                    }
-                  >
-                    <Text style={styles.secondaryButtonText}>
-                      Discard failed change
-                    </Text>
+                    onPress={() => void synchroniseReviewMutations({ force: true, clientMutationId: issue.clientMutationId })
+                      .then(refreshReviewDiagnostics).catch(() => setSyncStatusMessageAndCache("Unable to reconcile. Your saved change is preserved."))}>
+                    <Text style={styles.secondaryButtonText}>Reconcile now</Text>
                   </Pressable>
-                </View>
+                  {issue.resolutionStatus !== "resolution_unknown" ? (
+                    <Pressable accessibilityRole="button" style={pressable(styles.secondaryButton, styles.buttonPressed)}
+                      onPress={() => confirmDiscardReviewIssue(issue.clientMutationId)}>
+                      <Text style={styles.secondaryButtonText}>Discard failed change</Text>
+                    </Pressable>
+                  ) : null}
+                </Reanimated.View>
               ))}
             </View>
             <View style={styles.buttonRow}>

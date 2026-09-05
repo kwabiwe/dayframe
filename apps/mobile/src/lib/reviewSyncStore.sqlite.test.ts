@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({ open: vi.fn(), fetch: vi.fn(), session: vi.fn(
 vi.mock("expo-sqlite", () => ({ openDatabaseAsync: mocks.open }));
 vi.mock("./secure-session", () => ({ readOwnedAuthenticatedSessionSnapshot: mocks.session, invalidateMobileSessionIfCurrent: vi.fn(), isAuthenticatedSessionSnapshotCurrent: mocks.current }));
 vi.mock("./config", () => ({ DAYFRAME_API_BASE: "https://local-fixture.invalid" }));
-vi.mock("./mobile-network", () => ({ mobileFetchWithTimeout: mocks.fetch, MobileRequestTimeoutError: class extends Error {} }));
+vi.mock("./mobile-network", () => ({ mobileJsonRequest: async (...args: unknown[]) => { const response = await mocks.fetch(...args); return {response,body:await response.json()}; }, MobileRequestTimeoutError: class extends Error {}, StaleMobileSessionResponseError: class extends Error {}, isMobileTransportFailure: (error: unknown) => error instanceof TypeError }));
 let db: DatabaseSync;
 let directory: string;
 let store: typeof import("./reviewSyncStore");
@@ -52,6 +52,91 @@ beforeEach(async () => {
 afterEach(() => { db.close(); rmSync(directory, { recursive: true, force: true }); });
 
 describe("Review real SQLite transactions", () => {
+  it("selects the latest failure by timestamp rather than alphabetic error text", async () => {
+    const data=bootstrap();
+    for(let n=0;n<2;n++) await store.enqueueReviewMutation({bootstrap:data,item:data.reviewItems[n],clientMutationId:syntheticId(94+n),mutation:{action:"accept"}});
+    db.prepare("update review_mutation_outbox set last_error='z older',updated_at='2026-01-01' where client_mutation_id=?").run(syntheticId(94));
+    db.prepare("update review_mutation_outbox set last_error='a latest',updated_at='2026-01-02' where client_mutation_id=?").run(syntheticId(95));
+    expect((await store.getReviewSyncDiagnostics()).lastError).toBe("a latest");
+  });
+  it("reconciles a recently interrupted delivery after reopening without replacing its envelope", async () => {
+    const data = bootstrap();
+    const clientMutationId = syntheticId(91);
+    await store.enqueueReviewMutation({ bootstrap: data, item: data.reviewItems[0], clientMutationId, mutation: { action: "accept" } });
+    db.exec("update review_mutation_outbox set state='in_flight',resolution_status='delivery_unknown',attempt_count=1");
+    const before = db.prepare("select request_json,created_at from review_mutation_outbox").get()!;
+    await reopen();
+    const receipt = { ok: true, action: "accept", status: "accepted", entryId: syntheticId(99) };
+    mocks.fetch.mockResolvedValue({ status: 200, json: async () => ({ ok: true, results: [{
+      clientMutationId, reviewItemId: data.reviewItems[0].id, checkedAt: new Date().toISOString(), state: "applied", result: receipt
+    }] }) });
+    await store.synchroniseReviewMutations();
+    expect(mocks.fetch).toHaveBeenCalledOnce();
+    expect(mocks.fetch.mock.calls[0][0]).toContain("/reconcile");
+    const after = db.prepare("select request_json,created_at,state,acknowledgement_json from review_mutation_outbox").get()!;
+    expect(after).toMatchObject({ ...before, state: "acknowledged" });
+    expect(JSON.parse(String(after.acknowledgement_json))).toEqual(receipt);
+  });
+  it("does not discard an ambiguous server outcome or restore its hidden card", async () => {
+    const data = bootstrap();
+    const clientMutationId = syntheticId(92);
+    await store.enqueueReviewMutation({ bootstrap: data, item: data.reviewItems[0], clientMutationId, mutation: { action: "accept" } });
+    db.exec("update review_mutation_outbox set state='needs_attention',resolution_status='resolution_unknown'");
+    expect(await store.discardReviewSyncIssue(clientMutationId)).toBe(false);
+    expect(count("review_mutation_outbox")).toBe(1);
+    expect((await store.loadCachedReviewBootstrap())?.bootstrap.reviewItems.some(item => item.id === data.reviewItems[0].id)).toBe(false);
+  });
+  it("treats session generation replacement separately from rejected authentication", async () => {
+    const data = bootstrap();
+    await store.enqueueReviewMutation({ bootstrap: data, item: data.reviewItems[0], clientMutationId: syntheticId(93), mutation: { action: "accept" } });
+    mocks.session.mockResolvedValue({ status: "changed" });
+    expect((await store.synchroniseReviewMutations()).outcome).toBe("cancelled");
+    expect(db.prepare("select state from review_mutation_outbox").get()!.state).toBe("pending");
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+  it("retains an HTML or unsuccessful 200 instead of acknowledging durable intent", async () => {
+    const data = bootstrap();
+    await store.enqueueReviewMutation({ bootstrap: data, item: data.reviewItems[0], clientMutationId: syntheticId(81), mutation: { action: "accept" } });
+    mocks.fetch.mockResolvedValue({ status: 200, json: async () => ({ ok: false }) });
+    await store.synchroniseReviewMutations();
+    expect(db.prepare("select state from review_mutation_outbox").get()!.state).not.toBe("acknowledged");
+  });
+  it("escalates an old 21-attempt immutable intent into receipt reconciliation", async () => {
+    const data = bootstrap();
+    await store.enqueueReviewMutation({ bootstrap: data, item: data.reviewItems[0], clientMutationId: syntheticId(82), mutation: { action: "accept" } });
+    db.exec("update review_mutation_outbox set attempt_count=21, created_at='2026-01-01T00:00:00Z'");
+    mocks.fetch.mockResolvedValue({ status: 409, json: async () => ({ code: "review_item_locked" }) });
+    await store.synchroniseReviewMutations();
+    expect(mocks.fetch.mock.calls[0][0]).toContain("/api/review/mutations/reconcile");
+    const row=db.prepare("select client_mutation_id,attempt_count,created_at,state from review_mutation_outbox").get()!;
+    expect(row.client_mutation_id).toBe(syntheticId(82));
+    expect(row.created_at).toBe("2026-01-01T00:00:00Z");
+    expect(row.state).toBe("needs_attention");
+  });
+  it("delivers independent Review siblings after one server-busy response", async () => {
+    const data = bootstrap();
+    for(let n=0;n<2;n++) await store.enqueueReviewMutation({ bootstrap: data, item: data.reviewItems[n], clientMutationId: syntheticId(83+n), mutation: { action: "accept" } });
+    mocks.fetch.mockResolvedValueOnce({status:409,json:async()=>({code:"review_item_locked"})})
+      .mockResolvedValue({status:200,json:async()=>({ok:true,action:"accept",status:"accepted",entryId:syntheticId(99)})});
+    await store.synchroniseReviewMutations();
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    expect(db.prepare("select count(*) as n from review_mutation_outbox where state='acknowledged'").get()!.n).toBe(1);
+  });
+  it("runs exactly one manual follow-up when forced during an ordinary pass", async () => {
+    const data=bootstrap();
+    await store.enqueueReviewMutation({bootstrap:data,item:data.reviewItems[0],clientMutationId:syntheticId(85),mutation:{action:"accept"}});
+    let finish!:()=>void;
+    mocks.fetch.mockImplementationOnce(()=>new Promise(resolve=>{finish=()=>resolve({status:409,json:async()=>({code:"review_item_locked"})});}))
+      .mockResolvedValue({status:200,json:async()=>({ok:true,action:"accept",status:"accepted",entryId:syntheticId(99)})});
+    const ordinary=store.synchroniseReviewMutations();
+    await vi.waitFor(()=>expect(mocks.fetch).toHaveBeenCalledOnce());
+    const manual=store.synchroniseReviewMutations({force:true});
+    const repeated=store.synchroniseReviewMutations({force:true});
+    finish(); await Promise.all([ordinary,manual,repeated]);
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    expect(db.prepare("select state from review_mutation_outbox").get()!.state).toBe("acknowledged");
+  });
+
   it("atomically hides both merge sources and survives reopening", async () => {
     await store.enqueueReviewMutation(mergeInput());
     expect(count("review_mutation_outbox")).toBe(1); expect(count("review_mutation_effects")).toBe(2);
@@ -101,7 +186,7 @@ describe("Review real SQLite transactions", () => {
     expect(count("review_mutation_outbox")).toBe(1);
     expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((candidate) => candidate.id)).not.toContain(item.id);
   });
-  it("does not queue another forced pass while a Review request is active", async () => {
+  it("ordinary triggers join one active Review pass", async () => {
     const data = bootstrap();
     await store.enqueueReviewMutation({
       bootstrap: data,
@@ -118,7 +203,7 @@ describe("Review real SQLite transactions", () => {
     }));
     const first = store.synchroniseReviewMutations();
     await vi.waitFor(() => expect(mocks.fetch).toHaveBeenCalledOnce());
-    const repeated = store.synchroniseReviewMutations({ force: true });
+    const repeated = store.synchroniseReviewMutations();
     releaseResponse();
     await Promise.all([first, repeated]);
     expect(mocks.fetch).toHaveBeenCalledOnce();
@@ -138,7 +223,7 @@ describe("Review real SQLite transactions", () => {
         status: 409,
         json: async () => ({ code: "review_item_locked" })
       })
-      .mockResolvedValueOnce({ status: 200, json: async () => ({ ok: true }) });
+      .mockResolvedValueOnce({ status: 200, json: async () => ({ ok: true, action: "accept", status: "accepted", entryId: syntheticId(99) }) });
 
     await store.synchroniseReviewMutations();
     await store.processReviewBootstrap(data);
@@ -169,7 +254,7 @@ describe("Review real SQLite transactions", () => {
   });
   it("retains acknowledged merge tombstones until both source IDs disappear", async () => {
     const input = mergeInput(); await store.enqueueReviewMutation(input);
-    mocks.fetch.mockResolvedValue({ status: 200, json: async () => ({ ok: true }) });
+    mocks.fetch.mockResolvedValue({ status: 200, json: async () => ({ ok: true, action: "merge", status: "accepted", mergedSegmentId: syntheticId(99) }) });
     await store.synchroniseReviewMutations();
     await store.processReviewBootstrap({ ...input.bootstrap, reviewItems: input.bootstrap.reviewItems.filter(x => x.id !== input.item.id) });
     expect(count("review_mutation_outbox")).toBe(1);
@@ -208,9 +293,10 @@ describe("Review real SQLite transactions", () => {
     const data = bootstrap();
     await store.enqueueReviewMutation({ bootstrap: data, item: data.reviewItems[0], clientMutationId: syntheticId(20), mutation: { action: "accept" } });
     const request = db.prepare("select request_json from review_mutation_outbox").get()!.request_json;
+    for (const column of ["contention_count","reconciliation_attempt_count","last_reconciled_at","resolution_status","acknowledgement_json"]) db.exec(`alter table review_mutation_outbox drop column ${column}`);
     db.exec("drop table review_mutation_effects; drop index review_mutation_owner_idx; pragma user_version=4;");
     await reopen(); await store.loadCachedReviewBootstrap();
-    expect(db.prepare("pragma user_version").get()!.user_version).toBe(5);
+    expect(db.prepare("pragma user_version").get()!.user_version).toBe(6);
     expect(count("review_mutation_effects")).toBe(1);
     expect(db.prepare("select request_json from review_mutation_outbox").get()!.request_json).toBe(request);
   });

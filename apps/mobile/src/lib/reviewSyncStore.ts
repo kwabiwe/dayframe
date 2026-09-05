@@ -1,8 +1,12 @@
+import { createOwnerSyncCoalescer } from "./ownerSyncCoalescer";
+import type { SyncLaneOutcome } from "./syncLane";
 import * as SQLite from "expo-sqlite";
-import { REVIEW_EFFECTS_V5_SQL } from "./reviewSyncSchema";
+import { REVIEW_EFFECTS_V5_SQL, REVIEW_RECOVERY_V6_SQL } from "./reviewSyncSchema";
 import {
   LocationReviewEvidenceDtoSchema,
   ReviewMutationEnvelopeSchema,
+  ReviewReconciliationResponseSchema,
+  validReviewAcknowledgement,
   ReviewMutationSchema,
   type LocationReviewEvidenceDto,
   type ReviewMutation,
@@ -11,7 +15,9 @@ import {
 import { DAYFRAME_API_BASE } from "./config";
 import {
   MobileRequestTimeoutError,
-  mobileFetchWithTimeout
+  mobileJsonRequest,
+  StaleMobileSessionResponseError,
+  isMobileTransportFailure
 } from "./mobile-network";
 import {
   invalidateMobileSessionIfCurrent,
@@ -26,7 +32,7 @@ import { createSerialMutationQueue } from "./location/mutationQueue";
 import { isLocationReviewItem } from "./review";
 
 const DATABASE_NAME = "dayframe-review-sync.db";
-const DATABASE_VERSION = 5;
+const DATABASE_VERSION = 6;
 const ACTIVE_ACCOUNT_KEY = "active_account";
 const LAST_CACHE_AT_KEY = "last_cache_at";
 const LAST_SUCCESSFUL_SYNC_AT_KEY = "last_successful_sync_at";
@@ -80,6 +86,8 @@ export type ReviewSyncResult = {
   waitingCount: number;
   needsAttentionCount: number;
   stopped: boolean;
+  outcome?: SyncLaneOutcome;
+  nextRetryAt?: string | null;
   reason?: "no_account" | "no_session" | "retryable_failure";
 };
 
@@ -95,6 +103,10 @@ export type ReviewSyncDiagnosticMutation = {
   lastAttemptedAt: string | null;
   lastHttpStatus: number | null;
   lastError: string | null;
+  contentionCount?: number;
+  reconciliationAttemptCount?: number;
+  lastReconciledAt?: string | null;
+  resolutionStatus?: string | null;
 };
 
 type AccountRow = {
@@ -119,6 +131,9 @@ type MutationRow = {
   state: ReviewMutationState;
   local_effect: "hidden" | "restore";
   attempt_count: number;
+  contention_count: number;
+  reconciliation_attempt_count: number;
+  resolution_status: string | null;
   next_attempt_at: string | null;
   created_at: string;
 };
@@ -169,7 +184,6 @@ export type LocationReviewEvidenceCacheDiagnostics = {
 };
 
 let databasePromise: Promise<SQLite.SQLiteDatabase> | null = null;
-let synchronisationPromise: Promise<ReviewSyncResult> | null = null;
 let reviewCacheHitCount = 0;
 let reviewCacheMissCount = 0;
 let lastReviewCacheAgeMs: number | null = null;
@@ -303,12 +317,13 @@ async function database() {
           `);
         }
         await transaction.execAsync(REVIEW_EFFECTS_V5_SQL);
+        if ((version?.user_version ?? 0) < 6) await transaction.execAsync(REVIEW_RECOVERY_V6_SQL);
         await transaction.execAsync(`PRAGMA user_version = ${DATABASE_VERSION}`);
       });
     }
     await db.runAsync(
       `update review_mutation_outbox
-       set state = 'pending',
+       set state = 'pending', resolution_status = 'delivery_interrupted',
            next_attempt_at = null,
            updated_at = ?
        where state = 'in_flight'`,
@@ -1156,213 +1171,134 @@ export async function enqueueReviewMutation(input: {
   return { envelope: persistedEnvelope, idempotent };
 }
 
-export async function synchroniseReviewMutations(options: { force?: boolean } = {}) {
-  if (synchronisationPromise) return synchronisationPromise;
-  synchronisationPromise = synchroniseReviewMutationsUnsafe(options).finally(() => {
-    synchronisationPromise = null;
-    emitChange();
-  });
-  return synchronisationPromise;
+export type ReviewSyncOptions = { force?: boolean; signal?: AbortSignal; deadlineAt?: number; clientMutationId?: string };
+export const REVIEW_RECONCILE_AGE_MS = 10 * 60_000;
+export const REVIEW_CONTENTION_LIMIT = 3;
+const reviewCoalescer = createOwnerSyncCoalescer<ReviewSyncResult>();
+
+export async function synchroniseReviewMutations(options: ReviewSyncOptions = {}): Promise<ReviewSyncResult> {
+  const account = await activeAccount();
+  if (!account) return { acknowledgedCount: 0, waitingCount: 0, needsAttentionCount: 0, stopped: false, reason: "no_account", outcome: "complete" };
+  const manualKey = accountMetadataKey("manual_reconciliation_requested", account.account_key);
+  return reviewCoalescer.run(account.account_key, Boolean(options.force), async force => {
+    // A later owner must never inherit an earlier owner's forced follow-up.
+    if ((await activeAccount())?.account_key !== account.account_key) {
+      return {acknowledgedCount:0,waitingCount:0,needsAttentionCount:0,stopped:true,outcome:"cancelled"};
+    }
+    const persistedManual = await metadata(manualKey) === "true";
+    try { return await synchroniseReviewMutationsUnsafe(account, { ...options, force: force || persistedManual }); }
+    finally { emitChange(); }
+  }, () => serialiseReviewMutation(() => setMetadata(manualKey, "true")));
 }
 
-async function synchroniseReviewMutationsUnsafe(
-  options: { force?: boolean }
-): Promise<ReviewSyncResult> {
+async function synchroniseReviewMutationsUnsafe(account: AccountRow, options: ReviewSyncOptions): Promise<ReviewSyncResult> {
   const db = await database();
-  const account = await activeAccount(db);
-  if (!account) {
-    return {
-      acknowledgedCount: 0,
-      waitingCount: 0,
-      needsAttentionCount: 0,
-      stopped: false,
-      reason: "no_account"
-    };
-  }
-  if (options.force) {
-    await serialiseReviewMutation(() =>
-      db.runAsync(
-        `update review_mutation_outbox
-         set state = case when state = 'retry_wait' then 'pending' else state end,
-             next_attempt_at = case when state = 'retry_wait' then null else next_attempt_at end,
-             updated_at = ?
-         where account_key = ? and state in ('retry_wait', 'pending')`,
-        new Date().toISOString(),
-        account.account_key
-      )
-    );
-  }
-  const sessionRead = await readOwnedAuthenticatedSessionSnapshot({
-    userId: account.user_id,
-    workspaceId: account.workspace_id
-  });
+  const sessionRead = await readOwnedAuthenticatedSessionSnapshot({ userId: account.user_id, workspaceId: account.workspace_id });
   if (sessionRead.status !== "authenticated") {
+    // A changed owner is cancellation, not a rejection of that owner's intent.
+    if (sessionRead.status === "changed" || sessionRead.status === "owner_mismatch" || (await activeAccount(db))?.account_key !== account.account_key) return {acknowledgedCount:0,waitingCount:0,needsAttentionCount:0,stopped:true,outcome:"cancelled"};
     await markAccountAuthenticationRequired(account.account_key);
     const diagnostics = await getReviewSyncDiagnostics();
-    return {
-      acknowledgedCount: 0,
-      waitingCount: diagnostics.waitingCount,
-      needsAttentionCount: diagnostics.needsAttentionCount,
-      stopped: true,
-      reason: "no_session"
-    };
+    return {acknowledgedCount:0,waitingCount:diagnostics.waitingCount,needsAttentionCount:diagnostics.needsAttentionCount,stopped:true,reason:"no_session",outcome:"authentication_required"};
   }
-  const token = sessionRead.snapshot.token;
-
-  let acknowledgedCount = 0;
-  let stopped = false;
-  while (true) {
-    const currentOwner = await activeAccount(db);
-    const currentSession = await readOwnedAuthenticatedSessionSnapshot({ userId: account.user_id, workspaceId: account.workspace_id });
-    if (currentOwner?.account_key !== account.account_key || currentSession.status !== "authenticated" || currentSession.snapshot.token !== token) {
-      stopped = true;
-      break;
-    }
-    const row = await nextMutation(account.account_key, options.force ?? false);
-    if (!row) break;
-    const attemptedAt = new Date().toISOString();
-    await serialiseReviewMutation(() =>
-      db.runAsync(
-        `update review_mutation_outbox
-         set state = 'in_flight',
-             attempt_count = attempt_count + 1,
-             last_attempted_at = ?,
-             updated_at = ?
-         where client_mutation_id = ?`,
-        attemptedAt,
-        attemptedAt,
-        row.client_mutation_id
-      )
-    );
+  const isCurrent = async () => !options.signal?.aborted && isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot) &&
+    (await activeAccount(db))?.account_key === account.account_key;
+  if (!await isCurrent()) return {acknowledgedCount:0,waitingCount:0,needsAttentionCount:0,stopped:true,outcome:"cancelled"};
+  if (options.force) await serialiseReviewMutation(() => setMetadata(accountMetadataKey("manual_reconciliation_requested",account.account_key), "false"));
+  const deadlineAt = Math.min(options.deadlineAt ?? Infinity, Date.now() + 45_000);
+  // Snapshot selection prevents force from consuming a newly written backoff.
+  const rows = await db.getAllAsync<MutationRow>(
+    `select * from review_mutation_outbox where account_key=?
+       and (? is null or client_mutation_id=?)
+       and (state in ('pending','in_flight') or (state='needs_attention' and ?=1)
+         or (state='retry_wait' and (?=1 or next_attempt_at is null or next_attempt_at<=?
+           or (reconciliation_attempt_count=0 and (contention_count>=3 or created_at<=?)))))
+     order by created_at,client_mutation_id limit 25`,
+    account.account_key,options.clientMutationId??null,options.clientMutationId??null,options.force?1:0,options.force?1:0,new Date().toISOString(),new Date(Date.now()-REVIEW_RECONCILE_AGE_MS).toISOString());
+  let acknowledgedCount=0;
+  let outcome: SyncLaneOutcome="complete";
+  let stopped=false;
+  const affected = new Set<string>();
+  for (const row of rows) {
+    if (!await isCurrent() || Date.now() >= deadlineAt) { outcome="cancelled";stopped=true;break; }
+    const envelope = parseReviewMutationEnvelope(row.request_json);
+    if (!envelope) { await markMutation(row.client_mutation_id,"needs_attention",null,"Saved action could not be read.",null,"hidden");outcome="needs_attention";continue; }
+    const effectRows=await db.getAllAsync<{review_item_id:string}>("select review_item_id from review_mutation_effects where account_key=? and client_mutation_id=?",account.account_key,row.client_mutation_id);
+    if(effectRows.some(effect=>affected.has(effect.review_item_id))) continue;
+    effectRows.forEach(effect=>affected.add(effect.review_item_id));
+    const reconcile = row.state === "needs_attention" || row.state === "in_flight" || row.resolution_status === "delivery_interrupted" ||
+      row.contention_count >= REVIEW_CONTENTION_LIMIT || Date.now()-Date.parse(row.created_at) >= REVIEW_RECONCILE_AGE_MS;
+    const request = (path: string, body: string) => mobileJsonRequest(`${DAYFRAME_API_BASE}${path}`, {
+      method:"POST",headers:{Authorization:`Bearer ${sessionRead.snapshot.token}`,"Content-Type":"application/json"},body,signal:options.signal
+    }, {timeoutMilliseconds:Math.max(1,Math.min(REVIEW_SYNC_REQUEST_TIMEOUT_MS,deadlineAt-Date.now())),
+      timeoutMessage:"Review sync timed out. Your saved change is preserved.",isCurrent});
+    const attention = async (reason: string, status: number|null = null, restoreIds: string[] = []) => {
+      await markMutation(row.client_mutation_id,"needs_attention",status,reason,null,"hidden",restoreIds);
+      await serialiseReviewMutation(()=>db.runAsync("update review_mutation_outbox set resolution_status=? where client_mutation_id=? and account_key=?",reason,row.client_mutation_id,account.account_key));
+      outcome="needs_attention";
+    };
     try {
-      if (!isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot)) {
-        await markMutation(row.client_mutation_id, "pending", null, null, null, "hidden");
-        stopped = true;
-        break;
-      }
-      const response = await mobileFetchWithTimeout(
-        `${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(row.review_item_id)}`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json"
-          },
-          body: row.request_json
-        },
-        {
-          timeoutMilliseconds: REVIEW_SYNC_REQUEST_TIMEOUT_MS,
-          timeoutMessage: "Review sync timed out. Your saved change will retry automatically."
+      if (reconcile) {
+        await serialiseReviewMutation(()=>db.runAsync(`update review_mutation_outbox set reconciliation_attempt_count=reconciliation_attempt_count+1,
+          last_reconciled_at=?,resolution_status='reconciling' where client_mutation_id=? and account_key=?`,new Date().toISOString(),row.client_mutation_id,account.account_key));
+        const {response,body}=await request("/api/review/mutations/reconcile",JSON.stringify({mutations:[{...envelope,reviewItemId:row.review_item_id}]}));
+        if(response.status===401||response.status===403) {if((await activeAccount(db))?.account_key===account.account_key) await markAccountAuthenticationRequired(account.account_key);outcome="authentication_required";stopped=true;break;}
+        if(!await isCurrent()) {outcome="cancelled";stopped=true;break;}
+        const parsed=ReviewReconciliationResponseSchema.safeParse(body);
+        const proof=parsed.success&&parsed.data.results.length===1?parsed.data.results[0]:null;
+        if(!response.ok && !(response.status>=200&&response.status<300) || !proof || proof.clientMutationId!==row.client_mutation_id || proof.reviewItemId!==row.review_item_id) {
+          await attention("resolution_unknown",response.status);continue;
         }
-      );
-      const responseBody = await safeResponseJson(response);
-      const disposition = reviewSyncDisposition(
-        response.status,
-        typeof responseBody?.code === "string" ? responseBody.code : null
-      );
-      if (disposition === "acknowledge") {
-        await serialiseReviewMutation(() =>
-          db.runAsync(
-            `update review_mutation_outbox
-             set state = 'acknowledged',
-                 local_effect = 'hidden',
-                 next_attempt_at = null,
-                 last_http_status = ?,
-                 last_error = null,
-                 acknowledged_at = ?,
-                 updated_at = ?
-             where client_mutation_id = ?`,
-            response.status,
-            attemptedAt,
-            attemptedAt,
-            row.client_mutation_id
-          )
-        );
-        await setMetadata(
-          accountMetadataKey(
-            LAST_SUCCESSFUL_SYNC_AT_KEY,
-            account.account_key
-          ),
-          attemptedAt
-        );
-        acknowledgedCount += 1;
+        if ((proof.state==="applied"||proof.state==="equivalent_applied") && validReviewAcknowledgement(proof.result,envelope,row.review_item_id)) {
+          await acknowledgeReviewMutation(row,proof.result!,response.status,isCurrent);acknowledgedCount++;continue;
+        }
+        if(proof.state==="conflict"||proof.state==="missing") {await attention(proof.state==="missing"?"canonical_missing":"resolution_conflict",response.status);continue;}
+        if(proof.state!=="open" && !(proof.state==="unknown"&&proof.retryOriginal)) {await attention("resolution_unknown",response.status);continue;}
+      }
+      if(!await isCurrent()) {outcome="cancelled";stopped=true;break;}
+      const attemptedAt=new Date().toISOString();
+      await serialiseReviewMutation(()=>db.runAsync(`update review_mutation_outbox set state='in_flight',resolution_status='delivery_unknown',
+        attempt_count=attempt_count+1,last_attempted_at=?,updated_at=? where client_mutation_id=? and account_key=?`,attemptedAt,attemptedAt,row.client_mutation_id,account.account_key));
+      const {response,body}=await request(`/api/review/${encodeURIComponent(row.review_item_id)}`,row.request_json);
+      if(response.status===401||response.status===403) {if((await activeAccount(db))?.account_key===account.account_key) await markAccountAuthenticationRequired(account.account_key);outcome="authentication_required";stopped=true;break;}
+      if(!await isCurrent()) {outcome="cancelled";stopped=true;break;}
+      const responseBody=body&&typeof body==="object"&&!Array.isArray(body)?body:null;
+      const disposition=reviewSyncDisposition(response.status,typeof responseBody?.code==="string"?responseBody.code:null);
+      if(disposition==="acknowledge"&&validReviewAcknowledgement(responseBody,envelope,row.review_item_id)) {
+        await acknowledgeReviewMutation(row,responseBody!,response.status,isCurrent);acknowledgedCount++;continue;
+      }
+      if(disposition==="authentication_required") {await markAccountAuthenticationRequired(account.account_key);outcome="authentication_required";stopped=true;break;}
+      if(disposition==="retry"||disposition==="acknowledge") {
+        if(response.status===409&&responseBody?.code==="review_item_locked") await serialiseReviewMutation(()=>db.runAsync("update review_mutation_outbox set contention_count=contention_count+1 where client_mutation_id=? and account_key=?",row.client_mutation_id,account.account_key));
+        if(reconcile) await attention("resolution_unknown",response.status);
+        else {await scheduleRetry(row,response.status,disposition==="acknowledge"?"Invalid acknowledgement. Saved action retained.":safeFailureSummary(response.status,responseBody));if(outcome!=="needs_attention")outcome="server_busy";}
         continue;
       }
-      if (disposition === "authentication_required") {
-        await markMutation(
-          row.client_mutation_id,
-          "auth_required",
-          response.status,
-          "Authentication required.",
-          null,
-          "hidden"
-        );
-        await markAccountAuthenticationRequired(account.account_key);
-        await invalidateMobileSessionIfCurrent(token);
-        stopped = true;
-        break;
-      }
-      if (disposition === "retry") {
-        await scheduleRetry(
-          row,
-          response.status,
-          safeFailureSummary(response.status, responseBody)
-        );
-        stopped = true;
-        break;
-      }
-      const restoreIds = canonicalOpenEffectIds(responseBody, row.review_item_id);
-      await markMutation(
-        row.client_mutation_id,
-        "needs_attention",
-        response.status,
-        safeFailureSummary(response.status, responseBody),
-        null,
-        "hidden",
-        restoreIds
-      );
-    } catch (error) {
-      await scheduleRetry(
-        row,
-        null,
-        error instanceof MobileRequestTimeoutError
-          ? error.message
-          : "Network request failed."
-      );
-      stopped = true;
-      break;
+      await attention(safeFailureSummary(response.status,responseBody),response.status,canonicalOpenEffectIds(responseBody,row.review_item_id));
+    } catch(error) {
+      if(!await isCurrent() || error instanceof StaleMobileSessionResponseError || (error instanceof Error&&error.name==="AbortError")) {outcome="cancelled";stopped=true;break;}
+      if(isMobileTransportFailure(error)) {await scheduleRetry(row,null,"Network request failed. Saved action retained.");outcome="transport_failure";stopped=true;break;}
+      if(reconcile) await attention("resolution_unknown");
+      else {await scheduleRetry(row,null,error instanceof MobileRequestTimeoutError?error.message:"Server response unavailable. Saved action retained.");if(outcome!=="needs_attention")outcome="server_busy";}
     }
   }
-  const diagnostics = await getReviewSyncDiagnostics();
-  return {
-    acknowledgedCount,
-    waitingCount: diagnostics.waitingCount,
-    needsAttentionCount: diagnostics.needsAttentionCount,
-    stopped,
-    ...(stopped ? { reason: "retryable_failure" as const } : {})
-  };
+  if ((await activeAccount(db))?.account_key !== account.account_key) return {acknowledgedCount,waitingCount:0,needsAttentionCount:0,stopped:true,outcome:"cancelled"};
+  const diagnostics=await getReviewSyncDiagnostics();
+  if(outcome==="complete") outcome=diagnostics.needsAttentionCount>0?"needs_attention":diagnostics.waitingCount>0?"backoff":"complete";
+  return {acknowledgedCount,waitingCount:diagnostics.waitingCount,needsAttentionCount:diagnostics.needsAttentionCount,
+    stopped,outcome,nextRetryAt:diagnostics.nextRetryAt,...(outcome==="authentication_required"?{reason:"no_session" as const}:{})};
 }
 
-async function nextMutation(accountKeyValue: string, force: boolean) {
-  const db = await database();
-  const now = new Date().toISOString();
-  return await db.getFirstAsync<MutationRow>(
-    `select *
-     from review_mutation_outbox
-     where account_key = ?
-       and (
-         state = 'pending'
-         or (
-           state = 'retry_wait'
-           and (? = 1 or next_attempt_at is null or next_attempt_at <= ?)
-         )
-       )
-     order by created_at, client_mutation_id
-     limit 1`,
-    accountKeyValue,
-    force ? 1 : 0,
-    now
-  );
+async function acknowledgeReviewMutation(row: MutationRow, body: Record<string,unknown>, status: number, isCurrent:()=>Promise<boolean>) {
+  const db=await database();const now=new Date().toISOString();
+  await serialiseReviewMutation(()=>db.withExclusiveTransactionAsync(async transaction=>{
+    if (!await isCurrent()) throw new StaleMobileSessionResponseError();
+    await transaction.runAsync(`update review_mutation_outbox set state='acknowledged',local_effect='hidden',resolution_status='verified',
+      next_attempt_at=null,last_error=null,last_http_status=?,acknowledged_at=?,updated_at=?,acknowledgement_json=?
+      where client_mutation_id=? and account_key=?`,status,now,now,JSON.stringify(body),row.client_mutation_id,row.account_key);
+    await transaction.runAsync("update review_mutation_effects set local_effect='hidden' where client_mutation_id=? and account_key=?",row.client_mutation_id,row.account_key);
+    await setMetadata(accountMetadataKey(LAST_SUCCESSFUL_SYNC_AT_KEY,row.account_key),now,transaction);
+  }));
 }
 
 async function scheduleRetry(
@@ -1458,7 +1394,7 @@ export async function getReviewSyncDiagnostics(): Promise<ReviewSyncDiagnostics>
          where state in ('pending', 'in_flight', 'retry_wait', 'auth_required')
        ) as oldest_queued_at,
        min(next_attempt_at) filter (where state = 'retry_wait') as next_retry_at,
-       max(last_error) filter (where last_error is not null) as last_error
+       null as last_error
      from review_mutation_outbox
      where account_key = ?`,
     account.account_key
@@ -1476,6 +1412,10 @@ export async function getReviewSyncDiagnostics(): Promise<ReviewSyncDiagnostics>
   const pendingCount = Number(diagnostics.pending_count) || 0;
   const retryWaitCount = Number(diagnostics.retry_wait_count) || 0;
   const authenticationRequiredCount = Number(diagnostics.auth_required_count) || 0;
+  const escalation=await db.getFirstAsync<{due:string|null}>(`select min(case when contention_count>=3 then updated_at
+    else strftime('%Y-%m-%dT%H:%M:%fZ',created_at,'+10 minutes') end) as due from review_mutation_outbox
+    where account_key=? and state='retry_wait' and reconciliation_attempt_count=0`,account.account_key);
+  const dueDates=[diagnostics.next_retry_at,escalation?.due].filter((value):value is string=>Boolean(value)).sort();
   const evidenceCache = await getLocationReviewEvidenceCacheDiagnostics();
   return {
     pendingCount,
@@ -1492,8 +1432,8 @@ export async function getReviewSyncDiagnostics(): Promise<ReviewSyncDiagnostics>
       ),
       db
     ),
-    nextRetryAt: diagnostics.next_retry_at,
-    lastError: diagnostics.last_error,
+    nextRetryAt: pendingCount>0?null:dueDates[0]??null,
+    lastError: (await db.getFirstAsync<{last_error:string}>("select last_error from review_mutation_outbox where account_key=? and last_error is not null order by updated_at desc,client_mutation_id desc limit 1",account.account_key))?.last_error ?? null,
     lastCachedAt: await metadata(
       accountMetadataKey(LAST_CACHE_AT_KEY, account.account_key),
       db
@@ -1548,13 +1488,14 @@ export async function listReviewSyncIssues() {
     createdAt: string;
     lastHttpStatus: number | null;
     lastError: string | null;
+    resolutionStatus: string | null;
   }>(
     `select client_mutation_id as "clientMutationId",
             review_item_id as "reviewItemId",
             action_kind as action,
             created_at as "createdAt",
             last_http_status as "lastHttpStatus",
-            last_error as "lastError"
+            last_error as "lastError", resolution_status as "resolutionStatus"
      from review_mutation_outbox
      where account_key = ? and state = 'needs_attention'
      order by created_at`,
@@ -1579,7 +1520,8 @@ export async function listReviewSyncDiagnosticMutations(): Promise<
             next_attempt_at as "nextAttemptAt",
             last_attempted_at as "lastAttemptedAt",
             last_http_status as "lastHttpStatus",
-            last_error as "lastError"
+            last_error as "lastError", contention_count as "contentionCount",
+            reconciliation_attempt_count as "reconciliationAttemptCount",last_reconciled_at as "lastReconciledAt",resolution_status as "resolutionStatus"
      from review_mutation_outbox
      where account_key = ?
      order by created_at`,
@@ -1600,14 +1542,14 @@ export async function discardReviewSyncIssue(clientMutationId: string) {
         select e.review_item_id from review_mutation_effects e
         join review_mutation_outbox o on o.client_mutation_id = e.client_mutation_id
         where e.account_key = ? and o.client_mutation_id = ?
-          and o.state = 'needs_attention' and e.local_effect = 'hidden'
+          and o.state = 'needs_attention' and coalesce(o.resolution_status,'') != 'resolution_unknown' and e.local_effect = 'hidden'
       )`, account.account_key, account.account_key, clientMutationId
     );
     const result = await transaction.runAsync(
       `delete from review_mutation_outbox
        where client_mutation_id = ?
          and account_key = ?
-         and state = 'needs_attention'`,
+         and state = 'needs_attention' and coalesce(resolution_status,'') != 'resolution_unknown'`,
       clientMutationId,
       account.account_key
     );
@@ -1842,17 +1784,6 @@ export function reviewSyncDisposition(
     return "retry" as const;
   }
   return "needs_attention" as const;
-}
-
-async function safeResponseJson(response: Response) {
-  try {
-    const value = await response.json();
-    return value && typeof value === "object"
-      ? value as Record<string, unknown>
-      : null;
-  } catch {
-    return null;
-  }
 }
 
 function safeFailureSummary(
