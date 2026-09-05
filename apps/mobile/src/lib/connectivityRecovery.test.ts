@@ -260,7 +260,7 @@ describe("connectivity recovery", () => {
     expect(pendingStops).toEqual([]);
   });
 
-  it("stops on a returned retryable Review failure", async () => {
+  it("stops on a returned Review transport failure", async () => {
     const calls: ConnectivityRecoveryStepName[] = [];
     const result = await runConnectivityRecoveryPass({
       canContinue: () => true,
@@ -273,7 +273,7 @@ describe("connectivity recovery", () => {
           run: async () => {
             calls.push("review_outbox");
             return reviewConnectivityRecoveryStepResult({
-              reason: "retryable_failure"
+              reason: "retryable_failure",outcome:"transport_failure"
             });
           }
         },
@@ -291,7 +291,7 @@ describe("connectivity recovery", () => {
   });
 
   it.each(["request_failed", "replay_failed"] as const)(
-    "stops on a returned retryable Location failure: %s",
+    "stops on a returned Location transport failure: %s",
     async (reason) => {
       const calls: ConnectivityRecoveryStepName[] = [];
       const result = await runConnectivityRecoveryPass({
@@ -306,7 +306,7 @@ describe("connectivity recovery", () => {
               calls.push("location_intelligence");
               return locationConnectivityRecoveryStepResult({
                 synced: false,
-                reason
+                reason,outcome:"transport_failure"
               });
             }
           },
@@ -797,3 +797,13 @@ function deferred<Value>() {
   });
   return { promise, resolve };
 }
+
+it("continues Location and bootstrap after a retryable Review application response",async()=>{
+ const later=vi.fn();
+ await runConnectivityRecoveryPass({canContinue:()=>true,isAuthenticationRequired:()=>false,isTransportFailure:()=>false,onAuthenticationRequired:()=>{},steps:[
+  {name:"review_outbox",run:async()=>reviewConnectivityRecoveryStepResult({reason:"retryable_failure",waitingCount:1})},
+  {name:"location_intelligence",run:async()=>{later("location");}},
+  {name:"bootstrap",run:async()=>{later("bootstrap");}}
+ ]});
+ expect(later.mock.calls.flat()).toEqual(["location","bootstrap"]);
+});

@@ -299,6 +299,8 @@ For implementation PRs that affect shipped mobile/API behavior, do not ask KB to
 - Use synthetic 2/13/25/50-item profiles from `scripts/fixtures/review-performance.ts`. Run `npx tsx scripts/measure-review-performance.ts` for desktop preparation/SQLite timings only. On the same signed staging build measure cached first content (<300 ms), Back-start p95 (<250 ms), interactive swipe, mounted cards, local enqueue (<500 ms), evidence prefetch cancellation and 50-item scrolling. Do not claim desktop measurements as device acceptance or rewrite the list without measurements.
 - Physical regression: Start/Stop/Edit/Delete, PR #184 reconnect/account recovery, PR #185 finite timer background work, Live Activities, Review/evidence caches, Health import/reprocess, Location capture/replay, Calendar/Reports sum/union totals, sheets/keyboard/native navigation, VoiceOver, Dynamic Type and Reduce Motion. Record each as PASS/FAIL/NOT RUN against the exact Preview commit, stable staging alias and signed preview build; never test with production credentials/data.
 
+- Sync recovery: stalled response bodies and invalid acknowledgements retain original intent; a Review 409 cannot gate independent Location/capture; manual force runs once over stored backoff; interrupted delivery reconciles receipts before acknowledgement. Settings reports unfinished lanes and queues a canonical refresh after changing lanes. Verify Settings issue exit/reflow and Reduce Motion on device, retaining user drafts and selected date.
+
 ## Sync recovery proof
 
 - [ ] A Review mutation try-lock failure does not fabricate an open canonical row; query cancellation remains distinguishable from contention, with redacted phase and SQLSTATE.

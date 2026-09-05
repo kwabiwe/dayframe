@@ -51,6 +51,8 @@ Last repository audit: 2026-09-04 against `origin/main` at merge `d649e2d` (PR #
 | Account/workspace deletion and backup-retention policy | Decision needed | Entry/evidence deletion paths exist, but full account/workspace deletion, integration-token cleanup, raw Health/location deletion, backup/log retention, and user-facing confirmation semantics are not complete. |
 | Automation accuracy metrics | Decision needed | Review outcomes are stored, but the PRD's former claim that anonymized accepted/ignored accuracy analytics were shipped is not supported by a dedicated product surface or analytics implementation. Decide whether this is an internal report, privacy-preserving telemetry, or out of scope. |
 
+| Mobile bounded recovery and deliberate sync | Implementation pending | Branch `codex/sync-mobile-recovery` adds full JSON deadlines, acknowledgement validation, Review reconciliation, lane due times, partial Location outcomes and explicit Settings sync. Server prerequisite PR #188, Ready staging Preview, signed device build and physical acceptance remain outstanding. Health journal and environment migration remain separate work. |
+
 ## Decision register
 
 | Decision | Why it cannot be inferred safely | Options to decide between |

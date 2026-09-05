@@ -15,8 +15,8 @@ describe("location finalisation replay contracts", () => {
   it("reprocesses local evidence and forces one replay on foreground", () => {
     expect(runtimeSource).toContain("syncLocationIntelligenceOnForeground");
     expect(runtimeSource).toContain("await processPendingLocationEvidence()");
-    expect(runtimeSource).toContain("syncLocationEvidence({ forceReplay: true })");
-    expect(recoveryOwnerSource).toContain("await syncLocationIntelligenceOnForeground()");
+    expect(runtimeSource).toContain("syncLocationEvidence({ forceReplay: true,...options })");
+    expect(recoveryOwnerSource).toContain("await syncLocationIntelligenceOnForeground({forceReplay:!context?.dueOnly})");
     expect(dashboardSource).not.toContain("syncLocationIntelligenceOnForeground");
   });
 
