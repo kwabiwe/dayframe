@@ -915,7 +915,7 @@ async function runActivityQueueSyncRequest(
     ) {
       return deferredQueueSyncResult(owner, "non_timer");
     }
-    return syncQueueUnlocked({ ...options, signal: undefined }, owner);
+    return syncQueueUnlocked(options, owner);
   }
 
   const timerResult = await syncQueueUnlocked({
@@ -945,7 +945,7 @@ async function runActivityQueueSyncRequest(
   const foregroundResult = await syncQueueUnlocked({
     ...options,
     eventScope: "non_timer",
-    signal: undefined
+    signal: options.signal
   }, owner);
   return combineQueueSyncResults(
     [timerResult, foregroundResult],
