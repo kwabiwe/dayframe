@@ -21,18 +21,18 @@ const expect = (condition, message) => {
   if (!condition) failures.push(message);
 };
 
-const appConfiguration = (name) => {
+const appConfiguration = (name, bundleIdentifier) => {
   const blocks = [...project.matchAll(
     new RegExp(`\\n\\t\\t[^\\n]+ /\\* ${name} \\*/ = \\{[\\s\\S]*?\\n\\t\\t\\};`, "g")
   )].map((match) => match[0]);
-  return blocks.find((block) => block.includes("PRODUCT_BUNDLE_IDENTIFIER = com.layereight.dayframe;")) ?? "";
+  return blocks.find((block) => block.includes(`PRODUCT_BUNDLE_IDENTIFIER = ${bundleIdentifier};`)) ?? "";
 };
 
-const staging = appConfiguration("Staging");
-const release = appConfiguration("Release");
+const staging = appConfiguration("Staging", "com.layereight.dayframe.staging");
+const release = appConfiguration("Release", "com.layereight.dayframe");
 expect(staging.includes("APS_ENVIRONMENT = development;"), "Staging app configuration must use APNs development.");
 expect(release.includes("APS_ENVIRONMENT = production;"), "Release app configuration must use APNs production.");
-expect(eas.build?.preview?.ios?.buildConfiguration === "Release", "EAS preview must explicitly use Release.");
+expect(eas.build?.preview?.ios?.buildConfiguration === "Staging", "EAS preview must explicitly use Staging.");
 expect(eas.build?.production?.ios?.buildConfiguration === "Release", "EAS production must explicitly use Release.");
 expect(
   eas.build?.preview?.env?.EXPO_PUBLIC_DAYFRAME_API_BASE === "https://dayframe-staging.vercel.app",
@@ -48,17 +48,17 @@ for (const [label, contents] of [
   ["extension entitlements", extensionEntitlements]
 ]) {
   expect(contents.includes("com.apple.security.application-groups"), `${label} must declare App Groups.`);
-  expect(contents.includes("group.com.layereight.dayframe"), `${label} must use the Dayframe App Group.`);
+  expect(contents.includes("$(DAYFRAME_APP_GROUP)"), `${label} must resolve its environment-specific App Group.`);
   expect(contents.includes("keychain-access-groups"), `${label} must declare Keychain Sharing.`);
   expect(
-    contents.includes("$(AppIdentifierPrefix)com.layereight.dayframe.shared"),
-    `${label} must use the shared Dayframe Keychain group.`
+    contents.includes("$(AppIdentifierPrefix)$(DAYFRAME_KEYCHAIN_GROUP)"),
+    `${label} must resolve its environment-specific Keychain group.`
   );
 }
 for (const [label, contents] of [["host Info.plist", hostInfo], ["extension Info.plist", extensionInfo]]) {
   expect(
     contents.includes("DayframeSharedKeychainAccessGroup") &&
-      contents.includes("$(AppIdentifierPrefix)com.layereight.dayframe.shared"),
+      contents.includes("$(AppIdentifierPrefix)$(DAYFRAME_KEYCHAIN_GROUP)"),
     `${label} must expose the resolved shared Keychain group to native code.`
   );
 }

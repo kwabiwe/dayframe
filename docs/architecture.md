@@ -96,7 +96,7 @@ React projects pending Stop intents over cached/fetched bootstrap before publish
 - EAS `preview`: stable staging API.
 - EAS `production` and TestFlight: production API.
 
-Preview and production currently share one iOS bundle identity. Installing Preview can replace the installed TestFlight app; the separate staging identity remains an explicit future decision.
+Preview uses a separate `com.layereight.dayframe.staging` iOS identity, isolated shared containers and the staging API. Production/TestFlight remains `com.layereight.dayframe`, allowing both apps to coexist on one device without sharing authentication, queues or extension state.
 
 ## Change checklist
 

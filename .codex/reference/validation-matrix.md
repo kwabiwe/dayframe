@@ -388,7 +388,7 @@ Required checks:
 - Hosted auth changes require a provider-auth Vercel Preview pass against staging before merge, including a 10-minute visible-tab observation, tab switching, safe Vercel reason logs, explicit logout/login, Safari/WebKit where available, and canonical/custom hostname checks for host-scoped cookies.
 - Confirm the selected Ready Preview is manually promoted to `dayframe-staging.vercel.app`; the alias does not follow branches automatically.
 - Apply required migrations to staging before hosted checks. Confirm the visible `STAGING` badge, staging account/workspace and staging Supabase project before mutating data.
-- Mobile preview builds must report `https://dayframe-staging.vercel.app`; production/TestFlight builds must report `https://dayframe-web.vercel.app`. Until a separate staging bundle identity exists, note that installing preview may replace the existing app.
+- Mobile preview builds must report `https://dayframe-staging.vercel.app` and bundle identity `com.layereight.dayframe.staging`; production/TestFlight builds must report `https://dayframe-web.vercel.app` and `com.layereight.dayframe`. Verify both remain installed and retain isolated authentication, queues, Health permissions and Live Activities.
 - Mobile bearer session still works.
 - On iOS, gate the initial bearer-token read on active app state; test transient
   `errSecInteractionNotAllowed` recovery, legacy-token migration, explicit

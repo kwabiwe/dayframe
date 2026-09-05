@@ -78,7 +78,7 @@ mismatch rather than a valid sandbox preview.
 
 A hosted preview build fails at startup if its API base is missing rather than silently falling back to production. Preview builds show a visible `STAGING` badge. Promote the intended PR deployment to the stable staging alias before building or testing the physical iPhone.
 
-Preview and production currently share the `com.layereight.dayframe` iOS bundle identity. Installing a preview build may therefore replace the installed TestFlight/production app and reuse bundle-scoped device state. A separate `Dayframe Staging` identity is deferred; until then, treat each preview install as a deliberate replace-and-test cycle and confirm the visible badge and API base before mutating data.
+Preview uses `com.layereight.dayframe.staging` and production uses `com.layereight.dayframe`, allowing both apps to remain installed together. Staging also has separate App Group, keychain, URL-scheme, Live Activity extension and on-device state. Confirm the visible `STAGING` badge and staging API base before mutating data.
 
 ## iOS Capabilities
 

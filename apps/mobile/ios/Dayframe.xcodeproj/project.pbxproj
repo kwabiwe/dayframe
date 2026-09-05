@@ -71,7 +71,7 @@
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = Dayframe/Info.plist; sourceTree = "<group>"; };
 		1A6DC16DC66C3BC0A0812E20 /* libPods-Dayframe.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-Dayframe.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		2E3F5FC9A57F78D3CBEF1BC5 /* Pods-Dayframe.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Dayframe.release.xcconfig"; path = "Target Support Files/Pods-Dayframe/Pods-Dayframe.release.xcconfig"; sourceTree = "<group>"; };
-		47826C218DF2CD53638292FB /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = Dayframe/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		47826C218DF2CD53638292FB /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; name = PrivacyInfo.xcprivacy; path = Dayframe/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		883B29D3ECC403AF19A0A13D /* Pods-Dayframe.staging.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Dayframe.staging.xcconfig"; path = "Target Support Files/Pods-Dayframe/Pods-Dayframe.staging.xcconfig"; sourceTree = "<group>"; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = Dayframe/SplashScreen.storyboard; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
@@ -201,7 +201,6 @@
 				2E3F5FC9A57F78D3CBEF1BC5 /* Pods-Dayframe.release.xcconfig */,
 				883B29D3ECC403AF19A0A13D /* Pods-Dayframe.staging.xcconfig */,
 			);
-			name = Pods;
 			path = Pods;
 			sourceTree = "<group>";
 		};
@@ -561,6 +560,11 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Dayframe/Dayframe.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
+				DAYFRAME_APP_GROUP = group.com.layereight.dayframe;
+				DAYFRAME_DISPLAY_NAME = Dayframe;
+				DAYFRAME_KEYCHAIN_GROUP = com.layereight.dayframe.shared;
+				DAYFRAME_URL_SCHEME = dayframe;
+				DEVELOPMENT_TEAM = 65M773ZG6M;
 				ENABLE_BITCODE = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -599,6 +603,11 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Dayframe/Dayframe.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
+				DAYFRAME_APP_GROUP = group.com.layereight.dayframe;
+				DAYFRAME_DISPLAY_NAME = Dayframe;
+				DAYFRAME_KEYCHAIN_GROUP = com.layereight.dayframe.shared;
+				DAYFRAME_URL_SCHEME = dayframe;
+				DEVELOPMENT_TEAM = 65M773ZG6M;
 				INFOPLIST_FILE = Dayframe/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -762,6 +771,10 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = DayframeLiveActivity/DayframeLiveActivity.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
+				DAYFRAME_APP_GROUP = group.com.layereight.dayframe;
+				DAYFRAME_DISPLAY_NAME = Dayframe;
+				DAYFRAME_KEYCHAIN_GROUP = com.layereight.dayframe.shared;
+				DEVELOPMENT_TEAM = 65M773ZG6M;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = DayframeLiveActivity/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
@@ -787,6 +800,10 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = DayframeLiveActivity/DayframeLiveActivity.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
+				DAYFRAME_APP_GROUP = group.com.layereight.dayframe;
+				DAYFRAME_DISPLAY_NAME = Dayframe;
+				DAYFRAME_KEYCHAIN_GROUP = com.layereight.dayframe.shared;
+				DEVELOPMENT_TEAM = 65M773ZG6M;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = DayframeLiveActivity/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
@@ -814,7 +831,13 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Dayframe/Dayframe.entitlements;
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DAYFRAME_APP_GROUP = group.com.layereight.dayframe.staging;
+				DAYFRAME_DISPLAY_NAME = "Dayframe Staging";
+				DAYFRAME_KEYCHAIN_GROUP = com.layereight.dayframe.staging.shared;
+				DAYFRAME_URL_SCHEME = "dayframe-staging";
+				DEVELOPMENT_TEAM = 65M773ZG6M;
 				INFOPLIST_FILE = Dayframe/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -829,7 +852,7 @@
 					"-lc++",
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
-				PRODUCT_BUNDLE_IDENTIFIER = com.layereight.dayframe;
+				PRODUCT_BUNDLE_IDENTIFIER = com.layereight.dayframe.staging;
 				PRODUCT_NAME = Dayframe;
 				SWIFT_OBJC_BRIDGING_HEADER = "Dayframe/Dayframe-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
@@ -906,7 +929,12 @@
 			buildSettings = {
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = DayframeLiveActivity/DayframeLiveActivity.entitlements;
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DAYFRAME_APP_GROUP = group.com.layereight.dayframe.staging;
+				DAYFRAME_DISPLAY_NAME = "Dayframe Staging";
+				DAYFRAME_KEYCHAIN_GROUP = com.layereight.dayframe.staging.shared;
+				DEVELOPMENT_TEAM = 65M773ZG6M;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = DayframeLiveActivity/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
@@ -917,7 +945,7 @@
 				);
 				MARKETING_VERSION = 0.1.0;
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
-				PRODUCT_BUNDLE_IDENTIFIER = com.layereight.dayframe.DayframeLiveActivity;
+				PRODUCT_BUNDLE_IDENTIFIER = com.layereight.dayframe.staging.DayframeLiveActivity;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.0;

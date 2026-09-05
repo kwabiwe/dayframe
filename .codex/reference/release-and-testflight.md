@@ -11,7 +11,7 @@ Use this before saying a mobile/API fix is present or absent in production.
 
 The staging alias does not move automatically. Before merging an implementation PR, confirm its Preview is Ready, apply migrations to staging, promote that deployment to the stable alias, and complete the relevant hands-on checks. Production credentials and data are not a PR test lane.
 
-Preview and production currently share one iOS bundle identity, so installing an internal preview may replace the TestFlight/production app. The separate staging identity is deferred; always confirm the visible `STAGING` badge and baked API base after installation.
+Preview and production use separate iOS identities and can be installed together. Preview uses `com.layereight.dayframe.staging`, the `Staging` Xcode configuration, isolated App Group/keychain containers, and the staging API. Production/TestFlight remains `com.layereight.dayframe` with production containers and API. Always confirm the visible `STAGING` badge and baked API base before testing.
 
 ## Version Truth Table
 
