@@ -809,3 +809,14 @@ create index if not exists idx_external_refs_workspace on external_entity_refs(w
 create index if not exists idx_import_runs_workspace on import_runs(workspace_id, provider, started_at desc);
 create index if not exists idx_auth_sessions_token_hash on auth_sessions(token_hash) where revoked_at is null;
 create index if not exists idx_auth_sessions_user_expiry on auth_sessions(user_id, expires_at desc);
+
+-- Keep the clean base fixture aligned with the additive hosted/ordered migration.
+-- Explicit provenance for a revision/stage that resolves to another event's
+-- logical Sleep entry. No historical links are guessed or backfilled.
+alter table activity_events
+  add column if not exists resolved_time_entry_id uuid
+    references time_entries(id) on delete set null;
+
+create index if not exists activity_events_resolved_entry_idx
+  on activity_events (workspace_id, user_id, resolved_time_entry_id)
+  where resolved_time_entry_id is not null;

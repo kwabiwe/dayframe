@@ -54,3 +54,9 @@ Health event ingestion now uses the same bounded transaction for its fast duplic
 `validate-health-ingest-bounds.ts` passed on isolated PostgreSQL 17/PostGIS: a deliberately slow SQL insert was cancelled within the operation budget, its event and derived row rolled back, another connection acquired the owner row, and same-ID/concurrent retries produced exactly one event/entry per intent. The focused server event/query/route suite passed 105 tests. This is synthetic local evidence; the Vercel author-permission block and required staging/physical validation remain outstanding.
 
 The corresponding bounded-ingest regression fails on the pinned baseline with `Missing expected rejection`: its five-second SQL effect completes despite the supplied sub-second operation deadline. The original fixture is removed in the script finalizer. The updated full web suite passed 874 tests (one existing skip) before the additional Events-route timeout assertion.
+
+## Final review checks (September 5)
+
+The GitHub-created Preview `dpl_GhqgcAEa4PvFg3JEmmzCS3AMYYW1` is Ready at source `4cb0e33cc2590a8a305402fac2859adfa2df1f25`; earlier CLI author-permission rejection is historical, not a claim that all later builds remain blocked. Its stable staging alias and hosted behavioral validation were not yet observed at this checkpoint.
+
+CI exposed the base-only validation schema missing `resolved_time_entry_id` while ordered migrations passed. The base snapshot now contains the same additive column/index as migration 006. A fresh disposable base database passes every Review receipt/structural-action validator and the exact-entry Stop contention integration test. This updates the validation schema; it neither backfills nor changes production records. Wider environment migration and additional recovery UI are deferred under the user's scope freeze.
