@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { resolveReviewItem, ReviewResolutionError } from "@/lib/event-service";
-import { authErrorResponse } from "@/lib/api-errors";
+import { authErrorResponse, databaseReadinessResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import {
   LocationReviewActionSchema,
@@ -9,7 +9,12 @@ import {
 import { resolveLocationReviewAction } from "@/lib/location/location-review-service";
 import { resolveIdempotentReviewMutation } from "@/lib/review-mutation-service";
 
+export const maxDuration = 15;
+
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const startedAt = Date.now();
+  const requestId = crypto.randomUUID();
+  const operation = { signal: request.signal, deadlineAt: startedAt + 8_000, requestId };
   try {
     const session = await resolveRequestSession(request);
     const { id } = await context.params;
@@ -19,9 +24,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const result = await resolveIdempotentReviewMutation(
         id,
         reviewMutation.data,
-        session
+        session,
+        operation
       );
-      return NextResponse.json(result);
+      return NextResponse.json({ ...result as Record<string, unknown>,
+        clientMutationId: reviewMutation.data.clientMutationId, reviewItemId: id, requestId });
     }
     if (
       isRecord(body) &&
@@ -59,12 +66,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         "merge_and_confirm"
       ].includes(locationAction.data.action)
     ) {
-      const result = await resolveLocationReviewAction(id, locationAction.data, session);
+      const result = await resolveLocationReviewAction(id, locationAction.data, session, operation);
       return NextResponse.json(result);
     }
-    const result = await resolveReviewItem(id, action, session);
+    const result = await resolveReviewItem(id, action, session, operation);
     return NextResponse.json(result);
   } catch (error) {
+    const readiness = databaseReadinessResponse(error);
+    if (readiness) return readiness;
     const response = authErrorResponse(error);
     if (response) return response;
     if (error instanceof ReviewResolutionError) {
@@ -73,6 +82,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           ok: false,
           code: error.code,
           message: error.message,
+          requestId,
           ...(error.details ? error.details : {})
         },
         { status: error.status }

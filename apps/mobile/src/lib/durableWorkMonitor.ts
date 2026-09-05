@@ -1,3 +1,4 @@
+import type {SyncDueTimes} from "./syncDueTimes";
 import {
   getQueueDiagnostics,
   readQueue,
@@ -52,6 +53,7 @@ export type DurableWorkSnapshot = {
   nextRetryAt: string | null;
   lastError: string | null;
   revision: number;
+  retryLanes?:SyncDueTimes;
 };
 
 const EMPTY_SNAPSHOT: DurableWorkSnapshot = {
@@ -201,9 +203,19 @@ async function refreshOnce() {
   const nextRetryAt = earliestIso([
     activityDiagnostics.nextRetryAt,
     timeEntries.nextRetryAt ?? undefined,
-    reviewOwned ? review.nextRetryAt ?? undefined : undefined
+    reviewOwned ? review.nextRetryAt ?? undefined : undefined,
+    locationOwned ? location.nextRetryAt??undefined : undefined
   ]);
+  const nonTimerQueue=queue.filter(event=>!['timer_start','timer_stop'].includes(event.type)&&event.failureKind!=='permanent');
+  const activityDue=nonTimerQueue.some(event=>!event.nextRetryAt)?null:earliestIso(nonTimerQueue.map(event=>event.nextRetryAt))??null;
+  const retryLanes:SyncDueTimes={
+    timer:{pending:timerMutationCount,nextDueAt:timerStopCount||nativeShortcutCount||timerEventCount?null:timeEntries.nextRetryAt??null},
+    activity:{pending:nonTimerQueue.length,nextDueAt:activityDue},
+    review:{pending:reviewCount,nextDueAt:review.nextRetryAt},
+    location:{pending:locationCount,nextDueAt:nativeLocationSignalCount?null:location.nextRetryAt??null}
+  };
   publish({
+    retryLanes,
     accountKey: mobileAccountKey(owner),
     activityCount,
     nativeShortcutCount,
@@ -254,7 +266,7 @@ function snapshotsEqual(left: DurableWorkSnapshot, right: DurableWorkSnapshot) {
     left.nativeLocationSignalCount === right.nativeLocationSignalCount &&
     left.pendingCount === right.pendingCount &&
     left.nextRetryAt === right.nextRetryAt &&
-    left.lastError === right.lastError;
+    left.lastError === right.lastError && JSON.stringify(left.retryLanes)===JSON.stringify(right.retryLanes);
 }
 
 function earliestIso(values: Array<string | undefined>) {

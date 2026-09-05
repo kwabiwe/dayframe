@@ -1,3 +1,4 @@
+import { SyncOperationError, syncFailureMetadata } from "@/lib/sync-transaction";
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { isLockNotAvailableError, isStatementTimeoutError, query } from "@/lib/db";
@@ -18,7 +19,10 @@ function privateJson(body: unknown, status = 200) {
   return NextResponse.json(body, { status, headers: PRIVATE_LOCATION_HEADERS });
 }
 
+export const maxDuration = 15;
+
 export async function POST(request: Request) {
+  const startedAt = Date.now();
   try {
     const contentLength = Number(request.headers.get("content-length") ?? 0);
     if (contentLength > LOCATION_EVIDENCE_BODY_LIMIT_BYTES) {
@@ -35,7 +39,7 @@ export async function POST(request: Request) {
     } catch {
       return privateJson({ error: "Location evidence body must be valid JSON." }, 400);
     }
-    const result = await ingestLocationEvidence(body, session);
+    const result = await ingestLocationEvidence(body, session, undefined, {signal: request.signal, deadlineAt: startedAt + 8_000});
     return privateJson(result, result.duplicateBatch ? 200 : 201);
   } catch (error) {
     const authResponse = authErrorResponse(error);
@@ -49,10 +53,13 @@ export async function POST(request: Request) {
     if (error instanceof ZodError) {
       return privateJson({ error: "Invalid location evidence batch.", issues: error.issues }, 400);
     }
-    if (isLockNotAvailableError(error) || isStatementTimeoutError(error)) {
+    if (isLockNotAvailableError(error) || isStatementTimeoutError(error) || error instanceof SyncOperationError) {
       return privateJson({
         error: "Location processing is busy. The saved evidence will retry automatically.",
-        code: "location_processing_busy"
+        code: "location_processing_busy",
+        ...syncFailureMetadata(error),
+        ...(isLockNotAvailableError(error) ? { reason: "lock_unavailable" } : {}),
+        retryAfterMs: 5_000
       }, 503);
     }
     console.error("Location evidence sync failed without coordinate payloads", {

@@ -26,3 +26,13 @@ export const REVIEW_EFFECTS_V5_SQL = `
     original_position, preceding_ids_json, following_ids_json, local_effect
     from review_mutation_outbox;
 `;
+
+// Additive v5→v6 recovery metadata. Original UUIDs, hashes, payloads, creation
+// times and effect anchors are untouched. Apply atomically with user_version.
+export const REVIEW_RECOVERY_V6_SQL = `
+  alter table review_mutation_outbox add column contention_count integer not null default 0;
+  alter table review_mutation_outbox add column reconciliation_attempt_count integer not null default 0;
+  alter table review_mutation_outbox add column last_reconciled_at text;
+  alter table review_mutation_outbox add column resolution_status text;
+  alter table review_mutation_outbox add column acknowledgement_json text;
+`;

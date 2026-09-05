@@ -11,7 +11,8 @@ export const pool =
   globalForPg.dayframePool ??
   new Pool({
     connectionString: process.env.DATABASE_URL ?? DEFAULT_DATABASE_URL,
-    max: 10
+    max: 10,
+    connectionTimeoutMillis: 1_500
   });
 
 if (process.env.NODE_ENV !== "production") {
@@ -86,10 +87,13 @@ export function isLockNotAvailableError(error: unknown) {
   return candidate?.code === "55P03";
 }
 
-export function isStatementTimeoutError(error: unknown) {
+export function isQueryCancelledError(error: unknown) {
   const candidate = error as { code?: string } | null;
   return candidate?.code === "57014";
 }
+
+/** 57014 also includes explicit query cancellation; callers must not infer a lock. */
+export const isStatementTimeoutError = isQueryCancelledError;
 
 export class MissingRequiredColumnError extends Error {
   tableName: string;

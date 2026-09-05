@@ -1,3 +1,4 @@
+import {dueSyncLanes,nextSyncWorkDueAt} from "@/lib/syncDueTimes";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { AppState } from "react-native";
 import {
@@ -106,6 +107,7 @@ export function ConnectivityRecoveryOwner() {
         retryAt: new Date(retryAt).toISOString()
       });
     },
+    nextDueAt:()=>nextSyncWorkDueAt(getDurableWorkSnapshot().retryLanes),
     runPass: runRootRecoveryPass,
     shouldRetry: (result) => shouldRetryConnectivityRecovery(
       result,
@@ -233,7 +235,10 @@ export function ConnectivityRecoveryOwner() {
   return null;
 }
 
-async function runRootRecoveryPass() {
+async function runRootRecoveryPass(_epoch?:number, context?:{dueOnly:boolean}) {
+  const snapshot=await refreshDurableWorkSnapshot();
+  const due=dueSyncLanes(context?.dueOnly?snapshot.retryLanes:undefined);
+  let changed=false;
   const owner = await readActiveMobileAccount();
   if (!owner) return "authentication_required" as const;
   const sessionRead = await readOwnedAuthenticatedSessionSnapshot(owner);
@@ -242,7 +247,7 @@ async function runRootRecoveryPass() {
   }
   const ownerKey = mobileAccountKey(owner);
   let timerBackgroundLease: TimerBackgroundExecutionLease | null = null;
-  let timerPhaseActive = getDurableWorkSnapshot().timerMutationCount > 0;
+  let timerPhaseActive = due.has("timer") && getDurableWorkSnapshot().timerMutationCount > 0;
   let timerPhaseEnded = !timerPhaseActive;
   if (timerPhaseActive) {
     timerBackgroundLease = await beginTimerBackgroundExecution(
@@ -282,23 +287,27 @@ async function runRootRecoveryPass() {
         {
           name: "timer_stops_ready",
           run: async () => {
+            if(!due.has("timer"))return "continue";
             const result = await synchronisePendingTimerStops({
               owner,
               correlations: await readTimerEntryIdCorrelations(owner),
               signal: timerBackgroundLease?.signal
             });
+            changed ||= result.deliveredCount>0;
             return result.transportFailure ? "transport_failure" : "continue";
           }
         },
         {
           name: "timer_activity_queue",
           run: async () => {
+            if(!due.has("timer"))return "continue";
             await drainNativeShortcutQueue(owner);
             const result = await syncQueue({
               eventScope: "timer_mutations",
               forceRetry: true,
               signal: timerBackgroundLease?.signal
             });
+            changed ||= result.syncedCount>0;
             if (result.firstError?.failureKind === "network") return "transport_failure";
             return result.remaining.some((event) => event.failureKind !== "permanent")
               ? "application_failure"
@@ -308,11 +317,13 @@ async function runRootRecoveryPass() {
         {
           name: "time_entry_outbox",
           run: async () => {
+            if(!due.has("timer"))return "continue";
             const result = await synchroniseTimeEntryCommands({
               owner,
               correlations: await readTimerEntryIdCorrelations(owner),
               signal: timerBackgroundLease?.signal
             });
+            changed ||= result.deliveredCount>0;
             if (result.reason === "retryable_failure") return "transport_failure";
             if (
               result.reason === "authentication_required" ||
@@ -326,12 +337,14 @@ async function runRootRecoveryPass() {
         {
           name: "timer_stops_after_correlation",
           run: async () => {
+            if(!due.has("timer"))return "continue";
             try {
               const result = await synchronisePendingTimerStops({
                 owner,
                 correlations: await readTimerEntryIdCorrelations(owner),
                 signal: timerBackgroundLease?.signal
               });
+              changed ||= result.deliveredCount>0;
               if (result.transportFailure) return "transport_failure";
               return result.remaining.some((stop) => stop.failureKind !== "permanent")
                 ? "application_failure"
@@ -346,10 +359,12 @@ async function runRootRecoveryPass() {
         {
           name: "activity_queue",
           run: async () => {
+            if(!due.has("activity"))return "continue";
             const result = await syncQueue({
               eventScope: "non_timer",
-              forceRetry: true
+              forceRetry: false
             });
+            changed ||= result.syncedCount>0;
             if (result.firstError?.failureKind === "network") return "transport_failure";
             return result.remaining.some((event) => event.failureKind !== "permanent")
               ? "application_failure"
@@ -359,6 +374,7 @@ async function runRootRecoveryPass() {
         {
           name: "review_outbox",
           run: async () => {
+            if(!due.has("review"))return "continue";
             const reviewOwner = await getActiveReviewAccountIdentity();
             if (
               reviewOwner?.userId !== owner.userId ||
@@ -366,14 +382,14 @@ async function runRootRecoveryPass() {
             ) {
               return "continue";
             }
-            return reviewConnectivityRecoveryStepResult(
-              await synchroniseReviewMutations()
-            );
+            const result=await synchroniseReviewMutations();changed ||= result.acknowledgedCount>0;
+            return reviewConnectivityRecoveryStepResult(result);
           }
         },
         {
           name: "location_intelligence",
           run: async () => {
+            if(!due.has("location"))return "continue";
             const locationOwner = await getActiveLocationAccountIdentity();
             if (
               locationOwner?.userId !== owner.userId ||
@@ -381,14 +397,15 @@ async function runRootRecoveryPass() {
             ) {
               return "continue";
             }
-            return locationConnectivityRecoveryStepResult(
-              await syncLocationIntelligenceOnForeground()
-            );
+            const result=await syncLocationIntelligenceOnForeground({forceReplay:!context?.dueOnly});
+            changed ||= (result.acknowledgedCount??0)>0 || ("semanticSegmentCount" in result && (result.semanticSegmentCount??0)>0);
+            return locationConnectivityRecoveryStepResult(result);
           }
         },
         {
           name: "bootstrap",
           run: async () => {
+            if(context?.dueOnly&&!changed)return "continue";
             const publication = beginRecoveredDashboardBootstrapPublication();
             try {
               const serverBootstrap = await fetchBootstrap();

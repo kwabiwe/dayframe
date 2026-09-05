@@ -13,7 +13,8 @@ import {
   persistLocationEvidence,
   processPendingLocationEvidence,
   recordLocationStoreError,
-  syncLocationEvidence
+  syncLocationEvidence,
+  type LocationSyncOptions
 } from "./store";
 import { MAX_LOCATION_NATIVE_DRAIN_PASSES } from "./uploadPolicy";
 
@@ -81,11 +82,11 @@ export async function configureLocationIntelligence(bootstrap: MobileBootstrap) 
   void syncLocationEvidence().catch(recordLocationStoreError);
 }
 
-export async function syncLocationIntelligenceOnForeground() {
+export async function syncLocationIntelligenceOnForeground(options:LocationSyncOptions = {}) {
   if (await getLocationRolloutMode() === "v1") return { synced: false, reason: "v1" as const };
   await drainNativeLocationSignalsInBatches();
   await processPendingLocationEvidence();
-  return syncLocationEvidence({ forceReplay: true });
+  return syncLocationEvidence({ forceReplay: true,...options });
 }
 
 export async function startNativeLocationIntelligence() {

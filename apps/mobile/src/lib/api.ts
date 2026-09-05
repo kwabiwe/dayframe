@@ -1,7 +1,10 @@
+import { DAYFRAME_BACKEND_ID } from "./backendIdentity";
+import type { HealthCaptureOwner } from "./healthSyncStore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppState } from "react-native";
 import {
   ActivityEventInputSchema,
+  LocationReviewEvidenceDtoSchema,
   type ActivityEventInput,
   type ActivityEventType,
   type CategoryUsageRank,
@@ -22,6 +25,8 @@ import {
   StaleMobileSessionResponseError,
   isMobileTransportFailure,
   mobileFetch,
+  mobileJsonRequest,
+  InvalidMobileAcknowledgementError,
   mobileFetchWithTimeout
 } from "./mobile-network";
 import {
@@ -150,6 +155,7 @@ export type MobileReviewItem = {
 };
 
 export type MobileBootstrap = {
+  serverBuild?: {sourceSha:string|null;deploymentId:string|null;backendId:string|null;environment:string;syncContractVersion:number};
   user: {
     id: string;
     email: string;
@@ -286,6 +292,7 @@ export type PendingTimerStopDeliveryResult =
 export type ReviewItemAction = "accept" | "ignore_once";
 
 export type HealthReviewReprocessResult = {
+  nextCursor?: string | null;
   ok: boolean;
   checkedCount: number;
   confirmedCount: number;
@@ -339,6 +346,7 @@ export type QueuedEvent = Omit<ActivityEventInput, "occurredAt" | "workspaceId" 
   queuedAt: string;
   userId: string;
   workspaceId: string;
+  healthOwner?: HealthCaptureOwner;
   failedAt?: string;
   failureCount?: number;
   lastError?: string;
@@ -444,6 +452,7 @@ type ActivityEventDraft = {
   description?: string;
   rawPayload?: Record<string, unknown>;
   owner?: MobileAccountOwner;
+  healthOwner?: HealthCaptureOwner;
   requestImmediateDelivery?: boolean;
 };
 
@@ -465,21 +474,29 @@ type ApiJsonRead<T> =
   | { ok: true; payload: T }
   | { ok: false; message: string };
 
-export async function fetchBootstrap(options: { date?: string } = {}): Promise<MobileBootstrap> {
+export async function fetchBootstrap(options: { date?: string; signal?: AbortSignal; deadlineAt?: number } = {}): Promise<MobileBootstrap> {
   const params = options.date ? `?date=${encodeURIComponent(options.date)}` : "";
   const sessionRead = await readAuthenticatedSessionSnapshot();
   if (sessionRead.status === "changed") {
     throw new StaleMobileSessionResponseError();
   }
-  const response = await mobileFetchWithTimeout(
+  const { response, body } = await mobileJsonRequest<MobileBootstrap | null>(
     `${DAYFRAME_API_BASE}/api/bootstrap${params}`,
     {
+      signal: options.signal,
       headers: sessionRead.status === "authenticated"
         ? { Authorization: `Bearer ${sessionRead.snapshot.token}` }
         : {}
     },
     {
-      timeoutMilliseconds: MOBILE_OPENING_REQUEST_TIMEOUT_MS,
+      timeoutMilliseconds: Math.max(1, Math.min(MOBILE_OPENING_REQUEST_TIMEOUT_MS, (options.deadlineAt ?? Date.now() + MOBILE_OPENING_REQUEST_TIMEOUT_MS) - Date.now())),
+      isCurrent: () => sessionRead.status !== "authenticated" || isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot),
+      validate: (body, response) => {
+        if (!response.ok) return null;
+        const value = body as MobileBootstrap | null;
+        if (!value?.user?.id || !value.workspace?.id) throw new InvalidMobileAcknowledgementError();
+        return value;
+      },
       timeoutMessage: "Dayframe is taking too long to open. Check your connection and try again."
     }
   );
@@ -497,10 +514,11 @@ export async function fetchBootstrap(options: { date?: string } = {}): Promise<M
   if (!response.ok) {
     throw new MobileHttpResponseError(
       response.status,
-      await errorMessage(response, "Unable to load Dayframe API")
+      "Unable to load Dayframe API"
     );
   }
-  const bootstrap = await readJsonResponse<MobileBootstrap>(response);
+  if (!body) throw new InvalidMobileAcknowledgementError();
+  const bootstrap = body;
   if (bootstrap.user?.id && bootstrap.workspace?.id) {
     const owner = {
       userId: bootstrap.user.id,
@@ -614,9 +632,15 @@ export async function enqueueEvent(input: ActivityEventDraft) {
     if (!owner || !mobileAccountOwnersEqual(activeOwner, owner)) {
       throw new Error("An authenticated account is required to queue activity.");
     }
+    const isHealth = input.source === "health_sleep" || input.source === "health_workout";
+    const healthOwner = input.healthOwner ?? (isHealth && DAYFRAME_BACKEND_ID ? {...owner, backendId:DAYFRAME_BACKEND_ID} : undefined);
+    if (isHealth && (!healthOwner || !DAYFRAME_BACKEND_ID || healthOwner.backendId !== DAYFRAME_BACKEND_ID || !mobileAccountOwnersEqual(owner,healthOwner))) {
+      throw new StaleMobileSessionResponseError();
+    }
     const {
       localId,
       owner: _owner,
+      healthOwner: _healthOwner,
       requestImmediateDelivery,
       ...eventInput
     } = input;
@@ -626,7 +650,7 @@ export async function enqueueEvent(input: ActivityEventDraft) {
       rawPayload: eventInput.rawPayload ?? {}
     });
     const all = await readAllQueue(owner);
-    const queue = all.filter((item) => mobileAccountOwnersEqual(item, owner));
+    const queue = all.filter((item) => queuedEventMatchesOwner(item, owner));
     const queuedLocalId = normalizeLocalId(localId) ?? generatedLocalId();
     if (queue.some((item) => item.localId === queuedLocalId)) {
       if (requestImmediateDelivery && isExplicitTimerMutationEventType(parsed.type)) {
@@ -642,9 +666,22 @@ export async function enqueueEvent(input: ActivityEventDraft) {
       localId: queuedLocalId,
       queuedAt: new Date().toISOString(),
       userId: owner.userId,
-      workspaceId: owner.workspaceId
+      workspaceId: owner.workspaceId,
+      ...(healthOwner ? {healthOwner} : {})
     };
-    await writeAllQueue([...all, nextItem]);
+    // A journal-owned same-ID replay may repair a pre-upgrade untagged handoff only
+    // when its complete immutable event body agrees. Owner UUIDs alone are not proof.
+    const legacy = input.healthOwner && localId?.startsWith("healthkit:") ? all.find(item =>
+      item.localId === queuedLocalId && !item.healthOwner && mobileAccountOwnersEqual(item,owner)) : undefined;
+    if (legacy) {
+      const {canonicalHealthJson} = await import("./healthFingerprint");
+      if (canonicalHealthJson(queuedEventRequestBody(legacy)) !== canonicalHealthJson(queuedEventRequestBody(nextItem))) {
+        throw new Error("The retained Health event does not match its capture journal. It was preserved for review.");
+      }
+      await writeAllQueue(all.map(item=>item===legacy ? {...item,healthOwner} : item));
+    } else {
+      await writeAllQueue([...all, nextItem]);
+    }
     if (requestImmediateDelivery && isExplicitTimerMutationEventType(nextItem.type)) {
       await reserveTimerBackgroundExecution(
         activityQueueBackgroundExecutionKey(owner),
@@ -655,11 +692,17 @@ export async function enqueueEvent(input: ActivityEventDraft) {
   });
 }
 
+function queuedEventMatchesOwner(item: QueuedEvent, owner: MobileAccountOwner) {
+  if (!mobileAccountOwnersEqual(item,owner)) return false;
+  if (item.source !== "health_sleep" && item.source !== "health_workout") return true;
+  return !!DAYFRAME_BACKEND_ID && item.healthOwner?.backendId === DAYFRAME_BACKEND_ID && mobileAccountOwnersEqual(item.healthOwner,owner);
+}
+
 export async function readQueue(owner?: MobileAccountOwner): Promise<QueuedEvent[]> {
   const resolvedOwner = owner ?? await readActiveMobileAccount();
   if (!resolvedOwner) return [];
   return (await readAllQueue(resolvedOwner))
-    .filter((item) => mobileAccountOwnersEqual(item, resolvedOwner));
+    .filter((item) => queuedEventMatchesOwner(item, resolvedOwner));
 }
 
 export async function readTimerEntryIdCorrelations(owner?: MobileAccountOwner) {
@@ -749,7 +792,7 @@ export async function updateQueuedTimerStart(
     let updated = false;
     const next = all.map((item) => {
       if (
-        !mobileAccountOwnersEqual(item, owner) ||
+        !queuedEventMatchesOwner(item, owner) ||
         item.localId !== localId ||
         item.type !== "timer_start"
       ) return item;
@@ -783,7 +826,7 @@ export async function removeQueuedEvent(localId: string) {
     if (!owner) return false;
     const all = await readAllQueue(owner);
     const next = all.filter((item) =>
-      !mobileAccountOwnersEqual(item, owner) || item.localId !== localId
+      !queuedEventMatchesOwner(item, owner) || item.localId !== localId
     );
     if (next.length !== all.length) await writeAllQueue(next);
     return next.length !== all.length;
@@ -846,11 +889,11 @@ export async function clearFailedQueuedEvents() {
       return { removed: [], remaining: [], removedCount: 0, remainingCount: 0 };
     }
     const all = await readAllQueue(owner);
-    const queue = all.filter((item) => mobileAccountOwnersEqual(item, owner));
+    const queue = all.filter((item) => queuedEventMatchesOwner(item, owner));
     const remaining = queue.filter((item) => !isClearableFailedEvent(item));
     const removed = queue.filter(isClearableFailedEvent);
     await writeAllQueue([
-      ...all.filter((item) => !mobileAccountOwnersEqual(item, owner)),
+      ...all.filter((item) => !queuedEventMatchesOwner(item, owner)),
       ...remaining
     ]);
     return {
@@ -901,7 +944,7 @@ async function runActivityQueueSyncRequest(
     ) {
       return deferredQueueSyncResult(owner, "non_timer");
     }
-    return syncQueueUnlocked({ ...options, signal: undefined }, owner);
+    return syncQueueUnlocked(options, owner);
   }
 
   const timerResult = await syncQueueUnlocked({
@@ -931,7 +974,7 @@ async function runActivityQueueSyncRequest(
   const foregroundResult = await syncQueueUnlocked({
     ...options,
     eventScope: "non_timer",
-    signal: undefined
+    signal: options.signal
   }, owner);
   return combineQueueSyncResults(
     [timerResult, foregroundResult],
@@ -956,7 +999,7 @@ async function ownedQueueForScope(
 ) {
   const all = await withQueueMutation(() => readAllQueue(owner));
   return all.filter((item) =>
-    mobileAccountOwnersEqual(item, owner) && queueEventMatchesScope(item, scope)
+    queuedEventMatchesOwner(item, owner) && queueEventMatchesScope(item, scope)
   );
 }
 
@@ -992,7 +1035,7 @@ async function syncQueueUnlocked(
 ): Promise<SyncQueueResult> {
   const all = await withQueueMutation(() => readAllQueue(owner));
   const queue = all.filter((item) =>
-    mobileAccountOwnersEqual(item, owner) && queueEventMatchesScope(item, options.eventScope)
+    queuedEventMatchesOwner(item, owner) && queueEventMatchesScope(item, options.eventScope)
   );
   const hasDeliverableTimerMutation = queue.some((item) =>
     isQueuedTimerMutationEvent(item) && item.failureKind !== "permanent"
@@ -1063,13 +1106,14 @@ async function syncQueueItems(
 
     const attemptedAt = new Date().toISOString();
     try {
+      if (!queuedEventMatchesOwner(item,owner)) throw new StaleMobileSessionResponseError();
       const sessionRead = await readOwnedAuthenticatedSessionSnapshot(owner);
       if (sessionRead.status !== "authenticated") {
         remaining.push(item, ...queue.slice(index + 1));
         stopped = true;
         break;
       }
-      const response = await mobileFetchWithTimeout(
+      const {response,body:payload} = await mobileJsonRequest<Record<string,unknown> | null>(
         `${DAYFRAME_API_BASE}/api/events`,
         {
           method: "POST",
@@ -1081,6 +1125,7 @@ async function syncQueueItems(
           signal: options.signal
         },
         {
+          isCurrent: async () => queuedEventMatchesOwner(item,owner) && isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot) && mobileAccountOwnersEqual(await readActiveMobileAccount(),owner),
           timeoutMilliseconds: MOBILE_QUEUE_REQUEST_TIMEOUT_MS,
           timeoutMessage: "Queued activity sync timed out. It will retry automatically."
         }
@@ -1089,6 +1134,7 @@ async function syncQueueItems(
         throw new AuthRequiredError();
       }
       if (
+        !queuedEventMatchesOwner(item,owner) ||
         !isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot) ||
         !mobileAccountOwnersEqual(await readActiveMobileAccount(), owner)
       ) {
@@ -1098,7 +1144,7 @@ async function syncQueueItems(
       }
       if (!response.ok) {
         const failureKind = permanentStatusCodes.has(response.status) ? "permanent" : "server";
-        const message = await errorMessage(response, "Unable to sync queued event");
+        const message = formatApiError((payload ?? {}) as ApiErrorPayload) ?? "Unable to sync queued event";
         const failedItem = markQueueFailure(item, message, attemptedAt, failureKind, response.status);
         remaining.push(failedItem);
         firstError ??= queueFailureReport(failedItem, message, failureKind, response.status);
@@ -1109,9 +1155,12 @@ async function syncQueueItems(
         }
         continue;
       }
-      const payload = await readJsonResponse<{ eventId?: string; timeEntryId?: string }>(response);
+      if (!payload || typeof payload.eventId !== "string" || !payload.eventId.trim() || payload.ok === false || payload.partial === true ||
+          payload.clientEventId !== undefined && payload.clientEventId !== item.localId) {
+        throw new InvalidMobileAcknowledgementError();
+      }
       if (item.type === "timer_start") {
-        if (!payload.timeEntryId) {
+        if (typeof payload.timeEntryId !== "string" || !payload.timeEntryId) {
           throw new Error("Synced timer start did not return its canonical time entry.");
         }
         await recordTimerEntryIdCorrelation(item.localId, payload.timeEntryId, owner);
@@ -1120,13 +1169,30 @@ async function syncQueueItems(
           timeEntryId: payload.timeEntryId
         });
       }
+      if (item.source === "health_sleep" || item.source === "health_workout") {
+        if (item.healthOwner && queuedEventMatchesOwner(item,owner)) {
+          const { recordHealthAcknowledgement } = await import("./healthSyncStore");
+          await recordHealthAcknowledgement(item.healthOwner,item.localId,{
+            eventId:payload.eventId,clientEventId:item.localId,
+            processingDisposition:typeof payload.processingDisposition === "string" ? payload.processingDisposition : "legacy_unknown",
+            reviewItemId:typeof payload.reviewItemId === "string" ? payload.reviewItemId : null,
+            timeEntryId:typeof payload.timeEntryId === "string" ? payload.timeEntryId : null
+          });
+        } else if (item.localId.startsWith("healthkit:")) {
+          throw new Error("The Health acknowledgement backend is not verified.");
+        }
+      }
       synced.push(item.localId);
     } catch (error) {
       if (error instanceof AuthRequiredError) throw error;
+      if (error instanceof StaleMobileSessionResponseError || options.signal?.aborted || error instanceof Error && error.name === "AbortError") {
+        remaining.push(item,...queue.slice(index+1));stopped=true;break;
+      }
       const message = error instanceof Error ? error.message : "Network request failed";
-      const failedItem = markQueueFailure(item, message, attemptedAt, "network");
+      const failureKind = isMobileTransportFailure(error) ? "network" : "server";
+      const failedItem = markQueueFailure(item, message, attemptedAt, failureKind);
       remaining.push(failedItem, ...queue.slice(index + 1));
-      firstError ??= queueFailureReport(failedItem, message, "network");
+      firstError ??= queueFailureReport(failedItem, message, failureKind);
       stopped = true;
       break;
     }
@@ -1397,23 +1463,21 @@ export async function fetchLocationReviewEvidence(
   id: string,
   options: { signal?: AbortSignal } = {}
 ): Promise<LocationReviewEvidenceDto> {
-  const response = await mobileFetchWithTimeout(
+  const session = await readAuthenticatedSessionSnapshot();
+  if (session.status === "changed") throw new StaleMobileSessionResponseError();
+  if (session.status !== "authenticated") throw new AuthRequiredError();
+  const { response, body } = await mobileJsonRequest<LocationReviewEvidenceDto | null>(
     `${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(id)}/location-evidence`,
-    {
-      headers: await authHeaders(),
-      cache: "no-store",
-      signal: options.signal
-    },
-    {
-      timeoutMilliseconds: MOBILE_LOCATION_REVIEW_EVIDENCE_TIMEOUT_MS,
-      timeoutMessage: "Location evidence is taking too long to load."
-    }
+    { headers: { Authorization: `Bearer ${session.snapshot.token}` }, cache: "no-store", signal: options.signal },
+    { timeoutMilliseconds: MOBILE_LOCATION_REVIEW_EVIDENCE_TIMEOUT_MS,
+      timeoutMessage: "Location evidence is taking too long to load.",
+      isCurrent: () => isAuthenticatedSessionSnapshotCurrent(session.snapshot),
+      validate: (body, response) => response.ok ? LocationReviewEvidenceDtoSchema.parse(body) : null }
   );
-  if (response.status === 401) {
-    throw new AuthRequiredError();
-  }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to load location evidence"));
-  return readJsonResponse<LocationReviewEvidenceDto>(response);
+  if (response.status === 401 || response.status === 403) throw new AuthRequiredError();
+  if (!response.ok) throw new MobileHttpResponseError(response.status, "Unable to load location evidence");
+  if (!body) throw new InvalidMobileAcknowledgementError();
+  return body;
 }
 
 export function normaliseLocationReviewRequestError(
@@ -1462,21 +1526,19 @@ export function dismissReviewItem(id: string) {
 
 export async function reprocessHealthReviewItems(
   preferences: HealthImportPreferences,
-  options: { limit?: number; force?: boolean; mappings?: HealthAutoLogMappings } = {}
+  options: { limit?: number; force?: boolean; mappings?: HealthAutoLogMappings; cursor?: string | null; signal?: AbortSignal; deadlineAt?: number } = {}
 ): Promise<HealthReviewReprocessResult> {
-  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/review/reprocess-health`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(await authHeaders())
-    },
-    body: JSON.stringify({ preferences, limit: options.limit, force: options.force, mappings: options.mappings })
-  });
-  if (response.status === 401) {
-    throw new AuthRequiredError();
-  }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to reprocess Health review items"));
-  return readJsonResponse<HealthReviewReprocessResult>(response);
+  const session = await readAuthenticatedSessionSnapshot();
+  if(session.status!=="authenticated") throw new AuthRequiredError();
+  const {response,body} = await mobileJsonRequest<Record<string,unknown> | null>(`${DAYFRAME_API_BASE}/api/review/reprocess-health`, {
+    method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${session.snapshot.token}`},signal:options.signal,
+    body:JSON.stringify({preferences,limit:options.limit,force:options.force,mappings:options.mappings,cursor:options.cursor})
+  }, {timeoutMilliseconds:Math.max(1,Math.min(15_000,(options.deadlineAt??Date.now()+15_000)-Date.now())),timeoutMessage:"Health processing timed out. Captured activity remains saved.",
+    isCurrent:()=>isAuthenticatedSessionSnapshotCurrent(session.snapshot)});
+  if(response.status===401||response.status===403) throw new AuthRequiredError();
+  if(!response.ok) throw new MobileHttpResponseError(response.status,typeof body?.message==="string"?body.message:"Unable to reprocess Health review items");
+  if(!body || typeof body.checkedCount!=="number" || body.ok===false) throw new InvalidMobileAcknowledgementError();
+  return body as unknown as HealthReviewReprocessResult;
 }
 
 export async function saveEditedReviewItem(
@@ -1957,7 +2019,7 @@ function reconcileActivityQueueDrain(input: {
     const remainingById = new Map(input.remaining.map((item) => [item.localId, item]));
     const next = current.flatMap((item) => {
       if (
-        !mobileAccountOwnersEqual(item, input.owner) ||
+        !queuedEventMatchesOwner(item, input.owner) ||
         !processedIds.has(item.localId)
       ) {
         return [item];
@@ -1979,7 +2041,7 @@ function reconcileActivityQueueDrain(input: {
       }];
     });
     await writeAllQueue(next);
-    return next.filter((item) => mobileAccountOwnersEqual(item, input.owner));
+    return next.filter((item) => queuedEventMatchesOwner(item, input.owner));
   });
 }
 

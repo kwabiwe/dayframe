@@ -58,7 +58,7 @@ describe("finite timer background recovery ownership", () => {
 
     expect(reviewScreen).toContain("synchroniseReviewMutations({ force: true })");
     expect(owner).toContain("await synchroniseReviewMutations()");
-    expect(store).toContain("if (synchronisationPromise) return synchronisationPromise;");
+    expect(store).toContain("reviewCoalescer.run(account.account_key");
   });
 });
 

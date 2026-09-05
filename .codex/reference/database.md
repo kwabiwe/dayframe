@@ -51,3 +51,9 @@ Before declaring hosted auth/timer/event changes ready, verify:
 ## Review automation storage
 
 SQLite v5 adds account-owned per-source mutation effects and backfills v4 outbox rows transactionally; it removes no queue or compatibility columns. Two-source merge intent must reserve both IDs atomically. Postgres already has the boundary fields, `commute_segments.max_gap_seconds` and Review mutation receipts; changing these policies needs no new Postgres migration. The max-gap column means maximum internal observation gap (ceil to integral seconds), not total commute duration. Verify existing columns, receipt uniqueness and indexes in staging before smoke tests; do not fabricate bounds for old rows. Keep same-source Sleep lookup plus insertion under its existing user lock, and preserve `user_edited_at` protection.
+
+## Sync recovery schema and transaction checks
+
+Apply `supabase/migrations/202609040001_health_sleep_resolution_link.sql` to staging before the sync-server Preview. The corresponding clean/local migration is `packages/db/migrations/006_health_sleep_resolution_link.sql`. It adds a nullable, indexed, server-owned Sleep resolution link with delete-to-null behavior; it performs no data repair. Production application requires explicit release approval and this migration before deploying the dependent code.
+
+Run `npx tsx scripts/validate-sync-transactions.ts` with an explicit disposable local `*_test` DATABASE_URL, plus the Review and Location database validation commands. Check both PostgreSQL 16 fallback and the deployed PostgreSQL 17 transaction pooler. Connection destruction and database lock release are separately measured: a disconnected PostgreSQL 16 active query may remain until its statement guard fires. Never use a Promise race as a substitute for releasing/destroying the checked-out client, and never return a connection with uncertain rollback health to the pool.

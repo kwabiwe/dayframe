@@ -7,9 +7,9 @@ import {
 import type pg from "pg";
 import {
   isLockNotAvailableError,
-  isStatementTimeoutError,
-  pool
+  isStatementTimeoutError
 } from "../db";
+import { withSyncTransaction, setSyncPhase, syncFailureMetadata, SyncOperationError, type SyncTransactionOptions } from "../sync-transaction";
 import { ReviewResolutionError } from "../event-service";
 import type { RequestSession } from "../session";
 import { syncTimeEntryTags } from "../tag-service";
@@ -47,20 +47,15 @@ export const LOCATION_REVIEW_LOCK_TIMEOUT_MS = 1_500;
 export async function resolveLocationReviewAction(
   reviewItemId: string,
   input: unknown,
-  session: RequestSession
+  session: RequestSession,
+  options: SyncTransactionOptions = {}
 ) {
   const startedAt = Date.now();
   const action = LocationReviewActionSchema.parse(input);
   let lockOutcome: "not_attempted" | "acquired" | "contended" = "not_attempted";
-  const client = await pool.connect();
   try {
-    await client.query("begin");
-    await client.query(
-      `set local statement_timeout = '${LOCATION_REVIEW_STATEMENT_TIMEOUT_MS}ms'`
-    );
-    await client.query(
-      `set local lock_timeout = '${LOCATION_REVIEW_LOCK_TIMEOUT_MS}ms'`
-    );
+    const result = await withSyncTransaction("location_review", async ({client, phase}) => {
+    phase("owner_lock");
     const lock = await client.query<{ acquired: boolean }>(
       `select pg_try_advisory_xact_lock(
          hashtext($1),
@@ -73,13 +68,15 @@ export async function resolveLocationReviewAction(
       throw locationReviewLocked(reviewItemId);
     }
     lockOutcome = "acquired";
+    phase("effect");
     const result = await resolveLocationReviewActionWithClient(
       client,
       reviewItemId,
       action,
       session
     );
-    await client.query("commit");
+    return result;
+    }, options);
     logDirectLocationMutation({
       actionKind: action.action,
       durationMs: Date.now() - startedAt,
@@ -88,8 +85,7 @@ export async function resolveLocationReviewAction(
     });
     return result;
   } catch (error) {
-    await client.query("rollback");
-    if (isLockNotAvailableError(error) || isStatementTimeoutError(error)) {
+    if (isLockNotAvailableError(error)) {
       const lockedError = locationReviewLocked(reviewItemId);
       logDirectLocationMutation({
         actionKind: action.action,
@@ -99,6 +95,14 @@ export async function resolveLocationReviewAction(
       });
       throw lockedError;
     }
+    if (isStatementTimeoutError(error) || error instanceof SyncOperationError) {
+      const failure = syncFailureMetadata(error);
+      throw new ReviewResolutionError(failure.reason === "operation_timeout" ? "review_query_timeout" :
+        failure.reason === "query_cancelled" ? "review_query_cancelled" : "review_service_unavailable",
+        "Location Review could not finish. Reconcile your saved action.", {
+          status: 503, details: { canonicalStatus: "unknown", ...failure, retryAfterMs: 5_000 }
+        });
+    }
     logDirectLocationMutation({
       actionKind: action.action,
       durationMs: Date.now() - startedAt,
@@ -106,8 +110,6 @@ export async function resolveLocationReviewAction(
       outcome: locationMutationErrorOutcome(error)
     });
     throw error;
-  } finally {
-    client.release();
   }
 }
 
@@ -148,6 +150,7 @@ export async function resolveLocationReviewActionWithClient(
   session: RequestSession
 ) {
   const action = LocationReviewActionSchema.parse(input);
+  setSyncPhase(client, "review_lock");
   const lockedItems = action.action === "merge" || action.action === "merge_and_confirm"
     ? await lockLocationReviews(
         client,
@@ -155,6 +158,7 @@ export async function resolveLocationReviewActionWithClient(
         session
       )
     : [await lockLocationReview(client, reviewItemId, session)];
+  setSyncPhase(client, "effect");
   const item = lockedItems.find((candidate) => candidate.id === reviewItemId);
   if (!item) {
     throw new ReviewResolutionError(
@@ -266,7 +270,7 @@ function locationReviewLocked(reviewItemId: string) {
       status: 409,
       details: {
         reviewItemId,
-        canonicalStatus: "open"
+        canonicalStatus: "unknown", reason: "lock_unavailable", retryAfterMs: 5_000
       }
     }
   );
