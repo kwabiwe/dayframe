@@ -36,8 +36,9 @@ import {
   type ManualSyncResult,
 } from "./syncCoordinator";
 import type { SyncLaneOutcome } from "./syncLane";
+import { createOwnerSyncCoalescer } from "./ownerSyncCoalescer";
 
-const manualPasses = new Map<string, Promise<ManualSyncResult>>();
+const manualPasses = createOwnerSyncCoalescer<ManualSyncResult>();
 let lastManualResult: { key: string; result: ManualSyncResult } | null = null;
 export async function getLastManualSyncResult() {
   const owner = await readActiveMobileAccount();
@@ -46,15 +47,13 @@ export async function getLastManualSyncResult() {
     : null;
 }
 
-/** Manual work joins by authenticated owner; network failures never gate local capture. */
+/** Manual work retains one explicit follow-up per authenticated owner/generation; network failures never gate local capture. */
 export async function synchroniseDeviceNow(options: { date?: string } = {}) {
   const owner = await readActiveMobileAccount();
   if (!owner) throw new AuthRequiredError();
   const session = await readOwnedAuthenticatedSessionSnapshot(owner);
   if (session.status !== "authenticated") throw new AuthRequiredError();
   const key = mobileAccountKey(owner);
-  const active = manualPasses.get(key);
-  if (active) return active;
   const isCurrent = async () =>
     isAuthenticatedSessionSnapshotCurrent(session.snapshot) &&
     mobileAccountOwnersEqual(owner, await readActiveMobileAccount());
@@ -117,7 +116,7 @@ export async function synchroniseDeviceNow(options: { date?: string } = {}) {
       };
     };
 
-  const pass = runManualSync(
+  return manualPasses.run(`${key}:${session.snapshot.generation}`, true, () => runManualSync(
     {
       sleep: capture("sleep"),
       workouts: capture("workouts"),
@@ -230,10 +229,5 @@ export async function synchroniseDeviceNow(options: { date?: string } = {}) {
     .then(async (result) => {
       if (await isCurrent()) lastManualResult = { key, result };
       return result;
-    })
-    .finally(() => {
-      if (manualPasses.get(key) === pass) manualPasses.delete(key);
-    });
-  manualPasses.set(key, pass);
-  return pass;
+    }), () => Promise.resolve());
 }

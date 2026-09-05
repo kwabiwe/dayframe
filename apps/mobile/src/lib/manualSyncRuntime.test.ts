@@ -127,4 +127,30 @@ describe("Sync now runtime", () => {
     expect(mocks.publish).toHaveBeenCalled();
     expect(result.lanes.review.outcome).toBe("server_busy");
   });
+  it("coalesces a second device-wide Sync now into exactly one follow-up", async () => {
+    const first = deferred<ReturnType<typeof empty>>();
+    const followUp = deferred<ReturnType<typeof empty>>();
+    mocks.sleep.mockResolvedValue({ importedCount: 0 });
+    mocks.workout.mockResolvedValue({ importedCount: 0 });
+    // Each complete pass requests activity plus two capture-owned drains.
+    mocks.sync.mockReturnValueOnce(first.promise).mockResolvedValue(empty());
+    mocks.review.mockResolvedValueOnce({ outcome:"complete",acknowledgedCount:0,waitingCount:0,needsAttentionCount:0 })
+      .mockImplementationOnce(() => followUp.promise.then(() => ({ outcome:"complete",acknowledgedCount:1,waitingCount:0,needsAttentionCount:0 })));
+    const { synchroniseDeviceNow } = await import("./manualSyncRuntime");
+    const active = synchroniseDeviceNow();
+    await vi.waitFor(() => expect(mocks.review).toHaveBeenCalledTimes(1));
+    const pressed = synchroniseDeviceNow();
+    const repeated = synchroniseDeviceNow();
+    await new Promise(resolve => setTimeout(resolve,0));
+    first.resolve(empty());
+    await active;
+    await vi.waitFor(() => expect(mocks.review).toHaveBeenCalledTimes(2));
+    const duringFollowUp = synchroniseDeviceNow();
+    followUp.resolve(empty());
+    await Promise.all([pressed,repeated,duringFollowUp]);
+    expect(mocks.review).toHaveBeenCalledTimes(2);
+    expect(mocks.location).toHaveBeenCalledTimes(2);
+    expect(mocks.sleep).toHaveBeenCalledTimes(2);
+  });
+
 });
