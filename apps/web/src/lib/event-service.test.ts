@@ -1436,7 +1436,7 @@ describe("health event persistence", () => {
     const client = {
       query: vi.fn(async (statement: string, values?: unknown[]) => {
         void values;
-        if (statement.includes("client_event_id = $3")) return { rows: [{ id: "event-existing" }] };
+        if (statement.includes("client_event_id = $3")) return { rows: [{ eventId: "event-existing", processingDisposition: "confirmed", timeEntryId: null }] };
         return { rows: [] };
       }),
       release: vi.fn()
@@ -1453,6 +1453,7 @@ describe("health event persistence", () => {
 
     expect(result).toEqual({
       eventId: "event-existing",
+      processingDisposition: "confirmed",
       candidate: expect.objectContaining({ action: "create_time_entry" }),
       duplicate: true
     });
@@ -1667,7 +1668,10 @@ describe("health event persistence", () => {
         workoutType: null
       })
     ]);
-    mocks.pool.connect.mockResolvedValueOnce(client);
+    const original = client.query.getMockImplementation()!;
+    client.query.mockImplementation(async (sql, values) => sql.includes("select count(*)::int")
+      ? { rows: [{ count: 1 }] } : original(sql, values));
+    mocks.pool.connect.mockResolvedValue(client);
 
     const result = await reprocessHealthReviewItems({
       preferences: {
@@ -1684,7 +1688,7 @@ describe("health event persistence", () => {
     const reviewSelect = client.query.mock.calls.find(([statement]) =>
       String(statement).includes("from review_items ri") && String(statement).includes("for update of ri")
     );
-    expect(reviewSelect?.[0]).toContain("skip locked");
+    expect(reviewSelect?.[0]).toContain("nowait");
     expect(result).toMatchObject({
       checkedCount: 3,
       confirmedCount: 2,
@@ -1724,7 +1728,7 @@ describe("health event persistence", () => {
         durationSeconds: 37 * 60
       })
     ]);
-    mocks.pool.connect.mockResolvedValueOnce(client);
+    mocks.pool.connect.mockResolvedValue(client);
 
     const result = await reprocessHealthReviewItems({
       preferences: {
@@ -1760,64 +1764,24 @@ describe("health event persistence", () => {
     );
   });
 
-  it("limits Health review reprocess batches and reports remaining production work", async () => {
-    const client = reprocessClient([]);
-    client.query.mockImplementation(async (statement: string) => {
-      if (statement.includes("select count(*)::int")) return { rows: [{ count: 5 }] };
-      if (statement.includes("from review_items ri") && statement.includes("for update of ri")) {
-        return {
-          rows: [
-            healthWorkoutReviewRow({
-              id: "review-walk-1",
-              eventId: "event-walk-1",
-              durationSeconds: 16 * 60
-            }),
-            healthWorkoutReviewRow({
-              id: "review-walk-2",
-              eventId: "event-walk-2",
-              durationSeconds: 37 * 60
-            })
-          ]
-        };
-      }
-      if (statement.includes("from categories")) return { rows: [{ id: healthCategoryId() }] };
-      if (statement.includes("created_from_event_id = $3")) return { rows: [] };
-      if (statement.includes("started_at < $4::timestamptz")) return { rows: [] };
-      if (statement.includes("insert into time_entries")) return { rows: [{ id: "entry" }] };
-      return { rows: [] };
+  it("selects at most 25 candidates without locks and commits each unit before the next", async () => {
+    const rows = Array.from({length: 3}, (_, i) => healthWorkoutReviewRow({id:`review-walk-${i}`,eventId:`event-walk-${i}`}));
+    const client = reprocessClient(rows);
+    const original = client.query.getMockImplementation()!;
+    client.query.mockImplementation(async (sql, values) => {
+      if (sql.includes("select count(*)::int")) return {rows:[{count:5}]};
+      return original(sql, values);
     });
-    mocks.pool.connect.mockResolvedValueOnce(client);
-
-    const result = await reprocessHealthReviewItems({
-      limit: 2,
-      preferences: {
-        sleep: true,
-        walking: true,
-        running: true,
-        cycling: true,
-        strength_training: false,
-        swimming: false,
-        other: false
-      }
-    }, session);
-
-    const reviewSelect = client.query.mock.calls.find(([statement]) =>
-      String(statement).includes("from review_items ri") && String(statement).includes("for update of ri")
-    );
-    expect(reviewSelect?.[1]).toEqual([session.workspaceId, session.userId, 2, false]);
-    expect(reviewSelect?.[0]).toContain("ri.notes is null or ri.notes not like 'Left in Review:%'");
-    expect(reviewSelect?.[0]).toContain("ae.event_type = 'health_workout_import'");
-    expect(result).toMatchObject({
-      batchSize: 2,
-      checkedCount: 2,
-      confirmedCount: 2,
-      remainingReviewCount: 5,
-      partial: true,
-      hasMore: true
-    });
-    expect(
-      client.query.mock.calls.filter(([statement]) => String(statement).includes("insert into time_entries"))
-    ).toHaveLength(2);
+    mocks.pool.connect.mockResolvedValue(client);
+    const result = await reprocessHealthReviewItems({ limit: 2, preferences: {sleep:false} }, session);
+    expect(result).toMatchObject({batchSize:2,checkedCount:2,confirmedCount:2,remaining:5,hasMore:true,nextCursor:"review-walk-1"});
+    const calls=client.query.mock.calls;
+    const reads=calls.filter(([sql])=>String(sql).includes("from review_items ri")&&!String(sql).includes("count(*)"));
+    expect(reads[0][0]).not.toContain("for update");
+    expect(reads[0][1]).toEqual([session.workspaceId,session.userId,null,3]);
+    const locks=calls.map(([sql],i)=>String(sql).includes("for update of ri nowait")?i:-1).filter(i=>i>=0);
+    expect(locks).toHaveLength(2);
+    expect(calls.slice(locks[0],locks[1]).some(([sql])=>sql==="commit")).toBe(true);
   });
 
   it("ignores existing Walk review candidates when Walking import is disabled", async () => {
@@ -1828,7 +1792,7 @@ describe("health event persistence", () => {
         durationSeconds: 37 * 60
       })
     ]);
-    mocks.pool.connect.mockResolvedValueOnce(client);
+    mocks.pool.connect.mockResolvedValue(client);
 
     const result = await reprocessHealthReviewItems({
       preferences: {
@@ -1865,7 +1829,7 @@ describe("health event persistence", () => {
     ["high", "unknown", false, 2220, 0]
   ] as const)("reprocesses %s %s with preference %s and duration %i", async (confidence, workoutType, enabled, seconds, expected) => {
     const client = reprocessClient([{ ...healthWorkoutReviewRow({ workoutType, durationSeconds: seconds, stoppedAt: new Date(Date.parse("2026-07-04T19:09:00.000Z") + seconds * 1000).toISOString() }), title: workoutType === "unknown" ? "Unknown workout" : "Workout", confidence }]);
-    mocks.pool.connect.mockResolvedValueOnce(client);
+    mocks.pool.connect.mockResolvedValue(client);
     const result = await reprocessHealthReviewItems({ preferences: { swimming: enabled } }, session);
     expect(result.confirmedCount).toBe(expected);
     expect(client.query.mock.calls.filter(([statement])=>String(statement).includes("insert into time_entries"))).toHaveLength(expected);
@@ -1880,7 +1844,7 @@ describe("health event persistence", () => {
       })
     ]);
     client.query.mockImplementation(async (statement: string) => {
-      if (statement.includes("from review_items ri") && statement.includes("for update of ri")) {
+      if (statement.includes("from review_items ri") && !statement.includes("count(*)")) {
         return {
           rows: [
             healthWorkoutReviewRow({
@@ -1912,7 +1876,7 @@ describe("health event persistence", () => {
       }
       return { rows: [] };
     });
-    mocks.pool.connect.mockResolvedValueOnce(client);
+    mocks.pool.connect.mockResolvedValue(client);
 
     const result = await reprocessHealthReviewItems({
       preferences: {
@@ -1940,7 +1904,7 @@ describe("health event persistence", () => {
       })
     ]);
     client.query.mockImplementation(async (statement: string) => {
-      if (statement.includes("from review_items ri") && statement.includes("for update of ri")) {
+      if (statement.includes("from review_items ri") && !statement.includes("count(*)")) {
         return {
           rows: [
             healthWorkoutReviewRow({
@@ -1974,7 +1938,7 @@ describe("health event persistence", () => {
       }
       return { rows: [] };
     });
-    mocks.pool.connect.mockResolvedValueOnce(client);
+    mocks.pool.connect.mockResolvedValue(client);
 
     const result = await reprocessHealthReviewItems({
       preferences: {
@@ -2012,7 +1976,7 @@ describe("health event persistence", () => {
         durationSeconds: 23520
       })
     ]);
-    mocks.pool.connect.mockResolvedValueOnce(client);
+    mocks.pool.connect.mockResolvedValue(client);
 
     const result = await reprocessHealthReviewItems({
       preferences: {
@@ -2048,13 +2012,13 @@ describe("health event persistence", () => {
   it("repairs old confirmed Health-category Sleep entries when Sleep import is enabled", async () => {
     const client = reprocessClient([]);
     client.query.mockImplementation(async (statement: string) => {
-      if (statement.includes("from review_items ri") && statement.includes("for update of ri")) return { rows: [] };
+      if (statement.includes("from review_items ri") && !statement.includes("count(*)")) return { rows: [] };
       if (statement.includes("from categories")) return { rows: [{ id: sleepCategoryId() }] };
       if (statement.includes("update time_entries te")) return { rowCount: 1, rows: [{ id: "entry-sleep-old" }] };
       if (statement.includes("select count(*)::int")) return { rows: [{ count: 0, unexplainedCount: 0 }] };
       return { rows: [] };
     });
-    mocks.pool.connect.mockResolvedValueOnce(client);
+    mocks.pool.connect.mockResolvedValue(client);
 
     const result = await reprocessHealthReviewItems({
       preferences: {
@@ -2084,7 +2048,7 @@ describe("health event persistence", () => {
 
   it("does not run the legacy Sleep category repair when Sleep import is disabled", async () => {
     const client = reprocessClient([]);
-    mocks.pool.connect.mockResolvedValueOnce(client);
+    mocks.pool.connect.mockResolvedValue(client);
 
     const result = await reprocessHealthReviewItems({
       preferences: {
@@ -2120,32 +2084,13 @@ describe("health event persistence", () => {
         durationSeconds: 37 * 60
       })
     ]);
+    const original = client.query.getMockImplementation()!;
     client.query.mockImplementation(async (statement: string, values?: unknown[]) => {
-      if (statement.includes("insert into time_entries") && (values as unknown[])?.[10] === "event-bad") {
-        throw new Error("bad candidate");
-      }
-      if (statement.includes("from review_items ri") && statement.includes("for update of ri")) {
-        return {
-          rows: [
-            healthWorkoutReviewRow({
-              id: "review-bad",
-              eventId: "event-bad",
-              durationSeconds: 37 * 60
-            }),
-            healthWorkoutReviewRow({
-              id: "review-good",
-              eventId: "event-good",
-              durationSeconds: 37 * 60
-            })
-          ]
-        };
-      }
-      if (statement.includes("from categories")) return { rows: [{ id: healthCategoryId() }] };
-      if (statement.includes("created_from_event_id = $3")) return { rows: [] };
-      if (statement.includes("started_at < $4::timestamptz")) return { rows: [] };
-      return { rows: [] };
+      if (statement.includes("insert into time_entries") && values?.[10] === "event-bad") throw new Error("bad candidate");
+      if (statement.includes("select count(*)::int")) return { rows: [{ count: 1 }] };
+      return original(statement, values);
     });
-    mocks.pool.connect.mockResolvedValueOnce(client);
+    mocks.pool.connect.mockResolvedValue(client);
 
     const result = await reprocessHealthReviewItems({
       preferences: {
@@ -2208,7 +2153,7 @@ describe("health event persistence", () => {
         eventCategoryId: healthCategoryId()
       })
     ]);
-    mocks.pool.connect.mockResolvedValueOnce(client);
+    mocks.pool.connect.mockResolvedValue(client);
 
     const result = await reprocessHealthReviewItems({
       preferences: {
@@ -2288,7 +2233,7 @@ describe("health event persistence", () => {
     ];
     const client = reprocessClient(rows);
     client.query.mockImplementation(async (statement: string) => {
-      if (statement.includes("from review_items ri") && statement.includes("for update of ri")) {
+      if (statement.includes("from review_items ri") && !statement.includes("count(*)")) {
         return { rows };
       }
       if (statement.includes("from categories")) return { rows: [{ id: healthCategoryId() }] };
@@ -2314,7 +2259,7 @@ describe("health event persistence", () => {
       }
       return { rows: [] };
     });
-    mocks.pool.connect.mockResolvedValueOnce(client);
+    mocks.pool.connect.mockResolvedValue(client);
 
     const result = await reprocessHealthReviewItems({
       preferences: {
@@ -2366,7 +2311,7 @@ describe("health event persistence", () => {
       }
     };
     const client = reprocessClient([awakeRow]);
-    mocks.pool.connect.mockResolvedValueOnce(client);
+    mocks.pool.connect.mockResolvedValue(client);
 
     const result = await reprocessHealthReviewItems({
       preferences: {
@@ -2420,7 +2365,7 @@ describe("health event persistence", () => {
     };
     const client = reprocessClient([row]);
     client.query.mockImplementation(async (statement: string) => {
-      if (statement.includes("from review_items ri") && statement.includes("for update of ri")) {
+      if (statement.includes("from review_items ri") && !statement.includes("count(*)")) {
         return { rows: [row] };
       }
       if (statement.includes("from categories")) return { rows: [{ id: healthCategoryId() }] };
@@ -2446,7 +2391,7 @@ describe("health event persistence", () => {
       }
       return { rows: [] };
     });
-    mocks.pool.connect.mockResolvedValueOnce(client);
+    mocks.pool.connect.mockResolvedValue(client);
 
     const result = await reprocessHealthReviewItems({
       preferences: {
@@ -2484,7 +2429,7 @@ describe("health event persistence", () => {
       })
     ]);
     client.query.mockImplementation(async (statement: string, values?: unknown[]) => {
-      if (statement.includes("from review_items ri") && statement.includes("for update of ri")) {
+      if (statement.includes("from review_items ri") && !statement.includes("count(*)")) {
         return { rows: [healthWorkoutReviewRow({ id: "review-walk", eventId: "event-walk" })] };
       }
       if (statement.includes("from categories") && values?.[1] === "Sleep") return { rows: [{ id: sleepCategoryId() }] };
@@ -2492,7 +2437,7 @@ describe("health event persistence", () => {
       if (statement.includes("from categories")) throw new Error("categories unavailable");
       return { rows: [] };
     });
-    mocks.pool.connect.mockResolvedValueOnce(client);
+    mocks.pool.connect.mockResolvedValue(client);
 
     const result = await reprocessHealthReviewItems({
       preferences: {
@@ -2507,12 +2452,12 @@ describe("health event persistence", () => {
     }, session);
 
     expect(result).toMatchObject({
-      checkedCount: 1,
+      checkedCount: 0,
       confirmedCount: 0,
       failedCount: 1
     });
-    expect(result.errorSummary[0]).toContain("Skipped review-walk");
-    expect(client.query).toHaveBeenCalledWith("rollback to savepoint reprocess_health_item");
+    expect(result.errorSummary).toContain("health_unit_failed");
+    expect(client.query).toHaveBeenCalledWith("rollback");
     expect(client.query).toHaveBeenCalledWith("commit");
     expect(
       client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"))
@@ -2571,7 +2516,7 @@ describe("health event persistence", () => {
     const client = {
       query: vi.fn(async (statement: string, values?: unknown[]) => {
         void values;
-        if (statement.includes("client_event_id = $3")) return { rows: [{ id: "event-existing" }] };
+        if (statement.includes("client_event_id = $3")) return { rows: [{ eventId: "event-existing", processingDisposition: "confirmed", timeEntryId: null }] };
         return { rows: [] };
       }),
       release: vi.fn()
@@ -2590,6 +2535,7 @@ describe("health event persistence", () => {
     ]);
     expect(result).toEqual({
       eventId: "event-existing",
+      processingDisposition: "confirmed",
       candidate: expect.objectContaining({ action: "create_review_item" }),
       duplicate: true
     });
@@ -2603,7 +2549,7 @@ describe("health event persistence", () => {
     const client = {
       query: vi.fn(async (statement: string, values?: unknown[]) => {
         void values;
-        if (statement.includes("client_event_id = $3")) return { rows: [{ id: "event-existing" }] };
+        if (statement.includes("client_event_id = $3")) return { rows: [{ eventId: "event-existing", processingDisposition: "confirmed", timeEntryId: null }] };
         return { rows: [] };
       }),
       release: vi.fn()
@@ -2620,6 +2566,7 @@ describe("health event persistence", () => {
 
     expect(result).toEqual({
       eventId: "event-existing",
+      processingDisposition: "confirmed",
       candidate: expect.objectContaining({ action: "create_time_entry" }),
       duplicate: true
     });
@@ -3501,7 +3448,9 @@ function placeId(seed = "default") {
 function reprocessClient(reviewRows: Array<Record<string, unknown>>) {
   return {
     query: vi.fn(async (statement: string, values?: unknown[]) => {
-      if (statement.includes("from review_items ri") && statement.includes("for update of ri")) {
+      if (statement.includes("from review_items ri") && !statement.includes("count(*)")) {
+        if (Array.isArray(values?.[2])) return { rows: reviewRows.filter(row => (values![2] as string[]).includes(row.id as string)) };
+        if (statement.includes("not (ae.raw_payload ?")) return { rows: reviewRows.filter(row => row.eventType === "health_sleep_import") };
         return { rows: reviewRows };
       }
       if (statement.includes("from categories")) {

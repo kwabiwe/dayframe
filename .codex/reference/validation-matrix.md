@@ -451,3 +451,13 @@ Ask these before opening a PR:
 ## Bounded mobile sync recovery
 
 Run `npm run test --workspace @dayframe/mobile` and `npm run typecheck --workspace @dayframe/mobile`, including real SQLite Review/Location tests, full JSON body/validation deadlines, receipt-envelope matching, interrupted delivery, owner replacement, force coalescing, independent due-time scheduling, partial upload and shared prefetch-consumer cancellation. Verify manual Sync with one Health type failing, Review contention, retained Location batches, a refresh already in flight, and a 45-second deadline. Verify unresolved Review intent has Reconcile now and no ambiguous-outcome discard. Keep Settings and header state truthful under ordinary retry/backoff. Capture normal/Reduce Motion, rapid repeat, navigation, VoiceOver and Dynamic Type evidence on the selected staging build; a clean Simulator build does not establish HealthKit or physical-device behaviour.
+
+## Bounded sync transaction and Health units
+
+Use a disposable local PostgreSQL/PostGIS database whose name ends in `_test`. Run `npm run db:setup`, `npm run validate:sync-transactions`, `npm run validate:health-sync-units`, `npm run validate:review-mutation-db` and `npm run validate:location-v2-db` with its `DATABASE_URL`. These scripts create synthetic owners, exercise real concurrent connections and clean their fixtures. Do not point them at production. Check version 16 fallback and version 17 transaction protection; measure server lock release after cancellation and idle termination, not merely Promise completion. The Health unit script injects one slow effect and proves later rows are not locked by the first unit.
+
+For staging, apply the additive Sleep resolution-link migration before the Preview deployment, verify the alias's actual SHA/backend identity, then smoke-test exact receipt replay, bounded reconciliation and Health partial counts using synthetic owners. Preserve private raw evidence locally. Missing installed-build provenance or hands-on iPhone checks must remain explicit outstanding gates; tests or empty queues cannot close a reported missing-source incident.
+
+## Sync recovery CI gates
+
+The base and ordered disposable PostGIS jobs run Review transaction lifetime/abandoned-connection validation (`scripts/validate-sync-transactions.ts`), bounded Health logical-unit isolation/continuation (`scripts/validate-health-sync-units.ts`) and Health ingest deadlines/same-ID recovery (`scripts/validate-health-ingest-bounds.ts`), in addition to Review mutation receipts and structural actions. These are fail-on-error CI steps using synthetic local fixtures, with no hosted credentials.

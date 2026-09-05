@@ -50,8 +50,15 @@ describe("POST /api/events", () => {
 
     expect(response.status).toBe(201);
     expect(payload.eventId).toBe("event-1");
-    expect(mocks.processActivityEvent).toHaveBeenCalledWith(healthSleepEvent(), session);
+    expect(mocks.processActivityEvent).toHaveBeenCalledWith(healthSleepEvent(), session, {signal:expect.any(AbortSignal),deadlineAt:expect.any(Number)});
     expect(mocks.scheduleLiveActivityNotification).toHaveBeenCalledWith(session);
+  });
+
+  it("reports a Health SQL timeout with its real phase and preserves retry semantics",async()=>{
+    mocks.processActivityEvent.mockRejectedValueOnce(Object.assign(new Error("canceling statement due to statement timeout"),{code:"57014",syncPhase:"effect"}));
+    const response=await POST(jsonRequest(healthSleepEvent()));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({code:"event_sync_deferred",reason:"operation_timeout",phase:"effect",sqlState:"57014"});
   });
 
   it("accepts an idempotent Live Activity stop retry without creating another mutation", async () => {
@@ -73,7 +80,7 @@ describe("POST /api/events", () => {
 
     expect(response.status).toBe(200);
     expect(payload).toMatchObject({ eventId: "event-stop-1", duplicate: true });
-    expect(mocks.processActivityEvent).toHaveBeenCalledWith(stopEvent, session);
+    expect(mocks.processActivityEvent).toHaveBeenCalledWith(stopEvent, session, {signal:expect.any(AbortSignal),deadlineAt:expect.any(Number)});
   });
 
   it("preserves canonical timer-entry correlation on an idempotent start replay", async () => {
@@ -120,6 +127,22 @@ describe("POST /api/events", () => {
 
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({ code: "timer_busy" });
+  });
+
+  it.each([
+    { code: "42703", message: 'column "resolved_time_entry_id" does not exist' },
+    missingRequiredColumnError("activity_events", "resolved_time_entry_id", "schema prerequisite"),
+  ])("returns the Health resolution-link migration prerequisite as retryable readiness", async (error) => {
+    mocks.processActivityEvent.mockRejectedValueOnce(error);
+    const response = await POST(jsonRequest(healthSleepEvent()));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      code: "database_not_ready",
+      reason: "required_migration_missing",
+      objectName: "activity_events.resolved_time_entry_id",
+      migrationHint: expect.stringContaining("202609040001_health_sleep_resolution_link.sql"),
+    });
+    expect(mocks.scheduleLiveActivityNotification).not.toHaveBeenCalled();
   });
 
   it("returns a precise schema error when health sleep storage is missing", async () => {

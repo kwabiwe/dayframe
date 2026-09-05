@@ -300,3 +300,10 @@ For implementation PRs that affect shipped mobile/API behavior, do not ask KB to
 - Physical regression: Start/Stop/Edit/Delete, PR #184 reconnect/account recovery, PR #185 finite timer background work, Live Activities, Review/evidence caches, Health import/reprocess, Location capture/replay, Calendar/Reports sum/union totals, sheets/keyboard/native navigation, VoiceOver, Dynamic Type and Reduce Motion. Record each as PASS/FAIL/NOT RUN against the exact Preview commit, stable staging alias and signed preview build; never test with production credentials/data.
 
 - Sync recovery: stalled response bodies and invalid acknowledgements retain original intent; a Review 409 cannot gate independent Location/capture; manual force runs once over stored backoff; interrupted delivery reconciles receipts before acknowledgement. Settings reports unfinished lanes and queues a canonical refresh after changing lanes. Verify Settings issue exit/reflow and Reduce Motion on device, retaining user drafts and selected date.
+
+## Sync recovery proof
+
+- [ ] A Review mutation try-lock failure does not fabricate an open canonical row; query cancellation remains distinguishable from contention, with redacted phase and SQLSTATE.
+- [ ] A matching committed receipt wins after request timeout; reused IDs with different payloads conflict; logical Sleep equivalence requires explicit provenance and preserves metadata/user edits.
+- [ ] One slow Health reprocess unit does not hold later candidate rows or discard committed siblings; cursor continuation reaches later work and returns truthful partial/remaining results.
+- [ ] The named production Review, missing Sleep and missing commute have separate source-to-visible-state evidence. Empty queues, accepted status alone and green tests are insufficient incident closure.
