@@ -298,3 +298,10 @@ For implementation PRs that affect shipped mobile/API behavior, do not ask KB to
 - Run Review SQLite v4→v5 backfill, two-source merge reservation/rollback, account/session isolation, canonical-only restore, acknowledgement retention, discard safety and foreground retry; exercise all strict complex envelopes with disposable Postgres receipts and failed structural rollback.
 - Use synthetic 2/13/25/50-item profiles from `scripts/fixtures/review-performance.ts`. Run `npx tsx scripts/measure-review-performance.ts` for desktop preparation/SQLite timings only. On the same signed staging build measure cached first content (<300 ms), Back-start p95 (<250 ms), interactive swipe, mounted cards, local enqueue (<500 ms), evidence prefetch cancellation and 50-item scrolling. Do not claim desktop measurements as device acceptance or rewrite the list without measurements.
 - Physical regression: Start/Stop/Edit/Delete, PR #184 reconnect/account recovery, PR #185 finite timer background work, Live Activities, Review/evidence caches, Health import/reprocess, Location capture/replay, Calendar/Reports sum/union totals, sheets/keyboard/native navigation, VoiceOver, Dynamic Type and Reduce Motion. Record each as PASS/FAIL/NOT RUN against the exact Preview commit, stable staging alias and signed preview build; never test with production credentials/data.
+
+## Sync recovery proof
+
+- [ ] A Review mutation try-lock failure does not fabricate an open canonical row; query cancellation remains distinguishable from contention, with redacted phase and SQLSTATE.
+- [ ] A matching committed receipt wins after request timeout; reused IDs with different payloads conflict; logical Sleep equivalence requires explicit provenance and preserves metadata/user edits.
+- [ ] One slow Health reprocess unit does not hold later candidate rows or discard committed siblings; cursor continuation reaches later work and returns truthful partial/remaining results.
+- [ ] The named production Review, missing Sleep and missing commute have separate source-to-visible-state evidence. Empty queues, accepted status alone and green tests are insufficient incident closure.

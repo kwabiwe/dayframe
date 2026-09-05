@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { serverBuildMetadata } from "@/lib/build-metadata";
 import { authErrorResponse } from "@/lib/api-errors";
 import { isMissingRequiredColumnError } from "@/lib/db";
 import { resolveRequestSession } from "@/lib/ingest-auth";
@@ -16,6 +17,7 @@ export async function GET(request: Request) {
     scheduleLiveActivityRetry(session);
     return NextResponse.json({
       ...data,
+      serverBuild: serverBuildMetadata(),
       locationRolloutMode: getServerLocationRolloutMode()
     });
   } catch (error) {

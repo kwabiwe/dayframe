@@ -61,7 +61,7 @@ describe("POST /api/review/[id]", () => {
 
     expect(response.status).toBe(200);
     expect(payload).toMatchObject({ ok: true, entryId: "entry-1" });
-    expect(mocks.resolveReviewItem).toHaveBeenCalledWith("review-1", "accept", session);
+    expect(mocks.resolveReviewItem).toHaveBeenCalledWith("review-1", "accept", session, expect.objectContaining({ signal: expect.any(AbortSignal), deadlineAt: expect.any(Number) }));
   });
 
   it("returns JSON for expected review resolution failures", async () => {
@@ -108,7 +108,7 @@ describe("POST /api/review/[id]", () => {
     const response = await POST(jsonRequest(action), params("review-1"));
 
     expect(response.status).toBe(200);
-    expect(mocks.resolveLocationReviewAction).toHaveBeenCalledWith("review-1", action, session);
+    expect(mocks.resolveLocationReviewAction).toHaveBeenCalledWith("review-1", action, session, expect.objectContaining({ signal: expect.any(AbortSignal), deadlineAt: expect.any(Number) }));
     expect(mocks.resolveReviewItem).not.toHaveBeenCalled();
   });
 
@@ -124,7 +124,7 @@ describe("POST /api/review/[id]", () => {
     const response = await POST(jsonRequest(action), params("review-1"));
 
     expect(response.status).toBe(200);
-    expect(mocks.resolveLocationReviewAction).toHaveBeenCalledWith("review-1", action, session);
+    expect(mocks.resolveLocationReviewAction).toHaveBeenCalledWith("review-1", action, session, expect.objectContaining({ signal: expect.any(AbortSignal), deadlineAt: expect.any(Number) }));
   });
 
   it("dispatches strict idempotent mobile mutations through one transaction owner", async () => {
@@ -138,7 +138,7 @@ describe("POST /api/review/[id]", () => {
     expect(mocks.resolveIdempotentReviewMutation).toHaveBeenCalledWith(
       "review-1",
       envelope,
-      session
+      session, expect.objectContaining({ signal: expect.any(AbortSignal), deadlineAt: expect.any(Number) })
     );
     expect(mocks.resolveReviewItem).not.toHaveBeenCalled();
     expect(mocks.resolveLocationReviewAction).not.toHaveBeenCalled();
