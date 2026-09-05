@@ -23,6 +23,9 @@ function storeBoundSession(token: string, owner = TIMER_STOP_OWNER) {
 const secureStore = vi.hoisted(() => new Map<string, string>());
 const asyncStore = vi.hoisted(() => new Map<string, string>());
 const appState = vi.hoisted(() => ({ currentState: "active" }));
+const healthAcknowledgement = vi.hoisted(() => vi.fn());
+vi.mock("./backendIdentity",()=>({DAYFRAME_BACKEND_ID:"staging-fixture"}));
+vi.mock("./healthSyncStore",()=>({recordHealthAcknowledgement:healthAcknowledgement}));
 
 vi.mock("expo-secure-store", () => ({
   AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 1,
@@ -146,6 +149,7 @@ describe("mobile API client", () => {
     asyncStore.clear();
     appState.currentState = "active";
     vi.restoreAllMocks();
+    healthAcknowledgement.mockReset();
     __resetMobileAccountForTests();
     await activateMobileAccount(TIMER_STOP_OWNER);
   });
@@ -312,6 +316,7 @@ describe("mobile API client", () => {
   it("requests bootstrap data for a selected date", async () => {
     storeBoundSession("session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({
+      user: { id: TIMER_STOP_OWNER.userId }, workspace: { id: TIMER_STOP_OWNER.workspaceId },
       entries: [],
       places: [
         {
@@ -662,6 +667,38 @@ describe("mobile API client", () => {
     });
   });
 
+  it("retains a generic event until the response includes a canonical event ID", async () => {
+    storeBoundSession("session-token");
+    asyncStore.set("dayframe.offlineQueue.v1",JSON.stringify([storedQueuedEvent({source:"health_sleep",type:"health_sleep_import"})]));
+    vi.stubGlobal("fetch",vi.fn(async()=>jsonResponse({ok:true},200)));
+    await syncQueue();
+    expect(await readQueue()).toHaveLength(1);
+  });
+
+  it("preserves a delivered Health event when its local acknowledgement write fails",async()=>{
+    storeBoundSession("session-token");
+    const event=storedQueuedEvent({localId:"healthkit:sleep:episode:revision",source:"health_sleep",type:"health_sleep_import"});
+    asyncStore.set("dayframe.offlineQueue.v1",JSON.stringify([event]));
+    vi.stubGlobal("fetch",vi.fn(async()=>jsonResponse({eventId:"server-event",clientEventId:event.localId,processingDisposition:"confirmed",timeEntryId:"entry"},201)));
+    healthAcknowledgement.mockRejectedValueOnce(new Error("durable acknowledgement fixture"));
+    await syncQueue();expect((await readQueue())[0].localId).toBe(event.localId);
+    await syncQueue({forceRetry:true});expect(await readQueue()).toHaveLength(0);
+    expect(healthAcknowledgement).toHaveBeenCalledTimes(2);
+    expect(healthAcknowledgement.mock.calls[0]).toEqual(healthAcknowledgement.mock.calls[1]);
+    expect(healthAcknowledgement).toHaveBeenCalledWith({...TIMER_STOP_OWNER,backendId:"staging-fixture"},event.localId,{
+      eventId:"server-event",clientEventId:event.localId,processingDisposition:"confirmed",timeEntryId:"entry",reviewItemId:null
+    });
+  });
+
+  it("records a compatible legacy Health acknowledgement without inventing processing or visibility",async()=>{
+    storeBoundSession("session-token");
+    const event=storedQueuedEvent({source:"health_sleep",type:"health_sleep_import"});
+    asyncStore.set("dayframe.offlineQueue.v1",JSON.stringify([event]));
+    vi.stubGlobal("fetch",vi.fn(async()=>jsonResponse({eventId:"legacy-event"},200)));
+    await syncQueue();expect(await readQueue()).toHaveLength(0);
+    expect(healthAcknowledgement.mock.calls[0][2]).toMatchObject({processingDisposition:"legacy_unknown",timeEntryId:null,reviewItemId:null});
+  });
+
   it("syncs a queued Health event without posting stale client workspace fields", async () => {
     storeBoundSession("session-token");
     asyncStore.set(
@@ -885,14 +922,14 @@ describe("mobile API client", () => {
 
     await expect(sync).resolves.toMatchObject({
       stopped: true,
-      firstError: { failureKind: "network", localId: "timer-start-expired" }
+      firstError: undefined
     });
     await expect(readQueue()).resolves.toEqual([
       expect.objectContaining({
-        failureKind: "network",
         localId: "timer-start-expired"
       })
     ]);
+    expect((await readQueue())[0].failureKind).toBeUndefined();
   });
 
   it("converges an offline timer Start from local projection to one canonical server entry", async () => {
@@ -1022,6 +1059,7 @@ describe("mobile API client", () => {
         }
         if (url.includes("/api/bootstrap")) {
           return jsonResponse({
+            user: { id: TIMER_STOP_OWNER.userId }, workspace: { id: TIMER_STOP_OWNER.workspaceId },
             activeEntry: serverActiveEntry,
             entries: serverActiveEntry ? [serverActiveEntry] : []
           });
@@ -2018,7 +2056,7 @@ describe("mobile API client", () => {
     };
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ ok: true }, 201))
-      .mockResolvedValueOnce(jsonResponse({ places: [savedPlace] }, 200));
+      .mockResolvedValueOnce(jsonResponse({ user: { id: TIMER_STOP_OWNER.userId }, workspace: { id: TIMER_STOP_OWNER.workspaceId }, places: [savedPlace] }, 200));
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await createPlace({
@@ -2165,7 +2203,7 @@ describe("mobile API client", () => {
       "fetch",
       vi.fn()
         .mockResolvedValueOnce(jsonResponse({ ok: true }, 201))
-        .mockResolvedValueOnce(jsonResponse({ places: [] }, 200))
+        .mockResolvedValueOnce(jsonResponse({ user: { id: TIMER_STOP_OWNER.userId }, workspace: { id: TIMER_STOP_OWNER.workspaceId }, places: [] }, 200))
     );
 
     await expect(createPlace({ name: "Gym", latitude: 51.5, longitude: -0.12, radiusMeters: 100 })).rejects.toThrow(

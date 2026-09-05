@@ -23,6 +23,13 @@ import {
 } from "@dayframe/shared";
 import { enqueueEvent, reprocessHealthReviewItems, type HealthReviewReprocessResult } from "./api";
 import { DAYFRAME_API_BASE } from "./config";
+import { readActiveMobileAccount, mobileAccountOwnersEqual } from "./mobileAccount";
+import { StaleMobileSessionResponseError } from "./mobile-network";
+import { boundedHealthQuery, createHealthCaptureCoalescer, HealthQueryDeadlineError } from "./healthCaptureLifecycle";
+import { requireBackendIdentity } from "./backendIdentity";
+import { readOwnedAuthenticatedSessionSnapshot, isAuthenticatedSessionSnapshotCurrent } from "./secure-session";
+import { getHealthCheckpoint, beginOrResumeHealthRepair, commitHealthCapturePage, handoffHealthEvents, pruneAcknowledgedHealthCapture, recordHealthQueryFailure,
+  type HealthCaptureOwner, type HealthCaptureKind, type HealthJournalSample, type HealthEpisodeDraft } from "./healthSyncStore";
 
 const HEALTHKIT_SLEEP_TYPE = "HKCategoryTypeIdentifierSleepAnalysis";
 const HEALTHKIT_WORKOUT_TYPE = "HKWorkoutTypeIdentifier";
@@ -35,6 +42,7 @@ const HEALTHKIT_IMPORT_PREFERENCES_KEY = "dayframe.healthkit.importPreferences.v
 const HEALTHKIT_AUTO_LOG_MAPPINGS_KEY = "dayframe.healthkit.autoLogMappings.v1";
 const HEALTHKIT_WORKOUT_PREFERENCES_KEY = "dayframe.healthkit.workoutPreferences.v1";
 const HEALTHKIT_AUTOMATIC_SYNC_KEY = "dayframe.healthkit.automaticSync.v1";
+const HEALTHKIT_BACKGROUND_DELIVERY_KEY = "dayframe.healthkit.backgroundDelivery.v2";
 const HEALTHKIT_BACKGROUND_SYNC_TYPES = [HEALTHKIT_SLEEP_TYPE, HEALTHKIT_WORKOUT_TYPE] as const;
 const HEALTHKIT_UPDATE_FREQUENCY_IMMEDIATE = 1;
 const HEALTH_REPROCESS_THROTTLE_MS = 5 * 60 * 1000;
@@ -55,10 +63,13 @@ export const HEALTH_WORKOUT_PREFERENCE_OPTIONS = HEALTH_WORKOUT_TYPE_OPTIONS;
 export type HealthImportStatus = {
   provider: "healthkit";
   kind?: "availability" | "permissions" | "sleep" | "workout";
-  status: "available" | "unavailable" | "needs_permission" | "synced" | "error" | "planned";
+  status: "available" | "unavailable" | "needs_permission" | "synced" | "error" | "planned" | "query_completed" | "captured" | "queued" | "uploaded" | "processed" | "visible" | "disabled" | "query_failed" | "no_readable_samples";
   notes: string;
   importedCount?: number;
   lastSync?: string;
+  deletionCount?: number;
+  capturedCount?: number;
+  partial?: boolean;
 };
 
 export type DayframeSleepSample = {
@@ -224,6 +235,7 @@ export async function requestHealthKitPermissions() {
 
   const granted = await healthkit.requestAuthorization({ toRead: HEALTHKIT_READ_TYPES });
   if (granted) {
+    await AsyncStorage.setItem(HEALTHKIT_AUTOMATIC_SYNC_KEY, "true");
     await configureHealthKitAutomaticSync().catch(() => undefined);
   }
   return {
@@ -249,7 +261,7 @@ export async function configureHealthKitAutomaticSync() {
   const configured = await healthkit.configureBackgroundTypes(
     [...HEALTHKIT_BACKGROUND_SYNC_TYPES],
     HEALTHKIT_UPDATE_FREQUENCY_IMMEDIATE
-  );
+  ).catch(() => false);
   const deliveryResults = await Promise.all(
     HEALTHKIT_BACKGROUND_SYNC_TYPES.map((type) =>
       healthkit.enableBackgroundDelivery(type, HEALTHKIT_UPDATE_FREQUENCY_IMMEDIATE).catch(() => false)
@@ -257,9 +269,9 @@ export async function configureHealthKitAutomaticSync() {
   );
   const enabled = configured !== false && deliveryResults.some(Boolean);
   if (enabled) {
-    await AsyncStorage.setItem(HEALTHKIT_AUTOMATIC_SYNC_KEY, "true");
+    await AsyncStorage.setItem(HEALTHKIT_BACKGROUND_DELIVERY_KEY, "true");
   } else {
-    await AsyncStorage.removeItem(HEALTHKIT_AUTOMATIC_SYNC_KEY);
+    await AsyncStorage.setItem(HEALTHKIT_BACKGROUND_DELIVERY_KEY, "false");
   }
   return enabled;
 }
@@ -284,86 +296,118 @@ export async function startHealthKitChangeObservers(
   };
 }
 
-export async function importHealthKitSleep() {
-  ensureIos();
-  const healthkit = await loadHealthKit();
-  const anchor = await AsyncStorage.getItem(HEALTHKIT_ANCHOR_KEY);
-  const seen = new Set(await readSeenSampleIds());
-  const preferences = await getHealthImportPreferences();
-  const mappings = await getHealthAutoLogMappings();
-  const result = await healthkit.queryCategorySamplesWithAnchor(HEALTHKIT_SLEEP_TYPE, {
-    anchor: anchor ?? undefined,
-    limit: 0
-  });
+export type HealthCaptureOptions = { signal?: AbortSignal; observerChange?: boolean; repairWindow?: {startedAt:string;stoppedAt:string} };
+const HEALTH_QUERY_PAGE_SIZE = 250;
+const HEALTH_CAPTURE_PASS_MS = 15_000;
+const activeHealthCaptures = createHealthCaptureCoalescer();
 
-  const importedSamples: DayframeSleepSample[] = [];
-  for (const sample of result.samples as readonly HealthKitSleepSample[]) {
-    const mapped = mapHealthKitSleepSample(sample);
-    if (seen.has(mapped.externalSampleId)) continue;
-    seen.add(mapped.externalSampleId);
-    importedSamples.push(mapped);
-  }
-
-  const sessions = groupSleepSamplesIntoSessions(importedSamples);
-  let ignoredCount = 0;
-  for (const session of sessions) {
-    if (!preferences.sleep) {
-      ignoredCount += 1;
-      continue;
-    }
-    await enqueueEvent(healthKitSleepSessionEvent(session, healthAutoLogMappingFor("sleep", mappings)));
-  }
-
-  await AsyncStorage.setItem(HEALTHKIT_ANCHOR_KEY, result.newAnchor);
-  await AsyncStorage.setItem(HEALTHKIT_SEEN_KEY, JSON.stringify([...seen].slice(-1000)));
-
-  return {
-    provider: "healthkit" as const,
-    kind: "sleep" as const,
-    status: "synced" as const,
-    notes: sleepImportNotes(sessions.length - ignoredCount, ignoredCount),
-    importedCount: sessions.length - ignoredCount,
-    lastSync: new Date().toISOString()
-  };
+export async function currentHealthCaptureOwner(): Promise<HealthCaptureOwner | null> {
+  const owner = await readActiveMobileAccount();
+  if (!owner) return null;
+  return { ...owner, backendId: requireBackendIdentity() };
 }
 
-export async function importHealthKitWorkouts() {
+export function importHealthKitSleep(options: HealthCaptureOptions = {}) {
+  return captureHealthKind("sleep", options);
+}
+export function importHealthKitWorkouts(options: HealthCaptureOptions = {}) {
+  return captureHealthKind("workout", options);
+}
+
+async function captureHealthKind(kind: HealthCaptureKind, options: HealthCaptureOptions): Promise<HealthImportStatus> {
   ensureIos();
-  const healthkit = await loadHealthKit();
-  const anchor = await AsyncStorage.getItem(HEALTHKIT_WORKOUT_ANCHOR_KEY);
-  const seen = new Set(await readSeenSampleIds(HEALTHKIT_WORKOUT_SEEN_KEY));
+  const owner = await currentHealthCaptureOwner();
+  if (!owner) throw new Error("Sign in before capturing Apple Health data.");
+  const key = JSON.stringify([owner, kind, options.repairWindow ?? "delta"]);
+  return activeHealthCaptures.run(key, () => captureHealthKindUnsafe(owner, kind, options), options.observerChange);
+}
+
+async function captureHealthKindUnsafe(owner: HealthCaptureOwner, kind: HealthCaptureKind, options: HealthCaptureOptions): Promise<HealthImportStatus> {
   const preferences = await getHealthImportPreferences();
+  const enabled = kind === "sleep" ? preferences.sleep : Object.entries(preferences).some(([type,value])=>type!=="sleep"&&value);
+  if (!enabled) return {provider:"healthkit",kind,status:"disabled",notes:`${kind === "sleep" ? "Sleep" : "Workout"} import is off.`,importedCount:0};
+  const session = await readOwnedAuthenticatedSessionSnapshot(owner);
+  if (session.status !== "authenticated") throw new StaleMobileSessionResponseError();
+  const deadlineAt = Date.now() + HEALTH_CAPTURE_PASS_MS;
+  const isCurrent = async () => !options.signal?.aborted && Date.now() < deadlineAt &&
+    isAuthenticatedSessionSnapshotCurrent(session.snapshot) && mobileAccountOwnersEqual(owner,await readActiveMobileAccount());
+  const healthkit = await loadHealthKit();
   const mappings = await getHealthAutoLogMappings();
-  const result = await healthkit.queryWorkoutSamplesWithAnchor({
-    anchor: anchor ?? undefined,
-    limit: 0
-  });
-
-  const imported: DayframeWorkoutSample[] = [];
-  let ignoredCount = 0;
-  for (const sample of result.workouts as readonly HealthKitWorkoutSample[]) {
-    const mapped = mapHealthKitWorkoutSample(sample.toJSON?.() ?? sample);
-    if (seen.has(mapped.externalSampleId)) continue;
-    seen.add(mapped.externalSampleId);
-    if (!preferences[mapped.workoutType]) {
-      ignoredCount += 1;
-      continue;
+  await pruneAcknowledgedHealthCapture(owner);
+  let importedCount = 0, capturedCount = 0, deletionCount = 0, partial = false, queried = false;
+  // Recover a committed source page even when its former process died before enqueue.
+  importedCount += (await handoffHealthEvents(owner,enqueueEvent,isCurrent)).queuedCount;
+  for (let page = 0; page < 20; page++) {
+    if (!await isCurrent()) {partial=true;break;}
+    const checkpoint = await getHealthCheckpoint(owner,kind,options.repairWindow);
+    const startedAt = new Date().toISOString();
+    const runId = `${kind}:${startedAt}:${page}:${Math.random().toString(36).slice(2)}`;
+    try {
+      const query = {anchor:checkpoint.anchor??undefined,limit:HEALTH_QUERY_PAGE_SIZE,
+        filter:{date:{startDate:new Date(checkpoint.contract.startedAt),...(checkpoint.contract.stoppedAt?{endDate:new Date(checkpoint.contract.stoppedAt)}:{})}}};
+      const result = kind === "sleep"
+        ? await boundedHealthQuery(healthkit.queryCategorySamplesWithAnchor(HEALTHKIT_SLEEP_TYPE,query),deadlineAt,options.signal)
+        : await boundedHealthQuery(healthkit.queryWorkoutSamplesWithAnchor(query),deadlineAt,options.signal);
+      if (!await isCurrent()) throw new StaleMobileSessionResponseError();
+      queried=true;
+      const rawSamples = "samples" in result ? result.samples : result.workouts;
+      const additions: HealthJournalSample[] = [];
+      let ignoredCount = 0;
+      for (const raw of rawSamples) {
+        const sample = "toJSON" in raw && typeof raw.toJSON === "function" ? raw.toJSON() : raw;
+        if (!sample.uuid || !validDate(String(sample.startDate)) || !validDate(String(sample.endDate))) {ignoredCount++;continue;}
+        const mapped = kind === "sleep" ? mapHealthKitSleepSample(sample as HealthKitSleepSample) : mapHealthKitWorkoutSample(sample as HealthKitWorkoutSample);
+        if (!validDate(mapped.startedAt) || !validDate(mapped.stoppedAt) || Date.parse(mapped.stoppedAt)<=Date.parse(mapped.startedAt) || Date.parse(mapped.stoppedAt)<Date.now()-14*86_400_000) {ignoredCount++;continue;}
+        // Native arbitrary metadata never enters the durable capture store.
+        mapped.rawPayload = {uuid:sample.uuid,sourceRevision: { source: { name: sample.sourceRevision?.source?.name, bundleIdentifier: sample.sourceRevision?.source?.bundleIdentifier } },
+          ...(kind==="workout"?{workoutActivityType:(sample as HealthKitWorkoutSample).workoutActivityType}:{})};
+        additions.push({id:mapped.externalSampleId,sourceKey:sleepSampleSourceKey(mapped as DayframeSleepSample),startedAt:mapped.startedAt,stoppedAt:mapped.stoppedAt,value:mapped as unknown as Record<string,unknown>});
+      }
+      const deletedIds = result.deletedSamples.map(sample=>sample.uuid);
+      const complete = rawSamples.length + deletedIds.length < HEALTH_QUERY_PAGE_SIZE;
+      const committed = await commitHealthCapturePage({owner,...checkpoint,previousAnchor:checkpoint.anchor,newAnchor:result.newAnchor,
+        runId,startedAt,additions,deletedIds,returnedCount:rawSamples.length,ignoredCount,complete,isCurrent,
+        derive: samples => {
+          if (kind === "sleep") return groupSleepSamplesIntoSessions(samples.map(sample=>sample.value as unknown as DayframeSleepSample)).map(group=>({
+            sourceKey:sleepSampleSourceKey(group.samples[0]),sampleIds:group.samples.map(sample=>sample.externalSampleId),startedAt:group.startedAt,stoppedAt:group.stoppedAt,
+            event:{...healthKitSleepSessionEvent(group,healthAutoLogMappingFor("sleep",mappings)),rawPayload:{...healthKitSleepSessionEvent(group,healthAutoLogMappingFor("sleep",mappings)).rawPayload,sourceSampleIds:group.samples.map(sample=>sample.externalSampleId)}}
+          }));
+          return samples.flatMap(sample=>{
+            const workout=sample.value as unknown as DayframeWorkoutSample;
+            if (!preferences[workout.workoutType]) return [];
+            const event=healthKitWorkoutEvent(workout,healthAutoLogMappingFor(workout.workoutType,mappings));
+            return [{sourceKey:sample.sourceKey,sampleIds:[sample.id],startedAt:sample.startedAt,stoppedAt:sample.stoppedAt,event:{...event,rawPayload:{...event.rawPayload,sourceSampleIds:[sample.id]}}} satisfies HealthEpisodeDraft];
+          });
+        }});
+      capturedCount+=committed.usableSampleCount;deletionCount+=committed.deletionCount;
+      importedCount+=(await handoffHealthEvents(owner,enqueueEvent,isCurrent)).queuedCount;
+      partial=!complete;
+      if (complete) break;
+      if (result.newAnchor===checkpoint.anchor) {partial=true;break;}
+    } catch (error) {
+      if (error instanceof HealthQueryDeadlineError) {
+        await recordHealthQueryFailure({owner,contract:checkpoint.contract,runId,startedAt,reason:"query_failed"});
+        throw error;
+      }
+      if (error instanceof StaleMobileSessionResponseError || !await isCurrent()) throw new StaleMobileSessionResponseError();
+      const reason = error instanceof Error && /invalid.*anchor|anchor.*invalid/i.test(error.message) ? "invalid_anchor" : error instanceof Error && /capacity|storage is full/i.test(error.message) ? "storage_full" : "query_failed";
+      await recordHealthQueryFailure({owner,contract:checkpoint.contract,runId,startedAt,reason});
+      throw error;
     }
-    imported.push(mapped);
-    await enqueueEvent(healthKitWorkoutEvent(mapped, healthAutoLogMappingFor(mapped.workoutType, mappings)));
   }
+  return {provider:"healthkit",kind,status:importedCount?"queued":capturedCount?"captured":queried?"query_completed":"query_failed",
+    notes: importedCount ? `${importedCount} Health ${importedCount===1?"event is":"events are"} saved for delivery.${partial?" More source pages remain.":""}` :
+      capturedCount ? "Health samples were captured locally. Source corrections may still need review." : "The Health query completed without new usable samples. This does not establish read permission or server visibility.",
+    importedCount,capturedCount,deletionCount,partial,lastSync:new Date().toISOString()};
+}
 
-  await AsyncStorage.setItem(HEALTHKIT_WORKOUT_ANCHOR_KEY, result.newAnchor);
-  await AsyncStorage.setItem(HEALTHKIT_WORKOUT_SEEN_KEY, JSON.stringify([...seen].slice(-1000)));
-
-  return {
-    provider: "healthkit" as const,
-    kind: "workout" as const,
-    status: "synced" as const,
-    notes: workoutImportNotes(imported.length, ignoredCount),
-    importedCount: imported.length,
-    lastSync: new Date().toISOString()
-  };
+export async function repairRecentHealthCapture(options:{days?:7|14;signal?:AbortSignal}={}) {
+  const owner=await currentHealthCaptureOwner();
+  if(!owner) throw new Error("Sign in before repairing Health capture.");
+  const days=options.days??7;
+  const repairWindow=await beginOrResumeHealthRepair(owner,days);
+  const results=await Promise.allSettled([importHealthKitSleep({signal:options.signal,repairWindow}),importHealthKitWorkouts({signal:options.signal,repairWindow})]);
+  return {days,window:repairWindow,results};
 }
 
 export async function getHealthImportPreferences(): Promise<HealthImportPreferences> {
@@ -430,7 +474,7 @@ export async function setHealthWorkoutImportPreference(type: HealthWorkoutType, 
 
 export async function reprocessExistingHealthReviewItems(
   preferences?: HealthImportPreferences,
-  options: { force?: boolean; mappings?: HealthAutoLogMappings } = {}
+  options: { force?: boolean; mappings?: HealthAutoLogMappings; signal?: AbortSignal; deadlineAt?: number } = {}
 ) {
   const now = Date.now();
   if (healthReprocessInFlight) return healthReprocessInFlight;
@@ -444,7 +488,7 @@ export async function reprocessExistingHealthReviewItems(
       const result = await reprocessHealthReviewItemBatches(
         preferences ?? await getHealthImportPreferences(),
         options.mappings ?? await getHealthAutoLogMappings(),
-        options.force === true
+        options.force === true, options
       );
       lastHealthReprocessAt = result.hasMore ? 0 : Date.now();
       healthReprocessBackoffUntil = 0;
@@ -463,20 +507,25 @@ export async function reprocessExistingHealthReviewItems(
 async function reprocessHealthReviewItemBatches(
   preferences: HealthImportPreferences,
   mappings: HealthAutoLogMappings,
-  force: boolean
+  force: boolean,
+  options: {signal?: AbortSignal; deadlineAt?: number} = {}
 ) {
   const startedAt = Date.now();
   let combined: HealthReviewReprocessResult | null = null;
+  let cursor: string | null = null;
+  const deadlineAt = Math.min(options.deadlineAt ?? Infinity, startedAt + HEALTH_REPROCESS_MAX_DURATION_MS);
 
   for (let batch = 0; batch < HEALTH_REPROCESS_MAX_BATCHES; batch += 1) {
     const result = await reprocessHealthReviewItems(preferences, {
       limit: HEALTH_REPROCESS_BATCH_SIZE,
       force,
-      mappings
+      mappings, cursor, signal: options.signal, deadlineAt
     });
+    cursor = result.nextCursor ?? null;
     combined = mergeHealthReprocessResults(combined, result);
     if (!result.hasMore && !result.partial) break;
-    if (Date.now() - startedAt >= HEALTH_REPROCESS_MAX_DURATION_MS) {
+    if ("nextCursor" in result && !result.nextCursor) break;
+    if (options.signal?.aborted || Date.now() >= deadlineAt) {
       combined.partial = true;
       combined.hasMore = true;
       break;
@@ -759,8 +808,13 @@ export function healthKitSleepSessionEvent(session: DayframeSleepSession, mappin
   };
 }
 
-async function loadHealthKit(): Promise<HealthKitModule> {
-  return import("@kingstinct/react-native-healthkit");
+let healthKitModulePromise: Promise<HealthKitModule> | undefined;
+function loadHealthKit(): Promise<HealthKitModule> {
+  healthKitModulePromise ??= import("@kingstinct/react-native-healthkit").catch(error => {
+    healthKitModulePromise = undefined;
+    throw error;
+  });
+  return healthKitModulePromise;
 }
 
 function ensureIos() {
