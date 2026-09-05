@@ -44,7 +44,8 @@ type MobileRequestDeadline = {
  */
 export async function mobileFetch(
   input: Parameters<typeof fetch>[0],
-  init: Parameters<typeof fetch>[1] = {}
+  init: Parameters<typeof fetch>[1] = {},
+  handleAuthentication = true
 ) {
   const requestGeneration = connectivityRequestGeneration();
   let response: Response;
@@ -58,7 +59,7 @@ export async function mobileFetch(
   }
   reportHttpTransportResponse({ requestGeneration });
   const rejectedToken = bearerToken(init.headers);
-  if ((response.status === 401 || response.status === 403) && rejectedToken) {
+  if (handleAuthentication && (response.status === 401 || response.status === 403) && rejectedToken) {
     const invalidated = await invalidateMobileSessionIfCurrent(rejectedToken);
     if (!invalidated) throw new StaleMobileSessionResponseError();
   }
@@ -94,6 +95,38 @@ export async function mobileFetchWithTimeout(
   init: Parameters<typeof fetch>[1] = {},
   deadline: MobileRequestDeadline
 ) {
+  return mobileRequestOperation(input, init, deadline, response => Promise.resolve(response));
+}
+
+export class InvalidMobileAcknowledgementError extends Error {
+  constructor() { super("The server response did not confirm the saved action."); this.name = "InvalidMobileAcknowledgementError"; }
+}
+
+/** Own fetch, body parsing, validation and identity checks under one deadline. */
+export function mobileJsonRequest<T = Record<string, unknown> | null>(
+  input: Parameters<typeof fetch>[0],
+  init: Parameters<typeof fetch>[1],
+  options: MobileRequestDeadline & {
+    isCurrent?: () => boolean | Promise<boolean>;
+    handleAuthentication?: boolean;
+    validate?: (body: unknown, response: Response) => T | Promise<T>;
+  }
+) {
+  return mobileRequestOperation(input, init ?? {}, options, async response => {
+    let body: unknown;
+    try { body = await response.json(); }
+    catch { body = null; }
+    if (options.isCurrent && !await options.isCurrent()) throw new StaleMobileSessionResponseError();
+    const validated = options.validate ? await options.validate(body, response) : body as T;
+    return { response, body: validated };
+  }, options.isCurrent, true, options.handleAuthentication !== false);
+}
+
+async function mobileRequestOperation<T>(
+  input: Parameters<typeof fetch>[0], init: RequestInit,
+  deadline: MobileRequestDeadline, consume: (response: Response) => Promise<T>,
+  isCurrent?: () => boolean | Promise<boolean>, authenticateAfterConsume = false, handleAuthentication = true
+) {
   const requestGeneration = connectivityRequestGeneration();
   const controller = new AbortController();
   const callerSignal = init.signal;
@@ -119,7 +152,21 @@ export async function mobileFetchWithTimeout(
 
   try {
     return await Promise.race([
-      mobileFetch(input, { ...init, signal: controller.signal }),
+      (async () => {
+        if (controller.signal.aborted) throw callerAbortReason(callerSignal);
+        if (isCurrent && !await isCurrent()) throw new StaleMobileSessionResponseError();
+        if (controller.signal.aborted) throw callerAbortReason(callerSignal);
+        const response = await mobileFetch(input, { ...init, signal: controller.signal }, handleAuthentication && !authenticateAfterConsume);
+        if (controller.signal.aborted) throw callerAbortReason(callerSignal);
+        const result = await consume(response);
+        if (controller.signal.aborted) throw callerAbortReason(callerSignal);
+        if (isCurrent && !await isCurrent()) throw new StaleMobileSessionResponseError();
+        if (handleAuthentication && authenticateAfterConsume && (response.status === 401 || response.status === 403)) {
+          const token = bearerToken(init.headers);
+          if (token && !await invalidateMobileSessionIfCurrent(token)) throw new StaleMobileSessionResponseError();
+        }
+        return result;
+      })(),
       timeoutReached,
       callerAborted
     ]);
@@ -143,5 +190,7 @@ function bearerToken(headers: HeadersInit | undefined) {
 
 function callerAbortReason(signal: AbortSignal | null | undefined) {
   if (signal?.reason instanceof Error) return signal.reason;
-  return new Error("Mobile request was cancelled.");
+  const error = new Error("Mobile request was cancelled.");
+  error.name = "AbortError";
+  return error;
 }

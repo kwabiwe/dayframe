@@ -9,10 +9,10 @@ const source = readFileSync(
 
 describe("Review sync transport contract", () => {
   it("uses the bounded cookie-free mobile request boundary", () => {
-    expect(source).toContain("mobileFetchWithTimeout(");
+    expect(source).toContain("mobileJsonRequest(");
     expect(source).toContain("REVIEW_SYNC_REQUEST_TIMEOUT_MS = 15_000");
-    expect(source).toContain("Review sync timed out. Your saved change will retry automatically.");
+    expect(source).toContain("Review sync timed out. Your saved change is preserved.");
     expect(source).toContain("error instanceof MobileRequestTimeoutError");
-    expect(source).toContain("await scheduleRetry(");
+    expect(source).toContain("scheduleRetry(");
   });
 });
