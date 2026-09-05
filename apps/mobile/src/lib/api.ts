@@ -1,3 +1,5 @@
+import { DAYFRAME_BACKEND_ID } from "./backendIdentity";
+import type { HealthCaptureOwner } from "./healthSyncStore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppState } from "react-native";
 import {
@@ -344,6 +346,7 @@ export type QueuedEvent = Omit<ActivityEventInput, "occurredAt" | "workspaceId" 
   queuedAt: string;
   userId: string;
   workspaceId: string;
+  healthOwner?: HealthCaptureOwner;
   failedAt?: string;
   failureCount?: number;
   lastError?: string;
@@ -449,6 +452,7 @@ type ActivityEventDraft = {
   description?: string;
   rawPayload?: Record<string, unknown>;
   owner?: MobileAccountOwner;
+  healthOwner?: HealthCaptureOwner;
   requestImmediateDelivery?: boolean;
 };
 
@@ -628,9 +632,15 @@ export async function enqueueEvent(input: ActivityEventDraft) {
     if (!owner || !mobileAccountOwnersEqual(activeOwner, owner)) {
       throw new Error("An authenticated account is required to queue activity.");
     }
+    const isHealth = input.source === "health_sleep" || input.source === "health_workout";
+    const healthOwner = input.healthOwner ?? (isHealth && DAYFRAME_BACKEND_ID ? {...owner, backendId:DAYFRAME_BACKEND_ID} : undefined);
+    if (isHealth && (!healthOwner || !DAYFRAME_BACKEND_ID || healthOwner.backendId !== DAYFRAME_BACKEND_ID || !mobileAccountOwnersEqual(owner,healthOwner))) {
+      throw new StaleMobileSessionResponseError();
+    }
     const {
       localId,
       owner: _owner,
+      healthOwner: _healthOwner,
       requestImmediateDelivery,
       ...eventInput
     } = input;
@@ -640,7 +650,7 @@ export async function enqueueEvent(input: ActivityEventDraft) {
       rawPayload: eventInput.rawPayload ?? {}
     });
     const all = await readAllQueue(owner);
-    const queue = all.filter((item) => mobileAccountOwnersEqual(item, owner));
+    const queue = all.filter((item) => queuedEventMatchesOwner(item, owner));
     const queuedLocalId = normalizeLocalId(localId) ?? generatedLocalId();
     if (queue.some((item) => item.localId === queuedLocalId)) {
       if (requestImmediateDelivery && isExplicitTimerMutationEventType(parsed.type)) {
@@ -656,9 +666,22 @@ export async function enqueueEvent(input: ActivityEventDraft) {
       localId: queuedLocalId,
       queuedAt: new Date().toISOString(),
       userId: owner.userId,
-      workspaceId: owner.workspaceId
+      workspaceId: owner.workspaceId,
+      ...(healthOwner ? {healthOwner} : {})
     };
-    await writeAllQueue([...all, nextItem]);
+    // A journal-owned same-ID replay may repair a pre-upgrade untagged handoff only
+    // when its complete immutable event body agrees. Owner UUIDs alone are not proof.
+    const legacy = input.healthOwner && localId?.startsWith("healthkit:") ? all.find(item =>
+      item.localId === queuedLocalId && !item.healthOwner && mobileAccountOwnersEqual(item,owner)) : undefined;
+    if (legacy) {
+      const {canonicalHealthJson} = await import("./healthFingerprint");
+      if (canonicalHealthJson(queuedEventRequestBody(legacy)) !== canonicalHealthJson(queuedEventRequestBody(nextItem))) {
+        throw new Error("The retained Health event does not match its capture journal. It was preserved for review.");
+      }
+      await writeAllQueue(all.map(item=>item===legacy ? {...item,healthOwner} : item));
+    } else {
+      await writeAllQueue([...all, nextItem]);
+    }
     if (requestImmediateDelivery && isExplicitTimerMutationEventType(nextItem.type)) {
       await reserveTimerBackgroundExecution(
         activityQueueBackgroundExecutionKey(owner),
@@ -669,11 +692,17 @@ export async function enqueueEvent(input: ActivityEventDraft) {
   });
 }
 
+function queuedEventMatchesOwner(item: QueuedEvent, owner: MobileAccountOwner) {
+  if (!mobileAccountOwnersEqual(item,owner)) return false;
+  if (item.source !== "health_sleep" && item.source !== "health_workout") return true;
+  return !!DAYFRAME_BACKEND_ID && item.healthOwner?.backendId === DAYFRAME_BACKEND_ID && mobileAccountOwnersEqual(item.healthOwner,owner);
+}
+
 export async function readQueue(owner?: MobileAccountOwner): Promise<QueuedEvent[]> {
   const resolvedOwner = owner ?? await readActiveMobileAccount();
   if (!resolvedOwner) return [];
   return (await readAllQueue(resolvedOwner))
-    .filter((item) => mobileAccountOwnersEqual(item, resolvedOwner));
+    .filter((item) => queuedEventMatchesOwner(item, resolvedOwner));
 }
 
 export async function readTimerEntryIdCorrelations(owner?: MobileAccountOwner) {
@@ -763,7 +792,7 @@ export async function updateQueuedTimerStart(
     let updated = false;
     const next = all.map((item) => {
       if (
-        !mobileAccountOwnersEqual(item, owner) ||
+        !queuedEventMatchesOwner(item, owner) ||
         item.localId !== localId ||
         item.type !== "timer_start"
       ) return item;
@@ -797,7 +826,7 @@ export async function removeQueuedEvent(localId: string) {
     if (!owner) return false;
     const all = await readAllQueue(owner);
     const next = all.filter((item) =>
-      !mobileAccountOwnersEqual(item, owner) || item.localId !== localId
+      !queuedEventMatchesOwner(item, owner) || item.localId !== localId
     );
     if (next.length !== all.length) await writeAllQueue(next);
     return next.length !== all.length;
@@ -860,11 +889,11 @@ export async function clearFailedQueuedEvents() {
       return { removed: [], remaining: [], removedCount: 0, remainingCount: 0 };
     }
     const all = await readAllQueue(owner);
-    const queue = all.filter((item) => mobileAccountOwnersEqual(item, owner));
+    const queue = all.filter((item) => queuedEventMatchesOwner(item, owner));
     const remaining = queue.filter((item) => !isClearableFailedEvent(item));
     const removed = queue.filter(isClearableFailedEvent);
     await writeAllQueue([
-      ...all.filter((item) => !mobileAccountOwnersEqual(item, owner)),
+      ...all.filter((item) => !queuedEventMatchesOwner(item, owner)),
       ...remaining
     ]);
     return {
@@ -970,7 +999,7 @@ async function ownedQueueForScope(
 ) {
   const all = await withQueueMutation(() => readAllQueue(owner));
   return all.filter((item) =>
-    mobileAccountOwnersEqual(item, owner) && queueEventMatchesScope(item, scope)
+    queuedEventMatchesOwner(item, owner) && queueEventMatchesScope(item, scope)
   );
 }
 
@@ -1006,7 +1035,7 @@ async function syncQueueUnlocked(
 ): Promise<SyncQueueResult> {
   const all = await withQueueMutation(() => readAllQueue(owner));
   const queue = all.filter((item) =>
-    mobileAccountOwnersEqual(item, owner) && queueEventMatchesScope(item, options.eventScope)
+    queuedEventMatchesOwner(item, owner) && queueEventMatchesScope(item, options.eventScope)
   );
   const hasDeliverableTimerMutation = queue.some((item) =>
     isQueuedTimerMutationEvent(item) && item.failureKind !== "permanent"
@@ -1077,6 +1106,7 @@ async function syncQueueItems(
 
     const attemptedAt = new Date().toISOString();
     try {
+      if (!queuedEventMatchesOwner(item,owner)) throw new StaleMobileSessionResponseError();
       const sessionRead = await readOwnedAuthenticatedSessionSnapshot(owner);
       if (sessionRead.status !== "authenticated") {
         remaining.push(item, ...queue.slice(index + 1));
@@ -1095,7 +1125,7 @@ async function syncQueueItems(
           signal: options.signal
         },
         {
-          isCurrent: async () => isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot) && mobileAccountOwnersEqual(await readActiveMobileAccount(),owner),
+          isCurrent: async () => queuedEventMatchesOwner(item,owner) && isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot) && mobileAccountOwnersEqual(await readActiveMobileAccount(),owner),
           timeoutMilliseconds: MOBILE_QUEUE_REQUEST_TIMEOUT_MS,
           timeoutMessage: "Queued activity sync timed out. It will retry automatically."
         }
@@ -1104,6 +1134,7 @@ async function syncQueueItems(
         throw new AuthRequiredError();
       }
       if (
+        !queuedEventMatchesOwner(item,owner) ||
         !isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot) ||
         !mobileAccountOwnersEqual(await readActiveMobileAccount(), owner)
       ) {
@@ -1139,10 +1170,9 @@ async function syncQueueItems(
         });
       }
       if (item.source === "health_sleep" || item.source === "health_workout") {
-        const { DAYFRAME_BACKEND_ID } = await import("./backendIdentity");
-        if (DAYFRAME_BACKEND_ID) {
+        if (item.healthOwner && queuedEventMatchesOwner(item,owner)) {
           const { recordHealthAcknowledgement } = await import("./healthSyncStore");
-          await recordHealthAcknowledgement({...owner,backendId:DAYFRAME_BACKEND_ID},item.localId,{
+          await recordHealthAcknowledgement(item.healthOwner,item.localId,{
             eventId:payload.eventId,clientEventId:item.localId,
             processingDisposition:typeof payload.processingDisposition === "string" ? payload.processingDisposition : "legacy_unknown",
             reviewItemId:typeof payload.reviewItemId === "string" ? payload.reviewItemId : null,
@@ -1989,7 +2019,7 @@ function reconcileActivityQueueDrain(input: {
     const remainingById = new Map(input.remaining.map((item) => [item.localId, item]));
     const next = current.flatMap((item) => {
       if (
-        !mobileAccountOwnersEqual(item, input.owner) ||
+        !queuedEventMatchesOwner(item, input.owner) ||
         !processedIds.has(item.localId)
       ) {
         return [item];
@@ -2011,7 +2041,7 @@ function reconcileActivityQueueDrain(input: {
       }];
     });
     await writeAllQueue(next);
-    return next.filter((item) => mobileAccountOwnersEqual(item, input.owner));
+    return next.filter((item) => queuedEventMatchesOwner(item, input.owner));
   });
 }
 

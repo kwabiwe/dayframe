@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { authErrorResponse } from "@/lib/api-errors";
+import { authErrorResponse, databaseReadinessResponse } from "@/lib/api-errors";
 import { isLockNotAvailableError, isStatementTimeoutError } from "@/lib/db";
 import { reprocessHealthReviewItems } from "@/lib/event-service";
 import { resolveRequestSession } from "@/lib/ingest-auth";
@@ -17,6 +17,8 @@ export async function POST(request: Request) {
       { status: result.failedCount > 0 || result.partial ? 207 : 200 }
     );
   } catch (error) {
+    const readiness = databaseReadinessResponse(error);
+    if (readiness) return readiness;
     const response = authErrorResponse(error);
     if (response) return response;
     if (isLockNotAvailableError(error) || isStatementTimeoutError(error)) {

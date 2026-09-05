@@ -257,6 +257,19 @@ describe("HealthKit mapping", () => {
     expect(asyncStore.has("dayframe.healthkit.sleepAnchor.v1")).toBe(false);
   });
 
+
+  it("journals an older anchored change before advancing the checkpoint", async () => {
+    healthkitMocks.queryCategorySamplesWithAnchor.mockResolvedValueOnce({newAnchor:"old-change",deletedSamples:[],samples:[
+      {uuid:"older-phase",value:3,startDate:"2026-06-01T00:00:00.000Z",endDate:"2026-06-01T07:00:00.000Z"}
+    ]});
+    const result = await importHealthKitSleep();
+    expect(result.capturedCount).toBe(1);
+    expect(apiMocks.enqueueEvent).toHaveBeenCalledOnce();
+    expect(apiMocks.enqueueEvent.mock.calls[0][0].rawPayload.samples[0].externalSampleId).toBe("older-phase");
+    expect(captureDb.prepare("select anchor from health_checkpoints").get()?.anchor).toBe("old-change");
+    expect(captureDb.prepare("select sample_json from health_samples where sample_id='older-phase'").get()?.sample_json).toBeTruthy();
+  });
+
   it("continues a full native page from its saved anchor before reporting complete capture",async()=>{
     const first=Array.from({length:250},(_,index)=>({uuid:`phase-${index}`,value:3,startDate:"2026-07-06T23:55:00.000Z",endDate:"2026-07-07T02:15:00.000Z"}));
     healthkitMocks.queryCategorySamplesWithAnchor.mockResolvedValueOnce({newAnchor:"page-1",samples:first,deletedSamples:[]})

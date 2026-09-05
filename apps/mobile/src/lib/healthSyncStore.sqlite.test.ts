@@ -7,7 +7,7 @@ import type {
   HealthJournalSample,
 } from "./healthSyncStore";
 
-const mocks = vi.hoisted(() => ({ open: vi.fn(), failHandoff: false }));
+const mocks = vi.hoisted(() => ({ open: vi.fn(), failHandoff: false, failUpgrade: false }));
 vi.mock("expo-sqlite", () => ({ openDatabaseAsync: mocks.open }));
 vi.mock("expo-crypto", () => ({
   CryptoDigestAlgorithm: { SHA256: "sha256" },
@@ -24,6 +24,8 @@ const owner: HealthCaptureOwner = {
 function adapter() {
   const value = {
     execAsync: async (sql: string) => {
+      if (mocks.failUpgrade && sql === "PRAGMA user_version=2")
+        throw new Error("upgrade interrupted");
       db.exec(sql);
     },
     getFirstAsync: async (sql: string, ...args: never[]) =>
@@ -53,6 +55,7 @@ function adapter() {
 beforeEach(async () => {
   vi.resetModules();
   mocks.failHandoff = false;
+  mocks.failUpgrade = false;
   db = new DatabaseSync(":memory:");
   mocks.open.mockResolvedValue(adapter());
   store = await import("./healthSyncStore");
@@ -190,6 +193,7 @@ describe("Health journal real SQLite boundaries", () => {
     expect(enqueue).toHaveBeenCalledTimes(2);
     expect(queue.size).toBe(1);
     expect(enqueue.mock.calls[0][0]).toEqual(enqueue.mock.calls[1][0]);
+    expect(enqueue.mock.calls[0][0].healthOwner).toEqual(owner);
     expect(db.prepare("select state from health_deliveries").get()!.state).toBe(
       "queued",
     );
@@ -214,6 +218,60 @@ describe("Health journal real SQLite boundaries", () => {
       .prepare("select distinct client_event_id from health_deliveries")
       .all();
     expect(ids).toHaveLength(2);
+  });
+  it("atomically upgrades queued deliveries for owner-proven handoff without changing IDs, checkpoints or acknowledged work", async () => {
+    await page([sample("early")]);
+    await page([sample("late", 3_600_000)]);
+    const before = db.prepare("select * from health_deliveries order by rowid").all();
+    const acknowledgedId = String(before[0].client_event_id);
+    await store.recordHealthAcknowledgement(owner, acknowledgedId, {
+      eventId: "server-event", clientEventId: acknowledgedId, processingDisposition: "processed",
+    });
+    const acknowledged = db.prepare("select * from health_deliveries where client_event_id=?").get(acknowledgedId);
+    const queuedId = String(before[1].client_event_id);
+    db.prepare("update health_deliveries set state='queued' where client_event_id=?").run(queuedId);
+    db.exec("PRAGMA user_version=1");
+    vi.resetModules();
+    store = await import("./healthSyncStore");
+    mocks.failUpgrade = true;
+    await expect(store.getHealthCheckpoint(owner, "sleep")).rejects.toThrow("upgrade interrupted");
+    expect(db.prepare("PRAGMA user_version").get()!.user_version).toBe(1);
+    expect(db.prepare("select state from health_deliveries where client_event_id=?").get(queuedId)!.state).toBe("queued");
+    vi.resetModules();
+    store = await import("./healthSyncStore");
+    mocks.failUpgrade = false;
+    expect((await store.getHealthCheckpoint(owner, "sleep")).anchor).toBe("anchor-2");
+    expect(db.prepare("PRAGMA user_version").get()!.user_version).toBe(2);
+    const enqueue = vi.fn(async () => []);
+    await store.handoffHealthEvents({ ...owner, backendId: "production-fixture" }, enqueue, () => true);
+    expect(enqueue).not.toHaveBeenCalled();
+    await store.handoffHealthEvents(owner, enqueue, () => true);
+    expect(enqueue).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      localId: queuedId, healthOwner: owner,
+      rawPayload: JSON.parse(String(before[1].payload_json)).rawPayload,
+    }));
+    expect(db.prepare("select payload_json from health_deliveries where client_event_id=?").get(queuedId)!.payload_json).toBe(before[1].payload_json);
+    expect(db.prepare("select * from health_deliveries where client_event_id=?").get(acknowledgedId)).toEqual(acknowledged);
+    // A normal reopen must not keep resetting an already upgraded queue.
+    vi.resetModules();
+    store = await import("./healthSyncStore");
+    await store.getHealthCheckpoint(owner, "sleep");
+    await store.handoffHealthEvents(owner, enqueue, () => true);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+  it("rejects acknowledgements from a different backend, workspace or user", async () => {
+    await page([sample("early")]);
+    const clientEventId = String(db.prepare("select client_event_id from health_deliveries").get()!.client_event_id);
+    for (const wrongOwner of [
+      { ...owner, backendId: "production-fixture" },
+      { ...owner, workspaceId: "other-workspace" },
+      { ...owner, userId: "other-user" },
+    ]) {
+      await expect(store.recordHealthAcknowledgement(wrongOwner, clientEventId, {
+        eventId: "server-event", clientEventId, processingDisposition: "processed",
+      })).rejects.toThrow("no matching captured owner");
+    }
+    expect(db.prepare("select state from health_deliveries").get()!.state).toBe("pending_handoff");
   });
   it("records deletion as unresolved source correction without shrinking or replacing delivered intent", async () => {
     const early = sample("early"),

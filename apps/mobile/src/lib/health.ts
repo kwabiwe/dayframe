@@ -505,8 +505,7 @@ async function captureHealthKindUnsafe(
         if (
           !validDate(mapped.startedAt) ||
           !validDate(mapped.stoppedAt) ||
-          Date.parse(mapped.stoppedAt) <= Date.parse(mapped.startedAt) ||
-          Date.parse(mapped.stoppedAt) < Date.now() - 14 * 86_400_000
+          Date.parse(mapped.stoppedAt) <= Date.parse(mapped.startedAt)
         ) {
           ignoredCount++;
           continue;

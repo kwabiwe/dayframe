@@ -671,6 +671,12 @@ export async function processActivityEvent(
         suggestedStoppedAtForEvent(parsed)
       );
       timeEntryId = updatedEntry?.id;
+      if (timeEntryId) await client.query(
+        `update activity_events ae set resolved_time_entry_id=te.id from time_entries te
+         where ae.id=$1 and ae.workspace_id=$2 and ae.user_id=$3
+         and te.id=$4 and te.workspace_id=ae.workspace_id and te.user_id=ae.user_id`,
+        [eventId, session.workspaceId, session.userId, timeEntryId]
+      );
     } else if (candidate.action === "stop_timer") {
       const scopedStopStartedAt = Date.now();
       const stopResult = stopScope.mode === "entry"
@@ -747,7 +753,7 @@ export async function processActivityEvent(
     } else if (candidate.action === "create_time_entry") {
       const startedAt = suggestedStartedAtForEvent(parsed);
       const stoppedAt = suggestedStoppedAtForEvent(parsed);
-      await client.query(
+      const createdEntry = await client.query<{ id: string }>(
         `insert into time_entries (
             workspace_id,
             user_id,
@@ -762,7 +768,7 @@ export async function processActivityEvent(
             stopped_at,
             created_from_event_id
          )
-         values ($1, $2, $3, $4, $5, $6, $7, 'confirmed', $8, $9, coalesce($10, $9::timestamptz + interval '1 hour'), $11)`,
+         values ($1, $2, $3, $4, $5, $6, $7, 'confirmed', $8, $9, coalesce($10, $9::timestamptz + interval '1 hour'), $11) returning id`,
         [
           parsed.workspaceId,
           parsed.userId,
@@ -777,6 +783,7 @@ export async function processActivityEvent(
           eventId
         ]
       );
+      timeEntryId = createdEntry.rows[0]?.id;
     }
 
     if (candidate.reviewStatus === "needs_review") {

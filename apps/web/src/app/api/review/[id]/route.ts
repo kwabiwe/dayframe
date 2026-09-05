@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { resolveReviewItem, ReviewResolutionError } from "@/lib/event-service";
-import { authErrorResponse } from "@/lib/api-errors";
+import { authErrorResponse, databaseReadinessResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import {
   LocationReviewActionSchema,
@@ -65,6 +65,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const result = await resolveReviewItem(id, action, session);
     return NextResponse.json(result);
   } catch (error) {
+    const readiness = databaseReadinessResponse(error);
+    if (readiness) return readiness;
     const response = authErrorResponse(error);
     if (response) return response;
     if (error instanceof ReviewResolutionError) {

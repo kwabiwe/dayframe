@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
-import { authErrorResponse } from "@/lib/api-errors";
+import { authErrorResponse, databaseReadinessResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import { processActivityEvent, TimerMutationBusyError } from "@/lib/event-service";
 import { isDatabasePayloadError, isDatabaseReadinessError, isMissingRequiredColumnError } from "@/lib/db";
@@ -17,6 +17,8 @@ export async function POST(request: Request) {
     scheduleLiveActivityNotification(session);
     return NextResponse.json(result, { status: result.duplicate ? 200 : 201 });
   } catch (error) {
+    const readiness = databaseReadinessResponse(error);
+    if (readiness) return readiness;
     const authResponse = authErrorResponse(error);
     if (authResponse) return authResponse;
     if (error instanceof ZodError) {

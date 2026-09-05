@@ -33,8 +33,11 @@ Automatic Health sync needs both JS wiring and native launch wiring: after Healt
 Current implementation contract:
 
 - Capture checkpoints are keyed by stable backend identity, workspace, user, Health type and query contract. Global legacy anchors remain untouched. Unknown custom API backends require an explicit `EXPO_PUBLIC_DAYFRAME_BACKEND_ID`; checkpoint isolation alone does not attest a legacy session token.
+- The journal's backend/workspace/user identity must survive activity-queue handoff, selection, delivery and acknowledgement. Foreign or unproven Health records stay retained. Upgrade re-handoff may tag an old queue record only when its complete immutable payload and original ID match the owned journal; acknowledged deliveries remain settled. Stable staging/production aliases reject contradictory backend IDs.
 - Sleep revisions reconstruct all retained members of the source episode across query pages and deltas. Preserve the existing 90-minute grouping and server logical Sleep/user-edit guards. Source deletions retain recorded time and create a durable correction record; they never rewrite queued payloads.
+- Link every accepted Sleep revision to its canonical entry in the same server transaction, including the third and later arrivals. Return the canonical entry in the acknowledgement and preserve same-ID replay.
 - Retain acknowledged raw capture for 14 days and compact provenance for 90 days. Pending handoff, acknowledgement and unresolved correction dependencies remain protected; capacity limits stop checkpoint advancement rather than evict intent.
+- Retention age is measured from durable capture, not a sample's historical end date. A returned anchored change older than 14 days must still be journaled and reconstructed before advancing its checkpoint.
 - Sleep/workout captures settle independently, with bounded native-query callers and at most one observer follow-up per caller. A background-delivery configuration error does not revoke consent or prevent permitted foreground capture.
 - Server source identities preserve prior ignore decisions, reuse an existing workout entry, and report `prior_resolution_unavailable` when a confirmed source no longer has a provable entry. Do not recreate it or infer why it is missing.
 

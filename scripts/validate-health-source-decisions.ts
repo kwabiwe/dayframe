@@ -141,6 +141,26 @@ async function main() {
       [workspaceId],
     );
     assert.equal(open.rows[0].n, 0);
+
+    // Three separate arriving phases must all retain canonical provenance.
+    const sleep = (phase: number) => ({
+      source:"health_sleep",type:"health_sleep_import",clientEventId:`synthetic-sleep-phase:${phase}`,
+      occurredAt:"2026-09-02T00:00:00Z",description:"Sleep",
+      rawPayload:{provider:"healthkit",sleepStage:"asleep_unspecified",sourceName:"Synthetic Watch",sourceBundleIdentifier:"test.watch",
+        externalSampleId:`synthetic-sleep-revision-${phase}`,sourceSampleIds:Array.from({length:phase},(_,n)=>`sleep-${n+1}`),
+        startedAt:"2026-09-02T00:00:00Z",stoppedAt:`2026-09-02T0${phase+4}:00:00Z`,durationSeconds:(phase+4)*3600,autoConfirm:true,
+        samples:Array.from({length:phase},(_,n)=>({externalSampleId:`sleep-${n+1}`,sleepStage:"asleep_core",startedAt:"2026-09-02T00:00:00Z",stoppedAt:`2026-09-02T0${n+5}:00:00Z`}))}
+    });
+    const phases=[];
+    for(let phase=1;phase<=3;phase++) phases.push(await processActivityEvent(sleep(phase),session));
+    const sleepEntry=(await entries())[0];assert(sleepEntry);
+    for (const result of phases.slice(1)) assert.equal(result.timeEntryId,sleepEntry.id,"Every revision, including the third phase, resolves to the same entry");
+    const links=await pool.query("select resolved_time_entry_id from activity_events where id=any($1::uuid[]) order by client_event_id",[phases.slice(1).map(result=>result.eventId)]);
+    assert(links.rows.every(row=>row.resolved_time_entry_id===phases[0].timeEntryId),"Every later phase has a durable resolution link");
+    const finalSleep=await pool.query("select stopped_at from time_entries where id=$1",[phases[0].timeEntryId]);
+    assert.equal(finalSleep.rows[0].stopped_at.toISOString(),"2026-09-02T07:00:00.000Z");
+    const repeatedPhase=await processActivityEvent(sleep(3),session);
+    assert.equal(repeatedPhase.eventId,phases[2].eventId);assert.equal(repeatedPhase.timeEntryId,phases[0].timeEntryId);
     console.log(
       "PASS Health repair source decisions: source IDs retain a later edit and original provenance, unavailable entries are not recreated, ignored samples create no replacement entry or Review card, same-ID receipts preserve the outcome.",
     );

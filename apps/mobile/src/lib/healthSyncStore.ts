@@ -68,6 +68,9 @@ async function database() {
         "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
       );
       await db.withExclusiveTransactionAsync(async (transaction) => {
+        const version = await transaction.getFirstAsync<{ user_version: number }>(
+          "PRAGMA user_version",
+        );
         await transaction.execAsync(`
         create table if not exists health_checkpoints (
           owner_key text not null, contract_key text not null, contract_json text not null,
@@ -100,8 +103,15 @@ async function database() {
           checkpoint_advanced integer not null, outcome text not null, primary key(owner_key,run_id));
         create index if not exists health_sample_window on health_samples(owner_key,kind,stopped_at);
         create index if not exists health_delivery_pending on health_deliveries(owner_key,state,created_at);
-        PRAGMA user_version=1;
-      `);
+        `);
+        if ((version?.user_version ?? 0) < 2) {
+          // Re-handoff pre-identity queue records with their original journal
+          // owner and immutable payload. Acknowledged deliveries stay settled.
+          await transaction.runAsync(
+            "update health_deliveries set state='pending_handoff' where state='queued'",
+          );
+          await transaction.execAsync("PRAGMA user_version=2");
+        }
       });
       return db;
     },
@@ -258,12 +268,9 @@ export async function commitHealthCapturePage(input: {
         sample_json: string;
       }>(
         `select * from health_samples where owner_key=? and kind=? and deleted=0 and sample_json is not null
-         and stopped_at>=? order by started_at,sample_id`,
+         order by started_at,sample_id`,
         key,
         input.contract.kind,
-        new Date(
-          Date.now() - HEALTH_RAW_RETENTION_DAYS * 86_400_000,
-        ).toISOString(),
       );
       const drafts = input.derive(
         sampleRows.map((row) => ({
@@ -437,6 +444,7 @@ export async function handoffHealthEvents(
           localId: row.client_event_id,
           occurredAt: new Date(String(payload.occurredAt)),
           owner: { workspaceId: owner.workspaceId, userId: owner.userId },
+          healthOwner: owner,
         });
         if (!(await isCurrent())) break;
         await serial(() =>
@@ -476,7 +484,7 @@ export async function recordHealthAcknowledgement(
   )
     throw new Error("Health acknowledgement identity mismatch.");
   const db = await database();
-  await serial(() =>
+  const result = await serial(() =>
     db.runAsync(
       `update health_deliveries set state='acknowledged',acknowledgement_json=?,acknowledged_at=?
     where owner_key=? and client_event_id=?`,
@@ -486,6 +494,8 @@ export async function recordHealthAcknowledgement(
       clientEventId,
     ),
   );
+  if (!result.changes && clientEventId.startsWith("healthkit:"))
+    throw new Error("The Health acknowledgement has no matching captured owner and event.");
 }
 
 export async function beginOrResumeHealthRepair(
