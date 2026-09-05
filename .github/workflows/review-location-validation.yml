@@ -54,6 +54,15 @@ jobs:
       - name: Review receipts and all structural actions
         if: ${{ !cancelled() }}
         run: npm run validate:review-mutation-db
+      - name: Review transaction lifetime and abandoned connections
+        if: ${{ !cancelled() }}
+        run: npx tsx scripts/validate-sync-transactions.ts
+      - name: Health logical-unit isolation and continuation
+        if: ${{ !cancelled() }}
+        run: npx tsx scripts/validate-health-sync-units.ts
+      - name: Health ingestion deadline and same-ID retry
+        if: ${{ !cancelled() }}
+        run: npx tsx scripts/validate-health-ingest-bounds.ts
       - name: Exact-entry Stop contention
         if: ${{ !cancelled() }}
         env:

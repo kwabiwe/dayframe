@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { ReviewReconciliationRequestSchema } from "@dayframe/shared";
-import { authErrorResponse } from "@/lib/api-errors";
+import { authErrorResponse, databaseReadinessResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import { reconcileReviewMutations } from "@/lib/review-mutation-service";
 
@@ -16,6 +16,8 @@ export async function POST(request: Request) {
       signal: request.signal, deadlineAt: startedAt + 8_000
     }));
   } catch (error) {
+    const readiness = databaseReadinessResponse(error);
+    if (readiness) return readiness;
     const response = authErrorResponse(error);
     if (response) return response;
     throw error;

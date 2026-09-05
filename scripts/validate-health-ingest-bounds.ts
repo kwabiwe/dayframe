@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import pg from "pg";
 import { pool } from "../apps/web/src/lib/db";
 import { processActivityEvent } from "../apps/web/src/lib/event-service";
-import { SyncOperationError } from "../apps/web/src/lib/sync-transaction";
+import { syncFailureMetadata } from "../apps/web/src/lib/sync-transaction";
 
 const url = new URL(process.env.DATABASE_URL ?? "");
 assert(["localhost", "127.0.0.1"].includes(url.hostname) && url.pathname.endsWith("_test"), "Disposable local *_test database required.");
@@ -21,8 +21,10 @@ async function main(){
       if new.description='Synthetic slow Health ingestion' then perform pg_sleep(5); end if; return new; end $$`);
     await pool.query("create trigger dayframe_test_slow_health_ingest before insert on time_entries for each row execute function dayframe_test_slow_health_ingest()");
     const started=Date.now();
+    // PostgreSQL 17's transaction deadline can win the race with the JS guard.
+    // Both must expose the same timeout/phase contract and roll back all effects.
     await assert.rejects(processActivityEvent(event,session,{deadlineAt:Date.now()+900,cleanupReserveMs:100}),
-      error=>error instanceof SyncOperationError && error.reason==="operation_deadline" && error.phase==="effect");
+      error=>syncFailureMetadata(error).reason==="operation_timeout" && syncFailureMetadata(error).phase==="effect");
     assert(Date.now()-started<1800,"Whole ingestion did not settle within its budget");
     await monitor.query("set statement_timeout='1500ms'");
     // A separate transaction can acquire the same user row immediately after cancellation.
