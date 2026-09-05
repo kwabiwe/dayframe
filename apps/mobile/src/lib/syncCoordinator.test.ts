@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { runManualSync, manualSyncSummary, type ManualSyncOperations } from "./syncCoordinator";
+import {
+  runManualSync,
+  manualSyncSummary,
+  type ManualSyncOperations,
+} from "./syncCoordinator";
 
 function operations(): ManualSyncOperations {
   const complete = () => vi.fn(async () => ({ outcome: "complete" as const }));
@@ -12,7 +16,7 @@ function operations(): ManualSyncOperations {
     healthDelivery: complete(),
     healthReprocess: complete(),
     refresh: complete(),
-    classifyError: () => "server_busy"
+    classifyError: () => "server_busy",
   };
 }
 afterEach(() => vi.useRealTimers());
@@ -59,7 +63,7 @@ describe("deliberate manual sync dependency graph", () => {
         () =>
           new Promise((resolve) => {
             completeRefresh = () => resolve({ outcome: "complete" });
-          })
+          }),
       )
       .mockResolvedValue({ outcome: "complete" });
     const pass = runManualSync(steps, { isCurrent: () => true });
@@ -81,5 +85,14 @@ describe("deliberate manual sync dependency graph", () => {
     const result = await runManualSync(steps, { isCurrent: () => current });
     expect(steps.healthDelivery).not.toHaveBeenCalled();
     expect(result.lanes.sleep.outcome).toBe("cancelled");
+  });
+  it("delivers saved pages after partial capture without claiming the source query completed", async () => {
+    const steps = operations();
+    steps.sleep = async () => ({ outcome: "partial", stage: "captured" });
+    steps.workouts = async () => ({ outcome: "complete", stage: "disabled" });
+    const result = await runManualSync(steps, { isCurrent: () => true });
+    expect(steps.healthDelivery).toHaveBeenCalledOnce();
+    expect(steps.healthReprocess).toHaveBeenCalledOnce();
+    expect(result.lanes.sleep.outcome).toBe("partial");
   });
 });

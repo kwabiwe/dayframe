@@ -1,7 +1,8 @@
 import { createOwnerSyncCoalescer } from "./ownerSyncCoalescer";
 import type { SyncLaneOutcome } from "./syncLane";
 
-export type ManualSyncLane = "sleep" | "workouts" | "activity" | "review" | "location" | "refresh";
+export type ManualSyncLane =
+  "sleep" | "workouts" | "activity" | "review" | "location" | "refresh";
 export type ManualLaneResult = {
   outcome: SyncLaneOutcome;
   changed?: boolean;
@@ -34,7 +35,11 @@ export type ManualSyncOperations = {
 /** The deadline releases the UI; every underlying operation retains its own abort/owner guard. */
 export async function runManualSync(
   operations: ManualSyncOperations,
-  options: { isCurrent: ManualSyncContext["isCurrent"]; signal?: AbortSignal; timeoutMs?: number }
+  options: {
+    isCurrent: ManualSyncContext["isCurrent"];
+    signal?: AbortSignal;
+    timeoutMs?: number;
+  },
 ): Promise<ManualSyncResult> {
   const startedAt = new Date().toISOString();
   const controller = new AbortController();
@@ -43,15 +48,23 @@ export async function runManualSync(
   if (options.signal?.aborted) abort();
   else options.signal?.addEventListener("abort", abort, { once: true });
   const timer = setTimeout(abort, Math.max(0, deadlineAt - Date.now()));
-  const context = { signal: controller.signal, deadlineAt, isCurrent: options.isCurrent };
+  const context = {
+    signal: controller.signal,
+    deadlineAt,
+    isCurrent: options.isCurrent,
+  };
   const refreshes = createOwnerSyncCoalescer<ManualLaneResult>();
-  let latestRefresh: ManualLaneResult = { outcome: "partial", stage: "not_attempted" };
+  let latestRefresh: ManualLaneResult = {
+    outcome: "partial",
+    stage: "not_attempted",
+  };
 
   async function execute(operation: Operation): Promise<ManualLaneResult> {
     if (controller.signal.aborted) return { outcome: "cancelled" };
     let release: (() => void) | undefined;
     const cancelled = new Promise<ManualLaneResult>((resolve) => {
-      const cancel = () => resolve({ outcome: "cancelled", stage: "unfinished" });
+      const cancel = () =>
+        resolve({ outcome: "cancelled", stage: "unfinished" });
       controller.signal.addEventListener("abort", cancel, { once: true });
       release = () => controller.signal.removeEventListener("abort", cancel);
     });
@@ -65,7 +78,7 @@ export async function runManualSync(
           return !(await options.isCurrent()) || controller.signal.aborted
             ? { outcome: "cancelled" as const }
             : result;
-        })()
+        })(),
       ]);
     } catch (error) {
       return { outcome: operations.classifyError(error) };
@@ -81,7 +94,7 @@ export async function runManualSync(
         latestRefresh = await execute(operations.refresh);
         return latestRefresh;
       },
-      async () => {}
+      async () => {},
     );
 
   async function complete(operation: Operation) {
@@ -91,12 +104,23 @@ export async function runManualSync(
   }
   async function health(capture: Operation) {
     const captured = await execute(capture);
-    if (captured.outcome !== "complete" || captured.stage === "disabled") return captured;
+    if (
+      !["complete", "partial"].includes(captured.outcome) ||
+      captured.stage === "disabled"
+    )
+      return captured;
     const delivered = await complete(operations.healthDelivery);
     if (delivered.outcome !== "complete")
       return { ...delivered, stage: delivered.stage ?? "queued" };
     const processed = await complete(operations.healthReprocess);
-    return { ...processed, stage: processed.stage ?? "processing" };
+    return {
+      ...processed,
+      outcome:
+        processed.outcome === "complete" && captured.outcome === "partial"
+          ? "partial"
+          : processed.outcome,
+      stage: processed.stage ?? "processing",
+    };
   }
 
   try {
@@ -106,13 +130,20 @@ export async function runManualSync(
       health(operations.workouts),
       complete(operations.activity),
       complete(operations.review),
-      complete(operations.location)
+      complete(operations.location),
     ]);
     await refresh();
     return {
       startedAt,
       finishedAt: new Date().toISOString(),
-      lanes: { sleep, workouts, activity, review, location, refresh: latestRefresh }
+      lanes: {
+        sleep,
+        workouts,
+        activity,
+        review,
+        location,
+        refresh: latestRefresh,
+      },
     };
   } finally {
     clearTimeout(timer);
@@ -125,7 +156,9 @@ export function manualSyncSummary(result: ManualSyncResult) {
     if (lane.stage === "disabled") return "off";
     switch (lane.outcome) {
       case "complete":
-        return lane.stage === "no_readable_samples" ? "no readable samples" : "complete";
+        return lane.stage === "no_readable_samples"
+          ? "no readable samples"
+          : "complete";
       case "needs_attention":
         return "needs attention";
       case "authentication_required":
@@ -147,7 +180,7 @@ export function manualSyncSummary(result: ManualSyncResult) {
       ["Activity", "activity"],
       ["Review", "review"],
       ["Location", "location"],
-      ["Refresh", "refresh"]
+      ["Refresh", "refresh"],
     ] as const
   )
     .map(([label, key]) => `${label}: ${describe(result.lanes[key])}`)

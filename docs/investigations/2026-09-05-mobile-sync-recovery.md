@@ -1,6 +1,6 @@
 # Mobile sync recovery implementation
 
-This is implementation evidence, not closure of the September 4 incident. Server prerequisite: draft PR #188. Its Vercel deployment is blocked by commit-author permissions; no Ready staging Preview, alias promotion or physical-device validation exists for this work yet. Production remains unchanged.
+This is implementation evidence, not closure of the September 4 incident. Server prerequisite: draft PR #188. Earlier CLI Previews were blocked by commit-author permission. A subsequent GitHub-created server Preview is Ready; the checked mobile GitHub Preview was cancelled. Stable alias promotion and physical-device validation remain outstanding. Production remains unchanged.
 
 ## Settings motion contract
 
@@ -35,3 +35,7 @@ CocoaPods installation passed, changing only the three path-dependent prebuilt c
 The build exposes missing source/runtime/update attestations as null instead of inventing identities. Routine support output allowlists queued identifiers/state, omits raw payloads, and samples current native/Location/Review diagnostics at export time. New owner-bound Location diagnostic results do not adopt old unscoped replay errors. Review's latest error is selected by timestamp, never by maximum text value.
 
 Documentation impact: runtime/storage/API and visible Settings behaviour; architecture, tracker, validation matrix, regression checklist and this motion/evidence note updated. PRD/brand identity unchanged. Main's older tracker called already-merged #186/#187 work implementation-pending; this branch carries the same evidence-based Watch correction as server PR #188.
+
+## Scope freeze and final recovery check (September 5)
+
+No further Location redesign, repair UI, diagnostics expansion or wider environment migration is included. The final manual-runtime regression reproduced a later Health capture joining a previously selected forced delivery pass (two drains instead of the required three). Each completed capture now requests a new owner-serialized queue pass. The coordinator also delivers saved pages after partial capture while retaining the partial outcome. Full mobile validation passes 961 tests, including actual SQLite immutable Review reconciliation, lost force, independent siblings, busy Review with Location/refresh continuation and the manual runtime regression.
