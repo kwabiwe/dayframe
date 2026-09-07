@@ -537,10 +537,18 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
       const lastAt = active.visitSupportUntilAt && Date.parse(active.visitSupportUntilAt) > Date.parse(observedAt)
         ? active.visitSupportUntilAt
         : observedAt;
-      if (atMs - Date.parse(lastAt) > input.config.maxContinuityGapMs) {
+      const observationGapMs = atMs - Date.parse(lastAt);
+      const boundedSparseSameUnknown =
+        active.key === "unknown" &&
+        itemKey === "unknown" &&
+        sameUnknownCluster(active, item, input.config.sparseUnknownContinuityMaximumDistanceMeters) &&
+        observationGapMs <= input.config.sparseUnknownContinuityMaximumGapMs;
+      if (observationGapMs > input.config.maxContinuityGapMs && !boundedSparseSameUnknown) {
         closeAtTransition(active, evidence.occurredAt, "uncertain_gap", true, true);
         completed.push(active);
         active = null;
+      } else if (observationGapMs > input.config.maxContinuityGapMs) {
+        active.continuityStatus = "uncertain_gap";
       }
     }
 

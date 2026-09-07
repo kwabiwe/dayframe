@@ -156,6 +156,49 @@ describe("Location Intelligence V2", () => {
     expect(stays[homeIndexes[0] + 1].placeMatchKind).toBe("unknown");
   });
 
+  it("keeps a sparse gym visit continuous and constructs both surrounding commutes", () => {
+    const home = TEST_PLACE_A;
+    const gym = { latitude: 51.53, longitude: -0.1 };
+    const routePoint = (id: string, minute: number, latitude: number, speed = 12) =>
+      evidence(id, minute, { latitude, longitude: -0.1 }, { speedMetersPerSecond: speed });
+    const result = runLocationEngine(engineInput([
+      evidence("home-0543", 0, home),
+      evidence("home-0550", 7, home),
+      evidence("home-0557", 14, home),
+      routePoint("out-0602", 19, 51.508),
+      routePoint("out-0606", 23, 51.517),
+      routePoint("out-0610", 27, 51.526),
+      evidence("gym-0613-a", 30, gym),
+      evidence("gym-0613-b", 31, { latitude: 51.53005, longitude: -0.1 }),
+      // Core Location is quiet while stationary, then reports the same site
+      // when movement resumes. This gap must not manufacture a second visit.
+      evidence("gym-0703", 80, { latitude: 51.53004, longitude: -0.1 }),
+      routePoint("leave-past-gym", 82, 51.5299, 4),
+      routePoint("return-0708", 85, 51.522),
+      routePoint("return-0711", 88, 51.512),
+      routePoint("return-0714", 91, 51.504),
+      evidence("home-0715", 92, home),
+      evidence("home-0718", 95, home),
+      evidence("home-0720", 97, home)
+    ], [home]));
+
+    const stays = result.segmentUpserts.filter((segment): segment is StaySegment => segment.kind === "stay");
+    const gymStays = stays.filter((stay) => stay.placeMatchKind === "unknown");
+    const commutes = result.segmentUpserts.filter((segment) => segment.kind === "commute");
+
+    expect(gymStays).toHaveLength(1);
+    expect(gymStays[0]).toMatchObject({
+      startedAt: "2026-07-20T08:31:00.000Z",
+      sampleCount: 3
+    });
+    expect(Date.parse(gymStays[0].stoppedAt!)).toBeGreaterThanOrEqual(Date.parse("2026-07-20T09:20:00.000Z"));
+    expect(commutes).toHaveLength(2);
+    expect(commutes.map((commute) => [commute.fromPlaceId, commute.toPlaceId])).toEqual([
+      [home.id, null],
+      [null, home.id]
+    ]);
+  });
+
   it("is deterministic for reordered and duplicate delivery", () => {
     const fixture = locationAcceptanceFixture();
     const canonical = runLocationEngine(fixture);
@@ -462,7 +505,7 @@ describe("Location Intelligence V2", () => {
     expect(result.segmentUpserts.some((segment) => segment.kind === "commute")).toBe(false);
   });
 
-  it("keeps a sparse well-separated endpoint journey low-confidence and uncertain", () => {
+  it("does not fabricate a commute from a distant arrival without departure or route evidence", () => {
     const result = runLocationEngine(engineInput([
       evidence("sparse-a-1", 0, TEST_PLACE_A),
       evidence("sparse-a-2", 6, TEST_PLACE_A),
@@ -471,19 +514,16 @@ describe("Location Intelligence V2", () => {
     ], [TEST_PLACE_A, TEST_PLACE_FAR]));
     const commute = result.segmentUpserts.find((segment) => segment.kind === "commute");
 
-    expect(commute).toMatchObject({
-      kind: "commute",
-      routeSampleCount: 0,
-      continuityStatus: "uncertain_gap",
-      confidence: "low",
-      qualificationReason: "endpoint_only_significant_distance"
-    });
+    expect(commute).toBeUndefined();
   });
 
   it("waits for the existing finalisation lag before emitting a recovered journey", () => {
     const items = [
       evidence("lifecycle-a-1", 0, TEST_PLACE_A),
       evidence("lifecycle-a-2", 6, TEST_PLACE_A),
+      evidence("lifecycle-route", 30, { latitude: 51.52, longitude: -0.1 }, {
+        speedMetersPerSecond: 12
+      }),
       evidence("lifecycle-far-1", 60, TEST_PLACE_FAR),
       evidence("lifecycle-far-2", 66, TEST_PLACE_FAR)
     ];

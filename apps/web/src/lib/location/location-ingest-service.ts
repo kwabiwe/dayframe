@@ -168,7 +168,7 @@ export async function ingestLocationEvidence(
         ? [`${classification.rejectedEvidence.length} evidence item(s) were retained without coordinates for diagnostics.`]
         : []),
       ...(rollout.effectiveMode === "v2_shadow"
-        ? ["V2 shadow mode stored segments without replacing V1 suggestions."]
+        ? ["V2 shadow mode stored segments without emitting user-visible semantics."]
         : []),
       ...(!rollout.clientAcknowledgedMode
         ? ["The client has not acknowledged the server rollout mode; V2 semantic output was suppressed."]
@@ -272,7 +272,7 @@ function locationReplayWarnings(
 ) {
   return [
     ...(rollout.effectiveMode === "v2_shadow"
-      ? ["V2 shadow mode stored segments without replacing V1 suggestions."]
+      ? ["V2 shadow mode stored segments without emitting user-visible semantics."]
       : []),
     ...(!rollout.clientAcknowledgedMode
       ? ["The client has not acknowledged the server rollout mode; V2 semantic output was suppressed."]

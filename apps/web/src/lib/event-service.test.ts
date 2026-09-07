@@ -5,7 +5,8 @@ const mocks = vi.hoisted(() => ({
   pool: {
     connect: vi.fn()
   },
-  getNormalizationContext: vi.fn()
+  getNormalizationContext: vi.fn(),
+  getServerLocationRolloutMode: vi.fn(() => "v1")
 }));
 
 vi.mock("./db", async () => {
@@ -19,6 +20,10 @@ vi.mock("./db", async () => {
 
 vi.mock("./queries", () => ({
   getNormalizationContext: mocks.getNormalizationContext
+}));
+
+vi.mock("./location/location-rollout", () => ({
+  getServerLocationRolloutMode: mocks.getServerLocationRolloutMode
 }));
 
 const {
@@ -56,6 +61,7 @@ const session = {
 describe("category persistence", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mocks.getServerLocationRolloutMode.mockReturnValue("v1");
     mocks.getNormalizationContext.mockResolvedValue({
       projects: [],
       categories: [{ id: categoryId(), name: "Focus", color: "lime", isPinned: true }],
@@ -532,6 +538,42 @@ describe("category persistence", () => {
       "Commute learning found movement between places, but an uncertain endpoint keeps it review-first."
     ]);
   });
+
+  it.each(["v2_shadow", "v2_review", "v2_enabled"] as const)(
+    "retains queued legacy location evidence without emitting semantics in %s",
+    async (mode) => {
+      mocks.getServerLocationRolloutMode.mockReturnValue(mode);
+      const client = {
+        query: vi.fn(async (statement: string) =>
+          statement.includes("insert into activity_events")
+            ? { rows: [{ id: "event-legacy-location" }] }
+            : { rows: [] }
+        ),
+        release: vi.fn()
+      };
+      mocks.pool.connect.mockResolvedValueOnce(client);
+
+      const result = await processActivityEvent({
+        source: "location_learning",
+        type: "commute_detected",
+        occurredAt: new Date("2026-09-07T06:13:00.000Z"),
+        clientEventId: `legacy-commute-${mode}`,
+        rawPayload: {
+          provider: "expo_location",
+          startedAt: "2026-09-07T06:02:00.000Z",
+          stoppedAt: "2026-09-07T06:13:00.000Z"
+        }
+      }, session);
+
+      expect(result.candidate).toMatchObject({
+        action: "record_only",
+        reviewStatus: "confirmed"
+      });
+      expect(result.candidate.reason).toContain("V2 is authoritative");
+      expect(client.query.mock.calls.some(([statement]) => String(statement).includes("insert into review_items"))).toBe(false);
+      expect(client.query.mock.calls.some(([statement]) => String(statement).includes("insert into time_entries"))).toBe(false);
+    }
+  );
 
   it("auto-logs clean saved-place commutes as category-only time", async () => {
     mocks.getNormalizationContext.mockResolvedValueOnce({

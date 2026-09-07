@@ -19,6 +19,9 @@ Initial capture profile:
 - maximum accepted horizontal accuracy `200m`; matching allowance capped at `60m`.
 - saved dwell `5m`; unanchored candidate dwell `10m` with at least three samples; unknown review threshold `20m`.
 - continuity gap `12m`; finalisation lag `10m`; two corroborating outside samples.
+- a quiet reporting gap may bridge two parts of the same unknown stay for at
+  most `60m` when their centres remain within `120m` and no intervening route or
+  contradictory-place evidence exists; this is continuity, not a second visit.
 - raw evidence retention `7d`; upload batches at most 100 items.
 
 Temporal invariants:
@@ -32,7 +35,8 @@ Temporal invariants:
 - Commutes represent meaningful travel between contiguous stays, not every
   movement between stationary clusters. Distinct endpoints normally need at
   least `800m` separation, or at least `1200m` of efficient route evidence
-  outside the `450m` local-movement band. Speed is corroboration only: at least
+  outside the `450m` local-movement band. A distant arrival with no departure
+  or route observation is not a commute. Speed is corroboration only: at least
   three accurate samples at or above `2.8m/s` are needed before faster movement
   is considered robust, and one spike never qualifies a local transition.
 - Evidence-backed same-known-place round trips remain valid when they contain
@@ -59,8 +63,8 @@ Server ingestion creates one coordinate-free `activity_events` batch summary, st
 
 Rollout has four server-authoritative modes, returned by bootstrap and acknowledged by the mobile client:
 
-- `v1`: stop and clear V2 capture; keep the previous geofence semantics.
-- `v2_shadow`: capture/replay V2 but emit no V2 review item or time-entry semantics; V1 remains active.
+- `v1`: deprecated explicit compatibility mode; stop and clear V2 capture and keep the previous geofence semantics. It is never a default or fallback.
+- `v2_shadow`: capture/replay V2 but emit no review item or time-entry semantics. V1 classification is also suppressed, so shadow is silent rather than a semantic fallback.
 - `v2_review`: suppress competing V1 location semantics and permit V2 stays/commutes that begin after the same-mode acknowledgement cutover to become review items only.
 - `v2_enabled`: apply the canonical automatic logging table in `docs/PRD.md`. Normal confidence is `medium_high`/`high`; each valid boundary width is at most five minutes. Trusted stays may coexist with manual/Health time; conflicts with another location stay or commute allow at most five minutes per existing entry. Standard commutes require two saved endpoints and two route samples with significant endpoint displacement or meaningful same-place round-trip qualification. The medium exception requires distinct saved endpoints, three accepted route samples and significant endpoint displacement/route distance. Both require actual internal gap at most twelve minutes and at most five minutes per confirmed/accepted overlap. Saved-stay defaults and category-only Commute semantics remain unchanged.
 
@@ -82,7 +86,7 @@ Reverse geocoding is display-only: use saved/learned identity first, invoke a pr
 
 Postgres retention is operational through Vercel Cron calling `GET /api/cron/location-retention` daily at `03:17 UTC`. The route fails closed unless its bearer token matches `CRON_SECRET`, returns `no-store`, calls the bounded service-role cleanup function under an advisory lock, and warns if a 50,000-row run limit leaves a backlog. Vercel Cron runs on production deployments only, so hosted verification must confirm the environment secret, database role/function grant, invocation logs, and next-day schedule. A failed invocation leaves evidence for the next run and is visible through the non-2xx route result and Vercel logs; it must never fall back to an unauthenticated deletion path.
 
-The checked-in/default rollout remains `v2_shadow` as a fail-closed fallback. Deploy the additive migration, then API/web, then the native TestFlight build. Production may activate `v2_review` or the owner-approved narrow `v2_enabled` policy through the server environment only after the corresponding code is deployed. A client must acknowledge the same mode before new segments can emit semantics. Roll back by changing the server mode to `v2_shadow` or `v1` before reverting runtime code. Additive tables may remain and confirmed V2 entries must not be deleted.
+The checked-in/default rollout remains `v2_shadow` as a fail-closed V2 mode. Missing, invalid, or stale configuration must never activate V1. Deploy the additive migration, then API/web, then the native build. Production may activate `v2_review` or the owner-approved narrow `v2_enabled` policy through the server environment only after the corresponding code is deployed. A client must acknowledge the same mode before new segments can emit semantics. Roll back within V2 by changing the server mode to `v2_shadow` or `v2_review`; do not reactivate V1. Additive tables may remain and confirmed V2 entries must not be deleted.
 
 ## Classification invariant
 

@@ -178,11 +178,10 @@ export function qualifyCommuteCandidate(
 
   if (endpointDistance != null && endpointDistance >= config.commuteMinimumEndpointDistanceMeters) {
     if (summary.routeSampleCount === 0) {
-      return {
-        qualifies: true,
-        reason: "endpoint_only_significant_distance",
-        confidence: "low"
-      };
+      // Widely separated endpoint observations prove only that the device was
+      // later somewhere else. Without a departure or route observation, V2
+      // must not fabricate the missing journey.
+      return { qualifies: false, reason: "insufficient_evidence" };
     }
     const continuous =
       summary.maximumObservationGapSeconds * 1_000 <= config.maxContinuityGapMs;
