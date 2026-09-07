@@ -12,7 +12,7 @@ import { pool } from "../apps/web/src/lib/db";
 import { ensureCommuteCategoryId } from "../apps/web/src/lib/automatic-category-service";
 import { processActivityEvent } from "../apps/web/src/lib/event-service";
 import {
-  ingestLocationEvidence,
+  ingestLocationEvidence as storeLocationEvidence,
   replayRetainedLocationEvidence
 } from "../apps/web/src/lib/location/location-ingest-service";
 import { resolveLocationReviewAction } from "../apps/web/src/lib/location/location-review-service";
@@ -42,17 +42,37 @@ function batch(
   clientBatchId: string,
   evidence: LocationEvidence[],
   rolloutMode: LocationEvidenceBatchRequest["rolloutMode"],
-  semanticModeAcknowledgedAt?: string
+  semanticModeAcknowledgedAt?: string,
+  deviceId = DEVICE_ID
 ) {
   return {
     clientBatchId,
-    deviceId: DEVICE_ID,
+    deviceId,
     algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
     timeZone: "Europe/London",
     rolloutMode,
     semanticModeAcknowledgedAt,
     evidence
   };
+}
+
+async function ingestLocationEvidence(
+  evidenceBatch: ReturnType<typeof batch>,
+  requestSession: RequestSession,
+  processingAt = PROCESSING_AT
+) {
+  const ingest = await storeLocationEvidence(evidenceBatch, requestSession, processingAt);
+  await replayRetainedLocationEvidence(
+    {
+      deviceId: evidenceBatch.deviceId,
+      algorithmVersion: evidenceBatch.algorithmVersion,
+      rolloutMode: evidenceBatch.rolloutMode,
+      semanticModeAcknowledgedAt: evidenceBatch.semanticModeAcknowledgedAt
+    },
+    requestSession,
+    processingAt
+  );
+  return ingest;
 }
 
 function trustedCommuteFixture(prefix = "trusted-commute") {
@@ -211,19 +231,19 @@ async function validateOutOfOrderAndIdempotency() {
   process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_shadow";
   const evidence = locationAcceptanceFixture().evidence;
   const midpoint = Math.floor(evidence.length / 2);
-  await ingestLocationEvidence(batch("db-out-of-order-later", evidence.slice(midpoint), "v2_shadow"), session, PROCESSING_AT);
-  await ingestLocationEvidence(batch("db-out-of-order-earlier", evidence.slice(0, midpoint), "v2_shadow"), session, PROCESSING_AT);
+  await ingestLocationEvidence(batch("db-out-of-order-later", evidence.slice(midpoint), "v2_shadow"), session);
+  await ingestLocationEvidence(batch("db-out-of-order-earlier", evidence.slice(0, midpoint), "v2_shadow"), session);
   const outOfOrder = await segmentSnapshot();
   assert(outOfOrder.length > 0, "Out-of-order replay produced no segments.");
 
   await clearDerivedLocationState();
   const orderedBatch = batch("db-ordered", evidence, "v2_shadow");
-  const orderedResult = await ingestLocationEvidence(orderedBatch, session, PROCESSING_AT);
+  const orderedResult = await ingestLocationEvidence(orderedBatch, session);
   const ordered = await segmentSnapshot();
   assert.deepEqual(outOfOrder, ordered, "Out-of-order upload changed the canonical segment snapshot.");
   const evidenceCount = await count("location_evidence");
   const eventCount = await count("activity_events");
-  const duplicate = await ingestLocationEvidence(orderedBatch, session, PROCESSING_AT);
+  const duplicate = await ingestLocationEvidence(orderedBatch, session);
   assert.equal(duplicate.duplicateBatch, true);
   assert.equal(await count("location_evidence"), evidenceCount, "Duplicate upload inserted evidence.");
   assert.equal(await count("activity_events"), eventCount, "Duplicate upload inserted an activity event.");
@@ -464,13 +484,25 @@ async function validateCommuteReviewCategoryAndDescription() {
   assert(existingCategory.rows[0], "Commute category concurrency fixture is missing.");
   const commuteCategoryId = existingCategory.rows[0].id;
   const fixture = locationAcceptanceFixture();
-  const commuteBatch = batch(
-    "db-commute-review-quality",
-    fixture.evidence,
-    "v2_review",
-    fixture.evidence[0].occurredAt
-  );
-  await ingestLocationEvidence(commuteBatch, session, PROCESSING_AT);
+  const commuteBatches = Array.from({ length: 3 }, (_, index) => {
+    const suffix = index + 1;
+    const deviceId = `20000000-0000-4000-8000-${String(suffix + 1).padStart(12, "0")}`;
+    const evidence = fixture.evidence.map((item) => ({
+      ...item,
+      deviceId,
+      clientEvidenceId: `review-quality-${suffix}-${item.clientEvidenceId}`
+    }));
+    return batch(
+      `db-commute-review-quality-${suffix}`,
+      evidence,
+      "v2_review",
+      evidence[0].occurredAt,
+      deviceId
+    );
+  });
+  for (const commuteBatch of commuteBatches) {
+    await ingestLocationEvidence(commuteBatch, session, PROCESSING_AT);
+  }
 
   const categories = await pool.query<{ id: string; name: string; color: string }>(
     `select id, name, color from categories
@@ -552,7 +584,9 @@ async function validateCommuteReviewCategoryAndDescription() {
     "update activity_events set suggested_category_id = null where id = $1",
     [repair.eventId]
   );
-  await ingestLocationEvidence(commuteBatch, session, PROCESSING_AT);
+  for (const commuteBatch of commuteBatches) {
+    await ingestLocationEvidence(commuteBatch, session, PROCESSING_AT);
+  }
   const repaired = await pool.query<{
     eventCategoryId: string | null;
     reviewCategoryId: string | null;
@@ -579,7 +613,9 @@ async function validateCommuteReviewCategoryAndDescription() {
     "update activity_events set review_status = 'ignored', suggested_category_id = null where id = $1",
     [ignored.eventId]
   );
-  await ingestLocationEvidence(commuteBatch, session, PROCESSING_AT);
+  for (const commuteBatch of commuteBatches) {
+    await ingestLocationEvidence(commuteBatch, session, PROCESSING_AT);
+  }
   const ignoredAfterReplay = await pool.query<{
     eventCategoryId: string | null;
     reviewCategoryId: string | null;

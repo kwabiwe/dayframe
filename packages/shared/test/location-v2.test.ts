@@ -781,6 +781,97 @@ describe("Location Intelligence V2", () => {
     });
   });
 
+  it("recognises the 7 September unsaved-place return as one evidence-backed round trip", () => {
+    const observed = (
+      id: string,
+      occurredAt: string,
+      latitude: number,
+      longitude: number,
+      options: Partial<LocationEvidence> = {}
+    ): LocationEvidence => ({
+      clientEvidenceId: id,
+      deviceId: "device-1",
+      algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+      kind: "standard_location",
+      occurredAt,
+      latitude,
+      longitude,
+      horizontalAccuracyMeters: 25,
+      receivedAt: "2026-09-07T20:00:00.000Z",
+      timeZone: "Europe/London",
+      ...options
+    });
+    const sep7Input = engineInput([
+      observed("sep7-home-visit", "2026-09-07T15:34:04.000Z", 51.7478248, 0.4377503, {
+        kind: "visit",
+        endedAt: "2026-09-07T17:15:53.000Z",
+        horizontalAccuracyMeters: 17.4
+      }),
+      observed("sep7-home-support", "2026-09-07T16:32:19.376Z", 51.7477444, 0.4376642, {
+        speedMetersPerSecond: 0.97,
+        horizontalAccuracyMeters: 5.9
+      }),
+      observed("sep7-route-1", "2026-09-07T17:16:26.566Z", 51.7475860, 0.4425964, {
+        speedMetersPerSecond: 7.17,
+        horizontalAccuracyMeters: 14.3
+      }),
+      observed("sep7-route-2", "2026-09-07T17:17:24.000Z", 51.7433220, 0.4445868, {
+        kind: "significant_change",
+        horizontalAccuracyMeters: 64.3
+      }),
+      observed("sep7-route-3", "2026-09-07T17:17:32.677Z", 51.7418055, 0.4451292, {
+        speedMetersPerSecond: 1.82,
+        horizontalAccuracyMeters: 23.2
+      }),
+      observed("sep7-route-4", "2026-09-07T17:20:27.000Z", 51.7372388, 0.4621782, {
+        kind: "visit",
+        horizontalAccuracyMeters: 26
+      }),
+      observed("sep7-route-5", "2026-09-07T17:22:27.000Z", 51.7354769, 0.4662860, {
+        kind: "significant_change",
+        horizontalAccuracyMeters: 38.6
+      }),
+      observed("sep7-route-6", "2026-09-07T17:25:58.637Z", 51.7381745, 0.4623655, {
+        horizontalAccuracyMeters: 4.7
+      }),
+      observed("sep7-route-7", "2026-09-07T17:27:32.654Z", 51.7395674, 0.4561358, {
+        horizontalAccuracyMeters: 18.3
+      }),
+      observed("sep7-route-8", "2026-09-07T17:28:27.642Z", 51.7404385, 0.4507933, {
+        speedMetersPerSecond: 8.67,
+        horizontalAccuracyMeters: 23.7
+      }),
+      observed("sep7-return-visit", "2026-09-07T17:30:30.000Z", 51.7479440, 0.4378930, {
+        kind: "visit",
+        horizontalAccuracyMeters: 20
+      }),
+      observed("sep7-return-support-1", "2026-09-07T17:31:39.999Z", 51.7478606, 0.4376910, {
+        horizontalAccuracyMeters: 5
+      }),
+      observed("sep7-return-support-2", "2026-09-07T17:32:37.000Z", 51.7478310, 0.4376834, {
+        kind: "significant_change",
+        horizontalAccuracyMeters: 5.4
+      })
+    ], []);
+    const result = runLocationEngine({
+      ...sep7Input,
+      processingAt: "2026-09-07T20:00:00.000Z"
+    });
+    const stays = result.segmentUpserts.filter((segment): segment is StaySegment => segment.kind === "stay");
+    const commute = result.segmentUpserts.find((segment) => segment.kind === "commute");
+
+    expect(stays).toHaveLength(2);
+    expect(commute).toMatchObject({
+      kind: "commute",
+      qualificationReason: "same_place_meaningful_round_trip"
+    });
+    if (commute?.kind === "commute") {
+      expect(commute.straightLineDistanceMeters).toBeLessThan(20);
+      expect(commute.routeDistanceMeters).toBeGreaterThan(5_000);
+      expect(commute.routeSampleCount).toBeGreaterThanOrEqual(8);
+    }
+  });
+
   it("rejects a teleporting standard sample", () => {
     const result = runLocationEngine(engineInput([
       evidence("teleport-start", 0, TEST_PLACE_A),
