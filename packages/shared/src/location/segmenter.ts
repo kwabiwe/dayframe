@@ -125,20 +125,25 @@ function closeAtTransition(
   active: WorkingStay,
   nextAt: string,
   continuityStatus: ContinuityStatus,
-  exact = false,
-  respectVisitSupport = false
+  exact = false
 ) {
   const lastEvidence = active.evidence.at(-1)?.evidence;
-  let lastAt = lastEvidence?.endedAt && Date.parse(lastEvidence.endedAt) <= Date.parse(nextAt)
+  const lastAt = lastEvidence?.endedAt && Date.parse(lastEvidence.endedAt) <= Date.parse(nextAt)
     ? lastEvidence.endedAt
     : lastEvidence?.occurredAt ?? active.startedAt;
+  // A completed Visit supplies the departure itself, even when a later GPS
+  // sample was received within that Visit. Use it only while the transition
+  // and latest inside observation do not contradict that boundary.
   if (
-    respectVisitSupport &&
     active.visitSupportUntilAt &&
     Date.parse(active.visitSupportUntilAt) <= Date.parse(nextAt) &&
-    Date.parse(active.visitSupportUntilAt) > Date.parse(lastAt)
+    Date.parse(active.visitSupportUntilAt) >= Date.parse(lastAt)
   ) {
-    lastAt = active.visitSupportUntilAt;
+    active.stoppedAt = active.visitSupportUntilAt;
+    active.stopLowerBoundAt = active.visitSupportUntilAt;
+    active.stopUpperBoundAt = active.visitSupportUntilAt;
+    active.continuityStatus = continuityStatus;
+    return;
   }
   active.stoppedAt = exact ? lastAt : midpointTimeIso(lastAt, nextAt);
   active.stopLowerBoundAt = lastAt;
@@ -544,7 +549,7 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
         sameUnknownCluster(active, item, input.config.sparseUnknownContinuityMaximumDistanceMeters) &&
         observationGapMs <= input.config.sparseUnknownContinuityMaximumGapMs;
       if (observationGapMs > input.config.maxContinuityGapMs && !boundedSparseSameUnknown) {
-        closeAtTransition(active, evidence.occurredAt, "uncertain_gap", true, true);
+        closeAtTransition(active, evidence.occurredAt, "uncertain_gap", true);
         completed.push(active);
         active = null;
       } else if (observationGapMs > input.config.maxContinuityGapMs) {

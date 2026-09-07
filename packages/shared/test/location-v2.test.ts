@@ -312,6 +312,47 @@ describe("Location Intelligence V2", () => {
     ]));
     const stays = result.segmentUpserts.filter((segment): segment is StaySegment => segment.kind === "stay");
     expect(stays.map((stay) => stay.placeId)).toEqual([TEST_PLACE_A.id, TEST_PLACE_B.id, TEST_PLACE_A.id]);
+    expect(stays[0]).toMatchObject({
+      stoppedAt: "2026-07-20T08:12:30.000Z",
+      stopUpperBoundAt: "2026-07-20T08:25:00.000Z"
+    });
+  });
+
+  it.each([
+    ["another saved place", TEST_PLACE_B, [TEST_PLACE_A, TEST_PLACE_B]],
+    ["corroborated outside samples", TEST_PLACE_B, [TEST_PLACE_A]],
+    ["a long observation gap", TEST_PLACE_FAR, [TEST_PLACE_A, TEST_PLACE_FAR]]
+  ])("preserves a completed Visit departure before %s", (_label, destination, places) => {
+    const departureAt = "2026-07-20T09:00:00.000Z";
+    const outsideMinute = destination === TEST_PLACE_FAR ? 90 : 61;
+    const result = runLocationEngine(engineInput([
+      evidence("bounded-visit", 0, TEST_PLACE_A, { kind: "visit", endedAt: departureAt }),
+      evidence("inside-visit", 30, TEST_PLACE_A),
+      evidence("outside-1", outsideMinute, destination),
+      evidence("outside-2", outsideMinute + 2, destination)
+    ], places));
+    const origin = result.segmentUpserts.find((segment) => segment.kind === "stay" && segment.placeId === TEST_PLACE_A.id);
+    expect(origin).toMatchObject({
+      stoppedAt: departureAt,
+      stopLowerBoundAt: departureAt,
+      stopUpperBoundAt: departureAt
+    });
+  });
+
+  it("uses later inside evidence when it contradicts an earlier Visit departure", () => {
+    const result = runLocationEngine(engineInput([
+      evidence("earlier-departure", 0, TEST_PLACE_A, {
+        kind: "visit", endedAt: "2026-07-20T09:00:00.000Z"
+      }),
+      evidence("later-inside", 65, TEST_PLACE_A),
+      evidence("later-outside", 70, TEST_PLACE_B)
+    ]));
+    const origin = result.segmentUpserts.find((segment) => segment.kind === "stay" && segment.placeId === TEST_PLACE_A.id);
+    expect(origin).toMatchObject({
+      stoppedAt: "2026-07-20T09:07:30.000Z",
+      stopLowerBoundAt: "2026-07-20T09:05:00.000Z",
+      stopUpperBoundAt: "2026-07-20T09:10:00.000Z"
+    });
   });
 
   it("keeps a nearby A to B to A sequence as three temporal stays", () => {
@@ -801,54 +842,55 @@ describe("Location Intelligence V2", () => {
       timeZone: "Europe/London",
       ...options
     });
+    // Synthetic coordinates preserve the route shape without retaining a private trace.
     const sep7Input = engineInput([
-      observed("sep7-home-visit", "2026-09-07T15:34:04.000Z", 51.7478248, 0.4377503, {
+      observed("sep7-home-visit", "2026-09-07T15:34:04.000Z", 51.5, -0.1, {
         kind: "visit",
         endedAt: "2026-09-07T17:15:53.000Z",
         horizontalAccuracyMeters: 17.4
       }),
-      observed("sep7-home-support", "2026-09-07T16:32:19.376Z", 51.7477444, 0.4376642, {
+      observed("sep7-home-support", "2026-09-07T16:32:19.376Z", 51.4999, -0.1001, {
         speedMetersPerSecond: 0.97,
         horizontalAccuracyMeters: 5.9
       }),
-      observed("sep7-route-1", "2026-09-07T17:16:26.566Z", 51.7475860, 0.4425964, {
+      observed("sep7-route-1", "2026-09-07T17:16:26.566Z", 51.4998, -0.095, {
         speedMetersPerSecond: 7.17,
         horizontalAccuracyMeters: 14.3
       }),
-      observed("sep7-route-2", "2026-09-07T17:17:24.000Z", 51.7433220, 0.4445868, {
+      observed("sep7-route-2", "2026-09-07T17:17:24.000Z", 51.4955, -0.093, {
         kind: "significant_change",
         horizontalAccuracyMeters: 64.3
       }),
-      observed("sep7-route-3", "2026-09-07T17:17:32.677Z", 51.7418055, 0.4451292, {
+      observed("sep7-route-3", "2026-09-07T17:17:32.677Z", 51.494, -0.0925, {
         speedMetersPerSecond: 1.82,
         horizontalAccuracyMeters: 23.2
       }),
-      observed("sep7-route-4", "2026-09-07T17:20:27.000Z", 51.7372388, 0.4621782, {
+      observed("sep7-route-4", "2026-09-07T17:20:27.000Z", 51.4895, -0.0755, {
         kind: "visit",
         horizontalAccuracyMeters: 26
       }),
-      observed("sep7-route-5", "2026-09-07T17:22:27.000Z", 51.7354769, 0.4662860, {
+      observed("sep7-route-5", "2026-09-07T17:22:27.000Z", 51.4877, -0.0715, {
         kind: "significant_change",
         horizontalAccuracyMeters: 38.6
       }),
-      observed("sep7-route-6", "2026-09-07T17:25:58.637Z", 51.7381745, 0.4623655, {
+      observed("sep7-route-6", "2026-09-07T17:25:58.637Z", 51.4904, -0.0754, {
         horizontalAccuracyMeters: 4.7
       }),
-      observed("sep7-route-7", "2026-09-07T17:27:32.654Z", 51.7395674, 0.4561358, {
+      observed("sep7-route-7", "2026-09-07T17:27:32.654Z", 51.4918, -0.0816, {
         horizontalAccuracyMeters: 18.3
       }),
-      observed("sep7-route-8", "2026-09-07T17:28:27.642Z", 51.7404385, 0.4507933, {
+      observed("sep7-route-8", "2026-09-07T17:28:27.642Z", 51.4926, -0.087, {
         speedMetersPerSecond: 8.67,
         horizontalAccuracyMeters: 23.7
       }),
-      observed("sep7-return-visit", "2026-09-07T17:30:30.000Z", 51.7479440, 0.4378930, {
+      observed("sep7-return-visit", "2026-09-07T17:30:30.000Z", 51.5001, -0.0999, {
         kind: "visit",
         horizontalAccuracyMeters: 20
       }),
-      observed("sep7-return-support-1", "2026-09-07T17:31:39.999Z", 51.7478606, 0.4376910, {
+      observed("sep7-return-support-1", "2026-09-07T17:31:39.999Z", 51.5, -0.1001, {
         horizontalAccuracyMeters: 5
       }),
-      observed("sep7-return-support-2", "2026-09-07T17:32:37.000Z", 51.7478310, 0.4376834, {
+      observed("sep7-return-support-2", "2026-09-07T17:32:37.000Z", 51.5, -0.1001, {
         kind: "significant_change",
         horizontalAccuracyMeters: 5.4
       })
@@ -861,8 +903,18 @@ describe("Location Intelligence V2", () => {
     const commute = result.segmentUpserts.find((segment) => segment.kind === "commute");
 
     expect(stays).toHaveLength(2);
+    // 17:15:53 UTC is 18:15:53 BST. The previous GPS midpoint was
+    // 16:54:22.971 UTC (17:54:22 BST), over 21 minutes before departure.
+    expect(stays[0]).toMatchObject({
+      stoppedAt: "2026-09-07T17:15:53.000Z",
+      stopLowerBoundAt: "2026-09-07T17:15:53.000Z",
+      stopUpperBoundAt: "2026-09-07T17:15:53.000Z"
+    });
     expect(commute).toMatchObject({
       kind: "commute",
+      startedAt: "2026-09-07T17:15:53.000Z",
+      startLowerBoundAt: "2026-09-07T17:15:53.000Z",
+      startUpperBoundAt: "2026-09-07T17:15:53.000Z",
       qualificationReason: "same_place_meaningful_round_trip"
     });
     if (commute?.kind === "commute") {
