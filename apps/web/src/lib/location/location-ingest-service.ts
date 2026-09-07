@@ -156,19 +156,12 @@ export async function ingestLocationEvidence(
       );
     }
 
-    const semanticReplay = await replayAndEmitLocationSemantics(client, session, {
-      deviceId: batch.deviceId,
-      algorithmVersion: batch.algorithmVersion,
-      processingAt,
-      rollout
-    });
-    const replay = semanticReplay.replay;
     const warnings = [
       ...(classification.rejectedEvidence.length > 0
         ? [`${classification.rejectedEvidence.length} evidence item(s) were retained without coordinates for diagnostics.`]
         : []),
       ...(rollout.effectiveMode === "v2_shadow"
-        ? ["V2 shadow mode stored segments without emitting user-visible semantics."]
+        ? ["V2 shadow mode stored evidence without emitting user-visible semantics."]
         : []),
       ...(!rollout.clientAcknowledgedMode
         ? ["The client has not acknowledged the server rollout mode; V2 semantic output was suppressed."]
@@ -177,14 +170,13 @@ export async function ingestLocationEvidence(
           (rollout.effectiveMode === "v2_review" || rollout.effectiveMode === "v2_enabled") &&
           !rollout.semanticCutoverAt
         ? ["The client did not provide a semantic-mode cutover; V2 semantic output was suppressed."]
-        : []),
-      ...replay.diagnostics.warningCodes
+        : [])
     ];
     return {
       ok: true,
       duplicateBatch,
       acknowledgedEvidenceIds: batch.evidence.map((item) => item.clientEvidenceId),
-      segmentIds: [...replay.stayIds.keys(), ...replay.commuteIds.keys()],
+      segmentIds: [],
       replayVersion: batch.algorithmVersion,
       rolloutMode: rollout.effectiveMode,
       clientAcknowledgedMode: rollout.clientAcknowledgedMode,

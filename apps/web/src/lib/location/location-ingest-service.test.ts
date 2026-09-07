@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import {
   configureLocationTransaction,
@@ -22,5 +24,16 @@ describe("Location ingest transaction budgets", () => {
       "select set_config('statement_timeout', $1, true)",
       ["8000ms"]
     );
+  });
+
+  it("stores upload batches without replaying the full retained evidence set", () => {
+    const source = readFileSync(fileURLToPath(new URL("./location-ingest-service.ts", import.meta.url)), "utf8");
+    const ingest = source.slice(
+      source.indexOf("export async function ingestLocationEvidence"),
+      source.indexOf("export async function replayRetainedLocationEvidence")
+    );
+
+    expect(ingest).not.toContain("replayAndEmitLocationSemantics(");
+    expect(ingest).toContain("segmentIds: []");
   });
 });
