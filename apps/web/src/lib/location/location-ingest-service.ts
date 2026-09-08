@@ -14,7 +14,7 @@ import {
   type LocationSegment,
   type StaySegment
 } from "@dayframe/shared";
-import { pool } from "../db";
+import { withSyncTransaction, type SyncTransactionOptions } from "../sync-transaction";
 import type { RequestSession } from "../session";
 import { ensureCommuteCategoryId } from "../automatic-category-service";
 import { replayLocationEvidence } from "./location-replay-service";
@@ -57,7 +57,8 @@ export type LocationEvidenceIngestResult = {
 export async function ingestLocationEvidence(
   input: unknown,
   session: RequestSession,
-  processingAt = new Date().toISOString()
+  processingAt = new Date().toISOString(),
+  options: SyncTransactionOptions = {}
 ): Promise<LocationEvidenceIngestResult> {
   const batch = LocationEvidenceBatchRequestSchema.parse(input);
   const rollout = decideLocationRollout(
@@ -68,14 +69,13 @@ export async function ingestLocationEvidence(
   validateEvidenceTimes(batch, processingAt);
   const classification = classifyForStorage(batch, processingAt);
   const rejected = new Map(classification.rejectedEvidence.map((item) => [item.clientEvidenceId, item.reason]));
-  const client = await pool.connect();
-  try {
-    await client.query("begin");
-    await configureLocationTransaction(client);
+  return withSyncTransaction("location_evidence", async ({ client, phase }) => {
+    phase("owner_lock");
     await client.query(
       "select pg_advisory_xact_lock(hashtext($1), hashtext($2))",
       [session.workspaceId, session.userId]
     );
+    phase("effect");
     await client.query(
       `delete from location_evidence evidence
        using (
@@ -163,7 +163,6 @@ export async function ingestLocationEvidence(
       rollout
     });
     const replay = semanticReplay.replay;
-    await client.query("commit");
     const warnings = [
       ...(classification.rejectedEvidence.length > 0
         ? [`${classification.rejectedEvidence.length} evidence item(s) were retained without coordinates for diagnostics.`]
@@ -191,18 +190,14 @@ export async function ingestLocationEvidence(
       clientAcknowledgedMode: rollout.clientAcknowledgedMode,
       warnings
     };
-  } catch (error) {
-    await client.query("rollback");
-    throw error;
-  } finally {
-    client.release();
-  }
+  }, options);
 }
 
 export async function replayRetainedLocationEvidence(
   input: unknown,
   session: RequestSession,
-  processingAt = new Date().toISOString()
+  processingAt = new Date().toISOString(),
+  options: SyncTransactionOptions = {}
 ): Promise<LocationReplayResponse> {
   const request = LocationReplayRequestSchema.parse(input);
   validateSemanticAcknowledgementTime(request.semanticModeAcknowledgedAt, processingAt);
@@ -211,21 +206,19 @@ export async function replayRetainedLocationEvidence(
     request.rolloutMode,
     request.semanticModeAcknowledgedAt
   );
-  const client = await pool.connect();
-  try {
-    await client.query("begin");
-    await configureLocationTransaction(client);
+  return withSyncTransaction("location_evidence", async ({ client, phase }) => {
+    phase("owner_lock");
     await client.query(
       "select pg_advisory_xact_lock(hashtext($1), hashtext($2))",
       [session.workspaceId, session.userId]
     );
+    phase("effect");
     const semanticReplay = await replayAndEmitLocationSemantics(client, session, {
       deviceId: request.deviceId,
       algorithmVersion: request.algorithmVersion,
       processingAt,
       rollout
     });
-    await client.query("commit");
     return {
       ok: true,
       replayVersion: request.algorithmVersion,
@@ -235,12 +228,7 @@ export async function replayRetainedLocationEvidence(
       semanticSegmentCount: semanticReplay.semanticSegmentCount,
       warnings: locationReplayWarnings(rollout, semanticReplay.replay.diagnostics.warningCodes)
     };
-  } catch (error) {
-    await client.query("rollback");
-    throw error;
-  } finally {
-    client.release();
-  }
+  }, options);
 }
 
 async function replayAndEmitLocationSemantics(

@@ -509,7 +509,7 @@ async function run() {
         timeoutEnvelope,
         session
       ),
-      isReviewItemLocked
+      (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "review_query_timeout")
     );
   } finally {
     await pool.query(
@@ -521,8 +521,8 @@ async function run() {
   }
   const timeoutDurationMs = Date.now() - timeoutStartedAt;
   assert(
-    timeoutDurationMs >= 7_000 && timeoutDurationMs < 10_000,
-    `Statement timeout did not respect the 8-second ceiling (${timeoutDurationMs}ms).`
+    timeoutDurationMs >= 2_500 && timeoutDurationMs < 5_000,
+    `Statement timeout did not respect the 3-second statement ceiling (${timeoutDurationMs}ms).`
   );
   const timeoutRollback = await pool.query<{
     entryCount: number;
@@ -563,11 +563,40 @@ async function run() {
   );
   assert.equal(timeoutRetry.status, "accepted");
 
+  await validateLogicalSleepReceipts();
+
   await validateComplexReviewMutations(session, CATEGORY_ID);
 
   console.log(
     "Review mutation database validation passed: atomic generic edit-and-confirm, tags, receipt/result commit, lost-response retry, equivalent/conflicting resolution, concurrent same/different mutations, deliberate advisory/row contention, bounded statement-timeout rollback, retry after contention, duplicate prevention, payload conflict, and workspace/user scoping."
   );
+}
+
+async function validateLogicalSleepReceipts() {
+  const originalEvent = await pool.query<{id:string}>(
+    `insert into activity_events (workspace_id,user_id,source,event_type,occurred_at,confidence,raw_payload,review_status)
+     values ($1,$2,'health_sleep','health_sleep_import','2026-09-02T22:00:00Z','high',$3::jsonb,'confirmed') returning id`,
+    [WORKSPACE_ID,USER_ID,JSON.stringify({provider:"healthkit",sourceName:"Synthetic Watch",samples:[{id:"synthetic-original"}],startedAt:"2026-09-02T22:00:00Z",stoppedAt:"2026-09-03T06:00:00Z"})]);
+  const original = await pool.query<{id:string}>(
+    `insert into time_entries(workspace_id,user_id,source,confidence,review_status,description,category_id,started_at,stopped_at,created_from_event_id)
+     values($1,$2,'health_sleep','high','confirmed','Preserved Sleep',$3,'2026-09-02T22:00:00Z','2026-09-03T06:00:00Z',$4) returning id`,
+    [WORKSPACE_ID,USER_ID,CATEGORY_ID,originalEvent.rows[0].id]);
+  const item = await createReview(USER_ID,80,"2026-09-02T22:00:00Z","2026-09-03T07:00:00Z");
+  await pool.query(`update activity_events set source='health_sleep',event_type='health_sleep_import',raw_payload=$3::jsonb
+    where workspace_id=$1 and user_id=$2 and id=(select event_id from review_items where id=$4)`,
+    [WORKSPACE_ID,USER_ID,JSON.stringify({provider:"healthkit",sourceName:"Synthetic Watch",samples:[{id:"synthetic-revision"}],startedAt:"2026-09-02T22:00:00Z",stoppedAt:"2026-09-03T07:00:00Z"}),item]);
+  const first=await resolveIdempotentReviewMutation(item,{clientMutationId:"51000000-0000-4000-8000-000000000081",mutation:{action:"accept"}},session);
+  assert.equal(first.entryId,original.rows[0].id);
+  const second=await resolveIdempotentReviewMutation(item,{clientMutationId:"51000000-0000-4000-8000-000000000082",mutation:{action:"accept"}},session);
+  assert.equal(second.status,"accepted");
+  assert.equal((await pool.query("select count(*)::int as count from time_entries where workspace_id=$1 and user_id=$2 and source='health_sleep'",[WORKSPACE_ID,USER_ID])).rows[0].count,1);
+  const saved=await pool.query("select description,category_id,stopped_at from time_entries where id=$1",[original.rows[0].id]);
+  assert.equal(saved.rows[0].description,"Preserved Sleep");assert.equal(saved.rows[0].category_id,CATEGORY_ID);
+  // A later user edit must survive authoritative replay of either receipt.
+  await pool.query("update time_entries set description='User changed this',user_edited_at=now() where id=$1",[original.rows[0].id]);
+  await resolveIdempotentReviewMutation(item,{clientMutationId:"51000000-0000-4000-8000-000000000081",mutation:{action:"accept"}},session);
+  assert.equal((await pool.query("select description from time_entries where id=$1",[original.rows[0].id])).rows[0].description,"User changed this");
+  console.log("PASS explicit logical Sleep provenance, two equivalent receipts, one preserved entry, later edit survives receipt replay");
 }
 
 run()

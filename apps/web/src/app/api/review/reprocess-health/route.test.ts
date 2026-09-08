@@ -51,7 +51,7 @@ describe("POST /api/review/reprocess-health", () => {
     });
     expect(mocks.reprocessHealthReviewItems).toHaveBeenCalledWith(
       { preferences: { walking: true } },
-      session
+      session, expect.objectContaining({ signal: expect.any(AbortSignal), deadlineAt: expect.any(Number) })
     );
   });
 
@@ -108,11 +108,11 @@ describe("POST /api/review/reprocess-health", () => {
     });
     expect(mocks.reprocessHealthReviewItems).toHaveBeenCalledWith(
       { preferences: { walking: true }, limit: 12 },
-      session
+      session, expect.objectContaining({ signal: expect.any(AbortSignal), deadlineAt: expect.any(Number) })
     );
   });
 
-  it("returns structured JSON when review rows are temporarily locked", async () => {
+  it("returns structured JSON when a query is cancelled without proof of a row lock", async () => {
     mocks.reprocessHealthReviewItems.mockRejectedValueOnce(
       Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" })
     );
@@ -120,10 +120,10 @@ describe("POST /api/review/reprocess-health", () => {
     const response = await POST(jsonRequest({ preferences: { walking: true } }));
     const payload = await response.json();
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(503);
     expect(payload).toMatchObject({
       ok: false,
-      code: "review_reprocess_busy"
+      code: "health_reprocess_timeout"
     });
   });
 });
