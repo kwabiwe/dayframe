@@ -5,6 +5,7 @@
 - Plan: `dayframe_reports_implementation_plan.md`, revision 1, prepared 2026-09-08.
 - Baseline: `origin/main` at `439601c64880fe7bc4bc4618920149b0ce85e341`.
 - Branch/worktree: `codex/reports-stage-a` in an isolated worktree.
+- Pull request: #194, open and not merged.
 - Scope: mobile Reports polish, category filtering, small chart/control primitives, and additive bounded bootstrap coverage metadata only.
 - Explicitly unchanged: Today, Calendar, Review mutations/presentation, Health and Location capture, timer mutations, durable queues, native code, persistence, and roadmap Stages B–D.
 
@@ -55,7 +56,8 @@ The implementation keeps the existing entry-array limits and fetches only one ad
 ### Staging and device evidence
 
 - Local iOS simulator interaction: **NOT RUN to acceptance**. The app shell rendered on the iOS 26.5 Dayframe Sheet QA SE simulator, but the unsigned app could not recover or clear its session because Expo SecureStore reported a missing Keychain entitlement. Reports therefore had no authenticated projected bootstrap; no chart/filter or motion claim is made from that run.
-- Vercel PR Preview and stable staging promotion: **NOT RUN** pending PR publication and independent review.
+- Vercel PR Preview: the first committed implementation head `a40a4ee0ad33607b8315831a8f4001f7a192bdb9` produced a successful Preview at `https://dayframe-r7vzs3ur0-dayframeworkshop.vercel.app`; unauthenticated HTTP smoke returned 200 for `/`, `/reports`, `/timeline` and `/review`, and the expected 401 for `/api/bootstrap`. This is not authenticated browser or mobile evidence. The stable staging alias was **NOT PROMOTED** because independent review was not complete.
+- Independent Claude review/re-review: **BLOCKED / NOT RUN**. Claude Code 2.1.220 was installed, but its OAuth session was expired and could not refresh. OpenClaw 2026.9.2 had no Claude provider/model route configured, so no substitute Claude review was claimed.
 - Signed `com.layereight.dayframe.staging` build and signed host/extension audit: **NOT RUN**.
 - Physical-iPhone acceptance matrix, VoiceOver, Dynamic Type, Light/Dark/System, scroll/touch/motion recordings, filter-to-paint and warm-paint timings, timer/Review/Health/Location/sync regression: **NOT RUN**. Xcode listed the available physical iPhone targets as offline during this implementation session.
 - Browser smoke against the exact Preview at desktop and phone widths: **NOT RUN** pending Preview.
