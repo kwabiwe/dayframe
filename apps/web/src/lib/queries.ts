@@ -214,6 +214,7 @@ export type BootstrapData = {
   historyEntries: TimeEntryRow[];
   dayEntries: TimeEntryRow[];
   weekEntries: TimeEntryRow[];
+  entryCoverage?: BootstrapEntryCoverage;
   activeEntry: TimeEntryRow | null;
   reviewItems: ReviewItemRow[];
   activityEvents: ActivityRow[];
@@ -223,6 +224,63 @@ export type BootstrapData = {
   todaySeries: DashboardSeriesPoint[];
   weekSeries: DashboardSeriesPoint[];
 };
+
+export type EntryWindowCoverage = {
+  from: string;
+  toExclusive: string;
+  limit: number;
+  hasMore: boolean;
+};
+
+export type BootstrapEntryCoverage = {
+  capturedAt: string;
+  dayEntries: EntryWindowCoverage;
+  weekEntries: EntryWindowCoverage;
+  historyEntries: EntryWindowCoverage;
+};
+
+export const BOOTSTRAP_ENTRY_LIMITS = {
+  day: 100,
+  week: 300,
+  history: 2000
+} as const;
+
+export function trimBootstrapEntryWindow<T>(rows: readonly T[], limit: number) {
+  return { entries: rows.slice(0, limit), hasMore: rows.length > limit };
+}
+
+export function bootstrapEntryFetchLimit(kind: keyof typeof BOOTSTRAP_ENTRY_LIMITS) {
+  return BOOTSTRAP_ENTRY_LIMITS[kind] + 1;
+}
+
+export function buildBootstrapEntryCoverage(input: {
+  capturedAt: string;
+  dateRange: DashboardDateRange;
+  historyStart: string;
+  hasMore: { day: boolean; week: boolean; history: boolean };
+}): BootstrapEntryCoverage {
+  return {
+    capturedAt: input.capturedAt,
+    dayEntries: {
+      from: input.dateRange.dayStart,
+      toExclusive: input.dateRange.dayEnd,
+      limit: BOOTSTRAP_ENTRY_LIMITS.day,
+      hasMore: input.hasMore.day
+    },
+    weekEntries: {
+      from: input.dateRange.weekStart,
+      toExclusive: input.dateRange.weekEnd,
+      limit: BOOTSTRAP_ENTRY_LIMITS.week,
+      hasMore: input.hasMore.week
+    },
+    historyEntries: {
+      from: input.historyStart,
+      toExclusive: input.dateRange.dayEnd,
+      limit: BOOTSTRAP_ENTRY_LIMITS.history,
+      hasMore: input.hasMore.history
+    }
+  };
+}
 
 export async function getBootstrapData(
   session: RequestSession = getDevSession(),
@@ -242,9 +300,9 @@ export async function getBootstrapData(
     learnedPlaces,
     automationRules,
     entries,
-    historyEntries,
-    dayEntries,
-    weekEntries,
+    historyEntriesWithOverflow,
+    dayEntriesWithOverflow,
+    weekEntriesWithOverflow,
     activeEntry,
     reviewItems,
     activityEvents,
@@ -265,19 +323,19 @@ export async function getBootstrapData(
     getTimeEntries(session, {
       overlappingFrom: historyStart,
       startedBefore: dateRange.dayEnd,
-      limit: 2000,
+      limit: bootstrapEntryFetchLimit("history"),
       capturedNow
     }),
     getTimeEntries(session, {
       overlappingFrom: dateRange.dayStart,
       startedBefore: dateRange.dayEnd,
-      limit: 100,
+      limit: bootstrapEntryFetchLimit("day"),
       capturedNow
     }),
     getTimeEntries(session, {
       overlappingFrom: dateRange.weekStart,
       startedBefore: dateRange.weekEnd,
-      limit: 300,
+      limit: bootstrapEntryFetchLimit("week"),
       capturedNow
     }),
     getActiveEntry(session),
@@ -287,6 +345,13 @@ export async function getBootstrapData(
     getTaskSuggestions(session),
     getDashboardStats(session, dateRange, capturedNow)
   ]);
+
+  const historyWindow = trimBootstrapEntryWindow(historyEntriesWithOverflow, BOOTSTRAP_ENTRY_LIMITS.history);
+  const dayWindow = trimBootstrapEntryWindow(dayEntriesWithOverflow, BOOTSTRAP_ENTRY_LIMITS.day);
+  const weekWindow = trimBootstrapEntryWindow(weekEntriesWithOverflow, BOOTSTRAP_ENTRY_LIMITS.week);
+  const historyEntries = historyWindow.entries;
+  const dayEntries = dayWindow.entries;
+  const weekEntries = weekWindow.entries;
 
   const capturedAt = new Date(capturedNow);
   const todayCoverage = analyzeTimeIntervals(
@@ -329,6 +394,12 @@ export async function getBootstrapData(
     historyEntries,
     dayEntries,
     weekEntries,
+    entryCoverage: buildBootstrapEntryCoverage({
+      capturedAt: capturedNow,
+      dateRange,
+      historyStart,
+      hasMore: { day: dayWindow.hasMore, week: weekWindow.hasMore, history: historyWindow.hasMore }
+    }),
     activeEntry,
     reviewItems,
     activityEvents,
@@ -741,7 +812,7 @@ export function buildTimeEntriesQuery(
      left join categories cat on cat.id = te.category_id and cat.workspace_id = te.workspace_id
      left join places pl on pl.id = te.place_id and pl.workspace_id = te.workspace_id
      where ${where.join(" and ")}
-     order by te.started_at desc
+     order by te.started_at desc, te.id desc
      limit $${values.length}`,
     values
   };

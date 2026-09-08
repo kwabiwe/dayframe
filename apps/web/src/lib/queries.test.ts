@@ -1,9 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  BOOTSTRAP_ENTRY_LIMITS,
+  bootstrapEntryFetchLimit,
+  buildBootstrapEntryCoverage,
   buildTimeEntriesQuery,
   getCategoryUsageRanks,
   getNormalizationContext,
-  getTaskSuggestions
+  getTaskSuggestions,
+  trimBootstrapEntryWindow
 } from "./queries";
 import type { RequestSession } from "./session";
 
@@ -205,6 +209,7 @@ describe("time-entry range query", () => {
     expect(statement.text).toContain('te.updated_at as "updatedAt"');
     expect(statement.text).toContain('coalesce(pl.name, te.place_label) as "placeName"');
     expect(statement.text).toContain('end as "placeKind"');
+    expect(statement.text).toContain("order by te.started_at desc, te.id desc");
     expect(statement.values).toEqual([
       session.workspaceId,
       session.userId,
@@ -213,5 +218,56 @@ describe("time-entry range query", () => {
       "2026-07-27T00:00:00.000Z",
       300
     ]);
+  });
+
+  it("keeps the public bootstrap caps and uses one overflow row only for hasMore", () => {
+    expect(BOOTSTRAP_ENTRY_LIMITS).toEqual({ day: 100, week: 300, history: 2000 });
+    expect(bootstrapEntryFetchLimit("day")).toBe(101);
+    expect(bootstrapEntryFetchLimit("week")).toBe(301);
+    expect(bootstrapEntryFetchLimit("history")).toBe(2001);
+    expect(trimBootstrapEntryWindow(Array.from({ length: 100 }, (_, id) => id), 100)).toEqual({
+      entries: Array.from({ length: 100 }, (_, id) => id),
+      hasMore: false
+    });
+    const overflow = trimBootstrapEntryWindow(Array.from({ length: 101 }, (_, id) => id), 100);
+    expect(overflow.entries).toHaveLength(100);
+    expect(overflow.hasMore).toBe(true);
+  });
+
+  it("describes the exact captured query windows without changing their caps", () => {
+    expect(buildBootstrapEntryCoverage({
+      capturedAt: "2026-09-08T12:34:56.000Z",
+      dateRange: {
+        selectedDate: "2026-09-08",
+        previousDate: "2026-09-07",
+        nextDate: "2026-09-09",
+        dayStart: "2026-09-07T23:00:00.000Z",
+        dayEnd: "2026-09-08T23:00:00.000Z",
+        weekStart: "2026-09-06T23:00:00.000Z",
+        weekEnd: "2026-09-13T23:00:00.000Z"
+      },
+      historyStart: "2026-07-10T23:00:00.000Z",
+      hasMore: { day: false, week: true, history: false }
+    })).toEqual({
+      capturedAt: "2026-09-08T12:34:56.000Z",
+      dayEntries: {
+        from: "2026-09-07T23:00:00.000Z",
+        toExclusive: "2026-09-08T23:00:00.000Z",
+        limit: 100,
+        hasMore: false
+      },
+      weekEntries: {
+        from: "2026-09-06T23:00:00.000Z",
+        toExclusive: "2026-09-13T23:00:00.000Z",
+        limit: 300,
+        hasMore: true
+      },
+      historyEntries: {
+        from: "2026-07-10T23:00:00.000Z",
+        toExclusive: "2026-09-08T23:00:00.000Z",
+        limit: 2000,
+        hasMore: false
+      }
+    });
   });
 });

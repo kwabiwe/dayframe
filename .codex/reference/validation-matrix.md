@@ -248,6 +248,14 @@ Required checks:
 - Verify hybrid Calendar geometry: full-width isolated blocks, inset overlays only for substantially shorter contained pairs, lanes for partial/similar pairs, compact lanes for dense collisions, width-aware text suppression, deterministic z-order, and taps reaching the intended visible block.
 - Verify `Total logged`, `Time covered`, overlap markers, and goal-covered semantics across Dashboard, Timeline/History, Reports, and Settings copy.
 
+Mobile Reports Stage A additionally requires:
+
+- Pure tests for All/include selection and draft Apply/Cancel/empty/reset/refresh; stable Uncategorized, missing and same-name category IDs; all-versus-selected donut denominators; selected interval-union coverage; shared 59/60-second overlap boundary; cross-midnight and DST day clipping; active-entry deduplication; invalid/Review-needed exclusion; nine/fifteen categories; and partial/unknown source coverage.
+- Query/contract tests that day/week/history limits remain 100/300/2,000, only one overflow row is requested to derive `hasMore`, the returned arrays stay capped, windows share one captured instant, ordering has an ID tie-break, and workspace/user predicates remain unchanged. Cache round-trip must preserve optional metadata without a new SQLite schema.
+- Component checks for matching 44-point segmented controls, growable compact cards, Pie/legend filtering, non-action category bars, zero-height zero data, filter draft dismissal/focus return, no network request on filter/view changes, and distinct definitive-empty versus partial/unknown copy.
+- Motion checks for eager unfocused mount, first focused populated entrance, zero-data deferral, ordinary return/refresh/range/filter/theme updates, rapid replacement, blur/background, owner replacement and Reduce Motion. Record a simulator video for the local transitions and physical-iPhone results for frame pacing, VoiceOver/Dynamic Type, System/Light/Dark, scrolling and lifecycle interruption.
+- Signed acceptance uses the exact Ready Preview promoted to `https://dayframe-staging.vercel.app`, staging Supabase, and `com.layereight.dayframe.staging`. Record device, app build, PR SHA, Preview source, filter-to-paint and warm-paint timings, plus PASS/FAIL/NOT RUN for timer Start/Stop/Switch/Edit/Delete/Undo, Review exclusion, Health/Location, reconnect, native tabs/Calendar and account replacement. Do not infer any of these from automated tests or a Vercel build.
+
 Native Calendar evidence:
 
 - Run deterministic TypeScript bridge/serialization tests and Swift unit tests for native date clipping, block metrics, zoom bounds/state restoration, and callback identity where those helpers live.

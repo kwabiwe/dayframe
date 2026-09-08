@@ -40,7 +40,7 @@ describe("secure session startup contract", () => {
   it("preserves the entered password when the accepted session is rejected during opening", () => {
     const signedOutTransition = dashboardSource.slice(
       dashboardSource.indexOf("const transitionToSignedOut"),
-      dashboardSource.indexOf("const changeReportRange")
+      dashboardSource.indexOf("async function hydrateTimerEntryIdCorrelations")
     );
     const loadAuthFailure = dashboardSource.slice(
       dashboardSource.indexOf("const load = useCallback"),

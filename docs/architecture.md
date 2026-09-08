@@ -20,6 +20,8 @@ Web and iOS bootstrap/read models <──── workspace/user-scoped Postgres q
 - `packages/db/migrations` is the ordered local Postgres/PostGIS schema history. `packages/db/scripts/setup.ts` applies every SQL migration in filename order, then seed data.
 - `supabase/migrations` is the ordered hosted Supabase migration history, including RLS, hosted indexes/functions, tags, location, Review receipts, Health reconciliation, and Live Activity delivery.
 
+Bootstrap keeps its existing bounded day/week/history entry arrays at 100/300/2,000 rows. The server reads at most one additional row for each window and returns optional `entryCoverage` metadata with the captured instant, source window, limit, and `hasMore` result. Older clients ignore it and older account-owned cached snapshots may lack it. Mobile Reports unions the already projected arrays by entry ID, gives the projected active entry precedence, and uses only untruncated contiguous coverage windows to call a report complete; filters never upgrade partial coverage. This adds no report fetch path, cache, persistence table, or sync owner.
+
 ## Event-first write model
 
 Every newly captured signal must have an `activity_events` record before it creates a `time_entries` record. This includes web/mobile starts and stops, completed manual entries, HealthKit imports, geofence/location evidence summaries, Shortcuts/App Intents, and private integration ingest.
@@ -62,6 +64,8 @@ Every protected route resolves a `RequestSession` before data access. Personal r
 ## Mobile ownership boundaries
 
 React Native owns authentication, bootstrap data, routing, API mutations, offline reconciliation, timer truth, and sheet presentation. Targeted Swift/SwiftUI modules receive serializable presentation data and emit semantic actions; they must not call Dayframe APIs or maintain a second domain store.
+
+The extracted mobile Reports component is a presentation consumer of that React-owned bootstrap and clock. Its Today/Week, Pie/Bars, category selection, filter draft, and first-presentation motion state are ephemeral and keyed by backend/workspace/user identity. It performs no fetch, mutation, queue, Health/Location interpretation, or timer projection.
 
 Offline storage is intentionally split by responsibility:
 

@@ -180,6 +180,13 @@ Timeline/review:
 - Timesheet view with weekly grouped totals.
 - Review inbox for suggestions, ignored items, and rule creation.
 
+Mobile Reports:
+
+- Today and current-week totals distinguish Total logged from unique Time covered while preserving the shared meaningful-overlap rule.
+- One local multi-category selection filters totals, coverage, overlap copy, category bars, and current-week Daily bars. Pie geometry retains all eligible category time as context and dims excluded categories instead of renormalising them away.
+- Confirmed running entries contribute through the current captured time. Review suggestions and entries that still need Review do not contribute.
+- Cross-midnight entries are clipped into each device-local calendar day. Bounded or metadata-free bootstrap sources remain usable but are labelled partial or unknown rather than presented as definitive.
+
 Automation:
 
 - Trusted-place auto-start.
