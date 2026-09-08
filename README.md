@@ -10,6 +10,7 @@ The core invariant is event-first tracking: newly captured signals become `activ
 - Runtime and data ownership: [`docs/architecture.md`](docs/architecture.md)
 - Current shipped/watch/decision state: [`docs/feature-fix-tracker.md`](docs/feature-fix-tracker.md)
 - Documentation ownership: [`docs/documentation-governance.md`](docs/documentation-governance.md)
+- Temporary Review and Reports UX programme coordination (not canonical delivery status): [`docs/roadmaps/review-ux-roadmap.md`](docs/roadmaps/review-ux-roadmap.md)
 - Brand and UI system: [`docs/brand-style-guide.md`](docs/brand-style-guide.md)
 - Hosted deployment: [`docs/vercel-supabase-hosting.md`](docs/vercel-supabase-hosting.md)
 - Regression contract: [`docs/dayframe-regression-checklist.md`](docs/dayframe-regression-checklist.md)
