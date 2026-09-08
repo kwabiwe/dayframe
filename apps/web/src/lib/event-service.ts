@@ -57,6 +57,7 @@ import {
   healthCategorySpecForEventType,
   type AutomaticLoggingCategoryKind
 } from "./automatic-category-service";
+import { getServerLocationRolloutMode } from "./location/location-rollout";
 
 export type { AutomaticLoggingCategoryKind } from "./automatic-category-service";
 
@@ -226,6 +227,19 @@ const LOCATION_LEARNING_MIGRATION = "supabase/migrations/202607140001_location_l
 const DEFAULT_HEALTH_REPROCESS_BATCH_SIZE = 12;
 const MAX_HEALTH_REPROCESS_BATCH_SIZE = 25;
 const LEGACY_SLEEP_CONSOLIDATION_BATCH_SIZE = 120;
+
+const LEGACY_LOCATION_EVENT_TYPES = new Set<ActivityEventType>([
+  "geofence_enter",
+  "geofence_exit",
+  "unknown_stay",
+  "learned_place_visit",
+  "commute_detected"
+]);
+
+function isLegacyLocationSemanticInput(event: ReturnType<typeof ActivityEventInputSchema.parse>) {
+  return LEGACY_LOCATION_EVENT_TYPES.has(event.type) &&
+    ["geofence_specific", "geofence_broad", "location_learning"].includes(event.source);
+}
 
 function missingCategoryPinColumnError(cause: unknown) {
   return missingRequiredColumnError("categories", "is_pinned", CATEGORY_PINS_MIGRATION, cause);
@@ -480,6 +494,16 @@ async function processActivityEventWithClient(
   if (boundedClient) setSyncPhase(boundedClient, "canonical_read");
   const context = await getNormalizationContext(session, boundedClient?.query);
   let candidate = normalizeActivityEvent(parsed, context);
+  const suppressLegacyLocationSemantics =
+    getServerLocationRolloutMode() !== "v1" && isLegacyLocationSemanticInput(parsed);
+  if (suppressLegacyLocationSemantics) {
+    candidate = {
+      ...candidate,
+      action: "record_only",
+      reviewStatus: "confirmed",
+      reason: "Legacy location evidence was retained for audit, but Location Intelligence V2 is authoritative."
+    };
+  }
   const stopScope = timerStopScope(parsed);
   if (stopScope.mode === "ignored_unscoped") {
     candidate = {
@@ -575,14 +599,14 @@ async function processActivityEventWithClient(
       };
     }
 
-    if (parsed.type === "commute_detected" && !candidate.categoryId) {
+    if (!suppressLegacyLocationSemantics && parsed.type === "commute_detected" && !candidate.categoryId) {
       candidate = {
         ...candidate,
         categoryId: await ensureCommuteCategoryId(client, session)
       };
     }
 
-    if (parsed.type === "learned_place_visit" && await hasIgnoredLearnedPlaceCluster(client, parsed, session)) {
+    if (!suppressLegacyLocationSemantics && parsed.type === "learned_place_visit" && await hasIgnoredLearnedPlaceCluster(client, parsed, session)) {
       candidate = {
         ...candidate,
         action: "record_only",
@@ -925,6 +949,7 @@ async function processActivityEventWithClient(
     }
 
     if (
+      !suppressLegacyLocationSemantics &&
       parsed.type === "learned_place_visit" &&
       candidate.reviewStatus !== "ignored" &&
       classifyLocationLearningEvidence(locationLearningEvidenceFromPayload(parsed.rawPayload)).kind === "place_candidate"

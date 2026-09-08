@@ -4,9 +4,9 @@ Use this when changing Expo background sampling, learned-place events, `learned_
 
 ## Location Intelligence V2 architecture
 
-`packages/shared/src/location/` owns the deterministic `location-v2.0` evidence, matching, segmentation, commute, DTO, and fixture contracts. Thresholds live only in `LOCATION_ENGINE_V2_CONFIG`. Both the account-isolated mobile SQLite journal and the server replay service call the same pure engine. V1 learned-cluster classification below remains compatibility behavior during shadow rollout; do not mix its recurrence counters into V2 temporal continuity.
+`packages/shared/src/location/` owns the deterministic `location-v2.0` evidence, matching, segmentation, commute, DTO, and fixture contracts. Thresholds live only in `LOCATION_ENGINE_V2_CONFIG`. Both the account-isolated mobile SQLite journal and the server replay service call the same pure engine. V1 learned-cluster classification below applies only to explicit `v1` mode; do not mix its recurrence counters into V2 temporal continuity.
 
-Finalisation is time-driven as well as evidence-driven. After the ten-minute lag, mobile must re-run its local journal with current time and call the authenticated retained-evidence replay route even when there is no new upload. Evidence ingest and explicit replay must share one transaction, owner advisory lock, rollout acknowledgement/cutover check, semantic emitter, and idempotency path; never create a second replay implementation that can diverge.
+Finalisation is time-driven as well as evidence-driven. After the ten-minute lag, mobile must re-run its local journal with current time and call the authenticated retained-evidence replay route even when there is no new upload. Evidence ingest commits the event summary and evidence without semantic replay. Explicit replay has a separate bounded transaction under the same owner advisory lock and owns segmentation, the rollout acknowledgement/cutover check, semantic emission, and idempotency. An upload acknowledgement proves evidence durability only; replay failure must remain retryable even after the upload queue is empty.
 
 Evidence sources are Expo standard locations and geofences plus the local `dayframe-location-visits` module's `CLVisit`, significant-change, provider, pause, and resume signals. Native callbacks persist a bounded protected Application Support queue and perform no networking. JavaScript clears a native signal only after inserting it durably into SQLite. The complete saved/accepted-learned place catalogue is passed to matching even though iOS registers no more than 20 geofence regions.
 
@@ -19,6 +19,9 @@ Initial capture profile:
 - maximum accepted horizontal accuracy `200m`; matching allowance capped at `60m`.
 - saved dwell `5m`; unanchored candidate dwell `10m` with at least three samples; unknown review threshold `20m`.
 - continuity gap `12m`; finalisation lag `10m`; two corroborating outside samples.
+- a quiet reporting gap may bridge two parts of the same unknown stay for at
+  most `60m` when their centres remain within `120m` and no intervening route or
+  contradictory-place evidence exists; this is continuity, not a second visit.
 - raw evidence retention `7d`; upload batches at most 100 items.
 
 Temporal invariants:
@@ -27,15 +30,18 @@ Temporal invariants:
 - A later appearance at the same coordinates is not continuity. `A -> B -> A` is three stays.
 - An accepted different saved/learned place closes the current stay. A single noisy outside point does not; two corroborating outside points can.
 - A completed `CLVisit` can support a gap, but accepted intervening-place evidence breaks that support.
+- A completed Visit departure at or after the latest inside observation and at or before the transition is the exact stay stop and commute start, including both evidence bounds. Do not replace it with a midpoint to the first moving sample. Earlier contradictory-place evidence or later inside evidence invalidates that departure for the transition; keep the ordinary bounded estimate in those cases.
 - Initial geofence state is not an arrival. A bare geofence exit yields bounded uncertainty rather than a fabricated precise departure.
 - Boundaries retain lower/upper evidence bounds. Manual corrections use `continuity_status = manual` and canonical replay must not overwrite them.
 - Commutes represent meaningful travel between contiguous stays, not every
   movement between stationary clusters. Distinct endpoints normally need at
   least `800m` separation, or at least `1200m` of efficient route evidence
-  outside the `450m` local-movement band. Speed is corroboration only: at least
+  outside the `450m` local-movement band. A distant arrival with no departure
+  or route observation is not a commute. Speed is corroboration only: at least
   three accurate samples at or above `2.8m/s` are needed before faster movement
   is considered robust, and one spike never qualifies a local transition.
-- Evidence-backed same-known-place round trips remain valid when they contain
+- Evidence-backed same-place round trips, including unsaved endpoints within the
+  `450m` local-movement band, remain valid when they contain
   at least three route samples, `1800m` of route, `650m` excursion from the
   origin, and robust faster movement. This is the narrow exception to
   distinct endpoints established by PR #114; short same-site loops are not
@@ -55,12 +61,12 @@ Mobile uses `dayframe-location-v2.db` with WAL, foreign keys, a 5s busy timeout,
 
 One synchronisation pass drains at most five native chunks of 100 signals and uploads at most five ready batches in order. Permanent invalid batches may be skipped so later evidence can proceed; payload resizing, retryable transport/server failure, and authentication failure stop the pass. Foreground replay bypasses the ordinary five-minute replay throttle, concurrent requests coalesce, and diagnostics store only high-level counts, status, version, and timestamps.
 
-Server ingestion creates one coordinate-free `activity_events` batch summary, stores exact evidence in user-owned `location_evidence`, then replays segments in the same transaction. Evidence APIs require both workspace and user ownership and return `private, no-store`; raw evidence is never logged. Deletion removes exact evidence and cascading lineage while preserving derived summaries and entries.
+Server ingestion atomically creates one coordinate-free `activity_events` batch summary and stores exact evidence in user-owned `location_evidence`. Dedicated replay subsequently derives segments and semantics. Evidence APIs require both workspace and user ownership and return `private, no-store`; raw evidence is never logged. Deletion removes exact evidence and cascading lineage while preserving derived summaries and entries.
 
 Rollout has four server-authoritative modes, returned by bootstrap and acknowledged by the mobile client:
 
-- `v1`: stop and clear V2 capture; keep the previous geofence semantics.
-- `v2_shadow`: capture/replay V2 but emit no V2 review item or time-entry semantics; V1 remains active.
+- `v1`: deprecated explicit compatibility mode; stop and clear V2 capture and keep the previous geofence semantics. It is never a default or fallback.
+- `v2_shadow`: capture/replay V2 but emit no review item or time-entry semantics. V1 classification is also suppressed, so shadow is silent rather than a semantic fallback.
 - `v2_review`: suppress competing V1 location semantics and permit V2 stays/commutes that begin after the same-mode acknowledgement cutover to become review items only.
 - `v2_enabled`: apply the canonical automatic logging table in `docs/PRD.md`. Normal confidence is `medium_high`/`high`; each valid boundary width is at most five minutes. Trusted stays may coexist with manual/Health time; conflicts with another location stay or commute allow at most five minutes per existing entry. Standard commutes require two saved endpoints and two route samples with significant endpoint displacement or meaningful same-place round-trip qualification. The medium exception requires distinct saved endpoints, three accepted route samples and significant endpoint displacement/route distance. Both require actual internal gap at most twelve minutes and at most five minutes per confirmed/accepted overlap. Saved-stay defaults and category-only Commute semantics remain unchanged.
 
@@ -82,7 +88,7 @@ Reverse geocoding is display-only: use saved/learned identity first, invoke a pr
 
 Postgres retention is operational through Vercel Cron calling `GET /api/cron/location-retention` daily at `03:17 UTC`. The route fails closed unless its bearer token matches `CRON_SECRET`, returns `no-store`, calls the bounded service-role cleanup function under an advisory lock, and warns if a 50,000-row run limit leaves a backlog. Vercel Cron runs on production deployments only, so hosted verification must confirm the environment secret, database role/function grant, invocation logs, and next-day schedule. A failed invocation leaves evidence for the next run and is visible through the non-2xx route result and Vercel logs; it must never fall back to an unauthenticated deletion path.
 
-The checked-in/default rollout remains `v2_shadow` as a fail-closed fallback. Deploy the additive migration, then API/web, then the native TestFlight build. Production may activate `v2_review` or the owner-approved narrow `v2_enabled` policy through the server environment only after the corresponding code is deployed. A client must acknowledge the same mode before new segments can emit semantics. Roll back by changing the server mode to `v2_shadow` or `v1` before reverting runtime code. Additive tables may remain and confirmed V2 entries must not be deleted.
+The checked-in/default rollout remains `v2_shadow` as a fail-closed V2 mode. Missing, invalid, or stale configuration must never activate V1. Deploy the additive migration, then API/web, then the native build. Production may activate `v2_review` or the owner-approved narrow `v2_enabled` policy through the server environment only after the corresponding code is deployed. A client must acknowledge the same mode before new segments can emit semantics. Roll back within V2 by changing the server mode to `v2_shadow` or `v2_review`; do not reactivate V1. Additive tables may remain and confirmed V2 entries must not be deleted.
 
 ## Classification invariant
 

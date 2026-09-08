@@ -10,6 +10,7 @@ const runtimeSource = source("./runtime.ts");
 const storeSource = source("./store.ts");
 const dashboardSource = source("../../components/DayframeDashboard.tsx");
 const recoveryOwnerSource = source("../../components/ConnectivityRecoveryOwner.tsx");
+const geofenceSource = source("../geofence.ts");
 
 describe("location finalisation replay contracts", () => {
   it("reprocesses local evidence and forces one replay on foreground", () => {
@@ -32,6 +33,12 @@ describe("location finalisation replay contracts", () => {
     expect(runtimeSource).toContain("void syncLocationEvidence().catch(recordLocationStoreError)");
     expect(dashboardSource).toContain("await configureLocationIntelligence(bootstrap)");
     expect(dashboardSource).toContain("await refreshGeofencesForPlaces(bootstrap.places)");
+  });
+
+  it("keeps shared capture active while allowing legacy semantics only in explicit v1 mode", () => {
+    expect(geofenceSource.match(/if \(persisted\.rolloutMode !== "v1"\) return;/g)).toHaveLength(2);
+    expect(geofenceSource).toContain("await persistV2GeofenceEvidence");
+    expect(geofenceSource).toContain("await persistV2LocationBatch");
   });
 
   it("keeps replay diagnostics coordinate-free", () => {

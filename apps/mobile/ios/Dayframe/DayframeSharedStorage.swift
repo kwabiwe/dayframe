@@ -2,27 +2,6 @@ import Darwin
 import Foundation
 import Security
 
-enum DayframeSharedStorageConfiguration {
-  static let appGroupIdentifier = "group.com.layereight.dayframe"
-
-  static var keychainAccessGroup: String? {
-    guard
-      let value = Bundle.main.object(forInfoDictionaryKey: "DayframeSharedKeychainAccessGroup") as? String,
-      !value.isEmpty,
-      !value.contains("$(")
-    else {
-      return nil
-    }
-    return value
-  }
-
-  static var containerURL: URL? {
-    FileManager.default.containerURL(
-      forSecurityApplicationGroupIdentifier: appGroupIdentifier
-    )
-  }
-}
-
 enum DayframeShortcutDeliveryDiagnostic {
   case legacyUnscoped
   case started

@@ -136,7 +136,15 @@ export function summariseCommuteEvidence({
     // Persisted max_gap_seconds is integral. Round upward so a gap just beyond
     // the continuity ceiling cannot become eligible through rounding.
     maximumObservationGapSeconds: Math.ceil(maximumObservationGapMs / 1_000),
-    sameKnownPlace: sameKnownEndpoint(from, to),
+    // A real round trip can return to the same physical place even when that
+    // place has not been saved or learned yet. Keep the existing identity
+    // match, but also recognise endpoints whose centres are effectively
+    // co-located. Qualification below still requires a substantial sampled
+    // route, excursion, and credible faster movement.
+    sameKnownPlace:
+      sameKnownEndpoint(from, to) ||
+      (straightLineDistance != null &&
+        straightLineDistance <= config.commuteLocalMovementMaximumEndpointDistanceMeters),
     strongEndpoints: from.placeMatchKind !== "unknown" && to.placeMatchKind !== "unknown",
     hasCredibleFasterMovement:
       credibleFasterSampleCount >= config.commuteMinimumReliableSpeedSamples
@@ -178,11 +186,10 @@ export function qualifyCommuteCandidate(
 
   if (endpointDistance != null && endpointDistance >= config.commuteMinimumEndpointDistanceMeters) {
     if (summary.routeSampleCount === 0) {
-      return {
-        qualifies: true,
-        reason: "endpoint_only_significant_distance",
-        confidence: "low"
-      };
+      // Widely separated endpoint observations prove only that the device was
+      // later somewhere else. Without a departure or route observation, V2
+      // must not fabricate the missing journey.
+      return { qualifies: false, reason: "insufficient_evidence" };
     }
     const continuous =
       summary.maximumObservationGapSeconds * 1_000 <= config.maxContinuityGapMs;

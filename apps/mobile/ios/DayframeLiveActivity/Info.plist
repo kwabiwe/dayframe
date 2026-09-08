@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Dayframe</string>
+	<string>$(DAYFRAME_DISPLAY_NAME)</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -20,8 +20,10 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>DayframeSharedAppGroupIdentifier</key>
+	<string>$(DAYFRAME_APP_GROUP)</string>
 	<key>DayframeSharedKeychainAccessGroup</key>
-	<string>$(AppIdentifierPrefix)com.layereight.dayframe.shared</string>
+	<string>$(AppIdentifierPrefix)$(DAYFRAME_KEYCHAIN_GROUP)</string>
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionPointIdentifier</key>

@@ -208,7 +208,10 @@ TaskManager.defineTask(DAYFRAME_GEOFENCE_TASK, async ({ data, error }) => {
     return null;
   });
   if (!persisted) return;
-  if (persisted.rolloutMode === "v2_review" || persisted.rolloutMode === "v2_enabled") return;
+  // Expo geofences are shared capture infrastructure for V2. Once any V2 mode
+  // is active they must persist evidence only; the legacy visit classifier must
+  // never run as a semantic fallback (including in shadow mode).
+  if (persisted.rolloutMode !== "v1") return;
 
   await recordGeofenceTransition(transition, payload.region);
 });
@@ -230,7 +233,9 @@ TaskManager.defineTask(DAYFRAME_LOCATION_LEARNING_TASK, async ({ data, error }) 
     return null;
   });
   if (!persisted) return;
-  if (persisted.rolloutMode === "v2_review" || persisted.rolloutMode === "v2_enabled") return;
+  // The continuous Expo task feeds both pipelines, but V1 classification is
+  // permitted only in the explicit V1 mode.
+  if (persisted.rolloutMode !== "v1") return;
   const places = await readSavedPlaceCatalogue();
   for (const location of locations) {
     await recordLocationLearningSample(location, Object.values(places));

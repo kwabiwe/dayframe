@@ -120,14 +120,26 @@ describe("native Live Activity presentation contract", () => {
     expect(project.match(/DayframeSharedStorage\.swift in Sources/g)).toHaveLength(4);
     for (const entitlements of [hostEntitlements, extensionEntitlements]) {
       expect(entitlements).toContain("com.apple.security.application-groups");
-      expect(entitlements).toContain("group.com.layereight.dayframe");
+      expect(entitlements).toContain("$(DAYFRAME_APP_GROUP)");
       expect(entitlements).toContain("keychain-access-groups");
-      expect(entitlements).toContain("$(AppIdentifierPrefix)com.layereight.dayframe.shared");
+      expect(entitlements).toContain("$(AppIdentifierPrefix)$(DAYFRAME_KEYCHAIN_GROUP)");
     }
+    expect(project).toContain("DAYFRAME_APP_GROUP = group.com.layereight.dayframe.staging;");
+    expect(project).toContain("DAYFRAME_KEYCHAIN_GROUP = com.layereight.dayframe.staging.shared;");
 
     expect(sharedStorage).toContain("kSecAttrAccessGroup");
-    expect(sharedStorage).toContain("containerURL(");
-    expect(sharedStorage).toContain("forSecurityApplicationGroupIdentifier: appGroupIdentifier");
+    const storageConfiguration = readFileSync(
+      `${mobileRoot}ios/Dayframe/DayframeSharedStorageConfiguration.swift`, "utf8"
+    );
+    expect(project.match(/DayframeSharedStorageConfiguration\.swift in Sources/g)).toHaveLength(4);
+    expect(storageConfiguration).toContain("forSecurityApplicationGroupIdentifier: appGroupIdentifier");
+    expect(storageConfiguration).toContain('forInfoDictionaryKey: "DayframeSharedAppGroupIdentifier"');
+    expect(storageConfiguration).toContain("guard let appGroupIdentifier else { return nil }");
+    for (const path of ["Dayframe/Info.plist", "DayframeLiveActivity/Info.plist"]) {
+      expect(readFileSync(`${mobileRoot}ios/${path}`, "utf8")).toMatch(
+        /<key>DayframeSharedAppGroupIdentifier<\/key>\s*<string>\$\(DAYFRAME_APP_GROUP\)<\/string>/
+      );
+    }
     expect(sharedStorage).toContain("flock(descriptor, LOCK_EX)");
     expect(sharedStorage).toContain("options: .atomic");
     expect(sharedStorage).toContain("completeUntilFirstUserAuthentication");
@@ -161,7 +173,7 @@ describe("native Live Activity presentation contract", () => {
     expect(project).toContain("APS_ENVIRONMENT = development;");
     expect(project).toContain("APS_ENVIRONMENT = production;");
     expect(eas.build.preview.distribution).toBe("internal");
-    expect(eas.build.preview.ios.buildConfiguration).toBe("Release");
+    expect(eas.build.preview.ios.buildConfiguration).toBe("Staging");
     expect(eas.build.production.distribution).toBe("store");
     expect(eas.build.production.ios.buildConfiguration).toBe("Release");
   });

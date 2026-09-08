@@ -71,7 +71,7 @@ Offline storage is intentionally split by responsibility:
 - `apps/mobile/src/lib/timeEntryOutbox.ts`: account-owned offline Edit/Delete commands with bounded direct delivery, optimistic-ID dependencies, permanent/retryable classification, and a durable delivery hold for the existing Delete Undo window;
 - `apps/mobile/src/lib/reviewSyncStore.ts`: account-scoped downloaded Review state, resolving/structural Review outbox, and a validated private Location Evidence presentation cache capped at seven days, 25 items, and 5 MiB;
 - `apps/mobile/src/lib/location/store.ts`: protected Location V2 evidence journal, upload outbox, and bounded server-replay coordinator;
-- native App Group/Keychain storage: bounded Live Activity/App Intent hand-off data.
+- native App Group/Keychain storage: bounded Live Activity/App Intent hand-off data. Host and extension resolve `DayframeSharedAppGroupIdentifier` from the same `DAYFRAME_APP_GROUP` build setting as their entitlements. Native storage accepts only the group matching the baked bundle identity; absent, unresolved or cross-lane configuration returns no shared container, with no production fallback.
 
 These stores are not interchangeable. All resolving/structural Location actions use the Review outbox, including confirm/ignore, complete edit, change-place-and-confirm, record-once, one-time POI, save-place-and-confirm, split and merge variants. SQLite v5 atomically reserves one or both source IDs with account-owned snapshots and anchors; UI dismissal follows commit only. The direct pure `change_place` endpoint remains compatibility-only. Receipts commit with every Postgres side effect; ambiguous cross-device equivalence is a conflict. See `.codex/reference/offline-review-mutations.md`. Already-started durable timer Start/Switch/Stop/Edit/Delete work may share one native finite UIKit background assertion while it is actively transmitting. Native code owns exact-once identifier cleanup; expiry/logout/account replacement/cancellation/teardown release it while durable work stays queued. Review, Location Intelligence, and bootstrap remain foreground-owned. iOS promises neither connectivity nor background drain after expiry or explicit force-quit.
 
@@ -94,7 +94,7 @@ React projects pending Stop intents over cached/fetched bootstrap before publish
 - The Review SQLite database intentionally caches only the validated Location Evidence presentation DTO for the active account. It stores no bearer token or upload-journal copy, is pruned against canonical open Review IDs, expires at the earlier of server retention or seven days, enforces 25-item/5-MiB LRU bounds, and cascades on logout/account switch. Exact points therefore remain sensitive local data even though the cache is bounded.
 - Durable save-place intent necessarily retains the chosen bounded name/coordinate/radius and edits in the account-owned SQLite request until acknowledgement/conflict resolution. This is private intent, not a raw provider response, and must never appear in diagnostics.
 - Native Apple nearby/search responses remain transient presentation data. A one-time POI resolution crosses the API boundary as a trimmed name only; no Apple identifier, address, POI coordinate, or raw response is persisted.
-- Mobile reprocesses its local journal against current time and calls the private authenticated `/api/location/replay` route after foregrounding or a bounded periodic interval. The route reuses the same owner lock, deterministic engine, semantic cutover, and event-first transaction as evidence ingestion, so the ten-minute finalisation lag does not depend on a later location sample.
+- Mobile reprocesses its local journal against current time and calls the private authenticated `/api/location/replay` route after upload, foregrounding or a bounded periodic interval. Evidence ingestion commits its event summary and evidence first; replay uses a separate bounded transaction under the same owner lock to run the deterministic engine and apply semantic cutover. Upload acknowledgement does not imply replay success, and the ten-minute finalisation lag does not depend on a later location sample.
 - Retained exact location evidence is exported and deletable. Production retention is enforced through the protected Vercel cron route.
 - Health imports store only the data needed for sleep/workout reconciliation and Review. Debug export remains bounded and local to the user action.
 - Full account/workspace deletion and backup-retention semantics are still a product decision; do not imply they are complete.
@@ -107,7 +107,7 @@ React projects pending Stop intents over cached/fetched bootstrap before publish
 - EAS `preview`: stable staging API.
 - EAS `production` and TestFlight: production API.
 
-Preview and production currently share one iOS bundle identity. Installing Preview can replace the installed TestFlight app; the separate staging identity remains an explicit future decision.
+Preview uses a separate `com.layereight.dayframe.staging` iOS identity, isolated shared containers and the staging API. Production/TestFlight remains `com.layereight.dayframe`, allowing both apps to coexist on one device without sharing authentication, queues or extension state.
 
 ## Change checklist
 

@@ -34,6 +34,8 @@ export type LocationEngineConfig = {
   visitContinuityMaximumTransitionMs: number;
   visitContinuityMaximumRouteDistanceMeters: number;
   visitContinuityPedestrianSpeedThresholdMps: number;
+  sparseUnknownContinuityMaximumGapMs: number;
+  sparseUnknownContinuityMaximumDistanceMeters: number;
   rawEvidenceRetentionDays: number;
   maxEvidenceItemsPerUpload: number;
 };
@@ -80,6 +82,11 @@ export const LOCATION_ENGINE_V2_CONFIG: LocationEngineConfig = {
   visitContinuityMaximumTransitionMs: 2_700_000,
   visitContinuityMaximumRouteDistanceMeters: 1_200,
   visitContinuityPedestrianSpeedThresholdMps: 2.5,
+  // Core Location commonly goes quiet during a stationary visit. Two parts of
+  // the same tight unknown cluster may bridge this bounded quiet period only
+  // when there is no contradictory route/place evidence between them.
+  sparseUnknownContinuityMaximumGapMs: 3_600_000,
+  sparseUnknownContinuityMaximumDistanceMeters: 120,
   rawEvidenceRetentionDays: 7,
   maxEvidenceItemsPerUpload: 100
 };
