@@ -41,6 +41,8 @@ PODS:
     - ExpoModulesCore
   - ExpoClipboard (56.0.4):
     - ExpoModulesCore
+  - ExpoCrypto (56.0.5):
+    - ExpoModulesCore
   - ExpoDomWebView (56.0.6):
     - ExpoModulesCore
   - ExpoFileSystem (56.0.9):
@@ -2399,6 +2401,7 @@ DEPENDENCIES:
   - Expo (from `../../../node_modules/expo`)
   - ExpoAsset (from `../../../node_modules/expo-asset/ios`)
   - ExpoClipboard (from `../../../node_modules/expo-clipboard/ios`)
+  - ExpoCrypto (from `../../../node_modules/expo-crypto/ios`)
   - "ExpoDomWebView (from `../../../node_modules/@expo/dom-webview/ios`)"
   - ExpoFileSystem (from `../../../node_modules/expo-file-system/ios`)
   - ExpoFont (from `../../../node_modules/expo-font/ios`)
@@ -2526,6 +2529,8 @@ EXTERNAL SOURCES:
     :path: "../../../node_modules/expo-asset/ios"
   ExpoClipboard:
     :path: "../../../node_modules/expo-clipboard/ios"
+  ExpoCrypto:
+    :path: "../../../node_modules/expo-crypto/ios"
   ExpoDomWebView:
     :path: "../../../node_modules/@expo/dom-webview/ios"
   ExpoFileSystem:
@@ -2750,6 +2755,7 @@ SPEC CHECKSUMS:
   Expo: b06a9178293f86989516ee226c240605fb307d12
   ExpoAsset: 87b14d63c50edc7a07f6e99128c0832c03ef2bad
   ExpoClipboard: 342ae52697ff1cf89b8849bee624a9a320e77d3c
+  ExpoCrypto: cfd62630036e9bb983bcde73d564be3dbe47ceb2
   ExpoDomWebView: 4e53b05879dc73ba374f76bff93dd64c8a0d91b3
   ExpoFileSystem: fcd66cde377289cd8eeade5b307f742bd1d6bdfa
   ExpoFont: 274487aa78f8c65d6551e2558eca3ec6ce3432ce
@@ -2770,7 +2776,7 @@ SPEC CHECKSUMS:
   ExpoTaskManager: 705d2ceb645d42cdb6485ec1ac1a01c95e01de6c
   ExpoUI: 664174621222257d368cfd3c5e68b9ed1d4cb165
   FBLazyVector: 24e62c765683b8d89006a88a2c8f5cf019f0074d
-  hermes-engine: 09739323f7cead7af0abcbb56a0f54d075aed978
+  hermes-engine: 9e3eb13efffa0edf08b2985cde4e44e991708330
   NitroModules: 16bc17a076b12304d608f7c915b9d321f56dfc19
   RCTDeprecation: a4c521821fab57cbb125b36effe84d897d0dfa12
   RCTRequired: 9f3a7e5645d4bc3f551593de7550bb66ab6e42bc
@@ -2780,7 +2786,7 @@ SPEC CHECKSUMS:
   React: e2dc35338068bbd299c66f043ae0d7f25de8499e
   React-callinvoker: 28b25d21b124c26cebaea713ba7d801b9351dc48
   React-Core: 02ed7d2ffb70437bdf2aba074a13078a7b0b9ff0
-  React-Core-prebuilt: 55aa2f742587aa240cfcc6b2d88638a2645c9e5a
+  React-Core-prebuilt: bb33f4e31eb03afbe1848d9811ac7a981e10dabf
   React-CoreModules: b3a5a42dadcde3b5d47b325bd912eb2ced89e146
   React-cxxreact: fe8f88dda044e5905e99a00f41b7a874c3908716
   React-debug: 92944dc4d89f56d640e75498266cbde557a48189
@@ -2845,7 +2851,7 @@ SPEC CHECKSUMS:
   ReactAppDependencyProvider: 25c9c516839be2c5e3d3344f95dc7da5f7e63fc2
   ReactCodegen: dfe41c3f92bdf782bcf9b2c9d7c12cb9cfd82cb7
   ReactCommon: 7dfc3250793bf36cf221096ff59e1179e13eef7f
-  ReactNativeDependencies: 52dff0943884e97d6362e39b6daa56dab4f16201
+  ReactNativeDependencies: f4e46791fd9617953f217deeca5eeec14aa420de
   ReactNativeHealthkit: af20857324ceab69398bfb08924bb136b77a70a4
   RNCAsyncStorage: 2ad919e88b8bc2cd80e8697ce66d04d006743283
   RNCMaskedView: eb2b2e538afa907f05a5848a1a1ac26092e6fec9

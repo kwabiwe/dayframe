@@ -1,4 +1,24 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { DatabaseSync } from "node:sqlite";
+import { createHash } from "node:crypto";
+const captureDb = new DatabaseSync(":memory:");
+vi.mock("expo-crypto",()=>({CryptoDigestAlgorithm:{SHA256:"sha256"},digestStringAsync:async (_algorithm:string,value:string)=>createHash("sha256").update(value).digest("hex")}));
+vi.mock("expo-sqlite",()=>({openDatabaseAsync:async()=>{
+  const adapter={
+    execAsync:async(sql:string)=>{captureDb.exec(sql);},
+    getFirstAsync:async(sql:string,...args:never[])=>captureDb.prepare(sql).get(...args)??null,
+    getAllAsync:async(sql:string,...args:never[])=>captureDb.prepare(sql).all(...args),
+    runAsync:async(sql:string,...args:never[])=>captureDb.prepare(sql).run(...args),
+    withExclusiveTransactionAsync:async(work:(transaction:unknown)=>Promise<void>)=>{
+      captureDb.exec("begin immediate");try{await work(adapter);captureDb.exec("commit");}catch(error){captureDb.exec("rollback");throw error;}
+    }
+  };return adapter;
+}}));
+vi.mock("./backendIdentity",()=>({requireBackendIdentity:()=>"staging-fixture"}));
+vi.mock("./secure-session",()=>({readOwnedAuthenticatedSessionSnapshot:async()=>({status:"authenticated",snapshot:{}}),isAuthenticatedSessionSnapshotCurrent:()=>true}));
+afterAll(()=>captureDb.close());
+afterEach(()=>vi.useRealTimers());
 
 const asyncStore = vi.hoisted(() => new Map<string, string>());
 const apiMocks = vi.hoisted(() => ({
@@ -33,10 +53,13 @@ vi.mock("@react-native-async-storage/async-storage", () => ({
   }
 }));
 
-vi.mock("./mobileAccount", () => ({
-  readActiveMobileAccount: async () => ({userId:"health-user",workspaceId:"health-workspace"}),
-  mobileAccountOwnersEqual: (a: unknown,b: unknown) => JSON.stringify(a) === JSON.stringify(b)
-}));
+vi.mock("./mobileAccount", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./mobileAccount")>();
+  return {
+    ...actual,
+    readActiveMobileAccount: async () => ({ userId: "health-user", workspaceId: "health-workspace" }),
+  };
+});
 vi.mock("./mobile-network", () => ({StaleMobileSessionResponseError: class extends Error {}}));
 
 vi.mock("./api", () => ({
@@ -76,7 +99,10 @@ const {
 } = await import("./health");
 
 describe("HealthKit mapping", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await import("@kingstinct/react-native-healthkit");
+    vi.useFakeTimers({toFake:["Date"]});vi.setSystemTime(new Date("2026-07-08T12:00:00.000Z"));
+    for(const row of captureDb.prepare("select name from sqlite_master where type='table' and name like 'health_%'").all()) captureDb.exec(`delete from ${row.name}`);
     asyncStore.clear();
     apiMocks.enqueueEvent.mockReset();
     apiMocks.reprocessHealthReviewItems.mockReset();
@@ -196,7 +222,7 @@ describe("HealthKit mapping", () => {
 
   it("imports sleep phases as one queued sleep session", async () => {
     healthkitMocks.queryCategorySamplesWithAnchor.mockResolvedValueOnce({
-      newAnchor: "sleep-anchor-1",
+      newAnchor: "sleep-anchor-1", deletedSamples: [],
       samples: [
         { uuid: "core", value: 3, startDate: "2026-07-06T23:55:00.000Z", endDate: "2026-07-07T02:15:00.000Z" },
         { uuid: "deep", value: 4, startDate: "2026-07-07T02:15:00.000Z", endDate: "2026-07-07T03:10:00.000Z" },
@@ -223,6 +249,64 @@ describe("HealthKit mapping", () => {
         })
       })
     );
+  });
+
+  it("keeps the early phase when a later delta revises the same Sleep episode",async()=>{
+    const core={uuid:"core",value:3,startDate:"2026-07-06T23:55:00.000Z",endDate:"2026-07-07T02:15:00.000Z"};
+    const rem={uuid:"rem",value:5,startDate:"2026-07-07T02:15:00.000Z",endDate:"2026-07-07T06:27:00.000Z"};
+    healthkitMocks.queryCategorySamplesWithAnchor.mockResolvedValueOnce({newAnchor:"first",samples:[core],deletedSamples:[]})
+      .mockResolvedValueOnce({newAnchor:"second",samples:[rem],deletedSamples:[]});
+    await importHealthKitSleep();const first=apiMocks.enqueueEvent.mock.calls[0][0];
+    await importHealthKitSleep();const second=apiMocks.enqueueEvent.mock.calls[1][0];
+    expect(second.rawPayload.samples.map((sample:{externalSampleId:string})=>sample.externalSampleId)).toEqual(["core","rem"]);
+    expect(second.localId).not.toBe(first.localId);
+    expect(first.rawPayload.samples).toHaveLength(1);
+    expect(healthkitMocks.queryCategorySamplesWithAnchor.mock.calls[1][1].anchor).toBe("first");
+    expect(asyncStore.has("dayframe.healthkit.sleepAnchor.v1")).toBe(false);
+  });
+
+
+  it("journals an older anchored change before advancing the checkpoint", async () => {
+    healthkitMocks.queryCategorySamplesWithAnchor.mockResolvedValueOnce({newAnchor:"old-change",deletedSamples:[],samples:[
+      {uuid:"older-phase",value:3,startDate:"2026-06-01T00:00:00.000Z",endDate:"2026-06-01T07:00:00.000Z"}
+    ]});
+    const result = await importHealthKitSleep();
+    expect(result.capturedCount).toBe(1);
+    expect(apiMocks.enqueueEvent).toHaveBeenCalledOnce();
+    expect(apiMocks.enqueueEvent.mock.calls[0][0].rawPayload.samples[0].externalSampleId).toBe("older-phase");
+    expect(captureDb.prepare("select anchor from health_checkpoints").get()?.anchor).toBe("old-change");
+    expect(captureDb.prepare("select sample_json from health_samples where sample_id='older-phase'").get()?.sample_json).toBeTruthy();
+  });
+
+  it("continues a full native page from its saved anchor before reporting complete capture",async()=>{
+    const first=Array.from({length:250},(_,index)=>({uuid:`phase-${index}`,value:3,startDate:"2026-07-06T23:55:00.000Z",endDate:"2026-07-07T02:15:00.000Z"}));
+    healthkitMocks.queryCategorySamplesWithAnchor.mockResolvedValueOnce({newAnchor:"page-1",samples:first,deletedSamples:[]})
+      .mockResolvedValueOnce({newAnchor:"page-2",samples:[],deletedSamples:[]});
+    const result=await importHealthKitSleep();
+    expect(result).toMatchObject({capturedCount:250,partial:false,status:"queued"});
+    expect(healthkitMocks.queryCategorySamplesWithAnchor.mock.calls[1][1]).toMatchObject({anchor:"page-1",limit:250});
+    expect(apiMocks.enqueueEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("persists a successful workout while the independent sleep query fails",async()=>{
+    healthkitMocks.queryCategorySamplesWithAnchor.mockRejectedValueOnce(new Error("native query fixture"));
+    healthkitMocks.queryWorkoutSamplesWithAnchor.mockResolvedValueOnce({newAnchor:"workout",deletedSamples:[],workouts:[{
+      uuid:"walk",workoutActivityType:52,startDate:"2026-07-07T08:00:00.000Z",endDate:"2026-07-07T09:00:00.000Z",duration:3600
+    }]});
+    const results=await Promise.allSettled([importHealthKitSleep(),importHealthKitWorkouts()]);
+    expect(captureDb.prepare("select kind,usable,generated,ignored,outcome from health_query_runs order by kind").all()).toMatchObject([{kind:"sleep",outcome:"query_failed"},{kind:"workout",usable:1,generated:1}]);
+    expect(results[0].status).toBe("rejected");expect(results[1]).toMatchObject({status:"fulfilled",value:{status:"queued"}});
+    expect(apiMocks.enqueueEvent).toHaveBeenCalledTimes(1);
+    expect(captureDb.prepare("select kind,outcome from health_query_runs order by kind").all()).toMatchObject([{kind:"sleep",outcome:"query_failed"},{kind:"workout",outcome:"query_completed"}]);
+  });
+
+  it("foreground capture remains enabled after background registration fails",async()=>{
+    healthkitMocks.configureBackgroundTypes.mockRejectedValueOnce(new Error("registration fixture"));
+    healthkitMocks.enableBackgroundDelivery.mockResolvedValue(false);
+    await requestHealthKitPermissions();await expect(isHealthKitAutomaticSyncEnabled()).resolves.toBe(true);
+    healthkitMocks.queryCategorySamplesWithAnchor.mockResolvedValueOnce({newAnchor:"empty",samples:[],deletedSamples:[]});
+    await importHealthKitSleep();expect(healthkitMocks.queryCategorySamplesWithAnchor).toHaveBeenCalledOnce();
+    expect(apiMocks.enqueueEvent).not.toHaveBeenCalled();
   });
 
   it("exports a bounded Health debug snapshot without advancing anchors or leaking routes", async () => {
@@ -360,7 +444,8 @@ describe("HealthKit mapping", () => {
     const result = await importHealthKitSleep();
 
     expect(result.importedCount).toBe(0);
-    expect(result.notes).toContain("Ignored 1 disabled Apple Health sleep session");
+    expect(result.status).toBe("disabled");
+    expect(healthkitMocks.queryCategorySamplesWithAnchor).not.toHaveBeenCalled();
     expect(apiMocks.enqueueEvent).not.toHaveBeenCalled();
   });
 
@@ -552,7 +637,7 @@ describe("HealthKit mapping", () => {
   it("subscribes to HealthKit sleep and workout changes only after automatic sync is enabled", async () => {
     await expect(startHealthKitChangeObservers(vi.fn())).resolves.toBeNull();
 
-    await configureHealthKitAutomaticSync();
+    await requestHealthKitPermissions();
     const onChange = vi.fn();
     const subscription = await startHealthKitChangeObservers(onChange);
     const sleepCallback = healthkitMocks.subscribeToChanges.mock.calls[0][1];
@@ -705,7 +790,7 @@ describe("HealthKit mapping", () => {
 
   it("filters disabled workout types before queueing Health events", async () => {
     healthkitMocks.queryWorkoutSamplesWithAnchor.mockResolvedValueOnce({
-      newAnchor: "workout-anchor-1",
+      newAnchor: "workout-anchor-1", deletedSamples: [],
       workouts: [
         {
           uuid: "walk-1",
@@ -727,11 +812,11 @@ describe("HealthKit mapping", () => {
     const result = await importHealthKitWorkouts();
 
     expect(result.importedCount).toBe(1);
-    expect(result.notes).toContain("Ignored 1 disabled workout");
+    expect(result.status).toBe("queued");
     expect(apiMocks.enqueueEvent).toHaveBeenCalledTimes(1);
     expect(apiMocks.enqueueEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        localId: "healthkit-workout:walk-1",
+        localId: expect.stringMatching(/^healthkit:workout:/),
         description: "Walk",
         rawPayload: expect.objectContaining({
           autoConfirm: true,

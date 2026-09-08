@@ -23,6 +23,11 @@ function storeBoundSession(token: string, owner = TIMER_STOP_OWNER) {
 const secureStore = vi.hoisted(() => new Map<string, string>());
 const asyncStore = vi.hoisted(() => new Map<string, string>());
 const appState = vi.hoisted(() => ({ currentState: "active" }));
+const healthAcknowledgement = vi.hoisted(() => vi.fn());
+const healthBackend = vi.hoisted(() => ({id:"staging-fixture"}));
+vi.mock("./backendIdentity",()=>({get DAYFRAME_BACKEND_ID(){return healthBackend.id;}}));
+vi.mock("expo-crypto",()=>({}));
+vi.mock("./healthSyncStore",()=>({recordHealthAcknowledgement:healthAcknowledgement}));
 
 vi.mock("expo-secure-store", () => ({
   AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 1,
@@ -146,8 +151,63 @@ describe("mobile API client", () => {
     asyncStore.clear();
     appState.currentState = "active";
     vi.restoreAllMocks();
+    healthAcknowledgement.mockReset();
+    healthBackend.id="staging-fixture";
     __resetMobileAccountForTests();
     await activateMobileAccount(TIMER_STOP_OWNER);
+  });
+
+
+  it("preserves captured Health identity across staging/production with cloned account UUIDs", async () => {
+    storeBoundSession("session-token");
+    const captured={...TIMER_STOP_OWNER,backendId:"staging-fixture"};
+    for (const healthOwner of [{...captured,workspaceId:"other-workspace"},{...captured,userId:"other-user"}]) {
+      await expect(enqueueEvent({source:"health_sleep",type:"health_sleep_import",localId:"healthkit:sleep:wrong-owner",owner:TIMER_STOP_OWNER,healthOwner})).rejects.toThrow();
+    }
+    expect(await readQueue()).toEqual([]);
+    await enqueueEvent({source:"health_sleep",type:"health_sleep_import",localId:"healthkit:sleep:identity:one",owner:TIMER_STOP_OWNER,healthOwner:captured,rawPayload:{sourceSampleIds:["sample"]}});
+    const original=asyncStore.get("dayframe.offlineQueue.v1")!;
+    expect(JSON.parse(original)[0].healthOwner).toEqual(captured);
+    const fetchMock=vi.fn(async()=>jsonResponse({eventId:"server-event",clientEventId:"healthkit:sleep:identity:one",processingDisposition:"confirmed"}));
+    vi.stubGlobal("fetch",fetchMock);
+    healthBackend.id="production-fixture";
+    expect(await readQueue()).toEqual([]);
+    await syncQueue({eventScope:"non_timer",forceRetry:true});
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(JSON.parse(asyncStore.get("dayframe.offlineQueue.v1")!)[0].healthOwner).toEqual(captured);
+    await expect(enqueueEvent({source:"health_sleep",type:"health_sleep_import",localId:"healthkit:sleep:identity:two",owner:TIMER_STOP_OWNER,healthOwner:captured})).rejects.toThrow();
+    healthBackend.id="staging-fixture";
+    await syncQueue({eventScope:"non_timer",forceRetry:true});
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(healthAcknowledgement).toHaveBeenCalledWith(captured,"healthkit:sleep:identity:one",expect.objectContaining({eventId:"server-event"}));
+    expect(await readQueue()).toEqual([]);
+  });
+
+  it("retains a Health acknowledgement until the captured backend is current again", async () => {
+    storeBoundSession("session-token");
+    const captured={...TIMER_STOP_OWNER,backendId:"staging-fixture"};
+    await enqueueEvent({source:"health_sleep",type:"health_sleep_import",localId:"healthkit:sleep:late:one",healthOwner:captured});
+    vi.stubGlobal("fetch",vi.fn(async()=>({status:200,ok:true,json:async()=>{
+      healthBackend.id="production-fixture";
+      return {eventId:"event",clientEventId:"healthkit:sleep:late:one"};
+    }})));
+    await syncQueue({eventScope:"non_timer"});
+    expect(healthAcknowledgement).not.toHaveBeenCalled();
+    healthBackend.id="staging-fixture";
+    expect((await readQueue())[0].localId).toBe("healthkit:sleep:late:one");
+  });
+
+  it("does not deliver unproven Health queue data and repairs only an exact journal-owned handoff", async () => {
+    storeBoundSession("session-token");
+    const input={source:"health_sleep" as const,type:"health_sleep_import" as const,occurredAt:new Date("2026-07-01T00:00:00Z"),localId:"healthkit:sleep:legacy:one",rawPayload:{sourceSampleIds:["original"]}};
+    asyncStore.set("dayframe.offlineQueue.v1",JSON.stringify([{...input,occurredAt:input.occurredAt.toISOString(),queuedAt:"2026-07-01T00:01:00Z",...TIMER_STOP_OWNER,failureCount:21}]));
+    expect(await readQueue()).toEqual([]);
+    const healthOwner={...TIMER_STOP_OWNER,backendId:"staging-fixture"};
+    await expect(enqueueEvent({...input,healthOwner,rawPayload:{sourceSampleIds:["different"]}})).rejects.toThrow("does not match");
+    await enqueueEvent({...input,owner:TIMER_STOP_OWNER,healthOwner});
+    const queue=await readQueue();
+    expect(queue).toHaveLength(1);
+    expect(queue[0]).toMatchObject({localId:input.localId,failureCount:21,queuedAt:"2026-07-01T00:01:00Z",healthOwner});
   });
 
   it("stores the Dayframe app session token after login", async () => {
@@ -663,6 +723,7 @@ describe("mobile API client", () => {
     });
   });
 
+
   it.each(["all", "non_timer"] as const)("preserves caller cancellation during %s Health delivery",async(eventScope)=>{
     storeBoundSession("session-token");
     asyncStore.set("dayframe.offlineQueue.v1",JSON.stringify([storedQueuedEvent({source:"health_sleep",type:"health_sleep_import"})]));
@@ -683,6 +744,31 @@ describe("mobile API client", () => {
     await syncQueue();
     expect(await readQueue()).toHaveLength(1);
   });
+
+  it("preserves a delivered Health event when its local acknowledgement write fails",async()=>{
+    storeBoundSession("session-token");
+    const event=storedQueuedEvent({localId:"healthkit:sleep:episode:revision",source:"health_sleep",type:"health_sleep_import"});
+    asyncStore.set("dayframe.offlineQueue.v1",JSON.stringify([event]));
+    vi.stubGlobal("fetch",vi.fn(async()=>jsonResponse({eventId:"server-event",clientEventId:event.localId,processingDisposition:"confirmed",timeEntryId:"entry"},201)));
+    healthAcknowledgement.mockRejectedValueOnce(new Error("durable acknowledgement fixture"));
+    await syncQueue();expect((await readQueue())[0].localId).toBe(event.localId);
+    await syncQueue({forceRetry:true});expect(await readQueue()).toHaveLength(0);
+    expect(healthAcknowledgement).toHaveBeenCalledTimes(2);
+    expect(healthAcknowledgement.mock.calls[0]).toEqual(healthAcknowledgement.mock.calls[1]);
+    expect(healthAcknowledgement).toHaveBeenCalledWith({...TIMER_STOP_OWNER,backendId:"staging-fixture"},event.localId,{
+      eventId:"server-event",clientEventId:event.localId,processingDisposition:"confirmed",timeEntryId:"entry",reviewItemId:null
+    });
+  });
+
+  it("records a compatible legacy Health acknowledgement without inventing processing or visibility",async()=>{
+    storeBoundSession("session-token");
+    const event=storedQueuedEvent({source:"health_sleep",type:"health_sleep_import"});
+    asyncStore.set("dayframe.offlineQueue.v1",JSON.stringify([event]));
+    vi.stubGlobal("fetch",vi.fn(async()=>jsonResponse({eventId:"legacy-event"},200)));
+    await syncQueue();expect(await readQueue()).toHaveLength(0);
+    expect(healthAcknowledgement.mock.calls[0][2]).toMatchObject({processingDisposition:"legacy_unknown",timeEntryId:null,reviewItemId:null});
+  });
+
 
   it("syncs a queued Health event without posting stale client workspace fields", async () => {
     storeBoundSession("session-token");
@@ -2694,6 +2780,9 @@ function storedQueuedEvent(overrides: Record<string, unknown> = {}) {
     rawPayload: scopedStopPayload(),
     ...overrides
   };
+  if ((item.source === "health_sleep" || item.source === "health_workout") && !Object.hasOwn(overrides,"healthOwner")) {
+    (item as Record<string,unknown>).healthOwner={...TIMER_STOP_OWNER,backendId:"staging-fixture"};
+  }
   if (item.type === "timer_stop") {
     item.rawPayload = scopedStopPayload(
       item.rawPayload && typeof item.rawPayload === "object" && !Array.isArray(item.rawPayload)
