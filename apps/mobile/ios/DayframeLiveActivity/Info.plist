@@ -20,6 +20,8 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>DayframeSharedAppGroupIdentifier</key>
+	<string>$(DAYFRAME_APP_GROUP)</string>
 	<key>DayframeSharedKeychainAccessGroup</key>
 	<string>$(AppIdentifierPrefix)$(DAYFRAME_KEYCHAIN_GROUP)</string>
 	<key>NSExtension</key>

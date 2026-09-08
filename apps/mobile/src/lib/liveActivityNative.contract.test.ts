@@ -128,8 +128,18 @@ describe("native Live Activity presentation contract", () => {
     expect(project).toContain("DAYFRAME_KEYCHAIN_GROUP = com.layereight.dayframe.staging.shared;");
 
     expect(sharedStorage).toContain("kSecAttrAccessGroup");
-    expect(sharedStorage).toContain("containerURL(");
-    expect(sharedStorage).toContain("forSecurityApplicationGroupIdentifier: appGroupIdentifier");
+    const storageConfiguration = readFileSync(
+      `${mobileRoot}ios/Dayframe/DayframeSharedStorageConfiguration.swift`, "utf8"
+    );
+    expect(project.match(/DayframeSharedStorageConfiguration\.swift in Sources/g)).toHaveLength(4);
+    expect(storageConfiguration).toContain("forSecurityApplicationGroupIdentifier: appGroupIdentifier");
+    expect(storageConfiguration).toContain('forInfoDictionaryKey: "DayframeSharedAppGroupIdentifier"');
+    expect(storageConfiguration).toContain("guard let appGroupIdentifier else { return nil }");
+    for (const path of ["Dayframe/Info.plist", "DayframeLiveActivity/Info.plist"]) {
+      expect(readFileSync(`${mobileRoot}ios/${path}`, "utf8")).toMatch(
+        /<key>DayframeSharedAppGroupIdentifier<\/key>\s*<string>\$\(DAYFRAME_APP_GROUP\)<\/string>/
+      );
+    }
     expect(sharedStorage).toContain("flock(descriptor, LOCK_EX)");
     expect(sharedStorage).toContain("options: .atomic");
     expect(sharedStorage).toContain("completeUntilFirstUserAuthentication");

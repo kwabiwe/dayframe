@@ -13,6 +13,8 @@ The staging alias does not move automatically. Before merging an implementation 
 
 Preview and production use separate iOS identities and can be installed together. Preview uses `com.layereight.dayframe.staging`, the `Staging` Xcode configuration, isolated App Group/keychain containers, and the staging API. Production/TestFlight remains `com.layereight.dayframe` with production containers and API. Always confirm the visible `STAGING` badge and baked API base before testing.
 
+App Group selection must use the same `DAYFRAME_APP_GROUP` setting in the host/extension entitlements and `DayframeSharedAppGroupIdentifier` Info.plist key. Run `npm run check:ios-config`, `bash scripts/validate-ios-shared-storage.sh`, then `npm run check:ios-config -- --built-app <Dayframe.app>` after building. Before device acceptance, run `npm run check:ios-config -- --signed-app <Dayframe.app>` to compare both products' signed App Groups with their baked identities. Missing/unresolved or cross-lane native configuration must fail closed, never fall back to production. Unsigned Simulator products prove configuration/compilation only; verify shared Shortcut queue/catalog and Live Activity Stop hand-off on the signed staging app with both app identities installed.
+
 ## Version Truth Table
 
 A Dayframe fix may span several independently deployed surfaces:
