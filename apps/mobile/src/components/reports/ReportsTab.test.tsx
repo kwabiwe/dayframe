@@ -84,6 +84,12 @@ describe("ReportsTab", () => {
     expect(bar!.props.onPress).toBeUndefined();
   });
 
+  it("qualifies summary, chart context, and Daily independently when completeness is unknown", () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<ReportsTab data={data} isFocused nowMs={Date.parse("2026-09-08T12:00:00.000Z")} styles={sharedStyles} theme={theme} />); });
+    expect(tree.root.findAllByProps({ children: "Report completeness is unknown — based on available entries." })).toHaveLength(3);
+  });
+
   it("closes an open filter draft on route blur while preserving applied selection", () => {
     const nowMs = Date.parse("2026-09-08T12:00:00.000Z");
     let tree!: ReturnType<typeof create>;

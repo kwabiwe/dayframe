@@ -149,6 +149,7 @@ export function ReportsTab({
             value={chartView}
           />
         </View>
+        {partialSelected ? <DataQualityNotice quality={report.dataQuality.selectedPeriod} theme={theme} /> : null}
         <View style={localStyles.filterRow}>
           {selection.mode === "include" ? (
             <Pressable accessibilityRole="button" onPress={() => setSelection({ mode: "all" })} style={localStyles.textAction}>
