@@ -57,8 +57,9 @@ export function ReportsTab({
   const filterButtonRef = useRef<View>(null);
   const stableCategoryOrder = useRef<string[]>([]);
   const focusedNowRef = useRef(nowMs);
-  if (isFocused) focusedNowRef.current = nowMs;
-  const reportNowMs = isFocused ? nowMs : focusedNowRef.current;
+  const liveReportNowMs = data.activeEntry ? nowMs : Math.floor(nowMs / 60_000) * 60_000;
+  if (isFocused) focusedNowRef.current = liveReportNowMs;
+  const reportNowMs = isFocused ? liveReportNowMs : focusedNowRef.current;
   const { reduceMotion, resolved: reduceMotionResolved } = useResolvedReduceMotionPreference();
 
   const report = useMemo(
