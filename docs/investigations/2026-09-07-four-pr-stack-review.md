@@ -1,5 +1,7 @@
 # Four-PR stack and Visit departure review
 
+Historical status note (2026-09-08): PRs #188–#191 subsequently merged in order, with PR #191 at `ae60f6d`. The final App Group repair is recorded separately; production rollout/cutover, exact-final staging promotion, signed-device isolation, and physical acceptance remain unrecorded release gates. Current state lives in `docs/feature-fix-tracker.md`.
+
 ## Scope and source identity
 
 Reviewed #188 `90626eb3f3e9221c4b269ac66122210de1b9ffad`, #189 `160b1c169c80006b8e30ca9b437d833ff132c860`, #190 `ce9f5a0ff172db4fa1c501f993d4bc15a77fcf24`, and #191 `dea5eed1197d5872b8b67e171e57bdd127c47088` against main `d649e2db3a9393d521bd8c127d54504451b65a47`. These form an ancestry-preserving dependency chain in that order. The cumulative diff contains 121 files, 6,853 insertions and 1,547 deletions before this fix.

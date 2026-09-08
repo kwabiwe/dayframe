@@ -1,5 +1,7 @@
 # Mobile sync recovery implementation
 
+Historical status note (2026-09-08): this implementation merged in PR #189 at `108bfc0` after PR #188. Signed-device and physical recovery acceptance remain unrecorded; current delivery state lives in `docs/feature-fix-tracker.md`.
+
 This is implementation evidence, not closure of the September 4 incident. Server prerequisite: draft PR #188. Earlier CLI Previews were blocked by commit-author permission. A subsequent GitHub-created server Preview is Ready; the checked mobile GitHub Preview was cancelled. Stable alias promotion and physical-device validation remain outstanding. Production remains unchanged.
 
 ## Settings motion contract

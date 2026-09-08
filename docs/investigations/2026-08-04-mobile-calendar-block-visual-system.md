@@ -1,5 +1,7 @@
 # Native iOS Calendar block visual system
 
+Historical status note (2026-09-08): PR #191 later introduced the separate staging bundle, App Group, Keychain, URL scheme, Live Activity extension, and on-device identity. The replacement warning below records the earlier state; current release guidance lives in `AGENTS.md`, `docs/ios-hosted-supabase-runbook.md`, and `docs/feature-fix-tracker.md`.
+
 Date: 2026-08-04
 
 Branch: `codex/mobile-calendar-block-visual-system`

@@ -18,10 +18,16 @@ The additive v4→v5 transaction creates `review_mutation_effects`, keyed by mut
 
 Same UUID, primary source and canonical payload is idempotent; any changed request or a second owner of either merge source fails without a partial write. Do not downgrade a binary while complex work is pending: an older binary does not understand two-source effects. Drain or explicitly resolve pending work with a compatible build first.
 
+## SQLite v6 recovery metadata
+
+The additive v5→v6 migration records contention count, reconciliation attempts/time, resolution status, and the validated acknowledgement without changing original UUIDs, request hashes/payloads, creation order, or source anchors. An `in_flight` row found on open becomes pending with `delivery_interrupted`; it is not treated as either failed or applied.
+
+Before retrying an interrupted, old, repeatedly contended, or explicit-attention mutation, mobile calls the authenticated read-only `/api/review/mutations/reconcile` proof route. Only an exact envelope-matching receipt/effect result may acknowledge the saved intent. An open result permits the same original request to retry; missing, conflicting, malformed, or still-unknown proof remains actionable without inventing success. `resolution_unknown` offers reconciliation and cannot be discarded as a known permanent failure.
+
 ## Synchronisation and rollback
 
 - Keep one serial mutation queue, one drain promise and the existing root reconnect coordinator. Review stays foreground-only and never acquires the finite timer background assertion.
-- Recover stale `in_flight` on database open; preserve created order and bounded retry/backoff. Stop after network/408/429/5xx/lock contention; permanent errors become `needs_attention` and allow later work.
+- Recover stale `in_flight` as interrupted on database open; preserve created order and bounded retry/backoff. Stop after network/408/429/5xx/lock contention; proven permanent errors become `needs_attention` and allow later work.
 - Revalidate account and authenticated session generation/token before dispatch. Session expiry preserves intent for the same account; logout/replacement clears only its account-owned state after the existing warning.
 - Acknowledgement retains all hidden effects until a later canonical bootstrap proves every source is no longer open.
 - Permanent conflicts restore only source IDs individually proven open by scoped canonical server statuses. Unknown, accepted, ignored or missing sources stay hidden; restoration uses surviving anchors. A legacy `canonicalStatus=open` proves only the primary source.
@@ -35,4 +41,4 @@ Store only required private intent and presentation. Save-place requests necessa
 
 ## Required evidence
 
-Run shared/web/mobile suites, both Review validators and both Location validators, full lint/typecheck/test/build/docs/brand/diff gates and a clean native build. The Review SQLite validator executes real store transactions, v4 backfill, two-source rollback/restore/acknowledgement and account tests. Complete the physical staging matrix in `docs/dayframe-regression-checklist.md`; unit/Simulator results do not establish iPhone force-quit, background, network or navigation behaviour.
+Run shared/web/mobile suites, both Review validators and both Location validators, full lint/typecheck/test/build/docs/brand/diff gates and a clean native build. The Review SQLite validator executes real store transactions, v4→v5→v6 migration, two-source rollback/restore/acknowledgement, interrupted-delivery reconciliation, and account tests. Complete the physical staging matrix in `docs/dayframe-regression-checklist.md`; unit/Simulator results do not establish iPhone force-quit, background, network or navigation behaviour.

@@ -1,5 +1,7 @@
 # Mobile Review Offline-First And Location Evidence Cache
 
+Historical status note (2026-09-08): PR #186 later made every resolving/structural Location action durable, and PRs #188–#189 added v6 interruption/receipt reconciliation and independent recovery. Direct-only limitations below describe this earlier branch; current contracts live in `.codex/reference/offline-review-mutations.md` and `docs/feature-fix-tracker.md`.
+
 Date: 2026-08-20
 Branch: `codex/pr1-offline-first-review`
 Baseline: `origin/main` at `e849d929a4913186a35fbc898ca1c7b044e674d2`

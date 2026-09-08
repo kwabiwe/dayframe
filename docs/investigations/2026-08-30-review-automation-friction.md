@@ -1,5 +1,7 @@
 # Review automation and durable corrections
 
+Historical status note (2026-09-08): the implementation described here merged in PR #186 at `5fd50cf`. Its unrecorded signed-device and release evidence remains a gate; current delivery state lives in `docs/feature-fix-tracker.md`.
+
 Status: implementation complete on the feature branch; acceptance blocked. No merge, staging promotion or device acceptance claimed.
 
 Baseline: `df59588a68391dec7693b266e71255350ce7cd15` (`origin/main`, fetched 2026-08-30).

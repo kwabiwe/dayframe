@@ -1,5 +1,7 @@
 # PR #191 App Group isolation repair
 
+Historical status note: this repair merged with PR #191 at `ae60f6d` through final source head `dad7e23`. Signed host/extension entitlement validation and cross-process staging-device acceptance remain outstanding; see `docs/feature-fix-tracker.md`.
+
 Scope: repair native shared storage on `codex/location-v2-only-staging`, based on `3345296b760804f593857d160239a2f0831e0535`. No rollout, hosted environment, merge, or release changes are part of this repair.
 
 ## Root cause and change

@@ -1,5 +1,7 @@
 # Health capture journal implementation
 
+Historical status note (2026-09-08): this implementation merged in PR #190 at `3f91d08`. Production migration/deployment, a verified newer TestFlight binary, physical HealthKit behavior, and legacy-environment provenance remain release gates; see `docs/feature-fix-tracker.md`.
+
 This branch implements the durable source boundary required by the September 4 execution plan. It does not establish the cause or final outcome of the missing September 4 sleep. Exact HealthKit sample evidence and the installed build's source/API/update attestation remain unavailable. No production repairs are authorised.
 
 ## Verified baseline

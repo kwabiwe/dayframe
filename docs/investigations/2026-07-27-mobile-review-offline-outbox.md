@@ -1,5 +1,7 @@
 # Mobile Review Offline Outbox
 
+Historical status note (2026-09-08): this note describes the original terminal-action outbox. PRs #186 and #188–#189 later made all resolving/structural Location actions durable and added v6 receipt reconciliation; current contracts live in `.codex/reference/offline-review-mutations.md` and `docs/feature-fix-tracker.md`.
+
 Date: 2026-07-27
 
 Branch: `feat/mobile-review-offline-outbox`

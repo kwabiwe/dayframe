@@ -1,5 +1,7 @@
 # Review and Location sync reliability — 2026-09-03
 
+Historical status note (2026-09-08): PR #187 merged at `d649e2d`, followed by the bounded sync/recovery stack in PRs #188–#191. The reported production records remain unresolved; current delivery and release evidence lives in `docs/feature-fix-tracker.md`.
+
 ## Evidence and joined failure chain
 
 - The exported general event queue was empty, while Review SQLite contained one permanent mutation: `split` for Review item `0f3a4a59-b8d4-4443-ac2a-6d3bf71b2770`, rejected after 14 attempts with `HTTP 422 · invalid_action`.

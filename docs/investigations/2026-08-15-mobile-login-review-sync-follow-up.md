@@ -1,5 +1,7 @@
 # Mobile Login, Review Sync, And Location Review Follow-up
 
+Historical status note (2026-09-08): PR #186 later made complex Location corrections durable, and PRs #188–#189 added bounded receipt reconciliation and independent recovery. The limitations below remain historical evidence; current behavior lives in `.codex/reference/offline-review-mutations.md` and `docs/feature-fix-tracker.md`.
+
 Date: 2026-08-15
 
 Branch baseline: `origin/main` at `f98e134f3c50f5cc529ca1f661defb5e91a69b38`

@@ -84,22 +84,27 @@ Preview uses `com.layereight.dayframe.staging` and production uses `com.layereig
 
 The native build must preserve:
 
-- URL scheme: `dayframe`
+- URL scheme: `dayframe` for production and `dayframe-staging` for preview
 - Background modes: `location` and `fetch`
 - Location usage strings for foreground and background geofencing
 - HealthKit entitlement
 - HealthKit usage strings
-- App Group `group.com.layereight.dayframe` on both
+- Production App Group `group.com.layereight.dayframe` on
   `com.layereight.dayframe` and
   `com.layereight.dayframe.DayframeLiveActivity`
-- Keychain access group
-  `$(AppIdentifierPrefix)com.layereight.dayframe.shared` on both targets
+- Staging App Group `group.com.layereight.dayframe.staging` on
+  `com.layereight.dayframe.staging` and
+  `com.layereight.dayframe.staging.DayframeLiveActivity`
+- Matching production/staging Keychain access groups ending in
+  `com.layereight.dayframe.shared` and
+  `com.layereight.dayframe.staging.shared` on both targets in each lane
 
 HealthKit and background geofence behavior require a native iOS build and physical-device validation. Expo Go is not enough.
 
-In Certificates, Identifiers & Profiles, enable the App Group and Keychain
-Sharing capabilities on both identifiers, then regenerate or refresh both
-development and distribution provisioning profiles. The containing app writes
+In Certificates, Identifiers & Profiles, enable the lane-matching App Group and
+Keychain Sharing capabilities on both host/extension identifiers, then
+regenerate or refresh the required development, Ad Hoc, and distribution
+provisioning profiles. The containing app writes
 the allowlisted API base and app-session credential to the shared Keychain item.
 The extension writes its fallback event to an atomically updated file in the
 shared App Group. Existing private Keychain and `UserDefaults` values migrate on

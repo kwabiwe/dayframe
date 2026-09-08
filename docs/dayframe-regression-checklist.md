@@ -29,10 +29,10 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 
 - One process-wide monitor starts unknown. Initial online with zero work leaves the fixed header status slot visually empty. Native offline confirms after 300 ms and shows the persistent neutral cloud-slash; native online confirms after 400 ms. Ambiguous reachability preserves the last confirmed state and ordinary Wi-Fi/cellular handover must not flash offline.
 - Any current-generation Dayframe HTTP response—including `401`, `409`, or `500`—is strong online transport evidence without changing response/session semantics. Intentional caller cancellation and stale-session rejection are neutral. A current-generation request deadline or repeated genuine transport failures in the bounded evidence window contribute offline evidence; success and failure evidence begun before a newer offline request generation is rejected before it can clear or add failure history. Unchanged native online evidence must still pass through the normal confirmation debounce when repairing an HTTP-forced Offline state; raw-observation deduplication may not trap the machine Offline, restart an existing candidate timer, or weaken request-generation rejection. Development/staging logs record timestamps, raw NetInfo, evidence, debounce lifecycle, committed status, epoch, pending counts, pass steps and retry schedule without user content or sensitive payloads.
-- One root presentation/announcement owner feeds a fixed 44-point icon slot immediately after the shared Dayframe wordmark on Today, Calendar and Reports. The slot stays reserved when visually empty, so offline, syncing, synced, attention and settled states do not move header or page content. Confirmed offline is a neutral cloud-slash and remains the higher-priority state. Online durable work shows neutral circular arrows with subtle rotation; a live pending-count transition from non-zero to zero changes the same slot to a neutral cloud-check for about two seconds, while ordinary zero-work startup stays visually empty. Permanent timer Stop or time-entry Edit/Delete rejection shows a persistent neutral cloud-X button that opens Settings > Sync & diagnostics whenever offline is not current. The focused tab exposes one manually revisitable labelled status element, child SVGs do not duplicate traversal, and the root announces each distinct status once. Presentation is calculated purely during render and committed afterward; discarded renders cannot consume the transition. `textSecondary` retains Light/Dark contrast, and Reduce Motion stops rotation while preserving short opacity changes.
-- Reachability is informational. Start, Stop, Edit, Delete, queued Review terminal actions, cached evidence navigation and every offline-capable action remain enabled. The subscribed pending count includes account-owned general/native activity, explicit Stop, time-entry Edit/Delete, Review and Location work; retry wait still counts, while permanent rejection uses targeted diagnostics. Never clear or replace a durable owner to manipulate presentation.
+- One root presentation/announcement owner feeds a fixed 44-point icon slot immediately after the shared Dayframe wordmark on Today, Calendar and Reports. The slot stays reserved when visually empty, so offline, syncing, synced, attention and settled states do not move header or page content. Confirmed offline is a neutral cloud-slash and remains the higher-priority state. Ordinary online durable work waiting on a dependency or retry stays visually silent; only a live reconnect/recovery transmission shows neutral circular arrows with subtle rotation. A live pending-count transition from non-zero to zero changes the same slot to a neutral cloud-check for about two seconds, while ordinary zero-work startup stays visually empty. Permanent timer Stop or time-entry Edit/Delete rejection shows a persistent neutral cloud-X button that opens Settings > Sync & diagnostics whenever offline is not current. The focused tab exposes one manually revisitable labelled status element, child SVGs do not duplicate traversal, and the root announces each distinct status once. Presentation is calculated purely during render and committed afterward; discarded renders cannot consume the transition. `textSecondary` retains Light/Dark contrast, and Reduce Motion stops rotation while preserving short opacity changes.
+- Reachability is informational. Start, Stop, Edit, Delete, queued Review resolving/structural actions, cached evidence navigation and every offline-capable action remain enabled. The subscribed pending count includes account-owned general/native activity, explicit Stop, time-entry Edit/Delete, Review and Location work; retry wait still counts, while permanent rejection uses targeted diagnostics. Never clear or replace a durable owner to manipulate presentation.
 - Every cached/fetched Dashboard bootstrap is composed with one deterministic durable projection. Queued Start remains visible when absent from the server; correlations prevent local/canonical duplicates; persisted Edit/Delete and pending Stop survive refresh; wholly offline Start → Edit → Stop restores as one final stopped entry. Pull-to-refresh while confirmed offline may refresh evidence but cannot replace projected truth. Cold offline relaunch reconstructs from the cached server snapshot plus commands only when the SecureStore session's verified user/workspace matches that cache; a legacy unbound bearer must bootstrap successfully before cached account data or commands can be projected.
-- One account/workspace recovery owner wakes on durable creation, confirmed online, foreground and retry due. A real reconnect and every foreground transition run the ordered pass even when the subscribed pending count is zero, so Location replay and final bootstrap are not skipped; ordinary epoch-zero initial-online startup remains quiet. The owner pauses offline, shares drains, and uses jittered bounded exponential backoff; retry due is not treated as new durable work, so the attempt keeps increasing while the same work survives and resets only when work clears or a genuine reconnect/new-work epoch arrives. A newer reconnect epoch supersedes obsolete retry, and a forced reconnect is retained by an already-running time-entry drain even when its oldest command is in retry wait. Order is ready Stops; native Shortcut/general queue; time-entry Edit/Delete; post-correlation Stops; Review; Location; final bootstrap. The final bootstrap uses the same mutation-revision and deletion-reconciliation guard as ordinary refresh; overlapping Stop/Edit queues a fresh load, and a failed bootstrap publication explicitly releases its guard. Retryable owner outcomes schedule another attempt without a network toggle, including transport failure from a zero-count Location/bootstrap pass. Background interruption restarts the order on foreground, HealthKit is not imported merely due to reachability, and account replacement cannot send or project old work. The bearer and verified user/workspace persist in one SecureStore envelope; every durable owner must match it and the active account before dispatch. Location batch selection, request dispatch, replay and response-side SQLite mutation additionally pin and revalidate one location owner plus session generation; an account switch interrupts the stale pass without touching the replacement account's evidence.
+- One account/workspace recovery owner wakes on durable creation, confirmed online, foreground and retry due. A real reconnect and every foreground transition run the ordered pass even when the subscribed pending count is zero, so Location replay and final bootstrap are not skipped; ordinary epoch-zero initial-online startup remains quiet. The owner pauses offline, shares drains, and uses jittered bounded exponential backoff; retry due is not treated as new durable work, so the attempt keeps increasing while the same work survives and resets only when work clears or a genuine reconnect/new-work epoch arrives. A newer reconnect epoch supersedes obsolete retry, and a forced reconnect is retained by an already-running time-entry drain even when its oldest command is in retry wait. Order is ready Stops; native Shortcut plus queued timer events; time-entry Edit/Delete; post-correlation Stops; remaining non-timer events; Review; Location; final bootstrap. Each lane runs only when due, and one lane's server contention is not a transport failure for the others. The final bootstrap uses the same mutation-revision and deletion-reconciliation guard as ordinary refresh; overlapping Stop/Edit queues a fresh load, and a failed bootstrap publication explicitly releases its guard. Retryable owner outcomes schedule another attempt without a network toggle, including transport failure from a zero-count Location/bootstrap pass. Background interruption restarts the order on foreground, HealthKit is not imported merely due to reachability, and account replacement cannot send or project old work. The bearer and verified user/workspace persist in one SecureStore envelope; every durable owner must match it and the active account before dispatch. Location batch selection, request dispatch, replay and response-side SQLite mutation additionally pin and revalidate one location owner plus session generation; an account switch interrupts the stale pass without touching the replacement account's evidence.
 - Expected offline, request-deadline, transport, throttling and retryable server failures do not show a raw/internal Dashboard API alert; durable local truth remains on screen and recovery owns retry. Non-retryable refresh failure and local persistence failure use plain-language next steps without exposing response bodies or implementation strings. Reconnect with cached Review or Location Evidence stays silent: no full hydration spinner, card flash, editor remount or draft loss.
 
 ## Time Review
@@ -131,18 +131,24 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - An already-started durable mobile Start/Switch/Stop/Edit/Delete transmission may share one finite native iOS background task. Every native task ends exactly once after the final lease settles or on expiry/logout/account replacement/cancellation/teardown; expiry and force-quit never delete retryable work. Background state starts no new pass, and Review, Location Intelligence, and bootstrap remain foreground-owned.
 - Confirmed online pending work that is waiting, blocked, or in retry backoff remains background-only and does not occupy the header. Only a live reconnect/recovery delivery attempt shows sync arrows and rotates them; Reduce Motion keeps those arrows static. The pending count still reaches zero only from durable-owner settlement, never from reachability or a pass outcome.
 - Offline queue sync preserves shortcut, NFC, geofence, Apple Health, and other background event paths, respects retry backoff for automatic retries, and exposes retry/export diagnostics in Settings.
+- Health capture commits source additions/deletions, reconstructed episode revisions, immutable event payloads, and the next checkpoint in one backend/workspace/user-owned SQLite transaction before general-queue hand-off. An interruption repeats the same ID and payload; queue selection, delivery, and acknowledgement reject a foreign or unproved owner. Historical changes returned by an anchor are journaled before the checkpoint advances even when their sample end date predates the 14-day raw-capture retention window. Capacity applies backpressure instead of evicting pending intent.
 - Apple Health sleep stages group per normalized source with the shared 90-minute maximum waking gap. A gap exactly at the boundary remains one session; a gap one millisecond beyond it remains legitimate split sleep.
 - Same-source grouped sleep revisions with at least 80% overlap of the shorter interval update one untouched Health-derived entry in place. Incomplete-then-extended, extended-then-incomplete, identical retries, and small boundary adjustments preserve one stable entry and one logical total.
 - Manual Sleep entries, explicitly edited imported entries, cross-source records, weak overlaps, and multiple historical matches remain protected or ambiguous and do not reconcile automatically.
+- Settings Sync has one 45-second account/session-owned coordinator. Sleep, workouts, ordinary activity delivery, Review, and Location run independently, with coalesced projected refresh after changes and once at the end. A failed or busy Health/Review lane cannot prevent the other lanes from settling. A repeated explicit Sync while one pass runs schedules exactly one follow-up; further presses join it.
 - Offline Review decisions use their dedicated account-scoped SQLite owner, not
   the activity-event queue or location-evidence database. With Review data
-  already downloaded, Confirm, Dismiss, and Edit-and-confirm must commit the
-  request locally, remove the card through the existing Review list motion owner, survive
-  navigation, background/foreground, force-quit, and restart, then synchronise
-  exactly once when Dayframe is active and authenticated again. Timeout, retry,
-  authentication-required, and stale in-flight recovery keep it hidden; only a
-  permanent conflict whose canonical item remains open restores the exact
-  sanitised snapshot at its surviving list anchors.
+  already downloaded, generic Confirm/Dismiss and every resolving/structural
+  Location action—complete Edit-and-confirm, change-place-and-confirm,
+  record-once, record-POI-once, save-place-and-confirm, split and merge
+  variants—must commit the complete strict request locally before removing the
+  affected card or route through the existing motion owner. Merge reserves both
+  sources in one transaction. The immutable request/effects survive navigation,
+  background/foreground, force-quit, and restart, then synchronise exactly once
+  when Dayframe is active and authenticated again. Timeout, retry,
+  authentication-required, and interrupted-delivery reconciliation keep the
+  effects hidden; only a permanent conflict whose canonical source remains open
+  restores that source's sanitised snapshot at its surviving list anchors.
 - Cached Review data must never cross accounts or reinsert a pending local
   mutation as actionable. Session expiry preserves the same account's mutations as
   sign-in-required; confirmed logout warns with the exact unsynchronised count
@@ -152,11 +158,16 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
   response. Permanent category, technical duplicate, supersession, and
   cross-device resolution conflicts stop retrying, surface safe Settings
   diagnostics, and restore a card only when canonical server state remains open.
-- Review POSTs abort after 15 seconds into durable retry-wait. Pending,
-  in-flight, and retry-wait changes remain locally hidden and silent on the
-  Review screen; background retry follows its stored backoff without a manual
-  action that can collide with the original request. Authentication-required
-  and permanent-attention states keep their dedicated guidance.
+- Review POSTs include response parsing, schema validation, and captured-session
+  checks inside their deadline, then settle into durable retry-wait when the
+  outcome is not proved. Pending, in-flight, reconciliation, and retry-wait
+  effects remain locally hidden and silent on the Review screen; background
+  retry follows its stored backoff without a second mutation identity. Old,
+  interrupted, or repeatedly contended actions receive one bounded receipt/effect
+  reconciliation cycle before the original request is retried. An unresolved
+  outcome exposes `Reconcile now` and cannot be discarded as if it were known;
+  authentication-required and proven permanent-attention states keep their
+  dedicated guidance.
 - Review opens cache-first without waiting for bootstrap or Health reprocess.
   Its list and Location Evidence detail use the same right-aligned page-title
   header treatment as Settings (`Review` and `Location evidence` respectively),
@@ -178,23 +189,25 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
   raw native/network exception. A warm cache hit that resolves within the 300 ms
   target must render without even a transient full-screen hydration panel; cold
   or unusually slow loading feedback appears only after that grace period.
-- Location Evidence GET has a 10-second mobile ceiling. Direct-only place/split/
-  merge/record actions have a 15-second ceiling and retain the exact editor draft
-  on failure. The three durable actions (`confirm`, `ignore_once_location`, and a
-  complete `edit_and_confirm`) return after the SQLite commit without awaiting
-  network sync.
+- Location Evidence GET has a 10-second mobile ceiling. Every resolving or
+  structural action returns after the SQLite commit without awaiting network
+  sync and retains the exact editor draft when that local commit fails. Fresh
+  evidence hydration, Apple nearby/search lookup, and the compatibility-only
+  pure `change_place` action still require a bounded live connection; cached
+  evidence and its durable resolution actions do not.
 - Run `npm run validate:review-sync-sqlite` and
   `DATABASE_URL=..._test npm run validate:review-mutation-db` for Review outbox
   changes. The Postgres URL must name a disposable local `_test` database.
-- On a physical iPhone, repeat offline Confirm, Dismiss, and Edit-and-confirm
+- On a physical iPhone, repeat every generic and Location resolving/structural action
   across System/Light/Dark, Reduce Motion, large Dynamic Type, VoiceOver,
   foreground/background, force-quit/reopen, session expiry, same-account login,
   web conflicts, category removal, overlap, reconnect, and explicit logout.
   Record each result; tests and screenshots are not device durability evidence.
-- Save/change place, split, merge, record-once, and one-time POI actions remain
-  connectivity-dependent. Detailed Location Evidence is cache-first but does not
-  cache Apple map tiles. iOS does not guarantee a drain while
-  force-quit; the contract is durable now and automatic retry when active again.
+- Save/change-place-and-confirm, split, merge, record-once, and one-time POI
+  actions remain durable offline once their required evidence and input are
+  present. Detailed Location Evidence is cache-first but does not cache Apple map
+  tiles or provider search results. iOS does not guarantee a drain while
+  force-quit; the contract is local durability now and automatic foreground retry.
 - Bootstrap data remains backward compatible for web and mobile consumers.
 - No duplicate React keys, hydration errors, or framework runtime overlays appear during normal use.
 - In Location V2 `v2_enabled`, completed strong stays at logging-enabled saved or accepted-and-linked learned places create automatic confirmed entries. Commutes follow the standard or medium saved-route lane in the PRD, with independently valid five-minute bounds, actual internal gap at most twelve minutes and at most five minutes per existing overlap. The commute entry is category-only `Commute`, remains editable/deletable, and retains its source event.
@@ -295,7 +308,7 @@ For implementation PRs that affect shipped mobile/API behavior, do not ask KB to
 
 - Verify the automatic decision table in `docs/PRD.md`: medium-high/high; independently valid start/stop bounds at 299999/300000/300001 ms; maximum single overlap at the same edges; running and touching intervals; source provenance; Health coexistence and duplicate/session safety. Medium saved-route commutes require all exception conditions. Existing Review/terminal decisions and deleted automatic entries cannot be recreated.
 - Test overlapping saved radii in multiple input orders; keep the deterministic baseline first/selected, bounded alternatives and up to three transient POIs within 750 m. Confirm one-time names do not save a place and save-place actions are atomic.
-- Run Review SQLite v4→v5 backfill, two-source merge reservation/rollback, account/session isolation, canonical-only restore, acknowledgement retention, discard safety and foreground retry; exercise all strict complex envelopes with disposable Postgres receipts and failed structural rollback.
+- Run Review SQLite v4→v5→v6 migration, two-source merge reservation/rollback, immutable-envelope retention, interrupted-delivery/receipt reconciliation, account/session isolation, canonical-only restore, acknowledgement retention, unresolved-outcome discard prevention and foreground retry; exercise all strict complex envelopes with disposable Postgres receipts and failed structural rollback.
 - Use synthetic 2/13/25/50-item profiles from `scripts/fixtures/review-performance.ts`. Run `npx tsx scripts/measure-review-performance.ts` for desktop preparation/SQLite timings only. On the same signed staging build measure cached first content (<300 ms), Back-start p95 (<250 ms), interactive swipe, mounted cards, local enqueue (<500 ms), evidence prefetch cancellation and 50-item scrolling. Do not claim desktop measurements as device acceptance or rewrite the list without measurements.
 - Physical regression: Start/Stop/Edit/Delete, PR #184 reconnect/account recovery, PR #185 finite timer background work, Live Activities, Review/evidence caches, Health import/reprocess, Location capture/replay, Calendar/Reports sum/union totals, sheets/keyboard/native navigation, VoiceOver, Dynamic Type and Reduce Motion. Record each as PASS/FAIL/NOT RUN against the exact Preview commit, stable staging alias and signed preview build; never test with production credentials/data.
 

@@ -85,12 +85,15 @@ Offline Review mutation changes additionally require:
 - `npm run validate:review-sync-sqlite` against a temporary SQLite database.
 - `DATABASE_URL=..._test npm run validate:review-mutation-db` against a
   disposable local Postgres database.
-- Confirm, Dismiss, and Edit-and-confirm after local SQLite acknowledgement,
-  with a local-write failure proving that the card/form stays actionable.
-- Restart-persistent cache/tombstones, account switching/logout isolation,
-  bounded retry, session-expiry preservation, same-account reauthentication,
-  conflict/Discard diagnostics, and lost-response receipt replay without a
-  duplicate entry.
+- Generic Confirm/Dismiss plus every resolving/structural Location action after
+  local SQLite acknowledgement, including atomic two-source merge effects, with
+  a local-write failure proving that every affected card/form stays actionable.
+- Restart-persistent cache/effects, v4→v5→v6 migration, account switching/logout
+  isolation, bounded retry, session-expiry preservation, same-account
+  reauthentication, interrupted-delivery and repeated-contention reconciliation,
+  acknowledgement-envelope validation, canonical per-source restore, safe
+  conflict diagnostics, unresolved-outcome discard prevention, and lost-response
+  receipt replay without a duplicate entry.
 - Stall the Review POST beyond 15 seconds and verify it aborts into durable
   retry-wait. Pending, in-flight, and retry-wait work stays locally hidden and
   silent on Review while automatic backoff owns retries; sign-in and permanent
@@ -98,9 +101,10 @@ Offline Review mutation changes additionally require:
 - A clean iOS native build and the physical-iPhone Airplane Mode,
   force-quit/reopen, reconnect, conflict, System/Light/Dark, Dynamic Type,
   VoiceOver, and Reduce Motion matrices.
-- Explicit limitations: timers and non-terminal location operations are outside
-  this outbox; detailed Location Evidence may require a connection; force-quit
-  does not guarantee background synchronisation.
+- Explicit limitations: timer mutations use their own durable owners; fresh
+  Location Evidence, Apple nearby/search results, and compatibility-only pure
+  `change_place` may require a connection; force-quit does not guarantee
+  background synchronisation even though saved Review intent remains durable.
 
 ## Timer And Sync
 
@@ -232,7 +236,7 @@ Required checks:
 - With an existing active-account cache, open Review offline and require cached cards within 300 ms without bootstrap or Health reprocess completion. Health reprocess must not disable card actions; a concurrent server lock response remains retryable. Pull-to-refresh alone owns the visible spinner; failed background refresh retains cached content and shows Review-specific stale copy.
 - For Confirm, Dismiss, complete Edit-and-confirm and every resolving/structural Location action from list/detail, require one SQLite transaction before card/route removal, immediate existing-owner exit/reflow, no awaited network, and stable hidden state across timeout, `408`, `429`, `5xx`, `review_item_locked`, session expiry, background, force-quit, and reopen. A canonical-open permanent conflict restores exactly once at stored surviving anchors; canonical-resolved conflict stays hidden. Local SQLite failure retains the card/editor and exact draft.
 - Validate Location Evidence SQLite v4 migration, DTO schema/Review-ID validation, account ownership, earlier-of-server-or-seven-day expiry, 25-row and 5-MiB UTF-8 LRU bounds, malformed deletion, canonical-open pruning, logout/account-switch cascade, cache hit/miss/age/bytes diagnostics, request deduplication, serial foreground prefetch, first-failure stop/restart, and no token/raw upload-journal duplication. Cancellation must reach the actual network fetch, keep owner-abort observation through shared persistence, mark that request identity invalid, evict only that identity, and let immediate reopen/re-entry create and retain a replacement rather than attaching to stale work. Every deduplicated consumer must recheck validity/current identity after the shared cache-write await and reject an invalid request. Hold persistence open, cancel its owner, complete the replacement, then release the stale write: cancelled evidence must not return or remain cached, and exact account/Review/time/payload cleanup must not remove replacement data.
-- Exercise cached evidence with no network and unavailable Apple map tiles: times, category, textual summary, route coordinates, Back, Confirm, Ignore, and complete Edit-and-confirm remain usable. A warm cache hit that resolves within the 300 ms target must not mount the full-screen hydration panel or spinner even transiently; only a cold or unusually slow hydration may reveal loading feedback after that grace period. Fresh same-item revalidation must not remount the editor or erase a draft. Evidence GET stops at 10 seconds; legacy direct compatibility actions stop at 15 seconds, retain the draft, and show no native exception text.
+- Exercise cached evidence with no network and unavailable Apple map tiles: times, category, textual summary, route coordinates, Back, and every resolving/structural action whose required inputs are already present remain usable. Include generic Confirm/Dismiss, complete Edit-and-confirm, change-place-and-confirm, record-once/POI/save-place, split, and merge variants. A warm cache hit that resolves within the 300 ms target must not mount the full-screen hydration panel or spinner even transiently; only a cold or unusually slow hydration may reveal loading feedback after that grace period. Fresh same-item revalidation must not remount the editor or erase a draft. Evidence GET stops at 10 seconds; the compatibility-only pure `change_place` request stops at 15 seconds, retains the draft, and shows no native exception text.
 - In a disposable local Postgres `_test` database, prove Review receipt fast replay, non-blocking advisory contention, 8-second statement/1.5-second lock bounds, deterministic Review/event/exact-segment row locks, one canonical winner, rollback, and workspace/user isolation. For Location Evidence, compare representative `EXPLAIN (ANALYZE, BUFFERS)` before adding any index; accepted/rejected/nearby reads may run in parallel only after the scoped Review row resolves, with byte-identical ordering/DTO semantics.
 - On a physical staging iPhone, record `PASS`, `FAIL`, or `NOT RUN` separately for warm/cold Review launch, Airplane Mode, slow/stalled network, cached/uncached evidence, map-tile loss, prefetch tap deduplication, offline durable actions, durable complex-action failure, background/foreground, force-quit/reopen, session expiry/same-account login, account switch/logout, web conflict, overlap, Health reprocess isolation, timers, Live Activities, HealthKit, Location Intelligence, VoiceOver, Reduce Motion, large Dynamic Type, and System/Light/Dark. Simulator/unit evidence cannot substitute.
 - No duplicate React keys or runtime overlays.
@@ -441,7 +445,7 @@ Ask these before opening a PR:
 
 - Verify the automatic decision table in `docs/PRD.md`: medium-high/high; independently valid start/stop bounds at 299999/300000/300001 ms; maximum single overlap at the same edges; running and touching intervals; source provenance; Health coexistence and duplicate/session safety. Medium saved-route commutes require all exception conditions. Existing Review/terminal decisions and deleted automatic entries cannot be recreated.
 - Test overlapping saved radii in multiple input orders; keep the deterministic baseline first/selected, bounded alternatives and up to three transient POIs within 750 m. Confirm one-time names do not save a place and save-place actions are atomic.
-- Run Review SQLite v4→v5 backfill, two-source merge reservation/rollback, account/session isolation, canonical-only restore, acknowledgement retention, discard safety and foreground retry; exercise all strict complex envelopes with disposable Postgres receipts and failed structural rollback.
+- Run Review SQLite v4→v5→v6 migration, two-source merge reservation/rollback, immutable-envelope retention, interrupted-delivery/receipt reconciliation, account/session isolation, canonical-only restore, acknowledgement retention, unresolved-outcome discard prevention and foreground retry; exercise all strict complex envelopes with disposable Postgres receipts and failed structural rollback.
 - `.github/workflows/review-location-validation.yml` runs both base-only and all-ordered-migrations profiles in isolated PostGIS services with synthetic credentials, plus the enabled exact-entry Stop contention test. `DATABASE_URL=..._test npx tsx scripts/setup-validation-db.ts base` (or `ordered`) initialises an empty local test database only; it refuses non-local/non-test/non-empty targets and never seeds production data.
 - The same workflow runs a clean unsigned Simulator build on `macos-26` with staging-only public configuration and fresh Derived Data. Pod installation may regenerate only the three documented path-dependent prebuilt checksums; a graph/lockfile check rejects unrelated changes. This build is not signed-device, gesture, HealthKit or background execution evidence.
 - Use synthetic 2/13/25/50-item profiles from `scripts/fixtures/review-performance.ts`. Run `npx tsx scripts/measure-review-performance.ts` for desktop preparation/SQLite timings only. On the same signed staging build measure cached first content (<300 ms), Back-start p95 (<250 ms), interactive swipe, mounted cards, local enqueue (<500 ms), evidence prefetch cancellation and 50-item scrolling. Do not claim desktop measurements as device acceptance or rewrite the list without measurements.

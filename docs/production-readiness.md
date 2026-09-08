@@ -63,7 +63,7 @@ Behavior defaults:
 - Home: ambiguous and review-first by default.
 - Unknown stays over the threshold create review items.
 - Manual mobile starts and Siri Shortcut/NFC starts use the values supplied by the user or Shortcut; blank manual starts stay blank. Auto-log defaults are reserved for user-enabled automatic sources such as Health imports, walking/running, places, and opt-in commute/place learning.
-- Opt-in commute/place learning captures coarse mobile location samples, saved-place visit transitions, and learned unsaved-place candidates. It defaults off. In the separately enabled Location V2 automatic mode, only finalised, continuous, route-backed `medium_high`/`high` commutes between saved Dayframe endpoints auto-log; all other commute candidates remain Review-first until real-device behaviour is trusted.
+- Opt-in commute/place learning captures coarse mobile location samples, saved-place visit transitions, and learned unsaved-place candidates. It defaults off. In `v2_enabled`, finalised route-backed `medium_high`/`high` commutes use the standard saved-endpoint policy, while the documented `medium` exception additionally requires distinct verified saved endpoints, at least three accepted route samples, and significant displacement or route distance. All lanes retain the boundary, internal-gap, overlap, rollout-acknowledgement, and terminal-decision guards in `docs/PRD.md`; other commute candidates remain Review-first.
 
 Expo Go cannot fully exercise background geofencing; use a development build.
 
@@ -75,7 +75,7 @@ Implemented:
 
 - HealthKit config plugin and iOS entitlement.
 - Permission requests for `HKCategoryTypeIdentifierSleepAnalysis` and `HKWorkoutTypeIdentifier`.
-- Anchored sleep queries with local dedupe.
+- Backend/workspace/user-scoped anchored sleep queries with an atomic local source journal, split-query episode reconstruction, immutable delivery IDs, and exact-owner queue acknowledgement.
 - Mapping for in-bed, asleep unspecified/core/deep/REM, and awake.
 - Event-first queueing as `health_sleep_import` and `health_workout_import`.
 - Server-side audit/dedupe into `health_sleep_segments` and `health_workouts`.
@@ -110,7 +110,7 @@ Release and Watch state changes more quickly than this operational checklist. Us
 ## Remaining Before Wider Daily Beta Use
 
 - Keep duplicate/overlapping Sleep on Watch and collect real production row metadata before adding any merge/delete logic.
-- Keep offline/mobile queue recovery on Watch while real-device testing confirms foreground queue drains, retry backoff, manual retry, idempotency, and diagnostics export.
+- Keep offline/mobile recovery on Watch while real-device testing confirms independent Health, activity, Review, and Location lanes; foreground queue drains; retry backoff; the bounded Settings sync coordinator; idempotency; and diagnostics export.
 - Add safe account deletion, workspace deletion, and stronger privacy controls for raw Health/location payloads and integration tokens.
 - Add token management UI before Home Assistant or other local bridge inputs are promoted beyond manual/local setup.
 - Add the Home Assistant/Cockpit bridge only after ingestion contracts and token controls are stable.

@@ -50,7 +50,7 @@ Before declaring hosted auth/timer/event changes ready, verify:
 
 ## Review automation storage
 
-SQLite v5 adds account-owned per-source mutation effects and backfills v4 outbox rows transactionally; it removes no queue or compatibility columns. Two-source merge intent must reserve both IDs atomically. Postgres already has the boundary fields, `commute_segments.max_gap_seconds` and Review mutation receipts; changing these policies needs no new Postgres migration. The max-gap column means maximum internal observation gap (ceil to integral seconds), not total commute duration. Verify existing columns, receipt uniqueness and indexes in staging before smoke tests; do not fabricate bounds for old rows. Keep same-source Sleep lookup plus insertion under its existing user lock, and preserve `user_edited_at` protection.
+SQLite v5 adds account-owned per-source mutation effects and backfills v4 outbox rows transactionally; v6 adds contention, reconciliation, resolution, and validated-acknowledgement metadata without replacing immutable envelopes or effect anchors. Neither migration removes queued intent or compatibility columns. Two-source merge intent must reserve both IDs atomically. Postgres already has the boundary fields, `commute_segments.max_gap_seconds` and Review mutation receipts; changing these policies needs no new Postgres migration. The max-gap column means maximum internal observation gap (ceil to integral seconds), not total commute duration. Verify existing columns, receipt uniqueness and indexes in staging before smoke tests; do not fabricate bounds for old rows. Keep same-source Sleep lookup plus insertion under its existing user lock, and preserve `user_edited_at` protection.
 
 ## Sync recovery schema and transaction checks
 
