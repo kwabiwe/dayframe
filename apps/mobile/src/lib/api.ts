@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppState } from "react-native";
 import {
   ActivityEventInputSchema,
+  LocationReviewEvidenceDtoSchema,
   type ActivityEventInput,
   type ActivityEventType,
   type CategoryUsageRank,
@@ -22,6 +23,8 @@ import {
   StaleMobileSessionResponseError,
   isMobileTransportFailure,
   mobileFetch,
+  mobileJsonRequest,
+  InvalidMobileAcknowledgementError,
   mobileFetchWithTimeout
 } from "./mobile-network";
 import {
@@ -150,6 +153,7 @@ export type MobileReviewItem = {
 };
 
 export type MobileBootstrap = {
+  serverBuild?: {sourceSha:string|null;deploymentId:string|null;backendId:string|null;environment:string;syncContractVersion:number};
   user: {
     id: string;
     email: string;
@@ -286,6 +290,7 @@ export type PendingTimerStopDeliveryResult =
 export type ReviewItemAction = "accept" | "ignore_once";
 
 export type HealthReviewReprocessResult = {
+  nextCursor?: string | null;
   ok: boolean;
   checkedCount: number;
   confirmedCount: number;
@@ -465,21 +470,29 @@ type ApiJsonRead<T> =
   | { ok: true; payload: T }
   | { ok: false; message: string };
 
-export async function fetchBootstrap(options: { date?: string } = {}): Promise<MobileBootstrap> {
+export async function fetchBootstrap(options: { date?: string; signal?: AbortSignal; deadlineAt?: number } = {}): Promise<MobileBootstrap> {
   const params = options.date ? `?date=${encodeURIComponent(options.date)}` : "";
   const sessionRead = await readAuthenticatedSessionSnapshot();
   if (sessionRead.status === "changed") {
     throw new StaleMobileSessionResponseError();
   }
-  const response = await mobileFetchWithTimeout(
+  const { response, body } = await mobileJsonRequest<MobileBootstrap | null>(
     `${DAYFRAME_API_BASE}/api/bootstrap${params}`,
     {
+      signal: options.signal,
       headers: sessionRead.status === "authenticated"
         ? { Authorization: `Bearer ${sessionRead.snapshot.token}` }
         : {}
     },
     {
-      timeoutMilliseconds: MOBILE_OPENING_REQUEST_TIMEOUT_MS,
+      timeoutMilliseconds: Math.max(1, Math.min(MOBILE_OPENING_REQUEST_TIMEOUT_MS, (options.deadlineAt ?? Date.now() + MOBILE_OPENING_REQUEST_TIMEOUT_MS) - Date.now())),
+      isCurrent: () => sessionRead.status !== "authenticated" || isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot),
+      validate: (body, response) => {
+        if (!response.ok) return null;
+        const value = body as MobileBootstrap | null;
+        if (!value?.user?.id || !value.workspace?.id) throw new InvalidMobileAcknowledgementError();
+        return value;
+      },
       timeoutMessage: "Dayframe is taking too long to open. Check your connection and try again."
     }
   );
@@ -497,10 +510,11 @@ export async function fetchBootstrap(options: { date?: string } = {}): Promise<M
   if (!response.ok) {
     throw new MobileHttpResponseError(
       response.status,
-      await errorMessage(response, "Unable to load Dayframe API")
+      "Unable to load Dayframe API"
     );
   }
-  const bootstrap = await readJsonResponse<MobileBootstrap>(response);
+  if (!body) throw new InvalidMobileAcknowledgementError();
+  const bootstrap = body;
   if (bootstrap.user?.id && bootstrap.workspace?.id) {
     const owner = {
       userId: bootstrap.user.id,
@@ -901,7 +915,7 @@ async function runActivityQueueSyncRequest(
     ) {
       return deferredQueueSyncResult(owner, "non_timer");
     }
-    return syncQueueUnlocked({ ...options, signal: undefined }, owner);
+    return syncQueueUnlocked(options, owner);
   }
 
   const timerResult = await syncQueueUnlocked({
@@ -931,7 +945,7 @@ async function runActivityQueueSyncRequest(
   const foregroundResult = await syncQueueUnlocked({
     ...options,
     eventScope: "non_timer",
-    signal: undefined
+    signal: options.signal
   }, owner);
   return combineQueueSyncResults(
     [timerResult, foregroundResult],
@@ -1069,7 +1083,7 @@ async function syncQueueItems(
         stopped = true;
         break;
       }
-      const response = await mobileFetchWithTimeout(
+      const {response,body:payload} = await mobileJsonRequest<Record<string,unknown> | null>(
         `${DAYFRAME_API_BASE}/api/events`,
         {
           method: "POST",
@@ -1081,6 +1095,7 @@ async function syncQueueItems(
           signal: options.signal
         },
         {
+          isCurrent: async () => isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot) && mobileAccountOwnersEqual(await readActiveMobileAccount(),owner),
           timeoutMilliseconds: MOBILE_QUEUE_REQUEST_TIMEOUT_MS,
           timeoutMessage: "Queued activity sync timed out. It will retry automatically."
         }
@@ -1098,7 +1113,7 @@ async function syncQueueItems(
       }
       if (!response.ok) {
         const failureKind = permanentStatusCodes.has(response.status) ? "permanent" : "server";
-        const message = await errorMessage(response, "Unable to sync queued event");
+        const message = formatApiError((payload ?? {}) as ApiErrorPayload) ?? "Unable to sync queued event";
         const failedItem = markQueueFailure(item, message, attemptedAt, failureKind, response.status);
         remaining.push(failedItem);
         firstError ??= queueFailureReport(failedItem, message, failureKind, response.status);
@@ -1109,9 +1124,12 @@ async function syncQueueItems(
         }
         continue;
       }
-      const payload = await readJsonResponse<{ eventId?: string; timeEntryId?: string }>(response);
+      if (!payload || typeof payload.eventId !== "string" || !payload.eventId.trim() || payload.ok === false || payload.partial === true ||
+          payload.clientEventId !== undefined && payload.clientEventId !== item.localId) {
+        throw new InvalidMobileAcknowledgementError();
+      }
       if (item.type === "timer_start") {
-        if (!payload.timeEntryId) {
+        if (typeof payload.timeEntryId !== "string" || !payload.timeEntryId) {
           throw new Error("Synced timer start did not return its canonical time entry.");
         }
         await recordTimerEntryIdCorrelation(item.localId, payload.timeEntryId, owner);
@@ -1123,10 +1141,14 @@ async function syncQueueItems(
       synced.push(item.localId);
     } catch (error) {
       if (error instanceof AuthRequiredError) throw error;
+      if (error instanceof StaleMobileSessionResponseError || options.signal?.aborted || error instanceof Error && error.name === "AbortError") {
+        remaining.push(item,...queue.slice(index+1));stopped=true;break;
+      }
       const message = error instanceof Error ? error.message : "Network request failed";
-      const failedItem = markQueueFailure(item, message, attemptedAt, "network");
+      const failureKind = isMobileTransportFailure(error) ? "network" : "server";
+      const failedItem = markQueueFailure(item, message, attemptedAt, failureKind);
       remaining.push(failedItem, ...queue.slice(index + 1));
-      firstError ??= queueFailureReport(failedItem, message, "network");
+      firstError ??= queueFailureReport(failedItem, message, failureKind);
       stopped = true;
       break;
     }
@@ -1397,23 +1419,21 @@ export async function fetchLocationReviewEvidence(
   id: string,
   options: { signal?: AbortSignal } = {}
 ): Promise<LocationReviewEvidenceDto> {
-  const response = await mobileFetchWithTimeout(
+  const session = await readAuthenticatedSessionSnapshot();
+  if (session.status === "changed") throw new StaleMobileSessionResponseError();
+  if (session.status !== "authenticated") throw new AuthRequiredError();
+  const { response, body } = await mobileJsonRequest<LocationReviewEvidenceDto | null>(
     `${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(id)}/location-evidence`,
-    {
-      headers: await authHeaders(),
-      cache: "no-store",
-      signal: options.signal
-    },
-    {
-      timeoutMilliseconds: MOBILE_LOCATION_REVIEW_EVIDENCE_TIMEOUT_MS,
-      timeoutMessage: "Location evidence is taking too long to load."
-    }
+    { headers: { Authorization: `Bearer ${session.snapshot.token}` }, cache: "no-store", signal: options.signal },
+    { timeoutMilliseconds: MOBILE_LOCATION_REVIEW_EVIDENCE_TIMEOUT_MS,
+      timeoutMessage: "Location evidence is taking too long to load.",
+      isCurrent: () => isAuthenticatedSessionSnapshotCurrent(session.snapshot),
+      validate: (body, response) => response.ok ? LocationReviewEvidenceDtoSchema.parse(body) : null }
   );
-  if (response.status === 401) {
-    throw new AuthRequiredError();
-  }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to load location evidence"));
-  return readJsonResponse<LocationReviewEvidenceDto>(response);
+  if (response.status === 401 || response.status === 403) throw new AuthRequiredError();
+  if (!response.ok) throw new MobileHttpResponseError(response.status, "Unable to load location evidence");
+  if (!body) throw new InvalidMobileAcknowledgementError();
+  return body;
 }
 
 export function normaliseLocationReviewRequestError(
@@ -1462,21 +1482,19 @@ export function dismissReviewItem(id: string) {
 
 export async function reprocessHealthReviewItems(
   preferences: HealthImportPreferences,
-  options: { limit?: number; force?: boolean; mappings?: HealthAutoLogMappings } = {}
+  options: { limit?: number; force?: boolean; mappings?: HealthAutoLogMappings; cursor?: string | null; signal?: AbortSignal; deadlineAt?: number } = {}
 ): Promise<HealthReviewReprocessResult> {
-  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/review/reprocess-health`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(await authHeaders())
-    },
-    body: JSON.stringify({ preferences, limit: options.limit, force: options.force, mappings: options.mappings })
-  });
-  if (response.status === 401) {
-    throw new AuthRequiredError();
-  }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to reprocess Health review items"));
-  return readJsonResponse<HealthReviewReprocessResult>(response);
+  const session = await readAuthenticatedSessionSnapshot();
+  if(session.status!=="authenticated") throw new AuthRequiredError();
+  const {response,body} = await mobileJsonRequest<Record<string,unknown> | null>(`${DAYFRAME_API_BASE}/api/review/reprocess-health`, {
+    method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${session.snapshot.token}`},signal:options.signal,
+    body:JSON.stringify({preferences,limit:options.limit,force:options.force,mappings:options.mappings,cursor:options.cursor})
+  }, {timeoutMilliseconds:Math.max(1,Math.min(15_000,(options.deadlineAt??Date.now()+15_000)-Date.now())),timeoutMessage:"Health processing timed out. Captured activity remains saved.",
+    isCurrent:()=>isAuthenticatedSessionSnapshotCurrent(session.snapshot)});
+  if(response.status===401||response.status===403) throw new AuthRequiredError();
+  if(!response.ok) throw new MobileHttpResponseError(response.status,typeof body?.message==="string"?body.message:"Unable to reprocess Health review items");
+  if(!body || typeof body.checkedCount!=="number" || body.ok===false) throw new InvalidMobileAcknowledgementError();
+  return body as unknown as HealthReviewReprocessResult;
 }
 
 export async function saveEditedReviewItem(

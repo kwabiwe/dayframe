@@ -33,6 +33,12 @@ vi.mock("@react-native-async-storage/async-storage", () => ({
   }
 }));
 
+vi.mock("./mobileAccount", () => ({
+  readActiveMobileAccount: async () => ({userId:"health-user",workspaceId:"health-workspace"}),
+  mobileAccountOwnersEqual: (a: unknown,b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+}));
+vi.mock("./mobile-network", () => ({StaleMobileSessionResponseError: class extends Error {}}));
+
 vi.mock("./api", () => ({
   enqueueEvent: apiMocks.enqueueEvent,
   reprocessHealthReviewItems: apiMocks.reprocessHealthReviewItems
@@ -583,7 +589,7 @@ describe("HealthKit mapping", () => {
         strength_training: false,
         swimming: false
       }),
-      { limit: 25, force: true, mappings: {} }
+      { limit: 25, force: true, mappings: {}, cursor: null, deadlineAt: expect.any(Number), signal: undefined }
     );
   });
 
@@ -610,6 +616,7 @@ describe("HealthKit mapping", () => {
     expect(apiMocks.reprocessHealthReviewItems).toHaveBeenCalledWith(
       expect.objectContaining({ walking: true }),
       {
+        cursor: null, deadlineAt: expect.any(Number), signal: undefined,
         limit: 25,
         force: true,
         mappings: {
@@ -661,12 +668,12 @@ describe("HealthKit mapping", () => {
     expect(apiMocks.reprocessHealthReviewItems).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ walking: true }),
-      { limit: 25, force: true, mappings: {} }
+      { limit: 25, force: true, mappings: {}, cursor: null, deadlineAt: expect.any(Number), signal: undefined }
     );
     expect(apiMocks.reprocessHealthReviewItems).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({ walking: true }),
-      { limit: 25, force: true, mappings: {} }
+      { limit: 25, force: true, mappings: {}, cursor: null, deadlineAt: expect.any(Number), signal: undefined }
     );
     expect(result).toMatchObject({
       checkedCount: 33,

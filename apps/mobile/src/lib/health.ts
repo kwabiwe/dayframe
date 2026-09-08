@@ -23,6 +23,8 @@ import {
 } from "@dayframe/shared";
 import { enqueueEvent, reprocessHealthReviewItems, type HealthReviewReprocessResult } from "./api";
 import { DAYFRAME_API_BASE } from "./config";
+import { readActiveMobileAccount, mobileAccountOwnersEqual } from "./mobileAccount";
+import { StaleMobileSessionResponseError } from "./mobile-network";
 
 const HEALTHKIT_SLEEP_TYPE = "HKCategoryTypeIdentifierSleepAnalysis";
 const HEALTHKIT_WORKOUT_TYPE = "HKWorkoutTypeIdentifier";
@@ -284,7 +286,12 @@ export async function startHealthKitChangeObservers(
   };
 }
 
-export async function importHealthKitSleep() {
+export async function importHealthKitSleep(options: { signal?: AbortSignal } = {}) {
+  const owner = await readActiveMobileAccount();
+  const checkOwner = async () => {
+    if (!owner || options.signal?.aborted || !mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) throw new StaleMobileSessionResponseError();
+  };
+  await checkOwner();
   ensureIos();
   const healthkit = await loadHealthKit();
   const anchor = await AsyncStorage.getItem(HEALTHKIT_ANCHOR_KEY);
@@ -311,9 +318,11 @@ export async function importHealthKitSleep() {
       ignoredCount += 1;
       continue;
     }
-    await enqueueEvent(healthKitSleepSessionEvent(session, healthAutoLogMappingFor("sleep", mappings)));
+    await checkOwner();
+    await enqueueEvent({...healthKitSleepSessionEvent(session, healthAutoLogMappingFor("sleep", mappings)), owner: owner!});
   }
 
+  await checkOwner();
   await AsyncStorage.setItem(HEALTHKIT_ANCHOR_KEY, result.newAnchor);
   await AsyncStorage.setItem(HEALTHKIT_SEEN_KEY, JSON.stringify([...seen].slice(-1000)));
 
@@ -327,7 +336,12 @@ export async function importHealthKitSleep() {
   };
 }
 
-export async function importHealthKitWorkouts() {
+export async function importHealthKitWorkouts(options: { signal?: AbortSignal } = {}) {
+  const owner = await readActiveMobileAccount();
+  const checkOwner = async () => {
+    if (!owner || options.signal?.aborted || !mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) throw new StaleMobileSessionResponseError();
+  };
+  await checkOwner();
   ensureIos();
   const healthkit = await loadHealthKit();
   const anchor = await AsyncStorage.getItem(HEALTHKIT_WORKOUT_ANCHOR_KEY);
@@ -350,9 +364,11 @@ export async function importHealthKitWorkouts() {
       continue;
     }
     imported.push(mapped);
-    await enqueueEvent(healthKitWorkoutEvent(mapped, healthAutoLogMappingFor(mapped.workoutType, mappings)));
+    await checkOwner();
+    await enqueueEvent({...healthKitWorkoutEvent(mapped, healthAutoLogMappingFor(mapped.workoutType, mappings)), owner: owner!});
   }
 
+  await checkOwner();
   await AsyncStorage.setItem(HEALTHKIT_WORKOUT_ANCHOR_KEY, result.newAnchor);
   await AsyncStorage.setItem(HEALTHKIT_WORKOUT_SEEN_KEY, JSON.stringify([...seen].slice(-1000)));
 
@@ -430,7 +446,7 @@ export async function setHealthWorkoutImportPreference(type: HealthWorkoutType, 
 
 export async function reprocessExistingHealthReviewItems(
   preferences?: HealthImportPreferences,
-  options: { force?: boolean; mappings?: HealthAutoLogMappings } = {}
+  options: { force?: boolean; mappings?: HealthAutoLogMappings; signal?: AbortSignal; deadlineAt?: number } = {}
 ) {
   const now = Date.now();
   if (healthReprocessInFlight) return healthReprocessInFlight;
@@ -444,7 +460,7 @@ export async function reprocessExistingHealthReviewItems(
       const result = await reprocessHealthReviewItemBatches(
         preferences ?? await getHealthImportPreferences(),
         options.mappings ?? await getHealthAutoLogMappings(),
-        options.force === true
+        options.force === true, options
       );
       lastHealthReprocessAt = result.hasMore ? 0 : Date.now();
       healthReprocessBackoffUntil = 0;
@@ -463,20 +479,25 @@ export async function reprocessExistingHealthReviewItems(
 async function reprocessHealthReviewItemBatches(
   preferences: HealthImportPreferences,
   mappings: HealthAutoLogMappings,
-  force: boolean
+  force: boolean,
+  options: {signal?: AbortSignal; deadlineAt?: number} = {}
 ) {
   const startedAt = Date.now();
   let combined: HealthReviewReprocessResult | null = null;
+  let cursor: string | null = null;
+  const deadlineAt = Math.min(options.deadlineAt ?? Infinity, startedAt + HEALTH_REPROCESS_MAX_DURATION_MS);
 
   for (let batch = 0; batch < HEALTH_REPROCESS_MAX_BATCHES; batch += 1) {
     const result = await reprocessHealthReviewItems(preferences, {
       limit: HEALTH_REPROCESS_BATCH_SIZE,
       force,
-      mappings
+      mappings, cursor, signal: options.signal, deadlineAt
     });
+    cursor = result.nextCursor ?? null;
     combined = mergeHealthReprocessResults(combined, result);
     if (!result.hasMore && !result.partial) break;
-    if (Date.now() - startedAt >= HEALTH_REPROCESS_MAX_DURATION_MS) {
+    if ("nextCursor" in result && !result.nextCursor) break;
+    if (options.signal?.aborted || Date.now() >= deadlineAt) {
       combined.partial = true;
       combined.hasMore = true;
       break;

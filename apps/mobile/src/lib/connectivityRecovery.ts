@@ -1,3 +1,4 @@
+import type {SyncLaneOutcome} from "./syncLane";
 export type ConnectivityRecoveryStepName =
   | "timer_stops_ready"
   | "timer_activity_queue"
@@ -11,7 +12,7 @@ export type ConnectivityRecoveryStepName =
 export type ConnectivityRecoveryStepResult =
   | "continue"
   | "application_failure"
-  | "transport_failure";
+  | SyncLaneOutcome;
 
 export type ConnectivityRecoveryPassResult =
   | "completed"
@@ -25,7 +26,8 @@ export type ConnectivityRecoveryStepOutcome =
   | "interrupted"
   | "transport_failure"
   | "authentication_required"
-  | "application_error";
+  | "application_error"
+  | SyncLaneOutcome;
 
 export type ConnectivityRecoveryStep = {
   name: ConnectivityRecoveryStepName;
@@ -33,22 +35,14 @@ export type ConnectivityRecoveryStep = {
 };
 
 export type ReviewConnectivityRecoveryResult = {
+  outcome?: SyncLaneOutcome;
   reason?: "no_account" | "no_session" | "retryable_failure";
   waitingCount?: number;
   needsAttentionCount?: number;
 };
 
 export type LocationConnectivityRecoveryResult = {
-  synced: boolean;
-  reason?:
-    | "v1"
-    | "session_unavailable"
-    | "no_session"
-    | "session_changed"
-    | "payload_too_large"
-    | "request_failed"
-    | "invalid_batch"
-    | "replay_failed";
+  synced:boolean;reason?:string;outcome?:SyncLaneOutcome;
 };
 
 export type ConnectivityRecoveryRequest = {
@@ -111,7 +105,8 @@ export function connectivityAllowsRecovery(input: {
 export function reviewConnectivityRecoveryStepResult(
   result: ReviewConnectivityRecoveryResult
 ): ConnectivityRecoveryStepResult {
-  if (result.reason === "retryable_failure") return "transport_failure";
+  if (result.outcome) return result.outcome === "complete" ? "continue" : result.outcome;
+  if (result.reason === "retryable_failure") return "server_busy";
   if (
     result.reason === "no_session" ||
     (result.waitingCount ?? 0) > 0 ||
@@ -125,8 +120,9 @@ export function reviewConnectivityRecoveryStepResult(
 export function locationConnectivityRecoveryStepResult(
   result: LocationConnectivityRecoveryResult
 ): ConnectivityRecoveryStepResult {
+  if (result.outcome) return result.outcome === "complete" ? "continue" : result.outcome;
   if (result.reason === "request_failed" || result.reason === "replay_failed") {
-    return "transport_failure";
+    return "server_busy";
   }
   if (!result.synced && result.reason !== "v1") return "application_failure";
   return "continue";
@@ -184,9 +180,11 @@ export async function runConnectivityRecoveryPass(input: {
         recordOutcome("transport_failure");
         return "transport_failure";
       }
-      if (result === "application_failure") {
+      if (result === "authentication_required") {recordOutcome(result);input.onAuthenticationRequired();return "authentication_required";}
+      if (result === "cancelled") {recordOutcome(result);return "interrupted";}
+      if (result && result !== "continue" && result !== "complete") {
         hadApplicationFailure = true;
-        recordOutcome("application_error");
+        recordOutcome(result === "application_failure" ? "application_error" : result);
       }
     } catch (error) {
       if (input.isAuthenticationRequired(error)) {
@@ -228,7 +226,8 @@ export function createConnectivityRecoveryCoordinator(input: {
     retryAt: number;
   }) => void;
   random?: () => number;
-  runPass: (epoch: number) => Promise<ConnectivityRecoveryPassResult>;
+  nextDueAt?: () => number | null;
+  runPass: (epoch: number, context?: { dueOnly: boolean }) => Promise<ConnectivityRecoveryPassResult>;
   setTimer?: (callback: () => void, delay: number) => ReturnType<typeof setTimeout>;
   shouldRetry?: (result: ConnectivityRecoveryPassResult) => boolean;
 }) {
@@ -239,6 +238,7 @@ export function createConnectivityRecoveryCoordinator(input: {
   let handledWorkRevision = 0;
   let interruptedReconnectEpoch = 0;
   let ownershipRevision = 0;
+  let queuedDueOnly = false;
   let retryAttempt = 0;
   let retryAt: number | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -253,20 +253,21 @@ export function createConnectivityRecoveryCoordinator(input: {
     retryAt = null;
   };
 
-  const scheduleRetry = (epoch: number) => {
+  const scheduleRetry = (epoch: number, result: ConnectivityRecoveryPassResult) => {
     clearScheduledRetry();
     retryAttempt += 1;
     const baseMilliseconds = [1_000, 2_500, 5_000, 15_000, 30_000, 60_000][
       Math.min(retryAttempt, 6) - 1
     ];
     const jitter = 0.8 + Math.max(0, Math.min(random(), 1)) * 0.4;
-    const delay = Math.round(baseMilliseconds * jitter);
+    const dueAt = result === "transport_failure" ? null : input.nextDueAt?.();
+    const delay = Math.max(Math.round(baseMilliseconds * jitter), dueAt == null ? 0 : dueAt - now());
     retryAt = now() + delay;
     input.onRetryScheduled?.({ attempt: retryAttempt, epoch, retryAt });
     retryTimer = setTimer(() => {
       retryTimer = null;
       retryAt = null;
-      void request(epoch, { forcePass: true });
+      void request(epoch, { forcePass: true, dueOnly:true });
     }, delay) as ReturnType<typeof setTimeout>;
   };
 
@@ -290,7 +291,8 @@ export function createConnectivityRecoveryCoordinator(input: {
       handledWorkRevision = queuedWorkRevision;
       const passOwnershipRevision = ownershipRevision;
       input.onPassStarted?.(epoch);
-      const result = await input.runPass(epoch);
+      const dueOnly=queuedDueOnly;queuedDueOnly=false;
+      const result = await (dueOnly ? input.runPass(epoch,{dueOnly:true}) : input.runPass(epoch));
       if (
         result === "interrupted" &&
         passOwnershipRevision === ownershipRevision
@@ -305,7 +307,7 @@ export function createConnectivityRecoveryCoordinator(input: {
       const shouldRetry = input.shouldRetry?.(result) ?? result === "transport_failure";
       const hasPendingWork = input.hasPendingWork?.() ?? shouldRetry;
       if (!hasPendingPass && shouldRetry && input.canStart()) {
-        scheduleRetry(epoch);
+        scheduleRetry(epoch,result);
       } else if (!hasPendingPass && !shouldRetry && !hasPendingWork) {
         clearScheduledRetry();
         retryAttempt = 0;
@@ -320,7 +322,7 @@ export function createConnectivityRecoveryCoordinator(input: {
 
   const request = (
     epoch: number,
-    options: { forcePass?: boolean; queuedWorkArrived?: boolean } = {}
+    options: { forcePass?: boolean; queuedWorkArrived?: boolean; dueOnly?: boolean } = {}
   ) => {
     const queuedWorkArrived = options.queuedWorkArrived === true;
     const passRequested = queuedWorkArrived || options.forcePass === true;
@@ -340,7 +342,10 @@ export function createConnectivityRecoveryCoordinator(input: {
     ) {
       return reconnectRecoveryInFlight ?? Promise.resolve();
     }
-    if (passRequested) queuedWorkRevision += 1;
+    if (passRequested) {
+      queuedDueOnly=options.dueOnly===true && queuedWorkRevision===handledWorkRevision;
+      queuedWorkRevision += 1;
+    }
     queuedReconnectEpoch = Math.max(queuedReconnectEpoch, epoch);
     reconnectRecoveryInFlight ??= drain().finally(() => {
       reconnectRecoveryInFlight = null;

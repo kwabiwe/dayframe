@@ -26,6 +26,7 @@ type PrefetchDiagnostics = {
   attempted: number;
   completed: number;
   stopped: number;
+  idleStopped: number;
   lastOutcome: "idle" | "running" | "complete" | "cancelled" | "failed";
 };
 
@@ -44,6 +45,7 @@ let prefetchDiagnostics: PrefetchDiagnostics = {
   attempted: 0,
   completed: 0,
   stopped: 0,
+  idleStopped: 0,
   lastOutcome: "idle"
 };
 
@@ -67,7 +69,7 @@ export async function revalidateLocationReviewEvidence(
   input: EvidenceOwner
 ): Promise<LocationReviewEvidenceReadResult> {
   throwIfAborted(input.signal);
-  const request = networkLocationReviewEvidence(input);
+  const {request,release} = networkLocationReviewEvidence(input);
   try {
     const evidence = await awaitWithAbort(
       request.networkPromise,
@@ -85,13 +87,14 @@ export async function revalidateLocationReviewEvidence(
       cachedAt: fetchedAt
     };
   } finally {
-    request.release();
+    release();
   }
 }
 
 export function createLocationReviewEvidencePrefetcher() {
   let generation = 0;
   let controller: AbortController | null = null;
+  let attemptedForRun=false;
 
   return {
     start(input: {
@@ -105,6 +108,7 @@ export function createLocationReviewEvidencePrefetcher() {
       const ownerGeneration = generation;
       controller?.abort();
       controller = new AbortController();
+      attemptedForRun=false;
       const signal = controller.signal;
       prefetchDiagnostics = {
         ...prefetchDiagnostics,
@@ -117,9 +121,11 @@ export function createLocationReviewEvidencePrefetcher() {
           LOCATION_REVIEW_EVIDENCE_MAX_ITEMS
         ),
         signal,
+        onAttempt:()=>{attemptedForRun=true;},
         isCurrent: () => generation === ownerGeneration
       }).then((outcome) => {
         if (generation !== ownerGeneration) return;
+        controller=null;
         prefetchDiagnostics = {
           ...prefetchDiagnostics,
           lastOutcome: outcome
@@ -128,12 +134,14 @@ export function createLocationReviewEvidencePrefetcher() {
     },
     stop() {
       generation += 1;
+      const cancelled=Boolean(controller && attemptedForRun);
       controller?.abort();
       controller = null;
       prefetchDiagnostics = {
         ...prefetchDiagnostics,
-        stopped: prefetchDiagnostics.stopped + 1,
-        lastOutcome: "cancelled"
+        stopped: prefetchDiagnostics.stopped + (cancelled?1:0),
+        idleStopped: prefetchDiagnostics.idleStopped + (cancelled?0:1),
+        lastOutcome: cancelled?"cancelled":"idle"
       };
     }
   };
@@ -151,6 +159,7 @@ async function runPrefetch(input: {
   yieldMilliseconds?: number;
   signal: AbortSignal;
   isCurrent: () => boolean;
+  onAttempt:()=>void;
 }): Promise<PrefetchDiagnostics["lastOutcome"]> {
   try {
     await delay(input.initialDelayMilliseconds ?? 300, input.signal);
@@ -165,6 +174,7 @@ async function runPrefetch(input: {
       if (cacheDiagnostics.itemCount >= LOCATION_REVIEW_EVIDENCE_MAX_ITEMS) {
         return "complete";
       }
+      input.onAttempt();
       prefetchDiagnostics = {
         ...prefetchDiagnostics,
         attempted: prefetchDiagnostics.attempted + 1
@@ -194,7 +204,7 @@ function networkLocationReviewEvidence(input: EvidenceOwner) {
   let request = inFlightEvidenceRequests.get(key);
   if (!request) {
     let nextRequest: InFlightEvidenceRequest;
-    const ownerSignal = input.signal;
+    const transportController=new AbortController();
     const clearIfCurrent = () => {
       if (inFlightEvidenceRequests.get(key) === nextRequest) {
         inFlightEvidenceRequests.delete(key);
@@ -202,17 +212,15 @@ function networkLocationReviewEvidence(input: EvidenceOwner) {
     };
     const invalidate = () => {
       nextRequest.valid = false;
-      ownerSignal?.removeEventListener("abort", handleOwnerAbort);
+      transportController.abort();
       clearIfCurrent();
     };
-    const handleOwnerAbort = () => invalidate();
     const release = () => {
       nextRequest.consumerCount = Math.max(0, nextRequest.consumerCount - 1);
       if (nextRequest.consumerCount === 0) invalidate();
     };
-    ownerSignal?.addEventListener("abort", handleOwnerAbort, { once: true });
     const networkPromise = fetchLocationReviewEvidence(input.reviewItemId, {
-      signal: ownerSignal
+      signal: transportController.signal
     })
       .then((evidence) => {
         setTimeout(() => {
@@ -240,7 +248,16 @@ function networkLocationReviewEvidence(input: EvidenceOwner) {
     inFlightEvidenceRequests.set(key, request);
   }
   request.consumerCount += 1;
-  return request;
+  const held=request;
+  let released=false;
+  const release=()=>{
+    if(released)return;
+    released=true;
+    input.signal?.removeEventListener("abort",release);
+    held.release();
+  };
+  input.signal?.addEventListener("abort",release,{once:true});
+  return {request:held,release};
 }
 
 async function cacheNetworkEvidence(

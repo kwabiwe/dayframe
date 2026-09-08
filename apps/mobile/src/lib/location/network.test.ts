@@ -36,11 +36,12 @@ describe("location sync network boundary", () => {
   });
 
   it("clears the deadline after a successful response", async () => {
-    const response = { ok: true } as Response;
+    const body = {ok:true,replayVersion:"v2",rolloutMode:"v2_shadow",clientAcknowledgedMode:false,finalisedSegmentCount:0,semanticSegmentCount:0,warnings:[]};
+    const response = { ok: true, json:async()=>body } as Response;
     vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(response)));
 
     await expect(fetchLocationSync("https://dayframe.test/api/location/replay", {}, 100))
-      .resolves.toBe(response);
+      .resolves.toEqual({response,body});
     expect(fetch).toHaveBeenCalledWith(
       "https://dayframe.test/api/location/replay",
       expect.objectContaining({ credentials: "omit" })

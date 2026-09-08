@@ -20,7 +20,8 @@ describe("background session invalidation contracts", () => {
   });
 
   it("guards delayed Review sync rejections with their captured bearer", () => {
-    expect(reviewSyncStoreSource).toContain("invalidateMobileSessionIfCurrent(token)");
+    expect(reviewSyncStoreSource).toContain("isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot)");
+    expect(reviewSyncStoreSource).toContain("mobileJsonRequest(");
     expect(reviewSyncStoreSource).not.toContain("invalidateMobileSession()");
   });
 
