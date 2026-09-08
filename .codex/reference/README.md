@@ -24,7 +24,7 @@ On-demand references:
 - `debugging-playbook.md`: screenshot, production, and regression triage before coding.
 - `health-review-pipeline.md`: HealthKit, Review, auto-log, Confirm/Dismiss, and diagnostics.
 - `location-learning.md`: Location V2 evidence, segmentation, rollout, privacy, and Review policy.
-- `offline-review-mutations.md`: durable Review terminal-action outbox.
+- `offline-review-mutations.md`: durable Review resolving/structural-action outbox and reconciliation.
 - `motion.md`: motion ownership, continuity, accessibility, and PR evidence.
 - `release-and-testflight.md`: TestFlight, Vercel, Supabase, and runtime version checks.
 - `validation-matrix.md`: canonical validation commands and manual evidence by feature area.

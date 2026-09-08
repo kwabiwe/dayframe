@@ -1,5 +1,7 @@
 # Location Review Where/What editor
 
+Historical status note (2026-09-08): PR #186 later moved every resolving/structural Location action into the durable Review outbox. Connectivity-dependent wording below describes this earlier implementation; current behavior lives in `.codex/reference/offline-review-mutations.md` and `docs/feature-fix-tracker.md`.
+
 Date: 2026-08-12
 
 ## Product problem

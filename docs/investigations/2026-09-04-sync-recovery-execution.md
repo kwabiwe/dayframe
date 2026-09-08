@@ -1,5 +1,7 @@
 # Sync recovery execution evidence — 4 September 2026
 
+Historical status note (2026-09-08): PRs #188–#191 subsequently merged into `main`. This note remains the evidence trail for the unresolved incident and does not prove production repair, migration, TestFlight provenance, or physical-device acceptance; see `docs/feature-fix-tracker.md`.
+
 This investigation separates code correction from recovery of the reported production records. Delivery state belongs in the [feature tracker](../feature-fix-tracker.md). The [architecture](../architecture.md), [database reference](../../.codex/reference/database.md) and [Health pipeline](../../.codex/reference/health-review-pipeline.md) own the durable contracts.
 
 ## Identity and evidence boundaries

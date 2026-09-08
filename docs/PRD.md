@@ -460,7 +460,7 @@ Validation:
 - Realtime sync through Supabase Realtime/WebSocket/SSE.
 - More advanced rule learning from accepted/ignored suggestions.
 - Account deletion UI with full raw health/location deletion.
-- A separate staging iOS bundle/App Group/Keychain/APNs identity; the hosted staging environment already exists.
+- Signed-device validation of the implemented separate staging iOS bundle, App Group, Keychain, URL-scheme, Live Activity extension, and APNs lane.
 - App Store release if sideloading is no longer sufficient.
 
 ## 14. Risks & Mitigations

@@ -137,4 +137,4 @@ Use [`.codex/reference/validation-matrix.md`](.codex/reference/validation-matrix
 
 ## Known product decisions
 
-The feature tracker holds the active decision register. Current decisions include the production Location V2 mode, automation-accuracy measurement, full deletion/retention semantics, a separate staging iOS identity, native NFC beyond Shortcuts, and wider beta/App Store criteria.
+The feature tracker holds the active decision register. Current decisions include the production Location V2 mode, automation-accuracy measurement, full deletion/retention semantics, native NFC beyond Shortcuts, persisted activity/category icons, commute endpoint correction, and wider beta/App Store criteria. The separate staging iOS identity is implemented; signed-device isolation remains a release-evidence gate rather than a product decision.

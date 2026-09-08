@@ -1,5 +1,7 @@
 # Approved sync integration
 
+Historical status note (2026-09-08): PRs #188, #189, and #190 subsequently merged at `2dc2a90`, `108bfc0`, and `3f91d08`. The integration evidence below remains historical and does not establish production release or physical-device acceptance; see `docs/feature-fix-tracker.md`.
+
 The owner approved these exact independently reviewed heads for integration only:
 
 | PR | Approved head |
