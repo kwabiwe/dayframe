@@ -45,7 +45,7 @@ The implementation keeps the existing entry-array limits and fetches only one ad
 
 ### Automated and host evidence
 
-- Focused Reports/component/model/cache/session checks: **PASS**, 8 files and 39 tests after the final route-blur, one-presentation and overnight/invariant additions. Focused web query checks: **PASS**, 6/6.
+- Focused Reports/component/model/cache/session checks: **PASS**, 8 files and 40 tests after the final route-blur, one-presentation, source-qualification and overnight/invariant additions. Focused web query checks: **PASS**, 6/6.
 - Workspace typecheck: **PASS** for mobile, web and shared.
 - Controlled workspace tests: mobile **PASS**, 110 files and 1,022 tests; shared **PASS**, 14 files and 236 tests. Web ran 128 passing files, one skipped file and one unrelated failure in `categoryPicker.dom.test.tsx` while waiting for an existing creation dialog; its single isolated rerun then passed 1 file/6 tests. Both the first result and rerun are retained rather than calling that controlled invocation wholly green.
 - Lint/docs/iOS-config: **PASS** with 0 errors and two pre-existing `_values` warnings in `apps/web/src/lib/event-service.test.ts`. Production Next.js build: **PASS**, 38 pages. Brand assets, Review SQLite (21 tests), Location V2 SQLite and `git diff --check`: **PASS**.
