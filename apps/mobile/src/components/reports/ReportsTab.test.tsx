@@ -1,6 +1,11 @@
 import { act, create } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 
+vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+  callback(0);
+  return 1;
+});
+
 vi.mock("react", async () => {
   // @ts-expect-error The workspace currently installs the renderer's peer React at the repository root.
   return import("../../../../../node_modules/react/index.js");
@@ -38,7 +43,16 @@ import type { MobileBootstrap } from "@/lib/api";
 
 const data: MobileBootstrap = {
   activeEntry: null,
-  categories: [{ id: "work", name: "Work", color: "blue", isPinned: false }],
+  categories: [
+    { id: "work", name: "Work", color: "blue", isPinned: false },
+    { id: "health", name: "Health", color: "green", isPinned: false }
+  ],
+  entryCoverage: {
+    capturedAt: "2026-09-08T12:00:00.000Z",
+    dayEntries: { from: "2026-09-08T00:00:00.000Z", toExclusive: "2026-09-09T00:00:00.000Z", limit: 100, hasMore: false },
+    weekEntries: { from: "2026-09-07T00:00:00.000Z", toExclusive: "2026-09-14T00:00:00.000Z", limit: 300, hasMore: false },
+    historyEntries: { from: "2026-06-10T00:00:00.000Z", toExclusive: "2026-09-09T00:00:00.000Z", limit: 2000, hasMore: false }
+  },
   entries: [{
     categoryColor: "blue", categoryId: "work", categoryName: "Work", clientName: null,
     confidence: "high", description: null, durationSeconds: 3600, id: "entry", placeName: null,
@@ -84,9 +98,37 @@ describe("ReportsTab", () => {
     expect(bar!.props.onPress).toBeUndefined();
   });
 
+  it("explains a zero-time category selection while retaining the dimmed context ring", () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<ReportsTab data={data} isFocused nowMs={Date.parse("2026-09-08T12:00:00.000Z")} styles={sharedStyles} theme={theme} />); });
+    act(() => tree.root.findByProps({ accessibilityLabel: "Filters" }).props.onPress());
+    act(() => tree.root.findByProps({ accessibilityLabel: "Work" }).props.onPress());
+    act(() => tree.root.findByProps({ accessibilityLabel: "Apply filters" }).props.onPress());
+
+    const chart = tree.root.findByType("DonutChart" as never);
+    expect(chart.props.centerValue).toBe("0m");
+    expect(chart.props.segments).toEqual([
+      expect.objectContaining({ id: "work", selected: false, value: 3_600_000 })
+    ]);
+    expect(tree.root.findAllByProps({ children: "No logged time for the selected categories." })).toHaveLength(1);
+    expect(tree.root.findByProps({ accessibilityLabel: "Filters, 1 categories selected" })).toBeDefined();
+  });
+
+  it("replaces keyed chart owners when switching between Pie and Bars", () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<ReportsTab data={data} isFocused nowMs={Date.parse("2026-09-08T12:00:00.000Z")} styles={sharedStyles} theme={theme} />); });
+    const pie = tree.root.findByProps({ testID: "reports-pie-chart" });
+    const chartControl = tree.root.findAllByType("SegmentedPillControl" as never).find((node) => node.props.accessibilityLabel === "Category chart type")!;
+    act(() => chartControl.props.onChange("bars"));
+    const bars = tree.root.findByProps({ testID: "reports-bars-chart" });
+    expect(bars).not.toBe(pie);
+  });
+
   it("qualifies summary, chart context, and Daily independently when completeness is unknown", () => {
     let tree!: ReturnType<typeof create>;
     act(() => { tree = create(<ReportsTab data={data} isFocused nowMs={Date.parse("2026-09-08T12:00:00.000Z")} styles={sharedStyles} theme={theme} />); });
+    const dataWithoutCoverage = { ...data, entryCoverage: undefined };
+    act(() => { tree.update(<ReportsTab data={dataWithoutCoverage} isFocused nowMs={Date.parse("2026-09-08T12:00:00.000Z")} styles={sharedStyles} theme={theme} />); });
     expect(tree.root.findAllByProps({ children: "Report completeness is unknown — based on available entries." })).toHaveLength(3);
   });
 

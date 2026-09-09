@@ -114,6 +114,8 @@ export function ReportsTab({
   const filteredCount = selection.mode === "include" ? selection.keys.length : 0;
   const partialSelected = report.dataQuality.selectedPeriod !== "complete";
   const partialWeek = report.dataQuality.currentWeek !== "complete";
+  const selectedCategoriesHaveNoTime =
+    selection.mode === "include" && report.selectedLoggedSeconds === 0;
 
   return (
     <View style={sharedStyles.tabScreenStack}>
@@ -173,9 +175,12 @@ export function ReportsTab({
         {selection.mode === "include" ? (
           <Text style={[localStyles.contextCopy, { color: theme.textSecondary }]}>Slices show all categories; totals show selected categories. Percentages are of all time.</Text>
         ) : null}
+        {selectedCategoriesHaveNoTime ? (
+          <Text accessibilityLiveRegion="polite" style={[localStyles.emptySelection, { color: theme.textSecondary }]}>{partialSelected ? "No selected entries are available in this report data." : "No logged time for the selected categories."}</Text>
+        ) : null}
 
         {chartView === "pie" ? (
-          <Animated.View entering={FadeIn.duration(reduceMotion ? 0 : MOBILE_MOTION.control)} exiting={FadeOut.duration(reduceMotion ? 0 : MOBILE_MOTION.control)}>
+          <Animated.View key="pie" testID="reports-pie-chart" entering={FadeIn.duration(reduceMotion ? 0 : MOBILE_MOTION.control)} exiting={FadeOut.duration(reduceMotion ? 0 : MOBILE_MOTION.control)}>
             <View style={localStyles.chartWrap}>
               <DonutChart
                 animateEntrance={shouldAnimateEntrance}
@@ -194,20 +199,20 @@ export function ReportsTab({
                 theme={theme}
               />
             </View>
-            {segments.length === 0 ? (
+            {segments.length === 0 && !selectedCategoriesHaveNoTime ? (
               <EmptyReportCopy partial={partialSelected} selected={selection.mode === "include"} theme={theme} />
-            ) : (
+            ) : segments.length > 0 ? (
               <CategoryLegend
                 contextDurationMs={report.contextDurationMs}
                 onToggle={(key) => setSelection((current) => toggleReportCategory(current, key))}
                 segments={segments}
                 theme={theme}
               />
-            )}
+            ) : null}
           </Animated.View>
         ) : (
-          <Animated.View entering={FadeIn.duration(reduceMotion ? 0 : MOBILE_MOTION.control)} exiting={FadeOut.duration(reduceMotion ? 0 : MOBILE_MOTION.control)}>
-            <CategoryBars segments={segments.filter((segment) => segment.selected)} theme={theme} />
+          <Animated.View key="bars" testID="reports-bars-chart" entering={FadeIn.duration(reduceMotion ? 0 : MOBILE_MOTION.control)} exiting={FadeOut.duration(reduceMotion ? 0 : MOBILE_MOTION.control)}>
+            {selectedCategoriesHaveNoTime ? null : <CategoryBars segments={segments.filter((segment) => segment.selected)} theme={theme} />}
           </Animated.View>
         )}
       </View>
@@ -275,11 +280,11 @@ function ReportFiltersSheet({ draft, onApply, onCancel, onChange, options, theme
   if (!draft) return null;
   const visibleOptions = options.filter((option) => option.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
   const applyDisabled = draft.mode === "include" && draft.keys.length === 0;
-  return <Modal animationType="fade" onRequestClose={onCancel} transparent visible><View style={localStyles.modalRoot}><Pressable accessibilityLabel="Close filters" accessibilityRole="button" onPress={onCancel} style={[StyleSheet.absoluteFill, { backgroundColor: theme.overlay }]} /><View accessibilityViewIsModal style={[localStyles.sheet, { backgroundColor: theme.surfaceRaised, paddingBottom: Math.max(24, insets.bottom + 12) }]}><View style={localStyles.sheetHeader}><View><Text style={[localStyles.sheetTitle, { color: theme.textPrimary }]}>Filters</Text><Text style={[localStyles.sheetSection, { color: theme.textSecondary }]}>Categories</Text></View><Pressable accessibilityLabel="Cancel filters" accessibilityRole="button" onPress={onCancel} style={localStyles.sheetAction}><Text style={[localStyles.sheetActionText, { color: theme.textSecondary }]}>Cancel</Text></Pressable></View><TextInput accessibilityLabel="Search categories" onChangeText={setSearch} placeholder="Search categories" placeholderTextColor={theme.textMuted} style={[localStyles.search, { backgroundColor: theme.surfaceInset, color: theme.textPrimary }]} value={search} /><ScrollView keyboardShouldPersistTaps="handled" style={localStyles.optionScroller}><FilterOption checked={draft.mode === "all"} color={theme.accent} label="All categories" onPress={() => onChange(selectAllReportFilterDraft(draft))} theme={theme} />{visibleOptions.map((option) => <FilterOption key={option.key} checked={draft.mode === "all" || draft.keys.includes(option.key)} color={option.color} label={option.isUnavailable ? `${option.name} (not currently available)` : option.name} onPress={() => onChange(toggleReportFilterDraftKey(draft, option.key))} theme={theme} />)}</ScrollView>{applyDisabled ? <Text style={[localStyles.validation, { color: theme.warningText }]}>Choose at least one category, or select All categories.</Text> : null}<Pressable accessibilityRole="button" accessibilityState={{ disabled: applyDisabled }} disabled={applyDisabled} onPress={() => onApply(draft)} style={[localStyles.applyButton, { backgroundColor: applyDisabled ? theme.surfaceMuted : theme.accent }]}><Text style={[localStyles.applyText, { color: applyDisabled ? theme.disabled : theme.onAccent }]}>Apply</Text></Pressable></View></View></Modal>;
+  return <Modal animationType="fade" onRequestClose={onCancel} transparent visible><View style={localStyles.modalRoot}><Pressable accessibilityLabel="Close filters" accessibilityRole="button" onPress={onCancel} style={[StyleSheet.absoluteFill, { backgroundColor: theme.overlay }]} /><View accessibilityViewIsModal style={[localStyles.sheet, { backgroundColor: theme.surfaceRaised, paddingBottom: Math.max(24, insets.bottom + 12) }]}><View style={localStyles.sheetHeader}><View><Text style={[localStyles.sheetTitle, { color: theme.textPrimary }]}>Filters</Text><Text style={[localStyles.sheetSection, { color: theme.textSecondary }]}>Categories</Text></View><Pressable accessibilityLabel="Cancel filters" accessibilityRole="button" onPress={onCancel} style={localStyles.sheetAction}><Text style={[localStyles.sheetActionText, { color: theme.textSecondary }]}>Cancel</Text></Pressable></View><TextInput accessibilityLabel="Search categories" onChangeText={setSearch} placeholder="Search categories" placeholderTextColor={theme.textMuted} style={[localStyles.search, { backgroundColor: theme.surfaceInset, color: theme.textPrimary }]} value={search} /><ScrollView keyboardShouldPersistTaps="handled" style={localStyles.optionScroller}><FilterOption checked={draft.mode === "all"} color={theme.accent} label="All categories" onPress={() => onChange(selectAllReportFilterDraft(draft))} theme={theme} />{visibleOptions.map((option) => <FilterOption key={option.key} checked={draft.mode === "all" || draft.keys.includes(option.key)} color={option.color} label={option.isUnavailable ? `${option.name} (not currently available)` : option.name} onPress={() => onChange(toggleReportFilterDraftKey(draft, option.key))} theme={theme} />)}</ScrollView>{applyDisabled ? <Text style={[localStyles.validation, { color: theme.warningText }]}>Choose at least one category, or select All categories.</Text> : null}<Pressable accessibilityLabel="Apply filters" accessibilityRole="button" accessibilityState={{ disabled: applyDisabled }} disabled={applyDisabled} onPress={() => onApply(draft)} style={[localStyles.applyButton, { backgroundColor: applyDisabled ? theme.surfaceMuted : theme.accent }]}><Text style={[localStyles.applyText, { color: applyDisabled ? theme.disabled : theme.onAccent }]}>Apply</Text></Pressable></View></View></Modal>;
 }
 
 function FilterOption({ checked, color, label, onPress, theme }: { checked: boolean; color: string; label: string; onPress: () => void; theme: MobileTheme }) {
-  return <Pressable accessibilityRole="checkbox" accessibilityState={{ checked }} onPress={onPress} style={({ pressed }) => [localStyles.optionRow, { borderBottomColor: theme.border }, pressed && localStyles.pressed]}><View style={[localStyles.optionSwatch, { backgroundColor: color }]} /><Text style={[localStyles.optionLabel, { color: theme.textPrimary }]}>{label}</Text><View style={[localStyles.check, { backgroundColor: checked ? theme.accentSoft : theme.surfaceInset, borderColor: checked ? theme.accent : theme.borderStrong }]}>{checked ? <View style={[localStyles.checkMark, { backgroundColor: theme.accentText }]} /> : null}</View></Pressable>;
+  return <Pressable accessibilityLabel={label} accessibilityRole="checkbox" accessibilityState={{ checked }} onPress={onPress} style={({ pressed }) => [localStyles.optionRow, { borderBottomColor: theme.border }, pressed && localStyles.pressed]}><View style={[localStyles.optionSwatch, { backgroundColor: color }]} /><Text style={[localStyles.optionLabel, { color: theme.textPrimary }]}>{label}</Text><View style={[localStyles.check, { backgroundColor: checked ? theme.accentSoft : theme.surfaceInset, borderColor: checked ? theme.accent : theme.borderStrong }]}>{checked ? <View style={[localStyles.checkMark, { backgroundColor: theme.accentText }]} /> : null}</View></Pressable>;
 }
 
 function overlapCopy(seconds: number) {
@@ -313,6 +318,7 @@ const localStyles = StyleSheet.create({
   dailySlot: { alignItems: "center", flex: 1, gap: 8, height: "100%" },
   dailyTrack: { flex: 1, justifyContent: "flex-end", overflow: "hidden", width: "100%" },
   empty: { fontFamily: "System", fontSize: 14, lineHeight: 20, paddingVertical: 18 },
+  emptySelection: { fontFamily: "System", fontSize: 14, lineHeight: 20, paddingTop: 10 },
   filterButton: { alignItems: "center", borderRadius: 999, justifyContent: "center", minHeight: 44, paddingHorizontal: 14 },
   filterButtonLabel: { fontFamily: "System", fontSize: 13, fontWeight: "600" },
   filterRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", minHeight: 44 },
